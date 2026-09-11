@@ -496,60 +496,6 @@ class LmSettings(EnvSettings):
         },
     )
 
-    attach_image_downscale_trigger_bytes: int = Field(
-        default=1024 * 1024,
-        alias="AVA_ATTACH_IMAGE_DOWNSCALE_TRIGGER_BYTES",
-        description=(
-            "Attached images larger than this many bytes are downscaled while "
-            "packing: the long edge is bounded to attach_image_max_edge and the "
-            "pixels are re-encoded as JPEG at attach_image_jpeg_quality, keeping "
-            "inline base64 media from bloating the checkpointed messages channel. "
-            "Images at or under the trigger are delivered untouched."
-        ),
-        gt=0,
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    attach_image_max_edge: int = Field(
-        default=1568,
-        alias="AVA_ATTACH_IMAGE_MAX_EDGE",
-        description=(
-            "Long-edge bound (pixels) for a downscaled attached image: an image "
-            "over the trigger shrinks to fit this edge before JPEG re-encoding. "
-            "1568 keeps screenshots and photos readable for vision models while "
-            "bounding the base64 payload."
-        ),
-        gt=0,
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    attach_image_jpeg_quality: int = Field(
-        default=85,
-        alias="AVA_ATTACH_IMAGE_JPEG_QUALITY",
-        description=(
-            "JPEG quality (1-100) used when re-encoding a downscaled attached "
-            "image; lower trades fidelity for a smaller base64 payload."
-        ),
-        gt=0,
-        le=100,
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     gemini_explicit_cache_enabled: bool = Field(
         default=False,
         alias="AVA_GEMINI_EXPLICIT_CACHE_ENABLED",

@@ -4,9 +4,7 @@ DB wait/pool timeouts and the node-stall hang diagnostic: operational bounds of 
 
 from __future__ import annotations
 
-import json
-
-from pydantic import Field, field_validator
+from pydantic import Field
 
 from shared.config._base import EnvSettings
 
@@ -26,65 +24,6 @@ class AgentRuntimeSettings(EnvSettings):
             "lifecycle": "live",
         },
     )
-
-    checkpoint_max_blob_bytes: int = Field(
-        default=16 * 1024 * 1024,
-        alias="AVA_CHECKPOINT_MAX_BLOB_BYTES",
-        description=(
-            "Refuse to write any single checkpoint blob whose serialized size "
-            "exceeds this many bytes. Multi-megabyte inline content (e.g. images "
-            "in the messages channel) is rewritten in full on every checkpoint, "
-            "and a cross-network write of such a blob stalls at the database "
-            "statement timeout; the guard fails that write fast and loudly with "
-            "a clear error instead. Nothing is trimmed or dropped — the write "
-            "does not happen. Raise the limit only as a stopgap."
-        ),
-        gt=0,
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    checkpoint_max_blob_bytes_overrides: dict[str, int] = Field(
-        default_factory=dict,
-        alias="AVA_CHECKPOINT_MAX_BLOB_BYTES_OVERRIDES",
-        description=(
-            "Per-agent override of checkpoint_max_blob_bytes, as a JSON object "
-            'mapping agent id to bytes (e.g. {"6093": 33554432}). A thread '
-            "without an entry uses the base limit. Exists so an agent whose "
-            "stored history already carries an oversized blob can keep writing "
-            "on its current host while the storage fix lands, instead of being "
-            "locked out by the guard."
-        ),
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    @field_validator("checkpoint_max_blob_bytes_overrides", mode="before")
-    @classmethod
-    def _parse_blob_limit_overrides(cls, value: object) -> object:
-        """Accept the JSON-object environment value (e.g. '{"6093": 33554432}')."""
-        if isinstance(value, str):
-            return json.loads(value)
-        return value
-
-    @field_validator("checkpoint_max_blob_bytes_overrides")
-    @classmethod
-    def _validate_blob_limit_overrides(cls, value: dict[str, int]) -> dict[str, int]:
-        """Reject malformed override entries at config build, not at first write."""
-        for agent_id, limit in value.items():
-            if not agent_id.isdigit():
-                raise ValueError(f"override key must be a numeric agent id, got {agent_id!r}")
-            if limit <= 0:
-                raise ValueError(f"override for agent {agent_id} must be positive, got {limit}")
-        return value
 
     db_notify_wait_timeout_seconds: float = Field(
         default=30.0,

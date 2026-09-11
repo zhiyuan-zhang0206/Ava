@@ -3,17 +3,12 @@
 from __future__ import annotations
 
 import base64
-import io
-import os
 from pathlib import Path
-from typing import cast
 
 import pytest
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from PIL import Image
 
-from shared.config import settings
-from shared.config.lm import LmSettings
 from shared.lm import provider_api
 from shared.lm._plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.attach import (
@@ -21,7 +16,6 @@ from shared.lm.attach import (
     ATTACH_MAX_FILES_PER_TURN,
     ATTACH_MAX_TOTAL_BYTES,
     AttachEntry,
-    AttachmentPack,
     pack_attachments,
 )
 from shared.lm.factory import media_types_for_model
@@ -367,120 +361,3 @@ def test_media_types_use_registry_then_plugin_vision_fallback(
     assert media_types_for_model("attachment-plugin-unregistered") == frozenset({"image"})
     assert media_types_for_model("kimi-unknown-x") == frozenset({"image"})
     assert media_types_for_model("deepseek-unknown-x") == frozenset()
-
-
-def _noise_png(path: Path, size: tuple[int, int]) -> bytes:
-    """A PNG whose pixel noise does not compress — a genuinely heavy image."""
-    image = Image.frombytes("RGB", size, os.urandom(size[0] * size[1] * 3))
-    image.save(path)
-    return path.read_bytes()
-
-
-def _image_url(pack: AttachmentPack) -> str:
-    block = pack.blocks[2]
-    return cast("dict[str, str]", block["image_url"])["url"]
-
-
-def test_heavy_image_is_downscaled_to_a_bounded_jpeg(tmp_path: Path) -> None:
-    image_path = tmp_path / "heavy.png"
-    original = _noise_png(image_path, (2000, 1000))
-
-    pack = pack_attachments("deepseek-v4-flash-vision-exp", [_entry(image_path)])
-
-    assert pack is not None
-    assert pack.delivered == [str(image_path.resolve())]
-    assert [b.get("type") for b in pack.blocks] == ["text", "text", "image_url"]
-    url = _image_url(pack)
-    assert url.startswith("data:image/jpeg;base64,")
-    delivered = base64.b64decode(url.split(",", 1)[1])
-    assert len(delivered) < len(original) // 2
-    with Image.open(io.BytesIO(delivered)) as rendered:
-        assert rendered.size == (1568, 784)
-        assert rendered.format == "JPEG"
-    # The caption reports the delivered payload, not the on-disk file.
-    caption = cast("str", pack.blocks[1]["text"])
-    assert caption.startswith("- [1] heavy.png (image/jpeg,")
-
-
-def test_small_image_passes_through_untouched(tmp_path: Path) -> None:
-    image_path = tmp_path / "small.png"
-    original = _png(image_path, (200, 100))
-
-    pack = pack_attachments("deepseek-v4-flash-vision-exp", [_entry(image_path)])
-
-    assert pack is not None
-    assert pack.blocks[2] == {
-        "type": "image_url",
-        "image_url": {"url": f"data:image/png;base64,{base64.b64encode(original).decode()}"},
-    }
-
-
-def test_downscale_thresholds_come_from_config(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    image_path = tmp_path / "any.png"
-    _noise_png(image_path, (64, 64))
-    monkeypatch.setattr(settings.lm, "attach_image_downscale_trigger_bytes", 1)
-    monkeypatch.setattr(settings.lm, "attach_image_max_edge", 32)
-    monkeypatch.setattr(settings.lm, "attach_image_jpeg_quality", 60)
-
-    pack = pack_attachments("deepseek-v4-flash-vision-exp", [_entry(image_path)])
-
-    assert pack is not None
-    url = _image_url(pack)
-    assert url.startswith("data:image/jpeg;base64,")
-    with Image.open(io.BytesIO(base64.b64decode(url.split(",", 1)[1]))) as rendered:
-        assert rendered.size == (32, 32)
-
-
-def test_jpeg_quality_knob_changes_the_encoded_payload(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def pack_with_quality(quality: int) -> bytes:
-        image_path = tmp_path / f"q{quality}.png"
-        _noise_png(image_path, (160, 160))
-        monkeypatch.setattr(settings.lm, "attach_image_downscale_trigger_bytes", 1)
-        monkeypatch.setattr(settings.lm, "attach_image_jpeg_quality", quality)
-        pack = pack_attachments("deepseek-v4-flash-vision-exp", [_entry(image_path)])
-        assert pack is not None
-        url = _image_url(pack)
-        return base64.b64decode(url.split(",", 1)[1])
-
-    assert len(pack_with_quality(20)) < len(pack_with_quality(95))
-
-
-def test_failed_reencode_keeps_the_original_bytes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    image_path = tmp_path / "kept.png"
-    original = _noise_png(image_path, (64, 64))
-    monkeypatch.setattr(settings.lm, "attach_image_downscale_trigger_bytes", 1)
-
-    def exploding_save(self: Image.Image, *args: object, **kwargs: object) -> None:
-        raise OSError("synthetic encoder failure")
-
-    monkeypatch.setattr(Image.Image, "save", exploding_save)
-
-    pack = pack_attachments("deepseek-v4-flash-vision-exp", [_entry(image_path)])
-
-    assert pack is not None
-    assert pack.delivered == [str(image_path.resolve())]
-    assert pack.blocks[2] == {
-        "type": "image_url",
-        "image_url": {"url": f"data:image/png;base64,{base64.b64encode(original).decode()}"},
-    }
-
-
-def test_attach_downscale_config_defaults_and_metadata() -> None:
-    for name, default in (
-        ("attach_image_downscale_trigger_bytes", 1024 * 1024),
-        ("attach_image_max_edge", 1568),
-        ("attach_image_jpeg_quality", 85),
-    ):
-        field = LmSettings.model_fields[name]
-        assert field.default == default
-        extra = field.json_schema_extra
-        assert isinstance(extra, dict)
-        assert extra["scope"] == "cluster-pinned"
-        assert extra["restart_required"] == "agent"
-        assert extra["writable"] is True
