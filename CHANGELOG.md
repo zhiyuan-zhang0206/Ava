@@ -72,6 +72,12 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
   cross-model revalidation. The release probe substitutes the canonical
   fail-soft reporter, so a candidate image with unloadable plugin code is
   rejected instead of degraded.
+- Release preparation now exercises provider registration alongside the
+  `plugin.py` and `services.py` faces: the probe keeps the image's own
+  provider-bearing built-ins enabled next to the retained set (the provider
+  loader rejects an empty binding set), so a retained `provider.py` that
+  fails to load rejects the candidate instead of shipping and silently
+  degrading the model registry after rollout (task #3008).
 - Session-revoke suffix fallback could revoke the request's own session when
   called with its masked suffix (the logout-only guard was bypassed) and
   accepted any id shape of 8+ characters as a suffix. The fallback now only

@@ -84,9 +84,10 @@ Containment covers *code* that fails to load; inventory and contract conflicts
 stay hard instead of guessing at the operator's intent (duplicate plugin name,
 malformed `plugins_config.json`, config schema drift, provider
 registration-contract violations, post-load revalidation) — and the release
-probe re-raises the contained failures of the two loaders it imports (the
-`plugin.py` loader, dangling entries included, and the `services.py` roster).
-See [[okf/plugins/module-loading/fail-closed-boundaries.ava.okf.md]].
+probe re-raises the contained failures of the faces it exercises (the
+`plugin.py` loader, dangling entries included; the `services.py` roster;
+provider registration). See
+[[okf/plugins/module-loading/fail-closed-boundaries.ava.okf.md]].
 
 ## Registration precedes execution
 The module object is placed in `sys.modules` **before** `exec_module` runs, not
