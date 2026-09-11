@@ -339,7 +339,10 @@ subclass.
 
 `messages: Annotated[list, DeltaChannel(reducer, snapshot_frequency=X)]` with
 `_messages_delta_reducer` (or a repo-owned equivalent if the experimental reducer's gaps
-matter); all other channels keep full snapshots. Required companions: T3, wrapper retirement
+matter); all other channels keep full snapshots. Migration note: upstream 4.2.0 / 3.1.2
+make delta-history walks recognize plain-value seeds, so a hybrid thread (pre-delta full
+snapshots + post-delta writes) stays reconstructible mid-migration without a forced
+re-snapshot - re-verify on the frozen pins before relying on it. Required companions: T3, wrapper retirement
 for the delta channel (deltas must persist every super-step; the throttle's merge is a no-op
 there), fork snapshot materialization, impersonation/recovery forced snapshots, reader audit,
 snapshot cadence tuned to bound ancestor walks (candidate: much lower than the 1000 default;
@@ -429,9 +432,15 @@ return to company-mini/company-air under the normal placement rule.
 ## 7. Version sensitivity, risks, open questions
 
 - **Version pin.** Conclusions are read against langgraph 1.2.4 /
-  langgraph-checkpoint-postgres 3.1.0. The D dependency line (#6096, task #3099) may move
-  these versions; T2 decisions must be re-validated against whatever pin is current then.
-  T1 depends on no framework internals beyond the saver subclassing pattern already in use.
+  langgraph-checkpoint 4.1.1 / langgraph-checkpoint-postgres 3.1.0. The D dependency line
+  (#6096, task #3099) targets langgraph 1.2.11 / checkpoint 4.2.0 / checkpoint-postgres
+  3.1.2. The delta-related upstream notes between the pins are fixes with no explicit
+  breaking declaration (1.2.5 empty-thread `updateState`; 1.2.7 snapshot overwrite +
+  exit-mode UUIDs; 1.2.8 fresh-thread `updateState` now forces a snapshot - a behavior
+  change to re-check; 1.2.9 `updateState` counters; 1.2.11 / 4.2.0 plain-value seed
+  writes; 3.1.2 plain-value seed discovery when walking delta history). Re-run the scratch
+  harness against the frozen pins before any T2 decision; T1 depends on no framework
+  internals beyond the saver subclassing pattern already in use.
 - **Beta API.** `DeltaChannel` is documented beta with an explicitly unstable on-disk
   contract; adoption is a pinned-contract decision (T2 only).
 - **Migration transaction scoping.** CAS multi-row writes must follow the repo's PgBouncer
