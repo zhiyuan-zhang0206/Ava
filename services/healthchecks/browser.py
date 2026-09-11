@@ -80,13 +80,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from services.browser import macos_readiness
+from services.browser.macos_readiness import StartupReadiness
 from services.browser.orphan import reap_cluster_chrome
 from services.browser.probe import probe_browser
 from shared.cluster import session_name
 from shared.config import settings
 from shared.daemon_health import EXIT_PORT_TAKEN, EXIT_RESPAWN_FAILED, DaemonProbe
 from shared.log import init_gateway_process
+from shared.os_autostart import relaunch_via_gui_domain
 from shared.paths import run_dir
+from shared.platform import IS_MACOS
 from shared.service_respawn import respawn_service
 from shared.session_backend import get_backend
 
@@ -98,6 +101,17 @@ _PORT = settings.services.browser_cdp_port  # per-cluster (cluster port block); 
 # The condition is still logged at DEBUG every round; this only bounds how long
 # the alerting surface goes without a fresh line.
 _EPISODE_REMINDER_S = 6 * 3600.0
+
+# The GUI-domain context heal (macOS): a daemon chain that lost the GUI login
+# session cannot read the login Keychain, and no respawn inside that chain can
+# fix it — only `ava start` running in the GUI domain can. The heal stops the
+# stuck session and kickstarts this cluster's autostart job; these bound it.
+_CONTEXT_HEAL_MAX_ATTEMPTS = 2
+# Also the "a GUI relaunch is in flight" window the session-gone branch honours.
+_CONTEXT_HEAL_COOLDOWN_S = 600.0
+# The stop waits no longer than this for the stuck daemon to exit gracefully
+# before the backend's force fallback — a fraction of the watchdog's 90s tick.
+_CONTEXT_HEAL_STOP_TIMEOUT_S = 10.0
 
 
 def _probe() -> DaemonProbe:
@@ -184,6 +198,7 @@ class _Episode:
     ORPHAN_HEAL_FAILED = "orphan-heal-failed"
     RESPAWN_FAILED = "respawn-failed"
     WAITING_FOR_MACOS_READINESS = "waiting-for-macos-readiness"
+    CONTEXT_MISSING = "context-missing"
 
     def __init__(
         self,
@@ -253,9 +268,176 @@ def _episode_reporter() -> _Episode:
     return _Episode(run_dir() / "healthcheck-state" / "browser.json")
 
 
+@dataclass(frozen=True)
+class _ContextHealRecord:
+    """One context-heal episode's persisted bookkeeping."""
+
+    attempts: int
+    last_attempt_at: float
+
+
+class _ContextHeal:
+    """Bookkeeping for the GUI-domain context heal (macOS only).
+
+    The condition it bounds: the readiness wait says the ava-browser daemon
+    chain is outside the GUI login session (`context_missing`) — nothing an
+    in-place respawn can fix, because the wrong launchd domain survives every
+    relaunch from this chain. The heal stops the stuck session and kickstarts
+    this cluster's autostart job, whose `ava start` runs in the GUI domain.
+
+    The record keeps that bounded: at most ``max_attempts`` stop + kick rounds,
+    spaced by ``cooldown_s``, so a condition a kick cannot fix (no GUI login,
+    an unregistered autostart job) cannot kick-storm. A record younger than the
+    cooldown also means "a GUI relaunch is in flight": a session-gone round
+    inside that window must NOT rebuild the session in this process's own
+    context-less chain, or `ava start` would find a live session and skip it —
+    undoing the heal and leaving the browser broken while looking supervised.
+
+    All bookkeeping failures fall back to acting (or to deferring to the
+    in-flight relaunch): de-noising must never be why a stuck browser stays
+    stuck, and a failed write only means the next round may attempt again.
+    """
+
+    def __init__(
+        self,
+        path: Path,
+        *,
+        now: Callable[[], float] = time.time,
+        cooldown_s: float = _CONTEXT_HEAL_COOLDOWN_S,
+        max_attempts: int = _CONTEXT_HEAL_MAX_ATTEMPTS,
+    ) -> None:
+        self._path = path
+        self._now = now
+        self._cooldown_s = cooldown_s
+        self._max_attempts = max_attempts
+
+    def _read(self) -> _ContextHealRecord | None:
+        try:
+            data = json.loads(self._path.read_text())
+            return _ContextHealRecord(int(data["attempts"]), float(data["last_attempt_at"]))
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+
+    def _write(self, record: _ContextHealRecord) -> None:
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            self._path.write_text(
+                json.dumps({"attempts": record.attempts, "last_attempt_at": record.last_attempt_at})
+            )
+        except OSError:
+            _log.debug(
+                "[browser healthcheck] context-heal record write failed; retrying next round"
+            )
+
+    def exhausted(self) -> bool:
+        """True once this episode has spent its attempt budget."""
+        record = self._read()
+        return record is not None and record.attempts >= self._max_attempts
+
+    def in_flight(self) -> bool:
+        """True while a just-kicked GUI relaunch may still be landing."""
+        record = self._read()
+        return record is not None and self._now() - record.last_attempt_at < self._cooldown_s
+
+    def due(self) -> bool:
+        """True when another stop + kick may run now."""
+        if self.exhausted():
+            return False
+        record = self._read()
+        return record is None or self._now() - record.last_attempt_at >= self._cooldown_s
+
+    def record_attempt(self) -> None:
+        """Count a stop + kick round as spent, before it runs (a crash mid-round
+        must not turn into a per-round retry)."""
+        record = self._read()
+        attempts = 1 if record is None else record.attempts + 1
+        self._write(_ContextHealRecord(attempts, self._now()))
+
+    def clear(self) -> None:
+        """End the episode — the chain is in the right context again."""
+        with contextlib.suppress(OSError):
+            self._path.unlink(missing_ok=True)
+
+
+def _context_heal_reporter() -> _ContextHeal:
+    return _ContextHeal(run_dir() / "healthcheck-state" / "browser-context-heal.json")
+
+
+def _heal_context_missing(episode: _Episode, heal: _ContextHeal, wait: StartupReadiness) -> None:
+    """React to a daemon chain outside the GUI login session (macOS).
+
+    Stop the stuck ava-browser session (so the GUI-domain `ava start` does not
+    skip a live session and walk away), then kickstart this cluster's autostart
+    job. Episodes are bounded by `_ContextHeal`: a couple of attempts, then one
+    episode-gated ERROR carrying the manual recipe.
+    """
+    if heal.exhausted():
+        if episode.should_report(_Episode.CONTEXT_MISSING):
+            _log.error(
+                "[browser healthcheck] browser NOT REVIVABLE by this unit: the ava-browser "
+                "chain is outside the GUI login session (%s) and the GUI-domain relaunch did "
+                "not fix it after %d attempts — log into the GUI session and run `ava stop` + "
+                "`ava start` there (a missing autostart job re-registers on the next `ava "
+                "start`; see logs/autostart.log)",
+                wait.reason,
+                _CONTEXT_HEAL_MAX_ATTEMPTS,
+            )
+        else:
+            _log.debug(
+                "[browser healthcheck] still outside the GUI login session; manual fix reported "
+                "this episode"
+            )
+        return
+    if not heal.due():
+        _log.debug(
+            "[browser healthcheck] context heal already attempted; waiting for the GUI-domain "
+            "relaunch to land"
+        )
+        return
+    heal.record_attempt()
+    try:
+        stopped, _mode = get_backend().kill_session(
+            session_name("browser"),
+            graceful=True,
+            timeout=_CONTEXT_HEAL_STOP_TIMEOUT_S,
+            expected=True,
+        )
+    except Exception as exc:  # a healthcheck must not crash on its own heal
+        _log.error(
+            "[browser healthcheck] context heal: stopping the context-less ava-browser session "
+            "raised %s: %s",
+            type(exc).__name__,
+            exc,
+        )
+        return
+    if not stopped:
+        _log.error(
+            "[browser healthcheck] context heal: the context-less ava-browser session survived "
+            "its stop; not kicking a GUI relaunch (it would skip the live session)"
+        )
+        return
+    try:
+        ok, detail = relaunch_via_gui_domain()
+    except Exception as exc:  # a healthcheck must not crash on its own heal
+        ok, detail = False, f"{type(exc).__name__}: {exc}"
+    if ok:
+        _log.info(
+            "[browser healthcheck] context heal: stopped the context-less ava-browser session "
+            "and relaunched it via the GUI domain (%s)",
+            detail,
+        )
+    else:
+        _log.error(
+            "[browser healthcheck] context heal: stopped the stuck session but could not relaunch "
+            "it via the GUI domain (%s)",
+            detail,
+        )
+
+
 def main() -> None:
     init_gateway_process(name="browser-healthcheck")
     episode = _episode_reporter()
+    heal = _context_heal_reporter()
     probe = _probe()
     if probe.terminal:
         # Asked before the session question on purpose: whoever holds the port,
@@ -278,10 +460,16 @@ def main() -> None:
         if probe.alive:
             if episode.mark_healthy():
                 _log.info("[browser healthcheck] browser recovered (%s)", probe.detail)
+            heal.clear()
             _log.debug("[browser healthcheck] alive (%s), no-op", probe.detail)
             return
-        wait_reason = macos_readiness.degraded_wait_reason()
-        if wait_reason is not None:
+        wait = macos_readiness.degraded_wait_state()
+        if wait is not None:
+            if IS_MACOS and wait.context_missing:
+                _heal_context_missing(episode, heal, wait)
+                return
+            heal.clear()  # a context-healthy wait ends any open heal episode
+            wait_reason = wait.reason or "macOS startup readiness is unavailable"
             if episode.should_report(_Episode.WAITING_FOR_MACOS_READINESS):
                 _log.warning(
                     "[browser healthcheck] browser DEGRADED: waiting for macOS startup "
@@ -308,6 +496,15 @@ def main() -> None:
         # orphan still holds the port, because the daemon refuses to launch a
         # second Chrome on it (and launching would collide on the profile
         # SingletonLock anyway); the sweep is what frees the port.
+        if heal.in_flight():
+            # A GUI-domain relaunch was just kicked after a context-less wait:
+            # rebuilding here would put the session back in THIS chain's wrong
+            # context, and the GUI `ava start` would then skip the live session.
+            _log.debug(
+                "[browser healthcheck] ava-browser session gone; a GUI-domain relaunch was just "
+                "kicked — deferring the in-context rebuild so the relaunch is not undone"
+            )
+            return
         _log.info(
             "[browser healthcheck] ava-browser session gone (%s) — sweeping the "
             "unsupervised Chrome (identity-verified ours) and rebuilding the session",

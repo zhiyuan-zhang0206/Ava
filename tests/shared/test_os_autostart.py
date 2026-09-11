@@ -35,6 +35,10 @@ def _stub(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # Pin the home-path slug (label token) + this home's legacy-cleanup tokens.
     monkeypatch.setattr(os_autostart, "_home_slug", lambda: "ava-t-cafe0123")
     monkeypatch.setattr(os_autostart, "_legacy_tokens", lambda: ["t"])
+    # `relaunch_via_gui_domain` gates on IS_MACOS and CI runs this suite on
+    # Linux; pin it here so the relaunch tests describe the macOS behaviour on
+    # any host. The off-macOS refusal test overrides it back to False.
+    monkeypatch.setattr(os_autostart, "IS_MACOS", True)
 
 
 def test_plist_runs_ava_start_at_load() -> None:
@@ -211,3 +215,140 @@ def test_the_job_retries_on_windows_via_ava_boot(monkeypatch: pytest.MonkeyPatch
     # launchd and cron do, so a scheduler-imposed runtime limit would be a
     # Windows-only cap on the one job nothing else recovers.
     assert seen == [("autostart", ("boot",), os_schtasks.NO_TIME_LIMIT_S)]
+
+
+# --- the GUI-domain relaunch (the browser context heal's primitive) ---
+
+
+def _fake_launchctl(
+    monkeypatch: pytest.MonkeyPatch, results: dict[str, types.SimpleNamespace]
+) -> list[list[str]]:
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **_kw: object) -> types.SimpleNamespace:
+        calls.append(cmd)
+        # Keyed by the launchctl subcommand (cmd[1]); unknown ones succeed.
+        for sub, result in results.items():
+            if len(cmd) > 1 and cmd[1] == sub:
+                return result
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(os_autostart.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
+    return calls
+
+
+def test_relaunch_via_gui_domain_bootstraps_when_missing_then_kicks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The documented manual step, automated: an unloaded job is bootstrapped
+    into gui/<uid> first, then kickstarted so its `ava start` runs there."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    plist = tmp_path / "Library" / "LaunchAgents" / "com.ava.ava-t-cafe0123.autostart.plist"
+    plist.parent.mkdir(parents=True)
+    plist.write_text("plist")
+    import os as _os
+
+    domain = f"gui/{_os.getuid()}"
+    calls = _fake_launchctl(
+        monkeypatch,
+        {"print": types.SimpleNamespace(returncode=1, stdout="", stderr="Could not find")},
+    )
+    ok, detail = os_autostart.relaunch_via_gui_domain()
+    assert ok is True
+    assert "com.ava.ava-t-cafe0123.autostart" in detail
+    assert calls == [
+        ["launchctl", "print", f"{domain}/com.ava.ava-t-cafe0123.autostart"],
+        ["launchctl", "bootstrap", domain, str(plist)],
+        ["launchctl", "kickstart", "-k", f"{domain}/com.ava.ava-t-cafe0123.autostart"],
+    ]
+
+
+def test_relaunch_via_gui_domain_skips_bootstrap_when_loaded(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An already-loaded job is not re-bootstrapped (that errors); it is only
+    kickstarted, which re-runs `ava start` even after a clean exit."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    plist = tmp_path / "Library" / "LaunchAgents" / "com.ava.ava-t-cafe0123.autostart.plist"
+    plist.parent.mkdir(parents=True)
+    plist.write_text("plist")
+    calls = _fake_launchctl(
+        monkeypatch,
+        {"print": types.SimpleNamespace(returncode=0, stdout="", stderr="")},
+    )
+    ok, _detail = os_autostart.relaunch_via_gui_domain()
+    assert ok is True
+    assert [cmd[1] for cmd in calls] == ["print", "kickstart"]
+
+
+def test_relaunch_via_gui_domain_reports_a_missing_plist(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Nothing registered on this host: say so instead of running launchctl
+    against a label that does not exist (the caller logs the manual recipe)."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    calls = _fake_launchctl(monkeypatch, {})
+    ok, detail = os_autostart.relaunch_via_gui_domain()
+    assert ok is False
+    assert "autostart plist" in detail
+    assert calls == []
+
+
+def test_relaunch_via_gui_domain_reports_a_failed_kick(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    plist = tmp_path / "Library" / "LaunchAgents" / "com.ava.ava-t-cafe0123.autostart.plist"
+    plist.parent.mkdir(parents=True)
+    plist.write_text("plist")
+    _fake_launchctl(
+        monkeypatch,
+        {
+            "print": types.SimpleNamespace(returncode=0, stdout="", stderr=""),
+            "kickstart": types.SimpleNamespace(
+                returncode=113, stdout="", stderr="Bootstrap failed"
+            ),
+        },
+    )
+    ok, detail = os_autostart.relaunch_via_gui_domain()
+    assert ok is False
+    assert "Bootstrap failed" in detail
+
+
+def test_relaunch_via_gui_domain_refuses_off_macos(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The GUI domain is a macOS concept; elsewhere the caller must not expect a
+    relaunch (the heal is gated on IS_MACOS before it gets here)."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(os_autostart, "IS_MACOS", False)
+    calls = _fake_launchctl(monkeypatch, {})
+    ok, detail = os_autostart.relaunch_via_gui_domain()
+    assert ok is False
+    assert "macOS" in detail
+    assert calls == []
+
+
+def test_relaunch_via_gui_domain_reports_a_failed_bootstrap(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A bootstrap that fails (say, the job is already loaded under another
+    domain) must be reported, and no kickstart is attempted — nothing is
+    loaded to kick."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    plist = tmp_path / "Library" / "LaunchAgents" / "com.ava.ava-t-cafe0123.autostart.plist"
+    plist.parent.mkdir(parents=True)
+    plist.write_text("plist")
+    calls = _fake_launchctl(
+        monkeypatch,
+        {
+            "print": types.SimpleNamespace(returncode=1, stdout="", stderr="Could not find"),
+            "bootstrap": types.SimpleNamespace(
+                returncode=5, stdout="", stderr="Bootstrap failed: 5: Input/output error"
+            ),
+        },
+    )
+    ok, detail = os_autostart.relaunch_via_gui_domain()
+    assert ok is False
+    assert "Bootstrap failed" in detail
+    assert [cmd[1] for cmd in calls] == ["print", "bootstrap"]
