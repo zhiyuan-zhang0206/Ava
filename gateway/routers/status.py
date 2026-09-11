@@ -27,6 +27,7 @@ from gateway import loki_events, loki_query_budget
 from gateway.routers import _inspect_pg, _roster_probe, _roster_rows, _stats_dashboard
 from gateway.routers._backend_failure import raise_backend_unavailable
 from gateway.routers._health import get_health
+from gateway.routers._roster_rows import read_stranded_holds, stamp_cluster_globals
 from gateway.schemas import (
     ClusterPanel,
     MachineStatus,
@@ -42,7 +43,7 @@ from ops import cluster_rpc as _cluster_rpc
 from ops.cluster import ClusterStatus, _check_pidfile, current_orchestration
 from ops.cluster import is_paused as cluster_is_paused
 from shared.cluster_drift import prod_source_head_sha
-from shared.cluster_lock import DeployLease, settle_hosts
+from shared.cluster_lock import DeployLease
 from shared.config import settings
 from shared.last_update import LastUpdate
 from shared.machine import is_agent_runner, is_gateway, is_observability_station, machine_name
@@ -434,14 +435,6 @@ async def _probe_agent_runner(
     )
 
 
-def _pin_verdict(head_sha: str | None, cluster_target_sha: str | None) -> bool | None:
-    """Whether a node is on the cluster pin. None when there is no pin yet or the
-    node's head_sha is unknown (the comparison is meaningless); else head == pin."""
-    if cluster_target_sha is None or head_sha is None:
-        return None
-    return head_sha == cluster_target_sha
-
-
 def _read_cluster_pin() -> str | None:
     """The cluster pin (`cluster_target_sha`), or None if unset / DB unreachable.
 
@@ -595,6 +588,7 @@ async def gather_cluster_status(
     deploy_lease: DeployLease | None = None,
     last_update: LastUpdate | None = None,
     last_known_good_sha: str | None = None,
+    stranded_holds: dict[str, tuple[datetime, str | None]] | None = None,
 ) -> list[MachineStatus]:
     """Async fan-out: every machine probed in parallel via a status_probe op
     to its ops server (the local machine included — its ops server is dialed
@@ -658,24 +652,18 @@ async def gather_cluster_status(
     if probe_coros:
         machines.extend(await asyncio.gather(*probe_coros))
 
-    hold_detail = deploy_lease.describe() if deploy_lease is not None else None
-    # The hold's OWN population, read back from its note — never the machine table.
-    # A row absent from it is "not named by this hold", not "converged".
-    waited_on = frozenset(settle_hosts(deploy_lease.note) if deploy_lease is not None else [])
-    machines = [
-        m.model_copy(
-            update={
-                "on_pin": _pin_verdict(m.head_sha, cluster_target_sha),
-                "deploy_hold": hold_detail,
-                "settle_waited_on": m.name in waited_on,
-                "last_update": last_update,
-                "cluster_last_known_good_sha": last_known_good_sha,
-            }
-        )
-        for m in machines
-    ]
-    machines.sort(key=lambda m: m.name)
-    return machines
+    # The hold's OWN population, the pin verdict and the rest are applied in one
+    # place (`_roster_rows.stamp_cluster_globals`): a row absent from the hold's
+    # note is "not named by this hold", not "converged", and `stranded_holds` is
+    # the one per-host fact among them (task #3132).
+    return stamp_cluster_globals(
+        machines,
+        cluster_target_sha=cluster_target_sha,
+        deploy_lease=deploy_lease,
+        last_update=last_update,
+        last_known_good_sha=last_known_good_sha,
+        stranded_holds=stranded_holds,
+    )
 
 
 def _get_cluster_status(cur: Cursor) -> ClusterPanel:
@@ -708,6 +696,7 @@ def _get_cluster_status(cur: Cursor) -> ClusterPanel:
     lease = _read_deploy_lease()
     last_update = _read_last_update()
     known_good = _read_known_good()
+    stranded_holds = read_stranded_holds()
     local_name = machine_name()
     machines = (
         asyncio.run(
@@ -718,6 +707,7 @@ def _get_cluster_status(cur: Cursor) -> ClusterPanel:
                 deploy_lease=lease,
                 last_update=last_update,
                 last_known_good_sha=known_good,
+                stranded_holds=stranded_holds,
             )
         )
         if rows

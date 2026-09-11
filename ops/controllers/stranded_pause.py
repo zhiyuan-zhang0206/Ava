@@ -111,6 +111,22 @@ _log = logging.getLogger("ops.controllers.stranded_pause")
 # host's whole roster on a pause nobody is coming back for.
 STRANDED_PAUSE_TIMEOUT_S = 120.0  # 2 min
 
+# How long an ownerless maintenance hold must persist before the controller
+# DECLARES it stranded (task #3132) — the failure state a dead updater leg
+# leaves. Recovery deliberately does not touch a maintenance hold (an
+# incomplete stop is never resumed by a controller), so before this record the
+# state was silent, permanent and roster-invisible; the declaration is what the
+# gateway-side alarm and the roster read (host_deploy_state.stranded_hold_*).
+#
+# The bound reuses `ops.manager`'s standing judgment — ten rounds, no
+# legitimate transition holds this host longer (_BLOCKED_ROUND_ALARM_ROUNDS,
+# ten minutes at the 60s round) — rather than inventing a second one. It only
+# ever needs to outlast the ownerless gaps a healthy transition has (the
+# spawn gap inside `spawn_update`, observed tens of seconds worst case) plus
+# one watchdog round of clock slack; anything below the manager's bound would
+# alarm on states the manager still treats as ordinary.
+STRANDED_HOLD_NOTICE_S = 600.0  # 10 min
+
 # The reachability-evidence grace (value, ordering and rationale live in the
 # clock lattice — see the module-level import of `GATEWAY_DOWN_OWNER_GRACE_S`).
 _GATEWAY_DOWN_MARKER = "gateway-down-since"
@@ -260,6 +276,24 @@ def _pause_owner(
 
     if maintenance.held():
         return "explicit maintenance hold (no automatic expiry)"
+    return _executing_owner(handoff)
+
+
+def _executing_owner(
+    handoff: updater_handoff.UpdaterHandoffSnapshot | None = None,
+) -> str | None:
+    """Who is still executing a transition here, ignoring the maintenance hold.
+
+    The body of the two-signal owner determination minus the hold short-circuit:
+    `_pause_owner` answers "may this pause be resumed", and any maintenance hold
+    is an owner of that question (nobody resumes a held unit but the explicit
+    `ava start`). The stranded-hold verdict (task #3132) asks the narrower
+    question behind it — is anything executing DESPITE the hold — because a hold
+    with no live handoff, session, deploy lease or orchestration is exactly the
+    failure state a dead updater leg leaves, and it is the one state nothing
+    else on the host can see. Same placeholder-on-unreadable discipline as
+    `_pause_owner`: only `None` is proof that nothing is executing.
+    """
     handoff = updater_handoff.read() if handoff is None else handoff
     if handoff.status == "invalid":
         return "updater handoff is unreadable"
@@ -322,6 +356,87 @@ def _pause_owner(
         )
         return "unreadable orchestration session"
     return f"a local {orchestration} is in flight" if orchestration is not None else None
+
+
+def stranded_hold_verdict(
+    handoff: updater_handoff.UpdaterHandoffSnapshot | None = None,
+) -> tuple[str, float] | None:
+    """`(reason, paused_for_s)` when this host is a STRANDED maintenance hold, else None.
+
+    The failure state of task #3132: a maintenance hold — the deliberately
+    non-expiring pause a stop arms, releasable only by an explicit authorized
+    `ava start` — whose owning process is gone. Three facts together:
+    nothing executes under it (`_executing_owner` reads no live handoff,
+    session, deploy lease or orchestration), this host's own updater record
+    says the run that armed it FAILED (`exited` non-zero, or `unknown` — died
+    mid-flight; a `declined` run stopped nothing and a successful one would
+    have released the hold), and the state has outlived
+    `STRANDED_HOLD_NOTICE_S` so no in-flight transition can be misread as one.
+
+    Recovery deliberately does NOT auto-release such a hold, and this verdict
+    does not change that: it exists to make the state loud and visible
+    (`sync_stranded_hold_record`, the gateway-side alarm, the roster) instead
+    of silent and permanent. An operator's own `ava maintenance stop` produces
+    no failed updater outcome, so it never matches — deliberately held units
+    stay quiet.
+    """
+    from shared import maintenance
+
+    paused_for = _stranded_pause_seconds()
+    if paused_for is None or paused_for < STRANDED_HOLD_NOTICE_S:
+        return None
+    if not maintenance.held():
+        return None
+    if _executing_owner(handoff) is not None:
+        return None
+    from ops.updater_outcome import last_updater_outcome
+
+    outcome = last_updater_outcome()
+    if outcome is None or outcome.kind == "declined":
+        return None
+    if outcome.kind == "exited" and (outcome.rc or 0) == 0:
+        return None
+    reason = (
+        f"updater exited rc={outcome.rc}" if outcome.kind == "exited" else "updater died mid-flight"
+    )
+    return reason, paused_for
+
+
+def sync_stranded_hold_record(
+    handoff: updater_handoff.UpdaterHandoffSnapshot | None = None,
+) -> None:
+    """Bring this host's durable stranded-hold record in line with the verdict.
+
+    Declares while `stranded_hold_verdict` holds — set-once, and logged at
+    ERROR on the transition so the log carries the incident boundary and the
+    recourse — and clears otherwise (including on every unpaused round), so
+    the record cannot outlive the condition that justified it. Never raises:
+    it is a side band beside the recovery decision, and a DB blip must cost a
+    round, not the tick.
+    """
+    from shared.host_deploy_state import clear_stranded_hold, mark_stranded_hold
+
+    try:
+        verdict = stranded_hold_verdict(handoff)
+        if verdict is None:
+            clear_stranded_hold()
+            return
+        reason, paused_for = verdict
+        if mark_stranded_hold(reason):
+            _log.error(
+                "[ops.pause] STRANDED HOLD declared: this host has been held for %.0fs "
+                "(%s) with nothing executing under the pause — the state a failed "
+                "update leg leaves. Not unpausing (an incomplete stop is never resumed "
+                "automatically); nothing else will resume it either — run `ava start` "
+                "on this host.",
+                paused_for,
+                reason,
+            )
+    except Exception:
+        _log.warning(
+            "[ops.pause] stranded-hold record sync failed; retrying next round",
+            exc_info=True,
+        )
 
 
 def pause_owner_verdict(
@@ -454,6 +569,9 @@ class PauseController:
         if role == "gateway":
             record_gateway_reachability()
         if not is_paused():
+            # Not paused: the stranded-hold verdict (task #3132) is definitionally
+            # absent, so any record of it must go with it.
+            sync_stranded_hold_record()
             return ReconcileResult(dimension=self.name, blocks=BlockScope.NONE)
         if recover_stranded_pause():
             return ReconcileResult(
@@ -462,5 +580,9 @@ class PauseController:
                 acted=True,
                 detail="self-unpaused (stranded pause recovered)",
             )
+        # Still paused and no recovery licensed: this is where a failed leg's
+        # ownerless hold would otherwise sit silent and permanent. Record it —
+        # and only record it; the no-auto-resume rule is untouched.
+        sync_stranded_hold_record()
         _log.info("[ops.pause] host paused (posture), skipping tick")
         return ReconcileResult(dimension=self.name, blocks=BlockScope.ALL, detail="paused")

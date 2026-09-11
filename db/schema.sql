@@ -1077,6 +1077,13 @@ CREATE TABLE host_deploy_state (
     -- updater-outcome reader uses it to scope "which log runs belong to this
     -- pause window" (replaces the cluster_paused file mtime; Task #1021).
     paused_at                 TIMESTAMPTZ,
+    -- The stranded-hold record (task #3132): set while this host's pause is a
+    -- maintenance hold that has lost its owner (a failed updater leg left it).
+    -- Read by the gateway-side alarm + every roster surface, because the held
+    -- host's own probe is usually down with it. See
+    -- migrations/20260911T180406_host-deploy-stranded-hold.sql.
+    stranded_hold_since      TIMESTAMPTZ,
+    stranded_hold_reason     TEXT,
     updated_at               TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

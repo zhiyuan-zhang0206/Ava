@@ -4202,3 +4202,39 @@ def test_retired_service_failure_prevents_start_converge_and_migrations(
     retired.assert_called_once()
     converge.assert_not_called()
     migrate.assert_not_called()
+
+
+def test_cmd_cluster_status_renders_stranded_hold_banner(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A host carrying a stranded-hold record renders the held-host banner — its
+    reason and the one-command remedy — above the table (task #3132)."""
+    from datetime import UTC, datetime
+
+    roster = [
+        _machine_row(
+            name="macmini",
+            online=False,
+            paused=None,
+            stranded_hold_since=datetime(2026, 9, 12, 1, 2, tzinfo=UTC),
+            stranded_hold_reason="updater exited rc=1",
+        ),
+        _machine_row(name="wsl"),
+    ]
+    _patch_roster_get(monkeypatch, roster)
+    rc = _cli.cmd_cluster_status()
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "macmini: update failed (updater exited rc=1) \u2014 host left held" in out
+    assert "run `ava start` on macmini" in out
+    # banner above the table header
+    assert out.index("host left held") < out.index("up since")
+
+
+def test_cmd_cluster_status_without_held_hosts_has_no_banner(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _patch_roster_get(monkeypatch, [_machine_row(name="wsl")])
+    rc = _cli.cmd_cluster_status()
+    assert rc == 0
+    assert "host left held" not in capsys.readouterr().out
