@@ -375,7 +375,9 @@ def prove_broken_provider_refusal(inputs: PrepareInputs, release: VerifiedReleas
     try:
         _verify_plugins(plugins, release.root)
     except ReleaseRejectedError as exc:
-        raise AssertionError("clean image probe failed after the planted provider was removed") from exc
+        raise AssertionError(
+            "clean image probe failed after the planted provider was removed"
+        ) from exc
 
 
 def prove_prepared_frontend(
