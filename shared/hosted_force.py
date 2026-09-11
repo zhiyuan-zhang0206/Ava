@@ -5,14 +5,14 @@ continuation and owned exec cleanup return. Lease expiry, an empty cache, and
 the host process dying are not proof that independent exec children ended.
 """
 
-from pathlib import Path
 from uuid import UUID
 
 import psycopg
 from psycopg_pool import AsyncConnectionPool
 
 from shared.db_transaction import async_write_transaction
-from shared.paths import exec_run_dir
+from shared.exec_request_evidence import RequestEvidence, quarantine_stale
+from shared.runtime_incarnation import RuntimeIncarnation
 
 
 def install_hosted_force(conn: psycopg.Connection, agent_id: int, command_id: int) -> None:
@@ -104,38 +104,33 @@ async def original_host_force(
         return True
 
 
-def _exec_request_evidence(agent_id: int) -> tuple[Path, ...]:
-    """Persistent disposable-exec evidence left by a hosted turn.
-
-    A request envelope is created before the exec child and removed only after
-    the exact process domain, root reap, and output reader settle. The agent
-    subdirectory is therefore the crash-stable half of ``HostedTurnResources``:
-    absence means no disposable exec domain survived, while any request keeps
-    recovery deferred for explicit inspection.
-    """
-    return tuple(sorted((exec_run_dir() / str(agent_id)).glob("req-*.json")))
-
-
 async def recover_orphaned_hosted_forces(
     pool: AsyncConnectionPool,
     machine: str,
-) -> tuple[list[int], dict[int, tuple[Path, ...]]]:
+) -> tuple[list[int], dict[int, tuple[RequestEvidence, ...]]]:
     """Observe resource-free applied forces after an exclusive host boot.
 
     The caller must own the agent-host pidfile and call this before starting
     its scheduler. That process exclusivity proves the old owner is gone and
-    prevents a new turn from creating exec resources during this scan. A
-    surviving request envelope prevents recovery: host death alone cannot
-    prove its independent process domain ended.
+    prevents a new turn from creating exec resources during this scan.
+
+    A request envelope that can still belong to a live exec domain — a live
+    process reference, an unattributable envelope, or resource evidence that
+    contradicts the boot premise — defers recovery for that agent. Envelopes
+    that prove otherwise are quarantined here, preserved with a receipt, and do
+    not defer: a stale envelope attributed to a superseded incarnation must not
+    fence an unrelated newer lifecycle (issue #2157; see
+    shared/exec_request_evidence.py for the classification contract).
 
     The database transition re-locks and revalidates the exact command target;
-    it never retargets a force to the new host owner. Returned deferred paths
+    it never retargets a force to the new host owner. Returned deferred entries
     are diagnostic evidence for an operator, not cleanup authorization.
     """
     async with pool.connection() as conn:
         candidates = await (
             await conn.execute(
-                "SELECT m.id FROM agents_meta m JOIN inbound_messages force "
+                "SELECT m.id,m.runtime_generation,m.runtime_owner,m.incarnation_resources "
+                "FROM agents_meta m JOIN inbound_messages force "
                 "ON force.id=m.lifecycle_command_id AND force.agent_id=m.id "
                 "WHERE m.machine=%s AND m.status='terminated' "
                 "AND m.runtime_kind='hosted' AND m.runtime_generation IS NOT NULL "
@@ -149,11 +144,16 @@ async def recover_orphaned_hosted_forces(
         ).fetchall()
 
     recovered: list[int] = []
-    deferred: dict[int, tuple[Path, ...]] = {}
-    for (agent_id,) in candidates:
-        evidence = _exec_request_evidence(agent_id)
-        if evidence:
-            deferred[agent_id] = evidence
+    deferred: dict[int, tuple[RequestEvidence, ...]] = {}
+    for agent_id, generation, owner, resources in candidates:
+        report = quarantine_stale(
+            agent_id,
+            incumbent=RuntimeIncarnation(agent_id, generation, owner),
+            resources=resources,
+            reason="hosted boot recovery",
+        )
+        if report.retained:
+            deferred[agent_id] = report.retained
             continue
         async with async_write_transaction(pool) as conn:
             row = await (
