@@ -41,6 +41,12 @@ dependencies = [
     "watchdog>=6.0.0",
     "numpy>=2.4.4",
     "pymilvus[milvus-lite]>=3.0.0",
+    # The runtime startup-hook gate retains the original locked setuptools
+    # wheel — its distutils-precedence .pth is the one non-editable helper the
+    # release admits (shared/runtime_release.py). It rode in transitively via
+    # pymilvus until pymilvus 3.0.1 dropped the requirement; declared
+    # explicitly so the lock always carries exactly one wheel.
+    "setuptools>=82",
     "pyte>=0.8.0",  # terminal emulation screen model for PTY sessions (S6 step 2)
     "traceloop-sdk>=0.61",
     # Imported directly: shared/trace.py (span exporter, OTLP protobuf encode)
