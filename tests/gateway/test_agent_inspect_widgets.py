@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
@@ -482,3 +483,41 @@ def test_loader_skips_a_plugin_whose_inspector_fails_to_import(
     # every plugin broken -> still no raise, an empty registry
     monkeypatch.setattr(_plugin_inspector, "_enabled_inspector_modules", lambda: [bad])
     assert _plugin_inspector._load_inspect_widgets() == []
+
+
+def test_loader_drops_partial_widget_registrations_and_recovers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+) -> None:
+    """An inspector.py that raises after registering leaves nothing behind:
+    the loader drops the dying attempt's widgets, so a fixed file recovers on
+    the next request instead of dying on DuplicateInspectWidget
+    (fail-soft, user ruling 2026-09-11)."""
+    from shared.plugin_inspector import registered_inspect_widgets
+
+    plugin_dir = tmp_path / "drop_partial_insp"
+    plugin_dir.mkdir()
+    (plugin_dir / "__init__.py").write_text("", encoding="utf-8")
+    inspector_py = plugin_dir / "inspector.py"
+    source = (
+        "from shared.plugin_inspector import InspectButtonSpec, InspectWidgetSpec, "
+        "register_inspect_widget\n"
+        "register_inspect_widget(InspectWidgetSpec(id='drop_partial_widget', "
+        "kind='jumpButtons', order=50, "
+        "buttons=[InspectButtonSpec(target='notice')]))\n"
+    )
+    inspector_py.write_text(source + "raise RuntimeError('inspector boom')\n", encoding="utf-8")
+
+    monkeypatch.setattr(_plugin_inspector, "_enabled_inspector_modules", lambda: [inspector_py])
+    shipped_path = importlib.import_module("ava_builtins.plugins").__path__
+    monkeypatch.setattr("ava_builtins.plugins.__path__", [*shipped_path, str(tmp_path)])
+
+    assert _plugin_inspector._load_inspect_widgets() == []  # must not raise
+    assert [s for s in registered_inspect_widgets() if s.plugin == "drop_partial_insp"] == []
+    assert any(
+        "drop_partial_insp" in r["message"] and "failed to load" in r["message"]
+        for r in loguru_records
+    )
+
+    inspector_py.write_text(source, encoding="utf-8")
+    specs = _plugin_inspector._load_inspect_widgets()
+    assert [(s.plugin, s.id) for s in specs] == [("drop_partial_insp", "drop_partial_widget")]

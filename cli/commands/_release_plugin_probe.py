@@ -30,8 +30,13 @@ def prove_plugin_registration(root: Path, required: tuple[str, ...]) -> None:
         patch("socket.socket.connect", side_effect=RuntimeError("prepare network forbidden")),
         patch("socket.socket.connect_ex", side_effect=RuntimeError("prepare network forbidden")),
         patch("socket.create_connection", side_effect=RuntimeError("prepare network forbidden")),
+        # The canonical fail-soft reporter (shared/plugin_load_report.py):
+        # substituting it turns any contained plugin load failure — plugin.py,
+        # services.py, a dangling config entry — back into a hard release
+        # rejection, so a candidate image with unloadable plugin code never
+        # ships.
         patch(
-            "agent.graph._build._report_plugin_load_failure",
+            "shared.plugin_load_report.report_plugin_load_failure",
             side_effect=ReleaseRejectedError("candidate plugin import failed"),
         ),
     ):

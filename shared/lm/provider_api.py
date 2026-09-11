@@ -276,6 +276,19 @@ def require_key(key_env: str) -> str:
     return key
 
 
+class ProviderRegistrationError(ValueError):
+    """A `register()` call violated the provider-registration contract — a
+    duplicate or nested prefix, a model/binding mismatch, an unpriced spawnable
+    model, malformed price data.
+
+    Distinct from an arbitrary module-body exception on purpose: the loader
+    contains those (skip + loud report, fail-soft), but the prefix and
+    model-id maps are flat — a collision has no precedence order to resolve
+    it — so the loader lets this class propagate (fail-closed; user ruling
+    2026-09-11 draws that line).
+    """
+
+
 def register(
     binding: ProviderBinding,
     *,
@@ -284,9 +297,31 @@ def register(
 ) -> None:
     """The one entry point a provider.py calls. Order matters: models validate
     before prices mutate runtime state, then the stop vocabulary and binding
-    land. Any failure propagates out of the loader and fails the process —
-    registration is fail-fast, not best-effort.
+    land.
+
+    A contract violation raises `ProviderRegistrationError` (a ValueError):
+    registration is fail-fast, not best-effort, and the loader propagates this
+    class instead of containing it — the flat maps cannot pick a winner
+    between two claimants. An arbitrary exception from the module around this
+    call is the loader's business, not this function's.
     """
+    try:
+        _register_contract(binding, models=models, pricing=pricing)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except ProviderRegistrationError:
+        raise
+    except Exception as exc:
+        raise ProviderRegistrationError(str(exc)) from exc
+
+
+def _register_contract(
+    binding: ProviderBinding,
+    *,
+    models: Mapping[str, ModelSpec],
+    pricing: Mapping[str, PriceRates],
+) -> None:
+    """The registration sequence `register()` guards — see its docstring."""
     plugin = _CURRENT_PLUGIN or "<unknown>"
     REGISTRY.ensure_available(binding, plugin=plugin)
     provider = binding.provider_key or binding.prefix.rstrip("-")

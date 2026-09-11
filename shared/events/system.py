@@ -397,15 +397,22 @@ class GateAuthProbeFailed(TypedDict):
 
 
 class PluginLoadFailed(TypedDict):
-    """`plugin_load_failed` payload — agent/graph/_build.py.
+    """`plugin_load_failed` payload — shared/plugin_load_report.py.
 
-    One row per plugin that could not be loaded during `_load_extensions`
-    (its `plugin.py` raised at import, or the config referenced a plugin
-    whose directory is gone). The plugin is skipped — fail-soft contract
-    (2026-08-28 ava_ledger incident): a broken plugin must never block
-    `import ava` / graph build for the whole cluster. This event is the loud
-    half of that contract; `error` carries the exception type + message so
-    ops sees which plugin broke and why.
+    One row per plugin that could not be loaded at a plugin-code load site
+    reporting through this canonical reporter: `plugin.py` at host boot or
+    graph build, `provider.py`, `services.py`, `setup.py`, a built-in
+    plugin's `metrics.py`, the gateway plugin inspector's `inspector.py`, a
+    dangling config entry. Two contained sites stay off this reporter (not
+    oversights): `default_config.py` images surface as `error` entries on the
+    plugin-update result, and the runtime config readers' dangling warning is
+    a plain log line — only the graph loader reports dangling entries as rows
+    here. The plugin is skipped — fail-soft contract (user ruling 2026-09-11,
+    after the 2026-08-28 ava_ledger and 2026-09-10 agent-host incidents): a
+    broken plugin must never block `import ava` / host boot / graph build for
+    the whole cluster. This event is the loud half of that contract; `error`
+    carries the exception type + message so ops sees which plugin broke and
+    why.
     """
 
     plugin: str

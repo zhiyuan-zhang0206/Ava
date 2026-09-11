@@ -72,7 +72,7 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "memory_search_stats",  # services/memory_search/app.py:emit_memory_search_stats (positional emit)
         "pitr_remote_inventory",  # services/pitr/retention_scheduler.py:refresh (positional emit)
         "recovery_drill_failed",  # services/backup_scheduler/daemon.py:_run_due_local_dump_restore + services/pitr/base_scheduler_daemon.py:run (positional emit)
-        "plugin_load_failed",  # agent/graph/_build.py:_report_plugin_load_failure telemetry.emit("telemetry", ...)
+        "plugin_load_failed",  # shared/plugin_load_report.py:report_plugin_load_failure telemetry.emit("telemetry", ...)
         "loki_query_budget",  # gateway/loki_query_budget.py:_emit_observation
         "telemetry_read_stale",  # gateway/telemetry_staleness.py:_emit
         "telemetry_read_recovered",  # gateway/telemetry_staleness.py:_emit

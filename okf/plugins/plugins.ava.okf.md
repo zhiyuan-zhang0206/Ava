@@ -62,7 +62,7 @@ keyed by the same triple: [[activation-telemetry.ava.okf.md]].
 
 ## Entry Points
 - `shared/plugins_config.py:_discover_plugins()` — filesystem scan for `ava_builtins/plugins/<name>/plugin.py` (built-in) and `~/.ava/plugins/<name>/plugin.py` (external)
-- `agent/graph/_build.py:_load_extensions()` — imports plugins according to the enabled set (each `plugin.py` import wrapped with `with PluginContext(name):`), after which `bind_from_disk()` uniformly instantiates configs. Import mechanics, load order and reload semantics: [[okf/plugins/module-loading.ava.okf.md]].
+- `agent/graph/_build.py:_load_extensions()` — imports plugins according to the enabled set (each `plugin.py` import wrapped with `with PluginContext(name):`), after which `bind_from_disk()` uniformly instantiates configs. Import mechanics, load order and reload semantics: [[okf/plugins/module-loading/module-loading.ava.okf.md]].
 - `agent/graph/_build.py:build_graph()` — at build time calls `make_hook_runner` to snapshot hook lists
 - `agent/state.py:build_agent_state()` — at build time merges all plugins' state fields
 - `agent/plugin_catalog.py:build_catalog()` — loads this machine's enabled plugins and reads back what they registered (`ava plugins inspect`)
