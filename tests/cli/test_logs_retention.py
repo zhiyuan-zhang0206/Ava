@@ -150,6 +150,7 @@ def test_family_days_dry_run_reports_empty_policy_families(
         "gateway": 30,
         "ops": 30,
         "watchdog": 30,
+        "snapshot": 7,
         "other": 3,
     }.items():
         assert f"retention_family\tfamily={family}\tdays={days}\tfiles=0\tbytes=0" in out
@@ -519,3 +520,71 @@ def test_retention_deletes_expired_service_stdout_and_native_archive(
     assert not native_archive.exists()
     assert live_native.exists()
     assert "retention_summary\tmode=delete\tdeleted=2" in capsys.readouterr().out
+
+
+def test_snapshot_names_map_to_snapshot_family() -> None:
+    from cli.commands.logs import _MANAGED_LOG_NAME, _log_family
+
+    match = _MANAGED_LOG_NAME.fullmatch("agent-42-20260911T144255403250.png")
+    assert match is not None
+    assert match["snapshot"] == "agent-42-20260911T144255403250.png"
+    assert _log_family(match) == "snapshot"
+
+
+def test_snapshot_retention_scans_the_nested_computer_dir(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from cli.commands.logs import cmd_logs_retention
+
+    logs = tmp_path / "logs"
+    snapshots = logs / "computer" / "snapshots"
+    snapshots.mkdir(parents=True)
+    expired = _file_at(snapshots, "agent-42-20260816T120000000000.png", _NOW - timedelta(days=8))
+    at_cutoff = _file_at(snapshots, "agent-42-20260817T120000000000.png", _NOW - timedelta(days=7))
+    fresh = _file_at(snapshots, "agent-42-20260822T000000000000.png", _NOW - timedelta(days=2))
+    unmanaged = _file_at(snapshots, "screenshot.png", _NOW - timedelta(days=30))
+
+    rc = cmd_logs_retention(
+        older_than_days=None,
+        family_days={},
+        dry_run=True,
+        logs_path=logs,
+        now=_NOW,
+    )
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert (
+        "retention_candidate\tfamily=snapshot\tdays=7\tmtime=2026-08-16T12:00:00Z"
+        f"\tsize_bytes={expired.stat().st_size}\tpath={expired}"
+    ) in out
+    assert "retention_family\tfamily=snapshot\tdays=7\tfiles=1\tbytes=" in out
+    assert all(path.exists() for path in (expired, at_cutoff, fresh, unmanaged))
+
+    rc = cmd_logs_retention(
+        older_than_days=None,
+        family_days={},
+        dry_run=False,
+        logs_path=logs,
+        now=_NOW,
+    )
+
+    assert rc == 0
+    assert not expired.exists()
+    assert at_cutoff.exists()
+    assert fresh.exists()
+    assert unmanaged.exists()
+    assert "retention_summary\tmode=delete\tdeleted=1\tbytes=" in capsys.readouterr().out
+
+
+def test_retention_family_sets_stay_in_sync() -> None:
+    from cli.commands.logs import _FAMILY_DEFAULT_DAYS
+    from cli.parsers.logs import _FAMILY_DAYS_NAMES
+    from shared.os_logs_job import FAMILY_DAYS
+
+    assert set(_FAMILY_DEFAULT_DAYS) == set(_FAMILY_DAYS_NAMES) - {"default"}
+    job_families: dict[str, str] = {}
+    for item in FAMILY_DAYS.split(","):
+        family, _, days = item.partition("=")
+        job_families[family] = days
+    assert job_families == {family: str(days) for family, days in _FAMILY_DEFAULT_DAYS.items()}

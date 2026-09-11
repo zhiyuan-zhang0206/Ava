@@ -27,6 +27,7 @@ _MANAGED_LOG_NAME = re.compile(
     r"|prometheus\.log\.[0-9]{4}-[0-9]{2}-[0-9]{2}"
     r"|dbg-stdout\.log\.[0-9]{4}-[0-9]{2}-[0-9]{2})"
     r"|(?P<rotout>ava-[a-z][a-z0-9_-]*\.out\.log\.[0-9]{4}-[0-9]{2}-[0-9]{2})"
+    r"|(?P<snapshot>agent-[0-9]+-[0-9]{8}T[0-9]+\.png)"
     r")"
 )
 
@@ -38,6 +39,7 @@ _FAMILY_DEFAULT_DAYS = {
     "gateway": 30,
     "ops": 30,
     "watchdog": 30,
+    "snapshot": 7,
     "other": 3,
 }
 
@@ -71,6 +73,8 @@ def _service_family(service: str) -> str:
 
 def _log_family(match: re.Match[str]) -> str:
     """Return the C retention family for one allowlisted filename."""
+    if match["snapshot"] is not None:
+        return "snapshot"
     if match["agent"] is not None:
         return "agent"
     if match["shell"] is not None:
@@ -90,6 +94,19 @@ def _maintenance_roots(logs_path: Path) -> tuple[Path, ...]:
     if logs_path.name != "logs":
         return (logs_path,)
     return (logs_path, logs_path.parent / "lgtm" / "native" / "logs")
+
+
+def _retention_roots(logs_path: Path) -> tuple[Path, ...]:
+    """Roots scanned by retention: maintenance roots plus nested artifacts.
+
+    Rotation only ever acts on top-level stdout logs, so it keeps
+    `_maintenance_roots`; retention additionally prunes the nested
+    computer-use snapshot captures.
+    """
+    roots = _maintenance_roots(logs_path)
+    if logs_path.name == "logs":
+        return (*roots, logs_path / "computer" / "snapshots")
+    return roots
 
 
 def _active_log_paths(logs_path: Path) -> set[Path]:
@@ -163,7 +180,7 @@ def _retention_scan(
 ) -> tuple[list[RetentionCandidate], list[RetentionFailure]]:
     candidates: list[RetentionCandidate] = []
     failures: list[RetentionFailure] = []
-    for root in _maintenance_roots(target):
+    for root in _retention_roots(target):
         try:
             root_candidates, root_failures = _retention_candidates(
                 root,
