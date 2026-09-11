@@ -42,10 +42,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     for name in ("logs", "workspaces", "memory"):
         (home / name).mkdir(parents=True)
     monkeypatch.setattr("shared.paths.ava_home", lambda: home)
-    monkeypatch.setattr(
-        "cli.commands._setup._collect_setup_values",
-        lambda _args: ({"machine_role": "agent-runner"}, []),  # pyright: ignore[reportUnknownArgumentType]
-    )
+    monkeypatch.setattr("cli.commands._roles_or_none", lambda: frozenset({"agent-runner"}))
     monkeypatch.setattr("cli.commands._launch_roster", lambda *_a, **_k: ())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         "cli.commands._port_preflight.collect_port_conflicts",
@@ -99,10 +96,7 @@ def test_machine_role_missing_skips_ports_as_an_observation(
 ) -> None:
     """An unresolvable identity is the probe gate's refusal, not this one's: the
     port checks are skipped and the update still proceeds."""
-    monkeypatch.setattr(
-        "cli.commands._setup._collect_setup_values",
-        lambda _args: ({}, ["machine_role"]),  # pyright: ignore[reportUnknownArgumentType]
-    )
+    monkeypatch.setattr("cli.commands._roles_or_none", lambda: None)
 
     assert _run(repo) == 0
 
@@ -233,6 +227,28 @@ def test_migration_enumeration_failure_is_fatal(
 
     assert _run(repo) == 1
     assert "cannot be enumerated" in capsys.readouterr().err
+
+
+def test_configs_and_secrets_must_be_directories(
+    home: Path, repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Converge only mkdirs `configs` / `secrets`, so a file there aborts the
+    start after the stop (same class as the tree roots); a symlink TO a
+    directory is tolerated by `mkdir(exist_ok=True)` and must not refuse."""
+    (home / "configs").write_text("not a directory")
+
+    assert _run(repo) == 1
+    err = capsys.readouterr().err
+    assert str(home / "configs") in err
+    assert "is not a directory" in err
+
+    (home / "configs").unlink()
+    (home / "secrets").symlink_to(tmp_path, target_is_directory=True)
+    assert _run(repo) == 0, "mkdir(exist_ok=True) tolerates a symlink to a directory"
+
+    (home / "secrets").unlink()
+    (home / "secrets").symlink_to(tmp_path / "absent")
+    assert _run(repo) == 1, "a dangling symlink makes mkdir raise"
 
 
 def test_missing_venv_interpreter_is_fatal(

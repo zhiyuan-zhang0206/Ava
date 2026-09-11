@@ -112,29 +112,17 @@ def _prod_checkout_problem(repo: Path) -> str | None:
 
 
 def _machine_roles() -> MachineRoles | None:
-    """Resolve this host's roles read-only, like `_preflight_probes` does.
+    """Resolve this host's roles via the canonical read-only accessor.
 
-    None when the identity is not resolvable — the caller then skips the port
-    checks: the probe gate that runs just before this one already refuses on
-    that condition, so this gate does not have to fail twice for it.
+    `_roles_or_none` is the same helper `stop` / `status` / `_firewall` use
+    (read the persisted capability set; None when the identity is not
+    resolvable). None here means the caller skips the port checks: the probe
+    gate that runs just before this one already refuses on that condition, so
+    this gate does not have to fail twice for it.
     """
-    from cli.commands._setup import _collect_setup_values
+    import cli.commands as _ns
 
-    resolved, missing = _collect_setup_values(
-        {
-            "machine_name": None,
-            "machine_serve_gateway": None,
-            "machine_serve_agent_runner": None,
-            "machine_serve_observability_station": None,
-            "machine_description": None,
-            "memory_remote": None,
-            "gateway_url": None,
-        }
-    )
-    if missing:
-        return None
-    roles_raw = resolved.get("machine_role", "")
-    return frozenset(roles_raw.split(",")) if roles_raw else frozenset()
+    return _ns._roles_or_none()
 
 
 def _port_findings(repo: Path, home: Path, roles: MachineRoles) -> tuple[list[str], list[str]]:
@@ -187,14 +175,15 @@ def _port_findings(repo: Path, home: Path, roles: MachineRoles) -> tuple[list[st
 
 
 def _private_tree_findings(home: Path) -> tuple[list[str], list[str]]:
-    """(fatal, observations) for the private trees converge owns.
+    """(fatal, observations) for the private trees and skeleton converge owns.
 
-    Fatal is what `ensure_private_dir` / `ensure_private_file` would raise on:
-    a root that is a symlink or not a directory, and the metadata marker being
-    anything but a regular file. Observations are the non-regular nodes inside
-    the trees — converge skips them, so they cannot fail a start, but they are
-    exactly the class that aborted the 2026-09-12 update after its stop, and
-    seeing them before the stop is the point.
+    Fatal is what converge would raise on: a tree root that is a symlink or not
+    a directory, the metadata marker being anything but a regular file, and
+    `configs` / `secrets` existing as something mkdir cannot tolerate.
+    Observations are the non-regular nodes inside the trees — converge skips
+    them, so they cannot fail a start, but they are exactly the class that
+    aborted the 2026-09-12 update after its stop, and seeing them before the
+    stop is the point.
     """
     fatal: list[str] = []
     observations: list[str] = []
@@ -216,6 +205,19 @@ def _private_tree_findings(home: Path) -> tuple[list[str], list[str]]:
             observations.append(
                 f"{node} is a socket/FIFO/device — converge skips it (no permission "
                 "repair exists); remove it, or stop the process that owns it"
+            )
+
+    # `configs` / `secrets`: converge only mkdirs these (the same
+    # `_ensure_ava_home_dirs` step), so a path that exists but is not a
+    # directory makes that mkdir raise AFTER the stop — the same class as the
+    # three tree roots above, under mkdir's own rule: a symlink TO a directory
+    # is tolerated (`mkdir(exist_ok=True)`), a file or a dangling link is not.
+    for name in ("configs", "secrets"):
+        root = home / name
+        if (root.is_symlink() or root.exists()) and not root.is_dir():
+            fatal.append(
+                f"{root} exists but is not a directory — converge's mkdir for it "
+                "aborts the start; move it aside so a real directory can be created"
             )
 
     marker = home / "logs" / ".metadata_never_index"
