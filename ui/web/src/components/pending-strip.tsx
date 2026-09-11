@@ -4,13 +4,16 @@
 // but not yet started processing (status='pending'). Once claimed, a
 // message moves into the timeline, so it leaves this strip. Sources are
 // labeled so it's clear who queued each (User / another agent / a
-// scheduled task). Renders nothing when the queue is empty.
+// scheduled task). A multimodal message shows its image thumbnails, so a
+// queued image is visible before the claim (its reference urls come from
+// the /pending endpoint). Renders nothing when the queue is empty.
 
 import { Clock } from "lucide-react";
 import { useTranslations } from "next-intl";
 
-import type { PendingInbound } from "@/lib/types";
+import { assetUrl } from "@/lib/api";
 import { FLEX, MIN_W_0 } from "@/lib/layout";
+import type { PendingInbound } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 // Map the inbound `source` tag to a short human label. Tags:
@@ -51,7 +54,27 @@ export function PendingStrip({
           {items.map((it) => (
             <li key={it.id} className={cn("items-center gap-1.5 pl-4", FLEX, MIN_W_0)}>
               <span className="shrink-0 text-muted-foreground/70">· {sourceLabel(it.source)}</span>
-              <span className="truncate">{it.content}</span>
+              {/* An image-only message stores "[image]" as its text placeholder
+                  (shared/db.py); suppress that literal once real thumbnails
+                  render — the same rule the timeline's EnvelopeContent uses. */}
+              {it.images?.length && it.content === "[image]" ? null : (
+                <span className="truncate">{it.content}</span>
+              )}
+              {it.images?.length ? (
+                <span className={cn("shrink-0 gap-1", FLEX)}>
+                  {it.images.map((src) => (
+                    // eslint-disable-next-line @next/next/no-img-element -- agent upload reference, not a static asset
+                    <img
+                      key={src}
+                      src={assetUrl(src)}
+                      alt={t("imageAlt")}
+                      crossOrigin="use-credentials"
+                      loading="lazy"
+                      className="h-10 w-10 rounded border border-border object-cover"
+                    />
+                  ))}
+                </span>
+              ) : null}
             </li>
           ))}
         </ul>

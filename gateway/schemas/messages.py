@@ -261,6 +261,11 @@ class PendingInbound(BaseModel):
     the timeline snapshot; the web UI shows them as a compact strip above
     the composer. `source` disambiguates origin (user / agent:N /
     watcher:N / ...) so the UI can label who queued it.
+
+    `images` carries the image reference urls of a multimodal inbound (None
+    when the message has no image) — the same gateway-relative upload urls
+    the timeline renders for a claimed message, so the strip shows
+    thumbnails with one contract.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -268,6 +273,7 @@ class PendingInbound(BaseModel):
     id: int
     source: str | None
     content: str
+    images: list[str] | None
     created_at: datetime
 
 

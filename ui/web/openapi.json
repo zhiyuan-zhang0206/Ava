@@ -1062,7 +1062,7 @@
     "/api/agents/{agent_id}/pending": {
       "get": {
         "summary": "Get Pending Messages",
-        "description": "Chat inbounds still queued for the agent (status='pending'), oldest\nfirst. These have not been claimed yet, so they are absent from the\ntimeline snapshot; the web UI shows them as a compact strip above the\ncomposer. Once a message is claimed it enters the agent's messages and\nappears in the timeline, dropping out of this list.\n\nReturns an empty list for a nonexistent agent (this is a plain\ninbound-table read with no agent-existence precondition; a missing agent\njust has no pending rows).",
+        "description": "Chat inbounds still queued for the agent (status='pending'), oldest\nfirst. These have not been claimed yet, so they are absent from the\ntimeline snapshot; the web UI shows them as a compact strip above the\ncomposer. Once a message is claimed it enters the agent's messages and\nappears in the timeline, dropping out of this list. A multimodal\nmessage carries its image reference urls (`images`) so the strip can\nrender thumbnails before the claim.\n\nReturns an empty list for a nonexistent agent (this is a plain\ninbound-table read with no agent-existence precondition; a missing agent\njust has no pending rows).",
         "operationId": "get_pending_messages_api_agents__agent_id__pending_get",
         "parameters": [
           {
@@ -11959,6 +11959,20 @@
             "type": "string",
             "title": "Content"
           },
+          "images": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Images"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -11970,10 +11984,11 @@
           "id",
           "source",
           "content",
+          "images",
           "created_at"
         ],
         "title": "PendingInbound",
-        "description": "One queued inbound (status='pending', kind='chat') — element of\nGET /api/agents/{id}/pending.\n\nThese have not been claimed by the agent yet, so they are absent from\nthe timeline snapshot; the web UI shows them as a compact strip above\nthe composer. `source` disambiguates origin (user / agent:N /\nwatcher:N / ...) so the UI can label who queued it."
+        "description": "One queued inbound (status='pending', kind='chat') — element of\nGET /api/agents/{id}/pending.\n\nThese have not been claimed by the agent yet, so they are absent from\nthe timeline snapshot; the web UI shows them as a compact strip above\nthe composer. `source` disambiguates origin (user / agent:N /\nwatcher:N / ...) so the UI can label who queued it.\n\n`images` carries the image reference urls of a multimodal inbound (None\nwhen the message has no image) — the same gateway-relative upload urls\nthe timeline renders for a claimed message, so the strip shows\nthumbnails with one contract."
       },
       "PluginMetricResult": {
         "properties": {

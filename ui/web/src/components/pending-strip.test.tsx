@@ -7,7 +7,13 @@ import type { PendingInbound } from "@/lib/types";
 afterEach(cleanup);
 
 function item(over: Partial<PendingInbound> & { id: number }): PendingInbound {
-  return { source: "user", content: "hello", created_at: "2026-05-28T00:00:00Z", ...over };
+  return {
+    source: "user",
+    content: "hello",
+    images: null,
+    created_at: "2026-05-28T00:00:00Z",
+    ...over,
+  };
 }
 
 describe("PendingStrip", () => {
@@ -53,5 +59,44 @@ describe("PendingStrip", () => {
   it("labels a page callback (ui:page:<name>) as User", () => {
     render(<PendingStrip items={[item({ id: 1, source: "ui:page:compare" })]} />);
     expect(screen.getByText("· User")).toBeTruthy();
+  });
+
+  it("renders a thumbnail per image on a queued multimodal message", () => {
+    render(
+      <PendingStrip
+        items={[
+          item({
+            id: 1,
+            content: "look at this",
+            images: ["/api/agents/7/uploads/a.png", "/api/agents/7/uploads/b.png"],
+          }),
+        ]}
+      />,
+    );
+    const thumbs = screen.getAllByRole("img");
+    expect(thumbs).toHaveLength(2);
+    expect(thumbs[0].getAttribute("src")).toContain("/api/agents/7/uploads/a.png");
+    expect(thumbs[1].getAttribute("src")).toContain("/api/agents/7/uploads/b.png");
+    expect(thumbs[0].getAttribute("alt")).toBe("pending image");
+    // The message's text still shows next to its thumbnails.
+    expect(screen.getByText("look at this")).toBeTruthy();
+  });
+
+  it("renders no thumbnail and keeps the text for a text-only message", () => {
+    render(<PendingStrip items={[item({ id: 1, content: "just text" })]} />);
+    expect(screen.queryAllByRole("img")).toHaveLength(0);
+    expect(screen.getByText("just text")).toBeTruthy();
+  });
+
+  it("suppresses the [image] placeholder when thumbnails render", () => {
+    const { rerender } = render(
+      <PendingStrip
+        items={[item({ id: 1, content: "[image]", images: ["/api/agents/7/uploads/a.png"] })]}
+      />,
+    );
+    expect(screen.queryByText("[image]")).toBeNull();
+    // Without an image the same literal is the message's real text — keep it.
+    rerender(<PendingStrip items={[item({ id: 1, content: "[image]" })]} />);
+    expect(screen.getByText("[image]")).toBeTruthy();
   });
 });

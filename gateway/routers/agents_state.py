@@ -19,6 +19,7 @@ from psycopg_pool import ConnectionPool
 from gateway.inbound_provenance import request_inbound_provenance
 from gateway.routers._delivery import deliver_chat_inbound, reconcile_chat_delivery
 from gateway.routers._eval_guard import caller_eval_isolation, deny_isolated_result_read
+from gateway.routers._pending_images import pending_image_urls
 from gateway.schemas import (
     AgentMessageEnqueued,
     AgentMessagesResponse,
@@ -592,7 +593,9 @@ def get_pending_messages(agent_id: int, request: Request) -> list[PendingInbound
     first. These have not been claimed yet, so they are absent from the
     timeline snapshot; the web UI shows them as a compact strip above the
     composer. Once a message is claimed it enters the agent's messages and
-    appears in the timeline, dropping out of this list.
+    appears in the timeline, dropping out of this list. A multimodal
+    message carries its image reference urls (`images`) so the strip can
+    render thumbnails before the claim.
 
     Returns an empty list for a nonexistent agent (this is a plain
     inbound-table read with no agent-existence precondition; a missing agent
@@ -601,7 +604,13 @@ def get_pending_messages(agent_id: int, request: Request) -> list[PendingInbound
     with request.app.state.db_pool.connection() as conn:
         rows = list_pending_inbounds(conn, agent_id)
     return [
-        PendingInbound(id=r.id, source=r.source, content=r.content, created_at=r.created_at)
+        PendingInbound(
+            id=r.id,
+            source=r.source,
+            content=r.content,
+            images=pending_image_urls(agent_id, r.payload),
+            created_at=r.created_at,
+        )
         for r in rows
     ]
 
