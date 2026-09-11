@@ -37,6 +37,7 @@ from services.pitr.restore_manifest import (
 )
 from services.pitr.restore_object_store import GenerationPinnedObjectReader
 from services.pitr.wal_validate import validate_wal_file
+from shared.proc_tree import create_time_matches, stable_create_time
 
 
 class RestoreProofError(RuntimeError):
@@ -292,7 +293,7 @@ def _is_zombie(process: psutil.Process) -> bool:
 def _matching_process(pid: int, created_at: float) -> psutil.Process | None:
     try:
         process = psutil.Process(pid)
-        if abs(process.create_time() - created_at) >= 0.01:
+        if not create_time_matches(stable_create_time(process), created_at):
             return None
         if _is_zombie(process):
             return None
@@ -605,7 +606,7 @@ def prove_candidate(  # noqa: PLR0915
             "run_id": run_id,
             "partial": str(partial),
             "pid": process.pid,
-            "created_at": process.create_time(),
+            "created_at": stable_create_time(process),
             "pgid": pgid,
             "deadline": time.time() + 6 * 3600,
         },

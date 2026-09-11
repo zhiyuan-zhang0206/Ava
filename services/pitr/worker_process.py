@@ -15,6 +15,7 @@ from typing import NoReturn, Protocol
 import psutil
 
 from services.pitr.base_candidate import StopSignal
+from shared.proc_tree import create_time_matches, stable_create_time
 
 # Ownership gate (worker must not fork before controller adoption).
 ADOPTION_TIMEOUT_S = 30
@@ -46,7 +47,7 @@ def reap_restore_subprocess_group(process: subprocess.Popen[str], leader_created
         raise RuntimeError("refusing to signal the controller process group")
     try:
         leader = psutil.Process(process.pid)
-        if abs(leader.create_time() - leader_created_at) >= 0.01:
+        if not create_time_matches(stable_create_time(leader), leader_created_at):
             raise RuntimeError("restricted restore worker PID identity changed")
     except psutil.NoSuchProcess as exc:
         if group_members(process.pid):
@@ -91,7 +92,7 @@ def worker_bootstrap(
             "ready",
             str(process.pid),
             str(os.getpgrp()),
-            repr(process.create_time()),
+            repr(stable_create_time(process)),
         )
     )
     # No target work (no fork) before the controller adopts this worker.
@@ -145,7 +146,9 @@ def reap_job_group(
     leader: psutil.Process | None = None
     with suppress(psutil.NoSuchProcess):
         leader = psutil.Process(worker_pid)
-    if leader is not None and abs(leader.create_time() - leader_created_at) >= 0.01:
+    if leader is not None and not create_time_matches(
+        stable_create_time(leader), leader_created_at
+    ):
         raise RuntimeError("base candidate worker PID identity changed")
     deadline = time.monotonic() + deadline_s
     with suppress(ProcessLookupError):

@@ -37,6 +37,7 @@ from services.pitr.checksums import CRC32C, KNOWN_CHECKSUM_ALGOS
 from services.pitr.space_budget import CandidateSpaceBudget, require_candidate_space
 from shared.db import direct_db_url
 from shared.pg_tools import pg_tool
+from shared.proc_tree import create_time_matches, stable_create_time
 
 
 class BaseCandidateError(RuntimeError):
@@ -197,7 +198,7 @@ def _validate_replication_hba(replication: Mapping[str, object]) -> None:
 def _matching_process(pid: int, created_at: float, expected_token: str) -> psutil.Process | None:
     try:
         process = psutil.Process(pid)
-        if abs(process.create_time() - created_at) >= 0.01:
+        if not create_time_matches(stable_create_time(process), created_at):
             return None
         if expected_token not in " ".join(process.cmdline()):
             return None
@@ -293,7 +294,7 @@ def _stop_process(process: subprocess.Popen[bytes]) -> None:
         process.wait()
         return
     owned: dict[tuple[int, float], psutil.Process] = {
-        (member.pid, member.create_time()): member
+        (member.pid, stable_create_time(member)): member
         for member in [leader, *leader.children(recursive=True)]
     }
     for member in reversed(list(owned.values())):
@@ -304,7 +305,7 @@ def _stop_process(process: subprocess.Popen[bytes]) -> None:
     while alive and time.monotonic() < deadline:
         with suppress(psutil.NoSuchProcess):
             for member in leader.children(recursive=True):
-                owned[(member.pid, member.create_time())] = member
+                owned[(member.pid, stable_create_time(member))] = member
         _, alive = psutil.wait_procs(
             list(owned.values()), timeout=min(0.25, max(0, deadline - time.monotonic()))
         )
@@ -416,7 +417,7 @@ def _birth_candidate(
             {
                 "state": "spawning",
                 "pid": current.pid,
-                "created_at": current.create_time(),
+                "created_at": stable_create_time(current),
                 "deadline": time.time() + 30,
             },
         )
