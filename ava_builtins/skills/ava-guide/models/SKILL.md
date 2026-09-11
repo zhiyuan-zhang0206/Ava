@@ -1,20 +1,20 @@
 ---
 name: models
-description: Chooses the LLM tier and config overlay for spawned Ava workers under the current cost policy, which only picks models on the intelligence Pareto frontier. Use before every worker spawn or dynamic workflow, even when the model choice seems obvious.
+description: Chooses the LLM model and config overlay for spawned Ava workers under the current cost policy, which only picks models on the intelligence Pareto frontier. Use before every worker spawn or dynamic workflow, even when the model choice seems obvious.
 ---
 
-# Model Selection — the Pareto Frontier and Tier Policy
+# Model Selection — the Pareto Frontier and Cost Policy
 
 You pick a worker's model at spawn time:
 
 ```python
-ava.agents.spawn(prompt="...", config_overlay={"llm_model": "gemini-3.7-flash"})
+ava.agents.spawn(prompt="...", config_overlay={"llm_model": "deepseek-v4-flash"})
 ```
 
 Omitting the overlay is a valid choice — the child inherits the cluster default.
 The registry (`shared/lm/registry.py`) is the authoritative list of available
 models (`spawnable=True`) and their prices; this skill carries the judgment the
-registry cannot: **which tier a given sub-task deserves, and which registered
+registry cannot: **which model a given sub-task deserves, and which registered
 models sit on the Pareto frontier.**
 
 ## Where model names come from — enumerate, never hardcode
@@ -39,18 +39,21 @@ copied from an old doc or an old spawn; list the current roster first:
 
 - **Source of truth (repo-side)** — `shared/lm/registry.py`'s `MODELS` dict and
   the derived `SUPPORTED_MODELS` (provider → spawnable ids). A model is
-  selectable iff `spawnable=True`; a current price means a matching
-  `pricing_catalog.json` entry. The frontend picker and `/api/models` both
-  derive from this registry, so the registry is the only place a model is born.
+  selectable iff `spawnable=True`. Chat prices live in the provider plugin's
+  `PriceRates` and are mirrored in `shared/lm/pricing_catalog_archive.json` —
+  the reviewed ledger the runtime reads (catalog-only services such as
+  embeddings price from the archive alone). The frontend picker and
+  `/api/models` both derive from this registry, so the registry is the only
+  place a model is born.
 - **Presets are not models.** `ava presets ls` / `ava.agents.presets.list()`
   list named config templates (which may carry an `llm_model`), not the model
   roster. There is no dedicated `ava models` CLI yet — the API above or the
   registry is how an agent lists models.
 
-The table below names concrete ids as **policy** — the standing tier choices,
-not the full roster. Before spawning, confirm the id exists in the registry;
-if this doc names a model the roster no longer has, update the doc — the
-registry is maintained as it ships, this skill is maintained as policy.
+This skill names concrete ids as **policy** — the standing choices, not the
+full roster. Before spawning, confirm the id exists in the registry; if this
+doc names a model the roster no longer has, update the doc — the registry is
+maintained as it ships, this skill is maintained as policy.
 
 ## Pareto frontier principle
 
@@ -60,78 +63,72 @@ lower cost, or equally smart at lower cost. Picking a dominated model is a
 policy bug, not a preference, so the frontier is actively maintained:
 
 - When a new model lands, place it on the frontier **only if** it is not itself
-  dominated; register it, then update this skill's table.
-- When a new model dominates a current one, replace it in this skill's table and
+  dominated; register it, then update this skill's policy.
+- When a new model dominates a current one, replace it in this skill's policy and
   note the dominance; the old model stays registered (older configs keep
   working, and `superseded_by` hides it from the picker) but is no longer a
   choice this policy names.
 - A dominance pair is worth stating explicitly, so a later reader does not
   resurrect the dominated name out of habit.
 
-Standing dominance (user ruling 2026-09-10, flipped from 2026-09-03):
+Current frontier state (user ruling 2026-09-10):
 
 - `deepseek-v4-flash` **dominates** `deepseek-v4-flash-vision-exp` — same
   price (the catalog carries the same rates), same 1M context, and its
-  default backend is now DeepSeek V4.1 Flash, strictly stronger than the
-  vision experimental sibling. There is no reason to keep selecting
-  `deepseek-v4-flash-vision-exp` as the default tier: wherever a doc, script
-  or spawn choice names it, use the plain `deepseek-v4-flash` id. The
-  vision-exp id stays registered for tasks that genuinely need vision — the
-  V4.1 Flash backend's vision capability is not yet verified.
+  backend is DeepSeek V4.1 Flash. Wherever a doc, script or spawn choice
+  named the vision experimental sibling, use the plain `deepseek-v4-flash`
+  id: the policy is flash everywhere, vision work included.
+- `deepseek-v4-pro` is **withdrawn from selection** (same ruling). It stays
+  registered with `spawnable=False` so old configs keep working — it resolves
+  to `deepseek-v4-flash` — but no new choice may name it.
 
 ## Current cost policy
 
-The standing pairing is (subject to change — check with the user before
-reaching for anything more expensive):
+**One model: `deepseek-v4-flash`** (user ruling 2026-09-10, superseding the
+2026-09-03 two-tier table). Main agent and workers alike — orchestration,
+planning, synthesis, review, extraction, format transforms, scanning — run the
+same id on its V4.1 Flash backend.
 
-| Tier | Model | Use for |
-|---|---|---|
-| **Judgment (main)** | `gemini-3.7-flash` | orchestration, planning, synthesis, reviewing/judging other agents' output, writing for humans |
-| **Mechanical** | `deepseek-v4-flash` | high-volume parallel workers, extraction, format transforms, checklist verification, scanning/sweeping |
+- Complexity is absorbed by **decomposition and verification waves**, not by
+  upgrading the model (next section).
+- `deepseek-v4-pro` and `deepseek-v4-flash-vision-exp` are withdrawn by
+  policy; vision work uses plain `deepseek-v4-flash`.
+- Other registered models (`gemini-*`, Claude, GLM, Qwen, …) sit outside the
+  default policy: select one only when the user explicitly asks for that
+  model, and confirm it is on the roster first (section above).
+- An already-running agent still on a non-flash model is moved with
+  `ava.self.restart(config_overlay={"llm_model": "deepseek-v4-flash"})`.
+- Ruling record: shared-pool note `dev/ava-agent-model-flash-ruling-20260910.md`.
 
-`gemini-3.8-flash` is spawnable on the production picker since 2026-09-06
-(user order; fresh-spawn verified clean by agent #5834). Caveat: restarting an
-EXISTING agent onto 3.8 (history written by another model) still 400s with
-"Corrupted thought signature" — the cross-model message-projection protocol is
-not landed yet, so switch only fresh agents to 3.8. The mechanical tier is the
-plain `deepseek-v4-flash` id — its default backend is now DeepSeek V4.1 Flash,
-stronger than the vision-exp sibling (see the dominance pair above). Claude and
-other models stay registered and spawnable, but they sit outside the default
-policy — use them only when the user explicitly asks for them.
+## How to run sub-tasks (flash-only)
 
-## How to decide the tier
+There is no tier to pick; the same three questions now decide how much
+structure a sub-task gets:
 
-Three questions about the sub-task:
-
-1. **Open-ended judgment, or bounded procedure?** Decomposing a problem,
-   weighing trade-offs, synthesizing prose → judgment tier. Clear inputs, a
-   mechanical procedure, and a checkable done-condition → mechanical tier.
-2. **Blast radius of a wrong answer?** A wrong orchestrator decision poisons
-   every downstream worker → judgment tier at the top of the tree. One bad
-   worker among ten parallel ones gets caught by a verification wave →
-   mechanical tier at the leaves.
-3. **Volume?** N parallel workers multiply cost by N — that is exactly where
-   the cheap tier pays. One-off calls barely matter; fleets do.
+1. **Open-ended judgment, or bounded procedure?** Both run flash; open-ended
+   work is split into smaller, checkable steps first.
+2. **Blast radius of a wrong answer?** Large → add a verification wave (a
+   flash cross-check, or peer review between agents) instead of a more
+   expensive model.
+3. **Volume?** N parallel workers multiply cost by N — batch the work and
+   converge; that is where a flat policy pays. One-off calls barely matter.
 
 The typical dynamic-workflow shape that falls out:
 
 ```
-gemini-3.7-flash orchestrator
+deepseek-v4-flash orchestrator
   → deepseek-v4-flash worker fleet
   → deepseek-v4-flash cross-checkers
-  → gemini-3.7-flash synthesizer
 ```
 
 ## Don't
 
-- Don't run a whole worker fleet on the judgment tier — a flash fleet plus a
-  verification wave is cheaper and usually as accurate.
+- Don't select anything outside `deepseek-v4-flash` — `deepseek-v4-pro`,
+  `deepseek-v4-flash-vision-exp` and `gemini-*` are all withdrawn from the
+  policy, vision work included.
 - Don't hand flash an open-ended judgment task and trust the output
-  unverified — pair flash breadth with judgment-tier (or cross-flash) checking.
+  unverified — pair flash breadth with a flash cross-checking wave.
 - Don't scatter hardcoded model names where the cluster default would do —
-  an explicit overlay should mean a deliberate tier choice.
-- Don't pick `deepseek-v4-flash-vision-exp` out of habit — the plain
-  `deepseek-v4-flash` id is the default tier now: same price, and its
-  V4.1 Flash backend is strictly stronger.
+  an explicit overlay should mean a deliberate choice.
 - Don't trust a model name from an old spawn, an old chat, or a stale doc —
   enumerate first (`GET /api/models` or the registry).

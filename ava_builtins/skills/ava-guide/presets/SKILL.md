@@ -83,7 +83,7 @@ config = {
     # differentiates a role. Keep it to short disciplinary skills; a large
     # reference skill is already one ava.help() away via the index.
     "skills_to_expand_at_start": ["ava-code.conventions"],
-    "llm_model": "gemini-3.7-flash",
+    "llm_model": "deepseek-v4-flash",
 }
 ```
 
@@ -106,7 +106,7 @@ body = {
     "name": "my-preset",           # kebab-case, unique identifier
     "label": "My Preset",          # Human-readable name
     "description": "What this preset is for",
-    "config": {"llm_model": "gemini-3.7-flash", ...}
+    "config": {"llm_model": "deepseek-v4-flash", ...}
 }
 r = httpx.post(
     f"{base}/api/presets", json=body,
@@ -120,7 +120,7 @@ Or use the CLI:
 ```bash
 ava presets create --name my-preset --label "My Preset" \
     --description "What this preset is for" \
-    --config '{"llm_model":"gemini-3.7-flash"}'
+    --config '{"llm_model":"deepseek-v4-flash"}'
 ```
 
 ### 4. Verify
