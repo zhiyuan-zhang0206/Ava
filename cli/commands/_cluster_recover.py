@@ -9,6 +9,13 @@ takes that lock *after* the window check, so a forced rollout still aborts with
 `LOCK_TTL_S` (30 min) of a cluster nobody can deploy to, on the strength of a
 process that is already dead.
 
+A lease whose local holder process is provably gone is also reclaimed
+automatically by the watchdog's `stranded_lease` controller (one round, same
+pid proof, same compare-and-set) — this verb remains the immediate manual path
+and the only one that also clears a stranded pause for the shapes the
+controller must not touch (a remote holder, a settle hold, a maintenance hold
+kept for an operator).
+
 `ops.ops_cluster.cluster_recover_op` has always been able to fix that — it clears
 the lock plus a stranded paused posture, and carries the safety that makes it
 sound: it refuses while the lease holder's process is still running (pid-probed

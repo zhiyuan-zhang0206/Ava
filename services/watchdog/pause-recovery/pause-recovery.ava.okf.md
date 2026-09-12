@@ -7,8 +7,9 @@ tags: []
 
 # Pause recovery — stranded pauses, gateway reachability evidence, and the pause-scoped healthcheck exemption
 
-Owned by `ops/controllers/stranded_pause.py` (the pause controller) with two
-consumers in `services/healthchecks/gateway.py`. The incident this closes is
+Owned by `ops/controllers/stranded_pause.py` (the pause controller) and
+`ops/controllers/stranded_lease.py` (the dead-holder deploy-lease reclaim), with
+two consumers in `services/healthchecks/gateway.py`. The incident this closes is
 issue #2101: a dead update chain left the gateway host paused, and the gateway
 stayed DOWN 2h6m — the owner check never ran across 122 blocked watchdog rounds,
 and even a running check would have deferred to a live lease whose holder's
@@ -94,6 +95,14 @@ phase) lives in
 `conventions/graceful-maintenance.md`, "Recovering a stuck maintenance
 operation" — the automation is the same steps, so an operator can take over
 wherever an attempt stopped.
+
+## Dead-holder deploy-lease reclamation
+
+The automatic counterpart of `ava cluster recover`: a lease whose holder is
+provably gone is cleared in one watchdog round. The bounds (positive local-death
+evidence, live-signal gates, compare-and-set) and what it deliberately leaves to
+hand recovery are in
+[[services/watchdog/pause-recovery/stranded-lease-reclaim.ava.okf.md|Stranded deploy-lease reclamation]].
 
 ## Off-pin converge-back
 

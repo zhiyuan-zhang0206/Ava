@@ -7,7 +7,7 @@ healthchecks run only if no controller blocked (a paused / schema-mismatched /
 mid-self-heal host must not have its services revived).
 
 Order is load-bearing. Everything from `pause` down is the watchdog's original gate
-ordering; the two reclaimers are the additions, and they go in front of all of it:
+ordering; the three reclaimers are the additions, and they go in front of all of it:
 1. **updater** — reap a hung `ava-updater` session (agent-runner). Ahead of
    everything, because it is the one controller whose finding is *"the signal the
    controllers behind me defer to is a corpse"*: a hung updater leaves this host
@@ -32,12 +32,19 @@ ordering; the two reclaimers are the additions, and they go in front of all of i
    action is a `SIGINT` rather than a kill — the recovery for a failed rollout lives
    *inside* the rollout process — but it is equally safe here because it equally never
    blocks. See `ops.controllers.stalled_rollout`.
-3. **pause** — a paused host skips everything else (its services are meant to be
+3. **lease** — reclaim the cluster deploy lease when its holder process is provably
+   gone (so a hard-killed orchestration cannot block every new deploy for the
+   lease's full TTL). Ahead of `pause` because it meets its case there: a rollout
+   pauses its hosts before it stops/restarts them, so a killed orchestration
+   strands the lease *while the host is paused* — and anything behind `pause` is
+   short-circuited away while the pause blocks. Never blocks. See
+   `ops.controllers.stranded_lease`.
+4. **pause** — a paused host skips everything else (its services are meant to be
    down; reviving them fights the rollout).
-4. **schema** — a schema mismatch blocks before pin (old-code daemons would crash
+5. **schema** — a schema mismatch blocks before pin (old-code daemons would crash
    on the new schema).
-5. **pin** — off-pin self-heal (agent-runner) / warn (gateway).
-6. **code** — on-pin but running stale processes: restart (agent-runner). Last
+6. **pin** — off-pin self-heal (agent-runner) / warn (gateway).
+7. **code** — on-pin but running stale processes: restart (agent-runner). Last
    because it is the narrowest reading of "wrong code here": it only applies once
    the checkout is already right, which is what the pin controller ahead of it
    converges.
@@ -80,6 +87,7 @@ from ops.controllers.pin import PinController
 from ops.controllers.schema import SchemaController
 from ops.controllers.stalled_rollout import StalledRolloutController
 from ops.controllers.stalled_updater import StalledUpdaterController
+from ops.controllers.stranded_lease import StrandedLeaseController
 from ops.controllers.stranded_pause import PauseController
 from shared.machine import MachineRole
 
@@ -96,11 +104,12 @@ _BLOCKED_ROUND_ALARM_ROUNDS = 10
 
 
 def build_controllers() -> tuple[Controller, ...]:
-    """The controller list in reconcile order: updater → rollout → pause → schema → pin
-    → code."""
+    """The controller list in reconcile order: updater → rollout → lease → pause →
+    schema → pin → code."""
     return (
         StalledUpdaterController(),
         StalledRolloutController(),
+        StrandedLeaseController(),
         PauseController(),
         SchemaController(),
         PinController(),
