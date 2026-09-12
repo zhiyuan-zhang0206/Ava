@@ -36,7 +36,10 @@ ruled the open decision points on 2026-09-12 17:40–17:41. Design record:
    (degraded); the OS adapter restarts root; recovery reseeds the
    attribution-requiring subchains. Adoption (management takeover without
    re-parenting) is documented as the design's exception state — POSIX
-   cannot re-attach chains or attribution to existing processes.
+   cannot re-attach chains to existing processes; and (F1, 2026-09-12)
+   attribution is not reset by reparent while the chain root lives,
+   narrowing the actual loss case to the chain root's own lifecycle events
+   (helper death/restart; F12 to measure).
 5. **Supervision collapses from 4–5 layers to 2**: the OS adapter keeps root
    alive; root keeps the whole tree alive (parallel pull-up + startup gating,
    self-healing units; no declarative dependency DAG).
@@ -78,9 +81,9 @@ ruled the open decision points on 2026-09-12 17:40–17:41. Design record:
   stays entirely in the helper, and the zero-permission lint becomes a merge
   gate for the root codebase.
 - **Measurement debt accepted; F1 first.** The design rests on TCC
-  attribution propagating across the full hierarchy, today verified only one
-  level deep — F1 (the multi-level attribution probe across the whole
-  two-section tree) runs before the dependent implementation slices.
+  attribution propagating across the full hierarchy; F1 (the multi-level
+  attribution probe across the whole two-section tree) ran 2026-09-12 —
+  full-chain attribution held (27/27); see the design record's F1 result.
 - **Migration preconditions**: complete company-air's inventory before the
   cutover; the per-machine window is booked with the user directly, and the
   user watches the cutover live.
