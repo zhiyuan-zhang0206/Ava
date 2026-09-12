@@ -283,6 +283,31 @@ def test_root_keeper_contract_is_pinned_in_the_swift_source() -> None:
     # The wire surface is wired into dispatch.
     for method in ("root_seed", "root_status", "root_stop"):
         assert f'case "{method}"' in source
+    # Spawn and ownership accounting share one lock domain with the SIGCHLD
+    # reap: no unlock may sit between the spawn call and the pid record, or a
+    # root that exits inside the spawn window drains unattributed and parks
+    # the keeper on a dead pid (QA #3242).
+    attempt = keeper_source.split("private func attemptSpawn", 1)[1].split(
+        "private func scheduleSpawnRetry", 1
+    )[0]
+    spawn_at = attempt.index("spawnDetachedChild(")
+    account_at = attempt.index("childPID = pid")
+    lock_at = attempt.rindex("lock.lock()", 0, spawn_at)
+    assert "lock.unlock()" not in attempt[lock_at:account_at]
+
+
+def test_root_seed_env_rejects_a_non_string_map() -> None:
+    source = (
+        Path(__file__).parents[2] / "services/permissions_helper/helper/main.swift"
+    ).read_text()
+    seed_source = source.split("struct RootSeed", 1)[1].split("static func load", 1)[0]
+
+    # A present-but-mistyped `env` fails fast like every other seed field,
+    # instead of the cast collapsing to an empty map and silently dropping
+    # the child's environment (QA #3242).
+    assert 'raw["env"] as? [String: String]) ?? [:]' not in seed_source
+    assert "root seed: env must be a map of string to string" in seed_source
+    assert "environment = [:]" in seed_source
 
 
 @pytest.mark.parametrize(

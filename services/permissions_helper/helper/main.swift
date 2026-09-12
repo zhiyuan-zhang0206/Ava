@@ -771,13 +771,22 @@ struct RootSeed {
         else {
             throw OpError.bad("root seed: stderr must be an absolute path")
         }
+        let environment: [String: String]
+        if let rawEnvironment = raw["env"] {
+            guard let parsedEnvironment = rawEnvironment as? [String: String] else {
+                throw OpError.bad("root seed: env must be a map of string to string")
+            }
+            environment = parsedEnvironment
+        } else {
+            environment = [:]
+        }
         return RootSeed(
             argv: argv,
             cwd: cwd,
             runDir: runDir,
             stdoutPath: stdoutPath,
             stderrPath: stderrPath,
-            environment: (raw["env"] as? [String: String]) ?? [:]
+            environment: environment
         )
     }
 
@@ -1029,6 +1038,14 @@ final class RootKeeper {
         for (key, value) in seed.environment {
             environment[key] = value
         }
+        // Spawn and ownership accounting share one lock domain with
+        // `reapIfOwned`: a root that exits before its pid is recorded would
+        // otherwise be reaped by the SIGCHLD drain against a still-nil
+        // `childPID`, dropping that exit and parking the keeper on a dead pid
+        // it never restarts. Under one lock, a fast exit drains only after
+        // `childPID` is set and is attributed like any other exit (the same
+        // discipline the session table's spawn uses; QA #3242).
+        lock.lock()
         do {
             let pid = try spawnDetachedChild(
                 argv: seed.argv,
@@ -1037,7 +1054,6 @@ final class RootKeeper {
                 stdoutPath: seed.stdoutPath,
                 stderrPath: seed.stderrPath
             )
-            lock.lock()
             childPID = pid
             childStartedAt = Date()
             state = "running"
@@ -1046,10 +1062,14 @@ final class RootKeeper {
             conflictSince = nil
             lock.unlock()
             rootKeeperLog("ava-root started (pid \(pid))")
-        } catch let OpError.bad(message) {
-            scheduleSpawnRetry(reason: message)
         } catch {
-            scheduleSpawnRetry(reason: "\(error)")
+            // scheduleSpawnRetry takes the same lock; release before reporting.
+            lock.unlock()
+            if let opFailure = error as? OpError, case .bad(let message) = opFailure {
+                scheduleSpawnRetry(reason: message)
+            } else {
+                scheduleSpawnRetry(reason: "\(error)")
+            }
         }
     }
 
