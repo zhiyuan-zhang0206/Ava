@@ -58,6 +58,10 @@ export const FLEX_COL = "flex-col"; // column direction — the scroll axis
 export const MIN_W_0 = "min-w-0"; // horizontal flex-item contract (#979)
 export const MIN_H_0 = "min-h-0"; // vertical flex-item contract (#874)
 export const OVERFLOW_HIDDEN = "overflow-hidden"; // clip, never widen
+// Like OVERFLOW_HIDDEN, but without creating a scroll container — a sticky
+// descendant keeps resolving against the outer scroller (task #3215: the work
+// block body wrapper must not become the pinned child header's scrollport).
+export const OVERFLOW_CLIP = "overflow-clip";
 
 // ── The named invariants (I1–I6) ───────────────────────────────────────
 // One entry per invariant; `pages` says which page each applies to. Tests

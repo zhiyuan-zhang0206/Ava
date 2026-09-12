@@ -278,14 +278,25 @@ export const HEADER_CLS =
   "text-muted-foreground/80 hover:text-foreground hover:bg-accent/30 " +
   "transition-colors select-none rounded-tr-sm";
 
-// Sticky header contract shared by the two expandable surfaces: CardHeader
+// Sticky header contract shared by the expandable surfaces: CardHeader
 // (top-level message cards) and the work-block header in run-block.tsx. When
 // expanded, the header pins below the floating HeaderBar — top-11 must match
 // BAR_HEIGHT_PX / BAR_HEIGHT_CLASS in @/lib/layout (h-11 = 44px), the same
-// line findClosestStuckHeaderId measures against. While `isStuck`, the header
-// switches to the elevated opaque variant that masks the body scrolling
-// beneath it, then fades back to transparent once the block's range is left.
+// line findClosestStuckHeaderId measures against. A work block's child card
+// pins one level deeper instead (STICKY_CHILD_HEADER_CLS below). While
+// `isStuck`, the header switches to the elevated opaque variant that masks the
+// body scrolling beneath it, then fades back to transparent once the block's
+// range is left.
 export const STICKY_HEADER_CLS = "sticky top-11 z-10";
+
+// The nested variant (task #3215): a work block's child card pins under the
+// block header's pinned bottom — the same 2.75rem bar offset (BAR_HEIGHT_CLASS
+// h-11) plus --turn-header-h, the block header's live height, measured and set
+// on the block root by TurnBlock (run-block.tsx). z-5 keeps every child under
+// the block header (z-10) while staying above the card body scrolling beneath
+// it. Tailwind needs the literal class string (underscores = the calc spaces).
+export const STICKY_CHILD_HEADER_CLS =
+  "sticky top-[calc(2.75rem_+_var(--turn-header-h,0px))] z-[5]";
 export const STUCK_HEADER_CLS =
   "bg-background/95 backdrop-blur-md shadow-xs border-b border-border/60 " +
   "transition-[background-color,box-shadow,border-color] duration-150 ease-out motion-reduce:transition-none";
@@ -388,11 +399,11 @@ export const CardHeader = memo(function CardHeader({
   config: CardConfig;
   expanded: boolean;
   onToggle: () => void;
-  /** This card is a top-level message card: expanding it pins the header below
-   *  the HeaderBar while its body scrolls (task #3136). Cards inside a work
-   *  block keep their turn's sticky header instead, so two headers never pin
-   *  at the same line. */
-  stickyHeader?: boolean;
+  /** Where this card's header pins while expanded: `"top"` below the HeaderBar
+   *  (top-level message cards, task #3136), or `"nested"` under its expanded
+   *  work block's header (that block's child cards, task #3215 —
+   *  STICKY_CHILD_HEADER_CLS). false / omitted: no pin. */
+  stickyHeader?: "top" | "nested" | false;
   /** The header is currently pinned at the sticky line — drives the elevated
    *  mask styling (same contract as the work-block header). */
   isStuck?: boolean;
@@ -410,7 +421,8 @@ export const CardHeader = memo(function CardHeader({
   const Icon = config.icon;
   // Sticky only while expanded: a collapsed card has nothing to scroll under
   // its header, and the collapsed rest position must stay in flow.
-  const sticky = stickyHeader && expanded;
+  const sticky = !!stickyHeader && expanded;
+  const stickyCls = stickyHeader === "nested" ? STICKY_CHILD_HEADER_CLS : STICKY_HEADER_CLS;
 
   return (
     // No title attribute — deliberately no hover tooltip on this button; the
@@ -424,7 +436,7 @@ export const CardHeader = memo(function CardHeader({
       onClick={onToggle}
       className={cn(
         HEADER_CLS,
-        sticky && STICKY_HEADER_CLS,
+        sticky && stickyCls,
         sticky && (isStuck ? STUCK_HEADER_CLS : UNSTUCK_HEADER_CLS),
       )}
       aria-expanded={expanded}

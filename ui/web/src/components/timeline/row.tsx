@@ -43,7 +43,7 @@ export const TimelineRow = memo(function TimelineRow({
   streaming,
   expanded,
   showActions,
-  stickyHeader,
+  stickyHeader = false,
   isStuck,
   onToggle,
   onFork,
@@ -54,10 +54,11 @@ export const TimelineRow = memo(function TimelineRow({
   streaming: boolean;
   expanded: boolean;
   showActions: boolean;
-  /** This row is a top-level message card whose header pins while expanded
-   *  (primary items only — work-block children keep their turn's header, so
-   *  pass false there; see runs.classifyItem). */
-  stickyHeader: boolean;
+  /** Where this row's header pins while expanded: `"top"` below the HeaderBar
+   *  (top-level message cards) or `"nested"` under its expanded work block's
+   *  header (work-block children, task #3215; see runs.classifyItem). false
+   *  for rows with no pin. */
+  stickyHeader?: "top" | "nested" | false;
   /** The header is currently pinned at the sticky line (task #3136). */
   isStuck: boolean;
   onToggle: (id: string, kind: BackendTimelineItem["kind"]) => void;
@@ -102,13 +103,21 @@ export const TimelineRow = memo(function TimelineRow({
     </>
   ) : null;
 
+  // Sticky only while expanded — a collapsed row has nothing to scroll under
+  // its header. The level decides the scan bucket + the pin line: a work
+  // block's child row joins the nested pass (data-turn-child) instead of the
+  // level-1 scan (findClosestStuckHeaderId, run-block.tsx).
+  const sticky = !!stickyHeader && expanded;
+  const nestedSticky = stickyHeader === "nested";
+
   return (
     // data-card-sticky marks a row whose header may pin — the scan target for
     // findClosestStuckHeaderId (see run-block.tsx); expanded is required for
     // the pin, so a collapsed row drops out of the scan by itself.
     <div
       data-item-id={item.item_id}
-      data-card-sticky={stickyHeader && expanded}
+      data-card-sticky={sticky}
+      data-turn-child={nestedSticky ? "true" : undefined}
       aria-live="off"
       className="timeline-item"
     >
