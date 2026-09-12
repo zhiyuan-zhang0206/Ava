@@ -12,14 +12,18 @@ The `aops_pool` fixture mirrors prod's `agent/loop.py` db_pool (autocommit +
 check_connection); `_clean_state` truncates the checkpoint tables per test.
 """
 
-from typing import cast
+from collections.abc import Callable, Sequence
+from typing import Annotated, Any, TypedDict, cast
 
 import psycopg
 import pytest
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
+from langgraph.channels.delta import DeltaChannel
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.message import _messages_delta_reducer
 from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
 
@@ -37,6 +41,45 @@ def _saver(pool: AsyncConnectionPool) -> AsyncPostgresSaver:
     return AsyncPostgresSaver(
         conn=cast(AsyncConnectionPool[psycopg.AsyncConnection[DictRow]], pool)
     )
+
+
+def _delta_app(saver: AsyncPostgresSaver, *, snapshot_frequency: int = 1000):
+    """A minimal graph whose `messages` channel is a DeltaChannel — the write
+    model under evaluation (tasks #3180/#3181) — so the retention tests below
+    run against genuinely delta-shaped checkpoint rows. `snapshot_frequency`
+    picks the cadence of `_DeltaSnapshot` rows; a small value lands the newest
+    checkpoint ON a snapshot step (the review #6143 x2b shape)."""
+
+    class S(TypedDict):
+        messages: Annotated[
+            list[AnyMessage],
+            DeltaChannel(
+                cast(Callable[[Any, Sequence[Any]], Any], _messages_delta_reducer),
+                snapshot_frequency=snapshot_frequency,
+            ),
+        ]
+        n: int
+        target: int
+
+    def step(state: S) -> dict[str, Any]:
+        n = state["n"]
+        return {
+            "messages": [
+                HumanMessage(id=f"u{n}", content=f"user {n}"),
+                AIMessage(id=f"a{n}", content=f"reply {n} original"),
+            ],
+            "n": n + 1,
+        }
+
+    graph = StateGraph(S)
+    graph.add_node("step", step)
+    graph.add_edge(START, "step")
+
+    def route(state: S) -> str:
+        return "step" if state["n"] < state["target"] else END
+
+    graph.add_conditional_edges("step", route)
+    return graph.compile(checkpointer=saver)
 
 
 def _config(thread_id: str, checkpoint_id: str | None = None) -> RunnableConfig:
@@ -310,3 +353,107 @@ async def test_trim_noop_while_newer_messages_blob_is_in_flight(
     versions = await _blob_versions(aops_pool, "1", "messages")
     assert len(versions) == 5
     assert in_flight_version in versions
+
+
+# -- never-delete retention (tasks #3180/#3181) -------------------------------
+
+
+async def test_trim_parks_a_delta_written_thread(aops_pool: AsyncConnectionPool) -> None:
+    """Real delta rows: the explicit `delta_thread` exemption parks the thread
+    (its replay counters mark it delta; the newest messages version additionally
+    has no blobs to begin with) — zero deletions and the history still
+    reconstructs. This is the intended steady state under the never-delete
+    ruling (2026-09-12, tasks #3180/#3181)."""
+    saver = _saver(aops_pool)
+    app: Any = _delta_app(saver)
+    cfg = _config("delta-park")
+    await app.ainvoke({"messages": [], "n": 0, "target": 3}, cfg, recursion_limit=40)
+
+    before = await count_checkpoints(aops_pool, "delta-park")
+    assert before >= 4
+
+    counts = await trim_checkpoints(aops_pool, "delta-park", keep=1)
+
+    assert counts == (0, 0, 0)
+    assert await count_checkpoints(aops_pool, "delta-park") == before
+    state = await app.aget_state(cfg)
+    assert [m.id for m in state.values["messages"]] == ["u0", "a0", "u1", "a1", "u2", "a2"]
+
+
+async def test_trim_parks_a_delta_thread_at_snapshot_point(
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    """The explicit exemption, not blob absence, parks the trim at a delta
+    snapshot step (review #6143 I1/x2b): with `snapshot_frequency=2` the newest
+    checkpoint IS a snapshot point — no replay counters in its metadata and its
+    messages blob is committed (EXT-7 `_DeltaSnapshot`) — so the plain guard
+    alone would proceed and sever the ancestor chain. Zero deletions, and every
+    retained read still reconstructs."""
+    saver = _saver(aops_pool)
+    app: Any = _delta_app(saver, snapshot_frequency=2)
+    cfg = _config("delta-spark")
+    await app.ainvoke({"messages": [], "n": 0, "target": 9}, cfg, recursion_limit=60)
+
+    # Preconditions that make this the review-#6143-x2b shape.
+    async with aops_pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT metadata ? 'counters_since_delta_snapshot',"
+            " (SELECT count(*) FROM checkpoint_blobs b"
+            "   WHERE b.thread_id = c.thread_id AND b.channel = 'messages'"
+            "     AND b.version = c.checkpoint -> 'channel_versions' ->> 'messages')"
+            " FROM checkpoints c WHERE c.thread_id = %s"
+            " ORDER BY c.checkpoint_id DESC LIMIT 1",
+            ("delta-spark",),
+        )
+        row = await cur.fetchone()
+    assert row is not None
+    has_counters, blob_rows = row
+    assert has_counters is False, "target must land the newest checkpoint on a snapshot step"
+    assert blob_rows == 1, "the snapshot's messages blob must be committed"
+
+    before = await count_checkpoints(aops_pool, "delta-spark")
+    counts = await trim_checkpoints(aops_pool, "delta-spark", keep=1)
+
+    assert counts == (0, 0, 0)
+    assert await count_checkpoints(aops_pool, "delta-spark") == before
+
+    full_ids = [x for i in range(9) for x in (f"u{i}", f"a{i}")]
+    state = await app.aget_state(cfg)
+    assert [m.id for m in state.values["messages"]] == full_ids
+
+    # A mid-chain point still reads back its exact prefix (the surviving
+    # snapshot seeds survive with it).
+    async with aops_pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT checkpoint_id FROM checkpoints WHERE thread_id = %s"
+            " ORDER BY checkpoint_id OFFSET 4 LIMIT 1",
+            ("delta-spark",),
+        )
+        mid_row = await cur.fetchone()
+    assert mid_row is not None
+    mid_state = await app.aget_state(_config("delta-spark", mid_row[0]))
+    mid_ids = [m.id for m in mid_state.values["messages"]]
+    assert mid_ids == full_ids[: len(mid_ids)] and len(mid_ids) > 0
+
+
+async def test_tail_edit_keeps_the_replaced_copy_in_writes(
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    """A same-id tail edit is an append at the storage layer: the replaced copy
+    stays in the stored writes (never-delete ruling, 2026-09-12, task #3180)."""
+    saver = _saver(aops_pool)
+    app: Any = _delta_app(saver)
+    cfg = _config("delta-edit")
+    await app.ainvoke({"messages": [], "n": 0, "target": 2}, cfg, recursion_limit=40)
+    await app.aupdate_state(cfg, {"messages": [AIMessage(id="a1", content="reply 1 edited")]})
+
+    state = await app.aget_state(cfg)
+    assert [m.content for m in state.values["messages"]][-1] == "reply 1 edited"
+
+    async with aops_pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT blob FROM checkpoint_writes WHERE thread_id = %s", ("delta-edit",)
+        )
+        blobs = [bytes(r[0]) for r in await cur.fetchall()]
+    assert any(b"reply 1 original" in blob for blob in blobs)  # replaced copy kept
+    assert any(b"reply 1 edited" in blob for blob in blobs)  # replacement present
