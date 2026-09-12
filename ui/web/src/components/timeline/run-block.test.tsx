@@ -328,6 +328,10 @@ describe("TurnBlock component", () => {
     expect(toggle.className).toContain("backdrop-blur-md");
     expect(toggle.className).toContain("shadow-xs");
     expect(toggle.className).toContain("border-b");
+    // …with the border's height compensated: a bare border made the stuck
+    // header 1px taller than the unstuck one, and that 1px drove the
+    // ResizeObserver pin loop (user report 2026-09-12).
+    expect(toggle.className).toContain("-mb-px");
     expect(toggle.className).toContain("motion-reduce:transition-none");
   });
 

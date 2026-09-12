@@ -56,11 +56,6 @@
 //     instead of being yanked back on the next streamed item.
 
 export interface StickyThresholds {
-  // A user scroll must move UP by more than this px (within one event) to
-  // count as a deliberate scroll-up. Filters sub-pixel rebounds; real
-  // scrolls are tens of pixels per event. (Slow multi-event scroll-ups on
-  // wheel devices are caught by the wheel-intent path instead.)
-  unstickDeltaPx: number;
   // "At the bottom" zone = bottomPxRatio * clientHeight, clamped to
   // [bottomPxMin, bottomPxMax].
   bottomPxRatio: number;
@@ -70,7 +65,6 @@ export interface StickyThresholds {
 
 // Touch devices: wide bounce-tolerant zone.
 export const TOUCH_STICKY_THRESHOLDS: StickyThresholds = {
-  unstickDeltaPx: 20,
   bottomPxRatio: 0.2,
   bottomPxMin: 80,
   bottomPxMax: 200,
@@ -80,7 +74,6 @@ export const TOUCH_STICKY_THRESHOLDS: StickyThresholds = {
 // deliberate scroll-up of one wheel notch leaves the bottom zone and
 // unsticks — the timeline stops yanking the user back while they read.
 export const POINTER_STICKY_THRESHOLDS: StickyThresholds = {
-  unstickDeltaPx: 20,
   bottomPxRatio: 0.05,
   bottomPxMin: 24,
   bottomPxMax: 72,
@@ -133,20 +126,26 @@ export interface StickyController {
    * bottom. */
   isSticky(): boolean;
   /** Feed every viewport scroll event here (snapshot read from the live
-   * DOM, not the event). */
+   * DOM, not the event). Upward movement accumulates into a run; a run of
+   * more than one bottom zone releases following — regardless of how small
+   * the individual events were or how many pins interrupted it. */
   handleScroll(view: ScrollSnapshot): void;
   /** Feed every wheel event here. An upward notch outside the bottom zone
-   * (measured against both the current and last-known bottom) is the
-   * deliberate "stop following" gesture — the only unstick signal a slow
-   * scroll-up can produce, since per-event scroll deltas stay under
-   * unstickDeltaPx while auto-scroll keeps re-pinning the baseline. */
+   * (measured against both the current and last-known bottom) is an early
+   * "stop following" signal (a notch can arrive before the position
+   * moves). It is no longer the only signal a slow scroll-up produces:
+   * scroll events carry their own escape via the cumulative run, which is
+   * what a scrollbar drag depends on — a drag fires no wheel at all. */
   handleWheel(deltaY: number, view: ScrollSnapshot): void;
   /** Report a layout change (ResizeObserver) and ask whether to pin.
    * Takes a snapshot because a height change moves the bottom with no
    * scroll event: collapsing content or a growing viewport (mobile
    * keyboard dismissed) can leave the viewport visually at the bottom
-   * without any event to reconcile the flag. Applying the same at-bottom
-   * rule here keeps the flag honest without adding a second writer. */
+   * without any event to reconcile the flag. A viewer carried to the
+   * bottom this way re-sticks; a reader released mid-pull stays released
+   * even though the zone says "at bottom" — re-sticking them is what
+   * re-armed the pin they were escaping. Returns whether the viewport
+   * should be pinned. */
   handleLayoutChange(view: ScrollSnapshot): boolean;
   /** A touch drag started (touchstart). While a drag is in progress the
    * user's finger IS the scroll position — layout-change pins must not
@@ -193,6 +192,20 @@ export function createStickyController(
   // true the user's finger owns the scroll position: handleLayoutChange
   // must not ask for a pin (#1016 — see the interface docs).
   let touchActive = false;
+  // Net upward travel (px) since the last reset — the granularity-free
+  // counterpart of a per-event threshold. A scrollbar drag yields small
+  // per-event deltas and fires no wheel, so neither the wheel path nor a
+  // per-event bar can ever see the gesture; a run can. Reset by deliberate
+  // DOWNWARD motion and by arriving at the bottom — deliberately NOT by
+  // pins: a pin's yank must not erase the run, or repeated pins hold a slow
+  // drag at the bottom forever (user report 2026-09-12: streaming output
+  // plus a slow upward drag fought the reader indefinitely).
+  let upwardRun = 0;
+  // Whether the previous observation put the viewport inside the bottom
+  // zone. Distinguishes "arrived from outside" (reconcile, fresh run) from
+  // "never left" (keep the run through the echoes and pins that land at
+  // the bottom meanwhile).
+  let prevNearBottom = true;
 
   // Following: remember where the bottom was, so a later growth can be
   // told apart from a user scrolling away.
@@ -216,52 +229,77 @@ export function createStickyController(
     lastBottomScrollHeight - view.scrollTop - view.clientHeight <
       bottomZone(view.clientHeight, thresholds);
 
+  // Reconcile the flag against a viewport that is inside the bottom zone.
+  // A released reader (run past the zone bar) stays released through
+  // echoes at the bottom; only a genuine ARRIVAL from outside the zone
+  // (prevNearBottom false) reclaims following and starts a fresh run.
+  // Without the gate, any echo at the bottom would resurrect "following"
+  // mid-pull and re-arm the very pin the reader is escaping.
+  const reconcileAtBottom = (view: ScrollSnapshot) => {
+    const arrived = !prevNearBottom;
+    if (upwardRun <= bottomZone(view.clientHeight, thresholds) || arrived) {
+      stick(view);
+      if (arrived) upwardRun = 0;
+    }
+  };
+
   return {
     isSticky: () => sticky,
 
     handleScroll(view) {
-      if (isAtBottom(view, thresholds)) {
-        // At the bottom → follow, whatever moved us here. The wide touch
-        // zone absorbs iOS overscroll bounce / address-bar jitter. This is
-        // also the manual re-stick path (scrollbar / touch / keyboard back
-        // to the bottom).
-        stick(view);
-      } else if (sticky && nearLastKnownBottom(view)) {
-        // The content grew under a bottom-follower between the scroll and
-        // its dispatch — they never moved, keep following. Only
-        // *preserves* stick: an already-unstuck user has no anchor, so
-        // this branch cannot pull them back.
-        //
-        // Deliberately does NOT refresh the anchor here. Refreshing it to
-        // the grown scrollHeight would make the very next scroll/wheel
-        // event measure the viewport against the NEW bottom — a
-        // bottom-follower who never moved (still at the OLD bottom) would
-        // then look far from it and falsely unstick. That is the #564
-        // race: an agent switch pins the (shorter) cached thread, SSE/HTTP
-        // growth lands before the clamp echo dispatches, the echo
-        // refreshes the anchor, and the next event (trackpad momentum /
-        // wheel) reads "far from bottom" and permanently kills sticky
-        // (the RO cannot re-pin an unstuck viewport). Keeping the anchor
-        // at the last TRUE bottom absorbs every event until the RO pin
-        // (which is what legitimately advances it). #483's shrink branch
-        // below still handles content SHRINK — the only case where the
-        // anchor must move without a pin.
-      } else if (sticky && lastBottomScrollHeight !== null &&
-                 view.scrollHeight < lastBottomScrollHeight) {
+      const zone = bottomZone(view.clientHeight, thresholds);
+      const atBottom = isAtBottom(view, thresholds);
+      const movedUp = prevScrollTop - view.scrollTop;
+
+      if (sticky && lastBottomScrollHeight !== null &&
+          view.scrollHeight < lastBottomScrollHeight) {
         // Content shrunk since the last pin (e.g. async syntax
         // highlighting collapsed a code block). The browser likely
         // clamped scrollTop in response, producing an apparent scroll-up
         // that was not a user gesture. Update the anchor to the new
         // (smaller) height; do not unstick.
         lastBottomScrollHeight = view.scrollHeight;
-      } else if (prevScrollTop - view.scrollTop > thresholds.unstickDeltaPx) {
-        // Deliberate upward movement away from the bottom.
-        unstick();
+      } else if (movedUp > WHEEL_NOISE_PX) {
+        if (view.scrollHeight - view.scrollTop - view.clientHeight <= 0) {
+          // An upward move that lands at the true bottom is a clamp, not
+          // a gesture: nothing to depart from. Reconcile and start a
+          // fresh run.
+          upwardRun = 0;
+          reconcileAtBottom(view);
+        } else {
+          // Upward movement, however small the single event: accumulate
+          // into the run. A run of a full bottom zone is a deliberate
+          // departure even when no single event passed any per-event bar
+          // — a scrollbar drag yields only small deltas and fires no
+          // wheel, so nothing else can ever see the gesture.
+          upwardRun += movedUp;
+          if (upwardRun > zone) {
+            unstick();
+          } else if (atBottom) {
+            // Still inside the live zone: following continues.
+            stick(view);
+          }
+          // Beyond the live zone but under the run bar, or inside the
+          // old-bottom zone: keep state.
+        }
+      } else if (movedUp < -WHEEL_NOISE_PX) {
+        // Deliberate downward movement: a fresh run starts; landing back
+        // inside the zone re-sticks (the manual return path).
+        upwardRun = 0;
+        if (atBottom) stick(view);
+      } else if (atBottom) {
+        // Echoes and sub-noise wobble decide nothing by themselves, but
+        // the zone flag must still track the live position. A
+        // bottom-follower who never moved keeps the anchor at the last
+        // TRUE bottom here (no refresh — #564: refreshing would measure
+        // the next event against the grown height and falsely unstick).
+        reconcileAtBottom(view);
       }
-      // else: downward or small motion away from the bottom — keep state.
+      // else: sub-noise motion away from the bottom — keep state.
       // Downward must not unstick: the button's smooth ride and a user
       // scrolling back toward the bottom both pass through here.
       prevScrollTop = view.scrollTop;
+      prevNearBottom = atBottom;
     },
 
     handleWheel(deltaY, view) {
@@ -292,15 +330,23 @@ export function createStickyController(
       // A height change moved the bottom with no scroll event. If it left
       // the viewport at the bottom, that IS following — reconcile the flag
       // (the old design needed a separate at-bottom net in the observer
-      // for exactly this, which then raced the other writers).
-      if (isAtBottom(view, thresholds)) stick(view);
-      // Keep the anchor current even when the viewport has drifted from
-      // the bottom (content may shrink then grow again before this
-      // observer callback, e.g. async syntax highlighting collapsing a
-      // code block). Without this, lastBottomScrollHeight stays at the
-      // pre-shrink height and nearLastKnownBottom computes against a
-      // stale reference on the next scroll event.
-      else if (sticky) lastBottomScrollHeight = view.scrollHeight;
+      // for exactly this, which then raced the other writers). A reader
+      // released mid-pull is NOT reconciled: they are inside the zone by
+      // position but left it by intent, and re-sticking here re-arms the
+      // pin they are escaping.
+      const atBottom = isAtBottom(view, thresholds);
+      if (atBottom) {
+        reconcileAtBottom(view);
+      } else if (sticky) {
+        // Keep the anchor current even when the viewport has drifted from
+        // the bottom (content may shrink then grow again before this
+        // observer callback, e.g. async syntax highlighting collapsing a
+        // code block). Without this, lastBottomScrollHeight stays at the
+        // pre-shrink height and nearLastKnownBottom computes against a
+        // stale reference on the next scroll event.
+        lastBottomScrollHeight = view.scrollHeight;
+      }
+      prevNearBottom = atBottom;
       return sticky;
     },
 
@@ -315,7 +361,9 @@ export function createStickyController(
       // not yank them back (the position rule needs a scroll event to
       // unstick, and a released finger produces none). Inside the zone
       // (iOS bounce tolerance / a tap) following continues.
-      if (sticky && !isAtBottom(view, thresholds)) unstick();
+      const atBottom = isAtBottom(view, thresholds);
+      if (sticky && !atBottom) unstick();
+      prevNearBottom = atBottom;
     },
 
     requestStick() {
@@ -330,6 +378,7 @@ export function createStickyController(
     notifyPinnedToBottom(view) {
       stick(view);
       prevScrollTop = view.scrollTop;
+      prevNearBottom = true;
     },
   };
 }
