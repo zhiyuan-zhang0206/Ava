@@ -18,6 +18,7 @@ _ADMISSION_CHECKS = frozenset(
         "frontend (eslint + tsc + vitest)",
         "e2e (Playwright happy path)",
         "qa-approved-gate",
+        "doc lints (pre-commit family)",
     }
 )
 _EXPECTED_CHECKS = _ADMISSION_CHECKS  # legacy alias for the drift tests below
@@ -101,6 +102,7 @@ def _fake_gh(protection: dict[str, object], workflows: dict[str, object]):
 def test_expected_checks_is_the_trunk_admission_gate() -> None:
     audit = _audit()
     assert audit.expected_checks() == _ADMISSION_CHECKS
+    assert "doc lints (pre-commit family)" in _ADMISSION_CHECKS
 
 
 def test_trunk_gate_findings_reject_matrix_template_names() -> None:
