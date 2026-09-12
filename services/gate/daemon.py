@@ -16,8 +16,16 @@ transport failure (gateway or app) reuses that same snapshot, so a recovering
 service cannot make one request say "unavailable" and the next invent
 "updating" from a different condition.
 
-The SPA's own API/SSE traffic goes straight to the gateway (never through
-this proxy), so a simple buffering proxy suffices — no streaming needed.
+The SPA's own /api and SSE traffic goes straight to the gateway (never
+through this proxy). One SPA traffic class is same-origin through the gate,
+however: Next.js client-side navigation. Link clicks and router.push fetch
+`?_rsc=` payloads from the entry origin, negotiated by request headers
+(`rsc`, `next-router-state-tree`, `next-url`, `next-router-prefetch`,
+`next-router-segment-prefetch`). The proxy must carry those through: without
+them the app answers a plain HTML document for an `_rsc` request and Next
+falls back to a full document load on every route change — the SPA loses its
+query cache and in-memory state per switch (task #3217). Buffering the
+response remains fine — no streaming needed.
 
 All three static pages use a copy of the app's design tokens, down to reading
 the theme the user picked in the app — a rollout swaps one for the other, and
@@ -45,25 +53,43 @@ from shared.ui_update_state import UiUpdateSnapshot
 
 _log = logging.getLogger("services.gate")
 
-# Headers forwarded to the app / gateway on proxied requests. The app needs the
-# browser Host to derive the same gateway origin its client uses; everything
-# else (hop-by-hop headers and cookies beyond the session one) is dropped.
+# Headers forwarded to the app / gateway on proxied requests. The allowlist IS
+# the boundary: everything else is dropped by construction — every hop-by-hop
+# header (RFC 9110 §7.6.1: Connection, Keep-Alive, Proxy-*, TE,
+# Transfer-Encoding, Upgrade), cookies beyond the session one, and anything the
+# app does not negotiate on. The app needs the browser Host to derive the same
+# gateway origin its client uses; the `next-*` / `rsc` group is Next.js's
+# client-navigation negotiation and rides same-origin through this proxy
+# (module docstring; dropping it demotes every SPA route change to a full
+# document load, task #3217).
 _FORWARD_HEADERS = (
     "accept",
     "accept-language",
     "cookie",
     "content-type",
     "host",
+    "next-router-prefetch",
+    "next-router-segment-prefetch",
+    "next-router-state-tree",
+    "next-url",
+    "rsc",
     "x-forwarded-host",
     "x-forwarded-proto",
 )
 
-# Browser security headers originate at Next.js. They must cross the public
-# gate with the app response or the browser never enforces its CSP and related
-# hardening headers.
+# Response headers forwarded back to the browser: the app's representation
+# semantics that ride outside the content-type / cache-control / etag set above
+# (`Vary` names the negotiation dimensions the RSC and HTML representations
+# vary on — forwarding it keeps any downstream cache from reusing one
+# representation for the other; both are served no-store today, so this is
+# correctness, not a cacheability change) plus the browser security headers,
+# which must cross the public gate or the browser never enforces its CSP and
+# related hardening headers. Everything else — including every hop-by-hop
+# header — is dropped by construction, the same boundary as the request side.
 _FORWARD_RESPONSE_HEADERS = (
     "content-security-policy",
     "referrer-policy",
+    "vary",
     "x-content-type-options",
     "x-frame-options",
 )
