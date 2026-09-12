@@ -240,3 +240,15 @@ def test_pool_check_connections_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     captured.clear()
     db.pool(direct=True)
     assert captured.get("check") is None
+
+
+def test_write_transaction_direct_refuses_a_pool() -> None:
+    """`direct=True` names the dial, so it cannot combine with a pool — a pool
+    owns its own dial (and the refusal keeps a silent no-op from shipping)."""
+    from shared.db_transaction import write_transaction
+
+    with (
+        pytest.raises(ValueError, match="cannot take a pool"),
+        write_transaction(object(), direct=True),  # pyright: ignore[reportArgumentType]
+    ):
+        pass
