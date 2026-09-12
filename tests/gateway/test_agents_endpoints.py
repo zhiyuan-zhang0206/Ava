@@ -55,8 +55,10 @@ def test_get_models_returns_grouped_supported_models() -> None:
     body = resp.json()
     flat = [m for group in body["providers"].values() for m in group]
     assert "deepseek-v4-flash" in flat
-    # V4 Pro is withdrawn from the picker (user order 2026-09-10).
+    # V4 Pro and the vision experiment are withdrawn from the picker
+    # (user order 2026-09-10).
     assert "deepseek-v4-pro" not in flat
+    assert "deepseek-v4-flash-vision-exp" not in flat
     assert "gpt-5.6-sol" in flat
     # additional verified-live models
     assert "claude-sonnet-5" in flat

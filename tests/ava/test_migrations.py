@@ -99,6 +99,11 @@ _DEFAULT_MODEL_VISION_MIGRATION = (
     / "migrations"
     / "20260903T044332_default-model-deepseek-v4-flash-vision-exp.sql"
 )
+_DEFAULT_MODEL_FLASH_MIGRATION = (
+    Path(__file__).resolve().parents[2]
+    / "migrations"
+    / "20260912T100020_default-model-deepseek-v4-flash.sql"
+)
 _SNAPSHOT_RETIREMENT_MIGRATION = (
     Path(__file__).resolve().parents[2]
     / "migrations"
@@ -349,7 +354,7 @@ def test_fresh_schema_sql_bootstrap_is_baselined() -> None:
             default_model = conn.execute(
                 "SELECT llm_model FROM cluster_defaults WHERE id = 1"
             ).fetchone()
-            assert default_model == ("deepseek-v4-flash-vision-exp",)
+            assert default_model == ("deepseek-v4-flash",)
         # Apply on the baselined DB: the folded migration marker makes the strict
         # ALTER skip a fresh schema that already carries the column; all other
         # post-baseline migrations replay cleanly, then a second apply is a no-op.
@@ -359,6 +364,8 @@ def test_fresh_schema_sql_bootstrap_is_baselined() -> None:
             )
         with psycopg.connect(url) as conn:
             assert apply_pending_migrations(conn) == []
+            settled = conn.execute("SELECT llm_model FROM cluster_defaults WHERE id = 1").fetchone()
+            assert settled == ("deepseek-v4-flash",)
     finally:
         with psycopg.connect(admin_url, autocommit=True) as admin, admin.cursor() as cur:
             cur.execute(
@@ -404,6 +411,44 @@ def test_default_model_vision_migration_updates_only_prior_seed(
         cur.execute(sql.SQL(cast(LiteralString, up)), prepare=False)
         cur.execute("SELECT llm_model, updated_by FROM cluster_defaults WHERE id = 1")
         assert cur.fetchone() == ("deepseek-v4-flash-vision-exp", "migration")
+    db_conn.commit()
+
+
+def test_default_model_flash_migration_updates_only_prior_seed(
+    db_conn: psycopg.Connection, cluster_defaults_unset: None
+) -> None:
+    """Return the prior migration-owned vision default to flash, never an API choice."""
+    up = _DEFAULT_MODEL_FLASH_MIGRATION.read_text()
+    down = _DEFAULT_MODEL_FLASH_MIGRATION.with_suffix(".down.sql").read_text()
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE cluster_defaults SET llm_model = 'deepseek-v4-flash-vision-exp', "
+            "updated_by = 'migration' WHERE id = 1"
+        )
+        cur.execute(sql.SQL(cast(LiteralString, up)), prepare=False)
+        cur.execute("SELECT llm_model, updated_by FROM cluster_defaults WHERE id = 1")
+        assert cur.fetchone() == ("deepseek-v4-flash", "migration")
+
+        cur.execute(sql.SQL(cast(LiteralString, down)), prepare=False)
+        cur.execute("SELECT llm_model, updated_by FROM cluster_defaults WHERE id = 1")
+        assert cur.fetchone() == ("deepseek-v4-flash-vision-exp", "migration")
+
+        cur.execute(
+            "UPDATE cluster_defaults SET llm_model = 'deepseek-v4-flash-vision-exp', "
+            "updated_by = 'api' WHERE id = 1"
+        )
+        cur.execute(sql.SQL(cast(LiteralString, up)), prepare=False)
+        cur.execute("SELECT llm_model, updated_by FROM cluster_defaults WHERE id = 1")
+        assert cur.fetchone() == ("deepseek-v4-flash-vision-exp", "api")
+
+        cur.execute(
+            "UPDATE cluster_defaults SET llm_model = 'deepseek-v4-flash-vision-exp', "
+            "updated_by = NULL WHERE id = 1"
+        )
+        cur.execute(sql.SQL(cast(LiteralString, up)), prepare=False)
+        cur.execute("SELECT llm_model, updated_by FROM cluster_defaults WHERE id = 1")
+        assert cur.fetchone() == ("deepseek-v4-flash", "migration")
     db_conn.commit()
 
 

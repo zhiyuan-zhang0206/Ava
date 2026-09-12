@@ -218,13 +218,19 @@ def test_superseded_chain_validation_accepts_valid_link(
 
 
 def test_deepseek_vision_exp_registry_facts() -> None:
-    """The new multimodal deepseek entry carries the v4-flash facts (window,
+    """The multimodal deepseek entry carries the v4-flash facts (window,
     output cap, cutoff, effort vocabulary, compact thresholds) plus image
     media support — it is the same text model with still-image input added,
-    not a new family."""
+    not a new family. Withdrawn from new selections 2026-09-10 (user order):
+    the vision experiment is stopped, so it leaves the picker and resolves to
+    deepseek-v4-flash before provider construction — the facts stay for
+    registry answers (the PR #1582/#2140 withdrawal shape)."""
     spec = MODELS["deepseek-v4-flash-vision-exp"]
     assert spec.provider == "deepseek"
-    assert spec.spawnable
+    assert not spec.spawnable
+    assert spec.unavailable_fallback == "deepseek-v4-flash"
+    assert "deepseek-v4-flash-vision-exp" not in SUPPORTED_MODELS["deepseek"]
+    assert resolve_available_model("deepseek-v4-flash-vision-exp") == "deepseek-v4-flash"
     assert spec.context_window == 1_000_000
     assert spec.max_output_tokens == 384_000
     assert spec.knowledge_cutoff == "2026-04"
