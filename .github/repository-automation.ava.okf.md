@@ -12,9 +12,14 @@ tags:
 
 ## `workflows/ci-rerun.yml`
 
-A failed completed CI run can dispatch one rerun of its failed jobs. The workflow
-records its marker on the PR and refuses an unbounded rerun loop; a still-red run
-returns to normal maintainer triage.
+A failed or cap-cancelled completed CI run can dispatch one rerun of its failed
+jobs: `cancelled` is included alongside `failure`, because a job hitting its own
+`timeout-minutes` cancels the run and the next attempt usually passes (cap-cancel
+class). The workflow records its marker on the PR and refuses an unbounded rerun
+loop; the single-attempt, superseded-head, and newest-run guards also bound the
+residual — a deliberately cancelled run is re-run at most once, since GitHub
+exposes no cancel reason to distinguish it. A still-red run returns to normal
+maintainer triage.
 
 ## `workflows/update-model-pricing.yml`
 

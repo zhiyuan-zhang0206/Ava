@@ -81,6 +81,18 @@ def test_current_head_retries_once(tmp_path: Path, event: str) -> None:
     ]
 
 
+def test_cap_cancelled_run_reruns_once(tmp_path: Path) -> None:
+    """A cap-cancelled run (`conclusion=cancelled` — a job hitting its own
+    timeout-minutes cancels the run) is re-run once, like a failure
+    (2026-09-12 cap cancels; task #3239)."""
+    result, calls = run_retry(tmp_path, RUN_CONCLUSION="cancelled")
+    assert result.returncode == 0, result.stderr
+    posts = [call for call in calls if "POST" in call]
+    assert posts == [
+        ["api", "--method", "POST", f"repos/{REPO}/actions/runs/100/rerun-failed-jobs"]
+    ]
+
+
 def test_verified_fork_head_is_not_confused_with_base_repository(tmp_path: Path) -> None:
     fork = "contributor/repository"
     result, calls = run_retry(tmp_path, HEAD_REPO=fork, PR_RESPONSE=f"open\t{SHA}\t{REPO}\t{fork}")
@@ -98,7 +110,7 @@ def test_verified_fork_head_is_not_confused_with_base_repository(tmp_path: Path)
         {"PR_NUMBER": ""},
         {"PR_NUMBER": "42/other"},
         {"RUN_ATTEMPT": "2"},
-        {"RUN_CONCLUSION": "cancelled"},
+        {"RUN_CONCLUSION": "skipped"},
         {"NEWEST_RUN": "101"},
         {"RUN_EVENT": "push", "CURRENT_SHA": OTHER_SHA},
         {"RUN_EVENT": "push", "HEAD_REPO": "other/repo"},
