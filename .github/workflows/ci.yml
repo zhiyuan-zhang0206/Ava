@@ -1071,6 +1071,16 @@ jobs:
           assert client.ping()["pong"] is True
           PY
 
+      - name: Two-section chain smoke (keeper semantics)
+        run: |
+          # The macOS adapter's behavioral gate (task #3209): launchd -> helper
+          # -> root -> unit parentage, the root-crash keepalive, and the
+          # helper-crash conflict / dispose / reseed path. The F11
+          # tccd-attribution phase is skipped here because hosted runners
+          # restrict `log show`; run the script without --skip-attribution on a
+          # dev host for that phase.
+          uv run python scripts/two_section_chain_smoke.py --skip-attribution
+
       - name: Tear down helper launchd job
         if: ${{ always() }}
         run: |
@@ -1079,6 +1089,10 @@ jobs:
           if [[ -n "$label" ]]; then
             launchctl bootout "gui/$(id -u)/$label" || true
           fi
+          # The two-section smoke's own throwaway job (task #3209); the script
+          # tears it down itself, this is the belt-and-braces path for a step
+          # killed mid-run.
+          launchctl bootout "gui/$(id -u)/com.ava.test.two-section-chain-smoke" || true
           security delete-keychain "$RUNNER_TEMP/ava-signing.keychain-db" || true
 
   backend:

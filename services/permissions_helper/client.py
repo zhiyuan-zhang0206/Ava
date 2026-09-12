@@ -240,6 +240,52 @@ class SignalResult(TypedDict):
     sent: bool
 
 
+class RootSeedConfig(TypedDict):
+    """The root keeper's launch config (wire `root_seed.config`).
+
+    All paths absolute; `env` entries override the helper's own environment
+    for the root process.
+    """
+
+    argv: list[str]
+    cwd: str
+    run_dir: str
+    stdout: str
+    stderr: str
+    env: NotRequired[dict[str, str]]
+
+
+class RootExitInfo(TypedDict):
+    """How the root process last ended (a `last_exit` on `RootStatus`)."""
+
+    kind: str  # clean | refused | crash | stopped | spawn-failed
+    at: float
+    code: NotRequired[int]
+    signal: NotRequired[int]
+    detail: NotRequired[str]
+
+
+class RootConflictInfo(TypedDict):
+    """A live root that holds the run dir but was not seeded by this helper."""
+
+    pid: NotRequired[int]  # omitted when the lock's pid line was unreadable
+    since: NotRequired[float]
+
+
+class RootStatus(TypedDict):
+    """The root keeper's state (wire `root_status`, and every mutating reply)."""
+
+    state: str  # unseeded | running | backoff | conflict | stopping | stopped
+    seeded: bool
+    restarts: int
+    stop_requested: bool
+    pid: NotRequired[int]  # the keeper's live root child
+    last_exit: NotRequired[RootExitInfo]
+    next_restart_in_s: NotRequired[float]
+    conflict: NotRequired[RootConflictInfo]
+    seed_error: NotRequired[str]  # startup seed file was rejected
+
+
 class ScreenSize(TypedDict):
     x: float
     y: float
@@ -391,6 +437,34 @@ def signal_session(
     else:
         result = _call("signal", pid=pid, sig=sig, sock_path=sock_path)
     return result["sent"]
+
+
+def seed_root(config: RootSeedConfig, *, sock_path: str | Path | None = None) -> RootStatus:
+    """Tell the root keeper what ava-root to launch and keep alive.
+
+    The seed never disrupts a live root it already started — it applies to the
+    next spawn. A run dir already held by another live root leaves the keeper
+    in `conflict`: nothing is spawned, nothing is killed.
+    """
+    result: RootStatus = _call("root_seed", config=config, sock_path=sock_path)
+    return result
+
+
+def root_status(*, sock_path: str | Path | None = None) -> RootStatus:
+    """Report the root keeper's state (works even when no seed is configured)."""
+    result: RootStatus = _call("root_status", sock_path=sock_path)
+    return result
+
+
+def stop_root(*, force: bool = False, sock_path: str | Path | None = None) -> RootStatus:
+    """Stop the seeded root; `force` disposes a live root the helper did not seed.
+
+    Without `force`, a foreign root (the conflict case) is refused — stopping
+    it would tear down a serving tree. A stop the keeper requested is not
+    followed by a restart.
+    """
+    result: RootStatus = _call("root_stop", force=force, sock_path=sock_path)
+    return result
 
 
 def request_self_upgrade(exe_path: str, *, sock_path: str | Path | None = None) -> bool:

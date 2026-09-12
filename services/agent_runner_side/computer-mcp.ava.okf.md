@@ -113,7 +113,7 @@ task): a task that goes idle forever keeps its start + actions, which are
 complete facts for replay.
 
 ## Key Dependencies
-- [[permissions-helper.ava.okf.md]] — the signed helper every action executes
+- [[permissions-helper/permissions-helper.ava.okf.md]] — the signed helper every action executes
   through; `screen_size` / `frontmost_app` are helper methods added for the
   snapshot geometry (2026-08-09, task #1101).
 - [[browser/browser.ava.okf.md]] — browser tasks go through chrome MCP (DOM path,
