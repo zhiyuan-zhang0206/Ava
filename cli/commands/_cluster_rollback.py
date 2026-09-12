@@ -33,6 +33,7 @@ from cli.commands._update_git import (
     current_schema_state,
     git_head_sha,
     git_reset_hard,
+    git_stash_uncommitted,
     rollback_schema_to,
 )
 from cli.commands._update_orchestration import _phase_b_targets
@@ -224,6 +225,28 @@ def _notify_agents_of_rollback(from_sha: str, to_sha: str) -> None:
         print(f"  . could not notify agents: {e}", file=sys.stderr)
 
 
+def _preserve_uncommitted_work(from_sha: str, target_sha: str) -> None:
+    """Stash a dirty checkout before the rollback's reset; a clean tree is a no-op.
+
+    The stash entry is printed prominently because it is the only pointer back to
+    work the reset was about to discard (2026-09-12: an automatic rollback reset a
+    dev worktree and the edits were silently lost). A stash failure raises
+    `GitPullFailed` and aborts the rollback before the schema step, so code and
+    schema stay consistent on the pre-rollback revision.
+    """
+    stashed = git_stash_uncommitted(
+        reason=(
+            f"ava rollback {from_sha[:7]} -> {target_sha[:7]} "
+            "(uncommitted work, preserved before the reset)"
+        )
+    )
+    if stashed is None:
+        return
+    print("\n-> preserved uncommitted changes in a stash (the reset would discard them):")
+    print(f"  . {stashed}")
+    print("  . restore with `git stash pop` once the cluster is stable")
+
+
 def _run_rollback(
     target_sha: str,
     *,
@@ -242,7 +265,15 @@ def _run_rollback(
     2. Git reset + uv sync.
     3. `ava start` on the old code.
 
+    Uncommitted changes are preserved in a stash before anything mutates the
+    tree: a rollback may run where a developer's work is uncommitted (a dev
+    worktree — the 2026-09-12 incident, where an automatic rollback reset the
+    tree and the edits were silently lost), and a stash failure aborts the
+    rollback before the schema step, keeping code and schema consistent.
+
     On failure, attempts to recover to `from_sha` (the pre-rollback state)."""
+    _preserve_uncommitted_work(from_sha, target_sha)
+
     from shared.migrations import MigrationError, RollbackBelowFloor
 
     target_set = _migration_set_at_commit(target_sha)

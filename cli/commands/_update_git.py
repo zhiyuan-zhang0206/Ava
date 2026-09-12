@@ -326,6 +326,28 @@ def git_reset_hard(sha: str) -> None:
     verify_tree_at(sha, context="git_reset_hard")
 
 
+def git_stash_uncommitted(*, reason: str) -> str | None:
+    """Stash the tree's uncommitted changes (untracked files included) under
+    `reason`; return the new stash entry's line, or None when the tree was clean.
+
+    The preserve-before-discard partner of `git_reset_hard`: that primitive
+    discards a dirty tree by contract (a mid-update tree is a committed interim
+    state), but the ROLLBACK path can meet a developer's uncommitted work — a
+    dev worktree's normal state — and the 2026-09-12 incident is what a silent
+    discard looks like (an automatic rollback reset the worktree; only local
+    backups recovered the edits). Failures raise `GitPullFailed` like every
+    other mutating primitive: a caller on its way to a destructive step must
+    abort rather than discard what it could not preserve. Ignored files are
+    not stashed (`--include-untracked`, not `--all`): a worktree's `.ava_home`
+    pointer and build caches stay in place.
+    """
+    _wait_index_lock_free()
+    if not _git("status", "--porcelain"):
+        return None
+    _git("stash", "push", "--include-untracked", "-m", reason)
+    return _git("stash", "list", "--max-count=1") or None
+
+
 def git_resolve_origin_main() -> str:
     """Fetch the track target then resolve its sha — the rollout's pinned
     target, resolved once on the gateway so every node checks out the same

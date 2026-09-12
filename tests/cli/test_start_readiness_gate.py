@@ -776,6 +776,8 @@ def test_rollback_keeps_the_rollback_when_a_service_is_unready(
     monkeypatch.setattr(_rb, "current_schema_state", set)
     monkeypatch.setattr(_rb, "_migration_set_at_commit", lambda _sha: set())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_rb, "git_head_sha", lambda: "f" * 40)
+    # The preserve-before-reset stash must not touch the real checkout here.
+    monkeypatch.setattr(_rb, "git_stash_uncommitted", lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
 
     def _fake_run(args, **_kw):
         argv = [str(a) for a in args]  # pyright: ignore[reportUnknownArgumentType]

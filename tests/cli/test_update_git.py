@@ -93,6 +93,36 @@ def test_git_resolve_origin_main_returns_tip(cloned_repo: tuple[Path, str]) -> N
     assert g.git_resolve_origin_main() == main_sha
 
 
+def test_git_stash_uncommitted_preserves_tracked_and_untracked(
+    cloned_repo: tuple[Path, str],
+) -> None:
+    """The rollback's preserve-before-discard primitive: both a tracked edit and
+    a new untracked file survive as one stash entry, and the tree is left clean
+    for the `git_reset_hard` that follows (2026-09-12: a reset silently ate a
+    dev worktree's uncommitted work)."""
+    clone, _main_sha = cloned_repo
+    (clone / "f.txt").write_text("uncommitted edit")
+    (clone / "new-file.txt").write_text("untracked wip")
+
+    line = g.git_stash_uncommitted(reason="ava-test-stash")
+
+    assert line is not None and line.startswith("stash@{0}:") and "ava-test-stash" in line
+    assert _git(clone, "status", "--porcelain") == ""  # clean for the reset
+    _git(clone, "stash", "pop")
+    assert (clone / "f.txt").read_text() == "uncommitted edit"
+    assert (clone / "new-file.txt").read_text() == "untracked wip"
+
+
+def test_git_stash_uncommitted_is_a_noop_on_a_clean_tree(
+    cloned_repo: tuple[Path, str],
+) -> None:
+    """A clean tree stashes nothing and says so — no empty entry, no noise."""
+    clone, _main_sha = cloned_repo
+
+    assert g.git_stash_uncommitted(reason="ava-test-stash") is None
+    assert _git(clone, "stash", "list") == ""
+
+
 # ───────────── timeout + network retry (`_git` / `_git_network`) ─────────────
 
 

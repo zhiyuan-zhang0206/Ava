@@ -445,6 +445,21 @@ def cmd_install_cluster(
         pointer = _checkout_root() / ".ava_home"
         pointer.write_text(f"{home}\n")
         print(f"  · wrote {pointer} -> {home}")
+    if (
+        not cl.is_default_home(home)
+        and not (dotenv_values(env_path).get("AVA_HEALTH_PROBE_AGENT_MIN") or "").strip()
+    ):
+        # A dev/QA cluster keeps no resident agents by design, so the probe's
+        # population floor (built-in default 1) would fail forever and
+        # --auto-rollback would cycle the checkout on the third run: the
+        # 2026-08-10 preview and 2026-09-12 dev-worktree incidents (the latter
+        # reset uncommitted work away). Seed the dev-safe floor at birth; an
+        # explicit value already in the file — seeded or hand-set — always wins.
+        upsert_env(env_path, {"AVA_HEALTH_PROBE_AGENT_MIN": "0"})
+        print(
+            "  · wrote AVA_HEALTH_PROBE_AGENT_MIN=0 (dev cluster default: no "
+            "resident-agent floor; edit .env to require one)"
+        )
     if seed:
         seed_convenience_env(
             target_env=env_path, source_env=seed_source or Path.home() / ".ava" / ".env"
