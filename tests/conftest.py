@@ -312,6 +312,23 @@ os.environ["AVA_GATEWAY_URL"] = "http://test-gateway.invalid:8000"
 # `settings.telegram` explicitly (tests/cli/test_cluster_health.py does).
 os.environ["AVA_TELEGRAM_BOT_TOKEN"] = ""
 os.environ["AVA_TELEGRAM_OWNER_ID"] = "0"
+# ── macOS permissions helper: the suite spawns on the legacy route ──
+#
+# Same leak class as the OTLP switch above: the login shell exports the real
+# ~/.ava/.env into every child, and on a helper-spawn gray-rollout host
+# (macmini, 2026-09-12) a test's `{**os.environ}` child inherits
+# AVA_PERMISSIONS_HELPER_SPAWN=true. The child then routes every process
+# creation through a permissions helper resolved against ITS OWN sandboxed
+# $AVA_HOME — a helper that cannot exist there, reached over a tmp-home
+# socket path past the AF_UNIX 104-byte sun_path bound; the route is a
+# spawn-identity commitment that fails loud by design, never falling back
+# (shared/session_backend.py::helper_spawn_enabled). tests/cli/
+# test_maintenance_stop.py went red exactly this way on stock main. Pinned
+# OFF in the ENVIRONMENT, not just on the settings singleton, exactly because
+# the leak is in subprocesses; the suite exercises the legacy POSIX spawn
+# route everywhere, as CI does. A test that needs the helper route patches
+# `helper_spawn_enabled` / the settings explicitly (tests/test_helperproc.py).
+os.environ["AVA_PERMISSIONS_HELPER_SPAWN"] = "false"
 # Repository providers read the process environment while spawn validation reads
 # the cluster `.env` file. Seed every default provider's inert key through both
 # channels before project imports so tests can select any registered model.
