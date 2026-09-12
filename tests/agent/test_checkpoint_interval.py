@@ -1,16 +1,29 @@
-"""N-step checkpoint write throttling keeps checkpoint rows and writes in lockstep."""
+"""N-step checkpoint write throttling keeps checkpoint rows and writes in lockstep.
+
+Delta-bearing threads are the exception: once a checkpoint reveals a
+`DeltaChannel`, the throttle retires so every super-step and every write batch
+persists exactly as upstream produced them.
+"""
 
 from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from typing import cast
+from typing import Annotated, Any, cast
+from uuid import uuid4
 
+from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.runnables import RunnableConfig
+from langgraph.channels.delta import DeltaChannel
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from langgraph.checkpoint.serde.types import _DeltaSnapshot
 from langgraph.constants import PUSH
+from langgraph.graph import END, START, StateGraph
+from psycopg_pool import AsyncConnectionPool
 from typing_extensions import TypedDict
 
+from agent.messages_guard import guarded_delta_reducer
 from agent.startup import _wrap_saver_writes_with_nstep_interval
 from shared.config.agent_runtime import AgentRuntimeSettings
 
@@ -56,6 +69,14 @@ class _GraphState(TypedDict):
     count: int
 
 
+class _DeltaState(TypedDict):
+    """Delta-channel state used by the wrapper-retirement regression."""
+
+    messages: Annotated[list[Any], DeltaChannel(guarded_delta_reducer, snapshot_frequency=1000)]
+    n: int
+    target: int
+
+
 def _wrap(saver: _StubSaver, interval: int | Callable[[], int]) -> None:
     _wrap_saver_writes_with_nstep_interval(cast(AsyncPostgresSaver, saver), interval)
 
@@ -71,6 +92,33 @@ async def _aput(
         {"configurable": {"thread_id": thread_id}, "input_step": step},
         {"checkpoint_id": str(step), "channel_versions": {"messages": f"v{step}"}},
         {"source": source, "step": step},
+        {"channel": step},
+    )
+
+
+async def _aput_delta(
+    saver: _StubSaver,
+    step: int,
+    *,
+    source: str = "loop",
+    thread_id: str = "default",
+    counters: dict[str, tuple[int, int]] | None = None,
+    snapshot: bool = False,
+) -> dict[str, object]:
+    """Aput carrying delta evidence: channel counters, a `_DeltaSnapshot`, or neither."""
+    checkpoint: dict[str, object] = {
+        "checkpoint_id": str(step),
+        "channel_versions": {"messages": f"v{step}"},
+    }
+    if snapshot:
+        checkpoint["channel_values"] = {"messages": _DeltaSnapshot([])}
+    metadata: dict[str, object] = {"source": source, "step": step}
+    if counters is not None:
+        metadata["counters_since_delta_snapshot"] = counters
+    return await saver.aput(
+        {"configurable": {"thread_id": thread_id}, "input_step": step},
+        checkpoint,
+        metadata,
         {"channel": step},
     )
 
@@ -354,6 +402,104 @@ async def test_final_flush_persists_blobs_for_current_channel_versions() -> None
     assert flush_versions["messages"] == "v1"
 
 
+async def test_delta_thread_retires_the_throttle_after_first_evidence() -> None:
+    """Once a checkpoint reveals a DeltaChannel, nothing is skipped or re-homed."""
+    saver = _StubSaver()
+    _wrap(saver, interval=4)
+
+    assert await _aput_delta(saver, 0, counters={"messages": (0, 1)}) == {"stored_step": 0}
+    for step in (1, 2, 3, 4):
+        assert await _aput_delta(saver, step, counters={"messages": (step, step)}) == {
+            "stored_step": step
+        }
+
+    # Every super-step reached the saver, including the ones the throttle would skip.
+    assert [call[2]["step"] for call in saver.aput_calls] == [0, 1, 2, 3, 4]
+    # Pass-through: the loop's own config and the unmerged new_versions are intact.
+    for call in saver.aput_calls:
+        step = call[2]["step"]
+        assert call[0] == {"configurable": {"thread_id": "default"}, "input_step": step}
+        assert call[3] == {"channel": step}
+
+    # Writes keep their original config too: the retained batch, never remounted.
+    write_config: dict[str, object] = {"configurable": {"thread_id": "default"}, "input_step": 5}
+    writes: list[tuple[str, object]] = [("messages", ["m5"])]
+    await saver.aput_writes(write_config, writes, "task-5")
+    assert saver.aput_writes_calls == [(write_config, writes, "task-5", "")]
+
+
+async def test_delta_detection_is_sticky_without_further_evidence() -> None:
+    """A control-only checkpoint on a delta thread must not re-enable the throttle."""
+    saver = _StubSaver()
+    _wrap(saver, interval=4)
+
+    await _aput_delta(saver, 1, counters={"messages": (1, 1)})
+    # No counters, no marker — but the thread was already judged delta.
+    assert await _aput_delta(saver, 2) == {"stored_step": 2}
+    assert await _aput_delta(saver, 3) == {"stored_step": 3}
+
+    assert [call[2]["step"] for call in saver.aput_calls] == [1, 2, 3]
+    write_config: dict[str, object] = {"configurable": {"thread_id": "default"}, "input_step": 4}
+    writes: list[tuple[str, object]] = [("messages", ["m4"])]
+    await saver.aput_writes(write_config, writes, "task-4")
+    assert saver.aput_writes_calls == [(write_config, writes, "task-4", "")]
+
+
+async def test_delta_snapshot_marker_alone_retires_the_throttle() -> None:
+    """The snapshot super-step resets the counters; its marker still exempts the thread."""
+    saver = _StubSaver()
+    _wrap(saver, interval=4)
+
+    assert await _aput_delta(saver, 2, snapshot=True) == {"stored_step": 2}
+    assert await _aput_delta(saver, 3) == {"stored_step": 3}
+
+    assert [call[2]["step"] for call in saver.aput_calls] == [2, 3]
+
+
+async def test_vanilla_full_snapshot_checkpoints_do_not_retire_the_throttle() -> None:
+    """Plain channel values and absent counters must not be read as delta evidence."""
+    saver = _StubSaver()
+    _wrap(saver, interval=4)
+
+    # A full-snapshot messages value (the vanilla model) is not a delta marker.
+    await saver.aput(
+        {"configurable": {"thread_id": "default"}, "input_step": 0},
+        {
+            "checkpoint_id": "0",
+            "channel_versions": {"messages": "v0"},
+            "channel_values": {"messages": ["m0"]},
+        },
+        {"source": "loop", "step": 0},
+        {"channel": 0},
+    )
+    for step in (1, 2, 3, 4):
+        await _aput(saver, step, source="loop")
+
+    assert [call[2]["step"] for call in saver.aput_calls] == [0, 4]
+
+    # And its writes keep the vanilla skip/re-home behavior.
+    dropped: dict[str, object] = {"configurable": {"thread_id": "default"}, "input_step": 5}
+    dropped_writes: list[tuple[str, object]] = [("messages", ["m5"])]
+    await saver.aput_writes(dropped, dropped_writes, "task-dropped")
+    assert saver.aput_writes_calls == []
+    kept: dict[str, object] = {"configurable": {"thread_id": "default"}, "input_step": 6}
+    kept_writes: list[tuple[str, object]] = [(PUSH, "pushed")]
+    await saver.aput_writes(kept, kept_writes, "task-kept")
+    assert saver.aput_writes_calls == [({"stored_step": 4}, kept_writes, "task-kept", "")]
+
+
+async def test_delta_thread_flush_has_no_throttled_tail() -> None:
+    """Every delta super-step is already durable, so the flush adds nothing."""
+    saver = _StubSaver()
+    _wrap(saver, interval=4)
+
+    await _aput_delta(saver, 1, counters={"messages": (1, 1)})
+    await _aput_delta(saver, 2)
+    await saver._ava_nstep_flush("default")
+
+    assert [call[2]["step"] for call in saver.aput_calls] == [1, 2]
+
+
 class _BlockedSaver(_StubSaver):
     """Hold one actual save until the test releases it, before recording success."""
 
@@ -446,3 +592,78 @@ async def test_one_threads_flush_does_not_block_another_threads_save() -> None:
         saver.release.set()
         await asyncio.wait_for(pending, timeout=2)
     assert _stored_thread_ids(saver) == ["agent-b", "agent-a"]
+
+
+async def test_nstep_wrapper_delta_readback_matches_unwrapped_control(
+    aops_pool: AsyncConnectionPool[Any],
+) -> None:
+    """B1 regression: a wrapped delta run must read back exactly like the control.
+
+    Before the throttle retirement, the wrapper dropped and re-homed delta
+    writes: on this exact 12-superstep graph it read back 8 of 24 messages,
+    scrambled, with no error. Now the wrapped run and the unwrapped control
+    must persist the same delta log and reconstruct identical message ids.
+    """
+
+    def build(saver: AsyncPostgresSaver) -> Any:
+        def step(state: _DeltaState) -> dict[str, Any]:
+            n = state["n"]
+            return {
+                "messages": [
+                    HumanMessage(content=f"u{n}", id=f"u{n}"),
+                    AIMessage(content=f"a{n}", id=f"a{n}"),
+                ],
+                "n": n + 1,
+            }
+
+        def route(state: _DeltaState) -> str:
+            return "step" if state["n"] < state["target"] else END
+
+        graph = StateGraph(_DeltaState)
+        graph.add_node("step", step)  # pyright: ignore[reportUnknownMemberType]
+        graph.add_edge(START, "step")  # pyright: ignore[reportUnknownMemberType]
+        graph.add_conditional_edges("step", route)  # pyright: ignore[reportUnknownMemberType]
+        return graph.compile(checkpointer=saver)  # pyright: ignore[reportUnknownMemberType]
+
+    control_config: RunnableConfig = {"configurable": {"thread_id": str(uuid4())}}
+    wrapped_config: RunnableConfig = {"configurable": {"thread_id": str(uuid4())}}
+
+    control = build(AsyncPostgresSaver(aops_pool))
+    await control.ainvoke(  # pyright: ignore[reportUnknownMemberType]
+        {"messages": [], "n": 0, "target": 12}, control_config, recursion_limit=200
+    )
+
+    wrapped_saver = AsyncPostgresSaver(aops_pool)
+    _wrap_saver_writes_with_nstep_interval(wrapped_saver, 4)
+    wrapped = build(wrapped_saver)
+    await wrapped.ainvoke(  # pyright: ignore[reportUnknownMemberType]
+        {"messages": [], "n": 0, "target": 12}, wrapped_config, recursion_limit=200
+    )
+    await wrapped_saver._ava_nstep_flush(  # type: ignore[attr-defined]
+        str(wrapped_config["configurable"]["thread_id"])
+    )
+
+    async def read_message_ids(config: RunnableConfig) -> list[str | None]:
+        reader = build(AsyncPostgresSaver(aops_pool))
+        state = await reader.aget_state(config)  # pyright: ignore[reportUnknownMemberType]
+        return [getattr(message, "id", None) for message in state.values["messages"]]
+
+    expected = [f"{part}{n}" for n in range(12) for part in ("u", "a")]
+    assert await read_message_ids(control_config) == expected
+    assert await read_message_ids(wrapped_config) == expected
+
+    # No super-step may be skipped on a delta thread: the wrapped run persists
+    # the same checkpoint and write rows as upstream would.
+    counts: dict[str, tuple[int, int]] = {}
+    async with aops_pool.connection() as conn:
+        for label, config in (("control", control_config), ("wrapped", wrapped_config)):
+            thread_id = str(config["configurable"]["thread_id"])
+            cursor = await conn.execute(
+                "SELECT (SELECT count(*) FROM checkpoints WHERE thread_id = %s),"
+                " (SELECT count(*) FROM checkpoint_writes WHERE thread_id = %s)",
+                (thread_id, thread_id),
+            )
+            row = await cursor.fetchone()
+            assert row is not None
+            counts[label] = (int(row[0]), int(row[1]))
+    assert counts["wrapped"] == counts["control"]

@@ -38,7 +38,10 @@ Checkpoint readers and agent boot therefore need CRUD but no schema CREATE.
 (about 75% fewer checkpoint writes before terminal flushes). A crash can replay
 up to three super-steps (re-spending LLM tokens and possibly replaying tool side
 effects); claimed/pending reconciliation re-delivers inbounds, and checkpoint
-parent chains span four steps. Set a per-agent `{"checkpoint_interval": 1}`
+parent chains span four steps. A thread using a `DeltaChannel` is exempt: the
+throttle retires for it, every super-step persists as upstream wrote it, and a
+crash on such a thread replays at most the in-flight super-step. Set a
+per-agent `{"checkpoint_interval": 1}`
 config overlay plus an agent restart, or set `AVA_CHECKPOINT_INTERVAL=1` in the
 cluster `.env`, to restore every-super-step persistence. The full recovery
 verification and rollback protocol lives in
