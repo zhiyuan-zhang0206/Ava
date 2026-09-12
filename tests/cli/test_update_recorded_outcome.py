@@ -189,12 +189,10 @@ def test_local_dispatch_stamps_the_detached_rollout_log_onto_the_record(
 ) -> None:
     """The detached session enters through `cmd_update --local`; every dispatch
     seam between that entry and the record opener must preserve its log path."""
-    from cli.commands import _update_dispatch as _dispatch
-
     monkeypatch.setattr(_up, "_repo_root", lambda: Path("/unused"))
     monkeypatch.setattr(_up, "ava_home", lambda: Path("/home/ava/.ava"))
     monkeypatch.setattr(_up, "get_record", lambda _home: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_dispatch, "hosting_supervised_session", lambda: None)
+    monkeypatch.setattr("shared.proc.hosting_supervised_session", lambda: None)
     monkeypatch.setattr(
         _up,
         "_rollout_preflight",

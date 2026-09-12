@@ -18,7 +18,7 @@ import psutil
 import pytest
 
 from shared.paths import run_dir
-from shared.platform import IS_LINUX
+from shared.platform import IS_LINUX, IS_WINDOWS
 from shared.proc import (
     hosting_supervised_session,
     kill_process_tree,
@@ -65,6 +65,102 @@ def test_hosting_supervised_session_uses_starttime_despite_wall_clock_drift(
         assert hosting_supervised_session() == name
     finally:
         path.unlink(missing_ok=True)
+
+
+# --- hosting_exec_domain (issue #2331) -------------------------------------
+#
+# The predicate reads the SESSION LEADER's argv, so the join/follow cases run as
+# spawned children with `start_new_session` — their own session, the shape the
+# exec runtime creates for every exec domain. A same-process call cannot join a
+# synthetic session, and the suite's ambient session must not decide these.
+
+_PREDICATE_SRC = "from shared.proc import hosting_exec_domain\nprint(repr(hosting_exec_domain()))\n"
+
+
+def _predicate_in_new_session(*argv_tail: str) -> str:
+    result = subprocess.run(  # noqa: S603 — fixed interpreter + test source, fixture argv
+        [sys.executable, "-c", _PREDICATE_SRC, *argv_tail],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        start_new_session=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()
+
+
+@pytest.mark.skipif(IS_WINDOWS, reason="the membership route is POSIX-only (getsid)")
+@pytest.mark.parametrize("entry", ["agent.exec_child", "agent.exec_owner_child"])
+def test_hosting_exec_domain_names_the_entry_of_its_session_leader(entry: str) -> None:
+    """Both exec spawn shapes make their root the session leader; the entry
+    module on its argv is what marks the session as an exec domain."""
+    assert _predicate_in_new_session(entry) == repr(entry)
+
+
+@pytest.mark.skipif(IS_WINDOWS, reason="the membership route is POSIX-only (getsid)")
+def test_hosting_exec_domain_none_when_the_leader_is_not_an_exec_entry() -> None:
+    """A session whose leader is anything else — the per-session PTY host shape
+    behind `ava.shell.run_background` (a login shell) — is not an exec domain."""
+    assert _predicate_in_new_session() == "None"
+
+
+@pytest.mark.skipif(IS_WINDOWS, reason="the membership route is POSIX-only (getsid)")
+def test_hosting_exec_domain_follows_the_session_through_a_broken_parent_chain(
+    tmp_path: Path,
+) -> None:
+    """The 2026-09-12 incident shape: `sh -c "nohup … &"` reparents the child out
+    of every covered lineage (the ancestry guard's blind spot) but cannot leave
+    the session — membership still reads the exec domain, and the group that
+    dies with the call with it."""
+    out = tmp_path / "reparented.txt"
+    child_src = (
+        "import os, shlex, subprocess, sys, time\n"
+        "print(os.getpid(), flush=True)\n"
+        "inner = (\n"
+        "    'import os, sys, time\\n'\n"
+        "    'import psutil\\n'\n"
+        "    'from shared.proc import hosting_exec_domain\\n'\n"
+        "    'time.sleep(1.0)\\n'\n"
+        "    'ancestors = {p.pid for p in psutil.Process().parents()}\\n'\n"
+        "    'print(hosting_exec_domain(), os.getsid(0), int(sys.argv[1]) in ancestors)\\n'\n"
+        ")\n"
+        "command = (\n"
+        "    'nohup ' + shlex.quote(sys.executable) + ' -c ' + shlex.quote(inner)\n"
+        "    + ' ' + shlex.quote(str(os.getpid())) + ' > ' + shlex.quote(sys.argv[1]) + ' 2>&1 &'\n"
+        ")\n"
+        "subprocess.run(['sh', '-c', command])\n"
+        "# Stay alive while the reparented child takes its reading: a live exec\n"
+        "# root is exactly the state the membership probe must see (the domain\n"
+        "# lives until the call's turn ends).\n"
+        "time.sleep(5.0)\n"
+    )
+    leader = subprocess.Popen(  # noqa: S603 — fixed interpreter + test source, fixture argv
+        [sys.executable, "-c", child_src, str(out), "agent.exec_child"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        assert leader.stdout is not None
+        leader_pid = int(leader.stdout.readline().strip())
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            if out.exists() and len(out.read_text().split()) >= 3:
+                break
+            time.sleep(0.05)
+        assert out.exists(), "the reparented child never wrote its predicate result"
+        entry, sid, leader_was_an_ancestor = out.read_text().splitlines()[-1].split()
+        # The reading was taken while the leader (the synthetic exec root) was
+        # alive — what a call's exec domain looks like mid-call.
+        assert leader.poll() is None
+        assert entry == "agent.exec_child"
+        assert int(sid) == leader_pid  # still inside the exec session
+        assert leader_was_an_ancestor == "False"  # and no longer under its lineage
+    finally:
+        leader.kill()
+        leader.wait(timeout=30)
 
 
 # --- run_bounded fixtures -------------------------------------------------
