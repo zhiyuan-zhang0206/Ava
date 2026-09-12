@@ -77,7 +77,7 @@ describe("controller basics", () => {
     expect(ctl.isSticky()).toBe(true);
   });
 
-  it("small upward jitter (≤ unstickDeltaPx) away from the bottom keeps state", () => {
+  it("small upward jitter away from the bottom keeps state", () => {
     const ctl = createStickyController(TOUCH_STICKY_THRESHOLDS);
     pin(ctl, 2000);
     // user scrolled up deliberately → unstuck
@@ -165,16 +165,16 @@ describe("send flow: a clamp OBSERVED after a chunk grew (#1431 regression gate)
     // 1421, so the browser clamps 1500 → 1421. A chunk then grows
     // scrollHeight to 2500 BEFORE the scroll event dispatches:
     //   dist vs new bottom   = 2500 - 1421 - 600 = 479  (outside 120)
-    //   prevScrollTop - curr = 1500 - 1421 = 79         (> unstickDeltaPx 20)
+    //   prevScrollTop - curr = 1500 - 1421 = 79         (a 79px run, under 120)
     //   dist vs last bottom  = 2000 - 1421 - 600 = -21  (inside → never moved)
     ctl.handleScroll({ scrollTop: 1421, scrollHeight: 2500, clientHeight: 600 });
     expect(ctl.isSticky()).toBe(true);
   });
 
   it("the same shape, but the user really did scroll up → unsticks", () => {
-    // Same clamp + growth, except the user also scrolled up 300px. Now the
-    // old-bottom witness disagrees too (2000 - 1121 - 600 = 279, outside),
-    // so the deliberate gesture survives the rescue branch.
+    // Same clamp + growth, except the user also scrolled up 300px: the run
+    // (1500 → 1121 = 379) passes the 120px zone bar, and the old-bottom
+    // witness disagrees too (2000 - 1121 - 600 = 279, outside).
     const ctl = createStickyController(TOUCH_STICKY_THRESHOLDS);
     ctl.notifyPinnedToBottom({ scrollTop: 1500, scrollHeight: 2000, clientHeight: 500 });
     ctl.handleScroll({ scrollTop: 1121, scrollHeight: 2500, clientHeight: 600 });
@@ -290,17 +290,15 @@ describe("wheel intent (mouse/trackpad)", () => {
     expect(ctl.isSticky()).toBe(true);
   });
 
-  it("an upward notch outside the zone unsticks (slow scroll-up escape, #1027)", () => {
+  it("slow scroll-up creep releases once the run passes the zone (#1027, user report 2026-09-12)", () => {
     const ctl = createStickyController(POINTER_STICKY_THRESHOLDS);
     pin(ctl, 2000); // scrollTop 1400
-    // the user has crept up 40px (beyond the 30px pointer zone) via tiny
-    // scroll deltas that never individually exceeded unstickDeltaPx…
-    ctl.handleScroll(view(1385, 2000)); // drop 15 ≤ 20 → still sticky
-    ctl.handleScroll(view(1370, 2000)); // drop 15 → still sticky
-    ctl.handleScroll(view(1360, 2000)); // dist 40 ≥ 30, still sticky (small deltas)
+    // A scrollbar drag: tiny scroll deltas and NO wheel events — nothing
+    // but the cumulative run can see this gesture.
+    ctl.handleScroll(view(1385, 2000)); // run 15
+    ctl.handleScroll(view(1370, 2000)); // run 30 — at the bar, still sticky
     expect(ctl.isSticky()).toBe(true);
-    // …then the next wheel notch expresses the intent position deltas can't:
-    ctl.handleWheel(-10, view(1360, 2000));
+    ctl.handleScroll(view(1355, 2000)); // run 45 > 30 → released
     expect(ctl.isSticky()).toBe(false);
   });
 
@@ -363,8 +361,9 @@ describe("streaming growth race (content grows between events)", () => {
     ctl.handleScroll(view(400, 1000)); // manual scroll back to the bottom → re-stick
     expect(ctl.isSticky()).toBe(true);
     // streaming resumes: chunk grows to 1200 and the user nudges 25px —
-    // beyond unstickDeltaPx, but still inside the OLD bottom zone, so only
-    // a re-armed witness can tell "they never really left".
+    // a run under the 30px bar and inside the OLD bottom zone, so they
+    // have not left; only a re-armed witness tells "they never really
+    // left".
     ctl.handleScroll(view(375, 1200));
     expect(ctl.isSticky()).toBe(true);
   });
@@ -683,5 +682,45 @@ describe("touch drag (handleTouchStart / handleTouchEnd)", () => {
     ctl.handleScroll(view(400, 1000));
     ctl.handleTouchEnd(view(400, 1000));
     expect(ctl.isSticky()).toBe(true);
+  });
+});
+
+describe("slow drag run (user report 2026-09-12: streaming output + a slow drag fought the scrollbar)", () => {
+  it("releases after a zone's worth of cumulative upward travel (no wheel involved)", () => {
+    const ctl = createStickyController(POINTER_STICKY_THRESHOLDS); // zone 30
+    pin(ctl, 2000); // scrollTop 1400
+    for (let i = 0; i < 10; i++) {
+      ctl.handleScroll(view(1400 - 3 * (i + 1), 2000));
+      expect(ctl.isSticky()).toBe(true);
+    }
+    ctl.handleScroll(view(1400 - 33, 2000)); // run 33 > 30
+    expect(ctl.isSticky()).toBe(false);
+  });
+
+  it("a pin mid-drag does not reset the run (the pin-loop fight)", () => {
+    const ctl = createStickyController(POINTER_STICKY_THRESHOLDS); // zone 30
+    pin(ctl, 2000); // scrollTop 1400
+    // five 3px moves (run 15), then a chunk pins the follower back:
+    for (let i = 0; i < 5; i++) ctl.handleScroll(view(1400 - 3 * (i + 1), 2000));
+    ctl.handleScroll(pin(ctl, 2000)); // the pin's echo — must not reset the run
+    // six more moves bring the run to 33 — released while still inside the zone:
+    for (let i = 0; i < 6; i++) ctl.handleScroll(view(1400 - 3 * (i + 1), 2000));
+    expect(ctl.isSticky()).toBe(false);
+    // The released reader sits INSIDE the zone; a layout change must not
+    // re-stick them nor ask for a pin (that gate is what ends the fight).
+    expect(ctl.handleLayoutChange(view(1400 - 18, 2000))).toBe(false);
+    expect(ctl.isSticky()).toBe(false);
+  });
+
+  it("downward movement resets the run", () => {
+    const ctl = createStickyController(POINTER_STICKY_THRESHOLDS);
+    pin(ctl, 2000);
+    for (let i = 0; i < 9; i++) ctl.handleScroll(view(1400 - 3 * (i + 1), 2000)); // run 27
+    expect(ctl.isSticky()).toBe(true);
+    ctl.handleScroll(view(1400, 2000)); // back to the bottom → run resets
+    for (let i = 0; i < 10; i++) ctl.handleScroll(view(1400 - 3 * (i + 1), 2000)); // fresh run 30
+    expect(ctl.isSticky()).toBe(true); // 30 does not pass the bar
+    ctl.handleScroll(view(1400 - 33, 2000)); // 33 > 30
+    expect(ctl.isSticky()).toBe(false);
   });
 });

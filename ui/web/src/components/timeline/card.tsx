@@ -297,8 +297,16 @@ export const STICKY_HEADER_CLS = "sticky top-11 z-10";
 // it. Tailwind needs the literal class string (underscores = the calc spaces).
 export const STICKY_CHILD_HEADER_CLS =
   "sticky top-[calc(2.75rem_+_var(--turn-header-h,0px))] z-[5]";
+// The stuck variant must stay LAYOUT-NEUTRAL: the border used to make it
+// 1px taller than the unstuck one, and that 1px fed the timeline's
+// ResizeObserver — every stuck/unstuck flip around a scroll boundary fired
+// a layout change that pinned the reader back to the bottom, and the flips
+// then flip-flopped in a loop (user report 2026-09-12). -mb-px removes the
+// border's 1px from the box the following content sees; the border line
+// itself still renders (sticky z-10 draws it above the body sliding under).
 export const STUCK_HEADER_CLS =
   "bg-background/95 backdrop-blur-md shadow-xs border-b border-border/60 " +
+  "-mb-px " +
   "transition-[background-color,box-shadow,border-color] duration-150 ease-out motion-reduce:transition-none";
 export const UNSTUCK_HEADER_CLS =
   "bg-transparent transition-[background-color,box-shadow,border-color] duration-150 ease-out motion-reduce:transition-none";
