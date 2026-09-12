@@ -650,9 +650,9 @@ def _release_pools_route(
     Called by the ops stop path once this unit's agents are drained: closes
     every idle connection in both pools and answers `{"released": {"workload":
     n, "control": m}}`. Nothing reconnects during the quiesced window (the
-    beat, scan and page loops are gated) and the first borrow after resume
-    opens a fresh connection lazily. Loopback-only and unauthenticated, like
-    `/cancel-turn`.
+    beat and page loops are gated; the turn scan only through the stop leg)
+    and the first borrow after resume opens a fresh connection lazily.
+    Loopback-only and unauthenticated, like `/cancel-turn`.
     """
     import json
 

@@ -8,11 +8,15 @@ status: current
 # Quiesced window — loops hold off, pools release
 
 `maintenance.quiesced()` (phases `drained` through `ready`) is the stop window
-read by local background loops: the host daemon holds off ownership renewal,
-its pending-turn scan and its page reconciliation, and the ops daemon defers
-its shell-closure-notice flush. None of them may borrow the database across the
-window; an unreadable owner reads as quiesced, the same refuse-new-work posture
-the journal itself enforces by raising.
+read by local background loops: the host daemon holds off ownership renewal and
+page reconciliation, and the ops daemon defers its shell-closure-notice flush.
+None of them may borrow the database across the window; an unreadable owner
+reads as quiesced, the same refuse-new-work posture the journal itself enforces
+by raising. The host's pending-turn scan reads the narrower
+`maintenance.in_stop_leg()` (`drained` .. `stopped`): it holds through the stop
+leg, but from the start leg on a booting host must drain its pending workset
+and restore parked watcher intent even while the unit is still held — pub/sub
+has no replay, so recovery may not wait for the hold to release.
 
 The ops `cluster_stop` step — after the agent drain, before the data plane
 closes — releases every idle client-pool connection: the host daemon's shared

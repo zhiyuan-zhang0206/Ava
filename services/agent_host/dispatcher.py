@@ -635,11 +635,14 @@ class InboundWakeDispatcher:
             return
         if self._stale_after_s is None:
             raise RuntimeError("hosted pending scan configured without stale_after_s")
-        if maintenance.quiesced():
-            # A stop-window unit schedules nothing and cancels nothing: pending
-            # rows stay durable in the DB for the first scan after resume, and
-            # a stale turn here belongs to the operator's stop (which handles
-            # its own stragglers), not to a live host needing recovery.
+        if maintenance.in_stop_leg():
+            # The stop leg schedules nothing and cancels nothing: pending rows
+            # stay durable in the DB for the first scan after the start leg
+            # begins, and a stale turn here belongs to the operator's stop
+            # (which handles its own stragglers), not to a live host needing
+            # recovery. The start leg deliberately scans while the unit is
+            # still held — recovery may not wait for the hold to release,
+            # because pub/sub has no replay.
             return
 
         # Inbox/DB timestamps describe accumulated work, not this turn. A

@@ -99,3 +99,37 @@ def test_quiesced_covers_only_the_stop_window() -> None:
         "migration", WHEN, final.maintenance, final.maintenance, resumed=True
     )
     assert not maintenance.quiesced()
+
+
+def test_in_stop_leg_covers_only_the_drained_to_stopped_slice() -> None:
+    assert not maintenance.in_stop_leg()
+
+    first = pause_owner.begin_maintenance("migration", WHEN)
+    assert first.maintenance is not None
+    assert not maintenance.in_stop_leg()
+
+    pause_owner.change_maintenance(
+        "migration", WHEN, first.maintenance, MaintenanceHold("draining")
+    )
+    assert not maintenance.in_stop_leg()
+
+    for phase in ("drained", "stopping", "stopped"):
+        current = maintenance.set_phase("migration", WHEN, phase)
+        assert current.maintenance is not None
+        assert maintenance.in_stop_leg(), phase
+
+    for phase in ("starting", "ready"):
+        current = maintenance.set_phase("migration", WHEN, phase)
+        assert current.maintenance is not None
+        assert not maintenance.in_stop_leg(), phase
+
+
+def test_windows_read_an_unreadable_owner_as_held(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _unreadable() -> None:
+        raise OSError("owner state unreadable")
+
+    monkeypatch.setattr(maintenance, "snapshot", _unreadable)
+    assert maintenance.quiesced()
+    assert maintenance.in_stop_leg()
