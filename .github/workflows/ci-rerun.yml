@@ -31,9 +31,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # `cancelled` covers the cap-cancel shape: a job that hits its own
+          # timeout-minutes cancels the run, and the next attempt usually passes
+          # (2026-09-12: shards cancelled at the 20-minute cap on two runs). The
+          # guards below (single attempt, superseded head, newest run) bound the
+          # residual: a deliberately cancelled run is re-run at most once.
           conclusion="${RUN_CONCLUSION,,}"
           case "$conclusion" in
-            failure|timed_out|action_required|startup_failure) ;;
+            failure|timed_out|action_required|startup_failure|cancelled) ;;
             *) echo "CI conclusion $conclusion does not need a rerun"; exit 0 ;;
           esac
           case "$RUN_EVENT" in
