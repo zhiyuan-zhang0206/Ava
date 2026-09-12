@@ -6,7 +6,8 @@ since the LGTM cutover; `services.events_maintenance.rollup`), repairs
 pre-retention gaps from the 90-day filtered JSONL replay source
 (`services.events_maintenance.jsonl_replay`), runs the blob vacuum, and samples
 checkpoint table sizes. A separate one-minute loop prunes every checkpoint
-thread to its newest three rows. A five-minute resolution slice reads immutable Loki event classes,
+thread to its newest three rows; it parks as a no-op when
+`AVA_EVENTS_MAINTENANCE_CHECKPOINT_TRIM_ENABLED=false`. A five-minute resolution slice reads immutable Loki event classes,
 combines them with `event_dismissals`, and publishes unresolved + dismissed
 warning/error gauges (`services.events_maintenance.resolution`); the gateway
 stats dashboard reuses the same class arithmetic for its selected window. The PG `events` archive
