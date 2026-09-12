@@ -1449,6 +1449,69 @@ def test_health_port_backfill_skips_entirely_on_undecodable_value(
     assert "AVA_AGENT_HOST_HEALTH_PORT" in capsys.readouterr().err
 
 
+def test_health_port_backfill_reports_ignored_non_numeric_value(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A decodable but non-numeric value can never solve to a block base, so the
+    derivation skips it as an outlier — and when no block is left to prove, the
+    run used to end as a silent no-op. It must instead name the ignored value,
+    its source, and the empty derivation (#2974)."""
+    present = _health_block_present(_health_block(_HEALTH_BACKFILL_BASE))
+    original = (
+        "AVA_OPS_HEALTH_PORT=not-a-port\n"
+        f"AVA_LABELER_HEALTH_PORT={present['AVA_LABELER_HEALTH_PORT']}\n"
+    )
+    (tmp_path / ".env").write_text(original)
+    _run_health_backfill(tmp_path)
+    assert (tmp_path / ".env").read_text() == original  # nothing backfilled
+    err = capsys.readouterr().err
+    assert "AVA_OPS_HEALTH_PORT='not-a-port'" in err
+    assert "no block derived from the decoded values" in err
+    assert str(tmp_path / ".env") in err
+
+
+def test_health_port_backfill_reports_ignored_value_even_when_block_derived(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The outlier report does not wait for an empty derivation: a non-numeric
+    present value is named on stderr even while the remaining values prove and
+    heal the block (#2974)."""
+    full = _health_block(_HEALTH_BACKFILL_BASE)
+    present = _health_block_present(full)
+    (tmp_path / ".env").write_text(
+        f"AVA_OPS_HEALTH_PORT={present['AVA_OPS_HEALTH_PORT']}\n"
+        f"AVA_LABELER_HEALTH_PORT={present['AVA_LABELER_HEALTH_PORT']}\n"
+        "AVA_AGENT_HOST_HEALTH_PORT=oops\n"
+    )
+    _run_health_backfill(tmp_path)
+    _assert_health_block_healed(tmp_path, full, {**present, "AVA_AGENT_HOST_HEALTH_PORT": "oops"})
+    assert "AVA_AGENT_HOST_HEALTH_PORT=oops\n" in (tmp_path / ".env").read_text()
+    err = capsys.readouterr().err
+    assert "AVA_AGENT_HOST_HEALTH_PORT='oops'" in err
+    assert "no block derived" not in err
+
+
+def test_health_port_backfill_complete_key_set_reports_nothing_to_backfill(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """With every health-port key already present, an ignored non-numeric value
+    must not read as 'no block derived': `missing` is empty because nothing is
+    absent, not because the block could not be proved (#2974, PR #2281 review)."""
+    full = _health_block(_HEALTH_BACKFILL_BASE)
+    lines = [
+        f"{var}={'not-a-port' if var == 'AVA_OPS_HEALTH_PORT' else port}"
+        for var, port in sorted(full.items())
+    ]
+    original = "\n".join(lines) + "\n"
+    (tmp_path / ".env").write_text(original)
+    _run_health_backfill(tmp_path)
+    assert (tmp_path / ".env").read_text() == original  # complete set: nothing rewritten
+    err = capsys.readouterr().err
+    assert "AVA_OPS_HEALTH_PORT='not-a-port'" in err
+    assert "every health-port key is already present" in err
+    assert "no block derived" not in err
+
+
 # --- watchdog probe registration ------------------------------------------
 # The step fans out over the unit's capability SET. A single box carries both
 # capabilities and therefore runs TWO watchdog daemons; registering one probe
