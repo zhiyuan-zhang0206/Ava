@@ -4,6 +4,7 @@ import { useTranslations } from "next-intl";
 
 import { formatTokens } from "@/lib/format-number";
 import type { ContextMeterWidth } from "@/lib/types";
+import { useUserSettings } from "@/lib/use-user-settings";
 import { cn } from "@/lib/utils";
 import { OVERFLOW_HIDDEN } from "@/lib/layout";
 
@@ -22,6 +23,17 @@ export const CONTEXT_METER_WIDTH_CLASS: Record<ContextMeterWidth, string> = {
  *  setting's default rather than trusting an unsound cast. */
 export function resolveContextMeterWidth(value: unknown): ContextMeterWidth {
   return value === "compact" || value === "comfortable" || value === "wide" ? value : "comfortable";
+}
+
+/** The gauge-width class for the user's `display.context_meter_width` setting —
+ *  one resolution path for every consumer of the meter geometry: the
+ *  ContextButton, the breakdown panel, and the composer's loading ghost (so the
+ *  ghost occupies exactly the meter's footprint it stands in for). */
+export function useContextMeterWidthClass(): string {
+  const { settings } = useUserSettings();
+  return CONTEXT_METER_WIDTH_CLASS[
+    resolveContextMeterWidth(settings["display.context_meter_width"])
+  ];
 }
 
 export interface ContextMeterProps {
@@ -135,6 +147,29 @@ export function ContextMeter({
           ? t("soft", { soft: formatTokens(softCompactTokens), hard: formatTokens(hardCompactTokens) })
           : " tokens"}
       </span>
+    </span>
+  );
+}
+
+/** The composer's loading placeholder for the context readout: the same gauge
+ *  geometry as ContextMeter's track (width from the same
+ *  display.context_meter_width setting, so the readout's footprint is stable
+ *  while the first snapshot is in flight), pulsing and decorative only —
+ *  aria-hidden, no role, no numbers, not a button. */
+export function ContextMeterGhost({ className }: { className?: string }) {
+  const barWidthClassName = useContextMeterWidthClass();
+  return (
+    <span
+      aria-hidden="true"
+      data-testid="context-meter-ghost"
+      className={cn("inline-flex items-center gap-1.5", className)}
+    >
+      <span
+        className={cn(
+          "inline-block h-1.5 shrink-0 animate-pulse rounded-full bg-muted",
+          barWidthClassName,
+        )}
+      />
     </span>
   );
 }

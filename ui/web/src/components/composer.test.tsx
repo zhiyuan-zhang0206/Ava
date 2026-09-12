@@ -685,6 +685,15 @@ describe("Composer token display", () => {
     expect(span.textContent).toBe(" ");
   });
 
+  it("shows the loading ghost while the token snapshot is pending (cold switch)", () => {
+    renderComposer(<Composer {...baseProps} mode="idle" contextTokens={0} contextPending />);
+    // Same slot as the meter: the ghost stands in for the gauge while the
+    // first snapshot is in flight; no button (nothing to expand yet).
+    expect(screen.getByTestId("context-meter-ghost")).toBeTruthy();
+    expect(screen.queryByTestId("context-meter-button")).toBeNull();
+    expect(screen.getByTestId("composer-meta").textContent).toBe("");
+  });
+
   it("contextTokens > 0 shows formatted context token count", () => {
     renderComposer(<Composer {...baseProps} mode="idle" contextTokens={5000} />);
     const span = screen.getByTestId("composer-meta");

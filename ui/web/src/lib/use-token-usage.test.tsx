@@ -72,4 +72,35 @@ describe("useTokenUsage agent switch", () => {
     await waitFor(() => expect(getTokenUsage).toHaveBeenCalledTimes(3));
     expect(getTokenUsage).toHaveBeenLastCalledWith(1);
   });
+
+  it("reports contextPending until the cold key's first snapshot lands", async () => {
+    let resolveUsage: (v: TokenUsageResponse) => void = () => undefined;
+    getTokenUsage.mockImplementation(
+      () =>
+        new Promise<TokenUsageResponse>((resolve) => {
+          resolveUsage = resolve;
+        }),
+    );
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    );
+    const initialProps: { id: number | null } = { id: 7 };
+    const { result, rerender } = renderHook(
+      ({ id }: { id: number | null }) => useTokenUsage(id, () => undefined),
+      { initialProps, wrapper },
+    );
+
+    // Cold key: pending until the first snapshot lands.
+    expect(result.current.contextPending).toBe(true);
+
+    await waitFor(() => expect(getTokenUsage).toHaveBeenCalled());
+    resolveUsage(tokenFixture(7));
+    await waitFor(() => expect(result.current.contextPending).toBe(false));
+    expect(result.current.contextTokens).toBe(7000);
+
+    // No active agent: nothing is loading, so never "pending".
+    rerender({ id: null });
+    expect(result.current.contextPending).toBe(false);
+  });
 });

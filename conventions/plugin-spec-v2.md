@@ -129,12 +129,15 @@ Example (the shape `ava_code` would declare):
 | Lane | Mechanism | For |
 |---|---|---|
 | Declarative | `contributions.ui` in the manifest (`agentInspect` proxied sections, `nav`, `themes`) — data the console reads itself; there is no registration side | plugin-*served* content, links, skins |
-| Runtime registry | `register_inspect_widget()` at `inspector.py` import (`shared/plugin_inspector.py`) — the gateway imports each ENABLED builtin plugin's `inspector.py` under its `PluginContext` and serves `GET /api/agents/{id}/inspect/widgets`; the console renders closed-set widget kinds from the resolved payload | host-rendered interactive widgets whose targets are per-agent data (an agent's notice / task), where no static declaration can name the target |
+| Runtime registry | `register_inspect_widget()` at `inspector.py` import (`shared/plugin_inspector.py`) — the gateway imports each ENABLED builtin plugin's `inspector.py` under its `PluginContext` and serves `GET /api/agents/{id}/inspect/widgets`; the console renders closed-set widget kinds from the resolved payload | host-rendered widgets whose payload is per-agent data (an agent's active tasks), where no static declaration can name the rows |
 
-The inspector-widget registry resolves its closed target set (`notice`,
-`task`) server-side — the console never receives a link to nothing — and a
-target with no data drops its button (a widget left without buttons drops out
-of the response, matching the panel's empty-section rule). v1 covers builtin
+The inspector-widget registry resolves each widget's payload server-side —
+the console never receives a row it cannot address — and a widget with no
+payload drops out of the response, matching the panel's empty-section rule.
+The shipped kind is `taskList`: the agent's active tasks (`in_progress` /
+`ongoing`, newest first, capped at 8 kernel-side), each row a link to the
+task in the fleet view; `title` may be left unset to take the console's
+localized default ("Today's tasks"). v1 covers builtin
 plugins (the gateway imports no third-party plugin code; the plugin-metric
 loader is the sibling precedent). Failure follows the plugin-load fail-soft
 contract (2026-08-28 ava_ledger incident; restated for plugins 2026-09-11):
@@ -154,8 +157,8 @@ sections carry fixed keys, so a value slots a widget anywhere between them:
 | 100 | 200 | 300 | 400 | 500 | 600 | 700 | 800 |
 
 Equal orders stack built-in sections first, then widgets by `(plugin, id)` —
-deterministic, independent of registration order. (The fleet plugin's jump
-buttons use 50: navigation sits first, visible without scrolling.)
+deterministic, independent of registration order. (The fleet plugin's task
+list uses 50: the agent's work queue sits first, visible without scrolling.)
 
 ### Version ranges
 

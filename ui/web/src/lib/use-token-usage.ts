@@ -23,7 +23,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useLayoutEffect, useRef } from "react";
 
 import { api } from "./api";
 import { useTimelineStore } from "./timeline-store";
@@ -38,6 +38,10 @@ export interface TokenUsageState {
   softCompactTokens: number;
   /** Per-agent force-compact ceiling (a fraction of the model window). */
   hardCompactTokens: number;
+  /** True while the active agent's first token snapshot is still in flight
+   *  (cold key, no cached value): the composer shows its loading ghost in the
+   *  readout slot instead of collapsing it to a blank spacer. */
+  contextPending: boolean;
 }
 
 export function useTokenUsage(
@@ -83,7 +87,10 @@ export function useTokenUsage(
   // never disagree across two renders. This is ungated (no isEventForThread) —
   // a local switch reset does not depend on activeThreadId having caught up,
   // removing the effect-ordering fragility of the old synthetic-event path.
-  useEffect(() => {
+  //
+  // A layout effect (pre-paint): the reset must land in the same commit as the
+  // switch, or the first painted frame still shows the previous agent's value.
+  useLayoutEffect(() => {
     if (agentId == null) {
       applyTokenUsage(0, 0, 0, 0, 0);
       return;
@@ -116,7 +123,9 @@ export function useTokenUsage(
   }, [agentId, queryClient, applyTokenUsage]);
 
   // -- Once React Query data arrives → set value (overrides cached value or 0) --
-  useEffect(() => {
+  // Layout effect: applied in the same commit as the fetch resolution, so the
+  // values land before paint rather than a frame later.
+  useLayoutEffect(() => {
     if (tokenQuery.data && agentId != null) {
       applyTokenUsage(
         tokenQuery.data.input_tokens,
@@ -169,5 +178,14 @@ export function useTokenUsage(
 
   useAgentEventStream(onEvent, onConnectionEvent);
 
-  return { contextTokens: tokenUsage, maxContextTokens, softCompactTokens, hardCompactTokens };
+  // Cold-key pending: the readout's loading grace — see TokenUsageState.
+  const contextPending = agentId != null && tokenQuery.isPending;
+
+  return {
+    contextTokens: tokenUsage,
+    maxContextTokens,
+    softCompactTokens,
+    hardCompactTokens,
+    contextPending,
+  };
 }

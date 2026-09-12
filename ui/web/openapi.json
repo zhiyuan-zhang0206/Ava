@@ -9515,68 +9515,6 @@
         "title": "ImageUrlRef",
         "description": "The `image_url` object of an image content block."
       },
-      "InspectWidgetButton": {
-        "properties": {
-          "target": {
-            "type": "string",
-            "enum": [
-              "notice",
-              "task"
-            ],
-            "title": "Target"
-          },
-          "label": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Label"
-          },
-          "icon": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Icon"
-          },
-          "notice_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Notice Id"
-          },
-          "task_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Task Id"
-          }
-        },
-        "type": "object",
-        "required": [
-          "target"
-        ],
-        "title": "InspectWidgetButton",
-        "description": "One button of a resolved inspector widget — an element of\n`InspectWidgetResult.buttons` (GET /api/agents/{id}/inspect/widgets).\n\n`target` is the closed console vocabulary the kernel resolved (see\n`shared/plugin_inspector.py`): \"notice\" carries `notice_id` (the agent's\nopen notice), \"task\" carries `task_id` (the notice's task, else the\nagent's first real task). Both id fields stay optional because the payload\nis data, not policy: a button whose target did not resolve is dropped\nserver-side (so a carried target always has its id), but the console\nstill skips an unknown target rather than interpreting it. `label` /\n`icon` are the plugin's presentation overrides; without them the console\nuses its own localized default copy and icon for the target."
-      },
       "InspectWidgetResult": {
         "properties": {
           "plugin": {
@@ -9589,7 +9527,7 @@
           },
           "kind": {
             "type": "string",
-            "const": "jumpButtons",
+            "const": "taskList",
             "title": "Kind"
           },
           "order": {
@@ -9607,12 +9545,12 @@
             ],
             "title": "Title"
           },
-          "buttons": {
+          "tasks": {
             "items": {
-              "$ref": "#/components/schemas/InspectWidgetButton"
+              "$ref": "#/components/schemas/InspectWidgetTask"
             },
             "type": "array",
-            "title": "Buttons"
+            "title": "Tasks"
           }
         },
         "type": "object",
@@ -9623,7 +9561,26 @@
           "order"
         ],
         "title": "InspectWidgetResult",
-        "description": "One plugin widget rendered for the inspector panel — an element of\nGET /api/agents/{id}/inspect/widgets.\n\nThe resolved twin of a registered `InspectWidgetSpec`\n(`shared/plugin_inspector.py`): `plugin` + `id` name the registration,\n`kind` selects the console renderer (a closed set; an unknown kind is\nskipped by the console), and `buttons` carries only targets that\nresolved, so a widget without anything to show is dropped from the\nresponse entirely (the panel's empty-section rule)."
+        "description": "One plugin widget rendered for the inspector panel — an element of\nGET /api/agents/{id}/inspect/widgets.\n\nThe resolved twin of a registered `InspectWidgetSpec`\n(`shared/plugin_inspector.py`): `plugin` + `id` name the registration,\n`kind` selects the console renderer (a closed set; an unknown kind is\nskipped by the console), and the payload field the kind reads (`tasks`)\ncarries the kernel-resolved rows. A widget with an empty payload is\ndropped from the response entirely (the panel's empty-section rule)."
+      },
+      "InspectWidgetTask": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title"
+        ],
+        "title": "InspectWidgetTask",
+        "description": "One task row of a resolved ``taskList`` widget — an element of\n`InspectWidgetResult.tasks` (GET /api/agents/{id}/inspect/widgets).\n\nKernel-resolved data, not policy: the row carries only what the console\nrenders (id for the `/fleet?task=` link, title for the text). The list is\nalready filtered (the agent's active tasks) and capped kernel-side."
       },
       "InventoryAggregate": {
         "properties": {
