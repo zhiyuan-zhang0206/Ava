@@ -62,7 +62,7 @@ visual gate consume it so their definitions cannot drift.
 - `.github/workflows/` — GitHub Actions runs the full suite automatically
 - pre-commit runs ruff / ruff-format, pyright, frontend tsc, eslint, **full frontend vitest** in addition to lint (`.pre-commit-config.yaml`); just doesn't run pytest
 - CI runs all non-e2e tests + e2e + coverage thresholds
-- Every pre-commit hook runs in CI too, so no lint is local-only: the `backend` job runs `pre-commit run --all-files` (skipping the four npx hooks the `frontend` job covers), and the `docs-only` job — which the `changes` path filter routes markdown-only PRs to, skipping `backend` entirely — runs the same command so the doc lints (OKF size/format, doc symbol + roster sync, AGENTS.md / SKILL.md ceilings) still gate exactly the PRs that can break them
+- Every pre-commit hook runs in CI too, so no lint is local-only: the `backend` job runs `pre-commit run --all-files` (skipping the four npx hooks the `frontend` job covers), and the classify-independent `doc-lints` job runs the doc-lint family on every PR — including docs-only diffs, which skip `backend` entirely — so the doc lints (OKF size/format, doc symbol + roster sync, AGENTS.md / SKILL.md ceilings) still gate exactly the PRs that can break them
 
 ## Key dependencies
 

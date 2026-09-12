@@ -40,9 +40,10 @@ description: Runs the Ava repo's Python, frontend, and end-to-end checks and dia
 
 - **Every pre-commit lint hook also runs in CI**, so a locally skipped hook is
   still caught before merge: the backend job runs `pre-commit run --all-files`,
-  and a markdown-only PR (which skips backend by the path filter) gets the same
-  run from the `docs-only` job. That redundancy is what makes `SKIP=` safe and
-  `--no-verify` merely invisible rather than actually permissive.
+  and a markdown-only PR (which skips backend under the change classifier) still gets
+  the doc-lint family from the classify-independent `doc-lints` job. That
+  redundancy is what makes `SKIP=` safe and `--no-verify` merely invisible
+  rather than actually permissive.
 - **The reverse is not symmetric, deliberately.** A few CI steps have no local
   hook because they need a toolchain a dev machine may not have:
   `scripts/migration_smoke.py` boots a throwaway Postgres and shells out to

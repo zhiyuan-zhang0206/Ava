@@ -222,6 +222,49 @@ jobs:
       - name: Check canonical Python lock sources (stdlib only)
         run: python3 scripts/lint_python_lock.py
 
+  doc-lints:
+    # The doc-lint family must fire on EVERY PR — including docs-only diffs,
+    # where a doc reference is most likely to go stale: classify skips the
+    # suites for docs-only changes, and these hooks are otherwise carried only
+    # by the classify-gated backend-structure / merged-tree-structure jobs.
+    # Same classify-independent pattern as repo-language above and secret-scan
+    # below. The family is every markdown/skill/OKF-facing hook that is
+    # venv-only, node-free, seconds-fast: doc references, narrative facts,
+    # doc symbols / anchors / roster, AGENTS.md + SKILL.md ceilings and
+    # descriptions, and the OKF graph (membership rationale: task #3222 / the
+    # PR description). Whole-tree by design, not changed-files: that is the
+    # hooks' own contract (`pass_filenames: false` in .pre-commit-config.yaml —
+    # a link goes stale from a move anywhere, not just an edit to the doc
+    # citing it). Not a bare python3 job: the hooks run from the locked venv.
+    name: doc lints (pre-commit family)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # Draft PRs skip CI except Trunk test branches
+    # (trunk-merge/*, trunk-temp/*), which must verify.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false || startsWith(github.head_ref, 'trunk-merge/') || startsWith(github.head_ref, 'trunk-temp/') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: 0.10.2
+          enable-cache: true
+
+      - name: Install Python deps
+        uses: ./.github/actions/uv-sync
+
+      - name: Run the doc-lint family (--all-files)
+        # `pre-commit run` takes a single hook id, so run one per id and collect
+        # failures — every hook reports in one job run instead of stopping at
+        # the first failure.
+        run: |
+          status=0
+          for hook in check-doc-references check-narrative-facts lint-doc-symbols lint-doc-anchors lint-doc-roster lint-agents-md-size lint-skill-descriptions lint-skill-md-size lint-ava-okf; do
+            uv run pre-commit run --all-files "$hook" || status=1
+          done
+          exit $status
+
   secret-scan:
     # Run independently of classify: a secret can be introduced by any file,
     # including a docs-only change that skips the backend and frontend suites.
