@@ -857,7 +857,9 @@ def test_freeze_ack_has_no_later_session_start_during_concurrent_allocations(
             assert allocation_freeze.resume(frozen.generation)
         for proc, _envfile in launches:
             if proc.poll() is None:
-                proc.terminate()
+                # SIGKILL: SIGTERM=SIG_IGN inherited from a shell session would
+                # leave this spawned CLI alive.
+                proc.kill()
                 proc.wait(timeout=10)
 
 
