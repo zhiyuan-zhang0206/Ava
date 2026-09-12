@@ -19,7 +19,7 @@ Source of truth = services in `ops/spec.py` `build_services()` whose `ServiceSpe
 |------|------|------|
 | agent-ops | agent-runner inbound HTTP ops (authenticated) | [[agent_ops.ava.okf.md]] |
 | browser | headed Chrome reuse + shared MCP upstream | [[browser/browser.ava.okf.md]] |
-| permissions-helper | macOS/Windows desktop automation (launchd / logon task, not a session) | [[permissions-helper.ava.okf.md]] |
+| permissions-helper | macOS/Windows desktop automation (launchd / logon task, not a session) | [[permissions-helper/permissions-helper.ava.okf.md]] |
 | computer-mcp | computer-use executor: desktop actions through the signed permissions helper, screen-coordinated (lease + FIFO) + audited (task #1101) | [[computer-mcp.ava.okf.md]] |
 | agent-host | Executes local agents as isolated asyncio turns in one daemon | `services/agent_host/` |
 
