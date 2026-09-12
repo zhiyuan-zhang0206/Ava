@@ -74,6 +74,10 @@ export function findClosestStuckHeaderId(
   const stickyLine = vpRect.top + topOffset;
   // A candidate is stuck when its block's top has reached or passed its line,
   // and its bottom has not completely scrolled past it (with header buffer).
+  // The +1px top tolerance relies on the ≥2px in-flow gap below a block header
+  // (the header's pt-0.5): if that gap disappeared, the first child of an
+  // unpinned block — whose line is the header rect's bottom — would read as
+  // crossed and get the nested sticky styling early.
   const crossed = (r: DOMRect, line: number) => r.top <= line + 1 && r.bottom > line + 20;
 
   let topId: string | null = null;
@@ -188,7 +192,9 @@ export function TurnBlock({
     // keep it live across wraps / streaming / stuck-border changes.
     measure();
     const observer = new ResizeObserver(measure);
-    observer.observe(header);
+    // border-box: the stuck-state border-b grows only the border box, so a
+    // content-box observer would not fire on it (task #3215 review nit).
+    observer.observe(header, { box: "border-box" });
     return () => observer.disconnect();
   }, [expanded]);
 

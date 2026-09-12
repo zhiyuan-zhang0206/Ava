@@ -202,6 +202,42 @@ describe("findClosestStuckHeaderId", () => {
     expect(findClosestStuckHeaderId(container, 44)).toEqual({ topId: "turn-1", childId: "2.0" });
   });
 
+  it("prefers the closest child when two children in one block crossed the child line", () => {
+    const container = document.createElement("div");
+    vi.spyOn(container, "getBoundingClientRect").mockReturnValue(mockRect(0, 800, 800));
+
+    const turn = document.createElement("div");
+    turn.setAttribute("data-turn-id", "turn-1");
+    turn.setAttribute("data-turn-expanded", "true");
+    vi.spyOn(turn, "getBoundingClientRect").mockReturnValue(mockRect(10, 700, 690));
+
+    const header = document.createElement("button");
+    header.setAttribute("data-testid", "turn-toggle");
+    // Pinned block header: top 44, bottom 72 ⇒ the child line is 72.
+    vi.spyOn(header, "getBoundingClientRect").mockReturnValue(mockRect(44, 72, 28));
+
+    const older = document.createElement("div");
+    older.setAttribute("data-item-id", "2.0");
+    older.setAttribute("data-card-sticky", "true");
+    older.setAttribute("data-turn-child", "true");
+    // Crossed the child line first — top 10 is the farthest past it.
+    vi.spyOn(older, "getBoundingClientRect").mockReturnValue(mockRect(10, 400, 390));
+
+    const closer = document.createElement("div");
+    closer.setAttribute("data-item-id", "2.1");
+    closer.setAttribute("data-card-sticky", "true");
+    closer.setAttribute("data-turn-child", "true");
+    // Crossed later — top 50 is the closest to the line, so it must win.
+    vi.spyOn(closer, "getBoundingClientRect").mockReturnValue(mockRect(50, 400, 350));
+
+    turn.appendChild(header);
+    turn.appendChild(older);
+    turn.appendChild(closer);
+    container.appendChild(turn);
+
+    expect(findClosestStuckHeaderId(container, 44)).toEqual({ topId: "turn-1", childId: "2.1" });
+  });
+
   it("reports no child while its work block is still below the lines", () => {
     const container = document.createElement("div");
     vi.spyOn(container, "getBoundingClientRect").mockReturnValue(mockRect(0, 800, 800));
@@ -313,5 +349,34 @@ describe("TurnBlock component", () => {
     const toggle = screen.getByTestId("turn-toggle");
     fireEvent.click(toggle);
     expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it("observes the header's border box so stuck-border changes re-measure", () => {
+    const observe = vi.fn();
+    class FakeResizeObserver {
+      observe = observe;
+      disconnect = vi.fn();
+    }
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    try {
+      render(
+        <TurnBlock
+          id="turn-1"
+          memberIds={["1.0", "1.1"]}
+          summary={sampleSummary}
+          expanded={true}
+          isStuck={false}
+          onToggle={vi.fn()}
+        >
+          <div data-testid="detail-content">detail rows</div>
+        </TurnBlock>,
+      );
+      expect(observe).toHaveBeenCalledWith(
+        screen.getByTestId("turn-toggle"),
+        { box: "border-box" },
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
