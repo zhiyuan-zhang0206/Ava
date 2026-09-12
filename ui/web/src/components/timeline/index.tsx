@@ -317,9 +317,12 @@ export function TimelineView({
   // scroll event ever fires) still gets the control.
   const [atTop, setAtTop] = useState(false);
   const stuckRafRef = useRef<number | null>(null);
-  // The id of whichever expanded header (work block or top-level message card)
-  // is currently pinned at the sticky line — one owner for both surfaces.
+  // The ids of the pinned headers: one owner for all surfaces — a work block's
+  // header or a top-level message card's (level 1, one line under the HeaderBar)
+  // and the child card pinned nested under an expanded work block's header
+  // (level 2, task #3215).
   const [activeStuckHeaderId, setActiveStuckHeaderId] = useState<string | null>(null);
+  const [activeStuckChildId, setActiveStuckChildId] = useState<string | null>(null);
 
   const updateStuckHeader = useCallback(() => {
     const viewport =
@@ -327,8 +330,9 @@ export function TimelineView({
       wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ??
       null;
     if (!viewport) return;
-    const nextStuckId = findClosestStuckHeaderId(viewport, BAR_HEIGHT_PX);
-    setActiveStuckHeaderId((prev) => (prev === nextStuckId ? prev : nextStuckId));
+    const { topId, childId } = findClosestStuckHeaderId(viewport, BAR_HEIGHT_PX);
+    setActiveStuckHeaderId((prev) => (prev === topId ? prev : topId));
+    setActiveStuckChildId((prev) => (prev === childId ? prev : childId));
   }, []);
 
   // Pointer-aware sticky thresholds: touch keeps the wide bounce-tolerant
@@ -949,6 +953,7 @@ export function TimelineView({
     setOverrides(new Set());
     setTurnOverrides(new Map());
     setActiveStuckHeaderId(null);
+    setActiveStuckChildId(null);
   }
 
   // item_ids are message indexes local to each thread, so the same ids recur
@@ -960,6 +965,7 @@ export function TimelineView({
     setOverrides(new Set());
     setTurnOverrides(new Map());
     setActiveStuckHeaderId(null);
+    setActiveStuckChildId(null);
   }
 
   // Same-mode re-pick (user ruling 2026-08-06): the selector bumps this token
@@ -972,6 +978,7 @@ export function TimelineView({
     setOverrides(new Set());
     setTurnOverrides(new Map());
     setActiveStuckHeaderId(null);
+    setActiveStuckChildId(null);
   }
 
   // Sync the stuck header on changes or layout shifts. turnOverrides /
@@ -1058,10 +1065,16 @@ export function TimelineView({
         expanded={expanded}
         showActions={showActions}
         // A primary item is always a top-level card (it breaks turns), so its
-        // header is the sticky one; the stuck id can only match while it is
-        // expanded (see TimelineRow's data-card-sticky gate).
-        stickyHeader={isPrimary}
-        isStuck={isPrimary && activeStuckHeaderId === item.item_id}
+        // header pins below the HeaderBar; a secondary item is always a work-
+        // block child, whose header pins nested under the turn's (task #3215).
+        // The stuck id can only match while the row is expanded (see
+        // TimelineRow's data-card-sticky gate) — the level sets which id applies.
+        stickyHeader={isPrimary ? "top" : "nested"}
+        isStuck={
+          isPrimary
+            ? activeStuckHeaderId === item.item_id
+            : activeStuckChildId === item.item_id
+        }
         onToggle={toggleExpanded}
         onFork={isForkRow ? onFork ?? null : null}
         forkPending={isForkRow ? forkPending ?? false : false}

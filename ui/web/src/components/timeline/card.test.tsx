@@ -504,7 +504,7 @@ describe("CardHeader sticky header (task #3136)", () => {
   it("expanded sticky card pins the header at top-11 while resting", () => {
     const cfg = messageCardConfig(chatItem)!;
     const { container } = renderWithQuery(
-      <CardHeader item={chatItem} config={cfg} expanded={true} onToggle={noop} stickyHeader={true} />,
+      <CardHeader item={chatItem} config={cfg} expanded={true} onToggle={noop} stickyHeader="top" />,
     );
     const btn = container.querySelector("button")!;
     expect(btn.className).toContain("sticky");
@@ -517,7 +517,7 @@ describe("CardHeader sticky header (task #3136)", () => {
   it("collapsed sticky card does not pin (the rest position stays in flow)", () => {
     const cfg = messageCardConfig(chatItem)!;
     const { container } = renderWithQuery(
-      <CardHeader item={chatItem} config={cfg} expanded={false} onToggle={noop} stickyHeader={true} />,
+      <CardHeader item={chatItem} config={cfg} expanded={false} onToggle={noop} stickyHeader="top" />,
     );
     const btn = container.querySelector("button")!;
     expect(btn.className).not.toContain("sticky");
@@ -531,7 +531,7 @@ describe("CardHeader sticky header (task #3136)", () => {
         config={cfg}
         expanded={true}
         onToggle={noop}
-        stickyHeader={true}
+        stickyHeader="top"
         isStuck={true}
       />,
     );
@@ -552,11 +552,32 @@ describe("CardHeader sticky header (task #3136)", () => {
         config={cfg}
         expanded={true}
         onToggle={onToggle}
-        stickyHeader={true}
+        stickyHeader="top"
         isStuck={true}
       />,
     );
     fireEvent.click(container.querySelector("button")!);
     expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it("nested sticky (work-block child) pins under the block header, not at the bar line", () => {
+    // Task #3215: a child card's header line = top-11 + the block header's
+    // measured height (--turn-header-h, set on the turn root by TurnBlock).
+    const cItem = item("agent_reasoning", { payload: "thinking...", reasoning_ms: 8000 });
+    const cfg = messageCardConfig(cItem)!;
+    const { container } = renderWithQuery(
+      <CardHeader
+        item={cItem}
+        config={cfg}
+        expanded={true}
+        onToggle={noop}
+        stickyHeader="nested"
+      />,
+    );
+    const btn = container.querySelector("button")!;
+    expect(btn.className).toContain("sticky");
+    expect(btn.className).toContain("top-[calc(2.75rem_+_var(--turn-header-h,0px))]");
+    expect(btn.className).toContain("z-[5]");
+    expect(btn.className).not.toContain("top-11");
   });
 });
