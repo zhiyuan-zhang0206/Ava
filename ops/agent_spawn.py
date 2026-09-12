@@ -98,8 +98,12 @@ def _copy_checkpoint_chain(
       uniqued by (thread, ns, channel, version); the new agent reads
       corresponding channel/version on demand. Extra blobs that go unread do
       not affect behavior
-    - **Does NOT** copy checkpoint_writes: those are mid-step pending writes;
-      fork sees the clean post-commit snapshot
+    - **checkpoint_writes**: every write row attached to a copied checkpoint,
+      so the replica is complete for delta-written threads — their message
+      content lives in the writes, not blobs (tasks #3180/#3181). For
+      full-snapshot threads the copy is invisible to readers (values still
+      come from blobs) and keeps the same resume semantics: writes attach
+      to their producing checkpoint, and a clean tip has none attached.
 
     LangGraph checkpoints / blobs tables have `thread_id` as TEXT (framework
     schema unchanged) — agents_meta.id is BIGINT, this function explicitly
@@ -136,6 +140,28 @@ def _copy_checkpoint_chain(
         raise ForkCheckpointNotFound(
             f"checkpoint {source_checkpoint_id!r} does not exist in thread {source_agent_id}"
         )
+    cur.execute(
+        """
+        WITH RECURSIVE chain AS (
+            SELECT checkpoint_id, parent_checkpoint_id FROM checkpoints
+             WHERE thread_id = %(src)s AND checkpoint_id = %(ckpt)s
+            UNION ALL
+            SELECT c.checkpoint_id, c.parent_checkpoint_id
+              FROM checkpoints c
+              JOIN chain ON c.thread_id = %(src)s
+                       AND c.checkpoint_id = chain.parent_checkpoint_id
+        )
+        INSERT INTO checkpoint_writes (
+            thread_id, checkpoint_ns, checkpoint_id, task_id, idx, channel, type, blob
+        )
+        SELECT %(new)s, w.checkpoint_ns, w.checkpoint_id, w.task_id, w.idx,
+               w.channel, w.type, w.blob
+          FROM checkpoint_writes w
+          JOIN chain ON chain.checkpoint_id = w.checkpoint_id
+         WHERE w.thread_id = %(src)s
+        """,
+        {"src": str(source_agent_id), "ckpt": source_checkpoint_id, "new": str(new_agent_id)},
+    )
     cur.execute(
         """
         INSERT INTO checkpoint_blobs (thread_id, checkpoint_ns, channel, version, type, blob)
