@@ -183,6 +183,85 @@ def test_ensure_plugins_loaded_contains_a_failing_load_chain(
     assert "DuplicatePlugin" in stderr
 
 
+def test_ensure_plugins_loaded_defers_while_the_loader_module_still_initializes(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    loguru_records: list[dict],
+) -> None:
+    """A re-entrant import is not a failure (task #3234).
+
+    A process that imports an `agent.*` module before `ava` reaches the eager
+    load hits the loader while `agent.graph._build` is still its own partial
+    `sys.modules` entry: the attribute does not exist YET. That call must defer
+    (no latch, no loud report) — and once the module is complete, the next call
+    loads normally instead of being blocked by a latch for a load that never
+    ran.
+    """
+    import agent.graph._build as build
+
+    calls: list[int] = []
+
+    def fake() -> None:
+        calls.append(1)
+
+    # Mid-import: the loader attribute is not defined yet and CPython marks
+    # the partial-module state (the shape the real circular import hits).
+    monkeypatch.delattr(build, "_load_extensions")
+    monkeypatch.setattr(build.__spec__, "_initializing", True, raising=False)
+
+    ava._ensure_plugins_loaded()  # must not raise
+
+    assert ava._plugins_loaded is False  # deferred, not latched
+    assert calls == []
+    assert "plugin load failed" not in capsys.readouterr().err
+    assert not any("failed in this launched child" in r["message"] for r in loguru_records)
+
+    # The module finishes initializing; the next call retries and loads.
+    monkeypatch.setattr(build, "_load_extensions", fake, raising=False)
+    monkeypatch.setattr(build.__spec__, "_initializing", False)
+
+    ava._ensure_plugins_loaded()
+
+    assert calls == [1]
+    assert ava._plugins_loaded is True
+
+
+def test_lazy_miss_fails_fast_while_deferred_and_succeeds_after(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The deferred path must not re-enter `__getattr__` recursively.
+
+    With the latch left off, a lazy miss whose load defers stops at the
+    fail-fast AttributeError (no reload loop), and the first miss after the
+    loader module is complete loads the plugin surface.
+    """
+    _as_launched_child(monkeypatch)
+    import agent.graph._build as build
+
+    calls: list[int] = []
+
+    def fake() -> None:
+        calls.append(1)
+        ava.register_namespace("deferrednsp", SimpleNamespace(ping=lambda: "pong", __doc__="t"))
+
+    monkeypatch.delattr(build, "_load_extensions")
+    monkeypatch.setattr(build.__spec__, "_initializing", True, raising=False)
+
+    with pytest.raises(AttributeError):
+        _ = ava.deferrednsp  # type: ignore[attr-defined]
+    assert calls == []
+    assert ava._plugins_loaded is False
+    assert "plugin load failed" not in capsys.readouterr().err
+
+    monkeypatch.setattr(build, "_load_extensions", fake, raising=False)
+    monkeypatch.setattr(build.__spec__, "_initializing", False)
+
+    assert ava.deferrednsp.ping() == "pong"  # type: ignore[attr-defined]
+    assert calls == [1]
+    assert ava._plugins_loaded is True
+
+
 def _spy_member_loader(
     monkeypatch: pytest.MonkeyPatch, *, namespace: str, member: str
 ) -> list[int]:
