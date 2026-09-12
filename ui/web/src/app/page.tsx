@@ -296,7 +296,7 @@ function HomeContent({
 
   const { items, streamingCode, turnActive, hasMoreOlder, loadingOlder, loadOlder, isLoading } =
     useTimeline(activeId, showError);
-  const { contextTokens, maxContextTokens, softCompactTokens, hardCompactTokens } = useTokenUsage(
+  const { contextTokens, maxContextTokens, softCompactTokens, hardCompactTokens, contextPending } = useTokenUsage(
     activeId,
     showError,
   );
@@ -439,6 +439,7 @@ function HomeContent({
               maxContextTokens={maxContextTokens}
               softCompactTokens={softCompactTokens}
               hardCompactTokens={hardCompactTokens}
+              contextPending={contextPending}
               agentId={activeId}
               agentTerminated={activeAgent?.status === "terminated"}
               details={<ContentToggle />}

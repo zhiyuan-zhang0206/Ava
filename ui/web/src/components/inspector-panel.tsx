@@ -17,7 +17,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { Fragment, useCallback, type ReactNode, useEffect, useRef } from "react";
 
-import { SectionSkeleton } from "@/components/inspector-panel-skeleton";
+import { LiveSectionsSkeleton, SectionSkeleton, WindowedSectionsSkeleton } from "@/components/inspector-panel-skeleton";
 import { InspectWidgetSection } from "@/components/inspector-widgets";
 import { Section } from "@/components/inspector-section";
 import { OpenNoticeDetail } from "@/components/open-notice-detail";
@@ -35,7 +35,7 @@ import {
   inspectWidgetsQueryKey,
   inspectWindowedQueryKey,
 } from "@/lib/inspector-prefetch";
-import { INSPECT_SECTION_ORDER } from "@/lib/inspector-widgets";
+import { fleetNoticeHref, INSPECT_SECTION_ORDER } from "@/lib/inspector-widgets";
 import type {
   AgentInspect,
   AgentInspectLive,
@@ -235,6 +235,16 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
   // but the query is disabled so a closed panel cannot produce inspect traffic.
   if (!open) return null;
 
+  // First load = one coordinated reveal (user request 2026-09-12, task #3216):
+  // every query fires together when the panel opens or the agent switches, so
+  // a panel that filled in piecemeal (live half, then windowed, then widgets)
+  // read as broken loading order with mismatched skeletons. While ANY of the
+  // three is still pending, only the unified skeleton set renders; once each
+  // has settled (data or error) the sections below render in one pass. A
+  // window switch is not a first load — its placeholder keeps `isPending`
+  // false and only the windowed sections swap to their own skeletons.
+  const firstLoad = liveQuery.isPending || windowedQuery.isPending || widgetsQuery.isPending;
+
   // The panel's one ordered list (task #2909): built-in sections carry their
   // documented keys (`INSPECT_SECTION_ORDER`), plugin widgets slot in by their
   // own `order`, and the merged list is sorted here so DOM order is visual
@@ -248,12 +258,6 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
       { order: INSPECT_SECTION_ORDER.shells, tie: 0, key: "shells", node: <ShellsSection inspect={liveData} /> },
       { order: INSPECT_SECTION_ORDER.liveness, tie: 0, key: "liveness", node: <LivenessSection inspect={liveData} /> },
       { order: INSPECT_SECTION_ORDER.configOverlay, tie: 0, key: "config-overlay", node: <ConfigOverlaySection inspect={liveData} /> },
-    );
-  } else if (liveQuery.isPending) {
-    sections.push(
-      { order: INSPECT_SECTION_ORDER.shells, tie: 0, key: "shells", node: <SectionSkeleton title={t("sectionShells")} rows={1} /> },
-      { order: INSPECT_SECTION_ORDER.liveness, tie: 0, key: "liveness", node: <SectionSkeleton title={t("sectionLiveness")} rows={3} /> },
-      { order: INSPECT_SECTION_ORDER.configOverlay, tie: 0, key: "config-overlay", node: <SectionSkeleton title={t("sectionConfigOverlay")} rows={1} /> },
     );
   } else {
     sections.push({
@@ -281,19 +285,20 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
       { order: INSPECT_SECTION_ORDER.activity, tie: 0, key: "activity", node: <SectionSkeleton title={t("sectionActivity")} rows={4} /> },
     );
   }
+  const runLinkNode = (
+    <Link
+      href={`/insights/run/${agentId}`}
+      className="inline-flex items-center gap-1 font-mono text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+    >
+      {t("openRunTimeline")}
+      <ExternalLink className="size-3" aria-hidden />
+    </Link>
+  );
   sections.push({
     order: INSPECT_SECTION_ORDER.runLink,
     tie: 0,
     key: "run-link",
-    node: (
-      <Link
-        href={`/insights/run/${agentId}`}
-        className="inline-flex items-center gap-1 font-mono text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
-      >
-        {t("openRunTimeline")}
-        <ExternalLink className="size-3" aria-hidden />
-      </Link>
-    ),
+    node: runLinkNode,
   });
   if (liveData?.notice) {
     sections.push({
@@ -302,8 +307,6 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
       key: "notice",
       node: <NoticeReplySection agentId={agentId} notice={liveData.notice} />,
     });
-  } else if (liveQuery.isPending) {
-    sections.push({ order: INSPECT_SECTION_ORDER.notice, tie: 0, key: "notice", node: <SectionSkeleton title={t("sectionNotice")} /> });
   }
   for (const widget of widgetsQuery.data ?? []) {
     sections.push({
@@ -380,6 +383,12 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
             >
               {isFetching ? t("retrying") : t("retry")}
             </button>
+          </div>
+        ) : firstLoad ? (
+          <div className="space-y-4">
+            <LiveSectionsSkeleton />
+            <WindowedSectionsSkeleton />
+            {runLinkNode}
           </div>
         ) : (
           <div className="space-y-4">
@@ -482,7 +491,19 @@ function NoticeReplySection({
   const queryClient = useQueryClient();
   const t = useTranslations("inspector");
   return (
-    <Section icon={<Bell className="size-3" />} title={t("sectionNotice")}>
+    <Section
+      icon={<Bell className="size-3" />}
+      title={t("sectionNotice")}
+      action={
+        <Link
+          href={fleetNoticeHref(notice.id)}
+          className="inline-flex items-center gap-1 hover:text-foreground"
+        >
+          <ExternalLink className="size-3" aria-hidden />
+          {t("jumpNotice")}
+        </Link>
+      }
+    >
       {/* Key by notice id: OpenNoticeDetail keeps `pending` true after a resolve
           (the notice is going away), so when a refetch swaps in the next notice
           the keyed remount gives it a fresh, enabled reply surface. */}

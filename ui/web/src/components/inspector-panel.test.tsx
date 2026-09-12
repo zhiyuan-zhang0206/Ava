@@ -443,7 +443,7 @@ describe("InspectorPanel", () => {
     expect(screen.queryByText("Page")).toBeNull();
   });
 
-  it("renders section skeletons instead of a single loading line on a cold split load", () => {
+  it("renders the unified skeleton set while a cold split load is pending", () => {
     getAgentInspectLive.mockReturnValue(new Promise<AgentInspectLive>(() => undefined));
     getAgentInspect.mockReturnValue(new Promise<AgentInspect>(() => undefined));
 
@@ -455,20 +455,32 @@ describe("InspectorPanel", () => {
     expect(screen.getByLabelText("Configuration overlay loading")).toBeTruthy();
     expect(screen.getByLabelText("Cost loading")).toBeTruthy();
     expect(screen.getByLabelText("Activity loading")).toBeTruthy();
-    expect(screen.getByLabelText("Notice loading")).toBeTruthy();
+    // Sections that may not exist (notice / widgets) are not promised by the
+    // loading skeleton; they arrive with the single reveal.
+    expect(screen.queryByLabelText("Notice loading")).toBeNull();
     expect(screen.queryByText("Loading…")).toBeNull();
   });
 
-  it("keeps live sections visible while the slower windowed half is pending", async () => {
-    getAgentInspect.mockReturnValue(new Promise<AgentInspect>(() => undefined));
-
+  it("holds one unified skeleton until every half settles, then reveals at once", async () => {
+    let releaseWindowed: (v: AgentInspect) => void = () => undefined;
+    getAgentInspect.mockReturnValue(
+      new Promise<AgentInspect>((resolve) => {
+        releaseWindowed = resolve;
+      }),
+    );
     render(<InspectorPanel agentId={1} />);
 
-    await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
-    expect(screen.getByText("dev-server")).toBeTruthy();
+    // The live half is ready, but nothing reveals piecemeal: the panel keeps
+    // its unified skeleton until the windowed half has settled too.
+    await waitFor(() => expect(getAgentInspectLive).toHaveBeenCalled());
+    expect(screen.queryByText("dev-server")).toBeNull();
+    expect(screen.getByLabelText("Persistent shells loading")).toBeTruthy();
     expect(screen.getByLabelText("Cost loading")).toBeTruthy();
-    expect(screen.getByLabelText("Activity loading")).toBeTruthy();
-    expect(screen.queryByText("$0.4213")).toBeNull();
+
+    releaseWindowed(fixture({ window_hours: 24 }));
+    await waitFor(() => expect(screen.getByText("dev-server")).toBeTruthy());
+    expect(screen.queryByLabelText("Cost loading")).toBeNull();
+    expect(screen.queryByLabelText("Persistent shells loading")).toBeNull();
   });
 
   it("replaces the prior window with skeletons while a new window is pending", async () => {
@@ -1465,18 +1477,18 @@ describe("InspectorPanel agent switch (task #1939)", () => {
 });
 
 
-// Plugin widgets (task #2909): the panel renders what the enabled plugins
-// embed, slotted into the documented section order.
+// Plugin widgets (task #2909; taskList reshaped in #3216): the panel renders
+// what the enabled plugins embed, slotted into the documented section order.
 function widgetFixture(over: Partial<InspectWidget> = {}): InspectWidget {
   return {
     plugin: "ava_fleet",
-    id: "jump-buttons",
-    kind: "jumpButtons",
+    id: "today-tasks",
+    kind: "taskList",
     order: 50,
     title: null,
-    buttons: [
-      { target: "notice", label: null, icon: null, notice_id: 7, task_id: null },
-      { target: "task", label: null, icon: null, notice_id: null, task_id: 42 },
+    tasks: [
+      { id: 42, title: "Ship the inspector fix" },
+      { id: 43, title: "Reply to QA" },
     ],
     ...over,
   };
@@ -1493,13 +1505,17 @@ const widgetNotice = {
 };
 
 describe("InspectorPanel plugin widgets", () => {
-  it("renders a jumpButtons widget as links to the resolved targets", async () => {
+  it("renders a taskList widget as a titled section of fleet-task links", async () => {
     getAgentInspectWidgets.mockResolvedValue([widgetFixture()]);
     render(<InspectorPanel agentId={1} />);
 
-    const noticeLink = await screen.findByRole("link", { name: /Notification/ });
-    expect(noticeLink.getAttribute("href")).toBe("/fleet?notice=7");
-    expect(screen.getByRole("link", { name: /Task/ }).getAttribute("href")).toBe("/fleet?task=42");
+    // The console titles a taskList by default (localized copy).
+    expect(await screen.findByText("Today's tasks")).toBeTruthy();
+    const first = await screen.findByRole("link", { name: /Ship the inspector fix/ });
+    expect(first.getAttribute("href")).toBe("/fleet?task=42");
+    expect(screen.getByRole("link", { name: /Reply to QA/ }).getAttribute("href")).toBe(
+      "/fleet?task=43",
+    );
   });
 
   it("slots a widget into the section order (750: between the run link and the notice)", async () => {
@@ -1508,7 +1524,7 @@ describe("InspectorPanel plugin widgets", () => {
     render(<InspectorPanel agentId={1} />);
 
     const runLink = await screen.findByRole("link", { name: "Open run timeline" });
-    const widgetLink = await screen.findByRole("link", { name: /Notification/ });
+    const widgetLink = await screen.findByRole("link", { name: /Ship the inspector fix/ });
     const reply = screen.getByRole("textbox");
     // Document order follows the order keys: 700 (run link) < 750 (widget) <
     // 800 (notice).
@@ -1520,11 +1536,18 @@ describe("InspectorPanel plugin widgets", () => {
     ).toBeTruthy();
   });
 
+  it("the notice section carries the jump into the fleet inbox", async () => {
+    getAgentInspectLive.mockResolvedValue(liveFixture({ notice: widgetNotice }));
+    render(<InspectorPanel agentId={1} />);
+
+    const jump = await screen.findByRole("link", { name: "Notification" });
+    expect(jump.getAttribute("href")).toBe("/fleet?notice=92");
+  });
+
   it("renders no widget area when no plugin registers one", async () => {
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(getAgentInspectWidgets).toHaveBeenCalled());
-    expect(screen.queryByRole("link", { name: /Notification/ })).toBeNull();
-    expect(screen.queryByRole("link", { name: /Task/ })).toBeNull();
+    expect(screen.queryByText("Today's tasks")).toBeNull();
   });
 
   it("a widgets fetch failure leaves the rest of the panel intact", async () => {
@@ -1535,6 +1558,6 @@ describe("InspectorPanel plugin widgets", () => {
     await screen.findByRole("link", { name: "Open run timeline" });
     await screen.findAllByText("Cost");
     expect(screen.getAllByText("Activity").length).toBeGreaterThan(0);
-    expect(screen.queryByRole("link", { name: /Notification/ })).toBeNull();
+    expect(screen.queryByText("Today's tasks")).toBeNull();
   });
 });

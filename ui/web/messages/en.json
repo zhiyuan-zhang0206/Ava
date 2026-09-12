@@ -846,6 +846,7 @@
     "noData": "No data",
     "sectionPage": "Page",
     "sectionNotice": "Notice",
+    "sectionTasks": "Today's tasks",
     "sectionShells": "Persistent shells",
     "unnamed": "(unnamed)",
     "sectionConfigOverlay": "Configuration overlay",
@@ -871,7 +872,6 @@
     "windowedUnavailable": "Windowed inspector data unavailable",
     "retryWindowed": "Retry windowed data",
     "openRunTimeline": "Open run timeline",
-    "jumpNotice": "Notification",
-    "jumpTask": "Task"
+    "jumpNotice": "Notification"
   }
 }

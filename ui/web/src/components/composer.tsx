@@ -4,6 +4,7 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ContextButton } from "@/components/context-breakdown";
+import { ContextMeterGhost } from "@/components/context-meter";
 import {
   parseSlash,
   SlashAutocomplete,
@@ -58,6 +59,10 @@ interface Props {
   // hasn't done an LLM call yet (newly spawned / just switched to),
   // so the number is hidden
   contextTokens: number;
+  // true while the active agent's first token snapshot is still in flight
+  // (cold cache): the readout slot shows the loading ghost instead of
+  // collapsing to a blank spacer, so an agent switch never flashes it empty
+  contextPending?: boolean;
   // model context window ceiling; 0 = unknown — the "/max" segment
   // is hidden when 0
   maxContextTokens?: number;
@@ -184,7 +189,7 @@ function newClientMessageId(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, filesUploading = false, focusToken, contextTokens, maxContextTokens = 0, softCompactTokens = 0, hardCompactTokens = 0, agentId = null, agentTerminated = false, maxWidthCss, children, details }: Props) {
+export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, filesUploading = false, focusToken, contextTokens, contextPending = false, maxContextTokens = 0, softCompactTokens = 0, hardCompactTokens = 0, agentId = null, agentTerminated = false, maxWidthCss, children, details }: Props) {
   const t = useTranslations("common");
   const prevAgentIdRef = useRef(agentId);
   const [value, setValue] = useState(() => {
@@ -666,6 +671,8 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
                 softCompactTokens={softCompactTokens}
                 hardCompactTokens={hardCompactTokens}
               />
+            ) : contextPending ? (
+              <ContextMeterGhost />
             ) : (
               " "
             ))}

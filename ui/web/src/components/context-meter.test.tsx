@@ -5,9 +5,16 @@
 // happy-dom + RTL — vitest globals=false; explicit cleanup.
 
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ContextMeter, resolveContextMeterWidth } from "./context-meter";
+import { ContextMeter, ContextMeterGhost, resolveContextMeterWidth } from "./context-meter";
+
+// The ghost reads the gauge-width display setting; stub the settings hook so
+// the tests need no QueryClient and can drive the value per case.
+const settingsRef = vi.hoisted((): { value: Record<string, unknown> } => ({ value: {} }));
+vi.mock("@/lib/use-user-settings", () => ({
+  useUserSettings: () => ({ settings: settingsRef.value, setSetting: vi.fn(), isLoading: false }),
+}));
 
 afterEach(cleanup);
 
@@ -101,5 +108,26 @@ describe("resolveContextMeterWidth", () => {
     expect(resolveContextMeterWidth(undefined)).toBe("comfortable");
     expect(resolveContextMeterWidth(null)).toBe("comfortable");
     expect(resolveContextMeterWidth("huge")).toBe("comfortable");
+  });
+});
+
+describe("ContextMeterGhost", () => {
+  it("renders a decorative pulsing track in the meter's geometry", () => {
+    settingsRef.value = {};
+    render(<ContextMeterGhost />);
+    const ghost = screen.getByTestId("context-meter-ghost");
+    expect(ghost.getAttribute("aria-hidden")).toBe("true");
+    const track = ghost.querySelector("span");
+    expect(track?.className).toContain("h-1.5");
+    expect(track?.className).toContain("animate-pulse");
+    // Unset setting -> the comfortable tier (w-32), the meter default.
+    expect(track?.className).toContain("w-32");
+  });
+
+  it("follows the display.context_meter_width setting", () => {
+    settingsRef.value = { "display.context_meter_width": "wide" };
+    render(<ContextMeterGhost />);
+    const track = screen.getByTestId("context-meter-ghost").querySelector("span");
+    expect(track?.className).toContain("w-48");
   });
 });

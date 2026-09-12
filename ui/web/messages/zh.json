@@ -846,6 +846,7 @@
     "noData": "无数据",
     "sectionPage": "页面",
     "sectionNotice": "通知",
+    "sectionTasks": "今日任务",
     "sectionShells": "持久 Shell",
     "unnamed": "（未命名）",
     "sectionConfigOverlay": "配置覆盖",
@@ -871,7 +872,6 @@
     "windowedUnavailable": "窗口化检查器数据不可用",
     "retryWindowed": "重试窗口化数据",
     "openRunTimeline": "打开运行时间线",
-    "jumpNotice": "通知",
-    "jumpTask": "任务"
+    "jumpNotice": "通知"
   }
 }

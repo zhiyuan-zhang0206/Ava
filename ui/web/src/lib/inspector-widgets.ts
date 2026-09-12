@@ -1,5 +1,5 @@
 // Inspector section order — the contract plugin widgets slot into, plus the
-// console-side link targets a jumpButtons widget resolves to.
+// console-side link targets their payloads address.
 //
 // The built-in sections carry these keys (the panel renders one ordered list:
 // built-in sections and plugin widgets merged); a widget's `order` is any int,
@@ -8,8 +8,6 @@
 // reliance on registration order. Plugin authors read these values from
 // `conventions/plugin-spec-v2.md`; renumbering is a deliberate contract change
 // (the panel's tests pin the rendered order).
-
-import type { InspectWidgetButton } from "./types";
 
 export const INSPECT_SECTION_ORDER = {
   page: 100,
@@ -22,21 +20,15 @@ export const INSPECT_SECTION_ORDER = {
   notice: 800,
 } as const;
 
-/** The console route a resolved button jumps to, or null when the button's
- *  target did not resolve (or is unknown to this console build — a newer
- *  kernel's target is skipped, never guessed).
- *
- *  The literal return types are load-bearing like `fleetHref`'s: they let
- *  `next/link` infer the typed-route arm without a cast. */
-export function jumpButtonHref(
-  button: InspectWidgetButton,
-): `/fleet?notice=${number}` | `/fleet?task=${number}` | null {
-  switch (button.target) {
-    case "notice":
-      return button.notice_id != null ? `/fleet?notice=${button.notice_id}` : null;
-    case "task":
-      return button.task_id != null ? `/fleet?task=${button.task_id}` : null;
-    default:
-      return null;
-  }
+/** The fleet route a resolved taskList row jumps to (the task board's
+ *  anchor). The literal return type is load-bearing like `fleetHref`'s: it
+ *  lets `next/link` infer the typed-route arm without a cast. */
+export function fleetTaskHref(id: number): `/fleet?task=${number}` {
+  return `/fleet?task=${id}`;
+}
+
+/** The fleet route that opens one notice in the inbox — the notice section's
+ *  jump action. Same literal-type contract as `fleetTaskHref`. */
+export function fleetNoticeHref(id: number): `/fleet?notice=${number}` {
+  return `/fleet?notice=${id}`;
 }

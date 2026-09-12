@@ -1,9 +1,9 @@
-"""Registration for plugin inspector widgets (task #2909).
+"""Registration for plugin inspector widgets (task #2909; taskList family #3216).
 
 Covers what ``register_inspect_widget`` enforces at import time: PluginContext
-attribution, per-plugin id uniqueness, and the closed vocabularies (kind,
-target, icon) plus the jumpButtons shape. The per-agent resolution side lives
-in `tests/gateway/test_agent_inspect_widgets.py`.
+attribution, per-plugin id uniqueness, and the closed kind vocabulary plus the
+widget shape. The per-agent resolution side lives in
+`tests/gateway/test_agent_inspect_widgets.py`.
 """
 
 from typing import Any
@@ -14,7 +14,6 @@ from pydantic import ValidationError
 from shared.plugin_context import PluginContext
 from shared.plugin_inspector import (
     DuplicateInspectWidget,
-    InspectButtonSpec,
     InspectWidgetSpec,
     NoPluginContext,
     clear_registry,
@@ -32,10 +31,9 @@ def _clean_registry() -> Any:
 
 def _widget(**over: Any) -> InspectWidgetSpec:
     data: dict[str, Any] = {
-        "id": "jump-buttons",
-        "kind": "jumpButtons",
+        "id": "today-tasks",
+        "kind": "taskList",
         "order": 50,
-        "buttons": [InspectButtonSpec(target="notice")],
     }
     data.update(over)
     return InspectWidgetSpec(**data)
@@ -87,20 +85,9 @@ def test_unknown_kind_refused() -> None:
         _widget(kind="kv")
 
 
-def test_unknown_target_refused() -> None:
-    # model_validate takes Any — the invalid literal would otherwise be a type
-    # error at the call site itself.
-    with pytest.raises(ValidationError):
-        InspectButtonSpec.model_validate({"target": "agent"})
-
-
-def test_unknown_icon_refused_and_known_icon_accepted() -> None:
-    with pytest.raises(ValidationError):
-        InspectButtonSpec(target="notice", icon="not-an-icon")
-    assert InspectButtonSpec(target="notice", icon="bell").icon == "bell"
-
-
-def test_jump_buttons_widget_needs_a_button() -> None:
+def test_buttons_field_is_gone() -> None:
+    # The jumpButtons family was replaced by taskList (#3216); the old field
+    # must be refused as unknown rather than accepted and ignored.
     with pytest.raises(ValidationError):
         _widget(buttons=[])
 
@@ -111,9 +98,7 @@ def test_id_shape_enforced() -> None:
             _widget(id=bad)
 
 
-def test_label_and_title_must_be_non_empty_when_present() -> None:
-    with pytest.raises(ValidationError):
-        InspectButtonSpec(target="notice", label="")
+def test_title_must_be_non_empty_when_present() -> None:
     with pytest.raises(ValidationError):
         _widget(title="")
 
