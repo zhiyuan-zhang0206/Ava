@@ -324,3 +324,36 @@ def test_single_apply_matches_add_messages_for_append_shapes() -> None:
         merged = guarded_add_messages(base, delta)
         expected = cast(list[AnyMessage], guard.add_messages(cast(Any, base), cast(Any, delta)))
         assert _dump(merged) == _dump(expected)
+
+
+def test_unknown_id_removal_declines_fast_path_and_matches_add_messages() -> None:
+    """A ``RemoveMessage`` for an id absent from the thread must not be
+    classified as a new message: the fast path declines it (its
+    ``RemoveMessage`` early-return), and the outcome equals ``add_messages``
+    — ``ValueError`` for deleting an id that does not exist (it is not a
+    no-op), the same error ``guarded_add_messages`` raises."""
+
+    def hold() -> list[Any]:
+        return [RemoveMessage(id="not-present")]
+
+    with pytest.raises(ValueError, match="ID that doesn't exist"):
+        guarded_delta_reducer(_msgs(("b0", "zero")), [hold()])
+    with pytest.raises(ValueError, match="ID that doesn't exist"):
+        guarded_add_messages(_msgs(("b0", "zero")), hold())
+    with pytest.raises(ValueError, match="ID that doesn't exist"):
+        guard.add_messages(cast(Any, _msgs(("b0", "zero"))), cast(Any, hold()))
+
+
+def test_wipe_alone_declines_fast_path() -> None:
+    """A lone ``RemoveMessage(REMOVE_ALL)`` is the full-wipe class, not a new
+    message: the fast path declines it, and the fold yields the empty list
+    (everything after the marker) — equal to the fast-disabled fold."""
+
+    def build() -> tuple[list[Any], list[Any]]:
+        return _msgs(("b0", "zero")), [[RemoveMessage(id=REMOVE_ALL_MESSAGES)]]
+
+    folded = guarded_delta_reducer(*build())
+    assert folded == []
+    slow = _fold(build, fast=False)
+    assert slow == []
+    assert _dump(folded) == _dump(slow)
