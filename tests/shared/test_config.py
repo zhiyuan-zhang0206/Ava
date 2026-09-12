@@ -665,11 +665,11 @@ def test_sdk_nameerror_hint_enabled_config_contract() -> None:
     assert extra["lifecycle"] == "live"
 
 
-def test_llm_model_code_default_is_deepseek_vision_experiment() -> None:
-    """An unset AVA_MODEL must fall back to the cluster's vision-capable model."""
+def test_llm_model_code_default_is_deepseek_flash() -> None:
+    """An unset AVA_MODEL must fall back to deepseek-v4-flash (user ruling 2026-09-10)."""
     from shared.config.lm import LmSettings
 
-    assert LmSettings.model_fields["llm_model"].default == "deepseek-v4-flash-vision-exp"
+    assert LmSettings.model_fields["llm_model"].default == "deepseek-v4-flash"
 
 
 # --- agent_communication_style: enum + legacy-boolean alias ---
