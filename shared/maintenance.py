@@ -36,6 +36,34 @@ def held() -> bool:
     return snapshot() is not None
 
 
+# The stop window's phases: the drain has landed, or the unit is mid-stop /
+# mid-start. `preparing`/`draining` stay live — an already-admitted turn may
+# still be counted down and must finish; `ready` is included so a resume's
+# last moments cannot race a background loop with the hold about to release.
+_QUIESCED_PHASES = frozenset({"drained", "stopping", "stopped", "starting", "ready"})
+
+
+def quiesced() -> bool:
+    """Whether this unit is inside its stop window (`drained` .. `ready`).
+
+    Background loops consult this before doing database work: while a unit is
+    being stopped, held stopped, or brought back up, ownership renewals, turn
+    scans, page reconciliation and pool borrows must wait — the window's whole
+    point is that the unit stops doing database work until `ava start` releases
+    the hold. `preparing`/`draining` read as NOT quiesced (in-flight
+    continuations must still run). An unreadable owner reads as quiesced: the
+    same refuse-new-work posture `snapshot` enforces by raising, held by
+    background loops instead of crashing them.
+    """
+    try:
+        current = snapshot()
+    except (RuntimeError, OSError):
+        return True
+    if current is None or current.maintenance is None:
+        return False
+    return current.maintenance.phase in _QUIESCED_PHASES
+
+
 def require_released(action: str) -> None:
     if held():
         raise RuntimeError(

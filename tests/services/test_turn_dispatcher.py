@@ -851,6 +851,34 @@ class TestPendingScan:
         assert scheduler.woken == [23]
         assert scheduler.cancelled == []
 
+    async def test_scan_defers_while_the_unit_is_quiesced(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A stop-window unit neither wakes nor cancels: the durable rows wait
+        for the first scan after resume."""
+        from shared import maintenance
+
+        state = {"quiesced": True}
+        monkeypatch.setattr(maintenance, "quiesced", lambda: state["quiesced"])
+        scanner_calls: list[int] = []
+        scheduler = _ScanScheduler()
+
+        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+            scanner_calls.append(1)
+            return [dispatcher.PendingInboundWake(agent_id=23, stale=False)]
+
+        disp = InboundWakeDispatcher(
+            "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
+        )
+
+        await disp.scan_once()
+        assert scanner_calls == []
+        assert scheduler.woken == []
+
+        state["quiesced"] = False
+        await disp.scan_once()
+        assert scheduler.woken == [23]
+
     async def test_scan_cancels_a_stale_active_turn_before_rescheduling(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

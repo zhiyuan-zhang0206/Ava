@@ -25,8 +25,11 @@ The sole resident Ava HTTP process on agent-runner (session `ops`) — Gateway r
 `ops.agent_pause_probe` checks actual daemon identity and admitted work.
 Dependency APIs remain available until existing native actions finish.
 Local service teardown closes new API admission only after the drain; normal
-start resumes the existing hold after readiness. See
-[[shared/maintenance.ava.okf.md|Native pause and maintenance]].
+start resumes the existing hold after readiness. After the drain,
+`ops.cluster_stop` releases this daemon's idle dispatch-pool connections (and
+the local host daemon's pools over its loopback health port); the dispatch pool
+runs `min_size=0` and the shell-closure-notice flush defers while the unit is
+quiesced. See [[shared/maintenance/maintenance.ava.okf.md|Native pause and maintenance]].
 
 ## Strongly-Typed Wire Layer (`ops/rpc_schemas.py`)
 Request/response are no longer hand-assembled dicts — `OpEnvelope` (`{kind: str, payload: dict}`) in, `OpResponse` (`{status: "completed"|"failed", result: dict}`) out, with the legal set of `kind` being the `OpKind` Literal (re-exported from here by `ops/cluster_rpc.py` to keep old importers working). Each kind has dedicated pydantic payload/result models (e.g., `LifecyclePayload`, `ClusterUpdatePayload`, `ConfigWritePayload`, `InventoryWritePayload`, `AgentSkillViewPayload`; `ConfigReadResult`, `ConfigWriteOpResult`, `InventoryReadResult`, `InventoryWriteOpResult`, `ClusterSpawnSession`, `AgentSkillViewResult`). Pending-work resurrection carries `LifecyclePayload.trigger_inbound_id` plus `trigger_inbound_kind` (`chat` or `compact_request`) only on the distinct `resurrect-if-pending-work-v2` path; explicit manual resurrection uses `resurrect-explicit-v2`. A version-skewed old runner rejects both unknown v2 paths, while a new runner rejects legacy `/resurrect`, so neither rollout direction silently drops the guard and resurrects unconditionally. The daemon's `_dispatch` (`services/agent_ops/daemon.py:_dispatch`) uses `match kind:` to branch, `model_validate` the payload, call the corresponding `ops/ops_*.py` function, and `.model_dump(mode="json")` serialize the result — unknown kind falls to `case _` returning `failed`, not a crash. Failure state is unified as `OpFailure` (`error`/`detail`/`reason`), where `reason` is an enum value of `AvaAgentError`, allowing the gateway side to reconstruct the original exception. This batch of schemas is a bidirectional contract between gateway↔agent-runner, so placed in the `ops` layer following import layering (`shared < ops < gateway`) — gateway imports downward, `ops`/`services` never reach upward into gateway.

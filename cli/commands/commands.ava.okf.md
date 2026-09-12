@@ -58,7 +58,7 @@ leaving the unit dark; the stop report and journal record the outcome (issue
 releases normal startup admission only after readiness.
 `cli/parsers/maintenance.py` retains explicit intermediate steps through
 `_maintenance.py` and `_maintenance_probe`.
-They reuse the [durable maintenance journal](../../shared/maintenance.ava.okf.md).
+They reuse the [durable maintenance journal](../../shared/maintenance/maintenance.ava.okf.md).
 See [the coordinated operator procedure](../../conventions/graceful-maintenance.md).
 
 Gateway data-plane startup passes separate URL identities to `_cluster_instance`:

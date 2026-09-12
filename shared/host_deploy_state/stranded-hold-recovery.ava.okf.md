@@ -85,7 +85,7 @@ starts with a fresh budget and a spent one is never refunded.
 
 - [[host_deploy_state.ava.okf.md|Host Deploy State]] — the row, the record, and
   the budget columns
-- [[../maintenance.ava.okf.md|maintenance]] — the hold, its phases, and the
+- [[../maintenance/maintenance.ava.okf.md|maintenance]] — the hold, its phases, and the
   `authorized_start` boundary the start/resume legs run inside
 - `conventions/graceful-maintenance.md` — the operator recipe this automation
   mirrors (per-phase manual steps; a failed attempt is taken over by hand from
