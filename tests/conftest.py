@@ -329,6 +329,20 @@ os.environ["AVA_TELEGRAM_OWNER_ID"] = "0"
 # route everywhere, as CI does. A test that needs the helper route patches
 # `helper_spawn_enabled` / the settings explicitly (tests/test_helperproc.py).
 os.environ["AVA_PERMISSIONS_HELPER_SPAWN"] = "false"
+# The spawn-attribution marker rides a second channel the pin above cannot
+# close: the signed helper stamps AVA_PERMISSIONS_HELPER_PID (its own pid)
+# into every direct child (services/permissions_helper/helper/main.swift),
+# descendants inherit it, and shared/helper_chain_guard.parent_chain_intact
+# treats a marked process whose ppid is not the helper as an orphaned helper
+# child — the agent-host heartbeat then self-terminates with os._exit(70),
+# killing an in-process test run (test_host_turn_progress_publish.py,
+# 2026-09-12; 4 passed then rc=70). Popped, never set empty: an empty value
+# is a MALFORMED marker, i.e. a broken chain. PORT (which helper instance)
+# is stripped with it so the suite carries no helper spawn context at all —
+# the state CI runs in. A test that needs the marker sets it via monkeypatch
+# (tests/test_helperproc.py).
+os.environ.pop("AVA_PERMISSIONS_HELPER_PID", None)
+os.environ.pop("AVA_PERMISSIONS_HELPER_PORT", None)
 # Repository providers read the process environment while spawn validation reads
 # the cluster `.env` file. Seed every default provider's inert key through both
 # channels before project imports so tests can select any registered model.
