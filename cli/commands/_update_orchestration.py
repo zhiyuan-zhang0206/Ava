@@ -24,10 +24,236 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from cli.commands._update_git import GitPullFailed
+from shared.api_contracts.status import MachineStatus
 from shared.repo_change import classify_change as _classify_change
+
+
+@dataclass(frozen=True)
+class _BaselineValue[T]:
+    value: T | None = None
+    reason: str | None = None
+
+
+def _baseline_read[T](read: Callable[[], T | None]) -> _BaselineValue[T]:
+    """Keep a failed observation local to its source; never abort the rollout."""
+    try:
+        return _BaselineValue(read())
+    except Exception as exc:  # fail-fast-ok: independent best-effort observations
+        return _BaselineValue(reason=f"{type(exc).__name__}: {exc}")
+
+
+@dataclass(frozen=True)
+class _HealthProbeBaseline:
+    failures: _BaselineValue[tuple[int, str, str, str]]
+    pending_lkg: _BaselineValue[tuple[str, int]]
+    alert: _BaselineValue[str]
+
+
+@dataclass(frozen=True)
+class _HealthBaseline:
+    captured_at: datetime
+    target_sha: str | None
+    pin: _BaselineValue[tuple[str | None, str | None, tuple[str, datetime] | None]]
+    machines: _BaselineValue[list[MachineStatus]]
+    postures: _BaselineValue[dict[str, str]]
+    health_probe: _HealthProbeBaseline
+    db_size: _BaselineValue[int]
+
+
+def _baseline_file(name: str) -> list[str] | None:
+    from shared.paths import ava_home
+
+    try:
+        return (ava_home() / name).read_text().splitlines()
+    except FileNotFoundError:
+        return None
+
+
+def _baseline_failures() -> tuple[int, str, str, str] | None:
+    from cli.commands._health_alerts import FAILURE_COUNT_FILE
+
+    lines = _baseline_file(FAILURE_COUNT_FILE)
+    if lines is None:
+        return None
+    count, failure_class, reason, timestamp = lines
+    parsed_count = int(count)
+    if parsed_count < 0:
+        raise ValueError("negative failure count")
+    datetime.fromisoformat(timestamp)
+    return parsed_count, failure_class, reason, timestamp
+
+
+def _baseline_pending_lkg() -> tuple[str, int] | None:
+    from cli.commands._cluster_health import PENDING_LKG_PASSES_FILE
+
+    lines = _baseline_file(PENDING_LKG_PASSES_FILE)
+    if lines is None:
+        return None
+    sha, count = lines
+    parsed_count = int(count)
+    if not sha or parsed_count < 0:
+        raise ValueError("invalid pending-known-good state")
+    return sha, parsed_count
+
+
+def _baseline_alert() -> str | None:
+    from cli.commands._health_alerts import ALERT_STATE_FILE
+
+    lines = _baseline_file(ALERT_STATE_FILE)
+    return None if lines is None else lines[0]
+
+
+def _collect_health_baseline(*, target_sha: str | None) -> _HealthBaseline:
+    """Read pre-rollout evidence, independently degrading each unavailable source.
+
+    No health probe is run and no state is written. Missing files mean no stored
+    observation; malformed files remain distinguishable from healthy state.
+    """
+
+    def pin() -> tuple[str | None, str | None, tuple[str, datetime] | None]:
+        from shared.cluster_pin import (
+            get_cluster_target_sha,
+            get_last_known_good_sha,
+            get_pending_known_good,
+        )
+
+        return get_cluster_target_sha(), get_last_known_good_sha(), get_pending_known_good()
+
+    def machines() -> list[MachineStatus]:
+        from shared.http_dial import get as dial_get
+        from shared.machine import gateway_api_base, gateway_auth_headers
+
+        resp = dial_get(
+            f"{gateway_api_base()}/api/cluster/roster",
+            timeout=10.0,
+            headers=gateway_auth_headers(),
+        )
+        resp.raise_for_status()
+        return [MachineStatus.model_validate(machine) for machine in resp.json()]
+
+    def postures() -> dict[str, str]:
+        from shared.host_deploy_state import read_all
+
+        return {name: state.posture for name, state in read_all().items()}
+
+    def db_size() -> int:
+        from shared.db import connect
+
+        with connect(autocommit=True) as conn:
+            row = conn.execute("SELECT pg_database_size(current_database())").fetchone()
+        if row is None:
+            raise ValueError("database size query returned no row")
+        return int(row[0])
+
+    return _HealthBaseline(
+        captured_at=datetime.now(UTC),
+        target_sha=target_sha,
+        pin=_baseline_read(pin),
+        machines=_baseline_read(machines),
+        postures=_baseline_read(postures),
+        health_probe=_HealthProbeBaseline(
+            failures=_baseline_read(_baseline_failures),
+            pending_lkg=_baseline_read(_baseline_pending_lkg),
+            alert=_baseline_read(_baseline_alert),
+        ),
+        db_size=_baseline_read(db_size),
+    )
+
+
+def _baseline_absent(result: _BaselineValue[object]) -> str:
+    if result.reason is None:
+        return "(none)"
+    # Source messages can contain newlines; retain one stable log line per field.
+    return f"(unavailable: {' '.join(result.reason.splitlines())})"
+
+
+def _format_health_baseline(baseline: _HealthBaseline) -> list[str]:
+    """Render a snapshot without I/O or changes to health/rollback decisions."""
+    from cli.commands._cluster_health import PENDING_LKG_PASSES
+    from shared.machine import format_capabilities
+
+    target = baseline.target_sha[:7] if baseline.target_sha else "restart-only"
+    lines = [
+        f"── pre-rollout health baseline ({baseline.captured_at.isoformat()}; target={target}) ──"
+    ]
+    pin = _baseline_absent(baseline.pin)
+    if baseline.pin.value is not None:
+        current, known_good, pending = baseline.pin.value
+        pending_text = f"{pending[0][:7]} (at {pending[1].isoformat()})" if pending else "(none)"
+        pin = (
+            f"target={current[:7] if current else '(none)'} "
+            f"last-known-good={known_good[:7] if known_good else '(none)'} pending={pending_text}"
+        )
+    lines.append(f"cluster pin: {pin}")
+    if baseline.machines.value is None:
+        lines.append(f"machines: {_baseline_absent(baseline.machines)}")
+    else:
+        lines.append("machines:" if baseline.machines.value else "machines: (none)")
+        for machine in sorted(baseline.machines.value, key=lambda machine: machine.name):
+            posture = _baseline_absent(baseline.postures)
+            if baseline.postures.value is not None:
+                posture = (
+                    baseline.postures.value[machine.name]  # noqa: SIM401 - missing rows are expected
+                    if machine.name in baseline.postures.value
+                    else "(no row)"
+                )
+            role = format_capabilities(
+                machine.serve_gateway,
+                machine.serve_agent_runner,
+                machine.serve_observability_station,
+            )
+            on_pin = "(unknown)"
+            if machine.on_pin is not None and machine.head_sha is not None:
+                on_pin = f"{'✓' if machine.on_pin else '✗'} {machine.head_sha[:7]}"
+            status = "online" if machine.online else "stopped" if machine.stopped_at else "offline"
+            paused = "?" if machine.paused is None else "yes" if machine.paused else "no"
+            staging = " (staging)" if machine.is_staging else ""
+            lines.append(
+                f"  {machine.name}{staging}  {role}  posture={posture}  on-pin={on_pin}  "
+                f"status={status}  paused={paused}"
+            )
+    probe = baseline.health_probe
+    failures = _baseline_absent(probe.failures)
+    if probe.failures.value is not None:
+        count, failure_class, reason, timestamp = probe.failures.value
+        failures = f"{count}/3 ({failure_class}, recorded-at {timestamp}, reason={reason!r})"
+    pending_lkg = _baseline_absent(probe.pending_lkg)
+    if probe.pending_lkg.value is not None:
+        sha, count = probe.pending_lkg.value
+        pending_lkg = f"{count}/{PENDING_LKG_PASSES} ({sha[:7]})"
+    alert = (
+        repr(probe.alert.value) if probe.alert.value is not None else _baseline_absent(probe.alert)
+    )
+    lines.append(
+        f"health-probe (this host): failures={failures}; pending-lkg={pending_lkg}; alert-episode={alert}"
+    )
+    size = _baseline_absent(baseline.db_size)
+    if baseline.db_size.value is not None:
+        amount = float(baseline.db_size.value)
+        unit = "B"
+        for unit in ("B", "KiB", "MiB", "GiB", "TiB", "PiB"):
+            if amount < 1024 or unit == "PiB":
+                break
+            amount /= 1024
+        size = f"size={amount:.1f} {unit} ({baseline.db_size.value} bytes)"
+    lines.extend((f"db: {size}", "── end pre-rollout health baseline ──"))
+    return lines
+
+
+def _record_health_baseline(*, target_sha: str | None) -> None:
+    """Append best-effort evidence to the rollout log; never abort a rollout."""
+    try:
+        baseline = _collect_health_baseline(target_sha=target_sha)
+        print("\n".join(_format_health_baseline(baseline)))
+    except Exception as exc:  # fail-fast-ok: observability must not abort a rollout
+        reason = " ".join(f"{type(exc).__name__}: {exc}".splitlines())
+        print(f"⚠ pre-rollout health baseline failed: {reason}", file=sys.stderr)
 
 
 def _persist_cluster_pin(target_sha: str, *, origin: str, advance_known_good: bool = False) -> None:
