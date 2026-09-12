@@ -171,7 +171,9 @@ def test_live_reference_of_any_process_shape_is_never_excluded(
         assert child.pid in entry.live_pids
         assert request.exists()
     finally:
-        child.terminate()
+        # SIGKILL: SIGTERM=SIG_IGN is inherited from a shell session, so the
+        # graceful call would leave the exec child alive.
+        child.kill()
         child.wait(timeout=5)
 
 
