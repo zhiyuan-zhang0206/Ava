@@ -56,6 +56,22 @@ def isolate_runtime_incarnation(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(runtime_incarnation, "_child_incarnation", None)
 
 
+@pytest.fixture(autouse=True)
+def suite_is_not_inside_an_exec_domain(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Normalize the ambient session to the CI shape (issue #2331).
+
+    A suite launched from a fleet agent's `execute_code` runs inside the call's
+    exec-domain session, so `shared.proc.hosting_exec_domain` reports it and any
+    unrelated test that reaches an in-process lifecycle leg (`ava restart`,
+    pause/stop, `cmd_update --local`) would refuse — red on an agent box, green
+    in CI. A pty-session or login-shell run (the fleet's test convention) never
+    sees this. The predicate's own membership behaviour is exercised in spawned
+    child processes (`tests/shared/test_proc.py`), whose sessions are built for
+    the case; a lifecycle test that wants the refusal patches this back.
+    """
+    monkeypatch.setattr("shared.proc.hosting_exec_domain", lambda: None)
+
+
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.postgres import PostgresSaver
 

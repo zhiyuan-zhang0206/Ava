@@ -414,8 +414,25 @@ def stop(
     from cli.commands.stop import _announce_stopping, _confirm_stop
 
     os.environ.pop("AVA_HOME_OVERRIDE", None)
-    from shared.proc import hosting_supervised_session
+    from shared.proc import hosting_exec_domain, hosting_supervised_session
 
+    # An exec-domain leg is SIGKILLed with the call's process group as the tool
+    # call returns, mid-drain (the 2026-09-12 stranding shape). Name the one
+    # host that survives per verb: a pause keeps persistent terminals, a stop
+    # closes them.
+    if hosting_exec_domain() is not None:
+        verb = "pause" if keep_terminals else "stop"
+        survives = (
+            "a persistent terminal session survives a pause — host it via "
+            "ava.shell.run_background(...) — or a plain login shell"
+            if keep_terminals
+            else "a stop closes this unit's persistent terminals too — run it from a "
+            "shell no ava session hosts (e.g. a plain login shell)"
+        )
+        raise RuntimeError(
+            f"{verb} cannot run inside execute_code: the call's teardown SIGKILLs its "
+            f"process group as the call returns, stranding the {verb} mid-drain; {survives}"
+        )
     if hosting_supervised_session() is not None:
         raise RuntimeError("pause/stop must run outside the work it drains; use a login shell")
     roles, selected, preserved = _stop_plan(

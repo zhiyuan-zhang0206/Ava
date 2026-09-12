@@ -568,3 +568,25 @@ def test_services_restore_reports_a_child_that_never_returns(
     monkeypatch.setattr(command.subprocess, "run", _run)
     assert command._compensate_services_restore(frozenset()) is False
     assert message in capsys.readouterr().err
+
+
+def test_pause_refused_inside_an_exec_domain(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Issue #2331: an exec-domain pause is SIGKILLed mid-drain with the call's
+    process group; the refusal names `run_background` — a pause retains
+    persistent terminals, so a session hosted there survives."""
+    dependencies(monkeypatch)
+    monkeypatch.setattr("shared.proc.hosting_exec_domain", lambda: "agent.exec_child")
+
+    with pytest.raises(RuntimeError, match=r"ava\.shell\.run_background"):
+        entry.cmd_pause(timeout=1)
+
+
+def test_stop_refused_inside_an_exec_domain(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An exec-domain stop would die mid-drain too, but a stop also closes this
+    unit's persistent terminals — the refusal points at a shell no ava session
+    hosts instead of `run_background`."""
+    dependencies(monkeypatch)
+    monkeypatch.setattr("shared.proc.hosting_exec_domain", lambda: "agent.exec_child")
+
+    with pytest.raises(RuntimeError, match="login shell"):
+        entry.cmd_stop(require_confirmation=False, timeout=1)

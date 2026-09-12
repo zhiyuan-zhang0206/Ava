@@ -26,7 +26,6 @@ from __future__ import annotations
 import sys
 
 from shared.deploy_timing import CLUSTER_DISPATCH_TIMEOUT_S
-from shared.proc import hosting_supervised_session
 
 
 def cmd_update(
@@ -58,8 +57,11 @@ def cmd_update(
     `ava-rollout` and `ava-cluster-restart` sessions run (so neither re-POSTs
     and recurses), and it is the debugging path. Refused with exit 2 when this
     process is hosted inside a supervised session — the stop leg would kill
-    its own orchestration (`shared.proc.hosting_supervised_session`); the
-    detached orchestration sessions themselves are exempt.
+    its own orchestration (`shared.proc.hosting_supervised_session`) — or when
+    it runs inside an agent exec domain (`shared.proc.hosting_exec_domain`:
+    the `execute_code` call's teardown SIGKILLs the domain's process group as
+    the call returns, this orchestration with it). The detached orchestration
+    sessions themselves are exempt.
 
     `origin` (`--origin <who>`) names the trigger; recorded in the rollout
     log and the cluster pin's `updated_by`. Defaults to `cli:<machine>`.
@@ -193,11 +195,31 @@ def _run_in_process(
     # own stop leg mid-flight — 2026-08-12: an agent's pty-hosted shell ran
     # `ava cluster update --local`, the stop leg force-killed
     # ava-pty-supervisor's whole tree (rollout included), and the cluster
-    # stranded paused with services down. The detached orchestration sessions
+    # stranded paused with services down. A run inside an agent exec domain is
+    # killed earlier still — the execute_code call's teardown SIGKILLs its
+    # process group (2026-09-12). The detached orchestration sessions
     # (`spawn_rollout`/`spawn_update`/`spawn_restart`) are exempt inside
     # `hosting_supervised_session` — they are the auto-updater shape: the
     # trigger returns immediately and a process that outlives every stopped
     # service does the stop/update/start.
+    # Function-local, like the sibling guards in stop.py/_temporary_stop.py:
+    # call time resolves the loaded `shared.proc`, so the check runs against the
+    # deployed tree and tests patch one seam.
+    from shared.proc import hosting_exec_domain, hosting_supervised_session
+
+    exec_domain = hosting_exec_domain()
+    if exec_domain is not None:
+        print(
+            "\n✗ in-process update refused: this process runs inside an agent "
+            f"execute_code exec domain ({exec_domain}) — the call's teardown "
+            "SIGKILLs its process group as the call returns, stranding the host "
+            "mid-transition. Use the default `ava cluster update` (POSTs the "
+            "gateway, which runs the rollout in a detached session), or host it "
+            "in a persistent shell session via ava.shell.run_background(...).",
+            file=sys.stderr,
+        )
+        return 2
+
     hosting = hosting_supervised_session()
     if hosting is not None:
         print(
