@@ -125,7 +125,8 @@ def test_response_failures(sources: Path, monkeypatch: pytest.MonkeyPatch, stage
             fail if stage == "db_query" else lambda _sql: SimpleNamespace(fetchone=lambda: None)
         )
         monkeypatch.setattr(
-            "shared.db.connect", lambda **_kw: nullcontext(SimpleNamespace(execute=execute))
+            "shared.db.connect",
+            lambda **_kw: nullcontext(SimpleNamespace(execute=execute)),  # pyright: ignore[reportUnknownArgumentType]
         )
         field = "db_size"
     else:
@@ -133,7 +134,7 @@ def test_response_failures(sources: Path, monkeypatch: pytest.MonkeyPatch, stage
             raise_for_status=fail if stage == "http_status" else lambda: None,
             json=fail if stage == "json" else lambda: [{}],
         )
-        monkeypatch.setattr("shared.http_dial.get", lambda *_a, **_kw: response)
+        monkeypatch.setattr("shared.http_dial.get", lambda *_a, **_kw: response)  # pyright: ignore[reportUnknownArgumentType]
         field = "machines"
     baseline = orch._collect_health_baseline(target_sha=SHA)
     result = getattr(baseline, field)
@@ -233,7 +234,7 @@ def test_format_absent_and_empty(sources: Path, monkeypatch: pytest.MonkeyPatch)
         monkeypatch.setattr(f"shared.cluster_pin.{getter}", lambda: None)
     monkeypatch.setattr(
         "shared.http_dial.get",
-        lambda *_a, **_kw: SimpleNamespace(
+        lambda *_a, **_kw: SimpleNamespace(  # pyright: ignore[reportUnknownArgumentType]
             raise_for_status=lambda: None,
             json=list,
         ),
