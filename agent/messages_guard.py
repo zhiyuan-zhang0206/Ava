@@ -230,3 +230,32 @@ def guarded_add_messages(current: Any, delta: Any) -> Any:
     else:
         validate_messages_mutation(before, after)
     return merged
+
+
+def guarded_delta_reducer(state: Any, writes: Sequence[Any]) -> Any:
+    """``DeltaChannel`` form of the guard: replay stored writes in order.
+
+    A delta channel reconstructs its value by replaying stored writes
+    through the reducer - ``reducer(state, [write1, ...])`` - and requires
+    the reducer to be batching-invariant, because a read may combine writes
+    into larger batches than they were originally written in (task #3187):
+
+        reducer(reducer(state, xs), ys) == reducer(state, xs + ys)
+
+    Applying each write as its own ``guarded_add_messages`` merge keeps the
+    three-class validation equivalent to the commit-time guard (one write =
+    one mutation event) and makes the fold associative by construction: any
+    split or combination of the write list processes the same per-write
+    sequence and yields the same state. Validating the whole list in one
+    shot instead would mis-attribute a later modify-last onto an earlier
+    full-wipe rebuild and reject a legal history.
+
+    A write value is a list of message-likes, or a single message-like -
+    only lists flatten (the same convention as ``_accumulate_delta`` and
+    langgraph's ``_messages_delta_reducer``).
+    """
+    result: Any = state
+    for write in writes:
+        delta = write if isinstance(write, list) else [write]
+        result = guarded_add_messages(result, delta)
+    return result
