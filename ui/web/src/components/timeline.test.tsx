@@ -4320,27 +4320,32 @@ describe("TimelineView sticky message header (task #3136)", () => {
     makeItem({ item_id: "2.1", kind: "agent_code", payload: "code" }),
   ];
 
-  it("marks only the top-level message card header as sticky — work-block children are not", () => {
+  it("marks the top-level card header and every work-block child row, each on its own pin line", () => {
     const { container } = render(<TimelineView items={items} />);
 
+    // Level 1: the top-level message card, pinned below the HeaderBar.
     const marked = container.querySelectorAll<HTMLElement>('[data-card-sticky="true"]');
-    expect(marked.length).toBe(1);
-    expect(marked[0].getAttribute("data-item-id")).toBe("1.0");
-    const cardToggle = marked[0].querySelector('[data-testid="card-toggle"]')!;
+    expect(marked.length).toBe(3); // card 1.0 + work-block children 2.0 / 2.1
+    const cardRow = container.querySelector<HTMLElement>('[data-item-id="1.0"]')!;
+    expect(cardRow.getAttribute("data-turn-child")).toBeNull();
+    const cardToggle = cardRow.querySelector('[data-testid="card-toggle"]')!;
     expect(cardToggle.className).toContain("sticky");
     expect(cardToggle.className).toContain("top-11");
     expect(cardToggle.getAttribute("data-stuck")).toBe("false");
 
-    // Inside the expanded work block, no child row is a sticky-card marker —
-    // the turn's own header is the sticky one there, so two headers never pin
-    // at the same line.
+    // Level 2: inside the expanded work block every child row pins nested
+    // under the block's header (task #3215), off the --turn-header-h offset.
     const turn = container.querySelector('[data-turn-expanded="true"]')!;
     const innerRows = turn.querySelectorAll<HTMLElement>(".timeline-item");
     expect(innerRows.length).toBeGreaterThan(0);
     for (const row of innerRows) {
-      expect(row.getAttribute("data-card-sticky")).toBe("false");
+      expect(row.getAttribute("data-card-sticky")).toBe("true");
+      expect(row.getAttribute("data-turn-child")).toBe("true");
       const toggle = row.querySelector('[data-testid="card-toggle"]')!;
-      expect(toggle.className).not.toContain("sticky");
+      expect(toggle.className).toContain("sticky");
+      expect(toggle.className).toContain("var(--turn-header-h");
+      expect(toggle.className).toContain("z-[5]");
+      expect(toggle.getAttribute("data-stuck")).toBe("false");
     }
   });
 
@@ -4362,6 +4367,34 @@ describe("TimelineView sticky message header (task #3136)", () => {
       expect(cardToggle.className).toContain("shadow-xs");
       // The work block below stays unpinned — one stuck header at a time.
       expect(screen.getByTestId("turn-toggle").getAttribute("data-stuck")).toBe("false");
+    });
+  });
+
+  it("pins a work-block child header under the block header and marks it stuck (task #3215)", async () => {
+    const { container } = render(<TimelineView items={items} />);
+    const viewport = container.querySelector('[data-slot="scroll-area-viewport"]')!;
+    vi.spyOn(viewport, "getBoundingClientRect").mockReturnValue(makeMockRect(0, 800, 800));
+
+    const turnEl = container.querySelector<HTMLElement>('[data-turn-expanded="true"]')!;
+    vi.spyOn(turnEl, "getBoundingClientRect").mockReturnValue(makeMockRect(10, 700, 690));
+    const turnToggle = screen.getByTestId("turn-toggle");
+    // Pinned block header: top 44 + height 28 ⇒ the child line is 72.
+    vi.spyOn(turnToggle, "getBoundingClientRect").mockReturnValue(makeMockRect(44, 72, 28));
+
+    const childRow = container.querySelector<HTMLElement>(
+      '[data-turn-child="true"][data-item-id="2.0"]',
+    )!;
+    // Child top 60 crossed the 72 line while its bottom stays in view.
+    vi.spyOn(childRow, "getBoundingClientRect").mockReturnValue(makeMockRect(60, 500, 440));
+
+    fireEvent.scroll(viewport);
+
+    await waitFor(() => {
+      const childToggle = childRow.querySelector('[data-testid="card-toggle"]')!;
+      expect(childToggle.getAttribute("data-stuck")).toBe("true");
+      expect(childToggle.className).toContain("backdrop-blur-md");
+      // The block header above stays stuck — both levels pin together now.
+      expect(turnToggle.getAttribute("data-stuck")).toBe("true");
     });
   });
 

@@ -43,7 +43,7 @@ describe("findClosestStuckHeaderId", () => {
     container.innerHTML = `
       <div data-item-id="turn-1" data-turn-id="turn-1" data-turn-expanded="false"></div>
     `;
-    expect(findClosestStuckHeaderId(container, 44)).toBeNull();
+    expect(findClosestStuckHeaderId(container, 44)).toEqual({ topId: null, childId: null });
   });
 
   it("returns null when expanded block has not reached the sticky line", () => {
@@ -57,7 +57,7 @@ describe("findClosestStuckHeaderId", () => {
     vi.spyOn(block, "getBoundingClientRect").mockReturnValue(mockRect(100, 900, 800));
     container.appendChild(block);
 
-    expect(findClosestStuckHeaderId(container, 44)).toBeNull();
+    expect(findClosestStuckHeaderId(container, 44)).toEqual({ topId: null, childId: null });
   });
 
   it("returns turnId when expanded block has scrolled past the sticky line", () => {
@@ -71,7 +71,7 @@ describe("findClosestStuckHeaderId", () => {
     vi.spyOn(block, "getBoundingClientRect").mockReturnValue(mockRect(20, 700, 680));
     container.appendChild(block);
 
-    expect(findClosestStuckHeaderId(container, 44)).toBe("turn-1");
+    expect(findClosestStuckHeaderId(container, 44)).toEqual({ topId: "turn-1", childId: null });
   });
 
   it("returns null when block has completely scrolled past the sticky line", () => {
@@ -85,7 +85,7 @@ describe("findClosestStuckHeaderId", () => {
     vi.spyOn(block, "getBoundingClientRect").mockReturnValue(mockRect(-900, 40, 940));
     container.appendChild(block);
 
-    expect(findClosestStuckHeaderId(container, 44)).toBeNull();
+    expect(findClosestStuckHeaderId(container, 44)).toEqual({ topId: null, childId: null });
   });
 
   it("selects the closest/latest expanded block when multiple blocks cross the top", () => {
@@ -108,7 +108,7 @@ describe("findClosestStuckHeaderId", () => {
     container.appendChild(block2);
 
     // Block 2 has top = 10 >= Block 1's top = -400, so Block 2 is the closest stuck block
-    expect(findClosestStuckHeaderId(container, 44)).toBe("turn-2");
+    expect(findClosestStuckHeaderId(container, 44)).toEqual({ topId: "turn-2", childId: null });
   });
 
   it("ignores collapsed blocks even if their top is above sticky line", () => {
@@ -121,7 +121,7 @@ describe("findClosestStuckHeaderId", () => {
     vi.spyOn(block, "getBoundingClientRect").mockReturnValue(mockRect(-100, 200, 300));
     container.appendChild(block);
 
-    expect(findClosestStuckHeaderId(container, 44)).toBeNull();
+    expect(findClosestStuckHeaderId(container, 44)).toEqual({ topId: null, childId: null });
   });
 
   it("returns the row id when a marked message-card row has crossed the sticky line", () => {
@@ -135,7 +135,7 @@ describe("findClosestStuckHeaderId", () => {
     vi.spyOn(row, "getBoundingClientRect").mockReturnValue(mockRect(20, 900, 880));
     container.appendChild(row);
 
-    expect(findClosestStuckHeaderId(container, 44)).toBe("2.0");
+    expect(findClosestStuckHeaderId(container, 44)).toEqual({ topId: "2.0", childId: null });
   });
 
   it("ignores message-card rows that are not marked (collapsed or work-block children)", () => {
@@ -148,7 +148,7 @@ describe("findClosestStuckHeaderId", () => {
     vi.spyOn(row, "getBoundingClientRect").mockReturnValue(mockRect(-100, 700, 800));
     container.appendChild(row);
 
-    expect(findClosestStuckHeaderId(container, 44)).toBeNull();
+    expect(findClosestStuckHeaderId(container, 44)).toEqual({ topId: null, childId: null });
   });
 
   it("picks the closest candidate across both surfaces when a card and a turn cross the line", () => {
@@ -170,7 +170,62 @@ describe("findClosestStuckHeaderId", () => {
     container.appendChild(turn);
     container.appendChild(row);
 
-    expect(findClosestStuckHeaderId(container, 44)).toBe("2.0");
+    expect(findClosestStuckHeaderId(container, 44)).toEqual({ topId: "2.0", childId: null });
+  });
+
+  it("reports the pinned child under its work block's header as childId, not topId", () => {
+    const container = document.createElement("div");
+    vi.spyOn(container, "getBoundingClientRect").mockReturnValue(mockRect(0, 800, 800));
+
+    const turn = document.createElement("div");
+    turn.setAttribute("data-turn-id", "turn-1");
+    turn.setAttribute("data-turn-expanded", "true");
+    vi.spyOn(turn, "getBoundingClientRect").mockReturnValue(mockRect(10, 700, 690));
+
+    const header = document.createElement("button");
+    header.setAttribute("data-testid", "turn-toggle");
+    // Pinned block header: top 44, bottom 72 ⇒ the child line is 72.
+    vi.spyOn(header, "getBoundingClientRect").mockReturnValue(mockRect(44, 72, 28));
+
+    const child = document.createElement("div");
+    child.setAttribute("data-item-id", "2.0");
+    child.setAttribute("data-card-sticky", "true");
+    child.setAttribute("data-turn-child", "true");
+    // Child top 30 crossed both lines; bottom 500 still in view. It must NOT
+    // win the level-1 pass even though it is the topmost candidate there.
+    vi.spyOn(child, "getBoundingClientRect").mockReturnValue(mockRect(30, 500, 470));
+
+    turn.appendChild(header);
+    turn.appendChild(child);
+    container.appendChild(turn);
+
+    expect(findClosestStuckHeaderId(container, 44)).toEqual({ topId: "turn-1", childId: "2.0" });
+  });
+
+  it("reports no child while its work block is still below the lines", () => {
+    const container = document.createElement("div");
+    vi.spyOn(container, "getBoundingClientRect").mockReturnValue(mockRect(0, 800, 800));
+
+    const turn = document.createElement("div");
+    turn.setAttribute("data-turn-id", "turn-1");
+    turn.setAttribute("data-turn-expanded", "true");
+    vi.spyOn(turn, "getBoundingClientRect").mockReturnValue(mockRect(200, 700, 500));
+
+    const header = document.createElement("button");
+    header.setAttribute("data-testid", "turn-toggle");
+    vi.spyOn(header, "getBoundingClientRect").mockReturnValue(mockRect(200, 228, 28));
+
+    const child = document.createElement("div");
+    child.setAttribute("data-item-id", "2.0");
+    child.setAttribute("data-card-sticky", "true");
+    child.setAttribute("data-turn-child", "true");
+    vi.spyOn(child, "getBoundingClientRect").mockReturnValue(mockRect(260, 700, 440));
+
+    turn.appendChild(header);
+    turn.appendChild(child);
+    container.appendChild(turn);
+
+    expect(findClosestStuckHeaderId(container, 44)).toEqual({ topId: null, childId: null });
   });
 });
 

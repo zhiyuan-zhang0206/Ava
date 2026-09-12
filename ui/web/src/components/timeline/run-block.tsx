@@ -19,68 +19,98 @@
 // sticks at top-11 with backdrop-blur and elevation. The full detail rows
 // (thinking/code/output) continue scrolling naturally underneath the stuck
 // header. A top-level message card (CardHeader with stickyHeader) pins on the
-// same line; findClosestStuckHeaderId resolves which of the two, and only one
-// can be pinned at a time (sibling blocks never overlap). When collapsed while
-// stuck, the content collapses in place and the viewport scroll position is
-// preserved (no jump back to block top).
+// same line; findClosestStuckHeaderId resolves which of the two is stuck, and
+// only one level-1 header can be pinned at a time (sibling blocks never
+// overlap). The block's own child cards pin one level deeper: each expanded
+// child header sticks just below this block's header — its nested line is
+// top-11 + --turn-header-h, the header height measured here by a
+// ResizeObserver — and the finder reports the closest pinned child alongside
+// the level-1 id in the same pass. When collapsed while stuck, the content
+// collapses in place and the viewport scroll position is preserved (no jump
+// back to block top).
 
 import { ChevronDown, ChevronRight, Layers } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { formatDuration, type SdkCall } from "@/lib/item-summary";
 import { cn } from "@/lib/utils";
 
 import { CallBadge, HEADER_CLS, STICKY_HEADER_CLS, STUCK_HEADER_CLS, UNSTUCK_HEADER_CLS } from "./card";
 import { formatTurnSummary, formatTurnTiming, type TurnSummary } from "./runs";
-import { BAR_HEIGHT_PX, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout";
+import { BAR_HEIGHT_PX, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_CLIP } from "@/lib/layout";
 
 const LIVE_CLOCK_INTERVAL_MS = 100;
 
 /**
- * Identify which expanded header (if any) is currently stuck at the top of the
- * viewport. Two surfaces share this one sticky line: a work block's header
- * (`data-turn-expanded="true"` on the turn element) and a top-level message
- * card's header (`data-card-sticky="true"` on the row). Card rows inside an
- * expanded work block are deliberately NOT markers — their block's own header
- * is the sticky one, so two headers never pin at the same line.
+ * Identify which pinned headers are currently stuck at the top of the
+ * viewport — at most one per level. Level 1 shares one sticky line: a work
+ * block's header (`data-turn-expanded="true"` on the turn element) or a
+ * top-level message card's header (`data-card-sticky="true"` on the row).
+ * Level 2 is the pinned child card inside an expanded work block
+ * (`data-turn-child="true"` on the row): its header sticks just below its own
+ * block's header, so its line is that block header's rect bottom — the
+ * in-flow position while the block is unpinned (children cannot reach it
+ * before the block's header does) and the pinned bottom once it sticks.
  *
- * Sibling blocks never overlap in flow, so at most one candidate is stuck at a
- * time; when multiple cross the line (a mid-scroll intermediate state), returns
- * the latest/closest one that crossed the viewport top (highest top position
- * that is <= stickyLine).
+ * Sibling blocks never overlap in flow, so at most one candidate per level is
+ * stuck at a time; when multiple cross the line (a mid-scroll intermediate
+ * state), each level returns the latest/closest one that crossed the viewport
+ * top (highest top position that is <= that level's line).
  */
+export interface StuckHeaderIds {
+  /** The level-1 pinned header: an expanded work block's or a top-level card's. */
+  topId: string | null;
+  /** The child card header pinned nested under that work block's header, when
+   *  one has crossed its line; null when no block is pinned or none reached it. */
+  childId: string | null;
+}
+
 export function findClosestStuckHeaderId(
   viewport: HTMLElement,
   topOffset: number = BAR_HEIGHT_PX,
-): string | null {
-  const elements = viewport.querySelectorAll<HTMLElement>(
-    '[data-turn-expanded="true"], [data-card-sticky="true"]',
-  );
-  if (elements.length === 0) return null;
-
+): StuckHeaderIds {
   const vpRect = viewport.getBoundingClientRect();
   const stickyLine = vpRect.top + topOffset;
+  // A candidate is stuck when its block's top has reached or passed its line,
+  // and its bottom has not completely scrolled past it (with header buffer).
+  const crossed = (r: DOMRect, line: number) => r.top <= line + 1 && r.bottom > line + 20;
 
-  let closestId: string | null = null;
-  let closestTop = -Infinity;
-
-  for (const el of elements) {
+  let topId: string | null = null;
+  let topTop = -Infinity;
+  // Child rows are excluded here: their block's header is the level-1 marker,
+  // and they surface on the level-2 pass below.
+  for (const el of viewport.querySelectorAll<HTMLElement>(
+    '[data-turn-expanded="true"], [data-card-sticky="true"]:not([data-turn-child="true"])',
+  )) {
     const id = el.getAttribute("data-turn-id") ?? el.getAttribute("data-item-id");
     if (!id) continue;
-
     const r = el.getBoundingClientRect();
-    // A header is stuck when its block's top has reached or passed stickyLine,
-    // and its bottom has not completely scrolled past stickyLine (with header buffer).
-    if (r.top <= stickyLine + 1 && r.bottom > stickyLine + 20) {
-      if (r.top >= closestTop) {
-        closestTop = r.top;
-        closestId = id;
-      }
+    if (crossed(r, stickyLine) && r.top >= topTop) {
+      topTop = r.top;
+      topId = id;
     }
   }
 
-  return closestId;
+  let childId: string | null = null;
+  let childTop = -Infinity;
+  for (const el of viewport.querySelectorAll<HTMLElement>(
+    '[data-turn-child="true"][data-card-sticky="true"]',
+  )) {
+    const id = el.getAttribute("data-item-id");
+    const header = el
+      .closest<HTMLElement>("[data-turn-id]")
+      ?.querySelector<HTMLElement>('[data-testid="turn-toggle"]');
+    if (!id || !header) continue;
+    // The child line sits under the block's header — see the doc comment.
+    const r = el.getBoundingClientRect();
+    if (crossed(r, header.getBoundingClientRect().bottom) && r.top >= childTop) {
+      childTop = r.top;
+      childId = id;
+    }
+  }
+
+  return { topId, childId };
 }
 
 export function TurnBlock({
@@ -138,6 +168,29 @@ export function TurnBlock({
     }, LIVE_CLOCK_INTERVAL_MS);
     return () => clearInterval(id);
   }, [liveBlockStartedAt]);
+
+  // Nested pin line for this block's child headers (task #3215): a child
+  // header sticks just below this block's header, so --turn-header-h must
+  // track its real height — the summary / timing / SDK-call lines wrap and
+  // stream, changing it at runtime. Measured only while expanded (a collapsed
+  // block mounts no children); the variable is inherited by the child rows,
+  // whose sticky class reads it (STICKY_CHILD_HEADER_CLS, card.tsx).
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const headerRef = useRef<HTMLButtonElement | null>(null);
+  useLayoutEffect(() => {
+    if (!expanded) return;
+    const root = rootRef.current;
+    const header = headerRef.current;
+    if (!root || !header || typeof ResizeObserver === "undefined") return;
+    const measure = () =>
+      root.style.setProperty("--turn-header-h", `${header.getBoundingClientRect().height}px`);
+    // Sync set before first paint (no 1-frame flash at the header line), then
+    // keep it live across wraps / streaming / stuck-border changes.
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(header);
+    return () => observer.disconnect();
+  }, [expanded]);
 
   // How long the block that is streaming right now has been running. Zero when
   // the turn is idle or its last item is already committed. One value, read by
@@ -198,6 +251,7 @@ export function TurnBlock({
 
   return (
     <div
+      ref={rootRef}
       data-item-id={id}
       data-turn-id={id}
       data-turn-expanded={expanded}
@@ -209,6 +263,7 @@ export function TurnBlock({
       )}
     >
       <button
+        ref={headerRef}
         type="button"
         onClick={onToggle}
         className={cn(
@@ -252,13 +307,16 @@ export function TurnBlock({
           ) : null}
         </span>
       </button>
+      {/* The collapse wrapper must clip (overflow-clip, not overflow-hidden):
+          a scroll container here would become the child headers' scrollport
+          and break their nested sticky (task #3215). */}
       <div
         className={cn(
           "grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none",
           expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
         )}
       >
-        <div className={cn(OVERFLOW_HIDDEN, MIN_H_0)}>
+        <div className={cn(OVERFLOW_CLIP, MIN_H_0)}>
           <div className="px-2 pb-2 pt-0.5 space-y-3">{children}</div>
         </div>
       </div>
