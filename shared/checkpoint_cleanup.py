@@ -249,7 +249,12 @@ async def trim_checkpoints(
     dropped checkpoints' writes go with them, and any blob no surviving
     checkpoint references is removed. The latest checkpoint is always kept
     (keep >= 1), so the next resume reads intact state. Compaction boundaries
-    age out like every other checkpoint outside the newest-`keep` window.
+    are exempt from every trim — a stamped segment anchor is never deleted.
+
+    Trimming is a legacy operation: the cluster default parks it (never-delete
+    ruling, 2026-09-12, task #3180), and a delta-written thread is never
+    trimmed — its newest messages version has no blob row, so the guard parks
+    the thread.
 
     Returns the per-table delete counts.
     """

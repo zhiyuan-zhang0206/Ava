@@ -59,7 +59,7 @@ from agent.messages import (
 from agent.nodes import INIT_CONTEXT, LLM
 from agent.state import AgentState, CompactState, ContextReset
 from shared.audit_events import insert_event_log_async
-from shared.checkpoint_cleanup import mark_compact_boundary, trim_checkpoints
+from shared.checkpoint_cleanup import mark_compact_boundary
 from shared.config.turn_view import turn_settings
 from shared.context import AvaContext, agent_id_from_config
 from shared.live_events import CompactDone
@@ -130,43 +130,34 @@ class CompactionFailedError(RuntimeError):
     """
 
 
-# How many checkpoints to keep when a compaction trims the now-frozen
-# per-turn history. A compaction replaces the whole conversation, so the
-# pre-compact checkpoints will never be resumed again — only the latest
-# (holding the full pre-compact history) matters: every channel stores a
-# full snapshot, so the newest checkpoint alone restores the complete state
-# (the safety invariant documented in shared/checkpoint_cleanup.py). The raw
-# pre-compact history's only durable home is the summary itself (plus the
-# events mirror); older checkpoints would only retain redundant full copies
-# of the same conversation (2026-08-10, Task #1125 ruling).
-COMPACT_TRIM_KEEP = 1
+# Compaction keeps every pre-compact checkpoint: the never-delete ruling
+# (2026-09-12, task #3180) retired the former keep=1 trim (2026-08-10, Task
+# #1125) that dropped every non-boundary pre-compact row. The boundary stamp
+# below stays — it anchors the compaction segment for reads and audits (it no
+# longer carries a trim exemption: nothing is trimmed).
 
 
-async def trim_checkpoints_after_compact(pool: AsyncConnectionPool | None, agent_id: int) -> None:
-    """Stamp the compaction boundary, then trim the pre-compact history to keep=1.
+async def stamp_compact_boundary(pool: AsyncConnectionPool | None, agent_id: int) -> None:
+    """Best-effort: stamp the newest pre-compact checkpoint as the segment anchor.
 
-    Best-effort, in two steps: first `mark_compact_boundary` stamps the newest
-    pre-compact checkpoint (the full-snapshot record of this compaction segment)
-    for timeline segment reads while retained. The keep=1 trim drops the rest
-    of the now-frozen pre-compact history; the stamped survivor holds the
-    complete segment, but is not prune-exempt once it ages beyond a later keep
-    window. Storage cleanup must never abort the agent's turn (it runs inside
-    the graph), so a failure is logged and swallowed — the next trim trigger
-    retries. `pool is None` (container / eval mode) is a no-op. Shared by the
+    The stamped checkpoint is the full-snapshot record of this compaction
+    segment; timeline segment reads and audits anchor on it. Must never abort
+    the agent's turn (it runs inside the graph), so a failure is logged and
+    swallowed. `pool is None` (container / eval mode) is a no-op. Shared by the
     auto-compact hook here and the agent-/user-triggered compact paths in the
-    claim node.
+    claim node. Nothing is trimmed here since the never-delete ruling
+    (2026-09-12, task #3180).
     """
     if pool is None:
         return
     try:
         await mark_compact_boundary(pool, str(agent_id))
-        await trim_checkpoints(pool, str(agent_id), keep=COMPACT_TRIM_KEEP)
     except Exception as exc:
         logger.warning(
             "[{label}] {body}",
-            label="checkpoint-trim",
-            event="checkpoint_trim",
-            body=f"compact trim failed for agent {agent_id}: {exc!r}",
+            label="compact-boundary",
+            event="compact_boundary_stamp",
+            body=f"compact boundary stamp failed for agent {agent_id}: {exc!r}",
         )
 
 
@@ -727,9 +718,7 @@ class _AutoCompactHook(Hook):
     ) -> dict | None:
         result = await auto_compact_before_llm(state, runtime, config)
         if result is not None:
-            await trim_checkpoints_after_compact(
-                runtime.context.ops_pool, agent_id_from_config(config)
-            )
+            await stamp_compact_boundary(runtime.context.ops_pool, agent_id_from_config(config))
             # Bump version, keep the reminder flags (model_copy from the current
             # value); result carries `messages` / `context_reset` / `goto`, so
             # `compact` is not a key collision.
