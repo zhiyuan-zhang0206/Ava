@@ -450,7 +450,25 @@ def _cmd_restart_body(
     # `cli.commands._do_stop` / `cli.commands._cmd_start_body`.
     import cli.commands as _ns
     from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
-    from shared.proc import hosting_supervised_session
+    from shared.proc import hosting_exec_domain, hosting_supervised_session
+
+    # An exec-domain restart is SIGKILLed by the execute_code call's own
+    # teardown — the call's whole process group, as its turn ends (nohup/& do
+    # not leave the group — 2026-09-12: macmini stranded in a local pause).
+    # Refuse before any pause and name the one survivable host: `run_background`,
+    # a persistent shell session no stop leg kills.
+    exec_domain = hosting_exec_domain()
+    if exec_domain is not None:
+        print(
+            f"  ✗ refusing restart: this process runs inside an agent execute_code "
+            f"exec domain ({exec_domain}) — its process group is SIGKILLed when the "
+            "call's turn ends, this restart with it — the host stranded mid-restart. Run "
+            "it via ava.shell.run_background(...) — a persistent shell session that "
+            "survives the restart — or the detached form.",
+            file=sys.stderr,
+        )
+        _release_self_heal_pause()  # same decline contract as the preflight refusal below
+        return RESTART_DECLINED_EXIT_CODE
 
     # Same refusal as `cmd_update`'s in-process legs: the stop below kills every
     # service session's tree, so a restart hosted inside one of them severs

@@ -142,6 +142,53 @@ def hosting_supervised_session() -> str | None:
     return None
 
 
+# The entry modules an agent exec-domain session leader runs. Both exec spawn
+# shapes make their root the session leader (`start_new_session`): the
+# protocol-zero spawn runs `agent.exec_child` directly
+# (`agent/graph/_exec_subprocess.py::_spawn`), and the owned protocol spawns
+# `agent.exec_owner_child` as the root (`agent/exec_domain_owner.py`), which
+# runs the same payload via `runpy` in-process. Compared as whole argv
+# elements: the token is one exact argument, never a substring.
+_EXEC_DOMAIN_SESSION_ENTRIES = frozenset({"agent.exec_child", "agent.exec_owner_child"})
+
+
+def hosting_exec_domain() -> str | None:
+    """The agent exec domain this process runs inside — the entry module of this
+    process's session leader (`agent.exec_child` / `agent.exec_owner_child`), or
+    None when this process is not in an exec-domain session.
+
+    Membership, not ancestry: the exec root calls setsid (its spawn passes
+    `start_new_session`), and `ExecProcessDomain.close()` SIGKILLs its process
+    group as the tool call returns, while `sh -c "nohup ava … &"` reparents the
+    child out of any covered lineage WITHOUT leaving the session — the
+    2026-09-12 stranding: a restart that passed the ancestry guard was
+    group-killed mid-drain and left the host paused. The session id is the
+    widest cheap probe: every member still shares it after reparenting, and a
+    member that re-arranged its process group (interactive job control) is
+    refused too — deliberately, because the leg is still tied to an ephemeral
+    call, not only to the kill that call performs. The env marker is not usable
+    for this: `cli.main` clears `AVA_PROCESS_PROFILE` before any dispatch
+    (`docs/history/2026-08-24/cli-full-settings-profile.md`) and session shells
+    carry the exec request/result files and agent id as well, so only the
+    session's identity discriminates (see `hosting_supervised_session` for the
+    hosted-service half of the same refusal).
+
+    A session whose leader already exited reads as None — the argv evidence is
+    gone with it, and the domain's own teardown is already in flight by then.
+    Windows has no `getsid`; its exec teardown is the Job Object and this
+    membership route does not exist there — the ancestry guard stands alone.
+    """
+    if not get_backend().is_posix():
+        return None
+    cmdline = process_cmdline(os.getsid(0))
+    if cmdline is None:
+        return None
+    for argument in cmdline:
+        if argument in _EXEC_DOMAIN_SESSION_ENTRIES:
+            return argument
+    return None
+
+
 def process_alive(pid: int) -> bool:
     """Liveness probe.
 

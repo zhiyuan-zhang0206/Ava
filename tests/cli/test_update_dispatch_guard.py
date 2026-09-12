@@ -9,6 +9,13 @@ records (`shared.proc.hosting_supervised_session`) and bounces to the detached
 form. The detached orchestration sessions themselves are exempt — they are the
 sanctioned auto-updater shape: the trigger returns immediately, and a process
 outside every stopped tree does the stop/update/start.
+
+2026-09-12 added the second membership route (issue #2331): an in-process leg
+launched from `execute_code` is SIGKILLed with the call's process group as the
+call's turn ends, and `sh -c "nohup … &"` reparents the child out of every
+lineage — the ancestry route's blind spot — without leaving the exec-domain
+session (`shared.proc.hosting_exec_domain`). Those legs now refuse too and name
+`ava.shell.run_background(...)`, the persistent-shell host no stop leg kills.
 """
 
 from __future__ import annotations
@@ -404,3 +411,57 @@ def test_pty_session_records_do_not_refuse() -> None:
         assert hosting_supervised_session() is None
     finally:
         path.unlink(missing_ok=True)
+
+
+@pytest.mark.parametrize(
+    ("local", "restart_only"),
+    [
+        (True, False),  # the incident's shape: `ava cluster update --local`
+        (True, True),  # --local --restart-only keeps the in-process restart-only leg
+    ],
+    ids=["gateway-local", "gateway-local-restart-only"],
+)
+def test_in_process_legs_refused_inside_an_exec_domain(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    local: bool,
+    restart_only: bool,
+) -> None:
+    """Issue #2331: the exec-domain membership route refuses the same legs the
+    session-records route does, before any pause, and names the host that
+    survives (`ava.shell.run_background`)."""
+    monkeypatch.setattr("shared.proc.hosting_exec_domain", lambda: "agent.exec_child")
+    _stub_all_legs(monkeypatch)
+
+    rc = _cli.cmd_update(local=local, restart_only=restart_only)
+
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "execute_code" in err
+    assert "ava.shell.run_background" in err
+
+
+def test_restart_refused_inside_an_exec_domain(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    write_session_record: Callable[..., Path],
+) -> None:
+    """Issue #2331: an exec-domain restart is killed with the call's process
+    group as it returns, so it declines before any preflight. With a
+    supervised-session record also in the lineage, the exec refusal is the one
+    surfaced — `run_background` is the host that survives both."""
+    from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
+
+    write_session_record(_HOSTING_SESSION)
+    monkeypatch.setattr("shared.proc.hosting_exec_domain", lambda: "agent.exec_child")
+    monkeypatch.setattr("cli.commands.stop._release_self_heal_pause", lambda: None)
+    monkeypatch.setattr(_cli, "_preflight_probes", _fail_if_called("the preflight"))
+    monkeypatch.setattr(
+        _cli, "_preflight_start_readiness", _fail_if_called("the readiness preflight")
+    )
+    monkeypatch.setattr(_cli, "_do_stop", _fail_if_called("_do_stop"))
+
+    assert _cli.cmd_restart() == RESTART_DECLINED_EXIT_CODE
+    err = capsys.readouterr().err
+    assert "execute_code" in err
+    assert "ava.shell.run_background" in err
