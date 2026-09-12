@@ -236,6 +236,8 @@ def test_maintenance_pass_runs_unconditional_slices(monkeypatch: pytest.MonkeyPa
 def test_checkpoint_trim_pass_prunes_threads(monkeypatch: pytest.MonkeyPatch) -> None:
     prune = _CallRecorder(SimpleNamespace(agents=0, checkpoints=0, writes=0, blobs=0))
     monkeypatch.setattr(daemon, "prune_threads", prune)
+    # Trimming is opt-in since the never-delete ruling (task #3180).
+    monkeypatch.setattr(daemon.settings.daemon, "events_maintenance_checkpoint_trim_enabled", True)
     progress = LoopProgress("trim", timeout_s=5.0)
 
     daemon._run_checkpoint_trim(cast(ConnectionPool, _FAKE_POOL), progress)
@@ -370,7 +372,9 @@ def test_deadline_settings_defaults_and_env_aliases() -> None:
 
 
 def test_checkpoint_trim_setting_defaults_and_env_alias() -> None:
-    assert DaemonSettings().events_maintenance_checkpoint_trim_enabled is True
+    assert (
+        DaemonSettings().events_maintenance_checkpoint_trim_enabled is False
+    )  # never-delete default (task #3180)
     configured = DaemonSettings.model_validate(
         {"AVA_EVENTS_MAINTENANCE_CHECKPOINT_TRIM_ENABLED": "false"}
     )
