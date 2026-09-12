@@ -73,10 +73,30 @@ class _FakeGateway(BaseHTTPRequestHandler):
             self.end_headers()
 
 
+_NAV_HEADER_NAMES = (
+    "rsc",
+    "next-router-state-tree",
+    "next-url",
+    "next-router-prefetch",
+    "next-router-segment-prefetch",
+)
+# The names the allowlist must fringe off: hop-by-hop headers (RFC 9110
+# §7.6.1) and stray junk.
+_STRAY_HEADER_NAMES = ("connection", "x-smuggled", "te", "upgrade")
+# The negotiation dimensions the real app varies on (observed on both its HTML
+# and its RSC representation of a route).
+_VARY = (
+    "rsc, next-router-state-tree, next-router-prefetch, "
+    "next-router-segment-prefetch, Accept-Encoding"
+)
+
+
 class _FakeApp(BaseHTTPRequestHandler):
     not_found_paths: ClassVar[set[str]] = set()
     forwarded_origin_headers: ClassVar[list[dict[str, str | None]]] = []
     received_hosts: ClassVar[list[str | None]] = []
+    received_nav_headers: ClassVar[list[dict[str, str | None]]] = []
+    received_stray_headers: ClassVar[list[dict[str, str | None]]] = []
     requests = 0
 
     def log_message(self, format: str, *args: object) -> None:
@@ -91,6 +111,23 @@ class _FakeApp(BaseHTTPRequestHandler):
                 "x-forwarded-proto": self.headers.get("x-forwarded-proto"),
             }
         )
+        _FakeApp.received_nav_headers.append(
+            {name: self.headers.get(name) for name in _NAV_HEADER_NAMES}
+        )
+        _FakeApp.received_stray_headers.append(
+            {name: self.headers.get(name) for name in _STRAY_HEADER_NAMES}
+        )
+        # Mirror Next's negotiation: an RSC request is answered with the
+        # component payload, anything else with the document.
+        if self.headers.get("rsc"):
+            body = f"RSC-PAYLOAD {self.path}".encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/x-component")
+            self.send_header("Vary", _VARY)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if self.path in _FakeApp.not_found_paths:
             body = f"NOT-FOUND {self.path}".encode()
             self.send_response(404)
@@ -102,6 +139,7 @@ class _FakeApp(BaseHTTPRequestHandler):
         body = f"APP-PAGE {self.path}".encode()
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
+        self.send_header("Vary", _VARY)
         self.send_header("Content-Security-Policy", "default-src 'self'")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -128,6 +166,8 @@ def servers(tmp_path: Path) -> Iterator[_Servers]:
     _FakeApp.requests = 0
     _FakeApp.forwarded_origin_headers = []
     _FakeApp.received_hosts = []
+    _FakeApp.received_nav_headers = []
+    _FakeApp.received_stray_headers = []
     gw = ThreadingHTTPServer(("127.0.0.1", 0), _FakeGateway)
     app = ThreadingHTTPServer(("127.0.0.1", 0), _FakeApp)
     gate_server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
@@ -364,6 +404,77 @@ def test_app_proxy_forwards_browser_security_response_headers(servers: _Servers)
     assert headers["X-Frame-Options"] == "DENY"
     assert headers["X-Content-Type-Options"] == "nosniff"
     assert headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
+
+
+def test_app_proxy_carries_next_rsc_navigation_contract(servers: _Servers) -> None:
+    """The soft-navigation contract (task #3217): Next's client fetches
+    `?_rsc=` payloads through the gate origin, and the app answers with the
+    component payload only when the negotiation headers arrive. Assert the wire
+    outcome the browser depends on — the same URL returns `text/x-component`
+    through the gate — not merely that the headers were copied; and that a
+    plain GET is still answered with the HTML document."""
+    _FakeGateway.authenticated = True
+    _FakeGateway.down = False
+    nav_headers = {
+        "RSC": "1",
+        "Next-Router-State-Tree": "tree-value",
+        "Next-Url": "/fleet?agent_id=1",
+        "Next-Router-Prefetch": "1",
+        "Next-Router-Segment-Prefetch": "/fleet",
+    }
+
+    status, body, headers = _request(
+        servers["gate"] + "/fleet?agent_id=1&_rsc=abc123", headers=nav_headers
+    )
+
+    assert status == 200
+    assert body == "RSC-PAYLOAD /fleet?agent_id=1&_rsc=abc123"
+    assert headers["Content-Type"] == "text/x-component"
+    assert headers["Vary"] == _VARY
+    assert _FakeApp.received_nav_headers[-1] == {
+        "rsc": "1",
+        "next-router-state-tree": "tree-value",
+        "next-url": "/fleet?agent_id=1",
+        "next-router-prefetch": "1",
+        "next-router-segment-prefetch": "/fleet",
+    }
+
+    # The document path is unchanged: no negotiation headers means HTML.
+    status, body, headers = _request(servers["gate"] + "/fleet")
+
+    assert status == 200
+    assert body == "APP-PAGE /fleet"
+    assert headers["Content-Type"] == "text/html"
+    assert _FakeApp.received_nav_headers[-1] == dict.fromkeys(_NAV_HEADER_NAMES)
+
+
+def test_app_proxy_drops_hop_by_hop_and_stray_request_headers(servers: _Servers) -> None:
+    """The allowlist IS the boundary: hop-by-hop headers (RFC 9110 §7.6.1),
+    including a name riding a Connection token, and any other stray header must
+    never reach the app."""
+    _FakeGateway.authenticated = True
+    _FakeGateway.down = False
+
+    status, body, _ = _request(
+        servers["gate"] + "/fleet",
+        headers={
+            "Connection": "keep-alive, x-smuggled",
+            "X-Smuggled": "1",
+            "TE": "trailers",
+            "Upgrade": "websocket",
+        },
+    )
+
+    assert status == 200
+    assert body == "APP-PAGE /fleet"
+    got = _FakeApp.received_stray_headers[-1]
+    # `connection` may only carry the gate's OWN hop value (urllib sends
+    # `close` on the gate→app hop); the browser's `keep-alive, x-smuggled`
+    # token list and the other stray headers must not cross.
+    assert got["x-smuggled"] is None
+    assert got["te"] is None
+    assert got["upgrade"] is None
+    assert got["connection"] == "close"
 
 
 def test_app_proxy_preserves_browser_host_without_forwarded_origin_headers(
