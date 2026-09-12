@@ -216,6 +216,9 @@ jobs:
       - name: Scan for tailnet IP literals (CIDR range notation exempt)
         run: python3 scripts/lint_no_tailnet.py
 
+      - name: Scan the root supervisor for permission-domain symbols
+        run: python3 scripts/lint_ava_root_scope.py
+
       - name: Check canonical Python lock sources (stdlib only)
         run: python3 scripts/lint_python_lock.py
 
