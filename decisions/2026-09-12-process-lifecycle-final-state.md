@@ -36,8 +36,9 @@ ruled the open decision points on 2026-09-12 17:40–17:41. Design record:
    (degraded); the OS adapter restarts root; recovery reseeds the
    attribution-requiring subchains. Adoption (management takeover without
    re-parenting) is documented as the design's exception state — POSIX
-   cannot re-attach chains to existing processes; and (F1, 2026-09-12)
-   attribution is not reset by reparent while the chain root lives,
+   cannot re-attach chains to existing processes; and (F1/F2, 2026-09-12)
+   no reparent-family trigger resets attribution while the chain root
+   lives (16 scenarios enumerated; static at spawn),
    narrowing the actual loss case to the chain root's own lifecycle events
    (helper death/restart; F12 to measure).
 5. **Supervision collapses from 4–5 layers to 2**: the OS adapter keeps root
@@ -84,6 +85,7 @@ ruled the open decision points on 2026-09-12 17:40–17:41. Design record:
   attribution propagating across the full hierarchy; F1 (the multi-level
   attribution probe across the whole two-section tree) ran 2026-09-12 —
   full-chain attribution held (27/27); see the design record's F1 result.
+  F2 (reparent enumeration) likewise ran: no trigger resets the anchor.
 - **Migration preconditions**: complete company-air's inventory before the
   cutover; the per-machine window is booked with the user directly, and the
   user watches the cutover live.
