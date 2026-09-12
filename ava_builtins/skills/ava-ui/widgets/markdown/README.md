@@ -15,7 +15,7 @@ Zero build. Paste the whole file into a single page for use. Dependencies (marke
 ```python
 # agent flow: serve() starts a static server and registers it, done in one line
 ava.shell.run('mkdir -p /tmp/my-page && cp -r $AVA_HOME/skills/ava-ui/widgets/markdown/{md.html,vendor} /tmp/my-page/ && mv /tmp/my-page/md.html /tmp/my-page/index.html')
-# Edit /tmp/my-page/index.html, replace the {{MARKDOWN_CONTENT}} placeholder
+# Edit /tmp/my-page/index.html, replace the single {{MARKDOWN_CONTENT}} placeholder
 # inside the <script type="text/markdown" id="md-source"> with the content you want to render
 page = ava.ui.serve('/tmp/my-page', 'zhihu-answer', 8765)
 ```
@@ -27,7 +27,12 @@ template = Path('/tmp/my-page/index.html').read_text()
 md_source = (outdir / 'post.md').read_text()
 # escape `</script>` for safe embedding
 md_safe = md_source.replace('</script>', '<\\/script>')
-html = template.replace('{{MARKDOWN_CONTENT}}', md_safe)
+# Replace exactly the real slot. Do NOT plain-replace the token file-wide:
+# the header comment used to carry it too, which injected the markdown
+# twice (task #3185).
+SLOT = '<script type="text/markdown" id="md-source" hidden>{{MARKDOWN_CONTENT}}</script>'
+assert template.count(SLOT) == 1, 'md-source slot not found exactly once'
+html = template.replace(SLOT, '<script type="text/markdown" id="md-source" hidden>' + md_safe + '</script>')
 ```
 
 ### React version (`Markdown.tsx`)

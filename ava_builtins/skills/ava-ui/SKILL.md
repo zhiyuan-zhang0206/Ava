@@ -33,8 +33,9 @@ with the [markdown widget](widgets/markdown/README.md):
 
 1. Copy `widgets/markdown/md.html` and its `vendor/` directory into a page
    directory, saving `md.html` as `index.html`.
-2. Replace the `{{MARKDOWN_CONTENT}}` slot with the Markdown after escaping
-   its script terminator: `md_safe = md_string.replace('</script>', '<\\/script>')`.
+2. Replace the single `{{MARKDOWN_CONTENT}}` slot (inside the md-source script
+   tag) with the Markdown after escaping its script terminator:
+   `md_safe = md_string.replace('</script>', '<\\/script>')`.
 3. Serve the directory: `page = ava.ui.serve(page_dir, "my-report", 8765)`.
 
 The widget renders client-side with vendored marked.js, DOMPurify, KaTeX, and
