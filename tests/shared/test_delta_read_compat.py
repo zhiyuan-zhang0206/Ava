@@ -18,6 +18,7 @@ from langchain_core.messages import (
     RemoveMessage,
     SystemMessage,
 )
+from langchain_core.runnables import RunnableConfig
 from langgraph.channels.delta import DeltaChannel
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.checkpoint.serde.types import _DeltaSnapshot
@@ -72,11 +73,14 @@ def _delta_app(saver: AsyncPostgresSaver, *, snapshot_frequency: int = 1000):
             "n": n + 1,
         }
 
+    def route(state: S) -> str:
+        return "step" if state["n"] < state["target"] else END
+
     graph = StateGraph(S)
-    graph.add_node("step", step)
+    graph.add_node("step", step)  # pyright: ignore[reportUnknownMemberType]
     graph.add_edge(START, "step")
-    graph.add_conditional_edges("step", lambda s: "step" if s["n"] < s["target"] else END)
-    return graph.compile(checkpointer=saver)
+    graph.add_conditional_edges("step", route)
+    return graph.compile(checkpointer=saver)  # pyright: ignore[reportUnknownMemberType]
 
 
 def _vanilla_app(saver: AsyncPostgresSaver):
@@ -95,14 +99,17 @@ def _vanilla_app(saver: AsyncPostgresSaver):
             "n": n + 1,
         }
 
+    def route(state: S) -> str:
+        return "step" if state["n"] < state["target"] else END
+
     graph = StateGraph(S)
-    graph.add_node("step", step)
+    graph.add_node("step", step)  # pyright: ignore[reportUnknownMemberType]
     graph.add_edge(START, "step")
-    graph.add_conditional_edges("step", lambda s: "step" if s["n"] < s["target"] else END)
-    return graph.compile(checkpointer=saver)
+    graph.add_conditional_edges("step", route)
+    return graph.compile(checkpointer=saver)  # pyright: ignore[reportUnknownMemberType]
 
 
-def _config(thread_id: str, checkpoint_id: str | None = None) -> dict[str, Any]:
+def _config(thread_id: str, checkpoint_id: str | None = None) -> RunnableConfig:
     configurable: dict[str, Any] = {"thread_id": thread_id, "checkpoint_ns": ""}
     if checkpoint_id is not None:
         configurable["checkpoint_id"] = checkpoint_id
@@ -126,7 +133,7 @@ async def test_vanilla_thread_is_untouched(aops_pool: AsyncConnectionPool) -> No
     saver = _saver(aops_pool)
     app = _vanilla_app(saver)
     cfg = _config("drc-vanilla")
-    await app.ainvoke({"messages": [], "n": 0, "target": 3}, cfg, recursion_limit=40)
+    await app.ainvoke({"messages": [], "n": 0, "target": 3}, cfg, recursion_limit=40)  # pyright: ignore[reportUnknownMemberType]
 
     # A plain read of the (unpatched) tuple needs no reconstruction...
     raw = await saver.aget_tuple(cfg)
@@ -144,7 +151,7 @@ async def test_delta_thread_reconstructs_resumes_and_self_heals(
     saver = _saver(aops_pool)
     delta = _delta_app(saver)
     cfg = _config("drc-f1000")
-    await delta.ainvoke({"messages": [], "n": 0, "target": 6}, cfg, recursion_limit=60)
+    await delta.ainvoke({"messages": [], "n": 0, "target": 6}, cfg, recursion_limit=60)  # pyright: ignore[reportUnknownMemberType]
     truth = _ids((await delta.aget_state(cfg)).values["messages"])
     assert len(truth) == 12
 
@@ -159,7 +166,7 @@ async def test_delta_thread_reconstructs_resumes_and_self_heals(
 
     # A vanilla write resumes from the reconstructed history, and the new
     # checkpoint materializes a full messages blob (the store self-heals).
-    await vanilla.ainvoke({"n": 6, "target": 7}, cfg, recursion_limit=60)
+    await vanilla.ainvoke({"n": 6, "target": 7}, cfg, recursion_limit=60)  # pyright: ignore[reportUnknownMemberType, reportArgumentType]
     after_vanilla = _ids((await vanilla.aget_state(cfg)).values["messages"])
     after_delta = _ids((await delta.aget_state(cfg)).values["messages"])
     assert after_vanilla == after_delta == [*truth, "u6", "a6"]
@@ -181,7 +188,7 @@ async def test_snapshot_tip_unwraps_and_mid_chain_walks(
     saver = _saver(aops_pool)
     delta = _delta_app(saver, snapshot_frequency=2)
     cfg = _config("drc-snap")
-    await delta.ainvoke({"messages": [], "n": 0, "target": 9}, cfg, recursion_limit=60)
+    await delta.ainvoke({"messages": [], "n": 0, "target": 9}, cfg, recursion_limit=60)  # pyright: ignore[reportUnknownMemberType]
     truth = _ids((await delta.aget_state(cfg)).values["messages"])
 
     # Precondition: the newest checkpoint is a snapshot step, so its stored
@@ -213,7 +220,7 @@ async def test_remove_all_rebuild_folds(aops_pool: AsyncConnectionPool) -> None:
     saver = _saver(aops_pool)
     delta = _delta_app(saver)
     cfg = _config("drc-rebuild")
-    await delta.ainvoke({"messages": [], "n": 0, "target": 6}, cfg, recursion_limit=60)
+    await delta.ainvoke({"messages": [], "n": 0, "target": 6}, cfg, recursion_limit=60)  # pyright: ignore[reportUnknownMemberType]
     await delta.aupdate_state(
         cfg,
         {
@@ -223,7 +230,7 @@ async def test_remove_all_rebuild_folds(aops_pool: AsyncConnectionPool) -> None:
             ]
         },
     )
-    await delta.ainvoke({"n": 6, "target": 8}, cfg, recursion_limit=60)
+    await delta.ainvoke({"n": 6, "target": 8}, cfg, recursion_limit=60)  # pyright: ignore[reportUnknownMemberType, reportArgumentType]
     truth = _ids((await delta.aget_state(cfg)).values["messages"])
     assert truth == ["rb0", "u6", "a6", "u7", "a7"]
 
@@ -271,7 +278,7 @@ async def test_gateway_readers_reconstruct_delta_threads(
     saver = _saver(aops_pool)
     delta = _delta_app(saver)
     cfg = _config(thread)
-    await delta.ainvoke(
+    await delta.ainvoke(  # pyright: ignore[reportUnknownMemberType]
         {"messages": [SystemMessage(id="sys", content="system")], "n": 0, "target": 6},
         cfg,
         recursion_limit=60,
@@ -309,7 +316,7 @@ async def test_fork_copies_the_delta_write_chain(
     saver = _saver(aops_pool)
     delta = _delta_app(saver)
     cfg = _config(str(source))
-    await delta.ainvoke({"messages": [], "n": 0, "target": 6}, cfg, recursion_limit=60)
+    await delta.ainvoke({"messages": [], "n": 0, "target": 6}, cfg, recursion_limit=60)  # pyright: ignore[reportUnknownMemberType]
     truth = _ids((await delta.aget_state(cfg)).values["messages"])
     tip = (await _checkpoint_ids(aops_pool, str(source)))[-1]
 
@@ -353,7 +360,7 @@ async def test_startup_reconcile_reads_reconstructed_delta_state(
     saver = _saver(aops_pool)
     delta = _delta_app(saver)
     cfg = _config(str(agent_id))
-    await delta.ainvoke(
+    await delta.ainvoke(  # pyright: ignore[reportUnknownMemberType]
         {
             "messages": [
                 HumanMessage(
