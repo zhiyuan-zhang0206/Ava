@@ -13,7 +13,9 @@ loops:
   with the task #1281/#1823 cleanup — the table was dropped and its data lives
   in the Loki archive stream.
 - Fast loop (60s): prune every checkpoint thread above three rows to its newest
-  three (`services.events_maintenance.checkpoint_reaper.prune_threads`).
+  three (`services.events_maintenance.checkpoint_reaper.prune_threads`), unless
+  `AVA_EVENTS_MAINTENANCE_CHECKPOINT_TRIM_ENABLED` is false — the loop then
+  parks as a no-op.
 - Resolution loop (`AVA_EVENTS_RESOLUTION_INTERVAL_SECONDS`, default 5m):
   refresh immutable-event class-resolution state and gauges from Loki.
 
@@ -145,7 +147,15 @@ def _run_maintenance(pool: ConnectionPool, progress: LoopProgress) -> None:
 
 
 def _run_checkpoint_trim(pool: ConnectionPool, progress: LoopProgress) -> None:
-    """Prune every checkpoint thread to newest-three on the fast loop."""
+    """Prune every checkpoint thread to newest-three on the fast loop.
+
+    Disabled via `AVA_EVENTS_MAINTENANCE_CHECKPOINT_TRIM_ENABLED=false`: the
+    pass deletes nothing, but still stamps success so the loop — and the
+    daemon's health envelope — stay green.
+    """
+    if not settings.daemon.events_maintenance_checkpoint_trim_enabled:
+        progress.mark_success()
+        return
     pruned = prune_threads(pool)
     if pruned.agents:
         _log.info(
@@ -310,9 +320,10 @@ async def _checkpoint_trim_loop(pool: ConnectionPool, progress: LoopProgress) ->
     syntax error exits so the watchdog revives the daemon after the fix.
     """
     _log.info(
-        "[events-maintenance] checkpoint trim loop started, pid=%s, interval=%.0fs",
+        "[events-maintenance] checkpoint trim loop started, pid=%s, interval=%.0fs, enabled=%s",
         os.getpid(),
         _CHECKPOINT_TRIM_INTERVAL_S,
+        settings.daemon.events_maintenance_checkpoint_trim_enabled,
     )
     while True:
         try:

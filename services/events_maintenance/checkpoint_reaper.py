@@ -3,7 +3,9 @@
 LangGraph's PostgresSaver appends one checkpoint per super-step under Ava's
 default durability. The gateway-owned events-maintenance daemon therefore
 scans the checkpoint table every minute and prunes every thread above the
-fixed keep-three budget, independent of agent status or liveness. This makes
+fixed keep-three budget, independent of agent status or liveness (the driving
+daemon can park the scan as a no-op via
+`AVA_EVENTS_MAINTENANCE_CHECKPOINT_TRIM_ENABLED=false`). This makes
 the scan and retained storage O(thread count).
 
 Compaction-boundary checkpoints are exempt from the budget: a row stamped

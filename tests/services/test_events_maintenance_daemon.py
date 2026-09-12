@@ -6,7 +6,8 @@ The runtime guards the maintenance daemon needs and that are easy to regress:
   - a failed pass still waits a full interval before retrying, so a transient
     DB error does not become a tight hot-loop against Postgres;
   - the hourly pass ALWAYS runs the rollup + blob vacuum, while uniform
-    checkpoint pruning rides its own unconditional fast loop.
+    checkpoint pruning rides its own fast loop — a no-op when the trim setting
+    disables it.
 
 All driven directly (no DB): `_run_maintenance` / `_maintenance_with_liveness` are
 monkeypatched, so these are pure asyncio-loop tests.
@@ -243,8 +244,23 @@ def test_checkpoint_trim_pass_prunes_threads(monkeypatch: pytest.MonkeyPatch) ->
     assert progress.snapshot()["last_success_at"] is not None
 
 
+def test_checkpoint_trim_pass_disabled_parks_without_pruning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A disabled trim deletes nothing but still reads healthy on the loop."""
+    prune = _CallRecorder(SimpleNamespace(agents=0, checkpoints=0, writes=0, blobs=0))
+    monkeypatch.setattr(daemon, "prune_threads", prune)
+    monkeypatch.setattr(daemon.settings.daemon, "events_maintenance_checkpoint_trim_enabled", False)
+    progress = LoopProgress("trim", timeout_s=5.0)
+
+    daemon._run_checkpoint_trim(cast(ConnectionPool, _FAKE_POOL), progress)
+
+    assert prune.calls == 0
+    assert progress.snapshot()["last_success_at"] is not None
+
+
 def test_checkpoint_prune_loop_runs_on_fast_cadence(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Uniform pruning is unconditional and independent of the hourly loop."""
+    """Pruning rides its own fast cadence, independent of the hourly loop."""
     ran: list[object] = []
 
     def fake_trim(pool: object, progress: LoopProgress) -> None:
@@ -351,6 +367,14 @@ def test_deadline_settings_defaults_and_env_aliases() -> None:
     assert configured.events_maintenance_pass_deadline_s == 15.5
     assert configured.events_maintenance_trim_deadline_s == 25.0
     assert configured.events_maintenance_resolution_deadline_s == 35.5
+
+
+def test_checkpoint_trim_setting_defaults_and_env_alias() -> None:
+    assert DaemonSettings().events_maintenance_checkpoint_trim_enabled is True
+    configured = DaemonSettings.model_validate(
+        {"AVA_EVENTS_MAINTENANCE_CHECKPOINT_TRIM_ENABLED": "false"}
+    )
+    assert configured.events_maintenance_checkpoint_trim_enabled is False
 
 
 def test_run_gives_each_loop_its_own_progress_tracker(monkeypatch: pytest.MonkeyPatch) -> None:

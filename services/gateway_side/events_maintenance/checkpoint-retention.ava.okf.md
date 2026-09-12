@@ -10,7 +10,8 @@ tags: []
 ## Contract
 
 The events-maintenance daemon calls `checkpoint_reaper.prune_threads` every
-minute. One table-driven grouping counts all checkpoint rows by `thread_id`;
+minute, unless `AVA_EVENTS_MAINTENANCE_CHECKPOINT_TRIM_ENABLED=false` parks the
+pass as a no-op. One table-driven grouping counts all checkpoint rows by `thread_id`;
 threads above the fixed keep-three budget become candidates regardless of agent
 status, liveness, or whether an `agents_meta` row exists. Compaction boundaries
 are exempt from the budget: a checkpoint stamped `compact_boundary: true` is
@@ -44,4 +45,5 @@ does not consume the productive-thread cap, allowing later candidates to run.
   rotation, recheck, and the keep-three policy.
 - `shared/checkpoint_cleanup.py` owns the atomic trim, survivor references, and
   in-flight-write guard shared with the agent-side keep-one compaction flow.
-- `services/events_maintenance/daemon.py` owns the one-minute cadence.
+- `services/events_maintenance/daemon.py` owns the one-minute cadence and the
+  `AVA_EVENTS_MAINTENANCE_CHECKPOINT_TRIM_ENABLED` trim switch.
