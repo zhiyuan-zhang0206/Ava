@@ -1491,6 +1491,27 @@ def test_health_port_backfill_reports_ignored_value_even_when_block_derived(
     assert "no block derived" not in err
 
 
+def test_health_port_backfill_complete_key_set_reports_nothing_to_backfill(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """With every health-port key already present, an ignored non-numeric value
+    must not read as 'no block derived': `missing` is empty because nothing is
+    absent, not because the block could not be proved (#2974, PR #2281 review)."""
+    full = _health_block(_HEALTH_BACKFILL_BASE)
+    lines = [
+        f"{var}={'not-a-port' if var == 'AVA_OPS_HEALTH_PORT' else port}"
+        for var, port in sorted(full.items())
+    ]
+    original = "\n".join(lines) + "\n"
+    (tmp_path / ".env").write_text(original)
+    _run_health_backfill(tmp_path)
+    assert (tmp_path / ".env").read_text() == original  # complete set: nothing rewritten
+    err = capsys.readouterr().err
+    assert "AVA_OPS_HEALTH_PORT='not-a-port'" in err
+    assert "every health-port key is already present" in err
+    assert "no block derived" not in err
+
+
 # --- watchdog probe registration ------------------------------------------
 # The step fans out over the unit's capability SET. A single box carries both
 # capabilities and therefore runs TWO watchdog daemons; registering one probe

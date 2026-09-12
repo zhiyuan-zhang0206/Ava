@@ -359,12 +359,13 @@ def _backfill_health_port_keys_step(ctx: ConvergeCtx) -> None:
     if ignored:
         # The derivation skips a non-numeric value as an outlier (#2974); the
         # no-op it can cause was silent, so name the ignored value(s), their
-        # source, and whether a block was still derived from the others.
-        outcome = (
-            "no block derived from the decoded values; nothing backfilled"
-            if not missing
-            else "the block is derived from the remaining values"
-        )
+        # source, and why this run backfilled nothing.
+        if missing:
+            outcome = "the block is derived from the remaining values"
+        elif all(var in existing for var in wanted):
+            outcome = "every health-port key is already present; nothing backfilled"
+        else:
+            outcome = "no block derived from the decoded values; nothing backfilled"
         print(
             "  · health-port backfill: ignoring non-numeric value(s) "
             f"{', '.join(ignored)} (source: {env_path}) — {outcome}",
