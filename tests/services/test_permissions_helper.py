@@ -241,6 +241,75 @@ def test_native_spawn_contract_requires_absolute_output_paths_without_redundant_
     )
 
 
+def test_spawn_core_resets_child_signal_state() -> None:
+    source = (
+        Path(__file__).parents[2] / "services/permissions_helper/helper/main.swift"
+    ).read_text()
+    spawn_source = source.split("func spawnDetachedChild", 1)[1].split("func sessionList", 1)[0]
+
+    # Children inherit the calling thread's signal mask through posix_spawn, and
+    # the root keeper spawns from a GCD worker thread where libdispatch blocks
+    # most signals including SIGTERM. Without the reset below, a keeper-spawned
+    # ava-root never receives SIGTERM (confirmed empirically 2026-09-12).
+    assert "POSIX_SPAWN_SETSIGMASK" in spawn_source
+    assert "posix_spawnattr_setsigmask(&attributes, &emptySignalMask)" in spawn_source
+    assert "POSIX_SPAWN_SETSIGDEF" in spawn_source
+    assert "posix_spawnattr_setsigdefault(&attributes, &signalsToDefault)" in spawn_source
+
+
+def test_root_keeper_contract_is_pinned_in_the_swift_source() -> None:
+    source = (
+        Path(__file__).parents[2] / "services/permissions_helper/helper/main.swift"
+    ).read_text()
+    keeper_source = source.split("// MARK: - Root keeper", 1)[1].split("// MARK: - Dispatch", 1)[0]
+
+    # The CTO-ruled session-boundary sentence must live where root is spawned.
+    assert "session boundary only" in keeper_source
+    assert "ppid unchanged, no reparent" in keeper_source
+    # Single instance rides on the root's own lock file, probed non-blockingly.
+    assert '(runDir as NSString).appendingPathComponent("ava-root.lock")' in keeper_source
+    assert "flock(fd, LOCK_EX | LOCK_NB)" in keeper_source
+    # Root goes through the shared detached-child spawn core, never the
+    # session table.
+    assert "spawnDetachedChild(" in keeper_source
+    assert "children[" not in keeper_source
+    # A stop the keeper requested must never restart root.
+    assert 'let requested = stopRequested || state == "stopping"' in keeper_source
+    # The SIGCHLD drain must route root exits to the keeper before the table.
+    assert "if rootKeeper.reapIfOwned(pid: pid, exitStatus: status) { continue }" in source
+    # Startup seeding is opt-in via the seed environment; absent = dormant.
+    assert 'rootSeedEnvironment = "AVA_PERMISSIONS_HELPER_ROOT_SEED"' in source
+    assert "rootKeeper.startIfConfigured()" in source
+    # The wire surface is wired into dispatch.
+    for method in ("root_seed", "root_status", "root_stop"):
+        assert f'case "{method}"' in source
+    # Spawn and ownership accounting share one lock domain with the SIGCHLD
+    # reap: no unlock may sit between the spawn call and the pid record, or a
+    # root that exits inside the spawn window drains unattributed and parks
+    # the keeper on a dead pid (QA #3242).
+    attempt = keeper_source.split("private func attemptSpawn", 1)[1].split(
+        "private func scheduleSpawnRetry", 1
+    )[0]
+    spawn_at = attempt.index("spawnDetachedChild(")
+    account_at = attempt.index("childPID = pid")
+    lock_at = attempt.rindex("lock.lock()", 0, spawn_at)
+    assert "lock.unlock()" not in attempt[lock_at:account_at]
+
+
+def test_root_seed_env_rejects_a_non_string_map() -> None:
+    source = (
+        Path(__file__).parents[2] / "services/permissions_helper/helper/main.swift"
+    ).read_text()
+    seed_source = source.split("struct RootSeed", 1)[1].split("static func load", 1)[0]
+
+    # A present-but-mistyped `env` fails fast like every other seed field,
+    # instead of the cast collapsing to an empty map and silently dropping
+    # the child's environment (QA #3242).
+    assert 'raw["env"] as? [String: String]) ?? [:]' not in seed_source
+    assert "root seed: env must be a map of string to string" in seed_source
+    assert "environment = [:]" in seed_source
+
+
 @pytest.mark.parametrize(
     ("name", "pid"),
     [(None, None), ("agent-demo", 4123)],
@@ -248,6 +317,65 @@ def test_native_spawn_contract_requires_absolute_output_paths_without_redundant_
 def test_signal_session_requires_exactly_one_target(name: str | None, pid: int | None) -> None:
     with pytest.raises(ValueError, match="exactly one"):
         client.signal_session(name=name, pid=pid)
+
+
+def test_root_keeper_method_requests_and_results(fake_helper) -> None:
+    seen: list[dict[str, object]] = []
+    results: dict[str, dict[str, object]] = {
+        "root_seed": {
+            "state": "running",
+            "seeded": True,
+            "restarts": 0,
+            "stop_requested": False,
+            "pid": 5150,
+        },
+        "root_status": {
+            "state": "conflict",
+            "seeded": True,
+            "restarts": 1,
+            "stop_requested": False,
+            "conflict": {"pid": 4090, "since": 1_700_000_000.0},
+        },
+        "root_stop": {
+            "state": "stopping",
+            "seeded": True,
+            "restarts": 1,
+            "stop_requested": True,
+            "pid": 5150,
+        },
+    }
+
+    def handler(req: dict) -> dict:
+        seen.append({key: value for key, value in req.items() if key != "id"})  # pyright: ignore[reportUnknownMemberType]
+        return {"id": req["id"], "ok": True, "result": results[req["method"]]}  # pyright: ignore[reportUnknownArgumentType]
+
+    path = fake_helper(handler)
+    config: client.RootSeedConfig = {
+        "argv": ["/opt/ava/.venv/bin/python", "-m", "services.ava_root"],
+        "cwd": "/opt/ava",
+        "run_dir": "/opt/ava/run",
+        "stdout": "/opt/ava/logs/root.out.log",
+        "stderr": "/opt/ava/logs/root.err.log",
+        "env": {"AVA_TEST": "1"},
+    }
+
+    seeded = client.seed_root(config, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+    assert seeded["state"] == "running"
+    assert seeded.get("pid") == 5150
+    assert seen[0] == {"method": "root_seed", "config": config}
+
+    status = client.root_status(sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+    assert status["state"] == "conflict"
+    assert status.get("conflict") == {"pid": 4090, "since": 1_700_000_000.0}
+    assert seen[1] == {"method": "root_status"}
+
+    stopped = client.stop_root(sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+    assert stopped["state"] == "stopping"
+    assert stopped["stop_requested"] is True
+    assert seen[2] == {"method": "root_stop", "force": False}
+
+    client.stop_root(force=True, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+    assert seen[3] == {"method": "root_stop", "force": True}
 
 
 def test_self_upgrade_treats_connection_close_as_success(fake_helper) -> None:
