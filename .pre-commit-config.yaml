@@ -146,6 +146,19 @@ repos:
         language: system
         pass_filenames: false
 
+      # The root supervisor's own code (services/ava_root/) must stay free of
+      # permission-domain and macOS-specific symbols — the privileged helper
+      # program is a separate codebase by design (ruling 2026-09-12), and this
+      # lint is the machine-checkable half of that constraint. A line that
+      # genuinely must carry a name opts out inline with
+      # `# ava-root-scope-ok: <reason>`; see scripts/lint_ava_root_scope.py header.
+      - id: lint-ava-root-scope
+        name: lint ava-root scope (no permission-domain symbols)
+        entry: .venv/bin/python scripts/lint_ava_root_scope.py
+        language: system
+        files: ^(services/ava_root/|scripts/lint_ava_root_scope\.py|tests/scripts/test_lint_ava_root_scope\.py)$
+        pass_filenames: false
+
       # Ban decorative emoji in core Python (agent + backend layers). UX surfaces
       # (cli/, ui/) and prose/content (skills/, docs/, ui/web/) are exempt and
       # not scanned. A line that genuinely needs the character uses an inline
