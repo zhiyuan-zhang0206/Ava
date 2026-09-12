@@ -19,6 +19,7 @@ from psycopg import Connection, connect
 from psycopg.rows import DictRow, dict_row
 
 from shared.config import settings
+from shared.delta_read_compat import reconstruct_delta_messages
 
 
 def _state_module() -> Any:
@@ -93,9 +94,13 @@ def load_snapshot(agent_id: int) -> tuple[Any, dict[str, Any] | None, dict[str, 
         if row is None:
             raise LookupError(f"agent {agent_id} not found")
         saver = PostgresSaver(conn=typed_conn, serde=_serializer())
-        checkpoint = saver.get({"configurable": {"thread_id": str(agent_id)}})
-    if checkpoint is None:
+        snapshot = saver.get_tuple({"configurable": {"thread_id": str(agent_id)}})
+        if snapshot is not None:
+            # Transition layer (tasks #3180/#3181): attach with reconstructed
+            # messages instead of an empty history on delta-written threads.
+            reconstruct_delta_messages(saver, snapshot)
+    if snapshot is None:
         raise RuntimeError("approved agent has no checkpoint to attach")
     state_cls = _state_module().build_agent_state()
-    state = state_cls.model_validate(checkpoint["channel_values"])
+    state = state_cls.model_validate(snapshot.checkpoint["channel_values"])
     return state, row["config_overlay"], row["birth_config"]
