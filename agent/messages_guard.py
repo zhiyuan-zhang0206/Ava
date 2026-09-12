@@ -48,6 +48,18 @@ Validation model (per the ruling):
 
 ``validate_messages_mutation`` / ``validate_rebuild`` are the pure diff
 checks, unit-testable without a graph.
+
+Fast path (B2 fix, task #3180): a live thread is append-dominated, and the
+full diff above costs O(N) per write — W replayed writes made a delta read
+fold O(N*W) (measured ~18s at N~2000, W=1000). Every write is therefore
+classified before the diff: no ``RemoveMessage`` and no id already present
+in ``current`` means the write can only lengthen the list at the tail —
+exactly the legal append class — so it is merged directly with an
+O(len(delta)) check (``_try_pure_append``); every other shape falls through
+to the full validation above. The fast path only accelerates: it accepts
+nothing the full check would reject, and ``guarded_delta_reducer`` threads
+its index through writes (an append-only fold costs O(N + K) instead of
+O(N*W)) — both pinned by tests.
 """
 
 from __future__ import annotations
@@ -212,17 +224,82 @@ def validate_rebuild(before: Sequence[AnyMessage], after: Sequence[AnyMessage]) 
         prev = j
 
 
+def _try_pure_append(
+    current: Any,
+    delta: Any,
+    cached: tuple[list[AnyMessage], set[str]] | None = None,
+) -> tuple[list[AnyMessage], set[str]] | None:
+    """Fast path: merge a write that is provably a pure tail append.
+
+    Classification: the write carries no ``RemoveMessage`` and none of its
+    ids is present in ``current``. Such a write can only lengthen the list
+    at the tail — survivors keep their index and their content by
+    construction, the new messages form the trailing suffix by construction
+    — which is exactly the legal append class, so the full diff check is
+    skipped and the merge is built directly, in ``add_messages``-equivalent
+    form: same coercion chain, and a duplicate id inside one write keeps its
+    last value at the position of its first occurrence (``add_messages``
+    replaces the earlier entry in place). Any other shape returns ``None``
+    and is judged by the full diff validation.
+
+    ``cached`` is the ``(messages, ids)`` pair a previous call returned for
+    this same list; a fold threads it through writes instead of rescanning
+    the history. Returns ``(merged, ids)``, where ``ids`` indexes ``merged``
+    for the next write.
+    """
+    if current is None or delta is None:
+        return None  # degenerate input — preserve add_messages' ValueError contract
+    delta_msgs = _coerce(delta)
+    if any(isinstance(m, RemoveMessage) for m in delta_msgs):
+        return None
+    delta_ids: list[str] = []
+    for m in delta_msgs:
+        if m.id is None:
+            return None  # missing ids get fresh UUIDs in place — slow path owns that
+        delta_ids.append(m.id)
+    current_msgs: list[AnyMessage]
+    current_ids: set[str]
+    if cached is None:
+        current_msgs = _coerce(current)
+        current_ids = set()
+        for m in current_msgs:
+            if m.id is None:
+                return None  # same in-place UUID assignment on the left side
+            current_ids.add(m.id)
+    else:
+        current_msgs, current_ids = cached
+    new_msgs: list[AnyMessage] = []
+    first_slot: dict[str, int] = {}
+    for m, mid in zip(delta_msgs, delta_ids, strict=True):
+        if mid in current_ids:
+            return None  # id already present — replace/remove shapes need the full check
+        first = first_slot.get(mid)
+        if first is None:
+            first_slot[mid] = len(new_msgs)
+            new_msgs.append(m)
+        else:
+            new_msgs[first] = m
+    merged = [*current_msgs, *new_msgs]
+    current_ids.update(first_slot)
+    return merged, current_ids
+
+
 def guarded_add_messages(current: Any, delta: Any) -> Any:
     """``add_messages`` + the append-only invariant check (see module docstring).
 
     Installed as the ``messages`` channel reducer; also used by the plugin
     state handle for working-copy merges. The check is skipped when
     ``current`` is itself a delta (hook-runner co-write merges) — a delta is
-    not a checkpoint and carries no invariant of its own.
+    not a checkpoint and carries no invariant of its own. A write that
+    classifies as a pure tail append is merged directly in O(len(delta));
+    every other write is merged and judged by the full diff check.
     """
-    merged: Any = add_messages(current, delta)
     if _is_delta(current):
-        return merged
+        return add_messages(current, delta)
+    fast = _try_pure_append(current, delta)
+    if fast is not None:
+        return fast[0]
+    merged: Any = add_messages(current, delta)
     before = _coerce(current)
     after = _coerce(merged)
     if _contains_remove_all(delta):
@@ -253,9 +330,25 @@ def guarded_delta_reducer(state: Any, writes: Sequence[Any]) -> Any:
     A write value is a list of message-likes, or a single message-like -
     only lists flatten (the same convention as ``_accumulate_delta`` and
     langgraph's ``_messages_delta_reducer``).
+
+    The pure-append classification and the id index it needs are threaded
+    across writes (B2 fix, task #3180), so an append-only fold costs
+    O(N + K) instead of rescanning the history per write. The cached index
+    and the marker flag are acceleration only — a slow-path write discards
+    both, so the outcome is exactly the per-write sequence above.
     """
     result: Any = state
+    cached: tuple[list[AnyMessage], set[str]] | None = None
+    markers = _is_delta(state)
     for write in writes:
         delta = write if isinstance(write, list) else [write]
+        if not markers:
+            fast = _try_pure_append(result, delta, cached)
+            if fast is not None:
+                result = fast[0]
+                cached = fast  # fast IS the (messages, ids) index for the next write
+                continue
         result = guarded_add_messages(result, delta)
+        cached = None
+        markers = _is_delta(result)
     return result
