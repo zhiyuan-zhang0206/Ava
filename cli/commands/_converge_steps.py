@@ -279,6 +279,17 @@ def _migrate_host_config_to_env(ctx: ConvergeCtx) -> None:
     runtime_config.migrate_primary_gateway_url_key(ctx.ava_home / ".env")
 
 
+def _parses_as_int(value: str) -> bool:
+    """Mirror of the derivation's own parse (`int()` in
+    `env_registry.backfill_missing_health_ports`), so this step can name the
+    values that parse skips as outliers (#2974)."""
+    try:
+        int(value)
+    except ValueError:
+        return False
+    return True
+
+
 def _backfill_health_port_keys_step(ctx: ConvergeCtx) -> None:
     """Backfill missing AVA_*_HEALTH_PORT keys into a block-style unit's .env.
 
@@ -300,7 +311,9 @@ def _backfill_health_port_keys_step(ctx: ConvergeCtx) -> None:
     quotes, `int()` rejected it downstream, and the whole backfill was silently
     suppressed (#2704). A value the parser cannot decode makes this run write
     nothing at all (never mis-write) and is reported on stderr instead of being
-    silently dropped.
+    silently dropped. A decodable but non-numeric value can never solve to a
+    block base: the derivation skips it as an outlier, and whenever one is
+    present the run names it on stderr with the derivation's outcome (#2974).
     """
     from io import StringIO
 
@@ -340,6 +353,23 @@ def _backfill_health_port_keys_step(ctx: ConvergeCtx) -> None:
         )
         return
     missing = backfill_missing_health_ports(existing)
+    ignored = sorted(
+        f"{key}={value!r}" for key, value in existing.items() if not _parses_as_int(value)
+    )
+    if ignored:
+        # The derivation skips a non-numeric value as an outlier (#2974); the
+        # no-op it can cause was silent, so name the ignored value(s), their
+        # source, and whether a block was still derived from the others.
+        outcome = (
+            "no block derived from the decoded values; nothing backfilled"
+            if not missing
+            else "the block is derived from the remaining values"
+        )
+        print(
+            "  · health-port backfill: ignoring non-numeric value(s) "
+            f"{', '.join(ignored)} (source: {env_path}) — {outcome}",
+            file=sys.stderr,
+        )
     if not missing:
         return
     upsert_env(env_path, missing, audit_site="converge_health_port_backfill")
