@@ -3,8 +3,9 @@
 
 The repository declares its merge gate in ``.trunk/trunk.yaml`` (queue testing
 gate) plus the admission gate ruled in P2 (three suite aggregators +
-``qa-approved-gate``); GitHub stores required checks and workflow activation
-outside git. This read-only audit makes that external state observable and
+``qa-approved-gate``), amended 2026-09-13 (task #3207) with the docs-only gate
+``doc lints (pre-commit family)``; GitHub stores required checks and workflow
+activation outside git. This read-only audit makes that external state observable and
 distinguishes drift from an API/tool failure.
 """
 
@@ -24,15 +25,18 @@ import yaml
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _TRUNK_FILE = _REPO_ROOT / ".trunk" / "trunk.yaml"
 # P2 ruling (2026-09-02): the branch-protection admission gate is the three
-# suite aggregators plus the qa-approved label gate. The queue TESTING gate
-# lives in trunk.yaml (13 statuses) and is audited separately by
-# trunk_gate_findings().
+# suite aggregators plus the qa-approved label gate. Amended 2026-09-13
+# (task #3207): the docs-only gate "doc lints (pre-commit family)" joined
+# the admission set once the docs-only classify gap was closed by #2302 and
+# the check was promoted to a required context. The queue TESTING gate lives
+# in trunk.yaml (13 statuses) and is audited separately by trunk_gate_findings().
 _ADMISSION_CHECKS = frozenset(
     {
         "backend (pytest + pyright)",
         "frontend (eslint + tsc + vitest)",
         "e2e (Playwright happy path)",
         "qa-approved-gate",
+        "doc lints (pre-commit family)",
     }
 )
 _MATRIX_TEMPLATE = re.compile(r"\$\{\{ matrix")
