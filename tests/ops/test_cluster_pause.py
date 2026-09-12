@@ -1,3 +1,4 @@
+# pyright: reportUnknownArgumentType=warning, reportUnknownLambdaType=warning
 """Native pause preserves dependencies and pending work until service shutdown.
 
 Use real PostgreSQL and a private admission journal. The recording backend
@@ -274,3 +275,66 @@ def test_local_resume_refusal_is_the_verdict_the_unpause_raises(
     with pytest.raises(RuntimeError) as raised:
         cluster_pause.unpause_local_cluster()
     assert str(raised.value) == refusal
+
+
+def test_release_local_db_pools_dials_the_host_and_releases_the_ops_pool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The stop's last step: host pools over loopback, then this daemon's own."""
+    from types import SimpleNamespace
+
+    from services.agent_ops import daemon as ops_daemon
+    from shared import pool_release
+
+    posted: list[str] = []
+
+    def _post(url: str, **_kwargs: object) -> SimpleNamespace:
+        posted.append(url)
+        return SimpleNamespace(
+            raise_for_status=lambda: None,
+            json=lambda: {"released": {"workload": 2, "control": 1}},
+        )
+
+    released_pools: list[object] = []
+
+    def _release_idle_sync(pool: object) -> int:
+        released_pools.append(pool)
+        return 3
+
+    fake_pool = object()
+    monkeypatch.setattr(cluster_pause, "http_dial", SimpleNamespace(post=_post))
+    monkeypatch.setattr(cluster_pause, "health_port", lambda _name: 1234)
+    monkeypatch.setattr(ops_daemon, "_db_pool", fake_pool)
+    monkeypatch.setattr(pool_release, "release_idle_sync", _release_idle_sync)
+
+    released = cluster_pause.release_local_db_pools()
+
+    assert posted == ["http://127.0.0.1:1234/release-db-pools"]
+    assert released == {"host": {"workload": 2, "control": 1}, "ops": 3}
+    assert released_pools == [fake_pool]
+
+
+def test_release_local_db_pools_reports_failures_without_raising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both arms are best-effort: the stop must complete on either failure."""
+    from types import SimpleNamespace
+
+    from services.agent_ops import daemon as ops_daemon
+    from shared import pool_release
+
+    def _refused(_url: str, **_kwargs: object) -> object:
+        raise RuntimeError("connection refused")
+
+    def _boom(_pool: object) -> int:
+        raise RuntimeError("pool release exploded")
+
+    monkeypatch.setattr(cluster_pause, "http_dial", SimpleNamespace(post=_refused))
+    monkeypatch.setattr(cluster_pause, "health_port", lambda _name: 1234)
+    monkeypatch.setattr(ops_daemon, "_db_pool", object())
+    monkeypatch.setattr(pool_release, "release_idle_sync", _boom)
+
+    released = cluster_pause.release_local_db_pools()
+
+    assert released["host_error"] == "connection refused"
+    assert released["ops_error"] == "pool release exploded"

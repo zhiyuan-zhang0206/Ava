@@ -119,5 +119,7 @@ def _open_db_pool() -> ConnectionPool[psycopg.Connection[TupleRow]]:
     # 'the connection is closed' (Task #1027). The check discards the dead conn
     # and hands out a fresh one.
     return shared.db.pool(
-        max_size=max(2, settings.services.ops_concurrency + 2), check_connections=True
+        min_size=0,  # an idle daemon holds no client connection; borrows open lazily
+        max_size=max(2, settings.services.ops_concurrency + 2),
+        check_connections=True,
     )

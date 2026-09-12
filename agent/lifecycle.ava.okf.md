@@ -31,4 +31,4 @@ retaining durable agent data. Impersonation is an independent identity protocol.
 - [[process-lifecycle/reentry-paths.ava.okf.md]] — restart and resurrection
 - [[startup/admission.ava.okf.md]] — ownership fencing
 - [[sessions.ava.okf.md]] — persistent shell resources
-- [[shared/maintenance.ava.okf.md]] — cluster pause/stop
+- [[shared/maintenance/maintenance.ava.okf.md]] — cluster pause/stop

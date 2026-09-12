@@ -13,6 +13,7 @@ from collections.abc import Iterator
 import psycopg
 import pytest
 
+from shared import db_transaction
 from shared.cluster_lock import acquire_update_lock, release_update_lock
 from shared.last_update import (
     UpdateOutcome,
@@ -454,3 +455,30 @@ def test_a_new_attempt_drops_the_previous_observer_note() -> None:
     record = read_last_update()
     assert record is not None
     assert record.observed_by is None
+
+
+def test_finish_update_lands_when_the_pooler_is_down(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The outcome record must land even when the pooler is what the rollout's
+    data-plane stop just took down (issue #2307): the record dials direct and
+    reports the run instead of going silent exactly when it matters most."""
+    import shared.db_connections
+    from shared.config import settings
+    from tests._containers import _free_port
+
+    direct_url = settings.data_plane.db_url
+    begin_update(target_sha="a" * 40, origin="pooler-down-test", holder="h:1")
+    monkeypatch.setattr(
+        settings.data_plane, "db_url", f"postgresql://ava@127.0.0.1:{_free_port()}/ava"
+    )
+    monkeypatch.setattr(shared.db_connections, "direct_db_url", lambda: direct_url)
+
+    with pytest.raises(psycopg.OperationalError), db_transaction.write_transaction():
+        pass  # the pooled path is dead; the control proves the fixture bites
+
+    finish_update(UpdateOutcome.CLEAN)
+    row = db_conn.execute("SELECT outcome, ended_at FROM cluster_last_update WHERE id=1").fetchone()
+    assert row is not None
+    assert row[0] == "clean"
+    assert row[1] is not None

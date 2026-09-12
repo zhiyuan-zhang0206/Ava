@@ -27,12 +27,13 @@ from cli.commands._maintenance_stop_report import (
     capture_survivor,
     live_identities,
 )
-from cli.commands._repo import build_services, session_name
+from cli.commands._repo import _repo_root, build_services, session_name
 from cli.commands._retired_services import stop_retired_services
 from ops import pty_close_notices
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS, pause_agents
 from ops.agent_pause_probe import ops_quiescent
 from shared import maintenance, start_serving
+from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from shared.lifecycle_status import begin, finish, phase, status_path
 from shared.machine import MachineRoles, machine_name, machine_role
 from shared.paths import run_dir
@@ -185,21 +186,151 @@ def _stop_extras(deadline: float) -> None:
     stop_lgtm_services(timeout_s=remaining(deadline))
 
 
+# The compensating `ava start` gets its own budget: the failed stop already spent
+# the shared deadline, and this restore is what the operator is waiting on. 600s
+# matches `UV_SYNC_TIMEOUT_S`, the longest single step a start can legitimately
+# run on its own (a source-integrity `uv sync`), so a compensation cut off at
+# this bound is wedged, not slow. Deliberately a local constant rather than a
+# `PAUSE_TIMEOUT_SECONDS` reuse: the two bound different jobs.
+_COMPENSATION_TIMEOUT_S = 600.0
+
+
+def _compensate_services_restore(preserved: frozenset[str]) -> bool:
+    """Restore this unit after a failed data-plane stop (issue #2307).
+
+    The 2026-09-12 incident: the services phase stopped every service, then the
+    data-plane stop could not complete — a pooler waiting for the paused
+    runners' client connections — and the unit stayed dark until an operator
+    brought it back by hand. A fail-before-stop cannot close this shape: the
+    failures that reach here happen inside the data-plane stop (a hang is only
+    observable by attempting the stop), so the only compensation left is
+    afterwards. It is the operator's own recovery, a plain `ava start`, run
+    automatically and loudly: `ensure_pgbouncer` reads the half-shut pooler as
+    missing its reachable listener and restarts it fresh (the degraded-restart
+    branch), and the services stopped above come back up.
+
+    `--persist-services` marks the child as an internal start: it must not
+    rewrite the operator's durable `--disable-service` marker, and under a live
+    update lease it may run while deferring credential mutation to the
+    orchestration — the same contract as the rollout's own fresh `ava start`.
+    The preserved sessions ride through as transient skips: they were
+    deliberately left running and must not be bounced.
+
+    Returns True only when the child exited 0, its readiness gate verifying the
+    launched services. Exit `SERVICES_NOT_READY_EXIT_CODE` means the unit is up
+    but incomplete; every other outcome — another exit code, a timeout, failure
+    to launch — counts as not restored. Each outcome is printed here; the
+    caller folds the verdict into the stop report.
+    """
+    repo = _repo_root()
+    cmd = [str(repo / ".venv" / "bin" / "ava"), "start", "--persist-services"]
+    for session in sorted(preserved):
+        cmd += ["--disable-service", session]
+    print(
+        "  · data-plane stop failed after this unit's services stopped — restoring "
+        "them with `ava start`",
+        flush=True,
+    )
+    try:
+        rc = subprocess.run(cmd, cwd=repo, check=False, timeout=_COMPENSATION_TIMEOUT_S).returncode
+    except subprocess.TimeoutExpired:
+        print(
+            f"  ✗ compensating `ava start` did not finish within "
+            f"{int(_COMPENSATION_TIMEOUT_S)}s; this unit may still be down "
+            "(retry `ava start`)",
+            file=sys.stderr,
+            flush=True,
+        )
+        return False
+    except OSError as exc:
+        print(
+            f"  ✗ compensating `ava start` could not be launched: {exc}; this unit "
+            "may still be down (retry `ava start`)",
+            file=sys.stderr,
+            flush=True,
+        )
+        return False
+    if rc == 0:
+        print("  ✓ compensating `ava start` restored this unit's services", flush=True)
+        return True
+    if rc == SERVICES_NOT_READY_EXIT_CODE:
+        print(
+            "  ⚠ compensating `ava start` launched this unit, but at least one service "
+            "did not pass its readiness probe (exit 4); retrying `ava start` is "
+            "idempotent",
+            file=sys.stderr,
+            flush=True,
+        )
+        return False
+    print(
+        f"  ✗ compensating `ava start` failed (exit {rc}); this unit may still be down "
+        "(retry `ava start`)",
+        file=sys.stderr,
+        flush=True,
+    )
+    return False
+
+
+def _compensate_data_plane_failure(
+    phases: list[tuple[str, float]], *, data_plane_stopped: bool, preserved: frozenset[str]
+) -> bool | None:
+    """Run the services restore when (and only when) the data-plane phase failed.
+
+    `_timed_phase` appends its accounting entry even when a phase fails, so a
+    "data-plane" entry the phase did not complete means the data-plane phase
+    itself failed (issue #2307). The services phase before it already stopped the
+    sessions it selects, and the data plane is half stopped — the dark-cluster
+    shape the compensation closes. A failure before the phase cannot present this
+    way, and a failure after it (`_mark_stopped`) is a stop whose destructive
+    work is already done: both stay report-only. Returns the `compensated`
+    verdict for the stop report; None when nothing was attempted.
+    """
+    if data_plane_stopped or "data-plane" not in {label for label, _ in phases}:
+        return None
+    try:
+        return _compensate_services_restore(preserved)
+    except Exception as fault:
+        # The restore is best-effort; the report and the journal must survive it.
+        print(
+            f"  ✗ compensating `ava start` raised {type(fault).__name__}: {fault}",
+            file=sys.stderr,
+        )
+        return False
+
+
 def _report_incomplete(
-    exc: BaseException, phases: list[tuple[str, float]], *, owns_journal: bool
+    exc: BaseException,
+    phases: list[tuple[str, float]],
+    *,
+    owns_journal: bool,
+    compensated: bool | None = None,
 ) -> None:
     """Print the stop's real failure with its per-phase budget accounting and
     close the lifecycle journal when this stop owns it.
 
     The journal record carries the structured evidence too: the failing stage
     and the surviving-process inventory a `StopIncompleteError` collected, so the
-    diagnosis survives the process that printed it (issue #2162).
+    diagnosis survives the process that printed it (issue #2162). `compensated`
+    records the outcome of the services restore (issue #2307): True restored,
+    False attempted without a verified restore, None not attempted.
     """
     timing = "; ".join(f"{label} {elapsed:.1f}s" for label, elapsed in phases)
+    if compensated is True:
+        outcome = (
+            "A compensating `ava start` restored this unit's services before this "
+            "report; retry the command. "
+        )
+    elif compensated is False:
+        outcome = (
+            "The compensating `ava start` did not verify a complete restore; run "
+            "`ava start`, then retry the command. "
+        )
+    else:
+        outcome = "Retry the command, or use ava start to resume. "
     print(
         f"Pause/stop incomplete; resources were not force-killed: {exc}. "
         f"phases: {timing or 'before the first phase'}. "
-        f"Retry the command, or use ava start to resume. "
+        f"{outcome}"
         f"Status journal: {status_path()}.",
         file=sys.stderr,
     )
@@ -211,6 +342,8 @@ def _report_incomplete(
             extra["stage"] = stage
         if survivors:
             extra["survivors"] = survivors
+        if compensated is not None:
+            extra["compensated"] = compensated
         finish(1, error=f"{type(exc).__name__}: {exc}", extra=extra)
 
 
@@ -304,6 +437,7 @@ def stop(
     # shared budget it consumed, so the operator sees WHERE the budget went
     # (agent drain vs services vs terminals) — never a bare timeout (#2045).
     phases: list[tuple[str, float]] = []
+    data_plane_stopped = False
 
     try:
         _timed_phase(phases, "retired", lambda: stop_retired_services(remaining(deadline)))
@@ -342,9 +476,17 @@ def stop(
             _timed_phase(
                 phases, "data-plane", lambda: stop_data_plane(remaining(deadline), save=True)
             )
+            data_plane_stopped = True
         _mark_stopped(current.holder, current.acquired_at)
     except (RuntimeError, TimeoutError, OSError, subprocess.TimeoutExpired) as exc:
-        _report_incomplete(exc, phases, owns_journal=owns_journal)
+        _report_incomplete(
+            exc,
+            phases,
+            owns_journal=owns_journal,
+            compensated=_compensate_data_plane_failure(
+                phases, data_plane_stopped=data_plane_stopped, preserved=preserved
+            ),
+        )
         return 1
     if owns_journal:
         finish(0)

@@ -18,6 +18,7 @@ from cli.commands._pause_resume import resume_after_start
 from cli.parsers import build_parser
 from ops import agent_pause
 from shared import maintenance, pause_owner, start_serving
+from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from shared.maintenance_state import MaintenanceHold
 from shared.session_backend import PtySessionBackend
 from tests.agent.test_maintenance import WHEN
@@ -335,3 +336,235 @@ def test_explicit_force_stops_host_and_preserves_only_pause_terminals(
         assert not maintenance.held(), "force must not invent a durable flush receipt"
     finally:
         terminal.kill_session(name)
+
+
+# ── services restore after a data-plane stop failure (issue #2307) ────────────
+
+
+def _restore_spy(monkeypatch: pytest.MonkeyPatch) -> list[frozenset[str]]:
+    """Record every `_compensate_services_restore` call, reporting success."""
+    calls: list[frozenset[str]] = []
+    monkeypatch.setattr(
+        command,
+        "_compensate_services_restore",
+        lambda preserved: calls.append(preserved) or True,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    return calls
+
+
+def _stop_with_gateway_data_plane(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A gateway stop whose phases are real no-ops except what a test patches."""
+    dependencies(monkeypatch)
+    monkeypatch.setattr(command, "machine_role", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(command, "stop_retired_services", lambda _timeout: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        command,
+        "stop_services",
+        lambda _timeout, **_kw: None,  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+
+@pytest.mark.parametrize(
+    ("phases", "data_plane_stopped", "expected_calls"),
+    [
+        ([("services", 1.0), ("data-plane", 2.0)], False, True),
+        ([("services", 1.0), ("data-plane", 2.0)], True, False),
+        ([("services", 1.0)], False, False),
+    ],
+)
+def test_compensation_covers_only_the_failed_data_plane_phase(
+    monkeypatch: pytest.MonkeyPatch,
+    phases: list[tuple[str, float]],
+    data_plane_stopped: bool,
+    expected_calls: bool,
+) -> None:
+    """The decision seam: compensate only when the data-plane phase was entered and
+    did not complete — never a failure before it (data plane still up) or after it
+    (the stop already did its destructive work)."""
+    calls = _restore_spy(monkeypatch)
+    verdict = command._compensate_data_plane_failure(
+        phases, data_plane_stopped=data_plane_stopped, preserved=frozenset({"worker"})
+    )
+    if expected_calls:
+        assert calls == [frozenset({"worker"})]
+        assert verdict is True
+    else:
+        assert calls == []
+        assert verdict is None
+
+
+def test_compensation_fault_does_not_mask_the_stop_report(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The restore is best-effort: a fault inside it is reported as not restored
+    instead of escaping the stop's failure report."""
+
+    def _explode(_preserved: frozenset[str]) -> bool:
+        raise RuntimeError("restore blew up")
+
+    monkeypatch.setattr(command, "_compensate_services_restore", _explode)
+    verdict = command._compensate_data_plane_failure(
+        [("data-plane", 1.0)], data_plane_stopped=False, preserved=frozenset()
+    )
+    assert verdict is False
+    assert "restore blew up" in capsys.readouterr().err
+
+
+def test_stop_compensates_after_a_data_plane_failure(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The 2026-09-12 shape through the real stop() flow: the services phase ran,
+    the data-plane phase failed, and the unit is restored instead of left dark.
+    The preserved sessions ride through to the child as transient skips."""
+    _stop_with_gateway_data_plane(monkeypatch)
+    calls = _restore_spy(monkeypatch)
+
+    def _data_plane_stop(*_args: object, **_kw: object) -> None:
+        raise RuntimeError("maintenance kept its hold; processes did not exit: [2465]")
+
+    monkeypatch.setattr(command, "stop_data_plane", _data_plane_stop)
+
+    rc = command.stop(
+        require_confirmation=False,
+        keep_infra=False,
+        preserve_sessions=frozenset({"worker"}),
+        keep_browser=True,
+        keep_terminals=True,
+        announce=False,
+        teardown_extras=False,
+        timeout=1,
+    )
+
+    assert rc == 1
+    assert calls == [frozenset({"worker", "browser"})]
+    err = capsys.readouterr().err
+    assert "restored this unit's services before this report" in err
+
+
+def test_stop_does_not_compensate_when_the_data_plane_already_stopped(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A failure after the data-plane phase completed (`_mark_stopped`) keeps the
+    report-only behavior: the stop's destructive work is done, and a restore would
+    reverse a finished stop."""
+    _stop_with_gateway_data_plane(monkeypatch)
+    calls = _restore_spy(monkeypatch)
+    monkeypatch.setattr(command, "stop_data_plane", lambda _timeout, **_kw: [])  # pyright: ignore[reportUnknownArgumentType]
+
+    def _mark_fails(*_args: object, **_kw: object) -> None:
+        raise RuntimeError("held maintenance generation changed")
+
+    monkeypatch.setattr(command, "_mark_stopped", _mark_fails)
+
+    rc = command.stop(
+        require_confirmation=False,
+        keep_infra=False,
+        preserve_sessions=frozenset({"worker"}),
+        keep_browser=True,
+        keep_terminals=True,
+        announce=False,
+        teardown_extras=False,
+        timeout=1,
+    )
+
+    assert rc == 1
+    assert calls == []
+    assert "Retry the command, or use ava start to resume." in capsys.readouterr().err
+
+
+def _fake_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    (repo / ".venv" / "bin").mkdir(parents=True)
+    (repo / ".venv" / "bin" / "ava").touch()
+    return repo
+
+
+def test_services_restore_runs_the_internal_start_with_preserved_skips(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The child is exactly the internal start: `--persist-services` (never an
+    operator marker rewrite), the preserved sessions as transient skips, bounded
+    with its own budget."""
+    repo = _fake_repo(tmp_path)
+    monkeypatch.setattr(command, "_repo_root", lambda: repo)
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    class _Completed:
+        returncode = 0
+
+    def _run(cmd: list[str], **kwargs: object) -> _Completed:
+        calls.append((cmd, dict(kwargs)))
+        return _Completed()
+
+    monkeypatch.setattr(command.subprocess, "run", _run)
+
+    assert command._compensate_services_restore(frozenset({"worker", "browser"})) is True
+    assert [cmd for cmd, _ in calls] == [
+        [
+            str(repo / ".venv" / "bin" / "ava"),
+            "start",
+            "--persist-services",
+            "--disable-service",
+            "browser",
+            "--disable-service",
+            "worker",
+        ]
+    ]
+    assert calls[0][1] == {
+        "cwd": repo,
+        "check": False,
+        "timeout": command._COMPENSATION_TIMEOUT_S,
+    }
+
+
+@pytest.mark.parametrize(
+    ("returncode", "expected", "message"),
+    [
+        (0, True, "restored this unit's services"),
+        (SERVICES_NOT_READY_EXIT_CODE, False, "did not pass its readiness probe"),
+        (7, False, "failed (exit 7)"),
+    ],
+)
+def test_services_restore_maps_the_child_exit_code(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    returncode: int,
+    expected: bool,
+    message: str,
+) -> None:
+    monkeypatch.setattr(command, "_repo_root", lambda: _fake_repo(tmp_path))
+    monkeypatch.setattr(
+        command.subprocess,
+        "run",
+        lambda *_a, **_kw: type("_R", (), {"returncode": returncode})(),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    assert command._compensate_services_restore(frozenset()) is expected
+    captured = capsys.readouterr()
+    assert message in captured.out + captured.err
+
+
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        ("timeout", "did not finish within 600s"),
+        ("oserror", "could not be launched"),
+    ],
+)
+def test_services_restore_reports_a_child_that_never_returns(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    error: str,
+    message: str,
+) -> None:
+    monkeypatch.setattr(command, "_repo_root", lambda: _fake_repo(tmp_path))
+
+    def _run(cmd: list[str], **kwargs: object) -> object:
+        if error == "timeout":
+            raise command.subprocess.TimeoutExpired(cmd, float(kwargs["timeout"]))  # pyright: ignore[reportArgumentType]
+        raise OSError("launch refused")
+
+    monkeypatch.setattr(command.subprocess, "run", _run)
+    assert command._compensate_services_restore(frozenset()) is False
+    assert message in capsys.readouterr().err

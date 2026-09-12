@@ -30,6 +30,7 @@ from ops.cluster import (
     unpause_local_cluster,
     update_check,
 )
+from ops.cluster_pause import release_local_db_pools
 from ops.cluster_status import agent_shell_sessions, capture_shell, kill_shell
 from ops.rpc_schemas import (
     AgentSkillViewResult,
@@ -114,7 +115,8 @@ def cluster_stop_op(
             else:
                 pause_owner.mark_resumed(deploy_holder, deploy_acquired_at)
             raise
-    return {}
+        released = release_local_db_pools()
+    return {"released": released}
 
 
 def _refuse_live_local_updater() -> None:

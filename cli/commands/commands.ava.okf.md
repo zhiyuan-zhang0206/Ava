@@ -46,12 +46,19 @@ Most command modules follow these two naming groups:
 `stop.py` exposes `pause` and `stop` through `_temporary_stop`; update and
 restart reuse its native drain. `ops.agent_pause` and `ops.agent_pause_probe`
 own prepare/drain and runtime capability checks; `_maintenance_stop` and
-`_maintenance_data_plane` verify resource exits. `_stop_extras` and
+`_maintenance_data_plane` verify resource exits — the data-plane stop signals
+the pooler with SIGINT (`WAIT_FOR_SERVERS`) and stops Postgres with
+`pg_ctl -m fast`, so neither waits on idle client connections a drained state
+cannot protect (issue #2307). When the data-plane phase still fails after the
+services phase stopped, `_temporary_stop` compensates with a bounded internal
+`ava start` (restoring the services and reviving a half-shut pooler) instead of
+leaving the unit dark; the stop report and journal record the outcome (issue
+#2307). `_stop_extras` and
 `_stop_supervised` stop home-owned Gate/helper/native LGTM. `_pause_resume`
 releases normal startup admission only after readiness.
 `cli/parsers/maintenance.py` retains explicit intermediate steps through
 `_maintenance.py` and `_maintenance_probe`.
-They reuse the [durable maintenance journal](../../shared/maintenance.ava.okf.md).
+They reuse the [durable maintenance journal](../../shared/maintenance/maintenance.ava.okf.md).
 See [the coordinated operator procedure](../../conventions/graceful-maintenance.md).
 
 Gateway data-plane startup passes separate URL identities to `_cluster_instance`:

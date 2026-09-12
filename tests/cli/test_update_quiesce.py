@@ -189,6 +189,7 @@ def test_local_and_remote_phase_a_share_one_deploy_generation(
     monkeypatch.setattr("ops.cluster.pause_local_cluster", drain)
     monkeypatch.setattr(ops_cluster, "pause_local_cluster", drain)
     monkeypatch.setattr(ops_cluster, "_require_executing_deploy", MagicMock())
+    monkeypatch.setattr(ops_cluster, "release_local_db_pools", dict)
     monkeypatch.setattr(_cli, "_quiesce_all_agents", MagicMock(return_value=True))
     monkeypatch.setattr(_cli, "_fan_out", fanout)
     acked, drained_all = _stop_the_world(
