@@ -222,18 +222,21 @@ jobs:
       - name: Check canonical Python lock sources (stdlib only)
         run: python3 scripts/lint_python_lock.py
 
-  doc-references:
-    # The same check as the `check-doc-references` pre-commit hook, run on
-    # EVERY PR — including docs-only diffs, where a reference is most likely to
-    # go stale: classify skips everything for docs-only changes, and the hook is
-    # otherwise carried only by the classify-gated backend-structure /
-    # merged-tree-structure jobs. Same classify-independent pattern as
-    # repo-language above and secret-scan below. Whole-tree by design, not
-    # changed-files: that is the hook's own contract (`pass_filenames: false` in
-    # .pre-commit-config.yaml — a link goes stale from a move anywhere, not just
-    # an edit to the doc citing it). Not a bare python3 job: the script imports
-    # cli.main to enumerate the argparse tree, so it needs the locked venv.
-    name: doc references (CLI flags + relative links)
+  doc-lints:
+    # The doc-lint family must fire on EVERY PR — including docs-only diffs,
+    # where a doc reference is most likely to go stale: classify skips the
+    # suites for docs-only changes, and these hooks are otherwise carried only
+    # by the classify-gated backend-structure / merged-tree-structure jobs.
+    # Same classify-independent pattern as repo-language above and secret-scan
+    # below. The family is every markdown/skill/OKF-facing hook that is
+    # venv-only, node-free, seconds-fast: doc references, narrative facts,
+    # doc symbols / anchors / roster, AGENTS.md + SKILL.md ceilings and
+    # descriptions, and the OKF graph (membership rationale: task #3222 / the
+    # PR description). Whole-tree by design, not changed-files: that is the
+    # hooks' own contract (`pass_filenames: false` in .pre-commit-config.yaml —
+    # a link goes stale from a move anywhere, not just an edit to the doc
+    # citing it). Not a bare python3 job: the hooks run from the locked venv.
+    name: doc lints (pre-commit family)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     # Draft PRs skip CI except Trunk test branches
@@ -251,8 +254,16 @@ jobs:
       - name: Install Python deps
         uses: ./.github/actions/uv-sync
 
-      - name: Check doc references (full tree)
-        run: .venv/bin/python scripts/check_doc_references.py
+      - name: Run the doc-lint family (--all-files)
+        # `pre-commit run` takes a single hook id, so run one per id and collect
+        # failures — every hook reports in one job run instead of stopping at
+        # the first failure.
+        run: |
+          status=0
+          for hook in check-doc-references check-narrative-facts lint-doc-symbols lint-doc-anchors lint-doc-roster lint-agents-md-size lint-skill-descriptions lint-skill-md-size lint-ava-okf; do
+            uv run pre-commit run --all-files "$hook" || status=1
+          done
+          exit $status
 
   secret-scan:
     # Run independently of classify: a secret can be introduced by any file,
