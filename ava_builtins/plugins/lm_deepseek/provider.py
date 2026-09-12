@@ -210,9 +210,14 @@ register(
         # rates as v4-flash; adds still-image input (JPEG/PNG/GIF/WebP, no video/
         # audio) on every API surface, including the anthropic-compatible endpoint
         # Ava binds. Images bill as input tokens (<=384 per image) at v4-flash rates.
+        # Withdrawn from new selections 2026-09-10 (user order): the vision
+        # experiment is stopped. The entry stays registered so its facts, tuning,
+        # media matrix and final price remain; existing configurations keep
+        # working by resolving to `deepseek-v4-flash` before provider construction.
         "deepseek-v4-flash-vision-exp": ModelSpec(
             provider="deepseek",
-            spawnable=True,
+            spawnable=False,
+            unavailable_fallback="deepseek-v4-flash",
             context_window=1_000_000,
             max_output_tokens=384_000,
             # No vision-specific cutoff published; carries the v4 family's value.

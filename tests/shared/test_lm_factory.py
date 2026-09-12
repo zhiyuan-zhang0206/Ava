@@ -190,13 +190,17 @@ def test_missing_key_still_fails(env_file: Path, monkeypatch: pytest.MonkeyPatch
 
 
 def test_withdrawn_model_resolves_to_its_fallback_at_the_spawn_boundary(env_file: Path) -> None:
-    """A spawn that still names the withdrawn deepseek-v4-pro degrades to the
-    registered flash fallback instead of failing — both as the cluster default
-    and via a per-agent overlay (user order 2026-09-10)."""
+    """A spawn that still names a withdrawn deepseek model (v4-pro, vision-exp)
+    degrades to the registered flash fallback instead of failing — both as the
+    cluster default and via a per-agent overlay (user order 2026-09-10)."""
     env_file.write_text("DEEPSEEK_API_KEY=sk-file-value\n")
     assert validate_model_config(model="deepseek-v4-pro", config={}) == "deepseek-v4-flash"
     assert (
         validate_model_config(model=None, config={"llm_model": "deepseek-v4-pro"})
+        == "deepseek-v4-flash"
+    )
+    assert (
+        validate_model_config(model="deepseek-v4-flash-vision-exp", config={})
         == "deepseek-v4-flash"
     )
 
