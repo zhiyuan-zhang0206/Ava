@@ -50,6 +50,7 @@ from psycopg.rows import DictRow, dict_row
 from shared.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from shared.db import pool
 from shared.db_transaction import async_write_transaction
+from shared.delta_read_compat import reconstruct_delta_messages
 
 _log = logging.getLogger(__name__)
 
@@ -102,11 +103,16 @@ def load_checkpoint_messages(agent_id: int) -> list[BaseMessage]:
         # is exactly what this module is avoiding.
         with _checkpoint_read_connection(row_factory=dict_row) as conn:
             saver = PostgresSaver(conn=cast(Connection[DictRow], conn), serde=serde)
-            ckpt = saver.get(config)
+            tuple_ = saver.get_tuple(config)
+            if tuple_ is not None:
+                # Transition layer (tasks #3180/#3181): materialize a
+                # delta-written thread's messages before reading them.
+                reconstruct_delta_messages(saver, tuple_)
     except Exception as exc:
         raise CheckpointReadError(f"checkpoint read failed for agent {agent_id}") from exc
-    if not ckpt:
+    if tuple_ is None:
         return []
+    ckpt = tuple_.checkpoint
     # `channel_values` is a guaranteed Checkpoint key (always reconstructed by
     # the store), so index it. The `messages` channel, however, can legitimately
     # be absent: a just-spawned agent's latest committed checkpoint is the input
@@ -167,6 +173,33 @@ def _message_count_from_blob_header(blob_type: object, header: object) -> int:
     return _msgpack_array_length(bytes(cast(bytes, header)))
 
 
+def _is_delta_snapshot_blob(blob_type: object, header: object) -> bool:
+    """True when the messages version is a delta snapshot instead of a plain
+    array.
+
+    A snapshot-step checkpoint of a delta-written thread materializes its value
+    as a MessagePack extension (`_DeltaSnapshot`, tasks #3180/#3181) — the same
+    "value not directly readable" family as the no-blob case — so the count
+    path must reconstruct rather than parse a header.
+    """
+    if blob_type != "msgpack":
+        return False
+    # ext8/16/32 (0xc7-0xc9) or the fixext family (0xd4-0xd8): payloads up to
+    # 16 bytes pack as fixext — an emptied messages snapshot does (QA probe:
+    # `_DeltaSnapshot([])` -> first byte 0xd4), so both families are delta
+    # evidence, not a parse failure.
+    return bytes(cast(bytes, header))[:1] in (
+        b"\xc7",
+        b"\xc8",
+        b"\xc9",
+        b"\xd4",
+        b"\xd5",
+        b"\xd6",
+        b"\xd7",
+        b"\xd8",
+    )
+
+
 def load_checkpoint_message_count(agent_id: int) -> int:
     """Return the live checkpoint's messages length without loading the blob.
 
@@ -193,14 +226,38 @@ def load_checkpoint_message_count(agent_id: int) -> int:
                 " ORDER BY c.checkpoint_id DESC LIMIT 1",
                 (str(agent_id),),
             ).fetchone()
-        if row is None or row[0] is None:
+        if row is None:
             return 0
+        if row[0] is None:
+            # A delta-written thread stores no messages blob for its newest
+            # version — the value lives in the write chain (tasks #3180/#3181).
+            # Reconstruct and count; a vanilla thread that merely has nothing
+            # written yet reconstructs to nothing and still counts 0.
+            return _reconstructed_message_count(agent_id)
         blob_type, header = row
+        if _is_delta_snapshot_blob(blob_type, header):
+            return _reconstructed_message_count(agent_id)
         return _message_count_from_blob_header(blob_type, header)
     except Exception as exc:
         raise CheckpointReadError(
             f"checkpoint message count read failed for agent {agent_id}"
         ) from exc
+
+
+def _reconstructed_message_count(agent_id: int) -> int:
+    """Count a delta-written thread's messages via reconstruction (0 when not delta)."""
+    from langgraph.checkpoint.postgres import PostgresSaver
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+    config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
+    serde = JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
+    with _checkpoint_read_connection(row_factory=dict_row) as conn:
+        saver = PostgresSaver(conn=cast(Connection[DictRow], conn), serde=serde)
+        tuple_ = saver.get_tuple(config)
+        if tuple_ is None or not reconstruct_delta_messages(saver, tuple_):
+            return 0
+        messages = cast("list[Any]", tuple_.checkpoint["channel_values"].get("messages") or [])
+        return len(messages)
 
 
 def load_checkpoint_messages_segment(agent_id: int, checkpoint_id: str) -> list[BaseMessage]:
@@ -240,6 +297,8 @@ def load_checkpoint_messages_segment(agent_id: int, checkpoint_id: str) -> list[
                     },
                 }
             )
+            if checkpoint_tuple is not None:
+                reconstruct_delta_messages(saver, checkpoint_tuple)
     except Exception as exc:
         raise CheckpointReadError(
             f"compaction segment read failed for agent {agent_id} checkpoint {checkpoint_id}"
@@ -274,9 +333,11 @@ def load_checkpoint_messages_full(agent_id: int) -> list[BaseMessage]:
     try:
         with _checkpoint_read_connection(row_factory=dict_row) as conn:
             saver = PostgresSaver(conn=cast(Connection[DictRow], conn), serde=serde)
-            latest = saver.get(config)
-            if not latest:
+            latest_tuple = saver.get_tuple(config)
+            if latest_tuple is None:
                 return []
+            reconstruct_delta_messages(saver, latest_tuple)
+            latest = latest_tuple.checkpoint
             boundaries = cast(
                 list[dict[str, str]],
                 conn.execute(
@@ -302,6 +363,7 @@ def load_checkpoint_messages_full(agent_id: int) -> list[BaseMessage]:
                     }
                 )
                 if checkpoint_tuple is not None:
+                    reconstruct_delta_messages(saver, checkpoint_tuple)
                     segments.append(
                         checkpoint_tuple.checkpoint["channel_values"].get("messages", [])
                     )
@@ -375,6 +437,8 @@ def load_checkpoint_messages_by_trace(
                     "configurable": {**config["configurable"], "checkpoint_id": checkpoint_id},
                 }
             )
+            if ckpt is not None:
+                reconstruct_delta_messages(saver, ckpt)
     except Exception as exc:
         raise CheckpointReadError(
             f"checkpoint read by trace failed for agent {agent_id} trace {trace_id}"
