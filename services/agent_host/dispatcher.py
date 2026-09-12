@@ -56,6 +56,7 @@ from typing import Protocol, cast
 
 from agent._turn_progress import turn_progress_age_s, turn_progress_snapshot
 from services.agent_host.runtime import _active_turn_config_fingerprint
+from shared import maintenance
 from shared.hosted_db_wait import database_wait_snapshot
 from shared.log import logger
 from shared.stop_timing import CANCEL_UNWIND_TIMEOUT_S, CLOCK_READ_TIMEOUT_S
@@ -634,6 +635,15 @@ class InboundWakeDispatcher:
             return
         if self._stale_after_s is None:
             raise RuntimeError("hosted pending scan configured without stale_after_s")
+        if maintenance.in_stop_leg():
+            # The stop leg schedules nothing and cancels nothing: pending rows
+            # stay durable in the DB for the first scan after the start leg
+            # begins, and a stale turn here belongs to the operator's stop
+            # (which handles its own stragglers), not to a live host needing
+            # recovery. The start leg deliberately scans while the unit is
+            # still held — recovery may not wait for the hold to release,
+            # because pub/sub has no replay.
+            return
 
         # Inbox/DB timestamps describe accumulated work, not this turn. A
         # freshly resumed stream may have old pending rows until its next claim.

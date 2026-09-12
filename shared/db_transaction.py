@@ -12,7 +12,7 @@ _CT = TypeVar("_CT", bound=psycopg.AsyncConnection[Any])
 
 @contextmanager
 def write_transaction(
-    pool: ConnectionPool | None = None, *, timeout: float | None = None
+    pool: ConnectionPool | None = None, *, direct: bool = False, timeout: float | None = None
 ) -> Generator[psycopg.Connection, None, None]:
     """Open one transaction explicitly allowed to write.
 
@@ -20,11 +20,19 @@ def write_transaction(
     changed to default read-only. Declare this transaction writable as its first
     statement before DML, pinning the borrowed backend until the context commits
     or rolls back. Pool connections must not use autocommit.
+
+    `direct=True` dials the real Postgres instead of the pooler, for the
+    admin-plane tail writers that must still land when a maintenance stop has
+    just taken the pooled path down with it (the rollout's outcome record and
+    the deploy lease release/settle — issue #2307). It is only meaningful
+    without a `pool`, which owns its own dial.
     """
+    if direct and pool is not None:
+        raise ValueError("write_transaction(direct=True) cannot take a pool")
     if pool is None:
         from shared.db import connect
 
-        connection = connect()
+        connection = connect(direct=direct)
     else:
         connection = pool.connection(timeout=timeout)
     with connection as conn:

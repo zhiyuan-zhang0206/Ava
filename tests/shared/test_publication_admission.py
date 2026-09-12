@@ -21,7 +21,20 @@ from tests.shared.test_managed_writer_publication import pending, seed_current, 
 
 
 @pytest.mark.parametrize(
-    "mode", ["legacy", "pending", "valid_pending", "current", "corrupt", "empty", "missing"]
+    "mode",
+    [
+        "legacy",
+        "legacy_lapsed",
+        "pending",
+        "valid_pending",
+        "current",
+        "updating_live",
+        "updating_lapsed",
+        "updating_lapsed_pending",
+        "corrupt",
+        "empty",
+        "missing",
+    ],
 )
 async def test_sync_async_decisions_and_lock_interoperate(  # noqa: PLR0915 — one isolated schema and lock lifetime.
     db_conn: psycopg.Connection, mode: str
@@ -41,6 +54,25 @@ async def test_sync_async_decisions_and_lock_interoperate(  # noqa: PLR0915 — 
     current = seed_current(db_conn)
     if mode == "legacy":
         db_conn.execute("UPDATE deployment_state SET managed_writer_evidence=NULL")
+    elif mode in {"legacy_lapsed", "updating_live", "updating_lapsed", "updating_lapsed_pending"}:
+        # Lease liveness decides whether a non-stable phase still defers: a
+        # lapsed lease means the orchestration that set the phase is gone.
+        if mode == "legacy_lapsed":
+            db_conn.execute("UPDATE deployment_state SET managed_writer_evidence=NULL")
+        if mode == "updating_lapsed_pending":
+            # A durable pending publication survives lease expiry on purpose;
+            # only checked completion/recovery clears it.
+            begin_pending_publication(db_conn, pending(db_conn, current))
+        if mode == "updating_live":
+            db_conn.execute(
+                "UPDATE deployment_state SET phase='updating', holder='wsl:pid7', "
+                "expires_at=now() + interval '1 hour'"
+            )
+        else:
+            db_conn.execute(
+                "UPDATE deployment_state SET phase='updating', holder='wsl:pid7', "
+                "expires_at=now() - interval '1 hour'"
+            )
     elif mode in {"pending", "valid_pending"}:
         # A live operation before evidence adoption also freezes new births.
         proposal = pending(db_conn, current)
@@ -71,8 +103,12 @@ async def test_sync_async_decisions_and_lock_interoperate(  # noqa: PLR0915 — 
                 expected,
                 {
                     "legacy": LegacyProtocolZero,
+                    "legacy_lapsed": LegacyProtocolZero,
                     "pending": DeferredAdmission,
                     "valid_pending": DeferredAdmission,
+                    "updating_live": DeferredAdmission,
+                    "updating_lapsed": CurrentAdmission,
+                    "updating_lapsed_pending": DeferredAdmission,
                     "current": CurrentAdmission,
                 }[mode],
             )

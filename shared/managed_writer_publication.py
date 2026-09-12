@@ -49,7 +49,15 @@ class CurrentAdmission:
 
 AdmissionDecision = LegacyProtocolZero | DeferredAdmission | CurrentAdmission
 _ADMISSION_LOCK = "SELECT public.lock_runtime_publication_admission()"
-_ADMISSION_ROW = "SELECT managed_writer_evidence, phase FROM deployment_state WHERE id=1"
+# Lease liveness is read in the same statement and in Postgres' clock (the
+# consumers span machines): a non-stable phase only defers admission while the
+# deploy lease holding it there is live — the same judgement
+# `shared.cluster_lock.read_update_lease` makes.
+_ADMISSION_ROW = (
+    "SELECT managed_writer_evidence, phase, "
+    "(holder IS NOT NULL AND expires_at > now()) AS lease_live "
+    "FROM deployment_state WHERE id=1"
+)
 _UNIT_LOCK = "LOCK TABLE machine_units, machines IN SHARE MODE"
 _UNITS = "SELECT machine_name, home FROM machine_units ORDER BY machine_name, home"
 _MACHINES = "SELECT name FROM machines"
@@ -404,16 +412,25 @@ def require_current_publication(
 def _admission_state(row: tuple[object, ...] | None) -> WriterPublication | AdmissionDecision:
     if row is None:
         raise ManagedWriterBarrierError("deployment state is missing")
-    evidence, phase = row
+    evidence, phase, lease_live = row
+    # A non-stable phase defers admission only while the deploy lease that put
+    # it there is live. The lease is re-armed by the executing orchestration
+    # (`renew_update_lock`), so a lapsed one means that orchestration is gone —
+    # exactly the state `read_update_lease` already calls free, and the durable
+    # row alone must not freeze births cluster-wide indefinitely (2026-09-12
+    # incident, issue #2307). A durable `pending` publication below is
+    # deliberately different: it survives lease expiry and only checked
+    # completion/recovery may clear it (`begin_pending_publication`).
+    transitioning = phase != "stable" and bool(lease_live)
     if evidence is None:
         # SQL NULL is the migration's explicit never-enabled value, not a parse fallback.
-        return LegacyProtocolZero() if phase == "stable" else DeferredAdmission()
+        return DeferredAdmission() if transitioning else LegacyProtocolZero()
     state = WriterPublication.model_validate_json(json.dumps(evidence))
     if state.pending is not None:
         return DeferredAdmission()
     if state.current is None:
         raise ManagedWriterBarrierError("publication evidence has no current or pending record")
-    if phase != "stable":
+    if transitioning:
         return DeferredAdmission()
     return state
 

@@ -1654,3 +1654,30 @@ def test_the_exit_code_survives_the_hard_exit(tmp_path: Path) -> None:
         [sys.executable, "-c", script], capture_output=True, text=True, timeout=30, check=False
     )
     assert done.returncode == 1
+
+
+async def test_close_notice_flush_defers_while_quiesced(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stop-window unit keeps its undelivered records instead of borrowing a
+    pool the stop just released; the next start re-drives the flush."""
+    from services.agent_ops import close_notices
+    from shared import maintenance
+
+    flushed: list[object] = []
+    state = {"quiesced": True}
+    pool = object()
+
+    def _flush(flush_pool: object) -> int:
+        flushed.append(flush_pool)
+        return 0
+
+    monkeypatch.setattr(close_notices.pty_close_notices, "flush", _flush)
+    monkeypatch.setattr(maintenance, "quiesced", lambda: state["quiesced"])
+
+    await close_notices.deliver(pool)  # type: ignore[arg-type]
+    assert flushed == []
+
+    state["quiesced"] = False
+    await close_notices.deliver(pool)  # type: ignore[arg-type]
+    assert flushed == [pool]

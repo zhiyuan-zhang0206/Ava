@@ -37,4 +37,4 @@ Historical database rows and command payloads are retained. Runtime removal
 requires no destructive schema migration.
 
 Related: [[../lease.ava.okf.md]], [[../lifecycle.ava.okf.md]], and
-[[shared/maintenance.ava.okf.md]].
+[[shared/maintenance/maintenance.ava.okf.md]].

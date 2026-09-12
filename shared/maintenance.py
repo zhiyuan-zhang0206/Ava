@@ -36,6 +36,63 @@ def held() -> bool:
     return snapshot() is not None
 
 
+# The stop window's phases: the drain has landed, or the unit is mid-stop /
+# mid-start. `preparing`/`draining` stay live — an already-admitted turn may
+# still be counted down and must finish; `ready` is included so a resume's
+# last moments cannot race a background loop with the hold about to release.
+_QUIESCED_PHASES = frozenset({"drained", "stopping", "stopped", "starting", "ready"})
+
+
+def quiesced() -> bool:
+    """Whether this unit is inside its stop window (`drained` .. `ready`).
+
+    Background loops consult this before doing database work: while a unit is
+    being stopped, held stopped, or brought back up, ownership renewals, turn
+    scans, page reconciliation and pool borrows must wait — the window's whole
+    point is that the unit stops doing database work until `ava start` releases
+    the hold. `preparing`/`draining` read as NOT quiesced (in-flight
+    continuations must still run). An unreadable owner reads as quiesced: the
+    same refuse-new-work posture `snapshot` enforces by raising, held by
+    background loops instead of crashing them.
+    """
+    try:
+        current = snapshot()
+    except (RuntimeError, OSError):
+        return True
+    if current is None or current.maintenance is None:
+        return False
+    return current.maintenance.phase in _QUIESCED_PHASES
+
+
+# The stop leg of the maintenance window: drainage is complete and the unit has
+# not begun coming back up (`starting`). The host's turn scan reads this
+# narrower slice instead of the whole quiesced window: while the stop leg runs,
+# the operator's stop owns the agents and a scan would fight it, but from the
+# start leg on a booting host must drain its pending workset and restore parked
+# watcher intent — recovery may not wait for the hold to release, because
+# pub/sub has no replay (task #3227; tests/ava/test_hosted_watcher_recovery.py).
+_STOP_LEG_PHASES = frozenset({"drained", "stopping", "stopped"})
+
+
+def in_stop_leg() -> bool:
+    """Whether the unit is in its stop leg (`drained` .. `stopped`).
+
+    `quiesced()` is the wider no-database-work window (`drained` .. `ready`);
+    this is the narrower slice where agent work must not be touched at all:
+    the drain is complete and the start has not begun. An unreadable owner
+    reads as the stop leg — the same refuse-new-work posture `quiesced()`
+    takes. The start leg (`starting`/`ready`) reads False: a host booting into
+    a still-held unit must be able to scan its pending workset.
+    """
+    try:
+        current = snapshot()
+    except (RuntimeError, OSError):
+        return True
+    if current is None or current.maintenance is None:
+        return False
+    return current.maintenance.phase in _STOP_LEG_PHASES
+
+
 def require_released(action: str) -> None:
     if held():
         raise RuntimeError(

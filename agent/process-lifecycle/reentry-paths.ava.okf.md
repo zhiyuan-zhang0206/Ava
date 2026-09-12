@@ -33,4 +33,4 @@ accept different lifecycle states.
 | cluster `pause` / update | drains native controls | retained, resumable | retained |
 | full cluster `stop` | drains then stops host | retained, resumable | closed |
 
-Related: [[../lifecycle.ava.okf.md]] and [[shared/maintenance.ava.okf.md]].
+Related: [[../lifecycle.ava.okf.md]] and [[shared/maintenance/maintenance.ava.okf.md]].

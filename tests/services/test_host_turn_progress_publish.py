@@ -141,6 +141,59 @@ async def test_hung_progress_set_does_not_stop_repeated_ownership_renewal(
     assert all("turn-progress heartbeat publish exceeded" in record.message for record in warnings)
 
 
+async def test_beat_skips_ownership_renewal_while_quiesced(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Liveness beats continue across a stop window; lease renewals do not.
+
+    The leases lapse with their TTL while the unit is stopped, and the first
+    beat after resume refreshes every row this host still owns — a tracked
+    decision of the 2026-09-12 fix batch.
+    """
+    from shared import maintenance
+
+    calls: list[str] = []
+    state = {"quiesced": True}
+
+    class FakeHost:
+        async def renew_ownership(self) -> None:
+            calls.append("renew")
+
+    class FakeLiveness:
+        def beat(self) -> None:
+            calls.append("beat")
+
+    class FakeScheduler:
+        active_agents: frozenset[int] = frozenset()
+
+    async def _record_publish(_machine: str, _agents: frozenset[int]) -> None:
+        calls.append("publish")
+
+    monkeypatch.setattr(maintenance, "quiesced", lambda: state["quiesced"])
+    monkeypatch.setattr(host_daemon, "_publish_turn_progress_heartbeat", _record_publish)
+    monkeypatch.setattr(host_daemon, "_LIVENESS_BEAT_STEP_S", 0.01)
+
+    task = asyncio.create_task(
+        host_daemon._beat_forever(
+            cast(host_daemon.Liveness, FakeLiveness()),
+            cast(host_daemon.AgentHost, FakeHost()),
+            cast(host_daemon.TurnScheduler, FakeScheduler()),
+            "runner-a",
+        )
+    )
+    try:
+        await asyncio.sleep(0.05)
+        assert "renew" not in calls
+        assert calls.count("beat") >= 2
+        state["quiesced"] = False
+        await asyncio.sleep(0.05)
+        assert "renew" in calls
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+
 async def test_progress_publish_propagates_cancellation_without_failure_warning(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,

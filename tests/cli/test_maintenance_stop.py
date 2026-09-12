@@ -20,6 +20,7 @@ import pytest
 
 from cli.commands import _maintenance_data_plane as plane
 from cli.commands import _maintenance_stop as stop
+from cli.commands import _pgbouncer as pb
 from shared.config import settings
 from shared.session_backend import PosixProcSessionBackend, PtySessionBackend
 from shared.session_record import SessionRecord, pid_starttime_ticks
@@ -435,6 +436,30 @@ def test_remote_plane_refuses_without_any_signal(
         stop.stop_data_plane(1)
 
 
+def test_pooler_stop_uses_wait_for_servers_signal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SIGINT is PgBouncer's safe shutdown (>=1.23: disconnect clients, wait only
+    for in-flight server transactions). SIGTERM is the super-safe variant that
+    waits for every client to disconnect — the 2026-09-12 hang under paused
+    runners whose pooled clients never leave (issue #2307)."""
+    identity = stop.OwnedProcess.capture(psutil.Process(os.getpid()))
+    sent: list[int] = []
+
+    class _RecordingProcess:
+        def __init__(self, *_args: object, **_kwargs: object) -> None: ...
+
+        def send_signal(self, sig: int) -> None:
+            sent.append(sig)
+
+    class _PsutilProxy:
+        Process = _RecordingProcess
+
+    monkeypatch.setattr(plane, "psutil", _PsutilProxy)
+    plane._signal(identity)
+    assert sent == [signal.SIGINT]
+
+
 def test_recycled_pooler_pid_is_not_stopped(local_plane: None, home: Path) -> None:
     path = home / "pgbouncer/pgbouncer.pid"
     path.parent.mkdir()
@@ -525,9 +550,12 @@ def test_foreign_redis_directory_refuses_before_local_signals(
             assert client.ping()  # pyright: ignore[reportUnknownMemberType] — redis stubs
 
 
-def test_real_postgres_smart_stop_waits_for_open_client(
+def test_real_postgres_fast_stop_disconnects_open_client(
     local_plane: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """-m fast completes despite an idle client — the smart-stop twin of the
+    pooler hang (issue #2307): the drain already proved no agent work is live,
+    so waiting for an idle session to leave is not a safety condition."""
     import psycopg
 
     from shared.pg_tools import pg_tool, throwaway_postgres
@@ -545,16 +573,12 @@ def test_real_postgres_smart_stop_waits_for_open_client(
             assert row is not None
             data = Path(row[0])
             monkeypatch.setattr(plane.instance, "_pg_data_dir", lambda: data)
-            pid = int((data / "postmaster.pid").read_text().splitlines()[0])
-            with pytest.raises(TimeoutError):
-                stop.stop_data_plane(1)
-            assert client.execute("SELECT 1").fetchone() == (1,)
-            assert psutil.pid_exists(pid)
-        # The first SMART request takes effect when the existing client leaves.
-        deadline = time.monotonic() + 4
-        while (data / "postmaster.pid").exists() and time.monotonic() < deadline:
-            time.sleep(0.02)
-        assert not (data / "postmaster.pid").exists()
+            assert stop.stop_data_plane(10) == ["postgres"]
+            assert not (data / "postmaster.pid").exists()
+            # The fast request disconnected the idle client rather than waiting
+            # for it: the client's next use finds the backend gone.
+            with pytest.raises(psycopg.OperationalError):
+                client.execute("SELECT 1")
         assert stop.stop_data_plane(1) == []
 
 
@@ -627,7 +651,7 @@ def test_pg_ctl_failure_is_not_reported_as_stopped(
         context.setattr(plane.subprocess, "run", failed)
         with pytest.raises(RuntimeError, match="exit 7"):
             stop.stop_data_plane(1)
-    assert len(calls) == 1 and "smart" in calls[0] and "fast" not in calls[0]
+    assert len(calls) == 1 and "fast" in calls[0] and "smart" not in calls[0]
     assert proc.poll() is None
 
 
@@ -661,6 +685,57 @@ def test_real_pgbouncer_normal_exit_and_identity_cleanup(
         assert stop.stop_data_plane(3) == ["pgbouncer"]
         assert not identity.live()
         assert not (directory / "pgbouncer.pid").exists()
+    finally:
+        if identity.live():
+            psutil.Process(pid).kill()  # Exact test-owned process only, after assertions.
+
+
+def test_real_pgbouncer_stop_does_not_wait_for_idle_client(
+    local_plane: None, home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The 2026-09-12 incident shape: an idle connected client must not hold the
+    pooler stop open.
+
+    PgBouncer >=1.23 runs SIGTERM as SHUTDOWN WAIT_FOR_CLIENTS: with any
+    connected client (here an idle admin console) it waits for every client to
+    disconnect, so a stop under paused runners can only burn its deadline. The
+    safe-shutdown SIGINT disconnects clients and waits only for in-flight
+    server connections; it exits in well under a second."""
+    import shutil
+
+    import psycopg
+
+    from tests._containers import _free_port, _wait_port
+
+    binary = plane.pooler.pgbouncer_bin()
+    if not (Path(binary).exists() or shutil.which(binary)):
+        pytest.skip("native pgbouncer is not installed")
+    directory = home / "pgbouncer"
+    directory.mkdir()
+    port = _free_port()
+    (directory / "userlist.txt").write_text('"anyone" ""\n')
+    ini = directory / "pgbouncer.ini"
+    ini.write_text(
+        "[databases]\n[pgbouncer]\nlisten_addr=127.0.0.1\n"
+        f"listen_port={port}\nauth_type=trust\nauth_file={directory / 'userlist.txt'}\n"
+        "admin_users=anyone\nstats_users=anyone\n"
+        f"pidfile={directory / 'pgbouncer.pid'}\n"
+        f"logfile={directory / 'pgbouncer.log'}\n"
+        "unix_socket_dir=\n"
+    )
+    subprocess.run([binary, "-d", str(ini)], check=True, capture_output=True, timeout=5)  # noqa: S603 — private config
+    _wait_port(port, timeout=5)
+    pid = int((directory / "pgbouncer.pid").read_text())
+    identity = stop.OwnedProcess.capture(psutil.Process(pid))
+    monkeypatch.setattr(settings.data_plane, "redis_url", f"redis://127.0.0.1:{_free_port()}")
+    try:
+        with psycopg.connect(
+            f"postgresql://anyone@127.0.0.1:{port}/pgbouncer", autocommit=True
+        ) as client:
+            # Connected and idle from here on: the stop must not wait for this.
+            assert client.execute("SHOW VERSION").fetchone() is not None
+            assert stop.stop_data_plane(5) == ["pgbouncer"]
+        assert not identity.live()
     finally:
         if identity.live():
             psutil.Process(pid).kill()  # Exact test-owned process only, after assertions.
@@ -779,3 +854,164 @@ def test_bash_node_layered_chain_converges(home: Path) -> None:
                 # exact private fixtures, post-assertion
                 with contextlib.suppress(psutil.NoSuchProcess):
                     psutil.Process(pid).kill()
+
+
+def _nonloopback_addr() -> str | None:
+    """This machine's default-route address, or None when it has none.
+
+    A UDP connect() picks the route without sending a packet (TEST-NET
+    destination; connectionless sockets never contact it) — the portable read
+    of "which local address would reach the network".
+    """
+    import socket
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(("192.0.2.1", 9))
+            addr = str(probe.getsockname()[0])
+    except OSError:
+        return None
+    return addr if not addr.startswith("127.") else None
+
+
+def _launch_incident_shape_pooler(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[int, str, str, int]:
+    """Start a real pooler on the incident's degraded-path config.
+
+    Returns (port, role, secret, pid). Skips the calling test when this host
+    cannot run the fixture. Walks the reachable-address code path the incident
+    belongs to: a secret-set cluster binds loopback + the reachable address, so
+    a listener-less pooler reads as degraded (a no-secret cluster short-circuits
+    to the reload path by design). Pins the pooler's home and the address to
+    private, bindable values.
+    """
+    from tests._containers import _free_port, _wait_port
+
+    binary = pb.pgbouncer_bin()
+    if not (Path(binary).exists() or shutil.which(binary)):
+        pytest.skip("native pgbouncer is not installed")
+    addr = _nonloopback_addr()
+    if addr is None:
+        pytest.skip("this host has no non-loopback address for the reachable bind")
+
+    monkeypatch.setattr(pb, "ava_home", lambda: home)
+    monkeypatch.setattr(pb, "reachable_host", lambda: addr)
+    monkeypatch.setattr(plane.instance, "reachable_host", lambda: addr)
+    monkeypatch.setattr(pb, "_live_pg_socket_dir", lambda _port: home / "pg-socket")  # pyright: ignore[reportUnknownArgumentType] — private fixture home
+
+    port = _free_port()
+    role = "ava_maintenance_test"
+    secret = "s3cr3t"  # noqa: S105 — private ephemeral fixture
+    pb._write_config(
+        pg_port=15433,
+        listen_port=port,
+        db_name="ava_maintenance_test",
+        role=role,
+        cluster_secret=secret,
+        db_admin_password=secret,
+        runner_role=None,
+        runner_password="",
+    )
+    subprocess.run(  # noqa: S603 — private config, test-owned process
+        [binary, "-d", str(pb._ini_path())], check=True, capture_output=True, timeout=5
+    )
+    try:
+        _wait_port(port, timeout=5)
+        return port, role, secret, _wait_pidfile()
+    except BaseException:
+        _kill_test_poolers()
+        raise
+
+
+def _wait_pidfile(timeout: float = 5.0) -> int:
+    """The pooler pid once its pidfile lands.
+
+    The daemon writes the pidfile asynchronously from binding its listeners:
+    reading it straight after `_wait_port` returned races startup (2026-09-12,
+    the run that leaked the pooler).
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if pb._pidfile_path().exists():
+            with contextlib.suppress(ValueError):
+                return int(pb._pidfile_path().read_text().strip())
+        time.sleep(0.05)
+    raise AssertionError("the pooler never wrote its pidfile")
+
+
+def _pidfile_pid() -> set[int]:
+    """The pid recorded in the (test-home) pooler pidfile, when readable."""
+    pidfile = pb._pidfile_path()
+    if not pidfile.exists():
+        return set()
+    with contextlib.suppress(ValueError):
+        return {int(pidfile.read_text().strip())}
+    return set()
+
+
+def _kill_test_poolers(*pids: int | None) -> None:
+    """Kill exactly the test-owned pooler instances, half-started ones included."""
+    for target in sorted({p for p in pids if p} | _pidfile_pid()):
+        if psutil.pid_exists(target):
+            with contextlib.suppress(psutil.NoSuchProcess):
+                proc = psutil.Process(target)
+                proc.kill()
+                proc.wait(timeout=5)
+
+
+def test_real_ensure_pgbouncer_revives_a_shutdown_wait_pooler(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The 2026-09-12 half-shut state, end to end on a real pooler.
+
+    SIGTERM (PgBouncer >=1.23 SHUTDOWN WAIT_FOR_CLIENTS) with one idle client
+    connected leaves the pooler alive with its listeners closed — what the
+    failed stop produced (issue #2307). `ensure_pgbouncer`, the step the
+    compensating `ava start` runs, must read it as degraded (missing the
+    reachable listener), terminate it, and come back with a healthy double bind.
+    """
+    import psycopg
+
+    port, role, secret, pid = _launch_incident_shape_pooler(home, monkeypatch)
+    old = stop.OwnedProcess.capture(psutil.Process(pid))
+    new_pid: int | None = None
+    try:
+        client = psycopg.connect(
+            f"postgresql://{role}:{secret}@127.0.0.1:{port}/pgbouncer", autocommit=True
+        )
+        try:
+            assert client.execute("SHOW VERSION").fetchone() is not None
+            # The pre-#2307 stop signal: WAIT_FOR_CLIENTS with one idle client.
+            os.kill(pid, signal.SIGTERM)
+            deadline = time.monotonic() + 5.0
+            while time.monotonic() < deadline:
+                if not pb.pgbouncer_public_listener_reachable(port, role, secret):
+                    break
+                time.sleep(0.05)
+            else:
+                pytest.fail("the pooler never closed its listeners after SIGTERM")
+            assert old.live(), "the held client must keep the pooler in shutdown-wait"
+            assert pb._running_pid() == pid
+
+            rc = pb.ensure_pgbouncer(
+                pg_port=15433,
+                listen_port=port,
+                db_name="ava_maintenance_test",
+                role=role,
+                cluster_secret=secret,
+                db_admin_password=secret,
+                runner_password="",
+            )
+        finally:
+            with contextlib.suppress(Exception):
+                client.close()
+
+        assert rc == 0
+        assert not old.live(), "the degraded pooler must be terminated, not reloaded"
+        new_pid = pb._running_pid()
+        assert new_pid is not None and new_pid != pid
+        assert pb._admin_reachable(port, role, secret)
+        assert pb.pgbouncer_public_listener_reachable(port, role, secret)
+    finally:
+        _kill_test_poolers(pid, new_pid)

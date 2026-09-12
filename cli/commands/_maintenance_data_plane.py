@@ -1,8 +1,14 @@
 """Verified native data-plane stop for an already drained maintenance hold.
 
-No force escalation, snapshots, or remote management. Redis saves its current in-memory data before shutdown. An explicit save=False
-is reserved for callers that already verified a final snapshot. PID disappearance is checked in
-addition to command completion; an uncertain result always leaves the hold set.
+No force escalation, snapshots, or remote management. The stop semantics match
+what the preceding drain has already proven: the pooler gets SIGINT (safe
+shutdown — it disconnects clients and waits only for in-flight server
+transactions) and PostgreSQL `pg_ctl -m fast` (disconnect idle sessions, roll
+back stragglers, checkpoint), so neither waits on idle client connections a
+paused runner may still hold (issue #2307). Redis saves its current in-memory
+data before shutdown. An explicit save=False is reserved for callers that
+already verified a final snapshot. PID disappearance is checked in addition to
+command completion; an uncertain result always leaves the hold set.
 """
 
 from __future__ import annotations
@@ -132,11 +138,23 @@ def _require_no_unrecorded(captured: dict[str, OwnedProcess]) -> None:
 
 
 def _signal(identity: OwnedProcess) -> None:
+    """Ask the pooler for its safe shutdown, not its super-safe one.
+
+    PgBouncer >= 1.23 runs SIGTERM as SHUTDOWN WAIT_FOR_CLIENTS ("super safe":
+    wait for every client to disconnect) and SIGINT as SHUTDOWN
+    WAIT_FOR_SERVERS ("safe": disconnect clients, wait only for in-flight
+    server transactions) — verified against the pinned 1.25.2 semantics. After
+    the drain, a paused runner's pooled clients are expected to be idle, so
+    waiting on them is not a safety condition: it is how the stop burned its
+    full deadline on 2026-09-12 while a half-shut pooler never exited. SIGINT
+    carries the same safe-shutdown direction on <1.23, and no force escalation
+    is added — this is still a polite signal with a verified exit.
+    """
     # A psutil.Process object retains its own PID-reuse guard during delivery.
     process = psutil.Process(identity.pid)
     if not identity.live():
         raise RuntimeError("data-plane identity changed before stop")
-    process.send_signal(signal.SIGTERM)
+    process.send_signal(signal.SIGINT)
 
 
 async def _redis_command(client: Redis, deadline: float, *args: str) -> object:
@@ -206,13 +224,19 @@ async def _stop(deadline: float, *, save: bool = True) -> list[str]:
             if not identity.live():
                 raise RuntimeError(f"{name} identity changed before stop")
             if name == "postgres":
+                # -m fast after the held drain: smart waits for every session
+                # to disconnect and inherits the pooler's hang shape whenever
+                # any idle direct session lingers. fast disconnects idle
+                # sessions, rolls back a straggler transaction, and checkpoints
+                # before shutdown — still a clean shutdown, still no force
+                # termination (issue #2307).
                 result = subprocess.run(
                     [
                         instance._pg_bin("pg_ctl"),
                         "-D",
                         str(instance._pg_data_dir()),
                         "-m",
-                        "smart",
+                        "fast",
                         "-W",
                         "stop",
                     ],
@@ -223,7 +247,7 @@ async def _stop(deadline: float, *, save: bool = True) -> list[str]:
                     check=False,
                 )
                 if result.returncode:
-                    raise RuntimeError(f"PostgreSQL smart stop failed (exit {result.returncode})")
+                    raise RuntimeError(f"PostgreSQL fast stop failed (exit {result.returncode})")
             elif name == "redis":
                 # Do not use redis-py's shutdown helper: it accepts any connection
                 # error as success. Expected EOF is accepted only if the exact PID

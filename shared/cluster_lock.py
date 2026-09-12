@@ -365,7 +365,11 @@ def release_update_lock(holder: str) -> None:
     newer owner's lock. Durable pending publication also refuses this generic
     release; its checked protocol must clear pending before the lease can end.
     """
-    with write_transaction() as conn, conn.cursor() as cur:
+    # direct=True: this release must land even when the data-plane stop this
+    # rollout just ran left the pooler half-shut — the write cannot depend on
+    # the path the stop took down (issue #2307; the same standing reason
+    # `_update_git.current_schema_state` dials direct during an update).
+    with write_transaction(direct=True) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE deployment_state SET holder = NULL, acquired_at = NULL, expires_at = NULL, "
             "    note = NULL, settle_hosts = NULL, settle_note = NULL, settle_started_at = NULL, "
@@ -486,7 +490,9 @@ def settle_update_lock(holder: str, *, hosts: list[str], ttl_s: float = SETTLE_T
     """
     note = settle_note(hosts)
     sorted_hosts = sorted(hosts)  # one order in all three renderings
-    with write_transaction() as conn, conn.cursor() as cur:
+    # direct=True: same post-stop durability as `release_update_lock` — the
+    # settle conversion also runs in the rollout tail (issue #2307).
+    with write_transaction(direct=True) as conn, conn.cursor() as cur:
         # The settle fact lands three ways: the structured `settle_hosts` array
         # (the new truth), `settle_note` (human-readable), and the legacy `note`
         # column every current reader parses. All three are written together and

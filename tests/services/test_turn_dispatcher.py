@@ -851,6 +851,36 @@ class TestPendingScan:
         assert scheduler.woken == [23]
         assert scheduler.cancelled == []
 
+    async def test_scan_defers_through_the_stop_leg_and_runs_from_the_start_leg(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The stop leg neither wakes nor cancels: the durable rows wait for
+        the first scan after the start leg begins. The start leg scans even
+        while the unit is still held — recovery may not wait for the hold to
+        release, because pub/sub has no replay."""
+        from shared import maintenance
+
+        state = {"in_stop_leg": True}
+        monkeypatch.setattr(maintenance, "in_stop_leg", lambda: state["in_stop_leg"])
+        scanner_calls: list[int] = []
+        scheduler = _ScanScheduler()
+
+        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+            scanner_calls.append(1)
+            return [dispatcher.PendingInboundWake(agent_id=23, stale=False)]
+
+        disp = InboundWakeDispatcher(
+            "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
+        )
+
+        await disp.scan_once()
+        assert scanner_calls == []
+        assert scheduler.woken == []
+
+        state["in_stop_leg"] = False
+        await disp.scan_once()
+        assert scheduler.woken == [23]
+
     async def test_scan_cancels_a_stale_active_turn_before_rescheduling(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

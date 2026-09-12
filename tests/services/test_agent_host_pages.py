@@ -97,6 +97,38 @@ async def test_page_reconcile_forever_runs_immediately_on_start(
     assert calls == 1
 
 
+async def test_page_reconcile_forever_skips_passes_while_quiesced(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stop-window unit runs no pass — probing would borrow the released
+    pools — and resumes its passes once the window ends."""
+    from shared import maintenance
+    from shared.config import settings
+
+    state = {"quiesced": True}
+    calls = 0
+
+    async def _fake_all(pool, *, interval_s, event_publisher=None):
+        nonlocal calls
+        calls += 1
+
+    monkeypatch.setattr("agent.startup.reconcile_all_open_pages", _fake_all)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(maintenance, "quiesced", lambda: state["quiesced"])
+    monkeypatch.setattr(settings.daemon, "heartbeat_interval_seconds", 0.01)
+
+    task = asyncio.create_task(_page_reconcile_forever(object()))  # type: ignore[arg-type]
+    try:
+        await asyncio.sleep(0.06)
+        assert calls == 0
+        state["quiesced"] = False
+        await asyncio.sleep(0.06)
+        assert calls >= 1
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
 async def test_spawn_background_tasks_includes_page_reconciler() -> None:
     """The daemon's background-task wiring must include the page reconciler —
     a regression dropping it would silently reopen the busy-hosted-agent

@@ -8,7 +8,7 @@ status: current
 # Native pause and maintenance
 
 `maintenance.py`, `maintenance_state.py` and `maintenance_cohort.py` extend the
-existing [pause-owner journal](pause_owner.ava.okf.md). There is no new database
+[pause-owner journal](../pause_owner.ava.okf.md). There is no new database
 pause table or agent graph hook. The exact `(holder, acquired_at)` operation is
 stored in `$AVA_HOME/run/deploy-pause-owner.json`; it has no TTL. Invalid or
 unreadable state refuses admission. External-agent identity leases are a
@@ -119,5 +119,5 @@ not proof that its script cannot write. `resume --cancel` restores ordinary
 recovery during preparation/drain; it cannot bypass a partial service stop or
 prove replay safety for a failed arbitrary external effect.
 
-See the [operator procedure](../conventions/graceful-maintenance.md) for
+See [operator procedure](../../conventions/graceful-maintenance.md) for
 resource scopes, recovery and the first-deployment limitation.
