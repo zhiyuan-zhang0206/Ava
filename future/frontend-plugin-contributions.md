@@ -365,11 +365,10 @@ composer/plugin extension point.
   registers `InspectWidgetSpec` at its `inspector.py` import
   (`shared/plugin_inspector.py`); the gateway imports the ENABLED builtin
   plugins' modules under their `PluginContext` (the plugin-metric loader's
-  shape) and serves `GET /api/agents/{id}/inspect/widgets` with the closed
-  target set (`notice` → the agent's open notice, `task` → the queue's
-  ownership rule) resolved server-side. The console renders closed-set kinds
-  (`jumpButtons` first) with its own components: no third-party code, no
-  markup — unknown kinds/targets are skipped, never interpreted. Widgets
+  shape) and serves `GET /api/agents/{id}/inspect/widgets` with its payload —
+  the agent's active tasks — resolved server-side. The console renders
+  closed-set kinds (`taskList` today) with its own components: no third-party
+  code, no markup — unknown kinds are skipped, never interpreted. Widgets
   interleave with the panel's built-in sections by an `order` key (keys table
   in `conventions/plugin-spec-v2.md`). Deliberate boundary vs U4: this lane is
   host-rendered closed-set data for targets that exist per agent; U4's

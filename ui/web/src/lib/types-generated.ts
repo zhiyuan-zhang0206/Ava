@@ -5211,36 +5211,6 @@ export interface components {
             url: string;
         };
         /**
-         * InspectWidgetButton
-         * @description One button of a resolved inspector widget — an element of
-         *     `InspectWidgetResult.buttons` (GET /api/agents/{id}/inspect/widgets).
-         *
-         *     `target` is the closed console vocabulary the kernel resolved (see
-         *     `shared/plugin_inspector.py`): "notice" carries `notice_id` (the agent's
-         *     open notice), "task" carries `task_id` (the notice's task, else the
-         *     agent's first real task). Both id fields stay optional because the payload
-         *     is data, not policy: a button whose target did not resolve is dropped
-         *     server-side (so a carried target always has its id), but the console
-         *     still skips an unknown target rather than interpreting it. `label` /
-         *     `icon` are the plugin's presentation overrides; without them the console
-         *     uses its own localized default copy and icon for the target.
-         */
-        InspectWidgetButton: {
-            /**
-             * Target
-             * @enum {string}
-             */
-            target: "notice" | "task";
-            /** Label */
-            label?: string | null;
-            /** Icon */
-            icon?: string | null;
-            /** Notice Id */
-            notice_id?: number | null;
-            /** Task Id */
-            task_id?: number | null;
-        };
-        /**
          * InspectWidgetResult
          * @description One plugin widget rendered for the inspector panel — an element of
          *     GET /api/agents/{id}/inspect/widgets.
@@ -5248,9 +5218,9 @@ export interface components {
          *     The resolved twin of a registered `InspectWidgetSpec`
          *     (`shared/plugin_inspector.py`): `plugin` + `id` name the registration,
          *     `kind` selects the console renderer (a closed set; an unknown kind is
-         *     skipped by the console), and `buttons` carries only targets that
-         *     resolved, so a widget without anything to show is dropped from the
-         *     response entirely (the panel's empty-section rule).
+         *     skipped by the console), and the payload field the kind reads (`tasks`)
+         *     carries the kernel-resolved rows. A widget with an empty payload is
+         *     dropped from the response entirely (the panel's empty-section rule).
          */
         InspectWidgetResult: {
             /** Plugin */
@@ -5261,13 +5231,28 @@ export interface components {
              * Kind
              * @constant
              */
-            kind: "jumpButtons";
+            kind: "taskList";
             /** Order */
             order: number;
             /** Title */
             title?: string | null;
-            /** Buttons */
-            buttons?: components["schemas"]["InspectWidgetButton"][];
+            /** Tasks */
+            tasks?: components["schemas"]["InspectWidgetTask"][];
+        };
+        /**
+         * InspectWidgetTask
+         * @description One task row of a resolved ``taskList`` widget — an element of
+         *     `InspectWidgetResult.tasks` (GET /api/agents/{id}/inspect/widgets).
+         *
+         *     Kernel-resolved data, not policy: the row carries only what the console
+         *     renders (id for the `/fleet?task=` link, title for the text). The list is
+         *     already filtered (the agent's active tasks) and capped kernel-side.
+         */
+        InspectWidgetTask: {
+            /** Id */
+            id: number;
+            /** Title */
+            title: string;
         };
         /**
          * InventoryAggregate

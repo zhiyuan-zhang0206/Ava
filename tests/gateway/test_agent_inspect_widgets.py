@@ -1,16 +1,17 @@
-"""Integration tests for GET /api/agents/{id}/inspect/widgets (task #2909).
+"""Integration tests for GET /api/agents/{id}/inspect/widgets (task #2909;
+taskList payload reshaped in #3216).
 
 The extension surface where enabled plugins embed inspector widgets: the
 gateway builds the widget registry in process (mocked here by patching
-`_load_inspect_widgets`), resolves the closed target vocabulary for the agent
-— its open notice (the same read as /inspect/live) and the queue's
-task-ownership rule — and projects each widget, dropping unresolved buttons
-and emptied widgets.
+`_load_inspect_widgets`), resolves each widget's payload for the agent — a
+`taskList` lists the agent's active tasks, capped kernel-side — and drops
+widgets with nothing to show.
 
-Locks: empty registry -> [], unknown agent -> 404, the notice/task resolution
-rules (named task wins, first real task fallback, no notice/no task drop the
-button), widget ordering/attribution passthrough, the loader's enabled-set
-filtering, and its fail-soft skip of a broken inspector.py.
+Locks: empty registry -> [], unknown agent -> 404, the taskList resolution
+rules (owner filter, active statuses only, newest-first order, the kernel
+cap, empty payload -> widget dropped), widget ordering/attribution
+passthrough, the loader's enabled-set filtering, and its fail-soft skip of a
+broken inspector.py.
 """
 
 from __future__ import annotations
@@ -29,7 +30,6 @@ from gateway.app import app
 from gateway.routers import _plugin_inspector
 from shared.plugin_context import PluginContext
 from shared.plugin_inspector import (
-    InspectButtonSpec,
     InspectWidgetSpec,
     clear_registry,
     register_inspect_widget,
@@ -45,13 +45,9 @@ def _clean_registry() -> Any:
 
 def _widget(**over: Any) -> InspectWidgetSpec:
     data: dict[str, Any] = {
-        "id": "jump-buttons",
-        "kind": "jumpButtons",
+        "id": "today-tasks",
+        "kind": "taskList",
         "order": 50,
-        "buttons": [
-            InspectButtonSpec(target="notice"),
-            InspectButtonSpec(target="task"),
-        ],
     }
     data.update(over)
     with PluginContext("ava_fleet"):
@@ -84,27 +80,6 @@ def _insert_agent(db: psycopg.Connection, label: str = "t") -> int:
     return tid
 
 
-def _insert_notice(
-    db: psycopg.Connection,
-    agent_id: int,
-    *,
-    task_id: int | None = None,
-    require_response: bool = True,
-    title: str = "notice",
-) -> int:
-    with db.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agent_notices "
-            "(local_id, agent_id, title, content, priority, require_response, blocking, task_id, expire_at) "
-            "VALUES (1, %s, %s, NULL, 'P2', %s, FALSE, %s, now() + interval '1 day') "
-            "RETURNING id",
-            (agent_id, title, require_response, task_id),
-        )
-        row = cur.fetchone()
-    assert row is not None
-    return row[0]
-
-
 def _root_task_id(db: psycopg.Connection) -> int:
     """The system root's id for use as a parent (the throwaway test DB may or
     may not carry the seeded root row)."""
@@ -127,20 +102,21 @@ def _insert_task(
     owner: int | None,
     parent_id: int | None,
     title: str,
-    created_seconds_ago: float = 0,
+    status: str = "in_progress",
+    updated_seconds_ago: float = 0,
 ) -> int:
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO agent_tasks "
-            "(parent_id, title, description, status, owner, created_by, created_at, updated_at) "
-            "VALUES (%s, %s, 'd', 'in_progress', %s, %s, "
-            "now() - make_interval(secs => %s), now()) RETURNING id",
+            "(parent_id, title, description, status, owner, created_by, updated_at) "
+            "VALUES (%s, %s, 'd', %s, %s, %s, now() - make_interval(secs => %s)) RETURNING id",
             (
                 parent_id,
                 title,
+                status,
                 owner,
                 str(owner) if owner is not None else "user",
-                created_seconds_ago,
+                updated_seconds_ago,
             ),
         )
         row = cur.fetchone()
@@ -174,162 +150,79 @@ def test_unknown_agent_404(db_conn: psycopg.Connection, monkeypatch: pytest.Monk
     assert _get(999999).status_code == 404
 
 
-# ── resolution ────────────────────────────────────────────────────────────────
+# ── taskList resolution ───────────────────────────────────────────────────────
 
 
-def test_resolves_notice_and_its_named_task(
+def test_lists_only_the_agents_active_tasks_newest_first(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     aid = _insert_agent(db_conn)
-    task = _insert_task(db_conn, owner=aid, parent_id=_root_task_id(db_conn), title="named")
-    _insert_notice(db_conn, aid, task_id=task)
+    other = _insert_agent(db_conn, label="other")
+    root = _root_task_id(db_conn)
+    older = _insert_task(db_conn, owner=aid, parent_id=root, title="older", updated_seconds_ago=600)
+    newer = _insert_task(db_conn, owner=aid, parent_id=root, title="newer")
+    ongoing = _insert_task(
+        db_conn,
+        owner=aid,
+        parent_id=root,
+        title="ongoing",
+        status="ongoing",
+        updated_seconds_ago=60,
+    )
+    # Not active / not ours: none of these may appear.
+    for title, status, owner in (
+        ("done", "done", aid),
+        ("cancelled", "cancelled", aid),
+        ("theirs", "in_progress", other),
+    ):
+        _insert_task(db_conn, owner=owner, parent_id=root, title=title, status=status)
     _patch_loader(monkeypatch, _widget())
     db_conn.commit()
 
-    resp = _get(aid)
-    assert resp.status_code == 200
-    body = resp.json()
+    body = _get(aid).json()
     assert len(body) == 1
     widget = body[0]
     assert (widget["plugin"], widget["id"], widget["kind"], widget["order"]) == (
         "ava_fleet",
-        "jump-buttons",
-        "jumpButtons",
+        "today-tasks",
+        "taskList",
         50,
     )
-    assert widget["buttons"][0]["target"] == "notice"
-    assert widget["buttons"][0]["notice_id"] is not None
-    assert widget["buttons"][1]["target"] == "task"
-    # The notice's named task wins over the agent's task list.
-    assert widget["buttons"][1]["task_id"] == task
+    assert [t["id"] for t in widget["tasks"]] == [newer, ongoing, older]
+    assert widget["tasks"][0] == {"id": newer, "title": "newer"}
 
 
-def test_task_falls_back_to_first_real_task_owned_by_agent(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_task_list_is_capped(db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch) -> None:
     aid = _insert_agent(db_conn)
-    other = _insert_agent(db_conn, label="other")
-    # Older task of ours, a NEWER task of someone else, and our newest — the
-    # fallback is our newest real task (created_at DESC, like the console's
-    # taskForAgent over the created_at-desc list).
     root = _root_task_id(db_conn)
-    mine_old = _insert_task(
-        db_conn, owner=aid, parent_id=root, title="mine old", created_seconds_ago=600
-    )
-    _insert_task(db_conn, owner=other, parent_id=root, title="other's", created_seconds_ago=300)
-    mine_new = _insert_task(
-        db_conn, owner=aid, parent_id=root, title="mine new", created_seconds_ago=100
-    )
-    _insert_notice(db_conn, aid, task_id=None)
+    ids = [
+        _insert_task(db_conn, owner=aid, parent_id=root, title=f"t{i}", updated_seconds_ago=i)
+        for i in range(_plugin_inspector.TASK_LIST_LIMIT + 3)
+    ]
     _patch_loader(monkeypatch, _widget())
     db_conn.commit()
 
-    body = _get(aid).json()
-    buttons = {b["target"]: b for b in body[0]["buttons"]}
-    assert buttons["task"]["task_id"] == mine_new != mine_old
+    tasks = _get(aid).json()[0]["tasks"]
+    assert len(tasks) == _plugin_inspector.TASK_LIST_LIMIT
+    # Newest-first, capped: the first N ids by ascending age.
+    assert [t["id"] for t in tasks] == ids[: _plugin_inspector.TASK_LIST_LIMIT]
 
 
-def test_root_task_is_not_a_task_target(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A `parent_id IS NULL` row (the system root) never becomes the target."""
-    aid = _insert_agent(db_conn)
-    root = _insert_task(db_conn, owner=aid, parent_id=None, title="root-ish")
-    _insert_notice(db_conn, aid, task_id=None)
-    _patch_loader(monkeypatch, _widget())
-    db_conn.commit()
-
-    body = _get(aid).json()
-    # The only candidate is a root row -> no task button -> the notice-only
-    # button list survives only because the notice resolved; assert the task
-    # target is absent.
-    task_buttons = [b for b in body[0]["buttons"] if b["target"] == "task"]
-    assert task_buttons == []
-    assert body[0]["buttons"][0]["target"] == "notice"
-    assert root  # the row exists; it was simply not eligible
-
-
-def test_named_task_wins_even_when_owned_by_another_agent(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The console's rule is `byId.get(named) ?? taskForAgent` — no owner
-    check — so a notice naming someone else's task jumps there, not to the
-    agent's own first task. (The FK keeps the named id always real; the
-    fallback covers a notice with no task at all.)"""
-    aid = _insert_agent(db_conn)
-    other = _insert_agent(db_conn, label="other")
-    root = _root_task_id(db_conn)
-    theirs = _insert_task(db_conn, owner=other, parent_id=root, title="theirs")
-    mine = _insert_task(db_conn, owner=aid, parent_id=root, title="mine")
-    _insert_notice(db_conn, aid, task_id=theirs)
-    _patch_loader(monkeypatch, _widget())
-    db_conn.commit()
-
-    body = _get(aid).json()
-    buttons = {b["target"]: b for b in body[0]["buttons"]}
-    assert buttons["task"]["task_id"] == theirs != mine
-
-
-def test_no_notice_drops_notice_button(
+def test_widget_without_tasks_is_dropped(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     aid = _insert_agent(db_conn)
-    task = _insert_task(db_conn, owner=aid, parent_id=_root_task_id(db_conn), title="only task")
     _patch_loader(monkeypatch, _widget())
     db_conn.commit()
-
-    body = _get(aid).json()
-    assert [b["target"] for b in body[0]["buttons"]] == ["task"]
-    assert body[0]["buttons"][0]["task_id"] == task
-
-
-def test_emptied_widget_drops_out_of_the_response(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Neither target resolves -> the widget is not in the payload (the
-    panel's empty-section rule, applied server-side)."""
-    aid = _insert_agent(db_conn)
-    _patch_loader(monkeypatch, _widget())
-    db_conn.commit()
-
     assert _get(aid).json() == []
-
-
-def test_notice_only_widget_keeps_only_its_resolved_button(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    aid = _insert_agent(db_conn)
-    _insert_notice(db_conn, aid)
-    _patch_loader(
-        monkeypatch,
-        _widget(id="notice-only", buttons=[InspectButtonSpec(target="notice")]),
-    )
-    db_conn.commit()
-
-    body = _get(aid).json()
-    assert len(body) == 1
-    assert [b["target"] for b in body[0]["buttons"]] == ["notice"]
-
-
-def test_fyi_notice_within_ttl_resolves(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The notice read matches the live inspect's predicate: an unexpired
-    require_response notice resolves (an FYI older than its TTL would not)."""
-    aid = _insert_agent(db_conn)
-    _insert_notice(db_conn, aid, require_response=False)
-    _patch_loader(monkeypatch, _widget())
-    db_conn.commit()
-
-    body = _get(aid).json()
-    assert [b["target"] for b in body[0]["buttons"]] == ["notice"]
 
 
 def test_widgets_keep_registration_order(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     aid = _insert_agent(db_conn)
-    _insert_notice(db_conn, aid)
+    root = _root_task_id(db_conn)
+    _insert_task(db_conn, owner=aid, parent_id=root, title="work")
     _patch_loader(
         monkeypatch,
         _widget(id="second", order=750),
@@ -371,9 +264,9 @@ def test_loader_imports_shipped_fleet_widget(monkeypatch: pytest.MonkeyPatch) ->
 
     specs = _plugin_inspector._load_inspect_widgets()
     assert [(s.plugin, s.id, s.kind, s.order) for s in specs] == [
-        ("ava_fleet", "jump-buttons", "jumpButtons", 50)
+        ("ava_fleet", "today-tasks", "taskList", 50)
     ]
-    assert [b.target for b in specs[0].buttons] == ["notice", "task"]
+    assert specs[0].title is None
 
 
 def test_loader_filters_widgets_of_disabled_plugins(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -470,7 +363,7 @@ def test_loader_skips_a_plugin_whose_inspector_fails_to_import(
         sys.modules.pop(leftover, None)
 
     # the healthy plugin still serves; the broken one contributes nothing
-    assert [(s.plugin, s.id) for s in specs] == [("ava_fleet", "jump-buttons")]
+    assert [(s.plugin, s.id) for s in specs] == [("ava_fleet", "today-tasks")]
     # loud: a loguru error naming the plugin
     assert any(
         "broken_plugin" in r["message"] and "fail-soft" in r["message"] for r in loguru_records
@@ -499,11 +392,9 @@ def test_loader_drops_partial_widget_registrations_and_recovers(
     (plugin_dir / "__init__.py").write_text("", encoding="utf-8")
     inspector_py = plugin_dir / "inspector.py"
     source = (
-        "from shared.plugin_inspector import InspectButtonSpec, InspectWidgetSpec, "
-        "register_inspect_widget\n"
+        "from shared.plugin_inspector import InspectWidgetSpec, register_inspect_widget\n"
         "register_inspect_widget(InspectWidgetSpec(id='drop_partial_widget', "
-        "kind='jumpButtons', order=50, "
-        "buttons=[InspectButtonSpec(target='notice')]))\n"
+        "kind='taskList', order=50))\n"
     )
     inspector_py.write_text(source + "raise RuntimeError('inspector boom')\n", encoding="utf-8")
 

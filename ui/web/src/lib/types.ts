@@ -181,7 +181,7 @@ export type HeartbeatLastPause = Schemas["HeartbeatLastPause"];
 // closed-set data rendered by the console's own components — a kind the
 // console does not know is skipped at render time, never interpreted.
 export type InspectWidget = Schemas["InspectWidgetResult"];
-export type InspectWidgetButton = Schemas["InspectWidgetButton"];
+export type InspectWidgetTask = Schemas["InspectWidgetTask"];
 
 // --- Shell monitor page (GET /api/agents/{id}/shell/{sid}) ---
 //

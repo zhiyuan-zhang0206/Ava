@@ -1,6 +1,7 @@
 // InspectWidgetSection — the console renderer for plugin inspector widgets
-// (task #2909). A widget is data: known kinds render links from resolved
-// targets, unknown kinds/targets are skipped, empty widgets render nothing.
+// (task #2909; taskList reshaped in #3216). A widget is data: a known kind
+// renders the kernel-resolved payload under the section chrome, unknown kinds
+// are skipped, and an empty payload renders nothing.
 
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -22,25 +23,35 @@ afterEach(cleanup);
 function widget(over: Partial<InspectWidget> = {}): InspectWidget {
   return {
     plugin: "ava_fleet",
-    id: "jump-buttons",
-    kind: "jumpButtons",
+    id: "today-tasks",
+    kind: "taskList",
     order: 50,
     title: null,
-    buttons: [
-      { target: "notice", label: null, icon: null, notice_id: 7, task_id: null },
-      { target: "task", label: null, icon: null, notice_id: null, task_id: 42 },
+    tasks: [
+      { id: 42, title: "Ship the inspector fix" },
+      { id: 43, title: "Reply to QA" },
     ],
     ...over,
   };
 }
 
 describe("InspectWidgetSection", () => {
-  it("renders one link per resolved target, pointing at the fleet route", () => {
+  it("renders one fleet-task link per task row under the console default title", () => {
     render(<InspectWidgetSection widget={widget()} />);
+    // The console's own localized title stands in when the plugin set none.
+    expect(screen.getByText("Today's tasks")).toBeTruthy();
     const links = screen.getAllByRole("link");
     expect(links).toHaveLength(2);
-    expect(links[0].getAttribute("href")).toBe("/fleet?notice=7");
-    expect(links[1].getAttribute("href")).toBe("/fleet?task=42");
+    expect(links[0].getAttribute("href")).toBe("/fleet?task=42");
+    expect(links[1].getAttribute("href")).toBe("/fleet?task=43");
+    expect(links[0].textContent).toContain("Ship the inspector fix");
+    expect(links[0].textContent).toContain("#42");
+  });
+
+  it("uses a plugin-declared title when given", () => {
+    render(<InspectWidgetSection widget={widget({ title: "Agent tasks" })} />);
+    expect(screen.getByText("Agent tasks")).toBeTruthy();
+    expect(screen.queryByText("Today's tasks")).toBeNull();
   });
 
   it("renders nothing for an unknown kind", () => {
@@ -50,51 +61,8 @@ describe("InspectWidgetSection", () => {
     expect(container.querySelectorAll("a")).toHaveLength(0);
   });
 
-  it("skips an unknown target and an unresolved one", () => {
-    render(
-      <InspectWidgetSection
-        widget={widget({
-          buttons: [
-            { target: "agent" as never, label: null, icon: null, notice_id: null, task_id: null },
-            { target: "notice", label: null, icon: null, notice_id: null, task_id: null },
-            { target: "task", label: null, icon: null, notice_id: null, task_id: 42 },
-          ],
-        })}
-      />,
-    );
-    const links = screen.getAllByRole("link");
-    expect(links).toHaveLength(1);
-    expect(links[0].getAttribute("href")).toBe("/fleet?task=42");
-  });
-
-  it("renders nothing when no button resolves", () => {
-    const { container } = render(
-      <InspectWidgetSection
-        widget={widget({
-          buttons: [{ target: "task", label: null, icon: null, notice_id: null, task_id: null }],
-        })}
-      />,
-    );
+  it("renders nothing for an empty task list", () => {
+    const { container } = render(<InspectWidgetSection widget={widget({ tasks: [] })} />);
     expect(container.querySelectorAll("a")).toHaveLength(0);
-  });
-
-  it("uses a declared label, and shows the task id alongside it", () => {
-    render(
-      <InspectWidgetSection
-        widget={widget({
-          buttons: [
-            { target: "task", label: "Open task", icon: null, notice_id: null, task_id: 42 },
-          ],
-        })}
-      />,
-    );
-    const link = screen.getByRole("link");
-    expect(link.textContent).toContain("Open task");
-    expect(link.textContent).toContain("#42");
-  });
-
-  it("renders a titled widget with the section header", () => {
-    render(<InspectWidgetSection widget={widget({ title: "Quick jumps" })} />);
-    expect(screen.getByText("Quick jumps")).toBeTruthy();
   });
 });

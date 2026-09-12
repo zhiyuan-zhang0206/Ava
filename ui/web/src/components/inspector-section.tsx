@@ -12,11 +12,15 @@ export function Section({
   icon,
   title,
   badge,
+  action,
   children,
 }: {
   icon: ReactNode;
   title: string;
   badge?: string;
+  /** Optional right-aligned control in the header (a jump link). It only
+   *  claims the header's free space that the badge does not already claim. */
+  action?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -27,6 +31,11 @@ export function Section({
         {badge != null && (
           <span className="ml-auto font-mono text-[11px] tabular-nums text-foreground normal-case">
             {badge}
+          </span>
+        )}
+        {action != null && (
+          <span className={cn("shrink-0 items-center", FLEX, badge == null && "ml-auto")}>
+            {action}
           </span>
         )}
       </div>

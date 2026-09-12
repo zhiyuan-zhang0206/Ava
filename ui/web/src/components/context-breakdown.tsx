@@ -4,16 +4,11 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import {
-  CONTEXT_METER_WIDTH_CLASS,
-  ContextMeter,
-  resolveContextMeterWidth,
-} from "@/components/context-meter";
+import { ContextMeter, useContextMeterWidthClass } from "@/components/context-meter";
 import { api } from "@/lib/api";
 import { errMsg } from "@/lib/errors";
 import { formatTokens } from "@/lib/format-number";
 import type { ContextBreakdownResponse, ContextSection } from "@/lib/types";
-import { useUserSettings } from "@/lib/use-user-settings";
 import { cn } from "@/lib/utils";
 import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout";
 
@@ -92,9 +87,7 @@ export function ContextButton(props: ContextButtonProps) {
   const { agentId, open, onOpenChange, ...meter } = props;
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const { settings } = useUserSettings();
-  const barWidthClassName =
-    CONTEXT_METER_WIDTH_CLASS[resolveContextMeterWidth(settings["display.context_meter_width"])];
+  const barWidthClassName = useContextMeterWidthClass();
 
   // Escape / outside pointer-down collapse the panel. Document-level listeners
   // exist only while open; the closing outside click still lands on its target
@@ -170,12 +163,7 @@ export function ContextButton(props: ContextButtonProps) {
           className="absolute bottom-full left-0 z-50 mb-2 min-w-80 max-w-[min(28rem,90vw)] max-h-[50vh] overflow-x-hidden overflow-y-auto whitespace-normal rounded-md border border-border bg-popover p-2.5 text-popover-foreground shadow-md"
         >
           <div className={cn("mb-2 items-start justify-between gap-2", FLEX)}>
-            <div>
-              <p className="text-sm font-semibold">Context breakdown</p>
-              <p className="text-muted-foreground text-xs">
-                How this agent&apos;s context window is spent.
-              </p>
-            </div>
+            <p className="text-sm font-semibold">Context breakdown</p>
             <button
               type="button"
               data-testid="context-breakdown-close"
