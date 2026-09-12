@@ -508,13 +508,12 @@ export function TimelineView({
     };
     viewport.addEventListener("scroll", onScroll, { passive: true });
 
-    // Wheel intent — the "stop following" signal a slow scroll-up needs on
-    // mouse/trackpad (per-event scroll deltas stay under unstickDeltaPx
-    // while auto-scroll keeps re-pinning the baseline, so position alone
-    // can never express it). The controller absorbs upward notches at the
-    // bottom (resting-finger noise) and at the last-pinned bottom (a chunk
-    // grew the content between this event and the pin that follows).
-    // Touch devices never fire wheel. The same event also drives the
+    // Wheel intent — an early "stop following" signal for mouse/trackpad
+    // (a notch can arrive before the position moves) and the resting-finger
+    // absorb at the bottom. It is no longer the only escape a slow
+    // scroll-up has: the controller accumulates small upward scroll moves
+    // into a run, which is what a scrollbar drag (no wheel at all) depends
+    // on. Touch devices never fire wheel. The same event also drives the
     // pull-down-to-load gesture when the viewport is already at the top.
     const onWheel = (e: WheelEvent) => {
       controller.handleWheel(e.deltaY, snapshot());
