@@ -41,7 +41,10 @@ venv and the user present:
   overridable with `--timeout`), skips items that are already granted, and ends
   with a summary plus a JSON report under the workdir (default
   `/tmp/tcc-onboard-helper-grants`); exit code 0 only when every requested
-  item is granted/verified.
+  item is granted/verified (1 = items unresolved, 2 = setup failure -- not
+  macOS, unknown `--items`, helper unreachable, old helper build, probe
+  timeout). A dialog that times out has its waiting child reaped
+  (SIGTERM/SIGKILL) so nothing stays pending past the run.
 - AppleEvents rows are keyed per target app and are granted only by a live
   dialog, so they are triggered one by one with the user watching; `--check`
   can not read them (there is no silent query for that row shape).

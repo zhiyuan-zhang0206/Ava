@@ -40,7 +40,9 @@ Usage:
   .venv/bin/python scripts/tcc-onboard-helper-grants.py --timeout 180
 
 Exit codes: 0 = every requested item is granted/verified; 1 = unresolved
-items remain (details in the report and at the workdir).
+items remain (details in the report and at the workdir); 2 = setup failure
+(not macOS, unknown --items, helper unreachable, missing repo venv, helper
+build without the spawn wire method, probe timeout).
 """
 
 from __future__ import annotations
@@ -48,6 +50,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import sys
 import time
 from pathlib import Path
@@ -172,14 +175,24 @@ def spawn_child(client: Any, workdir: Path, name: str, argv: list[str], tag: str
     # activate_venv=False: the child's cwd is the scratch workdir, outside
     # this checkout (see shared/session_env.py).
     child_env = session_env.forward_env_dict(activate_venv=False)
-    result = client.spawn_process(
-        name,
-        argv,
-        child_env,
-        str(workdir),
-        str(workdir / f"{tag}.stdout.log"),
-        str(workdir / f"{tag}.stderr.log"),
-    )
+    try:
+        result = client.spawn_process(
+            name,
+            argv,
+            child_env,
+            str(workdir),
+            str(workdir / f"{tag}.stdout.log"),
+            str(workdir / f"{tag}.stderr.log"),
+        )
+    except client.PermissionsHelperError as exc:
+        message = str(exc)
+        if "unknown method" in message:
+            raise OnboardError(
+                "helper build needs a rebuild: it does not support the spawn"
+                f" wire method ({message!r}) -- rebuild or update the"
+                " permissions helper, then re-run this tool."
+            ) from exc
+        raise OnboardError(f"helper spawn failed: {message}") from exc
     pid = result.get("pid")
     if not isinstance(pid, int):
         raise OnboardError(f"helper spawn returned no pid: {result!r}")
@@ -196,7 +209,9 @@ def read_result(path: Path) -> str | None:
 def preflight_matrix(client: Any, workdir: Path, run_id: str) -> dict[str, str]:
     probe = workdir / "tcc_preflight_probe.py"
     probe.write_text(_PREFLIGHT_PROBE)
-    result_path = workdir / "preflight.results.json"
+    # Run-scoped result name: a late write from an earlier run's still-blocked
+    # child can not land in this run's file.
+    result_path = workdir / f"preflight-{run_id}.results.json"
     if result_path.exists():
         result_path.unlink()
     spawn_child(
@@ -215,8 +230,24 @@ def preflight_matrix(client: Any, workdir: Path, run_id: str) -> dict[str, str]:
         time.sleep(0.25)
     raise OnboardError(
         f"preflight probe produced no result within {PROBE_WAIT_S:.0f}s"
-        " (older helper build without the nursery 'spawn' method? rebuild first)"
+        f" (see the child logs under {workdir})"
     )
+
+
+def reap_child(client: Any, spawn_name: str) -> str:
+    """Kill a child that is still waiting after a timeout (SIGTERM, then
+    SIGKILL as needed) so no dialog is left pending past the run."""
+    try:
+        client.signal_session(name=spawn_name, sig=signal.SIGTERM)
+        time.sleep(1.0)
+        if client.session_has(spawn_name):
+            client.signal_session(name=spawn_name, sig=signal.SIGKILL)
+            time.sleep(0.5)
+            if client.session_has(spawn_name):
+                return "still alive after SIGKILL"
+        return "reaped"
+    except Exception as exc:
+        return f"reap failed: {exc!r}"
 
 
 def wait_for_item(
@@ -231,7 +262,8 @@ def wait_for_item(
 ) -> str:
     if result_path.exists():
         result_path.unlink()
-    spawn_child(client, workdir, f"tcc-onboard-{run_id}-{tag}", argv, f"{tag}-{run_id}")
+    spawn_name = f"tcc-onboard-{run_id}-{tag}"
+    spawn_child(client, workdir, spawn_name, argv, f"{tag}-{run_id}")
     print(f"  [{tag}] request sent -- click Allow in the system dialog (if shown).")
     deadline = time.monotonic() + timeout_s
     polls = 0
@@ -245,6 +277,7 @@ def wait_for_item(
             matrix = preflight_matrix(client, workdir, f"{run_id}-r{polls}")
             if matrix.get(recheck_service) == "granted":
                 return "granted"
+    print(f"  [{tag}] timed out after {timeout_s:.0f}s -- child {reap_child(client, spawn_name)}.")
     return "unresolved"
 
 
@@ -316,11 +349,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
         f"preflight_screen={ping.get('preflight_screen')} pong={ping.get('pong')}"
     )
 
-    try:
-        matrix = preflight_matrix(client, workdir, run_id)
-    except OnboardError as exc:
-        print(f"FAIL: {exc}")
-        return 2
+    matrix = preflight_matrix(client, workdir, run_id)
     print("current helper grant state (preflight, zero dialogs):")
     for service in PREFLIGHT_SERVICES:
         print(f"  {service}: {matrix.get(service, 'unknown')}")
@@ -341,7 +370,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
                 continue
             child = workdir / f"folder-{item_id}.child.py"
             child.write_text(_FOLDER_ACCESS_CHILD)
-            result_path = workdir / f"folder-{item_id}.result"
+            result_path = workdir / f"folder-{item_id}-{run_id}.result"
             text = wait_for_item(
                 client,
                 workdir,
@@ -362,7 +391,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
             item_id = f"apple-events:{target}"
             child = workdir / f"ae-{target.replace(' ', '_')}.child.py"
             child.write_text(_APPLE_EVENT_CHILD)
-            result_path = workdir / f"ae-{target.replace(' ', '_')}.result"
+            result_path = workdir / f"ae-{target.replace(' ', '_')}-{run_id}.result"
             text = wait_for_item(
                 client,
                 workdir,
@@ -434,4 +463,10 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except OnboardError as exc:
+        # Setup failures (missing repo venv, old helper build, probe timeout)
+        # end as a clean message + exit 2 instead of a traceback.
+        print(f"FAIL: {exc}")
+        raise SystemExit(2) from exc
