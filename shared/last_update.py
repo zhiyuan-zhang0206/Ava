@@ -228,7 +228,10 @@ def finish_update(
     """
     if outcome in (UpdateOutcome.RUNNING, UpdateOutcome.ORPHANED):
         raise ValueError(f"{outcome} is a reading of an unfinished row, not a recorded outcome")
-    with write_transaction() as conn, conn.cursor() as cur:
+    # direct=True: a record that depends on the pooled path a rollout's own
+    # data-plane stop just took down reports nothing exactly when the report
+    # matters most (issue #2307).
+    with write_transaction(direct=True) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE cluster_last_update SET ended_at = now(), outcome = %s, "
             "failing_step = %s, pin_advanced = %s WHERE id = 1",

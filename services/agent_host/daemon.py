@@ -64,9 +64,15 @@ from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_host.host import AgentHost
 from services.agent_host.pooled_checkpoint import PooledPostgresSaver
 from services.agent_host.pools import build_control_pool, build_shared_pool
-from shared import paths
+from shared import maintenance, paths, pool_release
 from shared.config import settings
-from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
+from shared.daemon_health import (
+    Liveness,
+    RouteHandler,
+    health_port,
+    start_health_server,
+    stop_health_server,
+)
 from shared.daemon_shutdown import install_graceful_shutdown
 from shared.exec_request_evidence import disposition_hint
 from shared.helper_chain_guard import parent_chain_intact
@@ -201,12 +207,18 @@ async def _beat_forever(
     while True:
         _require_helper_parent_chain()
         liveness.beat()
-        try:
-            await asyncio.wait_for(host.renew_ownership(), timeout=_OWNERSHIP_RENEW_TIMEOUT_S)
-        except TimeoutError:
-            _log.warning("[agent-host] ownership renewal timed out")
-        except Exception:
-            _log.exception("[agent-host] ownership renewal failed — retrying next beat")
+        # Liveness stays unconditional; database work does not. A quiesced unit
+        # is between stop and resume — renewing here would keep agent-row
+        # leases alive across the whole window and add DB work the window
+        # exists to stop. The leases lapse with their TTL; the first beat after
+        # resume refreshes every row this host still owns.
+        if not maintenance.quiesced():
+            try:
+                await asyncio.wait_for(host.renew_ownership(), timeout=_OWNERSHIP_RENEW_TIMEOUT_S)
+            except TimeoutError:
+                _log.warning("[agent-host] ownership renewal timed out")
+            except Exception:
+                _log.exception("[agent-host] ownership renewal failed — retrying next beat")
         await _publish_turn_progress_heartbeat(machine, scheduler.active_agents)
         await asyncio.sleep(_LIVENESS_BEAT_STEP_S)
 
@@ -258,12 +270,17 @@ async def _page_reconcile_forever(pool: AsyncConnectionPool) -> None:
     interval_s = float(settings.daemon.heartbeat_interval_seconds)
     publisher = _PageEventPublisher()
     while True:
-        try:
-            await reconcile_all_open_pages(pool, interval_s=interval_s, event_publisher=publisher)
-        except Exception:
-            _log.exception(
-                "[agent-host] periodic page reconcile pass failed — retrying next interval"
-            )
+        # A quiesced unit (stop window) skips its pass, silently, until
+        # resume: page probing would borrow the pools the stop released.
+        if not maintenance.quiesced():
+            try:
+                await reconcile_all_open_pages(
+                    pool, interval_s=interval_s, event_publisher=publisher
+                )
+            except Exception:
+                _log.exception(
+                    "[agent-host] periodic page reconcile pass failed — retrying next interval"
+                )
         await asyncio.sleep(interval_s)
 
 
@@ -526,6 +543,7 @@ async def run() -> None:
             extra_routes={
                 ("GET", "/stats"): _stats_route(host, scheduler),
                 ("POST", "/cancel-turn"): _cancel_turn_route(scheduler, host),
+                ("POST", "/release-db-pools"): _release_pools_route(workload_pool, control_pool),
             },
         )
         logger.info(
@@ -619,6 +637,35 @@ def _cancel_turn_route(scheduler: TurnScheduler, host: AgentHost):  # noqa: ANN2
             return 400, b'{"error":"positive integer identifiers required"}', "application/json"
         cancelled = await scheduler.cancel_exact_force(agent_id, command_id, host.accepts_force)
         return 200, json.dumps({"cancelled": cancelled}).encode(), "application/json"
+
+    return handler
+
+
+def _release_pools_route(
+    workload_pool: AsyncConnectionPool[psycopg.AsyncConnection],
+    control_pool: AsyncConnectionPool[psycopg.AsyncConnection],
+) -> RouteHandler:
+    """A `POST /release-db-pools` handler — the pre-stop pool release.
+
+    Called by the ops stop path once this unit's agents are drained: closes
+    every idle connection in both pools and answers `{"released": {"workload":
+    n, "control": m}}`. Nothing reconnects during the quiesced window (the
+    beat and page loops are gated; the turn scan only through the stop leg)
+    and the first borrow after resume opens a fresh connection lazily.
+    Loopback-only and unauthenticated, like `/cancel-turn`.
+    """
+    import json
+
+    async def handler(_body: bytes) -> tuple[int, bytes, str]:
+        released = {
+            "workload": await pool_release.release_idle_async(workload_pool),
+            "control": await pool_release.release_idle_async(control_pool),
+        }
+        logger.info(
+            "[agent-host] released idle db-pool connections on request: {released}",
+            released=released,
+        )
+        return 200, json.dumps({"released": released}).encode(), "application/json"
 
     return handler
 

@@ -443,8 +443,10 @@ def test_cluster_stop_op_invokes_pause(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(ops_cluster.pause_owner, "mark_paused", lambda *_a: None)
     monkeypatch.setattr(ops_cluster, "pause_local_cluster", lambda: called.append(True))
+    released = {"host": {"workload": 1, "control": 1}, "ops": 1}
+    monkeypatch.setattr(ops_cluster, "release_local_db_pools", lambda: released)
     result = ops_cluster.cluster_stop_op("gateway:pid1", acquired)
-    assert result == {}
+    assert result == {"released": released}
     assert called == [True]
 
 
@@ -472,8 +474,9 @@ def test_cluster_stop_accepts_every_executing_lease_including_legacy_and_rollbac
     )
     monkeypatch.setattr(ops_cluster.pause_owner, "mark_paused", lambda *_a: None)
     monkeypatch.setattr(ops_cluster, "pause_local_cluster", lambda: paused.append(True))
+    monkeypatch.setattr(ops_cluster, "release_local_db_pools", dict)
 
-    assert ops_cluster.cluster_stop_op("gateway:pid1", acquired) == {}
+    assert ops_cluster.cluster_stop_op("gateway:pid1", acquired) == {"released": {}}
     assert paused == [True]
 
 
@@ -561,6 +564,11 @@ def test_cluster_stop_records_only_a_successful_pause_compensation(
     )
     monkeypatch.setattr(
         ops_cluster, "pause_local_cluster", lambda: (_ for _ in ()).throw(OSError("pause"))
+    )
+    monkeypatch.setattr(
+        ops_cluster,
+        "release_local_db_pools",
+        lambda: pytest.fail("pool release must not run when the pause failed"),
     )
     if compensation_succeeds:
         monkeypatch.setattr(ops_cluster, "unpause_local_cluster", lambda: None)

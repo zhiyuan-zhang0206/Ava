@@ -18,6 +18,7 @@ from collections.abc import Iterator
 import psycopg
 import pytest
 
+from shared import db_transaction
 from shared.cluster_lock import (
     SETTLE_TTL_S,
     DeployLease,
@@ -471,3 +472,38 @@ def test_read_lease_carries_kind() -> None:
     settle_update_lock("A", hosts=["wsl"])
     lease2 = read_update_lease()
     assert lease2 is not None and lease2.kind == "rollout"  # kind survives a settle
+
+
+def test_release_and_settle_land_when_the_pooler_is_down(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The rollout tail must not depend on the pooler a data-plane stop has just
+    taken down (issue #2307): with the pooled URL dead — the half-shut-pooler
+    shape — release and settle still land through the direct dial."""
+    import shared.db_connections
+    from tests._containers import _free_port
+
+    direct_url = settings.data_plane.db_url
+    assert acquire_update_lock("A") is True
+    # The data-plane stop lands: the pooler's listeners are closed, Postgres stays up.
+    monkeypatch.setattr(
+        settings.data_plane, "db_url", f"postgresql://ava@127.0.0.1:{_free_port()}/ava"
+    )
+    monkeypatch.setattr(shared.db_connections, "direct_db_url", lambda: direct_url)
+
+    with pytest.raises(psycopg.OperationalError), db_transaction.write_transaction():
+        pass
+
+    release_update_lock("A")
+    row = db_conn.execute("SELECT holder FROM deployment_state WHERE id=1").fetchone()
+    assert row == (None,)
+
+    # A fresh lease for the settle leg, seeded directly (the pooler is down).
+    db_conn.execute(
+        "UPDATE deployment_state SET phase='updating', holder='B', "
+        "acquired_at=now(), expires_at=now()+interval '5 minutes' WHERE id=1"
+    )
+    db_conn.commit()
+    assert settle_update_lock("B", hosts=["runner-a"]) is True
+    row = db_conn.execute("SELECT phase, settle_hosts FROM deployment_state WHERE id=1").fetchone()
+    assert row == ("settling", ["runner-a"])

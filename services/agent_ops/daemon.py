@@ -60,7 +60,6 @@ from ops import (
     ops_inventory,
     ops_lifecycle,
     ops_uploads,
-    pty_close_notices,
 )
 from ops.cluster_status import ShellNotFoundError
 from ops.rpc_schemas import (
@@ -79,7 +78,7 @@ from ops.rpc_schemas import (
     UploadReceivePayload,
 )
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from services.agent_ops import health
+from services.agent_ops import close_notices, health
 from services.agent_ops import maintenance as maintenance_activity
 from services.agent_ops._boot import (
     _open_db_pool,
@@ -132,9 +131,6 @@ _dispatch_sem: asyncio.Semaphore | None = None
 # Shared DB pool for all in-process ops calls — opened in `_main`, closed in
 # its finally; tests that bypass `_main` set this explicitly.
 _db_pool: ConnectionPool | None = None
-
-# Background closure-notice flush (issue #2044) — daemon-lifetime like `_db_pool`.
-_close_notice_flush_task: asyncio.Task[object] | None = None
 
 
 def _write_pidfile() -> None:
@@ -647,7 +643,6 @@ async def _main() -> None:
     _write_pidfile()
 
     global _dispatch_sem, _db_pool  # noqa: PLW0603 — set once at startup, cleared in finally for test reuse
-    global _close_notice_flush_task  # noqa: PLW0603 — cancelled in the same finally
     _dispatch_sem = asyncio.Semaphore(settings.services.ops_concurrency)
 
     our_machine = machine_name()
@@ -669,7 +664,7 @@ async def _main() -> None:
     _db_pool = pool
     # Flush shell-closure notices the previous stop journaled (issue #2044) —
     # the first moment the DB is reachable again. Never fatal.
-    _start_close_notice_flush(pool)
+    close_notices.start(pool)
 
     try:
         bind_host = _ops_bind_host()
@@ -705,38 +700,11 @@ async def _main() -> None:
             await stop_health_server(server)
             _remove_pidfile()
     finally:
-        if _close_notice_flush_task is not None:
-            _close_notice_flush_task.cancel()
-            _close_notice_flush_task = None
+        close_notices.stop()
         pool.close()
         _db_pool = None
         _dispatch_sem = None
         _shutdown_op_pool()
-
-
-def _start_close_notice_flush(pool: ConnectionPool) -> None:
-    """Begin delivering shell-closure notices recorded by the previous stop."""
-    global _close_notice_flush_task  # noqa: PLW0603 — daemon-lifetime, like _db_pool
-    _close_notice_flush_task = asyncio.create_task(_flush_close_notices(pool))
-
-
-async def _flush_close_notices(pool: ConnectionPool) -> None:
-    """Deliver the previous stop's shell-closure notices; bounded retries.
-
-    Undelivered records stay in place for the next start (issue #2044).
-    """
-    for delay in (0.0, 30.0, 120.0, 300.0):
-        if delay:
-            await asyncio.sleep(delay)
-        try:
-            remaining = await asyncio.to_thread(pty_close_notices.flush, pool)
-        except Exception:
-            _log.exception("[ops] shell-closure notice flush failed; records kept")
-            continue
-        if not remaining:
-            return
-        _log.warning("[ops] %d shell-closure notices undelivered; retrying", remaining)
-    _log.error("[ops] shell-closure notices undelivered after retries; kept for next start")
 
 
 def _shutdown_op_pool() -> None:
