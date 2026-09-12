@@ -658,7 +658,9 @@ def test_cross_process_lock_contention_defers_then_recovers(
         res = sp.PauseController().reconcile("gateway")
         assert res.blocks is BlockScope.ALL and res.acted is False
     finally:
-        holder.terminate()
+        # SIGKILL: the session shell's SIGTERM=SIG_IGN is inherited; the kernel
+        # drops the flock either way (see shared.platform.file_lock).
+        holder.kill()
         holder.wait(timeout=10)
     # Lock released: the next round runs the ordinary no-owner rules.
     assert sp.recover_stranded_pause() is True

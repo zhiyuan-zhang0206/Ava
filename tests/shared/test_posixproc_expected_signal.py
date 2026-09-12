@@ -55,8 +55,10 @@ def test_replaced_name_never_signals_replacement(
             assert old.poll() is None
             assert SessionRecord.read(path) == new
         finally:
-            old.terminate()
-            replacement.terminate()
+            # SIGKILL, not terminate(): a shell session's SIGTERM=SIG_IGN is
+            # inherited, so the graceful call would leave both children alive.
+            old.kill()
+            replacement.kill()
             old.wait(timeout=10)
             replacement.wait(timeout=10)
 
@@ -131,6 +133,7 @@ def test_expected_identity_uses_stable_ticks_before_epoch_birth(
                 assert child.poll() is None
             assert SessionRecord.read(path) == expected
         finally:
+            # SIGKILL for the same SIG_IGN-inheritance reason as the test above.
             if child.poll() is None:
-                child.terminate()
+                child.kill()
             child.wait(timeout=3)

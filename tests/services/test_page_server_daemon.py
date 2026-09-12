@@ -849,5 +849,7 @@ def test_server_module_still_serves_a_tokenized_health_endpoint(tmp_path: Path) 
             time.sleep(0.05)
         assert psd._server_is_healthy(_HOST, port, "roundtrip")
     finally:
-        proc.terminate()
+        # SIGKILL: a shell session's SIGTERM=SIG_IGN is inherited, so the
+        # graceful call would leave the page server alive.
+        proc.kill()
         proc.wait(timeout=2.0)

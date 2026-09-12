@@ -502,8 +502,10 @@ def test_real_redis_stops_owned_instance_only(
                 assert restored.get("owned-test") == "latest-unsaved"  # pyright: ignore[reportUnknownMemberType]
             assert stop.stop_data_plane(3) == ["redis"]
         finally:
+            # SIGKILL: a shell session's SIGTERM=SIG_IGN is inherited, so the
+            # graceful call would leave this restarted redis alive.
             if restarted.poll() is None:
-                restarted.terminate()
+                restarted.kill()
             restarted.wait(timeout=5)
 
 
