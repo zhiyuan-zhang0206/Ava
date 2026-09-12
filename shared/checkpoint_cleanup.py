@@ -16,7 +16,7 @@ replaces the pre-compact history) is kept regardless of age, so each past
 compaction segment stays recoverable as one full snapshot — the user's
 "preserve information, bound storage" retention rule (Task #1125).
 
-Safety invariant — full-snapshot channels only:
+Safety invariant — full-snapshot channels only; delta threads are exempt:
     This naive "keep the latest K, drop the rest" trim is correct ONLY because
     every Ava state channel stores a self-contained full value in its blob. The
     `messages` channel is `Annotated[list, add_messages]` — a plain accumulator,
@@ -24,9 +24,16 @@ Safety invariant — full-snapshot channels only:
     LangGraph's beta `DeltaChannel` instead stores deltas and reconstructs by
     walking the parent chain back to a snapshot ancestor; dropping intermediate
     checkpoints would silently sever that chain (the channel reconstructs as
-    empty, with no error raised). If Ava ever adopts a `DeltaChannel`-backed
-    channel, this trim becomes unsafe and must preserve the parent chain (see
-    `BaseCheckpointSaver.prune`'s DeltaChannel warning).
+    empty, with no error raised).
+
+    `_TRIM_SQL` therefore refuses every delta-written thread: the `delta_thread`
+    CTE matches either delta replay counters in checkpoint metadata or an
+    EXT-7 (`_DeltaSnapshot`) messages blob, and a match parks the whole trim
+    (`ready = false`). Detection is shape-based on purpose — blob absence
+    alone does NOT identify a delta thread, because at a snapshot step the
+    blob exists; that is exactly the hole review #6143 (x2b) found. On any
+    doubt the bias is always "park": a false positive costs a no-op, a false
+    negative deletes the chain.
 
 Blob retention is keyed on the (channel, version) pairs a surviving checkpoint's
 `channel_versions` still references — NOT on which (deleted) checkpoint wrote the
@@ -84,24 +91,64 @@ newest_messages AS (
     FROM ranked
     WHERE rn = 1
 ),
-trim_guard AS (
-    SELECT newest.version IS NULL OR (
+delta_thread AS (
+    -- Explicit delta-written-thread exemption (never-delete ruling, task
+    -- #3180; review #6143 I1/x2b). Shape-based on purpose: at a snapshot step
+    -- the newest messages version DOES have a blob (an EXT-7 _DeltaSnapshot),
+    -- so blob absence alone cannot carry the exemption. Both markers below
+    -- are written only by delta-capable runtimes; on any doubt park the trim.
+    SELECT (
         EXISTS (
-            SELECT 1
-            FROM checkpoint_blobs b
-            WHERE b.thread_id = %(thread_id)s
-              AND b.checkpoint_ns = %(ns)s
-              AND b.channel = 'messages'
-              AND b.version = newest.version
+            SELECT 1 FROM ranked r
+            WHERE r.metadata ? 'counters_since_delta_snapshot'
         )
-        AND NOT EXISTS (
-            SELECT 1
-            FROM checkpoint_blobs b
+        OR EXISTS (
+            SELECT 1 FROM checkpoint_blobs b
             WHERE b.thread_id = %(thread_id)s
               AND b.checkpoint_ns = %(ns)s
               AND b.channel = 'messages'
-              AND split_part(b.version, '.', 1)::bigint
-                  > split_part(newest.version, '.', 1)::bigint
+              AND (
+                  -- msgpack EXT-7 framing: fixext1..16 start with the type
+                  -- byte right after the marker (xx 07); ext8/ext16/ext32
+                  -- carry it after 1/2/4 length bytes (c7/c8/c9).
+                  substring(b.blob FROM 1 FOR 2) IN (
+                      '\\xd407'::bytea, '\\xd507'::bytea, '\\xd607'::bytea,
+                      '\\xd707'::bytea, '\\xd807'::bytea
+                  )
+                  OR (substring(b.blob FROM 1 FOR 1) = '\\xc7'::bytea
+                      AND substring(b.blob FROM 3 FOR 1) = '\\x07'::bytea)
+                  OR (substring(b.blob FROM 1 FOR 1) = '\\xc8'::bytea
+                      AND substring(b.blob FROM 4 FOR 1) = '\\x07'::bytea)
+                  OR (substring(b.blob FROM 1 FOR 1) = '\\xc9'::bytea
+                      AND substring(b.blob FROM 6 FOR 1) = '\\x07'::bytea)
+              )
+        )
+    ) AS is_delta
+),
+trim_guard AS (
+    SELECT (
+        NOT (SELECT is_delta FROM delta_thread)
+        AND (
+            newest.version IS NULL
+            OR (
+                EXISTS (
+                    SELECT 1
+                    FROM checkpoint_blobs b
+                    WHERE b.thread_id = %(thread_id)s
+                      AND b.checkpoint_ns = %(ns)s
+                      AND b.channel = 'messages'
+                      AND b.version = newest.version
+                )
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM checkpoint_blobs b
+                    WHERE b.thread_id = %(thread_id)s
+                      AND b.checkpoint_ns = %(ns)s
+                      AND b.channel = 'messages'
+                      AND split_part(b.version, '.', 1)::bigint
+                          > split_part(newest.version, '.', 1)::bigint
+                )
+            )
         )
     ) AS ready
     FROM newest_messages newest
@@ -252,9 +299,11 @@ async def trim_checkpoints(
     are exempt from every trim — a stamped segment anchor is never deleted.
 
     Trimming is a legacy operation: the cluster default parks it (never-delete
-    ruling, 2026-09-12, task #3180), and a delta-written thread is never
-    trimmed — its newest messages version has no blob row, so the guard parks
-    the thread.
+    ruling, 2026-09-12, task #3180), and a delta-written thread is refused
+    outright by the `delta_thread` exemption in `_TRIM_SQL` (delta replay
+    counters in metadata or an EXT-7 `_DeltaSnapshot` blob). The exemption is
+    explicit because the blob-absence accident does not hold at snapshot
+    steps, where the trim guard alone would proceed (review #6143 x2b).
 
     Returns the per-table delete counts.
     """
