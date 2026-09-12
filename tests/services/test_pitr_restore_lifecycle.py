@@ -575,7 +575,9 @@ def _dead_child() -> tuple[subprocess.Popen[str], int, float, int]:
     probe = psutil.Process(process.pid)
     created_at = probe.create_time()
     pgid = os.getpgid(process.pid)
-    process.terminate()
+    # SIGKILL: SIGTERM is ignored when this suite runs inside a shell session
+    # (SIG_IGN is inherited), and the zombie post-condition needs a real death.
+    process.kill()
     deadline = time.monotonic() + 10
     while probe.status() != psutil.STATUS_ZOMBIE and time.monotonic() < deadline:
         time.sleep(0.01)
@@ -689,7 +691,9 @@ def test_executor_run_reaps_the_sandbox_postmaster_on_failure(
         raise RestoreProofError("restored migration set differs")
 
     def fake_stop(_pgdata: Path, _identity: SandboxPostgresIdentity) -> None:
-        child.terminate()  # dead child left unreaped, as the real stop path does
+        # SIGKILL (SIG_IGN-inherited sessions ignore SIGTERM): dead child left
+        # unreaped, as the real stop path does.
+        child.kill()
 
     monkeypatch.setattr(restore_postgres, "_run", fake_verify)
     monkeypatch.setattr(restore_postgres, "_spawn_sandbox_postgres", fake_spawn)
