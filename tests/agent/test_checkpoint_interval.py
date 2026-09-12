@@ -17,6 +17,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.channels.delta import DeltaChannel
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.serde.types import _DeltaSnapshot
 from langgraph.constants import PUSH
 from langgraph.graph import END, START, StateGraph
@@ -625,8 +626,9 @@ async def test_nstep_wrapper_delta_readback_matches_unwrapped_control(
         graph.add_conditional_edges("step", route)  # pyright: ignore[reportUnknownMemberType]
         return graph.compile(checkpointer=saver)  # pyright: ignore[reportUnknownMemberType]
 
-    control_config: RunnableConfig = {"configurable": {"thread_id": str(uuid4())}}
-    wrapped_config: RunnableConfig = {"configurable": {"thread_id": str(uuid4())}}
+    control_thread, wrapped_thread = str(uuid4()), str(uuid4())
+    control_config: RunnableConfig = {"configurable": {"thread_id": control_thread}}
+    wrapped_config: RunnableConfig = {"configurable": {"thread_id": wrapped_thread}}
 
     control = build(AsyncPostgresSaver(aops_pool))
     await control.ainvoke(  # pyright: ignore[reportUnknownMemberType]
@@ -639,9 +641,7 @@ async def test_nstep_wrapper_delta_readback_matches_unwrapped_control(
     await wrapped.ainvoke(  # pyright: ignore[reportUnknownMemberType]
         {"messages": [], "n": 0, "target": 12}, wrapped_config, recursion_limit=200
     )
-    await wrapped_saver._ava_nstep_flush(  # type: ignore[attr-defined]
-        str(wrapped_config["configurable"]["thread_id"])
-    )
+    await wrapped_saver._ava_nstep_flush(wrapped_thread)  # type: ignore[attr-defined]
 
     async def read_message_ids(config: RunnableConfig) -> list[str | None]:
         reader = build(AsyncPostgresSaver(aops_pool))
@@ -656,8 +656,7 @@ async def test_nstep_wrapper_delta_readback_matches_unwrapped_control(
     # the same checkpoint and write rows as upstream would.
     counts: dict[str, tuple[int, int]] = {}
     async with aops_pool.connection() as conn:
-        for label, config in (("control", control_config), ("wrapped", wrapped_config)):
-            thread_id = str(config["configurable"]["thread_id"])
+        for label, thread_id in (("control", control_thread), ("wrapped", wrapped_thread)):
             cursor = await conn.execute(
                 "SELECT (SELECT count(*) FROM checkpoints WHERE thread_id = %s),"
                 " (SELECT count(*) FROM checkpoint_writes WHERE thread_id = %s)",
@@ -667,3 +666,41 @@ async def test_nstep_wrapper_delta_readback_matches_unwrapped_control(
             assert row is not None
             counts[label] = (int(row[0]), int(row[1]))
     assert counts["wrapped"] == counts["control"]
+
+    async def writes_by_position(
+        thread_id: str,
+    ) -> list[list[tuple[str, list[str | None] | None]]]:
+        """Write rows grouped by checkpoint position, message payloads decoded.
+
+        Positions follow each thread's checkpoint order, so two runs of the same
+        graph align entry by entry; task ids are run-specific (xxhash of the
+        checkpoint id) and are canonicalized by sorting each position. A messages
+        row decodes to its message-id list, pinning content and per-row order.
+        """
+        serde = JsonPlusSerializer()
+        async with aops_pool.connection() as conn:
+            cursor = await conn.execute(
+                "SELECT checkpoint_id FROM checkpoints WHERE thread_id = %s ORDER BY checkpoint_id",
+                (thread_id,),
+            )
+            position = {row[0]: index for index, row in enumerate(await cursor.fetchall())}
+            cursor = await conn.execute(
+                "SELECT checkpoint_id, channel, type, blob FROM checkpoint_writes"
+                " WHERE thread_id = %s ORDER BY checkpoint_id, task_id, idx",
+                (thread_id,),
+            )
+            rows = await cursor.fetchall()
+        grouped: list[list[tuple[str, list[str | None] | None]]] = [[] for _ in position]
+        for checkpoint_id, channel, type_tag, blob in rows:
+            payload = None
+            if channel == "messages":
+                payload = [
+                    getattr(message, "id", None) for message in serde.loads_typed((type_tag, blob))
+                ]
+            grouped[position[checkpoint_id]].append((channel, payload))
+        return [sorted(entries, key=lambda entry: (entry[0], str(entry[1]))) for entries in grouped]
+
+    # Row level: every write row keeps its checkpoint — nothing skipped, merged,
+    # or re-homed — and every messages payload keeps its content and order.
+    control_rows = await writes_by_position(control_thread)
+    assert await writes_by_position(wrapped_thread) == control_rows
