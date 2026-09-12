@@ -566,6 +566,18 @@ class DaemonSettings(EnvSettings):
         },
     )
 
+    events_maintenance_checkpoint_trim_enabled: bool = Field(
+        default=True,
+        alias="AVA_EVENTS_MAINTENANCE_CHECKPOINT_TRIM_ENABLED",
+        description="Enforce the per-thread keep-three checkpoint budget on the maintenance fast loop. False parks the trim: the loop keeps its cadence and healthy stamp, and nothing is deleted — for retention-first clusters and while the checkpoint storage model is being redesigned.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     events_maintenance_resolution_deadline_s: float = Field(
         default=600.0,
         alias="AVA_EVENTS_MAINTENANCE_RESOLUTION_DEADLINE_S",
