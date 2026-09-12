@@ -287,7 +287,7 @@ Each (machine × cluster) has one complete **process tree**: a general root supe
 
 | # | When | Action | Duration | Notes |
 |---|---|---|---|---|
-| 1 | Before enablement (once per Mac) | Tick the boxes in System Settings: the helper's Desktop/Documents/Downloads folders + the AppleEvents target | ~1-2 min/machine | Screen Recording / Accessibility are already granted; **3 machines already inventoried** (macmini/mba/company-mini) + **company-air still to be inventoried** (the 4th candidate; the same mechanism and the same single occurrence once confirmed) |
+| 1 | Before enablement (once per Mac) | Tick the boxes in System Settings: the helper's Desktop/Documents/Downloads folders + the AppleEvents target | ~1-2 min/machine | List 3 machines (macmini/mba/company-mini) + company-air still to be inventoried (4th candidate, same mechanism); **NOTE: the folder authorization has NOT been executed yet** (macmini empirically lacked Desktop access on 2026-09-12); Screen Recording / Accessibility must be re-verified per machine (not assumed); the user must perform it **at that machine** (a TCC prompt may not be visible in a remote session). |
 | 2 | Migration window (once per machine) | Confirm a time window (no hands-on needed) | ~0 (one sentence back) | One-shot migration; includes a rollback path |
 | 3 | Post-migration acceptance (optional) | One experiential confirmation (popups gone, file access normal) | ~1 min | Can be delegated to an agent to verify automatically; you can skip it |
 
@@ -297,7 +297,7 @@ Each (machine × cluster) has one complete **process tree**: a general root supe
 (The rulings = the decision card; this section tracks implementation details)
 - G1 two-section — decided. G2 full tree — decided. G3 one tree per (machine × $AVA_HOME) — decided. G4 big-bang — decided. G5 ava-root (the helper keeps its name) — decided. G6 independent service group, all into the tree — decided.
 - Fallback strategy = lose attribution, not service — decided (user ruling 17:41; B5 + the two-section crash semantics).
-- Landing details (draft-3 / the implementation phase): (1) designing the "zero permission content in root" lint rule (B2a) (2) refining the helper→root keepalive chain and the single-instance flow (E1/B5) (3) aligning the B7 metrics with the F list (4) decomposing the migration steps (D).
+- Landing details (draft-3 / the implementation phase): (1) designing the "zero permission content in root" lint rule (B2a) (2) refining the helper→root keepalive chain and the single-instance flow (E1/B5) (3) aligning the B7 metrics with the F list (4) decomposing the migration steps (D) (5) per-machine audit of the actual helper authorization state on all four Macs (non-prompting probes only; never trigger a TCC prompt on a user or company device) — added 2026-09-12.
 
 ## Open / to verify (tracked)
 - [ ] Stale docstrings such as `ops/agents.py:16-17` (already listed as a candidate small task)
