@@ -23,7 +23,9 @@ birth config, then current cluster config.
 - Reconcile claimed inbounds against the actual checkpoint.
 - Repair crash-left unpaired tool uses/results.
 - Wrap saver writes with visible failures and the configured N-step interval.
-  The final flush removes its pending tail only after successful persistence.
+  Delta-bearing threads retire the interval: every super-step and write batch
+  persists as upstream wrote it. The final flush removes its pending tail only
+  after successful persistence.
 - Reconcile retained pages and report desktop permission faults.
 
 A missing or terminated row is not scheduled as normal work. A fresh foreign

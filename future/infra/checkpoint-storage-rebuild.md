@@ -65,6 +65,12 @@ as before — slowly.
     amplifier.
   - A turn ends with `_ava_nstep_flush(thread_id)` persisting the last skipped checkpoint.
     Per-thread locks serialize writes and flushes.
+  - A delta-bearing thread (checkpoint metadata `counters_since_delta_snapshot`, or a
+    `_DeltaSnapshot` value in `channel_values`) retires the throttle: every super-step and
+    write batch persists exactly as upstream produced them (original configs, no version
+    merge). Delta reconstruction replays `checkpoint_writes`, so a skipped batch is
+    unrecoverable and re-homing one scrambles the replay order — landed, this is the §349
+    "wrapper retirement for the delta channel" companion.
 - Net: a checkpoint's write volume = the full serialized state at that step; `messages`
   (the whole conversation list) dominates.
 
