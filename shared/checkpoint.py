@@ -173,6 +173,20 @@ def _message_count_from_blob_header(blob_type: object, header: object) -> int:
     return _msgpack_array_length(bytes(cast(bytes, header)))
 
 
+def _is_delta_snapshot_blob(blob_type: object, header: object) -> bool:
+    """True when the messages version is a delta snapshot instead of a plain
+    array.
+
+    A snapshot-step checkpoint of a delta-written thread materializes its value
+    as a MessagePack extension (`_DeltaSnapshot`, tasks #3180/#3181) — the same
+    "value not directly readable" family as the no-blob case — so the count
+    path must reconstruct rather than parse a header.
+    """
+    if blob_type != "msgpack":
+        return False
+    return bytes(cast(bytes, header))[:1] in (b"\xc7", b"\xc8", b"\xc9")
+
+
 def load_checkpoint_message_count(agent_id: int) -> int:
     """Return the live checkpoint's messages length without loading the blob.
 
@@ -208,6 +222,8 @@ def load_checkpoint_message_count(agent_id: int) -> int:
             # written yet reconstructs to nothing and still counts 0.
             return _reconstructed_message_count(agent_id)
         blob_type, header = row
+        if _is_delta_snapshot_blob(blob_type, header):
+            return _reconstructed_message_count(agent_id)
         return _message_count_from_blob_header(blob_type, header)
     except Exception as exc:
         raise CheckpointReadError(

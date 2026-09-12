@@ -216,6 +216,29 @@ async def test_snapshot_tip_unwraps_and_mid_chain_walks(
     assert 0 < len(truth_mid) < len(truth)
 
 
+async def test_count_reconstructs_snapshot_tip(
+    aops_pool: AsyncConnectionPool, db_conn: psycopg.Connection
+) -> None:
+    """A snapshot-step delta tip stores a `_DeltaSnapshot` extension, not a
+    plain msgpack array — the count reader must reconstruct instead of raising
+    (drill D2, execution card §4)."""
+    agent_id = create_agent(db_conn)
+    db_conn.commit()
+    saver = _saver(aops_pool)
+    delta = _delta_app(saver, snapshot_frequency=2)
+    cfg = _config(str(agent_id))
+    await delta.ainvoke({"messages": [], "n": 0, "target": 9}, cfg, recursion_limit=60)  # pyright: ignore[reportUnknownMemberType]
+    truth = _ids((await delta.aget_state(cfg)).values["messages"])
+
+    # Precondition: the newest checkpoint is a snapshot step (extension blob).
+    raw = await saver.aget_tuple(cfg)
+    assert raw is not None
+    stored = raw.checkpoint["channel_values"].get("messages")
+    assert isinstance(stored, _DeltaSnapshot)
+
+    assert load_checkpoint_message_count(agent_id) == len(truth) == 18
+
+
 async def test_remove_all_rebuild_folds(aops_pool: AsyncConnectionPool) -> None:
     saver = _saver(aops_pool)
     delta = _delta_app(saver)
