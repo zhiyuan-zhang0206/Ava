@@ -21,6 +21,7 @@ from langchain_core.messages import (
 from langchain_core.runnables import RunnableConfig
 from langgraph.channels.delta import DeltaChannel
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.serde.types import _DeltaSnapshot
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
@@ -31,6 +32,7 @@ from agent.messages_guard import guarded_delta_reducer
 from agent.startup import _reconcile_claimed_inbounds_at_startup
 from ops.agent_spawn import _copy_checkpoint_chain
 from shared.checkpoint import (
+    _is_delta_snapshot_blob,
     load_checkpoint_message_count,
     load_checkpoint_messages_full,
     load_checkpoint_messages_segment,
@@ -237,6 +239,19 @@ async def test_count_reconstructs_snapshot_tip(
     assert isinstance(stored, _DeltaSnapshot)
 
     assert load_checkpoint_message_count(agent_id) == len(truth) == 18
+
+
+def test_delta_snapshot_markers_cover_ext_and_fixext() -> None:
+    """Marker coverage: small snapshot payloads pack as fixext (d4-d8), not
+    just ext8/16/32 — an emptied messages snapshot serializes with a fixext
+    head (QA probe: `_DeltaSnapshot([])` -> first byte 0xd4). The count
+    predicate must accept both families and still reject a plain array head."""
+    _type, payload = JsonPlusSerializer().dumps_typed(_DeltaSnapshot([]))
+    assert payload[0] in (0xC7, 0xC8, 0xC9, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8)
+    assert _is_delta_snapshot_blob("msgpack", payload[:5]) is True
+    for marker in (b"\xc7", b"\xc8", b"\xc9", b"\xd4", b"\xd5", b"\xd6", b"\xd7", b"\xd8"):
+        assert _is_delta_snapshot_blob("msgpack", marker) is True
+    assert _is_delta_snapshot_blob("msgpack", b"\x92") is False
 
 
 async def test_remove_all_rebuild_folds(aops_pool: AsyncConnectionPool) -> None:

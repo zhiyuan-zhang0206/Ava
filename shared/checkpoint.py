@@ -184,7 +184,20 @@ def _is_delta_snapshot_blob(blob_type: object, header: object) -> bool:
     """
     if blob_type != "msgpack":
         return False
-    return bytes(cast(bytes, header))[:1] in (b"\xc7", b"\xc8", b"\xc9")
+    # ext8/16/32 (0xc7-0xc9) or the fixext family (0xd4-0xd8): payloads up to
+    # 16 bytes pack as fixext — an emptied messages snapshot does (QA probe:
+    # `_DeltaSnapshot([])` -> first byte 0xd4), so both families are delta
+    # evidence, not a parse failure.
+    return bytes(cast(bytes, header))[:1] in (
+        b"\xc7",
+        b"\xc8",
+        b"\xc9",
+        b"\xd4",
+        b"\xd5",
+        b"\xd6",
+        b"\xd7",
+        b"\xd8",
+    )
 
 
 def load_checkpoint_message_count(agent_id: int) -> int:
