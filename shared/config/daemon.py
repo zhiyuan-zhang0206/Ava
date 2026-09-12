@@ -567,9 +567,9 @@ class DaemonSettings(EnvSettings):
     )
 
     events_maintenance_checkpoint_trim_enabled: bool = Field(
-        default=True,
+        default=False,
         alias="AVA_EVENTS_MAINTENANCE_CHECKPOINT_TRIM_ENABLED",
-        description="Enforce the per-thread keep-three checkpoint budget on the maintenance fast loop. False parks the trim: the loop keeps its cadence and healthy stamp, and nothing is deleted — for retention-first clusters and while the checkpoint storage model is being redesigned.",
+        description="Enforce the per-thread keep-three checkpoint budget on the maintenance fast loop. Default false (never-delete ruling, 2026-09-12): nothing is deleted while the checkpoint storage model is retention-first. Setting true re-enables history deletion — an explicit authorization, and unsafe for delta-written threads.",
         json_schema_extra={
             "restart_required": "all",
             "writable": True,

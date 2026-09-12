@@ -146,6 +146,11 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         "history_dump", "pre-compact history dumped to workspace", tier="noise"
     ),
     "checkpoint_trim": _telemetry("checkpoint_trim", "checkpoint trimmed", tier="noise"),
+    "compact_boundary_stamp": _telemetry(
+        "compact_boundary_stamp",
+        "compact boundary stamp failed (segment anchor not recorded)",
+        tier="noise",
+    ),
     "recall_filter": _telemetry(
         "recall_filter", "memory recall filter", payload=RecallFilter, tier="noise"
     ),

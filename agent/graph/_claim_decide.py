@@ -32,7 +32,7 @@ from agent.hooks.compact import (
     conversation_messages,
     emergency_compact_summary,
     emit_compaction_monitoring,
-    trim_checkpoints_after_compact,
+    stamp_compact_boundary,
 )
 from agent.state_channels import CIRCUIT_REASON_CONTEXT_OVERFLOW
 from shared.inbound import InboundKind
@@ -148,7 +148,7 @@ async def decide(
             compact_kind=compact_kind,
         )
         ctx.event_publisher.emit(CompactDone(agent_id=agent_id).model_dump_json())
-        await trim_checkpoints_after_compact(ctx.ops_pool, agent_id)
+        await stamp_compact_boundary(ctx.ops_pool, agent_id)
         # Defer any chats co-batched with the compact: they arrived while the
         # turn was in flight and were never part of the summarized history, so
         # they must survive — but as pending inbounds delivered in the fresh

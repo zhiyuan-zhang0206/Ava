@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Per-thread checkpoint retention
-description: Gateway-owned keep-three checkpoint pruning with bounded fair passes and an in-flight messages-write guard.
+description: Gateway-owned keep-three checkpoint pruning (parked by default; never-delete ruling) with bounded fair passes and an in-flight messages-write guard.
 tags: []
 ---
 
@@ -10,8 +10,9 @@ tags: []
 ## Contract
 
 The events-maintenance daemon calls `checkpoint_reaper.prune_threads` every
-minute, unless `AVA_EVENTS_MAINTENANCE_CHECKPOINT_TRIM_ENABLED=false` parks the
-pass as a no-op. One table-driven grouping counts all checkpoint rows by `thread_id`;
+minute only while `AVA_EVENTS_MAINTENANCE_CHECKPOINT_TRIM_ENABLED=true`; the
+default is false (never-delete ruling, 2026-09-12, task #3180) — the pass is
+parked and nothing is deleted. One table-driven grouping counts all checkpoint rows by `thread_id`;
 threads above the fixed keep-three budget become candidates regardless of agent
 status, liveness, or whether an `agents_meta` row exists. Compaction boundaries
 are exempt from the budget: a checkpoint stamped `compact_boundary: true` is
