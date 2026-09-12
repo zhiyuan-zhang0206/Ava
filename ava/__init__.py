@@ -127,7 +127,9 @@ def _ensure_plugins_loaded() -> None:
     The entry point for a process an agent launched: a watcher / schedule
     bootstrap calls it explicitly before running agent code, and a persistent-shell
     child reaches it lazily from `__getattr__` on the first unknown `ava.X`.
-    Latched so it runs at most once per process.
+    Latched so it runs at most once per process — a call that arrives while the
+    loader module is still initializing (a re-entrant import) defers instead,
+    so a later miss retries once the module is complete.
 
     The loader lives in the agent layer; it is reached via `importlib` (a runtime
     string, not a static `from agent import`) so this ava-layer module keeps NO
@@ -155,6 +157,17 @@ def _ensure_plugins_loaded() -> None:
     try:
         importlib.import_module("agent.graph._build")._load_extensions()
     except Exception as exc:
+        if isinstance(exc, AttributeError) and (
+            "partially initialized module 'agent.graph._build'" in str(exc)
+        ):
+            # Not a failure — too early. A process that imports an `agent.*`
+            # module before `ava` reaches this call while the loader module is
+            # still its own partial `sys.modules` entry: the attribute does not
+            # exist YET. Unlatch so the next miss retries once the module
+            # finishes initializing; the in-flight lookup fails fast meanwhile
+            # (`_maybe_load_plugins_for_missing` reads the latch).
+            _plugins_loaded = False
+            return
         from shared.log import logger
 
         logger.error(
@@ -186,8 +199,9 @@ def _maybe_load_plugins_for_missing(name: str) -> bool:
     `ava.self.set_label` from ava_fleet) would AttributeError. On the first such miss,
     load plugins once — then the caller retries the lookup.
 
-    Returns True iff a load just ran (caller should re-attempt `getattr`), False
-    to fall through to the module's own fail-fast AttributeError. Fires only in
+    Returns True iff this call latched a load (caller should re-attempt
+    `getattr`); a deferral — the loader module is still importing — returns
+    False so the caller fails fast now and a later miss retries. Fires only in
     an agent-launched child (`_boot.is_launched_child`), only after `import ava`
     is complete (`_init_complete`), only once (`_plugins_loaded`), and never for
     underscore names — so gateway / cli / the agent process keep fail-fast on a
@@ -201,7 +215,10 @@ def _maybe_load_plugins_for_missing(name: str) -> bool:
     if not _boot.is_launched_child():
         return False
     _ensure_plugins_loaded()
-    return True
+    # Retry the lookup only if a load was recorded: a deferral (the loader
+    # module is still importing) leaves the latch off, so the caller fails fast
+    # now instead of re-entering this path, and a later miss retries.
+    return _plugins_loaded
 
 
 # PEP 562 module-level `__getattr__`. Plugins set runtime attributes via
