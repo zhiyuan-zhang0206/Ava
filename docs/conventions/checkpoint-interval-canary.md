@@ -20,6 +20,12 @@ granularity for write volume and must go through this protocol.
 - **Write path**: LangGraph `aput`/`aput_writes` are throttled to every Nth
   super-step; `input`/`fork` and the end-of-turn terminal state are never
   throttled (termination must land on disk).
+- **Delta-bearing threads**: exempt. Once a thread's checkpoints carry a
+  `DeltaChannel` (metadata counters or a `_DeltaSnapshot` value), the throttle
+  retires for that thread — every super-step and write batch persists as
+  upstream wrote it — and its crash-recovery bound is at most the in-flight
+  super-step, not `N-1`. The flag and this canary then cover only vanilla
+  full-snapshot threads.
 - **Crash recovery**: replays up to `N-1` super-steps — re-spending LLM tokens,
   possibly replaying tool side effects. Inbound messages are re-delivered by
   claimed/pending reconciliation, so a crash mid-turn does not lose an inbound,

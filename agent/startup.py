@@ -25,7 +25,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 from weakref import WeakValueDictionary
@@ -33,6 +33,7 @@ from weakref import WeakValueDictionary
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import ChannelVersions, Checkpoint, CheckpointMetadata
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from langgraph.checkpoint.serde.types import _DeltaSnapshot
 from langgraph.constants import PUSH
 from langgraph.graph.state import CompiledStateGraph
 from psycopg_pool import AsyncConnectionPool
@@ -112,13 +113,48 @@ def _wrap_saver_writes_with_loud_failure(
 
 @dataclass
 class _NstepCheckpointState:
-    """One thread's retained checkpoint parent and skipped tail."""
+    """One thread's retained checkpoint parent, skipped tail, and delta channels."""
 
     last_aput_step: int | None = None
     last_persisted_config: RunnableConfig | None = None
     last_skipped_aput: (
         tuple[RunnableConfig, Checkpoint, CheckpointMetadata, ChannelVersions] | None
     ) = None
+    delta_channels: set[str] = field(default_factory=set[str])
+
+
+def _delta_evidence(checkpoint: Checkpoint, metadata: CheckpointMetadata) -> set[str]:
+    """Delta channel names this checkpoint reveals, from two independent signals.
+
+    Both are only ever produced for `DeltaChannel` channels, so a non-empty
+    result proves the thread's state uses the delta write model:
+
+    - `counters_since_delta_snapshot` metadata — LangGraph counts delta
+      channels only; its keys are the channel names.
+    - `_DeltaSnapshot` values in `channel_values` — a delta channel's periodic
+      full snapshot. The counters are absent exactly on the super-step that
+      took the snapshot (they reset to zero and drop off the metadata), so the
+      marker is what keeps detection total.
+
+    Detection is sticky: once any signal is seen, the thread stays delta for
+    the saver's lifetime (`_NstepCheckpointState.delta_channels`).
+    """
+    evidence: set[str] = set()
+    counters = metadata.get("counters_since_delta_snapshot")
+    if counters:
+        evidence.update(counters)
+    for name, value in checkpoint.get("channel_values", {}).items():
+        if isinstance(value, _DeltaSnapshot):
+            evidence.add(name)
+    return evidence
+
+
+def _delta_retires_throttle(
+    state: _NstepCheckpointState, checkpoint: Checkpoint, metadata: CheckpointMetadata
+) -> bool:
+    """Learn the thread's delta channels; report whether the throttle is retired."""
+    state.delta_channels.update(_delta_evidence(checkpoint, metadata))
+    return bool(state.delta_channels)
 
 
 def _checkpoint_thread_id(config: RunnableConfig) -> str:
@@ -156,14 +192,19 @@ def _versions_with_current_blobs(
     """Extend new_versions with every current channel version.
 
     The saver writes a channel's blob only when that channel appears in
-    new_versions. A version born on a skipped super-step gets no blob row,
-    yet the next retained checkpoint's channel_versions still reference
-    it; the row then dangles and readers that reconstruct channel_values
-    (timeline cold load, crash recovery) lose the messages channel
-    entirely. Merging the full current version map makes the retained /
-    final write persist exactly one full snapshot per channel, keeping the
-    throttle's write reduction while every referenced version stays
-    readable.
+    new_versions. A version born on a skipped super-step gets no blob row, yet
+    the next retained checkpoint's channel_versions still reference it; the
+    row then dangles and readers that reconstruct channel_values (timeline cold
+    load, crash recovery) lose the channel entirely. Merging the full current
+    version map makes the retained / final write persist the current value for
+    every version it references, keeping the throttle's write reduction while
+    every referenced version stays readable by value.
+
+    Delta channels never pass through this merge: a delta-bearing thread is not
+    throttled at all (see `_wrap_saver_writes_with_nstep_interval`), so every
+    version it references is persisted by upstream's own write path. A delta
+    channel's non-snapshot steps deliberately have no blob row — readers
+    reconstruct those values by replaying `checkpoint_writes` in chain order.
     """
     return {**new_versions, **checkpoint["channel_versions"]}
 
@@ -172,17 +213,32 @@ def _wrap_saver_writes_with_nstep_interval(
     checkpointer: AsyncPostgresSaver,
     interval: int | Callable[[], int],
 ) -> None:
-    """Persist super-step checkpoints every ``interval`` steps.
+    """Persist super-step checkpoints every ``interval`` steps, except on
+    delta-bearing threads.
 
-    The wrapper leaves input/fork checkpoints untouched. For skipped super-step
-    checkpoints it skips their channel and PUSH writes except for writes at the
-    next retained step. Those writes and retained checkpoints use the last
-    persisted config, so every parent and write target has a checkpoint row. A
-    completed turn flushes the latest skipped update through
-    ``_ava_nstep_flush(thread_id)``; retained and flushed checkpoints persist
-    one full snapshot's blobs per channel, so every referenced channel value
-    stays readable; a crash may instead replay up to
-    ``interval - 1`` super-steps. A callable resolves an interval in the
+    A delta-bearing thread retires the throttle entirely: from the first
+    checkpoint that reveals a ``DeltaChannel`` (see `_delta_evidence`), every
+    super-step reaches the saver exactly as upstream writes it — original
+    configs, unmerged versions, no skipped writes. A delta channel is
+    reconstructed by replaying its ``checkpoint_writes`` in chain order, so a
+    skipped batch is unrecoverable and re-homing a batch onto another
+    checkpoint scrambles the replay (the fold orders batches by checkpoint
+    position only; within one checkpoint it sorts by opaque task-id hash). The
+    retirement is the wrapper slice of the delta rebuild
+    (`future/infra/checkpoint-storage-rebuild.md`): deltas persist every
+    super-step, and the throttle's blob merge is a no-op there. A crash on
+    such a thread therefore replays at most the in-flight super-step, not
+    ``interval - 1`` of them.
+
+    For every other thread the wrapper leaves input/fork checkpoints
+    untouched. For skipped super-step checkpoints it skips their channel and
+    PUSH writes except for writes at the next retained step. Those writes and
+    retained checkpoints use the last persisted config, so every parent and
+    write target has a checkpoint row. A completed turn flushes the latest
+    skipped update through ``_ava_nstep_flush(thread_id)``; retained and
+    flushed checkpoints persist one full snapshot's blobs per channel, so
+    every referenced channel value stays readable; a crash may instead replay
+    up to ``interval - 1`` super-steps. A callable resolves an interval in the
     current turn context, so the hosted runner can share one saver without
     sharing a throttle between agents.
 
@@ -221,6 +277,12 @@ def _wrap_saver_writes_with_nstep_interval(
             source = metadata["source"]
             state = states.setdefault(thread_id, _NstepCheckpointState())
             state.last_aput_step = step
+            if _delta_retires_throttle(state, checkpoint, metadata):
+                # Delta-bearing thread: the throttle retires — see the wrapper
+                # docstring. Pass upstream's own call through untouched; the
+                # parent stays the loop's config, versions are not merged, and
+                # nothing is buffered for a flush.
+                return await orig_aput(config, checkpoint, metadata, new_versions)
             # `loop` is graph.ainvoke's normal super-step path; `update` is the
             # manual state-update path. Both must use the same durability interval.
             if source not in ("loop", "update"):
@@ -246,8 +308,7 @@ def _wrap_saver_writes_with_nstep_interval(
                 state.last_skipped_aput = None
                 return saved_config
 
-            if state.last_persisted_config is None:
-                state.last_persisted_config = config
+            state.last_persisted_config = state.last_persisted_config or config
             state.last_skipped_aput = (config, checkpoint, metadata, new_versions)
             return state.last_persisted_config
 
@@ -264,7 +325,10 @@ def _wrap_saver_writes_with_nstep_interval(
                 await orig_aput_writes(config, writes, task_id, task_path)
                 return
             state = states.get(thread_id)
-            if state is None or state.last_aput_step is None:
+            if state is None or state.last_aput_step is None or state.delta_channels:
+                # Fail open before the thread's first checkpoint, and retire
+                # entirely on a delta-bearing thread: either way the batch keeps
+                # its original config — never skipped, never re-homed.
                 await orig_aput_writes(config, writes, task_id, task_path)
                 return
 
