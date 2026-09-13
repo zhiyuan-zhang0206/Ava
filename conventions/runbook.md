@@ -1828,7 +1828,9 @@ Where to look when something went wrong on a host:
 
 `ava logs rotate` copytruncates top-level `$AVA_HOME/logs/*.out.log` files and
 top-level `$AVA_HOME/lgtm/native/logs/*.log` files when they reach 64 MiB or
-their mtime's UTC date differs from today. Grafana logs are excluded because
+their mtime's UTC date differs from today. A zero-byte file never triggers:
+there is nothing to archive, and a stale empty log would otherwise produce a
+fresh empty archive every day. Grafana logs are excluded because
 Grafana rotates itself, as are already dated `*.log.YYYY-MM-DD` archives. The
 archive suffix is today's UTC date; an existing archive makes that file a
 same-day idempotent no-op. Copytruncate preserves the live path and inode, so a
