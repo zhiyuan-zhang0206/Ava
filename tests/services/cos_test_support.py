@@ -54,6 +54,8 @@ class FakeCos:
         self.etag_overrides: dict[str, str] = {}
         self.corrupt_get_keys: set[str] = set()
         self.corrupt_bytes_keys: set[str] = set()
+        self.deleted: list[str] = []
+        self.delete_error: int | None = None
         self.page_size = 1000
 
     def seed(self, key: str, body: bytes, metadata: dict[str, str] | None = None) -> str:
@@ -78,7 +80,16 @@ class FakeCos:
             return self._head(path)
         if request.method == "GET":
             return self._get(request, path)
+        if request.method == "DELETE":
+            return self._delete(path)
         return httpx.Response(405)
+
+    def _delete(self, path: str) -> httpx.Response:
+        if self.delete_error is not None:
+            return httpx.Response(self.delete_error)
+        self.deleted.append(path)
+        self.objects.pop(path, None)
+        return httpx.Response(204)
 
     def _verify_auth(self, request: httpx.Request) -> None:
         """Recompute the SigV4 signature from the wire request fields and

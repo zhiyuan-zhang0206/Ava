@@ -4,16 +4,19 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 
 from services.pitr.base_manifest import CandidateManifest, _lsn
 from services.pitr.restore_manifest import ProtectedManifest, required_archive_names
 from services.pitr.retention_manifest import (
     PLAN_SCHEMA_VERSION,
+    OrphanSidecar,
     RetentionDecision,
     RetentionObject,
     RetentionPlan,
+    RetentionSidecar,
+    SidecarPair,
 )
 
 
@@ -26,6 +29,8 @@ class RetentionEvidence:
     malformed_names: tuple[str, ...] = ()
     snapshot_before: str = ""
     snapshot_after: str = ""
+    sidecar_pairs: tuple[SidecarPair, ...] = ()
+    orphan_sidecars: tuple[OrphanSidecar, ...] = ()
 
 
 def plan_retention(  # noqa: PLR0915
@@ -131,6 +136,7 @@ def plan_retention(  # noqa: PLR0915
         for chain_id, proof in protected.items()
         if chain_id not in retained_chains
     }
+    pair_by_host = _sidecar_pairs_by_host(evidence.sidecar_pairs, blockers)
     eligible: list[RetentionDecision] = []
     retained: list[RetentionDecision] = []
     for identity, item in sorted(remote_inventory.items()):
@@ -149,11 +155,15 @@ def plan_retention(  # noqa: PLR0915
             blockers.add("unknown remote object is not policy-owned")
             retained.append(RetentionDecision(item, "unknown object pinned fail closed"))
 
+    orphan_sidecars = _eligible_orphan_sidecars(
+        evidence.orphan_sidecars, protected_objects, oldest, candidates, blockers
+    )
     if blockers:
         retained.extend(eligible)
         eligible = []
-    retained = _canonical_decisions(retained)
-    eligible = _canonical_decisions(eligible)
+        orphan_sidecars = []
+    retained = _canonical_decisions([_attach_sidecar(item, pair_by_host) for item in retained])
+    eligible = _canonical_decisions([_attach_sidecar(item, pair_by_host) for item in eligible])
     evidence_sha = hashlib.sha256(_canonical_evidence(evidence).encode()).hexdigest()
     return RetentionPlan(
         PLAN_SCHEMA_VERSION,
@@ -168,6 +178,7 @@ def plan_retention(  # noqa: PLR0915
         tuple(eligible),
         sum(item.object.size for item in retained),
         sum(item.object.size for item in eligible),
+        tuple(sorted(orphan_sidecars)),
     )
 
 
@@ -288,6 +299,63 @@ def _before_frontier(item: RetentionObject, oldest: CandidateManifest) -> bool:
     return timeline < start_timeline or (timeline == start_timeline and segment < start_segment)
 
 
+def _sidecar_pairs_by_host(
+    pairs: tuple[SidecarPair, ...], blockers: set[str]
+) -> dict[str, SidecarPair]:
+    """Index the observed pairs; a host with two differing sidecars is ambiguous."""
+
+    by_host: dict[str, SidecarPair] = {}
+    for pair in pairs:
+        host = pair.sidecar.host_name()
+        existing = by_host.get(host)
+        if existing is not None:
+            if existing != pair:
+                blockers.add("ambiguous sidecar observation")
+            continue
+        by_host[host] = pair
+    return by_host
+
+
+def _attach_sidecar(
+    decision: RetentionDecision, pair_by_host: dict[str, SidecarPair]
+) -> RetentionDecision:
+    """Attach the observed sidecar only when it still binds to the live pin token."""
+
+    pair = pair_by_host.get(decision.object.object_name)
+    if pair is None or pair.host_pin_token != decision.object.pin_token:
+        return decision
+    return RetentionDecision(decision.object, decision.reason, pair.sidecar)
+
+
+def _eligible_orphan_sidecars(
+    observations: tuple[OrphanSidecar, ...],
+    protected_objects: set[tuple[str, str]],
+    oldest: str | None,
+    candidates: dict[str, CandidateManifest],
+    blockers: set[str],
+) -> list[RetentionSidecar]:
+    """Keep only orphans whose reconstructed host passes the normal predicates."""
+
+    eligible: list[RetentionSidecar] = []
+    seen: dict[str, RetentionSidecar] = {}
+    for observation in observations:
+        host = observation.host
+        existing = seen.get(host.object_name)
+        if existing is not None:
+            if existing != observation.sidecar:
+                blockers.add("ambiguous orphan sidecar observation")
+            continue
+        seen[host.object_name] = observation.sidecar
+        if host.kind == "base":
+            if (host.object_name, host.pin_token) in protected_objects:
+                eligible.append(observation.sidecar)
+        elif (
+            host.kind == "wal" and oldest is not None and _before_frontier(host, candidates[oldest])
+        ):
+            eligible.append(observation.sidecar)
+    return eligible
+
+
 def _canonical_decisions(items: list[RetentionDecision]) -> list[RetentionDecision]:
     by_identity: dict[tuple[str, str], RetentionDecision] = {}
     for item in items:
@@ -308,6 +376,14 @@ def _canonical_evidence(evidence: RetentionEvidence) -> str:
             for item in sorted(evidence.inventory)
         ],
         "malformed_names": sorted(evidence.malformed_names),
+        "sidecar_pairs": [
+            json.dumps(asdict(item), sort_keys=True, separators=(",", ":"))
+            for item in sorted(evidence.sidecar_pairs)
+        ],
+        "orphan_sidecars": [
+            json.dumps(asdict(item), sort_keys=True, separators=(",", ":"))
+            for item in sorted(evidence.orphan_sidecars)
+        ],
     }
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 

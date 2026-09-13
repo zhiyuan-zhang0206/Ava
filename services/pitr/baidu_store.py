@@ -48,6 +48,7 @@ from services.pitr.object_store import (
     RemoteObjectAck,
     TransientObjectStoreError,
 )
+from services.pitr.retention_delete import DeleteOutcome
 from services.pitr.token_manager import StoreTokenManager
 
 MAX_SHARDS = 1024
@@ -499,6 +500,60 @@ class BaiduObjectStore:
         if isinstance(exc, PcsTransientError):
             return TransientObjectStoreError(f"{operation} temporarily failed: {exc}")
         return PermanentObjectStoreError(f"{operation} was rejected: {exc}")
+
+
+class BaiduRetentionDeleteStore:
+    """Identity-bound deletion for Baidu Netdisk: row-pinned emulated delete.
+
+    PCS exposes no atomic precondition and the delete is asynchronous
+    (``filemanager opera=delete`` is fire-and-forget), so the adapter
+    re-observes the live row, refuses on a mismatch, issues the delete, and
+    the executor re-observes absence. For Baidu the executor's verify
+    contract must be a bounded poll: a delete becomes visible only when the
+    listing drops the row. The row-to-delete window is acceptable because
+    the publisher path never rewrites an existing name (create-on-existing
+    always leaves the newest ``fs_id`` as the live row).
+    """
+
+    def __init__(
+        self,
+        *,
+        app_root: str,
+        token_manager: StoreTokenManager,
+        timeout_seconds: float = 300.0,
+    ) -> None:
+        self._store = BaiduObjectStore(
+            app_root=app_root, token_manager=token_manager, timeout_seconds=timeout_seconds
+        )
+
+    @classmethod
+    def from_store(cls, store: BaiduObjectStore) -> BaiduRetentionDeleteStore:
+        """Construct around an injected store for contract tests."""
+
+        instance = cls.__new__(cls)
+        instance._store = store
+        return instance
+
+    def delete_if_match(self, object_name: str, identity: str) -> DeleteOutcome:
+        """Delete iff the live row still equals ``identity``.
+
+        A missing row answers ABSENT (idempotent success); a different live
+        row identity answers MISMATCH and nothing is deleted.
+        """
+
+        try:
+            row = self._store._file_row(object_name)
+        except PcsError as exc:
+            raise self._store._map_error("Baidu retention row", exc) from exc
+        if row is None:
+            return DeleteOutcome.ABSENT
+        if f"{row.fs_id}:{row.md5}" != identity:
+            return DeleteOutcome.MISMATCH
+        try:
+            self._store._client().delete_files([self._store._path(object_name)])
+        except PcsError as exc:
+            raise self._store._map_error("Baidu retention delete", exc) from exc
+        return DeleteOutcome.DELETED
 
 
 # ── digest helpers ──

@@ -11,6 +11,56 @@ from services.pitr.checksums import CRC32C, KNOWN_CHECKSUM_ALGOS
 
 PLAN_SCHEMA_VERSION = 1
 
+SIDECAR_SUFFIX = ".ack.json"
+"""The ACK sidecar suffix OSS/Baidu publish beside a host object."""
+
+
+@dataclass(frozen=True, order=True)
+class RetentionSidecar:
+    """One sidecar object with its own immutable identity.
+
+    The deletion unit is the (host object, sidecar) pair: once the host's
+    identity-bound delete has been observed, the sidecar is deleted through
+    the same protocol with this recorded identity.
+    """
+
+    object_name: str
+    pin_token: str
+    size: int
+
+    def __post_init__(self) -> None:
+        if not self.object_name.endswith(SIDECAR_SUFFIX) or not self.pin_token or self.size <= 0:
+            raise ValueError("retention sidecar lacks an exact immutable identity")
+
+    def host_name(self) -> str:
+        return self.object_name[: -len(SIDECAR_SUFFIX)]
+
+
+@dataclass(frozen=True, order=True)
+class SidecarPair:
+    """An inventory observation: a live host object and its bound sidecar.
+
+    ``host_pin_token`` is the host identity the sidecar content binds to;
+    the policy attaches the sidecar to the host's decision only when it
+    still equals the decision object's live pin token.
+    """
+
+    host_pin_token: str
+    sidecar: RetentionSidecar
+
+
+@dataclass(frozen=True, order=True)
+class OrphanSidecar:
+    """A sidecar whose host is gone, with the host reconstructed from the
+    sidecar content so the normal eligibility predicates still apply."""
+
+    host: RetentionObject
+    sidecar: RetentionSidecar
+
+    def __post_init__(self) -> None:
+        if self.sidecar.host_name() != self.host.object_name:
+            raise ValueError("orphan sidecar names a different host object")
+
 
 @dataclass(frozen=True, order=True)
 class RetentionObject:
@@ -38,6 +88,11 @@ class RetentionObject:
 class RetentionDecision:
     object: RetentionObject
     reason: str
+    sidecar: RetentionSidecar | None = None
+
+    def __post_init__(self) -> None:
+        if self.sidecar is not None and self.sidecar.host_name() != self.object.object_name:
+            raise ValueError("retention decision sidecar names a different host object")
 
 
 @dataclass(frozen=True)
@@ -54,6 +109,7 @@ class RetentionPlan:
     eligible: tuple[RetentionDecision, ...]
     retained_bytes: int
     eligible_bytes: int
+    orphan_sidecars: tuple[RetentionSidecar, ...] = ()
 
     def __post_init__(self) -> None:
         if self.schema_version != PLAN_SCHEMA_VERSION or self.retained_chain_count < 2:
@@ -62,10 +118,14 @@ class RetentionPlan:
             raise ValueError("retention plan blockers must be canonical")
         if self.blocked_reasons and self.eligible:
             raise ValueError("a blocked retention plan cannot contain eligible objects")
+        if self.blocked_reasons and self.orphan_sidecars:
+            raise ValueError("a blocked retention plan cannot contain orphan sidecars")
         if self.retained_bytes != sum(item.object.size for item in self.retained):
             raise ValueError("retained byte total differs from its decisions")
         if self.eligible_bytes != sum(item.object.size for item in self.eligible):
             raise ValueError("eligible byte total differs from its decisions")
+        if tuple(sorted(set(self.orphan_sidecars))) != self.orphan_sidecars:
+            raise ValueError("orphan sidecars must be canonical and unique")
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), sort_keys=True, separators=(",", ":"))
@@ -76,6 +136,10 @@ class RetentionPlan:
     @classmethod
     def from_json(cls, value: str) -> RetentionPlan:
         raw: dict[str, Any] = json.loads(value)
+        # Legacy normalization: dry-run plans written before the sidecar
+        # rules carry no ``orphan_sidecars`` field (and decisions carry no
+        # ``sidecar`` field).
+        raw.setdefault("orphan_sidecars", [])
         if set(raw) != set(cls.__dataclass_fields__):
             raise ValueError("retention plan fields do not match schema")
         raw["protected_chain_ids"] = tuple(raw["protected_chain_ids"])
@@ -83,12 +147,15 @@ class RetentionPlan:
         raw["blocked_reasons"] = tuple(raw["blocked_reasons"])
         raw["retained"] = tuple(_decision(item) for item in raw["retained"])
         raw["eligible"] = tuple(_decision(item) for item in raw["eligible"])
+        raw["orphan_sidecars"] = tuple(RetentionSidecar(**item) for item in raw["orphan_sidecars"])
         return cls(**raw)
 
 
 def _decision(raw: dict[str, Any]) -> RetentionDecision:
-    if set(raw) != {"object", "reason"}:
+    if not set(raw) <= {"object", "reason", "sidecar"} or not {"object", "reason"} <= set(raw):
         raise ValueError("retention decision fields do not match schema")
+    raw_sidecar = raw.get("sidecar")
+    sidecar = None if raw_sidecar is None else RetentionSidecar(**dict(raw_sidecar))
     raw_object = dict(raw["object"])
     # Legacy normalization: dry-run plans written before the store
     # abstraction carry ``generation`` + ``crc32c`` (the GCS vocabulary).
@@ -109,4 +176,4 @@ def _decision(raw: dict[str, Any]) -> RetentionDecision:
     else:
         raw_object.pop("crc32c", None)
     raw_object["metadata"] = tuple(tuple(item) for item in raw_object["metadata"])
-    return RetentionDecision(RetentionObject(**raw_object), str(raw["reason"]))
+    return RetentionDecision(RetentionObject(**raw_object), str(raw["reason"]), sidecar)
