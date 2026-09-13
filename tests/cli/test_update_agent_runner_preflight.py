@@ -318,10 +318,12 @@ class TestModuleEntry:
             "_run_agent_runner_self_update",
             lambda _repo, **kw: calls.append(kw) or 0,  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         )
-        assert ar.main(["--target-sha", "abc1234", "--mode", "none", "--force-reap"]) == 0
+        # Full 40-hex; the entry gate refuses abbreviations (issue #2343).
+        target_sha = "abc1234" + "0" * 33
+        assert ar.main(["--target-sha", target_sha, "--mode", "none", "--force-reap"]) == 0
         assert calls == [
             {
-                "target_sha": "abc1234",
+                "target_sha": target_sha,
                 "restart_only": False,
                 "mode": "none",
                 "force_reap": True,

@@ -177,11 +177,13 @@ def test_target_origin_note(
 def test_parser_wires_target_flags() -> None:
     from cli.main import _build_parser
 
+    # Full 40-hex; abbreviated targets are refused at parse (issue #2343).
+    target_sha = "abc123" + "0" * 34
     ns = _build_parser().parse_args(
-        ["cluster", "update", "--target", "macmini", "--target-sha", "abc123"]
+        ["cluster", "update", "--target", "macmini", "--target-sha", target_sha]
     )
     assert ns.target == "macmini"
-    assert ns.target_sha == "abc123"
+    assert ns.target_sha == target_sha
     plain = _build_parser().parse_args(["cluster", "update"])
     assert plain.target is None
     assert plain.target_sha is None
@@ -197,6 +199,9 @@ def test_cluster_parser_directly_registers_target_flags() -> None:
     parser = argparse.ArgumentParser()
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser] = parser.add_subparsers()
     _cluster_parser._add_cluster_parser(subparsers)
-    args = parser.parse_args(["cluster", "update", "--target", "macmini", "--target-sha", "abc"])
+    target_sha = "abc" + "0" * 37  # full 40-hex; abbreviated targets are refused at parse (#2343)
+    args = parser.parse_args(
+        ["cluster", "update", "--target", "macmini", "--target-sha", target_sha]
+    )
     assert args.target == "macmini"
-    assert args.target_sha == "abc"
+    assert args.target_sha == target_sha

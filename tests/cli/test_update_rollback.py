@@ -431,6 +431,11 @@ def _patch_local_update(
 
     monkeypatch.setattr(_up, "git_checkout_sha", _checkout)  # pyright: ignore[reportUnknownArgumentType]
 
+    def _resolve(ref: str, *, context: str) -> str:
+        return ref
+
+    monkeypatch.setattr("cli.commands._update_git.resolve_commit", _resolve)
+
     def _sync(_repo: Path, *, timeout_s: float = 600.0) -> SimpleNamespace:
         return SimpleNamespace(returncode=sync_rc)
 

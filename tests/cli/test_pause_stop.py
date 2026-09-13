@@ -37,7 +37,7 @@ def drained() -> None:
 
 
 def dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(command, "pause_agents", lambda _timeout: drained())  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(command, "pause_agents", lambda _timeout, **_kw: drained())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(command, "machine_role", lambda: frozenset({"agent-runner"}))
     monkeypatch.setattr(
         command,

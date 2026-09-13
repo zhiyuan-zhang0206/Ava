@@ -46,7 +46,13 @@ node and degrades when rolling back to an older target.
 
 
 An explicit [maintenance hold](maintenance/maintenance.ava.okf.md) uses the same journal
-with a typed cohort/progress payload. It has no automatic expiry. Ordinary
+with a typed cohort/progress payload and the recorded shepherding process it
+was taken under (`shared/hold_driver.py`). It has no expiry timer, but a hold
+that is still pre-stop, whose shepherding process is gone and whose failures
+are empty is declared `abandoned` and, after a bounded observation window,
+released by the pause watchdog through the same cancel path (`resume
+--cancel`'s twin — tasks #3270/#2343; see
+[[host_deploy_state/stranded-hold-recovery.ava.okf.md]]). Ordinary
 compensation, natural startup finalization, force-clear and a newer rollout
-cannot release or overwrite it; only the exact maintenance start/resume path
-can do so. This is distinct from a recoverable stranded rollout pause.
+still cannot release or overwrite it. This is distinct from a recoverable
+stranded rollout pause.

@@ -129,6 +129,57 @@ def local_resume_refusal() -> str | None:
     return _hold_refusal(current)
 
 
+def release_pre_stop_hold(*, reason: str) -> None:
+    """Abandon a pre-stop maintenance hold -- the auto twin of `resume --cancel`.
+
+    The bounded release behind task #3270: nothing is executing under the hold
+    and its shepherding process is gone, so the unit returns to serving exactly
+    as the operator's `ava maintenance resume --cancel` returns it. The
+    preconditions mirror that verb's cancel half -- a started stop cannot be
+    cancelled, failed receipts need repair first, and on an agent-runner the
+    live agent-host and a reachable data plane must still answer -- and the
+    release itself runs through the same authorized-start + unpause sequence.
+    `reason` goes into the audit line so the ops log names the actor (watchdog
+    release vs updater self-release).
+
+    Callers serialize on the lifecycle lock (`recover_stranded_pause` is the
+    pattern); this function takes no lock of its own. Raises -- with the same
+    refusals the operator path raises -- leaving the hold preserved.
+    """
+    from shared import maintenance
+    from shared.db import connect
+    from shared.machine import machine_role
+
+    current = maintenance.snapshot()
+    if current is None:
+        raise RuntimeError("no maintenance hold stands on this unit")
+    assert current.holder is not None and current.acquired_at is not None  # noqa: S101
+    if current.maintenance is not None and current.maintenance.phase not in (
+        "preparing",
+        "draining",
+        "drained",
+    ):
+        raise RuntimeError(
+            "cancel cannot bypass a started stop; complete maintenance stop/start/resume"
+        )
+    if (refusal := _hold_refusal(current)) is not None:
+        raise RuntimeError(refusal)
+    if "agent-runner" in machine_role():
+        from ops.agent_pause_probe import host_identity
+
+        host_identity()
+    with connect() as conn:
+        conn.execute("SELECT 1")
+    with maintenance.authorized_start(current.holder, current.acquired_at):
+        unpause_local_cluster()
+    _log.error(
+        "[cluster] released a pre-stop maintenance hold (%s): holder=%s acquired_at=%s",
+        reason,
+        current.holder,
+        current.acquired_at.isoformat(),
+    )
+
+
 def _unpause_local_cluster() -> None:
     """Restore this unit's HTTP posture without launching any agent or service."""
     from shared import maintenance
