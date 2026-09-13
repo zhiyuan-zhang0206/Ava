@@ -47,3 +47,36 @@ def restricted_process_env() -> dict[str, str]:
         "PYTHONNOUSERSITE": "1",
         "TZ": "UTC",
     }
+
+
+_PROXY_ENV_NAMES = (
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+    "all_proxy",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "ALL_PROXY",
+)
+
+
+def forwarded_proxy_env() -> dict[str, str]:
+    """Forward the host's proxy variables to a child that inherits no authority.
+
+    A restricted child still needs the host's egress path: on hosts whose
+    resolver maps public names into a fake-IP range (a transparent proxy such
+    as Clash on WSL), a direct connect is blackholed and only the env proxy
+    reaches the destination — the 2026-09-13 activation lost every restore
+    worker to TCP SYN timeouts this way. Only proxy variable names cross;
+    values are copied verbatim and case-preserving, and an empty value is
+    dropped rather than forwarded as an empty override, so a host without
+    proxies forwards nothing and composing this is a no-op.
+    """
+
+    forwarded: dict[str, str] = {}
+    for name in _PROXY_ENV_NAMES:
+        value = os.environ.get(name)
+        if value:
+            forwarded[name] = value
+    return forwarded

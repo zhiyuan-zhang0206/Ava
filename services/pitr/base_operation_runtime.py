@@ -35,7 +35,7 @@ from shared.db import direct_db_url
 from shared.paths import ava_home
 from shared.pg_tools import pg_tool
 from shared.proc_tree import create_time_matches, stable_create_time
-from shared.process_env import restricted_process_env
+from shared.process_env import forwarded_proxy_env, restricted_process_env
 
 _EMERGENCY_FLOOR_BYTES = 4 * 1024**3
 
@@ -192,7 +192,7 @@ async def run_restore_input(inputs: RestoreWorkerInput) -> dict[str, str]:
     process = subprocess.Popen(  # noqa: S603
         [sys.executable, "-m", "services.pitr.restore_worker", str(request), str(result)],
         cwd=Path(__file__).resolve().parents[2],
-        env=restricted_process_env(),
+        env=restricted_process_env() | forwarded_proxy_env(),
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
