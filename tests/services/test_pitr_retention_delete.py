@@ -534,7 +534,7 @@ class _InterruptedSidecarStore:
     def delete_if_match(self, object_name: str, identity: str) -> DeleteOutcome:
         if object_name == self._sidecar_name:
             raise PermanentObjectStoreError("injected interruption between host and sidecar")
-        return cast(Any, self._inner).delete_if_match(object_name, identity)
+        return self._inner.delete_if_match(object_name, identity)
 
 
 def test_interrupted_pair_leaves_an_orphan_and_the_next_tick_cleans_it(tmp_path: Path) -> None:
