@@ -31,6 +31,7 @@ from services.pitr.restore_proof import (
 )
 from services.pitr.store_factory import get_store_group
 from shared.config import settings
+from shared.config.physical_backup import PhysicalBackupSettings
 from shared.db import direct_db_url
 from shared.paths import ava_home
 from shared.pg_tools import pg_tool
@@ -61,60 +62,71 @@ def tree_bytes(path: Path) -> int:
     return sum(item.stat().st_size for item in path.rglob("*") if item.is_file())
 
 
-def input_for(candidate: CandidateManifest) -> RestoreWorkerInput:
-    config = settings.physical_backup
-    if not config.pitr_restore_proof_enabled:
-        raise RuntimeError("restore proof cannot run while its flag is off")
+def restore_key_path(config: PhysicalBackupSettings) -> Path:
+    """The validated viewer-only restore key path (shared by proof and drill)."""
     key_path = config.pitr_backup_key_file
     if key_path is None:
         raise RuntimeError("validated viewer-only restore proof key is missing")
+    return key_path
+
+
+def restore_store_args(config: PhysicalBackupSettings) -> tuple[tuple[str, str], ...]:
+    """The per-backend store-args protocol shared by the restore proof and the
+    operator drill. An unknown backend fails fast."""
     if config.pitr_store_backend == "gcs":
         read_credentials = config.pitr_restore_gcs_credentials_file
         if read_credentials is None:
             raise RuntimeError("validated viewer-only restore proof secrets are missing")
-        store_args: tuple[tuple[str, str], ...] = (
+        return (
             ("project", config.pitr_gcs_project),
             ("bucket", config.pitr_gcs_bucket),
             ("viewer_credentials", str(read_credentials)),
         )
-    elif config.pitr_store_backend == "cos":
+    if config.pitr_store_backend == "cos":
         cos_credentials = config.pitr_cos_credentials_file
         if cos_credentials is None:
             raise RuntimeError("validated COS restore-proof secrets are missing")
-        store_args = (
+        return (
             ("bucket", config.pitr_cos_bucket),
             ("region", config.pitr_cos_region),
             ("credentials_file", str(cos_credentials)),
             ("prefix", config.pitr_gcs_prefix),
         )
-    elif config.pitr_store_backend == "baidu":
+    if config.pitr_store_backend == "baidu":
         baidu_credentials = config.pitr_baidu_credentials_file
         baidu_token = config.pitr_baidu_token_file
         if baidu_credentials is None or baidu_token is None:
             raise RuntimeError("validated Baidu restore-proof secrets are missing")
-        store_args = (
+        return (
             ("app_root", config.pitr_baidu_app_root),
             ("prefix", config.pitr_gcs_prefix),
             ("credentials_file", str(baidu_credentials)),
             ("token_file", str(baidu_token)),
         )
-    elif config.pitr_store_backend == "oss":
+    if config.pitr_store_backend == "oss":
         # The OSS backend: the restricted worker carries only the viewer-only
         # AccessKey pair — the reader/inventory roles alone never need the
         # uploader identity.
         read_credentials = config.pitr_oss_viewer_credentials_file
         if read_credentials is None:
             raise RuntimeError("validated viewer-only restore proof secrets are missing")
-        store_args = (
+        return (
             ("endpoint", config.pitr_oss_endpoint),
             ("bucket", config.pitr_oss_bucket),
             ("prefix", config.pitr_gcs_prefix),
             ("viewer_credentials_file", str(read_credentials)),
         )
-    else:
-        raise RuntimeError(
-            f"restore proof does not know the PITR store backend {config.pitr_store_backend!r}"
-        )
+    raise RuntimeError(
+        f"restore proof does not know the PITR store backend {config.pitr_store_backend!r}"
+    )
+
+
+def input_for(candidate: CandidateManifest) -> RestoreWorkerInput:
+    config = settings.physical_backup
+    if not config.pitr_restore_proof_enabled:
+        raise RuntimeError("restore proof cannot run while its flag is off")
+    key_path = restore_key_path(config)
+    store_args = restore_store_args(config)
     root = ava_home() / "physical-backup"
     logical_peak = max(
         (item.stat().st_size for item in (ava_home() / "backups" / "db").glob("*.enc")),
