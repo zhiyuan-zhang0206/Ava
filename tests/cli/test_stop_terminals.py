@@ -16,6 +16,7 @@ no-op. These tests lock the two parts of the fix:
 
 from __future__ import annotations
 
+import contextlib
 import os
 import signal
 import time
@@ -64,7 +65,9 @@ def _wait_exit(pid: int, timeout: float = 10.0) -> bool:
 
 
 def _shell_children(shell: OwnedProcess) -> list[psutil.Process]:
-    return psutil.Process(shell.pid).children(recursive=True)
+    with contextlib.suppress(psutil.NoSuchProcess, psutil.ZombieProcess):
+        return psutil.Process(shell.pid).children(recursive=True)
+    return []
 
 
 def _stop_env(monkeypatch: pytest.MonkeyPatch, home: Path, terminal: PtySessionBackend) -> None:
@@ -344,3 +347,21 @@ def test_stop_records_nothing_on_timeout(
         assert _notice_files(home) == []
     finally:
         terminal.kill_session(name)
+
+
+@pytest.mark.flaky
+def test_stop_tolerates_naturally_exited_session_with_stale_record(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A session whose shell exited naturally before stop (leaving a record)
+    must not fail the stop with RuntimeError — the terminal is already gone."""
+    dependencies(monkeypatch)
+    terminal = PtySessionBackend()
+    _stop_env(monkeypatch, home, terminal)
+    name = "ava-agent-987-shell-2045-already-dead"
+    shell = _start_busy_session(terminal, home, name, _TERM_OK_JOB)
+    # Kill the shell process out-of-band to leave its session record on disk
+    os.kill(shell.pid, signal.SIGKILL)
+    assert _wait_exit(shell.pid), "the shell must terminate after SIGKILL"
+    # The record on disk remains; normal stop must tolerate the dead session
+    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=10) == 0

@@ -8,6 +8,7 @@ The `_pty_sessions_env` fixture (session-scoped, tests/ava/conftest.py) runs the
 real supervisor daemon under the tmp test home; the session tests are
 POSIX-only (skip on Windows — the PTY supervisor is POSIX-only)."""
 
+import contextlib
 import datetime
 import os
 import pathlib
@@ -1770,7 +1771,8 @@ def test_cron_double_registration_reuses_live_session(
         assert len(rows) == 1  # exactly one registration, not two
         assert rows[0]["status"] == "running"
     finally:
-        ava.shell.kill(wid1)
+        with contextlib.suppress(ValueError, KeyError, ProcessLookupError):
+            ava.shell.kill(wid1)
 
 
 def test_cron_same_expr_different_timezone_registers_separately(
