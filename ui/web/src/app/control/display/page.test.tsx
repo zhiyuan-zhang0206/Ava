@@ -101,21 +101,21 @@ describe("DisplaySettingsPage", () => {
     });
   });
 
-  it("renders the reasoning markdown toggle", async () => {
+  it("renders the thinking markdown toggle", async () => {
     renderPage();
 
     await waitFor(() => {
-      expect(screen.getByLabelText("Render reasoning as markdown")).toBeTruthy();
+      expect(screen.getByLabelText("Render thinking as markdown")).toBeTruthy();
     });
   });
 
-  it("persists disabling reasoning markdown", async () => {
+  it("persists disabling thinking markdown", async () => {
     renderPage();
 
     await waitFor(() => {
-      expect(screen.getByLabelText("Render reasoning as markdown")).toBeTruthy();
+      expect(screen.getByLabelText("Render thinking as markdown")).toBeTruthy();
     });
-    fireEvent.click(screen.getByLabelText("Render reasoning as markdown"));
+    fireEvent.click(screen.getByLabelText("Render thinking as markdown"));
     await waitFor(() => {
       expect(api.putSetting).toHaveBeenCalledWith("display.render_reasoning_markdown", false);
     });

@@ -109,7 +109,7 @@ describe("ContextButton", () => {
     expect(button.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("System prompt")).toBeTruthy();
     expect(screen.getByText("Text output")).toBeTruthy();
-    expect(screen.getByText("Reasoning")).toBeTruthy();
+    expect(screen.getByText("Thinking")).toBeTruthy();
     // The inbound-source split renders its own labelled legend rows.
     expect(screen.getByText("Agent messages")).toBeTruthy();
     expect(screen.getByText("System notes")).toBeTruthy();
@@ -328,7 +328,7 @@ describe("ContextButton", () => {
       "System prompt400 · 40.00%",
       "Text output300 · 30.00%",
       "Agent messages150 · 15.00%",
-      "Reasoning100 · 10.00%",
+      "Thinking100 · 10.00%",
       "System notes50 · 5.00%",
     ]);
   });
