@@ -150,12 +150,13 @@ def test_shipped_grafana_runtime_contract() -> None:
 
 def test_default_dashboard_refresh_is_load_bounded() -> None:
     """The merged Ava Ops dashboard (2026-08-23: the four dashboards collapsed
-    into one) keeps the user-approved defaults: 10m refresh, now-6h window —
-    the 6h/10m ruling keeps Loki query weight bounded (task #1399)."""
+    into one) keeps the user-approved refresh: 10m; the default window is
+    now-24h (user request 2026-09-14; it was now-6h under task #1399 to bound
+    Loki query weight)."""
     for path in DASHBOARD_DIR.glob("ava-*.json"):
         dashboard = json.loads(path.read_text(encoding="utf-8"))
         assert dashboard["refresh"] == "10m"
-        assert dashboard["time"] == {"from": "now-6h", "to": "now"}
+        assert dashboard["time"] == {"from": "now-24h", "to": "now"}
 
 
 def test_shipped_alert_rules_provision_against_native_grafana(tmp_path: Path) -> None:
