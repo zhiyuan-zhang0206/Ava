@@ -60,6 +60,8 @@ class FakePcs:
     semantic the store engine relies on."""
 
     def __init__(self) -> None:
+        self.listall_page_cap: int | None = None
+        self.listall_has_more_sticky = False
         self.files: dict[str, dict[str, Any]] = {}
         self.parts: dict[str, dict[int, bytes]] = {}
         self.calls: list[str] = []
@@ -111,6 +113,8 @@ class FakePcs:
             return self._filemetas(params)
         if method == "list":
             return self._list(params)
+        if method == "listall":
+            return self._listall(params)
         if method == "filemanager":
             return self._filemanager(params, request.content)
         return httpx.Response(404, json={"errno": 1, "errmsg": "unknown method"})
@@ -177,21 +181,33 @@ class FakePcs:
         return httpx.Response(200, json={"list": rows})
 
     def _list(self, params: dict[str, str]) -> httpx.Response:
+        # Live PCS list answers exactly one level and ignores ``recursion``
+        # (verified live 2026-09-14); recursive walks use ``listall``.
         directory = str(params["dir"]).rstrip("/")
-        current = [
-            row
-            for row in self.files.values()
-            if row["path"] == directory or row["path"].startswith(f"{directory}/")
-        ]
-        stale = [
-            row
-            for row in self.replaced
-            if row["path"] == directory or row["path"].startswith(f"{directory}/")
-        ]
+        current = [row for row in self.files.values() if row["path"].rsplit("/", 1)[0] == directory]
+        stale = [row for row in self.replaced if row["path"].rsplit("/", 1)[0] == directory]
         rows = [*stale, *current]
         start = int(params.get("start") or 0)
         limit = int(params.get("limit") or 1000)
         return httpx.Response(200, json={"list": rows[start : start + limit]})
+
+    def _listall(self, params: dict[str, str]) -> httpx.Response:
+        directory = str(params["path"]).rstrip("/")
+        rows = [
+            row
+            for row in [*self.replaced, *self.files.values()]
+            if row["path"].startswith(f"{directory}/")
+        ]
+        rows.sort(key=lambda row: str(row["path"]))
+        start = int(params.get("start") or 0)
+        limit = int(params.get("limit") or 1000)
+        if self.listall_page_cap is not None:
+            limit = min(limit, self.listall_page_cap)
+        page = rows[start : start + limit]
+        has_more = start + len(page) < len(rows)
+        if self.listall_has_more_sticky:
+            has_more = has_more or bool(page)
+        return httpx.Response(200, json={"list": page, "has_more": int(has_more)})
 
 
 def _file_payload(content: bytes) -> bytes:

@@ -267,3 +267,89 @@ def test_publish_manifest_puts_through_the_engine(
     assert ack.checksum == ObjectChecksum(MD5, _md5(payload))
     assert ack.created is True
     assert fake.calls[0] == "precreate /apps/ava-pitr/ava-pitr/protected/x.json"
+
+
+def test_inventory_pages_through_server_capped_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A server page cap below the requested limit must not truncate the walk."""
+    fake = FakePcs()
+    fake.listall_page_cap = 2
+    reader = BaiduRetentionInventoryReader(
+        app_root=APP_ROOT, prefix="ava-pitr", token_manager=FakeTokenManager()
+    )
+    monkeypatch.setattr(reader._store, "_client", lambda: pcs_client_for(fake))
+
+    sidecar_bodies: dict[str, bytes] = {}
+    for index, chain in enumerate(("20260830T043835Z", "20260831T043835Z")):
+        rel = f"ava-pitr/base/{chain}/" + chr(ord("a") + index) * 64 + "/base.tar.zst.enc"
+        payload = json.dumps(
+            {
+                "object_name": rel,
+                "pin_token": f"{index}:m",
+                "size": 10,
+                "checksum_algo": "md5",
+                "checksum_value": "m",
+                "metadata": {},
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        fake.seed_file(f"{APP_ROOT}/{rel}", size=10, md5="m")
+        fake.seed_file(
+            f"{APP_ROOT}/{rel}.ack.json",
+            size=len(payload),
+            md5=_md5(payload),
+            dlink=f"https://dl.test/cap{index}",
+        )
+        sidecar_bodies[f"https://dl.test/cap{index}"] = payload
+
+    def fake_get(url: str, **_kwargs: object) -> httpx.Response:
+        return httpx.Response(200, content=sidecar_bodies[url.split("&", 1)[0]])
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    snapshot = reader.snapshot()
+
+    assert snapshot.unknown_names == ()
+    assert len(snapshot.objects) == 2
+    assert len(snapshot.sidecar_pairs) == 2
+
+
+def test_inventory_stops_on_an_empty_tail_even_when_has_more_sticks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A lingering truthy has_more must not loop forever: the empty page ends it."""
+    fake = FakePcs()
+    fake.listall_has_more_sticky = True
+    reader = BaiduRetentionInventoryReader(
+        app_root=APP_ROOT, prefix="ava-pitr", token_manager=FakeTokenManager()
+    )
+    monkeypatch.setattr(reader._store, "_client", lambda: pcs_client_for(fake))
+
+    rel = "ava-pitr/base/20260830T043835Z/" + "a" * 64 + "/base.tar.zst.enc"
+    payload = json.dumps(
+        {
+            "object_name": rel,
+            "pin_token": "1:m",
+            "size": 10,
+            "checksum_algo": "md5",
+            "checksum_value": "m",
+            "metadata": {},
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    fake.seed_file(f"{APP_ROOT}/{rel}", size=10, md5="m")
+    fake.seed_file(
+        f"{APP_ROOT}/{rel}.ack.json",
+        size=len(payload),
+        md5=_md5(payload),
+        dlink="https://dl.test/sticky",
+    )
+
+    def fake_get(url: str, **_kwargs: object) -> httpx.Response:
+        return httpx.Response(200, content=payload)
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    snapshot = reader.snapshot()
+
+    assert len(snapshot.objects) == 1
+    assert sum(1 for call in fake.calls if call.startswith("listall")) == 2
