@@ -148,6 +148,8 @@ def register_installed(
     *,
     accepted_findings: list[str] | None = None,
     content_hash: str | None = None,
+    update_mode: str | None = None,
+    check_every: int | None = None,
 ) -> None:
     """Record a freshly-installed package in the install registry (origin='user',
     so converge leaves it alone).
@@ -166,6 +168,11 @@ def register_installed(
     from shared import install_registry
 
     now = datetime.now(UTC).isoformat(timespec="seconds")
+    update = install_registry.UpdateState()
+    if update_mode is not None:
+        update.mode = update_mode  # type: ignore[assignment]  # callers pass the literal
+    if check_every is not None:
+        update.interval_seconds = check_every
     install_registry.register(
         install_registry.InstalledPackage(
             name=name,
@@ -181,6 +188,7 @@ def register_installed(
             accepted_findings=accepted_findings or [],
             content_hash=content_hash,
             installed_hash=content_hash,
+            update=update,
         )
     )
 
@@ -258,6 +266,8 @@ def install(
     path: str | None,
     ref: str | None,
     accept_risk: bool = False,
+    update_mode: str | None = None,
+    check_every: int | None = None,
 ) -> list[tuple[Path, str]]:
     """Copy every package into the skills load dir and register it; return the
     installed `(destination, scan report)` pairs in the order given.
@@ -306,6 +316,8 @@ def install(
             ref,
             accepted_findings=accepted,
             content_hash=tree_hash(dest),
+            update_mode=update_mode,
+            check_every=check_every,
         )
         installed.append((dest, report))
     return installed

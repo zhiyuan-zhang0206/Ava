@@ -161,6 +161,9 @@ class UpdateState(BaseModel):
     last_result: str | None = None
     """Last outcome, design §5.3 vocabulary: up_to_date | applied | available |
     blocked_version: … | conflict: … | refused_scan: … | error: …"""
+    failures: int = 0
+    """Consecutive non-success outcomes (the refresh pass's backoff counter;
+    reset to 0 by up_to_date / applied / available)."""
 
 
 class ChannelState(BaseModel):
@@ -483,6 +486,32 @@ def trust_by_name() -> dict[str, TrustTier]:
     through the registry) must treat it as `"unreviewed"`, the safe direction.
     """
     return {p.name: p.trust for p in load().packages}
+
+
+def host_contract_reason(pkg_dir: Path) -> str | None:
+    """Why the package at `pkg_dir` is NOT loadable on this host, or None when
+    it is. Thin wrapper over `shared.plugin_manifest.host_contract_errors_dir`
+    — the runtime half of the §5.5 version gate, shared by the skill scan and
+    `ava packages status`."""
+    from shared import plugin_manifest
+
+    errors = plugin_manifest.host_contract_errors_dir(pkg_dir)
+    return "; ".join(errors) if errors else None
+
+
+def loadable_skill_names() -> set[str]:
+    """`enabled_skill_names()` minus packages whose manifest excludes this host.
+
+    The runtime side of the version gate (design §5.5): a skill package whose
+    `engines.ava` / `requires_commit` no longer permits the running host is
+    dropped from the catalog/index; `ava packages status` carries the reason.
+    Packages without a manifest pass unchanged, so the check costs one stat per
+    enabled name unless a manifest is actually present.
+    """
+    skills_root = paths.skills_dir()
+    return {
+        name for name in enabled_skill_names() if host_contract_reason(skills_root / name) is None
+    }
 
 
 def installed_mcp_names() -> set[str]:

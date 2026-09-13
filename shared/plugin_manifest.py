@@ -554,6 +554,33 @@ def check_host_engine(manifest: PluginManifest, host_version: str) -> list[str]:
 _COMMIT_TIMEOUT_S = 10.0
 
 
+def host_contract_errors_dir(pkg_dir: Path, *, repo: Path | None = None) -> list[str]:
+    """Every host-contract error for the package at `pkg_dir`; [] = loadable.
+
+    One home for "may THIS host load this package" (design §5.5), used by the
+    install gate, the skill scan's runtime filter, and `ava packages status`:
+    reads the package's optional manifest, compares `engines.ava` against the
+    derived host version, and checks `requires_commit` ancestry in `repo`
+    (default: this checkout). A malformed manifest returns its validation error
+    (the caller drops the package; it must not crash the loader), and an
+    unresolvable check is an error — never a pass.
+    """
+    try:
+        manifest = load_manifest(pkg_dir)
+    except ManifestError as exc:
+        return [f"manifest invalid: {exc}"]
+    if manifest is None:
+        return []
+    from shared import host_version, paths
+
+    target = repo or paths.repo_root()
+    try:
+        host = host_version.host_version(target)
+    except host_version.HostVersionError as exc:
+        return [str(exc)]
+    return check_host_engine(manifest, host) + check_host_commit(manifest, target)
+
+
 def check_host_commit(manifest: PluginManifest, repo: Path) -> list[str]:
     """Errors when the host checkout does not CONTAIN `manifest.requires_commit`.
 

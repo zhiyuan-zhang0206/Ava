@@ -35,10 +35,12 @@ installed_at, updated_at, trust, scanned_at, accepted_findings, update}`
 - `update` — the per-package content-channel policy + bookkeeping (schema v2,
   tasks #2915 / #3267): `mode` (`auto` / `notify` / `off`), `interval_seconds`,
   `channel` (`core` = this repo's content paths / `git` = the recorded source),
-  `applied_rev`, and the last check/apply timestamps + result. `mode` /
-  `interval_seconds` / `channel` stay `None` until the refresh pass resolves
-  them from the source class at first sight; `resolved_policy()` computes the
-  effective values for readers without writing.
+  `applied_rev`, the last check/apply timestamps + result, and `failures` (the
+  consecutive-failure counter backing the refresh pass's check-interval
+  backoff). `mode` / `interval_seconds` / `channel` stay `None` until the
+  refresh pass resolves them from the source class at first sight;
+  `resolved_policy()` computes the effective values for readers without
+  writing.
 
 ## Schema v2 — update policy & channels
 
@@ -77,10 +79,12 @@ auto-injected. An untracked skill — a plugin's runtime provider root — count
 
 `$AVA_HOME/skills/` is the **single skill load dir**, and
 `ava/skills.py:_scan_tree` surfaces a top-level directory only when its name is
-in `enabled_skill_names()` (tracked **and** `enabled`). A directory that isn't
-registered — or whose entry is `enabled=false` — is skipped. That is what stops
-a stray hand-copied tree from silently loading; `ava skill register <name>`
-adopts one deliberately.
+in `loadable_skill_names()` — tracked **and** `enabled`, and the package's
+manifest host contract passes (`engines.ava` / `requires_commit`; the runtime
+half of the §5.5 gate, reason visible in `ava packages status`). A directory
+that isn't registered — or whose entry is `enabled=false` — is skipped. That is
+what stops a stray hand-copied tree from silently loading;
+`ava skill register <name>` adopts one deliberately.
 
 Repo skills (`<repo>/ava_builtins/skills/`) and plugin skills
 (`<repo>/ava_builtins/plugins/<p>/skills/`, `$AVA_HOME/plugins/<p>/skills/`) are

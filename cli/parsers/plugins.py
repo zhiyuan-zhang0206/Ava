@@ -76,7 +76,14 @@ def _h_plugins_disable(args: argparse.Namespace) -> int:
 def _h_skill_install(args: argparse.Namespace) -> int:
     from cli.commands import cmd_skill_install
 
-    return cmd_skill_install(args.source, args.ref, args.path, accept_risk=args.accept_risk)
+    return cmd_skill_install(
+        args.source,
+        args.ref,
+        args.path,
+        accept_risk=args.accept_risk,
+        update_mode=args.update_mode,
+        check_every=args.check_every,
+    )
 
 
 def _h_skill_enable(args: argparse.Namespace) -> int:
@@ -241,6 +248,18 @@ def _add_skill_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
         "--accept-risk",
         action="store_true",
         help="install despite critical security-scan findings (records which rules were waived)",
+    )
+    skill_install_p.add_argument(
+        "--update-mode",
+        choices=["auto", "notify", "off"],
+        default=None,
+        help="update policy recorded on the package (default: resolved from settings at first refresh)",
+    )
+    skill_install_p.add_argument(
+        "--check-every",
+        metavar="DUR",
+        default=None,
+        help="check interval for the update policy, e.g. 30m / 24h / 7d",
     )
     skill_install_p.set_defaults(func=_h_skill_install)
 
