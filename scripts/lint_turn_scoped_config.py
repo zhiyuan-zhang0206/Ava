@@ -1,7 +1,9 @@
 """Forbid reading per-agent config through a process-global in turn-scoped code.
 
 Run: `.venv/bin/python scripts/lint_turn_scoped_config.py [path ...]` (defaults
-to the turn-scoped packages). Also runs automatically via pre-commit.
+to the turn-scoped packages; an explicit path that does not exist is an error
+(stderr + exit 1) rather than a silent no-op). Also runs automatically via
+pre-commit.
 
 ## Why
 
@@ -105,11 +107,19 @@ def _iter_files(paths: list[str]) -> list[Path]:
 def main(argv: list[str]) -> int:
     from shared.config import per_agent_field_names
 
+    missing = [a for a in argv if not Path(a).exists()]
+    if missing:
+        print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
+        return 1
     per_agent = set(per_agent_field_names())
     errors: list[str] = []
     plugin_errors: list[str] = []
     for path in _iter_files(argv):
-        rel = path.resolve().relative_to(_REPO_ROOT).as_posix()
+        resolved = path.resolve()
+        try:
+            rel = resolved.relative_to(_REPO_ROOT).as_posix()
+        except ValueError:
+            rel = resolved.as_posix()
         if rel in _ALLOWED_FILES or "/tests/" in rel or rel.startswith("tests/"):
             continue
         if path.name.startswith("test_") or path.name.endswith("_test.py"):

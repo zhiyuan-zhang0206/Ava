@@ -23,7 +23,10 @@ min-only range keeps passing, and a legacy fixture that would be refused is
 visible in the log instead of surfacing as a surprise later. `--audit-dir`
 extends the audit to machine-local manifests (evidence runs; not used by CI).
 
-Run: python3 scripts/lint_core_content_manifests.py
+Run: python3 scripts/lint_core_content_manifests.py [--audit-dir DIR ...] (an
+`--audit-dir` that does not exist is an error (stderr + exit 1) rather than a
+silent skip; unrecognized arguments and a bare `--audit-dir` are rejected with
+exit 2).
 """
 
 from __future__ import annotations
@@ -103,7 +106,18 @@ def main(argv: list[str] | None = None) -> int:
     audit_dirs: list[Path] = []
     while argv and argv[0] == "--audit-dir":
         argv.pop(0)
+        if not argv:
+            print("error: --audit-dir requires a value", file=sys.stderr)
+            return 2
         audit_dirs.append(Path(argv.pop(0)).expanduser())
+
+    missing = [str(d) for d in audit_dirs if not d.exists()]
+    if missing:
+        print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
+        return 1
+    if argv:
+        print(f"error: unrecognized argument(s): {' '.join(argv)}", file=sys.stderr)
+        return 2
 
     try:
         derived = host_version.host_version(_REPO_ROOT)

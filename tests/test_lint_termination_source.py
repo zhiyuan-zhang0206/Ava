@@ -10,6 +10,9 @@ the reads and non-terminated writes that must NOT be flagged.
 from __future__ import annotations
 
 import importlib
+from pathlib import Path
+
+import pytest
 
 _lint = importlib.import_module("scripts.lint_termination_source")
 
@@ -132,4 +135,16 @@ def test_dynamic_sql_is_skipped():
 
 def test_real_tree_has_zero_violations():
     # Every terminated-write site in the live framework tree stamps a source.
-    assert _lint.main() == 0
+    assert _lint.main([]) == 0
+
+
+def test_explicit_missing_target_is_an_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A typo'd explicit path must fail the gate, not pass as a silent empty scan."""
+    good = tmp_path / "ok.py"
+    good.write_text("value = 1\n", encoding="utf-8")
+    missing = tmp_path / "typo.py"
+    assert _lint.main([str(missing)]) == 1
+    assert str(missing) in capsys.readouterr().err
+    assert _lint.main([str(good), str(missing)]) == 1

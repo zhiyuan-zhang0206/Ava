@@ -138,3 +138,25 @@ def test_non_core_manifest_is_audited_not_failed(
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "audit examples/thing/ava-plugin.json" in out
     assert "derived 2026.1.2: FAIL" in out
+
+
+def test_explicit_missing_target_is_an_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An --audit-dir that does not exist must fail, not be skipped silently."""
+    missing = tmp_path / "gone"
+    assert lint.main(["--audit-dir", str(missing)]) == 1
+    assert str(missing) in capsys.readouterr().err
+
+
+def test_unrecognized_arguments_are_rejected(capsys: pytest.CaptureFixture[str]) -> None:
+    """A positional path is not part of this lint's interface — reject it loudly
+    instead of silently running a full scan."""
+    assert lint.main(["nope/missing.py"]) == 2
+    assert "unrecognized argument(s)" in capsys.readouterr().err
+
+
+def test_audit_dir_without_a_value_is_rejected(capsys: pytest.CaptureFixture[str]) -> None:
+    """A bare --audit-dir is a usage error, not an IndexError traceback."""
+    assert lint.main(["--audit-dir"]) == 2
+    assert "--audit-dir requires a value" in capsys.readouterr().err
