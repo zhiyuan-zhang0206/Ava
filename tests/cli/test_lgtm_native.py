@@ -252,6 +252,11 @@ def test_ensure_renders_configs_with_native_paths_and_loopback(
         "grafana": ["127.0.0.1:3003"],
     }
 
+    grafana_job = next(
+        job for job in prometheus_config["scrape_configs"] if job["job_name"] == "grafana"
+    )
+    assert grafana_job["metrics_path"] == "/grafana/metrics"
+
 
 def test_ensure_renders_scrape_targets_from_telemetry_read_urls(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
