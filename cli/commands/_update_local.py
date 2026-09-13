@@ -246,6 +246,14 @@ def _checkout_and_sync(
         except GitPullFailed as e:
             print(f"  ✗ {e}", file=sys.stderr)
             return _recover_rc(repo, pull_recover, preserve_frontend)
+    # The record and every later comparison must carry the full id (issue
+    # #2343): normalize after the checkout, exactly as the agent-runner leg
+    # does, before printing or recording anything.
+    try:
+        target_sha = _git_mod.resolve_commit(target_sha, context="gateway update target")
+    except GitPullFailed as e:
+        print(f"  ✗ {e}", file=sys.stderr)
+        return _recover_rc(repo, pull_recover, preserve_frontend)
     print(f"  ✓ {from_sha[:7]} → {target_sha[:7]}")
 
     # 3) uv sync (new code may introduce dependencies)

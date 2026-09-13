@@ -164,14 +164,19 @@ partial release after a successful repair is completed by `resume --cancel`.
 
 ## Recovering a stuck maintenance operation
 
-A maintenance hold does not expire on its own. The watchdog's automatic
-release applies only to pauses it can prove are ownerless; an explicit
-maintenance hold is exempt by design (`ops/controllers/stranded_pause.py`
-reports `explicit maintenance hold (no automatic expiry)`), and an incomplete
-pause or stop retains its journal — which survives a CLI crash, a host reboot
-and an offline database — instead of unwinding. When a host is found
-mid-maintenance — services stopped or admission held, and nothing left
-running that owns the pause — recover it by hand.
+A maintenance hold does not expire on its own, and an incomplete pause or
+stop retains its journal — which survives a CLI crash, a host reboot and an
+offline database — instead of unwinding. Since task #3270 a **pre-stop** hold
+is no longer unconditionally hand-recovery: the operator-side entries stamp it
+with the shepherding process, and a hold whose shepherd is gone, whose
+failures are empty and which nothing is executing under is declared
+`abandoned` at the 10-minute notice bound and released by the pause watchdog
+after a 30-minute observation window — `resume --cancel`'s automatic twin,
+loudly audited, disable with `AVA_ABANDONED_HOLD_AUTO_RELEASE=0`. Everything
+else stays loud and manual: failed receipts, a started stop, legacy journals
+without a recorded shepherd, unreadable probes, and a still-live ladder. When
+such a host is found mid-maintenance — services stopped or admission held, and
+nothing left running that owns the pause — recover it by hand.
 
 Read the phase first. Every explicit command takes the same `--operation` and
 timezone-aware `--acquired-at` the hold carries, and `maintenance status`

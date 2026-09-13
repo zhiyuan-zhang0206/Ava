@@ -47,6 +47,10 @@ def _read_only_pth(repo: Path) -> Path:
     return pth
 
 
+# Full 40-hex; the update entrypoints refuse abbreviations (issue #2343).
+_FULL_SHA = "deadbeef11" + "0" * 30
+
+
 def _passing_import_gate(
     _repo: Path,
     *,
@@ -71,17 +75,21 @@ def test_gateway_update_makes_pth_writable_only_while_uv_sync_runs(
     def checkout(_sha: str) -> str:
         return "from-sha"
 
+    def resolve_identity(ref: str, *, context: str) -> str:
+        return ref
+
     def ignore_installed(_sha: str) -> None:
         return None
 
     monkeypatch.setattr(_up, "git_checkout_sha", checkout)
+    monkeypatch.setattr("cli.commands._update_git.resolve_commit", resolve_identity)
     monkeypatch.setattr(_native_sync, "run_bounded", sync_run)
     monkeypatch.setattr(_native_sync, "editable_import_gate", _passing_import_gate)
     monkeypatch.setattr("shared.source_integrity.set_installed", ignore_installed)
 
     result = _local._checkout_and_sync(
         repo,
-        "target-sha",
+        _FULL_SHA,
         ("from-sha", set(), None),
         frozenset(),
     )
@@ -102,7 +110,7 @@ def test_start_source_integrity_sync_restores_read_only_pth(
 
     def run(args: list[str], **_kwargs: object) -> SimpleNamespace:
         assert args == ["git", "rev-parse", "HEAD"]
-        return SimpleNamespace(returncode=0, stdout="target-sha\n")
+        return SimpleNamespace(returncode=0, stdout=_FULL_SHA + "\n")
 
     def sync_run(args: list[str], **_kwargs: object) -> SimpleNamespace:
         _uv_step(args)
@@ -118,7 +126,7 @@ def test_start_source_integrity_sync_restores_read_only_pth(
 
     assert modes_during_sync == [0o644, 0o644]
     assert _read_mode(pth) == 0o444
-    assert installed == ["target-sha"]
+    assert installed == [_FULL_SHA]
 
 
 def test_gateway_recovery_restores_pth_before_start(
@@ -176,14 +184,18 @@ def test_agent_runner_failed_sync_still_restores_read_only_pth(
     def checkout(_sha: str) -> str:
         return "from-sha"
 
+    def resolve_identity(ref: str, *, context: str) -> str:
+        return ref
+
     monkeypatch.setattr(_runner, "_source_switch_window", contextlib.nullcontext)
     monkeypatch.setattr(_runner, "git_checkout_sha", checkout)
+    monkeypatch.setattr(_runner, "resolve_commit", resolve_identity)
     monkeypatch.setattr(_native_sync, "run_bounded", sync_run)
     monkeypatch.setattr(_native_sync, "editable_import_gate", _passing_import_gate)
 
     result = _runner._run_agent_runner_self_update_inner(
         repo,
-        target_sha="target-sha",
+        target_sha=_FULL_SHA,
         mode="none",
     )
 

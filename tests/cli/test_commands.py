@@ -2161,6 +2161,11 @@ def test_gateway_local_update_starts_in_fresh_process(
     # The orchestration created the recovery anchor before entering the local leg.
     monkeypatch.setattr(_up, "git_checkout_sha", lambda _sha: calls.append("checkout") or "aaaaaaa")  # pyright: ignore[reportUnknownArgumentType]
 
+    def _resolve_identity(ref: str, *, context: str) -> str:
+        return ref
+
+    monkeypatch.setattr("cli.commands._update_git.resolve_commit", _resolve_identity)
+
     def _no_inprocess_migrate():
         raise AssertionError("apply_pending_migrations ran in-process")
 

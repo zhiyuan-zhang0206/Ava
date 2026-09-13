@@ -30,8 +30,15 @@ _HOLDER = "gateway-host:pid4242"
 _VerdictKind = Literal["stranded", "clear", "unknown"]
 
 
-def _verdict(kind: _VerdictKind = "stranded") -> sp.StrandedHoldVerdict:
-    return sp.StrandedHoldVerdict(kind=kind, detail="updater exited rc=1", paused_for=700.0)
+def _verdict(
+    kind: _VerdictKind = "stranded", *, armed: bool | None = None
+) -> sp.StrandedHoldVerdict:
+    return sp.StrandedHoldVerdict(
+        kind=kind,
+        detail="updater exited rc=1",
+        paused_for=700.0,
+        update_armed=(kind == "stranded") if armed is None else armed,
+    )
 
 
 def _verdict_reader(
@@ -141,6 +148,16 @@ def test_only_a_stranded_verdict_licenses_the_attempt(
 ) -> None:
     hold_at_phase("stopping")
     sp.maybe_spawn_stranded_recovery(_verdict(kind), role="agent-runner")
+    assert spawns.calls == [] and spawns.reservations == []
+
+
+def test_a_stranded_verdict_without_failed_leg_evidence_spends_nothing(
+    hold_at_phase: Callable[[str], None], spawns: _Spawns
+) -> None:
+    """Task #3270: `stranded` alone no longer completes -- only an update-armed
+    record does; a legacy or receipt-blocked hold stays declaration-only."""
+    hold_at_phase("stopped")
+    sp.maybe_spawn_stranded_recovery(_verdict(armed=False), role="agent-runner")
     assert spawns.calls == [] and spawns.reservations == []
 
 

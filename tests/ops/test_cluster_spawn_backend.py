@@ -603,6 +603,37 @@ def test_spawn_update_logs_nonzero_validate_fetch(
 
 
 @pytest.mark.real_cluster_spawn
+def test_short_target_sha_is_refused_before_any_pause_or_spawn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #2343's gate opens `spawn_update`: a refused sha must leave the host
+    untouched -- no pause taken and no updater session spawned."""
+    touched: list[str] = []
+    monkeypatch.setattr(
+        cluster_deploy.cluster_pause,
+        "pause_local_cluster",
+        lambda *_a, **_k: touched.append("pause"),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(
+        cluster_deploy.cluster_session,
+        "_spawn_detached_session",
+        lambda *_a, **_k: touched.append("spawn") or True,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    # The opt-out marker removes the conftest stub, so isolate the fetch the
+    # refusal must never reach.
+    monkeypatch.setattr(
+        cluster_deploy,
+        "run_bounded",
+        lambda *_a, **_k: SimpleNamespace(returncode=0, stdout="", stderr=""),  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    with pytest.raises(ValueError, match="full 40-character commit id"):
+        cluster_mod.spawn_update(target_sha="deadbeef")
+
+    assert touched == []
+
+
+@pytest.mark.real_cluster_spawn
 @pytest.mark.parametrize("restart_only", [False, True])
 def test_native_updater_chains_touch_and_clear_the_lease(
     restart_only: bool, native_host: _FakeSessionBackend
