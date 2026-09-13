@@ -32,6 +32,10 @@ speaks the official ``oss2`` SDK against a RAM AccessKey pair:
   ``<object>.ack.json`` because OSS never exposes a whole-object digest for
   multipart uploads — the sidecar lets the retention inventory reproduce
   the exact ACK identity a candidate manifest promised (QA #2157).
+
+``OSSRetentionDeleteStore`` (the identity-bound retention-delete role) lives
+here as well so both roles share this transport's error taxonomy and ETag
+normalization; the publish adapter above still exposes no delete verb.
 """
 
 from __future__ import annotations
@@ -56,6 +60,7 @@ from services.pitr.object_store import (
     RemoteObjectAck,
     TransientObjectStoreError,
 )
+from services.pitr.retention_delete import DeleteOutcome
 
 PART_SIZE = 32 * 1024 * 1024
 """Multipart part ceiling: OSS parts (except the last) must be >= 100 KiB;
@@ -225,6 +230,14 @@ class OSSBucketOps(Protocol):
     ) -> _CompleteResult: ...
 
     def abort_multipart_upload(self, key: str, upload_id: str) -> None: ...
+
+
+class OSSDeleteBucketOps(Protocol):
+    """Narrow transport for the retention-delete role: HEAD + DELETE only."""
+
+    def head_object(self, key: str, headers: Mapping[str, str] | None = None) -> _HeadResult: ...
+
+    def delete_object(self, key: str) -> object: ...
 
 
 class _PartRecorder:
@@ -651,3 +664,71 @@ class OSSObjectStore:
                     "OSS precondition raced with a missing object"
                 ) from None
             raise _map_error("OSS base verification", exc) from exc
+
+
+class OSSRetentionDeleteStore:
+    """Identity-bound deletion for OSS: emulated conditional delete.
+
+    OSS documents no precondition on DeleteObject and answers 204 whether or
+    not the object existed, so the backend cannot atomically refuse a replaced
+    object. The adapter therefore re-observes the live ETag, refuses on an
+    identity mismatch, deletes only on a match, and the executor re-observes
+    absence before recording success. The stat-to-delete window is acceptable
+    because the publisher path never rewrites an existing name (forbid-
+    overwrite puts and generation-zero uploads only). If OSS later documents
+    a conditional delete, this adapter upgrades without a contract change.
+    """
+
+    def __init__(
+        self,
+        *,
+        endpoint: str,
+        bucket: str,
+        credentials_file: str | Path,
+        timeout_seconds: float = 300.0,
+    ) -> None:
+        from services.pitr.oss_credentials import open_oss_bucket
+
+        self._bucket = cast(
+            OSSDeleteBucketOps,
+            open_oss_bucket(
+                endpoint=endpoint,
+                bucket=bucket,
+                credentials_file=credentials_file,
+                timeout_seconds=timeout_seconds,
+            ),
+        )
+
+    @classmethod
+    def from_bucket(cls, bucket: OSSDeleteBucketOps) -> OSSRetentionDeleteStore:
+        """Construct around an injected transport for contract tests."""
+
+        instance = cls.__new__(cls)
+        instance._bucket = bucket
+        return instance
+
+    def delete_if_match(self, object_name: str, identity: str) -> DeleteOutcome:
+        """Delete iff the live ETag still equals ``identity``.
+
+        A missing object answers ABSENT (idempotent success); a different
+        live ETag answers MISMATCH and nothing is deleted.
+        """
+
+        try:
+            head = self._bucket.head_object(object_name)
+        except oss2.exceptions.OssError as exc:
+            if _is_not_found(exc):
+                return DeleteOutcome.ABSENT
+            raise _map_error("OSS retention head", exc) from exc
+        etag = _normalize_etag(head.etag)
+        if not etag:
+            raise TransientObjectStoreError("OSS object omitted verification properties")
+        if etag != _normalize_etag(identity):
+            return DeleteOutcome.MISMATCH
+        try:
+            self._bucket.delete_object(object_name)
+        except oss2.exceptions.OssError as exc:
+            # DeleteObject answers 204 even for a missing object, so a raised
+            # error is a transport or permission failure, never "absent".
+            raise _map_error("OSS retention delete", exc) from exc
+        return DeleteOutcome.DELETED
