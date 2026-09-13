@@ -191,9 +191,10 @@ previous block's bottom (no gap row).
 **Do not add `autofitpanels`**: on Grafana 13.1.x it collapses every panel
 to a 30px title bar at narrow window widths.
 
-`refresh` is `10m` and the default window `now-6h` (2026-08-23, task
-#1399: the 24h window was the main Loki query-weight driver — 88 Loki
-queries × 24h × 5m; 6h/10m keeps the dashboard live while bounding Loki).
+`refresh` is `10m` and the default window `now-24h` (2026-09-14, user
+request; the earlier `now-6h` default, 2026-08-23 task #1399, was chosen to
+bound Loki query weight — 88 Loki queries × 24h × 5m; with the 24h default,
+watch Loki panel latency and shrink the window again if it degrades).
 
 ## Syncing to the live Grafana
 

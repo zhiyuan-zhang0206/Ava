@@ -5473,7 +5473,7 @@
   "list": []
  },
  "time": {
-  "from": "now-6h",
+  "from": "now-24h",
   "to": "now"
  },
  "timepicker": {},
