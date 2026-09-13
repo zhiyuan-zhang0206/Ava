@@ -132,9 +132,17 @@ def test_explicit_missing_target_is_an_error(
     assert _lint.main([str(good), str(missing)]) == 1
 
 
-def test_directory_with_dangling_symlink_member_is_skipped(tmp_path: Path) -> None:
+def test_directory_with_dangling_symlink_member_is_skipped(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     """A broken *.py symlink inside an explicit directory must be skipped like
-    any unreadable entry — the scan must not crash on it."""
+    any unreadable entry — the scan must not crash on it, and a violating
+    sibling file is still reported."""
     (tmp_path / "ok.py").write_text("value = 1\n", encoding="utf-8")
     (tmp_path / "dangling.py").symlink_to(tmp_path / "missing.py")
     assert _lint.main([str(tmp_path)]) == 0
+    (tmp_path / "viol.py").write_text(
+        "pool = ConnectionPool(url, min_size=1, max_size=2, open=True)\n", encoding="utf-8"
+    )
+    assert _lint.main([str(tmp_path)]) == 1
+    assert "passes no `kwargs=`" in capsys.readouterr().out

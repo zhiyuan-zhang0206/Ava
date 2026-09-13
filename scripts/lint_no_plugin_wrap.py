@@ -86,7 +86,10 @@ def _attr_path(node: ast.Attribute) -> str:
 
 def _scan_file(path: Path) -> list[tuple[int, str]]:
     """Return [(lineno, message), ...] for bare ava monkey-patches."""
-    lines = path.read_text(encoding="utf-8").splitlines()
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return []  # unreadable entry (e.g. a dangling symlink) or binary content
     try:
         tree = ast.parse("\n".join(lines), filename=str(path))
     except SyntaxError:

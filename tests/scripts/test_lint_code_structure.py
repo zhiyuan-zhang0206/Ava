@@ -25,6 +25,23 @@ def _scan(tmp_path: pathlib.Path, name: str, n_lines: int) -> list[str]:
     return [msg for _ln, msg, sev in lcs._scan_file(p, name) if sev == "error"]
 
 
+def test_directory_with_unreadable_member_is_skipped(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unreadable *.py member (non-UTF-8 / dangling symlink) must be skipped
+    like any unreadable entry — the scan must not crash on it, in any of its
+    call forms (file / directory / default)."""
+    monkeypatch.setattr(lcs, "_REPO_ROOT", tmp_path)
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    (shared / "ok.py").write_text("value = 1\n", encoding="utf-8")
+    (shared / "bad_utf8.py").write_bytes(b"\xff\xfe\x00bad")
+    (shared / "dangling.py").symlink_to(shared / "missing.py")
+    assert lcs.main([str(shared / "bad_utf8.py")]) == 0
+    assert lcs.main([str(shared)]) == 0
+    assert lcs.main([]) == 0
+
+
 def test_over_ceiling_is_hard_error(tmp_path: pathlib.Path) -> None:
     """An over-800 file is a hard error — no allowlist remains."""
     errors = _scan(tmp_path, "big.py", 900)
