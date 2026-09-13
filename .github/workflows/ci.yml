@@ -1371,7 +1371,7 @@ jobs:
         working-directory: ui/web
         continue-on-error: true
         run: npx vitest run --coverage
-      # vitest.config.ts already emits json-summary for this gate. Quarantined
+      # vitest.config.mts already emits json-summary for this gate. Quarantined
       # src/**/flaky/** tests run serially below with coverage disabled, so this
       # checks the stable parallel denominator. Raise toward the measured value
       # over time (tests/README.md), never toward 100: line coverage is not quality.
@@ -1395,11 +1395,11 @@ jobs:
               )
           EOF
       # Quarantined timing-sensitive tests (src/**/flaky/**) run serially in
-      # their own vitest process — see ui/web/vitest.flaky.config.ts.
+      # their own vitest process — see ui/web/vitest.flaky.config.mts.
       - name: Flaky unit tests (vitest run, serial)
         working-directory: ui/web
         continue-on-error: true
-        run: npx vitest run --config vitest.flaky.config.ts
+        run: npx vitest run --config vitest.flaky.config.mts
 
       - name: Trunk quarantine gate (upload test results)
         id: trunk-gate
