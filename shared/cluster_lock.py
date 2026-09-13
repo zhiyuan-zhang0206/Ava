@@ -234,6 +234,62 @@ def holder_pid_if_local(holder: str) -> int | None:
     return pid if process_alive(pid) else None
 
 
+# `holder_process_gone`'s pid-recycling slack. A genuine holder PROCESS existed
+# before it acquired the lease, so a probed process whose start time is
+# meaningfully AFTER the acquire moment is a recycled pid, not the holder. The
+# slack absorbs pg-vs-local clock fuzz (the probe host is the holder's own box,
+# and every gateway-capable host runs its DB locally, so the skew is NTP-grade)
+# and errs toward "live": a false "recycled" verdict would let a caller clear a
+# claim under a running holder — the 2026-06-01 collision class.
+_HOLDER_START_SLACK_S = 30.0
+
+
+def holder_process_gone(holder: str, *, held_for_s: float | None = None) -> bool:
+    """Whether `holder`'s process is PROVABLY not running on this host.
+
+    The conservative twin of `holder_pid_if_local` ("may I signal this pid"): this
+    one answers "may I reclaim what the holder left". True only on positive death
+    evidence — the holder parses as THIS machine's `<machine>:pid<N>` and the pid
+    is absent, or (with `held_for_s`, the lease's server-computed age) is alive
+    but provably a RECYCLED pid (`_HOLDER_START_SLACK_S`). Every uncertainty — a
+    holder on another machine (its pid is meaningless in this namespace), an
+    unparseable string, an unreadable process identity — answers False, so a
+    caller that destroys state on this reading can only ever destroy a claim
+    whose owner is definitively gone. `ops.ops_cluster._lock_holder_is_live` is
+    its negation, and the stranded-lease controller its automatic consumer.
+    """
+    from shared.machine import machine_name
+    from shared.proc import process_alive
+
+    machine, sep, pid_str = holder.partition(":pid")
+    if sep == "":
+        return False
+    try:
+        if machine != machine_name():
+            return False
+    except Exception:
+        return False
+    try:
+        pid = int(pid_str)
+    except ValueError:
+        return False
+    if not process_alive(pid):
+        return True
+    if held_for_s is None:
+        return False
+    import time
+
+    import psutil
+
+    try:
+        started = psutil.Process(pid).create_time()
+    except psutil.NoSuchProcess:
+        return True  # exited between the two probes
+    except psutil.Error:
+        return False  # unreadable identity — refuse rather than clobber
+    return started > (time.time() - held_for_s) + _HOLDER_START_SLACK_S
+
+
 def self_holder() -> str:
     """This process's holder string, `<machine>:pid<N>`.
 

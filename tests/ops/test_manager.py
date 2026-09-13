@@ -199,10 +199,17 @@ def test_default_controllers_in_reconcile_order() -> None:
     that can hang, so a hung rollout is only ever met on a paused host — and on
     2026-08-02 the sole line prod's watchdog emitted through 67 minutes of a hung
     rollout was `round blocked by pause (scope=all)`. Neither of the two ahead of
-    `pause` blocks, so nothing behind them loses a round to their position."""
+    `pause` blocks, so nothing behind them loses a round to their position.
+
+    `lease` joins them between `rollout` and `pause` for the same "meet the case on a
+    paused host" reason: a killed orchestration strands its deploy lease while the
+    host it paused sits blocked, so a reclaim behind `pause` would never run — and
+    the stranded lease is exactly what refuses the next deploy for the rest of its
+    TTL (2026-09-12). It, too, never blocks."""
     assert [c.name for c in build_controllers()] == [
         "updater",
         "rollout",
+        "lease",
         "pause",
         "schema",
         "pin",
