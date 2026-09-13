@@ -31,7 +31,8 @@ tags:
 - [[cli/config.ava.okf.md|`ava config get/set/unset`]]
 - `ava pty freeze/status/resume`: host-wide PTY allocation gate.
 - `ava logs rotate`: top-level copytruncate rotation for service stdout and
-  native backend logs at 64 MiB or a UTC-day boundary.
+  native backend logs at 64 MiB or a UTC-day boundary; zero-byte files are not
+  rotated.
 - `ava logs retention`: local, non-recursive managed-log cleanup; legacy global
   14-day fallback or explicit family tiers across service and native archives;
   open handles are excluded.
