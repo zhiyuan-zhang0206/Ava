@@ -17,6 +17,11 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+# Put project root on sys.path so `from shared... import ...` finds this
+# checkout's modules (without it, an editable install of another checkout
+# shadows them — same pattern as dump_event_fixtures.py / dump_openapi.py).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from shared.events.contract import EVENTS, payload_keys
 from shared.live_events import GLOBAL_ROLES, SYSTEM_ROLES
 

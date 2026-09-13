@@ -14664,6 +14664,17 @@
             ],
             "title": "Inbound Id"
           },
+          "compact_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compact Id"
+          },
           "reasoning_ms": {
             "anyOf": [
               {

@@ -27,7 +27,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | telemetry (category=telemetry) | `events` | 166 | events table |
 | log (category=log) | `events` | 11 | events table |
 | file-only (destination=file) | file log | 1 | file only (not the events table) |
-| SSE live | Redis → frontend (not persisted) | 28 role | live projection |
+| SSE live | Redis → frontend (not persisted) | 30 role | live projection |
 
 All persistent events land in the single `events` table (`category` distinguishes
 audit / telemetry / log). The four legacy mechanisms under the unified event model
@@ -285,7 +285,7 @@ consumers: see the comments at each emit point.
 | `chrome_page_ttl_expired` | the browser-mcp TTL sweep closed a Chrome page whose hard deadline passed; attributes carry page_id, url, agent_id (None when no affinity slot still named the page) | observation | — | events |
 | `watcher_reaped` | the gateway TTL reaper reclaimed a watcher whose owner agent is terminated for good; attributes carry agent_id, session_id, mode | observation | — | events |
 
-## 5. SSE roles (live channel, not persisted, 28)
+## 5. SSE roles (live channel, not persisted, 30)
 
 Typed Pydantic discriminators in `shared/live_events.py` (role is a Literal);
 `EVENT_ADAPTER` / `SYSTEM_ROLES` / `GLOBAL_ROLES` derive from the single
@@ -304,7 +304,9 @@ same origin as persistent events but uses an independent schema.
 | `code_delta` | — |
 | `code_start` | — |
 | `compact_done` | — |
+| `compact_finished` | — |
 | `compact_request` | — |
+| `compact_started` | — |
 | `error` | — |
 | `exec_output` | — |
 | `exec_output_chunk` | — |

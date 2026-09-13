@@ -44,6 +44,7 @@ from tests.agent.test_claim import (
     _fake_llm,
     _insert_inbound_kind,
     _make_runtime,
+    _pair_compact_cycles,
 )
 from tests.agent.test_llm_helpers import _CONFIG as _LLM_CONFIG
 from tests.agent.test_llm_helpers import _make_runtime as _llm_make_runtime
@@ -312,17 +313,23 @@ async def test_heartbeat_while_breaker_open_forces_compact(
 ) -> None:
     """Breaker open with context_overflow + heartbeat wake → the check-in note
     is NOT appended (no doomed call), and the wake routes into a compaction
-    whose tail is the generated summary — the overflow self-rescue."""
+    whose tail is the generated summary — the overflow self-rescue.
+
+    Task #3323: the rescue also emits its live run pair (compact_started with
+    mode=auto, compact_finished success — same compact_id) and the summary
+    carries the durable ava_compact_id anchor."""
     tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
 
     state = _overflow_state(breaker_reason="context_overflow")
     fake_llm = _fake_llm(_LONG_SUMMARY)
+    publisher = MagicMock()
     cmd = await claim_node(
         state,
         _make_runtime(
             ops_pool=aops_pool,
             llm=fake_llm,
+            event_publisher=publisher,
         ),
         _config(tid),
     )
@@ -332,6 +339,37 @@ async def test_heartbeat_while_breaker_open_forces_compact(
     assert len(tail) == 1, "forced compact tail must be the summary alone — no heartbeat note"  # pyright: ignore[reportUnknownArgumentType]
     assert tail[0].content == compose_summary_message(_LONG_SUMMARY)  # pyright: ignore[reportUnknownMemberType]
     assert cmd.update["compact"].version == 1  # pyright: ignore[reportOptionalSubscript, reportUnknownArgumentType, reportUnknownMemberType]
+    [(started, finished)] = _pair_compact_cycles(publisher)
+    assert started["mode"] == "auto"  # overflow rescue — no explicit request
+    assert finished["status"] == "success"
+    assert tail[0].additional_kwargs["ava_compact_id"] == started["compact_id"]  # pyright: ignore[reportUnknownMemberType]
+
+
+async def test_heartbeat_while_breaker_open_compaction_failure_emits_terminal(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    """Task #3323: when the overflow rescue itself exhausts its transient
+    retries (CompactionFailedError), the run still reaches its terminal
+    signal (failure) before the error propagates — no hanging ticking block."""
+    tid = spawn_agent()
+    _insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
+
+    state = _overflow_state(breaker_reason="context_overflow")
+    llm = MagicMock()
+    llm.bind_tools.return_value.ainvoke = AsyncMock(side_effect=RuntimeError("provider 502"))
+    publisher = MagicMock()
+
+    with pytest.raises(CompactionFailedError, match="no usable summary"):
+        await claim_node(
+            state,
+            _make_runtime(ops_pool=aops_pool, llm=llm, event_publisher=publisher),
+            _config(tid),
+        )
+
+    [(started, finished)] = _pair_compact_cycles(publisher)
+    assert started["mode"] == "auto"
+    assert finished["status"] == "failure"
 
 
 async def test_heartbeat_while_breaker_open_falls_back_to_minimal_compact(

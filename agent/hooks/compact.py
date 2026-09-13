@@ -14,6 +14,8 @@ Exports:
   Compaction LLM over the whole conversation and returns the summary text.
 - `register_compact_hooks()`: registers the before_llm hook (force-compact +
   reminder). Called once at graph build time.
+- The compaction live-run events (`emit_compact_started` / `emit_compact_finished`)
+  live in `agent/hooks/compact_events.py` (file line budget).
 
 Redesign plan for forced / command / spontaneous compact:
 `agent/compaction-redesign.md`.
@@ -49,6 +51,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.history_dump import dump_history, history_dump_note
 from agent.hooks import Hook, register_before_llm
+from agent.hooks.compact_events import emit_compact_finished, emit_compact_started
 from agent.lm_cache import ainvoke_with_cache_retry
 from agent.messages import (
     COMPACT_SUMMARY_HEADER,
@@ -476,6 +479,9 @@ async def auto_compact_before_llm(
         event="auto_compact",
         body=f"start: tokens≈{occupancy}, compressing {len(content_msgs)} messages",
     )
+    agent_id = agent_id_from_config(config)
+    publisher = runtime.context.event_publisher
+    compact_run_id = emit_compact_started(publisher, agent_id, mode="auto")
 
     summary: str = ""
     last_error: Exception | None = None
@@ -508,6 +514,7 @@ async def auto_compact_before_llm(
         # P1-1 — a compact failure used to kill the process into a
         # non-resurrectable 'exit', one crash per incoming message while the
         # cause persisted).
+        emit_compact_finished(publisher, agent_id, compact_run_id, status="failure")
         raise CompactionFailedError(
             f"Compaction produced no usable summary across {COMPACT_MAX_ATTEMPTS}"
             f" attempts (last: {detail}); the model is not following the"
@@ -522,7 +529,6 @@ async def auto_compact_before_llm(
         body=f"done: summary {len(summary)} chars",
     )
 
-    agent_id = agent_id_from_config(config)
     emit_compaction_monitoring(
         state.messages,
         summary,
@@ -549,7 +555,6 @@ async def auto_compact_before_llm(
                 body=f"failed to insert event_log: {exc!r}",
             )
 
-    publisher = runtime.context.event_publisher
     if publisher is not None:
         publisher.emit(CompactDone(agent_id=agent_id).model_dump_json())
 
@@ -571,17 +576,24 @@ async def auto_compact_before_llm(
     # rejected by the provider. Best-effort: a dump failure must never abort
     # the compaction itself.
     dump_path = dump_history(state.messages, agent_id)
-    return build_compact_transition(
+    summary_kwargs: dict[str, Any] = {
+        "additional_kwargs": {
+            "ava_msg_type": AvaMsgType.COMPACT_SUMMARY.value,
+            "ava_created_at": datetime.now(UTC).isoformat(),
+        },
+    }
+    # The durable anchor tying this summary to its live run — both compact
+    # paths carry it, so the UI can match the ticking block to this item.
+    if compact_run_id is not None:
+        summary_kwargs["additional_kwargs"]["ava_compact_id"] = compact_run_id
+    transition = build_compact_transition(
         summary,
         resume=LLM,
         extra_msgs=([history_dump_note(dump_path)] if dump_path is not None else None),
-        summary_kwargs={
-            "additional_kwargs": {
-                "ava_msg_type": AvaMsgType.COMPACT_SUMMARY.value,
-                "ava_created_at": datetime.now(UTC).isoformat(),
-            },
-        },
+        summary_kwargs=summary_kwargs,
     )
+    emit_compact_finished(publisher, agent_id, compact_run_id, status="success")
+    return transition
 
 
 # ── Shared compact transition builder ──
