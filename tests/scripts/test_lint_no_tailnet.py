@@ -185,3 +185,19 @@ def test_explicit_missing_target_is_an_error(
     assert str(missing) in capsys.readouterr().err
     assert gate.main([str(good), str(missing)]) == 1
     assert gate.main(["typo.txt"]) == 1
+
+
+def test_out_of_repo_directory_argument_is_scanned(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A directory outside the repo must be scanned: its members used to die
+    on the repo-relative prefix computation."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "ok.txt").write_text("no tailnet literals here\n", encoding="utf-8")
+    assert gate.main([str(outside)]) == 0
+    (outside / "bad.txt").write_text(
+        f"url = 'http://{_cgnat_ip(64, '0.3')}:8000'\n", encoding="utf-8"
+    )
+    assert gate.main([str(outside)]) == 1
+    assert "bad.txt" in capsys.readouterr().out

@@ -210,9 +210,13 @@ def _scan_file(
     if rel_path in _ALLOWED_FILES or rel_path in _GRANDFATHERED:
         return []
     is_test = _is_test_file(rel_path)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []  # unreadable entry (e.g. a dangling symlink) or binary content
     violations: list[tuple[int, str, str]] = []
     inside_triple = False
-    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+    for lineno, line in enumerate(text.splitlines(), start=1):
         # Triple-quote state machine: count occurrences of """ / ''' per
         # line; odd count flips the inside state. We do not parse nested
         # string semantics, but this suffices (docstrings not written on a

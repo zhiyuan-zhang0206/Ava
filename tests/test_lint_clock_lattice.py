@@ -139,12 +139,30 @@ def test_explicit_missing_target_is_an_error(
     assert _lint.main([str(good), str(missing)]) == 1
 
 
-def test_explicit_outside_repo_and_relative_targets_scan_cleanly(
-    scan_tmp, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_directory_with_dangling_symlink_member_is_skipped(scan_tmp) -> None:
+    """A broken *.py symlink inside an explicit directory must be skipped like
+    any unreadable entry — the scan must not crash on it."""
+    pkg = _lint._REPO_ROOT / "pkg"
+    pkg.mkdir()
+    (pkg / "ok.py").write_text("value = 1\n", encoding="utf-8")
+    (pkg / "dangling.py").symlink_to(pkg / "missing.py")
+    assert _lint.main([str(pkg)]) == 0
+
+
+def test_explicit_outside_repo_and_relative_targets_are_scanned(
+    scan_tmp,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """An existing path outside the repo, or given relative to the cwd, scans
-    instead of dying on the repo-relative prefix computation."""
-    good = _write(scan_tmp, "ok.py", "value = 1\n")
-    assert _lint.main([str(good)]) == 0
-    monkeypatch.chdir(tmp_path)
-    assert _lint.main(["ok.py"]) == 0
+    """A path outside the repo, or given relative to the cwd, must be scanned
+    for real: the lattice violation in it is reported (exit 1) rather than
+    tolerated as a clean scan, and the scan must not die on the repo-relative
+    prefix computation."""
+    outside = tmp_path_factory.mktemp("outside")
+    bad = outside / "bad.py"
+    bad.write_text("_MY_STALL_TIMEOUT_S = 5\n", encoding="utf-8")
+    assert _lint.main([str(bad)]) == 1
+    monkeypatch.chdir(outside)
+    assert _lint.main(["bad.py"]) == 1
+    assert "bad.py" in capsys.readouterr().err
