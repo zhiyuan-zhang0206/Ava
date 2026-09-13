@@ -25,6 +25,9 @@ from shared.deploy_timing import UV_SYNC_TIMEOUT_S
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _STAGE_TIMEOUT_LINE = "STAGE_NO_PROGRESS_TIMEOUT_S = 675.0"
 
+# A full 40-hex id: the update entrypoints refuse abbreviations (issue #2343).
+_FULL_TARGET = "deadbeef11" + "0" * 30
+
 
 def _make_skew_tree(tmp_path: Path) -> Path:
     """Build an old shared module beside the current outcome reader."""
@@ -136,6 +139,11 @@ def test_updater_hands_off_to_fresh_interpreter_after_sync(
         return subprocess.CompletedProcess(["uv", "sync"], returncode=0)
 
     monkeypatch.setattr(_runner, "git_checkout_sha", lambda _sha: "oldsha0000")  # pyright: ignore[reportUnknownArgumentType]
+
+    def resolve_identity(ref: str, *, context: str) -> str:
+        return ref
+
+    monkeypatch.setattr(_runner, "resolve_commit", resolve_identity)
     monkeypatch.setattr(_runner, "run_uv_sync_verified", sync_verified)
     monkeypatch.setattr("shared.source_integrity.set_installed", lambda _sha: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
@@ -148,7 +156,7 @@ def test_updater_hands_off_to_fresh_interpreter_after_sync(
     with pytest.raises(SystemExit, match="0"):
         _runner._run_agent_runner_self_update(
             tmp_path,
-            target_sha="newsha1111",
+            target_sha=_FULL_TARGET,
             mode="none",
             force_reap=True,
         )
@@ -160,7 +168,7 @@ def test_updater_hands_off_to_fresh_interpreter_after_sync(
             "cli.commands._update_agent_runner",
             "--post-checkout",
             "--target-sha",
-            "newsha1111",
+            _FULL_TARGET,
             "--from-sha",
             "oldsha0000",
             "--mode",
@@ -193,7 +201,7 @@ def test_handoff_claim_failure_releases_the_updater_lock(
     monkeypatch.setattr(updater_handoff, "clear", lambda *_args: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("shared.cluster.session_name", lambda _name: "ava-updater")  # pyright: ignore[reportUnknownArgumentType]
 
-    assert _runner._run_agent_runner_self_update(tmp_path, target_sha="newsha1111") == (
+    assert _runner._run_agent_runner_self_update(tmp_path, target_sha=_FULL_TARGET) == (
         RESTART_DECLINED_EXIT_CODE
     )
     assert released == [True]
@@ -266,7 +274,7 @@ def test_post_checkout_leg_runs_validate_to_start(
     assert (
         _runner._run_agent_runner_self_update(
             tmp_path,
-            target_sha="newsha1111",
+            target_sha=_FULL_TARGET,
             from_sha="oldsha0000",
             post_checkout=True,
             mode="smooth",
@@ -301,7 +309,7 @@ def test_post_checkout_fails_fast_when_the_flock_did_not_survive(
     with pytest.raises(RuntimeError, match="flock did not survive"):
         _runner._run_agent_runner_self_update(
             tmp_path,
-            target_sha="newsha1111",
+            target_sha=_FULL_TARGET,
             from_sha="oldsha0000",
             post_checkout=True,
             mode="none",
@@ -322,7 +330,7 @@ def test_post_checkout_flag_parses(monkeypatch: pytest.MonkeyPatch) -> None:
             [
                 "--post-checkout",
                 "--target-sha",
-                "newsha1111",
+                _FULL_TARGET,
                 "--from-sha",
                 "oldsha0000",
                 "--mode",
@@ -333,7 +341,7 @@ def test_post_checkout_flag_parses(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert calls == [
         {
-            "target_sha": "newsha1111",
+            "target_sha": _FULL_TARGET,
             "restart_only": False,
             "mode": "none",
             "force_reap": False,
@@ -345,7 +353,7 @@ def test_post_checkout_flag_parses(monkeypatch: pytest.MonkeyPatch) -> None:
     for bad in (
         ["--post-checkout"],  # neither sha
         ["--post-checkout", "--from-sha", "oldsha0000"],  # missing target
-        ["--post-checkout", "--target-sha", "newsha1111"],  # missing from
+        ["--post-checkout", "--target-sha", _FULL_TARGET],  # missing from
         ["--post-checkout", "--restart-only"],  # contradictory mode
     ):
         with pytest.raises(SystemExit):

@@ -178,6 +178,58 @@ def test_a_shell_relay_is_never_the_owner() -> None:
     assert driver is not None and liveness(driver) == "dead"
 
 
+def test_a_forked_relay_below_the_leader_keeps_the_script_as_the_root() -> None:
+    """The Linux shape of the relay test: a compound command cannot be
+    exec-replaced, so the `sh -c` relay stays resident below the script while
+    the ladder runs. The binding must skip it -- a relay is never the owner --
+    rather than read owner-lost at its exit."""
+    relay_cmd = f"{sys.executable} -c {shlex.quote(_MINT)} ; :"
+    script = _spawn(
+        _wrapper(
+            [
+                "import shlex",
+                "p = subprocess.run("
+                + repr(relay_cmd)
+                + ", shell=True, capture_output=True, text=True)",
+                _PRINT,
+            ]
+        ),
+        new_session=True,
+    )
+    driver = None
+    try:
+        driver = _read_driver(script)
+        assert driver.root is not None
+        assert driver.root.pid == script.pid
+        assert liveness(driver) == "alive"
+    finally:
+        _reap(script)
+    assert driver is not None and liveness(driver) == "dead"
+
+
+def test_the_relay_predicate_reads_only_inline_command_shells() -> None:
+    """`_is_relay_shim` decides the exclusion: an inline command (`-c`, `-lc`)
+    is a one-shot relay; a script file, an interactive shell and non-shell
+    commands are not."""
+    from shared import hold_driver
+
+    class _CmdProc:
+        def __init__(self, argv: list[str]) -> None:
+            self._argv = argv
+
+        def cmdline(self) -> list[str]:
+            return self._argv
+
+    def relay(argv: list[str]) -> bool:
+        return hold_driver._is_relay_shim(cast("psutil.Process", _CmdProc(argv)))
+
+    assert relay(["/bin/sh", "-c", "ava maintenance prepare"])
+    assert relay(["bash", "-lc", "ava start"])
+    assert not relay(["bash", "drill.sh"])
+    assert not relay([sys.executable, "-c", "print(1)"])
+    assert not relay(["/bin/zsh", "-i"])
+
+
 def test_minting_in_this_process_reads_alive() -> None:
     assert liveness(mint_driver()) == "alive"
 

@@ -58,10 +58,12 @@ def maybe_release_abandoned_hold(*, paused_for: float | None) -> None:
     Called by the pause controller once the verdict reads `abandoned`
     (ownerless + pre-stop + no failed receipts, with a dead recorded shepherd
     or a failed update leg as the proof). Re-verifies the whole proof under the
-    lifecycle lock -- a shepherd that returned, an executing signal that
-    appeared, a progressed phase or a new failure all abort silently -- and
-    then performs the cancellation through `release_pre_stop_hold`, the twin of
-    the operator's `ava maintenance resume --cancel`.
+    lifecycle lock -- a released hold, a shepherd that returned, or an
+    executing signal that appeared all abort silently -- and then performs the
+    cancellation through `release_pre_stop_hold`, the twin of the operator's
+    `ava maintenance resume --cancel`. A phase that progressed past pre-stop
+    or new failed receipts are refused by the release itself and escalate
+    loudly (ERROR + the record re-marked); the hold is preserved.
 
     Before the window passes this is a no-op: the declaration stays visible and
     the operator keeps the first move. A failed release is loud and the hold is

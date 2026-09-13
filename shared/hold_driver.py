@@ -11,8 +11,10 @@ shepherd remains. This module records and judges that shepherd.
 session leader** (the 2026-09-13 ruling by agent #2343/#405's thread):
 
 - A session id survives reparenting (`os.getsid` -- the issue #2331 membership
-  route), so a one-shot `sh -c` intermediary is never mistaken for the owner:
-  it sits below the root of the tree and its exit changes nothing.
+  route), so a one-shot `sh -c` relay is never mistaken for the owner: relay
+  shells (`sh -c ...`, forked or exec-replaced) are excluded from the owner
+  candidates, and when a relay is the leader's direct child the leader itself
+  is bound. A relay's exit between ladder steps changes nothing.
 - In a persistent session used as a multi-command flow, the session leader
   itself is the root (there is nothing between the command and the leader), so
   the binding lives exactly as long as the session: the flow is shepherded
@@ -33,12 +35,10 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal, cast
 
 import psutil
-
-from shared.proc_tree import create_time_matches, stable_create_time
-from shared.session_record import pid_starttime_ticks
 
 DriverLiveness = Literal["alive", "dead", "missing", "unreadable"]
 
@@ -68,6 +68,13 @@ class ProcessRef:
         birth does not match); `unreadable` means the question could not be
         answered and must not be treated as death.
         """
+        # Method-local (shared/proc.py precedent): the in-process updater's
+        # pre-checkout import closure must not reach shared.session_record /
+        # shared.proc_tree, so the post-checkout image loads the new files
+        # (the PR #932 class); tests/cli/test_update_import_timing.py pins it.
+        from shared.proc_tree import create_time_matches, stable_create_time
+        from shared.session_record import pid_starttime_ticks
+
         try:
             proc = psutil.Process(self.pid)
         except psutil.NoSuchProcess:
@@ -125,10 +132,10 @@ class ProcessRef:
 class HoldDriver:
     """The recorded shepherd: `root` decides liveness, `leader` is evidence.
 
-    `root` is the topmost process of the writer's command tree below its
-    session leader (or the session leader itself, or the direct parent when no
-    leader is readable); `leader` is the session leader at mint time, kept for
-    the operator-facing journal. None means the identity was not recorded.
+    `root` is the topmost non-relay process of the writer's command tree below
+    its session leader (or the session leader itself, or the direct parent when
+    no leader is readable); `leader` is the session leader at mint time, kept
+    for the operator-facing journal. None means the identity was not recorded.
     """
 
     root: ProcessRef | None = None
@@ -163,6 +170,11 @@ def _argv_head(proc: psutil.Process) -> str:
 
 def _capture(proc: psutil.Process) -> ProcessRef | None:
     """Best-effort capture of one live process; None when unreadable."""
+    # Deferred like ProcessRef.probe: keep the updater's pre-checkout closure
+    # off shared.session_record / shared.proc_tree.
+    from shared.proc_tree import stable_create_time
+    from shared.session_record import pid_starttime_ticks
+
     try:
         birth = stable_create_time(proc)
     except (psutil.Error, OSError):
@@ -184,10 +196,42 @@ def _leader_ref(sid: int | None) -> ProcessRef | None:
         return None
 
 
+# Relay-class shells: a one-shot `sh -c <cmd>` intermediary is never the owner
+# (task #3270 review): it exists only for the one command it wraps and exits
+# between ladder steps, so binding one would read as owner-lost while the
+# script above still shepherds.
+_RELAY_SHELLS = frozenset({"sh", "dash", "bash", "zsh", "ksh", "ksh93", "mksh", "ash", "busybox"})
+
+
+def _is_relay_shim(proc: psutil.Process) -> bool:
+    """Whether this ancestor is a one-shot `sh -c` relay rather than a shepherd.
+
+    A shell whose command flag carries an inline command (` -c `, ` -lc `) is a
+    relay; a shell reading a script file, an interactive session shell, and a
+    shell whose argv cannot be read are not. Best-effort, like every probe
+    here: unreadable argv reads as "not a relay", the conservative way round.
+    """
+    try:
+        argv = proc.cmdline()
+    except (psutil.Error, OSError, AttributeError):
+        return False
+    if not argv or Path(argv[0]).name.lstrip("-") not in _RELAY_SHELLS:
+        return False
+    if len(argv) < 2:
+        return False
+    flags = argv[1]
+    return flags.startswith("-") and not flags.startswith("--") and "c" in flags[1:]
+
+
 def _resolve_root(
     ancestors: list[psutil.Process], sid: int | None, leader: ProcessRef | None
 ) -> ProcessRef | None:
-    """The topmost ancestor below the session leader, per the module docstring."""
+    """The topmost non-relay ancestor below the session leader, per the docstring.
+
+    Relay shims are excluded: when the only process below the leader is a relay
+    (its direct child), the leader itself is the root, so the relay's exit
+    between ladder steps never reads as owner-lost.
+    """
     if sid is not None:
         below: list[psutil.Process] = []
         for ancestor in ancestors:
@@ -196,13 +240,18 @@ def _resolve_root(
             below.append(ancestor)
         else:
             # The leader is not in this process's ancestry (it exited, or the
-            # member was reparented out of the session): the direct parent is
-            # the recorded fallback; nothing above it is ours to claim.
+            # member was reparented out of the session): the direct parent --
+            # never a relay shim -- is the recorded fallback; nothing above it
+            # is ours to claim.
             below = ancestors[:1]
-        if below:
-            return _capture(below[-1])
+        candidates = [ancestor for ancestor in below if not _is_relay_shim(ancestor)]
+        if candidates:
+            return _capture(candidates[-1])
         return leader
-    return _capture(ancestors[0]) if ancestors else None
+    for ancestor in ancestors:
+        if not _is_relay_shim(ancestor):
+            return _capture(ancestor)
+    return None
 
 
 def mint_driver() -> HoldDriver:

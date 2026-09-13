@@ -541,8 +541,21 @@ def stranded_hold_verdict(
             paused_for=paused_for,
             driver=driver,
         )
-    # Post-stop, no failures, no update evidence: an operator's own completed
-    # stop (or pause) -- the state it deliberately left has no wrong to alarm.
+    if reading.kind == "unreadable":
+        # Missing evidence never clears (task #3150, extended past the
+        # missing-shepherd case): without a readable outcome, a post-stop hold
+        # whose shepherd died cannot be told from a failed update leg's
+        # aftermath, so the record stands.
+        return StrandedHoldVerdict(
+            kind="unknown",
+            detail="updater outcome is unreadable",
+            paused_for=paused_for,
+            driver=driver,
+        )
+    # Post-stop, no failures, and a readable outcome carrying no update
+    # evidence: an operator's own completed stop (or pause) -- the state it
+    # deliberately left has no wrong to alarm. (An unreadable outcome never
+    # reaches here; it cannot clear the record.)
     return StrandedHoldVerdict(kind="clear", detail="", paused_for=paused_for, driver=driver)
 
 
@@ -764,10 +777,13 @@ class PauseController:
             )
         # Still paused and no recovery licensed: this is where a failed leg's
         # ownerless hold would otherwise sit silent and permanent. Record it,
-        # then — for an update-armed post-stop hold only — spend the episode's
-        # one bounded completion attempt (task #3142). Every other hold, and
-        # every pre-stop phase, stays record-only: the no-auto-resume rule
-        # stands untouched.
+        # then take the two bounded automatic paths: an update-armed post-stop
+        # hold may spend the episode's one completion attempt (task #3142), and
+        # an abandoned pre-stop hold (gone shepherd or failed updater leg, no
+        # failed receipts) is released through the cancel path after its
+        # observation window (task #3270). Everything else — failure-carrying,
+        # legacy, unreadable, post-stop without updater evidence — stays
+        # record-only: the no-auto-resume rule stands untouched for it.
         verdict = sync_stranded_hold_record()
         maybe_spawn_stranded_recovery(verdict, role=role)
         if verdict is not None and verdict.kind == "abandoned":

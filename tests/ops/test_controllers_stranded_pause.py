@@ -982,6 +982,25 @@ def test_unreadable_outcome_neither_declares_nor_clears(
     assert _record_recorder.clears == 0
 
 
+def test_post_stop_dead_shepherd_with_an_unreadable_outcome_is_unknown(
+    hold_plan: Callable[..., None],
+    _ownerless: None,
+    _record_recorder: _Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Task #3150's rule past the missing-shepherd case: post-stop + dead
+    shepherd + unreadable outcome cannot be told from a failed update leg's
+    aftermath, so the record stands -- never a silent clear."""
+    hold_plan(sp.STRANDED_HOLD_NOTICE_S + 60, phase="stopped", driver="dead")
+    _outcome_reading_patch(monkeypatch, _outcome_reading("unreadable"))
+
+    verdict = sp.stranded_hold_verdict()
+    assert (verdict.kind, verdict.detail) == ("unknown", "updater outcome is unreadable")
+    sp.sync_stranded_hold_record()
+    assert _record_recorder.marks == []
+    assert _record_recorder.clears == 0
+
+
 def test_a_dead_shepherd_settles_the_question_without_an_outcome(
     hold_plan: Callable[..., None],
     _ownerless: None,
