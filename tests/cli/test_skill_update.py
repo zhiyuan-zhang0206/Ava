@@ -351,7 +351,9 @@ def test_update_unchanged_reanchors_stale_origin_path(unit_home: Path, repo: Pat
     assert _entry("builtin-a").origin_path == str(repo / "ava_builtins" / "skills" / "builtin-a")
 
 
-def test_update_skips_channel_managed_packages(unit_home: Path, repo: Path, capsys) -> None:
+def test_update_skips_channel_managed_packages(
+    unit_home: Path, repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     """Resolved core-channel rows belong to `ava packages refresh` (design
     §5.7-1): `skill update` reports the skip and leaves the copy alone, and an
     explicit `mode=off` opts the package back onto the checkout path."""

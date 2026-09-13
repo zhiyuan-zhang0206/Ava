@@ -491,6 +491,7 @@ class _Pass:
                 stamp = self.now.isoformat(timespec="seconds")
                 delta.update["last_apply_at"] = stamp
                 delta.package["content_hash"] = new_hash
+                delta.package["installed_hash"] = new_hash
                 delta.package["updated_at"] = stamp
         self._record(pkg, result)
 
@@ -707,6 +708,7 @@ class _Pass:
                     stamp = self.now.isoformat(timespec="seconds")
                     delta.update["last_apply_at"] = stamp
                     delta.package["content_hash"] = new_hash
+                    delta.package["installed_hash"] = new_hash
                     delta.package["updated_at"] = stamp
             self._record(pkg, result)
         finally:

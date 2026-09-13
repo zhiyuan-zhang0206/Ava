@@ -12,8 +12,10 @@ import json
 import os
 import shutil
 import subprocess
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -113,7 +115,7 @@ def _seed(
     name: str,
     *,
     applied_rev: str | None,
-    mode: str | None = None,
+    mode: reg.UpdateMode | None = None,
     last_check_at: str | None = None,
 ) -> None:
     src = repo / "ava_builtins" / "skills" / name
@@ -131,6 +133,13 @@ def _seed(
             update=reg.UpdateState(applied_rev=applied_rev, mode=mode, last_check_at=last_check_at),
         )
     )
+
+
+def _mirror_installed_hash(name: str) -> None:
+    """Give `name` the row shape `ava skill install` writes: both edit guards set."""
+    with reg.mutate() as registry:
+        row = next(p for p in registry.packages if p.name == name)
+        row.installed_hash = row.content_hash
 
 
 def _row(name: str) -> reg.InstalledPackage:
@@ -214,6 +223,37 @@ def test_refresh_applies_only_the_changed_package(core_repo: Path) -> None:
     )
 
 
+def test_refresh_apply_then_apply_with_installed_hash(core_repo: Path) -> None:
+    """Rows carrying `installed_hash` (the `ava skill install` shape) keep
+    updating: apply / rollback write BOTH edit guards, so the second upstream
+    change is not misread as a local edit. The guard prefers `installed_hash`
+    (converge owns `content_hash` on installed-plugin rows), so a stale value
+    would freeze every later apply and falsely refuse rollback (QA MF-1)."""
+    from cli.commands.packages import cmd_packages_rollback
+
+    c1 = _head(core_repo)
+    _seed(core_repo, "foo", applied_rev=c1)
+    _mirror_installed_hash("foo")
+    _write_skill(core_repo, "foo", "# v2\n")
+    _commit_push(core_repo, "foo v2")
+
+    assert run_refresh(repo=core_repo).items[0].result == "applied"
+    row = _row("foo")
+    assert row.installed_hash == row.content_hash  # the guards moved with the tree
+
+    _write_skill(core_repo, "foo", "# v3\n")
+    c3 = _commit_push(core_repo, "foo v3")
+    second = run_refresh(repo=core_repo)
+    assert second.items[0].result == "applied"  # not "conflict: ..."
+    assert _row("foo").update.applied_rev == c3
+
+    # rollback reads the same baseline: no false refusal, and it dual-writes too
+    assert cmd_packages_rollback("foo") == 0
+    row = _row("foo")
+    assert row.installed_hash == row.content_hash
+    assert "# v2" in (_home() / "skills" / "foo" / "SKILL.md").read_text(encoding="utf-8")
+
+
 def test_refresh_reconciles_unknown_baseline_by_content(core_repo: Path) -> None:
     # Rows from before the channel carried no applied_rev.
     _seed(core_repo, "foo", applied_rev=None)
@@ -249,6 +289,40 @@ def test_refresh_conflict_refuses_then_force_applies(core_repo: Path) -> None:
     report = run_refresh(repo=core_repo, force=True)
     assert report.items[0].result == "applied"
     assert "# v2" in copy.read_text(encoding="utf-8")
+
+
+def test_refresh_skips_local_source_rows(core_repo: Path, tmp_path: Path) -> None:
+    """Local sources have no remote channel (design §5.1): the pass skips them
+    with no error record and no backoff — including a stale persisted
+    `channel: git` written before local sources were classified (QA MF-3)."""
+    src = core_repo / "ava_builtins" / "skills" / "foo"
+    dest = _home() / "skills" / "foo"
+    shutil.copytree(src, dest, ignore=shutil.ignore_patterns(*reg.IGNORED_NAMES))
+
+    def _register_local(source: str, *, channel: reg.ChannelKind | None = None) -> None:
+        reg.register(
+            reg.InstalledPackage(
+                name="foo",
+                type="skill",
+                origin="user",
+                source=source,
+                enabled=True,
+                content_hash=reg.tree_hash(dest),
+                update=reg.UpdateState(channel=channel),
+            )
+        )
+
+    for source in ("local:testbox", str(tmp_path)):
+        _register_local(source)
+        report = run_refresh(repo=core_repo)
+        assert report.ran and "foo" not in {i.name for i in report.items}
+        row = _row("foo")
+        assert row.update.failures == 0
+        assert row.update.last_result is None  # skipped, not recorded as an error
+
+    _register_local("local:testbox", channel="git")
+    assert run_refresh(repo=core_repo).ran
+    assert _row("foo").update.failures == 0
 
 
 def test_refresh_blocks_on_the_version_gate(core_repo: Path) -> None:
@@ -298,7 +372,7 @@ def test_refresh_records_error_and_backs_off_when_offline(
         "bar": True,
     }
     assert _row("foo").update.failures == 1
-    assert reg.load().channels["core"].last_result.startswith("error")
+    assert (reg.load().channels["core"].last_result or "").startswith("error")
 
     # the job retries only after the backoff: same run parameters, not due now
     monkeypatch.setattr("cli.commands._packages_refresh.os_jobs_enabled", lambda: True)
@@ -409,7 +483,7 @@ def test_rollback_restores_the_previous_tree(core_repo: Path) -> None:
     home = _home()
     assert "# v1" in (home / "skills" / "foo" / "SKILL.md").read_text(encoding="utf-8")
     assert "# v2" in (home / "skills" / ".foo.prev" / "SKILL.md").read_text(encoding="utf-8")
-    assert _row("foo").update.last_result.startswith("rolled_back")
+    assert (_row("foo").update.last_result or "").startswith("rolled_back")
 
     # local edits refuse without --force
     copy = home / "skills" / "foo" / "SKILL.md"
@@ -505,7 +579,11 @@ def test_scan_drops_host_blocked_packages(core_repo: Path, monkeypatch: pytest.M
     monkeypatch.setattr(paths_mod, "repo_root", lambda: core_repo)
     monkeypatch.setattr(skills_mod, "_provider_roots", list)
 
-    tree = skills_mod._scan_tree()
+    scan_tree = cast(
+        "Callable[[], dict[str, object]]",
+        skills_mod._scan_tree,  # pyright: ignore[reportUnknownMemberType] — _scan_tree is annotated `-> dict`
+    )
+    tree = scan_tree()
     assert "ok" in tree and "blocked" not in tree
 
 

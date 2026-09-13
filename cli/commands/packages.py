@@ -400,7 +400,9 @@ def cmd_packages_rollback(name: str, *, force: bool = False) -> int:
     with install_registry.mutate() as reg:
         fresh = next((p for p in reg.packages if match_key(p.name) == match_key(row.name)), None)
         if fresh is not None:
-            fresh.content_hash = install_registry.tree_hash(dest, skip_subtrees=skip)
+            new_hash = install_registry.tree_hash(dest, skip_subtrees=skip)
+            fresh.content_hash = new_hash
+            fresh.installed_hash = new_hash
             fresh.updated_at = stamp
             fresh.update.last_apply_at = stamp
             fresh.update.last_result = "rolled_back: previous tree restored"
