@@ -100,7 +100,7 @@ def parse_request(raw: bytes) -> RequestPayload:
         Verb(verb_raw)
     except ValueError as exc:
         raise UnknownVerbError(f"unknown verb {verb_raw!r}") from exc
-    if name_raw is not None:
+    if "name" in document:
         raise ProtocolError(f"verb {verb_raw!r} takes no 'name'")
     unnamed: RequestPayload = {"verb": verb_raw}
     return unnamed

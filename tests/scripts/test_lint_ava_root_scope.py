@@ -118,6 +118,23 @@ def test_inline_marker_exempts_only_its_own_line(tmp_path: Path) -> None:
     assert [h[0] for h in hits] == [2]
 
 
+def test_inline_marker_in_string_literal_does_not_exempt(tmp_path: Path) -> None:
+    path = _write(tmp_path, "mod.py", 'marker = "ava-root-scope-ok: TCC"\n')
+    hits = gate.scan_file(path)
+    assert [h[0] for h in hits] == [1]
+
+
+def test_unparseable_text_falls_back_to_substring_marker(tmp_path: Path) -> None:
+    """Tokenizing failure falls back to a per-line substring match, mirroring
+    lint_no_emoji.py's permissive fallback."""
+    path = _write(
+        tmp_path,
+        "mod.py",
+        "first = 'ava-root-scope-ok: TCC'\nsecond = 'open quote\n",
+    )
+    assert gate.scan_file(path) == []
+
+
 def test_binary_file_skipped(tmp_path: Path) -> None:
     path = tmp_path / "asset.bin"
     path.write_bytes(b"launchd\x00binary")
@@ -147,6 +164,17 @@ def test_main_returns_nonzero_on_violation(tmp_path: Path) -> None:
 def test_main_returns_zero_on_clean_file(tmp_path: Path) -> None:
     good = _write(tmp_path, "mod.py", "value = 'clean'\n")
     assert gate.main([str(good)]) == 0
+
+
+def test_explicit_missing_target_is_an_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A typo'd explicit path must fail the gate, not pass as a silent empty scan."""
+    good = _write(tmp_path, "mod.py", "value = 1\n")
+    missing = tmp_path / "typo.py"
+    assert gate.main([str(missing)]) == 1
+    assert str(missing) in capsys.readouterr().err
+    assert gate.main([str(good), str(missing)]) == 1
 
 
 def test_default_scan_root_is_ava_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

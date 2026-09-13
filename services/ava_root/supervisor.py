@@ -397,8 +397,12 @@ class Supervisor:
         existing = runtime.restart_task
         if existing is not None and not existing.done():
             existing.cancel()
+        # Clamp the exponent before the float multiply: `2 ** streak` beyond
+        # ~1023 overflows the int-to-float conversion and would raise inside
+        # `_watch`, killing the watch task before `generation.exited` is set
+        # (the delay is capped at `backoff_max_s` below either way).
         delay = min(
-            self._config.backoff_base_s * (2**runtime.failure_streak),
+            self._config.backoff_base_s * (2 ** min(runtime.failure_streak, 64)),
             self._config.backoff_max_s,
         )
         runtime.failure_streak += 1

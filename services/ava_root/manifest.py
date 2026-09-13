@@ -23,8 +23,9 @@ from typing import cast
 # itself and cannot be declared as one.
 ROOT_ID = "root"
 
-# Unit ids are lowercase slugs: stable, filesystem-safe, log-safe.
-_UNIT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+# Unit ids are lowercase slugs: stable, filesystem-safe, log-safe. `\Z`, not
+# `$`: `$` also matches before a trailing newline, letting "gateway\n" through.
+_UNIT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*\Z")
 
 # The closed K2 field sets. A new field must go through design first — the
 # validators reject anything else, so field drift fails loudly instead of

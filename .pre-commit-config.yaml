@@ -156,7 +156,7 @@ repos:
         name: lint ava-root scope (no permission-domain symbols)
         entry: .venv/bin/python scripts/lint_ava_root_scope.py
         language: system
-        files: ^(services/ava_root/|scripts/lint_ava_root_scope\.py|tests/scripts/test_lint_ava_root_scope\.py)$
+        files: ^(services/ava_root/|scripts/lint_ava_root_scope\.py$|tests/scripts/test_lint_ava_root_scope\.py$)
         pass_filenames: false
 
       # Ban decorative emoji in core Python (agent + backend layers). UX surfaces
