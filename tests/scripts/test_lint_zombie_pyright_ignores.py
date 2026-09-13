@@ -52,6 +52,10 @@ def _ignore(path: str, line: int, rule: str) -> gate.PyrightIgnore:
     return gate.PyrightIgnore(path=path, line=line, rule=rule)
 
 
+def _no_pyright_errors(_path: Path) -> frozenset[tuple[int, str]]:
+    return frozenset()
+
+
 def test_tier_config_uses_longest_environment_root(tier_config: gate.TierConfig) -> None:
     assert tier_config.level_for("shared/model.py", "reportUnknownMemberType") == "error"
     assert tier_config.level_for("shared/lenient/model.py", "reportUnknownMemberType") == "warning"
@@ -207,7 +211,7 @@ def test_verify_out_of_repo_file_runs_cleanly(
     of dying on the repo-relative prefix computation."""
     outside = tmp_path / "elsewhere.py"
     outside.write_text("value = 1\n", encoding="utf-8")
-    monkeypatch.setattr(gate, "_pyright_errors", lambda _path: frozenset())
+    monkeypatch.setattr(gate, "_pyright_errors", _no_pyright_errors)
     assert gate.main(["--verify", str(outside)]) == 0
     assert "elsewhere.py" in capsys.readouterr().out
 
@@ -219,7 +223,7 @@ def test_verify_non_utf8_file_is_skipped(tmp_path: Path, monkeypatch: pytest.Mon
     bad = tmp_path / "agent" / "bad.py"
     bad.parent.mkdir()
     bad.write_bytes(b"\xff\xfe\x00bad")
-    monkeypatch.setattr(gate, "_pyright_errors", lambda _path: frozenset())
+    monkeypatch.setattr(gate, "_pyright_errors", _no_pyright_errors)
     assert gate.main(["--verify", str(bad)]) == 0
 
 
@@ -232,7 +236,7 @@ def test_verify_dangling_symlink_is_skipped(
     link = tmp_path / "agent" / "dangling.py"
     link.parent.mkdir()
     link.symlink_to(tmp_path / "agent" / "missing.py")
-    monkeypatch.setattr(gate, "_pyright_errors", lambda _path: frozenset())
+    monkeypatch.setattr(gate, "_pyright_errors", _no_pyright_errors)
     assert gate.main(["--verify", str(link)]) == 0
 
 
