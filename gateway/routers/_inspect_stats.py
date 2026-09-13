@@ -72,7 +72,7 @@ _lifecycle_cache = InspectQueryCache[int, list[tuple[datetime, str]]](
     max_entries=256,
     max_inflight=128,
 )
-_lifecycle_cache_freeze: datetime | None | object = object()
+_lifecycle_cache_freeze: datetime | object | None = object()
 _lifecycle_cache_lock = threading.Lock()
 
 

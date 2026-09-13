@@ -454,7 +454,7 @@ class _EventPipeline:
         self._writer = writer
         self._batch_size = batch_size
         self._flush_interval_s = flush_interval_s
-        self._queue: queue.Queue[Event | None | _SyncMarker] = queue.Queue(maxsize=queue_maxsize)
+        self._queue: queue.Queue[Event | _SyncMarker | None] = queue.Queue(maxsize=queue_maxsize)
         self.dropped = 0  # records shed because the queue was full since the last flush
         # enqueue() runs on producer threads while _flush() (drain thread)
         # reads and zeroes the counter — `+=` is not atomic under the GIL, so
