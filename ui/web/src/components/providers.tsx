@@ -11,6 +11,7 @@ import { ToastHost } from "@/components/toast";
 import { LanguageProvider } from "@/i18n/language-provider";
 import { AuthProvider, notifySessionInvalid } from "@/lib/auth-context";
 import { ApiError } from "@/lib/api";
+import { NonceProvider } from "@/lib/nonce-context";
 import { SettingsMigration } from "@/lib/settings-migration";
 import { EventStreamProvider } from "@/lib/useEventStream";
 import { AlertsProvider } from "@/lib/use-alerts";
@@ -80,33 +81,35 @@ export function createQueryClient(): QueryClient {
 export function Providers({ children, nonce }: { children: React.ReactNode; nonce?: string }) {
   const [queryClient] = useState(() => createQueryClient());
   return (
-    <QueryClientProvider client={queryClient}>
-      <GateMaintenanceProvider />
-      <AuthProvider>
-        <EventStreamProvider>
-          <AlertsProvider>
-            <SettingsMigration />
-            <ThemeProvider
-              attribute="class"
-              defaultTheme="system"
-              enableSystem
-              disableTransitionOnChange
-              nonce={nonce}
-            >
-              <LanguageProvider>
-                {/* Applies the selected plugin skin's tokens over the active
-                    light/dark palette; renders nothing. */}
-                <ThemePackTokens />
-                <AppConnectionBanner />
-                {children}
-                {/* The toast renderer is root-level so error toasts reach the
-                    user on every route, not just the Home page (Task #1051). */}
-                <ToastHost />
-              </LanguageProvider>
-            </ThemeProvider>
-          </AlertsProvider>
-        </EventStreamProvider>
-      </AuthProvider>
-    </QueryClientProvider>
+    <NonceProvider value={nonce}>
+      <QueryClientProvider client={queryClient}>
+        <GateMaintenanceProvider />
+        <AuthProvider>
+          <EventStreamProvider>
+            <AlertsProvider>
+              <SettingsMigration />
+              <ThemeProvider
+                attribute="class"
+                defaultTheme="system"
+                enableSystem
+                disableTransitionOnChange
+                nonce={nonce}
+              >
+                <LanguageProvider>
+                  {/* Applies the selected plugin skin's tokens over the active
+                      light/dark palette; renders nothing. */}
+                  <ThemePackTokens />
+                  <AppConnectionBanner />
+                  {children}
+                  {/* The toast renderer is root-level so error toasts reach the
+                      user on every route, not just the Home page (Task #1051). */}
+                  <ToastHost />
+                </LanguageProvider>
+              </ThemeProvider>
+            </AlertsProvider>
+          </EventStreamProvider>
+        </AuthProvider>
+      </QueryClientProvider>
+    </NonceProvider>
   );
 }
