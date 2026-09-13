@@ -14,16 +14,16 @@ export interface SdkCall {
 }
 
 export interface CodeSummary {
-  /** Per-method `ava.<method>(...)` call counts, descending by count then
-   *  method name. `method` is the full dotted path after `ava.` (e.g.
-   *  `files.read`, `self.log`) so reads and writes on the same
-   *  namespace stay distinct. Empty when the snippet calls no SDK (plain
-   *  Python). */
+  /** Per-method call counts as recorded by the executing run, descending by
+   *  count then method name. `method` is the full dotted path after `ava.`
+   *  (e.g. `files.read`, `self.log`) so reads and writes on the same
+   *  namespace stay distinct. Empty when none were recorded (plain Python,
+   *  or the field is absent while streaming). */
   readonly calls: readonly SdkCall[];
   /** Total `ava.*` call sites (sum of `calls[].count`). */
   readonly totalCalls: number;
-  /** Non-blank line count of the snippet — the fallback signal shown when the
-   *  snippet makes no SDK calls. */
+  /** Non-blank line count of the snippet — shown when there are no recorded
+   *  calls. */
   readonly lines: number;
 }
 
@@ -35,36 +35,22 @@ export interface OutputSummary {
   readonly hasError: boolean;
 }
 
-// `ava.<dotted.path>(` call sites. The full dotted path after `ava.` is the
-// method key (`ava.files.read(...)` -> `files.read`), so a namespace's read
-// and write count separately. Requires the trailing `(` so attribute reads
-// like `ava.self.AGENT_ID` are not counted as calls. `\bava\.` avoids matching
-// `something_ava.x(`.
-const AVA_CALL_RE = /\bava\.([a-z_]\w*(?:\.[a-z_]\w*)*)\s*\(/g;
-
 export function summarizeCode(
   payload: string,
   sdkCalls?: readonly SdkCall[] | null,
 ): CodeSummary {
-  // When the backend supplies AST-parsed SDK calls (committed items), use
-  // them directly — zero false positives from string literals / comments.
-  // During streaming the field is absent; fall back to the regex heuristic
-  // for the live chip (transient, replaced by the committed snapshot).
-  if (sdkCalls != null) {
-    const totalCalls = sdkCalls.reduce((sum, c) => sum + c.count, 0);
-    return { calls: sdkCalls, totalCalls, lines: nonBlankLineCount(payload) };
-  }
-  const counts = new Map<string, number>();
-  let total = 0;
-  for (const m of payload.matchAll(AVA_CALL_RE)) {
-    const method = m[1];
-    counts.set(method, (counts.get(method) ?? 0) + 1);
-    total += 1;
-  }
-  const calls = [...counts.entries()]
-    .map(([method, count]) => ({ method, count }))
-    .sort((a, b) => b.count - a.count || a.method.localeCompare(b.method));
-  return { calls, totalCalls: total, lines: nonBlankLineCount(payload) };
+  // Calls come only from the backend's recorded tally — the SDK-call
+  // metadata projected onto the item; the runtime that executed the snippet
+  // counted its real calls. No text scanning, not even as a streaming
+  // fallback: while the field is absent the chip shows the line count alone.
+  const calls = [...(sdkCalls ?? [])].sort(
+    (a, b) => b.count - a.count || a.method.localeCompare(b.method),
+  );
+  return {
+    calls,
+    totalCalls: calls.reduce((sum, c) => sum + c.count, 0),
+    lines: nonBlankLineCount(payload),
+  };
 }
 
 // Traceback header, or a line that is just `WordError: ...` / `WordException:

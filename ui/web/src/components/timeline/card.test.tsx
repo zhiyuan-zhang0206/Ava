@@ -447,6 +447,19 @@ describe("CardHeader", () => {
     expect(container.textContent).toContain("3 lines of code");
   });
 
+  it("agent_code without sdk_calls never scans the payload for call names", () => {
+    const cItem = item("agent_code", {
+      payload: "ava.files.read('x')\nava.shell.run('ls')",
+    });
+    const cfg = messageCardConfig(cItem)!;
+    const { container } = renderWithQuery(
+      <CardHeader item={cItem} config={cfg} expanded={false} onToggle={noop} />,
+    );
+    expect(container.textContent).toContain("2 lines of code");
+    expect(container.textContent).not.toContain("files.read");
+    expect(container.textContent).not.toContain("shell.run");
+  });
+
   it("code_output with exec_ms shows duration", () => {
     const oItem = item("code_output", {
       payload: "line1\nline2",
