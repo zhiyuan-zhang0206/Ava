@@ -210,6 +210,31 @@ describe("EventStreamProvider connection lifecycle", () => {
     expect(expectInstance().url).toContain("/api/system");
   });
 
+  it("hidden tab closes the global stream and reopens it when visible", async () => {
+    renderHook(() => useEventStream(vi.fn(), vi.fn()), { wrapper: withProvider() });
+    await waitForInstance();
+    const first = expectInstance();
+
+    act(() => {
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        value: "hidden",
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(first.readyState).toBe(MockEventSource.CLOSED);
+
+    act(() => {
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        value: "visible",
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(expectInstance()).not.toBe(first);
+    expect(expectInstance().url).toContain("/api/system");
+  });
+
   it("opens with withCredentials so the session cookie reaches the cross-origin gateway", async () => {
     // Regression: the gateway requires auth and EventSource cannot send a
     // Bearer header, so a cross-origin SSE GET (:3000 -> :8000) must carry the

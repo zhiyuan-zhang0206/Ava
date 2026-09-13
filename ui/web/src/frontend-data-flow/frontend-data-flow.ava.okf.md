@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Frontend Data Flow (SSE + hooks)
-description: Two SSE Providers — global /api/system broadcast + active-agent /api/system/all stream with hidden-tab polling; #648 connection resilience; React Query hook directory.
+description: Three authenticated SSE streams (global /api/system, active-agent /api/system/all, alerts /api/alerts/stream) — all close while the tab is hidden; #648 connection resilience; React Query hook directory.
 tags:
 - frontend
 - sse
@@ -9,7 +9,7 @@ tags:
 
 # Frontend Data Flow (SSE + hooks)
 
-Server data enters UI via React Query cache, kept live by SSE while visible; hidden tabs close the connection and invalidate the active agent's REST snapshots every 7s. SSE connects directly to FastAPI (not through Next rewrites — Turbopack dev proxy buffers SSE).
+Server data enters UI via React Query cache, kept live by SSE while visible; hidden tabs close every stream — the agent stream invalidates the active agent's REST snapshots every 7s, alerts polls its caches on the same cadence. SSE connects directly to FastAPI (not through Next rewrites — Turbopack dev proxy buffers SSE).
 
 ## Two SSE Providers (`lib/useEventStream.tsx`)
 
@@ -18,7 +18,7 @@ Server data enters UI via React Query cache, kept live by SSE while visible; hid
 | `EventStreamProvider` / `useEventStream` | `/api/system` | **Global broadcast**: cross-agent low-frequency lifecycle (spawn/update/label, page open/close, notice/task changes, `cluster_update_started`) | **Fold owner** reconciles `["agents","live"]` + `["agents","terminated"]` (both always seeded — terminated rows are the spawn-tree lineage joints), notices, pages, tasks, and fleet graph; reconnect repair is scoped and throttled |
 | `AgentEventStreamProvider` / `useAgentEventStream` | `/api/system/all?agents=<active>,<parked…>` | **Active-agent throttled stream**: selected agents plus `agent_id=0` system events, batched (`data: [{...}]`), throttled ≤10 push/s | `useTimeline`, `useTokenUsage`, `usePendingMessages` |
 
-The agent stream is connected while authenticated and visible; `activeId` re-keys its URL (null → unfiltered endpoint). Hidden tabs: the provider passes `null` to `useSseConnection` (closes EventSource) and emits `ConnectionEvent {type: "poll"}` every 7s; the three subscribers invalidate `timeline`/`token-usage`/`pending` for the active agent. Visible again: interval cleared, SSE reopens, the `open` event reconciles REST state. `isEventForThread` remains a defensive gate. Multiple hooks share one EventSource; `withCredentials` carries the session cookie through gateway auth.
+The agent stream is connected while authenticated and visible; `activeId` re-keys its URL (null → unfiltered endpoint). Hidden tabs: the provider passes `null` to `useSseConnection` (closes EventSource) and emits `ConnectionEvent {type: "poll"}` every 7s; the three subscribers invalidate `timeline`/`token-usage`/`pending` for the active agent. The global `EventStreamProvider` and `AlertsProvider` (`lib/use-alerts.tsx`) follow the same hidden-tab close — three streams per visible page saturate HTTP/1.1's per-origin budget of 6 at two tabs, so every stream yields its slot while hidden; the global stream's return reopens it under the fold owner's throttled reconcile, and alerts polls its `["alerts"]` caches every 7s so a returning tab lands on near-live data (the reopen's exact badge invalidate covers the last gap). Visible again: interval cleared, SSE reopens, the `open` event reconciles REST state. `isEventForThread` remains a defensive gate. Multiple hooks share one EventSource; `withCredentials` carries the session cookie through gateway auth.
 
 ## Connection resilience (#648)
 
@@ -27,35 +27,10 @@ The agent stream is connected while authenticated and visible; `activeId` re-key
 - **Cluster update Gate reload + reconnect**: global `cluster_update_started` is a hint emitted only after the persistent UI generation exists; `AppConnectionBanner` asks the current URL to reload through Gate. The root-mounted, auth-independent `GateMaintenanceProvider` polls Gate's same-origin `GET /__ava/deploy-state` as the missed-SSE fallback. Both share a module-level latch, so their race navigates once. Neither renders or times maintenance. The authenticated `/api/cluster/status` poll in `useClusterHealth` still distinguishes stranded pause and reconnects SSE/refetches agents on the real paused true→false gateway-bounce edge.
 - For the two system streams, watchdog and cluster update use the global store `reconnectNonce`; each CLOSED retry uses its own local `retryTimer` + `retryNonce` and does not re-key the other Provider. AlertsProvider has its own reconnect/watchdog and retry state.
 
-## Hook directory (`lib/use-*.ts`)
+## Hook directory
 
-| hook | data |
-|---|---|
-| `useAgents` | SQL-bounded live roster + always-fetched terminated history (merged roster = raw lineage for the spawn tree; show-terminated is render-only); fold/SSE keeps both caches live |
-| `useFleetAgents` | `/fleet` read-only agents (pure-read shares `AGENTS_QUERY_KEY` cache) |
-| `useFleetGraph` | Fleet relationship graph (GraphView data source); SSE invalidation + 30s reconciliation poll, served from the backend's 60s whole-response cache |
-| `useTasks` | [[ui/web/src/frontend-data-flow/task-list.ava.okf.md|Task list data flow]] |
-| `useTimeline` | timeline items (merged three sources: React Query snapshot + SSE fold + reload merge; switching back to a cached thread triggers fetch-on-enter background reconcile, see [[frontend-state.ava.okf.md|State management]]) |
-| `useTokenUsage` | context window occupancy (React Query historical value + SSE token_usage) |
-| `useAgentPages` | single agent opened pages (InspectorPanel, SSE folds page_opened/closed into cache, replaces deleted PageDock/use-fleet-pages) |
-| `useAllPages` (#655) | fleet-wide opened pages fetched once + SSE incremental fold (Inbox attaches associated page links to notices, avoids N+1 per-agent requests) |
-| `usePendingMessages` | pending inbound messages count |
-| Run timeline page | one on-demand React Query read of `GET /api/agents/{id}/run-timeline` per agent/window/session/level; it does not subscribe or poll, requests turns first for a server-selected session, requests one-hour buckets up front for an explicit window of at least six hours, and falls back to buckets before rendering a turn response above 400 rows |
-
-Message POSTs are bounded across both headers and body consumption. A timeout,
-transport loss, 429, or 5xx is an ambiguous outcome: the client looks up the
-same `Idempotency-Key` through `/messages/reconcile`, may resubmit the original
-body once under that same key, and never silently generates a replacement key.
-The returned `inbound_id` is the durable receipt; exhaustion leaves the draft in
-an explicit unconfirmed state for same-message retry or deliberate abandonment.
-| `GateMaintenanceProvider` | auth-independent Gate snapshot reload hint |
-| `useClusterHealth` | cluster paused polling + SSE reconnect coordination |
-| `useNotices` | the unified Inbox feed — one request carries the open queue (FYI + awaiting) and a keyset page of resolved history (R4 layer 2 single contract); notice_* events invalidate-refetch |
-| ~~`usePrefetchTimelines`~~ | removed (Aw-Snap fix) — the fleet-wide full-timeline prefetch retained one ~128KB system prompt + history per agent for gcTime=30min, the dominant renderer-heap source; timelines now fetch on demand when an agent is opened |
-| `useThrottledStreaming` | streaming increment throttled batching |
-| `useUserSettings` | server-side user preferences (`user_settings` table) |
-| `useMediaQuery` / `useIsLarge` | responsive breakpoints |
-
+The per-hook data catalog (what each `use-*` hook reads, folds, and refetches)
+has its own node: [[ui/web/src/frontend-data-flow/hook-directory.ava.okf.md|Hook directory]].
 
 ## Frontend telemetry (user modeling, #1092)
 
