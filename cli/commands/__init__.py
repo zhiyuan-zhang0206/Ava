@@ -129,7 +129,12 @@ from cli.commands.mcp import (
     cmd_mcp_upgrade,
 )
 from cli.commands.migrations import cmd_migrations_apply
-from cli.commands.packages import cmd_packages_status
+from cli.commands.packages import (
+    cmd_packages_policy,
+    cmd_packages_refresh,
+    cmd_packages_rollback,
+    cmd_packages_status,
+)
 from cli.commands.pitr import (
     cmd_pitr_drill,
     cmd_pitr_retention_inspect,
@@ -325,6 +330,9 @@ __all__ = [
     "cmd_mcp_uninstall",
     "cmd_mcp_upgrade",
     "cmd_migrations_apply",
+    "cmd_packages_policy",
+    "cmd_packages_refresh",
+    "cmd_packages_rollback",
     "cmd_packages_status",
     "cmd_pause",
     "cmd_pitr_activate",

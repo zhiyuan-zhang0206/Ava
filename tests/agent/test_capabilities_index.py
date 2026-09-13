@@ -39,7 +39,7 @@ def _isolate_load_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         d = skills_mod._skills_dir()
         return {p.name for p in d.iterdir() if p.is_dir()} if d.is_dir() else set()
 
-    monkeypatch.setattr(skills_mod, "enabled_skill_names", _all_enabled)
+    monkeypatch.setattr(skills_mod, "loadable_skill_names", _all_enabled)
 
 
 @pytest.fixture(autouse=True)

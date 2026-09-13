@@ -63,11 +63,9 @@ as a boot would write it).
 
 ## `ava packages`
 
-`ava packages status` — the read-only update-policy surface over registry
-schema v2, next to the verbs above:
-```bash
-ava packages status [--json]                  # host version + channels + per-package state
-```
+The per-machine content-update plane over registry schema v2 — `status` /
+`refresh` / `rollback` / `policy` (verb details in the child node below); the
+full per-package state lives in `status --json`:
 [[update-policy.ava.okf.md|Update policy & channels]] ·
 [[install_registry.ava.okf.md|Schema]].
 
