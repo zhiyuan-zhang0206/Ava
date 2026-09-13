@@ -15,7 +15,8 @@
 // reopen + heartbeat skip), scoped down to the one alert shape: frames that
 // fail to parse are dropped, a wedged socket reopens, a CLOSED stream
 // with a valid session reconnects with capped backoff, and an expired session
-// stays closed.
+// stays closed. Hidden tabs close the stream and poll the ["alerts"] caches
+// every 7s (the same hidden-tab policy as the system streams).
 //
 // Cache shape: AlertsResponse (alerts + meta.unresolved_count). Frames upsert
 // by row id and apply unresolved-count deltas.
@@ -33,6 +34,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { API_BASE, api } from "./api";
 import { notifySessionInvalid, useAuth } from "./auth-context";
 import type { Alert, AlertsResponse } from "./types";
+import { useDocumentVisible } from "./use-document-visible";
 
 // Half-dead-connection watchdog window (same value as useEventStream: the
 // server emits a heartbeat data frame after ~15s of silence).
@@ -42,6 +44,10 @@ const WATCHDOG_MS = 45_000;
 // retries for 401/403; valid sessions reopen with capped exponential backoff.
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
+// Hidden-tab poll cadence — the same 7s the system/all stream polls at
+// (commit 087eb756e): a hidden tab closes its streams and keeps snapshots
+// warm through this interval instead of holding a connection slot.
+const HIDDEN_POLL_MS = 7_000;
 
 /** The default-params cache key (badge / provider warm-up). */
 export const ALERTS_QUERY_KEY = ["alerts"] as const;
@@ -117,12 +123,27 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
 
   // Stable reconnect callback (mirrors useEventStream's bumpReconnect).
   const bumpReconnect = useCallback(() => setReconnectNonce((n) => n + 1), []);
+  const isVisible = useDocumentVisible();
+
+  // Hidden tab: the stream-owning effect below stays closed, and this poll
+  // keeps the alerts caches near-live instead (the badge always; the section
+  // while its page is mounted) — so returning to the tab lands on fresh data
+  // and the reopen's exact badge invalidate only repairs the last gap.
+  useEffect(() => {
+    if (isVisible || authStatus !== "authenticated") return;
+    const interval = setInterval(() => {
+      void queryClient.invalidateQueries({ queryKey: ALERTS_QUERY_KEY });
+    }, HIDDEN_POLL_MS);
+    return () => clearInterval(interval);
+  }, [isVisible, authStatus, queryClient]);
 
   useEffect(() => {
-    if (authStatus !== "authenticated") {
+    if (authStatus !== "authenticated" || !isVisible) {
       // Session not authenticated: keep the stream closed (Task #1635 — an
       // unauthenticated SSE GET 401s and blind retries produced the 43k/24h
       // /api/alerts/stream storm). Login flips the status → effect re-runs → opens.
+      // Hidden tab: same close — the 7s poll above covers freshness until the
+      // tab becomes visible again (reopen runs the exact badge invalidate).
       return;
     }
 
@@ -221,9 +242,10 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
       if (retryTimer !== null) clearTimeout(retryTimer);
       es.close();
     };
-    // reconnectNonce + retryNonce are the reopen levers; the cache folders are
-    // stable identities included only to satisfy the lint.
-  }, [queryClient, reconnectNonce, retryNonce, bumpReconnect, authStatus]);
+    // reconnectNonce + retryNonce are the reopen levers; isVisible gates the
+    // stream on tab visibility; the cache folders are stable identities
+    // included only to satisfy the lint.
+  }, [queryClient, reconnectNonce, retryNonce, bumpReconnect, authStatus, isVisible]);
 
   return children;
 }
