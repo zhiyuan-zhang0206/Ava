@@ -17,6 +17,7 @@
     "supports_vision": true,
     "liveness_state": "online",
     "last_probe_at": null,
+    "observation": null,
     "notices_awaiting_response": [],
     "unread_notice_count": 0,
     "heartbeat_paused_until": null
