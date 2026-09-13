@@ -3,14 +3,12 @@ import { describe, expect, it } from "vitest";
 import { formatDuration, summarizeCode, summarizeOutput } from "./item-summary";
 
 describe("summarizeCode", () => {
-  it("groups ava.* calls by full method path, descending", () => {
-    const code = [
-      "ava.files.read('a')",
-      "ava.files.write('b', x)",
-      "ava.shell.run('ls')",
-      "ava.files.read('c')",
-    ].join("\n");
-    const s = summarizeCode(code);
+  it("renders recorded calls descending by count, ties by method name", () => {
+    const s = summarizeCode("", [
+      { method: "shell.run", count: 1 },
+      { method: "files.read", count: 2 },
+      { method: "files.write", count: 1 },
+    ]);
     expect(s.calls).toEqual([
       { method: "files.read", count: 2 },
       { method: "files.write", count: 1 },
@@ -19,42 +17,21 @@ describe("summarizeCode", () => {
     expect(s.totalCalls).toBe(4);
   });
 
-  it("ties break by method name", () => {
-    const s = summarizeCode("ava.shell.run()\nava.agents.spawn()");
-    expect(s.calls).toEqual([
-      { method: "agents.spawn", count: 1 },
-      { method: "shell.run", count: 1 },
-    ]);
-  });
-
-  it("does not count attribute reads (no trailing paren)", () => {
-    const s = summarizeCode("x = ava.self.AGENT_ID\nava.self.log('hi')");
-    expect(s.calls).toEqual([{ method: "self.log", count: 1 }]);
+  it("recorded calls win — the payload text never adds or removes entries", () => {
+    const code = "ava.shell.run('ls')\nava.files.read('a')";
+    const s = summarizeCode(code, [{ method: "files.read", count: 1 }]);
+    expect(s.calls).toEqual([{ method: "files.read", count: 1 }]);
     expect(s.totalCalls).toBe(1);
   });
 
-  it("counts a direct callable like ava.help(ava)", () => {
-    const s = summarizeCode("ava.help(ava)");
-    expect(s.calls).toEqual([{ method: "help", count: 1 }]);
-  });
-
-  it("does not match a non-ava identifier ending in ava", () => {
-    const s = summarizeCode("guava.fs.read()\nlava.x()");
-    expect(s.totalCalls).toBe(0);
-  });
-
-  it("tolerates whitespace before the paren", () => {
-    expect(summarizeCode("ava.fs.read ('a')").totalCalls).toBe(1);
-  });
-
-  it("falls back to non-blank line count for plain python", () => {
+  it("plain python: no calls, non-blank line count", () => {
     const code = "x = 1\n\ny = 2\nprint(x + y)\n";
     const s = summarizeCode(code);
     expect(s.calls).toEqual([]);
     expect(s.lines).toBe(3);
   });
 
-  it("trusts an authoritative empty sdk_calls array without regex fallback", () => {
+  it("trusts an authoritative empty array — comment/string mentions never count", () => {
     const code = "# ava.files.read('comment-only')\nvalue = \"ava.shell.run('string-only')\"";
 
     expect(summarizeCode(code, [])).toEqual({
@@ -65,11 +42,13 @@ describe("summarizeCode", () => {
   });
 
   it.each([undefined, null])(
-    "uses the regex fallback when sdk_calls is absent (%s)",
+    "absent sdk_calls (%s) shows no calls and never scans the payload",
     (sdkCalls) => {
-      expect(summarizeCode("ava.files.read('a')", sdkCalls)).toMatchObject({
-        calls: [{ method: "files.read", count: 1 }],
-        totalCalls: 1,
+      const code = "ava.files.read('a')\nava.shell.run('ls')";
+      expect(summarizeCode(code, sdkCalls)).toEqual({
+        calls: [],
+        totalCalls: 0,
+        lines: 2,
       });
     },
   );

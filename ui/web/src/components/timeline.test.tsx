@@ -143,6 +143,7 @@ function makeItem(overrides: Partial<BackendTimelineItem> & Pick<BackendTimeline
     exec_ms: overrides.exec_ms,
     images: overrides.images ?? null,
     image_captions: overrides.image_captions ?? null,
+    sdk_calls: overrides.sdk_calls,
   };
 }
 
@@ -479,20 +480,26 @@ describe("toggle chip: summary on expanded items", () => {
     expect(screen.getByText("Thinking")).toBeTruthy();
   });
 
-  it("agent_code chip shows per-method SDK histogram", () => {
+  it("agent_code chip shows the recorded per-method SDK histogram", () => {
     render(
       <TimelineView
         items={[
           makeItem({
             kind: "agent_code",
             payload: "ava.files.read('a')\nava.files.read('b')\nava.shell.run()",
+            sdk_calls: [
+              { method: "files.read", count: 2 },
+              { method: "shell.run", count: 1 },
+            ],
           }),
         ]}
       />,
     );
-    expect(screen.getByText("files.read")).toBeTruthy();
-    expect(screen.getByText("shell.run")).toBeTruthy();
-    expect(screen.getByText(/× 2/)).toBeTruthy();
+    // Both the block's own chip and the turn-header aggregate render the
+    // recorded histogram — one files.read badge each, from `sdk_calls` alone.
+    expect(screen.getAllByText("files.read")).toHaveLength(2);
+    expect(screen.getAllByText("shell.run")).toHaveLength(2);
+    expect(screen.getAllByText(/× 2/)).toHaveLength(2);
   });
 
   it("plain-python code chip shows no histogram", () => {
