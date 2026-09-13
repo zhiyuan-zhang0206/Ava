@@ -161,16 +161,16 @@ def test_summarize_splits_attribution_and_meters_minutes() -> None:
 
     payload = module.summarize(
         entries,
-        day="2026-09-07",
-        window_start="2026-09-05T21:00:00Z",
-        window_end="2026-09-06T21:00:00Z",
+        day="2026-09-07",  # time-bomb-ok: explicit fixture window input
+        window_start="2026-09-05T21:00:00Z",  # time-bomb-ok: explicit fixture window input
+        window_end="2026-09-06T21:00:00Z",  # time-bomb-ok: explicit fixture window input
         appended_runs=2,
     )
 
     assert payload == {
-        "day": "2026-09-07",
-        "window_start": "2026-09-05T21:00:00Z",
-        "window_end": "2026-09-06T21:00:00Z",
+        "day": "2026-09-07",  # time-bomb-ok: explicit fixture window input
+        "window_start": "2026-09-05T21:00:00Z",  # time-bomb-ok: explicit fixture window input
+        "window_end": "2026-09-06T21:00:00Z",  # time-bomb-ok: explicit fixture window input
         "runs": 3,
         "attributed_runs": 2,
         "unattributed_runs": 1,

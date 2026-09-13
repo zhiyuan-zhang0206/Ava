@@ -12,9 +12,10 @@ each ejecting the merge-queue batch). The lint has two halves:
   without `now=` — the rollup bomb's seedling);
 - test: exact `==` on a fixed-instant-derived expression inside a function
   whose derivation reaches an unpinned real-now path (the inspect bomb:
-  `client.get(...)` + `== INDEX_LABEL_CUTOVER_AT`).
+  `client.get(...)` + `== INDEX_LABEL_CUTOVER_AT`), and a fixed calendar
+  literal bound to a window-shaped name (the 2026-09-13 fixture-date red).
 
-The two known bombs are reproduced as regression fixtures.
+The known bombs are reproduced as regression fixtures.
 """
 
 from __future__ import annotations
@@ -341,3 +342,181 @@ def test_literal_datetime_assertions_are_allowed(scratch) -> None:
     )
     errors = _lint._lint_tests(build(), [build().root / "tests"])
     assert errors == []
+
+
+# ── rule 3: fixed calendar fixtures bound to window-shaped names ────────────
+
+
+def test_fixture_date_dict_value_is_rejected(scratch) -> None:
+    """Regression: the 2026-09-13 queue-level red — a fixed date pinned as the
+    `day` window input rotted once the real clock rolled past it."""
+    root, build = scratch
+    _write(
+        root,
+        "tests/test_daily_report.py",
+        """
+        def test_report_day():
+            payload = {"day": "2026-09-06", "rows": 3}
+        """,
+    )
+    errors = _lint._lint_tests(build(), [build().root / "tests"])
+    assert len(errors) == 1
+    assert "tests/test_daily_report.py:" in errors[0]
+    assert "time-bomb fixture date" in errors[0]
+    assert "'day'" in errors[0]
+
+
+def test_fixture_date_keyword_is_rejected(scratch) -> None:
+    root, build = scratch
+    _write(
+        root,
+        "tests/test_daily_report.py",
+        """
+        def test_report_day():
+            payload = build_report(day=date(2026, 6, 9))
+        """,
+    )
+    errors = _lint._lint_tests(build(), [build().root / "tests"])
+    assert len(errors) == 1
+    assert "time-bomb fixture date" in errors[0]
+    assert "'day'" in errors[0]
+
+
+def test_fixture_date_assignment_is_rejected(scratch) -> None:
+    """The fleet-usage shape: `since = datetime(..., tzinfo=UTC)` — the
+    tzinfo keyword does not make the calendar date dynamic."""
+    root, build = scratch
+    _write(
+        root,
+        "tests/test_fleet_usage.py",
+        """
+        from datetime import UTC, datetime
+
+
+        def test_window_bounds_variants():
+            since = datetime(2026, 7, 22, 18, tzinfo=UTC)
+            assert usage._window_bounds(since, None)[0] == since
+        """,
+    )
+    errors = _lint._lint_tests(build(), [build().root / "tests"])
+    assert len(errors) == 1
+    assert "time-bomb fixture date" in errors[0]
+
+
+def test_fixture_date_opt_out_on_the_binding_suppresses(scratch) -> None:
+    root, build = scratch
+    _write(
+        root,
+        "tests/test_daily_report.py",
+        """
+        def test_report_day():
+            payload = {"day": "2026-09-06", "rows": 3}  # time-bomb-ok: the report under test pins this day
+        """,
+    )
+    errors = _lint._lint_tests(build(), [build().root / "tests"])
+    assert errors == []
+
+
+def test_fixture_date_marker_outside_the_binding_span_does_not_suppress(scratch) -> None:
+    root, build = scratch
+    _write(
+        root,
+        "tests/test_fleet_usage.py",
+        """
+        from datetime import UTC, datetime
+
+
+        def test_window_bounds_variants():
+            # time-bomb-ok: this marker sits outside the binding's span
+            since = datetime(2026, 7, 22, 18, tzinfo=UTC)
+        """,
+    )
+    errors = _lint._lint_tests(build(), [build().root / "tests"])
+    assert len(errors) == 1
+
+
+def test_fixture_date_opt_out_inside_a_multiline_value_suppresses(scratch) -> None:
+    root, build = scratch
+    _write(
+        root,
+        "tests/test_fleet_usage.py",
+        """
+        from datetime import UTC, datetime
+
+
+        def test_window_bounds_variants():
+            since = datetime(
+                2026,
+                7,
+                22,
+                18,
+                tzinfo=UTC,
+            )  # time-bomb-ok: explicit request range, pinned in the assertion
+        """,
+    )
+    errors = _lint._lint_tests(build(), [build().root / "tests"])
+    assert errors == []
+
+
+def test_clock_derived_window_values_are_allowed(scratch) -> None:
+    root, build = scratch
+    _write(
+        root,
+        "tests/test_daily_report.py",
+        """
+        from datetime import timedelta
+
+
+        def test_report_day(now):
+            since = now - timedelta(days=7)
+            payload = {"day": day.isoformat(), "since": since}
+        """,
+    )
+    errors = _lint._lint_tests(build(), [build().root / "tests"])
+    assert errors == []
+
+
+def test_fixture_date_other_names_and_values_are_allowed(scratch) -> None:
+    root, build = scratch
+    _write(
+        root,
+        "tests/test_daily_report.py",
+        """
+        def test_report_day():
+            payload = {"label": "2026-09-06", "day": "not a date"}
+            cutover = "2026-09-06"
+        """,
+    )
+    errors = _lint._lint_tests(build(), [build().root / "tests"])
+    assert errors == []
+
+
+def test_fixture_date_computed_ctor_args_are_allowed(scratch) -> None:
+    """`date(2026, 6, n)` is not a fixed calendar literal — its day is an
+    input."""
+    root, build = scratch
+    _write(
+        root,
+        "tests/test_daily_report.py",
+        """
+        def test_report_day(n):
+            since = date(2026, 6, n)
+        """,
+    )
+    errors = _lint._lint_tests(build(), [build().root / "tests"])
+    assert errors == []
+
+
+def test_explicit_relative_path_argument_runs(scratch) -> None:
+    """A relative path argument resolves against the repo root instead of
+    crashing `relative_to` (pre-existing bug folded in with the lint change)."""
+    root, _ = scratch
+    _write(
+        root,
+        "tests/test_clean.py",
+        """
+        def test_ok():
+            assert True
+        """,
+    )
+    assert _lint.main(["tests/test_clean.py"]) == 0
