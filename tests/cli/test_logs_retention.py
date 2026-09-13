@@ -449,6 +449,7 @@ def test_agent_and_shell_names_keep_precedence_over_service_stdout() -> None:
         ("dbg-stdout.log.2026-09-07", "rotlog", "other"),
         ("ava-gateway.out.log.2026-09-07", "rotout", "gateway"),
         ("ava-otel-collector.out.log.2026-09-07", "rotout", "other"),
+        ("ava-agent-12-shell-3-review.out.log.2026-09-07", "rotout", "shell"),
     ],
 )
 def test_copytruncate_archives_are_managed(name: str, group: str, family: str) -> None:
