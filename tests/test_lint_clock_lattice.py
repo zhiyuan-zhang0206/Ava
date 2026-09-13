@@ -166,3 +166,13 @@ def test_explicit_outside_repo_and_relative_targets_are_scanned(
     monkeypatch.chdir(outside)
     assert _lint.main(["bad.py"]) == 1
     assert "bad.py" in capsys.readouterr().err
+
+
+def test_directory_with_non_utf8_member_is_skipped(scan_tmp) -> None:
+    """A non-UTF-8 *.py member of an explicit directory is skipped like any
+    unreadable entry — the scan must not crash on it."""
+    pkg = _lint._REPO_ROOT / "pkg"
+    pkg.mkdir()
+    (pkg / "ok.py").write_text("value = 1\n", encoding="utf-8")
+    (pkg / "bad_utf8.py").write_bytes(b"\xff\xfe\x00bad")
+    assert _lint.main([str(pkg)]) == 0

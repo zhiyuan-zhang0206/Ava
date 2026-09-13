@@ -45,13 +45,18 @@ must scan rather than crash:
 - **Explicit arguments must resolve to an existing path.** Any argument that
   does not is a hard error: `error: target path(s) not found: <argument(s)>` on
   stderr, exit 1. Resolution is per-script: absolute paths are used as-is; a
-  relative path is resolved against the repo root first where the script
-  supports it (`lint_no_cjk` / `lint_no_tailnet` / `lint_time_bomb`), otherwise
-  against the caller's cwd (pre-commit passes absolute paths).
+  relative path is resolved against the repo root first with a caller-cwd
+  fallback (`lint_no_cjk` / `lint_no_tailnet`), against the repo root only
+  (`lint_time_bomb`), or against the caller's cwd (the other scripts; pre-commit
+  passes absolute paths).
 - **Out-of-repo targets are scanned.** An existing target outside the repository
   is scanned under its absolute path — its members are never dropped by the
-  repo-relative prefix computation. Directory targets enumerate their members;
-  an unreadable member (e.g. a dangling `*.py` symlink) is skipped like any
-  unreadable file.
+  repo-relative prefix computation. Directory targets enumerate their members
+  (`lint_turn_scoped_config` takes `.py` files only: a directory argument scans
+  nothing); an unreadable member (a dangling `*.py` symlink, non-UTF-8 content)
+  is skipped like any unreadable file. One index caveat: `lint_time_bomb`
+  resolves callees through its repo-scoped index, so an out-of-repo source
+  file's source half silently passes (rc 0) — only its test half, which reads
+  the target directly, applies.
 
 Parent: [[scripts/scripts.ava.okf.md|scripts]].

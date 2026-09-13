@@ -218,8 +218,8 @@ def _scan_file(path: Path) -> list[str]:
         rel = path.as_posix()
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
-    except (OSError, SyntaxError):
-        return []  # unreadable entry (e.g. a dangling symlink) or a syntax error the compiler owns
+    except (OSError, UnicodeDecodeError, SyntaxError):
+        return []  # unreadable entry (dangling symlink / non-UTF-8), or a syntax error the compiler owns
     errors: list[str] = []
     for node in tree.body:
         if not isinstance(node, (ast.Assign, ast.AnnAssign)):
