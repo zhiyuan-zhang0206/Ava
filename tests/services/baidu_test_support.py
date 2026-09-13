@@ -60,6 +60,8 @@ class FakePcs:
     semantic the store engine relies on."""
 
     def __init__(self) -> None:
+        self.listall_page_cap: int | None = None
+        self.listall_has_more_sticky = False
         self.files: dict[str, dict[str, Any]] = {}
         self.parts: dict[str, dict[int, bytes]] = {}
         self.calls: list[str] = []
@@ -199,7 +201,13 @@ class FakePcs:
         rows.sort(key=lambda row: str(row["path"]))
         start = int(params.get("start") or 0)
         limit = int(params.get("limit") or 1000)
-        return httpx.Response(200, json={"list": rows[start : start + limit]})
+        if self.listall_page_cap is not None:
+            limit = min(limit, self.listall_page_cap)
+        page = rows[start : start + limit]
+        has_more = start + len(page) < len(rows)
+        if self.listall_has_more_sticky:
+            has_more = has_more or bool(page)
+        return httpx.Response(200, json={"list": page, "has_more": int(has_more)})
 
 
 def _file_payload(content: bytes) -> bytes:

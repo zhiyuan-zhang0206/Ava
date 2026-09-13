@@ -740,13 +740,27 @@ def test_list_all_uses_multimedia_listall_and_pages() -> None:
         ]
         start = int(params.get("start") or 0)
         limit = int(params.get("limit") or 1000)
-        return httpx.Response(200, json={"errno": 0, "list": rows[start : start + limit]})
+        page = rows[start : start + limit]
+        has_more = start + len(page) < len(rows)
+        return httpx.Response(200, json={"errno": 0, "list": page, "has_more": int(has_more)})
 
     client = PcsClient("t", transport=httpx.MockTransport(handler))
-    page = client.list_all("/apps/A", start=0, limit=1)
+    page, has_more = client.list_all("/apps/A", start=0, limit=1)
     assert [row.fs_id for row in page] == [1]
     assert page[0].path == "/apps/A/a/b.txt"
-    second = client.list_all("/apps/A", start=1, limit=1)
+    assert has_more is True
+    second, second_more = client.list_all("/apps/A", start=1, limit=1)
     assert [row.fs_id for row in second] == [2]
     assert second[0].isdir == 1
+    assert second_more is False
     assert seen == ["listall", "listall"]
+
+
+def test_list_all_reports_has_more_from_an_empty_tail_page() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"errno": 0, "list": [], "has_more": 1})
+
+    client = PcsClient("t", transport=httpx.MockTransport(handler))
+    page, has_more = client.list_all("/apps/A", start=9, limit=9)
+    assert page == []
+    assert has_more is True

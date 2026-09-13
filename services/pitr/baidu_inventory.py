@@ -197,11 +197,16 @@ class BaiduRetentionInventoryReader:
         directory = f"{self._store.app_root}/{self._prefix}"
         while True:
             try:
-                page = self._store._client().list_all(directory, start=start)
+                page, has_more = self._store._client().list_all(directory, start=start)
             except PcsError:
                 return rows
             rows.extend(page)
-            if len(page) < 1000:
+            if not page:
+                return rows
+            # End-of-listing needs both signals to agree: a short page alone
+            # is wrong if the server caps pages below ``limit``; ``has_more``
+            # alone can stay truthy on the tail (live probes 2026-09-14).
+            if len(page) < 1000 and not has_more:
                 return rows
             start += len(page)
 

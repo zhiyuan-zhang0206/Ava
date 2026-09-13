@@ -276,12 +276,16 @@ class PcsClient:
         rows = cast(list[dict[str, Any]], payload.get("list") or [])
         return [_parse_file(row) for row in rows]
 
-    def list_all(self, dir_path: str, *, start: int = 0, limit: int = 1000) -> list[RemoteFile]:
+    def list_all(
+        self, dir_path: str, *, start: int = 0, limit: int = 1000
+    ) -> tuple[list[RemoteFile], bool]:
         """One page of a recursive flat listing (multimedia ``listall``).
 
-        Returns every descendant of ``dir_path`` — files and directories —
-        sorted by name. This is the enumeration the retention inventory uses:
-        ``file?method=list`` only ever answers one level (see ``list_dir``).
+        Returns ``(rows, has_more)``. Rows are every descendant of
+        ``dir_path`` — files and directories — sorted by name. ``has_more``
+        is the server's end-of-listing flag; it is advisory only (live
+        probes 2026-09-14 saw it stay truthy on a tail page), so callers stop
+        on a short page *together with* a falsy flag, never on the flag alone.
         """
         params = self._params() | {
             "method": "listall",
@@ -294,7 +298,7 @@ class PcsClient:
         payload = self._get(f"{PCS_HOST}/rest/2.0/xpan/multimedia", params=params)
         _check_errno(payload)
         rows = cast(list[dict[str, Any]], payload.get("list") or [])
-        return [_parse_file(row) for row in rows]
+        return [_parse_file(row) for row in rows], bool(payload.get("has_more"))
 
     def delete_files(self, paths: list[str]) -> None:
         """Async delete (filemanager opera=delete); fire-and-forget tasks."""
