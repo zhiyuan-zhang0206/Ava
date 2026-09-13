@@ -19,6 +19,40 @@ OTHER_SHA = "b" * 40
 FAMILY_JOB = "cold-offline (ubuntu-24.04)"
 FAMILY_STEP = "Real offline prepare, retained interpreter and failure isolation"
 
+KNOWN_FAMILY_JOBS = {
+    "jobs": [
+        {
+            "name": FAMILY_JOB,
+            "conclusion": "failure",
+            "steps": [
+                {"name": "Checkout", "conclusion": "success"},
+                {"name": FAMILY_STEP, "conclusion": "failure"},
+                {"name": "Upload artifacts", "conclusion": "skipped"},
+            ],
+        },
+        {
+            "name": "cold-offline (macos-14)",
+            "conclusion": "success",
+            "steps": [{"name": FAMILY_STEP, "conclusion": "success"}],
+        },
+    ]
+}
+
+DOUBLE_FAULT_JOBS = {
+    "jobs": [
+        {
+            "name": FAMILY_JOB,
+            "conclusion": "failure",
+            "steps": [{"name": FAMILY_STEP, "conclusion": "failure"}],
+        },
+        {
+            "name": "cold-offline (macos-14)",
+            "conclusion": "failure",
+            "steps": [{"name": FAMILY_STEP, "conclusion": "failure"}],
+        },
+    ]
+}
+
 
 def retry_script() -> str:
     workflow = yaml.safe_load((ROOT / ".github/workflows/ci-rerun.yml").read_text())
@@ -32,7 +66,7 @@ def run_retry(
     mock = tmp_path / "gh"
     mock.write_text(
         f"#!{sys.executable}\n"
-        "import json, os, sys\n"
+        "import json, os, subprocess, sys\n"
         "args = sys.argv[1:]\n"
         "with open(os.environ['CALL_LOG'], 'a') as log: log.write(json.dumps(args) + '\\n')\n"
         "if os.environ.get('API_FAIL') == '1': sys.exit(1)\n"
@@ -40,7 +74,15 @@ def run_retry(
         "endpoint = args[1]\n"
         "if '/pulls/' in endpoint: print(os.environ['PR_RESPONSE'])\n"
         "elif '/commits/' in endpoint: print(os.environ['CURRENT_SHA'])\n"
-        "elif '/jobs' in endpoint: print(os.environ['JOBS_RESPONSE'])\n"
+        "elif '/jobs' in endpoint:\n"
+        "    # Run the real --jq program against the payload, the way gh does.\n"
+        "    done = subprocess.run(\n"
+        "        ['jq', '-r', args[args.index('--jq') + 1]],\n"
+        "        input=os.environ['JOBS_PAYLOAD'], capture_output=True, text=True,\n"
+        "    )\n"
+        "    sys.stdout.write(done.stdout)\n"
+        "    sys.stderr.write(done.stderr)\n"
+        "    sys.exit(done.returncode)\n"
         "else: print(os.environ['NEWEST_RUN'])\n"
     )
     mock.chmod(0o700)
@@ -62,7 +104,7 @@ def run_retry(
         "PR_RESPONSE": f"open\t{SHA}\t{REPO}\t{REPO}",
         "CURRENT_SHA": SHA,
         "NEWEST_RUN": "100",
-        "JOBS_RESPONSE": "match",
+        "JOBS_PAYLOAD": json.dumps(KNOWN_FAMILY_JOBS),
         "CALL_LOG": str(call_log),
         "API_FAIL": "0",
         **overrides,
@@ -161,7 +203,7 @@ def test_runtime_prepare_known_family_reruns_once(tmp_path: Path) -> None:
     result, calls = run_retry(
         tmp_path,
         WORKFLOW_NAME="Inactive runtime preparation",
-        JOBS_RESPONSE="match",
+        JOBS_PAYLOAD=json.dumps(KNOWN_FAMILY_JOBS),
     )
     assert result.returncode == 0, result.stderr
     posts = [call for call in calls if "POST" in call]
@@ -183,7 +225,7 @@ def test_ci_flow_never_queries_job_conclusions(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "overrides",
     [
-        {"JOBS_RESPONSE": "mismatch"},
+        {"JOBS_PAYLOAD": json.dumps(DOUBLE_FAULT_JOBS)},
         {"RUN_ATTEMPT": "2"},
         {"RUN_CONCLUSION": "skipped"},
         {"NEWEST_RUN": "101"},
@@ -286,6 +328,16 @@ def test_family_expression_matches_only_the_known_shape() -> None:
                 job(FAMILY_JOB, "failure", {"Checkout": "success", FAMILY_STEP: "cancelled"}),
                 healthy,
             ],
+        ),
+        (
+            "job-level cancelled",
+            "mismatch",
+            [job(FAMILY_JOB, "cancelled", {FAMILY_STEP: "failure"}), healthy],
+        ),
+        (
+            "missing steps list",
+            "mismatch",
+            [{"name": FAMILY_JOB, "conclusion": "failure"}, healthy],
         ),
         (
             "fully green run",

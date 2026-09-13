@@ -24,9 +24,11 @@ maintainer triage.
 The trigger whitelist is per-workflow. `Inactive runtime preparation` is covered
 too, narrowed to its known flake family: exactly one failing job —
 `cold-offline (ubuntu-24.04)` — whose only failed step is `Real offline prepare,
-retained interpreter and failure isolation` (the offline-prepare watchdog, six
-runs 2026-09-11 through 2026-09-13; root cause tracked in task #3281). Any other
-failure shape on either workflow is left to manual triage (task #3285).
+retained interpreter and failure isolation` (the offline-prepare watchdog; five
+of the six runs catalogued in task #3281 match it in their original-attempt
+view, and the sixth failed both matrix legs). Wider shapes — a second failing
+job or leg, a consequence step after the watchdog step — are left to manual
+triage, as is every other workflow (task #3285).
 
 ## `workflows/update-model-pricing.yml`
 

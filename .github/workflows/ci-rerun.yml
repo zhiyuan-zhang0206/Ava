@@ -87,6 +87,8 @@ jobs:
           # On pushes, this workflow shares HEAD_SHA with CI and would otherwise be newest.
           # Filter to the triggering workflow only; PR rerun heads are on default branch, not the PR.
           newest_run_id="$(
+            # Double-quoted so ${WORKFLOW_NAME} expands; the escaped quotes keep
+            # the jq string literal intact (the trigger whitelist pins both names).
             gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${HEAD_SHA}&per_page=100" \
               --jq "[.workflow_runs[] | select(.name == \"${WORKFLOW_NAME}\") | .id] | max"
           )"
@@ -99,8 +101,8 @@ jobs:
           # exactly one failing job (the ubuntu leg) whose only failed step is
           # the offline prepare. Wider shapes go to manual triage (task #3285).
           if [ "$WORKFLOW_NAME" = "Inactive runtime preparation" ]; then
-            verdict="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/jobs" \
-              --jq '[.jobs[] | select(.conclusion != "success" and .conclusion != "skipped" and .conclusion != "neutral" and .conclusion != null)] as $failed | if ($failed | length) == 1 and $failed[0].name == "cold-offline (ubuntu-24.04)" and $failed[0].conclusion == "failure" and ([$failed[0].steps[] | select(.conclusion == "failure" or .conclusion == "timed_out") | .name] == ["Real offline prepare, retained interpreter and failure isolation"]) then "match" else "mismatch" end')"
+            verdict="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100" \
+              --jq '[.jobs[] | select(.conclusion != "success" and .conclusion != "skipped" and .conclusion != "neutral" and .conclusion != null)] as $failed | if ($failed | length) == 1 and $failed[0].name == "cold-offline (ubuntu-24.04)" and $failed[0].conclusion == "failure" and ([($failed[0].steps // []) | .[] | select(.conclusion == "failure" or .conclusion == "timed_out") | .name] == ["Real offline prepare, retained interpreter and failure isolation"]) then "match" else "mismatch" end')"
             if [ "$verdict" != "match" ]; then
               echo "runtime preparation failure shape does not match the known flake family; refusing retry"
               exit 0
