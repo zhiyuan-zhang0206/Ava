@@ -253,7 +253,10 @@ def prove_checkout_absent(  # noqa: PLR0915 — one guarded checkout-retirement 
                 capture_output=True,
                 text=True,
                 check=False,
-                timeout=180,
+                # Native PG initialization, full schema migration, and admission
+                # invariant rejection checks can take >180s under noisy runner I/O.
+                # Align budget with bootstrap step (600s) to prevent false flakes (task #3281).
+                timeout=600,
             )
             if result.returncode:
                 # This child has only explicit CI scratch credentials, not the
