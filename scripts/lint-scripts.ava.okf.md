@@ -34,4 +34,24 @@ Code and document structure guards, mostly invoked by `.pre-commit-config.yaml` 
 - `check_doc_references.py` — validates every CLI flag in the docs against the argparse tree and `scripts/*.sh` case branches, plus relative markdown links; runs on every pre-commit commit (`pass_filenames: false`) and in the always-on `doc-lints` CI job (the classify-independent doc-lint family, so docs-only PRs are covered) (`lint_skill_md_size.py`: hard cap of 300 lines / soft zone 250-300 for SKILL.md, pushing progressive disclosure — root SKILL.md as index, depth sinks into sub-skills)
 - `lint_migrations.py` — timestamp-id + applied-set scheme checks: filename format, unique names, up/down `.down.sql` pairing, `db/schema.sql` baseline/folded-migration stamping, and a later-drop plan for every `*_backfill_*` snapshot table; **no expand-contract check** (that's a documentation discipline, not lint)
 
+## CLI contract (explicit targets)
+
+The `lint_*.py` gates that take explicit path arguments share one contract — a
+typo'd target must never pass as a silent empty scan, and an out-of-repo target
+must scan rather than crash:
+
+- **No arguments** — scan the script's default scope (its `_SCAN_DIRS`, the
+  git-tracked file list, ...).
+- **Explicit arguments must resolve to an existing path.** Any argument that
+  does not is a hard error: `error: target path(s) not found: <argument(s)>` on
+  stderr, exit 1. Resolution is per-script: absolute paths are used as-is; a
+  relative path is resolved against the repo root first where the script
+  supports it (`lint_no_cjk` / `lint_no_tailnet` / `lint_time_bomb`), otherwise
+  against the caller's cwd (pre-commit passes absolute paths).
+- **Out-of-repo targets are scanned.** An existing target outside the repository
+  is scanned under its absolute path — its members are never dropped by the
+  repo-relative prefix computation. Directory targets enumerate their members;
+  an unreadable member (e.g. a dangling `*.py` symlink) is skipped like any
+  unreadable file.
+
 Parent: [[scripts/scripts.ava.okf.md|scripts]].

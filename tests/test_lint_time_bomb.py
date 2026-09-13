@@ -533,3 +533,14 @@ def test_explicit_missing_target_is_an_error(
     assert str(missing) in capsys.readouterr().err
     assert _lint.main([str(good), str(missing)]) == 1
     assert _lint.main(["typo-missing.py"]) == 1
+
+
+def test_out_of_repo_file_and_directory_targets_run(
+    scratch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """A target outside the repo (file and directory forms) must scan instead
+    of dying on the repo-relative prefix computation."""
+    outside = tmp_path_factory.mktemp("outside")
+    (outside / "clean.py").write_text("value = 1\n", encoding="utf-8")
+    assert _lint.main([str(outside / "clean.py")]) == 0
+    assert _lint.main([str(outside)]) == 0

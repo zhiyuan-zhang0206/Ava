@@ -153,7 +153,7 @@ class _Index:
                     continue
                 try:
                     tree = ast.parse(path.read_text(encoding="utf-8"))
-                except SyntaxError:
+                except (OSError, SyntaxError):
                     continue
                 mod = rel[:-3].replace("/", ".")
                 self.trees[mod] = tree
@@ -390,17 +390,25 @@ def _is_test_path(rel: str) -> bool:
     return any(pat.search(rel) for pat in _TEST_PATTERNS)
 
 
+def _rel_or_abs(path: Path) -> str:
+    """Repo-relative posix path, or the absolute path for a target outside the repo."""
+    try:
+        return path.relative_to(_REPO_ROOT).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
 def _lint_source(index: _Index, paths: list[Path]) -> list[str]:
     errors: list[str] = []
     for path in paths:
         if path.is_dir():
             for p in sorted(path.rglob("*.py")):
-                rel = p.relative_to(_REPO_ROOT).as_posix()
+                rel = _rel_or_abs(p)
                 if _is_test_path(rel):
                     continue
                 errors.extend(_lint_source_file(index, p, rel))
         elif path.suffix == ".py":
-            rel = path.relative_to(_REPO_ROOT).as_posix()
+            rel = _rel_or_abs(path)
             if not _is_test_path(rel):
                 errors.extend(_lint_source_file(index, path, rel))
     return errors
@@ -453,11 +461,11 @@ def _lint_tests(index: _Index, paths: list[Path]) -> list[str]:
     for path in paths:
         if path.is_dir():
             for p in sorted(path.rglob("*.py")):
-                rel = p.relative_to(_REPO_ROOT).as_posix()
+                rel = _rel_or_abs(p)
                 if _is_test_path(rel):
                     errors.extend(_lint_test_file(index, p, rel))
         elif path.suffix == ".py":
-            rel = path.relative_to(_REPO_ROOT).as_posix()
+            rel = _rel_or_abs(path)
             if _is_test_path(rel):
                 errors.extend(_lint_test_file(index, path, rel))
     return errors
@@ -657,10 +665,11 @@ def _lint_fixture_dates(path: Path, tree: ast.Module, lines: list[str]) -> list[
 
 def _lint_test_file(index: _Index, path: Path, rel: str) -> list[str]:
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-    except SyntaxError:
+        text = path.read_text(encoding="utf-8")
+        tree = ast.parse(text)
+    except (OSError, SyntaxError):
         return []
-    source_lines = path.read_text(encoding="utf-8").splitlines()
+    source_lines = text.splitlines()
     errors: list[str] = _lint_fixture_dates(path, tree, source_lines)
     mod = rel[:-3].replace("/", ".")
     fixed_names, aliases = _fixed_names_in_module(index, tree)
