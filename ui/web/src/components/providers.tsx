@@ -34,11 +34,11 @@ import { AlertsProvider } from "@/lib/use-alerts";
 //
 // EventStreamProvider lives here, above the route tree, so the global
 // `/api/system` broadcast survives page navigation (Main / Fleet / Settings /
-// Memory share one persistent EventSource instead of tearing it down and
-// reopening on every switch). The fold owner (useFoldOwner inside
-// EventStreamProvider) is the single root writer folding SSE into the query
-// caches. The all-events, high-frequency stream stays scoped to the
-// conversation view (page.tsx).
+// Memory share one EventSource instead of tearing it down and reopening on
+// every switch; it does close while the tab is hidden — useEventStream.tsx).
+// The fold owner (useFoldOwner inside EventStreamProvider) is the single root
+// writer folding SSE into the query caches. The all-events, high-frequency
+// stream stays scoped to the conversation view (page.tsx).
 //
 // AppConnectionBanner also rides that connection here at the root, so
 // disconnect/recovery chrome and Gate reload hints protect every page, not

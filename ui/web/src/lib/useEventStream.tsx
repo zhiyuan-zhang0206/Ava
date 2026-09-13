@@ -47,6 +47,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { API_BASE, api } from "./api";
 import { notifySessionInvalid, useAuth } from "./auth-context";
 import { useFoldOwner } from "./fold/owner";
+import { useDocumentVisible } from "./use-document-visible";
 import { useStore } from "./store";
 import { useTimelineStore } from "./timeline-store";
 import type { SystemEvent } from "./types";
@@ -382,7 +383,8 @@ const EventStreamContext = createContext<EventStreamContextValue | null>(null);
 /**
  * Provider for the global `/api/system` broadcast. One EventSource serves
  * all subscribers; it never closes on agent switch (the broadcast is
- * agent-agnostic). Renders an `sse-ready` marker once OPEN — e2e tests
+ * agent-agnostic) but does close while the tab is hidden (see
+ * useDocumentVisible). Renders an `sse-ready` marker once OPEN — e2e tests
  * (`page.wait_for_selector('[data-testid="sse-ready"]')`) gate on it before
  * interacting, so SSE-driven UI isn't raced.
  */
@@ -394,8 +396,15 @@ export function EventStreamProvider({
   // Mutable Set of subscribers — useRef avoids re-renders on every subscribe.
   const subscribersRef = useRef<Set<Subscriber>>(new Set());
   const [sseOpen, setSseOpen] = useState(false);
+  // Hidden tabs close the global stream too; the fold owner's throttled
+  // reconnect reconcile (30s window) repairs whatever was missed on return.
+  const isVisible = useDocumentVisible();
 
-  useSseConnection(`${API_BASE}/api/system`, subscribersRef, setSseOpen);
+  useSseConnection(
+    isVisible ? `${API_BASE}/api/system` : null,
+    subscribersRef,
+    setSseOpen,
+  );
   const subscribe = useSubscribe(subscribersRef);
 
   // ── The fold (R4 layer 1): ONE subscriber owns every domain's snapshot×SSE
@@ -488,16 +497,7 @@ export function AgentEventStreamProvider({
   const compactedIds = useTimelineStore(
     (s) => [...s.compactedThreadIds].sort((a, b) => a - b).join(","),
   );
-  const [isVisible, setIsVisible] = useState(
-    () => typeof document === "undefined" || document.visibilityState === "visible",
-  );
-
-  useEffect(() => {
-    const syncVisibility = () => setIsVisible(document.visibilityState === "visible");
-    document.addEventListener("visibilitychange", syncVisibility);
-    syncVisibility();
-    return () => document.removeEventListener("visibilitychange", syncVisibility);
-  }, []);
+  const isVisible = useDocumentVisible();
 
   useEffect(() => {
     if (isVisible) return;
