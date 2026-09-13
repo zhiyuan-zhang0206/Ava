@@ -7,7 +7,6 @@ import type { BackendTimelineItem } from "@/lib/types";
 import {
   classifyItem,
   formatTurnSummary,
-  formatTurnTiming,
   groupIntoTurns,
   inboundKind,
   summarizeTurn,
@@ -106,10 +105,10 @@ describe("summarizeTurn / formatTurnSummary", () => {
     expect(s.output).toBe(1);
     // The heartbeat note lands in the systemNotes bucket — every member kind
     // is counted somewhere so the header is never blank.
-    expect(formatTurnSummary(s)).toBe("1 system note · 1 agent message · 2 thinking · 1 code · 1 output");
+    expect(formatTurnSummary(s)).toBe("2 turns · 1 system note · 1 agent message");
   });
 
-  it("omits zero-count action kinds from the summary line", () => {
+  it("collapses action items into one work-rounds count", () => {
     const s = summarizeTurn([
       item("agent_code"),
       item("agent_code"),
@@ -118,7 +117,9 @@ describe("summarizeTurn / formatTurnSummary", () => {
     expect(s.thinking).toBe(0);
     expect(s.code).toBe(2);
     expect(s.output).toBe(1);
-    expect(formatTurnSummary(s)).toBe("2 code · 1 output");
+    // Two rounds of code-writing (no reasoning emitted) — one "2 turns" label.
+    expect(s.turns).toBe(2);
+    expect(formatTurnSummary(s)).toBe("2 turns");
   });
 
   it("a turn with no actions still summarizes every member (never an empty header)", () => {
@@ -132,13 +133,13 @@ describe("summarizeTurn / formatTurnSummary", () => {
     expect(formatTurnSummary(s)).toBe("1 system note · 1 agent message");
   });
 
-  it("a turn with only thinking shows just the thinking count", () => {
+  it("a turn with only thinking shows the rounds count", () => {
     const s = summarizeTurn([
       item("agent_reasoning"),
       item("agent_reasoning"),
       item("agent_reasoning"),
     ]);
-    expect(formatTurnSummary(s)).toBe("3 thinking");
+    expect(formatTurnSummary(s)).toBe("3 turns");
   });
 });
 
@@ -156,8 +157,6 @@ describe("summarizeTurn — timing aggregation", () => {
     expect(s.thinkingMs).toBe(12_000);
     expect(s.codeMs).toBe(5_500);
     expect(s.execMs).toBe(4_000);
-    // formatDuration rounds to whole seconds above 1s: 5.5s → 6s.
-    expect(formatTurnTiming(s)).toBe("Thought for 12s · Wrote code for 6s · Ran for 4s");
   });
 
   it("codeMs is zero when no agent_code items carry codeElapsedMs", () => {
@@ -184,17 +183,12 @@ describe("summarizeTurn — timing aggregation", () => {
     expect(summarizeTurn(run).thinkingMs).toBe(3_000);
   });
 
-  it("a turn with no reasoning/execution items has zero timing and no timing line", () => {
+  it("a turn with no reasoning/execution items has zero timing and zero rounds", () => {
     const run = [item("inbound_chat", "agent:1"), item("system_marker", "heartbeat")];
     const s = summarizeTurn(run);
     expect(s.thinkingMs).toBe(0);
     expect(s.execMs).toBe(0);
-    expect(formatTurnTiming(s)).toBeNull();
-  });
-
-  it("drops the zero side — thinking only", () => {
-    const s = summarizeTurn([item("agent_reasoning", null, undefined, { reasoning_ms: 500 })]);
-    expect(formatTurnTiming(s)).toBe("Thought for 0.5s");
+    expect(s.turns).toBe(0);
   });
 });
 
@@ -531,6 +525,6 @@ describe("groupIntoTurns", () => {
     const turn = groups[1];
     if (turn.kind !== "turn") throw new Error("expected turn");
     // The attach member lands in the systemNotes bucket.
-    expect(formatTurnSummary(turn.summary)).toBe("1 system note · 1 code · 1 output");
+    expect(formatTurnSummary(turn.summary)).toBe("1 turn · 1 system note");
   });
 });

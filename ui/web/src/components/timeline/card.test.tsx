@@ -551,7 +551,8 @@ describe("CardHeader sticky header (task #3136)", () => {
     const btn = container.querySelector("button")!;
     expect(btn.getAttribute("data-stuck")).toBe("true");
     expect(btn.className).toContain("backdrop-blur-md");
-    expect(btn.className).toContain("shadow-xs");
+    // The stuck variant's edge seals ride on box-shadow (tasks #3224/#3308).
+    expect(btn.className).toContain("shadow-[");
     expect(btn.className).toContain("border-b");
     // …with the border's height compensated: a bare border made the stuck
     // header 1px taller than the unstuck one, and that 1px drove the

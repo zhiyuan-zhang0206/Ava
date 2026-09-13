@@ -304,9 +304,25 @@ export const STICKY_CHILD_HEADER_CLS =
 // then flip-flopped in a loop (user report 2026-09-12). -mb-px removes the
 // border's 1px from the box the following content sees; the border line
 // itself still renders (sticky z-10 draws it above the body sliding under).
+//
+// Two paint-only seals close the mask's edges (tasks #3224/#3308). Both are
+// box-shadow copies — layout-neutral like -mb-px; shadows never feed layout:
+// - 16px right: the block root ends where the scroller's reserved scrollbar
+//   gutter begins; without the seal the unmasked strip shows the body
+//   scrolling past as a vertical seam (QA #3224).
+// - 2px bottom: sub-pixel / single-frame slits between this header's bottom
+//   edge and a child header pinned just below it (pin-line desync right at a
+//   sticky transition, QA #3308) stay covered by the opaque copy.
+// The border-b goes fully opaque for the same reason: content sliding under
+// the stuck header must not ghost through a translucent 1px line. The seal
+// color is the raw token (var(--background)) — the theme token lives in lab
+// space, so the hsl(var(--background)) form is invalid at computed-value
+// time and silently drops the whole box-shadow (verified in-browser).
+
 export const STUCK_HEADER_CLS =
-  "bg-background/95 backdrop-blur-md shadow-xs border-b border-border/60 " +
+  "bg-background/95 backdrop-blur-md border-b border-border " +
   "-mb-px " +
+  "shadow-[0_1px_2px_0_rgba(0,0,0,0.05),16px_0_0_0_var(--background),0_2px_0_0_var(--background)] " +
   "transition-[background-color,box-shadow,border-color] duration-150 ease-out motion-reduce:transition-none";
 export const UNSTUCK_HEADER_CLS =
   "bg-transparent transition-[background-color,box-shadow,border-color] duration-150 ease-out motion-reduce:transition-none";
