@@ -326,6 +326,29 @@ def git_reset_hard(sha: str) -> None:
     verify_tree_at(sha, context="git_reset_hard")
 
 
+def git_stash_uncommitted(*, reason: str) -> str | None:
+    """Stash the tree's uncommitted changes (untracked files included) under
+    `reason`; return the new stash entry's line, or None when the tree was clean.
+
+    The preserve-before-discard partner of the by-contract discarders
+    (`git_reset_hard`, `git_checkout_sha`): those discard a dirty tree as part of
+    their job (a mid-update tree is a committed interim state), but the ROLLBACK
+    and UPDATE paths can meet a developer's uncommitted work — a dev worktree's
+    normal state — and the 2026-09-12 incident is what a silent discard looks
+    like (an automatic rollback reset the worktree; only local backups recovered
+    the edits). Failures raise `GitPullFailed` like every
+    other mutating primitive: a caller on its way to a destructive step must
+    abort rather than discard what it could not preserve. Ignored files are
+    not stashed (`--include-untracked`, not `--all`): a worktree's `.ava_home`
+    pointer and build caches stay in place.
+    """
+    _wait_index_lock_free()
+    if not _git("status", "--porcelain"):
+        return None
+    _git("stash", "push", "--include-untracked", "-m", reason)
+    return _git("stash", "list", "--max-count=1") or None
+
+
 def git_resolve_origin_main() -> str:
     """Fetch the track target then resolve its sha — the rollout's pinned
     target, resolved once on the gateway so every node checks out the same
@@ -352,12 +375,19 @@ def git_checkout_sha(sha: str) -> str:
 
     Commits reachable from the prior HEAD but not from `sha` (unpushed / diverged
     local work) are DISCARDED — logged here, recoverable via `git reflog` — because
-    a prod source tracks the cluster's commit and is not a dev workspace. Resets
-    branch `main` to `sha` (`checkout --force -B main`) so a node left on a feature
-    branch lands back on main at the pinned commit.
+    a prod source tracks the cluster's commit and is not a dev workspace.
+    Uncommitted work is NOT discarded: it is stashed first (untracked files
+    included) and the stash ref is printed into the update log, so a dirty tree
+    survives the checkout and an operator can restore it. When the stash cannot be
+    written the checkout is REFUSED rather than discarding what it could not
+    preserve — the 2026-09-12 incident is what that silent discard costs (an
+    automatic rollback reset a dev worktree; only local backups recovered the
+    edits). Resets branch `main` to `sha` (`checkout --force -B main`) so a node
+    left on a feature branch lands back on main at the pinned commit.
 
     Raises:
-        GitPullFailed: a git subcommand non-zero exit.
+        GitPullFailed: a git subcommand non-zero exit, or the pre-checkout stash of
+            uncommitted work could not be written (the tree is left untouched).
     """
     from_sha = _git("rev-parse", "HEAD")
     _git_network("fetch", "origin")
@@ -375,7 +405,14 @@ def git_checkout_sha(sha: str) -> str:
             f"{from_sha[:7]} (recoverable via `git reflog`)",
             file=sys.stderr,
         )
-    _wait_index_lock_free()
+    stashed = git_stash_uncommitted(reason=f"update force-checkout {from_sha[:7]} -> {sha[:7]}")
+    if stashed is not None:
+        print(
+            f"  ↳ uncommitted work preserved as {stashed} — restore: `git stash list`, "
+            "find the entry quoting this checkout, then `git stash apply stash@{N}` "
+            "(the stash list is shared by every worktree — never pop blind)",
+            file=sys.stderr,
+        )
     _git("checkout", "--force", "-B", settings.general.track_branch, sha)
     # Atomicity check: a checkout raced by a concurrent git process can land a
     # MIXED tree (index coherent, working tree a mixture of two commits) while

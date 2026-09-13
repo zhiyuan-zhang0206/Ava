@@ -16,6 +16,7 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
@@ -1477,7 +1478,11 @@ def test_ci_usage_prints_per_agent_rollup(monkeypatch, tmp_path, capsys) -> None
         json.dumps(
             {
                 "run_id": 1,
-                "day": "2026-09-06",
+                # Window-relative day: the rollup window is a rolling
+                # `--ci-usage-days` x 24h, so a hard-coded "recent" day ages out
+                # of it (2026-09-13: the 2026-09-06 fixtures aged out at 00:00
+                # UTC and turned every backend shard red).
+                "day": (datetime.now(UTC).date() - timedelta(days=1)).isoformat(),
                 "agent_id": 5811,
                 "linux_minutes": 100,
                 "macos_minutes": 10,
@@ -1498,7 +1503,7 @@ def test_ci_usage_json_machine_readable(monkeypatch, tmp_path, capsys) -> None:
         json.dumps(
             {
                 "run_id": 1,
-                "day": "2026-09-06",
+                "day": (datetime.now(UTC).date() - timedelta(days=1)).isoformat(),
                 "agent_id": 5811,
                 "linux_minutes": 10,
                 "macos_minutes": 1,

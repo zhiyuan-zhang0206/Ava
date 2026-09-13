@@ -543,6 +543,42 @@ def test_worktree_machine_name_not_overwritten(
     assert dotenv_values(home / ".env")["AVA_MACHINE_NAME"] == "my-custom-name"
 
 
+def test_dev_home_birth_seeds_the_health_probe_floor(
+    isolated_registry: Path, noop_infra: Path, tmp_path: Path
+) -> None:
+    """A dev cluster keeps no resident agents, so its birth seeds the probe's
+    population floor to 0 — without it the check fails forever and --auto-rollback
+    cycles the checkout (2026-08-10 preview and 2026-09-12 dev-worktree incidents;
+    the manual `.env` line was the documented workaround this replaces)."""
+    home = tmp_path / ".ava-dev"
+    assert _install(home) == 0
+    assert dotenv_values(home / ".env")["AVA_HEALTH_PROBE_AGENT_MIN"] == "0"
+
+
+def test_explicit_health_probe_floor_is_kept(
+    isolated_registry: Path, noop_infra: Path, tmp_path: Path
+) -> None:
+    """An operator's explicit floor survives the idempotent re-install."""
+    home = tmp_path / ".ava-dev"
+    assert _install(home) == 0
+    from shared.envfile import upsert_env
+
+    upsert_env(home / ".env", {"AVA_HEALTH_PROBE_AGENT_MIN": "2"})
+    assert _install(home) == 0
+    assert dotenv_values(home / ".env")["AVA_HEALTH_PROBE_AGENT_MIN"] == "2"
+
+
+def test_prod_home_birth_does_not_seed_a_floor(
+    isolated_registry: Path, noop_infra: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The prod home keeps the built-in floor: the seeding is dev-only, so a prod
+    install never writes the knob behind the operator's back."""
+    monkeypatch.setattr(cl, "is_default_home", lambda _home: True)  # pyright: ignore[reportUnknownArgumentType]
+    home = tmp_path / ".ava-prodlike"
+    assert _install(home, worktree=False) == 0
+    assert "AVA_HEALTH_PROBE_AGENT_MIN" not in dotenv_values(home / ".env")
+
+
 def test_instance_failure_rolls_back_created_record(
     isolated_registry: Path, noop_infra: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

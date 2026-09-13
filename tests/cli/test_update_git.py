@@ -2,10 +2,11 @@
 
 `git_checkout_sha` must land every node on the *exact* target commit from any
 starting branch or dirty tree — the moving-tip + feature-branch-stuck failures of
-the 2026-06-01 collision — discarding (and logging) unpushed local work, since a
-prod source tracks the cluster's commit and is not a dev workspace. These run
-against a real throwaway origin+clone (the force-checkout semantics are the point;
-mocking git would test nothing)."""
+the 2026-06-01 collision. It discards (and logs) unpushed local COMMITS, since a
+prod source tracks the cluster's commit and is not a dev workspace, but it never
+discards uncommitted WORK: it stashes it first and refuses the checkout when the
+stash cannot be written. These run against a real throwaway origin+clone (the
+force-checkout semantics are the point; mocking git would test nothing)."""
 
 from __future__ import annotations
 
@@ -68,12 +69,52 @@ def test_git_checkout_sha_force_aligns_from_feature_branch(
     assert "discards 1 unpushed local commit" in capsys.readouterr().err  # option B: logged
 
 
-def test_git_checkout_sha_discards_dirty_tree(cloned_repo: tuple[Path, str]) -> None:
-    """Uncommitted local edits on a prod source are discarded by the force checkout."""
+def test_git_checkout_sha_stashes_a_dirty_tree_and_prints_the_ref(
+    cloned_repo: tuple[Path, str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Uncommitted work (tracked edits + untracked files) survives the force
+    checkout in a stash whose ref reaches the update log — 2026-09-12: the same
+    silent discard in the rollback path lost a dev worktree's edits."""
     clone, main_sha = cloned_repo
     (clone / "f.txt").write_text("uncommitted local edit")
+    (clone / "new-file.txt").write_text("untracked wip")
+
     g.git_checkout_sha(main_sha)
-    assert (clone / "f.txt").read_text() == "c1"
+
+    assert (clone / "f.txt").read_text() == "c1"  # the checkout still lands exactly
+    assert _git(clone, "status", "--porcelain") == ""
+    stash = _git(clone, "stash", "list", "--max-count=1")
+    assert stash.startswith("stash@{0}:") and "update force-checkout" in stash
+    err = capsys.readouterr().err
+    assert "uncommitted work preserved as stash@{0}" in err
+    # The restore hint must name the shared-list-safe procedure, not a bare pop.
+    assert "git stash apply stash@{N}" in err and "never pop blind" in err
+    _git(clone, "stash", "pop")
+    assert (clone / "f.txt").read_text() == "uncommitted local edit"
+    assert (clone / "new-file.txt").read_text() == "untracked wip"
+
+
+def test_git_checkout_sha_refuses_when_the_stash_cannot_be_written(
+    cloned_repo: tuple[Path, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stash that cannot be written aborts BEFORE the checkout: the work is kept,
+    never traded for the target commit."""
+    clone, main_sha = cloned_repo
+    (clone / "f.txt").write_text("uncommitted local edit")
+    real_git = g._git
+
+    def _failing_stash(*args: str, timeout_s: float | None = None) -> str:
+        if args[:2] == ("stash", "push"):
+            raise g.GitPullFailed("index.lock is held")
+        return real_git(*args) if timeout_s is None else real_git(*args, timeout_s=timeout_s)
+
+    monkeypatch.setattr(g, "_git", _failing_stash)
+
+    with pytest.raises(g.GitPullFailed, match=r"index\.lock is held"):
+        g.git_checkout_sha(main_sha)
+
+    assert (clone / "f.txt").read_text() == "uncommitted local edit"
+    assert _git(clone, "stash", "list") == ""
 
 
 def test_git_checkout_sha_noop_when_already_on_target(
@@ -91,6 +132,36 @@ def test_git_resolve_origin_main_returns_tip(cloned_repo: tuple[Path, str]) -> N
     """Fetches + resolves origin/main to the pinned target sha."""
     _clone, main_sha = cloned_repo
     assert g.git_resolve_origin_main() == main_sha
+
+
+def test_git_stash_uncommitted_preserves_tracked_and_untracked(
+    cloned_repo: tuple[Path, str],
+) -> None:
+    """The rollback's preserve-before-discard primitive: both a tracked edit and
+    a new untracked file survive as one stash entry, and the tree is left clean
+    for the `git_reset_hard` that follows (2026-09-12: a reset silently ate a
+    dev worktree's uncommitted work)."""
+    clone, _main_sha = cloned_repo
+    (clone / "f.txt").write_text("uncommitted edit")
+    (clone / "new-file.txt").write_text("untracked wip")
+
+    line = g.git_stash_uncommitted(reason="ava-test-stash")
+
+    assert line is not None and line.startswith("stash@{0}:") and "ava-test-stash" in line
+    assert _git(clone, "status", "--porcelain") == ""  # clean for the reset
+    _git(clone, "stash", "pop")
+    assert (clone / "f.txt").read_text() == "uncommitted edit"
+    assert (clone / "new-file.txt").read_text() == "untracked wip"
+
+
+def test_git_stash_uncommitted_is_a_noop_on_a_clean_tree(
+    cloned_repo: tuple[Path, str],
+) -> None:
+    """A clean tree stashes nothing and says so — no empty entry, no noise."""
+    clone, _main_sha = cloned_repo
+
+    assert g.git_stash_uncommitted(reason="ava-test-stash") is None
+    assert _git(clone, "stash", "list") == ""
 
 
 # ───────────── timeout + network retry (`_git` / `_git_network`) ─────────────
