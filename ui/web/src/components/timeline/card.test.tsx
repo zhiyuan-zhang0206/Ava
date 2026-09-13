@@ -15,6 +15,7 @@ import { fireEvent, render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { CardHeader, MessageCard, messageCardConfig, type CardConfig } from "./card";
+import { resolveTimelineColors } from "@/lib/timeline-colors";
 import type { BackendTimelineItem } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
@@ -170,6 +171,42 @@ describe("messageCardConfig", () => {
       const cfg = messageCardConfig(item("system_marker", { source: src }));
       expect(cfg!.title).toBe("Note");
     }
+  });
+
+  // ── Configurable palette (tasks #3304 / #3312) ──────────────────────────
+  // Inbound defaults are pinned above (gray / violet / sky / rose). These pin
+  // the changed defaults + the override path — overrides arrive as a resolved
+  // color map from the settings hook, exactly like the timeline passes them.
+
+  it("agent_code default → cyan-500/70 border", () => {
+    const cfg = messageCardConfig(item("agent_code"));
+    expect(cfg!.border).toBe("border-cyan-500/70");
+  });
+
+  it("agent_code with a recorded override → the family drives the border", () => {
+    const colors = resolveTimelineColors({ "display.color.agent_code": "pink" });
+    const cfg = messageCardConfig(item("agent_code"), colors);
+    expect(cfg!.border).toBe("border-pink-500/70");
+  });
+
+  it("agent_reasoning default → blue-400/40 border + blue bg", () => {
+    const cfg = messageCardConfig(item("agent_reasoning"));
+    expect(cfg!.border).toBe("border-blue-400/40");
+    expect(cfg!.bg).toBe("bg-blue-50/60 dark:bg-blue-900/20");
+  });
+
+  it("note default → teal border/bg/text tint", () => {
+    const cfg = messageCardConfig(item("system_marker", { source: "sdk_hint" }));
+    expect(cfg!.border).toBe("border-teal-500/40");
+    expect(cfg!.bg).toBe("bg-teal-50/40 dark:bg-teal-950/15");
+    expect(cfg!.cardText).toBe("text-teal-700 dark:text-teal-300");
+  });
+
+  it("note with a recorded override → fuchsia family", () => {
+    const colors = resolveTimelineColors({ "display.color.note": "fuchsia" });
+    const cfg = messageCardConfig(item("system_marker", { source: "sdk_hint" }), colors);
+    expect(cfg!.border).toBe("border-fuchsia-500/40");
+    expect(cfg!.cardText).toBe("text-fuchsia-700 dark:text-fuchsia-300");
   });
 });
 

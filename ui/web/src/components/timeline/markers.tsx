@@ -15,6 +15,7 @@
 import { GitFork, Info, NotebookText, PowerOff, RotateCw, type LucideIcon } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import { DEFAULT_TIMELINE_COLORS, type ColorSlotId, type TimelineColors } from "@/lib/timeline-colors";
 import { cn } from "@/lib/utils";
 
 export const LIFECYCLE_TAGS = [
@@ -88,75 +89,51 @@ export interface MarkerVisual {
 
 const LABEL_CLS = "uppercase tracking-widest";
 
-const LIFECYCLE_VISUAL: Record<LifecycleTag, MarkerVisual> = {
-  lifecycle_terminate: {
-    icon: PowerOff,
-    title: "Terminated",
-    titleKey: "terminated",
-    titleClass: `text-rose-700 dark:text-rose-300 ${LABEL_CLS}`,
-    border: "border-rose-400/60",
-    bg: "bg-rose-50 dark:bg-rose-950/30",
-    text: "text-rose-700 dark:text-rose-300",
-  },
-  lifecycle_restart: {
-    icon: RotateCw,
-    title: "Restarted",
-    titleKey: "restarted",
-    titleClass: `text-amber-700 dark:text-amber-300 ${LABEL_CLS}`,
-    border: "border-amber-400/60",
-    bg: "bg-amber-50 dark:bg-amber-950/30",
-    text: "text-amber-700 dark:text-amber-300",
-  },
-  lifecycle_resurrect: {
-    icon: RotateCw,
-    title: "Resurrected",
-    titleKey: "resurrected",
-    titleClass: `text-emerald-700 dark:text-emerald-300 ${LABEL_CLS}`,
-    border: "border-emerald-400/60",
-    bg: "bg-emerald-50 dark:bg-emerald-950/30",
-    text: "text-emerald-700 dark:text-emerald-300",
-  },
-  lifecycle_fork: {
-    icon: GitFork,
-    title: "Forked",
-    titleKey: "forked",
-    titleClass: `text-sky-700 dark:text-sky-300 ${LABEL_CLS}`,
-    border: "border-sky-400/60",
-    bg: "bg-sky-50 dark:bg-sky-950/30",
-    text: "text-sky-700 dark:text-sky-300",
-  },
+// Icon/title metadata per marker family — the color classes come from the
+// resolved timeline-colors slot (Display-settings configurable), composed at
+// call time so one family swap restyles the whole marker.
+const LIFECYCLE_META: Record<
+  LifecycleTag,
+  { icon: LucideIcon; title: string; titleKey: string; slot: ColorSlotId }
+> = {
+  lifecycle_terminate: { icon: PowerOff, title: "Terminated", titleKey: "terminated", slot: "lifecycle_terminate" },
+  lifecycle_restart: { icon: RotateCw, title: "Restarted", titleKey: "restarted", slot: "lifecycle_restart" },
+  lifecycle_resurrect: { icon: RotateCw, title: "Resurrected", titleKey: "resurrected", slot: "lifecycle_resurrect" },
+  lifecycle_fork: { icon: GitFork, title: "Forked", titleKey: "forked", slot: "lifecycle_fork" },
 };
 
-const MEMORY_VISUAL: MarkerVisual = {
-  icon: NotebookText,
-  title: "Memory",
-  titleKey: "memory",
-  titleClass: `text-violet-700 dark:text-violet-300 ${LABEL_CLS}`,
-  border: "border-violet-400/60",
-  bg: "bg-violet-50 dark:bg-violet-950/30",
-  text: "text-violet-700 dark:text-violet-300",
-};
+const MEMORY_META = { icon: NotebookText, title: "Memory", titleKey: "memory", slot: "memory" } as const;
+const NOTE_META = { icon: Info, title: "Note", titleKey: "note", slot: "note" } as const;
 
-const NOTE_VISUAL: MarkerVisual = {
-  icon: Info,
-  title: "Note",
-  titleKey: "note",
-  titleClass: `text-muted-foreground ${LABEL_CLS}`,
-  border: "border-muted-foreground/40",
-  bg: "bg-muted/40",
-  text: "text-muted-foreground",
-};
+function slotVisual(
+  meta: { icon: LucideIcon; title: string; titleKey: string; slot: ColorSlotId },
+  colors: TimelineColors,
+): MarkerVisual {
+  const c = colors[meta.slot];
+  return {
+    icon: meta.icon,
+    title: meta.title,
+    titleKey: meta.titleKey,
+    titleClass: `${c.text ?? ""} ${LABEL_CLS}`.trim(),
+    border: c.border,
+    bg: c.bg ?? "",
+    text: c.text ?? "",
+  };
+}
 
 // Visual mapping for a card-rendered marker. Only called for lifecycle / memory /
 // note (the ephemeral class has no card and never reaches here).
-export function markerVisual(cls: MarkerClass): MarkerVisual {
+export function markerVisual(
+  cls: MarkerClass,
+  colors: TimelineColors = DEFAULT_TIMELINE_COLORS,
+): MarkerVisual {
   switch (cls.kind) {
     case "lifecycle":
-      return LIFECYCLE_VISUAL[cls.tag];
+      return slotVisual(LIFECYCLE_META[cls.tag], colors);
     case "memory":
-      return MEMORY_VISUAL;
+      return slotVisual(MEMORY_META, colors);
     case "note":
-      return NOTE_VISUAL;
+      return slotVisual(NOTE_META, colors);
     /* v8 ignore next 2 */
     case "ephemeral":
       throw new Error("markerVisual called on an ephemeral marker");
