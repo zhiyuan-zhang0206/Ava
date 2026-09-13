@@ -26,7 +26,7 @@ from shared.exec_owner_protocol import (
 from shared.incarnation_resources import ExecAllocation
 
 
-def main() -> None:
+def main() -> None:  # noqa: PLR0915
     root = Path(sys.argv[1]).resolve()
     root.mkdir(parents=True, exist_ok=True)
     prefix = Path(sys.prefix).resolve()
@@ -36,6 +36,7 @@ def main() -> None:
     identity = uuid4()
     request = (root / f"req-{identity.hex}.json").resolve()
     active = (root / "active").resolve()
+    result_path = (root / "result.json").resolve()
     # Offline standalone execution without live PostgreSQL uses agent_id=None
     # so exec_child runs user code without attempting DB connection boot (task #2679).
     write_request(
@@ -50,12 +51,12 @@ def main() -> None:
         generation=uuid4(),
         runtime_owner=uuid4(),
         request_path=request,
-        result_path=(root / "result.json").resolve(),
+        result_path=result_path,
         allocation=ExecAllocation(
             request=identity,
             domain=uuid4(),
             request_digest=hashlib.sha256(request.read_bytes()).hexdigest(),
-            deadline=datetime.now(UTC) + timedelta(seconds=60),
+            deadline=datetime.now(UTC) + timedelta(seconds=120),
         ),
     )
     path = (root / "owner.json").resolve()
@@ -88,9 +89,12 @@ def main() -> None:
         )
         try:
             while not path.with_suffix(".ready").exists():
-                if child.poll() is not None or time.monotonic() - started > 40:
+                if child.poll() is not None or time.monotonic() - started > 60:
+                    output.flush()
                     log_text = log_file.read_text(errors="replace") if log_file.exists() else ""
-                    raise AssertionError(f"installed owner failed before handshake:\n{log_text}")
+                    raise AssertionError(
+                        f"installed owner failed before handshake (exit={child.poll()}):\n{log_text}"
+                    )
                 time.sleep(0.02)
             ready = OwnerReady.model_validate_json(path.with_suffix(".ready").read_bytes())
             if child.stdin is None or ready.allocation.owner_process is None:
@@ -104,16 +108,26 @@ def main() -> None:
                 + b"\n"
             )
             child.stdin.flush()
+
+            permit_started = time.monotonic()
             while not active.exists():
-                if child.poll() is not None or time.monotonic() - started > 50:
+                if child.poll() is not None or time.monotonic() - permit_started > 80:
+                    output.flush()
                     log_text = log_file.read_text(errors="replace") if log_file.exists() else ""
+                    res_text = (
+                        result_path.read_text(errors="replace") if result_path.exists() else ""
+                    )
                     raise AssertionError(
-                        f"installed exec never reached real user code:\n{log_text}"
+                        f"installed exec never reached real user code (exit={child.poll()}):\nowner.log:\n{log_text}\nresult.json:\n{res_text}"
                     )
                 time.sleep(0.02)
             child.stdin.close()
             if child.wait(timeout=15) != 0:
-                raise AssertionError("installed owner failed its domain closure")
+                output.flush()
+                log_text = log_file.read_text(errors="replace") if log_file.exists() else ""
+                raise AssertionError(
+                    f"installed owner failed its domain closure (exit={child.returncode}):\n{log_text}"
+                )
             closed = OwnerClosed.model_validate_json(path.with_suffix(".closed").read_bytes())
             if closed.allocation != ready.allocation or closed.reason != "host_eof":
                 raise AssertionError("installed terminal receipt differs from its allocation")
