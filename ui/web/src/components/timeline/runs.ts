@@ -18,7 +18,7 @@
 //    secondary items are always groupable so the first streaming chunk
 //    immediately lands inside a work block (no bare-then-wrap layout shift).
 
-import { formatDuration, type SdkCall } from "@/lib/item-summary";
+import { type SdkCall } from "@/lib/item-summary";
 import type { BackendTimelineItem } from "@/lib/types";
 import enMessages from "../../../messages/en.json";
 
@@ -108,6 +108,11 @@ export interface TurnSummary {
   readonly thinking: number;
   readonly code: number;
   readonly output: number;
+  // Model work rounds (task #3313): one round emits its reasoning, code, and
+  // output items together, so the three action counters agree on every
+  // complete round — `turns` is their max. The header shows this single count
+  // ("5 turns") in place of the former per-kind labels.
+  readonly turns: number;
   // Non-work item counts — shown when present alongside or in lieu of work items.
   readonly systemPrompts: number;
   readonly compactSummaries: number;
@@ -264,28 +269,26 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
       lastLiveStartedAt = last.execStartedAt ?? 0;
     }
   }
-  return { total: items.length, thinking, code, output, systemPrompts, compactSummaries, memories, agentMessages, systemNotes, thinkingMs, codeMs, execMs, sdkCalls, workedMs, lastLiveKind, lastLiveStartedAt };
+  return { total: items.length, thinking, code, output, turns: Math.max(thinking, code, output), systemPrompts, compactSummaries, memories, agentMessages, systemNotes, thinkingMs, codeMs, execMs, sdkCalls, workedMs, lastLiveKind, lastLiveStartedAt };
 }
-
-// "Thought for 15m · Wrote code for 3m · Ran for 2s" — in chronological
-// agent-work order. Omits any side when zero; null when all three are zero.
-export function formatTurnTiming(summary: TurnSummary, t: TurnTranslator = EN_TURN): string | null {
-  const parts: string[] = [];
-  if (summary.thinkingMs > 0) parts.push(t("thoughtFor", { duration: formatDuration(summary.thinkingMs) }));
-  if (summary.codeMs > 0) parts.push(t("wroteCodeFor", { duration: formatDuration(summary.codeMs) }));
-  if (summary.execMs > 0) parts.push(t("ranFor", { duration: formatDuration(summary.execMs) }));
-  return parts.length > 0 ? parts.join(" · ") : null;
-}
-
-// Action-item display order for the turn summary header.
-const ACTION_ORDER = ["thinking", "code", "output"] as const;
 
 export function formatTurnSummary(summary: TurnSummary, t: TurnTranslator = EN_TURN): string {
   const parts: string[] = [];
-  // Non-work items first (context + chatter). Sentence case throughout — these
-  // fragments join into one status line ("system prompt · 2 compact summaries ·
-  // 1 memory · 2 system notes · 1 agent message · 2 thinking"), so every label
+  // The model's work rounds first ("5 turns") — one round emits its reasoning,
+  // code, and output items together, so the former per-kind action counts
+  // ("2 thinking · 1 code · 1 output") always agreed and collapse into this
+  // single number (task #3313). Then non-work items (context + chatter).
+  // Sentence case throughout — these fragments join into one status line
+  // ("2 turns · 1 memory · 2 system notes · 2 agent messages"), so every label
   // stays lowercase like the work-item labels below (no mid-line Title Case).
+  if (summary.turns > 0) {
+    parts.push(
+      t("turns", {
+        count: summary.turns,
+        unit: t(summary.turns === 1 ? "turnSingular" : "turnPlural"),
+      }),
+    );
+  }
   // Singular system prompts / compact summaries drop the count prefix
   // ("system prompt · 2 compact summaries …"), mirroring the original English
   // copy — the singular label stands alone.
@@ -332,16 +335,6 @@ export function formatTurnSummary(summary: TurnSummary, t: TurnTranslator = EN_T
         unit: t(summary.agentMessages === 1 ? "agentMessageSingular" : "agentMessagesPlural"),
       }),
     );
-  }
-  // Work items — action names are translated ("thinking" → the zh label etc.).
-  const counts: Record<string, number> = { thinking: summary.thinking, code: summary.code, output: summary.output };
-  for (const key of ACTION_ORDER) {
-    const n = counts[key];
-    if (n > 0) {
-      parts.push(
-        t("actionCount", { count: n, action: t(`action${key[0].toUpperCase()}${key.slice(1)}`) }),
-      );
-    }
   }
   return parts.join(" · ");
 }

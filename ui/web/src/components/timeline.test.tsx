@@ -410,9 +410,9 @@ describe("toggle chip: summary on expanded items", () => {
         ]}
       />,
     );
-    // getByText throws on multiple matches — also pins down that the duration
-    // is no longer duplicated inside the expanded content.
-    expect(screen.getAllByText(/Thought for 8s/)).toHaveLength(2);
+    // The duration lives only in this chip — the work block's aggregate
+    // timing row it used to duplicate is gone (task #3313).
+    expect(screen.getAllByText(/Thought for 8s/)).toHaveLength(1);
     expect(screen.getByText(/1\.2k tokens/)).toBeTruthy();
     expect(screen.getByText("ponder")).toBeTruthy();
   });
@@ -450,7 +450,7 @@ describe("toggle chip: summary on expanded items", () => {
         ]}
       />,
     );
-    expect(screen.getAllByText(/Thought for 4s/)).toHaveLength(2);
+    expect(screen.getAllByText(/Thought for 4s/)).toHaveLength(1);
     expect(screen.queryByText(/Thinking for/)).toBeNull();
   });
 
@@ -2135,8 +2135,9 @@ describe("Details mode — collapse/expand", () => {
     // In "none" mode, detail blocks collapse but primary content stays visible
     expect(screen.queryByText("hidden thought")).toBeNull();
     expect(screen.getByText("visible chat")).toBeTruthy();
-    // Turn header is visible with summary (formatTurnTiming uses lowercase)
-    expect(screen.getByText(/thought for 8s/i)).toBeTruthy();
+    // Turn header is visible with the work summary (lowercase fragments)
+    expect(screen.getByText(/worked for 8s/i)).toBeTruthy();
+    expect(screen.getByText(/1 turn/i)).toBeTruthy();
   });
 
   it('settings still loading (isLoading) → detail blocks collapsed, no "all"-default flash', () => {
@@ -3411,10 +3412,9 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
         ]}
       />,
     );
-    // The aggregate summary shows action counts (thinking/code/output).
+    // The aggregate summary shows the model work rounds count.
     const runHeader = runToggle();
-    expect(runHeader.textContent).toContain("thinking");
-    expect(runHeader.textContent).toContain("code");
+    expect(runHeader.textContent).toContain("1 turn");
 
 
     // Default expanded (detailsMode='all').
@@ -3564,7 +3564,7 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
     const wrapper = container.querySelector('[data-item-id="3.0"]');
     expect(wrapper).toBeTruthy();
     // The node is the work-block wrapper (holds the aggregate toggle).
-    expect(wrapper?.textContent).toContain("thinking");
+    expect(wrapper?.textContent).toContain("1 turn");
     // Default expanded (detailsMode='all'). Inner code row is mounted.
     expect(wrapper?.querySelector('[data-expanded="true"]')).toBeTruthy();
     expect(screen.getByTestId("python-code").textContent).toBe("x=1");
@@ -3831,7 +3831,7 @@ describe("detail-block duration display (Last mode)", () => {
   // Symptom 3 (completed half): a turn that was one continuous code block
   // shows both "Worked for" (from the block's own committed duration) and
   // "Wrote code for" (from the backend code_elapsed_ms).
-  it("completed single-code-block turn shows 'Worked for' and 'Wrote code for'", () => {
+  it("completed single-code-block turn shows 'Worked for' and the rounds count", () => {
     setToggleState({ detailsMode: "last" });
     render(
       <TimelineView
@@ -3849,7 +3849,7 @@ describe("detail-block duration display (Last mode)", () => {
     );
     const header = runToggle();
     expect(header.textContent).toContain("Worked for 5s");
-    expect(header.textContent).toContain("Wrote code for 5s");
+    expect(header.textContent).toContain("1 turn");
   });
 
   // Symptom 4: a turn holding only a system note must never render a blank
@@ -3935,11 +3935,11 @@ describe("detail-block duration display (Last mode)", () => {
         ]}
       />,
     );
-    // 10s committed thinking + 3s of code still being written.
+    // 10s committed thinking + 3s of code still being written — the 13s live
+    // clock charges both; the per-segment ticking row is gone (task #3313).
     const header = runToggle().textContent;
     expect(header).toContain("Working for 13s");
-    expect(header).toContain("Thought for 10s");
-    expect(header).toContain("Wrote code for 3s");
+    expect(header).toContain("1 turn");
   });
 
   // The live gate no longer keys on the turn's first stamped created_at: the
@@ -4234,7 +4234,11 @@ describe("TimelineView sticky work block (task #2601)", () => {
       const toggle = screen.getByTestId("turn-toggle");
       expect(toggle.getAttribute("data-stuck")).toBe("true");
       expect(toggle.className).toContain("backdrop-blur-md");
-      expect(toggle.className).toContain("shadow-xs");
+      // The stuck variant's paint-only edge seals (tasks #3224/#3308) replaced
+      // the plain shadow-xs: gutter + child-slit masks ride on box-shadow.
+      expect(toggle.className).toContain("shadow-[");
+      expect(toggle.className).toContain("16px_0_0_0_hsl(var(--background))");
+      expect(toggle.className).toContain("0_2px_0_0_hsl(var(--background))");
     });
   });
 
@@ -4364,7 +4368,7 @@ describe("TimelineView sticky message header (task #3136)", () => {
       const cardToggle = cardRow.querySelector('[data-testid="card-toggle"]')!;
       expect(cardToggle.getAttribute("data-stuck")).toBe("true");
       expect(cardToggle.className).toContain("backdrop-blur-md");
-      expect(cardToggle.className).toContain("shadow-xs");
+      expect(cardToggle.className).toContain("shadow-[");
       // The work block below stays unpinned — one stuck header at a time.
       expect(screen.getByTestId("turn-toggle").getAttribute("data-stuck")).toBe("false");
     });
