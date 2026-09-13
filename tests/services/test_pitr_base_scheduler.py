@@ -165,14 +165,13 @@ async def test_restore_worker_popen_forwards_host_proxy_env(
     assert "PGPASSWORD" not in captured
 
 
-def test_restore_worker_store_args_validate_against_the_backend_constructor(
+def test_store_args_validate_against_the_backend_constructor(
     tmp_path: Path,
 ) -> None:
-    from services.pitr.restore_worker import _construct_group
-    from services.pitr.store_factory import get_group_constructor_named
+    from services.pitr.store_factory import construct_store_group
 
-    gcs = _construct_group(
-        get_group_constructor_named("gcs"),
+    gcs = construct_store_group(
+        "gcs",
         {
             "project": "p",
             "bucket": "b",
@@ -180,8 +179,8 @@ def test_restore_worker_store_args_validate_against_the_backend_constructor(
         },
     )
     assert gcs.generation_pinned_object_reader is not None
-    baidu = _construct_group(
-        get_group_constructor_named("baidu"),
+    baidu = construct_store_group(
+        "baidu",
         {
             "app_root": "/apps/ava/ava-pitr",
             "prefix": "ava-pitr",
@@ -191,14 +190,11 @@ def test_restore_worker_store_args_validate_against_the_backend_constructor(
     )
     assert baidu.generation_pinned_object_reader is not None
     with pytest.raises(ValueError, match="unknown"):
-        _construct_group(
-            get_group_constructor_named("gcs"),
-            {"project": "p", "bucket": "b", "nope": "x"},
-        )
+        construct_store_group("gcs", {"project": "p", "bucket": "b", "nope": "x"})
     with pytest.raises(ValueError, match="required"):
-        _construct_group(get_group_constructor_named("gcs"), {"project": "p"})
-    cos_group = _construct_group(
-        get_group_constructor_named("cos"),
+        construct_store_group("gcs", {"project": "p"})
+    cos_group = construct_store_group(
+        "cos",
         {
             "bucket": "ava-pitr-1250000000",
             "region": "ap-guangzhou",

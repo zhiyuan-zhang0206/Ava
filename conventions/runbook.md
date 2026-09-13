@@ -786,6 +786,9 @@ reserves to force a run. A candidate remains `protected=false` until the real
 isolated replay, promotion, fingerprints, live-Postgres identity check, and
 immutable proof publication all succeed. Keep daily and pre-update logical
 dumps regardless; this boundary has no retention or remote-delete operation.
+To re-prove a protected chain at an operator-chosen target LSN, run the
+isolated drill: `ava pitr drill` (procedure:
+`.agents/skills/operating-ava-cluster/references/physical-restore-drill.md`).
 
 When an activation fails, read the durable record first:
 `$AVA_HOME/physical-backup/activation/operation.json`

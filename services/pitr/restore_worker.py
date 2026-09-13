@@ -3,18 +3,16 @@
 from __future__ import annotations
 
 import hashlib
-import inspect
 import json
 import sys
 import time
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
 from services.pitr.base_manifest import CandidateManifest
 from services.pitr.restore_postgres import IsolatedPostgresRestoreExecutor
 from services.pitr.restore_proof import RestoreSpaceBudget, prove_candidate
-from services.pitr.store_factory import PitrStoreGroup, get_group_constructor_named
+from services.pitr.store_factory import construct_store_group
 
 
 def _object(value: object) -> dict[str, Any]:
@@ -27,30 +25,6 @@ def _string_map(value: object) -> dict[str, str]:
     if not isinstance(value, dict):
         raise TypeError("restore worker store args must be an object")
     return {str(key): str(item) for key, item in cast(dict[str, object], value).items()}
-
-
-def _construct_group(
-    constructor: Callable[..., PitrStoreGroup], store_args: dict[str, str]
-) -> PitrStoreGroup:
-    """Fail-fast construction from the restricted protocol: every provided
-    argument must be accepted by the backend constructor, and every required
-    one must be present — a protocol drift is an error, never a TypeError
-    from deep inside a constructor."""
-    parameters = inspect.signature(constructor).parameters
-    unknown = set(store_args) - set(parameters)
-    if unknown:
-        raise ValueError(f"restore worker store args are unknown to the backend: {sorted(unknown)}")
-    required = {
-        name
-        for name, parameter in parameters.items()
-        if parameter.default is inspect.Parameter.empty
-        and parameter.kind
-        in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
-    }
-    missing = required - set(store_args)
-    if missing:
-        raise ValueError(f"restore worker store args lack required fields: {sorted(missing)}")
-    return constructor(**store_args)
 
 
 def run(input_path: Path, output_path: Path) -> None:
@@ -72,9 +46,7 @@ def run(input_path: Path, output_path: Path) -> None:
         raise ValueError("restore worker input fields differ from the restricted protocol")
     candidate = CandidateManifest.from_json(str(raw["candidate_json"]))
     budget = _object(raw["budget"])
-    group = _construct_group(
-        get_group_constructor_named(str(raw["backend"])), _string_map(raw["store_args"])
-    )
+    group = construct_store_group(str(raw["backend"]), _string_map(raw["store_args"]))
     protected = prove_candidate(
         candidate=candidate,
         root=Path(str(raw["root"])),
