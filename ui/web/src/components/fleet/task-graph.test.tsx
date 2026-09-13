@@ -417,7 +417,156 @@ describe("TaskGraph (graph mode)", () => {
     expect(harnessRenders).toBeLessThan(30);
   });
 
-    it("renders a static selection ring — no perpetual pulse on the selected node (task #3278)", async () => {
+  // Cold-list harness: the crossed pair mounts while the task query is still
+  // loading (an empty list), and the list lands only afterwards — the window
+  // that kept a residual 2-cycle in kanban mode (QA #6177 round 2).
+  function ColdListHarness() {
+    const [boardMounted, setBoardMounted] = useState(false);
+    const [agent, setAgent] = useState<number | null>(9);
+    const [task, setTask] = useState<number | null>(10); // task 10 belongs to 7 → crossed
+    harnessRenders += 1;
+    if (harnessRenders > 60) {
+      throw new Error("selection oscillation: harness re-rendered more than 60 times");
+    }
+    return (
+      <div>
+        <div data-testid="selection-state">{`${agent}:${task}`}</div>
+        <button type="button" onClick={() => setBoardMounted(true)}>
+          scratch-mount
+        </button>
+        {boardMounted ? (
+          <TaskGraph
+            selectedAgentId={agent}
+            onSelectAgent={setAgent}
+            selectedTaskId={task}
+            onSelectTask={setTask}
+          />
+        ) : null}
+      </div>
+    );
+  }
+
+  it("converges when a crossed pair mounts while the task list is cold (kanban, QA #6177 round 2)", async () => {
+    // The cold window used to consume the first-resolved-run seed on the empty
+    // mount pass; when the list landed, B wrote the stale task's owner in the
+    // same flush the kanban's own mount sync re-paired the task side — two
+    // crossing writes, 9:10 <-> 7:20 forever (unbounded). The seed now
+    // survives until a task resolves, and that first resolved run re-pairs a
+    // crossed task side itself (the agent-side effect above only reacts to
+    // agent changes, so a cold mount got no second chance).
+    resetMockSettings({ "display.task_graph_mode": "kanban" });
+    useTasks.mockReturnValue(ok([])); // cold: nothing loaded yet
+
+    harnessRenders = 0;
+    const view = render(<ColdListHarness />);
+    fireEvent.click(screen.getByText("scratch-mount"));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    // The list arrives while the board is already up and crossed.
+    useTasks.mockReturnValue(
+      ok([
+        task(1, { title: "root", status: "ongoing" }),
+        task(10, { title: "agent-7-work", parent_id: 1, owner: 7 }),
+        task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
+      ]),
+    );
+    view.rerender(<ColdListHarness />);
+
+    await waitFor(() => expect(screen.getByTestId("selection-state").textContent).toBe("9:20"));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(screen.getByTestId("selection-state").textContent).toBe("9:20");
+    expect(harnessRenders).toBeLessThan(30);
+  });
+
+  it("converges when a crossed pair mounts while the task list is cold (graph, QA #6177 round 2)", async () => {
+    // Graph mode has no kanban mount sync to fall back on: left to the owner
+    // sync alone, the cold mount settled at 7:10 — the OPPOSITE side of the
+    // warm-list resolution (9:20). The resolved-run re-pair makes cold and
+    // warm mounts resolve the same way.
+    resetMockSettings({ "display.task_graph_mode": "graph" });
+    useTasks.mockReturnValue(ok([])); // cold: nothing loaded yet
+
+    harnessRenders = 0;
+    const view = render(<ColdListHarness />);
+    fireEvent.click(screen.getByText("scratch-mount"));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    useTasks.mockReturnValue(
+      ok([
+        task(1, { title: "root", status: "ongoing" }),
+        task(10, { title: "agent-7-work", parent_id: 1, owner: 7 }),
+        task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
+      ]),
+    );
+    view.rerender(<ColdListHarness />);
+
+    await waitFor(() => expect(screen.getByTestId("selection-state").textContent).toBe("9:20"));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(screen.getByTestId("selection-state").textContent).toBe("9:20");
+    expect(harnessRenders).toBeLessThan(30);
+  });
+
+  it("settles after one handler writes a crossed pair in a single commit (QA #6177 boundary)", async () => {
+    // Not reachable through today's UI writers (QA #6177), but the pair must
+    // still converge: the resolved-run re-pair gives the crossed commit a
+    // single deterministic resolution instead of two warring writes.
+    resetMockSettings({ "display.task_graph_mode": "kanban" });
+    useTasks.mockReturnValue(
+      ok([
+        task(1, { title: "root", status: "ongoing" }),
+        task(10, { title: "agent-7-work", parent_id: 1, owner: 7 }),
+        task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
+      ]),
+    );
+
+    function CrossedWriteHarness() {
+      const [agent, setAgent] = useState<number | null>(null);
+      const [task, setTask] = useState<number | null>(null);
+      harnessRenders += 1;
+      if (harnessRenders > 60) {
+        throw new Error("selection oscillation: harness re-rendered more than 60 times");
+      }
+      return (
+        <div>
+          <div data-testid="selection-state">{`${agent}:${task}`}</div>
+          <button
+            type="button"
+            onClick={() => {
+              setAgent(9);
+              setTask(10);
+            }}
+          >
+            scratch-cross
+          </button>
+          <TaskGraph
+            selectedAgentId={agent}
+            onSelectAgent={setAgent}
+            selectedTaskId={task}
+            onSelectTask={setTask}
+          />
+        </div>
+      );
+    }
+
+    harnessRenders = 0;
+    render(<CrossedWriteHarness />);
+    fireEvent.click(screen.getByText("scratch-cross"));
+
+    await waitFor(() => expect(screen.getByTestId("selection-state").textContent).toBe("9:20"));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(screen.getByTestId("selection-state").textContent).toBe("9:20");
+    expect(harnessRenders).toBeLessThan(30);
+  });
+
+  it("renders a static selection ring — no perpetual pulse on the selected node (task #3278)", async () => {
     // User report: the selected item "keeps flashing". The ring used Tailwind's
     // animate-pulse (2s infinite opacity loop); selection stays marked by the
     // static dashed sky ring instead.

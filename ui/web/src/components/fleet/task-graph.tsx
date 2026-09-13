@@ -459,33 +459,44 @@ export function TaskGraph({
 
   // A task selected from outside a board click (a route jump, task #2909)
   // propagates its owner the same way a click does — the surfaces stay
-  // bidirectionally synced however the selection arrived. Two guards keep it
-  // from fighting the agent-side sync above (task #3300): it syncs ONCE per
-  // task selection (lastSyncedTaskRef); and on the first run after mount, a
-  // non-null agent selection outranks the carried-over task — everything
-  // that can be selected while this surface is unmounted (the queue's row
-  // button, a graph node) writes the agent side only, so the agent is the
-  // newer intent and the agent-side sync above re-pairs the task. Only a
-  // mount with no agent selection yet (the route jump) propagates the owner.
-  // Either way, at most one side of the pair writes per commit; letting both
+  // bidirectionally synced however the selection arrived. Guards keep it from
+  // fighting the agent-side sync above (task #3300):
+  //  - it syncs ONCE per task selection (lastSyncedTaskRef);
+  //  - the first-resolved-run seed: everything selectable while this surface
+  //    is unmounted (the queue's row button, a graph node) writes the agent
+  //    side only, so a non-null agent selection outranks the carried-over
+  //    task. The seed is consumed only when a task RESOLVES: a cold task list
+  //    means the mount pass ran against [], and consuming the seed there let
+  //    the owner sync fire the moment the list landed — crossing the pair the
+  //    kanban's mount sync had just re-paired (cold-list 2-cycle, QA #6177
+  //    round 2: 9:10 <-> 7:20 forever);
+  //  - on that first resolved run, a still-crossed task side is re-paired
+  //    right here (the agent-side effect above only reacts to agent changes,
+  //    so a cold mount never got a second chance to pick the agent's task).
+  // Either way at most one side of the pair writes per commit; letting both
   // write would let each effect's write re-trigger the other forever.
   const lastSyncedTaskRef = useRef<number | null>(null);
   const taskSyncSeededRef = useRef(false);
   useEffect(() => {
-    const firstRunAfterMount = !taskSyncSeededRef.current;
-    taskSyncSeededRef.current = true;
     if (selectedTaskId == null) return;
     if (lastSyncedTaskRef.current === selectedTaskId) return;
     const task = tasks.find((t) => t.id === selectedTaskId);
-    const mayPropagate = !firstRunAfterMount || selectedAgentId == null;
-    if (mayPropagate && task?.owner != null && task.owner !== selectedAgentId) {
-      onSelectAgent(task.owner);
-    }
     // Mark only a resolved lookup as synced: a task not in the list yet (a
     // route jump landing before the first fetch) stays pending so the next
-    // list update retries it.
-    if (task) lastSyncedTaskRef.current = selectedTaskId;
-  }, [selectedTaskId, tasks, selectedAgentId, onSelectAgent]);
+    // list update retries it, and the mount seed survives with it.
+    if (!task) return;
+    const firstResolvedTaskRun = !taskSyncSeededRef.current;
+    taskSyncSeededRef.current = true;
+    if (firstResolvedTaskRun && selectedAgentId != null) {
+      if (task.owner !== selectedAgentId) {
+        const first = tasks.find((t) => t.owner === selectedAgentId);
+        if (first) onSelectTask(first.id);
+      }
+    } else if (task.owner != null && task.owner !== selectedAgentId) {
+      onSelectAgent(task.owner);
+    }
+    lastSyncedTaskRef.current = selectedTaskId;
+  }, [selectedTaskId, tasks, selectedAgentId, onSelectAgent, onSelectTask]);
 
   // When user clicks a task, sync its owner as the selected agent (bidirectional).
   const handleSelectTask = useCallback((taskId: number | null) => {
