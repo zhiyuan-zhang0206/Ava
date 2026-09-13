@@ -91,21 +91,19 @@ capability watchdogs run it.
 
 from __future__ import annotations
 
-import contextlib
 import logging
-import os
 import time
 from dataclasses import dataclass
-from datetime import datetime
-from pathlib import Path
 from typing import Literal
 
-from ops import cluster_session, hold_recovery
+from ops import cluster_session, hold_recovery, strand_hold
 from ops.cluster import unpause_local_cluster
 from ops.controllers.base import BlockScope, ReconcileResult
+from ops.gateway_reachability import _gateway_down_seconds, record_gateway_reachability
 from shared import pause_owner, ui_update_state, updater_handoff
 from shared.cluster_lock import read_update_lease
 from shared.deploy_timing import GATEWAY_DOWN_OWNER_GRACE_S
+from shared.hold_driver import DriverLiveness
 from shared.host_deploy_state import HostDeployState
 from shared.machine import MachineRole, machine_name
 from shared.platform import LockTimeoutError
@@ -142,72 +140,10 @@ STRANDED_PAUSE_TIMEOUT_S = 120.0  # 2 min
 # alarm on states the manager still treats as ordinary.
 STRANDED_HOLD_NOTICE_S = 600.0  # 10 min
 
-# The reachability-evidence grace (value, ordering and rationale live in the
-# clock lattice — see the module-level import of `GATEWAY_DOWN_OWNER_GRACE_S`).
-_GATEWAY_DOWN_MARKER = "gateway-down-since"
 
-
-def _gateway_down_marker_path() -> Path:
-    import shared.paths
-
-    return shared.paths.run_dir() / _GATEWAY_DOWN_MARKER
-
-
-def _probe_gateway_reachable() -> bool:
-    """Whether the gateway answers its health URL at all.
-
-    Any HTTP response (even a 503 — the process is alive but degraded) counts as
-    reachable: the question is "can the gateway-side orchestration still be
-    executing", and a process that answers can be driven. Only connection errors
-    and timeouts (the event-loop freeze shape) read as unreachable."""
-    import httpx
-
-    from shared.config import settings
-
-    try:
-        httpx.get(settings.services.gateway_health_url, timeout=2.0)
-    except httpx.HTTPError:
-        return False
-    return True
-
-
-def record_gateway_reachability() -> None:
-    """Maintain the host-local gateway-down-since marker.
-
-    Called by the pause controller each round on the gateway-capability watchdog.
-    Reachable clears the marker; unreachable stamps it once (the FIRST down round
-    is the evidence's anchor — a later probe keeps the original timestamp so the
-    grace bound measures the continuous outage, not the last failed probe).
-
-    Best-effort on both sides: an unwritable run dir must not break the tick, and
-    a missing marker reads as no evidence (the conservative, lease-owns path)."""
-    path = _gateway_down_marker_path()
-    if _probe_gateway_reachable():
-        with contextlib.suppress(OSError):
-            path.unlink(missing_ok=True)
-        return
-    with contextlib.suppress(OSError):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if path.exists():
-            return
-        tmp = path.with_name(f".{_GATEWAY_DOWN_MARKER}.tmp")
-        tmp.write_text(str(time.time()))
-        os.replace(tmp, path)  # noqa: PTH105 — explicit atomic replace injection seam
-
-
-def _gateway_down_seconds() -> float | None:
-    """How long the gateway has been unreachable, or None when there is no
-    evidence (marker absent, unreadable, or a backwards clock — all read as
-    no-evidence so the lease keeps owning the pause)."""
-    path = _gateway_down_marker_path()
-    try:
-        ts = float(path.read_text().strip())
-    except (OSError, ValueError):
-        return None
-    elapsed = time.time() - ts
-    return elapsed if elapsed >= 0 else None
-
-
+# Reachability evidence lives in `ops.gateway_reachability` (split out for this
+# module's line budget, task #3270). `_gateway_down_seconds` is imported by
+# name into this namespace, which is also the seam the tests patch.
 def is_paused() -> bool:
     """Whether this host is paused or converging (R1, Task #1021 — the
     `host_deploy_state.posture` row).
@@ -414,65 +350,96 @@ def _executing_owner(
 
 @dataclass(frozen=True)
 class StrandedHoldVerdict:
-    """One round's reading of the stranded-hold question (task #3132).
+    """One round's reading of the stranded-hold question (tasks #3132/#3270).
 
     A reading, not a boolean, because the durable record is a claim that must
     never be asserted or erased on missing evidence:
 
-    - ``"stranded"`` — declare/keep: a maintenance hold past the notice bound,
-      a failed updater run under it, and nothing executing. ``detail`` is the
-      declaration reason (e.g. ``"updater exited rc=1"``).
-    - ``"clear"`` — decidably not stranded: no pause (or too young a one), no
-      maintenance hold, no failed updater run readable in this window, or a
-      live/queued owner. ``detail`` is ``""``.
-    - ``"unknown"`` — the evidence is missing THIS round: the posture row could
-      not be read, the ownership signal is an unreadable placeholder
-      (``_UNREADABLE_OWNER_READINGS``, named in ``detail``), or the updater
-      outcome could not be read. The record must be left exactly as it stands —
-      see `sync_stranded_hold_record`.
+    - ``"stranded"`` -- declare/keep: an ownerless hold that must NOT be
+      released (failed receipts, a post-stop update leg, or a legacy hold whose
+      shepherd cannot be judged). ``detail`` is the declaration reason.
+    - ``"abandoned"`` -- declare/keep AND license the bounded release: an
+      ownerless PRE-stop hold with no failed receipts whose shepherd is dead
+      (or whose update leg failed) -- exactly the state a dead ladder leaves
+      before the stop began. The controller declares it loudly now and performs
+      `resume --cancel` once the observation window passes (`ops.strand_hold`).
+    - ``"clear"`` -- decidably not stranded: no hold, too young a hold, a live
+      shepherd, a live/queued executing owner, or a post-stop hold with no
+      update evidence (an operator's own completed stop).
+    - ``"unknown"`` -- the evidence is missing THIS round: the posture row or
+      the hold journal could not be read, the ownership signal is an unreadable
+      placeholder, or the shepherd probe could not answer. The record must be
+      left exactly as it stands -- see `sync_stranded_hold_record`.
 
-    ``paused_for`` is the pause's age in seconds, or None when no anchor could
-    be read.
+    ``paused_for`` is the hold's age from its own ``acquired_at`` -- the hold,
+    not the posture row, is the maintenance state's anchor. ``driver`` is the
+    recorded shepherd's liveness this round (None when not judged);
+    ``update_armed`` says a failed updater run is on the record -- the gate
+    task #3142's bounded completion reads.
     """
 
-    kind: Literal["stranded", "clear", "unknown"]
+    kind: Literal["stranded", "abandoned", "clear", "unknown"]
     detail: str
     paused_for: float | None
+    driver: DriverLiveness | None = None
+    update_armed: bool = False
+
+
+def _failed_outcome_detail(reading: object) -> str:
+    """The failed-run wording of a readable updater outcome, or "" when unarmed.
+
+    ``unreadable`` readings and healthy runs (no outcome / declined / exited
+    rc=0) all return "" -- callers tell "unarmed" from "unreadable" through the
+    reading itself, which `stranded_hold_verdict` consumes directly.
+    """
+    from ops.updater_outcome import UpdaterOutcomeReading
+
+    if not isinstance(reading, UpdaterOutcomeReading) or reading.kind == "unreadable":
+        return ""
+    outcome = reading.outcome
+    if outcome is None or outcome.kind == "declined":
+        return ""
+    if outcome.kind == "exited" and (outcome.rc or 0) == 0:
+        return ""
+    return (
+        f"updater exited rc={outcome.rc}" if outcome.kind == "exited" else "updater died mid-flight"
+    )
 
 
 def stranded_hold_verdict(
     handoff: updater_handoff.UpdaterHandoffSnapshot | None = None,
 ) -> StrandedHoldVerdict:
-    """This round's reading of the stranded-hold question (task #3132).
+    """This round's reading of the stranded-hold question (tasks #3132/#3270).
 
-    The failure state itself: a maintenance hold — the deliberately
-    non-expiring pause a stop arms, releasable only by an explicit authorized
-    `ava start` — whose owning process is gone. Three facts together:
-    nothing executes under it (`_executing_owner` reads no live handoff,
-    session, deploy lease or orchestration), this host's own updater record
-    says the run that armed it FAILED (`exited` non-zero, or `unknown` — died
-    mid-flight; a `declined` run stopped nothing and a successful one would
-    have released the hold), and the state has outlived
-    `STRANDED_HOLD_NOTICE_S` so no in-flight transition can be misread as one.
+    An ownerless maintenance hold is judged in two layers. The EXECUTING layer
+    is unchanged: a live handoff, deploy lease, local orchestration session or
+    orchestration means someone is still working, and any unreadable reading of
+    those signals leaves the record untouched. The SHEPHERD layer is what task
+    #3270 adds: the hold carries the identity of the operator-side process that
+    took or last advanced it (`shared.hold_driver`), and once nothing executes
+    under the hold that identity decides:
 
-    Clears only on a DECIDED not-stranded reading — no pause row, too young a
-    pause, no maintenance hold, a healthy/absent updater outcome, or a real
-    owner. Missing evidence (`unknown`) is deliberately not a clear — an
-    unreadable ownership signal, or an unreadable updater outcome (task #3150):
-    it must neither erase a standing record nor invent a declaration.
+    - a live shepherd clears the round -- the session running a multi-command
+      flow, or the script driving the ladder, is the definition of "still
+      owned";
+    - a dead shepherd (or, for a hold without one, a FAILED updater run on the
+      record -- the update leg's own proof) with a pre-stop phase and no failed
+      receipts reads ``abandoned``: the releasable state;
+    - everything else ownerless reads ``stranded``: failure-carrying holds,
+      post-stop update legs, and the legacy shape (no shepherd recorded, no
+      failed leg) whose silence was the 2026-09-13 disease. A post-stop hold
+      with a dead or absent shepherd and NO update evidence is an operator's
+      own completed stop -- decidably clear, not silent.
 
-    Recovery deliberately does NOT auto-release such a hold, and this verdict
-    does not change that: it exists to make the state loud and visible
-    (`sync_stranded_hold_record`, the gateway-side alarm, the roster) instead
-    of silent and permanent. An operator's own `ava maintenance stop` produces
-    no failed updater outcome, so it never matches — deliberately held units
-    stay quiet.
+    The hold's own age from ``acquired_at`` is the notice bound: a transition
+    in flight is never misread. Missing evidence never releases: an unreadable
+    shepherd probe or an unreadable updater outcome leaves the round `unknown`
+    unless a DEAD shepherd already settles the question.
     """
-    from shared import maintenance
     from shared.host_deploy_state import read as read_host_deploy_state
 
     try:
-        state = read_host_deploy_state()
+        read_host_deploy_state()
     except Exception:
         _log.warning(
             "[ops.pause] cannot read host_deploy_state; the stranded-hold reading is "
@@ -481,36 +448,102 @@ def stranded_hold_verdict(
         return StrandedHoldVerdict(
             kind="unknown", detail="unreadable host deploy state", paused_for=None
         )
-    paused_for = _paused_age(state)
-    if paused_for is None or paused_for < STRANDED_HOLD_NOTICE_S:
-        return StrandedHoldVerdict(kind="clear", detail="", paused_for=paused_for)
-    if not maintenance.held():
+    try:
+        current = strand_hold.hold_snapshot()
+    except Exception:
+        _log.warning("[ops.pause] unreadable maintenance hold; the stranded reading is unknown")
+        return StrandedHoldVerdict(
+            kind="unknown", detail="unreadable maintenance hold", paused_for=None
+        )
+    if current is None:
+        return StrandedHoldVerdict(kind="clear", detail="", paused_for=None)
+    assert current.holder is not None and current.acquired_at is not None  # noqa: S101
+    assert current.maintenance is not None  # noqa: S101
+    paused_for = time.time() - current.acquired_at.timestamp()
+    if paused_for < STRANDED_HOLD_NOTICE_S:
         return StrandedHoldVerdict(kind="clear", detail="", paused_for=paused_for)
     owner = _executing_owner(handoff)
     if owner is not None and not _owner_reading_is_unreadable(owner):
         return StrandedHoldVerdict(kind="clear", detail="", paused_for=paused_for)
+    if owner is not None:
+        # The ownership half could not be read; the failed-evidence half is
+        # deliberately not consulted -- leaving the record untouched is the
+        # only reading that neither asserts nor erases on missing evidence.
+        return StrandedHoldVerdict(kind="unknown", detail=owner, paused_for=paused_for)
+    driver = strand_hold.driver_reading(current)
+    if driver == "alive":
+        return StrandedHoldVerdict(kind="clear", detail="", paused_for=paused_for, driver=driver)
+    if driver == "unreadable":
+        return StrandedHoldVerdict(
+            kind="unknown",
+            detail="shepherd identity is unreadable",
+            paused_for=paused_for,
+            driver=driver,
+        )
     from ops.updater_outcome import last_updater_outcome_reading
 
     reading = last_updater_outcome_reading()
-    if reading.kind == "unreadable":
+    if reading.kind == "unreadable" and driver == "missing":
         # Missing evidence is never a clear (task #3150): the record stands.
         return StrandedHoldVerdict(
-            kind="unknown", detail="updater outcome is unreadable", paused_for=paused_for
+            kind="unknown",
+            detail="updater outcome is unreadable",
+            paused_for=paused_for,
+            driver=driver,
         )
-    outcome = reading.outcome
-    if outcome is None or outcome.kind == "declined":
-        return StrandedHoldVerdict(kind="clear", detail="", paused_for=paused_for)
-    if outcome.kind == "exited" and (outcome.rc or 0) == 0:
-        return StrandedHoldVerdict(kind="clear", detail="", paused_for=paused_for)
-    if owner is not None:
-        # The failed-updater half is proven; the ownership half could not be
-        # read. Leaving the record untouched is the only reading that neither
-        # asserts nor erases anything on missing evidence.
-        return StrandedHoldVerdict(kind="unknown", detail=owner, paused_for=paused_for)
-    reason = (
-        f"updater exited rc={outcome.rc}" if outcome.kind == "exited" else "updater died mid-flight"
-    )
-    return StrandedHoldVerdict(kind="stranded", detail=reason, paused_for=paused_for)
+    failed_detail = _failed_outcome_detail(reading)
+    update_armed = bool(failed_detail)
+    phase = current.maintenance.phase
+    failures = bool(current.maintenance.failures)
+    pre_stop = phase in strand_hold.PRE_STOP_PHASES
+    if failures:
+        return StrandedHoldVerdict(
+            kind="stranded",
+            detail=failed_detail or f"failed receipts with no owner (phase {phase})",
+            paused_for=paused_for,
+            driver=driver,
+            update_armed=update_armed,
+        )
+    if driver == "dead" and pre_stop:
+        return StrandedHoldVerdict(
+            kind="abandoned",
+            detail=failed_detail or "shepherd process exited",
+            paused_for=paused_for,
+            driver=driver,
+            update_armed=update_armed,
+        )
+    if driver == "missing" and pre_stop and update_armed:
+        # The update leg's own proof: the run that armed this hold failed and
+        # nothing shepherds it. The compensating `resume --cancel` is exactly
+        # the release the standalone chain never ran.
+        return StrandedHoldVerdict(
+            kind="abandoned",
+            detail=failed_detail,
+            paused_for=paused_for,
+            driver=driver,
+            update_armed=True,
+        )
+    if update_armed:
+        reason = failed_detail
+        if not pre_stop:
+            reason = f"post-stop leg with no owner left ({failed_detail})"
+        return StrandedHoldVerdict(
+            kind="stranded",
+            detail=reason,
+            paused_for=paused_for,
+            driver=driver,
+            update_armed=True,
+        )
+    if pre_stop:
+        return StrandedHoldVerdict(
+            kind="stranded",
+            detail="no shepherd identity recorded; release stays manual",
+            paused_for=paused_for,
+            driver=driver,
+        )
+    # Post-stop, no failures, no update evidence: an operator's own completed
+    # stop (or pause) -- the state it deliberately left has no wrong to alarm.
+    return StrandedHoldVerdict(kind="clear", detail="", paused_for=paused_for, driver=driver)
 
 
 def sync_stranded_hold_record(
@@ -542,6 +575,18 @@ def sync_stranded_hold_record(
         if verdict.kind == "clear":
             clear_stranded_hold()
             return verdict
+        if verdict.kind == "abandoned":
+            if mark_stranded_hold(f"abandoned hold: {verdict.detail}"):
+                _log.error(
+                    "[ops.pause] ABANDONED HOLD declared: this host's pre-stop hold "
+                    "(%.0fs; %s) has no shepherding process left and nothing executes "
+                    "under it -- the automatic `resume --cancel` release runs once the "
+                    "hold outlives the %.0f-minute window, unless a shepherd returns.",
+                    verdict.paused_for or 0.0,
+                    verdict.detail,
+                    strand_hold.AUTO_RELEASE_S / 60.0,
+                )
+            return verdict
         if mark_stranded_hold(verdict.detail):
             _log.error(
                 "[ops.pause] STRANDED HOLD declared: this host has been held for %.0fs "
@@ -566,83 +611,14 @@ def maybe_spawn_stranded_recovery(
 ) -> None:
     """Spend this episode's one bounded attempt at completing the hold (task #3142).
 
-    The narrow exception to "an incomplete stop is never resumed automatically":
-    when nothing is executing under an update leg's hold, the host may complete
-    that leg's own sequence — the same stop / start / resume an operator runs by
-    hand (`conventions/graceful-maintenance.md`, "Recovering a stuck maintenance
-    operation"). Everything about it is bounded and reversible:
-
-    - **Narrow** — only a `stranded` verdict (which already carries the *failed
-      updater leg* evidence), only a post-stop phase, and never in the gateway
-      capability's watchdog round: the gateway watchdog does not initiate a
-      completion, while a unit that also serves `agent-runner` completes the
-      same hold through that capability's round (the drill's macmini is such a
-      unit). `role` is the capability of the ROUND being run
-      (`services/watchdog/daemon.py` runs one per capability), not a statement
-      about the machine.
-    - **Bounded** — one attempt per episode: the budget is a compare-and-set in
-      the host's durable record (`reserve_stranded_recovery`), so two racing
-      deciders cannot both spawn a leg and a spent budget is never refunded.
-    - **Observable, and switchable** — the spawn is logged, the outcome lands in
-      the record, and `settings.gateway.stranded_hold_recovery` turns it off.
-
-    A spawn that fails still spends the attempt: the episode's budget is what
-    bounds the mechanism's exposure, not the backend's success.
+    The policy surface lives in `ops.hold_recovery.maybe_complete_stranded_hold`
+    (split out for this module's line budget, task #3270); this wrapper owns the
+    gate: only a `stranded` verdict whose record carries a FAILED updater leg --
+    `update_armed` -- may complete anything automatically.
     """
-    if verdict is None or verdict.kind != "stranded":
+    if verdict is None or verdict.kind != "stranded" or not verdict.update_armed:
         return
-    from shared.config import settings
-
-    if not settings.gateway.stranded_hold_recovery:
-        return
-    if role == "gateway":
-        return
-    held = _held_generation()
-    if held is None:
-        return
-    holder, acquired_at, phase = held
-    if phase not in hold_recovery.RECOVERABLE_PHASES:
-        return
-    from shared.host_deploy_state import finish_stranded_recovery, reserve_stranded_recovery
-
-    attempt = reserve_stranded_recovery(
-        max_attempts=hold_recovery.MAX_ATTEMPTS,
-        cooldown_s=hold_recovery.COOLDOWN_S,
-        note=f"attempt reserved (phase={phase})",
-    )
-    if attempt is None:
-        return  # budget spent, inside the cooldown, or the record just cleared
-    try:
-        log_path = hold_recovery.spawn_hold_recovery(holder=holder, acquired_at=acquired_at)
-    except Exception as exc:
-        _log.error(
-            "[ops.pause] stranded-hold completion session could not start "
-            "(the attempt is spent): %r",
-            exc,
-        )
-        try:
-            finish_stranded_recovery(f"spawn failed: {exc!r}"[:500])
-        except Exception:
-            _log.warning("[ops.pause] could not record the failed spawn", exc_info=True)
-        return
-    _log.warning(
-        "[ops.pause] stranded hold: bounded completion attempt #%d started "
-        "(phase=%s holder=%s) — log %s",
-        attempt,
-        phase,
-        holder,
-        log_path,
-    )
-
-
-def _held_generation() -> tuple[str, datetime, str] | None:
-    """This host's `(holder, acquired_at, phase)`, or None when no hold stands."""
-    current = pause_owner.read()
-    if current.status != "paused" or current.maintenance is None:
-        return None
-    if current.holder is None or current.acquired_at is None:
-        return None
-    return current.holder, current.acquired_at, current.maintenance.phase
+    hold_recovery.maybe_complete_stranded_hold(role=role)
 
 
 def pause_owner_verdict(
@@ -794,5 +770,7 @@ class PauseController:
         # stands untouched.
         verdict = sync_stranded_hold_record()
         maybe_spawn_stranded_recovery(verdict, role=role)
+        if verdict is not None and verdict.kind == "abandoned":
+            strand_hold.maybe_release_abandoned_hold(paused_for=verdict.paused_for)
         _log.info("[ops.pause] host paused (posture), skipping tick")
         return ReconcileResult(dimension=self.name, blocks=BlockScope.ALL, detail="paused")

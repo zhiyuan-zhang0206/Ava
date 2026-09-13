@@ -26,6 +26,7 @@ from pathlib import Path
 from ops import cluster_session
 from ops.cluster_session import _HOLD_RECOVER_SERVICE, _REPO_ROOT, _native_arg
 from shared.cluster import session_name
+from shared.machine import MachineRole
 from shared.session_env import venv_activation_prefix
 
 _log = logging.getLogger(__name__)
@@ -96,6 +97,84 @@ def spawn_hold_recovery(*, holder: str, acquired_at: datetime) -> Path:
         log_path,
     )
     return log_path
+
+
+def maybe_complete_stranded_hold(*, role: MachineRole) -> None:
+    """Spend this episode's one bounded attempt at completing the hold (task #3142).
+
+    Moved here from `ops.controllers.stranded_pause` (task #3270) so the policy
+    and the mechanism live together; the caller owns the verdict gate -- only a
+    `stranded` verdict carrying a *failed updater leg* reaches this function.
+
+    - **Narrow** — only a post-stop phase, and never in the gateway capability's
+      watchdog round: the gateway watchdog does not initiate a completion, while
+      a unit that also serves `agent-runner` completes the same hold through
+      that capability's round. `role` is the capability of the ROUND being run
+      (`services/watchdog/daemon.py` runs one per capability), not a statement
+      about the machine.
+    - **Bounded** — one attempt per episode: the budget is a compare-and-set in
+      the host's durable record (`reserve_stranded_recovery`), so two racing
+      deciders cannot both spawn a leg and a spent budget is never refunded.
+    - **Observable, and switchable** — the spawn is logged, the outcome lands in
+      the record, and `settings.gateway.stranded_hold_recovery` turns it off.
+
+    A spawn that fails still spends the attempt: the episode's budget is what
+    bounds the mechanism's exposure, not the backend's success.
+    """
+    from shared.config import settings
+
+    if not settings.gateway.stranded_hold_recovery:
+        return
+    if role == "gateway":
+        return
+    held = _held_generation()
+    if held is None:
+        return
+    holder, acquired_at, phase = held
+    if phase not in RECOVERABLE_PHASES:
+        return
+    from shared.host_deploy_state import finish_stranded_recovery, reserve_stranded_recovery
+
+    attempt = reserve_stranded_recovery(
+        max_attempts=MAX_ATTEMPTS,
+        cooldown_s=COOLDOWN_S,
+        note=f"attempt reserved (phase={phase})",
+    )
+    if attempt is None:
+        return  # budget spent, inside the cooldown, or the record just cleared
+    try:
+        log_path = spawn_hold_recovery(holder=holder, acquired_at=acquired_at)
+    except Exception as exc:
+        _log.error(
+            "[hold-recovery] stranded-hold completion session could not start "
+            "(the attempt is spent): %r",
+            exc,
+        )
+        try:
+            finish_stranded_recovery(f"spawn failed: {exc!r}"[:500])
+        except Exception:
+            _log.warning("[hold-recovery] could not record the failed spawn", exc_info=True)
+        return
+    _log.warning(
+        "[hold-recovery] stranded hold: bounded completion attempt #%d started "
+        "(phase=%s holder=%s) — log %s",
+        attempt,
+        phase,
+        holder,
+        log_path,
+    )
+
+
+def _held_generation() -> tuple[str, datetime, str] | None:
+    """This host's `(holder, acquired_at, phase)`, or None when no hold stands."""
+    from shared import pause_owner
+
+    current = pause_owner.read()
+    if current.status != "paused" or current.maintenance is None:
+        return None
+    if current.holder is None or current.acquired_at is None:
+        return None
+    return current.holder, current.acquired_at, current.maintenance.phase
 
 
 def _new_recovery_log() -> Path:

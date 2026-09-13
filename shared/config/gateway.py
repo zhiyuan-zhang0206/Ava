@@ -185,6 +185,28 @@ class GatewaySettings(EnvSettings):
         },
     )
 
+    abandoned_hold_auto_release: bool = Field(
+        default=True,
+        alias="AVA_ABANDONED_HOLD_AUTO_RELEASE",
+        description=(
+            "Bounded automatic release of an abandoned pre-stop maintenance hold "
+            "(task #3270). When a pre-stop hold past the notice bound has no "
+            "shepherding process left and nothing is executing under it, and no "
+            "continuation failure blocks `resume --cancel`, the pause controller "
+            "may perform that release itself once the hold has survived a 30-minute "
+            "observation window; the declaration and the release are both loud "
+            "(ops log + stranded-hold record). False disables the automatic release "
+            "-- the loud declaration stays; the release is manual. Read by the "
+            "watchdogs on every tick; a change takes effect at their next restart."
+        ),
+        json_schema_extra={
+            "restart_required": "ops",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     schedule_stall_timeout_seconds: float = Field(
         default=1200.0,
         alias="AVA_SCHEDULE_STALL_TIMEOUT_SECONDS",

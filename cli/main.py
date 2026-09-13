@@ -404,12 +404,17 @@ def main(argv: list[str] | None = None) -> int:
 
         return run_boot(args_in[1:])
 
-    # Maintenance verbs build settings-lite: no gateway fetch, so they still work
-    # while the gateway is down (a runner's stop / status / watchdog-probe are its
-    # recovery path). Every other verb — start, converge, update, trace-ship — and
-    # every daemon/agent process fetches per its own role at Settings build.
-    # shared.session_env does not forward this var, so processes a lite verb spawns
-    # never inherit the opt-out.
+    # Maintenance verbs build settings-lite only for `status` (journal-only) and
+    # `stop-data-plane` (a gateway-role verb, where the fetch is local anyway).
+    # `maintenance stop` deliberately does NOT: its verify-drained and
+    # host-identity legs dial this unit's real data plane, so on a pure runner a
+    # lite stop could only ever hit the never-dialed placeholder DB URL
+    # (UnanchoredHomeError — the 2026-09-13 drill stall, issue #2346). With the
+    # gateway down such a stop now fails at the fetch with the actionable
+    # BootstrapFetchError — the same contract `restart` took above. Every other
+    # verb — start, converge, update, trace-ship — and every daemon/agent process
+    # fetches per its own role at Settings build. shared.session_env does not
+    # forward this var, so processes a lite verb spawns never inherit the opt-out.
     from cli.preflight import unit_already_stopped
 
     if (
@@ -420,7 +425,6 @@ def main(argv: list[str] | None = None) -> int:
         os.environ.setdefault("AVA_CONFIG_FETCH", "skip")
     if args_in[:2] in (
         ["maintenance", "status"],
-        ["maintenance", "stop"],
         ["maintenance", "stop-data-plane"],
     ):
         os.environ.setdefault("AVA_CONFIG_FETCH", "skip")

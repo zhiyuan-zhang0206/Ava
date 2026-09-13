@@ -15,6 +15,7 @@ from uuid import UUID, uuid4
 from ops.agent_pause_probe import host_identity, host_running
 from shared import maintenance, maintenance_cohort, pause_owner
 from shared.db import connect, publish_inbound_wake
+from shared.hold_driver import HoldDriver
 from shared.machine import machine_name, machine_role
 from shared.maintenance_state import MaintenanceHold
 
@@ -32,12 +33,18 @@ def _wake(hold: MaintenanceHold) -> None:
         publish_inbound_wake(agent, "maintenance")
 
 
-def _prepare(holder: str, at: datetime) -> None:
+def _prepare(holder: str, at: datetime, *, driver: HoldDriver | None = None) -> None:
+    """Publish the hold and enqueue restarts.
+
+    `driver` is the shepherding identity of an operator-side entry (task
+    #3270); daemon-driven pauses pass None and keep the handoff/outcome as
+    their ownership evidence.
+    """
     roles = machine_role()
     identity = host_identity() if "agent-runner" in roles and host_running() else None
     # The actual running daemon, not the checked-out source, must support the
     # admission fence. First deployment of this protocol needs separate proof.
-    pause_owner.begin_maintenance(holder, at)
+    pause_owner.begin_maintenance(holder, at, driver=driver)
     if "agent-runner" not in roles:
         with connect() as conn:
             row = conn.execute(
@@ -48,7 +55,9 @@ def _prepare(holder: str, at: datetime) -> None:
             raise RuntimeError("unit has native agents but no running hosted owner")
         current = _hold(holder, at)
         if current.phase == "preparing":
-            pause_owner.change_maintenance(holder, at, current, MaintenanceHold("draining"))
+            pause_owner.change_maintenance(
+                holder, at, current, MaintenanceHold("draining"), refresh_driver=driver is not None
+            )
         return
     with connect() as conn:
         hold = maintenance_cohort.prepare(
@@ -58,6 +67,7 @@ def _prepare(holder: str, at: datetime) -> None:
             holder=holder,
             acquired_at=at,
             host_absent=identity is None,
+            driver=driver,
         )
     if identity is not None and host_identity().owner != identity.owner:
         raise RuntimeError("agent-host changed boot during preparation; hold retained")
@@ -193,14 +203,23 @@ def _stall_line(
     return line
 
 
-def pause_agents(timeout: float = PAUSE_TIMEOUT_SECONDS) -> None:
-    """Idempotently drain this unit, leaving persistent terminals untouched."""
+def pause_agents(
+    timeout: float = PAUSE_TIMEOUT_SECONDS, *, driver: HoldDriver | None = None
+) -> None:
+    """Idempotently drain this unit, leaving persistent terminals untouched.
+
+    `driver` is minted by operator-side callers (`ava stop` / `ava pause`);
+    daemon-driven callers (`spawn_update`, the update quiesce) pass None so a
+    long-lived caller process never masks a dead ladder shepherd.
+    """
     current = pause_owner.read()
     if current.status == "invalid":
         raise RuntimeError("cannot pause with an unreadable local pause owner")
     if current.status == "paused":
         assert current.holder is not None and current.acquired_at is not None  # noqa: S101
         holder, at = current.holder, current.acquired_at
+        if driver is not None:
+            pause_owner.refresh_driver(holder, at, driver=driver)
     else:
         holder, at = f"local-pause:{machine_name()}:{os.getpid()}:{uuid4()}", datetime.now(UTC)
     if (
@@ -208,7 +227,7 @@ def pause_agents(timeout: float = PAUSE_TIMEOUT_SECONDS) -> None:
         or current.maintenance is None
         or current.maintenance.phase == "preparing"
     ):
-        _prepare(holder, at)
+        _prepare(holder, at, driver=driver)
     hold = _hold(holder, at)
     if hold.phase in ("preparing", "draining", "drained"):
         _drain(holder, at, timeout)
