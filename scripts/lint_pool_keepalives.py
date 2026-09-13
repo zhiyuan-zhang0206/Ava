@@ -1,7 +1,9 @@
 """Forbid building a psycopg connection pool without TCP keepalives.
 
 Run: `.venv/bin/python scripts/lint_pool_keepalives.py [path ...]` (defaults to
-scanning the whole repo). Also run automatically via pre-commit hook.
+scanning the whole repo; an explicit path that does not exist is an error
+(stderr + exit 1) rather than a silent no-op). Also run automatically via
+pre-commit hook.
 
 ## Why
 
@@ -185,6 +187,11 @@ def _iter_py_files(roots: list[Path]) -> list[Path]:
 
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
+    if argv:
+        missing = [arg for arg in argv if not Path(arg).exists()]
+        if missing:
+            print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
+            return 1
     # argv non-empty = pre-commit passed the changed-file list; empty = full scan.
     targets = [Path(a).resolve() for a in argv] if argv else [_REPO_ROOT / d for d in _SCAN_DIRS]
 
