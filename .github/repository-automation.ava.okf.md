@@ -21,6 +21,13 @@ residual — a deliberately cancelled run is re-run at most once, since GitHub
 exposes no cancel reason to distinguish it. A still-red run returns to normal
 maintainer triage.
 
+The trigger whitelist is per-workflow. `Inactive runtime preparation` is covered
+too, narrowed to its known flake family: exactly one failing job —
+`cold-offline (ubuntu-24.04)` — whose only failed step is `Real offline prepare,
+retained interpreter and failure isolation` (the offline-prepare watchdog, six
+runs 2026-09-11 through 2026-09-13; root cause tracked in task #3281). Any other
+failure shape on either workflow is left to manual triage (task #3285).
+
 ## `workflows/update-model-pricing.yml`
 
 A daily schedule (plus manual dispatch) runs the strict provider adapters in

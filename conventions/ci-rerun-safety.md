@@ -3,7 +3,12 @@
 Automatic failed-job retries require an open PR whose current head and base/head
 repository identities match the completed run. Push retries require the current
 branch tip. Missing identity or API errors do not authorize a retry. Only the
-first failed attempt is retried, and cancelled runs are not retried.
+first failed attempt is retried; a cap-cancelled run (`cancelled`) follows the
+same single-attempt policy as a failure, never a second rerun (task #3239). The
+trigger whitelist is per-workflow: besides CI, only `Inactive runtime
+preparation` is retried, and only when its failure shape is the known
+cold-offline family (task #3285); every other workflow or shape is left to
+manual triage.
 
 The guard is not atomic with GitHub's rerun API. CI therefore partitions native
 concurrency by ref **and immutable tested revision (`github.sha`)**. For PRs this

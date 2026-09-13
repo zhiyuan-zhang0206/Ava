@@ -2,6 +2,8 @@
 
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -14,12 +16,19 @@ REPO = "owner/repository"
 SHA = "a" * 40
 OTHER_SHA = "b" * 40
 
+FAMILY_JOB = "cold-offline (ubuntu-24.04)"
+FAMILY_STEP = "Real offline prepare, retained interpreter and failure isolation"
+
+
+def retry_script() -> str:
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci-rerun.yml").read_text())
+    return workflow["jobs"]["rerun-failed-jobs"]["steps"][0]["run"]
+
 
 def run_retry(
     tmp_path: Path, **overrides: str
 ) -> tuple[subprocess.CompletedProcess[str], list[list[str]]]:
-    workflow = yaml.safe_load((ROOT / ".github/workflows/ci-rerun.yml").read_text())
-    script = workflow["jobs"]["rerun-failed-jobs"]["steps"][0]["run"]
+    script = retry_script()
     mock = tmp_path / "gh"
     mock.write_text(
         f"#!{sys.executable}\n"
@@ -31,6 +40,7 @@ def run_retry(
         "endpoint = args[1]\n"
         "if '/pulls/' in endpoint: print(os.environ['PR_RESPONSE'])\n"
         "elif '/commits/' in endpoint: print(os.environ['CURRENT_SHA'])\n"
+        "elif '/jobs' in endpoint: print(os.environ['JOBS_RESPONSE'])\n"
         "else: print(os.environ['NEWEST_RUN'])\n"
     )
     mock.chmod(0o700)
@@ -44,6 +54,7 @@ def run_retry(
         "RUN_ATTEMPT": "1",
         "RUN_CONCLUSION": "failure",
         "RUN_EVENT": "pull_request",
+        "WORKFLOW_NAME": "CI",
         "HEAD_SHA": SHA,
         "HEAD_BRANCH": "feature",
         "HEAD_REPO": REPO,
@@ -51,6 +62,7 @@ def run_retry(
         "PR_RESPONSE": f"open\t{SHA}\t{REPO}\t{REPO}",
         "CURRENT_SHA": SHA,
         "NEWEST_RUN": "100",
+        "JOBS_RESPONSE": "match",
         "CALL_LOG": str(call_log),
         "API_FAIL": "0",
         **overrides,
@@ -141,3 +153,159 @@ def test_cross_sha_guard_race_cannot_share_native_concurrency_group() -> None:
     # This remains different if PR synchronization happens after the GET guard.
     assert old != new
     assert old == group.replace("${{ github.ref }}", ref).replace(expression, SHA)
+
+
+def test_runtime_prepare_known_family_reruns_once(tmp_path: Path) -> None:
+    """The second whitelisted workflow retries only after the jobs probe
+    confirms the known cold-offline family (task #3285)."""
+    result, calls = run_retry(
+        tmp_path,
+        WORKFLOW_NAME="Inactive runtime preparation",
+        JOBS_RESPONSE="match",
+    )
+    assert result.returncode == 0, result.stderr
+    posts = [call for call in calls if "POST" in call]
+    assert posts == [
+        ["api", "--method", "POST", f"repos/{REPO}/actions/runs/100/rerun-failed-jobs"]
+    ]
+    probes = [call for call in calls if any("/jobs" in arg for arg in call)]
+    assert len(probes) == 1
+    assert "--jq" in probes[0]
+
+
+def test_ci_flow_never_queries_job_conclusions(tmp_path: Path) -> None:
+    result, calls = run_retry(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert any("POST" in call for call in calls)
+    assert not any("/jobs" in arg for call in calls for arg in call)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"JOBS_RESPONSE": "mismatch"},
+        {"RUN_ATTEMPT": "2"},
+        {"RUN_CONCLUSION": "skipped"},
+        {"NEWEST_RUN": "101"},
+        {"PR_RESPONSE": f"closed\t{SHA}\t{REPO}\t{REPO}"},
+    ],
+)
+def test_runtime_prepare_unconfirmed_never_posts(tmp_path: Path, overrides: dict[str, str]) -> None:
+    result, calls = run_retry(tmp_path, WORKFLOW_NAME="Inactive runtime preparation", **overrides)
+    assert result.returncode == 0, result.stderr
+    assert not any("POST" in call for call in calls)
+
+
+def test_trigger_whitelist_names_both_workflows() -> None:
+    # YAML 1.1 parses the bare `on` key as boolean True, not the string "on".
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci-rerun.yml").read_text())
+    assert workflow[True]["workflow_run"]["workflows"] == [
+        "CI",
+        "Inactive runtime preparation",
+    ]
+    env = workflow["jobs"]["rerun-failed-jobs"]["env"]
+    assert env["WORKFLOW_NAME"] == "${{ github.event.workflow_run.name }}"
+
+
+def test_runtime_prepare_family_names_stay_coupled() -> None:
+    """The family gate hard-codes the job and step names below; renaming
+    either side of the coupling must fail here, not silently refuse retries."""
+    prepare = yaml.safe_load((ROOT / ".github/workflows/runtime-prepare.yml").read_text())
+    job = prepare["jobs"]["cold-offline"]
+    ubuntu = [entry for entry in job["strategy"]["matrix"]["os"] if entry.startswith("ubuntu")]
+    assert ubuntu == ["ubuntu-24.04"]
+    steps = [step["name"] for step in job["steps"] if "name" in step]
+    assert FAMILY_STEP in steps
+
+    script = retry_script()
+    assert f"cold-offline ({ubuntu[0]})" in script
+    assert FAMILY_STEP in script
+
+
+def test_family_expression_matches_only_the_known_shape() -> None:
+    """Mock gh feeds the jobs probe a pre-decided verdict; this evaluates the
+    real jq expression against job shapes the GitHub API returns."""
+    jq = shutil.which("jq")
+    if jq is None:
+        pytest.skip("jq is required to evaluate the family expression")
+    found = re.search(r"--jq '(\[\.jobs[^']*)'", retry_script())
+    assert found, "family jq expression not found in the retry script"
+
+    def job(name: str, conclusion: str | None, steps: dict[str, str | None]) -> dict[str, object]:
+        return {
+            "name": name,
+            "conclusion": conclusion,
+            "steps": [
+                {"name": step_name, "conclusion": step_conclusion}
+                for step_name, step_conclusion in steps.items()
+            ],
+        }
+
+    healthy = job("cold-offline (macos-14)", "success", {FAMILY_STEP: "success"})
+    known = job(
+        FAMILY_JOB,
+        "failure",
+        {"Checkout": "success", FAMILY_STEP: "failure", "Upload artifacts": "skipped"},
+    )
+    cases = [
+        ("known shape", "match", [known, healthy]),
+        (
+            "watchdog step reports timed_out",
+            "match",
+            [
+                job(FAMILY_JOB, "failure", {"Checkout": "success", FAMILY_STEP: "timed_out"}),
+                healthy,
+            ],
+        ),
+        (
+            "second failing step",
+            "mismatch",
+            [
+                job(
+                    FAMILY_JOB,
+                    "failure",
+                    {"Checkout": "success", FAMILY_STEP: "failure", "Upload": "failure"},
+                ),
+                healthy,
+            ],
+        ),
+        (
+            "different failing step",
+            "mismatch",
+            [job(FAMILY_JOB, "failure", {"Checkout": "success", "Type-check": "failure"}), healthy],
+        ),
+        (
+            "second failing job",
+            "mismatch",
+            [known, job("cold-offline (macos-14)", "failure", {FAMILY_STEP: "failure"})],
+        ),
+        (
+            "cancelled step",
+            "mismatch",
+            [
+                job(FAMILY_JOB, "failure", {"Checkout": "success", FAMILY_STEP: "cancelled"}),
+                healthy,
+            ],
+        ),
+        (
+            "fully green run",
+            "mismatch",
+            [healthy, job(FAMILY_JOB, "success", {FAMILY_STEP: "success"})],
+        ),
+        (
+            "still-running job",
+            "mismatch",
+            [job(FAMILY_JOB, None, {FAMILY_STEP: "success"}), healthy],
+        ),
+    ]
+    for label, expected, jobs in cases:
+        payload = {"jobs": jobs}
+        result = subprocess.run(  # noqa: S603 — local jq, checked-in expression
+            [jq, "-r", found.group(1)],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        )
+        assert result.stdout.strip() == expected, f"{label}: {payload}"
