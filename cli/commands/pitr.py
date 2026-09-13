@@ -25,7 +25,165 @@ from shared.paths import ava_home
 from shared.pg_tools import pg_tool
 
 
+def cmd_pitr_retention_status() -> int:
+    from services.pitr.retention_gate import (
+        CarrierState,
+        display_armed,
+        iso_timestamp,
+        journal_line,
+        journal_tail,
+        plan_line,
+        read_daemon_record,
+        read_plan,
+    )
+
+    carriers = CarrierState.read()
+    plan = read_plan()
+    daemon = read_daemon_record()
+    print(f"retention gate @ {ava_home()}")
+    print(
+        f"  carriers: armed={display_armed(armed=carriers.armed)} "
+        f"approved_digest={carriers.approved_digest or 'unset'}"
+    )
+    if plan is None:
+        print("  plan:     none on disk yet")
+    else:
+        print(f"  plan:     {plan_line(plan)}")
+        print(f"            updated {iso_timestamp(plan.mtime)}")
+    if daemon is None:
+        print("  daemon:   unreachable - showing file state only")
+    else:
+        totals = daemon.get("delete_totals")
+        lines = [
+            f"  daemon:   delete_state={daemon.get('delete_state')} "
+            f"armed_at={iso_timestamp(daemon.get('armed_at'))}",
+            f"            stable_ticks={daemon.get('digest_stable_ticks')}",
+        ]
+        if isinstance(totals, dict):
+            lines.append(
+                f"            totals: ticks={totals.get('ticks')} deleted={totals.get('deleted')} "
+                f"absent={totals.get('absent')} failed={totals.get('failed')}"
+            )
+        detail = daemon.get("delete_error") or daemon.get("detail")
+        if detail:
+            lines.append(f"            detail: {detail}")
+        print("\n".join(lines))
+    for record in journal_tail():
+        print(f"  journal:  {journal_line(record)}")
+    return 0
+
+
+def cmd_pitr_retention_arm(*, digest: str, confirm: bool) -> int:
+    from services.pitr.retention_gate import (
+        CarrierState,
+        append_gate_record,
+        plan_line,
+        read_plan,
+        write_arm_carriers,
+    )
+
+    plan = read_plan()
+    if plan is None:
+        print(
+            "no dry-run plan on disk yet; the scheduler writes one each tick - "
+            "wait for the next tick, then re-run",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"plan: {plan_line(plan)}")
+    if plan.blocked_reasons:
+        print(
+            "refusing to arm: the plan carries blockers; eligibility is forced empty",
+            file=sys.stderr,
+        )
+        return 1
+    if plan.digest != digest:
+        print(
+            f"refusing to arm: --digest {digest} does not match the plan on disk "
+            f"({plan.digest}); read `retention status` and approve the current digest",
+            file=sys.stderr,
+        )
+        return 1
+    if not confirm:
+        print("preview only: re-run with --confirm to write the arm carriers")
+        return 0
+    before = CarrierState.read()
+    append_gate_record("arm", phase="intent", plan_digest=digest, before=before)
+    write_arm_carriers(digest)
+    after = CarrierState.read()
+    append_gate_record("arm", phase="applied", plan_digest=digest, after=after)
+    print(
+        "armed: the scheduler re-reads the carriers on its next tick; deletion still "
+        "requires the digest to hold for consecutive ticks before the first execution"
+    )
+    return 0
+
+
+def cmd_pitr_retention_disable(*, confirm: bool) -> int:
+    from services.pitr.retention_gate import (
+        CarrierState,
+        append_gate_record,
+        clear_arm_carriers,
+        display_armed,
+    )
+
+    before = CarrierState.read()
+    if not confirm:
+        print(
+            f"preview only: would clear armed={display_armed(armed=before.armed)} "
+            f"approved_digest={before.approved_digest or 'unset'}; re-run with --confirm"
+        )
+        return 0
+    append_gate_record("disable", phase="intent", plan_digest=before.approved_digest, before=before)
+    clear_arm_carriers()
+    after = CarrierState.read()
+    append_gate_record("disable", phase="applied", plan_digest=None, after=after)
+    print("disabled: carriers cleared; the scheduler returns to dry-run on its next tick")
+    return 0
+
+
+def cmd_pitr_retention_run_once(*, confirm: bool) -> int:
+    """One deletion pass on the operator's explicit command (design 3.5)."""
+    from services.pitr.retention_gate import CarrierState
+
+    carriers = CarrierState.read()
+    if not carriers.armed or carriers.approved_digest is None:
+        print(
+            "retention deletion is not armed; run `ava pitr retention arm` first",
+            file=sys.stderr,
+        )
+        return 1
+    if not confirm:
+        print(
+            "preview only: would recompute the plan, re-compare the approved digest, "
+            "and run one bounded pass through the executor; re-run with --confirm"
+        )
+        return 0
+    from services.pitr import retention_scheduler
+
+    try:
+        summary = retention_scheduler.run_operator_once(settings.physical_backup)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    deleted = summary.deleted + summary.sidecars_deleted + summary.orphans_deleted
+    absent = summary.absent + summary.sidecars_absent + summary.orphans_absent
+    failed = (
+        summary.failed + summary.verify_failed + summary.sidecars_failed + summary.orphans_failed
+    )
+    print(
+        f"operator pass complete: deleted={deleted} absent={absent} "
+        f"failed={failed} skipped={summary.skipped}"
+    )
+    if summary.refused_reason:
+        print(f"refused: {summary.refused_reason}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def cmd_pitr_retention_inspect() -> int:
+    from services.pitr.retention_gate import CarrierState
+
     plan = inspect_dry_run_plan(ava_home() / "physical-backup")
     print(
         json.dumps(
@@ -40,7 +198,7 @@ def cmd_pitr_retention_inspect() -> int:
                 "eligible_objects": len(plan.eligible),
                 "retained_bytes": plan.retained_bytes,
                 "eligible_bytes": plan.eligible_bytes,
-                "delete_enabled": False,
+                "delete_enabled": CarrierState.read().armed is True,
             },
             sort_keys=True,
         )

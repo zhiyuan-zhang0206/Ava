@@ -291,6 +291,66 @@ def _build_verify_absent(config: PhysicalBackupSettings) -> Callable[[str], bool
     return poll
 
 
+def run_operator_once(config: PhysicalBackupSettings) -> RetentionExecutionSummary:
+    """Execute one retention pass on the operator's explicit command (3.5).
+
+    The operator-present first run: the live carriers must say armed with an
+    approved digest, the plan is recomputed and its digest compared right
+    before execution (the same double-run guard as a daemon first tick), and
+    the pass goes through the same bounded executor as the daemon inline path.
+    Raises ValueError on any doubt, before deleting anything.
+    """
+    from services.pitr.retention_gate import CarrierState, append_gate_record
+
+    root = ava_home() / "physical-backup"
+    journal = RetentionJournal(root / "retention-journal")
+    carriers = CarrierState.read()
+    digest = carriers.approved_digest
+    if not carriers.armed or digest is None:
+        raise ValueError("retention deletion is not armed; run `ava pitr retention arm` first")
+    append_gate_record("run-once", phase="intent", plan_digest=digest, before=carriers)
+    recheck = write_dry_run_plan(
+        root,
+        retain_chains=config.pitr_retained_weekly_chains,
+        inventory_reader=get_store_group().retention_inventory_reader(),
+    )
+    if recheck.blocked or recheck.digest != digest:
+        reason = (
+            "the fresh plan carries blockers; eligibility is forced empty"
+            if recheck.blocked
+            else "the fresh plan digest differs from the approved digest"
+        )
+        append_gate_record(
+            "run-once", phase="refused", plan_digest=recheck.digest, extra={"reason": reason}
+        )
+        raise ValueError(f"refusing the operator pass: {reason}")
+    summary = execute_retention_plan(
+        inspect_dry_run_plan(root),
+        expected_digest=digest,
+        delete_store=get_store_group().retention_delete_store(),
+        verify_absent=_build_verify_absent(config),
+        remote_total_bytes=recheck.remote_bytes,
+        journal=journal,
+    )
+    append_gate_record(
+        "run-once",
+        phase="result",
+        plan_digest=digest,
+        extra={
+            "refused_reason": summary.refused_reason,
+            "deleted": summary.deleted + summary.sidecars_deleted + summary.orphans_deleted,
+            "absent": summary.absent + summary.sidecars_absent + summary.orphans_absent,
+            "failed": (
+                summary.failed
+                + summary.verify_failed
+                + summary.sidecars_failed
+                + summary.orphans_failed
+            ),
+        },
+    )
+    return summary
+
+
 def health_component(state: RetentionDryRunState) -> dict[str, object]:
     plan = state.plan
     delete = state.delete

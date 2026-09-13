@@ -561,6 +561,24 @@ def _probe_home(url: str, *, timeout_s: float = _PROBE_TIMEOUT_S) -> DaemonProbe
     return DaemonProbe.up(f"home {expected_home}")
 
 
+def read_health_payload(
+    name: str, *, timeout_s: float = _PROBE_TIMEOUT_S
+) -> dict[str, object] | None:
+    """The parsed `/healthz` body of THIS unit's daemon ``name``, or None.
+
+    The read-only sibling of ``probe_home`` for status surfaces: same ``home``
+    identity contract -- a payload answered by another unit's process on a
+    shared port is rejected, never rendered -- but it returns the body for
+    display, and None covers both "nothing answered" and "not ours".
+    """
+    payload = _health_payload(f"http://127.0.0.1:{health_port(name)}/healthz", timeout_s)
+    if isinstance(payload, DaemonProbe):
+        return None
+    if payload.get("home") != str(ava_home()):
+        return None
+    return payload
+
+
 def probe_daemon(
     name: str, url: str, *, pidfile: Path, timeout_s: float = _PROBE_TIMEOUT_S
 ) -> DaemonProbe:

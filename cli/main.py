@@ -120,7 +120,11 @@ from cli.parsers.packages import (
 )
 from cli.parsers.pitr import (
     _h_pitr_drill,
+    _h_pitr_retention_arm,
+    _h_pitr_retention_disable,
     _h_pitr_retention_inspect,
+    _h_pitr_retention_run_once,
+    _h_pitr_retention_status,
     _h_pitr_snapshot_archive,
     _h_pitr_snapshot_retire,
     _h_pitr_snapshot_verify,
@@ -207,7 +211,11 @@ __all__ = [
     "_h_packages_status",
     "_h_pause",
     "_h_pitr_drill",
+    "_h_pitr_retention_arm",
+    "_h_pitr_retention_disable",
     "_h_pitr_retention_inspect",
+    "_h_pitr_retention_run_once",
+    "_h_pitr_retention_status",
     "_h_pitr_snapshot_archive",
     "_h_pitr_snapshot_retire",
     "_h_pitr_snapshot_verify",

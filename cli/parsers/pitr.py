@@ -24,6 +24,30 @@ def _h_pitr_retention_inspect(_args: argparse.Namespace) -> int:
     return cmd_pitr_retention_inspect()
 
 
+def _h_pitr_retention_arm(args: argparse.Namespace) -> int:
+    from cli.commands import cmd_pitr_retention_arm
+
+    return cmd_pitr_retention_arm(digest=args.digest, confirm=args.confirm)
+
+
+def _h_pitr_retention_disable(args: argparse.Namespace) -> int:
+    from cli.commands import cmd_pitr_retention_disable
+
+    return cmd_pitr_retention_disable(confirm=args.confirm)
+
+
+def _h_pitr_retention_status(_args: argparse.Namespace) -> int:
+    from cli.commands import cmd_pitr_retention_status
+
+    return cmd_pitr_retention_status()
+
+
+def _h_pitr_retention_run_once(args: argparse.Namespace) -> int:
+    from cli.commands import cmd_pitr_retention_run_once
+
+    return cmd_pitr_retention_run_once(confirm=args.confirm)
+
+
 def _h_pitr_snapshot_archive(args: argparse.Namespace) -> int:
     from cli.commands import cmd_pitr_snapshot_archive
 
@@ -45,7 +69,11 @@ def _h_pitr_snapshot_retire(args: argparse.Namespace) -> int:
 def _add_pitr_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     from cli.main import (
         _h_pitr_drill,
+        _h_pitr_retention_arm,
+        _h_pitr_retention_disable,
         _h_pitr_retention_inspect,
+        _h_pitr_retention_run_once,
+        _h_pitr_retention_status,
         _h_pitr_snapshot_archive,
         _h_pitr_snapshot_retire,
         _h_pitr_snapshot_verify,
@@ -93,10 +121,51 @@ def _add_pitr_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
         help="bound for postmaster start and replay to the target",
     )
     drill.set_defaults(func=_h_pitr_drill)
-    retention = pitr_sub.add_parser("retention", help="inspect retention dry-run plans")
+    retention = pitr_sub.add_parser(
+        "retention", help="inspect the retention dry-run plan and operate its deletion gate"
+    )
     retention_sub = retention.add_subparsers(dest="retention_cmd", required=True)
     inspect = retention_sub.add_parser("inspect", help="show the latest local dry-run plan")
     inspect.set_defaults(func=_h_pitr_retention_inspect)
+    arm = retention_sub.add_parser(
+        "arm",
+        help="approve one plan digest and write the arm carriers (the only gate opener)",
+    )
+    arm.add_argument(
+        "--digest",
+        metavar="SHA256",
+        required=True,
+        help="plan digest to approve; read it from `retention status`",
+    )
+    arm.add_argument(
+        "--confirm",
+        action="store_true",
+        help="write the carriers; without it the command only previews",
+    )
+    arm.set_defaults(func=_h_pitr_retention_arm)
+    disable = retention_sub.add_parser(
+        "disable", help="clear the arm carriers; back to the default-off dry-run"
+    )
+    disable.add_argument(
+        "--confirm",
+        action="store_true",
+        help="clear the carriers; without it the command only previews",
+    )
+    disable.set_defaults(func=_h_pitr_retention_disable)
+    gate_status = retention_sub.add_parser(
+        "status", help="show carriers, the latest plan, and the deletion state machine"
+    )
+    gate_status.set_defaults(func=_h_pitr_retention_status)
+    run_once = retention_sub.add_parser(
+        "run-once",
+        help="operator-present first deletion pass through the bounded executor",
+    )
+    run_once.add_argument(
+        "--confirm",
+        action="store_true",
+        help="execute the pass; without it the command only validates",
+    )
+    run_once.set_defaults(func=_h_pitr_retention_run_once)
     snapshot = pitr_sub.add_parser("snapshot", help="archive finite migration rollback snapshots")
     snapshot_sub = snapshot.add_subparsers(dest="snapshot_cmd", required=True)
     for name, handler, help_text in (
