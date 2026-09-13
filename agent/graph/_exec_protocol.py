@@ -9,8 +9,8 @@ logs it shares the home with):
 - request `<uuid>.json`: the code, the agent id, the timeout, and the typed
   state snapshot.
 - result  `<uuid>.json`: the outcome kind, the plugin state-update delta, the
-  security findings, attachments, and — for a crash — the child-formatted
-  traceback text.
+  security findings, attachments, the run's SDK-call tally, and — for a crash —
+  the child-formatted traceback text.
 
 On Windows the parent also creates a short-lived `<uuid>.job-ready.json` gate
 after attaching the child to its Job Object. The child cannot enter user code
@@ -109,7 +109,8 @@ class ResultPayload:
     decoded); `state_update_error` is set when the agent tampered with the
     slot (left it a non-dict) — the parent then raises the same TypeError the
     old in-process path raised. `findings` and `attachments` are plain JSON
-    dicts drained from child-local buffers."""
+    dicts drained from child-local buffers; `sdk_calls` is the run's real
+    SDK-call tally."""
 
     kind: ResultKind
     lifecycle_type: str | None = None
@@ -125,6 +126,11 @@ class ResultPayload:
     state_update_error: str | None = None
     findings: list[dict[str, Any]] | None = None
     attachments: list[dict[str, Any]] | None = None
+    # The run's SDK-call tally in `shared.sdk_telemetry.tally_entries` shape
+    # (`[{"method": ..., "count": N}, ...]`); the exec node attaches it to the
+    # exec_output ToolMessage as `additional_kwargs["sdk_calls"]`. None = the
+    # code never ran (boot crash) — "ran, zero calls" is `[]`, a real zero.
+    sdk_calls: list[dict[str, Any]] | None = None
 
 
 def make_request_path(exec_dir: Path, agent_id: int | None) -> Path:
@@ -246,6 +252,7 @@ def write_result(path: Path, payload: ResultPayload) -> None:
         "state_update_error": payload.state_update_error,
         "findings": payload.findings,
         "attachments": payload.attachments,
+        "sdk_calls": payload.sdk_calls,
     }
     if payload.state_update is not None:
         tag, blob = dumps_typed(payload.state_update)
@@ -287,6 +294,7 @@ def read_result(path: Path) -> ResultPayload:
         state_update_error=envelope.get("state_update_error"),
         findings=envelope.get("findings"),
         attachments=cast("list[dict[str, Any]] | None", envelope.get("attachments")),
+        sdk_calls=cast("list[dict[str, Any]] | None", envelope.get("sdk_calls")),
     )
     _log_envelope_transfer("result", "read", path, started_at)
     return payload
