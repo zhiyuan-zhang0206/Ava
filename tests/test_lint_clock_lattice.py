@@ -168,11 +168,17 @@ def test_explicit_outside_repo_and_relative_targets_are_scanned(
     assert "bad.py" in capsys.readouterr().err
 
 
-def test_directory_with_non_utf8_member_is_skipped(scan_tmp) -> None:
+def test_directory_with_non_utf8_member_is_skipped(
+    scan_tmp, capsys: pytest.CaptureFixture[str]
+) -> None:
     """A non-UTF-8 *.py member of an explicit directory is skipped like any
-    unreadable entry — the scan must not crash on it."""
+    unreadable entry — the scan must not crash on it, and a violating sibling
+    file is still reported."""
     pkg = _lint._REPO_ROOT / "pkg"
     pkg.mkdir()
     (pkg / "ok.py").write_text("value = 1\n", encoding="utf-8")
     (pkg / "bad_utf8.py").write_bytes(b"\xff\xfe\x00bad")
     assert _lint.main([str(pkg)]) == 0
+    (pkg / "viol.py").write_text("_MY_STALL_TIMEOUT_S = 5\n", encoding="utf-8")
+    assert _lint.main([str(pkg)]) == 1
+    assert "_MY_STALL_TIMEOUT_S" in capsys.readouterr().err

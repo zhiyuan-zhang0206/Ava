@@ -390,7 +390,11 @@ def setup_env_keys(src: str, fixture_name: str) -> tuple[frozenset[str], frozens
 
 def _scan_file(path: Path, rel_path: str) -> list[tuple[int, str]]:
     has_init = (path.parent / "__init__.py").is_file()
-    return findings_in_source(path.read_text(encoding="utf-8"), rel_path, has_package_init=has_init)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []  # unreadable entry (e.g. a dangling symlink) or binary content
+    return findings_in_source(text, rel_path, has_package_init=has_init)
 
 
 def _iter_py_files(roots: list[Path]) -> list[Path]:

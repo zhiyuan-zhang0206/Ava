@@ -361,6 +361,22 @@ def test_setup_env_keys_matches_the_real_fixtures_body() -> None:
     assert literal == declared
 
 
+def test_directory_with_unreadable_member_is_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unreadable *.py member under tests/ (non-UTF-8 / dangling symlink)
+    must be skipped like any unreadable entry — the scan must not crash on it."""
+    monkeypatch.setattr(_lint, "_REPO_ROOT", tmp_path)
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "ok.py").write_text("value = 1\n", encoding="utf-8")
+    (tests / "bad_utf8.py").write_bytes(b"\xff\xfe\x00bad")
+    (tests / "dangling.py").symlink_to(tests / "missing.py")
+    assert _lint.main([str(tests / "bad_utf8.py")]) == 0
+    assert _lint.main([str(tests)]) == 0
+    assert _lint.main([]) == 0
+
+
 def test_explicit_missing_target_is_an_error(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

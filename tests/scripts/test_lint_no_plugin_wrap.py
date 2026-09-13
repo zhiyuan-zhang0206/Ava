@@ -13,6 +13,21 @@ import pytest
 from scripts import lint_no_plugin_wrap as gate
 
 
+def test_directory_with_unreadable_member_is_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unreadable *.py member under plugins/ (non-UTF-8 / dangling symlink)
+    must be skipped like any unreadable entry — the scan must not crash on it."""
+    monkeypatch.setattr(gate, "_REPO_ROOT", tmp_path)
+    plugins = tmp_path / "plugins"
+    plugins.mkdir()
+    (plugins / "ok.py").write_text("value = 1\n", encoding="utf-8")
+    (plugins / "bad_utf8.py").write_bytes(b"\xff\xfe\x00bad")
+    (plugins / "dangling.py").symlink_to(plugins / "missing.py")
+    assert gate.main([str(plugins / "bad_utf8.py")]) == 0
+    assert gate.main([]) == 0
+
+
 def test_explicit_missing_target_is_an_error(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

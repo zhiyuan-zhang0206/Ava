@@ -546,19 +546,47 @@ def test_out_of_repo_file_and_directory_targets_run(
     assert _lint.main([str(outside)]) == 0
 
 
-def test_directory_with_non_utf8_test_member_is_skipped(scratch) -> None:
+def test_directory_with_non_utf8_test_member_is_skipped(
+    scratch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """A non-UTF-8 test member of an explicit directory is skipped like any
-    unreadable entry — the scan must not crash on it."""
+    unreadable entry — the scan must not crash on it, and a violating sibling
+    test file is still reported."""
     root, _ = scratch
     pkg = root / "pkg"
     pkg.mkdir()
     (pkg / "test_bad.py").write_bytes(b"\xff\xfe\x00bad")
     assert _lint.main([str(pkg)]) == 0
+    (pkg / "test_viol.py").write_text('day = "2026-09-06"\n', encoding="utf-8")
+    assert _lint.main([str(pkg)]) == 1
+    assert "time-bomb fixture date" in capsys.readouterr().err
 
 
-def test_non_utf8_module_in_scan_dir_is_skipped(scratch) -> None:
-    """A non-UTF-8 module inside the scanned tree must not crash the index build."""
+def test_non_utf8_module_in_scan_dir_is_skipped(
+    scratch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A non-UTF-8 module inside the scanned tree must not crash the index
+    build — and a violating sibling module is still reported."""
     root, _ = scratch
     (root / "shared" / "bad_utf8.py").write_bytes(b"\xff\xfe\x00bad")
     (root / "shared" / "clean.py").write_text("value = 1\n", encoding="utf-8")
     assert _lint.main([]) == 0
+    _write(root, "shared/loki_index_labels.py", FIXED_FAMILY)
+    _write(
+        root,
+        "services/events_maintenance.py",
+        """
+        from shared.loki_index_labels import split_index_label_window
+
+
+        def compute_rollup(*, now_utc):
+            day = now_utc.date()
+            return _aggregate(day)
+
+
+        def _aggregate(day):
+            return split_index_label_window(day, day)
+        """,
+    )
+    assert _lint.main([]) == 1
+    assert "compute_rollup" in capsys.readouterr().err

@@ -154,7 +154,10 @@ def _type_checking_violations(tree: ast.Module) -> list[int]:
 
 def _scan_file(path: Path, rel_path: str) -> list[tuple[int, str, str]]:
     """Return [(lineno, message, severity), ...]; severity is "error" | "note"."""
-    text = path.read_text(encoding="utf-8")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []  # unreadable entry (e.g. a dangling symlink) or binary content
     out: list[tuple[int, str, str]] = []
 
     tree = ast.parse(text, filename=rel_path)

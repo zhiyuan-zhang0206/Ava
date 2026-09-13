@@ -51,7 +51,10 @@ must scan rather than crash:
   passes absolute paths).
 - **Out-of-repo targets are scanned.** An existing target outside the repository
   is scanned under its absolute path — its members are never dropped by the
-  repo-relative prefix computation. Directory targets enumerate their members
+  repo-relative prefix computation. Scope-anchored scripts
+  (`lint_code_structure` / `lint_fixture_scope` / `lint_no_plugin_wrap`) keep
+  their own scope filter: a target or member outside it is skipped silently
+  (rc 0). Directory targets enumerate their members
   (`lint_turn_scoped_config` takes `.py` files only: a directory argument scans
   nothing); an unreadable member (a dangling `*.py` symlink, non-UTF-8 content)
   is skipped like any unreadable file. One index caveat: `lint_time_bomb`
