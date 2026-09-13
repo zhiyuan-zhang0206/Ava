@@ -34,10 +34,11 @@ Usage as CLI:
     with the monitor contract — 0 green, 1 not green (or timed out), 3
     persistent gh/network errors, 4 Trunk queue submission failed.
     `--merge` implies `--wait`
-    and submits the PR to Trunk once green. `--force` (with --wait/--merge)
-    concludes green when GitHub-limbo runs — queued, zero jobs, aged >= 10 min
-    (task #3275) — are the only obstacle; noisy by design, never a blanket
-    bypass. `--require-fresh-base` turns the
+    and submits the PR to Trunk once green. `--force` (with --wait/--merge) is
+    the operator escape hatch: after the named GitHub-limbo runs (queued, zero
+    jobs, aged >= 10 min — task #3275) have been inspected, it concludes green
+    when they are the ONLY obstacle; noisy by design, never a blanket bypass.
+    `--require-fresh-base` turns the
     advisory base-staleness warning (main advanced past the PR's base) into a
     refusal, so the operator rebases instead of paying an in-queue re-test. `--queue` (or `CI_QUEUE`) selects
     the Trunk queue; `--priority` maps the submission priority, which requires
@@ -1640,8 +1641,9 @@ def _wait_for_verdict(
     infinite loop this was built to eliminate (2026-08-02, PR #1243).
 
     GitHub-limbo runs (task #3275) are named loudly as soon as they are seen
-    and again at the deadline; `force` concludes green anyway, but only when
-    the named limbo runs are the sole obstacle (`_only_limbo_blocks`).
+    and again at the deadline; `force` is the operator escape hatch — it
+    concludes green anyway, but only when the named limbo runs are the sole
+    obstacle (`_only_limbo_blocks`).
     """
     consecutive_errors = 0
     no_checks_reported = False
@@ -1765,9 +1767,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--force",
         action="store_true",
-        help="with --wait/--merge: conclude green when GitHub-limbo runs (queued, "
-        "zero jobs, aged >= 10m — task #3275) are the ONLY obstacle; real pending, "
-        "failed or unreadable evidence still blocks",
+        help="with --wait/--merge: operator escape hatch — conclude green when the "
+        "named GitHub-limbo runs (queued, zero jobs, aged >= 10m — task #3275) have "
+        "been inspected and are the ONLY obstacle; real pending, failed or "
+        "unreadable evidence still blocks",
     )
     p.add_argument(
         "--merge",
