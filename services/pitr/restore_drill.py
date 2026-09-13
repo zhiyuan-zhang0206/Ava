@@ -460,7 +460,10 @@ def _residue_scan(scratch: Path, port: int, pgdata: Path) -> dict[str, Any]:
     line may quote.
     """
 
-    root = f"{scratch.resolve()}{os.sep}"
+    # Match both the path as passed and its resolved form: process argv
+    # carries the operator's verbatim path, and a symlinked scratch (on
+    # macOS ``/tmp`` -> ``/private/tmp``) resolves to a different prefix.
+    roots = (f"{scratch}{os.sep}", f"{scratch.resolve()}{os.sep}")
     ignored = {os.getpid()}
     with suppress(psutil.Error):
         ignored.update(process.pid for process in psutil.Process().parents())
@@ -474,7 +477,7 @@ def _residue_scan(scratch: Path, port: int, pgdata: Path) -> dict[str, Any]:
             cmdline = [str(part) for part in cast("list[object]", raw_cmdline)]
             if not cmdline or not _is_postgres_executable(cmdline[0]):
                 continue
-            if any(part.startswith(root) for part in cmdline):
+            if any(part.startswith(root) for part in cmdline for root in roots):
                 processes.append(" ".join(cmdline))
     listening = False
     with socket.socket() as probe:

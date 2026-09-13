@@ -386,6 +386,34 @@ def test_residue_scan_ignores_its_own_invocation(
     assert result["pid_file_present"] is False
 
 
+def test_residue_scan_matches_a_symlinked_scratch_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The matched prefix must cover the path form that argv actually carries.
+
+    QA on PR #2358 noted the gate compared only ``scratch.resolve()`` while the
+    sandbox postmaster's argv shows the path as passed; a symlinked scratch
+    (macOS ``/tmp`` -> ``/private/tmp``) would have let a surviving process
+    slip the gate silently. Both forms now match.
+    """
+    real_root = tmp_path / "real-root"
+    real_root.mkdir()
+    scratch = tmp_path / "scratch-link"
+    scratch.symlink_to(real_root, target_is_directory=True)
+    pgdata = scratch / "sandbox" / "data"
+    rows = [
+        _FakeScanProcess(990005, ["/usr/lib/postgresql/17/bin/postgres", "-D", f"{pgdata}"]),
+    ]
+
+    def fake_process_iter(*args: object, **kwargs: object) -> Iterator[_FakeScanProcess]:
+        return iter(rows)
+
+    monkeypatch.setattr(restore_drill.psutil, "process_iter", fake_process_iter)
+    result = restore_drill._residue_scan(scratch, 1, pgdata)
+
+    assert result["processes"] == [f"/usr/lib/postgresql/17/bin/postgres -D {pgdata}"]
+
+
 def test_acceptance_failures_cover_the_criteria_set(tmp_path: Path) -> None:
     request = _request(tmp_path)
     failures = restore_drill._acceptance_failures(_evidence(request))
