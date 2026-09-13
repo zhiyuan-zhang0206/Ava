@@ -181,3 +181,154 @@ def test_alert_exit_stays_2_when_seen_runs_vanish_without_test_filter(
     assert ds.alert_exit([], counts) == 2
     rendered = ds.render([], Path("d.jsonl"), 1, counts)
     assert "ALERT — 0 runs collected" in rendered
+
+
+def test_render_compacts_oversized_bad_list_when_report_is_persisted(daily_scan: Any) -> None:
+    """A bad list over the stdout budget (the runner delivers only the output
+    tail) collapses to counter lines once the full report is on disk, so the
+    trailing summary + pointer always survive in the delivered tail."""
+    ds = daily_scan
+    records = [
+        _record(
+            "fumbled", agent_id=i, task_prompt=f"long task {i} " + "x" * 140, corrections=["fix"]
+        )
+        for i in range(1, 21)
+    ]
+    out = ds.render(records, Path("d.jsonl"), 1, report_path=Path("d.report.txt"), compact_bad=True)
+    assert "(compact; details in report)" in out
+    assert "| task:" not in out
+    assert "  #1 fumbled c1" in out
+    assert "full report: d.report.txt" in out
+    assert len(out) < 2000
+
+
+def test_render_keeps_rich_bad_lines_within_budget(daily_scan: Any) -> None:
+    """A small bad list stays rich even under compact_bad: compaction is a
+    fallback for oversized lists only."""
+    ds = daily_scan
+    records = [
+        _record("fumbled", agent_id=1, task_prompt="short task"),
+        _record("fumbled", agent_id=2, task_prompt="another task"),
+        _record("failed", agent_id=3, task_prompt="third task"),
+    ]
+    out = ds.render(records, Path("d.jsonl"), 1, report_path=Path("d.report.txt"), compact_bad=True)
+    assert "(compact" not in out
+    assert "| task: short task" in out
+    assert "full report: d.report.txt" in out
+
+
+def test_render_appends_summary_and_report_pointer_last(daily_scan: Any) -> None:
+    """The closing two lines carry the window summary and the persisted
+    report path — the part tail truncation must keep."""
+    ds = daily_scan
+    records = [
+        _record("ok", agent_id=1),
+        _record("fumbled", agent_id=2, corrections=["a", "b"], peer_feedback=["p"]),
+        _record("failed", agent_id=3, exec_failed=2, breached=True),
+    ]
+    out = ds.render(records, Path("d.jsonl"), 1, report_path=Path("d.report.txt"))
+    lines = out.splitlines()
+    assert lines[-2] == (
+        "summary: 3 runs (ok 1 / fumbled 1 / failed 1) | corrections 2 | peer 1 "
+        "| breached 1 | exec-fail runs 1"
+    )
+    assert lines[-1] == "full report: d.report.txt"
+
+
+def test_render_defaults_unchanged(daily_scan: Any) -> None:
+    """No kwargs keeps the pre-existing contract: no summary, no pointer, no
+    compaction even for an oversized bad list."""
+    ds = daily_scan
+    records = [
+        _record("fumbled", agent_id=i, task_prompt=f"long task {i} " + "x" * 140)
+        for i in range(1, 21)
+    ]
+    out = ds.render(records, Path("d.jsonl"), 1)
+    assert "summary:" not in out
+    assert "full report:" not in out
+    assert "(compact" not in out
+    assert "| task:" in out
+
+
+def test_render_never_compacts_without_report_path(daily_scan: Any) -> None:
+    """Compacting without a stored report would drop the only copy of the
+    task text, so the gate is report_path — compact_bad alone is not enough."""
+    ds = daily_scan
+    records = [
+        _record("fumbled", agent_id=i, task_prompt=f"long task {i} " + "x" * 140)
+        for i in range(1, 21)
+    ]
+    out = ds.render(records, Path("d.jsonl"), 1, compact_bad=True)
+    assert "(compact" not in out
+    assert "| task:" in out
+
+
+def test_main_persists_report_and_prints_pointer(
+    daily_scan: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """main() writes the rich report beside the dataset and prints the compact
+    stdout view ending in the pointer line."""
+    ds = daily_scan
+    records = [
+        _record("fumbled", agent_id=1, task_prompt="t" * 200, corrections=["a"]),
+        _record("ok", agent_id=2),
+    ]
+    dataset = tmp_path / "daily.jsonl"
+
+    def _fake_scan(days: int, include_test: bool = False) -> tuple[list[Any], Path, None]:
+        assert days == 1
+        assert include_test is False
+        return records, dataset, None
+
+    monkeypatch.setattr(ds, "scan", _fake_scan)
+    monkeypatch.setattr(sys, "argv", ["daily_scan.py"])
+
+    with pytest.raises(SystemExit) as excinfo:
+        ds.main()
+
+    assert excinfo.value.code == 2
+    report = tmp_path / "daily.report.txt"
+    # line 0 is the wall-clock header; the rest of the report must equal the
+    # rich render
+    assert (
+        report.read_text(encoding="utf-8").splitlines()[1:]
+        == ds.render(records, dataset, 1).splitlines()[1:]
+    )
+    out = capsys.readouterr().out
+    assert f"full report: {report}" in out
+
+
+def test_main_degrades_to_rich_output_when_report_unwritable(
+    daily_scan: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A failed report write must not compact stdout: the rich lines are then
+    the only copy of the details."""
+    ds = daily_scan
+    records = [
+        _record("fumbled", agent_id=i, task_prompt=f"long task {i} " + "x" * 140)
+        for i in range(1, 21)
+    ]
+    dataset = tmp_path / "daily.jsonl"
+    (tmp_path / "daily.report.txt").mkdir()  # write_text() raises OSError
+
+    def _fake_scan(days: int, include_test: bool = False) -> tuple[list[Any], Path, None]:
+        assert days == 1
+        assert include_test is False
+        return records, dataset, None
+
+    monkeypatch.setattr(ds, "scan", _fake_scan)
+    monkeypatch.setattr(sys, "argv", ["daily_scan.py"])
+
+    with pytest.raises(SystemExit):
+        ds.main()
+
+    captured = capsys.readouterr()
+    assert "could not write full report" in captured.err
+    assert "full report: " not in captured.out
+    assert "| task:" in captured.out
