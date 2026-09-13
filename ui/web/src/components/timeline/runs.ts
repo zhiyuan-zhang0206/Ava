@@ -136,19 +136,14 @@ export interface TurnSummary {
   readonly execMs: number;
   // SDK calls aggregated across the turn's `agent_code` items, by method name,
   // descending by count. Read directly off each item's backend-populated
-  // `sdk_calls` (shared/timeline.py: extract_sdk_calls, an AST parse — zero
-  // false positives from string literals / comments). This aggregation does
-  // NOT go through the per-block chip's `summarizeCode` helper: that
-  // function's regex fallback (for the rare case the backend field is
-  // absent, e.g. streaming or a syntax error) is appropriate for a single
-  // expanded block but would be wrong here — a committed item can carry a
-  // genuinely empty `sdk_calls: []` (AST parsed fine, found zero calls), and
-  // routing an empty array through summarizeCode would regex-scan the
-  // payload text anyway, surfacing a phantom method from a comment/string
-  // like `# see ava.files.read(...)` in a header the user may never expand
-  // to check. So: `it.sdk_calls` present (even `[]`) is trusted as-is;
-  // absent (no committed field yet) contributes nothing rather than falling
-  // back to a text scan — this aggregation performs zero regex extraction.
+  // `sdk_calls` — the call tally recorded by the run that executed the code
+  // and projected onto the item. This aggregation renders ONLY recorded
+  // calls: `it.sdk_calls` present (even `[]`) is trusted as-is; absent (no
+  // committed field yet, e.g. streaming) contributes nothing. No text
+  // scanning, here or in the per-block chip (`summarizeCode`): scanning the
+  // payload could surface a phantom method from a comment or string like
+  // `# see ava.files.read(...)` in a header the user may never expand to
+  // check.
   // How long the agent actually WORKED in this turn: thinkingMs + codeMs +
   // execMs. Not wall-clock across the turn — a turn is a maximal run of
   // secondary items, so it can span a restart marker or a wake-up and the idle
