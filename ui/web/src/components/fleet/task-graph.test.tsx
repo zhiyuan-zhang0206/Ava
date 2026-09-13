@@ -7,6 +7,7 @@
 // useTasks is mocked so the view is fed a fixed task list.
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { TaskRow } from "@/lib/types";
@@ -285,7 +286,138 @@ describe("TaskGraph (graph mode)", () => {
     expect(onSelectAgent).not.toHaveBeenCalled();
   });
 
-  it("renders a static selection ring — no perpetual pulse on the selected node (task #3278)", async () => {
+  // Stateful harness mirroring fleet-view's wiring: the component owns the
+  // selection state and passes its setters down, so an effect write can
+  // chain into the other effect (the recursion under test, task #3300).
+  // The external buttons stand in for the queue rows, which write only the
+  // agent (NoticeListRow's onClick calls onSelectAgent directly).
+  let harnessRenders = 0;
+  function SelectionHarness() {
+    const [agent, setAgent] = useState<number | null>(null);
+    const [task, setTask] = useState<number | null>(null);
+    harnessRenders += 1;
+    if (harnessRenders > 60) {
+      throw new Error("selection oscillation: harness re-rendered more than 60 times");
+    }
+    return (
+      <div>
+        <div data-testid="selection-state">{`${agent}:${task}`}</div>
+        <button type="button" onClick={() => setAgent(9)}>
+          external-select-agent-9
+        </button>
+        <TaskGraph
+          selectedAgentId={agent}
+          onSelectAgent={setAgent}
+          selectedTaskId={task}
+          onSelectTask={setTask}
+        />
+      </div>
+    );
+  }
+
+  it("settles on a crossed selection instead of oscillating between two cards (task #3300)", async () => {
+    // User report: the selection "keeps switching focus between two cards".
+    // Two sync effects used to undo each other forever: A (agent change →
+    // select the agent's first task) and B (task change → write back the
+    // task's owner). Every write of one re-triggered the other, so a crossed
+    // state — agent 9 selected while a task of agent 7 is selected, which is
+    // exactly what clicking a queue row of another agent produces — never
+    // converged. B now syncs once per task selection (lastSyncedTaskRef).
+    resetMockSettings({ "display.task_graph_mode": "kanban" });
+    useTasks.mockReturnValue(
+      ok([
+        task(1, { title: "root", status: "ongoing" }),
+        task(10, { title: "agent-7-work", parent_id: 1, owner: 7 }),
+        task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
+      ]),
+    );
+    harnessRenders = 0;
+    render(<SelectionHarness />);
+
+    await waitFor(() => expect(screen.getAllByText(/#20/).length).toBeGreaterThan(0), { timeout: 4000 });
+
+    // 1) Queue row of agent 9: external agent-only selection → board follows.
+    fireEvent.click(screen.getByText("external-select-agent-9"));
+    await waitFor(() => expect(screen.getByTestId("selection-state").textContent).toBe("9:20"));
+
+    // 2) Click agent 7's card: a consistent (agent, task) pair.
+    fireEvent.click(screen.getByText(/#10/));
+    await waitFor(() => expect(screen.getByTestId("selection-state").textContent).toBe("7:10"));
+
+    // 3) Re-select agent 9 externally: crossed again. Without the guard the
+    //    state bounces 7:20 ⇄ 9:10 forever (each effect undoing the other).
+    fireEvent.click(screen.getByText("external-select-agent-9"));
+
+    await waitFor(() => expect(screen.getByTestId("selection-state").textContent).toBe("9:20"));
+    // Let any runaway chain surface, then hold the claim: still settled.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(screen.getByTestId("selection-state").textContent).toBe("9:20");
+    expect(harnessRenders).toBeLessThan(30);
+    // The settled highlight is the solid selected card; group tint stays on
+    // the selected agent's other cards.
+    const solidCard = screen.getByText(/#20/).closest('[role="button"]');
+    expect(solidCard?.className).toContain("border-sky-400");
+    expect(solidCard?.className).not.toContain("border-sky-400/40");
+  });
+
+  it("converges when mounted with a crossed selection (the Graph-tab swap path, task #3300)", async () => {
+    // QA #6177 counterexample: the selection pair persists in FleetView while
+    // the left panel unmounts TaskGraph (Graph view swap / mobile tab /
+    // breakpoint flip), an agent-only write lands meanwhile (a queue row), and
+    // the surface remounts already crossed. A carried-over task is stale by
+    // definition — the agent-side selection is the newer intent — so the
+    // mount must resolve toward the agent side instead of re-propagating the
+    // stale task's owner, or A and B keep undoing each other forever.
+    resetMockSettings({ "display.task_graph_mode": "kanban" });
+    useTasks.mockReturnValue(
+      ok([
+        task(1, { title: "root", status: "ongoing" }),
+        task(10, { title: "agent-7-work", parent_id: 1, owner: 7 }),
+        task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
+      ]),
+    );
+
+    function CrossedMountHarness() {
+      const [boardMounted, setBoardMounted] = useState(false);
+      const [agent, setAgent] = useState<number | null>(9);
+      const [task, setTask] = useState<number | null>(10); // task 10 belongs to 7 → crossed
+      harnessRenders += 1;
+      if (harnessRenders > 60) {
+        throw new Error("selection oscillation: harness re-rendered more than 60 times");
+      }
+      return (
+        <div>
+          <div data-testid="selection-state">{`${agent}:${task}`}</div>
+          <button type="button" onClick={() => setBoardMounted(true)}>
+            scratch-mount
+          </button>
+          {boardMounted ? (
+            <TaskGraph
+              selectedAgentId={agent}
+              onSelectAgent={setAgent}
+              selectedTaskId={task}
+              onSelectTask={setTask}
+            />
+          ) : null}
+        </div>
+      );
+    }
+
+    harnessRenders = 0;
+    render(<CrossedMountHarness />);
+    fireEvent.click(screen.getByText("scratch-mount"));
+
+    await waitFor(() => expect(screen.getByTestId("selection-state").textContent).toBe("9:20"));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(screen.getByTestId("selection-state").textContent).toBe("9:20");
+    expect(harnessRenders).toBeLessThan(30);
+  });
+
+    it("renders a static selection ring — no perpetual pulse on the selected node (task #3278)", async () => {
     // User report: the selected item "keeps flashing". The ring used Tailwind's
     // animate-pulse (2s infinite opacity loop); selection stays marked by the
     // static dashed sky ring instead.

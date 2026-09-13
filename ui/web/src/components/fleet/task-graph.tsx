@@ -21,7 +21,7 @@
 import { CheckCheck, EyeOff } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 
 import { WindowSelect, type WindowOption } from "@/components/window-select";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
@@ -459,13 +459,32 @@ export function TaskGraph({
 
   // A task selected from outside a board click (a route jump, task #2909)
   // propagates its owner the same way a click does — the surfaces stay
-  // bidirectionally synced however the selection arrived.
+  // bidirectionally synced however the selection arrived. Two guards keep it
+  // from fighting the agent-side sync above (task #3300): it syncs ONCE per
+  // task selection (lastSyncedTaskRef); and on the first run after mount, a
+  // non-null agent selection outranks the carried-over task — everything
+  // that can be selected while this surface is unmounted (the queue's row
+  // button, a graph node) writes the agent side only, so the agent is the
+  // newer intent and the agent-side sync above re-pairs the task. Only a
+  // mount with no agent selection yet (the route jump) propagates the owner.
+  // Either way, at most one side of the pair writes per commit; letting both
+  // write would let each effect's write re-trigger the other forever.
+  const lastSyncedTaskRef = useRef<number | null>(null);
+  const taskSyncSeededRef = useRef(false);
   useEffect(() => {
+    const firstRunAfterMount = !taskSyncSeededRef.current;
+    taskSyncSeededRef.current = true;
     if (selectedTaskId == null) return;
+    if (lastSyncedTaskRef.current === selectedTaskId) return;
     const task = tasks.find((t) => t.id === selectedTaskId);
-    if (task?.owner != null && task.owner !== selectedAgentId) {
+    const mayPropagate = !firstRunAfterMount || selectedAgentId == null;
+    if (mayPropagate && task?.owner != null && task.owner !== selectedAgentId) {
       onSelectAgent(task.owner);
     }
+    // Mark only a resolved lookup as synced: a task not in the list yet (a
+    // route jump landing before the first fetch) stays pending so the next
+    // list update retries it.
+    if (task) lastSyncedTaskRef.current = selectedTaskId;
   }, [selectedTaskId, tasks, selectedAgentId, onSelectAgent]);
 
   // When user clicks a task, sync its owner as the selected agent (bidirectional).
