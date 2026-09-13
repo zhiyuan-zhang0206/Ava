@@ -49,6 +49,7 @@ function resetStore(): void {
     loadingOlder: false,
     olderFetchCount: 0,
     scrollToBottomRequest: 0,
+    liveCompact: null,
     threads: new Map(),
   });
 }
@@ -2038,5 +2039,103 @@ describe("processSseEventBatch — frame-level folding", () => {
     expect(stripThreads(useTimelineStore.getState().threads)).toEqual(
       stripThreads(afterBatch.threads),
     );
+  });
+});
+
+describe("liveCompact — compact_started / compact_finished (task #3324)", () => {
+  const started = (over?: Record<string, unknown>): SystemEvent =>
+    ({
+      agent_id: 42,
+      role: "compact_started",
+      compact_id: "c1",
+      started_at: "2026-09-14T03:00:00+00:00",
+      mode: "request",
+      ...over,
+    }) as unknown as SystemEvent;
+  const finished = (over?: Record<string, unknown>): SystemEvent =>
+    ({
+      agent_id: 42,
+      role: "compact_finished",
+      compact_id: "c1",
+      status: "success",
+      finished_at: "2026-09-14T03:00:24+00:00",
+      ...over,
+    }) as unknown as SystemEvent;
+
+  it("started opens the entry; finished pairs by compact_id and settles", () => {
+    act(() => {
+      useTimelineStore.getState().processSseEvent(started());
+    });
+    expect(useTimelineStore.getState().liveCompact).toEqual({
+      compactId: "c1",
+      startedAt: "2026-09-14T03:00:00+00:00",
+      mode: "request",
+      status: null,
+      finishedAt: null,
+    });
+    act(() => {
+      useTimelineStore.getState().processSseEvent(finished());
+    });
+    expect(useTimelineStore.getState().liveCompact).toEqual({
+      compactId: "c1",
+      startedAt: "2026-09-14T03:00:00+00:00",
+      mode: "request",
+      status: "success",
+      finishedAt: "2026-09-14T03:00:24+00:00",
+    });
+  });
+
+  it("drops a terminal for a superseded run (compact_id mismatch)", () => {
+    act(() => {
+      useTimelineStore.getState().processSseEvent(started());
+      useTimelineStore.getState().processSseEvent(started({ compact_id: "c2" }));
+      useTimelineStore.getState().processSseEvent(
+        finished({ compact_id: "c1", status: "replaced" }),
+      );
+    });
+    expect(useTimelineStore.getState().liveCompact?.compactId).toBe("c2");
+    expect(useTimelineStore.getState().liveCompact?.status).toBeNull();
+  });
+
+  it("records an entry-less terminal (start lost in an SSE gap)", () => {
+    act(() => {
+      useTimelineStore.getState().processSseEvent(finished({ status: "failure" }));
+    });
+    expect(useTimelineStore.getState().liveCompact).toEqual({
+      compactId: "c1",
+      startedAt: null,
+      mode: null,
+      status: "failure",
+      finishedAt: "2026-09-14T03:00:24+00:00",
+    });
+  });
+
+  it("retires when the run's summary item lands in a snapshot", () => {
+    act(() => {
+      useTimelineStore.getState().processSseEvent(started());
+      useTimelineStore.getState().processSseEvent(finished());
+    });
+    const summary = item({
+      kind: "inbound_compact_summary",
+      item_id: "0.0",
+      compact_id: "c1",
+    });
+    act(() => {
+      useTimelineStore.getState().processSseEvent({
+        role: "timeline_snapshot",
+        agent_id: 42,
+        items: [summary],
+      } as unknown as SystemEvent);
+    });
+    expect(useTimelineStore.getState().liveCompact).toBeNull();
+    expect(useTimelineStore.getState().items).toEqual([summary]);
+  });
+
+  it("clears on thread switch", () => {
+    act(() => {
+      useTimelineStore.getState().processSseEvent(started());
+      useTimelineStore.getState().switchThread(7, [], false);
+    });
+    expect(useTimelineStore.getState().liveCompact).toBeNull();
   });
 });
