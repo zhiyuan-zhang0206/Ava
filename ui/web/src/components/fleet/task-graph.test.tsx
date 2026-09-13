@@ -285,6 +285,29 @@ describe("TaskGraph (graph mode)", () => {
     expect(onSelectAgent).not.toHaveBeenCalled();
   });
 
+  it("renders a static selection ring — no perpetual pulse on the selected node (task #3278)", async () => {
+    // User report: the selected item "keeps flashing". The ring used Tailwind's
+    // animate-pulse (2s infinite opacity loop); selection stays marked by the
+    // static dashed sky ring instead.
+    useTasks.mockReturnValue(ok(sampleTasks()));
+    const { container } = render(
+      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={2} onSelectTask={vi.fn()} />,
+    );
+    await waitFor(() => {
+      expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0);
+    }, { timeout: 4000 });
+    await new Promise((r) => setTimeout(r, 0));
+    const rings = Array.from(container.querySelectorAll("circle,rect")).filter(
+      (el) => el.getAttribute("stroke-dasharray") === "4 3",
+    );
+    expect(rings.length).toBeGreaterThan(0);
+    for (const ring of rings) {
+      const cls = ring.getAttribute("class") ?? "";
+      expect(cls).toContain("text-sky-400");
+      expect(cls).not.toContain("animate-pulse");
+    }
+  });
+
   it("renders parent-child edges hanging under the root node", async () => {
     useTasks.mockReturnValue(ok(sampleTasks()));
     const { container } = render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);

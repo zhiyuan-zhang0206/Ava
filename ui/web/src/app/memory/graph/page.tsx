@@ -692,7 +692,7 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
                   {isSelected ? (
                     <circle
                       r={r + 5}
-                      className="text-sky-400 animate-pulse"
+                      className="text-sky-400"
                       fill="none"
                       stroke="currentColor"
                       strokeOpacity={0.7}
