@@ -326,6 +326,25 @@ class OSSObjectStore:
             raise PermanentObjectStoreError("OSS object sidecar identity is malformed") from exc
         return sidecar
 
+    def sidecar_identity(self, object_name: str) -> tuple[str, int] | None:
+        """The sidecar's own immutable identity ``(ETag, size)``; None when absent.
+
+        The retention pair records this identity in the approved plan; the
+        later sidecar delete then goes through the same identity-bound
+        protocol as any host object.
+        """
+        sidecar_name = f"{object_name}{_SIDECAR_SUFFIX}"
+        try:
+            head = self._bucket.head_object(sidecar_name)
+        except oss2.exceptions.OssError as exc:
+            if _is_not_found(exc):
+                return None
+            raise _map_error("OSS sidecar identity", exc) from exc
+        etag = _normalize_etag(head.etag)
+        if not etag or head.content_length is None:
+            raise TransientObjectStoreError("OSS sidecar omitted verification properties")
+        return etag, int(head.content_length)
+
     def _object_checksum(self, object_name: str, etag: str, size: int) -> ObjectChecksum:
         md5 = _etag_md5(etag)
         if md5 is not None:

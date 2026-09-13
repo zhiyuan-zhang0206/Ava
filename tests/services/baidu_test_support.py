@@ -71,6 +71,8 @@ class FakePcs:
         # row (2026-08-31 live observation), so readers that list a
         # directory see both — this models exactly that.
         self.replaced: list[dict[str, Any]] = []
+        self.deleted: list[str] = []
+        self.delete_errno: int | None = None
         self._next_fs_id = 100
         self._next_uploadid = 0
 
@@ -110,8 +112,20 @@ class FakePcs:
         if method == "list":
             return self._list(params)
         if method == "filemanager":
-            return httpx.Response(200, json={"errno": 0})
+            return self._filemanager(params, request.content)
         return httpx.Response(404, json={"errno": 1, "errmsg": "unknown method"})
+
+    def _filemanager(self, params: dict[str, str], content: bytes) -> httpx.Response:
+        assert params.get("opera") == "delete"
+        if self.delete_errno is not None:
+            return httpx.Response(200, json={"errno": self.delete_errno, "errmsg": "injected"})
+        form = dict(httpx.QueryParams(content.decode()))
+        paths = [str(item) for item in json.loads(form.get("filelist") or "[]")]
+        self.deleted.extend(paths)
+        for path in paths:
+            self.files.pop(path, None)
+            self.replaced = [row for row in self.replaced if row["path"] != path]
+        return httpx.Response(200, json={"errno": 0})
 
     def _precreate(self, params: dict[str, str], path: str) -> httpx.Response:
         if path in self.transient_paths:

@@ -424,6 +424,15 @@ class CosClient:
         finally:
             response.close()
 
+    def delete_object(self, key: str) -> None:
+        """Delete one object; COS answers 204 whether or not it existed."""
+        response = self._request("DELETE", key)
+        try:
+            if response.status_code not in (200, 204):
+                self._raise_for_status(response, operation="delete object")
+        finally:
+            response.close()
+
     def list_object_keys(self, prefix: str) -> Iterator[str]:
         """List every key under ``prefix`` (ListObjectsV2, paged)."""
         token: str | None = None

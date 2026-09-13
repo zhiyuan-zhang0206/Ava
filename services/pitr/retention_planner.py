@@ -14,7 +14,12 @@ from services.pitr.archive_shim import archive_name_is_valid
 from services.pitr.base_manifest import CandidateManifest
 from services.pitr.restore_manifest import ProtectedManifest
 from services.pitr.retention_inventory import RetentionInventoryReader
-from services.pitr.retention_manifest import RetentionObject, RetentionPlan
+from services.pitr.retention_manifest import (
+    OrphanSidecar,
+    RetentionObject,
+    RetentionPlan,
+    SidecarPair,
+)
 from services.pitr.retention_policy import RetentionEvidence, plan_retention
 from services.pitr.uploader import AckManifest, ack_manifest_from_raw
 
@@ -30,9 +35,10 @@ class DryRunResult:
     eligible_bytes: int
     remote_object_count: int = 0
     remote_bytes: int = 0
+    orphan_sidecars: int = 0
 
 
-def build_local_evidence(
+def build_local_evidence(  # noqa: PLR0915
     root: Path, *, inventory_reader: RetentionInventoryReader | None = None
 ) -> RetentionEvidence:
     """Take a content-addressed local evidence snapshot without changing source state."""
@@ -103,8 +109,12 @@ def build_local_evidence(
             malformed.append(str(path))
     remote_before = inventory_reader.snapshot() if inventory_reader is not None else None
     remote_after = inventory_reader.snapshot() if inventory_reader is not None else None
+    sidecar_pairs: tuple[SidecarPair, ...] = ()
+    orphan_sidecars: tuple[OrphanSidecar, ...] = ()
     if remote_before is not None:
         inventory = list(remote_before.objects)
+        sidecar_pairs = remote_before.sidecar_pairs
+        orphan_sidecars = remote_before.orphan_sidecars
         malformed.extend(remote_before.unknown_names)
         if remote_after != remote_before:
             malformed.append("remote inventory changed during snapshot")
@@ -117,6 +127,8 @@ def build_local_evidence(
         tuple(sorted(set(malformed))),
         before,
         after,
+        sidecar_pairs,
+        orphan_sidecars,
     )
 
 
@@ -140,6 +152,7 @@ def write_dry_run_plan(
         plan.eligible_bytes,
         len(evidence.inventory),
         sum(item.size for item in evidence.inventory),
+        len(plan.orphan_sidecars),
     )
 
 
