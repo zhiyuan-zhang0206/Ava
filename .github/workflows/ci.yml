@@ -626,6 +626,16 @@ jobs:
         # step — Trunk's quarantine-aware evaluation of the uploaded JUnit is
         # the gate now (quarantined failures pass, real failures still block).
         continue-on-error: true
+        # Hang forensics (task #3328): the canary shard has stalled silently
+        # ~17 min at ~96% until the 20-min cap killed it (e.g. run 34779755502
+        # — dead output, workers idle). -o faulthandler_timeout=300 uses the
+        # built-in faulthandler plugin (no new dependency) to arm a per-test
+        # dump in every xdist worker: the next stall prints the stuck worker's
+        # stacks — test frames included — into this log. 300s is ~8x the
+        # slowest backend test (.test_durations max 37s, refreshed nightly
+        # from these runners) and re-arms per test, so a healthy slow run
+        # cannot false-positive. A stall outside any test (controller, or a
+        # worker between items) produces no dump — the cap stays its backstop.
         run: |
           set +e
           set -o pipefail
@@ -636,6 +646,7 @@ jobs:
             --cov=agent --cov=ava --cov=cli --cov=gateway --cov=shared --cov=ui \
             --cov=ops --cov=services --cov=ava_builtins \
             --junit-xml=tmp/junit-backend-shard-${{ matrix.group }}-a1.xml -o junit_family=xunit1 \
+            -o faulthandler_timeout=300 \
             2>&1 | tee tmp/flake-attempt1-shard-${{ matrix.group }}.log
           status=$?
           if [ '${{ matrix.group }}' = 8 ]; then
@@ -654,7 +665,8 @@ jobs:
               --splitting-algorithm least_duration \
               --cov=agent --cov=ava --cov=cli --cov=gateway --cov=shared --cov=ui \
               --cov=ops --cov=services --cov=ava_builtins \
-              --junit-xml=tmp/junit-backend-shard-${{ matrix.group }}-a2.xml -o junit_family=xunit1
+              --junit-xml=tmp/junit-backend-shard-${{ matrix.group }}-a2.xml -o junit_family=xunit1 \
+              -o faulthandler_timeout=300
             status=$?
           fi
           exit "$status"
