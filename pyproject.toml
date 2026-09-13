@@ -141,10 +141,10 @@ dev = [
     "pytest-asyncio>=1.0",
     "pytest-playwright>=0.7.0",
     "pytest-xdist>=3.8",
-    # Held at 0.15.x on purpose: ruff 0.16 stabilizes new lint rules (PLR0917,
-    # RUF036) and markdown code-block formatting (55 tracked docs drift) — a
-    # policy-shaped migration tracked separately (task #3162).
-    "ruff>=0.15.12,<0.16",
+    # ruff 0.16 (migration, task #3162): PLR0917 joins its PLR0913 sibling in
+    # the ignore list; RUF036 fixed in-tree; markdown code-block formatting
+    # stays out of the format scope for now — see [tool.ruff.format].exclude.
+    "ruff>=0.16.7,<0.17",
     "pytest-cov>=7.0",
     # starlette 1.2+ TestClient prefers httpx2 over httpx; declaring it here
     # makes the in-process TestClient (FastAPI re-exports starlette's) run on
@@ -317,6 +317,7 @@ ignore = [
     "PLR0911",      # too many return statements — dispatch-style match/case naturally has many returns
     "PLR0912",      # too many branches — top-level orchestration functions (cmd_start etc.) naturally have many branches
     "PLR0913",      # too many arguments
+    "PLR0917",      # too many positional arguments — same policy as PLR0913
     "PLR2004",      # magic value comparisons
     "PLC0415",      # import inside function
     "TRY003",       # long exception messages
@@ -415,6 +416,9 @@ known-first-party = ["ava", "cli", "shared", "runtime"]
 [tool.ruff.format]
 quote-style = "double"
 line-ending = "lf"
+# Markdown code-block formatting (stable in 0.16) stays out of scope until
+# adopted deliberately — 55 tracked docs would reflow otherwise (task #3162).
+exclude = ["*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

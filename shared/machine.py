@@ -124,7 +124,7 @@ class _IdentityHolder:
         *,
         name: str | _Unset = _UNSET,
         role: str | Iterable[str] | _Unset = _UNSET,
-        description: str | None | _Unset = _UNSET,
+        description: str | _Unset | None = _UNSET,
         host: str | _Unset = _UNSET,
     ) -> None:
         if name is not _UNSET:
@@ -257,7 +257,7 @@ def set_identity(
     *,
     name: str | _Unset = _UNSET,
     role: str | Iterable[str] | _Unset = _UNSET,
-    description: str | None | _Unset = _UNSET,
+    description: str | _Unset | None = _UNSET,
     host: str | _Unset = _UNSET,
 ) -> None:
     """Inject machine identity, overriding env/file resolution for the fields

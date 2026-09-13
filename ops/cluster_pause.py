@@ -25,7 +25,7 @@ _POOL_RELEASE_TIMEOUT_S = 5.0
 
 
 def is_paused(
-    state: shared.host_deploy_state.HostDeployState | None | object = _UNSET,
+    state: shared.host_deploy_state.HostDeployState | object | None = _UNSET,
 ) -> bool:
     """Whether this host is paused — the `host_deploy_state.posture` row written
     by the gateway's pause fan-out (R1, Task #1021).

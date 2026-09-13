@@ -174,8 +174,8 @@ def live_orchestration_session() -> str | None:
 
 
 def current_orchestration(
-    state: HostDeployState | None | object = _UNSET,
-    lease: DeployLease | None | object = _UNSET,
+    state: HostDeployState | object | None = _UNSET,
+    lease: DeployLease | object | None = _UNSET,
 ) -> OrchestrationKind | None:
     """The whole-cluster orchestration running on this host, or None if idle.
 
