@@ -52,6 +52,10 @@ def _ignore(path: str, line: int, rule: str) -> gate.PyrightIgnore:
     return gate.PyrightIgnore(path=path, line=line, rule=rule)
 
 
+def _no_pyright_errors(_path: Path) -> frozenset[tuple[int, str]]:
+    return frozenset()
+
+
 def test_tier_config_uses_longest_environment_root(tier_config: gate.TierConfig) -> None:
     assert tier_config.level_for("shared/model.py", "reportUnknownMemberType") == "error"
     assert tier_config.level_for("shared/lenient/model.py", "reportUnknownMemberType") == "warning"
@@ -198,6 +202,50 @@ def test_strip_multiple_rules_removes_only_selected_rule(tmp_path: Path) -> None
     assert path.read_text(encoding="utf-8") == (
         "value = other  # pyright: ignore[reportAssignmentType]\n"
     )
+
+
+def test_verify_out_of_repo_file_runs_cleanly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A file outside the repo must verify under its absolute-path label instead
+    of dying on the repo-relative prefix computation."""
+    outside = tmp_path / "elsewhere.py"
+    outside.write_text("value = 1\n", encoding="utf-8")
+    monkeypatch.setattr(gate, "_pyright_errors", _no_pyright_errors)
+    assert gate.main(["--verify", str(outside)]) == 0
+    assert "elsewhere.py" in capsys.readouterr().out
+
+
+def test_verify_non_utf8_file_is_skipped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A non-UTF-8 target is skipped like any unreadable entry — verify must
+    not raise UnicodeDecodeError on it."""
+    monkeypatch.setattr(gate, "_REPO_ROOT", tmp_path)
+    bad = tmp_path / "agent" / "bad.py"
+    bad.parent.mkdir()
+    bad.write_bytes(b"\xff\xfe\x00bad")
+    monkeypatch.setattr(gate, "_pyright_errors", _no_pyright_errors)
+    assert gate.main(["--verify", str(bad)]) == 0
+
+
+def test_verify_dangling_symlink_is_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A dangling target is skipped like any unreadable entry — verify must not
+    raise FileNotFoundError on it."""
+    monkeypatch.setattr(gate, "_REPO_ROOT", tmp_path)
+    link = tmp_path / "agent" / "dangling.py"
+    link.parent.mkdir()
+    link.symlink_to(tmp_path / "agent" / "missing.py")
+    monkeypatch.setattr(gate, "_pyright_errors", _no_pyright_errors)
+    assert gate.main(["--verify", str(link)]) == 0
+
+
+def test_strip_file_unreadable_target_is_a_noop(tmp_path: Path) -> None:
+    """strip_file must skip an unreadable target instead of raising."""
+    bad = tmp_path / "bad.py"
+    bad.write_bytes(b"\xff\xfe\x00bad")
+    gate.strip_file(bad, frozenset({_ignore("agent/a.py", 1, "reportPrivateUsage")}))
+    assert bad.read_bytes() == b"\xff\xfe\x00bad"
 
 
 def test_verify_multiline_call_rejects_load_bearing_rule_at_call_line(
