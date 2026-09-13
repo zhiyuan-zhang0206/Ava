@@ -197,7 +197,7 @@ class BaiduRetentionInventoryReader:
         directory = f"{self._store.app_root}/{self._prefix}"
         while True:
             try:
-                page = self._store._client().list_dir(directory, start=start, recursion=1)
+                page = self._store._client().list_all(directory, start=start)
             except PcsError:
                 return rows
             rows.extend(page)

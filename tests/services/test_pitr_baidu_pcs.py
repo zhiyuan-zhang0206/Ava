@@ -725,3 +725,28 @@ def test_opaque_pin_flows_from_upload_into_wal_evidence_validation(
             "backup_key_sha256": "0" * 64,
         },
     )
+
+
+def test_list_all_uses_multimedia_listall_and_pages() -> None:
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/rest/2.0/xpan/multimedia"
+        params = dict(request.url.params)
+        seen.append(str(params.get("method")))
+        rows = [
+            {"fs_id": 1, "path": "/apps/A/a/b.txt", "size": 5, "md5": "x", "isdir": 0},
+            {"fs_id": 2, "path": "/apps/A/c", "size": 0, "md5": "", "isdir": 1},
+        ]
+        start = int(params.get("start") or 0)
+        limit = int(params.get("limit") or 1000)
+        return httpx.Response(200, json={"errno": 0, "list": rows[start : start + limit]})
+
+    client = PcsClient("t", transport=httpx.MockTransport(handler))
+    page = client.list_all("/apps/A", start=0, limit=1)
+    assert [row.fs_id for row in page] == [1]
+    assert page[0].path == "/apps/A/a/b.txt"
+    second = client.list_all("/apps/A", start=1, limit=1)
+    assert [row.fs_id for row in second] == [2]
+    assert second[0].isdir == 1
+    assert seen == ["listall", "listall"]

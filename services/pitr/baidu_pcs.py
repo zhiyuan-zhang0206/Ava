@@ -260,8 +260,9 @@ class PcsClient:
     def list_dir(
         self, dir_path: str, *, start: int = 0, limit: int = 1000, recursion: int = 0
     ) -> list[RemoteFile]:
-        """One page of a directory listing; callers page with ``start`` and
-        may ask for a recursive walk (``recursion=1``)."""
+        """One page of a directory listing: exactly one level, even when
+        ``recursion=1`` is asked for — the live PCS API ignores the parameter
+        (verified live 2026-09-14), so recursive walks use :meth:`list_all`."""
         params = self._params() | {
             "method": "list",
             "dir": dir_path,
@@ -271,6 +272,26 @@ class PcsClient:
             "recursion": str(recursion),
         }
         payload = self._get(f"{PCS_HOST}/rest/2.0/xpan/file", params=params)
+        _check_errno(payload)
+        rows = cast(list[dict[str, Any]], payload.get("list") or [])
+        return [_parse_file(row) for row in rows]
+
+    def list_all(self, dir_path: str, *, start: int = 0, limit: int = 1000) -> list[RemoteFile]:
+        """One page of a recursive flat listing (multimedia ``listall``).
+
+        Returns every descendant of ``dir_path`` — files and directories —
+        sorted by name. This is the enumeration the retention inventory uses:
+        ``file?method=list`` only ever answers one level (see ``list_dir``).
+        """
+        params = self._params() | {
+            "method": "listall",
+            "path": dir_path,
+            "order": "name",
+            "limit": str(limit),
+            "start": str(start),
+            "recursion": "1",
+        }
+        payload = self._get(f"{PCS_HOST}/rest/2.0/xpan/multimedia", params=params)
         _check_errno(payload)
         rows = cast(list[dict[str, Any]], payload.get("list") or [])
         return [_parse_file(row) for row in rows]
