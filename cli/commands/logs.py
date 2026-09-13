@@ -33,6 +33,8 @@ _MANAGED_LOG_NAME = re.compile(
 
 _ROTATED_LOG_ARCHIVE = re.compile(r".+\.log\.[0-9]{4}-[0-9]{2}-[0-9]{2}")
 
+_AGENT_SHELL_SERVICE = re.compile(r"agent-[0-9]+-shell-[0-9]+-")
+
 _FAMILY_DEFAULT_DAYS = {
     "agent": 15,
     "shell": 7,
@@ -66,6 +68,8 @@ def _service_family(service: str) -> str:
         return "ops"
     if service.endswith(("-watchdog", "_watchdog")):
         return "watchdog"
+    if _AGENT_SHELL_SERVICE.match(service):
+        return "shell"
     if service.startswith("agent-"):
         return "agent"
     return "other"
@@ -339,8 +343,11 @@ def _rotate_entry(
             return False
         file_stat = entry.stat(follow_symlinks=False)
         archive = Path(f"{path}.{archive_suffix}")
-        triggered = file_stat.st_size >= size_threshold or (
-            datetime.fromtimestamp(file_stat.st_mtime, UTC).date() != current.date()
+        # Nothing to archive when the file is empty: stale logs would otherwise
+        # get an empty dated copy every day until retention deletes them.
+        triggered = file_stat.st_size > 0 and (
+            file_stat.st_size >= size_threshold
+            or datetime.fromtimestamp(file_stat.st_mtime, UTC).date() != current.date()
         )
         if not triggered or os.path.lexists(archive):
             _print_rotation_state(path, 0, "kept")
