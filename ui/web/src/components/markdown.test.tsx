@@ -183,3 +183,62 @@ describe("ChatMarkdown", () => {
     expect(inlineCode.closest("pre")).toBeNull();
   });
 });
+
+
+// CJK emphasis regression (task #3314): CommonMark's flanking rule treats a
+// punctuation run right after the opening `**` as blocking left-flanking
+// when it follows a CJK letter, so `**"..."**` stayed plain text. remark-
+// cjk-friendly (+ the gfm-strikethrough companion, required while remark-gfm
+// is in the pipeline) restores emphasis for CJK-adjacent delimiters. Keep
+// the reported case, its quote variants, the strikethrough family, and the
+// plain/ASCII controls together — this file is the markdown contract.
+describe("CJK emphasis (remark-cjk-friendly, task #3314)", () => {
+  it("renders bold for the reported sentence (curly quotes)", () => {
+    const { container } = render(
+      <ChatMarkdown
+        content={"\u4e0d\u7b97\u5168\u9a97\u5c40\uff0c\u4f46**\u201c\u7f8e\u767d\u201d\u8fd9\u4e2a\u8bcd\u88ab\u7528\u6b6a\u4e86**\u3002\u62c6\u5f00\u770b\u5c31\u6e05\u695a\u4e86\uff1a"}
+      />,
+    );
+    const strong = container.querySelector("strong");
+    expect(strong?.textContent).toBe(
+      "\u201c\u7f8e\u767d\u201d\u8fd9\u4e2a\u8bcd\u88ab\u7528\u6b6a\u4e86",
+    );
+  });
+
+  it("renders bold with straight ASCII quotes", () => {
+    const { container } = render(
+      <ChatMarkdown content={"\u4f46**\"\u7f8e\u767d\"\u8fd9\u4e2a\u8bcd**\u3002"} />,
+    );
+    expect(container.querySelector("strong")?.textContent).toBe(
+      "\"\u7f8e\u767d\"\u8fd9\u4e2a\u8bcd",
+    );
+  });
+
+  it("renders bold with corner brackets", () => {
+    const { container } = render(
+      <ChatMarkdown content={"\u4f46**\u300c\u7f8e\u767d\u300d\u8fd9\u4e2a\u8bcd**\u3002"} />,
+    );
+    expect(container.querySelector("strong")?.textContent).toBe(
+      "\u300c\u7f8e\u767d\u300d\u8fd9\u4e2a\u8bcd",
+    );
+  });
+
+  it("renders strikethrough for quoted CJK (GFM companion)", () => {
+    const { container } = render(
+      <ChatMarkdown content={"\u4f46~~\u201c\u7f8e\u767d\u201d\u8fd9\u4e2a\u8bcd~~\u3002"} />,
+    );
+    expect(container.querySelector("del")?.textContent).toBe(
+      "\u201c\u7f8e\u767d\u201d\u8fd9\u4e2a\u8bcd",
+    );
+  });
+
+  it("leaves plain CJK and ASCII emphasis unchanged", () => {
+    const { container } = render(
+      <ChatMarkdown content={"\u4f46**\u7f8e\u767d**\u8fd9\u4e2a\u8bcd\u3002 word**bold**word."} />,
+    );
+    const strongs = container.querySelectorAll("strong");
+    expect(strongs).toHaveLength(2);
+    expect(strongs[0].textContent).toBe("\u7f8e\u767d");
+    expect(strongs[1].textContent).toBe("bold");
+  });
+});
