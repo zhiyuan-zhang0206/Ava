@@ -81,6 +81,11 @@ Still on you:
 - **Conflicts** — the queue cannot rebase a conflicting PR. Resolve locally
   (`git rebase origin/main`), force-push, re-enqueue.
 - **A red PR** — CI failures on your branch are yours; fix, re-push, re-enqueue.
+- **GitHub-limbo runs** — a run stuck `queued` with zero jobs never materializes
+  and no GitHub API can cancel it; it holds an otherwise green rollup PENDING
+  until the watch times out. `ci_utils` names the runs loudly; when they are the
+  ONLY obstacle the operator escape hatch is `--force` (inspect the named runs
+  first; real pending / failed / unreadable evidence still blocks — task #3275).
 - **User-review PRs are never enqueued.** A PR awaiting the user's verdict
   stays manual until they say go.
 
