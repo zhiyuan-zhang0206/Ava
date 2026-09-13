@@ -372,8 +372,8 @@ export default function DisplaySettingsPage() {
         />
         <ToggleRow
           icon={Sparkles}
-          label="Render reasoning as markdown"
-          description="Render agent reasoning (thinking) content as formatted markdown; off shows the raw text"
+          label="Render thinking as markdown"
+          description="Render agent thinking content as formatted markdown; off shows the raw text"
           value={settings["display.render_reasoning_markdown"] as boolean}
           onChange={(v) => setSetting("display.render_reasoning_markdown", v)}
         />

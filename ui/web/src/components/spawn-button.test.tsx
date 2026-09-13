@@ -9,7 +9,7 @@
 // When a non-default model is selected onSpawn receives
 // { model: <selected> }; leaving the default yields { model: undefined }.
 //
-// Reasoning effort select: rendered only for a model that publishes an effort
+// Thinking effort select: rendered only for a model that publishes an effort
 // ladder, showing the ladder's concrete values with the model's published
 // default (reasoning_effort_default — the registry's per-model tuning value)
 // pre-selected; no synthetic "Effort: default" option (task #568). A model
@@ -714,7 +714,7 @@ describe("SpawnButton model dropdown", () => {
     // With the resolved model (default), the effort select now appears
     // without needing a manual model switch.
     await waitFor(() => {
-      expect(screen.getByLabelText("Reasoning effort")).toBeTruthy();
+      expect(screen.getByLabelText("Thinking effort")).toBeTruthy();
     });
   });
 
@@ -734,7 +734,7 @@ describe("SpawnButton model dropdown", () => {
     await selectModel("claude-opus-4-8");
     // A select whose only entry is "Effort: default" controls nothing — the
     // whole control is gone rather than rendered inert.
-    expect(screen.queryByLabelText("Reasoning effort")).toBeNull();
+    expect(screen.queryByLabelText("Thinking effort")).toBeNull();
 
     fireEvent.click(screen.getByLabelText("Spawn agent"));
     expect(onSpawn).toHaveBeenCalledWith({
@@ -758,7 +758,7 @@ describe("SpawnButton model dropdown", () => {
     await waitFor(() => {
       expect(screen.getByLabelText("Spawn agent").hasAttribute("disabled")).toBe(false);
     });
-    expect(screen.queryByLabelText("Reasoning effort")).toBeNull();
+    expect(screen.queryByLabelText("Thinking effort")).toBeNull();
   });
 
   // A stored spawn_model naming a model the catalog no longer carries (model
@@ -773,7 +773,7 @@ describe("SpawnButton model dropdown", () => {
     await waitFor(() => {
       expect(screen.getByLabelText("Model")).toBeTruthy();
     });
-    expect(screen.queryByLabelText("Reasoning effort")).toBeNull();
+    expect(screen.queryByLabelText("Thinking effort")).toBeNull();
   });
 
   it("model with effort options → selecting one passes reasoning_effort to onSpawn", async () => {
@@ -793,7 +793,7 @@ describe("SpawnButton model dropdown", () => {
     // immediately (no manual switch needed), pre-selected at the model's
     // published default ("max"). No synthetic "Effort: default" option.
     await selectModel("deepseek-v4-pro");
-    const effortSelect = screen.getByLabelText<HTMLSelectElement>("Reasoning effort");
+    const effortSelect = screen.getByLabelText<HTMLSelectElement>("Thinking effort");
     expect([...effortSelect.options].map((o) => o.text)).toEqual(["high", "max"]);
     expect(effortSelect.value).toBe("max");
 
@@ -822,12 +822,12 @@ describe("SpawnButton model dropdown", () => {
     });
 
     await selectModel("deepseek-v4-pro");
-    fireEvent.change(screen.getByLabelText("Reasoning effort"), {
+    fireEvent.change(screen.getByLabelText("Thinking effort"), {
       target: { value: "max" },
     });
     await selectModel("claude-opus-4-8");
 
-    expect(screen.queryByLabelText("Reasoning effort")).toBeNull();
+    expect(screen.queryByLabelText("Thinking effort")).toBeNull();
     fireEvent.click(screen.getByLabelText("Spawn agent"));
     expect(onSpawn).toHaveBeenCalledWith({
       machine: "test-host",
@@ -856,12 +856,12 @@ describe("SpawnButton model dropdown", () => {
     });
 
     await selectModel("deepseek-v4-pro");
-    fireEvent.change(screen.getByLabelText("Reasoning effort"), {
+    fireEvent.change(screen.getByLabelText("Thinking effort"), {
       target: { value: "max" },
     });
     await selectModel("gpt-5.6");
 
-    const effortSelect = screen.getByLabelText<HTMLSelectElement>("Reasoning effort");
+    const effortSelect = screen.getByLabelText<HTMLSelectElement>("Thinking effort");
     expect([...effortSelect.options].map((o) => o.text)).toEqual([
       "minimal",
       "low",
@@ -892,12 +892,12 @@ describe("SpawnButton model dropdown", () => {
     });
 
     await selectModel("deepseek-v4-pro");
-    fireEvent.change(screen.getByLabelText("Reasoning effort"), {
+    fireEvent.change(screen.getByLabelText("Thinking effort"), {
       target: { value: "high" },
     });
     await selectModel("gpt-5.6");
 
-    expect(screen.getByLabelText<HTMLSelectElement>("Reasoning effort").value).toBe("high");
+    expect(screen.getByLabelText<HTMLSelectElement>("Thinking effort").value).toBe("high");
     fireEvent.click(screen.getByLabelText("Spawn agent"));
     expect(onSpawn).toHaveBeenCalledWith({
       machine: "test-host",
@@ -924,7 +924,7 @@ describe("SpawnButton model dropdown", () => {
 
     // deepseek-v4-pro is the default model; its default effort "max" is
     // pre-selected with no interaction at all.
-    const effortSelect = screen.getByLabelText<HTMLSelectElement>("Reasoning effort");
+    const effortSelect = screen.getByLabelText<HTMLSelectElement>("Thinking effort");
     expect(effortSelect.value).toBe("max");
     expect(screen.queryByText("Effort: default")).toBeNull();
 
@@ -951,12 +951,12 @@ describe("SpawnButton model dropdown", () => {
       expect(screen.getByLabelText("Spawn agent").hasAttribute("disabled")).toBe(false);
     });
 
-    expect(screen.getByLabelText<HTMLSelectElement>("Reasoning effort").value).toBe("max");
+    expect(screen.getByLabelText<HTMLSelectElement>("Thinking effort").value).toBe("max");
     await selectModel("gpt-5.6");
-    expect(screen.getByLabelText<HTMLSelectElement>("Reasoning effort").value).toBe("medium");
+    expect(screen.getByLabelText<HTMLSelectElement>("Thinking effort").value).toBe("medium");
     // And back: deepseek's default returns.
     await selectModel("deepseek-v4-pro");
-    expect(screen.getByLabelText<HTMLSelectElement>("Reasoning effort").value).toBe("max");
+    expect(screen.getByLabelText<HTMLSelectElement>("Thinking effort").value).toBe("max");
 
     fireEvent.click(screen.getByLabelText("Spawn agent"));
     expect(onSpawn).toHaveBeenCalledWith({
@@ -982,7 +982,7 @@ describe("SpawnButton model dropdown", () => {
       expect(screen.getByLabelText("Spawn agent").hasAttribute("disabled")).toBe(false);
     });
 
-    const effortSelect = screen.getByLabelText<HTMLSelectElement>("Reasoning effort");
+    const effortSelect = screen.getByLabelText<HTMLSelectElement>("Thinking effort");
     expect([...effortSelect.options].map((o) => o.text)).toEqual([
       "Effort: default",
       "high",
@@ -1024,7 +1024,7 @@ describe("SpawnButton model dropdown", () => {
 
     // Model picker follows the preset's model, effort follows that model's default.
     expect(screen.getByLabelText("Model").textContent).toContain("mimo-v2.5-pro-ultraspeed");
-    expect(screen.getByLabelText<HTMLSelectElement>("Reasoning effort").value).toBe("high");
+    expect(screen.getByLabelText<HTMLSelectElement>("Thinking effort").value).toBe("high");
 
     fireEvent.click(screen.getByLabelText("Spawn agent"));
     expect(onSpawn).toHaveBeenCalledWith({
@@ -1057,7 +1057,7 @@ describe("SpawnButton model dropdown", () => {
     fireEvent.click(screen.getByText("Ultra Speed Worker"));
 
     expect(screen.getByLabelText("Model").textContent).toContain("deepseek-v4-pro");
-    expect(screen.getByLabelText<HTMLSelectElement>("Reasoning effort").value).toBe("max");
+    expect(screen.getByLabelText<HTMLSelectElement>("Thinking effort").value).toBe("max");
 
     fireEvent.click(screen.getByLabelText("Spawn agent"));
     expect(onSpawn).toHaveBeenCalledWith({
@@ -1091,7 +1091,7 @@ describe("SpawnButton model dropdown", () => {
     fireEvent.click(screen.getByLabelText("Preset"));
     fireEvent.click(screen.getByText("Ultra Speed Worker"));
 
-    expect(screen.getByLabelText<HTMLSelectElement>("Reasoning effort").value).toBe("high");
+    expect(screen.getByLabelText<HTMLSelectElement>("Thinking effort").value).toBe("high");
 
     fireEvent.click(screen.getByLabelText("Spawn agent"));
     expect(onSpawn).toHaveBeenCalledWith({
@@ -1127,7 +1127,7 @@ describe("SpawnButton model dropdown", () => {
     // Explicitly switch back to deepseek — the preset stays selected (it still
     // seeds skills etc.), but the explicit model wins on spawn.
     await selectModel("deepseek-v4-pro");
-    expect(screen.getByLabelText<HTMLSelectElement>("Reasoning effort").value).toBe("max");
+    expect(screen.getByLabelText<HTMLSelectElement>("Thinking effort").value).toBe("max");
 
     fireEvent.click(screen.getByLabelText("Spawn agent"));
     expect(onSpawn).toHaveBeenCalledWith({
