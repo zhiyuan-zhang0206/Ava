@@ -235,7 +235,11 @@ def violations_in_source(
 
 
 def _scan_file(path: Path, legal_sources: frozenset[str]) -> list[tuple[int, str]]:
-    return violations_in_source(path.read_text(encoding="utf-8"), legal_sources)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []  # unreadable entry (e.g. a dangling symlink) or binary content
+    return violations_in_source(text, legal_sources)
 
 
 def _is_test_file(rel_path: str) -> bool:
