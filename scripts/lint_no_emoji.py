@@ -151,7 +151,10 @@ def _scan_file(path: Path, rel_path: str) -> list[tuple[int, str, str]]:
     """Return violations [(lineno, char, line_stripped), ...]."""
     if _is_exempt_path(rel_path):
         return []
-    text = path.read_text(encoding="utf-8")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []  # unreadable entry (e.g. a dangling symlink) or binary content
     exempt_lines = _exempt_comment_lines(text)
     violations: list[tuple[int, str, str]] = []
     for lineno, line in enumerate(text.splitlines(), start=1):

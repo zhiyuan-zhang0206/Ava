@@ -108,6 +108,14 @@ def _scan_file(rel_path: str) -> list[tuple[int, str, str]]:
     return violations
 
 
+def _rel_or_abs(path: Path) -> str:
+    """Repo-relative posix path, or the absolute path for a target outside the repo."""
+    try:
+        return path.relative_to(_REPO_ROOT).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     if argv:
@@ -129,16 +137,12 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         files = []
         for t in targets:
-            try:
-                rel = t.relative_to(_REPO_ROOT).as_posix()
-            except ValueError:
-                rel = t.as_posix()
             if t.is_file():
-                files.append(rel)
+                files.append(_rel_or_abs(t))
             elif t.is_dir():
-                files.extend(
-                    p.relative_to(_REPO_ROOT).as_posix() for p in t.rglob("*") if p.is_file()
-                )
+                for p in t.rglob("*"):
+                    if p.is_file():
+                        files.append(_rel_or_abs(p))
         # Explicit paths: scan them (git-tracked or not — a worktree edit
         # that is not yet added still must be caught).
         scan = sorted(set(files))
