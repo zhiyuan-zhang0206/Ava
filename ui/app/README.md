@@ -33,6 +33,16 @@ never stored in this repository. Use Tauri's `TAURI_SIGNING_PRIVATE_KEY` and
 signatures. `cargo tauri build --no-sign` is the explicit unsigned validation
 path.
 
+## Icons
+
+The app ships without branding icons (task #3286). `bundle.icon` is empty by
+design, so a macOS bundle takes the system default icon and the installers fall
+back to their stock icons. The two files kept under `icons/` are blank
+placeholders the toolchain requires, not artwork: `icon.png` is what
+`tauri-codegen` embeds as the default window icon, and `icon.ico` is what
+`tauri-build` compiles into the Windows executable resource. Deleting either
+one breaks the build without changing anything else.
+
 ## Android
 
 The generated Gradle project is intentionally ignored. Generate it from the
