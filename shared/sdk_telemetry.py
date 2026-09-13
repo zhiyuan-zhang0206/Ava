@@ -23,6 +23,14 @@ NOT, and must never regress to, a scan of the code's source text. The old metric
 ``ava.X(`` textually and so counted private calls, comments, strings, and example code;
 this path only ever reflects a call that actually ran, with the arguments it ran with.
 
+The same state feeds a second channel: each ``recording()`` block counts
+its top-level calls in full (``fn -> count``, unsampled — the 1-in-10 gate stays in the
+emitter) and yields that tally; ``tally_entries()`` materializes it as the wire list
+(``[{"method": "<ns>.<fn>", "count": N}, ...]``) that the exec child ships in its result
+envelope, ``agent/graph/_exec.py`` attaches to the exec_output ToolMessage as
+``additional_kwargs["sdk_calls"]``, and ``sdk_calls_by_tool_call_id()`` reads back for
+the timeline projection (``SdkCall`` is that list's entry model).
+
 Discipline (shared with the recorder in ``agent/sdk_metering.py``): a pure side channel.
 An emit / annotate failure is swallowed (``Exception`` only, so cancel/timeout injection
 still propagates) and never changes an SDK call's arguments, result, or exceptions.
@@ -34,10 +42,14 @@ import contextlib
 import itertools
 import threading
 import time
-from collections.abc import Callable, Generator, Mapping
+from collections.abc import Callable, Generator, Mapping, Sequence
 from typing import Any
 
+from langchain_core.messages import BaseMessage, ToolMessage
+from pydantic import BaseModel
+
 from shared.log import logger
+from shared.message_kwargs import AvaMsgType, read_ava_kwargs
 
 # Event name written to events for one top-level SDK call.
 SDK_CALL_EVENT = "sdk_call"
@@ -52,21 +64,32 @@ _sdk_call_counter = itertools.count()
 #             emits an event. annotate() targets the top of the stack, so a nested
 #             SDK call's annotations attach to its own frame and are discarded with
 #             it (nested calls are not counted), never polluting the outer event.
+#   .tally  — the full per-recording call tally (fn -> count) while recording() is
+#             armed, None outside it; every top-level call bumps it, sampled or not.
 _local = threading.local()
 
 
 @contextlib.contextmanager
-def recording() -> Generator[None, None, None]:
+def recording() -> Generator[dict[str, int], None, None]:
     """Arm SDK-call metering for the enclosed block — the exec worker wraps the
     ``exec(compile(agent_code))`` call with this, so only agent-authored ``ava.*``
     calls are metered. Framework-internal calls (system-prompt rendering, hooks) run
-    outside it and are never counted. Reentrant: restores the previous flag on exit."""
+    outside it and are never counted.
+
+    Yields the block's full tally (``fn -> count`` of top-level calls — a call that
+    raises still counts, like its event). Reentrant: restores the previous flag and
+    tally on exit, so a nested block counts into its own fresh tally.
+    """
     prev = getattr(_local, "active", False)
+    prev_tally = getattr(_local, "tally", None)
+    tally: dict[str, int] = {}
     _local.active = True
+    _local.tally = tally
     try:
-        yield
+        yield tally
     finally:
         _local.active = prev
+        _local.tally = prev_tally
 
 
 def annotate(**detail: Any) -> None:
@@ -107,10 +130,10 @@ def run_metered(fn: str, original: Callable[..., Any], args: Any, kwargs: Any) -
     Outside ``recording()`` (framework-internal), calls straight through with no frame
     and no event. Inside it, pushes a ``detail`` frame for the duration of the call so
     the body's ``annotate()`` lands on this frame; only the outermost (depth-0) call
-    emits an event, carrying whatever it accumulated — a nested call's frame is popped
-    and discarded. The event is emitted after the call returns (so ``detail`` is
-    complete), on success and on exception alike. The call's result and exceptions pass
-    through untouched.
+    emits an event and bumps the recording's tally (unsampled), carrying whatever it
+    accumulated — a nested call's frame is popped and discarded. The event is emitted
+    after the call returns (so ``detail`` is complete), on success and on exception
+    alike. The call's result and exceptions pass through untouched.
     """
     if not getattr(_local, "active", False):
         return original(*args, **kwargs)
@@ -125,7 +148,58 @@ def run_metered(fn: str, original: Callable[..., Any], args: Any, kwargs: Any) -
     finally:
         detail = frames.pop()
         if is_top:
+            tally = getattr(_local, "tally", None)
+            if tally is not None:
+                tally[fn] = tally.get(fn, 0) + 1
             # Wall-clock seconds for the whole top-level call — the registry's
             # SdkCall payload declares `duration`; before this the TypedDict
             # key had no producer (audit-round2 events-obs P2).
             emit(fn, detail, duration=time.monotonic() - t0)
+
+
+# ── the wire-side counts: entry model + materialization + read-back ───────────
+
+
+class SdkCall(BaseModel):
+    """One SDK method's call count in an agent_code block, e.g.
+    ``SdkCall(method="files.read", count=3)`` for ``ava.files.read(...)`` x3."""
+
+    method: str
+    count: int
+
+
+def tally_entries(tally: Mapping[str, int]) -> list[dict[str, Any]]:
+    """Materialize a recording tally as the wire list that rides the exec result:
+    ``[{"method": "<ns>.<fn>", "count": N}, ...]``, sorted by descending count then
+    method — the collapsed-code chip's render order (JSON dicts, one per fn)."""
+    entries: list[dict[str, Any]] = []
+    for fn, count in sorted(tally.items(), key=lambda item: (-item[1], item[0])):
+        entries.append({"method": fn, "count": count})
+    return entries
+
+
+def sdk_calls_by_tool_call_id(
+    messages: Sequence[BaseMessage], start: int = 0
+) -> dict[str, list[SdkCall]]:
+    """Map each exec_output ToolMessage's ``tool_call_id`` to its block's SDK calls.
+
+    The counts are the runtime tally ``agent/graph/_exec.py`` wrote to the message's
+    ``additional_kwargs["sdk_calls"]`` — what the code really executed, never a scan
+    of its text. Only ``messages[start:]`` is scanned (the rendered span): a tool
+    call's metadata rides the ToolMessage that follows it, so nothing outside the
+    span can enrich an item rendered from it. A message without the field (pre-tally
+    history) stays absent from the map; a block that ran with zero SDK calls maps to
+    ``[]`` — a real zero the UI must not confuse with "not yet known".
+    """
+    out: dict[str, list[SdkCall]] = {}
+    for msg in messages[start:]:
+        if not isinstance(msg, ToolMessage):
+            continue
+        kwargs = read_ava_kwargs(msg)
+        if kwargs.get("ava_msg_type") != AvaMsgType.EXEC_OUTPUT:
+            continue
+        calls = kwargs.get("sdk_calls")
+        if calls is None:
+            continue
+        out[msg.tool_call_id] = [SdkCall.model_validate(entry) for entry in calls]
+    return out

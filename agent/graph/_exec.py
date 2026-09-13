@@ -255,6 +255,7 @@ async def _run_agent_code(
     int,
     list[SecurityFindingEntry],
     list[dict[str, Any]] | None,
+    list[dict[str, Any]] | None,
 ]:
     """Run the agent's code in one disposable child process.
 
@@ -264,7 +265,7 @@ async def _run_agent_code(
     envelope back. Validation is fail-fast on a tampered slot, and the child
     receives the bound turn's config maps so its SDK calls
     resolve the same settings. Returns
-    (result, plugin_state_update, exec_ms, findings, attachments)."""
+    (result, plugin_state_update, exec_ms, findings, attachments, sdk_calls)."""
     config_overlay = {**(current_agent_config_pins() or {}), **current_agent_plugin_pins()}
     exec_started = time.monotonic()
     async with subscribe_interrupt(ctx.ops_pool, agent_id) as cancel_event:
@@ -296,7 +297,8 @@ async def _run_agent_code(
         else []
     )
     attachments = payload.attachments if payload is not None else None
-    return result, plugin_state_update, exec_ms, findings, attachments
+    sdk_calls = payload.sdk_calls if payload is not None else None
+    return result, plugin_state_update, exec_ms, findings, attachments, sdk_calls
 
 
 def _dispatch_exec_result(
@@ -489,6 +491,7 @@ async def _exec_node_impl(
         exec_ms,
         envelope_findings,
         envelope_attachments,
+        envelope_sdk_calls,
     ) = await _run_agent_code(state, ctx, agent_id, resolved.code, chunk_publisher)
     halted, result_text, exit_code_for_msg = _dispatch_exec_result(
         result, ctx, agent_id, referenced_messages=state.messages
@@ -525,6 +528,7 @@ async def _exec_node_impl(
             cancelled=isinstance(result, _ExecCancelled),
             timed_out=isinstance(result, _ExecTimedOut),
             exec_ms=exec_ms,
+            sdk_calls=envelope_sdk_calls,
             created_at=datetime.now(UTC),
         )
         state_messages_update.append(msg)
