@@ -80,6 +80,23 @@ describe("CompactingBlock", () => {
     expect(screen.queryByTestId("compacting-block")).toBeNull();
   });
 
+  it("self-hides a success when no summary follows (grace expiry)", () => {
+    setLive({ status: "success", finishedAt: "2026-09-14T03:00:05+00:00" });
+    renderWithQuery(<CompactingBlock />);
+    expect(screen.getByTestId("compacting-block")).toBeTruthy();
+    act(() => {
+      vi.advanceTimersByTime(3_000);
+    });
+    expect(screen.queryByTestId("compacting-block")).toBeNull();
+  });
+
+  it("labels a superseded run", () => {
+    setLive({ status: "replaced", finishedAt: "2026-09-14T03:00:04+00:00" });
+    renderWithQuery(<CompactingBlock />);
+    expect(screen.getByTestId("compacting-block").dataset.status).toBe("replaced");
+    expect(screen.getByText("Compaction superseded")).toBeTruthy();
+  });
+
   it("hands over when the store retires the entry (summary landed)", () => {
     setLive({ status: "success", finishedAt: "2026-09-14T03:00:24+00:00" });
     renderWithQuery(<CompactingBlock />);

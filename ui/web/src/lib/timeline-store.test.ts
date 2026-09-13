@@ -2097,6 +2097,19 @@ describe("liveCompact — compact_started / compact_finished (task #3324)", () =
     expect(useTimelineStore.getState().liveCompact?.status).toBeNull();
   });
 
+  it("records an entry-less terminal (start lost in an SSE gap)", () => {
+    act(() => {
+      useTimelineStore.getState().processSseEvent(finished({ status: "failure" }));
+    });
+    expect(useTimelineStore.getState().liveCompact).toEqual({
+      compactId: "c1",
+      startedAt: null,
+      mode: null,
+      status: "failure",
+      finishedAt: "2026-09-14T03:00:24+00:00",
+    });
+  });
+
   it("retires when the run's summary item lands in a snapshot", () => {
     act(() => {
       useTimelineStore.getState().processSseEvent(started());
