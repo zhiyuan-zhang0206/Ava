@@ -42,7 +42,7 @@ const CATEGORY_LABEL: Record<string, string> = {
   user_input: "User input",
   agent_messages: "Agent messages",
 
-  reasoning: "Reasoning",
+  reasoning: "Thinking",
   output: "Text output",
   tool_call: "Tool calls",
   tool_response: "Tool responses",
