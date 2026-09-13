@@ -2,7 +2,7 @@ name: CI failed-job rerun
 
 on:
   workflow_run:
-    workflows: ["CI"]
+    workflows: ["CI", "Inactive runtime preparation"]
     types: [completed]
 
 permissions:
@@ -20,6 +20,7 @@ jobs:
       RUN_ID: ${{ github.event.workflow_run.id }}
       RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
       RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+      WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
       RUN_EVENT: ${{ github.event.workflow_run.event }}
       HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
       HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
@@ -31,6 +32,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Triggered by two whitelisted workflows: CI, and `Inactive runtime
+          # preparation`, whose retry is narrowed to the known cold-offline
+          # flake family (the offline-prepare watchdog timeout; root cause
+          # task #3281).
           # `cancelled` covers the cap-cancel shape: a job that hits its own
           # timeout-minutes cancels the run, and the next attempt usually passes
           # (2026-09-12: shards cancelled at the 20-minute cap on two runs). The
@@ -80,14 +85,28 @@ jobs:
             fi
           fi
           # On pushes, this workflow shares HEAD_SHA with CI and would otherwise be newest.
-          # Filter to CI only; PR rerun heads are on default branch, not the PR.
+          # Filter to the triggering workflow only; PR rerun heads are on default branch, not the PR.
           newest_run_id="$(
+            # Double-quoted so ${WORKFLOW_NAME} expands; the escaped quotes keep
+            # the jq string literal intact (the trigger whitelist pins both names).
             gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${HEAD_SHA}&per_page=100" \
-              --jq '[.workflow_runs[] | select(.name == "CI") | .id] | max'
+              --jq "[.workflow_runs[] | select(.name == \"${WORKFLOW_NAME}\") | .id] | max"
           )"
           if [ "$RUN_ID" != "$newest_run_id" ]; then
-            echo "CI run ${RUN_ID} is not the newest run (${newest_run_id}) for ${HEAD_SHA}"
+            echo "${WORKFLOW_NAME} run ${RUN_ID} is not the newest run (${newest_run_id}) for ${HEAD_SHA}"
             exit 0
+          fi
+
+          # `Inactive runtime preparation` retries only its known flake family:
+          # exactly one failing job (the ubuntu leg) whose only failed step is
+          # the offline prepare. Wider shapes go to manual triage (task #3285).
+          if [ "$WORKFLOW_NAME" = "Inactive runtime preparation" ]; then
+            verdict="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100" \
+              --jq '[.jobs[] | select(.conclusion != "success" and .conclusion != "skipped" and .conclusion != "neutral" and .conclusion != null)] as $failed | if ($failed | length) == 1 and $failed[0].name == "cold-offline (ubuntu-24.04)" and $failed[0].conclusion == "failure" and ([($failed[0].steps // []) | .[] | select(.conclusion == "failure" or .conclusion == "timed_out") | .name] == ["Real offline prepare, retained interpreter and failure isolation"]) then "match" else "mismatch" end')"
+            if [ "$verdict" != "match" ]; then
+              echo "runtime preparation failure shape does not match the known flake family; refusing retry"
+              exit 0
+            fi
           fi
 
           # The first job-level rerun starts a new attempt, making later calls fail with 403.
@@ -108,4 +127,4 @@ jobs:
           fi
           gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
             -f body="$marker
-          Failed CI jobs were re-run once. Inspect the current PR head and remaining failures before requesting another action. This workflow does not change merge-queue membership."
+          Failed jobs were re-run once. Inspect the current PR head and remaining failures before requesting another action. This workflow does not change merge-queue membership."
