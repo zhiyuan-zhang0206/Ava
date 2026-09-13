@@ -97,10 +97,19 @@ def _samples() -> dict[str, dict]:
             "status": "success",
             "finished_at": "2026-09-14T02:15:24+00:00",
         },
+        # Enriched values mirror the real permanent-provider block copy
+        # (aligned in #1587); the generator stays the canonical source —
+        # re-run this script to keep the fixture regenerable.
         "error": {
             "role": "error",
             "agent_id": agent_id,
-            "content": "something broke",
+            "content": "provider rejected the request",
+            "error_class": "permanent",
+            "provider": "deepseek",
+            "status": 400,
+            "reason": "bad_request",
+            "blocked": True,
+            "recovery": "Choose a different model overlay, then send a new message.",
         },
         "cancelled": {"role": "cancelled", "agent_id": agent_id},
         "inbound_arrived": {
