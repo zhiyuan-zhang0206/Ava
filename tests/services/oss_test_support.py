@@ -6,7 +6,7 @@ Not a test module: pytest never collects this file. The fake lives at the
 transport boundary the adapters narrow to (``OSSBucketOps``), so the role
 tests exercise one honest in-memory OSS backend: per-part MD5 verification,
 the forbid-overwrite precondition, the deterministic multipart ETag chain,
-and If-Match pinned reads.
+If-Match pinned reads, and the retention-delete role (``OSSDeleteBucketOps``).
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from oss2.models import PartInfo
 from services.pitr.oss_inventory import OSSRetentionInventoryReader
 from services.pitr.oss_publish_store import OSSProtectedManifestPublisher
 from services.pitr.oss_restore_store import OSSGenerationPinnedObjectReader
-from services.pitr.oss_store import OSSObjectStore
+from services.pitr.oss_store import OSSObjectStore, OSSRetentionDeleteStore
 
 PREFIX = "ava-pitr"
 WA_OBJECT = f"{PREFIX}/wal/00000001/000000010000000000000001.enc"
@@ -152,6 +152,7 @@ class FakeOssBucket:
         self.corrupt_part_etags = False
         self.corrupt_complete_etag = False
         self.head_error: tuple[int, str] | None = None
+        self.delete_error: tuple[int, str] | None = None
         self.request_error = False
 
     def seed(
@@ -297,6 +298,15 @@ class FakeOssBucket:
         self._parts.pop(upload_id, None)
         self._pending.pop(upload_id, None)
 
+    def delete_object(self, key: str) -> object:
+        if self.request_error:
+            raise oss2.exceptions.RequestError(OSError("injected transport failure"))
+        if self.delete_error is not None:
+            status, code = self.delete_error
+            raise _server_error(status, code, f"injected {code}")
+        # OSS answers 204 whether or not the object existed.
+        return self.files.pop(key, None)
+
 
 def _multipart_etag_of(data: bytes, part_count: int) -> str:
     etags = [_uppercase(data)]
@@ -307,6 +317,10 @@ def make_store(fake: FakeOssBucket) -> OSSObjectStore:
     # The fake narrows OSSBucketOps at the same seam the GCS contract tests
     # use cast(Any, ...) — protocol conformance is enforced by the role tests.
     return OSSObjectStore.from_bucket(cast(Any, fake))
+
+
+def make_delete_store(fake: FakeOssBucket) -> OSSRetentionDeleteStore:
+    return OSSRetentionDeleteStore.from_bucket(cast(Any, fake))
 
 
 def make_reader(fake: FakeOssBucket) -> OSSGenerationPinnedObjectReader:
