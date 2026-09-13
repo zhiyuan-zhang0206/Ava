@@ -37,5 +37,8 @@ scrape_configs:
     static_configs:
       - targets: ["{{AVA_LOKI_SCRAPE_TARGET}}"]
   - job_name: grafana
+    # Grafana serves from /grafana (grafana.ini serve_from_sub_path); scraping
+    # /metrics would 301-redirect into the gateway auth wall (task #3316).
+    metrics_path: /grafana/metrics
     static_configs:
       - targets: ["{{AVA_GRAFANA_SCRAPE_TARGET}}"]
