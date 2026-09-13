@@ -246,6 +246,51 @@ async def test_backoff_schedule_grows_and_caps(started: StartFactory) -> None:
     assert delays == pytest.approx([0.05, 0.1, 0.2, 0.2], abs=0.03)
 
 
+async def test_backoff_schedule_clamps_a_huge_failure_streak(started: StartFactory) -> None:
+    """Regression (the wiring gate): an unclamped `2**streak` overflows the
+    int-to-float conversion from streak=1024 on, raising before the `min()`
+    cap could apply."""
+    supervisor = await started(
+        [_unit("svc", _SLEEP_FOREVER)], backoff_base_s=0.05, backoff_max_s=0.2
+    )
+    runtime = supervisor._units["svc"]
+    runtime.failure_streak = 10_000
+    before = time.monotonic()
+    supervisor._schedule_restart(runtime)
+    backoff_until = runtime.backoff_until
+    assert backoff_until is not None
+    assert backoff_until - before == pytest.approx(0.2, abs=0.03)
+    task = runtime.restart_task
+    assert task is not None
+    task.cancel()
+
+
+async def test_watch_survives_a_huge_streak_and_the_unit_restarts(
+    started: StartFactory,
+) -> None:
+    """Regression: the overflow used to kill the watch task before
+    `generation.exited` was set, so the unit silently stopped restarting while
+    its status kept claiming running."""
+    exits_soon = _python("import sys, time; time.sleep(0.3); sys.exit(1)")
+    supervisor = await started(
+        [_unit("svc", exits_soon, restart="always")],
+        backoff_base_s=0.05,
+        backoff_max_s=0.1,
+    )
+    runtime = supervisor._units["svc"]
+    watch_task = runtime.watch_task
+    runtime.failure_streak = 5000
+
+    async def restarted() -> bool:
+        entry = await _unit_status(supervisor, "svc")
+        return cast(int, entry["restart_count"]) >= 1
+
+    await _wait_until(restarted)
+    assert watch_task is not None
+    assert watch_task.done()
+    assert watch_task.exception() is None
+
+
 async def test_manual_restart_replaces_generation(started: StartFactory) -> None:
     supervisor = await started([_unit("svc", _SLEEP_FOREVER)])
     old_pid = cast(int, (await _unit_status(supervisor, "svc"))["pid"])
