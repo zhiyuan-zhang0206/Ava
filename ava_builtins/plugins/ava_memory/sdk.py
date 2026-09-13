@@ -183,7 +183,14 @@ def _locked_update(index_path: Path, update: Callable[[str], str]) -> None:
 def _upsert_index(
     root: Path, relative_path: str, title: str, description: str, *, shared: bool
 ) -> None:
-    """Replace or append one index pointer without disturbing other entries."""
+    """Replace or append one index pointer without disturbing other entries.
+
+    Shared subdirectory entries are exempt: the root index carries root-level
+    notes and directory pointers only, and the entry's own directory index.md
+    carries its line (built by consolidation).
+    """
+    if shared and "/" in relative_path:
+        return
     index_path = root / "MEMORY.md"
     pointer = _pointer_line(title, relative_path, description)
     target = re.compile(rf"^- \[[^]]+\]\({re.escape(relative_path)}\) — .*$")
@@ -434,7 +441,9 @@ def write(
 
     Personal entries use a flat kebab-case name in the calling agent's
     workspace; shared entries may use topic directories in the memory pool.
-    Both targets are absolute store paths.
+    Both targets are absolute store paths. A shared subdirectory entry is
+    exempt from the root index: its line belongs to the entry's own
+    directory index.md, so the write leaves the root MEMORY.md untouched.
 
     Content may open with its own frontmatter block: that block is kept as
     the note's only one, gains whichever required fields it is missing, and
