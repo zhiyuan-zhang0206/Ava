@@ -341,7 +341,9 @@ repos:
       # until the wall clock passes the constant's boundary — the 2026-08-30
       # pair of deterministic-red tests that each ejected the merge-queue
       # batch. Also guards the source side: a function that accepts a clock
-      # parameter must thread it into fixed-instant window boundaries. See
+      # parameter must thread it into fixed-instant window boundaries, and the
+      # test side against fixed calendar fixtures bound to window-shaped names
+      # (a pinned date rots the day the window rolls past it). See
       # scripts/lint_time_bomb.py.
       - id: lint-time-bomb
         name: lint time bombs (fixed instant x real clock)

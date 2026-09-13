@@ -505,3 +505,18 @@ def test_fixture_date_computed_ctor_args_are_allowed(scratch) -> None:
     )
     errors = _lint._lint_tests(build(), [build().root / "tests"])
     assert errors == []
+
+
+def test_explicit_relative_path_argument_runs(scratch) -> None:
+    """A relative path argument resolves against the repo root instead of
+    crashing `relative_to` (pre-existing bug folded in with the lint change)."""
+    root, _ = scratch
+    _write(
+        root,
+        "tests/test_clean.py",
+        """
+        def test_ok():
+            assert True
+        """,
+    )
+    assert _lint.main(["tests/test_clean.py"]) == 0

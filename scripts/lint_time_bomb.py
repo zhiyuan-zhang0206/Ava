@@ -22,7 +22,7 @@ an unstated wall-clock relation.
 
 ## The rules
 
-Two checks, both AST-based (no imports of app code; runs anywhere the source
+Three checks, all AST-based (no imports of app code; runs anywhere the source
 tree is present — the same zero-dependency shape as the other `scripts/`
 lints):
 
@@ -61,6 +61,9 @@ lints):
    window it feeds is evaluated against the real clock: the fixture rots the
    day the window rolls past it. Derive the value from the clock (or from the
    request under test), or carry `# time-bomb-ok: <reason>` on the binding.
+   Scanned positions are the dict value, keyword argument, and plain
+   assignment — attribute/subscript targets, `AnnAssign`, and values laundered
+   through other names are deliberately out of scope.
 
 Scope: rule 1 scans non-test source dirs only; rules 2 and 3 scan `tests/`
 only. Error format `file:line: <reason>` + non-zero exit.
@@ -612,8 +615,9 @@ def _lint_fixture_dates(path: Path, tree: ast.Module, lines: list[str]) -> list[
     the value only for a keyword)."""
     found: list[tuple[int, str]] = []
 
-    def check(name: str, start: int, end: int, value: ast.AST) -> None:
-        if any(_OPT_OUT in line for line in lines[start - 1 : end]):
+    def check(name: str, start: int, end: int | None, value: ast.AST) -> None:
+        stop = end if end is not None else start
+        if any(_OPT_OUT in line for line in lines[start - 1 : stop]):
             return
         found.append(
             (
@@ -695,7 +699,7 @@ def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     root = _REPO_ROOT
     if argv:
-        paths = [Path(a) for a in argv]
+        paths = [p if p.is_absolute() else root / p for p in (Path(a) for a in argv)]
         used = {p for p in paths if p.is_dir()}
         dirs = tuple(d for d in _SCAN_DIRS if (root / d).is_dir()) if used else ()
         index = _Index(root, dirs)
