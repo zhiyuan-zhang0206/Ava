@@ -449,14 +449,33 @@ def _stop_sandbox(pg_ctl: Path, pgdata: Path, sandbox: SandboxPostgresIdentity) 
 
 
 def _residue_scan(scratch: Path, port: int, pgdata: Path) -> dict[str, Any]:
+    """Scan for sandbox processes still holding the scratch tree.
+
+    The drill's own invocation carries ``--scratch <root>`` and a launcher
+    shell may quote the whole command line, so this process and its ancestors
+    are skipped -- a scan that flagged its own command line would fail every
+    drill. A surviving sandbox postmaster runs with ``-D
+    <scratch>/sandbox/data``: the match requires a ``postgres`` executable
+    plus a path *inside* the tree, never the bare root an unrelated command
+    line may quote.
+    """
+
+    root = f"{scratch.resolve()}{os.sep}"
+    ignored = {os.getpid()}
+    with suppress(psutil.Error):
+        ignored.update(process.pid for process in psutil.Process().parents())
     processes: list[str] = []
-    for process in psutil.process_iter(["cmdline"]):
+    for process in psutil.process_iter(["pid", "cmdline"]):
         with suppress(psutil.Error):
+            raw_pid = process.info["pid"]
             raw_cmdline = process.info["cmdline"]
-            if isinstance(raw_cmdline, list):
-                cmdline = [str(part) for part in cast("list[object]", raw_cmdline)]
-                if any(str(scratch) in part for part in cmdline):
-                    processes.append(" ".join(cmdline))
+            if raw_pid in ignored or not isinstance(raw_cmdline, list):
+                continue
+            cmdline = [str(part) for part in cast("list[object]", raw_cmdline)]
+            if not cmdline or not _is_postgres_executable(cmdline[0]):
+                continue
+            if any(part.startswith(root) for part in cmdline):
+                processes.append(" ".join(cmdline))
     listening = False
     with socket.socket() as probe:
         probe.settimeout(1.0)
@@ -466,6 +485,14 @@ def _residue_scan(scratch: Path, port: int, pgdata: Path) -> dict[str, Any]:
         "port_listening": listening,
         "pid_file_present": (pgdata / "postmaster.pid").exists(),
     }
+
+
+def _is_postgres_executable(executable: str) -> bool:
+    """The sandbox postmaster runs as ``postgres`` (children show as
+    ``postgres: <role>``); nothing else in the drill spawns a long-lived
+    process under the scratch tree."""
+    name = Path(executable).name
+    return name == "postgres" or name.startswith("postgres:")
 
 
 def _acceptance_failures(evidence: DrillEvidence) -> list[str]:

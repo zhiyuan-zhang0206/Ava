@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from collections.abc import Iterator
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, cast
@@ -344,6 +345,45 @@ def test_run_restore_drill_passes_when_every_check_holds(
     payload = json.loads((request.scratch / "drill-evidence.json").read_text())
     assert payload["outcome"] == "pass"
     assert payload["chain_id"] == "activation-test-chain"
+
+
+class _FakeScanProcess:
+    def __init__(self, pid: int, cmdline: list[str]) -> None:
+        self.info: dict[str, object] = {"pid": pid, "cmdline": cmdline}
+
+
+def test_residue_scan_ignores_its_own_invocation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The drill's own `--scratch` argv must not trip the residue gate.
+
+    QA on PR #2358 reproduced the opposite: a bare containment match flagged
+    the invoking process chain, so every runbook-shaped invocation would have
+    false-failed its isolation criterion. The scan now skips this process and
+    its ancestors, requires a path inside the tree (never the bare root), and
+    only counts `postgres` executables.
+    """
+    scratch = tmp_path / "scratch"
+    pgdata = scratch / "sandbox" / "data"
+    rows = [
+        _FakeScanProcess(os.getpid(), ["ava", "pitr", "drill", "--scratch", str(scratch)]),
+        _FakeScanProcess(990001, ["bash", "-c", f"ava pitr drill --scratch {scratch}"]),
+        _FakeScanProcess(990002, ["tail", "-f", f"{scratch}/sandbox-postgres.log"]),
+        _FakeScanProcess(990003, ["/usr/bin/postgres", "-D", "/somewhere/else/data"]),
+        _FakeScanProcess(
+            990004, ["/usr/lib/postgresql/17/bin/postgres", "-D", f"{scratch}/sandbox/data"]
+        ),
+    ]
+
+    def fake_process_iter(*args: object, **kwargs: object) -> Iterator[_FakeScanProcess]:
+        return iter(rows)
+
+    monkeypatch.setattr(restore_drill.psutil, "process_iter", fake_process_iter)
+    result = restore_drill._residue_scan(scratch, 1, pgdata)
+
+    assert result["processes"] == [f"/usr/lib/postgresql/17/bin/postgres -D {scratch}/sandbox/data"]
+    assert result["port_listening"] is False
+    assert result["pid_file_present"] is False
 
 
 def test_acceptance_failures_cover_the_criteria_set(tmp_path: Path) -> None:

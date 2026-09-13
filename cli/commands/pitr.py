@@ -8,12 +8,6 @@ from collections.abc import Callable
 from pathlib import Path
 
 from services.pitr.base_manifest import CandidateManifest
-from services.pitr.base_operation_runtime import (
-    live_data_directory,
-    restore_key_path,
-    restore_store_args,
-)
-from services.pitr.restore_drill import DrillRequest, parse_target_wall, run_restore_drill
 from services.pitr.retention_planner import inspect_dry_run_plan
 from services.pitr.rollback_snapshot_archive import (
     RollbackSnapshotArchive,
@@ -125,11 +119,36 @@ def cmd_pitr_drill(
     """Restore one protected chain to an operator target in isolation.
 
     The scratch tree is kept as evidence on every outcome; the drill never
-    publishes and never writes to the live cluster.
+    publishes and never writes to the live cluster. The service imports are
+    method-local on purpose: `cli.commands` sits in the agent-runner
+    updater's pre-checkout import closure, and the drill's modules reach
+    `shared.session_record`, which must stay outside it
+    (`tests/cli/test_update_import_timing.py`).
     """
+    from services.pitr.base_operation_runtime import (
+        live_data_directory,
+        restore_key_path,
+        restore_store_args,
+    )
+    from services.pitr.restore_drill import DrillRequest, parse_target_wall, run_restore_drill
+
     try:
-        request = _drill_request(
-            chain, candidate, target_lsn, target_wall, scratch, timeout_seconds
+        candidate_manifest = _resolve_drill_candidate(chain, candidate)
+        config = settings.physical_backup
+        group = construct_store_group(config.pitr_store_backend, dict(restore_store_args(config)))
+        request = DrillRequest(
+            candidate=candidate_manifest,
+            reader=group.generation_pinned_object_reader(),
+            key=restore_key_path(config).read_bytes(),
+            ack_dir=ava_home() / "physical-backup" / "ack",
+            scratch=Path(scratch),
+            target_lsn=target_lsn,
+            target_wall=parse_target_wall(target_wall),
+            pg_ctl=pg_tool("pg_ctl"),
+            pg_verifybackup=pg_tool("pg_verifybackup"),
+            live_db_url=direct_db_url(),
+            data_directory=live_data_directory(),
+            timeout_seconds=timeout_seconds,
         )
     except Exception as exc:
         print(f"pitr drill failed before start: {exc}", file=sys.stderr)
@@ -169,33 +188,6 @@ def cmd_pitr_drill(
         )
     )
     return 0
-
-
-def _drill_request(
-    chain: str | None,
-    candidate: str | None,
-    target_lsn: str,
-    target_wall: str,
-    scratch: str,
-    timeout_seconds: int,
-) -> DrillRequest:
-    candidate_manifest = _resolve_drill_candidate(chain, candidate)
-    config = settings.physical_backup
-    group = construct_store_group(config.pitr_store_backend, dict(restore_store_args(config)))
-    return DrillRequest(
-        candidate=candidate_manifest,
-        reader=group.generation_pinned_object_reader(),
-        key=restore_key_path(config).read_bytes(),
-        ack_dir=ava_home() / "physical-backup" / "ack",
-        scratch=Path(scratch),
-        target_lsn=target_lsn,
-        target_wall=parse_target_wall(target_wall),
-        pg_ctl=pg_tool("pg_ctl"),
-        pg_verifybackup=pg_tool("pg_verifybackup"),
-        live_db_url=direct_db_url(),
-        data_directory=live_data_directory(),
-        timeout_seconds=timeout_seconds,
-    )
 
 
 def _resolve_drill_candidate(chain: str | None, candidate: str | None) -> CandidateManifest:
