@@ -156,7 +156,7 @@ to add `@pytest.mark.flaky` without a root-cause analysis.
 
 **Evidence.** The serial bucket is real infrastructure: `@pytest.mark.flaky`
 runs in the backend serial job (`-m flaky -n 1`), and the frontend has
-`vitest.flaky.config.ts`. The split predates the 2026-08-18 public-repo
+`vitest.flaky.config.mts`. The split predates the 2026-08-18 public-repo
 cutover, so its original PR number is not reachable from public main; the
 internal-CI migration rewrite (commit `8f00cc49b`) silently dropped it, and
 PR #433 restored it with the frontend coverage gate. PRs #306 and #964 show why serial execution is not a

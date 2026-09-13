@@ -15,7 +15,7 @@ import { afterEach, vi } from "vitest";
 import { cleanup } from "@testing-library/react";
 
 // RTL auto-cleanup registers itself only when `afterEach` exists on
-// globalThis — which `globals: false` (vitest.config.ts) never provides — so
+// globalThis — which `globals: false` (vitest.config.mts) never provides — so
 // without this line NOTHING unmounts between tests. Rendered components leak
 // for the rest of the file; a leaked live-clock interval (see
 // src/components/timeline/reasoning-clock.ts useNow) can then fire a setState

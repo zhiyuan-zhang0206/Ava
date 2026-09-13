@@ -2,7 +2,7 @@
 //
 // These tests are timing-sensitive (DOM rendering races, animation-dependent
 // assertions) and must run serially (fileParallelism false). They are excluded
-// from the main parallel vitest run (vitest.config.ts excludes the same
+// from the main parallel vitest run (vitest.config.mts excludes the same
 // `src/**/flaky/**` pattern this config includes), and CI runs this config as
 // its own serial step after the parallel one.
 //
@@ -17,7 +17,7 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   resolve: {
-    alias: { "@": path.resolve(__dirname, "./src") },
+    alias: { "@": path.resolve(import.meta.dirname, "./src") },
   },
   test: {
     environment: "happy-dom",
@@ -25,7 +25,7 @@ export default defineConfig({
     // Same deterministic timezone as the main config — this run is its own
     // vitest process, so the pin isn't inherited.
     env: { TZ: "UTC" },
-    // Same global stubs + network guard as the main config (vitest.config.ts) —
+    // Same global stubs + network guard as the main config (vitest.config.mts) —
     // this run gets its own process, so setupFiles isn't inherited automatically.
     setupFiles: ["./vitest.setup.ts"],
     reporters: [

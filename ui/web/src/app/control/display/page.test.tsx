@@ -43,7 +43,7 @@ function renderPage() {
   );
 }
 
-// Explicit cleanup: globals are off (vitest.config.ts), so RTL's auto-cleanup
+// Explicit cleanup: globals are off (vitest.config.mts), so RTL's auto-cleanup
 // never registers and the DOM would accumulate one page per test — the
 // multiple-elements failures in the slider tests exposed that. Other frontend
 // test files (page.test.tsx, composer.test.tsx) follow the same pattern.
