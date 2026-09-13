@@ -22,7 +22,7 @@ dropped into a gateway-only host's `$AVA_HOME/plugins/` is never scanned.
 ## Entry shape
 
 `{name, type, source, path, ref, enabled, origin, origin_path, content_hash,
-installed_at, updated_at, trust, scanned_at, accepted_findings}`
+installed_at, updated_at, trust, scanned_at, accepted_findings, update}`
 
 - `type` — `skill` | `plugin` | `mcp`
 - `source` / `path` / `ref` — the git URL, the subdir within it, the pinned ref
@@ -32,6 +32,25 @@ installed_at, updated_at, trust, scanned_at, accepted_findings}`
 - `trust` / `scanned_at` / `accepted_findings` — the content trust tier, when
   `shared/skill_scan.py` last read the package, and the rule ids a human waived
   with `--accept-risk` (see below)
+- `update` — the per-package content-channel policy + bookkeeping (schema v2,
+  tasks #2915 / #3267): `mode` (`auto` / `notify` / `off`), `interval_seconds`,
+  `channel` (`core` = this repo's content paths / `git` = the recorded source),
+  `applied_rev`, and the last check/apply timestamps + result. `mode` /
+  `interval_seconds` / `channel` stay `None` until the refresh pass resolves
+  them from the source class at first sight; `resolved_policy()` computes the
+  effective values for readers without writing.
+
+## Schema v2 — update policy & channels
+
+`Registry.version` is 2 since the content-channel support. Beside the per-row
+`update` above, the registry carries a top-level `channels` map
+(`ChannelState`: one row per channel kind — remote URL, ref, last seen head,
+last check). A legacy v1 file loads as v2 **in memory** (every row gains a
+default `UpdateState`, `channels` starts empty) and is rewritten as v2 on the
+next `save`; `load()` itself never writes. A file carrying a *newer* schema
+version is refused outright — an old build must not guess at a newer shape.
+The surface over all of it: `ava packages status`
+([[../../cli/commands/packages/packages.ava.okf.md|the package commands]]).
 
 ## Trust tiers
 
@@ -116,7 +135,7 @@ projects.
 
 ## Key Dependencies
 
-- [[cli/commands/packages.ava.okf.md]] — the `ava plugins` / `ava skill` / `ava mcp` operator surface
+- [[cli/commands/packages/packages.ava.okf.md]] — the `ava plugins` / `ava skill` / `ava mcp` operator surface
 - [[plugins_config.ava.okf.md]] — the sibling per-machine plugin enable config
 - [[okf/skills/skills.ava.okf.md|Skills]] — what a skill is and how the scanner loads one
 - [[okf/mcps/mcps.ava.okf.md|MCP integration]] — MCP server merge layers and launch form
