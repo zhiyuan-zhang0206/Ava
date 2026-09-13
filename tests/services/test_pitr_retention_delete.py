@@ -607,3 +607,56 @@ def test_interrupted_pair_leaves_an_orphan_and_the_next_tick_cleans_it(tmp_path:
     )
     assert second.orphans_deleted == 1
     assert sidecar_name not in fake.files
+
+
+def test_executor_records_sidecar_absent_and_verify_failure(tmp_path: Path) -> None:
+    host = _object("pairs/base.enc", pin="host-pin", size=3)
+    sidecar = RetentionSidecar("pairs/base.enc.ack.json", "side-pin", 2)
+    decision = RetentionDecision(host, "older drilled base chain", sidecar)
+    plan = _plan_units((decision,))
+
+    already_gone = _FakeDeleteStore({"pairs/base.enc.ack.json": DeleteOutcome.ABSENT})
+    first = execute_retention_plan(
+        plan,
+        expected_digest=plan.digest(),
+        delete_store=already_gone,
+        verify_absent=_Gone(),
+        remote_total_bytes=1000,
+        journal=_journal(tmp_path),
+    )
+    assert (first.sidecars_absent, first.sidecars_failed, first.sidecars_deleted) == (1, 0, 0)
+
+    fading = _FakeDeleteStore()
+    second = execute_retention_plan(
+        plan,
+        expected_digest=plan.digest(),
+        delete_store=fading,
+        verify_absent=_Gone(present={"pairs/base.enc.ack.json"}),
+        remote_total_bytes=1000,
+        journal=_journal(tmp_path),
+    )
+    assert (second.sidecars_deleted, second.sidecars_failed) == (0, 1)
+    sidecar_units = [
+        record.get("outcome")
+        for record in _records(tmp_path)
+        if record["kind"] == "result" and record.get("unit") == "sidecar"
+    ]
+    assert sidecar_units == ["absent", "verify-failed"]
+
+
+def test_executor_counts_orphan_sidecars_already_absent(tmp_path: Path) -> None:
+    sidecar = RetentionSidecar("pairs/y.enc.ack.json", "pin", 2)
+    plan = _plan_units(orphan_sidecars=(sidecar,))
+    store = _FakeDeleteStore({"pairs/y.enc.ack.json": DeleteOutcome.ABSENT})
+
+    summary = execute_retention_plan(
+        plan,
+        expected_digest=plan.digest(),
+        delete_store=store,
+        verify_absent=_Gone(),
+        remote_total_bytes=1000,
+        journal=_journal(tmp_path),
+    )
+
+    assert (summary.orphans_absent, summary.orphans_failed, summary.orphans_deleted) == (1, 0, 0)
+    assert store.calls == [("pairs/y.enc.ack.json", "pin")]

@@ -151,7 +151,6 @@ def test_oss_inventory_captures_pairs_and_orphans() -> None:
     )
 
     orphan_name = f"{PREFIX}/base/20251201T000000Z/" + "c" * 64 + "/base.tar.zst.enc"
-    orphan_payload = b"gone-host"
     orphan_bytes = json.dumps(
         {
             "object_name": orphan_name,
@@ -189,7 +188,7 @@ def test_oss_inventory_captures_pairs_and_orphans() -> None:
     assert orphan.host.kind == "base"
     assert orphan.host.pin_token == "opaque:pin"  # noqa: S105 — fixture identity
     assert orphan.sidecar.pin_token == orphan_etag
-    assert orphan_payload  # host payload never re-read for orphans
+    assert orphan_name not in fake.files  # the host itself is gone
 
 
 # ── Baidu inventory capture ──
@@ -297,6 +296,12 @@ def test_plan_attaches_bound_sidecars_to_their_host_decisions() -> None:
     assert len(attached) == 1
     assert attached[0].sidecar == bound.sidecar
 
+    round_tripped = type(plan).from_json(plan.to_json())
+    restored = [
+        d for d in round_tripped.eligible if d.object.object_name == first.base_object.object_name
+    ]
+    assert [d.sidecar for d in restored] == [bound.sidecar]
+
     retained_pair = SidecarPair(
         second.base_object.pin_token,
         RetentionSidecar(f"{second.base_object.object_name}.ack.json", "kept-pin", 5),
@@ -349,6 +354,17 @@ def test_plan_keeps_only_orphans_inside_the_eligible_range() -> None:
         "e" * 32,
         (),
     )
+    history_name = "000000010000000000000002.history"
+    history_host = RetentionObject(
+        f"pitr/wal/00000001/{history_name}.enc",
+        "42",
+        20,
+        history_name,
+        "history",
+        "crc32c",
+        "crc",
+        (("ava-archive-name", history_name),),
+    )
 
     def orphan(host: RetentionObject, pin: str) -> OrphanSidecar:
         return OrphanSidecar(host, RetentionSidecar(f"{host.object_name}.ack.json", pin, 3))
@@ -359,6 +375,7 @@ def test_plan_keeps_only_orphans_inside_the_eligible_range() -> None:
         orphan(unknown_base, "orphan-99"),
         orphan(_remote_wal(1), "orphan-wal-old"),
         orphan(_remote_wal(4), "orphan-wal-late"),
+        orphan(history_host, "orphan-history"),
     )
     evidence = _three_chain_evidence(candidates, orphan_sidecars=observations)
     plan = plan_retention(evidence)
