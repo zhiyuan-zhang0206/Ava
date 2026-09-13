@@ -197,7 +197,8 @@ metadata, and the cap bounds the discovered set. File names become resource
 Local cleanup is explicit and converge-owned: a daily 04:40 job runs `ava logs
 rotate` and then `ava logs retention --family-days ...`. Rotation copytruncates
 service `.out.log` files and native backend logs at each UTC-day boundary or
-when they reach the 64 MiB trigger, so writers keep their open file descriptor.
+when they reach the 64 MiB trigger, so writers keep their open file descriptor;
+zero-byte files are skipped, so a stale log is not re-archived every day.
 Retention prunes the resulting archives using agent 15d, named PTY shell and
 computer-use snapshots 7d, gateway/ops/watchdog 30d, and other/native archives
 3d. With neither age flag, the legacy global threshold remains
