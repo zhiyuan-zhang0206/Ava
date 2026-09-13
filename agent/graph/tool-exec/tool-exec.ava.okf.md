@@ -31,6 +31,7 @@ The agent's sole tool—`execute_code(code: str)`—executes Python code in a di
 - `agent/graph/_exec_output.py:wrap_code_output()` wraps the result (cancelled/timed_out markers)
 - Configurable soft line previews and the two existing hard caps have distinct retention contracts; see [[agent/graph/tool-exec/output-preview.ava.okf.md]]. Soft archives protect current context references within a byte budget; legacy hard-overflow files retain their 20-file ring
 - Results are dispatched by sum type (`_ExecDone|_ExecCancelled|_ExecTimedOut|_ExecLifecycle|_ExecCrashed`): runtime imports occur under the child entry guard, so boot/config and user-code exceptions become a `crashed` envelope with their traceback; lifecycle exceptions (terminate/restart/compact) take highest priority
+- The exec-result ToolMessage carries `additional_kwargs["sdk_calls"]` — the run's real top-level `ava.*` call tally, measured in the child by `shared.sdk_telemetry` (`[]` = ran, called none; omitted = unknown, e.g. a boot crash). The timeline's collapsed-code chip renders these counts only — no source-text scan.
 
 ### In-memory system-note injection (`_exec_notes.py`, user ruling 2026-08-11)
 - AGENTS.md / CLAUDE.md context notes (ava_code plugin) and prompt-injection security findings (ava.security) are delivered **inside the exec's own messages delta** — no side-channel file

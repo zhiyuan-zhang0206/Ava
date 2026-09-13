@@ -217,3 +217,127 @@ def test_emit_swallows_sink_failure(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(sdk_telemetry, "logger", _Boom())
     sdk_telemetry.emit("ns.fn", {"k": 1})  # must not raise
+
+
+# ── full tally: per-recording, unsampled, top-level only ──────────────────────
+
+
+def test_recording_yields_the_full_tally_per_fn(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Loop N executions count N; a call that never runs counts nothing; emit's
+    spy sees the same order of calls."""
+    calls = _spy_emit(monkeypatch)
+    with sdk_telemetry.recording() as tally:
+        for _ in range(3):
+            sdk_telemetry.run_metered("files.read", lambda: "ok", (), {})
+        sdk_telemetry.run_metered("shell.run", lambda: "ok", (), {})
+    assert tally == {"files.read": 3, "shell.run": 1}
+    assert [fn for fn, _ in calls] == ["files.read", "files.read", "files.read", "shell.run"]
+
+
+def test_tally_is_unsampled_while_events_keep_the_one_in_ten_gate() -> None:
+    """Acceptance: the 1-in-10 sampling stays in the emit layer only — ten real
+    executions write one event but a full tally of ten."""
+    captured: list[dict[str, Any]] = []
+    sink_id = logger.add(
+        lambda m: captured.append(dict(m.record["extra"])),
+        level="INFO",
+        filter=lambda r: r["extra"].get("event") == sdk_telemetry.SDK_CALL_EVENT,
+    )
+    try:
+        with sdk_telemetry.recording() as tally:
+            for _ in range(10):
+                sdk_telemetry.run_metered("files.read", lambda: "ok", (), {})
+    finally:
+        logger.remove(sink_id)
+
+    assert len(captured) == 1  # the sampler dropped the other nine events
+    assert tally == {"files.read": 10}  # the tally is full
+    assert getattr(sdk_telemetry._local, "tally", None) is None  # restored on exit
+
+
+def test_tally_counts_a_failed_top_level_call_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Like its event, a call that raises still counts — it really executed."""
+    _spy_emit(monkeypatch)
+
+    def boom() -> None:
+        raise ValueError("x")
+
+    with sdk_telemetry.recording() as tally, pytest.raises(ValueError, match="x"):
+        sdk_telemetry.run_metered("ns.boom", boom, (), {})
+    assert tally == {"ns.boom": 1}
+
+
+def test_tally_counts_only_outermost_calls(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A nested ava.* call inside a metered call is framework fan-out, not an
+    agent statement — same top-level-only rule as the events."""
+    _spy_emit(monkeypatch)
+
+    def inner() -> str:
+        return sdk_telemetry.run_metered("ns.inner", lambda: "inner", (), {})
+
+    with sdk_telemetry.recording() as tally:
+        sdk_telemetry.run_metered("ns.outer", inner, (), {})
+    assert tally == {"ns.outer": 1}
+
+
+def test_tally_absent_outside_recording_and_each_block_gets_its_own(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _spy_emit(monkeypatch)
+    sdk_telemetry.run_metered("ns.fn", lambda: "ok", (), {})  # framework-internal: no tally
+    with sdk_telemetry.recording() as first:
+        sdk_telemetry.run_metered("a.fn", lambda: "ok", (), {})
+    with sdk_telemetry.recording() as second:
+        sdk_telemetry.run_metered("b.fn", lambda: "ok", (), {})
+    assert first == {"a.fn": 1}
+    assert second == {"b.fn": 1}
+    assert getattr(sdk_telemetry._local, "tally", None) is None
+
+
+def test_tally_entries_sorts_by_descending_count_then_method() -> None:
+    assert sdk_telemetry.tally_entries({"b.x": 2, "a.x": 2, "c.x": 5}) == [
+        {"method": "c.x", "count": 5},
+        {"method": "a.x", "count": 2},
+        {"method": "b.x", "count": 2},
+    ]
+    assert sdk_telemetry.tally_entries({}) == []
+
+
+# ── reading the metadata back off exec_output messages ────────────────────────
+
+
+def _exec_output(tool_call_id: str, sdk_calls: list[dict[str, Any]] | None) -> Any:
+    from langchain_core.messages import ToolMessage
+
+    kwargs: dict[str, Any] = {"ava_msg_type": "exec_output"}
+    if sdk_calls is not None:
+        kwargs["sdk_calls"] = sdk_calls
+    return ToolMessage(content="out", tool_call_id=tool_call_id, additional_kwargs=kwargs)
+
+
+def test_sdk_calls_by_tool_call_id_reads_exec_output_metadata() -> None:
+    """Present-and-empty maps to `[]` (a real zero); a message without the field
+    (pre-tally history) stays absent from the map; other messages are ignored."""
+    from langchain_core.messages import HumanMessage, ToolMessage
+
+    messages = [
+        HumanMessage(content="hi"),
+        _exec_output("tc-1", [{"method": "files.read", "count": 3}]),
+        _exec_output("tc-2", []),
+        _exec_output("tc-3", None),
+        ToolMessage(content="x", tool_call_id="tc-4"),
+    ]
+    index = sdk_telemetry.sdk_calls_by_tool_call_id(messages)
+    assert index == {
+        "tc-1": [sdk_telemetry.SdkCall(method="files.read", count=3)],
+        "tc-2": [],
+    }
+
+
+def test_sdk_calls_by_tool_call_id_respects_the_start_window() -> None:
+    """Only messages[start:] is scanned — the rendered span."""
+    messages = [
+        _exec_output("tc-1", [{"method": "files.read", "count": 1}]),
+        _exec_output("tc-2", [{"method": "shell.run", "count": 1}]),
+    ]
+    assert set(sdk_telemetry.sdk_calls_by_tool_call_id(messages, start=1)) == {"tc-2"}

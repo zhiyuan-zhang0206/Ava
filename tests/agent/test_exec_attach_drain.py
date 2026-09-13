@@ -70,13 +70,16 @@ async def test_exec_drains_attachment_right_after_output(
 
     async def _fake_run_agent_code(
         *args: object, **kwargs: object
-    ) -> tuple[_ExecDone, dict[str, Any], int, list[Any], list[dict[str, str]] | None]:
+    ) -> tuple[
+        _ExecDone, dict[str, Any], int, list[Any], list[dict[str, str]] | None, list[Any] | None
+    ]:
         return (
             _ExecDone(output="exec output text", stream_cap=None),
             {},
             12,
             [],
             [{"path": str(image), "label": "brand"}],
+            [{"method": "files.read", "count": 3}],
         )
 
     monkeypatch.setattr("agent.graph._exec._run_agent_code", _fake_run_agent_code)
@@ -92,6 +95,8 @@ async def test_exec_drains_attachment_right_after_output(
     assert len(msgs) == 2
     # exec output ToolMessage first, attach HumanMessage immediately after
     assert isinstance(msgs[0], ToolMessage)
+    # the run's SDK-call tally rides the exec output ToolMessage metadata
+    assert msgs[0].additional_kwargs["sdk_calls"] == [{"method": "files.read", "count": 3}]
     assert isinstance(msgs[1], HumanMessage)
     assert msgs[1].additional_kwargs["ava_msg_type"] == AvaMsgType.ATTACH.value
     # pending attachments are drained (cleared) in the same update
@@ -113,8 +118,10 @@ async def test_exec_without_attachments_appends_no_attach_message(
 ) -> None:
     async def _fake_run_agent_code(
         *args: object, **kwargs: object
-    ) -> tuple[_ExecDone, dict[str, Any], int, list[Any], list[dict[str, str]] | None]:
-        return (_ExecDone(output="exec output text", stream_cap=None), {}, 12, [], None)
+    ) -> tuple[
+        _ExecDone, dict[str, Any], int, list[Any], list[dict[str, str]] | None, list[Any] | None
+    ]:
+        return (_ExecDone(output="exec output text", stream_cap=None), {}, 12, [], None, None)
 
     monkeypatch.setattr("agent.graph._exec._run_agent_code", _fake_run_agent_code)
 
@@ -128,5 +135,6 @@ async def test_exec_without_attachments_appends_no_attach_message(
     msgs = update.get("messages", [])
     assert len(msgs) == 1
     assert isinstance(msgs[0], ToolMessage)
+    assert "sdk_calls" not in msgs[0].additional_kwargs  # unknown (no tally) -> omitted
     # attach channel stays an empty state, no attach message appended
     assert update["attach"] == AttachState()  # type: ignore[index]

@@ -75,7 +75,7 @@ class TestAiMessageItems:
 
         if not isinstance(msg, AIMessage):
             msg = AIMessage(content=msg)  # pyright: ignore[reportUnknownArgumentType]
-        return _ai_message_items(msg, msg_idx, self._next_ts)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        return _ai_message_items(msg, msg_idx, self._next_ts, {})  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
     def test_string_content_treated_as_chat(self):
         from langchain_core.messages import AIMessage
@@ -468,6 +468,101 @@ class TestAiMessageItems:
 
         items = self._items(AIMessage(content=[]))  # pyright: ignore[reportUnknownMemberType]
         assert items == []
+
+
+class TestSdkCallsProjection:
+    """`agent_code.sdk_calls` is the runtime tally projected from the matching
+    exec_output ToolMessage's metadata — never a scan of the code text, so a call
+    that never executed cannot appear."""
+
+    def test_agent_code_item_reads_the_exec_output_tally(self):
+        from langchain_core.messages import AIMessage, ToolMessage
+
+        ai = AIMessage(
+            content="",
+            tool_calls=[
+                {"name": "execute_code", "args": {"code": "ava.files.read('x')"}, "id": "tc-1"}
+            ],
+        )
+        out = ToolMessage(
+            content="ok",
+            tool_call_id="tc-1",
+            additional_kwargs={
+                "ava_msg_type": "exec_output",
+                "sdk_calls": [{"method": "files.read", "count": 3}],
+            },
+        )
+        items, _ = build_timeline_items([ai, out], [])
+        code = next(it for it in items if it.kind == "agent_code")
+        assert code.sdk_calls is not None
+        assert [(c.method, c.count) for c in code.sdk_calls] == [("files.read", 3)]
+
+    def test_code_without_exec_output_metadata_has_no_sdk_calls(self):
+        """The AIMessage alone — its exec has not produced a ToolMessage yet —
+        renders `sdk_calls=None` even though the code text calls ava.*: the
+        projection trusts the metadata, not the text."""
+        from langchain_core.messages import AIMessage
+
+        ai = AIMessage(
+            content="",
+            tool_calls=[
+                {"name": "execute_code", "args": {"code": "ava.files.read('x')"}, "id": "tc-1"}
+            ],
+        )
+        items, _ = build_timeline_items([ai], [])
+        code = next(it for it in items if it.kind == "agent_code")
+        assert code.sdk_calls is None
+
+    def test_empty_tally_is_a_real_zero_not_unknown(self):
+        """`[]` (ran, called nothing) stays distinct from absent (unknown)."""
+        from langchain_core.messages import AIMessage, ToolMessage
+
+        ai = AIMessage(
+            content="",
+            tool_calls=[{"name": "execute_code", "args": {"code": "print(1)"}, "id": "tc-9"}],
+        )
+        out = ToolMessage(
+            content="1",
+            tool_call_id="tc-9",
+            additional_kwargs={"ava_msg_type": "exec_output", "sdk_calls": []},
+        )
+        items, _ = build_timeline_items([ai, out], [])
+        code = next(it for it in items if it.kind == "agent_code")
+        assert code.sdk_calls == []
+
+    def test_metadata_pairs_by_tool_call_id_not_message_order(self):
+        """Two code blocks in one render each get their own exec_output's counts."""
+        from langchain_core.messages import AIMessage, ToolMessage
+
+        ai = AIMessage(
+            content="",
+            tool_calls=[
+                {"name": "execute_code", "args": {"code": "first()"}, "id": "tc-a"},
+                {"name": "execute_code", "args": {"code": "second()"}, "id": "tc-b"},
+            ],
+        )
+        out_a = ToolMessage(
+            content="a",
+            tool_call_id="tc-a",
+            additional_kwargs={
+                "ava_msg_type": "exec_output",
+                "sdk_calls": [{"method": "a.fn", "count": 1}],
+            },
+        )
+        out_b = ToolMessage(
+            content="b",
+            tool_call_id="tc-b",
+            additional_kwargs={
+                "ava_msg_type": "exec_output",
+                "sdk_calls": [{"method": "b.fn", "count": 2}],
+            },
+        )
+        items, _ = build_timeline_items([ai, out_a, out_b], [])
+        codes = [it for it in items if it.kind == "agent_code"]
+        assert [[(c.method, c.count) for c in (it.sdk_calls or [])] for it in codes] == [
+            [("a.fn", 1)],
+            [("b.fn", 2)],
+        ]
 
 
 class TestAvaMsgTypeDispatch:

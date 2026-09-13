@@ -15,10 +15,10 @@ files + signals:
   (`init_subprocess_logger` adds no stderr handler), and stdout/stderr are
   reconfigured to line buffering so `print(..., end="")` still streams.
 - Result envelope: `AVA_EXEC_RESULT_FILE` — outcome kind, plugin state-update
-  delta, security findings, attachments, and (for a crash) the full traceback
-  text. Written on every exit path except `os._exit` (watchdog / the agent's
-  own call) and SIGKILL — the parent classifies those from its own
-  cancel/timeout flags.
+  delta, security findings, attachments, the run's SDK-call tally, and (for a
+  crash) the full traceback text. Written on every exit path except `os._exit`
+  (watchdog / the agent's own call) and SIGKILL — the parent classifies those
+  from its own cancel/timeout flags.
 - POSIX signals: SIGINT -> KeyboardInterrupt, SIGTERM -> TimeoutError, both raised
   at the next bytecode boundary (the same semantics the old in-thread ctypes
   injection had). POSIX gets a grace period before the parent closes the
@@ -282,6 +282,7 @@ def _run_code(code: str, payload: Any) -> None:
         "__name__": "__agent_code__",
         "__builtins__": builtins_map,
     }
+    tally: dict[str, int] = {}
     try:
         # From here on the agent-authored code has run (or is about to) — the
         # envelope flag the parent uses to tell "the code never executed" from
@@ -289,8 +290,10 @@ def _run_code(code: str, payload: Any) -> None:
         payload.code_reached = True
         # `recording()` arms SDK-usage metering for exactly this agent-authored
         # code, so framework-internal ava.* calls are never counted (same
-        # contract as the old in-process worker had).
-        with sdk_telemetry.recording():
+        # contract as the old in-process worker had). It yields the block's full
+        # runtime tally — the block's real SDK-call counts, not a scan of its
+        # text. Read in the finally so a crash keeps what already ran.
+        with sdk_telemetry.recording() as tally:
             exec(compile(code, "<agent_code>", "exec"), fresh_globals)
     except BaseException as exc:
         from shared.lifecycle import _LifecycleExit
@@ -314,6 +317,8 @@ def _run_code(code: str, payload: Any) -> None:
         payload.full_traceback = format_full_traceback(exc)
         sys.stdout.write(format_agent_traceback(exc))
         sys.stdout.flush()
+    finally:
+        payload.sdk_calls = sdk_telemetry.tally_entries(tally)
 
 
 def _run(request_path: str, result_path: str) -> None:  # noqa: PLR0915 — one child lifecycle: boot, run, deliver, envelope
@@ -452,6 +457,7 @@ def _write_crashed_result(
         "state_update_error": None,
         "findings": None,
         "attachments": None,
+        "sdk_calls": None,
     }
     try:
         from agent.graph._exec_protocol import ResultPayload as RuntimeResultPayload
