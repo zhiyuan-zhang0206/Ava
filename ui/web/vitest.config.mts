@@ -19,7 +19,7 @@ import { configDefaults, coverageConfigDefaults, defineConfig } from "vitest/con
 export default defineConfig({
   resolve: {
     // Mirror tsconfig.json `paths` so vitest can resolve `@/...` imports
-    alias: { "@": path.resolve(__dirname, "./src") },
+    alias: { "@": path.resolve(import.meta.dirname, "./src") },
   },
   test: {
     // happy-dom provides the window / document React render needs. Pure
@@ -44,7 +44,7 @@ export default defineConfig({
     // missing fixtures). Build artifacts are never test sources.
     // `src/**/flaky/**` is the quarantine convention: a timing-sensitive test
     // file lives under a `flaky/` directory, which this run skips and the
-    // serial CI step (vitest.flaky.config.ts) picks up by the same pattern.
+    // serial CI step (vitest.flaky.config.mts) picks up by the same pattern.
     exclude: [...configDefaults.exclude, ".builds/**", "src/**/flaky/**"],
     // fork pool: each test file runs in its own V8 isolate (no DOM leakage).
     // fileParallelism true: files run concurrently using available CPUs.

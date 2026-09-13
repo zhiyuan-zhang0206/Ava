@@ -150,7 +150,7 @@ def test_format_local_carries_year_and_zone() -> None:
     assert text.startswith("2026-01-03 ")
     # A trailing zone abbreviation/offset token after "HH:MM " — the exact
     # spelling depends on the runner's local zone (UTC in CI, per
-    # vitest.config.ts-style TZ pinning is a frontend-only convention; the
+    # vitest.config.mts-style TZ pinning is a frontend-only convention; the
     # backend suite runs whatever TZ the host provides), so assert presence
     # rather than a specific string.
     assert text.split(" ")[-1] != ""
