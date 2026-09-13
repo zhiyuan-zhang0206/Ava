@@ -900,24 +900,24 @@ def test_read_health_payload_requires_this_unit(
 ) -> None:
     """The display read accepts only a payload whose `home` is this unit's."""
     monkeypatch.setattr(daemon_health, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(
-        daemon_health,
-        "_health_payload",
-        lambda *_args, **_kw: {"name": "pitr_base_backup", "home": str(tmp_path)},
-    )
+
+    def own_unit_body(_url: str, _timeout_s: float) -> dict[str, object]:
+        return {"name": "pitr_base_backup", "home": str(tmp_path)}
+
+    monkeypatch.setattr(daemon_health, "_health_payload", own_unit_body)
     assert daemon_health.read_health_payload("pitr_base_backup") == {
         "name": "pitr_base_backup",
         "home": str(tmp_path),
     }
-    monkeypatch.setattr(
-        daemon_health,
-        "_health_payload",
-        lambda *_args, **_kw: {"home": str(tmp_path / "other")},
-    )
+
+    def other_unit_body(_url: str, _timeout_s: float) -> dict[str, object]:
+        return {"home": str(tmp_path / "other")}
+
+    monkeypatch.setattr(daemon_health, "_health_payload", other_unit_body)
     assert daemon_health.read_health_payload("pitr_base_backup") is None
-    monkeypatch.setattr(
-        daemon_health,
-        "_health_payload",
-        lambda *_args, **_kw: daemon_health.DaemonProbe.down("no answer"),
-    )
+
+    def no_answer(_url: str, _timeout_s: float) -> daemon_health.DaemonProbe:
+        return daemon_health.DaemonProbe.down("no answer")
+
+    monkeypatch.setattr(daemon_health, "_health_payload", no_answer)
     assert daemon_health.read_health_payload("pitr_base_backup") is None

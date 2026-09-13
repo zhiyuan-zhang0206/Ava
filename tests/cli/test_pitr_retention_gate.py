@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -35,6 +35,7 @@ from services.pitr.retention_manifest import (
 )
 from services.pitr.retention_planner import DryRunResult
 from shared import runtime_config
+from shared.config.physical_backup import PhysicalBackupSettings
 
 _PIN_TOKEN = "av-test-pin"  # noqa: S105 — opaque test fixture pin, not a secret
 
@@ -206,8 +207,12 @@ def test_run_once_preview_writes_nothing(
     assert "preview only" in capsys.readouterr().out
 
 
-def _fake_config() -> SimpleNamespace:
-    return SimpleNamespace(pitr_store_backend="oss", pitr_retained_weekly_chains=2)
+def _fake_config() -> PhysicalBackupSettings:
+    """A duck-typed stand-in: run_operator_once reads only these two fields."""
+    return cast(
+        PhysicalBackupSettings,
+        SimpleNamespace(pitr_store_backend="oss", pitr_retained_weekly_chains=2),
+    )
 
 
 class _FakeViewer:

@@ -22,6 +22,7 @@ import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 from services.pitr.retention_journal import RetentionJournal
 from services.pitr.retention_manifest import RetentionPlan
@@ -185,9 +186,12 @@ def read_daemon_record() -> dict[str, object] | None:
     components = payload.get("components")
     if not isinstance(components, list):
         return None
-    for record in components:
-        if isinstance(record, dict) and record.get("name") == _RETENTION_COMPONENT:
-            return record
+    for record in cast("list[object]", components):
+        if not isinstance(record, dict):
+            continue
+        candidate = cast("dict[str, object]", record)
+        if candidate.get("name") == _RETENTION_COMPONENT:
+            return candidate
     return None
 
 
@@ -202,7 +206,7 @@ def journal_tail(limit: int = 3) -> list[dict[str, object]]:
         except json.JSONDecodeError:
             continue
         if isinstance(parsed, dict):
-            records.append(parsed)
+            records.append(cast("dict[str, object]", parsed))
     return records
 
 

@@ -6,6 +6,7 @@ import json
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 from services.pitr.base_manifest import CandidateManifest
 from services.pitr.retention_planner import inspect_dry_run_plan
@@ -60,9 +61,11 @@ def cmd_pitr_retention_status() -> int:
             f"            stable_ticks={daemon.get('digest_stable_ticks')}",
         ]
         if isinstance(totals, dict):
+            totals_record = cast("dict[str, object]", totals)
             lines.append(
-                f"            totals: ticks={totals.get('ticks')} deleted={totals.get('deleted')} "
-                f"absent={totals.get('absent')} failed={totals.get('failed')}"
+                f"            totals: ticks={totals_record.get('ticks')} "
+                f"deleted={totals_record.get('deleted')} "
+                f"absent={totals_record.get('absent')} failed={totals_record.get('failed')}"
             )
         detail = daemon.get("delete_error") or daemon.get("detail")
         if detail:
