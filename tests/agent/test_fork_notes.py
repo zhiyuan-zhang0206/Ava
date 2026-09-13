@@ -302,7 +302,7 @@ async def test_fork_tail_grafts_delta_skills_from_inbound_payload(
         d = skills_mod._skills_dir()
         return {p.name for p in d.iterdir() if p.is_dir()} if d.is_dir() else set()
 
-    monkeypatch.setattr(skills_mod, "enabled_skill_names", _all_enabled)
+    monkeypatch.setattr(skills_mod, "loadable_skill_names", _all_enabled)
 
     tid = spawn_agent()
     with db_conn.cursor() as cur:

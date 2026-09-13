@@ -46,11 +46,17 @@ _REFUSAL_ADVICE = (
 
 
 def cmd_skill_install(
-    source: str, ref: str | None, path: str | None, *, accept_risk: bool = False
+    source: str,
+    ref: str | None,
+    path: str | None,
+    *,
+    accept_risk: bool = False,
+    update_mode: str | None = None,
+    check_every: str | None = None,
 ) -> int:
     """`ava skill install <git-url-or-local-path> [--ref REF] [--path SUBDIR]
-    [--accept-risk]` — install Agent Skills standard skill package(s) into
-    `$AVA_HOME/skills/`.
+    [--accept-risk] [--update-mode auto|notify|off] [--check-every DUR]` —
+    install Agent Skills standard skill package(s) into `$AVA_HOME/skills/`.
 
     The source is used as published: a bare skill folder, a repo of skills under
     `skills/` or `.claude/skills/`, or a pile of skill folders all install
@@ -61,9 +67,15 @@ def cmd_skill_install(
     aborts the whole install with the report; `--accept-risk` overrides it and
     records which rules were waived.
     """
+    from ._packages_refresh import parse_duration
     from ._pkg_source import SourcePathNotFoundError, acquire_source, cleanup_temp
     from ._skill_package import SkillPackageError, SkillScanRefused, discover, install
 
+    try:
+        interval = parse_duration(check_every) if check_every else None
+    except ValueError as exc:
+        print(f"[ava skill install] {exc}", file=sys.stderr)
+        return 1
     try:
         acquired = acquire_source(source, ref)
     except (subprocess.CalledProcessError, SourcePathNotFoundError) as e:
@@ -82,7 +94,15 @@ def cmd_skill_install(
 
         try:
             packages = discover(root)
-            results = install(packages, source=source, path=path, ref=ref, accept_risk=accept_risk)
+            results = install(
+                packages,
+                source=source,
+                path=path,
+                ref=ref,
+                accept_risk=accept_risk,
+                update_mode=update_mode,
+                check_every=interval,
+            )
         except SkillScanRefused as e:
             print("[ava skill install] security scan found critical patterns:", file=sys.stderr)
             print(e.report, file=sys.stderr)
@@ -332,6 +352,7 @@ def _update_one(
     updated: list[str],
     unchanged: list[str],
     conflicts: list[str],
+    skipped: list[str],
 ) -> None:
     """Bring one repo-native skill in line with its source (the per-package
     update/conflict/force decision table of `cmd_skill_update`)."""
@@ -341,6 +362,15 @@ def _update_one(
     src_hash = tree_hash(s.src)
     skip = reg.preserved_subpaths(dest)
     entry = next((p for p in registry.packages if p.name == s.name), None)
+    if entry is not None:
+        policy = reg.resolved_policy(entry)
+        if policy.channel == "core" and policy.mode != "off":
+            # Channel-managed (design §5.7-1; tasks #2915/#3267): the content
+            # channel (`ava packages refresh`) owns this package's revision —
+            # applying the checkout's copy here could downgrade a revision the
+            # channel already applied. An explicit `mode=off` keeps this path.
+            skipped.append(s.name)
+            return
 
     if entry is not None and entry.origin == "user":
         if entry.source and entry.source.startswith(
@@ -476,6 +506,7 @@ def cmd_skill_update(
     updated: list[str] = []
     unchanged: list[str] = []
     conflicts: list[str] = []
+    skipped: list[str] = []
     with reg.mutate() as registry:
         for s in sources:
             _update_one(
@@ -488,7 +519,13 @@ def cmd_skill_update(
                 updated=updated,
                 unchanged=unchanged,
                 conflicts=conflicts,
+                skipped=skipped,
             )
+    if skipped:
+        print(
+            f"[ava skill update] {len(skipped)} channel-managed package(s) skipped — "
+            "`ava packages refresh` owns their updates (see `ava packages status`)."
+        )
     for name in landed:
         print(f"[ava skill update] landed '{name}' -> {skills_root / name}")
     for name in updated:

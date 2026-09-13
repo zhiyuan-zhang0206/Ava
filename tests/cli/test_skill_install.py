@@ -238,3 +238,27 @@ def test_install_skips_junk_names(unit_home: Path, tmp_path: Path) -> None:
     assert (dest / "SKILL.md").is_file()
     assert not (dest / "__pycache__").exists()
     assert not (dest / ".DS_Store").exists()
+
+
+def test_install_records_explicit_update_policy(unit_home: Path, tmp_path: Path) -> None:
+    """`--update-mode` / `--check-every` write an explicit policy onto the row;
+    unset fields stay None so the refresh pass resolves the defaults later."""
+    src = _write_skill(tmp_path / "policy-skill", "policy-skill")
+
+    assert cmd_skill_install(str(src), None, None, update_mode="notify", check_every="2h") == 0
+
+    pkg = reg.get("policy-skill")
+    assert pkg is not None
+    assert pkg.update.mode == "notify"
+    assert pkg.update.interval_seconds == 7200
+    assert pkg.update.channel is None
+    assert pkg.update.applied_rev is None
+
+
+def test_install_rejects_a_bad_check_every(
+    unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    src = _write_skill(tmp_path / "bad-duration", "bad-duration")
+    assert cmd_skill_install(str(src), None, None, check_every="soon") == 1
+    assert "duration" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert reg.get("bad-duration") is None

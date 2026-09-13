@@ -25,6 +25,7 @@ from cli.commands._converge_os_jobs import (
     ensure_cluster_autostart,
     ensure_health_probe_cron,
     ensure_logs_maintenance,
+    ensure_packages_refresh_job,
     ensure_watchdog_probe,
     reap_stale_schtasks,
 )
@@ -612,6 +613,13 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     ConvergeStep(
         "daily logs maintenance",
         ensure_logs_maintenance,
+        requires_unit_config=True,
+    ),
+    # The content channel's recurring pass: per-machine skills state, so every
+    # serving unit registers it (the command owns all further gating).
+    ConvergeStep(
+        "packages refresh job",
+        ensure_packages_refresh_job,
         requires_unit_config=True,
     ),
     ConvergeStep(

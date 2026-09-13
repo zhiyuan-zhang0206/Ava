@@ -28,14 +28,14 @@ def _overlay_all_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     focused on scanning rather than the install-registry reservation.
 
     The reservation behavior gets its own tests that re-patch
-    `enabled_skill_names` to a controlled set (a per-test setattr overrides
+    `loadable_skill_names` to a controlled set (a per-test setattr overrides
     this autouse one)."""
 
     def _all_enabled() -> set[str]:
         d = skills_mod._skills_dir()
         return {p.name for p in d.iterdir() if p.is_dir()} if d.is_dir() else set()
 
-    monkeypatch.setattr(skills_mod, "enabled_skill_names", _all_enabled)
+    monkeypatch.setattr(skills_mod, "loadable_skill_names", _all_enabled)
 
 
 @pytest.fixture
@@ -294,7 +294,7 @@ def test_untracked_skill_not_surfaced(
 ) -> None:
     """A skill dir in the load dir that the registry doesn't track is skipped."""
     _write_skill(fake_skills_dir, "ext", "name: ext\ndescription: external")
-    monkeypatch.setattr(skills_mod, "enabled_skill_names", set)
+    monkeypatch.setattr(skills_mod, "loadable_skill_names", set)
     assert skills_mod._names() == []
 
 
@@ -303,7 +303,7 @@ def test_disabled_skill_not_surfaced(
 ) -> None:
     """A tracked-but-disabled skill (not in the enabled set) is skipped."""
     _write_skill(fake_skills_dir, "ext", "name: ext\ndescription: external")
-    monkeypatch.setattr(skills_mod, "enabled_skill_names", lambda: {"other"})
+    monkeypatch.setattr(skills_mod, "loadable_skill_names", lambda: {"other"})
     assert skills_mod._names() == []
 
 
@@ -312,7 +312,7 @@ def test_tracked_enabled_skill_surfaced(
 ) -> None:
     """A tracked+enabled skill is surfaced."""
     _write_skill(fake_skills_dir, "ext", "name: ext\ndescription: external")
-    monkeypatch.setattr(skills_mod, "enabled_skill_names", lambda: {"ext"})
+    monkeypatch.setattr(skills_mod, "loadable_skill_names", lambda: {"ext"})
     assert [s["name"] for s in skills_mod._names()] == ["ext"]
 
 
@@ -325,9 +325,9 @@ def test_gate_applies_to_namespace_top_level(
     _write_skill(
         fake_skills_dir / "superpowers", "brainstorming", "name: brainstorming\ndescription: bs"
     )
-    monkeypatch.setattr(skills_mod, "enabled_skill_names", lambda: {"superpowers"})
+    monkeypatch.setattr(skills_mod, "loadable_skill_names", lambda: {"superpowers"})
     assert [s["name"] for s in skills_mod._names()] == ["brainstorming"]
-    monkeypatch.setattr(skills_mod, "enabled_skill_names", set)
+    monkeypatch.setattr(skills_mod, "loadable_skill_names", set)
     assert skills_mod._names() == []
 
 
@@ -916,7 +916,7 @@ def test_registry_gate_matches_across_the_dash_underscore_fold(
     every skill would silently vanish between the code upgrade and the next
     converge."""
     _write_skill(fake_skills_dir, "ava-goal", "name: ava-goal\ndescription: d")
-    monkeypatch.setattr(skills_mod, "enabled_skill_names", lambda: {"ava-goal"})
+    monkeypatch.setattr(skills_mod, "loadable_skill_names", lambda: {"ava-goal"})
     assert [skills_mod.identifier(s) for s in skills_mod._names()] == ["ava-goal"]
 
 
@@ -925,7 +925,7 @@ def test_registry_gate_still_hides_an_unlisted_skill(
 ) -> None:
     """The normalized gate must not turn into a pass-through."""
     _write_skill(fake_skills_dir, "ava-goal", "name: ava-goal\ndescription: d")
-    monkeypatch.setattr(skills_mod, "enabled_skill_names", lambda: {"something-else"})
+    monkeypatch.setattr(skills_mod, "loadable_skill_names", lambda: {"something-else"})
     assert skills_mod._names() == []
 
 
@@ -1432,7 +1432,7 @@ def test_index_gate_folds_dash_underscore(
     SKILL.md; the merged traversal must not keep that drift."""
     (fake_skills_dir / "foo_bar").mkdir()
     (fake_skills_dir / "foo_bar" / "INDEX.md").write_text("namespace doc", encoding="utf-8")
-    monkeypatch.setattr(skills_mod, "enabled_skill_names", lambda: {"foo-bar"})
+    monkeypatch.setattr(skills_mod, "loadable_skill_names", lambda: {"foo-bar"})
     assert skills_mod.foo_bar.__doc__ == "namespace doc"
 
 
@@ -1443,7 +1443,7 @@ def test_index_gate_still_hides_unlisted_dirs(
     directory's INDEX.md sets no doc."""
     _write_skill(fake_skills_dir, "foo_bar", "name: foo-bar\ndescription: s")
     (fake_skills_dir / "foo_bar" / "INDEX.md").write_text("namespace doc", encoding="utf-8")
-    monkeypatch.setattr(skills_mod, "enabled_skill_names", lambda: {"something-else"})
+    monkeypatch.setattr(skills_mod, "loadable_skill_names", lambda: {"something-else"})
     assert skills_mod._names() == []
 
 
@@ -1480,7 +1480,7 @@ def test_frontmatter_name_not_folding_to_dir_is_refused(
     under a name that was not its own; the loader refuses it now (same
     family as SkillNameCollision)."""
     _write_skill(fake_skills_dir, "wechat-ocr", "name: wechat\ndescription: read wechat")
-    monkeypatch.setattr(skills_mod, "enabled_skill_names", lambda: {"wechat-ocr"})
+    monkeypatch.setattr(skills_mod, "loadable_skill_names", lambda: {"wechat-ocr"})
     from shared.skill_names import SkillIdentityMismatch
 
     with pytest.raises(SkillIdentityMismatch):
@@ -1495,6 +1495,6 @@ def test_namespaced_subskill_folds_against_its_leaf_dir(
     `name: console` is consistent."""
     (fake_skills_dir / "web_ai").mkdir()
     _write_skill(fake_skills_dir / "web_ai", "console", "name: console\ndescription: d")
-    monkeypatch.setattr(skills_mod, "enabled_skill_names", lambda: {"web_ai"})
+    monkeypatch.setattr(skills_mod, "loadable_skill_names", lambda: {"web_ai"})
     (skill,) = skills_mod._names()
     assert skills_mod.identifier(skill) == "web-ai:console"

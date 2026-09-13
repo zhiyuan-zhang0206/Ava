@@ -47,6 +47,14 @@ def _entry(name: str) -> reg.InstalledPackage:
     return pkg
 
 
+def _set_mode_off(name: str) -> None:
+    """Opt a package out of the content channel — the designed escape hatch
+    that keeps `skill update` applying checkout content (design §5.7-1)."""
+    with reg.mutate() as registry:
+        row = next(p for p in registry.packages if p.name == name)
+        row.update.mode = "off"
+
+
 # ─── skill update: bootstrap ────────────────────────────────────────────────
 
 
@@ -82,6 +90,7 @@ def test_update_unknown_name_errors(unit_home: Path, repo: Path, capsys) -> None
 
 def test_update_propagates_source_change(unit_home: Path, repo: Path) -> None:
     assert cmd_skill_update(None, repo=repo) == 0
+    _set_mode_off("builtin-a")
     (repo / "ava_builtins" / "skills" / "builtin-a" / "SKILL.md").write_text(
         "---\nname: builtin-a\ndescription: v2\n---\n\n# v2\n", encoding="utf-8"
     )
@@ -92,6 +101,7 @@ def test_update_propagates_source_change(unit_home: Path, repo: Path) -> None:
 
 def test_update_conflict_on_local_edit_refuses(unit_home: Path, repo: Path, capsys) -> None:
     assert cmd_skill_update(None, repo=repo) == 0
+    _set_mode_off("builtin-a")
     copy = unit_home / "skills" / "builtin-a" / "SKILL.md"
     copy.write_text("---\nname: builtin-a\ndescription: MINE\n---\n\nhands off\n", encoding="utf-8")
     (repo / "ava_builtins" / "skills" / "builtin-a" / "SKILL.md").write_text(
@@ -106,6 +116,7 @@ def test_update_conflict_on_local_edit_refuses(unit_home: Path, repo: Path, caps
 
 def test_update_force_overwrites_local_edit(unit_home: Path, repo: Path) -> None:
     assert cmd_skill_update(None, repo=repo) == 0
+    _set_mode_off("builtin-a")
     copy = unit_home / "skills" / "builtin-a" / "SKILL.md"
     copy.write_text("---\nname: builtin-a\ndescription: MINE\n---\n\nhands off\n", encoding="utf-8")
     (repo / "ava_builtins" / "skills" / "builtin-a" / "SKILL.md").write_text(
@@ -121,6 +132,7 @@ def test_update_local_edit_without_source_change_reports_conflict(
 ) -> None:
     """Local edits alone (no upstream change) still surface — --force restores."""
     assert cmd_skill_update(None, repo=repo) == 0
+    _set_mode_off("builtin-a")
     copy = unit_home / "skills" / "builtin-a" / "SKILL.md"
     copy.write_text("---\nname: builtin-a\ndescription: MINE\n---\n\nhands off\n", encoding="utf-8")
     rc = cmd_skill_update(None, repo=repo)
@@ -337,3 +349,25 @@ def test_update_unchanged_reanchors_stale_origin_path(unit_home: Path, repo: Pat
     reg.save(reg.load())
     assert cmd_skill_update(None, repo=repo) == 0
     assert _entry("builtin-a").origin_path == str(repo / "ava_builtins" / "skills" / "builtin-a")
+
+
+def test_update_skips_channel_managed_packages(
+    unit_home: Path, repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Resolved core-channel rows belong to `ava packages refresh` (design
+    §5.7-1): `skill update` reports the skip and leaves the copy alone, and an
+    explicit `mode=off` opts the package back onto the checkout path."""
+    assert cmd_skill_update(None, repo=repo) == 0
+    capsys.readouterr()
+    (repo / "ava_builtins" / "skills" / "builtin-a" / "SKILL.md").write_text(
+        "---\nname: builtin-a\ndescription: v2\n---\n\n# v2\n", encoding="utf-8"
+    )
+    assert cmd_skill_update(None, repo=repo) == 0
+    out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    assert "channel-managed" in out and "skipped" in out
+    body = (unit_home / "skills" / "builtin-a" / "SKILL.md").read_text(encoding="utf-8")
+    assert "# v2" not in body
+    _set_mode_off("builtin-a")
+    assert cmd_skill_update(None, repo=repo) == 0
+    body = (unit_home / "skills" / "builtin-a" / "SKILL.md").read_text(encoding="utf-8")
+    assert "# v2" in body

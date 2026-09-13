@@ -10,7 +10,7 @@ from typing import Any, TypedDict
 
 from ava import _skill_sources
 from shared.audit_events import SkillInvokedPayload
-from shared.install_registry import enabled_skill_names
+from shared.install_registry import loadable_skill_names
 from shared.log import logger
 from shared.paths import ava_home
 from shared.skill_index import SkillFile, SkillIndex
@@ -79,9 +79,11 @@ _recorded_skill_invocations: set[tuple[int, str]] = set()
 # why two directories that fold together are refused (`SkillNameCollision`).
 #
 # Loading from `~/.ava/skills/` is gated by the install registry
-# (enabled_skill_names): a top-level directory with no enabled registry entry —
+# (loadable_skill_names): a top-level directory with no enabled registry entry —
 # hand-copied, or tracked but disabled — is silently ignored (register with
-# `ava skill register <name>`). Keeps stray copies from silently loading.
+# `ava skill register <name>`), and an enabled package whose manifest excludes
+# this host (`engines.ava` / `requires_commit`) is dropped too, with the reason
+# visible in `ava packages status`. Keeps stray copies from silently loading.
 # Provider roots are scanned last (override). The scan is the shared,
 # mtime-cached SkillIndex (doorplate ⑤) — see shared/skill_index.py.
 # Frontmatter requires name + description; other files in a skill dir are read
@@ -431,7 +433,7 @@ def _scan_tree() -> dict:
     three are usually links back to the third).
     """
     builder = SkillIndexBuilder()
-    builder.mount(_skills_dir(), enabled_skill_names())
+    builder.mount(_skills_dir(), loadable_skill_names())
     for root in _provider_roots():
         builder.mount(root, None)
     return builder.tree

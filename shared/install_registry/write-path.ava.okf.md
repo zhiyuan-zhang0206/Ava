@@ -14,16 +14,20 @@ tags:
 Every change goes through `shared/install_registry.py:mutate()`, which loads the
 registry, hands it over for edits, and saves it back under `registry_lock` — a
 bounded advisory lock on the sibling `installed.json.lock`. `register` /
-`deregister` are thin wrappers over it, and the three cycles that edit rows in
-bulk — the gateway's skills-toggle handler, `ava skill update`, and skills
-converge — open it directly. `scripts/migrate_skill_identity.py --apply` cannot
+`deregister` are thin wrappers over it, and the four cycles that edit rows in
+bulk — the gateway's skills-toggle handler, `ava skill update`, skills
+converge, and `ava packages refresh` — open it directly. (The refresh pass
+stages its per-package deltas during the pass and lands them in ONE cycle at
+the end, applied per name against the freshly-read registry — never a stale
+full save.) `scripts/migrate_skill_identity.py --apply` cannot
 use `mutate` (it rewrites a registry under an arbitrary `--ava-home`), so it
 takes `registry_lock` explicitly; that is the only writer outside this module.
 
 The lock is what the file needs that atomic saving does not give it: `save` is a
 full replace, so two writers in different processes (an agent running
-`ava skill install`, a restart running converge, the panel toggling a skill) each
-publish a registry read before the other's rows existed, and one side's packages
+`ava skill install`, a restart running converge, the panel toggling a skill, a
+refresh pass landing an update) each publish a registry read before the other's
+rows existed, and one side's packages
 stop being tracked while their directories sit on disk. `save` also stages
 through ONE fixed temp name, so two overlapping saves corrupt each other's
 staging outright rather than merely losing a row.

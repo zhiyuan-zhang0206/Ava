@@ -62,7 +62,7 @@ def skills_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(skills_mod, "_skills_dir", lambda: d)
     monkeypatch.setattr(
         skills_mod,
-        "enabled_skill_names",
+        "loadable_skill_names",
         lambda: {p.name for p in d.iterdir() if p.is_dir()},
     )
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])

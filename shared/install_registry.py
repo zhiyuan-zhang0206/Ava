@@ -161,6 +161,9 @@ class UpdateState(BaseModel):
     last_result: str | None = None
     """Last outcome, design §5.3 vocabulary: up_to_date | applied | available |
     blocked_version: … | conflict: … | refused_scan: … | error: …"""
+    failures: int = 0
+    """Consecutive non-success outcomes (the refresh pass's backoff counter;
+    reset to 0 by up_to_date / applied / available)."""
 
 
 class ChannelState(BaseModel):
@@ -485,6 +488,32 @@ def trust_by_name() -> dict[str, TrustTier]:
     return {p.name: p.trust for p in load().packages}
 
 
+def host_contract_reason(pkg_dir: Path) -> str | None:
+    """Why the package at `pkg_dir` is NOT loadable on this host, or None when
+    it is. Thin wrapper over `shared.plugin_manifest.host_contract_errors_dir`
+    — the runtime half of the §5.5 version gate, shared by the skill scan and
+    `ava packages status`."""
+    from shared import plugin_manifest
+
+    errors = plugin_manifest.host_contract_errors_dir(pkg_dir)
+    return "; ".join(errors) if errors else None
+
+
+def loadable_skill_names() -> set[str]:
+    """`enabled_skill_names()` minus packages whose manifest excludes this host.
+
+    The runtime side of the version gate (design §5.5): a skill package whose
+    `engines.ava` / `requires_commit` no longer permits the running host is
+    dropped from the catalog/index; `ava packages status` carries the reason.
+    Packages without a manifest pass unchanged, so the check costs one stat per
+    enabled name unless a manifest is actually present.
+    """
+    skills_root = paths.skills_dir()
+    return {
+        name for name in enabled_skill_names() if host_contract_reason(skills_root / name) is None
+    }
+
+
 def installed_mcp_names() -> set[str]:
     """Names of `type="mcp"` packages tracked in the registry.
 
@@ -509,13 +538,35 @@ class ResolvedPolicy:
     interval_seconds: int | None
 
 
+def looks_like_local_path(source: str) -> bool:
+    """True when `source` is an existing local directory rather than a git URL.
+
+    A `scheme://` URL (including `file://`) or an `scp`-style `git@host:repo`
+    is always a git source; anything else is treated as a local path when it
+    resolves to a directory on disk. Shared by the install commands (which
+    classify what they copy) and `derived_channel` below (which must never
+    read a remote channel off a local source).
+    """
+    if "://" in source or source.startswith("git@"):
+        return False
+    return Path(source).expanduser().is_dir()
+
+
+def is_local_source(source: str) -> bool:
+    """True when a recorded `source` cannot have a remote channel (design §5.1):
+    the `local:<machine>` encoding installs write, or a plain local path."""
+    return source.startswith("local:") or looks_like_local_path(source)
+
+
 def derived_channel(pkg: InstalledPackage) -> ChannelKind | None:
     """The channel a package's content would come from, from its provenance.
 
     - `origin="repo"` — the checkout's own content: channel "core".
     - `origin="plugin"` whose `origin_path` lives inside this checkout — a
       builtin plugin's skills: channel "core" too (same authoring home).
-    - `origin="user"` with a recorded `source` — the existing git flow.
+    - `origin="user"` with a recorded remote `source` — the existing git flow;
+      a local source (`local:<machine>` or an on-disk path) has no remote
+      channel and is skipped (design §5.1).
     - everything else (hand-registered, installed-plugin skills) — no channel.
     """
     if pkg.origin == "repo":
@@ -526,6 +577,8 @@ def derived_channel(pkg: InstalledPackage) -> ChannelKind | None:
             return "core"
         return None
     if pkg.origin == "user" and pkg.source:
+        if is_local_source(pkg.source):
+            return None
         return "git"
     return None
 
@@ -537,6 +590,10 @@ def resolved_policy(pkg: InstalledPackage) -> ResolvedPolicy:
     "off". The refresh pass writes a resolved row back at first sight; readers
     (status) resolve without writing."""
     channel = pkg.update.channel or derived_channel(pkg)
+    if channel == "git" and pkg.source and is_local_source(pkg.source):
+        # A stale persisted `git` value (written before local sources were
+        # classified) must not resurrect a channel local packages never had.
+        channel = None
     if channel is None:
         return ResolvedPolicy(channel=None, mode="off", interval_seconds=None)
     from shared.config import settings

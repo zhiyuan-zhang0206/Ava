@@ -95,9 +95,38 @@ Rules that keep the model clean:
 - A hand-written Mode-1 skill is not updatable by design; to make it
   updatable, put it in a repo and install it from there.
 - Repo-native skills (those shipped by the Ava checkout) are never updated by
-  converge — `ava skill update` is the explicit update command for them.
+  converge — their updates flow through the **content channel**
+  (`ava packages refresh`, below); `ava skill update` only applies to packages
+  opted out of the channel (`ava packages policy <name> --update-mode off`).
 - There is no separate manifest file to maintain: `SKILL.md` frontmatter
   (`name` + `description`) is the identity, and the git ref is the version.
+
+## The content channel (`ava packages`)
+
+The per-machine update plane for channel-backed packages (skills today;
+plugins later). A repo-native skill resolves to the **core** channel; an
+installed skill with a recorded source is on the **git** channel.
+
+```bash
+ava packages status [--json]                 # host version, channels, per-package policy/state
+ava packages refresh [--check] [--package NAME] [--force]   # check + apply due updates now
+ava packages policy <name> --update-mode auto|notify|off [--check-every 24h]
+ava packages rollback <name> [--force]       # restore the previous tree kept by the last apply
+```
+
+- A converge-registered OS job runs `ava packages refresh --from-job` on a
+  15-minute tick; per-package cadence (default 24h) and failure backoff are
+  registry data. Manual runs check on demand.
+- Refresh never restarts anything — a landed skill activates at the next skill
+  scan. It never writes the checkout (the core channel fetches commit objects
+  only) and never overwrites a hand-edited copy: conflicts are recorded and
+  `--force` is the human-only override.
+- Version contract: a package may ship an optional `ava-plugin.json` beside
+  `SKILL.md` (`engines.ava` range / `requires_commit`). Out-of-range content is
+  refused at landing (`blocked_version` in `status`) and dropped from the
+  catalog at load time.
+- `ava skill install … [--update-mode …] [--check-every <dur>]` records an
+  explicit policy at install time.
 
 ## Install
 

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from shared import os_autostart, os_cron, os_logs_job, os_watchdog_probe
+from shared import os_autostart, os_cron, os_logs_job, os_packages, os_watchdog_probe
 from shared.config import settings
 
 
@@ -27,6 +27,9 @@ class _ExplodingBackend:
 
     def register_logs_job(self) -> None:
         raise AssertionError("register_logs_job reached the OS with the gate off")
+
+    def register_packages_job(self) -> None:
+        raise AssertionError("register_packages_job reached the OS with the gate off")
 
     def register_watchdog_probe(self, _role: str, **_kw: object) -> None:
         raise AssertionError("register_watchdog_probe reached the OS with the gate off")
@@ -45,6 +48,9 @@ class _RecordingBackend:
     def register_logs_job(self) -> None:
         self.calls.append("logs-maintenance")
 
+    def register_packages_job(self) -> None:
+        self.calls.append("packages-refresh")
+
     def register_watchdog_probe(self, role: str, **_kw: object) -> None:
         self.calls.append(f"watchdog-probe.{role}")
 
@@ -56,6 +62,9 @@ class _RecordingBackend:
 
     def unregister_logs_job(self, slug: str) -> None:
         self.calls.append(f"unregister-logs-maintenance:{slug}")
+
+    def unregister_packages_job(self, slug: str) -> None:
+        self.calls.append(f"unregister-packages-refresh:{slug}")
 
     def unregister_watchdog_probe(self, role: str, slug: str) -> None:
         self.calls.append(f"unregister-watchdog-probe:{role}:{slug}")
@@ -93,6 +102,7 @@ def test_suite_default_is_off() -> None:
         pytest.param(os_cron.register_os_cron, id="health-probe"),
         pytest.param(os_autostart.register_autostart, id="autostart"),
         pytest.param(os_logs_job.register_logs_job, id="logs-maintenance"),
+        pytest.param(os_packages.register_packages_job, id="packages-refresh"),
         pytest.param(lambda: os_watchdog_probe.register_watchdog_probe("gateway"), id="watchdog"),
     ],
 )
@@ -109,11 +119,13 @@ def test_registration_dispatches_when_enabled(gate_on: None, backend: _Recording
     os_autostart.register_autostart()
     os_logs_job.register_logs_job()
     os_watchdog_probe.register_watchdog_probe("agent-runner")
+    os_packages.register_packages_job()
     assert backend.calls == [
         "cron",
         "autostart",
         "logs-maintenance",
         "watchdog-probe.agent-runner",
+        "packages-refresh",
     ]
 
 
@@ -125,11 +137,13 @@ def test_deregistration_is_never_gated(backend: _RecordingBackend, tmp_path: Pat
     os_autostart.unregister_autostart(home)
     os_logs_job.unregister_logs_job(home)
     os_watchdog_probe.unregister_watchdog_probe("gateway", home)
+    os_packages.unregister_packages_job(home)
     assert [c.split(":")[0] for c in backend.calls] == [
         "unregister-cron",
         "unregister-autostart",
         "unregister-logs-maintenance",
         "unregister-watchdog-probe",
+        "unregister-packages-refresh",
     ]
 
 

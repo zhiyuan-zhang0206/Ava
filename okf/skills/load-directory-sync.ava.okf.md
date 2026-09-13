@@ -15,18 +15,37 @@ flag). Converge (`cli/commands/_converge_skills.py`, on `ava start` /
 
 1. **Repo built-in** (origin=repo): `<repo>/ava_builtins/skills/` →
    `~/.ava/skills/<name>/`. Repo-native sources are bootstrap-only:
-   converge lands a missing copy and never updates one (the R5 ruling). The
-   refresh moment is the **product rollout**: `ava cluster update`'s legs run
-   the explicit-update machinery once per rollout (issue #1289 — before that
-   wiring, a builtin copy stayed at the version that first landed it), and the
-   manual equivalent is `ava skill update`. Local edits are never clobbered:
-   the rollout reports them as conflicts and leaves the copy untouched.
+   converge lands a missing copy and never updates one (the R5 ruling).
+   Updating an existing copy belongs to the **content channel**
+   (`ava packages refresh`, registry schema v2): a repo-native row resolves to
+   the `core` channel by default and is refreshed from the checkout's remote on
+   its own cadence — commit objects fetched without ever touching the
+   checkout's working tree. `ava skill update` and the rollout legs (issue
+   #1289) now SKIP channel-managed packages; `ava packages policy <name>
+   --update-mode off` opts one back onto the rollout path. Local edits are
+   never clobbered either way: refresh records a conflict and leaves the copy
+   untouched, the same contract the rollout always had.
 2. **Plugin-carried** (origin=plugin): `<repo>/ava_builtins/plugins/<p>/skills/`
    and `~/.ava/plugins/<p>/skills/` → `~/.ava/skills/<p>/`.
 
 User-installed packages (origin=user): `ava skill install` drops directly into
 `~/.ava/skills/` (untouched by converge); a hand-placed dir needs
 `ava skill register`.
+
+**The content channel adds two more pieces to this contract** (design §5.5 /
+§5.6; [[cli/commands/packages/update-policy.ava.okf.md|update policy &
+channels]]):
+
+- the **refresh pass** is the load directory's fourth bulk writer (after
+  converge, `ava skill update`, and the gateway's skills toggle). It stages
+  swaps the same way converge does (`.<name>.new` → swap; marker-protected
+  subtrees carried; the replaced tree kept at `.<name>.prev` for
+  `ava packages rollback`), and writes the registry through one `mutate` at
+  the end of the pass;
+- the **runtime host filter**: the skill scan mounts `loadable_skill_names()`
+  — enabled entries whose manifest host contract passes — so a package whose
+  `engines.ava` / `requires_commit` excludes the running host is dropped from
+  the catalog/index, with the reason visible in `ava packages status`.
 
 **Not converged — the 11 real `.agents/skills/` project skills.** The
 repo-development workflow and Ava-cluster-operations family (ship-a-change,

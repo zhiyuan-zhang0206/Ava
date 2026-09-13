@@ -102,3 +102,33 @@ def test_declared_range_displayed(unit_home: Path, capsys: pytest.CaptureFixture
     assert cmd_packages_status() == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "commit abcdef1" in out
+
+
+def test_host_blocked_package_surfaces_the_reason(
+    unit_home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A manifest whose range excludes this host is a load-time drop, and the
+    status surface carries the reason (design §5.5)."""
+    _register("blocked", origin="repo", origin_path="/x/ava_builtins/skills/blocked")
+    manifest = unit_home / "skills" / "blocked" / "ava-plugin.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(
+        json.dumps(
+            {
+                "apiVersion": 2,
+                "name": "blocked",
+                "version": "1.0.0",
+                "engines": {"ava": ">=2099"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert cmd_packages_status(json_output=True) == 0
+    payload = json.loads(capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
+    (row,) = payload["packages"]
+    assert row["host_blocked"] is not None and "2099" in row["host_blocked"]
+
+    assert cmd_packages_status() == 0
+    out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    assert "not loadable on this host" in out
