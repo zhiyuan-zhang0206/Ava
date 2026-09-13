@@ -723,7 +723,7 @@ export const ForceGraph = memo(function ForceGraph({
                     shape === "circle" ? (
                       <circle
                         r={r + 6}
-                        className="text-sky-400 animate-pulse"
+                        className="text-sky-400"
                         fill="none"
                         stroke="currentColor"
                         strokeOpacity={0.7}
@@ -737,7 +737,7 @@ export const ForceGraph = memo(function ForceGraph({
                         width={2 * (r + 6)}
                         height={2 * (r + 6)}
                         rx={r * 0.25}
-                        className="text-sky-400 animate-pulse"
+                        className="text-sky-400"
                         fill="none"
                         stroke="currentColor"
                         strokeOpacity={0.7}
