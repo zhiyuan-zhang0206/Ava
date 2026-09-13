@@ -1523,3 +1523,276 @@ def test_ci_usage_exclusive_and_no_pr() -> None:
         ci_utils.main(["42", "--ci-usage"])
     with pytest.raises(SystemExit):
         ci_utils.main(["--ci-usage", "--wait"])
+
+
+# --- GitHub-limbo runs (task #3275, 2026-09-13): `queued` with zero jobs,
+# aged past `_LIMBO_AGE_SECONDS`, and no GitHub API can clean them up --
+# cancel -> 409, rerun -> 403, DELETE -> 403. They used to hold an all-green
+# rollup PENDING until a --wait budget silently ran out. ---
+
+
+class _ProbeResponse:
+    def __init__(self, returncode: int, stdout: str) -> None:
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = ""
+
+
+def _aged(seconds: float = 900.0) -> str:
+    """A GitHub RFC3339 `created_at` that is `seconds` old."""
+    return (datetime.now(UTC) - timedelta(seconds=seconds)).isoformat()
+
+
+def _install_probe(
+    monkeypatch: pytest.MonkeyPatch,
+    runs: object,
+    jobs: dict[int, int],
+    *,
+    calls: list[list[str]] | None = None,
+    runs_rc: int = 0,
+    jobs_rc: dict[int, int] | None = None,
+) -> None:
+    """Stub `gh api` for `_limbo_runs`: one runs probe, then one jobs probe per
+    aged queued candidate. `runs` is the jq-projected list (or a raw string
+    standing in for unreadable output); `jobs` maps a run id to its jq-printed
+    total_count."""
+
+    def run(cmd, **_kwargs):
+        if calls is not None:
+            calls.append(list(cmd))
+        url = cmd[2]
+        if "/jobs" in url:
+            run_id = int(url.split("/")[-2])
+            return _ProbeResponse((jobs_rc or {}).get(run_id, 0), str(jobs[run_id]))
+        return _ProbeResponse(runs_rc, runs if isinstance(runs, str) else json.dumps(runs))
+
+    monkeypatch.setattr(ci_utils.subprocess, "run", run)
+
+
+def test_limbo_runs_flags_aged_queued_zero_job_run(monkeypatch) -> None:
+    calls: list[list[str]] = []
+    _install_probe(
+        monkeypatch,
+        [{"id": 91, "name": "Native launcher observation proof", "created_at": _aged(910)}],
+        {91: 0},
+        calls=calls,
+    )
+    got = ci_utils._limbo_runs("abc1234", "o/r")
+    assert got is not None
+    assert [r["id"] for r in got] == [91]
+    assert got[0]["name"] == "Native launcher observation proof"
+    assert got[0]["age_s"] >= 900
+    # the runs probe filters queued-only server-side; the jobs probe confirms zero.
+    assert 'select(.status == "queued")' in calls[0][-1]
+    assert calls[1][2].endswith("/runs/91/jobs")
+
+
+def test_limbo_runs_skips_fresh_and_progressing_runs(monkeypatch) -> None:
+    _install_probe(
+        monkeypatch,
+        [
+            {"id": 92, "name": "fresh", "created_at": _aged(120)},  # below the age bound
+            {"id": 93, "name": "progressing", "created_at": _aged(1200)},  # has jobs
+            {"id": 94, "name": "stuck", "created_at": _aged(1200)},
+        ],
+        {93: 3, 94: 0},
+    )
+    assert [r["id"] for r in ci_utils._limbo_runs("abc1234", "o/r")] == [94]
+
+
+def test_limbo_runs_probe_failures_never_read_as_limbo(monkeypatch) -> None:
+    # An unanswerable runs probe is None (missing evidence), never [].
+    _install_probe(monkeypatch, [], {}, runs_rc=1)
+    assert ci_utils._limbo_runs("abc1234", "o/r") is None
+    # Unreadable output is the same: not evidence of limbo.
+    _install_probe(monkeypatch, "not json", {}, runs_rc=0)
+    assert ci_utils._limbo_runs("abc1234", "o/r") is None
+    # A candidate whose job count cannot be read is skipped, not assumed stuck.
+    _install_probe(
+        monkeypatch,
+        [{"id": 95, "name": "stuck", "created_at": _aged(1200)}],
+        {95: 0},
+        jobs_rc={95: 1},
+    )
+    assert ci_utils._limbo_runs("abc1234", "o/r") == []
+
+
+def test_limbo_runs_skips_unparseable_created_at_and_non_int_id(monkeypatch) -> None:
+    calls: list[list[str]] = []
+    _install_probe(
+        monkeypatch,
+        [
+            {"id": 96, "name": "no-created", "created_at": None},
+            {"id": "97", "name": "str-id", "created_at": _aged(1200)},
+            {"id": 98, "name": "garbage-created", "created_at": "yesterday"},
+        ],
+        {},
+        calls=calls,
+    )
+    assert ci_utils._limbo_runs("abc1234", "o/r") == []
+    assert len(calls) == 1  # no jobs probe ran for any candidate
+
+
+def test_check_ci_attaches_limbo_to_pending(gh: Any, has_workflows: Any, monkeypatch) -> None:
+    gh(
+        [_check("backend (pytest + pyright)", "SUCCESS")],
+        scheduled=["Caller protocol integration proof"],
+    )
+    has_workflows(True)
+    stuck = [{"id": 91, "name": "Caller protocol integration proof", "age_s": 1500}]
+    monkeypatch.setattr(ci_utils, "_limbo_runs", lambda *_a, **_k: stuck)
+    r = ci_utils.check_ci("1")
+    assert r.verdict is CIStatus.PENDING
+    assert r.pending == ["Caller protocol integration proof"]
+    assert r.limbo == stuck
+    assert "GitHub limbo" in r.summary()
+
+
+def test_check_ci_empty_rollup_with_scheduled_run_probes_limbo(
+    gh: Any, has_workflows: Any, monkeypatch
+) -> None:
+    gh([], scheduled=["CI"])
+    has_workflows(True)
+    monkeypatch.setattr(
+        ci_utils, "_limbo_runs", lambda *_a, **_k: [{"id": 92, "name": "CI", "age_s": 1200}]
+    )
+    r = ci_utils.check_ci("1")
+    assert r.verdict is CIStatus.PENDING
+    assert r.limbo == [{"id": 92, "name": "CI", "age_s": 1200}]
+
+
+def test_check_ci_limbo_probe_none_stays_plain_pending(
+    gh: Any, has_workflows: Any, monkeypatch
+) -> None:
+    gh([_check("backend", "SUCCESS")], scheduled=["CI"])
+    has_workflows(True)
+    monkeypatch.setattr(ci_utils, "_limbo_runs", lambda *_a, **_k: None)
+    r = ci_utils.check_ci("1")
+    assert r.verdict is CIStatus.PENDING
+    assert r.limbo == []
+
+
+def _limbo_result(
+    *,
+    pending: list[str] | None = None,
+    limbo: list[dict[str, Any]] | None = None,
+    failed: list[dict[str, str]] | None = None,
+) -> Any:
+    return ci_utils.CIResult(
+        verdict=CIStatus.PENDING,
+        pending=list(pending or []),
+        limbo=list(limbo or []),
+        failed=list(failed or []),
+    )
+
+
+def test_query_once_json_includes_limbo(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(
+        ci_utils,
+        "check_ci",
+        lambda *_a, **_k: _limbo_result(
+            pending=["CI"], limbo=[{"id": 91, "name": "CI", "age_s": 700}]
+        ),
+    )
+    assert ci_utils.main(["1", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["limbo"] == [{"id": 91, "name": "CI", "age_s": 700}]
+
+
+def test_only_limbo_blocks_requires_the_named_runs_to_be_the_only_obstacle() -> None:
+    stuck = {"id": 91, "name": "CI", "age_s": 700}
+    assert ci_utils._only_limbo_blocks(_limbo_result(pending=["CI"], limbo=[stuck])) is True
+    # A real pending check beside them: --force must not touch this.
+    assert (
+        ci_utils._only_limbo_blocks(_limbo_result(pending=["CI", "docs lint"], limbo=[stuck]))
+        is False
+    )
+    # Same names but no limbo evidence at all.
+    assert ci_utils._only_limbo_blocks(_limbo_result(pending=["CI"], limbo=[])) is False
+    # Two limbo runs of one name cannot cover a single pending entry (count lock).
+    assert (
+        ci_utils._only_limbo_blocks(
+            _limbo_result(pending=["CI"], limbo=[stuck, {**stuck, "id": 92}])
+        )
+        is False
+    )
+    # A failed check is never forgivable.
+    assert (
+        ci_utils._only_limbo_blocks(
+            _limbo_result(
+                pending=["CI"], limbo=[stuck], failed=[{"name": "lint", "conclusion": "FAILURE"}]
+            )
+        )
+        is False
+    )
+
+
+def test_report_limbo_names_once_per_key(capsys) -> None:
+    result = _limbo_result(pending=["CI"], limbo=[{"id": 91, "name": "CI", "age_s": 660}])
+    key = ci_utils._report_limbo(result, None)
+    first = capsys.readouterr()
+    assert key == (91,)
+    assert "GitHub limbo" in first.err
+    assert "(#91," in first.err
+    # The same state does not re-print on every poll.
+    assert ci_utils._report_limbo(result, key) == key
+    assert capsys.readouterr().err == ""
+
+
+def _install_results_poller(monkeypatch: pytest.MonkeyPatch, *results: Any) -> None:
+    calls = {"n": 0}
+
+    def fake_check(pr, *, repo):
+        i = min(calls["n"], len(results) - 1)
+        calls["n"] += 1
+        return results[i]
+
+    monkeypatch.setattr(ci_utils, "check_ci", fake_check)
+
+
+def test_wait_names_limbo_runs_and_says_the_block(no_sleep, monkeypatch, capsys) -> None:
+    _install_results_poller(
+        monkeypatch,
+        _limbo_result(pending=["CI"], limbo=[{"id": 91, "name": "CI", "age_s": 1500}]),
+    )
+    assert ci_utils.main(["1243", "--wait", "--timeout", "1"]) == 1
+    err = capsys.readouterr().err
+    assert "GitHub limbo" in err
+    assert "the block is" in err
+    assert "91" in err
+
+
+def test_wait_force_concludes_green_only_over_limbo(no_sleep, monkeypatch, capsys) -> None:
+    _install_results_poller(
+        monkeypatch,
+        _limbo_result(pending=["CI"], limbo=[{"id": 91, "name": "CI", "age_s": 1500}]),
+    )
+    assert ci_utils.main(["1243", "--wait", "--force"]) == 0
+    captured = capsys.readouterr()
+    assert "--force: proceeding despite 1 GitHub-limbo run(s)" in captured.out
+    assert "forced past: CI (#91)" in captured.err
+
+
+def test_wait_force_is_refused_when_a_real_check_is_still_pending(
+    no_sleep, monkeypatch, capsys
+) -> None:
+    _install_results_poller(
+        monkeypatch,
+        _limbo_result(pending=["CI", "docs lint"], limbo=[{"id": 91, "name": "CI", "age_s": 1500}]),
+    )
+    assert ci_utils.main(["1243", "--wait", "--timeout", "1", "--force"]) == 1
+    captured = capsys.readouterr()
+    assert "CI green" not in captured.out
+    assert "the block is" in captured.err
+
+
+def test_wait_force_does_not_green_a_plain_pending(no_sleep, monkeypatch, capsys) -> None:
+    _install_results_poller(monkeypatch, _limbo_result(pending=["CI"]))
+    assert ci_utils.main(["1243", "--wait", "--timeout", "1", "--force"]) == 1
+    assert "CI green" not in capsys.readouterr().out
+
+
+def test_force_requires_wait_or_merge() -> None:
+    with pytest.raises(SystemExit) as e:
+        ci_utils.main(["42", "--force"])
+    assert e.value.code == 2

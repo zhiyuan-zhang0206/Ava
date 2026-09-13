@@ -23,7 +23,7 @@ still read as NO_WORKFLOW_RUNS once — corroborate before acting on it.
 
 Usage as CLI:
     .venv/bin/python scripts/ci_utils.py <PR_NUMBER> [--repo owner/repo] [--json]
-    .venv/bin/python scripts/ci_utils.py <PR_NUMBER> --wait [--timeout N] [--merge]
+    .venv/bin/python scripts/ci_utils.py <PR_NUMBER> --wait [--timeout N] [--merge] [--force]
     .venv/bin/python scripts/ci_utils.py <PR_NUMBER> --evict [--repo owner/repo]
     .venv/bin/python scripts/ci_utils.py --queue-status [--repo owner/repo] [--json]
     .venv/bin/python scripts/ci_utils.py <PR_NUMBER> --diagnose [--repo owner/repo] [--json]
@@ -34,7 +34,10 @@ Usage as CLI:
     with the monitor contract — 0 green, 1 not green (or timed out), 3
     persistent gh/network errors, 4 Trunk queue submission failed.
     `--merge` implies `--wait`
-    and submits the PR to Trunk once green. `--require-fresh-base` turns the
+    and submits the PR to Trunk once green. `--force` (with --wait/--merge)
+    concludes green when GitHub-limbo runs — queued, zero jobs, aged >= 10 min
+    (task #3275) — are the only obstacle; noisy by design, never a blanket
+    bypass. `--require-fresh-base` turns the
     advisory base-staleness warning (main advanced past the PR's base) into a
     refusal, so the operator rebases instead of paying an in-queue re-test. `--queue` (or `CI_QUEUE`) selects
     the Trunk queue; `--priority` maps the submission priority, which requires
@@ -68,7 +71,7 @@ from datetime import datetime
 from enum import Enum
 from math import ceil
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 # Allow `python scripts/ci_utils.py` (sys.path[0] = scripts/) to find the
 # sibling module; under pytest pythonpath=["."] this is a redundant no-op.
@@ -139,6 +142,12 @@ def _derive_repo() -> str:
 DEFAULT_REPO = _derive_repo()
 POLL_INTERVAL = 30  # seconds between polls
 MAX_CONSECUTIVE_ERRORS = 3
+# A run still `queued` with ZERO jobs this long after it was created is GitHub
+# limbo: the scheduler never materialized its jobs, and every cleanup API
+# refuses it (cancel -> 409 "not been queued yet", rerun -> 403 "already
+# running", DELETE -> 403; task #3275, 2026-09-13). Legitimate queue lag is
+# seconds to minutes; this bound keeps a busy scheduler from reading as stuck.
+_LIMBO_AGE_SECONDS = 600.0
 QUEUE_COOLDOWN_SECONDS = 300
 RETRY_BACKOFF_SECONDS = 300
 _QUEUE_CHOICES = ("trunk",)
@@ -198,6 +207,14 @@ def _queue_cooldown_seconds(pr: str, repo: str) -> int:
     return 0 if last is None else max(0, ceil(QUEUE_COOLDOWN_SECONDS - (time.time() - last)))
 
 
+class LimboRun(TypedDict):
+    """One run confirmed stuck in GitHub limbo (task #3275)."""
+
+    id: int
+    name: str
+    age_s: int
+
+
 @dataclass
 class CIResult:
     verdict: CIStatus
@@ -216,6 +233,10 @@ class CIResult:
     # its submission, not by this CI verdict. Keep them separate so they cannot
     # enter the verdict buckets.
     gate_checks: list[dict] = field(default_factory=list)
+    # Runs stuck in GitHub limbo (task #3275): `queued`, zero jobs, aged past
+    # `_LIMBO_AGE_SECONDS`. Detail on a PENDING verdict — never a basis for
+    # green except through an explicit --force (`_only_limbo_blocks`).
+    limbo: list[LimboRun] = field(default_factory=list)
     mergeable: str = ""  # MERGEABLE / CONFLICTING / UNKNOWN
     error_detail: str = ""
 
@@ -229,9 +250,17 @@ class CIResult:
             names = [c["name"] for c in self.failed]
             return f"CI FAILED: {', '.join(names)}"
         if self.verdict == CIStatus.PENDING:
-            if len(self.pending) > 3:
-                return f"CI pending: {len(self.pending)} still running ({', '.join(self.pending[:3])}...)"
-            return f"CI pending: {', '.join(self.pending)}"
+            core = (
+                f"CI pending: {len(self.pending)} still running ({', '.join(self.pending[:3])}...)"
+                if len(self.pending) > 3
+                else f"CI pending: {', '.join(self.pending)}"
+            )
+            if self.limbo:
+                stuck = ", ".join(
+                    f"{r['name']} (#{r['id']}, {r['age_s'] // 60}m)" for r in self.limbo[:3]
+                )
+                core += f" — {len(self.limbo)} run(s) in GitHub limbo (queued, zero jobs): {stuck}"
+            return core
         if self.verdict == CIStatus.NO_CHECKS:
             return "No checks found"
         if self.verdict == CIStatus.NO_WORKFLOW_RUNS:
@@ -423,6 +452,84 @@ def _runs_not_yet_reporting(head_sha: str, repo: str | None) -> list[str] | None
     return [str(n) for n in names] if isinstance(names, list) else None
 
 
+def _limbo_runs(head_sha: str, repo: str | None) -> list[LimboRun] | None:
+    """Runs for `head_sha` that look permanently stuck in GitHub limbo.
+
+    The class (task #3275, 2026-09-13): `queued`, ZERO jobs ever created, and
+    past `_LIMBO_AGE_SECONDS`. Such a run stays in every non-completed answer
+    forever, so without this probe it holds an all-green rollup PENDING until
+    the caller's timeout -- silently. None means the probe could not answer
+    (missing evidence, never "no limbo"); a candidate whose job count cannot
+    be read is skipped, not assumed stuck.
+    """
+    owner = repo if repo else "{owner}/{repo}"
+    r = subprocess.run(  # noqa: S603
+        [
+            "gh",
+            "api",
+            f"repos/{owner}/actions/runs?head_sha={head_sha}",
+            "--jq",
+            '[.workflow_runs[] | select(.status == "queued") | {id, name, created_at}] | @json',
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if r.returncode != 0:
+        return None
+    try:
+        candidates = json.loads(r.stdout.strip() or "[]")
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(candidates, list):
+        return None
+    now = time.time()
+    limbo: list[LimboRun] = []
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        raw_id = candidate.get("id")
+        created_at = candidate.get("created_at")
+        created_ts = _parse_ts(created_at if isinstance(created_at, str) else None)
+        if type(raw_id) is not int or created_ts is None:
+            continue
+        age = now - created_ts
+        if age < _LIMBO_AGE_SECONDS:
+            continue
+        jobs = subprocess.run(  # noqa: S603
+            ["gh", "api", f"repos/{owner}/actions/runs/{raw_id}/jobs", "--jq", ".total_count"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if jobs.returncode != 0:
+            continue
+        try:
+            total = int(jobs.stdout.strip())
+        except ValueError:
+            continue
+        if total == 0:
+            limbo.append(
+                {"id": raw_id, "name": str(candidate.get("name") or "?"), "age_s": round(age)}
+            )
+    return limbo
+
+
+def _only_limbo_blocks(result: CIResult) -> bool:
+    """Whether confirmed GitHub-limbo runs are the ONLY obstacle to green.
+
+    Tied to the runs the limbo probe itself named: every pending entry must be
+    one of them -- same count, so a same-named fresh run cannot ride along --
+    and nothing may sit in any other non-passing bucket. Anything short of
+    that is a real pending state and `--force` must not touch it (#2873:
+    missing evidence is not green; this is an explicit, named exception).
+    """
+    if not result.limbo or result.failed:
+        return False
+    limbo_names = [item["name"] for item in result.limbo]
+    return len(result.pending) == len(limbo_names) and set(result.pending) == set(limbo_names)
+
+
 def _empty_rollup_verdict(result: CIResult, head_sha: str, repo: str | None) -> None:
     """Resolve an empty `statusCheckRollup` into a verdict on `result`.
 
@@ -448,6 +555,7 @@ def _empty_rollup_verdict(result: CIResult, head_sha: str, repo: str | None) -> 
     elif scheduled:
         result.pending.extend(scheduled)
         result.verdict = CIStatus.PENDING
+        result.limbo = _limbo_runs(head_sha, repo) or []
     else:
         result.verdict = CIStatus.NO_CHECKS
 
@@ -551,6 +659,7 @@ def check_ci(pr_number: str | int, *, repo: str | None = None) -> CIResult:
         if scheduled:
             result.pending.extend(scheduled)
             result.verdict = CIStatus.PENDING
+            result.limbo = _limbo_runs(data.get("headRefOid", ""), repo) or []
         elif not result.workflow_checks and _repo_has_workflows():
             # Nothing from a workflow is attached — and nothing is confirmed
             # scheduled (an unanswerable probe, None, reads the same here) —
@@ -609,6 +718,7 @@ def _query_once(pr: str, repo: str, *, as_json: bool) -> int:
                     "mergeable": result.mergeable,
                     "completed": result.completed,
                     "pending": result.pending,
+                    "limbo": result.limbo,
                     "passed": result.passed,
                     "failed": result.failed,
                     "workflow_checks": result.workflow_checks,
@@ -937,6 +1047,8 @@ def _validate_common_args(args: argparse.Namespace, parser: argparse.ArgumentPar
         parser.error("--timeout must be >= 0")
     if args.json and args.wait:
         parser.error("--json and --wait are mutually exclusive")
+    if args.force and not (args.wait or args.merge):
+        parser.error("--force is only meaningful with --wait/--merge")
 
 
 def _ci_usage_command(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int | None:
@@ -1467,6 +1579,48 @@ def _trunk_merge_flow(
     )
 
 
+def _report_limbo(result: CIResult, reported: tuple[int, ...] | None) -> tuple[int, ...] | None:
+    """Name GitHub-limbo runs loudly on first sight (and on any change).
+
+    Never silent (task #3275): this is the state that used to eat a --wait
+    budget invisibly. Returns the new reported-state key so a repeat poll
+    does not spam the same notice.
+    """
+    if not result.limbo:
+        return reported
+    key = tuple(sorted(r["id"] for r in result.limbo))
+    if key == reported:
+        return reported
+    stuck = ", ".join(f"{r['name']} (#{r['id']}, {r['age_s'] // 60}m)" for r in result.limbo)
+    print(
+        f"[ci] GitHub limbo: {len(result.limbo)} run(s) for this head are queued with zero "
+        f"jobs and no progress for >= {int(_LIMBO_AGE_SECONDS // 60)} minutes — they may "
+        f"never complete and no GitHub API can cancel them (task #3275): {stuck}",
+        file=sys.stderr,
+        flush=True,
+    )
+    print(
+        "[ci]   inspect with `gh run view <id>`; once everything else is green, `--force` "
+        "concludes the verdict despite them",
+        file=sys.stderr,
+        flush=True,
+    )
+    return key
+
+
+def _limbo_timeout_note(pr: str, result: CIResult) -> None:
+    """Add limbo context to a --wait deadline message (task #3275)."""
+    if not result.limbo:
+        return
+    ids = ", ".join(str(r["id"]) for r in result.limbo)
+    print(
+        f"PR #{pr} the block is {len(result.limbo)} GitHub-limbo run(s) ({ids}; queued, "
+        "zero jobs, aged — task #3275)",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
 def _wait_for_verdict(
     pr: str,
     repo: str,
@@ -1477,24 +1631,34 @@ def _wait_for_verdict(
     priority: str = "medium",
     trunk_token: str | None = None,
     require_fresh_base: bool = False,
+    force: bool = False,
 ) -> int:
     """Poll check_ci until the verdict settles, then report and exit.
 
     Never loops silently: a persistent gh/network failure exits 3 after
     MAX_CONSECUTIVE_ERRORS attempts with the error printed — the silent
     infinite loop this was built to eliminate (2026-08-02, PR #1243).
+
+    GitHub-limbo runs (task #3275) are named loudly as soon as they are seen
+    and again at the deadline; `force` concludes green anyway, but only when
+    the named limbo runs are the sole obstacle (`_only_limbo_blocks`).
     """
     consecutive_errors = 0
     no_checks_reported = False
     deadline = time.monotonic() + timeout if timeout else None
 
+    limbo_reported: tuple[int, ...] | None = None
+
     while True:
         result = check_ci(pr, repo=repo)
         verdict = result.verdict
+        forced_green = verdict is CIStatus.PENDING and force and _only_limbo_blocks(result)
 
-        if verdict is CIStatus.PENDING:
+        if verdict is CIStatus.PENDING and not forced_green:
             consecutive_errors = 0
+            limbo_reported = _report_limbo(result, limbo_reported)
             if _deadline_hit(deadline, pr, timeout):
+                _limbo_timeout_note(pr, result)
                 return 1
             time.sleep(every)
             continue
@@ -1536,8 +1700,16 @@ def _wait_for_verdict(
             continue
 
         # Settled verdict — FAILED / MERGE_CONFLICT / NO_WORKFLOW_RUNS / ALL_PASSED
-        if verdict is CIStatus.ALL_PASSED:
-            print(f"PR #{pr} CI green: {result.summary()}")
+        if verdict is CIStatus.ALL_PASSED or forced_green:
+            if forced_green:
+                names = ", ".join(f"{r['name']} (#{r['id']})" for r in result.limbo)
+                print(
+                    f"PR #{pr} CI green (--force: proceeding despite {len(result.limbo)} "
+                    f"GitHub-limbo run(s) — task #3275)"
+                )
+                print(f"[ci] forced past: {names}", file=sys.stderr, flush=True)
+            else:
+                print(f"PR #{pr} CI green: {result.summary()}")
             if merge:
                 if trunk_token is None:
                     raise AssertionError("Trunk merge flow requires a token")
@@ -1589,6 +1761,13 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=0,
         help="with --wait: stop after N seconds still pending (0 = forever)",
+    )
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="with --wait/--merge: conclude green when GitHub-limbo runs (queued, "
+        "zero jobs, aged >= 10m — task #3275) are the ONLY obstacle; real pending, "
+        "failed or unreadable evidence still blocks",
     )
     p.add_argument(
         "--merge",
@@ -1718,6 +1897,7 @@ def main(argv: list[str] | None = None) -> int:
             priority=args.priority,
             trunk_token=trunk_token,
             require_fresh_base=args.require_fresh_base,
+            force=args.force,
         )
     return _query_once(args.pr, args.repo, as_json=args.json)
 
