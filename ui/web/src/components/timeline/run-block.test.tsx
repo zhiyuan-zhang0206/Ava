@@ -330,8 +330,8 @@ describe("TurnBlock component", () => {
     // The stuck variant carries its paint-only edge seals: 16px right over
     // the scroller gutter (#3224) and 2px bottom against child-pin slits (#3308).
     expect(toggle.className).toContain("shadow-[");
-    expect(toggle.className).toContain("16px_0_0_0_hsl(var(--background))");
-    expect(toggle.className).toContain("0_2px_0_0_hsl(var(--background))");
+    expect(toggle.className).toContain("16px_0_0_0_var(--background)");
+    expect(toggle.className).toContain("0_2px_0_0_var(--background)");
     expect(toggle.className).toContain("border-b");
     // …with the border's height compensated: a bare border made the stuck
     // header 1px taller than the unstuck one, and that 1px drove the

@@ -4237,8 +4237,8 @@ describe("TimelineView sticky work block (task #2601)", () => {
       // The stuck variant's paint-only edge seals (tasks #3224/#3308) replaced
       // the plain shadow-xs: gutter + child-slit masks ride on box-shadow.
       expect(toggle.className).toContain("shadow-[");
-      expect(toggle.className).toContain("16px_0_0_0_hsl(var(--background))");
-      expect(toggle.className).toContain("0_2px_0_0_hsl(var(--background))");
+      expect(toggle.className).toContain("16px_0_0_0_var(--background)");
+      expect(toggle.className).toContain("0_2px_0_0_var(--background)");
     });
   });
 

@@ -314,11 +314,15 @@ export const STICKY_CHILD_HEADER_CLS =
 //   edge and a child header pinned just below it (pin-line desync right at a
 //   sticky transition, QA #3308) stay covered by the opaque copy.
 // The border-b goes fully opaque for the same reason: content sliding under
-// the stuck header must not ghost through a translucent 1px line.
+// the stuck header must not ghost through a translucent 1px line. The seal
+// color is the raw token (var(--background)) — the theme token lives in lab
+// space, so the hsl(var(--background)) form is invalid at computed-value
+// time and silently drops the whole box-shadow (verified in-browser).
+
 export const STUCK_HEADER_CLS =
   "bg-background/95 backdrop-blur-md border-b border-border " +
   "-mb-px " +
-  "shadow-[0_1px_2px_0_rgba(0,0,0,0.05),16px_0_0_0_hsl(var(--background)),0_2px_0_0_hsl(var(--background))] " +
+  "shadow-[0_1px_2px_0_rgba(0,0,0,0.05),16px_0_0_0_var(--background),0_2px_0_0_var(--background)] " +
   "transition-[background-color,box-shadow,border-color] duration-150 ease-out motion-reduce:transition-none";
 export const UNSTUCK_HEADER_CLS =
   "bg-transparent transition-[background-color,box-shadow,border-color] duration-150 ease-out motion-reduce:transition-none";
