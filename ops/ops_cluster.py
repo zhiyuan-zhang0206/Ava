@@ -52,7 +52,7 @@ from shared.host_deploy_state import updater_lease_live
 from shared.log import logger
 from shared.machine import machine_name
 from shared.machines import mark_stopping
-from shared.proc import process_alive, run_bounded, timeout_stderr_tail
+from shared.proc import run_bounded, timeout_stderr_tail
 
 # `cluster_fetch_op`'s two git calls. The fetch ceiling is generous (the whole
 # point of the pre-flight is to find out whether this host can reach the remote);
@@ -176,55 +176,26 @@ def cluster_resume_legacy_op() -> dict[str, object]:
     return {}
 
 
-# `_lock_holder_is_live`'s pid-recycling slack. A genuine holder PROCESS existed
-# before it acquired the lease, so a probed process whose start time is
-# meaningfully AFTER the acquire moment is a recycled pid, not the holder. The
-# slack absorbs pg-vs-local clock fuzz (the probe host is the holder's own box,
-# and every gateway-capable host runs its DB locally, so the skew is NTP-grade)
-# and errs toward "live": a false "recycled" verdict would let recovery clear the
-# lease under a running rollout — the 2026-06-01 collision class.
-_HOLDER_START_SLACK_S = 30.0
-
-
 def _lock_holder_is_live(holder: str, *, held_for_s: float | None = None) -> bool:
     """Whether `holder` (the update-lock owner string `<machine>:pid<N>`, minted by
     cli/commands/update.py:_run_gateway_orchestration) names a process that is
     still running on THIS host.
 
-    A holder on a different machine cannot be probed locally — treat it as live so
-    recovery never clobbers another gateway's lock. An unparseable holder is
-    likewise treated as live (refuse rather than risk clobbering a real run).
-
-    `held_for_s` (the lease's server-computed age, `DeployLease.held_for_s`) arms
-    the pid-recycling check: the holder string carries no start time, but a real
-    holder process predates its own acquire, so a live pid whose process STARTED
-    after the acquire (+ slack) is the pid's next occupant, not the holder — dead
-    for recovery purposes. Without `held_for_s` the probe is bare liveness, as
-    before. This matters at recover's timescale: a 30-minute TTL is exactly the
-    window in which a busy host recycles the dead orchestration's pid.
+    The negation of `shared.cluster_lock.holder_process_gone` — that shared twin
+    owns the probe (the pid-recycling slack included), so this manual-recovery
+    refusal and the stranded-lease controller's automatic reclaim can never
+    disagree about whether a holder is dead. A holder on a different machine, an
+    unparseable holder, and an unreadable process identity are all treated as live
+    (refuse rather than risk clobbering a real run). `held_for_s` (the lease's
+    server-computed age) arms the pid-recycling check: the holder string carries
+    no start time, but a live pid whose process STARTED after the acquire (+ the
+    shared slack) is the pid's next occupant, not the holder. This matters at
+    recover's timescale: a 30-minute TTL is exactly the window in which a busy
+    host recycles the dead orchestration's pid.
     """
-    machine, sep, pid_str = holder.partition(":pid")
-    if sep == "" or machine != machine_name():
-        return True
-    try:
-        pid = int(pid_str)
-    except ValueError:
-        return True
-    if not process_alive(pid):
-        return False
-    if held_for_s is None:
-        return True
-    import time
+    from shared.cluster_lock import holder_process_gone
 
-    import psutil
-
-    try:
-        started = psutil.Process(pid).create_time()
-    except psutil.NoSuchProcess:
-        return False  # exited between the two probes
-    except psutil.Error:
-        return True  # unreadable identity — refuse rather than clobber
-    return started <= (time.time() - held_for_s) + _HOLDER_START_SLACK_S
+    return not holder_process_gone(holder, held_for_s=held_for_s)
 
 
 def cluster_recover_op() -> dict[str, object]:

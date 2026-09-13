@@ -545,6 +545,37 @@ status` whose watchdog log repeats `round blocked by pause`. A hold naming a *di
 host still owns this host's pause, as does a lease with no note (a rollout executing
 right now).
 
+A **deploy lease whose holder is provably gone is reclaimed automatically** (task
+#3250). The stranded-pause path above recovers the pause, but the lease row itself
+outlives a hard-killed orchestration by up to `LOCK_TTL_S` (30 min), refusing every
+new deploy with "another cluster update is in progress (held by ...)" on the strength
+of a process that is gone — the 2026-09-12 dev-worktree incident waited 9.5 minutes
+for a hand-run `ava cluster recover`. The watchdog's `stranded_lease` controller
+(registered ahead of the pause gate; never blocks) clears such a row in one round:
+the holder must name THIS machine and its pid be absent or provably recycled
+(`shared.cluster_lock.holder_process_gone` — the negation of the probe `ava cluster
+recover` uses, so the manual and automatic paths can never disagree); a live
+orchestration session or a live local updater lease declines; and the clear is a
+compare-and-set on the exact lease observed, so a racing new owner is never
+clobbered. Only a plain executing lease qualifies — a settle hold is never touched,
+and neither is the paused posture or any maintenance hold.
+
+Recovery recipe for a stranded deploy (deploys refused, or this host stuck paused):
+
+- **Automatic** — the `stranded_lease` controller reclaims a lease whose local
+  holder is provably dead within a round or two; a truly unowned pause self-clears
+  at the ~2 min bound. Watch one round of the watchdog log (`[ops.lease]` /
+  `[ops.pause]`) rather than reaching for the manual path.
+- **Manual** — `ava cluster recover` (in-process; needs only the data plane):
+  it prints the holder it is about to clear, refuses while the holder process is
+  alive, a spawned session or a local updater is live (that refusal is the command
+  working), then clears the lock and unpauses this host. A holder on ANOTHER
+  machine cannot be pid-probed here — run it there, or wait out the lease TTL.
+- **After** — `ava cluster status` should show the hold column empty and the host
+  unpaused; the next `ava cluster update` can start. A hold the controller must not
+  touch (a maintenance hold, a settle hold) follows its own hand-recovery recipe
+  ([graceful maintenance](graceful-maintenance.md)).
+
 A **stranded update hold is completed once, bounded** (task #3142). The record
 above makes the silent hold loud; this completes the one shape whose owner is
 provably gone AND whose state is resumable: an update-armed hold (the pause
