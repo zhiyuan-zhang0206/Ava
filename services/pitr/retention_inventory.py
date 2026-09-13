@@ -46,7 +46,7 @@ class _Bucket(Protocol):
 
 
 class GCSRetentionInventoryReader:
-    """Viewer-only inventory; this adapter deliberately has no write verb."""
+    """Viewer-only inventory; this adapter deliberately has no write verb (deletion lives in the separate retention-delete role, off by default)."""
 
     def __init__(self, *, project: str, bucket: str, prefix: str, credentials_file: Path) -> None:
         credentials = service_account.Credentials.from_service_account_file(str(credentials_file))

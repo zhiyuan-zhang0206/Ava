@@ -479,6 +479,7 @@ def test_factory_constructs_every_role_for_the_gcs_backend(tmp_path: Path) -> No
         prefix="ava-pitr",
         uploader_credentials=credentials,
         viewer_credentials=credentials,
+        delete_credentials=credentials,
     )
     assert group.object_store() is not None
     assert group.restartable_streaming_object_store() is not None
@@ -486,6 +487,7 @@ def test_factory_constructs_every_role_for_the_gcs_backend(tmp_path: Path) -> No
     assert group.generation_pinned_object_reader() is not None
     assert group.retention_inventory_reader() is not None
     assert group.protected_manifest_publisher() is not None
+    assert group.retention_delete_store() is not None
 
 
 def test_factory_constructs_every_role_for_the_baidu_backend(tmp_path: Path) -> None:
@@ -506,17 +508,24 @@ def test_factory_constructs_every_role_for_the_baidu_backend(tmp_path: Path) -> 
     assert group.generation_pinned_object_reader() is not None
     assert group.retention_inventory_reader() is not None
     assert group.protected_manifest_publisher() is not None
+    assert group.retention_delete_store() is not None
 
 
 def test_factory_constructs_every_role_for_the_oss_backend(tmp_path: Path) -> None:
     credentials = tmp_path / "oss.json"
     credentials.write_text(json.dumps({"access_key_id": "ak", "access_key_secret": "sk"}))
     credentials.chmod(0o600)
+    delete_credentials = tmp_path / "oss-delete.json"
+    delete_credentials.write_text(
+        json.dumps({"access_key_id": "delete-ak", "access_key_secret": "sk"})
+    )
+    delete_credentials.chmod(0o600)
     group = get_group_constructor_named("oss")(
         endpoint="https://oss-cn-shanghai.aliyuncs.com",
         bucket="ava-pitr-store",
         prefix="ava-pitr",
         credentials_file=credentials,
+        delete_credentials_file=delete_credentials,
     )
     assert group.object_store() is not None
     assert group.restartable_streaming_object_store() is not None
@@ -524,6 +533,30 @@ def test_factory_constructs_every_role_for_the_oss_backend(tmp_path: Path) -> No
     assert group.generation_pinned_object_reader() is not None
     assert group.retention_inventory_reader() is not None
     assert group.protected_manifest_publisher() is not None
+    assert group.retention_delete_store() is not None
+
+
+def test_oss_delete_role_requires_its_credential_file(tmp_path: Path) -> None:
+    credentials = tmp_path / "oss.json"
+    credentials.write_text(json.dumps({"access_key_id": "ak", "access_key_secret": "sk"}))
+    credentials.chmod(0o600)
+    group = get_group_constructor_named("oss")(
+        endpoint="https://oss-cn-shanghai.aliyuncs.com",
+        bucket="ava-pitr-store",
+        credentials_file=credentials,
+    )
+    with pytest.raises(RuntimeError, match="OSS delete credential file is missing"):
+        group.retention_delete_store()
+
+
+def test_gcs_delete_role_requires_its_credential(tmp_path: Path) -> None:
+    credentials = tmp_path / "gcs.json"
+    credentials.write_text(_service_account())
+    group = get_group_constructor_named("gcs")(
+        project="p", bucket="b", uploader_credentials=credentials
+    )
+    with pytest.raises(RuntimeError, match="PITR delete credential is missing"):
+        group.retention_delete_store()
 
 
 def test_factory_constructs_every_role_for_the_cos_backend(tmp_path: Path) -> None:
@@ -541,6 +574,7 @@ def test_factory_constructs_every_role_for_the_cos_backend(tmp_path: Path) -> No
     assert group.generation_pinned_object_reader() is not None
     assert group.retention_inventory_reader() is not None
     assert group.protected_manifest_publisher() is not None
+    assert group.retention_delete_store() is not None
 
 
 def test_factory_rejects_unknown_backend_without_falling_back() -> None:
@@ -577,6 +611,40 @@ def test_factory_reads_the_configured_backend(
     monkeypatch.setattr(settings.physical_backup, "pitr_store_backend", "nope")
     with pytest.raises(ValueError, match="unknown PITR store backend"):
         get_store_group()
+
+
+def test_get_store_group_passes_the_delete_credential(monkeypatch: pytest.MonkeyPatch) -> None:
+    import services.pitr.store_factory as store_factory_module
+    from shared.config import settings
+
+    config = settings.physical_backup
+    uploader = Path("up.json")
+    delete = Path("delete.json")
+    captured: dict[str, object] = {}
+
+    def fake_oss(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(config, "pitr_store_backend", "oss")
+    monkeypatch.setattr(config, "pitr_oss_credentials_file", uploader)
+    monkeypatch.setattr(config, "pitr_oss_viewer_credentials_file", None)
+    monkeypatch.setattr(config, "pitr_oss_delete_credentials_file", delete)
+    monkeypatch.setattr(store_factory_module, "oss_pitr_store_group", fake_oss)
+    store_factory_module.get_store_group()
+    assert captured["delete_credentials_file"] == delete
+
+    captured.clear()
+
+    def fake_gcs(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(config, "pitr_store_backend", "gcs")
+    monkeypatch.setattr(config, "pitr_gcs_delete_credentials_file", delete)
+    monkeypatch.setattr(store_factory_module, "gcs_pitr_store_group", fake_gcs)
+    store_factory_module.get_store_group()
+    assert captured["delete_credentials"] == delete
 
 
 # ── token manager skeleton ──

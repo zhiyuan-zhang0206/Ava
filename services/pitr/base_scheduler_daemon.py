@@ -52,6 +52,9 @@ from services.pitr.retention_scheduler import (
     RetentionDryRunState,
 )
 from services.pitr.retention_scheduler import (
+    delete_tick as retention_delete_tick,
+)
+from services.pitr.retention_scheduler import (
     refresh as refresh_retention_plan,
 )
 from services.pitr.space_budget import CandidateSpaceBudget
@@ -422,6 +425,10 @@ async def _loop(state: BaseCandidateState) -> None:  # noqa: PLR0915
                 _log.exception("PITR retention dry-run planning failed")
                 await _sleep(BASE_BACKUP_RETRY_INTERVAL_S)
                 continue
+        # One arm-gated deletion pass per tick (a no-op while disabled). The
+        # executor is synchronous and paces itself across up to minutes, and
+        # the health server shares this loop, so run it off-loop.
+        await asyncio.to_thread(retention_delete_tick, state.retention, config)
         if (
             config.pitr_restore_proof_enabled
             and restore_proof_due(datetime.now(UTC), last_success=state.last_protected)

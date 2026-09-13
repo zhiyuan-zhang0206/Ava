@@ -2,76 +2,22 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import re
 import stat
 from pathlib import Path, PurePosixPath
-from typing import cast
 from urllib.parse import urlsplit
 
 from pydantic import Field, model_validator
 
 from shared.config._base import EnvSettings
+from shared.config.physical_backup_credentials import (
+    aliyun_oss_identity,
+    reject_shared_delete_identity,
+    require_private_regular_file,
+    service_account_identity,
+)
 
 _SAFE_PREFIX_PART = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-
-
-def _require_private_regular_file(path: Path | None, alias: str) -> None:
-    if path is None or not path.is_absolute():
-        raise ValueError(f"{alias} must be an absolute path")
-    try:
-        info = path.lstat()
-    except OSError as exc:
-        raise ValueError(f"{alias} must exist") from exc
-    if not stat.S_ISREG(info.st_mode) or path.is_symlink() or stat.S_IMODE(info.st_mode) != 0o600:
-        raise ValueError(f"{alias} must be a non-symlink regular file with mode 0600")
-
-
-def _service_account_identity(path: Path, alias: str) -> tuple[str, str, str]:
-    try:
-        payload = path.read_bytes()
-        raw = json.loads(payload)
-        _validate_service_account_payload(raw)
-        return (
-            str(raw["client_email"]),
-            str(raw["project_id"]),
-            hashlib.sha256(payload).hexdigest(),
-        )
-    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
-        raise ValueError(f"{alias} must contain a service-account identity") from exc
-
-
-def _validate_service_account_payload(raw: object) -> None:
-    if not isinstance(raw, dict):
-        raise TypeError("service-account payload must be an object")
-    payload = cast(dict[str, object], raw)
-    if {"type", "client_email", "project_id", "private_key_id"} - set(payload):
-        raise ValueError("service-account identity fields are missing")
-    if payload["type"] != "service_account":
-        raise ValueError("credential is not a service account")
-
-
-def _aliyun_oss_identity(path: Path, alias: str) -> tuple[str, str]:
-    """Validate a 0600 Aliyun OSS credential JSON and return its
-    (access_key_id, sha256) identity — the viewer/uploader distinction
-    proof for restore drills."""
-    _require_private_regular_file(path, alias)
-    try:
-        payload = path.read_bytes()
-        raw = json.loads(payload)
-    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
-        raise ValueError(f"{alias} must contain an Aliyun OSS identity") from exc
-    if not isinstance(raw, dict):
-        raise TypeError("OSS credential payload must be an object")
-    credentials = cast(dict[str, object], raw)
-    key_id = credentials.get("access_key_id")
-    key_secret = credentials.get("access_key_secret")
-    if not isinstance(key_id, str) or not isinstance(key_secret, str):
-        raise TypeError("OSS credential identity fields are missing")
-    if not key_id or not key_secret:
-        raise ValueError("OSS credential identity fields must be non-empty")
-    return key_id, hashlib.sha256(payload).hexdigest()
 
 
 class PhysicalBackupSettings(EnvSettings):
@@ -119,6 +65,41 @@ class PhysicalBackupSettings(EnvSettings):
         description="Enable local dry-run PITR retention planning; this never deletes objects. Gateway-local enablement: never served by bootstrap to agent-runners.",
         json_schema_extra={
             "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+            "bootstrap": False,
+        },
+    )
+    pitr_retention_delete_armed: bool = Field(
+        default=False,
+        alias="AVA_PITR_RETENTION_DELETE_ARMED",
+        description=(
+            "Operator arm state for policy-owned retention deletion (task #2150). "
+            "Only the explicit retention arm/disable commands write it, together "
+            "with the approved plan digest; the base scheduler daemon re-reads "
+            "this key from the unit .env on every tick, so a flip takes effect on "
+            "the next tick without a restart. Never edit the file by hand: the "
+            "commands are the only switch and every flip is journalled."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+            "bootstrap": False,
+        },
+    )
+    pitr_retention_delete_approved_digest: str | None = Field(
+        default=None,
+        alias="AVA_PITR_RETENTION_DELETE_APPROVED_DIGEST",
+        description=(
+            "Plan digest the operator approved at arm time; the deletion tick "
+            "refuses any plan whose digest differs. Written together with the arm "
+            "key by the explicit retention commands; absent while deletion is off."
+        ),
+        json_schema_extra={
+            "restart_required": "",
             "writable": True,
             "sensitive": False,
             "scope": "cluster-pinned",
@@ -332,6 +313,24 @@ class PhysicalBackupSettings(EnvSettings):
             "bootstrap": False,
         },
     )
+    pitr_oss_delete_credentials_file: Path | None = Field(
+        default=None,
+        alias="AVA_PITR_OSS_DELETE_CREDENTIALS_FILE",
+        description=(
+            "0600 JSON holding the deletion-only Aliyun OSS RAM AccessKey pair "
+            "(task #2150). Read only by the arm-gated retention executor; "
+            "leaving it unset keeps retention deletion disabled on oss. Must be "
+            "a distinct identity from the uploader and viewer credentials."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": True,
+            "scope": "host",
+            "remote_writable": False,
+            "bootstrap": False,
+        },
+    )
     pitr_archive_timeout_seconds: int = Field(
         default=60,
         ge=30,
@@ -440,6 +439,22 @@ class PhysicalBackupSettings(EnvSettings):
         default=None,
         alias="AVA_PITR_RESTORE_GCS_CREDENTIALS_FILE",
         description="0600 viewer-only service-account JSON used by restore drills.",
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": False,
+            "sensitive": True,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+    pitr_gcs_delete_credentials_file: Path | None = Field(
+        default=None,
+        alias="AVA_PITR_GCS_DELETE_CREDENTIALS_FILE",
+        description=(
+            "0600 deletion-only service-account JSON for the gcs retention "
+            "executor (task #2150). Unset keeps retention deletion disabled on "
+            "gcs; must be a distinct identity from the uploader and viewer."
+        ),
         json_schema_extra={
             "restart_required": "gateway",
             "writable": False,
@@ -584,30 +599,28 @@ class PhysicalBackupSettings(EnvSettings):
                     "AVA_PITR_BACKUP_KEY_FILE must be a 32-byte, non-symlink regular file with mode 0600"
                 )
             if self.pitr_store_backend == "gcs":
-                _require_private_regular_file(
+                require_private_regular_file(
                     self.pitr_gcs_credentials_file, "AVA_PITR_GCS_CREDENTIALS_FILE"
                 )
             if self.pitr_store_backend == "baidu":
-                _require_private_regular_file(
+                require_private_regular_file(
                     self.pitr_baidu_credentials_file, "AVA_PITR_BAIDU_CREDENTIALS_FILE"
                 )
                 token_file = self.pitr_baidu_token_file
                 if token_file is None or not token_file.is_absolute():
                     raise ValueError("AVA_PITR_BAIDU_TOKEN_FILE must be an absolute path")
                 if token_file.exists():
-                    _require_private_regular_file(token_file, "AVA_PITR_BAIDU_TOKEN_FILE")
+                    require_private_regular_file(token_file, "AVA_PITR_BAIDU_TOKEN_FILE")
             if self.pitr_store_backend == "oss":
                 if self.pitr_oss_credentials_file is None:
                     raise ValueError("AVA_PITR_OSS_CREDENTIALS_FILE is required")
-                _aliyun_oss_identity(
-                    self.pitr_oss_credentials_file, "AVA_PITR_OSS_CREDENTIALS_FILE"
-                )
+                aliyun_oss_identity(self.pitr_oss_credentials_file, "AVA_PITR_OSS_CREDENTIALS_FILE")
             if self.pitr_store_backend == "cos":
-                _require_private_regular_file(
+                require_private_regular_file(
                     self.pitr_cos_credentials_file, "AVA_PITR_COS_CREDENTIALS_FILE"
                 )
             if self.pitr_restore_proof_enabled and self.pitr_store_backend == "gcs":
-                _require_private_regular_file(
+                require_private_regular_file(
                     self.pitr_restore_gcs_credentials_file,
                     "AVA_PITR_RESTORE_GCS_CREDENTIALS_FILE",
                 )
@@ -626,10 +639,10 @@ class PhysicalBackupSettings(EnvSettings):
                     raise ValueError(
                         "AVA_PITR_RESTORE_GCS_CREDENTIALS_FILE must be a distinct viewer-only credential"
                     )
-                uploader_identity = _service_account_identity(
+                uploader_identity = service_account_identity(
                     uploader, "AVA_PITR_GCS_CREDENTIALS_FILE"
                 )
-                viewer_identity = _service_account_identity(
+                viewer_identity = service_account_identity(
                     viewer, "AVA_PITR_RESTORE_GCS_CREDENTIALS_FILE"
                 )
                 if (
@@ -661,8 +674,8 @@ class PhysicalBackupSettings(EnvSettings):
                         "AVA_PITR_OSS_VIEWER_CREDENTIALS_FILE must be a distinct "
                         "viewer-only credential"
                     )
-                uploader_identity = _aliyun_oss_identity(uploader, "AVA_PITR_OSS_CREDENTIALS_FILE")
-                viewer_identity = _aliyun_oss_identity(
+                uploader_identity = aliyun_oss_identity(uploader, "AVA_PITR_OSS_CREDENTIALS_FILE")
+                viewer_identity = aliyun_oss_identity(
                     viewer, "AVA_PITR_OSS_VIEWER_CREDENTIALS_FILE"
                 )
                 if (
@@ -670,6 +683,29 @@ class PhysicalBackupSettings(EnvSettings):
                     or uploader_identity[1] == viewer_identity[1]
                 ):
                     raise ValueError("restore proof requires a distinct viewer-only OSS identity")
+        reject_shared_delete_identity(
+            self.pitr_gcs_delete_credentials_file,
+            "AVA_PITR_GCS_DELETE_CREDENTIALS_FILE",
+            (
+                (self.pitr_gcs_credentials_file, "AVA_PITR_GCS_CREDENTIALS_FILE"),
+                (
+                    self.pitr_restore_gcs_credentials_file,
+                    "AVA_PITR_RESTORE_GCS_CREDENTIALS_FILE",
+                ),
+            ),
+            parse=service_account_identity,
+            distinct_indexes=(0, 2),
+        )
+        reject_shared_delete_identity(
+            self.pitr_oss_delete_credentials_file,
+            "AVA_PITR_OSS_DELETE_CREDENTIALS_FILE",
+            (
+                (self.pitr_oss_credentials_file, "AVA_PITR_OSS_CREDENTIALS_FILE"),
+                (self.pitr_oss_viewer_credentials_file, "AVA_PITR_OSS_VIEWER_CREDENTIALS_FILE"),
+            ),
+            parse=aliyun_oss_identity,
+            distinct_indexes=(0, 1),
+        )
         return self
 
 

@@ -7,10 +7,10 @@ The same discipline as ``services.memory_indexer.backends.factory``:
 fails fast — a typo must never silently fall back to the previous
 backend while the operator believes the switch happened.
 
-A backend is a ``PitrStoreGroup``: five role factories (uploader /
+A backend is a ``PitrStoreGroup``: seven role factories (uploader /
 restartable-streaming writer / viewer stat / generation-pinned reader /
-retention inventory / protected-manifest publisher) bound to one
-backend's credentials. The four role contracts stay separate (an
+retention inventory / protected-manifest publisher / retention deletion)
+bound to one backend's credentials. The role contracts stay separate (an
 adapter may serve several roles internally, but no caller gets a
 merged surface). Daemons take the settings-bound group; the restricted
 restore worker builds the group explicitly from its input protocol,
@@ -28,6 +28,7 @@ from services.pitr.base_object_store import RestartableStreamingObjectStore
 from services.pitr.object_store import ObjectStore
 from services.pitr.restore_object_store import GenerationPinnedObjectReader
 from services.pitr.restore_proof import ProtectedManifestPublisher
+from services.pitr.retention_delete import RetentionDeleteStore
 from services.pitr.retention_inventory import RetentionInventoryReader
 
 
@@ -41,6 +42,7 @@ class PitrStoreGroup:
     generation_pinned_object_reader: Callable[[], GenerationPinnedObjectReader]
     retention_inventory_reader: Callable[[], RetentionInventoryReader]
     protected_manifest_publisher: Callable[[], ProtectedManifestPublisher]
+    retention_delete_store: Callable[[], RetentionDeleteStore]
 
 
 def gcs_pitr_store_group(
@@ -50,6 +52,7 @@ def gcs_pitr_store_group(
     prefix: str = "",
     uploader_credentials: str | Path | None = None,
     viewer_credentials: str | Path | None = None,
+    delete_credentials: str | Path | None = None,
     timeout_seconds: int = 300,
 ) -> PitrStoreGroup:
     """The baseline backend: each role is the existing GCS adapter with its
@@ -67,6 +70,11 @@ def gcs_pitr_store_group(
         if viewer_credentials is None:
             raise RuntimeError("validated PITR viewer credential is missing")
         return Path(viewer_credentials)
+
+    def require_delete() -> Path:
+        if delete_credentials is None:
+            raise RuntimeError("validated PITR delete credential is missing")
+        return Path(delete_credentials)
 
     def require_prefix() -> str:
         if not prefix:
@@ -124,6 +132,13 @@ def gcs_pitr_store_group(
             project=project, bucket=bucket, credentials_file=require_uploader()
         )
 
+    def retention_delete_store() -> RetentionDeleteStore:
+        from services.pitr.retention_delete import GCSRetentionDeleteStore
+
+        return GCSRetentionDeleteStore(
+            project=project, bucket=bucket, credentials_file=require_delete(), timeout_seconds=30
+        )
+
     return PitrStoreGroup(
         object_store=object_store,
         restartable_streaming_object_store=restartable_streaming_object_store,
@@ -131,6 +146,7 @@ def gcs_pitr_store_group(
         generation_pinned_object_reader=generation_pinned_object_reader,
         retention_inventory_reader=retention_inventory_reader,
         protected_manifest_publisher=protected_manifest_publisher,
+        retention_delete_store=retention_delete_store,
     )
 
 
@@ -147,7 +163,7 @@ def baidu_pitr_store_group(
     from services.pitr.baidu_inventory import BaiduRetentionInventoryReader
     from services.pitr.baidu_publish_store import BaiduProtectedManifestPublisher
     from services.pitr.baidu_restore_store import BaiduGenerationPinnedObjectReader
-    from services.pitr.baidu_store import BaiduObjectStore
+    from services.pitr.baidu_store import BaiduObjectStore, BaiduRetentionDeleteStore
     from services.pitr.baidu_token import BaiduCredentials, BaiduTokenManager
 
     def token_manager() -> BaiduTokenManager:
@@ -155,6 +171,13 @@ def baidu_pitr_store_group(
 
     def object_store() -> BaiduObjectStore:
         return BaiduObjectStore(
+            app_root=app_root, token_manager=token_manager(), timeout_seconds=timeout_seconds
+        )
+
+    def retention_delete_store() -> BaiduRetentionDeleteStore:
+        # This backend has no credential split: one token serves every role
+        # (see the group docstring), so the deletion role shares it.
+        return BaiduRetentionDeleteStore(
             app_root=app_root, token_manager=token_manager(), timeout_seconds=timeout_seconds
         )
 
@@ -174,6 +197,7 @@ def baidu_pitr_store_group(
         protected_manifest_publisher=lambda: BaiduProtectedManifestPublisher(
             app_root=app_root, token_manager=token_manager(), timeout_seconds=timeout_seconds
         ),
+        retention_delete_store=retention_delete_store,
     )
 
 
@@ -184,6 +208,7 @@ def oss_pitr_store_group(
     prefix: str = "",
     credentials_file: str | Path | None = None,
     viewer_credentials_file: str | Path | None = None,
+    delete_credentials_file: str | Path | None = None,
     timeout_seconds: float = 300.0,
 ) -> PitrStoreGroup:
     """The Aliyun OSS backend: one AccessKey pair per role cluster, the
@@ -208,6 +233,11 @@ def oss_pitr_store_group(
             raise RuntimeError("validated PITR OSS viewer credential file is missing")
         return viewer
 
+    def require_delete() -> str | Path:
+        if delete_credentials_file is None:
+            raise RuntimeError("validated PITR OSS delete credential file is missing")
+        return delete_credentials_file
+
     def object_store(credentials: str | Path) -> OSSObjectStore:
         return OSSObjectStore(
             endpoint=endpoint,
@@ -221,6 +251,16 @@ def oss_pitr_store_group(
 
     def viewer_role() -> OSSObjectStore:
         return object_store(require_viewer())
+
+    def retention_delete_store() -> RetentionDeleteStore:
+        from services.pitr.oss_store import OSSRetentionDeleteStore
+
+        return OSSRetentionDeleteStore(
+            endpoint=endpoint,
+            bucket=bucket,
+            credentials_file=require_delete(),
+            timeout_seconds=timeout_seconds,
+        )
 
     return PitrStoreGroup(
         object_store=object_store_role,
@@ -245,6 +285,7 @@ def oss_pitr_store_group(
             credentials_file=require_uploader(),
             timeout_seconds=timeout_seconds,
         ),
+        retention_delete_store=retention_delete_store,
     )
 
 
@@ -264,13 +305,18 @@ def cos_pitr_store_group(
     from services.pitr.cos_inventory import CosRetentionInventoryReader
     from services.pitr.cos_publish_store import CosProtectedManifestPublisher
     from services.pitr.cos_restore_store import CosGenerationPinnedObjectReader
-    from services.pitr.cos_store import CosObjectStore
+    from services.pitr.cos_store import CosObjectStore, COSRetentionDeleteStore
 
     def credentials() -> CosCredentials:
         return CosCredentials.from_file(Path(credentials_file), region=region, bucket=bucket)
 
     def object_store() -> CosObjectStore:
         return CosObjectStore(credentials=credentials(), timeout_seconds=timeout_seconds)
+
+    def retention_delete_store() -> COSRetentionDeleteStore:
+        # This backend has no credential split: one static key pair serves
+        # every role (see the group docstring), so the deletion role shares it.
+        return COSRetentionDeleteStore(credentials=credentials(), timeout_seconds=timeout_seconds)
 
     return PitrStoreGroup(
         object_store=object_store,
@@ -285,6 +331,7 @@ def cos_pitr_store_group(
         protected_manifest_publisher=lambda: CosProtectedManifestPublisher(
             credentials=credentials(), timeout_seconds=timeout_seconds
         ),
+        retention_delete_store=retention_delete_store,
     )
 
 
@@ -353,6 +400,7 @@ def get_store_group() -> PitrStoreGroup:
             prefix=config.pitr_gcs_prefix,
             uploader_credentials=config.pitr_gcs_credentials_file,
             viewer_credentials=config.pitr_restore_gcs_credentials_file,
+            delete_credentials=config.pitr_gcs_delete_credentials_file,
         )
     if name == "baidu":
         credentials_file = config.pitr_baidu_credentials_file
@@ -384,4 +432,5 @@ def get_store_group() -> PitrStoreGroup:
         prefix=config.pitr_gcs_prefix,
         credentials_file=credentials_file,
         viewer_credentials_file=config.pitr_oss_viewer_credentials_file,
+        delete_credentials_file=config.pitr_oss_delete_credentials_file,
     )

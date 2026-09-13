@@ -33,9 +33,10 @@ so the GCS / Baidu Netdisk adapters are shared and the Drive-sync-folder copy
 is gone. The publish is best-effort and immutable: it happens iff absent,
 the ACK (pin_token, size, checksum) is the store-verified identity, and a
 missing/unavailable/failed store warns and keeps the local artifact — it never
-discards it. Remote objects are append-only: the store contract deliberately
-has no delete verb (neither does the physical plane), so remote retention is a
-shared planner concern (dry-run today) — see `future/infra/pg-backup.md`.
+discards it. Remote objects are append-only except policy-owned retention deletions (off
+by default): the store contract deliberately has no delete verb, and the
+separate retention-delete role only acts when explicitly armed — remote
+retention is a shared planner concern (dry-run today) — see `future/infra/pg-backup.md`.
 The dump is `pg_dump --format=custom` with zstd compression — custom format
 already compresses the archive, so the pre-2026-08-27 pipeline's extra `gzip`
 stage (a second compression pass over already-compressed bytes) is gone. The

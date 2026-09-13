@@ -417,3 +417,67 @@ def test_oss_store_keys_are_writable_on_the_own_host() -> None:
         assert metas[name].writable is True
     assert metas["pitr_oss_credentials_file"].remote_writable is False
     assert metas["pitr_oss_viewer_credentials_file"].remote_writable is False
+
+
+def test_retention_delete_carriers_default_off() -> None:
+    settings = PhysicalBackupSettings()
+    assert settings.pitr_retention_delete_armed is False
+    assert settings.pitr_retention_delete_approved_digest is None
+    assert settings.pitr_oss_delete_credentials_file is None
+    assert settings.pitr_gcs_delete_credentials_file is None
+
+
+def test_oss_delete_credentials_must_be_distinct(tmp_path: Path) -> None:
+    uploader = _oss_credential(tmp_path, key_id="uploader-ak")
+    with pytest.raises(ValidationError, match="distinct deletion-only identity"):
+        PhysicalBackupSettings(
+            AVA_PITR_OSS_CREDENTIALS_FILE=uploader,
+            AVA_PITR_OSS_DELETE_CREDENTIALS_FILE=uploader,
+        )
+    copied = tmp_path / "delete-copy.json"
+    copied.write_text(uploader.read_text())
+    copied.chmod(0o600)
+    with pytest.raises(ValidationError, match="distinct deletion-only identity"):
+        PhysicalBackupSettings(
+            AVA_PITR_OSS_CREDENTIALS_FILE=uploader,
+            AVA_PITR_OSS_DELETE_CREDENTIALS_FILE=copied,
+        )
+    delete = _oss_credential(tmp_path, key_id="delete-ak")
+    configured = PhysicalBackupSettings(
+        AVA_PITR_OSS_CREDENTIALS_FILE=uploader,
+        AVA_PITR_OSS_DELETE_CREDENTIALS_FILE=delete,
+    )
+    assert configured.pitr_oss_delete_credentials_file == delete
+
+
+def test_gcs_delete_credentials_must_be_distinct(tmp_path: Path) -> None:
+    uploader = tmp_path / "gcs-uploader.json"
+    uploader.write_text(_service_account("uploader@example.com"))
+    uploader.chmod(0o600)
+    with pytest.raises(ValidationError, match="distinct deletion-only identity"):
+        PhysicalBackupSettings(
+            AVA_PITR_GCS_CREDENTIALS_FILE=uploader,
+            AVA_PITR_GCS_DELETE_CREDENTIALS_FILE=uploader,
+        )
+    delete = tmp_path / "gcs-delete.json"
+    delete.write_text(_service_account("delete@example.com"))
+    delete.chmod(0o600)
+    configured = PhysicalBackupSettings(
+        AVA_PITR_GCS_CREDENTIALS_FILE=uploader,
+        AVA_PITR_GCS_DELETE_CREDENTIALS_FILE=delete,
+    )
+    assert configured.pitr_gcs_delete_credentials_file == delete
+
+
+def test_gcs_delete_credentials_reject_overexposed_file(tmp_path: Path) -> None:
+    uploader = tmp_path / "gcs-uploader.json"
+    uploader.write_text(_service_account("uploader@example.com"))
+    uploader.chmod(0o600)
+    overexposed = tmp_path / "gcs-delete.json"
+    overexposed.write_text(_service_account("delete@example.com"))
+    overexposed.chmod(0o644)
+    with pytest.raises(ValidationError, match=r"GCS_DELETE_CREDENTIALS_FILE.*mode 0600"):
+        PhysicalBackupSettings(
+            AVA_PITR_GCS_CREDENTIALS_FILE=uploader,
+            AVA_PITR_GCS_DELETE_CREDENTIALS_FILE=overexposed,
+        )
