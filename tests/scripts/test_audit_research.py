@@ -56,7 +56,7 @@ def _good_state() -> dict:
                 "url": "https://example.com/a",
                 "title": "Source A",
                 "publisher": "Example Corp",
-                "date": "2026-01-01",
+                "date": "2026-01-01",  # time-bomb-ok: source publication metadata
                 "accessed_at": "2026-08-09T12:00:00Z",
                 "kind": "primary",
             },
@@ -65,7 +65,7 @@ def _good_state() -> dict:
                 "url": "https://example.com/b",
                 "title": "Source B",
                 "publisher": "Example Corp",
-                "date": "2026-02-01",
+                "date": "2026-02-01",  # time-bomb-ok: source publication metadata
                 "accessed_at": "2026-08-09T12:05:00Z",
                 "kind": "secondary",
             },

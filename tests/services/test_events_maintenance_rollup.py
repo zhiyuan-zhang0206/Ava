@@ -323,7 +323,7 @@ def test_first_pass_rolls_the_whole_retained_window_once(
 def test_matching_source_count_skips_full_reroll(
     db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    day = date(2026, 6, 9)
+    day = date(2026, 6, 9)  # time-bomb-ok: explicit fixture day feeding a pinned rollup window
     _state(db, day, 7)
     fake = _FakeLokiDays({day: ([], [])})
     result = _roll(db, fake, monkeypatch, lookback=0, counts={day: 7})
@@ -336,7 +336,7 @@ def test_changed_source_count_rerolls_and_advances_watermark(
     db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     aid = _agent(db)
-    day = date(2026, 6, 9)
+    day = date(2026, 6, 9)  # time-bomb-ok: explicit fixture day feeding a pinned rollup window
     _state(db, day, 1)
     fake = _FakeLokiDays({day: ([_tokens_row(aid)], [])})
     result = _roll(db, fake, monkeypatch, lookback=0, counts={day: 2})
@@ -373,7 +373,7 @@ def test_late_write_lookback_re_rolls_closed_day(
     db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     aid = _agent(db)
-    day = date(2026, 6, 9)
+    day = date(2026, 6, 9)  # time-bomb-ok: explicit fixture day feeding a pinned rollup window
     _roll(db, _FakeLokiDays({day: ([_tokens_row(aid, calls=1, tokens_in=10)], [])}), monkeypatch)
     # A late OTLP write raised the day's totals — the lookback re-roll
     # overwrites with the new full-day aggregate.
@@ -556,7 +556,7 @@ def test_probe_failure_rerolls_but_keeps_previous_watermark(
     db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     aid = _agent(db)
-    day = date(2026, 6, 9)
+    day = date(2026, 6, 9)  # time-bomb-ok: explicit fixture day feeding a pinned rollup window
     _state(db, day, 5)
     fake = _FakeLokiDays({day: ([_tokens_row(aid)], [])})
     warnings: list[str] = []
@@ -675,7 +675,7 @@ def test_source_count_query_uses_the_union_body_truth_pipeline(
 
 
 def test_cutover_day_merges_legacy_and_indexed_rollups(monkeypatch: pytest.MonkeyPatch) -> None:
-    day = date(2026, 8, 10)
+    day = date(2026, 8, 10)  # time-bomb-ok: explicit fixture day feeding a pinned rollup window
     day_start = datetime.combine(day, datetime.min.time(), tzinfo=UTC)
     cutover = day_start + timedelta(hours=12)
     day_end = day_start + timedelta(days=1)

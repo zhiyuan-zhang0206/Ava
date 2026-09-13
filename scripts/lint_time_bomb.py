@@ -1,6 +1,6 @@
 """Forbid the wall-clock time-bomb: exact-equality test assertions on
 values derived from a fixed instant while the derivation can reach the real
-clock.
+clock, and fixed calendar fixtures bound to window-shaped names in tests.
 
 Run: `.venv/bin/python scripts/lint_time_bomb.py [path ...]` (defaults to the
 source dirs + tests/). Also run automatically via pre-commit.
@@ -53,8 +53,17 @@ lints):
    `abs(...) < n`) is always allowed. Deliberate exceptions carry an
    inline `# time-bomb-ok: <reason>` comment on the asserted line.
 
-Scope: rule 1 scans non-test source dirs only; rule 2 scans `tests/` only.
-Error format `file:line: <reason>` + non-zero exit.
+3. **Fixed calendar fixtures bound to window-shaped names (test).** A fixed
+   calendar literal (`"2026-09-06"`, `date(2026, 6, 9)`,
+   `datetime(2026, 7, 22, 18, tzinfo=UTC)`) bound to a window-shaped name
+   (`day`, `date`, `since`, `until`, `window_start`, `window_end`) as a dict
+   value, keyword argument, or plain assignment is a time bomb the moment the
+   window it feeds is evaluated against the real clock: the fixture rots the
+   day the window rolls past it. Derive the value from the clock (or from the
+   request under test), or carry `# time-bomb-ok: <reason>` on the binding.
+
+Scope: rule 1 scans non-test source dirs only; rules 2 and 3 scan `tests/`
+only. Error format `file:line: <reason>` + non-zero exit.
 """
 
 from __future__ import annotations
@@ -94,6 +103,11 @@ _HTTP_NAMES = frozenset({"client", "session", "httpx", "requests"})
 _HTTP_METHODS = frozenset({"get", "post", "put", "delete", "request", "patch"})
 
 _OPT_OUT = "time-bomb-ok"
+
+# Rule 3 window-shaped names: a fixed calendar literal bound to one of these
+# is a fixture date that will rot against the real clock.
+_WINDOW_NAMES = frozenset({"day", "date", "since", "until", "window_start", "window_end"})
+_CALENDAR_STR = re.compile(r"^\d{4}-\d{2}-\d{2}($|[T ])")
 
 
 def _is_dt_ctor(node: ast.AST) -> bool:
@@ -571,17 +585,82 @@ def _tainted(function: ast.AST, index: _Index, mod: str) -> list[str]:
     return taints
 
 
+# ── rule 3: fixed calendar literals bound to window-shaped names (tests/) ───
+
+
+def _is_calendar_literal(node: ast.AST) -> bool:
+    """A fixed calendar date: an ISO date/datetime string, or a `date(...)` /
+    `datetime(...)` construction with at least three constant positional args
+    (year, month, day; keywords like `tzinfo=` do not make the date dynamic)."""
+    if isinstance(node, ast.Constant):
+        return isinstance(node.value, str) and bool(_CALENDAR_STR.match(node.value))
+    if isinstance(node, ast.Call):
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+        return (
+            name in ("date", "datetime")
+            and len(node.args) >= 3
+            and all(isinstance(arg, ast.Constant) for arg in node.args)
+        )
+    return False
+
+
+def _lint_fixture_dates(path: Path, tree: ast.Module, lines: list[str]) -> list[str]:
+    """A calendar literal bound to a window-shaped name (dict value, keyword
+    argument, or plain assignment) must derive from the clock or carry
+    `# time-bomb-ok: <reason>` on any line of the binding's span (key..value;
+    the value only for a keyword)."""
+    found: list[tuple[int, str]] = []
+
+    def check(name: str, start: int, end: int, value: ast.AST) -> None:
+        if any(_OPT_OUT in line for line in lines[start - 1 : end]):
+            return
+        found.append(
+            (
+                start,
+                f"{path}:{start}: time-bomb fixture date: a fixed calendar "
+                f"literal ({ast.unparse(value)}) bound to the window-shaped "
+                f"name '{name}'; derive it from the clock or add "
+                f"'# {_OPT_OUT}: <reason>' to opt out",
+            )
+        )
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Dict):
+            for key, value in zip(node.keys, node.values, strict=True):
+                if (
+                    isinstance(key, ast.Constant)
+                    and isinstance(key.value, str)
+                    and key.value in _WINDOW_NAMES
+                    and _is_calendar_literal(value)
+                ):
+                    check(key.value, key.lineno, value.end_lineno, value)
+        elif isinstance(node, ast.keyword):
+            if node.arg in _WINDOW_NAMES and _is_calendar_literal(node.value):
+                check(node.arg, node.value.lineno, node.value.end_lineno, node.value)
+        elif (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id in _WINDOW_NAMES
+            and _is_calendar_literal(node.value)
+        ):
+            check(node.targets[0].id, node.targets[0].lineno, node.value.end_lineno, node.value)
+
+    return [message for _, message in sorted(found)]
+
+
 def _lint_test_file(index: _Index, path: Path, rel: str) -> list[str]:
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except SyntaxError:
         return []
+    source_lines = path.read_text(encoding="utf-8").splitlines()
+    errors: list[str] = _lint_fixture_dates(path, tree, source_lines)
     mod = rel[:-3].replace("/", ".")
     fixed_names, aliases = _fixed_names_in_module(index, tree)
     if not fixed_names and not aliases:
-        return []  # nothing fixed-instant in this test module — fast path
-    errors: list[str] = []
-    source_lines = path.read_text(encoding="utf-8").splitlines()
+        return errors  # nothing fixed-instant in this test module — fast path
     for node in tree.body:
         if not isinstance(
             node, (ast.FunctionDef, ast.AsyncFunctionDef)

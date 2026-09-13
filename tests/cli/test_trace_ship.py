@@ -346,7 +346,14 @@ def test_windowed_ship_includes_gzipped_segments(monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.setattr("httpx.Client", _Client)
 
-    assert cmd_trace_ship(since="2026-06-15", until="2026-06-17", dry_run=False) == 0
+    assert (
+        cmd_trace_ship(
+            since="2026-06-15",  # time-bomb-ok: explicit request range under test
+            until="2026-06-17",  # time-bomb-ok: explicit request range under test
+            dry_run=False,
+        )
+        == 0
+    )
     assert len(posts) == 1  # only the gz segment in the window
 
 
@@ -423,7 +430,14 @@ def test_windowed_ship_filters_by_file_day_and_ignores_watermark(
 
     monkeypatch.setattr("httpx.Client", _Client)
 
-    assert cmd_trace_ship(since="2026-06-15", until="2026-06-17", dry_run=False) == 0
+    assert (
+        cmd_trace_ship(
+            since="2026-06-15",  # time-bomb-ok: explicit request range under test
+            until="2026-06-17",  # time-bomb-ok: explicit request range under test
+            dry_run=False,
+        )
+        == 0
+    )
     assert len(posts) == 1  # only the in-window file, shipped whole despite the watermark
 
 

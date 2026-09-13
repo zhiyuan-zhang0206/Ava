@@ -98,7 +98,7 @@ def test_window_bounds_rejects_two_windows() -> None:
 
 
 def test_window_bounds_variants() -> None:
-    since = datetime(2026, 7, 22, 18, tzinfo=UTC)
+    since = datetime(2026, 7, 22, 18, tzinfo=UTC)  # time-bomb-ok: explicit input, passed through
     assert usage._window_bounds(None, None) == (None, None)
     from_, to = usage._window_bounds(since, None)
     assert from_ == since and to is not None
