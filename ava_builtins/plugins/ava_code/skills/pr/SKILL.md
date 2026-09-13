@@ -32,7 +32,7 @@ gh pr list --head $(git branch --show-current) --json number,url
 
 If this returns empty, the PR was not created — don't pretend a PR exists; investigate right away.
 
-PR title and description are in **Chinese**.
+PR title and description are in **English** (user ruling 2026-08-20: repo contribution rules — neutral wording for private-network tooling, PR text in English, CI green then wait for the review verdict before enqueueing).
 
 ## Dependency declaration
 

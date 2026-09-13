@@ -28,5 +28,22 @@ Run it from the repo root: the path resolves against your current logical direct
 so running it from inside another worktree silently nests the new worktree
 there instead of placing it under the repo root's `.worktrees/`.
 
+**Bootstrap the environment:** a fresh worktree has no `.venv`, and the repo
+gates invoke `.venv/bin/python` — build a real per-worktree venv before your
+first commit (never symlink one; the why is the "Worktree uv iron rule" in
+`conventions/runbook.md`):
+
+```bash
+env -u VIRTUAL_ENV python scripts/guard_editable_venv.py . \
+  && env -u VIRTUAL_ENV uv sync && env -u VIRTUAL_ENV uv pip install -e .
+```
+
+**Never stash in a shared checkout:** every worktree shares one `.git`, so
+`git stash` operates on a repo-wide list — a bare `git stash pop` can drop
+another agent's WIP into your tree. To compare against old code, use
+`git worktree add --detach /tmp/old <sha>`, `git show <sha>:path`, or
+`git diff > /tmp/p.patch` instead. If you must stash: `git stash push -m
+<branch>` and pop that explicit entry, never the list head.
+
 **After the PR merges:** `git worktree remove <path>` — a stranded worktree
 keeps a full checkout on disk for nothing (the branch is deleted by the merge).
