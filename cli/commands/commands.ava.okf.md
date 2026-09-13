@@ -113,7 +113,7 @@ schema change catches the DB up on its own.
 - `cli/mcp_server.py` is the third top-level module a verb routes to
   (`ava mcp serve`) rather than a `commands/` module: it is a long-running
   stdio server, not a command that renders and exits, and it pulls in the mcp
-  SDK that no other verb needs. See [[cli/commands/packages.ava.okf.md]].
+  SDK that no other verb needs. See [[cli/commands/packages/packages.ava.okf.md]].
 - [[pitr.ava.okf.md]] defines the PITR inspection surface and the archive →
   verify → retire guard for finite migration rollback snapshots.
 - [[ownership_preflight.ava.okf.md]] names the warning-only ownership repair

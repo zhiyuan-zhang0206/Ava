@@ -10,9 +10,11 @@ tags:
 
 ## What It Declares
 Packages may ship an `ava-plugin.json` at their root declaring identity
-(name/version/`engines.ava` range), dependencies (`plugins` /
+(name/version/`engines.ava` range, optional `requires_commit` pin), dependencies (`plugins` /
 `pythonPackages` / `hostCapabilities`), contribution surfaces, and lifecycle
-shape. Install paths validate it via `shared/plugin_manifest.py`; runtime
+shape. Install paths validate it via `shared/plugin_manifest.py` (host-axis
+checks: the derived host version must satisfy `engines.ava`, and the checkout
+must contain `requires_commit` — [host-versioning.md](../../conventions/host-versioning.md)); runtime
 loading, lifecycle states, and context gates land post-open-source. Full
 contract: [conventions/plugin-spec-v2.md](../../conventions/plugin-spec-v2.md).
 
