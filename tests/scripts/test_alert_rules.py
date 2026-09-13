@@ -81,6 +81,8 @@ _EXPECTED_UIDS = {
     # recovery posture — scheduled-proof failure and remote retention growth
     "ava-ops-recovery-drill-failed",
     "ava-ops-pitr-storage-growth",
+    # alerting stack health — remote Tempo scrape target (task #3330)
+    "ava-ops-tempo-backend-down",
 }
 
 # The infra rules and the metric each one is built on. A rename on the
@@ -106,7 +108,7 @@ def _load_groups() -> list[dict[str, Any]]:
     assert [group["name"] for group in groups] == ["ava-ops", "ava-ops-slow"]
     assert [group["folder"] for group in groups] == ["Ava", "Ava"]
     assert [group["interval"] for group in groups] == ["1m", "5m"]
-    assert [len(group["rules"]) for group in groups] == [24, 9]
+    assert [len(group["rules"]) for group in groups] == [24, 10]
     return groups
 
 
@@ -165,6 +167,7 @@ def test_low_cost_rules_use_the_slow_group() -> None:
         "ava-ops-turn-duration-p95",
         "ava-ops-gw-latency-slow-warning",
         "ava-ops-gw-latency-slow-error",
+        "ava-ops-tempo-backend-down",
     ):
         assert group_for_rule[uid] == "ava-ops-slow"
 
@@ -773,4 +776,32 @@ def test_pitr_storage_growth_rule_compares_remote_bytes_week_over_week() -> None
         "metric": "pitr_remote_storage_growth",
         "team": "ava-ops",
         "notify_im": "false",
+    }
+
+
+def test_tempo_backend_down_rule_tracks_the_remote_scrape() -> None:
+    """The silence guard for the remote Tempo backend (task #3330): the rule
+    fires on `up{job="tempo"}` below 1 held for 1h. A drift in the scrape job
+    name, the comparison direction, or the labels would silently disable the
+    only signal for the remote trace store - it is deliberately outside the
+    station healthcheck repair loop."""
+    rules = {r["uid"]: r for r in _load_rules()}
+    rule = rules["ava-ops-tempo-backend-down"]
+
+    assert _exprs(rule, "prometheus") == ['up{job="tempo"}']
+    assert _exprs(rule, "loki") == []
+    assert rule["for"] == "1h"
+    assert rule["noDataState"] == "OK"
+    assert rule["execErrState"] == "OK"
+    assert _threshold_params(rule) == [[1]]
+    assert [
+        d["model"]["conditions"][0]["evaluator"]["type"]
+        for d in rule["data"]
+        if d["model"].get("type") == "threshold"
+    ] == ["lt"]
+    assert rule["labels"] == {
+        "severity": "warning",
+        "ruleUID": "ava-ops-tempo-backend-down",
+        "metric": "tempo_up",
+        "team": "ava-ops",
     }
