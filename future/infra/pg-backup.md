@@ -47,8 +47,9 @@
 > Google Drive sync folder — it publishes through the shared BlobStore store
 > group (`services.pitr.store_factory`), so GCS and Baidu Netdisk are the
 > shared adapters and the Drive copy is gone. Remote objects are append-only
-> (the store contract has no delete verb); a shared remote-retention planner
-> is the follow-up.
+> except policy-owned retention deletions (off by default; the publish
+> contract has no delete verb and the deletion role must be explicitly armed);
+> a shared remote-retention planner is the follow-up.
 
 ## Future work
 
@@ -75,10 +76,11 @@ remains mandatory and is never pruned by physical-backup retention.
    `ava-logical/<name>`; the store-verified ACK (pin_token, size, checksum) is
    the identity. The publish is if-absent and immutable; a missing/unconfigured
    store or a failed publish warns without discarding the local backup, which
-   stays the primary copy. Remote objects are append-only for now: the store
-   contract deliberately has no delete verb (the physical plane's retention
-   planner is dry-run too), so remote retention of logical dumps is a shared
-   future concern — see the storage-abstraction effort's retention planner.
+   stays the primary copy. Remote objects are append-only except policy-owned
+   retention deletions (off by default): the store contract deliberately has
+   no delete verb, and the physical plane's retention planner is dry-run until
+   an operator arms the deletion role — so remote retention of logical dumps
+   is a shared future concern — see the storage-abstraction effort's retention planner.
 2. **Restore drill — delivered.** `scripts/restore_drill.py` decrypts the
    latest managed artifact (or a supplied path), restores it into scratch
    Postgres, and validates schema, agent rows, checkpoint rows, a checkpoint
