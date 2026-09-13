@@ -205,7 +205,7 @@ class DaemonSettings(EnvSettings):
     health_probe_agent_min: int = Field(
         default=1,
         alias="AVA_HEALTH_PROBE_AGENT_MIN",
-        description="Minimum running/idling agents the health-probe requires for a healthy verdict. A test/QA cluster with no resident agents must set this to 0, or the probe's agent-population check fails forever and --auto-rollback rolls the cluster back to the last-known-good commit on a cycle (2026-08-10 preview incident).",
+        description="Minimum running/idling agents the health-probe requires for a healthy verdict. A dev/QA cluster (any non-default home) has this seeded to 0 in its `.env` at birth: with no resident agents by design, the check would otherwise fail forever and --auto-rollback would cycle the checkout (2026-08-10 preview and 2026-09-12 dev-worktree incidents). An explicit value — including the prod default 1 — stands as written.",
         json_schema_extra={
             "restart_required": "",
             "writable": True,

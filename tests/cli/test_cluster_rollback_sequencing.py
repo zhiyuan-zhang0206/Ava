@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -233,3 +234,80 @@ def test_rollback_parser_accepts_keep_pin() -> None:
     args = _build_parser().parse_args(["cluster", "rollback", "--keep-pin", "--yes"])
 
     assert args.keep_pin is True
+
+
+# ─── preserve-before-reset: the rollback must not eat uncommitted work ───────
+
+
+class _FakeResult:
+    def __init__(self, returncode: int) -> None:
+        self.returncode = returncode
+
+
+def _wire_run_rollback(
+    monkeypatch: pytest.MonkeyPatch,
+    order: list[tuple[str, str]],
+    *,
+    stash: str | None,
+) -> None:
+    """Stub every external step of `_run_rollback`; record stash/reset order."""
+    from cli.commands._update_git import GitPullFailed
+
+    def _stash(*, reason: str) -> str | None:
+        order.append(("stash", reason))
+        if stash == "raise":
+            raise GitPullFailed("index.lock is held")
+        return stash
+
+    monkeypatch.setattr(_rb, "git_stash_uncommitted", _stash)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_rb, "git_reset_hard", lambda sha: order.append(("reset", sha)))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _rb,
+        "rollback_schema_to",
+        lambda *_a, **_k: order.append(("schema", "")) or (True, []),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(_rb, "_migration_set_at_commit", lambda _sha: set())  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_rb, "current_schema_state", set)
+    monkeypatch.setattr(_rb, "run_uv_sync", lambda _repo, **_kw: _FakeResult(0))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_rb.subprocess, "run", lambda *_a, **_kw: _FakeResult(0))  # pyright: ignore[reportUnknownArgumentType]
+
+
+def test_run_rollback_stashes_uncommitted_work_before_the_reset(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A rollback preserves uncommitted work before its reset discards it: the
+    2026-09-12 incident reset a dev worktree and silently lost its edits, so the
+    stash line + its restore hint must be printed (they are the only pointer to
+    the preserved work)."""
+    order: list[tuple[str, str]] = []
+    _wire_run_rollback(monkeypatch, order, stash="stash@{0}: On main: ava stash")
+
+    rc = _rb._run_rollback("b" * 40, repo=tmp_path, from_sha="f" * 40)
+
+    assert rc == 0
+    assert [kind for kind, _ in order] == ["stash", "reset"]
+    assert order[0][1].startswith("ava rollback fffffff -> bbbbbbb")
+    out = capsys.readouterr().out
+    assert "preserved uncommitted changes in a stash" in out
+    assert "stash@{0}: On main: ava stash" in out
+    # The restore hint must name the shared-list-safe procedure, not a bare pop.
+    assert "git stash apply stash@{N}" in out
+    assert "shared by every worktree" in out
+
+
+def test_run_rollback_aborts_before_mutating_when_the_stash_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """If the work cannot be preserved, it is not destroyed: a stash failure
+    propagates before the schema step or the reset, leaving code and schema on
+    the pre-rollback revision (the auto path then keeps its failure count and
+    retries)."""
+    from cli.commands._update_git import GitPullFailed
+
+    order: list[tuple[str, str]] = []
+    _wire_run_rollback(monkeypatch, order, stash="raise")
+
+    with pytest.raises(GitPullFailed):
+        _rb._run_rollback("b" * 40, repo=tmp_path, from_sha="f" * 40)
+
+    assert [kind for kind, _ in order] == ["stash"]  # nothing else ran
