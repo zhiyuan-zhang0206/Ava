@@ -3,8 +3,9 @@
 
 Run: `.venv/bin/python scripts/lint_ava_root_scope.py [path ...]` — no paths
 scans `services/ava_root/` (the root supervisor's own code); explicit paths
-scan exactly those files/directories. Also run automatically via pre-commit
-and in CI (the `repo-language` job).
+scan exactly those files/directories, and an explicit path that does not
+exist is an error (stderr + exit 1) rather than a silent no-op. Also run
+automatically via pre-commit and in CI (the `repo-language` job).
 
 ## Why
 
@@ -42,15 +43,19 @@ this lint's review surface.
 
 A line that genuinely must carry one of these names opts out inline with
 `# ava-root-scope-ok: <reason>` (same convention as the other repo lints).
-The marker exempts only its own line.
+The marker is matched against real comment tokens only (the token semantics
+of `lint_no_emoji.py`), so the same text inside a string literal does not
+exempt. The marker exempts only its own line.
 
 Error format `file:line: <symbol> | <line content>` + non-zero exit.
 """
 
 from __future__ import annotations
 
+import io
 import re
 import sys
+import tokenize
 from pathlib import Path
 
 # Project root (this script lives under scripts/).
@@ -59,7 +64,8 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 # The default scan root: the root supervisor's own code.
 _DEFAULT_TARGET = "services/ava_root"
 
-# Inline opt-out marker, same convention as the other repo lints.
+# Inline opt-out marker, same convention as the other repo lints; matched
+# against real comment tokens only (see _exempt_lines).
 _OPT_OUT_MARKER = "ava-root-scope-ok:"
 
 # ── Group 1: permission-domain symbols ──────────────────────────────────────
@@ -153,6 +159,23 @@ def _iter_files(targets: list[Path]) -> list[Path]:
     return files
 
 
+def _exempt_lines(text: str) -> set[int]:
+    """Line numbers whose *comment* carries the opt-out marker.
+
+    Tokenizing distinguishes a real comment from the same characters appearing
+    inside a string literal (lint_no_emoji.py's semantics). Unparseable text
+    falls back to a permissive per-line substring match.
+    """
+    try:
+        return {
+            tok.start[0]
+            for tok in tokenize.generate_tokens(io.StringIO(text).readline)
+            if tok.type == tokenize.COMMENT and _OPT_OUT_MARKER in tok.string
+        }
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        return {i for i, line in enumerate(text.splitlines(), start=1) if _OPT_OUT_MARKER in line}
+
+
 def scan_file(path: Path) -> list[Violation]:
     """Return violations [(lineno, symbol, line_stripped), ...] for one file."""
     try:
@@ -165,9 +188,10 @@ def scan_file(path: Path) -> list[Violation]:
         text = data.decode("utf-8")
     except UnicodeDecodeError:
         return []  # not UTF-8 text
+    exempt_lines = _exempt_lines(text)
     violations: list[Violation] = []
     for lineno, line in enumerate(text.splitlines(), start=1):
-        if _OPT_OUT_MARKER in line:
+        if lineno in exempt_lines:
             continue
         for _source, pattern in _COMPILED:
             match = pattern.search(line)
@@ -179,6 +203,11 @@ def scan_file(path: Path) -> list[Violation]:
 
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
+    if argv:
+        missing = [arg for arg in argv if not Path(arg).exists()]
+        if missing:
+            print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
+            return 1
     targets = [Path(arg).resolve() for arg in argv] if argv else [_REPO_ROOT / _DEFAULT_TARGET]
     total = 0
     for path in _iter_files(targets):
