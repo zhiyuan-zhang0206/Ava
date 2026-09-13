@@ -16,6 +16,7 @@ no-op. These tests lock the two parts of the fix:
 
 from __future__ import annotations
 
+import contextlib
 import os
 import signal
 import time
@@ -64,7 +65,9 @@ def _wait_exit(pid: int, timeout: float = 10.0) -> bool:
 
 
 def _shell_children(shell: OwnedProcess) -> list[psutil.Process]:
-    return psutil.Process(shell.pid).children(recursive=True)
+    with contextlib.suppress(psutil.NoSuchProcess, psutil.ZombieProcess):
+        return psutil.Process(shell.pid).children(recursive=True)
+    return []
 
 
 def _stop_env(monkeypatch: pytest.MonkeyPatch, home: Path, terminal: PtySessionBackend) -> None:

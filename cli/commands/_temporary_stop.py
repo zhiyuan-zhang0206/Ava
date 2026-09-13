@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import signal
 import subprocess
@@ -64,10 +65,10 @@ def _stop_terminals(deadline: float, operation: str, acquired_at: datetime) -> N
     for name in names:
         record = SessionRecord.read(run_dir() / "pty" / f"{name}.json")
         if record is None:
-            raise RuntimeError(f"cannot verify terminal identity: {name}")
+            continue
         shell = OwnedProcess(record.pid, record.create_time, record.starttime)
         if not shell.live():
-            raise RuntimeError(f"terminal identity changed: {name}")
+            continue
         shells.append(shell)
         by_name[name] = shell
         owner[shell.pid] = name
@@ -82,10 +83,12 @@ def _stop_terminals(deadline: float, operation: str, acquired_at: datetime) -> N
     # current job (#2045). Jobs get their graceful SIGTERM right after.
     for shell in shells:
         if shell.live():
-            psutil.Process(shell.pid).send_signal(signal.SIGHUP)
+            with contextlib.suppress(psutil.NoSuchProcess, psutil.ZombieProcess):
+                psutil.Process(shell.pid).send_signal(signal.SIGHUP)
     for process in jobs:
         if process.live():
-            psutil.Process(process.pid).send_signal(signal.SIGTERM)
+            with contextlib.suppress(psutil.NoSuchProcess, psutil.ZombieProcess):
+                psutil.Process(process.pid).send_signal(signal.SIGTERM)
     try:
         wait_for_exit(set(shells) | jobs, deadline)
     except TimeoutError as exc:
