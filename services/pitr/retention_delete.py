@@ -8,8 +8,9 @@ expose their own adapters in their transport modules.
 
 The publish-side contracts (``ObjectStore``,
 ``RestartableStreamingObjectStore``, the manifest publishers) deliberately
-carry no delete verb, so the publishing path stays append-only by
-construction and deletion lives only in this role.
+carry no delete verb, so the publishing path keeps its append-only contract
+and deletion lives only in this role, off by default and behind the explicit
+arm gate.
 
 Per-backend guarantees:
 
