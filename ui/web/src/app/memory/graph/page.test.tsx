@@ -189,6 +189,26 @@ describe("Memory graph page", () => {
     expect(screen.getAllByText(/Alpha/).length).toBeGreaterThanOrEqual(2);
   });
 
+  it("marks the selected node with a static ring — no perpetual pulse (task #3278)", async () => {
+    mockGetMemoryGraph.mockResolvedValue(seed());
+    wrap();
+    const node = await waitFor(
+      () => screen.getByTestId("memory-node-alpha.md"),
+      { timeout: 4000 },
+    );
+    fireEvent.click(node);
+    const ring = await waitFor(() => {
+      const r = [...node.querySelectorAll("circle")].find(
+        (c) => c.getAttribute("stroke-dasharray") === "4 3",
+      );
+      expect(r).toBeTruthy();
+      return r!;
+    });
+    const cls = ring.getAttribute("class") ?? "";
+    expect(cls).toContain("text-sky-400");
+    expect(cls).not.toContain("animate-pulse");
+  });
+
   it("hovering a node highlights its structure without a floating tooltip", async () => {
     // An isolated note (no edges) so the 1-hop neighborhood of alpha does NOT
     // cover the whole graph — the whole point of the dim test.
