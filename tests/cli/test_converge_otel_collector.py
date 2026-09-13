@@ -722,7 +722,7 @@ def test_session_filelog_receivers_are_disjoint_and_bound_discovery(
         "include_file_name": True,
         "include_file_path": False,
         "storage": "file_storage/logoffsets",
-        "poll_interval": "10s",
+        "poll_interval": "30s",
         "polls_to_archive": 50,
         "max_concurrent_files": 200,
     }
@@ -738,10 +738,13 @@ def test_session_filelog_receivers_are_disjoint_and_bound_discovery(
         "include_file_name": True,
         "include_file_path": False,
         "storage": "file_storage/logoffsets",
-        "poll_interval": "10s",
+        "poll_interval": "30s",
         "polls_to_archive": 50,
         "max_concurrent_files": 200,
     }
+
+    orchestration = cfg["receivers"]["filelog/orchestration"]
+    assert orchestration["poll_interval"] == "30s"
 
 
 def test_runner_forwards_to_authenticated_gateway_ingress_without_renaming_queues(
