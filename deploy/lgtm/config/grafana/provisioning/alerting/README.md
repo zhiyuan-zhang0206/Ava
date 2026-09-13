@@ -43,13 +43,13 @@ The contact point posts to the gateway's alert ingest endpoint — loopback
 `127.0.0.1:8000` when the observatory is local, the gateway's reachable
 address when `AVA_OBSERVABILITY_URL` points at a remote station.
 
-## Rules (27)
+## Rules (34)
 
-The rules are split between `ava-ops` (20 rules, evaluated every minute:
+The rules are split between `ava-ops` (24 rules, evaluated every minute:
 R1-R6, the watchdog-tick and gateway-metrics silence rules, R8-R12, and
 R14-R16) and
-`ava-ops-slow` (seven rules, evaluated every five minutes: R7, R13, R17's two
-fast-route tiers, R18, and R19's two slow-route tiers). Each rule retains its
+`ava-ops-slow` (ten rules, evaluated every five minutes: R7, R13, R17's two
+fast-route tiers, R18, and R19's two slow-route tiers, plus the PITR-storage / Tempo-backend / LLM-rate-limit checks). Each rule retains its
 own `for` window.
 
 Application layer — the Loki event stream plus the LLM latency histogram:
@@ -71,6 +71,7 @@ Application layer — the Loki event stream plus the LLM latency histogram:
 | `ava-ops-turn-duration-p95` | `ava-ops-slow` | Turn duration p95 (collective slowdown) | histogram p95 > 75s for 10m (Prometheus, 24h baseline 37.6s × 2) | 10m | warning |
 | `ava-ops-gw-latency-slow-warning` | `ava-ops-slow` | Gateway latency: slow route p95 | p95 > 5s for 5m (Loki, slow route class) | 5m | warning |
 | `ava-ops-gw-latency-slow-error` | `ava-ops-slow` | Gateway latency: slow route p95 | p95 > 10s for 5m (same route class) | 5m | error |
+| `ava-ops-tempo-backend-down` | `ava-ops-slow` | remote Tempo backend reachable | up{job="tempo"}=0 for 1h (Prometheus) | 1h | warning |
 
 Infrastructure layer (issue #46) — the per-machine OTel Collector sidecar's
 own scrapes, labelled `host` (OS hostname / physical identity) and
