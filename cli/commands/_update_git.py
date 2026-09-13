@@ -184,11 +184,33 @@ def _index_lock_path() -> Path:
     return _REPO_ROOT_FOR_GIT / ".git" / "index.lock"
 
 
+def resolve_commit(ref: str, *, context: str) -> str:
+    """Resolve a commit reference (full id / unique prefix / ref name) to the
+    full 40-hex id — the boundary normalization for issue #2343.
+
+    The detached updater may receive an abbreviated sha from an entrypoint that
+    predates the strict gate; resolving here means the checkout, the tree
+    verification and every later comparison all name one full id, so a prefix
+    can never pierce to the `HEAD != sha` deep-fail again.
+
+    Raises:
+        GitPullFailed: the ref does not resolve to a commit in this repo.
+    """
+    try:
+        return _git("rev-parse", "--verify", f"{ref}^{{commit}}")
+    except GitPullFailed as exc:
+        raise GitPullFailed(f"{context}: cannot resolve target {ref!r} to a commit: {exc}") from exc
+
+
 def verify_tree_at(sha: str, *, context: str) -> None:
     """Fail-fast atomicity check after a checkout / reset / pull: HEAD must be
-    exactly `sha` and every TRACKED path must match the index (untracked strays
-    are not the poison — a missing/modified tracked file is, because the next
-    `ava start` imports from the filesystem).
+    exactly the resolved `sha` and every TRACKED path must match the index
+    (untracked strays are not the poison — a missing/modified tracked file is,
+    because the next `ava start` imports from the filesystem).
+
+    The target is resolved to its full commit id first (issue #2343 — a caller's
+    abbreviated sha must not compare against `rev-parse HEAD`), and both ids in
+    the failure message are printed full, so the mismatch is readable as-is.
 
     A tree that fails either check is mixed or incomplete — the 2026-08-02
     rollout failure: two checkouts raced the index lock, interleaved their
@@ -198,15 +220,16 @@ def verify_tree_at(sha: str, *, context: str) -> None:
     here is what turns that silent corruption into a clean, recoverable failure.
 
     Raises:
-        GitPullFailed: HEAD != sha, or `git status --porcelain --untracked-files=no`
-            is non-empty. The message names the actual state so the operator can
-            tell a moved-HEAD case from a dirty-tree case.
+        GitPullFailed: HEAD != the resolved sha, or `git status --porcelain
+            --untracked-files=no` is non-empty. The message names the actual
+            state so the operator can tell a moved-HEAD case from a dirty-tree case.
     """
+    target = resolve_commit(sha, context=context)
     head = _git("rev-parse", "HEAD")
     dirty = _git("status", "--porcelain", "--untracked-files=no")
     problems: list[str] = []
-    if head != sha:
-        problems.append(f"HEAD is {head[:12]} (expected {sha[:12]})")
+    if head != target:
+        problems.append(f"HEAD is {head} (expected {target})")
     if dirty:
         entries = dirty.splitlines()
         shown = ", ".join(e[:60] for e in entries[:3])
@@ -391,6 +414,9 @@ def git_checkout_sha(sha: str) -> str:
     """
     from_sha = _git("rev-parse", "HEAD")
     _git_network("fetch", "origin")
+    # Normalize after the fetch so a prefix for a just-fetched commit resolves
+    # too (issue #2343); every comparison and the checkout below use the full id.
+    sha = resolve_commit(sha, context="git_checkout_sha")
     # Count only commits that would be LOST — reachable from HEAD, not from the
     # target, AND not on any remote (`--not --remotes`). Without `--not --remotes`
     # this inflates when HEAD is merely ahead of the pinned sha on main (those

@@ -225,6 +225,10 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
         OrchestrationSpawnFailed: the session backend declined to start the
             updater session.
     """
+    if target_sha is not None:
+        from shared.git_sha import require_full_sha
+
+        require_full_sha(target_sha, entry="cluster update --target-sha")
     deploy_spawn.assert_prod_home_has_its_own_checkout()
     # Standalone self-heals (watchdog pin/code controllers, the management
     # endpoint, an operator's direct `ava cluster update` on a runner) quiesce

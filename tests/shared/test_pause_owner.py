@@ -87,3 +87,59 @@ def test_legacy_resume_tombstone_is_idempotent_and_exact_stop_replaces_it() -> N
     assert pause_owner.mark_legacy_resumed().status == "legacy-resumed"
     pause_owner.mark_paused("B", _when())
     assert pause_owner.read().matches("B", _when())
+
+
+def test_begin_maintenance_records_and_refresh_re_stamps_the_shepherd() -> None:
+    """Task #3270: the hold carries the operator-side shepherd; progress writes
+    keep it, a refresh (a new ladder step) re-stamps it."""
+    from dataclasses import replace
+
+    from shared.hold_driver import HoldDriver, mint_driver
+
+    shepherd = mint_driver()
+    before = pause_owner.begin_maintenance("op1", _when(), driver=shepherd)
+    assert before.driver == shepherd
+    hold = before.maintenance
+    assert hold is not None
+    # A progress write (agent-host side) must not claim the ladder.
+    stamp = HoldDriver()
+    assert pause_owner.refresh_driver("op1", _when(1), driver=stamp) is False  # wrong generation
+    assert pause_owner.refresh_driver("op1", _when(), driver=stamp) is True
+    after = pause_owner.change_maintenance("op1", _when(), hold, replace(hold, phase="draining"))
+    assert after.driver == stamp
+
+
+def test_a_legacy_journal_without_a_shepherd_reads_none() -> None:
+    """A pre-#3270 journal is valid state with missing evidence, not an error."""
+    from shared.maintenance_state import MaintenanceHold
+
+    pause_owner.state_path().write_text(
+        '{"state":"paused","holder":"A","acquired_at":"2026-08-25T01:02:00+00:00",'
+        f'"maintenance":{__import__("json").dumps(MaintenanceHold().encode())}}}'
+    )
+    snapshot = pause_owner.read()
+    assert snapshot.status == "paused"
+    assert snapshot.driver is None
+
+
+def test_a_malformed_shepherd_degrades_to_none_never_a_broken_journal() -> None:
+    """The hold must stay readable when only its shepherd evidence is unusable:
+    the verdict reports the missing identity loudly instead."""
+    import json
+
+    from shared.maintenance_state import MaintenanceHold
+
+    pause_owner.state_path().write_text(
+        json.dumps(
+            {
+                "state": "paused",
+                "holder": "A",
+                "acquired_at": "2026-08-25T01:02:00+00:00",
+                "maintenance": MaintenanceHold().encode(),
+                "driver": {"root": {"pid": -1, "birth": "nope"}},
+            }
+        )
+    )
+    snapshot = pause_owner.read()
+    assert snapshot.status == "paused"
+    assert snapshot.driver is None

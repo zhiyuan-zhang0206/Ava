@@ -352,6 +352,53 @@ def test_verify_tree_at_rejects_mixed_tree(cloned_repo: tuple[Path, str]) -> Non
         g.verify_tree_at(main_sha, context="test")
 
 
+def test_verify_tree_at_resolves_an_abbreviated_target(cloned_repo: tuple[Path, str]) -> None:
+    """Issue #2343: a 9-character prefix (copied from a status display) must
+    normalize at the guard instead of deep-failing HEAD-vs-prefix and stranding
+    the hold."""
+    _clone, main_sha = cloned_repo
+    g.verify_tree_at(main_sha[:9], context="test")  # must not raise
+
+
+def test_verify_tree_at_mismatch_message_shows_full_ids(
+    cloned_repo: tuple[Path, str],
+) -> None:
+    """The mismatch names both ids in full — the old 12-character display is
+    what made the 09-13 message unreadable about WHY it failed."""
+    clone, main_sha = cloned_repo
+    (clone / "f.txt").write_text("c2")
+    _git(clone, "commit", "-am", "c2")
+    other_sha = _git(clone, "rev-parse", "HEAD")
+    assert other_sha != main_sha
+    with pytest.raises(g.GitPullFailed) as exc:
+        g.verify_tree_at(main_sha, context="test")
+    message = str(exc.value)
+    assert other_sha in message
+    assert main_sha in message
+
+
+def test_git_checkout_sha_accepts_an_abbreviated_target(
+    cloned_repo: tuple[Path, str],
+) -> None:
+    """The detached updater normalizes its target at the checkout boundary: a
+    prefix an entrypoint predating the strict gate let through still lands the
+    exact commit (issue #2343, defense in depth)."""
+    _clone, main_sha = cloned_repo
+    from_sha = g.git_checkout_sha(main_sha[:9])
+    assert from_sha == main_sha
+    assert g._git("rev-parse", "HEAD") == main_sha
+
+
+def test_git_checkout_sha_rejects_an_unresolvable_target(
+    cloned_repo: tuple[Path, str],
+) -> None:
+    """An unknown ref fails fast at resolution with the ref named, before any
+    checkout is attempted."""
+    _clone, _main_sha = cloned_repo
+    with pytest.raises(g.GitPullFailed, match="cannot resolve target"):
+        g.git_checkout_sha("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+
+
 def test_verify_tree_at_ignores_untracked_strays(cloned_repo: tuple[Path, str]) -> None:
     """Untracked files are not the poison (a stray file is never imported);
     ignoring them keeps an operator's scratch file from failing every update."""

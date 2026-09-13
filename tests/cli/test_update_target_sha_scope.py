@@ -29,15 +29,40 @@ from cli import main as _main
 def test_target_sha_requires_target(capsys: pytest.CaptureFixture[str]) -> None:
     """`ava cluster update --target-sha <sha>` alone — a loud exit-2 refusal,
     not a silent-ignore window."""
-    assert _main.main(["cluster", "update", "--target-sha", "0123456789abcdef"]) == 2
+    assert (
+        _main.main(
+            ["cluster", "update", "--target-sha", "0123456789abcdef0123456789abcdef01234567"]
+        )
+        == 2
+    )
     assert "--target-sha requires --target" in capsys.readouterr().err
 
 
 def test_target_sha_with_local_still_requires_target(capsys: pytest.CaptureFixture[str]) -> None:
     """The `--local` escape hatch does not make the pin meaningful on its own —
     the in-process orchestration resolves its own target like the detached one."""
-    assert _main.main(["cluster", "update", "--local", "--target-sha", "0123456789abcdef"]) == 2
+    assert (
+        _main.main(
+            [
+                "cluster",
+                "update",
+                "--local",
+                "--target-sha",
+                "0123456789abcdef0123456789abcdef01234567",
+            ]
+        )
+        == 2
+    )
     assert "--target-sha requires --target" in capsys.readouterr().err
+
+
+def test_short_target_sha_is_refused_at_parse(capsys: pytest.CaptureFixture[str]) -> None:
+    """Issue #2343: a short sha copied from a status display is refused at the CLI
+    boundary — resolving to the full 40-character id is the caller's one step."""
+    with pytest.raises(SystemExit) as exc:
+        _main.main(["cluster", "update", "--target", "macmini", "--target-sha", "30df11a83"])
+    assert exc.value.code == 2
+    assert "full 40-character commit id" in capsys.readouterr().err
 
 
 def test_target_scoped_dispatch_carries_the_pin(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -52,11 +77,20 @@ def test_target_scoped_dispatch_carries_the_pin(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(_commands, "cmd_update", _fake)
 
-    rc = _main.main(["cluster", "update", "--target", "macmini", "--target-sha", "abc123"])
+    rc = _main.main(
+        [
+            "cluster",
+            "update",
+            "--target",
+            "macmini",
+            "--target-sha",
+            "abcdef0123456789abcdef0123456789abcdef01",
+        ]
+    )
 
     assert rc == 0
     assert seen["target"] == "macmini"
-    assert seen["target_sha"] == "abc123"
+    assert seen["target_sha"] == "abcdef0123456789abcdef0123456789abcdef01"
 
 
 def test_plain_update_dispatch_stays_pin_free(monkeypatch: pytest.MonkeyPatch) -> None:

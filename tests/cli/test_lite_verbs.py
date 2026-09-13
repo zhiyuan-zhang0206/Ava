@@ -108,3 +108,20 @@ def test_corrupt_stop_journal_is_not_offline_success(
 def test_pty_stays_settings_lite(monkeypatch: pytest.MonkeyPatch) -> None:
     """The allocation gate is an offline host recovery surface."""
     assert _dispatched_fetch_env(monkeypatch, ["pty", "status"]) == "skip"
+
+
+def test_maintenance_stop_is_not_settings_lite(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Task #3268 (issue #2346): stop's drain verification dials this unit's real
+    data plane, so a lite maintenance stop on a runner could only ever hit the
+    never-dialed placeholder DB URL and die UnanchoredHomeError mid-ladder —
+    leaving the hold behind. It fetches like restart does."""
+    assert _dispatched_fetch_env(monkeypatch, ["maintenance", "stop"]) is None
+
+
+@pytest.mark.parametrize("verb", ["status", "stop-data-plane"])
+def test_journal_only_maintenance_verbs_stay_settings_lite(
+    monkeypatch: pytest.MonkeyPatch, verb: str
+) -> None:
+    """`status` reads only the local journal; `stop-data-plane` is a gateway-role
+    verb, where the fetch is local — both remain offline-capable."""
+    assert _dispatched_fetch_env(monkeypatch, ["maintenance", verb]) == "skip"

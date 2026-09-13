@@ -233,6 +233,13 @@ async def post_cluster_update(
     reported failure (e.g. an updater session already in flight there — the
     caller waits for paused=false then retries).
     """
+    if target_sha is not None:
+        from shared.git_sha import require_full_sha
+
+        try:
+            require_full_sha(target_sha, entry="target_sha")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     target_machine = target if target is not None else machine_name()
     result = await _dispatch_op(
         target_machine,

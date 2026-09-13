@@ -11,6 +11,16 @@ from __future__ import annotations
 import argparse
 
 
+def _target_sha_arg(value: str) -> str:
+    """Refuse anything but a full commit id at the CLI boundary (issue #2343)."""
+    from shared.git_sha import require_full_sha
+
+    try:
+        return require_full_sha(value, entry="--target-sha")
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
 def _h_cluster_update(args: argparse.Namespace) -> int:
     if args.prepared is not None:
         from cli.prepared_update import run_prepared_update
@@ -372,9 +382,10 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
     cluster_update_p.add_argument(
         "--target-sha",
         metavar="SHA",
+        type=_target_sha_arg,
         default=None,
         help="with --target: pin the force-checkout commit (the updater converges to exactly "
-        "this commit instead of the moving origin/main tip).",
+        "this commit instead of the moving origin/main tip); needs the full 40-character id.",
     )
     cluster_update_p.set_defaults(func=_h_cluster_update)
 

@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Never, cast
 
+from shared.hold_driver import HoldDriver, mint_driver
 from shared.maintenance_state import MaintenanceHold
 from shared.platform import file_lock
 
@@ -36,6 +37,11 @@ class PauseOwnerSnapshot:
     holder: str | None = None
     acquired_at: dt.datetime | None = None
     maintenance: MaintenanceHold | None = None
+    # The shepherding identity of the OPERATOR-SIDE entry that last took or
+    # advanced a maintenance hold (task #3270); None for legacy journals and
+    # daemon-driven pauses. Judged by `shared.hold_driver.liveness` -- see the
+    # stranded-hold verdict.
+    driver: HoldDriver | None = None
 
     def matches(self, holder: str, acquired_at: dt.datetime) -> bool:
         return self.holder == holder and self.acquired_at == acquired_at
@@ -53,6 +59,23 @@ def lock_path() -> Path:
     import shared.paths
 
     return shared.paths.run_dir() / "deploy-pause-owner.lock"
+
+
+def _decode_driver(value: object) -> HoldDriver | None:
+    """A malformed driver identity degrades to None -- never a broken journal.
+
+    The hold itself must stay readable when only its shepherd evidence is
+    unusable: an unreadable journal refuses every operation (the load-bearing
+    fail-fast), while a missing identity is exactly the evidence the
+    stranded-hold verdict reports as loud-but-unreleasable.
+    """
+    if value is None:
+        return None
+    try:
+        return HoldDriver.decode(value)
+    except (KeyError, TypeError, ValueError) as exc:
+        _log.warning("[pause-owner] unreadable hold driver identity: %s", exc)
+        return None
 
 
 def _read_unlocked(path: Path) -> PauseOwnerSnapshot:
@@ -76,6 +99,7 @@ def _read_unlocked(path: Path) -> PauseOwnerSnapshot:
         if acquired_at.tzinfo is None:
             _invalid("acquired_at must carry a timezone")
         maintenance = MaintenanceHold.decode(raw["maintenance"]) if "maintenance" in raw else None
+        driver = _decode_driver(raw.get("driver"))
     except FileNotFoundError:
         return PauseOwnerSnapshot(status="inactive")
     except (KeyError, OSError, TypeError, ValueError) as exc:
@@ -86,6 +110,7 @@ def _read_unlocked(path: Path) -> PauseOwnerSnapshot:
         holder=holder,
         acquired_at=acquired_at.astimezone(dt.UTC),
         maintenance=maintenance,
+        driver=driver,
     )
 
 
@@ -260,8 +285,16 @@ def _refuse_maintenance(current: PauseOwnerSnapshot) -> None:
         raise RuntimeError("maintenance requires its exact operation's explicit resume")
 
 
-def begin_maintenance(holder: str, acquired_at: dt.datetime) -> PauseOwnerSnapshot:
-    """Close admission durably; a new deploy cannot overwrite this capability."""
+def begin_maintenance(
+    holder: str, acquired_at: dt.datetime, *, driver: HoldDriver | None = None
+) -> PauseOwnerSnapshot:
+    """Close admission durably; a new deploy cannot overwrite this capability.
+
+    `driver` is the shepherding identity minted by an operator-side entry (task
+    #3270). Daemon-driven pauses leave it None on purpose: their ownership
+    evidence is the updater handoff / outcome, never a caller daemon that
+    outlives the ladder and would mask a dead shepherd.
+    """
     if not holder or acquired_at.tzinfo is None:
         raise ValueError("holder and timezone-aware acquired_at are required")
     with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
@@ -272,11 +305,16 @@ def begin_maintenance(holder: str, acquired_at: dt.datetime) -> PauseOwnerSnapsh
             current.status == "paused" and not current.matches(holder, acquired_at)
         ):
             raise RuntimeError("another or unreadable pause owner must be resolved first")
-        return _write_maintenance(holder, acquired_at, MaintenanceHold())
+        return _write_maintenance(holder, acquired_at, MaintenanceHold(), driver=driver)
 
 
 def _write_maintenance(
-    holder: str, acquired_at: dt.datetime, hold: MaintenanceHold, *, resumed: bool = False
+    holder: str,
+    acquired_at: dt.datetime,
+    hold: MaintenanceHold,
+    *,
+    resumed: bool = False,
+    driver: HoldDriver | None = None,
 ) -> PauseOwnerSnapshot:
     _write_atomic(
         state_path(),
@@ -285,6 +323,7 @@ def _write_maintenance(
             "holder": holder,
             "acquired_at": acquired_at.astimezone(dt.UTC).isoformat(),
             "maintenance": hold.encode(),
+            "driver": driver.encode() if driver is not None else None,
         },
     )
     return _read_unlocked(state_path())
@@ -297,8 +336,15 @@ def change_maintenance(
     replacement: MaintenanceHold,
     *,
     resumed: bool = False,
+    refresh_driver: bool = False,
 ) -> PauseOwnerSnapshot:
-    """CAS a caller-validated maintenance transition without losing receipts."""
+    """CAS a caller-validated maintenance transition without losing receipts.
+
+    `refresh_driver` re-stamps the shepherding identity from THIS process --
+    only for operator-side transitions; agent-host progress writes keep the
+    standing binding untouched (a daemon must not claim a ladder it does not
+    drive).
+    """
     with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
         current = _read_unlocked(state_path())
         if (
@@ -307,4 +353,36 @@ def change_maintenance(
             or current.maintenance != expected
         ):
             raise RuntimeError("maintenance operation or progress changed; reread before retry")
-        return _write_maintenance(holder, acquired_at, replacement, resumed=resumed)
+        return _write_maintenance(
+            holder,
+            acquired_at,
+            replacement,
+            resumed=resumed,
+            driver=mint_driver() if refresh_driver else current.driver,
+        )
+
+
+def refresh_driver(
+    holder: str, acquired_at: dt.datetime, *, driver: HoldDriver | None = None
+) -> bool:
+    """Re-stamp a matching standing hold with this process's shepherding identity.
+
+    Operator-side entries call this at the start of every maintenance verb (and
+    the local stop/pause flow calls it after the drain) so the binding tracks
+    the process that last ran a ladder step. Returns False when this journal is
+    not the matching paused generation -- nothing re-stamped, which is a no-op
+    for entries that never wrote this hold (`prepare`'s first run).
+    """
+    if not holder or acquired_at.tzinfo is None:
+        raise ValueError("holder and timezone-aware acquired_at are required")
+    stamped = driver if driver is not None else mint_driver()
+    with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
+        current = _read_unlocked(state_path())
+        if (
+            current.status != "paused"
+            or current.maintenance is None
+            or not current.matches(holder, acquired_at)
+        ):
+            return False
+        _write_maintenance(holder, acquired_at, current.maintenance, driver=stamped)
+        return True
