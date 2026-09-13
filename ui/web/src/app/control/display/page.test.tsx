@@ -336,4 +336,64 @@ describe("DisplaySettingsPage", () => {
       expect(api.putSetting).toHaveBeenCalledWith("display.language", "zh");
     });
   });
+
+  // Timeline colors (tasks #3304/#3312): one row per slot, the slot default
+  // preselected, and writes go straight to display.color.<slot>.
+  it("renders a color row for every timeline slot with its default family", async () => {
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Timeline colors")).toBeTruthy();
+    });
+    const expected: [string, string][] = [
+      ["Agent message", "emerald"],
+      ["Tool call (code)", "cyan"],
+      ["Tool output", "amber"],
+      ["Thinking", "blue"],
+      ["Human message", "gray"],
+      ["Agent message (inbound)", "violet"],
+      ["System message (inbound)", "sky"],
+      ["System prompt", "indigo"],
+      ["Attachment", "sky"],
+      ["Note", "teal"],
+      ["Memory", "violet"],
+      ["Terminated", "rose"],
+      ["Restarted", "amber"],
+      ["Resurrected", "emerald"],
+      ["Forked", "sky"],
+    ];
+    for (const [label, family] of expected) {
+      expect(screen.getByLabelText<HTMLSelectElement>(label).value).toBe(family);
+    }
+  });
+
+  it("persists a color-family change for its slot", async () => {
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Timeline colors")).toBeTruthy();
+    });
+    fireEvent.change(screen.getByLabelText<HTMLSelectElement>("Note"), {
+      target: { value: "fuchsia" },
+    });
+    await waitFor(() => {
+      expect(api.putSetting).toHaveBeenCalledWith("display.color.note", "fuchsia");
+    });
+  });
+
+  it("reflects a stored family and falls back to the default for garbage", async () => {
+    vi.mocked(api.getSettings).mockResolvedValue({
+      settings: [
+        { key: "display.color.note", value: "fuchsia", updated_at: "2026-09-14T00:00:00Z" },
+        { key: "display.color.memory", value: "chartreuse", updated_at: "2026-09-14T00:00:00Z" },
+      ],
+    });
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Timeline colors")).toBeTruthy();
+    });
+    expect(screen.getByLabelText<HTMLSelectElement>("Note").value).toBe("fuchsia");
+    expect(screen.getByLabelText<HTMLSelectElement>("Memory").value).toBe("violet");
+  });
 });

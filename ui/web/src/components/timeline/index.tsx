@@ -17,8 +17,9 @@
 // - PythonCode / ChatMarkdown are wrapped with React.memo so unchanged
 //   content prop skips Prism / remarkGfm re-parse (the main CPU cost).
 // - messageCardConfig is memoized per item via `cardConfigFor` (a WeakMap
-//   keyed on the stable item ref), so the config object stays reference-
-//   stable for unchanged rows even as the items array is rebuilt each chunk.
+//   keyed on the stable item ref + the resolved color map), so the config
+//   object stays reference-stable for unchanged rows even as the items array
+//   is rebuilt each chunk.
 // - mergeSnapshotWithStreaming returns the same prev reference when
 //   content matches, so Zustand skips setState and the tree skips
 //   reconciliation.
@@ -51,8 +52,8 @@
 //    expanded; clicking a header overrides one item. The ephemeral system markers
 //    (compact_done / cancelled / error / unrecognized) have no card and render
 //    bare. messageCardConfig is the pure per-kind visual mapping; cardConfigFor
-//    memoizes it per item ref (WeakMap) so a row's config stays reference-stable
-//    across the array rebuilds that streaming triggers.
+//    memoizes it per item ref + resolved color map (WeakMap) so a row's config
+//    stays reference-stable across the array rebuilds that streaming triggers.
 //
 // Copy / fork are hover-revealed actions pinned inside a card's bottom-right
 // corner (MessageCard's `actions` overlay) — they no longer occupy their own
@@ -95,6 +96,7 @@ import type { BackendTimelineItem } from "@/lib/types";
 import { useTimelineStore } from "@/lib/timeline-store";
 import { BAR_HEIGHT_PX, BAR_CLEAR_TOP_PADDING_CLASS, FLEX, FLEX_1, MIN_H_0, OVERFLOW_HIDDEN } from "@/lib/layout";
 import { cn } from "@/lib/utils";
+import { useTimelineColors } from "@/lib/use-timeline-colors";
 
 import { ConnectionNotice } from "@/components/connection-notice";
 import { findClosestStuckHeaderId, TurnBlock } from "./run-block";
@@ -899,6 +901,10 @@ export function TimelineView({
   const { detailsMode, isLoading: detailsModeLoading } = useContentToggle();
   const effectiveDetailsMode = detailsModeLoading ? "none" : detailsMode;
 
+  // Configurable timeline colors, resolved from the user settings — one lookup
+  // for the whole view; reference-stable while no display.color.* changes.
+  const timelineColors = useTimelineColors();
+
   // Work-block collapse: fold adjacent secondary items into aggregate work blocks
   // under a "Details" header. Always on — the Details toggle button controls
   // expand-all / collapse-all, not show/hide. Each block's expand state is a Map
@@ -1010,7 +1016,7 @@ export function TimelineView({
   // a run header. All memo-stability inputs (config via the WeakMap cache, the
   // stable toggleExpanded) are captured here.
   const renderRow = (item: BackendTimelineItem, index: number, forceExpand?: boolean) => {
-    const config = cardConfigFor(item);
+    const config = cardConfigFor(item, timelineColors);
     const streaming =
       streamingCode && index === items.length - 1 && item.kind === "agent_code";
     // Ephemeral system markers (config === null): bare, not collapsible. The

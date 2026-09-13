@@ -551,6 +551,7 @@
       "display": "显示",
       "display-agent-list": "Agent 列表显示",
       "display-timeline": "时间线",
+      "display-colors": "时间线配色",
       "display-context-bar": "上下文用量条",
       "display-notifications": "通知",
       "display-confirmations": "确认对话框",

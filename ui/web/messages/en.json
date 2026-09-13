@@ -551,6 +551,7 @@
       "display": "Display",
       "display-agent-list": "Agent list display",
       "display-timeline": "Timeline",
+      "display-colors": "Timeline colors",
       "display-context-bar": "Context usage bar",
       "display-notifications": "Notifications",
       "display-confirmations": "Confirmations",

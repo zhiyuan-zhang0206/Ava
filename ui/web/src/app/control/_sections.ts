@@ -88,6 +88,7 @@ export const CONTROL_SECTIONS: ControlSectionDef[] = [
     subs: [
       { id: "display-agent-list", label: "Agent list display", labelKey: "display-agent-list" },
       { id: "display-timeline", label: "Timeline", labelKey: "display-timeline" },
+      { id: "display-colors", label: "Timeline colors", labelKey: "display-colors" },
       { id: "display-context-bar", label: "Context usage bar", labelKey: "display-context-bar" },
       { id: "display-notifications", label: "Notifications", labelKey: "display-notifications" },
       { id: "display-confirmations", label: "Confirmations", labelKey: "display-confirmations" },
