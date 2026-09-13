@@ -851,8 +851,22 @@ the same bounded executor -- the operator-present form of the first real run.
 Every flip and every pass append to
 `$AVA_HOME/physical-backup/retention-journal/journal.jsonl` (actor, full
 command, plan digest, before/after carrier state); `retention status` shows the
-latest records. The full procedure and the pre-open cost comparison live with
-the retention design (task #2150).
+latest records.
+
+Retention depth rides one deploy-provisioned key, `AVA_PITR_RETAINED_WEEKLY_CHAINS`
+(default `2`, capped at `8`): that many newest protected chains are kept, each
+additional chain moving the deletable WAL floor roughly one week further back,
+so the key sets how far back point-in-time recovery reaches. It is read-only for
+`ava config` (`writable: false`) and is provisioned in the unit `.env` at deploy
+time, like `AVA_PITR_GCS_PREFIX`; align it before the shadow period starts so the
+observed digests describe the opening configuration instead of the default. The
+pre-open cost comparison (task #3292) measured about 30 GB of WAL per day on the
+live prefix and put each extra week near CNY 19/month; the opening parameter is
+`4` (roughly a 30-day window, about CNY 77/month). Deepening through the bucket's
+90-day lifecycle ceiling stays deferred until after the shadow period.
+
+The full procedure and the pre-open cost comparison live with the retention
+design (task #2150).
 
 All sessions have cwd set to the prod path `~/.ava/source/` (see "Prod and dev clone paths" above).
 Session commands run under `bash -lc` (#476) — the login-shell flag pulls in the user's
