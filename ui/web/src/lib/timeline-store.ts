@@ -43,6 +43,24 @@ import { isEventForThread } from "./timeline";
 import type { BackendTimelineItem, SystemEvent } from "./types";
 import type { ConnectionState } from "./use-timeline";
 
+/** One in-flight forced/auto compact run on the ACTIVE thread — the frontend
+ *  half of the live run pair (wire: task #3323, this view: task #3324). The
+ *  ISO timestamps drive the ticking "Compacting" block; `status` flips when
+ *  the terminal role arrives. A live signal, not folded content: it never
+ *  enters `items` — the summary item (matched by `compactId`) is the durable
+ *  record, and its arrival retires the entry. */
+export interface LiveCompact {
+  compactId: string;
+  /** ISO-8601 start; null when only the terminal role was seen (start lost
+   *  in an SSE gap). */
+  startedAt: string | null;
+  mode: "request" | "auto" | null;
+  /** null while the run is in flight. */
+  status: "success" | "failure" | "replaced" | null;
+  /** ISO-8601 finish; set exactly when `status` is. */
+  finishedAt: string | null;
+}
+
 export interface TimelineState {
   items: BackendTimelineItem[];
   streamingCode: boolean;
@@ -103,6 +121,14 @@ export interface TimelineState {
    * the flag. Cleared on SSE reconnect (GET becomes trusted again) and on
    * thread switch (per-thread flag). */
   resetPending: boolean;
+
+  /** The active thread's in-flight compact run — drives the ticking
+   * "Compacting" block. Set by `compact_started` / `compact_finished` for the
+   * active thread only (parked threads drop it, like token_usage — the
+   * committed summary is their durable record). Retired when the run's
+   * summary item lands in `items` (matched by `compact_id`), replaced by a
+   * newer run, and cleared on thread switch. */
+  liveCompact: LiveCompact | null;
 
   /** Whether older items exist before the oldest currently-loaded item —
    * drives the scroll-up "load older" trigger. The timeline endpoint returns
@@ -284,6 +310,19 @@ function crossedUnseenCompact(
 }
 
 /**
+ * Retire the live compact whose summary item just landed in `items` — the
+ * item is the durable view the ticking block hands over to. Returns the same
+ * reference while nothing matches, so per-field selectors stay quiet.
+ */
+function retireLiveCompact(
+  live: LiveCompact | null,
+  items: readonly BackendTimelineItem[],
+): LiveCompact | null {
+  if (live === null) return live;
+  return items.some((it) => it.compact_id === live.compactId) ? null : live;
+}
+
+/**
  * The per-event reducer shared by `processSseEvent` and
  * `processSseEventBatch` — one event, one state, one partial to merge
  * ({} = nothing changed). Pure: both entry points route through it, so the
@@ -305,6 +344,36 @@ function applySseEvent(state: TimelineState, ev: SystemEvent): Partial<TimelineS
   // ACTIVE thread (or agent_id=0 system signal): fold into the top-level
   // fields. This is the rendered thread, so its updates drive the UI.
   if (isEventForThread(ev, state.activeThreadId)) {
+    if (ev.role === "compact_started") {
+      // A new run supersedes any previous entry; the stale run's terminal,
+      // if it still arrives, is dropped by the compact_id pairing below.
+      return {
+        liveCompact: {
+          compactId: ev.compact_id,
+          startedAt: ev.started_at,
+          mode: ev.mode,
+          status: null,
+          finishedAt: null,
+        },
+      };
+    }
+    if (ev.role === "compact_finished") {
+      // Pair by compact_id — a terminal for a superseded run is stale and
+      // dropped. An entry-less terminal (start lost in an SSE gap) still
+      // records the outcome so the block can show it briefly.
+      if (state.liveCompact !== null && state.liveCompact.compactId !== ev.compact_id) {
+        return {};
+      }
+      return {
+        liveCompact: {
+          compactId: ev.compact_id,
+          startedAt: state.liveCompact?.startedAt ?? null,
+          mode: state.liveCompact?.mode ?? null,
+          status: ev.status,
+          finishedAt: ev.finished_at,
+        },
+      };
+    }
     // compact_done = the whole history was rewritten (shrink). keep-all
     // merging would resurrect pre-compact items, and a GET fired during
     // the window may read a lagging pre-compact checkpoint — so arm the
@@ -348,6 +417,7 @@ function applySseEvent(state: TimelineState, ev: SystemEvent): Partial<TimelineS
           streamingIds: new Set(),
           resetPending: false,
           hasMoreOlder: state.hasMoreOlder,
+          liveCompact: retireLiveCompact(state.liveCompact, snapItems),
         };
       }
     }
@@ -373,6 +443,7 @@ function applySseEvent(state: TimelineState, ev: SystemEvent): Partial<TimelineS
       streamingCode: next.streamingCode,
       turnActive: next.turnActive,
       hasMoreOlder: next.hasMoreOlder,
+      liveCompact: retireLiveCompact(state.liveCompact, next.items),
     };
   }
 
@@ -469,6 +540,7 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
   streamingIds: new Set(),
   compactedThreadIds: new Set(),
   resetPending: false,
+  liveCompact: null,
   hasMoreOlder: false,
   loadingOlder: false,
   olderFetchCount: 0,
@@ -571,6 +643,7 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
         items: merged,
         hasMoreOlder,
         resetPending: crossedCompact ? false : s.resetPending,
+        liveCompact: retireLiveCompact(s.liveCompact, merged),
       };
     });
   },
@@ -645,6 +718,9 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
         // (the stream may actually be reconnecting right now).
         connectionState: s.connectionState,
         resetPending: parked ? parked.resetPending : wasCompacted,
+        // A live compact run belongs to the outgoing thread; the incoming
+        // thread has none until its own compact_started arrives.
+        liveCompact: null,
         compactedThreadIds,
         tokenUsage: 0,
         reasoningTokens: 0,

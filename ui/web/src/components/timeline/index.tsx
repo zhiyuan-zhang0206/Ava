@@ -99,6 +99,7 @@ import { cn } from "@/lib/utils";
 import { useTimelineColors } from "@/lib/use-timeline-colors";
 
 import { ConnectionNotice } from "@/components/connection-notice";
+import { CompactingBlock } from "./compacting-block";
 import { findClosestStuckHeaderId, TurnBlock } from "./run-block";
 import { classifyItem, groupIntoTurns, type TimelineGroup } from "./runs";
 import { LoadOlderButton, PullToLoadIndicator, ColdLoadSpinner, ScrollToBottomButton } from "./overlays";
@@ -1212,6 +1213,7 @@ export function TimelineView({
               </Fragment>
             );
           })}
+          <CompactingBlock />
           <div ref={endRef} />
         </div>
       </ScrollArea>
