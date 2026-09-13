@@ -134,6 +134,18 @@ echo and export it as the one-shot `AVA_INSTALL_CLUSTER_SECRET` before `install.
 want auth on a dev cluster, then unset it. The secret is never inherited from prod; this is only a manual step for a
 worktree that skipped the install.
 
+**A worktree cluster runs pinned; rebase soberly.** A rollout (or a self-heal)
+moves the cluster pin — the commit the cluster installed — and rebasing the
+worktree under a running cluster leaves its HEAD off that pin. If the cluster then
+rolls back to its pin (the health probe's `--auto-rollback` did exactly that on
+2026-09-12), `git reset --hard` lands the worktree on the pin. Two guardrails
+soften that now: `ava cluster rollback` stashes uncommitted work first (restore
+with `git stash pop`), and a dev cluster's birth seeds `AVA_HEALTH_PROBE_AGENT_MIN=0`
+so a fresh cluster with no resident agents no longer trips the probe (the "pinned
+cluster, casual rebase" strand). Prefer committing/pushing WIP before rebasing
+under a live cluster; if a worktree cluster does strand a lease or a pause, its
+own `ava cluster recover` clears it (see the runbook's stranded-deploy recipe).
+
 **What needs a cluster, what doesn't** (pick the lightest loop that covers the
 change):
 

@@ -1318,33 +1318,40 @@ class TestUpdateCheck:
 
 
 class TestLockHolderLiveness:
-    """`_lock_holder_is_live` parses `<machine>:pid<N>` and probes the pid locally."""
+    """`_lock_holder_is_live` parses `<machine>:pid<N>` and probes the pid locally.
+
+    The probe itself lives in `shared.cluster_lock.holder_process_gone` (the
+    manual recovery and the automatic reclaim share one verdict), so the death
+    evidence is stubbed at the shared seam — and the two "treated live" cases
+    below patch the same machine-name seam, or they would pass vacuously on a
+    host whose real name differs from the `mc` they assume.
+    """
 
     def test_this_machine_dead_pid_is_not_live(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from ops import ops_cluster as ops_mod
 
-        monkeypatch.setattr(ops_mod, "machine_name", lambda: "mc")
-        monkeypatch.setattr(ops_mod, "process_alive", lambda _pid: False)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr("shared.machine.machine_name", lambda: "mc")
+        monkeypatch.setattr("shared.proc.process_alive", lambda _pid: False)  # pyright: ignore[reportUnknownArgumentType]
         assert ops_mod._lock_holder_is_live("mc:pid123") is False
 
     def test_this_machine_alive_pid_is_live(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from ops import ops_cluster as ops_mod
 
-        monkeypatch.setattr(ops_mod, "machine_name", lambda: "mc")
-        monkeypatch.setattr(ops_mod, "process_alive", lambda _pid: True)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr("shared.machine.machine_name", lambda: "mc")
+        monkeypatch.setattr("shared.proc.process_alive", lambda _pid: True)  # pyright: ignore[reportUnknownArgumentType]
         assert ops_mod._lock_holder_is_live("mc:pid123") is True
 
     def test_foreign_machine_holder_is_treated_live(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from ops import ops_cluster as ops_mod
 
         # Can't probe a remote pid — must not clobber another gateway's lock.
-        monkeypatch.setattr(ops_mod, "machine_name", lambda: "mc")
+        monkeypatch.setattr("shared.machine.machine_name", lambda: "mc")
         assert ops_mod._lock_holder_is_live("other:pid5") is True
 
     def test_unparseable_holder_is_treated_live(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from ops import ops_cluster as ops_mod
 
-        monkeypatch.setattr(ops_mod, "machine_name", lambda: "mc")
+        monkeypatch.setattr("shared.machine.machine_name", lambda: "mc")
         assert ops_mod._lock_holder_is_live("garbage") is True
 
 

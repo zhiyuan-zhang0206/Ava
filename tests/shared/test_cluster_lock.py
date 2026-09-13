@@ -24,6 +24,7 @@ from shared.cluster_lock import (
     DeployLease,
     acquire_update_lock,
     claim_recovery_lock,
+    holder_process_gone,
     read_update_lease,
     release_settle_hold,
     release_update_lock,
@@ -394,6 +395,32 @@ def test_self_holder_is_the_format_the_liveness_probe_parses() -> None:
     assert sep == ":pid"
     assert machine == machine_name()
     assert pid_str == str(os.getpid())
+
+
+def test_holder_process_gone_only_on_positive_local_death() -> None:
+    """The reclaim-side probe errs the other way from the signalling probe: only a
+    parseable THIS-machine holder with an absent pid reads as gone; a foreign
+    holder, an operator-chosen (unparseable) name, and a live process all read as
+    live — a caller that destroys state on this reading may only ever destroy a
+    claim whose owner is definitively gone."""
+    from shared.machine import machine_name
+
+    assert holder_process_gone("elsewhere:pid1") is False
+    assert holder_process_gone("operator-chosen-campaign") is False
+    assert holder_process_gone(f"{machine_name()}:pid999999999") is True
+    assert holder_process_gone(f"{machine_name()}:pid{os.getpid()}") is False
+
+
+def test_holder_process_gone_reads_a_recycled_pid_as_gone() -> None:
+    """An alive pid is not enough: with the lease's age, a process that started
+    after the acquire cannot be the holder (the recycled-pid bound is shared with
+    `ops.ops_cluster._lock_holder_is_live`, so manual and automatic recovery can
+    never disagree)."""
+    from shared.machine import machine_name
+
+    holder = f"{machine_name()}:pid{os.getpid()}"
+    assert holder_process_gone(holder, held_for_s=10**9) is True
+    assert holder_process_gone(holder, held_for_s=0.0) is False
 
 
 # ─── the explicit-model row: phase + kind (R1 wave, Task #1021) ──────────────
