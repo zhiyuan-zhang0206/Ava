@@ -64,7 +64,7 @@ def test_missing_required_field_is_rejected(field: str) -> None:
         UnitManifest.from_mapping(raw, origin="t")
 
 
-@pytest.mark.parametrize("bad_id", ["", "Upper", "with space", "has/slash", "-lead"])
+@pytest.mark.parametrize("bad_id", ["", "Upper", "with space", "has/slash", "-lead", "gateway\n"])
 def test_invalid_id_is_rejected(bad_id: str) -> None:
     with pytest.raises(ManifestError, match="id"):
         UnitManifest.from_mapping(_manifest(id=bad_id), origin="t")
@@ -95,7 +95,7 @@ def test_invalid_restart_value_is_rejected() -> None:
         UnitManifest.from_mapping(_manifest(restart="sometimes"), origin="t")
 
 
-@pytest.mark.parametrize("bad_attach", [3, "", "Bad Id"])
+@pytest.mark.parametrize("bad_attach", [3, "", "Bad Id", "gateway\n"])
 def test_invalid_attach_is_rejected(bad_attach: object) -> None:
     with pytest.raises(ManifestError, match="attach"):
         UnitManifest.from_mapping(_manifest(attach=bad_attach), origin="t")
