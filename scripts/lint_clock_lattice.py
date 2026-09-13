@@ -1,7 +1,9 @@
 """Forbid lattice-vocabulary timing constants outside the clock-lattice modules.
 
 Run: `.venv/bin/python scripts/lint_clock_lattice.py [path ...]` (defaults to
-scanning the non-test source dirs). Also run automatically via pre-commit hook.
+scanning the non-test source dirs; an explicit path that does not exist is an
+error (stderr + exit 1) rather than a bare traceback). Also run automatically
+via pre-commit hook.
 
 ## Why
 
@@ -210,7 +212,10 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
 
 
 def _scan_file(path: Path) -> list[str]:
-    rel = path.relative_to(_REPO_ROOT).as_posix()
+    try:
+        rel = path.relative_to(_REPO_ROOT).as_posix()
+    except ValueError:
+        rel = path.as_posix()
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except SyntaxError:
@@ -247,7 +252,10 @@ def _scan(paths: list[Path]) -> list[str]:
     for path in paths:
         if path.is_dir():
             for p in sorted(path.rglob("*.py")):
-                rel = p.relative_to(_REPO_ROOT).as_posix()
+                try:
+                    rel = p.relative_to(_REPO_ROOT).as_posix()
+                except ValueError:
+                    rel = p.as_posix()
                 if any(pat.search(rel) for pat in _TEST_PATTERNS):
                     continue
                 errors.extend(_scan_file(p))
@@ -258,7 +266,12 @@ def _scan(paths: list[Path]) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    paths = [Path(a) for a in argv] if argv else [_REPO_ROOT / d for d in _SCAN_DIRS]
+    if argv:
+        missing = [arg for arg in argv if not Path(arg).exists()]
+        if missing:
+            print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
+            return 1
+    paths = [Path(a).resolve() for a in argv] if argv else [_REPO_ROOT / d for d in _SCAN_DIRS]
     errors = _scan(paths)
     for err in errors:
         print(err, file=sys.stderr)

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Forbid raw CJK characters anywhere in the repo — English-only source (hard rule).
 
-Run: `.venv/bin/python scripts/lint_no_cjk.py` (whole repo, git-tracked files
-only). Also run automatically via pre-commit and in CI (dedicated
+Run: `.venv/bin/python scripts/lint_no_cjk.py [path ...]` (defaults to the whole
+repo, git-tracked files only; an explicit path that does not exist is an error
+(stderr + exit 1) rather than a silent no-op). Also run automatically via
+pre-commit and in CI (dedicated
 `repo-language` job, so a docs-only or skills-only PR cannot slip raw CJK
 past a job that classifies by code side).
 
@@ -145,6 +147,10 @@ def main(argv: list[str] | None = None) -> int:
                 if cand.exists():
                     p = cand
             targets.append(p.resolve())
+        missing = [a for a, t in zip(argv, targets, strict=True) if not t.exists()]
+        if missing:
+            print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
+            return 1
         files = []
         for t in targets:
             try:

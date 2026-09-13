@@ -1,7 +1,8 @@
 """Forbid bare os.environ / os.getenv — runtime config must go through shared.config.Settings.
 
-Run: `.venv/bin/python scripts/lint_no_os_environ.py [path ...]` (defaults to scanning the whole repo).
-Also run automatically via pre-commit hook before commit.
+Run: `.venv/bin/python scripts/lint_no_os_environ.py [path ...]` (defaults to scanning the whole repo;
+an explicit path that does not exist is an error (stderr + exit 1) rather than a
+silent no-op). Also run automatically via pre-commit hook before commit.
 
 ## Why
 
@@ -251,6 +252,10 @@ def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     # argv non-empty = pre-commit passed the changed-file list; empty = default scan of all _SCAN_DIRS + tests/.
     if argv:
+        missing = [arg for arg in argv if not Path(arg).exists()]
+        if missing:
+            print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
+            return 1
         targets = [Path(a).resolve() for a in argv]
     else:
         targets = [_REPO_ROOT / d for d in _SCAN_DIRS] + [_REPO_ROOT / "tests"]

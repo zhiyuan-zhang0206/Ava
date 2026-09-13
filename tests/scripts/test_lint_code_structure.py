@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import pathlib
 
+import pytest
+
 from scripts import lint_code_structure as lcs
 
 
@@ -38,3 +40,14 @@ def test_transitional_zone_is_note_not_error(tmp_path: pathlib.Path) -> None:
 
     p2 = _write(tmp_path, "floor.py", lcs._TRANSITIONAL_FLOOR)
     assert lcs._scan_file(p2, "floor.py") == []
+
+
+def test_explicit_missing_target_is_an_error(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A typo'd explicit path must fail the gate, not pass as a silent empty scan."""
+    good = _write(tmp_path, "ok.py", 1)
+    missing = tmp_path / "typo.py"
+    assert lcs.main([str(missing)]) == 1
+    assert str(missing) in capsys.readouterr().err
+    assert lcs.main([str(good), str(missing)]) == 1

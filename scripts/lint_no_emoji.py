@@ -1,7 +1,9 @@
 """Forbid decorative emoji in core Python — keep agent / backend code glyph-free.
 
 Run: `.venv/bin/python scripts/lint_no_emoji.py [path ...]` (defaults to scanning
-the in-scope dirs below). Also run automatically via pre-commit hook.
+the in-scope dirs below; an explicit path that does not exist is an error
+(stderr + exit 1) rather than a silent no-op). Also run automatically via
+pre-commit hook.
 
 ## Why
 
@@ -173,6 +175,11 @@ def _iter_py_files(roots: list[Path]) -> list[Path]:
 
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
+    if argv:
+        missing = [arg for arg in argv if not Path(arg).exists()]
+        if missing:
+            print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
+            return 1
     # argv = explicit file list (manual run / pre-commit changed files); empty = scan every in-scope dir.
     targets = [Path(a).resolve() for a in argv] if argv else [_REPO_ROOT / d for d in _SCAN_DIRS]
 
