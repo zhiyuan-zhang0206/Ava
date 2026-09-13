@@ -188,10 +188,12 @@ ships updater/rollout tees. Agent main stdout is banner-only on this surface,
 and its structured records already arrive through OTLP, so excluding it loses
 no diagnostic stream while avoiding content-fingerprint collisions.
 
-Both session and service receivers poll every 10 seconds, archive 50 generations
-of EOF metadata, and cap discovery at 200 concurrent files. The slower poll cuts
-discovery churn 50x, the archive lets a returning EOF file reuse its reader
-metadata, and the cap bounds the discovered set. File names become resource
+All three filelog receivers poll every 30 seconds (orchestration included as of
+task #3290 - it previously ran at the unset default of 200ms). The session and
+service receivers archive 50 generations of EOF metadata and cap discovery at
+200 concurrent files. The slower poll cuts discovery churn 150x, the archive
+lets a returning EOF file reuse its reader metadata, and the cap bounds the
+discovered set. File names become resource
 `service.name`, which Loki exposes as `service_name`; read offsets persist under
 `$AVA_HOME/otel-collector/log-offsets`, so a restart does not replay history.
 Local cleanup is explicit and converge-owned: a daily 04:40 job runs `ava logs

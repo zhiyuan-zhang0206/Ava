@@ -121,9 +121,14 @@ $REMOTE_OTLP_RECEIVER
   # start_at: end = no backfill; offsets persist in file_storage/logoffsets so
   # a restart does not re-read.
   #
-  # The 10s poll interval cuts discovery churn 50x. A positive archive count
-  # lets EOF files reuse their metadata instead of creating a reader every
-  # poll, while the concurrent-file cap bounds the discovery set.
+  # The 30s poll interval cuts discovery churn 150x versus the filelog
+  # default of 200ms (raised from 10s on 2026-09-14, task #3290: enumeration
+  # CPU scales with poll frequency over this large logs directory). A positive
+  # archive count lets EOF files reuse their metadata instead of creating a
+  # reader every poll, while the concurrent-file cap bounds the discovery set.
+  # At 30s the 50-poll archive window is ~25 min (was ~8.3 min at the 10s
+  # cadence): the longer reuse window is kept deliberately - fewer
+  # rediscoveries.
   filelog/sessions:
     include:
       - $AVA_HOME/logs/ava-agent-*-shell-*.out.log
@@ -131,7 +136,7 @@ $REMOTE_OTLP_RECEIVER
     include_file_name: true
     include_file_path: false
     storage: file_storage/logoffsets
-    poll_interval: 10s
+    poll_interval: 30s
     polls_to_archive: 50
     max_concurrent_files: 200
   filelog/services:
@@ -147,7 +152,7 @@ $REMOTE_OTLP_RECEIVER
     include_file_name: true
     include_file_path: false
     storage: file_storage/logoffsets
-    poll_interval: 10s
+    poll_interval: 30s
     polls_to_archive: 50
     max_concurrent_files: 200
   filelog/orchestration:
@@ -158,6 +163,7 @@ $REMOTE_OTLP_RECEIVER
     include_file_name: true
     include_file_path: false
     storage: file_storage/logoffsets
+    poll_interval: 30s
 $DATA_PLANE_RECEIVERS
 processors:
   # memory_limiter runs FIRST in every pipeline: under memory pressure it
