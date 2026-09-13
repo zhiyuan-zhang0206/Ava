@@ -171,6 +171,10 @@ def prove_checkout_absent(  # noqa: PLR0915 — one guarded checkout-retirement 
                 "RUNNER_TEMP": os.environ["RUNNER_TEMP"],
             }
             schema = json.loads((release.root / "manifest.json").read_text())["schema_digest"]
+            (root / "unit/plugins_config.json").unlink(missing_ok=True)
+            import shutil
+
+            shutil.rmtree(root / "unit/plugins/runtime_fixture", ignore_errors=True)
             subprocess.run(  # noqa: S603 — installed owner, absent checkout, private CI directory (task #2679).
                 [str(release.interpreter), "-I", "-B", str(exec_owner), str(root / "exec-owner")],
                 cwd=root,
