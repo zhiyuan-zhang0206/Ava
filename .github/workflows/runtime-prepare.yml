@@ -8,6 +8,7 @@ on:
       - 'shared/runtime_publication_input.py'
       - 'shared/verified_file.py'
       - 'scripts/prove_runtime_publication_input.py'
+      - 'scripts/prove_exec_owner_installed.py'
       - 'scripts/runtime-node-version'
       - 'shared/dotenv_boot.py'
       - 'shared/platform_backend.py'
