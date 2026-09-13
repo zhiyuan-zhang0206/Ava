@@ -339,7 +339,10 @@ _ERROR_TIER_ROOTS = _TIER_CONFIG.error_tier_roots
 
 
 def scan_file(path: Path, relative_path: str) -> list[PyrightIgnore]:
-    source = path.read_text(encoding="utf-8")
+    try:
+        source = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []  # unreadable entry (e.g. a dangling symlink) or binary content
     ignores: list[PyrightIgnore] = []
     tokens = tokenize.generate_tokens(io.StringIO(source).readline)
     for token in tokens:
@@ -365,7 +368,10 @@ def _tracked_python_files(repo_root: Path) -> list[str]:
 def _relative_file(path: str | Path, repo_root: Path) -> tuple[Path, str]:
     candidate = Path(path)
     absolute = candidate if candidate.is_absolute() else repo_root / candidate
-    relative = absolute.resolve().relative_to(repo_root.resolve()).as_posix()
+    try:
+        relative = absolute.resolve().relative_to(repo_root.resolve()).as_posix()
+    except ValueError:
+        relative = absolute.resolve().as_posix()  # outside the repo — label by absolute path
     return absolute, relative
 
 
@@ -440,7 +446,10 @@ def strip_file(
 ) -> None:
     if not candidates:
         return
-    source = path.read_text(encoding="utf-8")
+    try:
+        source = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return  # unreadable entry (e.g. a dangling symlink) or binary content — nothing to strip
     lines = source.splitlines(keepends=True)
     comments = _comment_matches(source)
     candidates_by_line: dict[int, set[str]] = {}
@@ -513,8 +522,13 @@ def _pyright_errors(path: Path) -> frozenset[tuple[int, str]]:
 
 
 def verify_file(path: Path, candidates: frozenset[PyrightIgnore]) -> Verification:
+    if not candidates:
+        return Verification(frozenset(), frozenset())  # nothing to certify — skip the Pyright run
     baseline_errors = _pyright_errors(path)
-    source = path.read_text(encoding="utf-8")
+    try:
+        source = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return Verification(frozenset(), frozenset())  # unreadable entry — nothing to certify
     with tempfile.NamedTemporaryFile(
         mode="w",
         encoding="utf-8",
