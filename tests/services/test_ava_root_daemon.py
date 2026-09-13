@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import subprocess
 import sys
 import time
@@ -145,6 +146,8 @@ def test_daemon_end_to_end(short_tmp: Path) -> None:
     manifests = _write_manifests(short_tmp, [{"id": "svc", "exec": _SLEEPER, "restart": "always"}])
     with _daemon(run_dir, manifests) as (proc, log_path):
         client = _wait_ready(run_dir, proc, log_path)
+        # K3 face: the control socket is owner-only.
+        assert stat.S_IMODE((run_dir / _SOCKET_NAME).stat().st_mode) == 0o600
 
         response = client.status()
         result = cast("dict[str, object]", response.get("result"))
