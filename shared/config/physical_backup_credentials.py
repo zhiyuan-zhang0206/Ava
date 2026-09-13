@@ -82,9 +82,13 @@ def reject_shared_delete_identity(
     parse: Callable[[Path, str], tuple[str, ...]],
     distinct_indexes: tuple[int, ...],
 ) -> None:
-    """The deletion identity must differ from every peer role identity.
+    """The deletion credential must be private, with a distinct identity.
 
-    Only the tuple indexes that ARE the identity are compared (email + file
+    A present delete file must pass ``require_private_regular_file`` first --
+    the same 0600/absolute/non-symlink contract as every peer credential file
+    -- so parsers that do not stat the file themselves (the GCS service
+    account) enforce it too. Only the tuple indexes that ARE the identity are
+    compared (email + file
     digest for service accounts; key id + file digest for OSS), so a
     legitimately shared field such as a GCP project id never trips the check.
     A missing delete file is skipped: provisioning order must not break config
@@ -92,6 +96,7 @@ def reject_shared_delete_identity(
     """
     if delete_file is None or not delete_file.is_file():
         return
+    require_private_regular_file(delete_file, delete_alias)
     delete_identity = parse(delete_file, delete_alias)
     for peer, peer_alias in peers:
         if peer is None or not Path(peer).is_file():
