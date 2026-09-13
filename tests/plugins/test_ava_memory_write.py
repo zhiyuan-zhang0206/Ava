@@ -174,7 +174,7 @@ def test_shared_write_uses_pool_frontmatter_and_pointers_section(
     )
 
     entry = ava.memory.write(
-        "health/user-health-overview",
+        "user-health-overview",
         "The user tracks daily symptoms.\n",
         title="User health overview",
         description="Durable health context",
@@ -182,7 +182,7 @@ def test_shared_write_uses_pool_frontmatter_and_pointers_section(
         store="shared",
     )
 
-    assert entry == (pool / "health" / "user-health-overview.md").resolve()
+    assert entry == (pool / "user-health-overview.md").resolve()
     written = entry.read_text(encoding="utf-8")
     assert "type: Memory\nava_agent: 17\ntitle: User health overview\n" in written
     assert "description: Durable health context\ntags: [type/project]\n" in written
@@ -190,9 +190,42 @@ def test_shared_write_uses_pool_frontmatter_and_pointers_section(
     assert "ava_machine: memory-host\n" in written
     assert "<!-- agent-17 @ memory-host, " in written
     index = (pool / "MEMORY.md").read_text(encoding="utf-8")
-    assert index.index("- [User health overview](health/user-health-overview.md)") < index.index(
+    assert index.index("- [User health overview](user-health-overview.md)") < index.index(
         "## Archive"
     )
+
+
+def test_shared_subdir_write_leaves_root_index_untouched(
+    memory_plugin: Any, tmp_path: Path
+) -> None:
+    """A shared subdirectory note is indexed by its own directory's index.md,
+    never by a root pointer line — the root index keeps root notes and
+    directory pointers only."""
+    pool = _pool_with_pointers(tmp_path)
+    root_index = pool / "MEMORY.md"
+    before = root_index.read_text(encoding="utf-8")
+
+    entry = ava.memory.write(
+        "health/medication-log",
+        "Tracked in the health topic.\n",
+        title="Medication log",
+        description="Per-topic note",
+        tags=["type/project"],
+        store="shared",
+    )
+
+    assert entry == (pool / "health" / "medication-log.md").resolve()
+    assert root_index.read_text(encoding="utf-8") == before
+
+    ava.memory.write(
+        "health/medication-log",
+        "Updated body.\n",
+        title="Medication log",
+        description="Updated description",
+        tags=["type/project"],
+        store="shared",
+    )
+    assert root_index.read_text(encoding="utf-8") == before
 
 
 def test_personal_write_rejects_directory_slug(memory_plugin: Any) -> None:
@@ -388,7 +421,7 @@ def test_shared_write_defaults_title_and_description_to_file_name(
     assert frontmatter["title"] == "alpha-note"
     assert frontmatter["description"] == "alpha-note"
     index = (pool / "MEMORY.md").read_text(encoding="utf-8")
-    assert "- [alpha-note](projects/demo/alpha-note.md) — alpha-note" in index
+    assert "alpha-note" not in index
 
 
 def test_shared_write_timestamp_is_second_precision(memory_plugin: Any, tmp_path: Path) -> None:
@@ -443,7 +476,7 @@ def test_write_keeps_caller_frontmatter_as_the_only_block(
     assert written.count("type: Memory") == 1
     assert parts[2] == "<!-- agent-17 @ memory-host, 2026-09-10 13:00 -->\n\nBody.\n"
     index = (pool / "MEMORY.md").read_text(encoding="utf-8")
-    assert "- [Caller title](projects/demo/gamma-note.md) — Caller description" in index
+    assert "gamma-note" not in index
 
 
 def test_shared_write_completes_partial_frontmatter(memory_plugin: Any, tmp_path: Path) -> None:
@@ -667,10 +700,7 @@ def test_write_quotes_caller_values_yaml_would_misread(memory_plugin: Any, tmp_p
     block = written.split("---\n", 2)[1]
     assert 'title: "Release #42 notes"' in block
     index = (pool / "MEMORY.md").read_text(encoding="utf-8")
-    assert (
-        "- [Release #42 notes](projects/demo/caller-hash-note.md) — Task #770 pylint baseline"
-        in index
-    )
+    assert "caller-hash-note" not in index
 
 
 def test_write_quotes_caller_values_the_block_read_would_reject(
