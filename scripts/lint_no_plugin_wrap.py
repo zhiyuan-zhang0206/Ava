@@ -153,13 +153,14 @@ def _under_plugins(path: Path) -> bool:
         rel = path.resolve().relative_to(_REPO_ROOT).as_posix()
     except ValueError:
         return False
-    return rel.startswith(f"{_SCAN_DIR}/")
+    return rel == _SCAN_DIR or rel.startswith(f"{_SCAN_DIR}/")
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     # argv non-empty = pre-commit passed changed files (any dir); keep only plugin
-    # files. Empty = default full scan of plugins/.
+    # paths (the plugins/ dir itself included, so it enumerates its members).
+    # Empty = default full scan of plugins/.
     if argv:
         missing = [arg for arg in argv if not Path(arg).exists()]
         if missing:

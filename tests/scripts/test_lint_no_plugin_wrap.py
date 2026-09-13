@@ -14,10 +14,11 @@ from scripts import lint_no_plugin_wrap as gate
 
 
 def test_directory_with_unreadable_member_is_skipped(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """An unreadable *.py member under plugins/ (non-UTF-8 / dangling symlink)
-    must be skipped like any unreadable entry — the scan must not crash on it."""
+    must be skipped like any unreadable entry — the scan must not crash on it,
+    and a violating sibling file is still reported."""
     monkeypatch.setattr(gate, "_REPO_ROOT", tmp_path)
     plugins = tmp_path / "plugins"
     plugins.mkdir()
@@ -26,6 +27,24 @@ def test_directory_with_unreadable_member_is_skipped(
     (plugins / "dangling.py").symlink_to(plugins / "missing.py")
     assert gate.main([str(plugins / "bad_utf8.py")]) == 0
     assert gate.main([]) == 0
+    (plugins / "viol.py").write_text("ava.files.read = my_read\n", encoding="utf-8")
+    assert gate.main([]) == 1
+    assert "ava.files.read" in capsys.readouterr().out
+
+
+def test_explicit_plugins_directory_argument_enumerates_members(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The plugins/ directory itself is in scope, so a directory argument
+    enumerates its members (it used to be filtered out: an empty scan, rc 0)."""
+    monkeypatch.setattr(gate, "_REPO_ROOT", tmp_path)
+    plugins = tmp_path / "plugins"
+    plugins.mkdir()
+    (plugins / "ok.py").write_text("value = 1\n", encoding="utf-8")
+    assert gate.main([str(plugins)]) == 0
+    (plugins / "viol.py").write_text("ava.files.read = my_read\n", encoding="utf-8")
+    assert gate.main([str(plugins)]) == 1
+    assert "ava.files.read" in capsys.readouterr().out
 
 
 def test_explicit_missing_target_is_an_error(

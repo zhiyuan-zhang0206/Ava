@@ -362,10 +362,11 @@ def test_setup_env_keys_matches_the_real_fixtures_body() -> None:
 
 
 def test_directory_with_unreadable_member_is_skipped(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """An unreadable *.py member under tests/ (non-UTF-8 / dangling symlink)
-    must be skipped like any unreadable entry — the scan must not crash on it."""
+    must be skipped like any unreadable entry — the scan must not crash on it,
+    and a violating sibling fixture is still reported."""
     monkeypatch.setattr(_lint, "_REPO_ROOT", tmp_path)
     tests = tmp_path / "tests"
     tests.mkdir()
@@ -375,6 +376,16 @@ def test_directory_with_unreadable_member_is_skipped(
     assert _lint.main([str(tests / "bad_utf8.py")]) == 0
     assert _lint.main([str(tests)]) == 0
     assert _lint.main([]) == 0
+    (tests / "sub").mkdir()
+    (tests / "sub" / "conftest.py").write_text(
+        '@pytest.fixture(scope="session")\n'
+        "def _process_env():\n"
+        '    os.environ["AVA_HOME"] = "/tmp/x"\n'
+        "    yield\n",
+        encoding="utf-8",
+    )
+    assert _lint.main([str(tests)]) == 1
+    assert "AVA_HOME" in capsys.readouterr().out
 
 
 def test_explicit_missing_target_is_an_error(
