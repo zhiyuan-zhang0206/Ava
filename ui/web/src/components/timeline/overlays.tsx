@@ -100,11 +100,17 @@ export function PullToLoadIndicator({
 // hint for everyone, since the pull ring only appears mid-pull. Mounted
 // always (for the opacity transition) but unfocusable and pointer-events-none
 // while hidden, so an invisible control can never trap keyboard focus.
-// Positioned below the floating header (BAR_HEIGHT_PX 44 + 8px clearance →
-// top-14): at top-2 the translucent header overlays the button and intercepts
-// its pointer events. z-20 lifts it above #1954's stuck turn header
-// (sticky top-11 z-10), which otherwise sits in the same band at the top and
-// steals the click (the e2e round-2 click regression, second variant).
+// Position (task #3224②): inside the floating header's band (top-2) at
+// z-30 — pinned there so the button never overlaps the conversation content.
+// Placed below the header (the previous top-14) it collided with the first
+// turn block's header band at the top settle (QA-measured 26.5px overlap).
+// Stacking, from the two historical constraints: ABOVE the translucent
+// header (z-20 — otherwise it overlays the button and intercepts its pointer
+// events) and above the stuck turn header (#1954, sticky top-11 z-10 — z-20
+// already lifted the button over it; z-30 keeps that and additionally wins
+// the header bar). The bar's center band carries no interactive content, so
+// while visible the button stays the click target; hidden, it is
+// pointer-events-none + unfocusable, so nothing is trapped.
 export function LoadOlderButton({
   visible,
   onClick,
@@ -125,7 +131,7 @@ export function LoadOlderButton({
   return (
     <div
       className={cn(
-        "absolute top-14 left-1/2 -translate-x-1/2 z-20",
+        "absolute top-2 left-1/2 -translate-x-1/2 z-30",
         "transition-opacity duration-200",
         visible ? "opacity-100" : "opacity-0 pointer-events-none",
       )}
