@@ -14,7 +14,7 @@
 // fleet-graph.test.ts.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentRow, FleetGraph, FleetGraphEdge, FleetGraphNode } from "@/lib/types";
@@ -480,6 +480,75 @@ describe("GraphView", () => {
       expect(fetchAgentRoster).toHaveBeenCalledWith(expect.any(QueryClient), "terminated"),
     );
     expect(fetchAgentRoster).toHaveBeenCalledWith(expect.any(QueryClient), "live");
+  });
+
+  it("cold load holds the canvas until the merged roster lands (no lineage flip)", async () => {
+    // A(1, live) -> B(2, terminated) -> C(3, live): C's lineage edge to its
+    // nearest live ancestor exists only once B's roster row has landed.
+    // Painting from the graph payload + live roster alone would float C as an
+    // isolated node and pull it into place when the terminated roster
+    // arrived — the first-paint flip the sidebar tree fixed in #2074, off the
+    // same input pair. The sequence below is the observed cold-load ordering:
+    // the live half resolves first, the terminated half (thousands of rows)
+    // seconds later.
+    useFleetGraph.mockReturnValue(
+      ok({
+        nodes: [
+          node(1, { label: "grandparent" }),
+          node(3, { label: "child", status: "idling", spawner: "agent:2" }),
+        ],
+        edges: [],
+      }),
+    );
+    let resolveLive!: (rows: AgentRow[]) => void;
+    let resolveTerminated!: (rows: AgentRow[]) => void;
+    const live = new Promise<AgentRow[]>((resolve) => {
+      resolveLive = resolve;
+    });
+    const terminated = new Promise<AgentRow[]>((resolve) => {
+      resolveTerminated = resolve;
+    });
+    fetchAgentRoster.mockImplementation((_qc: unknown, scope = "live") =>
+      scope === "terminated" ? terminated : live,
+    );
+
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { container } = render(
+      <QueryClientProvider client={qc}>
+        <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    // Both scopes in flight: the canvas holds at the loading state — no
+    // nodes, no edges painted from the partial roster.
+    await waitFor(() => expect(fetchAgentRoster).toHaveBeenCalledTimes(2));
+    expect(screen.getByText("Loading...")).toBeTruthy();
+    expect(queryNodeLabel(1)).toBeNull();
+    expect(queryNodeLabel(3)).toBeNull();
+
+    // The live half lands while the terminated half is still in flight — the
+    // canvas must keep holding, because C's lineage spring is not derivable
+    // yet.
+    await act(async () => {
+      resolveLive([rosterRow(1, { status: "running" })]);
+      await live;
+    });
+    await waitFor(() => expect(qc.getQueryData(AGENTS_QUERY_KEY)).toBeTruthy());
+    expect(screen.getByText("Loading...")).toBeTruthy();
+    expect(queryNodeLabel(3)).toBeNull();
+
+    // The terminated half lands: the first paint carries the final layout,
+    // with C re-parented to its nearest live ancestor A.
+    await act(async () => {
+      resolveTerminated([rosterRow(2, { spawner: "agent:1" })]);
+      await terminated;
+    });
+    const label3 = await waitFor(() => getNodeLabel(3), { timeout: 4000 });
+    expect(label3).toBeTruthy();
+    expect(queryNodeLabel(1)).not.toBeNull();
+    expect(screen.getByText("2 nodes · 1 edges")).toBeTruthy();
+    const svg = container.querySelector('svg[aria-label="Fleet relationship graph"]')!;
+    expect(svg.querySelectorAll("line").length).toBe(1); // lineage edge re-parented from 1 to 3
   });
 
   it("shows the stale snapshot age for a non-empty fallback graph", () => {
