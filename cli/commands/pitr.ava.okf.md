@@ -12,6 +12,13 @@ tags:
 `cli/commands/pitr.py` backs the `ava pitr` command group. `retention inspect`
 renders the newest local retention dry-run plan without a delete surface.
 
+`drill --chain <chain> --target-lsn <LSN> --target-wall <TS> --scratch <DIR>`
+restores one protected physical chain to an operator-chosen target LSN in an
+isolated sandbox, reports the acceptance criteria, publishes nothing and keeps
+the scratch tree as evidence. See
+`.agents/skills/operating-ava-cluster/references/physical-restore-drill.md`
+for the operator workflow.
+
 `snapshot archive <table>` accepts only the shared `*_backfill_*` rollback
 snapshot convention. It exports the table, AES-GCM encrypts the custom dump,
 and publishes it through the configured PITR store. Its owner-only local record

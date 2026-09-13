@@ -5,7 +5,15 @@ from __future__ import annotations
 import json
 import sys
 from collections.abc import Callable
+from pathlib import Path
 
+from services.pitr.base_manifest import CandidateManifest
+from services.pitr.base_operation_runtime import (
+    live_data_directory,
+    restore_key_path,
+    restore_store_args,
+)
+from services.pitr.restore_drill import DrillRequest, parse_target_wall, run_restore_drill
 from services.pitr.retention_planner import inspect_dry_run_plan
 from services.pitr.rollback_snapshot_archive import (
     RollbackSnapshotArchive,
@@ -16,9 +24,11 @@ from services.pitr.rollback_snapshot_archive import (
     retire_rollback_snapshot,
     verify_rollback_snapshot,
 )
-from services.pitr.store_factory import get_store_group
+from services.pitr.store_factory import construct_store_group, get_store_group
 from shared.config import settings
+from shared.db import direct_db_url
 from shared.paths import ava_home
+from shared.pg_tools import pg_tool
 
 
 def cmd_pitr_retention_inspect() -> int:
@@ -101,3 +111,99 @@ def _pitr_backup_key() -> bytes:
     if path is None:
         raise RuntimeError("PITR backup key file is not configured")
     return path.read_bytes()
+
+
+def cmd_pitr_drill(
+    *,
+    chain: str | None,
+    candidate: str | None,
+    target_lsn: str,
+    target_wall: str,
+    scratch: str,
+    timeout_seconds: int,
+) -> int:
+    """Restore one protected chain to an operator target in isolation.
+
+    The scratch tree is kept as evidence on every outcome; the drill never
+    publishes and never writes to the live cluster.
+    """
+    try:
+        request = _drill_request(
+            chain, candidate, target_lsn, target_wall, scratch, timeout_seconds
+        )
+    except Exception as exc:
+        print(f"pitr drill failed before start: {exc}", file=sys.stderr)
+        return 1
+    print(
+        json.dumps(
+            {
+                "chain_id": request.candidate.chain_id,
+                "target_lsn": request.target_lsn,
+                "target_wall": request.target_wall.isoformat(),
+                "scratch": str(request.scratch),
+            },
+            sort_keys=True,
+        ),
+        file=sys.stderr,
+    )
+    evidence_path = request.scratch / "drill-evidence.json"
+    try:
+        evidence = run_restore_drill(
+            request, progress=lambda message: print(message, file=sys.stderr)
+        )
+    except Exception as exc:
+        print(f"pitr drill failed: {exc} (evidence: {evidence_path})", file=sys.stderr)
+        return 1
+    print(
+        json.dumps(
+            {
+                "outcome": evidence.outcome,
+                "chain_id": evidence.chain_id,
+                "target_lsn": evidence.target_lsn,
+                "evidence": str(evidence_path),
+                "counts_restored": evidence.criteria.get("counts_restored"),
+                "counts_live": evidence.criteria.get("counts_live"),
+                "timings": evidence.timings,
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def _drill_request(
+    chain: str | None,
+    candidate: str | None,
+    target_lsn: str,
+    target_wall: str,
+    scratch: str,
+    timeout_seconds: int,
+) -> DrillRequest:
+    candidate_manifest = _resolve_drill_candidate(chain, candidate)
+    config = settings.physical_backup
+    group = construct_store_group(config.pitr_store_backend, dict(restore_store_args(config)))
+    return DrillRequest(
+        candidate=candidate_manifest,
+        reader=group.generation_pinned_object_reader(),
+        key=restore_key_path(config).read_bytes(),
+        ack_dir=ava_home() / "physical-backup" / "ack",
+        scratch=Path(scratch),
+        target_lsn=target_lsn,
+        target_wall=parse_target_wall(target_wall),
+        pg_ctl=pg_tool("pg_ctl"),
+        pg_verifybackup=pg_tool("pg_verifybackup"),
+        live_db_url=direct_db_url(),
+        data_directory=live_data_directory(),
+        timeout_seconds=timeout_seconds,
+    )
+
+
+def _resolve_drill_candidate(chain: str | None, candidate: str | None) -> CandidateManifest:
+    if (chain is None) == (candidate is None):
+        raise ValueError("pass exactly one of --chain or --candidate")
+    if candidate is not None:
+        return CandidateManifest.from_json(Path(candidate).read_text())
+    path = ava_home() / "physical-backup" / "base-manifests" / f"{chain}.candidate.json"
+    if not path.is_file():
+        raise ValueError(f"no candidate manifest for chain {chain!r} at {path}")
+    return CandidateManifest.from_json(path.read_text())
