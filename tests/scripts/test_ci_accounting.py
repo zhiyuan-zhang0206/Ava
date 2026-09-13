@@ -6,6 +6,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -218,10 +219,16 @@ def test_append_ledger_is_idempotent(monkeypatch: pytest.MonkeyPatch, tmp_path: 
 
 
 def test_report_rollup_days_and_cost() -> None:
+    # Window-relative fixture days: the rollup window is a rolling `days` x 24h,
+    # so a hard-coded "recent" day ages out of it (2026-09-13: the 2026-09-06
+    # fixtures aged out at 00:00 UTC and turned every backend shard red).
+    today = datetime.now(UTC).date()
+    recent = (today - timedelta(days=1)).isoformat()
+    stale = (today - timedelta(days=30)).isoformat()
     entries = [
         {
             "run_id": 1,
-            "day": "2026-09-06",
+            "day": recent,
             "agent_id": 5811,
             "task_id": None,
             "pr_number": None,
@@ -234,7 +241,7 @@ def test_report_rollup_days_and_cost() -> None:
         },
         {
             "run_id": 2,
-            "day": "2026-09-06",
+            "day": recent,
             "agent_id": 5814,
             "task_id": None,
             "pr_number": None,
@@ -247,7 +254,7 @@ def test_report_rollup_days_and_cost() -> None:
         },
         {
             "run_id": 3,
-            "day": "2026-08-01",
+            "day": stale,
             "agent_id": 5811,
             "task_id": None,
             "pr_number": None,
@@ -261,7 +268,7 @@ def test_report_rollup_days_and_cost() -> None:
     ]
     ledger = {e["run_id"]: e for e in entries}
     rows = ci_accounting.report_rows(ledger, days=7, agent=None)
-    assert len(rows) == 2  # the 2026-08-01 entry is outside the window
+    assert len(rows) == 2  # the stale entry is outside the window
     top = rows[0]
     assert top["agent_id"] == 5811
     assert top["linux_minutes"] == 100
