@@ -20,10 +20,11 @@ import contextlib
 import hashlib
 import json
 from collections.abc import Generator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from shared import paths
 from shared.platform import LockTimeoutError as LockTimeoutError
@@ -122,6 +123,58 @@ PackageOrigin = Literal["repo", "plugin", "user"]
 """
 
 
+UpdateMode = Literal["auto", "notify", "off"]
+"""A package's update policy (registry schema v2; tasks #2915 / #3267).
+
+- "auto" — the refresh pass checks the channel and applies new content.
+- "notify" — it checks and records "update available", never applies.
+- "off" — never checked, never applied (explicit verbs still work).
+"""
+
+ChannelKind = Literal["core", "git"]
+"""Where a package's new content comes from (schema v2).
+
+- "core" — this repo's content paths, fetched from the checkout remote by ref.
+- "git" — the row's recorded `source` + `ref` (the existing install flow).
+"""
+
+
+class UpdateState(BaseModel):
+    """Per-package update policy + channel bookkeeping (schema v2).
+
+    `mode` / `interval_seconds` / `channel` are None until the refresh pass
+    resolves them from the source class at first sight (design §5.2: the
+    resolved default is written into the row); a concrete value recorded here
+    is an operator decision (`ava packages policy`) that survives every pass.
+    """
+
+    mode: UpdateMode | None = None
+    interval_seconds: int | None = None
+    """Check interval in seconds; None = the channel-backed default from
+    settings (24h per the user's 2026-09-11 ruling)."""
+    channel: ChannelKind | None = None
+    applied_rev: str | None = None
+    """The rev of the content currently on disk — a commit SHA for a core
+    package, the fetched ref tip for a git package."""
+    last_check_at: str | None = None
+    last_apply_at: str | None = None
+    last_result: str | None = None
+    """Last outcome, design §5.3 vocabulary: up_to_date | applied | available |
+    blocked_version: … | conflict: … | refused_scan: … | error: …"""
+
+
+class ChannelState(BaseModel):
+    """One channel's per-machine state (schema v2) — keyed by channel name
+    ("core") in `Registry.channels`."""
+
+    name: str
+    remote_url: str
+    ref: str = "main"
+    last_seen_sha: str | None = None
+    last_checked_at: str | None = None
+    last_result: str | None = None
+
+
 class InstalledPackage(BaseModel):
     """One tracked package.
 
@@ -165,17 +218,28 @@ class InstalledPackage(BaseModel):
     scanned_at: str | None = None
     accepted_findings: list[str] = []
 
+    update: UpdateState = Field(default_factory=UpdateState)
+    """Content-channel policy + bookkeeping (schema v2; see `UpdateState`)."""
+
+
+SCHEMA_VERSION = 2
+"""Current `installed.json` schema version (2 = content channels, #2915/#3267)."""
+
 
 class Registry(BaseModel):
     """The whole `installed.json` — a flat list of packages keyed by name.
 
-    `version` is the registry schema version (absent/1 on legacy files, default
-    1) — the migration anchor if the schema ever evolves (the sibling
-    `~/.agents/.skill-lock.json` format already carries one; audit round 2,
-    skills-plugins #14)."""
+    `version` is the registry schema version — 2 since the content-channel
+    support (per-package `UpdateState` + per-machine `ChannelState`; tasks
+    #2915 / #3267). Legacy files (absent/1) load as v2 in memory — every row
+    gains a default `UpdateState`, `channels` starts empty — and are rewritten
+    as v2 on the next save. Also the migration anchor if the schema evolves
+    further (the sibling `~/.agents/.skill-lock.json` format already carries
+    one; audit round 2, skills-plugins #14)."""
 
-    version: int = 1
+    version: int = SCHEMA_VERSION
     packages: list[InstalledPackage] = []
+    channels: dict[str, ChannelState] = Field(default_factory=dict)
 
 
 class InstallRegistryError(Exception):
@@ -234,6 +298,16 @@ def load() -> Registry:
         registry = Registry.model_validate_json(raw)
     except ValidationError as e:
         raise SchemaInvalid(f"{path} schema invalid: {e}") from e
+    if registry.version > SCHEMA_VERSION:
+        raise SchemaInvalid(
+            f"{path} carries registry schema v{registry.version}, but this build "
+            f"knows v{SCHEMA_VERSION} — refusing to read a newer file (upgrade this "
+            f"checkout instead)"
+        )
+    # v1 -> v2 is a pure in-memory fill: pydantic's default_factory gives every
+    # row its `UpdateState` and `channels` starts empty (the design's "lazy
+    # migration" — load() never writes; the next save rewrites the file as v2).
+    registry.version = SCHEMA_VERSION
     dups = _folding_duplicates(registry)
     if dups:
         names = ", ".join(f"{a!r} / {b!r}" for a, b in dups)
@@ -423,3 +497,50 @@ def installed_mcp_names() -> set[str]:
     and machine servers — so this stays a pure "is it installed" check.
     """
     return {p.name for p in load().packages if p.type == "mcp"}
+
+
+@dataclass(frozen=True)
+class ResolvedPolicy:
+    """A package's effective update policy — explicit row values or the
+    defaults resolved from its source class (design §5.2)."""
+
+    channel: ChannelKind | None
+    mode: UpdateMode
+    interval_seconds: int | None
+
+
+def derived_channel(pkg: InstalledPackage) -> ChannelKind | None:
+    """The channel a package's content would come from, from its provenance.
+
+    - `origin="repo"` — the checkout's own content: channel "core".
+    - `origin="plugin"` whose `origin_path` lives inside this checkout — a
+      builtin plugin's skills: channel "core" too (same authoring home).
+    - `origin="user"` with a recorded `source` — the existing git flow.
+    - everything else (hand-registered, installed-plugin skills) — no channel.
+    """
+    if pkg.origin == "repo":
+        return "core"
+    if pkg.origin == "plugin":
+        origin_path = pkg.origin_path
+        if origin_path and Path(origin_path).is_relative_to(paths.repo_root()):
+            return "core"
+        return None
+    if pkg.origin == "user" and pkg.source:
+        return "git"
+    return None
+
+
+def resolved_policy(pkg: InstalledPackage) -> ResolvedPolicy:
+    """`pkg`'s effective policy: explicit row values win; None values resolve
+    from the source class — channel-backed packages take the settings defaults
+    (auto @ 24h per the user's 2026-09-11 ruling), channelless packages are
+    "off". The refresh pass writes a resolved row back at first sight; readers
+    (status) resolve without writing."""
+    channel = pkg.update.channel or derived_channel(pkg)
+    if channel is None:
+        return ResolvedPolicy(channel=None, mode="off", interval_seconds=None)
+    from shared.config import settings
+
+    mode: UpdateMode = pkg.update.mode or settings.packages.refresh_default_mode
+    interval = pkg.update.interval_seconds or settings.packages.refresh_default_interval_seconds
+    return ResolvedPolicy(channel=channel, mode=mode, interval_seconds=interval)

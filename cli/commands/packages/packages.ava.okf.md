@@ -1,7 +1,7 @@
 ---
 type: doc
-title: Package Commands (plugins / skill / mcp)
-description: The operator surface for installing external skills, Claude Code plugins, and MCP servers on one machine — `cli/commands/plugins.py`, `skill.py`, `mcp.py` — plus `ava mcp serve` (`cli/mcp_server.py`), which points the other way and exposes this cluster AS an MCP server. Installs are always local to the host the command runs on.
+title: Package Commands (plugins / skill / mcp / packages)
+description: The operator surface for installing external skills, Claude Code plugins, and MCP servers on one machine — `cli/commands/plugins.py`, `skill.py`, `mcp.py`, `packages.py` (update policy + channels) — plus `ava mcp serve` (`cli/mcp_server.py`), which points the other way and exposes this cluster AS an MCP server. Installs are always local to the host the command runs on.
 tags:
 - cli
 - tool
@@ -60,6 +60,16 @@ a **disabled** plugin is listed with its enable-state and nothing else, rather
 than with a guess read off its source, and the load carries an agent boot's own
 side effects (a plugin's missing config image is written from defaults, exactly
 as a boot would write it).
+
+## `ava packages`
+
+`ava packages status` — the read-only update-policy surface over registry
+schema v2, next to the verbs above:
+```bash
+ava packages status [--json]                  # host version + channels + per-package state
+```
+[[update-policy.ava.okf.md|Update policy & channels]] ·
+[[install_registry.ava.okf.md|Schema]].
 
 ## The install gate
 
