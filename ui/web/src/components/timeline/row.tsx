@@ -6,6 +6,7 @@
 
 import { memo, useCallback } from "react";
 
+import { DEFAULT_TIMELINE_COLORS, type TimelineColors } from "@/lib/timeline-colors";
 import type { BackendTimelineItem } from "@/lib/types";
 
 import { CopyButton, ForkButton } from "./buttons";
@@ -20,12 +21,22 @@ import { ItemErrorBoundary } from "./item-error-boundary";
 // That stability — combined with the memoized TimelineRow below — is what lets
 // an unchanged row skip re-render on every streaming chunk: the items ARRAY
 // identity changes each chunk, but the individual item refs (and thus their
-// configs) do not. Recomputed only when an item's reference changes.
-const configCache = new WeakMap<BackendTimelineItem, CardConfig | null>();
-export function cardConfigFor(item: BackendTimelineItem): CardConfig | null {
-  if (configCache.has(item)) return configCache.get(item) ?? null;
-  const config = messageCardConfig(item);
-  configCache.set(item, config);
+// configs) do not. Recomputed only when an item's reference — or the
+// resolved color map — changes: the config now depends on the user's
+// timeline-color settings, and `useTimelineColors` keeps its result
+// reference-stable while no color setting changes.
+const configCache = new WeakMap<
+  BackendTimelineItem,
+  { colors: TimelineColors; config: CardConfig | null }
+>();
+export function cardConfigFor(
+  item: BackendTimelineItem,
+  colors: TimelineColors = DEFAULT_TIMELINE_COLORS,
+): CardConfig | null {
+  const hit = configCache.get(item);
+  if (hit?.colors === colors) return hit.config;
+  const config = messageCardConfig(item, colors);
+  configCache.set(item, { colors, config });
   return config;
 }
 

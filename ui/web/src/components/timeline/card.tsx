@@ -4,8 +4,10 @@
 // a MessageCard: a colored left-border container with a clickable CardHeader
 // (chevron + icon + title/summary + timestamp) and a collapsible body below it.
 //
-// messageCardConfig(item) is the single source of the per-kind visual mapping —
-// icon, title, border/background color, which global toggle governs its default
+// messageCardConfig(item, colors) is the single source of the per-kind visual
+// mapping — icon, title, border/background color (color families resolved from
+// @/lib/timeline-colors; user-configurable via Display settings), which global
+// toggle governs its default
 // expanded state, and whether the header stamps a timestamp. It returns null for
 // the ephemeral system markers (compact_done / cancelled / error / unrecognized),
 // which render bare (no card, not collapsible) through their own renderers.
@@ -40,6 +42,7 @@ import {
   summarizeOutput,
   type SdkCall,
 } from "@/lib/item-summary";
+import { DEFAULT_TIMELINE_COLORS, type TimelineColors } from "@/lib/timeline-colors";
 import type { BackendTimelineItem } from "@/lib/types";
 import { useUserSettings } from "@/lib/use-user-settings";
 import { useThrottledStreaming } from "@/lib/use-throttled-streaming";
@@ -105,15 +108,18 @@ function agentChatTitle(item: BackendTimelineItem): {
 // Pure per-item visual config. null → this item is an ephemeral system marker
 // that renders bare (no card). Kept pure (no toggle state) so the timeline can
 // memoize it over the items array alone.
-export function messageCardConfig(item: BackendTimelineItem): CardConfig | null {
+export function messageCardConfig(
+  item: BackendTimelineItem,
+  colors: TimelineColors = DEFAULT_TIMELINE_COLORS,
+): CardConfig | null {
   switch (item.kind) {
     case "system_prompt":
       return {
         rich: "system_prompt",
         icon: Settings,
         title: null,
-        border: "border-indigo-400/40",
-        bg: "bg-indigo-50/40 dark:bg-indigo-950/15",
+        border: colors.system_prompt.border,
+        bg: colors.system_prompt.bg ?? "",
         fixedDefault: false,
         headerTs: false,
       };
@@ -122,8 +128,8 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         rich: "reasoning",
         icon: Sparkles,
         title: null,
-        border: "border-slate-400/40",
-        bg: "bg-slate-50/60 dark:bg-slate-900/20",
+        border: colors.reasoning.border,
+        bg: colors.reasoning.bg ?? "",
         fixedDefault: true,
         headerTs: true,
       };
@@ -133,7 +139,7 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         icon: Code2,
         title: null,
         // Deeper border than agent_chat — the tool call is the load-bearing action.
-        border: "border-emerald-500/70",
+        border: colors.agent_code.border,
         bg: "bg-card",
         fixedDefault: true,
         headerTs: true,
@@ -143,8 +149,8 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         rich: "output",
         icon: Terminal,
         title: null,
-        border: "border-amber-500/50",
-        bg: "bg-amber-50/40 dark:bg-amber-950/10",
+        border: colors.code_output.border,
+        bg: colors.code_output.bg ?? "",
         fixedDefault: true,
         headerTs: true,
       };
@@ -156,7 +162,7 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         title: chatTitle.title,
         titleKey: `timeline.${chatTitle.titleKey}`,
         titleValues: chatTitle.titleValues,
-        border: "border-emerald-500/50",
+        border: colors.agent_chat.border,
         bg: "bg-card",
         fixedDefault: true,
         headerTs: true,
@@ -170,8 +176,8 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         icon: Paperclip,
         title: null,
         titleKey: "timeline.attachedFiles",
-        border: "border-sky-400/50",
-        bg: "bg-sky-50/40 dark:bg-sky-950/10",
+        border: colors.attach.border,
+        bg: colors.attach.bg ?? "",
         fixedDefault: true,
         headerTs: true,
       };
@@ -186,8 +192,8 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
           title: `Agent ${(item.source ?? "").slice("agent:".length)}`,
           titleKey: "timeline.agent",
           titleValues: { id: (item.source ?? "").slice("agent:".length) },
-          border: "border-violet-400/60",
-          bg: "bg-violet-50 dark:bg-violet-950/20",
+          border: colors.inbound_agent.border,
+          bg: colors.inbound_agent.bg ?? "",
           fixedDefault: false,
           headerTs: true,
         };
@@ -198,8 +204,8 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
           icon: User,
           title: "Human",
           titleKey: "timeline.human",
-          border: "border-gray-400/60",
-          bg: "bg-gray-50 dark:bg-gray-900/30",
+          border: colors.inbound_human.border,
+          bg: colors.inbound_human.bg ?? "",
           fixedDefault: true,
           headerTs: true,
         };
@@ -209,8 +215,8 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         icon: Info,
         title: "System",
         titleKey: "timeline.system",
-        border: "border-sky-400/60",
-        bg: "bg-sky-50 dark:bg-sky-950/20",
+        border: colors.inbound_system.border,
+        bg: colors.inbound_system.bg ?? "",
         fixedDefault: false,
         headerTs: true,
       };
@@ -221,8 +227,8 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         icon: FileText,
         title: "Compact summary",
         titleKey: "timeline.compactSummary",
-        border: "border-sky-400/60",
-        bg: "bg-sky-50 dark:bg-sky-950/20",
+        border: colors.inbound_system.border,
+        bg: colors.inbound_system.bg ?? "",
         fixedDefault: false,
         headerTs: true,
       };
@@ -232,15 +238,15 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         icon: FileText,
         title: "Compact request",
         titleKey: "timeline.compactRequest",
-        border: "border-sky-400/60",
-        bg: "bg-sky-50 dark:bg-sky-950/20",
+        border: colors.inbound_system.border,
+        bg: colors.inbound_system.bg ?? "",
         fixedDefault: false,
         headerTs: true,
       };
     case "system_marker": {
       const cls = classifyMarker(item.source);
       if (cls.kind === "ephemeral") return null; // bare render path
-      const v = markerVisual(cls);
+      const v = markerVisual(cls, colors);
       return {
         rich: null,
         icon: v.icon,

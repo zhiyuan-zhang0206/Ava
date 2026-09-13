@@ -687,6 +687,27 @@ describe("ItemView: code_output", () => {
   });
 });
 
+describe("ItemView: configurable timeline colors (tasks #3304/#3312)", () => {
+  it("a seeded color override drives the rendered marker classes", () => {
+    setUserSettings({ "display.color.note": "fuchsia" });
+    render(
+      <TimelineView
+        items={[
+          makeItem({
+            kind: "system_marker",
+            source: "sdk_hint",
+            payload: "[note] palette override",
+          }),
+        ]}
+      />,
+    );
+    // The card frame carries the resolved family's border + bg.
+    const card = screen.getByText("Note").closest(".border-l-2");
+    expect(card?.className).toContain("border-fuchsia-500/40");
+    expect(card?.className).toContain("bg-fuchsia-50/40");
+  });
+});
+
 describe("ItemView: system_marker → LifecycleChip", () => {
   it("source='lifecycle_terminate' → Terminated chip", () => {
     render(

@@ -8,6 +8,7 @@
 // pick up the new schema (re-export names here are stable). The
 // pre-commit hook enforces codegen ↔ schema sync; drift fails the commit.
 
+import { TIMELINE_COLOR_ITEMS } from "./timeline-colors";
 import type { components } from "./types-generated";
 
 // --- HTTP schemas (gateway/schemas.py) — re-export from generated ---
@@ -778,6 +779,24 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   // element, so it applies over whichever of light/dark is active — a plugin
   // that wants both ships one pack per mode.
   "display.theme_pack": null,
+  // Timeline block colors — one family per block kind; the valid values, the
+  // class mapping and the approved defaults live in timeline-colors.ts (the
+  // Display settings panel writes these keys only when a user changes a family).
+  "display.color.agent_chat": TIMELINE_COLOR_ITEMS.agent_chat.default,
+  "display.color.agent_code": TIMELINE_COLOR_ITEMS.agent_code.default,
+  "display.color.code_output": TIMELINE_COLOR_ITEMS.code_output.default,
+  "display.color.reasoning": TIMELINE_COLOR_ITEMS.reasoning.default,
+  "display.color.inbound_human": TIMELINE_COLOR_ITEMS.inbound_human.default,
+  "display.color.inbound_agent": TIMELINE_COLOR_ITEMS.inbound_agent.default,
+  "display.color.inbound_system": TIMELINE_COLOR_ITEMS.inbound_system.default,
+  "display.color.system_prompt": TIMELINE_COLOR_ITEMS.system_prompt.default,
+  "display.color.attach": TIMELINE_COLOR_ITEMS.attach.default,
+  "display.color.note": TIMELINE_COLOR_ITEMS.note.default,
+  "display.color.memory": TIMELINE_COLOR_ITEMS.memory.default,
+  "display.color.lifecycle_terminate": TIMELINE_COLOR_ITEMS.lifecycle_terminate.default,
+  "display.color.lifecycle_restart": TIMELINE_COLOR_ITEMS.lifecycle_restart.default,
+  "display.color.lifecycle_resurrect": TIMELINE_COLOR_ITEMS.lifecycle_resurrect.default,
+  "display.color.lifecycle_fork": TIMELINE_COLOR_ITEMS.lifecycle_fork.default,
   "behavior.confirm_terminate": true,
   "behavior.confirm_restart": true,
   "behavior.confirm_force_kill": true,
