@@ -121,6 +121,7 @@ from shared.config.gateway import GatewaySettings
 from shared.config.general import GeneralSettings
 from shared.config.lm import LmSettings
 from shared.config.observability import ObservabilitySettings
+from shared.config.packages import PackagesSettings
 from shared.config.physical_backup import PhysicalBackupSettings
 from shared.config.profiles import (
     AVA_PROCESS_PROFILE_ENV,
@@ -241,6 +242,7 @@ class Settings(BaseModel):
     physical_backup: PhysicalBackupSettings = Field(default_factory=PhysicalBackupSettings)
     services: ServiceSettings = Field(default_factory=ServiceSettings)
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
+    packages: PackagesSettings = Field(default_factory=PackagesSettings)
     feishu: FeishuSettings = Field(default_factory=FeishuSettings)
     telegram: TelegramSettings = Field(default_factory=TelegramSettings)
     general: GeneralSettings = Field(default_factory=GeneralSettings)

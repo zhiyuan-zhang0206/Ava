@@ -30,21 +30,26 @@ def manifest_install_errors(pkg_dir: Path, *, mirror_pyproject: bool = False) ->
         return []
 
     errors: list[str] = []
+    from shared import host_version as host_version_mod
+
     try:
-        host = plugin_manifest.host_version_from_repo(paths.repo_root())
-    except plugin_manifest.ManifestError as e:
+        host = host_version_mod.host_version(paths.repo_root())
+    except host_version_mod.HostVersionError as e:
         return [str(e)]
     errors += plugin_manifest.check_host_engine(manifest, host)
+    errors += plugin_manifest.check_host_commit(manifest, paths.repo_root())
 
     if mirror_pyproject:
+        from shared import pyproject_mirror
+
         pyproject = pkg_dir / "pyproject.toml"
         if pyproject.is_file():
             try:
-                specs = plugin_manifest.pyproject_dependency_specs(pkg_dir)
+                specs = pyproject_mirror.pyproject_dependency_specs(pkg_dir)
             except plugin_manifest.ManifestError as e:
                 errors.append(str(e))
             else:
-                errors += plugin_manifest.check_python_packages(manifest, specs)
+                errors += pyproject_mirror.check_python_packages(manifest, specs)
         elif manifest.dependencies.python_packages:
             errors.append(
                 "manifest declares dependencies.pythonPackages but the package "

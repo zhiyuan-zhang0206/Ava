@@ -230,3 +230,95 @@ def test_mutate_is_not_reentrant_within_one_process(
     monkeypatch.setattr(reg, "_REGISTRY_LOCK_TIMEOUT_S", 0.3)
     with reg.mutate(), pytest.raises(LockTimeoutError), reg.mutate():
         pass
+
+
+# ── schema v2: migration + update-policy resolution ─────────────────────
+
+
+def test_v1_file_migrates_in_memory_and_rewrites_on_save(unit_home: Path) -> None:
+    """A legacy v1 file loads as v2 (rows gain a default `UpdateState`,
+    `channels` starts empty) WITHOUT a write; the next save rewrites it as v2."""
+    import json
+
+    path = install_registry_path()
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "packages": [
+                    {
+                        "name": "alpha",
+                        "type": "skill",
+                        "origin": "repo",
+                        "origin_path": "/x/ava_builtins/skills/alpha",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    loaded = reg.load()
+    assert loaded.version == reg.SCHEMA_VERSION == 2
+    assert loaded.channels == {}
+    assert loaded.packages[0].update.mode is None  # unresolved until first sight
+    assert json.loads(path.read_text(encoding="utf-8"))["version"] == 1  # load() never writes
+
+    reg.register(_pkg("beta"))
+    assert json.loads(path.read_text(encoding="utf-8"))["version"] == 2
+
+
+def test_newer_schema_version_is_refused(unit_home: Path) -> None:
+    import json
+
+    install_registry_path().write_text(json.dumps({"version": 3, "packages": []}), encoding="utf-8")
+    with pytest.raises(reg.SchemaInvalid):
+        reg.load()
+
+
+def test_resolved_policy_resolves_from_source_class(unit_home: Path) -> None:
+    from shared.config import settings
+
+    repo_pkg = reg.InstalledPackage(
+        name="r", type="skill", origin="repo", origin_path="/x/ava_builtins/skills/r"
+    )
+    pol = reg.resolved_policy(repo_pkg)
+    assert pol.channel == "core"
+    assert pol.mode == settings.packages.refresh_default_mode
+    assert pol.interval_seconds == settings.packages.refresh_default_interval_seconds
+
+    git_pkg = reg.InstalledPackage(name="g", type="skill", origin="user", source="https://x/g")
+    assert reg.resolved_policy(git_pkg).channel == "git"
+
+    local_pkg = reg.InstalledPackage(name="l", type="skill", origin="user")
+    local_pol = reg.resolved_policy(local_pkg)
+    assert local_pol.channel is None
+    assert local_pol.mode == "off"
+    assert local_pol.interval_seconds is None
+
+
+def test_resolved_policy_plugin_channel_follows_origin_path(unit_home: Path) -> None:
+    from shared import paths
+
+    inside = reg.InstalledPackage(
+        name="p",
+        type="skill",
+        origin="plugin",
+        origin_path=str(paths.repo_root() / "ava_builtins" / "plugins" / "ava_code" / "skills"),
+    )
+    assert reg.resolved_policy(inside).channel == "core"
+
+    outside = reg.InstalledPackage(
+        name="q", type="skill", origin="plugin", origin_path="/elsewhere/plugins/q/skills"
+    )
+    outside_pol = reg.resolved_policy(outside)
+    assert outside_pol.channel is None
+    assert outside_pol.mode == "off"
+
+
+def test_resolved_policy_explicit_values_win(unit_home: Path) -> None:
+    pkg = reg.InstalledPackage(name="r", type="skill", origin="repo")
+    pkg.update.mode = "notify"
+    pkg.update.interval_seconds = 3600
+    pkg.update.channel = "git"  # a deliberately odd pin: explicit wins over provenance
+    pol = reg.resolved_policy(pkg)
+    assert (pol.channel, pol.mode, pol.interval_seconds) == ("git", "notify", 3600)

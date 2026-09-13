@@ -10,6 +10,7 @@ from typing import Any, cast
 import pytest
 
 from shared import plugin_manifest as pm
+from shared import pyproject_mirror as mirror
 from shared.plugin_manifest import ManifestError
 
 
@@ -230,7 +231,7 @@ def test_host_version_from_repo(tmp_path: Path) -> None:
 def _mirror(declared: str | None, py: str | None) -> list[str]:
     m = _deps({"x": declared} if declared is not None else None)
     specs = {"x": py} if py is not None else {}
-    return pm.check_python_packages(m, specs)
+    return mirror.check_python_packages(m, specs)
 
 
 def test_mirror_ok() -> None:
@@ -271,11 +272,11 @@ def test_mirror_exclusive_boundary() -> None:
 
 def test_mirror_missing_sides() -> None:
     m = _deps({"x": ">=1,<2"})
-    assert pm.check_python_packages(m, {}) != []  # declared but absent from pyproject
+    assert mirror.check_python_packages(m, {}) != []  # declared but absent from pyproject
     m2 = _deps(None)
-    errors = pm.check_python_packages(m2, {"y": ">=1,<2"})
+    errors = mirror.check_python_packages(m2, {"y": ">=1,<2"})
     assert len(errors) == 1  # pyproject declares, manifest does not
-    assert pm.check_python_packages(m2, {}) == []
+    assert mirror.check_python_packages(m2, {}) == []
 
 
 def test_mirror_py_lower_but_declared_unbounded_below() -> None:
@@ -297,7 +298,7 @@ def _write_pyproject(tmp_path: Path, deps: list[str]) -> Path:
 
 
 def test_pyproject_dependency_specs(tmp_path: Path) -> None:
-    specs = pm.pyproject_dependency_specs(
+    specs = mirror.pyproject_dependency_specs(
         _write_pyproject(
             tmp_path,
             [
@@ -319,24 +320,26 @@ def test_pyproject_dependency_specs(tmp_path: Path) -> None:
 
 
 def test_pyproject_extras_with_space(tmp_path: Path) -> None:
-    specs = pm.pyproject_dependency_specs(_write_pyproject(tmp_path, ["mcp [cli] >=1.27,<2"]))
+    specs = mirror.pyproject_dependency_specs(_write_pyproject(tmp_path, ["mcp [cli] >=1.27,<2"]))
     assert specs == {"mcp": ">=1.27,<2"}
 
 
 def test_pyproject_rejects_unmirrorable(tmp_path: Path) -> None:
     with pytest.raises(ManifestError, match="direct-URL"):
-        pm.pyproject_dependency_specs(_write_pyproject(tmp_path, ["x @ git+https://x/y"]))
+        mirror.pyproject_dependency_specs(_write_pyproject(tmp_path, ["x @ git+https://x/y"]))
     with pytest.raises(ManifestError, match="environment marker"):
-        pm.pyproject_dependency_specs(_write_pyproject(tmp_path, ["x>=1; python_version > '3.12'"]))
+        mirror.pyproject_dependency_specs(
+            _write_pyproject(tmp_path, ["x>=1; python_version > '3.12'"])
+        )
     with pytest.raises(ManifestError, match="unsupported clause"):
-        pm.pyproject_dependency_specs(_write_pyproject(tmp_path, ["x!=1.0"]))
+        mirror.pyproject_dependency_specs(_write_pyproject(tmp_path, ["x!=1.0"]))
     with pytest.raises(ManifestError, match="duplicate"):
-        pm.pyproject_dependency_specs(_write_pyproject(tmp_path, ["x>=1,<2", "x>=1,<3"]))
+        mirror.pyproject_dependency_specs(_write_pyproject(tmp_path, ["x>=1,<2", "x>=1,<3"]))
 
 
 def test_pyproject_missing(tmp_path: Path) -> None:
     with pytest.raises(ManifestError, match=r"no pyproject\.toml"):
-        pm.pyproject_dependency_specs(tmp_path)
+        mirror.pyproject_dependency_specs(tmp_path)
 
 
 # ── load_manifest ──────────────────────────────────────────────────────
@@ -382,6 +385,99 @@ def test_mirror_tilde_patch_level() -> None:
 
 
 def test_pyproject_wildcard_major_only(tmp_path: Path) -> None:
-    specs = pm.pyproject_dependency_specs(_write_pyproject(tmp_path, ["x==1.*"]))
+    specs = mirror.pyproject_dependency_specs(_write_pyproject(tmp_path, ["x==1.*"]))
     assert specs == {"x": "==1.*"}
     assert _mirror(">=1.0,<2", "==1.*") == []
+
+
+# ── requires_commit (the exactness layer, design §5.5) ──────────────────
+
+
+def _commit_repo(tmp_path: Path) -> tuple[Path, str, str]:
+    """A scratch git repo with two commits on main + one side commit.
+
+    Returns (repo, main_sha, side_sha): `main_sha` is an ancestor of HEAD,
+    `side_sha` exists but is not.
+    """
+    import os
+    import subprocess
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(  # noqa: S603 — fixed argv, test-local fixture repo
+        ["git", "init", "-q", "-b", "main", str(repo)], check=True, capture_output=True
+    )
+    env = os.environ | {
+        "GIT_AUTHOR_DATE": "2026-03-05T12:00:00+00:00",
+        "GIT_COMMITTER_DATE": "2026-03-05T12:00:00+00:00",
+    }
+
+    def _git(*args: str) -> str:
+        return subprocess.run(  # noqa: S603 — fixed argv, test-local fixture repo
+            ["git", "-C", str(repo), *args],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=env,
+        ).stdout.strip()
+
+    (repo / "f.txt").write_text("1", encoding="utf-8")
+    _git("add", "-A")
+    _git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "one")
+    main_sha = _git("rev-parse", "HEAD")
+
+    _git("checkout", "-q", "-b", "side")
+    (repo / "f.txt").write_text("2", encoding="utf-8")
+    _git("add", "-A")
+    _git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "side")
+    side_sha = _git("rev-parse", "HEAD")
+    _git("checkout", "-q", "main")
+    return repo, main_sha, side_sha
+
+
+def test_requires_commit_alone_is_a_valid_manifest() -> None:
+    """engines and requires_commit are alternatives (design §5.5: core content
+    may be commit-pinned only)."""
+    m = pm._validate(
+        {
+            "apiVersion": 2,
+            "name": "acme",
+            "version": "1.0.0",
+            "requires_commit": "abc1234",
+        }
+    )
+    assert m.requires_commit == "abc1234"
+    assert m.engines == {}
+
+
+def test_requires_commit_bad_format_fails() -> None:
+    for bad in ("XYZ", "abc", "A1B2C3D4", " ", 7):
+        with pytest.raises(ManifestError, match="requires_commit"):
+            _manifest(requires_commit=bad)
+
+
+def test_both_engines_and_requires_commit_are_accepted() -> None:
+    m = _manifest(requires_commit="d" * 40)
+    assert m.engines == {"ava": ">=0.1.0"}
+    assert m.requires_commit == "d" * 40
+
+
+def test_check_host_commit_none_declared_passes(tmp_path: Path) -> None:
+    assert pm.check_host_commit(_manifest(), tmp_path) == []
+
+
+def test_check_host_commit_ancestor_passes(tmp_path: Path) -> None:
+    repo, main_sha, _side = _commit_repo(tmp_path)
+    assert pm.check_host_commit(_manifest(requires_commit=main_sha), repo) == []
+
+
+def test_check_host_commit_non_ancestor_blocks(tmp_path: Path) -> None:
+    repo, _main, side_sha = _commit_repo(tmp_path)
+    errors = pm.check_host_commit(_manifest(requires_commit=side_sha), repo)
+    assert errors and "not an ancestor" in errors[0]
+
+
+def test_check_host_commit_unresolvable_blocks(tmp_path: Path) -> None:
+    repo, _main, _side = _commit_repo(tmp_path)
+    errors = pm.check_host_commit(_manifest(requires_commit="f" * 40), repo)
+    assert errors and "unresolvable" in errors[0]

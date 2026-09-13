@@ -5,7 +5,7 @@
 > [`decisions/2026-07-29-skill-trust-tiers-and-install-scan.md`](../../decisions/2026-07-29-skill-trust-tiers-and-install-scan.md);
 > the current-state description lives in
 > [`shared/install_registry.ava.okf.md`](../../shared/install_registry/install_registry.ava.okf.md)
-> and [`cli/commands/packages.ava.okf.md`](../../cli/commands/packages.ava.okf.md).
+> and [`cli/commands/packages/packages.ava.okf.md`](../../cli/commands/packages/packages.ava.okf.md).
 > This doc holds only the open work.
 
 In one line: every package entering `$AVA_HOME/skills/` from outside the

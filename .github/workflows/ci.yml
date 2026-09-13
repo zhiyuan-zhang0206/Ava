@@ -222,6 +222,36 @@ jobs:
       - name: Check canonical Python lock sources (stdlib only)
         run: python3 scripts/lint_python_lock.py
 
+  core-content-manifests:
+    # The content-channel gate (tasks #2915/#3267): core manifests' declared
+    # ranges + requires_commit must hold against the repo's derived host
+    # version. Classify-independent like repo-language above — the check also
+    # catches a range whose bound the calendar has crossed with no file edit —
+    # and it needs FULL history (`git merge-base --is-ancestor`), so
+    # fetch-depth: 0. Seconds-fast, venv-only.
+    name: core-content manifests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # Draft PRs skip CI except Trunk test branches
+    # (trunk-merge/*, trunk-temp/*), which must verify.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false || startsWith(github.head_ref, 'trunk-merge/') || startsWith(github.head_ref, 'trunk-temp/') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: 0.10.2
+          enable-cache: true
+
+      - name: Install Python deps
+        uses: ./.github/actions/uv-sync
+
+      - name: Lint core-content manifests
+        run: uv run python scripts/lint_core_content_manifests.py
+
   doc-lints:
     # The doc-lint family must fire on EVERY PR — including docs-only diffs,
     # where a doc reference is most likely to go stale: classify skips the
@@ -413,7 +443,7 @@ jobs:
       # ruff/ruff-format/pyright/lint-migrations/lint-clock-lattice, the
       # frontend job runs tsc/eslint/vitest. Everything else in
       # .pre-commit-config.yaml runs here.
-      SKIP: ruff,ruff-format,pyright,lint-migrations,lint-clock-lattice,frontend-tsc,frontend-eslint,frontend-vitest
+      SKIP: ruff,ruff-format,pyright,lint-migrations,lint-clock-lattice,frontend-tsc,frontend-eslint,frontend-vitest,lint-core-content-manifests
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -458,7 +488,7 @@ jobs:
       AVA_REDIS_URL: redis://127.0.0.1:1/0
       # Same command set as backend-structure: hooks already covered by other
       # jobs are skipped here too.
-      SKIP: ruff,ruff-format,pyright,lint-migrations,lint-clock-lattice,frontend-tsc,frontend-eslint,frontend-vitest
+      SKIP: ruff,ruff-format,pyright,lint-migrations,lint-clock-lattice,frontend-tsc,frontend-eslint,frontend-vitest,lint-core-content-manifests
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

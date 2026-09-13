@@ -12,7 +12,7 @@ tags:
 
 ## What it is
 
-The inverse of the rest of [[commands/packages.ava.okf.md|the `ava mcp` family]].
+The inverse of the rest of [[commands/packages/packages.ava.okf.md|the `ava mcp` family]].
 Those verbs configure servers Ava's own agents call **out** to; `serve` runs an
 MCP server over stdio whose tools are this cluster's own control plane, so an
 external agent calls **in** and drives the fleet:
@@ -80,5 +80,5 @@ an agent that talks and never acts.
 ## Key Dependencies
 
 - [[okf/mcps/mcps.ava.okf.md|MCP integrations]] — the domain node; the outbound half
-- [[commands/packages.ava.okf.md]] — the rest of the `ava mcp` verb surface
+- [[commands/packages/packages.ava.okf.md]] — the rest of the `ava mcp` verb surface
 - [[gateway/routers/ops-surfaces.ava.okf.md|gateway routes]] — the control plane being proxied

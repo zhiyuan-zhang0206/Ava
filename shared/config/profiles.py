@@ -52,6 +52,9 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             # The PITR uploader daemon reads the physical-backup plane under
             # the gateway profile (bucket/key/credentials).
             "physical_backup",
+            # The skills router (#3267) reads install_registry.resolved_policy(),
+            # which resolves per-package update defaults from settings.packages.
+            "packages",
         }
     ),
     # Agent host and exec children (kernel + SDK + builtin plugins). daemon is
@@ -73,6 +76,10 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             # agent closure (via the fleet plugin); only gateway/runner
             # processes read the domain at runtime.
             "physical_backup",
+            # ava/skills.py imports shared.install_registry, whose
+            # resolved_policy() resolves per-package update defaults from
+            # settings.packages (#3267).
+            "packages",
         }
     ),
     # runner support daemons (ops / watchdog / browser / browser-mcp /
@@ -91,6 +98,10 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             "observability",
             # ops/spec.py gates the pitr-uploader roster entry on AVA_PITR_ENABLED.
             "physical_backup",
+            # shared.install_registry.resolved_policy() is reachable from the
+            # runner closure and resolves per-package update defaults from
+            # settings.packages (#3267).
+            "packages",
         }
     ),
 }

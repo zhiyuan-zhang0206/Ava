@@ -78,10 +78,12 @@ def test_mcp_install_refuses_manifest_beyond_host_engines(
     unit_home: Path, tmp_path: Path, fake_uv_sync: None, capsys: pytest.CaptureFixture
 ) -> None:
     pkg = _make_mcp_package(tmp_path)
-    bad = dict(GOOD_MANIFEST, engines={"ava": ">=99"})
+    # ">=2099" (not ">=99"): the host version is now the derived date axis
+    # (2026.x), so the beyond-host example must outrun a full year, not two digits.
+    bad = dict(GOOD_MANIFEST, engines={"ava": ">=2099"})
     _write_manifest(pkg, bad)
     assert cmd_mcp_install(str(pkg), None, None) == 1
-    assert "requires Ava >=99" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "requires Ava >=2099" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert reg.get("acme") is None
     assert not (unit_home / "mcps" / "acme").exists()
 
@@ -164,11 +166,11 @@ def test_mcp_upgrade_refuses_source_that_breaks_the_contract(
     url = f"file://{pkg}"
     assert cmd_mcp_install(url, None, None) == 0
 
-    _write_manifest(pkg, dict(GOOD_MANIFEST, engines={"ava": ">=99"}))
+    _write_manifest(pkg, dict(GOOD_MANIFEST, engines={"ava": ">=2099"}))
     _git(pkg, "add", ".")
     _git(pkg, "commit", "-q", "-m", "break engines")
     assert cmd_mcp_upgrade("acme") == 1
-    assert "requires Ava >=99" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "requires Ava >=2099" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     # the landed copy still carries the previous manifest — nothing was re-landed
     landed = unit_home / "mcps" / "acme" / "ava-plugin.json"
     assert json.loads(landed.read_text(encoding="utf-8"))["engines"] == {"ava": ">=0.1.0"}
@@ -219,7 +221,7 @@ def test_skill_install_refuses_invalid_manifest_before_discovery(
     (pkg / "ava-plugin.json").write_text('{"apiVersion": 2, "name": "x"}', encoding="utf-8")
     assert cmd_skill_install(str(pkg), None, None) == 1
     err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
-    assert "engines is required" in err
+    assert "engines (or requires_commit) is required" in err
     assert reg.get("x") is None
 
 
