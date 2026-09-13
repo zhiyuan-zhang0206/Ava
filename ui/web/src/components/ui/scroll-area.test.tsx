@@ -5,6 +5,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { NonceProvider } from "@/lib/nonce-context";
 import { ScrollArea } from "./scroll-area";
 
 const defaultResizeObserver = globalThis.ResizeObserver;
@@ -74,6 +75,19 @@ function mockScrollableGeometry() {
 }
 
 describe("ScrollArea", () => {
+  it("forwards the page nonce to Radix's injected scrollbar style", () => {
+    render(
+      <NonceProvider value="request-nonce">
+        <ScrollArea>
+          <div>content</div>
+        </ScrollArea>
+      </NonceProvider>,
+    );
+
+    const style = document.querySelector('[data-slot="scroll-area"]')?.querySelector("style");
+    expect(style?.getAttribute("nonce")).toBe("request-nonce");
+  });
+
   it("applies viewportClassName to the inner scroll viewport", () => {
     render(
       <ScrollArea viewportClassName="[overflow-anchor:none]">

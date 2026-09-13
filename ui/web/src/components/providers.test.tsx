@@ -57,6 +57,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
 
 import { ApiError } from "@/lib/api";
 import { setSessionInvalidHandler } from "@/lib/auth-context";
+import { useNonce } from "@/lib/nonce-context";
 
 import { createQueryClient, Providers } from "./providers";
 
@@ -124,5 +125,19 @@ describe("Providers", () => {
     );
 
     expect(screen.getByTestId("theme-provider").dataset.nonce).toBe("request-nonce");
+  });
+
+  it("exposes the request nonce to the subtree", () => {
+    function NonceProbe() {
+      return <span data-testid="nonce-probe">{useNonce() ?? "(none)"}</span>;
+    }
+
+    render(
+      <Providers nonce="request-nonce">
+        <NonceProbe />
+      </Providers>,
+    );
+
+    expect(screen.getByTestId("nonce-probe").textContent).toBe("request-nonce");
   });
 });

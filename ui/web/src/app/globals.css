@@ -192,9 +192,9 @@
   [role="button"]:not(:disabled) {
     cursor: pointer;
   }
-  /* Radix normally hides the native scrollbar with an injected style tag,
-     which the production CSP blocks. Keep that rule in the compiled app
-     stylesheet instead. */
+  /* Radix hides the native scrollbar with an injected style tag; ScrollArea
+     forwards the page nonce to it so it applies (scroll-area.tsx). Keep the
+     same rule compiled here as the nonce-less fallback. */
   [data-slot="scroll-area-viewport"] {
     scrollbar-width: none;
     -ms-overflow-style: none;
