@@ -172,3 +172,16 @@ def test_explicit_path_scan_catches_untracked_violation(
     f = repo / "new-file.txt"
     f.write_text(f"url = 'http://{_cgnat_ip(64, '0.2')}:8000'\n", encoding="utf-8")
     assert gate.main([str(f)]) == 1
+
+
+def test_explicit_missing_target_is_an_error(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A typo'd explicit path must fail the gate, not pass as a silent empty scan."""
+    good = repo / "ok.txt"
+    good.write_text("no tailnet literals here\n", encoding="utf-8")
+    missing = repo / "typo.txt"
+    assert gate.main([str(missing)]) == 1
+    assert str(missing) in capsys.readouterr().err
+    assert gate.main([str(good), str(missing)]) == 1
+    assert gate.main(["typo.txt"]) == 1

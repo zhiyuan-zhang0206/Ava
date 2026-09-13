@@ -520,3 +520,16 @@ def test_explicit_relative_path_argument_runs(scratch) -> None:
         """,
     )
     assert _lint.main(["tests/test_clean.py"]) == 0
+
+
+def test_explicit_missing_target_is_an_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A typo'd explicit path must fail the gate, not pass as a silent empty scan."""
+    good = tmp_path / "ok.py"
+    good.write_text("value = 1\n", encoding="utf-8")
+    missing = tmp_path / "typo.py"
+    assert _lint.main([str(missing)]) == 1
+    assert str(missing) in capsys.readouterr().err
+    assert _lint.main([str(good), str(missing)]) == 1
+    assert _lint.main(["typo-missing.py"]) == 1

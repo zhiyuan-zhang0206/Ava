@@ -52,6 +52,8 @@ Rules (source of truth):
 
 Usage:
     .venv/bin/python scripts/lint_ava_okf.py [--fix] [paths...]
+    An explicit path that does not exist is an error (stderr + exit 1) rather
+    than the "No .ava.okf.md files found." message with exit 0.
 """
 
 from __future__ import annotations
@@ -556,6 +558,11 @@ def main():
         "--fix", action="store_true", help="Auto-fix where possible (not yet implemented)"
     )
     args = parser.parse_args()
+
+    missing = [p for p in args.paths if not Path(p).exists()]
+    if missing:
+        print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
+        sys.exit(1)
 
     repo_root = Path.cwd().resolve()
     files = find_files(args.paths or [str(repo_root)])

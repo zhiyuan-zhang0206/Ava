@@ -3,7 +3,8 @@ values derived from a fixed instant while the derivation can reach the real
 clock, and fixed calendar fixtures bound to window-shaped names in tests.
 
 Run: `.venv/bin/python scripts/lint_time_bomb.py [path ...]` (defaults to the
-source dirs + tests/). Also run automatically via pre-commit.
+source dirs + tests/; an explicit path that does not exist is an error (stderr +
+exit 1) rather than a silent no-op). Also run automatically via pre-commit.
 
 ## Why
 
@@ -700,6 +701,10 @@ def main(argv: list[str] | None = None) -> int:
     root = _REPO_ROOT
     if argv:
         paths = [p if p.is_absolute() else root / p for p in (Path(a) for a in argv)]
+        missing = [a for a, p in zip(argv, paths, strict=True) if not p.exists()]
+        if missing:
+            print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
+            return 1
         used = {p for p in paths if p.is_dir()}
         dirs = tuple(d for d in _SCAN_DIRS if (root / d).is_dir()) if used else ()
         index = _Index(root, dirs)
