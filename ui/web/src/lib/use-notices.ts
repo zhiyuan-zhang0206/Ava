@@ -109,9 +109,18 @@ export function useNotices(): NoticesFeed {
  *  read immediately. The SSE-triggered refetch reconciles a beat later (and
  *  is a no-op against server truth), and the resolved history still arrives
  *  from the server. Only the open feed is touched — awaiting entries are
- *  filtered too (defensive). */
+ *  filtered too (defensive).
+ *
+ *  Any in-flight open-queue refetch is cancelled first so a pre-resolve
+ *  snapshot cannot land over the drop and resurrect the row (task #3269). */
 export function dropOpenNotices(queryClient: QueryClient, noticeIds: number[]): void {
   if (noticeIds.length === 0) return;
+  // Cancel the in-flight open-queue refetch first: its snapshot predates this
+  // drop, and letting it land would resurrect the just-resolved row until the
+  // next SSE-driven refetch corrects it — visible as the row bouncing back
+  // during a resolve burst (task #3269). Same guard as the settings optimistic
+  // update (use-user-settings.ts).
+  void queryClient.cancelQueries({ queryKey: NOTICES_QUERY_KEY });
   const gone = new Set(noticeIds);
   queryClient.setQueryData<NoticesFeedWire>(NOTICES_QUERY_KEY, (old) => {
     if (!old) return old;
