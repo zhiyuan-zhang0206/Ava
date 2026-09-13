@@ -73,6 +73,7 @@ class TestParseRequest:
             b'{"verb": "down"}',
             b'{"verb": "restart"}',
             b'{"verb": "status", "name": "x"}',
+            b'{"verb": "status", "name": null}',
             b'{"verb": "up", "name": "x", "extra": 1}',
         ],
     )
