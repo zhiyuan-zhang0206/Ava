@@ -816,15 +816,43 @@ digest, blockers, object counts and byte totals with:
 ava pitr retention inspect
 ```
 
-A blocked plan exits 2 and always has zero eligible objects. The flag grants no
-delete credential, calls no remote delete API, does not alter Cloud Storage soft
-delete, and leaves daily/pre-update `pg_dump` retention unchanged. Eligibility
+A blocked plan exits 2 and always has zero eligible objects. The planner flag
+alone grants no delete credential and calls no remote delete API; deletion has
+its own gate -- the arm carriers and the explicit commands below. The gate does
+not alter Cloud Storage soft delete and leaves daily/pre-update `pg_dump`
+retention unchanged. Eligibility
 also remains zero while any candidate is unprotected, while the plan is stale,
 or while timeline history ancestry has not been authenticated. A WAL/history
 object is continuous only after its local ACK and viewer-only remote inventory
 entry match exactly on canonical archive/object path, generation, size, CRC32C,
 and immutable metadata; any missing, extra, duplicate, or conflicting entry
 blocks the complete plan.
+
+### Retention deletion gate (arm / run-once / disable)
+
+The deletion machinery ships armed-off, with exactly one sanctioned opener --
+the explicit command; the carriers in the unit `.env` are never hand-edited.
+
+```bash
+ava pitr retention status                            # carriers, plan, daemon state, journal tail
+ava pitr retention arm --digest <SHA256> --confirm   # approve the current plan digest
+ava pitr retention run-once --confirm                # operator-present first pass (same executor)
+ava pitr retention disable --confirm                 # clear the carriers; back to dry-run
+```
+
+`arm` fails closed unless the stored plan is unblocked and its digest equals
+`--digest`; every flipping command only previews without `--confirm`. The
+scheduler re-reads the carriers from the unit `.env` on every tick, so a flip
+takes effect on the next tick without a restart. Deletion still requires the
+approved digest to hold for consecutive ticks, and the first execution of a
+process recomputes the plan and re-compares the digest immediately before
+deleting; `run-once` runs exactly that recompute-then-execute sequence through
+the same bounded executor -- the operator-present form of the first real run.
+Every flip and every pass append to
+`$AVA_HOME/physical-backup/retention-journal/journal.jsonl` (actor, full
+command, plan digest, before/after carrier state); `retention status` shows the
+latest records. The full procedure and the pre-open cost comparison live with
+the retention design (task #2150).
 
 All sessions have cwd set to the prod path `~/.ava/source/` (see "Prod and dev clone paths" above).
 Session commands run under `bash -lc` (#476) — the login-shell flag pulls in the user's
