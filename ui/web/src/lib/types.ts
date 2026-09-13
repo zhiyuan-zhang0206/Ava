@@ -295,6 +295,18 @@ export interface CompactRequestEvent extends BaseEvent {
 export interface CompactDoneEvent extends BaseEvent {
   readonly role: "compact_done";
 }
+export interface CompactStartedEvent extends BaseEvent {
+  readonly role: "compact_started";
+  readonly compact_id: string;
+  readonly started_at: string;
+  readonly mode: "request" | "auto";
+}
+export interface CompactFinishedEvent extends BaseEvent {
+  readonly role: "compact_finished";
+  readonly compact_id: string;
+  readonly status: "success" | "failure" | "replaced";
+  readonly finished_at: string;
+}
 export interface CodeStartEvent extends BaseEvent {
   readonly role: "code_start";
   readonly item_id: string;
@@ -434,6 +446,8 @@ export type SystemEvent =
   | ChatDeltaEvent
   | CompactRequestEvent
   | CompactDoneEvent
+  | CompactStartedEvent
+  | CompactFinishedEvent
   | CodeStartEvent
   | CodeDeltaEvent
   | ReasoningStartEvent

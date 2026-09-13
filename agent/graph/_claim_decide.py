@@ -28,12 +28,14 @@ from agent.graph._context import AvaContext
 from agent.graph._nodes import BEFORE_LLM, CLAIM, END, INIT_CONTEXT
 from agent.history_dump import dump_history, history_dump_note
 from agent.hooks.compact import (
+    CompactionFailedError,
     build_compact_transition,
     conversation_messages,
     emergency_compact_summary,
     emit_compaction_monitoring,
     stamp_compact_boundary,
 )
+from agent.hooks.compact_events import emit_compact_finished, emit_compact_started
 from agent.state_channels import CIRCUIT_REASON_CONTEXT_OVERFLOW
 from shared.inbound import InboundKind
 from shared.live_events import CompactDone
@@ -71,6 +73,14 @@ async def decide(
     # ── Cancel path ──
     # Pause, but only when neither an exit nor a revive shares the batch.
     if st.cancelled and routing.cancelled_applies:
+        # Both branches below drop any pending compact payload instead of
+        # applying it — a run that generated a summary this pass can never
+        # land once the cancel wins the batch, so its live block closes as
+        # `replaced` (every started run reaches exactly one terminal state).
+        if st.compact_payload is not None and st.compact_payload[2] is not None:
+            emit_compact_finished(
+                ctx.event_publisher, agent_id, st.compact_payload[2], status="replaced"
+            )
         if st.committed_chat_ids:
             return _Outcome(
                 command=Command[ClaimGoto](
@@ -134,12 +144,19 @@ async def decide(
             event="circuit_breaker_compact",
             agent_id=agent_id,
         )
-        summary = await emergency_compact_summary(state.messages, ctx.llm)
-        st.compact_payload = (summary, AvaMsgType.COMPACT_REQUEST.value)
+        compact_run_id = emit_compact_started(ctx.event_publisher, agent_id, mode="auto")
+        try:
+            summary = await emergency_compact_summary(state.messages, ctx.llm)
+        except CompactionFailedError:
+            # Transient failures exhausted — the fallback rescue did not
+            # happen either; close the live block before the turn aborts.
+            emit_compact_finished(ctx.event_publisher, agent_id, compact_run_id, status="failure")
+            raise
+        st.compact_payload = (summary, AvaMsgType.COMPACT_REQUEST.value, compact_run_id)
 
     # ── Compact path ──
     if st.compact_payload is not None:
-        summary_text, compact_kind = st.compact_payload
+        summary_text, compact_kind, compact_run_id = st.compact_payload
         assert ctx.event_publisher is not None, "decide compact path requires ctx.event_publisher"  # noqa: S101
         emit_compaction_monitoring(
             state.messages,
@@ -148,6 +165,9 @@ async def decide(
             compact_kind=compact_kind,
         )
         ctx.event_publisher.emit(CompactDone(agent_id=agent_id).model_dump_json())
+        # Terminal signal for the run's live block; CompactDone above keeps its
+        # own meaning (messages modified in place — UI re-fetch).
+        emit_compact_finished(ctx.event_publisher, agent_id, compact_run_id, status="success")
         await stamp_compact_boundary(ctx.ops_pool, agent_id)
         # Defer any chats co-batched with the compact: they arrived while the
         # turn was in flight and were never part of the summarized history, so
@@ -187,16 +207,19 @@ async def decide(
         # not content the compact summary may carry — and build_compact_transition
         # types extra_msgs as AnyMessage, which excludes them.
         extra_msgs = [cast(AnyMessage, m) for m in st.new_msgs if not isinstance(m, RemoveMessage)]
+        summary_kwargs: dict[str, str] = {
+            "ava_msg_type": compact_kind,
+            "ava_created_at": datetime.now(UTC).isoformat(),
+        }
+        # The durable anchor tying this summary to its live run — the auto
+        # path's summary carries the same key (identical message contract).
+        if compact_run_id is not None:
+            summary_kwargs["ava_compact_id"] = compact_run_id
         transition = build_compact_transition(
             summary_text,
             resume=st.next_goto,
             extra_msgs=extra_msgs,
-            summary_kwargs={
-                "additional_kwargs": {
-                    "ava_msg_type": compact_kind,
-                    "ava_created_at": datetime.now(UTC).isoformat(),
-                },
-            },
+            summary_kwargs={"additional_kwargs": summary_kwargs},
         )
         return _Outcome(
             command=Command[ClaimGoto](

@@ -65,6 +65,35 @@ def _committed_publishes(pub: MagicMock) -> list[dict]:
     ]
 
 
+def _events_with_role(pub: MagicMock, role: str) -> list[dict[str, Any]]:
+    """Every event_publisher.emit payload for *role*, parsed, in emit order."""
+    import json
+
+    return [
+        json.loads(c.args[0])
+        for c in pub.emit.call_args_list
+        if json.loads(c.args[0]).get("role") == role
+    ]
+
+
+def _pair_compact_cycles(pub: MagicMock) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    """Pair every compact_started with its exactly-one compact_finished.
+
+    Task #3323's completeness invariant: a started run reaches exactly one
+    terminal state (success / failure / replaced), otherwise the frontend's
+    ticking block would hang forever. Returns (started, finished) pairs in
+    start order.
+    """
+    started = _events_with_role(pub, "compact_started")
+    finished = _events_with_role(pub, "compact_finished")
+    by_id = {e["compact_id"]: e for e in finished}
+    assert len(finished) == len(by_id), f"duplicate terminal for one run: {finished}"
+    assert {e["compact_id"] for e in started} == set(by_id), (
+        f"unpaired compact runs: started={started}, finished={finished}"
+    )
+    return [(s, by_id[s["compact_id"]]) for s in started]
+
+
 def _fake_llm(summary: str = "synthetic compaction summary") -> Any:
     """Mock LLM — bind_tools(...).ainvoke returns AIMessage(content=summary),
     matching the call shape of generate_summary (same tool binding as the main llm node)."""
@@ -483,6 +512,147 @@ async def test_claim_compact_request_calls_backend_llm(
     assert tail[0].content == compose_summary_message("LLM-generated summary")  # pyright: ignore[reportUnknownMemberType]
 
 
+async def test_claim_compact_request_emits_live_run_pair_with_durable_anchor(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+):
+    """Task #3323: the claim-path compact run (UI Compact / auto-resurrect)
+    emits compact_started before the Compaction LLM call and
+    compact_finished(success) when the summary is applied — same compact_id —
+    and the summary message carries the durable anchor ava_compact_id."""
+    tid = spawn_agent()
+    _insert_inbound_kind(db_conn, tid, "", "compact_request")
+    state = AgentState(
+        messages=[
+            SystemMessage(content="<sys>"),
+            *(HumanMessage(content=f"history-{i}") for i in range(8)),
+        ]
+    )
+    publisher = MagicMock()
+
+    cmd = await claim_node(
+        state,
+        _make_runtime(
+            ops_pool=aops_pool,
+            llm=_fake_llm("LLM-generated summary"),
+            event_publisher=publisher,
+        ),
+        _config(tid),
+    )
+
+    [(started, finished)] = _pair_compact_cycles(publisher)
+    assert started["mode"] == "request"
+    assert finished["status"] == "success"
+    assert cmd.goto == "init_context"
+    tail = _compact_tail(cmd.update)
+    assert tail[0].additional_kwargs["ava_compact_id"] == started["compact_id"]  # pyright: ignore[reportUnknownMemberType]
+
+
+async def test_claim_two_compact_requests_second_replaces_first(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+):
+    """Two compact_requests claimed in one batch (double-triggered Compact):
+    the later summary wins the payload slot; the earlier run's generated
+    summary can never be applied, so its live block closes as `replaced`
+    (task #3323) and the applied summary is the second one."""
+    tid = spawn_agent()
+    _insert_inbound_kind(db_conn, tid, "", "compact_request")
+    _insert_inbound_kind(db_conn, tid, "", "compact_request")
+    state = AgentState(
+        messages=[
+            SystemMessage(content="<sys>"),
+            *(HumanMessage(content=f"history-{i}") for i in range(8)),
+        ]
+    )
+    llm = MagicMock()
+    llm.bind_tools.return_value.ainvoke = AsyncMock(
+        side_effect=[AIMessage(content="first summary"), AIMessage(content="second summary")]
+    )
+    publisher = MagicMock()
+
+    cmd = await claim_node(
+        state,
+        _make_runtime(ops_pool=aops_pool, llm=llm, event_publisher=publisher),
+        _config(tid),
+    )
+
+    pairs = _pair_compact_cycles(publisher)
+    assert [p[1]["status"] for p in pairs] == ["replaced", "success"]
+    assert llm.bind_tools.return_value.ainvoke.await_count == 2
+    tail = _compact_tail(cmd.update)
+    assert tail[0].content == compose_summary_message("second summary")  # pyright: ignore[reportUnknownMemberType]
+    assert tail[0].additional_kwargs["ava_compact_id"] == pairs[1][0]["compact_id"]  # pyright: ignore[reportUnknownMemberType]
+
+
+async def test_claim_compact_summary_supersedes_pending_request_and_closes_it_replaced(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+):
+    """A batch whose compact_request is followed by an agent compact_summary:
+    the request's LLM run produced a summary, but the summary overwrites the
+    payload slot, so the run's live block closes as `replaced` (task #3323)
+    and the applied summary is the agent-authored one (no live-run anchor).
+    """
+    tid = spawn_agent()
+    _insert_inbound_kind(db_conn, tid, "", "compact_request")
+    _insert_inbound_kind(db_conn, tid, "agent-authored summary", "compact_summary")
+    state = AgentState(
+        messages=[
+            SystemMessage(content="<sys>"),
+            *(HumanMessage(content=f"history-{i}") for i in range(8)),
+        ]
+    )
+    llm = _fake_llm("llm-generated summary")
+    publisher = MagicMock()
+
+    cmd = await claim_node(
+        state,
+        _make_runtime(ops_pool=aops_pool, llm=llm, event_publisher=publisher),
+        _config(tid),
+    )
+
+    [(started, finished)] = _pair_compact_cycles(publisher)
+    assert started["mode"] == "request"
+    assert finished["status"] == "replaced"
+    assert llm.bind_tools.return_value.ainvoke.await_count == 1
+    tail = _compact_tail(cmd.update)
+    assert tail[0].content == compose_summary_message("agent-authored summary")  # pyright: ignore[reportUnknownMemberType]
+    assert "ava_compact_id" not in tail[0].additional_kwargs  # pyright: ignore[reportUnknownMemberType]
+
+
+async def test_claim_cancel_beats_pending_compact_and_closes_it_replaced(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+):
+    """cancel co-batched with an already-run compact_request: the cancel path
+    drops the compact payload instead of applying it — the run's live block
+    must still close (replaced), and no summary enters the new context."""
+    tid = spawn_agent()
+    _insert_inbound_kind(db_conn, tid, "", "compact_request")
+    _insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
+    state = AgentState(
+        messages=[
+            SystemMessage(content="<sys>"),
+            *(HumanMessage(content=f"history-{i}") for i in range(8)),
+        ]
+    )
+    publisher = MagicMock()
+
+    cmd = await claim_node(
+        state,
+        _make_runtime(
+            ops_pool=aops_pool,
+            llm=_fake_llm("never applied"),
+            event_publisher=publisher,
+        ),
+        _config(tid),
+    )
+
+    [(started, finished)] = _pair_compact_cycles(publisher)
+    assert started["mode"] == "request"
+    assert finished["status"] == "replaced"
+    assert cmd.goto == "claim"
+    assert cmd.update["halted"] is True  # type: ignore[index]
+    assert cmd.update is not None and "context_reset" not in cmd.update
+
+
 async def test_claim_compact_request_empty_conversation_consumed_as_noop(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ):
@@ -529,18 +699,22 @@ async def test_claim_compact_request_retries_then_raises_compaction_failed(
     failing = AsyncMock(side_effect=RuntimeError("provider 502 on every attempt"))
     llm = MagicMock()
     llm.bind_tools.return_value.ainvoke = failing
+    publisher = MagicMock()
 
     from agent.hooks.compact import COMPACT_MAX_ATTEMPTS, CompactionFailedError
 
     with pytest.raises(CompactionFailedError, match="no usable summary across"):
         await claim_node(
             state,
-            _make_runtime(ops_pool=aops_pool, llm=llm),
+            _make_runtime(ops_pool=aops_pool, llm=llm, event_publisher=publisher),
             _config(
                 tid,
             ),
         )
     assert failing.await_count == COMPACT_MAX_ATTEMPTS
+    [(started, finished)] = _pair_compact_cycles(publisher)
+    assert started["mode"] == "request"
+    assert finished["status"] == "failure"
 
 
 async def test_claim_compact_request_retries_then_succeeds(

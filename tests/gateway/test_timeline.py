@@ -634,6 +634,21 @@ class TestAvaMsgTypeDispatch:
         assert items[0].kind == "system_marker"
         assert items[0].source is None
 
+    def test_compact_summary_item_carries_the_compact_run_id(self) -> None:
+        """Task #3323: the ava_compact_id durable anchor rides into the
+        timeline item — the frontend matches the live ticking block to this
+        summary by it. Pre-anchor summaries render with None."""
+        from shared.message_kwargs import AvaMsgType
+
+        anchored = self._render(
+            self._tagged(AvaMsgType.COMPACT_REQUEST.value, ava_compact_id="run-1")
+        )
+        assert len(anchored) == 1
+        assert anchored[0].kind == "inbound_compact_request"
+        assert anchored[0].compact_id == "run-1"
+        unanchored = self._render(self._tagged(AvaMsgType.COMPACT_SUMMARY.value))
+        assert unanchored[0].compact_id is None
+
 
 class TestAttachItems:
     """`build_timeline_items` dispatch for ava_msg_type="attach" messages.

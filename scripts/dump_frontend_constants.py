@@ -15,6 +15,11 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+# Put project root on sys.path so `from shared.live_events import ...` finds
+# this checkout's module (without it, an editable install of another checkout
+# shadows it — same pattern as dump_event_fixtures.py / dump_openapi.py).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from shared.live_events import EVENT_COALESCE_MS
 
 _OUT = Path("ui/web/src/lib/constants-generated.ts")

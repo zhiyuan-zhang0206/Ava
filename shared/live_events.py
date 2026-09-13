@@ -107,6 +107,48 @@ class CompactDone(_Base):
     role: Literal["compact_done"] = "compact_done"
 
 
+class CompactStarted(_Base):
+    """A forced/auto compaction began — the compaction LLM is running and
+    the history has not been replaced yet; the UI renders a ticking
+    "Compacting" block until the matching `CompactFinished` (same
+    `compact_id`) arrives.
+
+    `started_at` is the server-side ISO-8601 UTC start time — the countdown
+    basis (transport arrival can lag a degraded link). `mode` names the
+    trigger class: `request` = an explicitly enqueued compact_request (the
+    UI/API Compact action), `auto` = framework-initiated without a request
+    (the before_llm threshold hook or the overflow circuit-breaker rescue).
+    The agent-authored `ava.self.compact` path is not a forced compaction —
+    it keeps emitting `CompactRequest` / `CompactDone` only, without a
+    ticking block."""
+
+    role: Literal["compact_started"] = "compact_started"
+    compact_id: str
+    started_at: str
+    mode: Literal["request", "auto"]
+
+
+class CompactFinished(_Base):
+    """Terminal signal for one compaction run (`compact_id`) — emitted
+    exactly once per `CompactStarted`, on every path.
+
+    `status`:
+    - `success` — a summary was generated and applied; `CompactDone` is
+      emitted at the same point and keeps its meaning (messages modified in
+      place; UI re-fetch), so this event only closes the ticking block;
+    - `failure` — every attempt failed (`CompactionFailedError`); the
+      conversation is preserved and the turn aborts;
+    - `replaced` — the run's outcome was discarded without being applied:
+      superseded by a later compaction in the same claim batch, or dropped
+      by a co-batched cancel.
+    """
+
+    role: Literal["compact_finished"] = "compact_finished"
+    compact_id: str
+    status: Literal["success", "failure", "replaced"]
+    finished_at: str
+
+
 class CodeStart(_Base):
     """LLM started emitting agent code — the UI starts a new code
     block. See `item_id` in ChatStart."""
@@ -478,6 +520,8 @@ Event = Annotated[
     | ChatDelta
     | CompactRequest
     | CompactDone
+    | CompactStarted
+    | CompactFinished
     | CodeStart
     | CodeDelta
     | ReasoningStart
@@ -515,6 +559,8 @@ _ROLE_CLASSES: tuple[tuple[type[Event], bool], ...] = (
     (ChatDelta, False),
     (CompactRequest, False),
     (CompactDone, False),
+    (CompactStarted, False),
+    (CompactFinished, False),
     (CodeStart, False),
     (CodeDelta, False),
     (ReasoningStart, False),
