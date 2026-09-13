@@ -179,6 +179,10 @@ describe("AlertsProvider connection auth gating", () => {
     mocks.checkAuth.mockReset();
     mocks.checkAuth.mockResolvedValue({ authenticated: true });
     vi.stubGlobal("EventSource", MockEventSource);
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
   });
 
   afterEach(() => {
@@ -344,5 +348,83 @@ describe("AlertsProvider connection auth gating", () => {
       vi.advanceTimersByTime(1);
     });
     expect(expectInstance()).not.toBe(second);
+  });
+});
+
+describe("AlertsProvider hidden-tab gating", () => {
+  beforeEach(() => {
+    lastInstance = null;
+    queryClients = [];
+    mocks.getAlerts.mockReset();
+    mocks.getAlerts.mockResolvedValue(resp([], 0));
+    mocks.checkAuth.mockReset();
+    mocks.checkAuth.mockResolvedValue({ authenticated: true });
+    vi.stubGlobal("EventSource", MockEventSource);
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+  });
+
+  afterEach(() => {
+    // Leave the shared document visible for the next test.
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    cleanup();
+    for (const queryClient of queryClients) queryClient.clear();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("hidden tab closes the stream and polls the alerts caches every 7s; visible reopens", async () => {
+    const { result } = renderHook(() => useAuth().status, { wrapper: alertsWrapper() });
+
+    await waitFor(() => expect(result.current).toBe("authenticated"));
+    await waitForInstance();
+    const first = expectInstance();
+    const queryClient = queryClients[0];
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+
+    try {
+      vi.useFakeTimers();
+      act(() => {
+        Object.defineProperty(document, "visibilityState", {
+          configurable: true,
+          value: "hidden",
+        });
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+
+      // The stream effect closes its EventSource (freeing the connection slot).
+      expect(first.readyState).toBe(MockEventSource.CLOSED);
+
+      invalidateSpy.mockClear();
+      act(() => {
+        vi.advanceTimersByTime(7_000);
+      });
+      // The hidden poll refreshes every ["alerts", ...] cache (badge + section).
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["alerts"] });
+
+      invalidateSpy.mockClear();
+      act(() => {
+        Object.defineProperty(document, "visibilityState", {
+          configurable: true,
+          value: "visible",
+        });
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+
+      // Returning visible opens a fresh stream and stops the poll.
+      expect(expectInstance()).not.toBe(first);
+      expect(expectInstance().url).toContain("/api/alerts/stream");
+      act(() => {
+        vi.advanceTimersByTime(7_000);
+      });
+      expect(invalidateSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
