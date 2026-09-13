@@ -5,6 +5,7 @@ import * as ScrollAreaPrimitive from "@radix-ui/react-scroll-area"
 
 import { cn } from "@/lib/utils"
 import { FLEX, FLEX_1, OVERFLOW_HIDDEN } from "@/lib/layout";
+import { useNonce } from "@/lib/nonce-context";
 
 const SCROLLBAR_IDLE_DELAY_MS = 800
 
@@ -21,6 +22,11 @@ function ScrollArea({
 }) {
   const [isScrollActive, setIsScrollActive] = React.useState(false)
   const [isDraggingScrollbar, setIsDraggingScrollbar] = React.useState(false)
+  // Radix injects a <style> hiding the native scrollbar; the production
+  // style-src only applies it when it carries the page nonce. Forward the
+  // nonce so the injection is allowed instead of console-refused; the rule
+  // compiled in globals.css stays as the nonce-less fallback.
+  const nonce = useNonce()
   const idleTimerRef = React.useRef<number | null>(null)
 
   // Element refs for the direct thumb positioning in positionThumb below.
@@ -120,6 +126,7 @@ function ScrollArea({
     >
       <ScrollAreaPrimitive.Viewport
         ref={viewportRef}
+        nonce={nonce}
         data-slot="scroll-area-viewport"
         className={cn(
           "size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1",
