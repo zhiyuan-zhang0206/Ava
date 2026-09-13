@@ -9,6 +9,7 @@ const sampleSummary: TurnSummary = {
   thinking: 1,
   code: 1,
   output: 1,
+  turns: 1,
   systemPrompts: 0,
   compactSummaries: 0,
   memories: 0,
@@ -283,7 +284,7 @@ describe("TurnBlock component", () => {
     expect(toggle.getAttribute("data-expanded")).toBe("false");
     expect(toggle.getAttribute("data-stuck")).toBe("false");
     expect(toggle.className).not.toContain("sticky");
-    expect(toggle.className).not.toContain("shadow-xs");
+    expect(toggle.className).not.toContain("shadow-[");
   });
 
   it("renders expanded turn block with sticky classes", () => {
@@ -326,7 +327,11 @@ describe("TurnBlock component", () => {
     expect(toggle.getAttribute("data-expanded")).toBe("true");
     expect(toggle.getAttribute("data-stuck")).toBe("true");
     expect(toggle.className).toContain("backdrop-blur-md");
-    expect(toggle.className).toContain("shadow-xs");
+    // The stuck variant carries its paint-only edge seals: 16px right over
+    // the scroller gutter (#3224) and 2px bottom against child-pin slits (#3308).
+    expect(toggle.className).toContain("shadow-[");
+    expect(toggle.className).toContain("16px_0_0_0_var(--background)");
+    expect(toggle.className).toContain("0_2px_0_0_var(--background)");
     expect(toggle.className).toContain("border-b");
     // …with the border's height compensated: a bare border made the stuck
     // header 1px taller than the unstuck one, and that 1px drove the
