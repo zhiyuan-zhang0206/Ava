@@ -298,4 +298,59 @@ describe("dropOpenNotices (Task #1814)", () => {
     dropOpenNotices(queryClient, [1]);
     expect(queryClient.getQueryData(NOTICES_QUERY_KEY)).toBeUndefined();
   });
+
+  it("cancels the in-flight open-queue refetch so a pre-resolve snapshot cannot resurrect a dropped row (task #3269)", async () => {
+    queryClient.setQueryData(NOTICES_QUERY_KEY, {
+      open: [
+        { id: 1, title: "resolved" },
+        { id: 2, title: "next" },
+      ],
+      awaiting: [],
+      resolved_page: [],
+      next_cursor: null,
+    });
+
+    // A refetch is mid-flight (e.g. a previous resolve's SSE-driven refetch);
+    // its response carries the pre-resolve snapshot — notice 1 still present.
+    let release!: () => void;
+    const inFlight = new Promise<NoticesFeed>((resolve) => {
+      release = () =>
+        resolve({
+          open: [
+            { id: 1, title: "resolved" },
+            { id: 2, title: "next" },
+          ],
+          awaiting: [],
+          resolved_page: [],
+          next_cursor: null,
+        } as unknown as NoticesFeed);
+    });
+    let fetches = 0;
+    const fetchPromise = queryClient.query({
+      queryKey: NOTICES_QUERY_KEY,
+      queryFn: () => {
+        fetches += 1;
+        return inFlight;
+      },
+    });
+    fetchPromise.catch(() => undefined); // a cancelled fetch rejects; handled here
+    // Confirm the refetch is genuinely in flight before the drop (a cache
+    // short-circuit would make this test green for the wrong reason).
+    await vi.waitFor(() => expect(queryClient.isFetching({ queryKey: NOTICES_QUERY_KEY })).toBe(1));
+
+    // The user resolves notice 1 while that refetch is in flight.
+    dropOpenNotices(queryClient, [1]);
+    expect(
+      queryClient.getQueryData<NoticesFeedWire>(NOTICES_QUERY_KEY)?.open.map((n) => n.id),
+    ).toEqual([2]);
+
+    release();
+    // Wait for the fetch to SETTLE before asserting — checking too early would
+    // pass before a late stale snapshot lands.
+    await vi.waitFor(() => expect(queryClient.isFetching({ queryKey: NOTICES_QUERY_KEY })).toBe(0));
+    expect(fetches).toBe(1);
+    expect(
+      queryClient.getQueryData<NoticesFeedWire>(NOTICES_QUERY_KEY)?.open.map((n) => n.id),
+    ).toEqual([2]);
+  });
 });
