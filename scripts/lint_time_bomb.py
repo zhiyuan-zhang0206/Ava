@@ -153,7 +153,7 @@ class _Index:
                     continue
                 try:
                     tree = ast.parse(path.read_text(encoding="utf-8"))
-                except (OSError, SyntaxError):
+                except (OSError, UnicodeDecodeError, SyntaxError):
                     continue
                 mod = rel[:-3].replace("/", ".")
                 self.trees[mod] = tree
@@ -667,7 +667,7 @@ def _lint_test_file(index: _Index, path: Path, rel: str) -> list[str]:
     try:
         text = path.read_text(encoding="utf-8")
         tree = ast.parse(text)
-    except (OSError, SyntaxError):
+    except (OSError, UnicodeDecodeError, SyntaxError):
         return []
     source_lines = text.splitlines()
     errors: list[str] = _lint_fixture_dates(path, tree, source_lines)
