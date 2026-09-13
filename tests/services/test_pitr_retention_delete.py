@@ -6,6 +6,7 @@ limit matrix, and the append-only journal."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, cast
@@ -27,8 +28,14 @@ from services.pitr.retention_manifest import (
     RetentionDecision,
     RetentionObject,
     RetentionPlan,
+    RetentionSidecar,
 )
-from tests.services.oss_test_support import FakeOssBucket, make_delete_store
+from tests.services.oss_test_support import (
+    PREFIX,
+    FakeOssBucket,
+    make_delete_store,
+    make_inventory,
+)
 
 
 class _FakeDeleteBlob:
@@ -376,3 +383,280 @@ def test_journal_appends_fsynced_jsonl_records(tmp_path: Path) -> None:
     assert all(record["at"] for record in records)
     assert path.stat().st_mode & 0o777 == 0o600
     assert path.parent.stat().st_mode & 0o777 == 0o700
+
+
+# ── sidecar pairs and orphan cleanup (design section 2.5) ──
+
+
+def _plan_units(
+    decisions: tuple[RetentionDecision, ...] = (),
+    *,
+    orphan_sidecars: tuple[RetentionSidecar, ...] = (),
+    blocked: tuple[str, ...] = (),
+) -> RetentionPlan:
+    eligible = () if blocked else decisions
+    return RetentionPlan(
+        schema_version=PLAN_SCHEMA_VERSION,
+        retained_chain_count=2,
+        evidence_sha256="evidence",
+        protected_chain_ids=("chain-a",),
+        unprotected_chain_ids=(),
+        oldest_retained_chain_id="chain-a",
+        ack_high_water=None,
+        blocked_reasons=blocked,
+        retained=(),
+        eligible=eligible,
+        retained_bytes=0,
+        eligible_bytes=sum(item.object.size for item in eligible),
+        orphan_sidecars=() if blocked else orphan_sidecars,
+    )
+
+
+def test_executor_deletes_host_then_its_sidecar(tmp_path: Path) -> None:
+    host = _object("pairs/base.enc", pin="host-pin", size=3)
+    sidecar = RetentionSidecar("pairs/base.enc.ack.json", "side-pin", 2)
+    plan = _plan_units((RetentionDecision(host, "older drilled base chain", sidecar),))
+    store = _FakeDeleteStore()
+    gone = _Gone()
+
+    summary = execute_retention_plan(
+        plan,
+        expected_digest=plan.digest(),
+        delete_store=store,
+        verify_absent=gone,
+        remote_total_bytes=1000,
+        journal=_journal(tmp_path),
+    )
+
+    assert store.calls == [
+        ("pairs/base.enc", "host-pin"),
+        ("pairs/base.enc.ack.json", "side-pin"),
+    ]
+    assert gone.checked == ["pairs/base.enc", "pairs/base.enc.ack.json"]
+    assert (summary.deleted, summary.sidecars_deleted) == (1, 1)
+    units = [
+        (record.get("unit"), record.get("outcome"))
+        for record in _records(tmp_path)
+        if record["kind"] == "result"
+    ]
+    assert units == [(None, "deleted"), ("sidecar", "deleted")]
+    assert _records(tmp_path)[-1]["sidecars_deleted"] == 1
+
+
+def test_executor_holds_the_sidecar_until_the_host_delete_is_confirmed(
+    tmp_path: Path,
+) -> None:
+    host = _object("pairs/base.enc", pin="host-pin", size=3)
+    sidecar = RetentionSidecar("pairs/base.enc.ack.json", "side-pin", 2)
+    decision = RetentionDecision(host, "older drilled base chain", sidecar)
+
+    # The delete applied but the re-observation still sees the host: keep
+    # the sidecar until the host is confirmed gone.
+    plan = _plan_units((decision,))
+    store = _FakeDeleteStore()
+    summary = execute_retention_plan(
+        plan,
+        expected_digest=plan.digest(),
+        delete_store=store,
+        verify_absent=_Gone(present={"pairs/base.enc"}),
+        remote_total_bytes=1000,
+        journal=_journal(tmp_path),
+    )
+    assert store.calls == [("pairs/base.enc", "host-pin")]
+    assert (summary.verify_failed, summary.sidecars_deleted, summary.sidecars_failed) == (1, 0, 0)
+
+    # A raised host delete keeps the sidecar untouched too.
+    raising = _FakeDeleteStore({"pairs/base.enc": PermanentObjectStoreError("injected")})
+    second = execute_retention_plan(
+        plan,
+        expected_digest=plan.digest(),
+        delete_store=raising,
+        verify_absent=_Gone(),
+        remote_total_bytes=1000,
+        journal=_journal(tmp_path),
+    )
+    assert raising.calls == [("pairs/base.enc", "host-pin")]
+    assert (second.failed, second.sidecars_deleted, second.sidecars_failed) == (1, 0, 0)
+
+    # An already-absent host defers its sidecar to the next tick's orphan path.
+    absent = _FakeDeleteStore({"pairs/base.enc": DeleteOutcome.ABSENT})
+    third = execute_retention_plan(
+        plan,
+        expected_digest=plan.digest(),
+        delete_store=absent,
+        verify_absent=_Gone(),
+        remote_total_bytes=1000,
+        journal=_journal(tmp_path),
+    )
+    assert absent.calls == [("pairs/base.enc", "host-pin")]
+    assert (third.absent, third.sidecars_deleted, third.sidecars_failed) == (1, 0, 0)
+
+
+def test_executor_cleans_orphan_sidecars_under_the_tick_budgets(tmp_path: Path) -> None:
+    sidecars = tuple(
+        RetentionSidecar(f"pairs/x{index}.enc.ack.json", f"pin-{index}", 2) for index in range(3)
+    )
+    plan = _plan_units(orphan_sidecars=sidecars)
+    store = _FakeDeleteStore()
+    now = [0.0]
+    sleeps: list[float] = []
+
+    def _sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        now[0] += seconds
+
+    summary = execute_retention_plan(
+        plan,
+        expected_digest=plan.digest(),
+        delete_store=store,
+        verify_absent=_Gone(),
+        remote_total_bytes=1000,
+        journal=_journal(tmp_path),
+        limits=RetentionExecutionLimits(max_objects=2, rate_per_second=2.0),
+        clock=lambda: now[0],
+        sleep=_sleep,
+    )
+
+    assert store.calls == [("pairs/x0.enc.ack.json", "pin-0"), ("pairs/x1.enc.ack.json", "pin-1")]
+    assert (summary.orphans_deleted, summary.attempted, summary.skipped) == (2, 2, 1)
+    assert sleeps == [pytest.approx(0.5)]
+    tick = _records(tmp_path)[-1]
+    assert (tick["kind"], tick["orphans_deleted"], tick["skipped"]) == ("tick", 2, 1)
+
+
+class _InterruptedSidecarStore:
+    """Wraps the real OSS delete store and fails exactly one sidecar delete."""
+
+    def __init__(self, inner: Any, sidecar_name: str) -> None:
+        self._inner = inner
+        self._sidecar_name = sidecar_name
+
+    def delete_if_match(self, object_name: str, identity: str) -> DeleteOutcome:
+        if object_name == self._sidecar_name:
+            raise PermanentObjectStoreError("injected interruption between host and sidecar")
+        return self._inner.delete_if_match(object_name, identity)
+
+
+def test_interrupted_pair_leaves_an_orphan_and_the_next_tick_cleans_it(tmp_path: Path) -> None:
+    """The full chain: pair delete interrupted -> inventory sees the orphan
+    -> the next tick's plan cleans it through the same delete protocol."""
+    fake = FakeOssBucket()
+    host_name = f"{PREFIX}/base/20260101T000000Z/" + "b" * 64 + "/base.tar.zst.enc"
+    host_payload = b"base-ciphertext"
+    host_etag = fake.seed(host_name, data=host_payload)
+    sidecar_bytes = json.dumps(
+        {
+            "object_name": host_name,
+            "pin_token": host_etag,
+            "size": len(host_payload),
+            "checksum_algo": MD5,
+            "checksum_value": hashlib.md5(host_payload).hexdigest(),  # noqa: S324 — fixture digest
+            "metadata": {},
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    sidecar_name = f"{host_name}.ack.json"
+    sidecar_etag = fake.seed(sidecar_name, data=sidecar_bytes)
+    host = RetentionObject(
+        host_name,
+        host_etag,
+        len(host_payload),
+        None,
+        "base",
+        MD5,
+        hashlib.md5(host_payload).hexdigest(),  # noqa: S324 — fixture digest
+        (),
+    )
+    plan = _plan_units(
+        (
+            RetentionDecision(
+                host,
+                "older drilled base chain",
+                RetentionSidecar(sidecar_name, sidecar_etag, len(sidecar_bytes)),
+            ),
+        )
+    )
+
+    first = execute_retention_plan(
+        plan,
+        expected_digest=plan.digest(),
+        delete_store=_InterruptedSidecarStore(make_delete_store(fake), sidecar_name),
+        verify_absent=lambda name: name not in fake.files,
+        remote_total_bytes=10000,
+        journal=_journal(tmp_path),
+    )
+    assert (first.deleted, first.sidecars_failed) == (1, 1)
+    assert host_name not in fake.files
+    assert sidecar_name in fake.files
+
+    snapshot = make_inventory(fake).snapshot()
+    assert [item.sidecar.object_name for item in snapshot.orphan_sidecars] == [sidecar_name]
+    orphan = snapshot.orphan_sidecars[0]
+    assert orphan.host.object_name == host_name
+    assert orphan.host.pin_token == host_etag
+
+    second_plan = _plan_units(orphan_sidecars=(orphan.sidecar,))
+    second = execute_retention_plan(
+        second_plan,
+        expected_digest=second_plan.digest(),
+        delete_store=make_delete_store(fake),
+        verify_absent=lambda name: name not in fake.files,
+        remote_total_bytes=10000,
+        journal=_journal(tmp_path),
+    )
+    assert second.orphans_deleted == 1
+    assert sidecar_name not in fake.files
+
+
+def test_executor_records_sidecar_absent_and_verify_failure(tmp_path: Path) -> None:
+    host = _object("pairs/base.enc", pin="host-pin", size=3)
+    sidecar = RetentionSidecar("pairs/base.enc.ack.json", "side-pin", 2)
+    decision = RetentionDecision(host, "older drilled base chain", sidecar)
+    plan = _plan_units((decision,))
+
+    already_gone = _FakeDeleteStore({"pairs/base.enc.ack.json": DeleteOutcome.ABSENT})
+    first = execute_retention_plan(
+        plan,
+        expected_digest=plan.digest(),
+        delete_store=already_gone,
+        verify_absent=_Gone(),
+        remote_total_bytes=1000,
+        journal=_journal(tmp_path),
+    )
+    assert (first.sidecars_absent, first.sidecars_failed, first.sidecars_deleted) == (1, 0, 0)
+
+    fading = _FakeDeleteStore()
+    second = execute_retention_plan(
+        plan,
+        expected_digest=plan.digest(),
+        delete_store=fading,
+        verify_absent=_Gone(present={"pairs/base.enc.ack.json"}),
+        remote_total_bytes=1000,
+        journal=_journal(tmp_path),
+    )
+    assert (second.sidecars_deleted, second.sidecars_failed) == (0, 1)
+    sidecar_units = [
+        record.get("outcome")
+        for record in _records(tmp_path)
+        if record["kind"] == "result" and record.get("unit") == "sidecar"
+    ]
+    assert sidecar_units == ["absent", "verify-failed"]
+
+
+def test_executor_counts_orphan_sidecars_already_absent(tmp_path: Path) -> None:
+    sidecar = RetentionSidecar("pairs/y.enc.ack.json", "pin", 2)
+    plan = _plan_units(orphan_sidecars=(sidecar,))
+    store = _FakeDeleteStore({"pairs/y.enc.ack.json": DeleteOutcome.ABSENT})
+
+    summary = execute_retention_plan(
+        plan,
+        expected_digest=plan.digest(),
+        delete_store=store,
+        verify_absent=_Gone(),
+        remote_total_bytes=1000,
+        journal=_journal(tmp_path),
+    )
+
+    assert (summary.orphans_absent, summary.orphans_failed, summary.orphans_deleted) == (1, 0, 0)
+    assert store.calls == [("pairs/y.enc.ack.json", "pin")]

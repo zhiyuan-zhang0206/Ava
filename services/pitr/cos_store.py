@@ -42,6 +42,7 @@ from services.pitr.object_store import (
     RemoteObjectAck,
     TransientObjectStoreError,
 )
+from services.pitr.retention_delete import DeleteOutcome
 
 _HASH_CHUNK_BYTES = 8 * 1024 * 1024
 """Read/write granularity; the base packer and WAL staging use 8 MiB."""
@@ -81,7 +82,7 @@ class CosObjectStore:
         try:
             row = self._client.head_object(object_name)
         except CosClientError as exc:
-            raise self._map_error("COS stat", exc) from exc
+            raise _map_error("COS stat", exc) from exc
         if row is None:
             return None
         if "-" in row.etag:
@@ -262,13 +263,58 @@ class CosObjectStore:
                 f"multi-part packaging before this backend can carry it"
             )
 
-    @staticmethod
-    def _map_error(operation: str, exc: CosClientError) -> ObjectStoreError:
-        if isinstance(exc, CosTransientError):
-            return TransientObjectStoreError(f"{operation} temporarily failed: {exc}")
-        if isinstance(exc, CosNotFoundError):
-            return TransientObjectStoreError(f"{operation} raced with a missing object")
-        return PermanentObjectStoreError(f"{operation} was rejected: {exc}")
+
+class COSRetentionDeleteStore:
+    """Identity-bound deletion for COS: emulated conditional delete.
+
+    COS documents no precondition on DeleteObject (checked 2026-09-13
+    against the DELETE Object API reference and the S3-compatibility
+    surface) and answers success whether or not the object existed, so the
+    adapter re-observes the live ETag, refuses on a mismatch, deletes only
+    on a match, and the executor re-observes absence. The stat-to-delete
+    window is acceptable because the publisher path never rewrites an
+    existing name (``If-None-Match: *`` puts only).
+    """
+
+    def __init__(self, *, credentials: CosCredentials, timeout_seconds: float = 300.0) -> None:
+        self._client = CosClient(credentials, timeout_seconds=timeout_seconds)
+
+    @classmethod
+    def from_client(cls, client: CosClient) -> COSRetentionDeleteStore:
+        """Construct around a transport-controlled client for contract tests."""
+
+        instance = cls.__new__(cls)
+        instance._client = client
+        return instance
+
+    def delete_if_match(self, object_name: str, identity: str) -> DeleteOutcome:
+        """Delete iff the live ETag still equals ``identity``.
+
+        A missing object answers ABSENT (idempotent success); a different
+        live ETag answers MISMATCH and nothing is deleted.
+        """
+
+        try:
+            row = self._client.head_object(object_name)
+        except CosClientError as exc:
+            raise _map_error("COS retention head", exc) from exc
+        if row is None:
+            return DeleteOutcome.ABSENT
+        if row.etag != identity:
+            return DeleteOutcome.MISMATCH
+        try:
+            self._client.delete_object(object_name)
+        except CosClientError as exc:
+            raise _map_error("COS retention delete", exc) from exc
+        return DeleteOutcome.DELETED
+
+
+def _map_error(operation: str, exc: CosClientError) -> ObjectStoreError:
+    if isinstance(exc, CosTransientError):
+        return TransientObjectStoreError(f"{operation} temporarily failed: {exc}")
+    if isinstance(exc, CosNotFoundError):
+        return TransientObjectStoreError(f"{operation} raced with a missing object")
+    return PermanentObjectStoreError(f"{operation} was rejected: {exc}")
 
 
 def _file_digests(path: Path) -> tuple[str, str]:

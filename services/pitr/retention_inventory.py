@@ -15,13 +15,18 @@ from google.oauth2 import service_account
 
 from services.pitr.archive_shim import archive_name_is_valid
 from services.pitr.checksums import CRC32C
-from services.pitr.retention_manifest import RetentionObject
+from services.pitr.retention_manifest import OrphanSidecar, RetentionObject, SidecarPair
 
 
 @dataclass(frozen=True)
 class InventorySnapshot:
     objects: tuple[RetentionObject, ...]
     unknown_names: tuple[str, ...]
+    sidecar_pairs: tuple[SidecarPair, ...] = ()
+    """Bound sidecars observed beside a live host object (canonical order)."""
+
+    orphan_sidecars: tuple[OrphanSidecar, ...] = ()
+    """Sidecars whose host is already gone (canonical order)."""
 
 
 class RetentionInventoryReader(Protocol):
