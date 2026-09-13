@@ -51,9 +51,12 @@ from shared.paths import ava_home
 
 ORCHESTRATION_SKILLS = ("ava-workflow", "ava-dynamic-workflow", "ava-goal")
 
-# The waking agent receives only the output tail (~2000 chars), so a bad
-# list longer than this compacts to counter lines once the full report is
-# persisted and pointed to.
+# The runner delivers only the output tail (last 2000 chars); the fixed
+# report scaffold around the bad list costs ~450-600 chars, so the rich list
+# is capped here and a longer one compacts to counter lines once the full
+# report is persisted and pointed to. At the 2026-09-12 scale (48 bad runs)
+# the compact view measures ~1500 chars; past ~55 runs the head lines leave
+# the tail, while the summary + pointer always land.
 BAD_LIST_MAX_CHARS = 1400
 
 
@@ -276,7 +279,11 @@ def main() -> None:
     full = render(records, path, args.days, counts)
     report_path = path.with_suffix(".report.txt")
     try:
-        report_path.write_text(full, encoding="utf-8")
+        # Publish atomically (tmp + rename): a reader never sees a partial
+        # report, and a failed rerun leaves the previous file in place.
+        tmp_path = report_path.with_name(report_path.name + ".tmp")
+        tmp_path.write_text(full, encoding="utf-8")
+        tmp_path.replace(report_path)
     except OSError as exc:
         print(f"warning: could not write full report {report_path}: {exc}", file=sys.stderr)
         report_path = None

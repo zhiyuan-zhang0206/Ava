@@ -297,6 +297,7 @@ def test_main_persists_report_and_prints_pointer(
         report.read_text(encoding="utf-8").splitlines()[1:]
         == ds.render(records, dataset, 1).splitlines()[1:]
     )
+    assert not (tmp_path / "daily.report.txt.tmp").exists()  # tmp renamed away, not left behind
     out = capsys.readouterr().out
     assert f"full report: {report}" in out
 
@@ -307,15 +308,15 @@ def test_main_degrades_to_rich_output_when_report_unwritable(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A failed report write must not compact stdout: the rich lines are then
-    the only copy of the details."""
+    """A failed report publish (tmp + rename) must not compact stdout: the
+    rich lines are then the only copy of the details."""
     ds = daily_scan
     records = [
         _record("fumbled", agent_id=i, task_prompt=f"long task {i} " + "x" * 140)
         for i in range(1, 21)
     ]
     dataset = tmp_path / "daily.jsonl"
-    (tmp_path / "daily.report.txt").mkdir()  # write_text() raises OSError
+    (tmp_path / "daily.report.txt").mkdir()  # the final replace() onto a directory raises OSError
 
     def _fake_scan(days: int, include_test: bool = False) -> tuple[list[Any], Path, None]:
         assert days == 1
@@ -332,3 +333,25 @@ def test_main_degrades_to_rich_output_when_report_unwritable(
     assert "could not write full report" in captured.err
     assert "full report: " not in captured.out
     assert "| task:" in captured.out
+
+
+def test_compact_bad_line_pins_every_signal_token(daily_scan: Any) -> None:
+    """The compact tokens mirror _why() one-for-one — pin the full mapping so
+    a dropped or renamed signal cannot pass unnoticed (QA review of #2366)."""
+    ds = daily_scan
+    all_signals = _record(
+        "fumbled",
+        agent_id=7,
+        followup_prompts=["a", "b"],
+        corrections=["c"],
+        peer_feedback=["p"],
+        exec_failed=2,
+        last_exec_failed=True,
+        compactions=3,
+        breached=True,
+        terminated=True,
+        final_output="",
+        turns=1,
+    )
+    assert ds._compact_bad_line(all_signals) == "  #7 fumbled rep2 c1 pf1 ef2 last cp3 br term"
+    assert ds._compact_bad_line(_record("failed", agent_id=8)) == "  #8 failed -"
