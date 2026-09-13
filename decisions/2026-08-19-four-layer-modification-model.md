@@ -143,3 +143,5 @@ per-agent activation), `conventions/plugin-spec-v2.md`,
 section above: option 2 is ruled, sequenced after issue #39's S2 registry
 slice. The rest of this entry (the four layers, the skill restructuring, the
 known gaps) stands unchanged. -->
+
+<!-- Superseded in part by: decisions/2026-09-13-core-package-update-channel.md — ruling 2's delivery half is revised: builtin plugins stay authored in the kernel (the base set does not move out), but they are delivered and refreshed via the core content channel, decoupled from the cluster update. The rest of this entry stands unchanged. -->
