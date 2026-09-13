@@ -172,7 +172,11 @@ def _scan_file(path: Path, rel_path: str) -> list[tuple[int, str]]:
     """`violations_in_source` for one file, minus the exempt paths."""
     if rel_path in _ALLOWED_FILES or _is_test_file(rel_path):
         return []
-    return violations_in_source(path.read_text(encoding="utf-8"), str(path))
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []  # unreadable entry (e.g. a dangling symlink) or binary content
+    return violations_in_source(text, str(path))
 
 
 def _iter_py_files(roots: list[Path]) -> list[Path]:

@@ -544,3 +544,21 @@ def test_out_of_repo_file_and_directory_targets_run(
     (outside / "clean.py").write_text("value = 1\n", encoding="utf-8")
     assert _lint.main([str(outside / "clean.py")]) == 0
     assert _lint.main([str(outside)]) == 0
+
+
+def test_directory_with_non_utf8_test_member_is_skipped(scratch) -> None:
+    """A non-UTF-8 test member of an explicit directory is skipped like any
+    unreadable entry — the scan must not crash on it."""
+    root, _ = scratch
+    pkg = root / "pkg"
+    pkg.mkdir()
+    (pkg / "test_bad.py").write_bytes(b"\xff\xfe\x00bad")
+    assert _lint.main([str(pkg)]) == 0
+
+
+def test_non_utf8_module_in_scan_dir_is_skipped(scratch) -> None:
+    """A non-UTF-8 module inside the scanned tree must not crash the index build."""
+    root, _ = scratch
+    (root / "shared" / "bad_utf8.py").write_bytes(b"\xff\xfe\x00bad")
+    (root / "shared" / "clean.py").write_text("value = 1\n", encoding="utf-8")
+    assert _lint.main([]) == 0
