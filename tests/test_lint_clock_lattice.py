@@ -126,3 +126,25 @@ def test_unknown_clock_alias_is_rejected(scan_tmp) -> None:
         """,
     )
     assert len(errs) == 1
+
+
+def test_explicit_missing_target_is_an_error(
+    scan_tmp, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A typo'd explicit path must fail the gate, not die in a bare traceback."""
+    good = _write(scan_tmp, "ok.py", "value = 1\n")
+    missing = tmp_path / "typo.py"
+    assert _lint.main([str(missing)]) == 1
+    assert str(missing) in capsys.readouterr().err
+    assert _lint.main([str(good), str(missing)]) == 1
+
+
+def test_explicit_outside_repo_and_relative_targets_scan_cleanly(
+    scan_tmp, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An existing path outside the repo, or given relative to the cwd, scans
+    instead of dying on the repo-relative prefix computation."""
+    good = _write(scan_tmp, "ok.py", "value = 1\n")
+    assert _lint.main([str(good)]) == 0
+    monkeypatch.chdir(tmp_path)
+    assert _lint.main(["ok.py"]) == 0

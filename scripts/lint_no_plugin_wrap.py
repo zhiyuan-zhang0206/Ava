@@ -1,7 +1,8 @@
 """Forbid bare monkey-patching of `ava.*` in plugins — wraps must go through `ava.extend.wrap`.
 
-Run: `.venv/bin/python scripts/lint_no_plugin_wrap.py [path ...]` (defaults to scanning `plugins/`).
-Also run automatically via pre-commit hook before commit.
+Run: `.venv/bin/python scripts/lint_no_plugin_wrap.py [path ...]` (defaults to scanning `plugins/`;
+an explicit path that does not exist is an error (stderr + exit 1) rather than a
+silent no-op). Also run automatically via pre-commit hook before commit.
 
 ## Why
 
@@ -157,6 +158,10 @@ def main(argv: list[str] | None = None) -> int:
     # argv non-empty = pre-commit passed changed files (any dir); keep only plugin
     # files. Empty = default full scan of plugins/.
     if argv:
+        missing = [arg for arg in argv if not Path(arg).exists()]
+        if missing:
+            print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
+            return 1
         targets = [p for p in (Path(a).resolve() for a in argv) if _under_plugins(p)]
     else:
         targets = [_REPO_ROOT / _SCAN_DIR]

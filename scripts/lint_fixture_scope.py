@@ -2,7 +2,8 @@
 global it mutates.
 
 Run: `.venv/bin/python scripts/lint_fixture_scope.py [path ...]` (defaults to
-scanning `tests/`). Also run automatically via pre-commit hook.
+scanning `tests/`; an explicit path that does not exist is an error (stderr +
+exit 1) rather than a silent no-op). Also run automatically via pre-commit hook.
 
 ## Why
 
@@ -404,6 +405,11 @@ def _iter_py_files(roots: list[Path]) -> list[Path]:
 
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
+    if argv:
+        missing = [arg for arg in argv if not Path(arg).exists()]
+        if missing:
+            print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
+            return 1
     targets = [Path(a).resolve() for a in argv] if argv else [_REPO_ROOT / "tests"]
 
     total = 0

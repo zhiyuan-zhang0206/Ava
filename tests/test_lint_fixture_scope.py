@@ -14,6 +14,8 @@ import ast
 import importlib
 from pathlib import Path
 
+import pytest
+
 _lint = importlib.import_module("scripts.lint_fixture_scope")
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -357,3 +359,15 @@ def test_setup_env_keys_matches_the_real_fixtures_body() -> None:
         if isinstance(e, ast.Constant)
     }
     assert literal == declared
+
+
+def test_explicit_missing_target_is_an_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A typo'd explicit path must fail the gate, not pass as a silent empty scan."""
+    good = tmp_path / "conftest.py"
+    good.write_text("value = 1\n", encoding="utf-8")
+    missing = tmp_path / "typo.py"
+    assert _lint.main([str(missing)]) == 1
+    assert str(missing) in capsys.readouterr().err
+    assert _lint.main([str(good), str(missing)]) == 1

@@ -125,3 +125,15 @@ def test_explicit_paths_scan_untracked_edits(repo: Path, monkeypatch: pytest.Mon
     _write(repo, "new.txt", "\u4e2d\u6587\n")
     monkeypatch.setattr(gate, "_tracked_files", list)
     assert gate.main(["new.txt"]) == 1
+
+
+def test_explicit_missing_target_is_an_error(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A typo'd explicit path must fail the gate, not pass as a silent empty scan."""
+    _write(repo, "ok.txt", "All English here.\n")
+    missing = repo / "typo.txt"
+    assert gate.main([str(missing)]) == 1
+    assert str(missing) in capsys.readouterr().err
+    assert gate.main([str(repo / "ok.txt"), str(missing)]) == 1
+    assert gate.main(["typo.txt"]) == 1

@@ -270,3 +270,14 @@ def test_main_returns_nonzero_on_violation(scan_tmp) -> None:
         """,
     )
     assert _lint.main([str(good)]) == 0
+
+
+def test_explicit_missing_target_is_an_error(
+    scan_tmp, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A typo'd explicit path must fail the gate, not pass as a silent empty scan."""
+    good = _write(scan_tmp, "tools/clean.py", "VALUE = 1\n")
+    missing = tmp_path / "typo.py"
+    assert _lint.main([str(missing)]) == 1
+    assert str(missing) in capsys.readouterr().err
+    assert _lint.main([str(good), str(missing)]) == 1
