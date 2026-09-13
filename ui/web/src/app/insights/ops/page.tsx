@@ -8,7 +8,7 @@ import { useTranslations } from "next-intl";
 
 import { API_BASE } from "@/lib/api";
 
-const OPS_DASHBOARD_URL = `${API_BASE}/grafana/d/ava-ops-main?from=now-6h&to=now`;
+const OPS_DASHBOARD_URL = `${API_BASE}/grafana/d/ava-ops-main?from=now-24h&to=now`;
 
 export default function OpsPage() {
   const t = useTranslations("insights.opsPanel");

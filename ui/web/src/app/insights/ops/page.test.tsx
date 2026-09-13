@@ -22,7 +22,7 @@ describe("Ops tab (Grafana link)", () => {
     expect(links).toHaveLength(1);
     const link = screen.getByRole("link", { name: "Open the Ava ops dashboard" });
     expect(link.getAttribute("href")).toBe(
-      "http://localhost:8000/grafana/d/ava-ops-main?from=now-6h&to=now",
+      "http://localhost:8000/grafana/d/ava-ops-main?from=now-24h&to=now",
     );
     expect(link.getAttribute("href")).toContain("/grafana/d/ava-ops-main");
     expect(link.getAttribute("target")).toBe("_blank");
