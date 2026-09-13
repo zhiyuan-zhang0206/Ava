@@ -452,12 +452,12 @@ class TestSpawnUpdate:
         monkeypatch.setattr(cluster_pause, "pause_local_cluster", lambda: None)
         monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path)
 
-        cluster_mod.spawn_update(target_sha="PINNEDSHA")
+        cluster_mod.spawn_update(target_sha="0123456789abcdef0123456789abcdef01234567")
         cmd = spawn_backend.spawn_calls[0][1]
         # The pinned sha rides --target-sha into the in-process entry (R1-6); the
         # checkout itself happens inside the entry, not in the shell command.
         assert "python -m cli.commands._update_agent_runner" in cmd
-        assert "--target-sha PINNEDSHA" in cmd
+        assert "--target-sha 0123456789abcdef0123456789abcdef01234567" in cmd
         assert "git pull" not in cmd
 
     def test_spawn_update_rejects_if_session_exists(
@@ -500,7 +500,7 @@ class TestSpawnUpdate:
         monkeypatch.setattr("shared.migrations.validate_migrations_at_ref", _raise)  # pyright: ignore[reportUnknownArgumentType]
 
         with pytest.raises(MigrationLayoutError, match="duplicate migration name"):
-            cluster_mod.spawn_update(target_sha="POISONED")
+            cluster_mod.spawn_update(target_sha="deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
         assert events == [], f"refusal must precede pause + spawn, got {events}"
         assert spawn_backend.spawn_calls == []
 
@@ -561,9 +561,9 @@ class TestSpawnUpdate:
         monkeypatch.setattr(cluster_pause, "pause_local_cluster", lambda: None)
         monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path)
 
-        result = cluster_mod.spawn_update(target_sha="PINNEDSHA")
+        result = cluster_mod.spawn_update(target_sha="0123456789abcdef0123456789abcdef01234567")
         assert result["session"] == "ava-test-updater"
-        assert vetted_refs == ["PINNEDSHA"]
+        assert vetted_refs == ["0123456789abcdef0123456789abcdef01234567"]
 
     def test_post_update_returns_502_when_update_in_progress(
         self,
@@ -627,11 +627,28 @@ class TestSpawnUpdate:
 
         monkeypatch.setattr(cluster_router._cluster_rpc, "dispatch_to_machine", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
         with TestClient(app) as client:
-            r = client.post("/api/cluster/update", params={"target_sha": "abc1234"})
+            r = client.post(
+                "/api/cluster/update",
+                params={"target_sha": "0123456789abcdef0123456789abcdef01234567"},
+            )
         assert r.status_code == 202
         assert captured["target_machine"] == "test-host"
         assert captured["kind"] == "cluster_update"
-        assert captured["payload"] == {"target_sha": "abc1234"}
+        assert captured["payload"] == {"target_sha": "0123456789abcdef0123456789abcdef01234567"}
+
+    def test_post_update_rejects_a_short_target_sha(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        set_machine_identity,
+    ) -> None:
+        """Issue #2343: a prefix (e.g. copied from a status display) is refused
+        at the relay boundary with the full-id requirement named — it never
+        reaches a target's detached updater."""
+        set_machine_identity(role="gateway", name="test-host")
+        with TestClient(app) as client:
+            r = client.post("/api/cluster/update", params={"target_sha": "30df11a83"})
+        assert r.status_code == 422
+        assert "full 40-character commit id" in r.json()["detail"]
 
     def test_post_update_forwards_target_sha_remote(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A remote target POSTs cluster_update with the target_sha in the op payload."""
@@ -655,10 +672,11 @@ class TestSpawnUpdate:
         monkeypatch.setattr(cluster_router, "machine_name", lambda: "cloud")
         with TestClient(app) as client:
             r = client.post(
-                "/api/cluster/update", params={"target": "wsl", "target_sha": "abc1234"}
+                "/api/cluster/update",
+                params={"target": "wsl", "target_sha": "0123456789abcdef0123456789abcdef01234567"},
             )
         assert r.status_code == 202
-        assert captured["payload"] == {"target_sha": "abc1234"}
+        assert captured["payload"] == {"target_sha": "0123456789abcdef0123456789abcdef01234567"}
 
     def test_spawn_update_log_file_created(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, spawn_backend: _FakeSessionBackend

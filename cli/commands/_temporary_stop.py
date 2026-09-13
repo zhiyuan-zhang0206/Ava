@@ -458,7 +458,13 @@ def stop(
 
     try:
         _timed_phase(phases, "retired", lambda: stop_retired_services(remaining(deadline)))
-        _timed_phase(phases, "drain", lambda: pause_agents(remaining(deadline)))
+        # Task #3270: an operator's own stop/pause binds the hold to this
+        # command's shepherding process; daemon-driven pauses stay unbound.
+        from shared.hold_driver import mint_driver
+
+        _timed_phase(
+            phases, "drain", lambda: pause_agents(remaining(deadline), driver=mint_driver())
+        )
         start_serving.clear_serving()
         if announce:
             _announce_stopping()

@@ -15,6 +15,7 @@ from psycopg.pq import TransactionStatus
 from psycopg.types.json import Jsonb
 
 from shared import maintenance, pause_owner
+from shared.hold_driver import HoldDriver
 from shared.maintenance_state import MaintenanceHold
 
 
@@ -26,6 +27,7 @@ def prepare(
     holder: str,
     acquired_at: datetime,
     host_absent: bool = False,
+    driver: HoldDriver | None = None,
 ) -> MaintenanceHold:
     """Freeze the original runnable set and enqueue one restart per member.
 
@@ -71,13 +73,17 @@ def prepare(
         )
         _require_resolved(conn, captured, cold=cold)
         if captured != hold:
-            pause_owner.change_maintenance(holder, acquired_at, hold, captured)
+            pause_owner.change_maintenance(
+                holder, acquired_at, hold, captured, refresh_driver=driver is not None
+            )
             hold = captured
         commands: dict[int, int] = {}
         for agent_id in sorted(hold.commands):
             commands[agent_id] = _restart(conn, agent_id, holder, acquired_at)
     draining = MaintenanceHold("draining", commands, parked=hold.parked)
-    pause_owner.change_maintenance(holder, acquired_at, hold, draining)
+    pause_owner.change_maintenance(
+        holder, acquired_at, hold, draining, refresh_driver=driver is not None
+    )
     return draining
 
 

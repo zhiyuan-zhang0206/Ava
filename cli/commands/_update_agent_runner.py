@@ -18,7 +18,12 @@ from collections.abc import Generator
 from pathlib import Path
 
 from cli.commands._repo import _repo_root
-from cli.commands._update_git import GitPullFailed, git_checkout_sha, git_resolve_origin_main
+from cli.commands._update_git import (
+    GitPullFailed,
+    git_checkout_sha,
+    git_resolve_origin_main,
+    resolve_commit,
+)
 from cli.commands._update_uv_sync import run_uv_sync_verified
 from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
 from shared.migrations import MigrationLayoutError, validate_migrations_at_ref
@@ -201,16 +206,26 @@ def _run_agent_runner_self_update(  # noqa: PLR0915 — one existing lock/handof
 
                     return continue_after_bootstrap(prepared, normal_continuation, owned_generation)
                 return result
-            return _run_agent_runner_self_update_inner(
-                repo,
-                target_sha=target_sha,
-                restart_only=restart_only,
-                mode=mode,
-                force_reap=force_reap,
-                post_checkout=post_checkout,
-                from_sha=from_sha,
-                handoff_generation=owned_generation,
-            )
+            try:
+                result = _run_agent_runner_self_update_inner(
+                    repo,
+                    target_sha=target_sha,
+                    restart_only=restart_only,
+                    mode=mode,
+                    force_reap=force_reap,
+                    post_checkout=post_checkout,
+                    from_sha=from_sha,
+                    handoff_generation=owned_generation,
+                )
+            except BaseException:
+                # Task #3270: a standalone leg that died pre-stop must not
+                # leave its hold for a manual recovery (the 2026-09-13 class).
+                if mode != "none":
+                    _self_release_pre_stop_hold("updater raised during the pre-stop ladder")
+                raise
+            if result not in (0, RESTART_DECLINED_EXIT_CODE) and mode != "none":
+                _self_release_pre_stop_hold("updater failed before a completed stop")
+            return result
         finally:
             if prepared is None:
                 with contextlib.suppress(Exception):
@@ -223,6 +238,55 @@ def _run_agent_runner_self_update(  # noqa: PLR0915 — one existing lock/handof
         # is released by the OS at exit. On Windows the pre-exec parent still owns
         # the descriptor and reaches this same finally after its child returns.
         release_updater_lock()
+
+
+def _self_release_pre_stop_hold(reason: str) -> None:
+    """Compensate a failed standalone updater's pre-stop hold (task #3270).
+
+    The detached updater owns the pause it was spawned under only while it
+    runs; a pre-stop failure used to return non-zero and leave the hold for a
+    manual recovery — the #2343 / 2026-09-13-drill class. The standalone path
+    has no orchestration compensator, so the failing chain releases its own
+    hold through the same preconditions the operator's `resume --cancel` runs
+    (`ops.cluster_pause.release_pre_stop_hold`). Never when a stop has begun
+    (post-stop recovery belongs to the watchdog's bounded paths) and never for
+    the rollout's Phase B (`mode == "none"`), whose orchestrator compensates.
+    """
+    from shared import maintenance
+
+    try:
+        current = maintenance.snapshot()
+    except Exception as exc:
+        print(f"  ✗ cannot read the maintenance hold to self-release: {exc}", file=sys.stderr)
+        return
+    if current is None:
+        return
+    assert current.holder is not None and current.acquired_at is not None  # noqa: S101
+    if current.maintenance is not None and current.maintenance.phase not in (
+        "preparing",
+        "draining",
+        "drained",
+    ):
+        print(
+            "  · services were already stopped; the hold is left for maintenance "
+            "start/resume or the watchdog's bounded recovery",
+            file=sys.stderr,
+        )
+        return
+    from ops.cluster_pause import release_pre_stop_hold
+    from shared import ui_update_state
+
+    try:
+        with ui_update_state.lifecycle_lock():
+            release_pre_stop_hold(reason=reason)
+    except Exception as exc:
+        print(
+            f"  ✗ could not self-release the pre-stop hold ({reason}): {exc} — the host "
+            "needs an operator (`ava maintenance resume --cancel` after fixing the cause)",
+            file=sys.stderr,
+        )
+        return
+    print(f"  ✓ released the pre-stop maintenance hold ({reason}); the host keeps serving")
 
 
 def _exec_post_checkout(argv: list[str]) -> int:
@@ -343,6 +407,14 @@ def _run_agent_runner_self_update_inner(  # noqa: PLR0915 — the self-update's 
                 except GitPullFailed as e:
                     print(f"  ✗ {e}", file=sys.stderr)
                     return 1
+            # Bookkeeping uses the full id (issue #2343): the recorded
+            # installed_sha and the post-checkout continuation's target must
+            # never carry a prefix.
+            try:
+                sha = resolve_commit(sha, context="self-update target")
+            except GitPullFailed as e:
+                print(f"  ✗ {e}", file=sys.stderr)
+                return 1
             print(f"  ✓ {from_sha[:7]} → {sha[:7]}")
 
             print("\n→ uv sync")
@@ -659,6 +731,13 @@ def main(argv: list[str] | None = None) -> int:
         from cli.commands._update_normal_release import run_normal_release
 
         return run_normal_release(args.normal_release)
+    if args.target_sha is not None:
+        from shared.git_sha import require_full_sha
+
+        try:
+            require_full_sha(args.target_sha, entry="--target-sha")
+        except ValueError as exc:
+            parser.error(str(exc))
     if args.bootstrap_hop is not None:
         if args.mode != "smooth":
             parser.error("--bootstrap-hop cannot use a source drain policy")

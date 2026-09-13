@@ -6,6 +6,7 @@ a backup, and proves only this home's declared services and owned descendants.
 """
 
 import argparse
+import contextlib
 import getpass
 import json
 import os
@@ -23,7 +24,7 @@ from cli.commands._maintenance_stop import (
 )
 from cli.commands._pause_resume import exclusive_resources
 from ops.agent_pause import _drain, _hold, _prepare
-from shared import maintenance, maintenance_cohort, pause_owner, start_serving
+from shared import hold_driver, maintenance, maintenance_cohort, pause_owner, start_serving
 from shared.db import connect
 from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from shared.machine import machine_name, machine_role
@@ -217,8 +218,16 @@ def run(args: argparse.Namespace) -> int:
     at = datetime.fromisoformat(args.acquired_at)
     if at.tzinfo is None or not args.operation.strip():
         raise ValueError("maintenance requires a nonempty operation and timezone-aware timestamp")
+    # Task #3270: this invocation is an operator-side ladder step, so stamp its
+    # shepherding identity on the standing hold before doing its work. A no-op
+    # when no matching hold stands yet (prepare's first run mints via _prepare).
+    # Best-effort: a failed stamp must not block the verb itself -- the
+    # stranded-hold verdict reports missing evidence loudly instead.
+    driver = hold_driver.mint_driver()
+    with contextlib.suppress(Exception):
+        pause_owner.refresh_driver(args.operation, at, driver=driver)
     if verb == "prepare":
-        _prepare(args.operation, at)
+        _prepare(args.operation, at, driver=driver)
     elif verb == "drain":
         _drain(args.operation, at, args.timeout)
     elif verb == "stop":

@@ -32,7 +32,7 @@ every CLI routes to it (user ruling 2026-08-21, issue #216). The line is not
 - **illegitimate** — "should I do this myself, or ask the gateway?": a module
   that implements an operation must not branch on role.
 
-So instead of banning the call (five legitimate uses exist) we allowlist it:
+So instead of banning the call (legitimate uses exist) we allowlist it:
 `_MACHINE_ROLE_ALLOWED` enumerates the modules that may call `machine_role()`,
 each with a one-line reason naming the question it answers. A call anywhere
 else fails the run; an allowlisted module that stops calling it also fails
@@ -96,6 +96,7 @@ _SCAN_DIRS = (
 _MACHINE_ROLE_ALLOWED: dict[str, str] = {
     "cli/commands/_temporary_stop.py": "Which selected local services and data plane does this unit own during explicit pause/stop? No execution is routed elsewhere.",
     "ops/agent_pause.py": "Does this unit serve an agent host whose admitted cohort and actual continuation completion must be verified before local shutdown?",
+    "ops/cluster_pause.py": "Does this unit serve an agent host whose live daemon identity must answer before a pre-stop hold release restores local posture (what do I serve)",
     "cli/commands/_maintenance.py": "Which services/data plane does this explicitly local, DB-offline-capable stop/start own? Fleet transport is operator-coordinated.",
     "shared/machine.py": "defines machine_role() and its capability wrappers is_gateway()/is_agent_runner() — the implementation itself",
     "shared/observability.py": "does this process serve the gateway capability whose LGTM marker governs telemetry (what do I serve)",
