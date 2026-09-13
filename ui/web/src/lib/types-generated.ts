@@ -5216,6 +5216,30 @@ export interface components {
             url: string;
         };
         /**
+         * ImpersonationMetadata
+         * @description Declared identity and observed process facts on a rendered message.
+         */
+        ImpersonationMetadata: {
+            /** Agent Id */
+            agent_id: number;
+            /** Session Id */
+            session_id: number;
+            /** Name */
+            name: string;
+            /** Executor Name */
+            executor_name: string;
+            /** Provider */
+            provider: string | null;
+            /** Process */
+            process: {
+                [key: string]: unknown;
+            };
+            /** Anchor Item Id */
+            anchor_item_id?: string | null;
+            /** Seq */
+            seq?: number | null;
+        };
+        /**
          * InspectWidgetResult
          * @description One plugin widget rendered for the inspector panel — an element of
          *     GET /api/agents/{id}/inspect/widgets.
@@ -7651,7 +7675,9 @@ export interface components {
         /**
          * TimelineItem
          * @description One element of a timeline view of LangGraph state.messages, using the
-         *     inbound_messages table only as ts anchor.
+         *     inbound_messages table as a timestamp anchor and impersonation history
+         *     expanded at its checkpoint marker. External session metadata identifies
+         *     the actual executor without changing the cursor grammar.
          *
          *     `item_id` is the stable key coordinating frontend timeline with
          *     streaming SSE; the current segment uses `f"{msg_idx}.{block_idx}"`
@@ -7685,6 +7711,7 @@ export interface components {
             payload: string;
             /** Created At */
             created_at?: string | null;
+            impersonation?: components["schemas"]["ImpersonationMetadata"] | null;
             /** Inbound Id */
             inbound_id?: number | null;
             /** Compact Id */

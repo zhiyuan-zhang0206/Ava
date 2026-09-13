@@ -74,6 +74,22 @@ async def claim_gate(
     await supervise_relay(session, agent_id)
     if session is None:
         return None
+    if session["status"] == "requested" and session["automatic"]:
+        from agent.impersonation_handoff import start_marker
+        from shared.impersonation import accept
+
+        incarnation = current_incarnation(agent_id)
+        assert incarnation is not None  # noqa: S101 — native_status requires it
+        brief = session["reason"] or "Continue the agent's work from its saved state."
+        await asyncio.to_thread(accept, session["id"], agent_id, incarnation, brief)
+        return Command(
+            update={
+                "messages": [start_marker(session)],
+                "turn_active": False,
+                "turn_idle": True,
+            },
+            goto=END,
+        )
     if session["status"] == "requested":
         request_receipt = f"{session['id']}:{session['consent_version']}"
         if state.impersonation_request_id == request_receipt:
@@ -159,6 +175,10 @@ async def settle_checkpoint(
             raise RuntimeError(
                 "cannot activate impersonation with unresolved native exec resources"
             )
+        if session["automatic"]:
+            from agent.impersonation_handoff import ensure_start_marker
+
+            await ensure_start_marker(graph, session)
         # The bound relay must be live before the takeover stands. On failure
         # the lease is rolled back to 'rejected' with a loud reason and the
         # native agent resumes — no silent half-takeover.
@@ -183,6 +203,10 @@ async def settle_checkpoint(
             await flush_checkpoint(graph.checkpointer, agent_id)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
             receipt = expected
         await asyncio.to_thread(mark_plugin_applied, session["id"], version, incarnation)
+    if session["automatic"] and session["handoff_applied_at"] is None:
+        from agent.impersonation_handoff import deliver_handoff
+
+        await deliver_handoff(graph, session, incarnation)
     return False
 
 
@@ -234,13 +258,19 @@ def _spawn_codex_relay(
     relay_token: str,
     thread_id: str,
     codex_remote: str | None,
+    codex_home: str | None = None,
 ) -> subprocess.Popen[bytes]:
     """Spawn the bound relay; the scoped credential travels over a private pipe.
 
-    The token never appears in argv or the environment. The child inherits the
-    runtime's own environment (DB reachability), stdout is discarded (hints
+    The token never appears in argv or the environment. The child receives the
+    session environment projection and boots its cluster connections; stdout is discarded (hints
     travel through `codex queue`), stderr flows into this process's log.
     """
+    from shared.session_env import forward_env_dict
+
+    relay_env = forward_env_dict()
+    if codex_home is not None:
+        relay_env["CODEX_HOME"] = codex_home
     argv = [
         sys.executable,
         "-m",
@@ -263,6 +293,7 @@ def _spawn_codex_relay(
         stdin=subprocess.PIPE,
         stdout=subprocess.DEVNULL,
         start_new_session=True,
+        env=relay_env,
     )
     try:
         assert process.stdin is not None  # noqa: S101 — PIPE requested above
@@ -310,6 +341,22 @@ def establish_relay(session: dict[str, Any], incarnation: RuntimeIncarnation) ->
 
     provider = session["relay_provider"]
     if provider == "claude":
+        if session["automatic"]:
+            from shared.impersonation import native_status as read_status
+
+            deadline = time.monotonic() + _RELAY_READY_TIMEOUT_S
+            while (
+                not _heartbeat_fresh(session["relay_heartbeat_at"]) and time.monotonic() < deadline
+            ):
+                time.sleep(_RELAY_READY_POLL_S)
+                latest = read_status(incarnation.agent_id, incarnation)
+                if (
+                    latest is None
+                    or latest["id"] != session["id"]
+                    or latest["status"] != "accepted"
+                ):
+                    return False
+                session = latest
         if _heartbeat_fresh(session["relay_heartbeat_at"]):
             return True
         return _roll_back_relay_failure(
@@ -336,6 +383,7 @@ def establish_relay(session: dict[str, Any], incarnation: RuntimeIncarnation) ->
             relay_token,
             session["relay_thread_id"],
             session["relay_codex_remote"],
+            session["process_metadata"].get("codex_home"),
         ),
         relay_token,
         time.monotonic(),
@@ -407,7 +455,7 @@ async def supervise_relay(session: dict[str, Any] | None, agent_id: int) -> None
     )
 
     child = _relay_children.get(agent_id)
-    if session is None:
+    if session is None or session["status"] not in ("requested", "accepted", "active"):
         # Native control returned (release/expiry): the relay self-exits on
         # terminal status; this kill is the explicit symmetric teardown.
         if child is not None:
@@ -455,6 +503,7 @@ async def supervise_relay(session: dict[str, Any] | None, agent_id: int) -> None
             token,
             session["relay_thread_id"],
             session["relay_codex_remote"],
+            session["process_metadata"].get("codex_home"),
         ),
         token,
         spawned_at,

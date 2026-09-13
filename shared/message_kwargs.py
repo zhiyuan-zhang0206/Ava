@@ -63,6 +63,7 @@ class NoteTag(StrEnum):
     `heartbeat_pause` is retained to render historical heartbeat-pause notes.
     """
 
+    IMPERSONATION = "impersonation"
     SDK_HINT = "sdk_hint"
     AGENT_REPLY = "agent_reply"
     TASK = "task"
@@ -110,6 +111,7 @@ class AvaMessageKwargs(TypedDict, total=False):
     map. Both are read back for backward-compatible timeline rendering.
     """
 
+    ava_impersonation: dict[str, Any]
     ava_msg_type: str
     ava_source: str
     ava_inbound_id: int

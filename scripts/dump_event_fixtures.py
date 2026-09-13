@@ -112,6 +112,7 @@ def _samples() -> dict[str, dict]:
             "recovery": "Choose a different model overlay, then send a new message.",
         },
         "cancelled": {"role": "cancelled", "agent_id": agent_id},
+        "impersonation_changed": {"role": "impersonation_changed", "agent_id": agent_id},
         "inbound_arrived": {
             "role": "inbound_arrived",
             "agent_id": agent_id,

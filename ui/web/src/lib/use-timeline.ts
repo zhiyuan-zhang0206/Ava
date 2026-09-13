@@ -279,7 +279,9 @@ export function useTimeline(
   // interval ticks.
   const trackCompactForInvalidation = useCallback(
     (ev: SystemEvent) => {
-      if (ev.role === "compact_done") {
+      if (ev.role === "impersonation_changed" || ev.role === "inbound_arrived") {
+        void queryClient.invalidateQueries({ queryKey: ["timeline", ev.agent_id] });
+      } else if (ev.role === "compact_done") {
         pendingCompactAgentsRef.current.add(ev.agent_id);
       } else if (
         ev.role === "timeline_snapshot" &&

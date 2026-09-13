@@ -16,10 +16,10 @@ heartbeat. In both cases a relay that is not live when the takeover would
 activate rolls the acceptance back loudly: the lease ends `rejected` with the
 reason, the native agent receives a system note and keeps running.
 
-The relay waits natively for consent and quiescence, then delivers the
-native agent's start message — the handoff brief recorded at acceptance —
+The relay waits natively for preparation and quiescence, then delivers the
+session's start message — the handoff brief recorded during preparation —
 even if the inbox is empty. Rejection or expiry also wakes the controller;
-waiting for a decision never requires a model to poll status.
+waiting for activation never requires a model to poll status.
 The relay authenticates with the lease's scoped `relay_token` — never the
 controller's `AVA_IMPERSONATION_TOKEN` — and no relay session, token or
 message files are created.
@@ -93,7 +93,7 @@ active. The manual form below remains for diagnostics:
 
 ```sh
 /path/to/checkout/.venv/bin/ava impersonate relay 42 \
-  --lease-id LEASE_UUID --provider codex --thread-id CODEX_SESSION_UUID \
+  --session 0 --provider codex --thread-id CODEX_SESSION_UUID \
   --codex-remote unix:///path/to/private/run/codex.sock
 ```
 
@@ -139,7 +139,7 @@ Monitor cannot start (no fresh heartbeat), acceptance rolls back loudly.
 
 ```json
 {
-  "command": "AVA_IMPERSONATION_RELAY_TOKEN=<relay token> /path/to/checkout/.venv/bin/ava impersonate relay 42 --lease-id LEASE_UUID --provider claude",
+  "command": "AVA_IMPERSONATION_RELAY_TOKEN=<relay token> /path/to/checkout/.venv/bin/ava impersonate relay 42 --session 0 --provider claude",
   "description": "Ava agent 42 inbox",
   "persistent": true
 }
@@ -168,7 +168,7 @@ the [channel protocol](https://code.claude.com/docs/en/channels-reference).
   full content in one envelope per batch, and every unacknowledged batch is
   pushed again after five minutes, marked as re-delivery, until the host ACKs
   it or the lease ends. Rows already pending at activation push immediately
-  (they waited through consent); fresh routine arrivals coalesce inside the
+  (they waited through preparation); fresh routine arrivals coalesce inside the
   lease's configured merge window (default 30 seconds), while user chats,
   cancels and renewal reminders never wait. New messages arriving under an
   outstanding batch push as their own batch.
@@ -178,8 +178,8 @@ the [channel protocol](https://code.claude.com/docs/en/channels-reference).
   the inbox command: it fits Claude Monitor's per-line budget and keeps the
   codex `queue --message` argv bounded, so one oversized inbound cannot fail
   every emit and wedge the relay. Fetch messages (or full payloads) with
-  `impersonate inbox LEASE_UUID`; process and explicitly
-  `impersonate ack LEASE_UUID ID ...`. The envelope's ACK line carries the
+  `impersonate inbox 0 --agent 42`; process and explicitly
+  `impersonate ack 0 ID ... --agent 42`. The envelope's ACK line carries the
   exact command for its batch.
   An ACK that marks messages done publishes a wake so the relay immediately
   drops the ids from its outstanding set, even when no new message has arrived.
@@ -200,8 +200,8 @@ the [channel protocol](https://code.claude.com/docs/en/channels-reference).
   native side; a stale heartbeat is stamped on the lease row
   (`relay_last_failure_at`, visible in `impersonate status`) and logged.
 - Renewal reminders: five minutes before a lease expires, the gateway inserts
-  a durable inbox row of `kind="reminder"` (one per lease; the payload carries
-  the lease id) that the relay pushes like any message. Release or expiry
+  a durable inbox row of `kind="reminder"` (one per expiry deadline; the payload carries
+  the session linkage) that the relay pushes like any message. Release or expiry
   dismisses any still-pending reminder, so the native agent never sees a stale
   one.
 - Release, expiry, rejection, an invalid lease, a failed host queue or a broken

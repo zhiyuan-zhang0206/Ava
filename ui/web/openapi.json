@@ -9515,6 +9515,75 @@
         "title": "ImageUrlRef",
         "description": "The `image_url` object of an image content block."
       },
+      "ImpersonationMetadata": {
+        "properties": {
+          "agent_id": {
+            "type": "integer",
+            "title": "Agent Id"
+          },
+          "session_id": {
+            "type": "integer",
+            "title": "Session Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "executor_name": {
+            "type": "string",
+            "title": "Executor Name"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "process": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Process"
+          },
+          "anchor_item_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anchor Item Id"
+          },
+          "seq": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seq"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "session_id",
+          "name",
+          "executor_name",
+          "provider",
+          "process"
+        ],
+        "title": "ImpersonationMetadata",
+        "description": "Declared identity and observed process facts on a rendered message."
+      },
       "InspectWidgetResult": {
         "properties": {
           "plugin": {
@@ -14723,6 +14792,16 @@
             ],
             "title": "Created At"
           },
+          "impersonation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImpersonationMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "inbound_id": {
             "anyOf": [
               {
@@ -14844,7 +14923,7 @@
           "payload"
         ],
         "title": "TimelineItem",
-        "description": "One element of a timeline view of LangGraph state.messages, using the\ninbound_messages table only as ts anchor.\n\n`item_id` is the stable key coordinating frontend timeline with\nstreaming SSE; the current segment uses `f\"{msg_idx}.{block_idx}\"`\n(msg_idx = position in state.messages; for other message types\nblock_idx=0). Cold-loaded compact history prefixes that local position\nwith `s<rank>.<boundary_checkpoint_id>.`; it never enters the live SSE\nmerge path. For an\nAIMessage, text/thinking are content blocks (block_idx = their content\nposition) and each tool call gets `block_idx = <number of text/thinking\ncontent blocks> + <ordinal in msg.tool_calls>` — a provider-agnostic\nrule derived from langchain's normalized `tool_calls` view, so it holds\nwhether the provider carries tool calls inside `content` (anthropic\n`tool_use` blocks) or only in the separate `tool_calls` list\n(gemini / openai). During streaming, the frontend uses `*_start`\nevent's `item_id` to create items; after commit, the same rule\nrecomputes id, and matching ids on both sides means the same logical\nitem. On merge, the snapshot version wins, avoiding race bugs from\nts-heuristic matching."
+        "description": "One element of a timeline view of LangGraph state.messages, using the\ninbound_messages table as a timestamp anchor and impersonation history\nexpanded at its checkpoint marker. External session metadata identifies\nthe actual executor without changing the cursor grammar.\n\n`item_id` is the stable key coordinating frontend timeline with\nstreaming SSE; the current segment uses `f\"{msg_idx}.{block_idx}\"`\n(msg_idx = position in state.messages; for other message types\nblock_idx=0). Cold-loaded compact history prefixes that local position\nwith `s<rank>.<boundary_checkpoint_id>.`; it never enters the live SSE\nmerge path. For an\nAIMessage, text/thinking are content blocks (block_idx = their content\nposition) and each tool call gets `block_idx = <number of text/thinking\ncontent blocks> + <ordinal in msg.tool_calls>` — a provider-agnostic\nrule derived from langchain's normalized `tool_calls` view, so it holds\nwhether the provider carries tool calls inside `content` (anthropic\n`tool_use` blocks) or only in the separate `tool_calls` list\n(gemini / openai). During streaming, the frontend uses `*_start`\nevent's `item_id` to create items; after commit, the same rule\nrecomputes id, and matching ids on both sides means the same logical\nitem. On merge, the snapshot version wins, avoiding race bugs from\nts-heuristic matching."
       },
       "TimelineResponse": {
         "properties": {

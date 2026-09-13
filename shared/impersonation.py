@@ -37,7 +37,8 @@ from shared.caller_identity import CallerIdentity, caller_payload
 from shared.config import settings
 from shared.db import connect, publish_inbound_wake
 from shared.db_transaction import write_transaction
-from shared.live_events import Cancelled
+from shared.impersonation_history import append, capture_pending, set_actor
+from shared.live_events import Cancelled, ImpersonationChanged
 from shared.log import logger
 from shared.machine import machine_name
 from shared.runtime_incarnation import RuntimeIncarnation
@@ -55,6 +56,11 @@ def _ttl(value: int) -> int:
 
 def _wake(agent_id: int) -> None:
     publish_inbound_wake(agent_id, "impersonation")
+    redis_client.publish_best_effort_sync(
+        settings.data_plane.events_channel,
+        ImpersonationChanged(agent_id=agent_id).model_dump_json(),
+        context="impersonation_changed",
+    )
 
 
 def request(
@@ -67,8 +73,12 @@ def request(
     relay_thread_id: str | None = None,
     relay_codex_remote: str | None = None,
     relay_batch_window_seconds: int = 30,
+    name: str = "",
+    executor_name: str = "",
+    process_metadata: dict[str, Any] | None = None,
+    automatic: bool = False,
 ) -> dict[str, Any]:
-    """Ask the native agent for consent; return the secret once, never store it raw.
+    """Prepare a controller lease; return the secret once, never store it raw.
 
     Every request must name its relay endpoint up front: the accepting runtime
     never guesses one. A claude request also mints the scoped relay credential
@@ -80,6 +90,8 @@ def request(
     per window (user messages always hint immediately). 0 disables merging.
     """
     ttl = _ttl(ttl_seconds)
+    if automatic and (not name.strip() or not executor_name.strip()):
+        raise ValueError("Session name and executor name must be nonempty")
     if caller.kind != "external_agent":
         raise ValueError("Impersonation requires an external_agent caller")
     validate_relay_spec(relay_provider, relay_thread_id, relay_codex_remote)
@@ -100,7 +112,7 @@ def request(
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "SELECT * FROM agent_impersonations WHERE agent_id=%s "
-                "AND (status IN ('requested','accepted','active') OR delta_version>applied_version) "
+                "AND (status IN ('requested','accepted','active') OR delta_version>applied_version OR (automatic AND handoff_applied_at IS NULL)) "
                 "FOR UPDATE",
                 (agent_id,),
             )
@@ -110,13 +122,15 @@ def request(
             if (
                 previous["status"] in OPEN
                 or previous["delta_version"] > previous["applied_version"]
+                or (previous["automatic"] and previous["handoff_applied_at"] is None)
             ):
                 raise ImpersonationError("Agent already has a request, lease, or unapplied state")
+        set_actor(conn, caller.source())
         conn.execute(
             "INSERT INTO agent_impersonations(id,agent_id,source,machine,token_hash,reason,"
             "status,ttl_seconds,expires_at,relay_provider,relay_thread_id,relay_codex_remote,"
-            "relay_token_hash,relay_batch_window_seconds) VALUES(%s,%s,%s,%s,%s,%s,'requested',%s,"
-            "clock_timestamp()+%s*interval '1 second',%s,%s,%s,%s,%s)",
+            "relay_token_hash,relay_batch_window_seconds,name,executor_name,process_metadata,automatic) VALUES(%s,%s,%s,%s,%s,%s,'requested',%s,"
+            "clock_timestamp()+%s*interval '1 second',%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 lease_id,
                 agent_id,
@@ -131,6 +145,10 @@ def request(
                 relay_codex_remote,
                 token_hash(relay_token) if relay_token is not None else None,
                 relay_batch_window_seconds,
+                name,
+                executor_name or caller.source(),
+                Jsonb(process_metadata or {}),
+                automatic,
             ),
         )
         result = public(lock_lease(conn, str(lease_id)))
@@ -176,7 +194,7 @@ def accept(
     incarnation: RuntimeIncarnation,
     start_message: str,
 ) -> dict[str, Any]:
-    """Record consent and the required handoff brief for the external session.
+    """Record native preparation and the required brief for the external session.
 
     The brief becomes the relay's first host message at activation, so the
     controller starts with the native agent's own words instead of a synthetic
@@ -266,6 +284,7 @@ def activate(lease_id: str, incarnation: RuntimeIncarnation) -> dict[str, Any]:
             (lease_id,),
         )
         result = public(lock_lease(conn, lease_id))
+        capture_pending(conn, result)
     _wake(incarnation.agent_id)
     return result
 
@@ -281,7 +300,7 @@ def native_status(agent_id: int, incarnation: RuntimeIncarnation) -> dict[str, A
             "SELECT runtime_generation=%s AND runtime_owner=%s "
             "AND status IN ('running','idling') AND lease_expires_at>clock_timestamp(),"
             "EXISTS(SELECT 1 FROM agent_impersonations WHERE agent_id=%s AND "
-            "(status IN ('requested','accepted','active') OR delta_version>applied_version)) "
+            "(status IN ('requested','accepted','active') OR delta_version>applied_version OR (automatic AND handoff_applied_at IS NULL))) "
             "FROM agents_meta WHERE id=%s",
             (incarnation.generation, incarnation.owner, agent_id, agent_id),
         ).fetchone()
@@ -294,7 +313,7 @@ def native_status(agent_id: int, incarnation: RuntimeIncarnation) -> dict[str, A
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "SELECT * FROM agent_impersonations WHERE agent_id=%s AND "
-                "(status IN ('requested','accepted','active') OR delta_version>applied_version) "
+                "(status IN ('requested','accepted','active') OR delta_version>applied_version OR (automatic AND handoff_applied_at IS NULL)) "
                 "ORDER BY created_at LIMIT 1 FOR UPDATE",
                 (agent_id,),
             )
@@ -357,6 +376,7 @@ def renew(lease_id: str, token: str, *, ttl_seconds: int | None = None) -> dict[
     with write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
         require_active_locked(conn, lease, token)
+        set_actor(conn, lease["source"])
         ttl = lease["ttl_seconds"] if ttl_seconds is None else _ttl(ttl_seconds)
         conn.execute(
             "UPDATE agent_impersonations SET ttl_seconds=%s,expires_at=clock_timestamp()+"
@@ -377,15 +397,20 @@ def release(lease_id: str, token: str, summary: str) -> dict[str, Any]:
         if lease["status"] == "released":
             return public(lease)
         require_active_locked(conn, lease, token)
-        inbound_id = insert_handoff(
-            conn,
-            lease,
-            f"External session ended (lease {lease_id}).\n\n{summary}",
+        set_actor(conn, lease["source"])
+        inbound_id = (
+            None
+            if lease["automatic"]
+            else insert_handoff(
+                conn,
+                lease,
+                f"External session ended (lease {lease_id}).\n\n{summary}",
+            )
         )
         conn.execute(
             "UPDATE agent_impersonations SET status='released',ended_at=clock_timestamp(),"
-            "summary_inbound_id=%s WHERE id=%s",
-            (inbound_id, lease_id),
+            "summary_inbound_id=%s,summary=%s WHERE id=%s",
+            (inbound_id, summary, lease_id),
         )
         dismiss_reminders(conn, lease)
         result = public(lock_lease(conn, lease_id))
@@ -438,6 +463,18 @@ def ack(lease_id: str, token: str, message_ids: list[int]) -> None:
             "WHERE lease_id=%s AND inbound_id=ANY(%s)",
             (lease_id, message_ids),
         )
+        if message_ids:
+            append(
+                conn,
+                lease_id,
+                "lifecycle",
+                {
+                    "event": "ack",
+                    "message_ids": sorted(set(message_ids)),
+                    "source": lease["source"],
+                },
+                event_key="ack:" + ",".join(map(str, sorted(set(message_ids)))),
+            )
     if any(row[0] == "cancel" for row in acknowledged):
         redis_client.publish_best_effort_sync(
             settings.data_plane.events_channel,

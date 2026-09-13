@@ -137,7 +137,13 @@ async def test_spawn_background_tasks_includes_page_reconciler() -> None:
 
     tasks = daemon_mod._spawn_background_tasks(object())  # type: ignore[arg-type]
     try:
-        assert set(tasks) == {"plugins_watch", "page_reconciler", "stdout_log_rotate"}
+        assert set(tasks) == {
+            "plugins_watch",
+            "page_reconciler",
+            "stdout_log_rotate",
+            "impersonation_events",
+        }
+        assert isinstance(tasks["impersonation_events"], asyncio.Task)
         assert isinstance(tasks["page_reconciler"], asyncio.Task)
         assert isinstance(tasks["stdout_log_rotate"], asyncio.Task)
     finally:

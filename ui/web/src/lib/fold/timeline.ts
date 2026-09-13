@@ -480,6 +480,7 @@ export function applySystemEvent(
       // turnActive via processSseEvent; no placeholder is inserted in
       // the timeline. Message content is rendered by the snapshot
       // envelope-wrap after inbound_committed → reload.
+    case "impersonation_changed":
     case "inbound_committed":
       // reload handled by useTimeline
     case "token_usage":

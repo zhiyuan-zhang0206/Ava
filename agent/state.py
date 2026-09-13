@@ -131,6 +131,7 @@ class BaseAgentState(BaseModel):
     chat or unassociated inbound work, so ownership never implies attribution.
     """
 
+    impersonation_handoff_id: str | None = None
     impersonation_request_id: str | None = None
     """Last presented takeover request; survives history compaction."""
     impersonation_applied: dict[str, object] = Field(default_factory=dict)

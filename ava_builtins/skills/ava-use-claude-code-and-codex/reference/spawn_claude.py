@@ -134,7 +134,16 @@ def main() -> int:
         default=None,
         help="opt in to v1 external provenance (bounded instance ID); requires target protocol support",
     )
+    parser.add_argument(
+        "--impersonate-self", action="store_true", help="replace the launching Ava agent"
+    )
+    parser.add_argument("--impersonation-name", help="display name for the takeover session")
     args = parser.parse_args()
+    from ava._boot import require_agent_id
+
+    takeover_agent_id = require_agent_id() if args.impersonate_self else None
+    if args.impersonation_name is not None and not args.impersonate_self:
+        parser.error("--impersonation-name requires --impersonate-self")
     # Validate before creating files or sessions. This assignment belongs only
     # to the external process, not the Ava-owned launcher/supervisor.
     caller_assignment = launch_caller_assignment("claude_code", args.caller_instance)
@@ -174,6 +183,24 @@ def main() -> int:
         f"Your work file (yours to write, STATUS + log) is {work_file}. "
         "Now read the task file and start working."
     )
+    if takeover_agent_id is not None:
+        from ava._impersonation_launch import bootstrap_message
+
+        guide = (
+            Path(__file__).resolve().parents[4]
+            / ".agents"
+            / "skills"
+            / "impersonator-guide"
+            / "SKILL.md"
+        )
+        msg = bootstrap_message(
+            takeover_agent_id,
+            args.impersonation_name or workspace.name,
+            "claude",
+            tasks_file,
+            work_file,
+            guide,
+        )
     ava.shell.sessions.send(sid, msg)
 
     print(f"ready. name={session_name}  workspace={workspace}")

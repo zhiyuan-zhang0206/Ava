@@ -19,7 +19,6 @@ from psycopg_pool import ConnectionPool
 from gateway.inbound_provenance import request_inbound_provenance
 from gateway.routers._delivery import deliver_chat_inbound, reconcile_chat_delivery
 from gateway.routers._eval_guard import caller_eval_isolation, deny_isolated_result_read
-from gateway.routers._pending_images import pending_image_urls
 from gateway.schemas import (
     AgentMessageEnqueued,
     AgentMessagesResponse,
@@ -46,6 +45,7 @@ from shared.config import settings
 from shared.db import agent_exists, insert_inbound_message, list_pending_inbounds
 from shared.db_transaction import write_transaction
 from shared.inbound import InboundKind
+from shared.inbound_images import inbound_image_urls
 from shared.inbound_provenance import InboundProvenance
 from shared.uploads import image_mime_for, parse_upload_url, resolve_upload_path
 
@@ -608,7 +608,7 @@ def get_pending_messages(agent_id: int, request: Request) -> list[PendingInbound
             id=r.id,
             source=r.source,
             content=r.content,
-            images=pending_image_urls(agent_id, r.payload),
+            images=inbound_image_urls(agent_id, r.payload),
             created_at=r.created_at,
         )
         for r in rows

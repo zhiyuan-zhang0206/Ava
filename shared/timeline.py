@@ -30,6 +30,7 @@ from langchain_core.messages import (
 
 from shared.config import now_timestamp, settings
 from shared.db import InboundRow
+from shared.impersonation_history import ImpersonationMetadata
 from shared.message_kwargs import (
     AvaMessageKwargs,
     AvaMsgType,
@@ -234,9 +235,12 @@ def build_timeline_items(
                 _exec_output_item(msg_idx, content, next_ts(msg), kwargs.get("ava_exec_ms"))
             )
         elif ava_type == AvaMsgType.SYSTEM_NOTE:
-            items.append(
-                _system_note_item(msg_idx, content, kwargs.get("ava_note_tag"), next_ts(msg))
-            )
+            item = _system_note_item(msg_idx, content, kwargs.get("ava_note_tag"), next_ts(msg))
+            if "ava_impersonation" in kwargs:
+                item.impersonation = ImpersonationMetadata.model_validate(
+                    kwargs["ava_impersonation"]
+                )
+            items.append(item)
         elif ava_type == AvaMsgType.COMPACT_SUMMARY:
             items.append(
                 _compact_item(

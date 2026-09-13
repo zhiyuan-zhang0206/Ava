@@ -262,6 +262,12 @@ class Cancelled(_Base):
     role: Literal["cancelled"] = "cancelled"
 
 
+class ImpersonationChanged(_Base):
+    """Durable session history changed; reload the unified timeline projection."""
+
+    role: Literal["impersonation_changed"] = "impersonation_changed"
+
+
 class InboundArrived(_Base):
     """New system event: any inbound message INSERTed into
     inbound_messages publishes this. The Developer view uses it to
@@ -531,6 +537,7 @@ Event = Annotated[
     | ExecOutput
     | Error
     | Cancelled
+    | ImpersonationChanged
     | InboundArrived
     | InboundCommitted
     | LabelUpdated
@@ -570,6 +577,7 @@ _ROLE_CLASSES: tuple[tuple[type[Event], bool], ...] = (
     (ExecOutput, False),
     (Error, False),
     (Cancelled, False),
+    (ImpersonationChanged, False),
     (InboundArrived, False),
     (InboundCommitted, False),
     (LabelUpdated, True),
