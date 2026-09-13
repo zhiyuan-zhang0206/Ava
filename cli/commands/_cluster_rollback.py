@@ -230,7 +230,10 @@ def _preserve_uncommitted_work(from_sha: str, target_sha: str) -> None:
 
     The stash entry is printed prominently because it is the only pointer back to
     work the reset was about to discard (2026-09-12: an automatic rollback reset a
-    dev worktree and the edits were silently lost). A stash failure raises
+    dev worktree and the edits were silently lost) — and the print names the safe
+    restore (`git stash list` → `git stash apply stash@{N}`), because the stash list
+    is shared by every worktree of this repo (`ava/worktree/git-ops/
+    git-stash-shared-worktree-hazard.md`). A stash failure raises
     `GitPullFailed` and aborts the rollback before the schema step, so code and
     schema stay consistent on the pre-rollback revision.
     """
@@ -244,7 +247,11 @@ def _preserve_uncommitted_work(from_sha: str, target_sha: str) -> None:
         return
     print("\n-> preserved uncommitted changes in a stash (the reset would discard them):")
     print(f"  . {stashed}")
-    print("  . restore with `git stash pop` once the cluster is stable")
+    print(
+        "  . restore: `git stash list` → find the entry quoting the tag above, then "
+        "`git stash apply stash@{N}` (this repo's stash list is shared by every worktree, "
+        "so never pop/apply it blind)"
+    )
 
 
 def _run_rollback(

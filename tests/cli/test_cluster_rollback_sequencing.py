@@ -290,7 +290,9 @@ def test_run_rollback_stashes_uncommitted_work_before_the_reset(
     out = capsys.readouterr().out
     assert "preserved uncommitted changes in a stash" in out
     assert "stash@{0}: On main: ava stash" in out
-    assert "git stash pop" in out
+    # The restore hint must name the shared-list-safe procedure, not a bare pop.
+    assert "git stash apply stash@{N}" in out
+    assert "shared by every worktree" in out
 
 
 def test_run_rollback_aborts_before_mutating_when_the_stash_fails(
