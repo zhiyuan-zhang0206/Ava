@@ -2,6 +2,8 @@
 
 import { memo } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
+import remarkCjkFriendly from "remark-cjk-friendly";
+import remarkCjkFriendlyGfmStrikethrough from "remark-cjk-friendly-gfm-strikethrough";
 import remarkGfm from "remark-gfm";
 
 import { CopyButton } from "@/components/copy-button";
@@ -12,7 +14,9 @@ import remarkCjkLinkBoundary from "@/lib/remark-cjk-link-boundary";
 import { cn } from "@/lib/utils";
 
 // Renders agent chat items and the memory-note side panel body (same
-// markdown surface: GFM tables, fenced code, safe links). user / info /
+// markdown surface: GFM tables, fenced code, safe links, CJK-adjacent
+// emphasis via remark-cjk-friendly + its GFM-strikethrough companion —
+// required together while remark-gfm is in the pipeline). user / info /
 // error stay as plain text.
 //
 // Security:
@@ -103,6 +107,12 @@ export const ChatMarkdown = memo(function ChatMarkdown({ content }: Props) {
       <ReactMarkdown
         remarkPlugins={[
           remarkGfm,
+          // CJK-friendly emphasis (task #3314): the two packages ship as a
+          // pair — the companion hooks the GFM strikethrough tokenizer, and
+          // without it `~~...~~` next to CJK punctuation stays plain, even
+          // though emphasis itself would already work.
+          remarkCjkFriendly,
+          remarkCjkFriendlyGfmStrikethrough,
           remarkCjkLinkBoundary,
           remarkAutolinkDelimiter,
         ]}
