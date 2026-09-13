@@ -26,11 +26,13 @@ def _scan(tmp_path: pathlib.Path, name: str, n_lines: int) -> list[str]:
 
 
 def test_directory_with_unreadable_member_is_skipped(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """An unreadable *.py member (non-UTF-8 / dangling symlink) must be skipped
-    like any unreadable entry — the scan must not crash on it, in any of its
-    call forms (file / directory / default)."""
+    like any unreadable entry — the scan must not crash on it in any of its call
+    forms (file / directory / default), and a violating sibling is still reported."""
     monkeypatch.setattr(lcs, "_REPO_ROOT", tmp_path)
     shared = tmp_path / "shared"
     shared.mkdir()
@@ -40,6 +42,9 @@ def test_directory_with_unreadable_member_is_skipped(
     assert lcs.main([str(shared / "bad_utf8.py")]) == 0
     assert lcs.main([str(shared)]) == 0
     assert lcs.main([]) == 0
+    (shared / "big.py").write_text("x = 1\n" * 901, encoding="utf-8")
+    assert lcs.main([str(shared)]) == 1
+    assert "hard ceiling" in capsys.readouterr().out
 
 
 def test_over_ceiling_is_hard_error(tmp_path: pathlib.Path) -> None:
