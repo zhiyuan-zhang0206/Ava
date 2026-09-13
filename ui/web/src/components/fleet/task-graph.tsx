@@ -21,7 +21,7 @@
 import { CheckCheck, EyeOff } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 
 import { WindowSelect, type WindowOption } from "@/components/window-select";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
@@ -459,14 +459,44 @@ export function TaskGraph({
 
   // A task selected from outside a board click (a route jump, task #2909)
   // propagates its owner the same way a click does — the surfaces stay
-  // bidirectionally synced however the selection arrived.
+  // bidirectionally synced however the selection arrived. Guards keep it from
+  // fighting the agent-side sync above (task #3300):
+  //  - it syncs ONCE per task selection (lastSyncedTaskRef);
+  //  - the first-resolved-run seed: everything selectable while this surface
+  //    is unmounted (the queue's row button, a graph node) writes the agent
+  //    side only, so a non-null agent selection outranks the carried-over
+  //    task. The seed is consumed only when a task RESOLVES: a cold task list
+  //    means the mount pass ran against [], and consuming the seed there let
+  //    the owner sync fire the moment the list landed — crossing the pair the
+  //    kanban's mount sync had just re-paired (cold-list 2-cycle, QA #6177
+  //    round 2: 9:10 <-> 7:20 forever);
+  //  - on that first resolved run, a still-crossed task side is re-paired
+  //    right here (the agent-side effect above only reacts to agent changes,
+  //    so a cold mount never got a second chance to pick the agent's task).
+  // Either way at most one side of the pair writes per commit; letting both
+  // write would let each effect's write re-trigger the other forever.
+  const lastSyncedTaskRef = useRef<number | null>(null);
+  const taskSyncSeededRef = useRef(false);
   useEffect(() => {
     if (selectedTaskId == null) return;
+    if (lastSyncedTaskRef.current === selectedTaskId) return;
     const task = tasks.find((t) => t.id === selectedTaskId);
-    if (task?.owner != null && task.owner !== selectedAgentId) {
+    // Mark only a resolved lookup as synced: a task not in the list yet (a
+    // route jump landing before the first fetch) stays pending so the next
+    // list update retries it, and the mount seed survives with it.
+    if (!task) return;
+    const firstResolvedTaskRun = !taskSyncSeededRef.current;
+    taskSyncSeededRef.current = true;
+    if (firstResolvedTaskRun && selectedAgentId != null) {
+      if (task.owner !== selectedAgentId) {
+        const first = tasks.find((t) => t.owner === selectedAgentId);
+        if (first) onSelectTask(first.id);
+      }
+    } else if (task.owner != null && task.owner !== selectedAgentId) {
       onSelectAgent(task.owner);
     }
-  }, [selectedTaskId, tasks, selectedAgentId, onSelectAgent]);
+    lastSyncedTaskRef.current = selectedTaskId;
+  }, [selectedTaskId, tasks, selectedAgentId, onSelectAgent, onSelectTask]);
 
   // When user clicks a task, sync its owner as the selected agent (bidirectional).
   const handleSelectTask = useCallback((taskId: number | null) => {
