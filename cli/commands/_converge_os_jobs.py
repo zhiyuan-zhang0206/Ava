@@ -1,12 +1,13 @@
 """Converge steps that register this host's OS-level scheduled jobs.
 
-Four jobs, one concept — everything Ava asks the platform scheduler (launchd /
+Five jobs, one concept — everything Ava asks the platform scheduler (launchd /
 crontab) to run on its behalf:
 
 - **health probe** — periodic cluster health check with auto-rollback (gateway).
 - **watchdog probe** — revives a dead per-capability watchdog (any serving role).
 - **boot autostart** — brings the whole cluster back after a reboot (prod only).
 - **logs maintenance** — daily copytruncate rotation followed by tiered retention.
+- **packages refresh** — the content channel's recurring pass (skills fast lane).
 
 They share a shape worth keeping together: each is idempotent, each delegates the
 platform branching to a ``shared.os_*`` module, and each fails the converge loudly
@@ -64,6 +65,22 @@ def ensure_logs_maintenance(_ctx: ConvergeCtx) -> None:
 
     register_logs_job()
     reap_legacy_logs_job()
+
+
+def ensure_packages_refresh_job(_ctx: ConvergeCtx) -> None:
+    """Register the recurring content-refresh pass (design §5.6; task #3267).
+
+    Every serving unit runs it: skills are per-machine state, so each home owns
+    its own pass. Delegates to `shared.os_packages`, which no-ops when
+    `AVA_OS_JOBS_ENABLED` is off and skips registration when the refresh channel
+    itself is disabled (`AVA_PACKAGES_REFRESH_ENABLED`); the registered command
+    re-checks both at run time. Idempotent."""
+    from shared.os_packages import register_packages_job
+
+    register_packages_job()
+    # POSIX: a registration failure propagates so converge fails fast (without
+    # the job, content updates would silently stall until a manual refresh).
+    # Windows degrades to a warning — see WindowsPlatformBackend.register_packages_job.
 
 
 def ensure_watchdog_probe(ctx: ConvergeCtx) -> None:

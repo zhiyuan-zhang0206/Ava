@@ -128,6 +128,18 @@ class PlatformBackend(abc.ABC):
         """Remove the daily logs-maintenance job for ``slug``."""
         ...
 
+    # -- packages refresh ----------------------------------------------------
+
+    @abc.abstractmethod
+    def register_packages_job(self) -> None:
+        """Register the recurring content-refresh pass (skills fast lane)."""
+        ...
+
+    @abc.abstractmethod
+    def unregister_packages_job(self, slug: str) -> None:
+        """Remove the recurring content-refresh pass for ``slug``."""
+        ...
+
     # -- watchdog probe -----------------------------------------------------
 
     @abc.abstractmethod
@@ -268,6 +280,19 @@ class MacPlatformBackend(PlatformBackend):
 
         _unregister_macos(slug)
 
+    # -- packages refresh --
+
+    def register_packages_job(self) -> None:
+        from shared.os_packages import _register_macos
+
+        if _register_macos() != 0:
+            raise RuntimeError("packages-refresh registration failed on macOS")
+
+    def unregister_packages_job(self, slug: str) -> None:
+        from shared.os_packages import _unregister_macos
+
+        _unregister_macos(slug)
+
     # -- watchdog probe --
 
     def register_watchdog_probe(self, role: str, interval_s: int = 60) -> None:
@@ -364,6 +389,19 @@ class LinuxPlatformBackend(PlatformBackend):
 
     def unregister_logs_job(self, slug: str) -> None:
         from shared.os_logs_job import _unregister_linux
+
+        _unregister_linux(slug)
+
+    # -- packages refresh --
+
+    def register_packages_job(self) -> None:
+        from shared.os_packages import _register_linux
+
+        if _register_linux() != 0:
+            raise RuntimeError("packages-refresh registration failed on Linux")
+
+    def unregister_packages_job(self, slug: str) -> None:
+        from shared.os_packages import _unregister_linux
 
         _unregister_linux(slug)
 
@@ -517,6 +555,32 @@ class WindowsPlatformBackend(PlatformBackend):
 
     def unregister_logs_job(self, slug: str) -> None:
         from shared.os_logs_job import _unregister_windows
+
+        _unregister_windows(slug)
+
+    # -- packages refresh --
+
+    def register_packages_job(self) -> None:
+        from shared.os_packages import _register_windows
+
+        reason = _register_windows()
+        if reason is not None:
+            # Degrade, do not fail the bring-up — see register_logs_job for the
+            # policy and its rationale. Without this job the content-refresh
+            # pass only runs manually; the cluster still runs, the warning is
+            # loud, and every start retries.
+            print(  # noqa: T201
+                "  ! packages refresh: schtasks registration failed — continuing "
+                "without the recurring refresh pass "
+                f"(next `ava start` retries): {reason}",
+                file=sys.stderr,
+            )
+            from loguru import logger
+
+            logger.error("packages-refresh registration failed on Windows: {}", reason)
+
+    def unregister_packages_job(self, slug: str) -> None:
+        from shared.os_packages import _unregister_windows
 
         _unregister_windows(slug)
 

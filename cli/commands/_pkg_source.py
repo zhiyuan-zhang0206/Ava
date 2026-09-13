@@ -14,6 +14,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from shared.install_registry import looks_like_local_path
+
 _TEMP_PREFIX = "ava-install-"
 
 
@@ -26,18 +28,6 @@ class SourcePathNotFoundError(ValueError):
     the message instead of a mysterious `git clone` failure of a path that is
     not a repo.
     """
-
-
-def looks_like_local_path(source: str) -> bool:
-    """True when `source` is an existing local directory rather than a git URL.
-
-    A `scheme://` URL (including `file://`) or an `scp`-style `git@host:repo`
-    is always a git source; anything else is treated as a local path when it
-    resolves to a directory on disk.
-    """
-    if "://" in source or source.startswith("git@"):
-        return False
-    return Path(source).expanduser().is_dir()
 
 
 def clone_git(url: str, ref: str | None) -> Path:

@@ -1171,7 +1171,7 @@ ava cluster status   # full multi-machine roster (thin client: GET /api/cluster/
 ava cluster restart  # bounce the WHOLE cluster (this host + fan out to agent-runners, no git pull) via POST /api/cluster/restart. The gateway's detached `ava-cluster-restart` session runs `ava cluster update --local --restart-only`; plain `ava cluster update --restart-only` is also a thin POST, never the detached child's command. `ava restart` is the local single-host form
 ava cluster ls       # list all registered clusters in ~/.ava/clusters.json
 ava cluster down --path PATH   # stop the cluster at a home path (its gateway + its own pg/redis instance), keeping its registry slot + data dirs (the safe way to stop a dev worktree cluster from another checkout)
-ava cluster destroy --path PATH [--drop-db]   # stop a cluster + free its registry slot (port block) + deregister its OS-scheduled jobs (health probe, both watchdog probes, autostart, logs maintenance); --drop-db also removes its pg/redis data dirs; refused for the default home ~/.ava
+ava cluster destroy --path PATH [--drop-db]   # stop a cluster + free its registry slot (port block) + deregister its OS-scheduled jobs (health probe, both watchdog probes, autostart, logs maintenance, packages refresh); --drop-db also removes its pg/redis data dirs; refused for the default home ~/.ava
 ```
 
 `ava cluster update --target MACHINE [--target-sha SHA]` triggers ONE machine's
@@ -1287,10 +1287,11 @@ anyway. Two callers pass it and an operator normally should not:
   question one step later and better (off-box, authenticated, through the probe
   each runner's preflight uses). See the deploy-window section.
 
-**OS-scheduled jobs.** Four kinds go to the platform scheduler — the health
+**OS-scheduled jobs.** Five kinds go to the platform scheduler — the health
 probe (`shared/os_cron.py`), one watchdog probe per capability
 (`shared/os_watchdog_probe.py`), the boot autostart (`shared/os_autostart.py`),
-and daily rotate-then-retain log maintenance (`shared/os_logs_job.py`)
+daily rotate-then-retain log maintenance (`shared/os_logs_job.py`), and the
+per-machine content-refresh pass (`shared/os_packages.py`)
 — as launchd LaunchAgents on macOS, crontab lines on Linux, `\Ava\<home-slug>\`
 tasks on Windows (`shared/os_schtasks.py`). Two properties are load-bearing:
 

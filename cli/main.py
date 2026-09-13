@@ -112,7 +112,12 @@ from cli.parsers.mcp import (
     _h_memory_refresh,
     _h_memory_search,
 )
-from cli.parsers.packages import _h_packages_status
+from cli.parsers.packages import (
+    _h_packages_policy,
+    _h_packages_refresh,
+    _h_packages_rollback,
+    _h_packages_status,
+)
 from cli.parsers.pitr import (
     _h_pitr_drill,
     _h_pitr_retention_inspect,
@@ -196,6 +201,9 @@ __all__ = [
     "_h_notices_clear",
     "_h_notices_list",
     "_h_notices_resolve",
+    "_h_packages_policy",
+    "_h_packages_refresh",
+    "_h_packages_rollback",
     "_h_packages_status",
     "_h_pause",
     "_h_pitr_drill",
