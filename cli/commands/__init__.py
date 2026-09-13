@@ -130,6 +130,7 @@ from cli.commands.mcp import (
 )
 from cli.commands.migrations import cmd_migrations_apply
 from cli.commands.pitr import (
+    cmd_pitr_drill,
     cmd_pitr_retention_inspect,
     cmd_pitr_snapshot_archive,
     cmd_pitr_snapshot_retire,
@@ -325,6 +326,7 @@ __all__ = [
     "cmd_migrations_apply",
     "cmd_pause",
     "cmd_pitr_activate",
+    "cmd_pitr_drill",
     "cmd_pitr_retention_inspect",
     "cmd_pitr_rollback",
     "cmd_pitr_snapshot_archive",

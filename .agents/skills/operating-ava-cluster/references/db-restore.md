@@ -140,3 +140,9 @@ snapshot table. Do not delete or edit the evidence record between these steps:
 the record is the guard that binds retirement to the archived, drilled object.
 Verification requires the record key ID to match the currently configured PITR key.
 Before reusing a rollback-snapshot table name, delete its old evidence record.
+
+## Sibling procedure
+
+This document covers the logical `.dump.enc` artifact. To prove the physical
+PITR chain restores to a chosen point in time, use the isolated physical
+restore drill: [`physical-restore-drill.md`](physical-restore-drill.md).

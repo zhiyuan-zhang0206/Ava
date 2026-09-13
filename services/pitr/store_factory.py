@@ -19,7 +19,8 @@ which keeps its exec boundary free of ``shared.config``.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import inspect
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -306,6 +307,33 @@ def get_group_constructor_named(name: str) -> Callable[..., PitrStoreGroup]:
     except KeyError:
         known = ", ".join(sorted(_GROUP_CONSTRUCTORS))
         raise ValueError(f"unknown PITR store backend {name!r} (known: {known})") from None
+
+
+def construct_store_group(backend: str, store_args: Mapping[str, str]) -> PitrStoreGroup:
+    """Construct one backend group from the restricted store-args protocol.
+
+    Every provided argument must be accepted by the backend constructor and
+    every required one must be present -- a protocol drift is an error, never
+    a TypeError from deep inside a constructor. The restricted restore worker
+    and the operator drill both build their group this way, staying free of
+    ``shared.config``.
+    """
+    constructor = get_group_constructor_named(backend)
+    parameters = inspect.signature(constructor).parameters
+    unknown = set(store_args) - set(parameters)
+    if unknown:
+        raise ValueError(f"store args are unknown to the backend: {sorted(unknown)}")
+    required = {
+        name
+        for name, parameter in parameters.items()
+        if parameter.default is inspect.Parameter.empty
+        and parameter.kind
+        in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+    }
+    missing = required - set(store_args)
+    if missing:
+        raise ValueError(f"store args lack required fields: {sorted(missing)}")
+    return constructor(**store_args)
 
 
 def get_store_group() -> PitrStoreGroup:
