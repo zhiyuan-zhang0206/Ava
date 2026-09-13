@@ -485,7 +485,7 @@ class UpdaterOutcomeReading:
 
 
 def last_updater_outcome(
-    state: shared.host_deploy_state.HostDeployState | None | object = _UNSET,
+    state: shared.host_deploy_state.HostDeployState | object | None = _UNSET,
 ) -> UpdaterOutcome | None:
     """This host's last updater outcome, or None when no log speaks for *this* update.
 
@@ -512,7 +512,7 @@ def last_updater_outcome(
 
 
 def last_updater_outcome_reading(
-    state: shared.host_deploy_state.HostDeployState | None | object = _UNSET,
+    state: shared.host_deploy_state.HostDeployState | object | None = _UNSET,
 ) -> UpdaterOutcomeReading:
     """The same read as `last_updater_outcome`, keeping what the nothing was.
 

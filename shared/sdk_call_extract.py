@@ -107,7 +107,7 @@ class _SdkCallVisitor(_ast.NodeVisitor):
         # new scope's parent: a function scope's parent may skip class scopes.
         self._scope = self._saved.pop()
 
-    def _binding(self, name: str) -> tuple[str, ...] | None | _Unbound:
+    def _binding(self, name: str) -> tuple[str, ...] | _Unbound | None:
         """The innermost visible binding of *name*, or ``_UNBOUND``."""
         scope: _Scope | None = self._scope
         while scope is not None:
