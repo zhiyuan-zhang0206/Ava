@@ -105,6 +105,66 @@ def test_restore_worker_exec_import_boundary_has_no_publisher_or_settings(tmp_pa
     assert completed.returncode == 0
 
 
+async def test_restore_worker_popen_forwards_host_proxy_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    for name in (
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+        "all_proxy",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "ALL_PROXY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("http_proxy", "http://127.0.0.1:7890")
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7890")
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "/run/secrets/viewer.json")
+    monkeypatch.setenv("PGPASSWORD", "viewer-only")
+    captured: dict[str, str] = {}
+
+    class _WorkerSpawnedError(Exception):
+        pass
+
+    def _capture_popen(
+        *args: object, env: dict[str, str], **kwargs: object
+    ) -> subprocess.Popen[str]:
+        captured.update(env)
+        raise _WorkerSpawnedError
+
+    monkeypatch.setattr(restore_runtime.subprocess, "Popen", _capture_popen)
+    inputs = daemon._RestoreWorkerInput(
+        candidate_json=_candidate("proxy-forwarding").to_json(),
+        root=tmp_path,
+        ack_dir=tmp_path / "ack",
+        key_path=tmp_path / "backup.key",
+        backend="oss",
+        store_args=(
+            ("endpoint", "oss-cn-shanghai.aliyuncs.com"),
+            ("bucket", "ava-pitr-prod"),
+            ("prefix", "ava-pitr"),
+            ("viewer_credentials_file", str(tmp_path / "viewer.json")),
+        ),
+        budget=RestoreSpaceBudget(0, 0, 0),
+        live_db_url="postgresql://viewer@127.0.0.1:5433/ava",
+        data_directory="/live/data",
+        pg_ctl=Path("/usr/bin/true"),
+        pg_verifybackup=Path("/usr/bin/true"),
+    )
+
+    with pytest.raises(_WorkerSpawnedError):
+        await restore_runtime.run_restore_input(inputs)
+
+    assert captured == restricted_process_env() | {
+        "http_proxy": "http://127.0.0.1:7890",
+        "HTTPS_PROXY": "http://127.0.0.1:7890",
+    }
+    assert "GOOGLE_APPLICATION_CREDENTIALS" not in captured
+    assert "PGPASSWORD" not in captured
+
+
 def test_restore_worker_store_args_validate_against_the_backend_constructor(
     tmp_path: Path,
 ) -> None:
