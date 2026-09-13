@@ -2,8 +2,10 @@
 """Daily incremental self-evolution scan.
 
 Collects the past N days (default 1) of real agent runs into a trace
-dataset — the same JSONL records the weekly collect builds — then prints a
-compact daily report and exits 2 (ALERT) when any run is worth mining.
+dataset — the same JSONL records the weekly collect builds — writes the
+full report beside it (`<date>.report.txt`), prints a compact stdout view
+ending with a summary + pointer to that report, and exits 2 (ALERT) when any
+run is worth mining.
 
 Exit codes:
     0   no bad runs — nothing to act on
@@ -49,6 +51,14 @@ from shared.paths import ava_home
 
 ORCHESTRATION_SKILLS = ("ava-workflow", "ava-dynamic-workflow", "ava-goal")
 
+# The runner delivers only the output tail (last 2000 chars); the fixed
+# report scaffold around the bad list costs ~450-600 chars, so the rich list
+# is capped here and a longer one compacts to counter lines once the full
+# report is persisted and pointed to. At the 2026-09-12 scale (48 bad runs)
+# the compact view measures ~1500 chars; past ~55 runs the head lines leave
+# the tail, while the summary + pointer always land.
+BAD_LIST_MAX_CHARS = 1400
+
 
 def _why(rec: dict[str, Any]) -> list[str]:
     """Human-readable signals explaining a non-ok label. Display-only; the
@@ -75,6 +85,36 @@ def _why(rec: dict[str, Any]) -> list[str]:
     ):
         why.append("terminated without output")
     return why or ["no explicit signal"]
+
+
+def _compact_bad_line(rec: dict[str, Any]) -> str:
+    """One bad run as counter tokens — the compact fallback for a bad list
+    over BAD_LIST_MAX_CHARS (task text stays in the persisted full report).
+    Tokens mirror _why(): rep=re-prompts, c=corrections, pf=peer feedback,
+    ef=exec failures, last=last exec failed, cp=compactions, br=breach,
+    term=terminated without output."""
+    parts: list[str] = []
+    if rec.get("followup_prompts"):
+        parts.append(f"rep{len(rec['followup_prompts'])}")
+    if rec.get("corrections"):
+        parts.append(f"c{len(rec['corrections'])}")
+    if rec.get("peer_feedback"):
+        parts.append(f"pf{len(rec['peer_feedback'])}")
+    if rec.get("exec_failed"):
+        parts.append(f"ef{rec['exec_failed']}")
+    if rec.get("last_exec_failed"):
+        parts.append("last")
+    if rec.get("compactions"):
+        parts.append(f"cp{rec['compactions']}")
+    if rec.get("breached"):
+        parts.append("br")
+    if (
+        rec.get("terminated")
+        and not rec.get("final_output", "").strip()
+        and rec.get("turns", 0) > 0
+    ):
+        parts.append("term")
+    return f"  #{rec['agent_id']} {rec['label']} " + (" ".join(parts) if parts else "-")
 
 
 def scan(
@@ -125,8 +165,19 @@ def alert_exit(records: list[dict[str, Any]], counts: dict[str, int] | None = No
 
 
 def render(
-    records: list[dict[str, Any]], path: Path, days: int, counts: dict[str, int] | None = None
+    records: list[dict[str, Any]],
+    path: Path,
+    days: int,
+    counts: dict[str, int] | None = None,
+    *,
+    report_path: Path | None = None,
+    compact_bad: bool = False,
 ) -> str:
+    """Render the scan report. With `report_path` set the output closes with
+    a summary line and a pointer to the persisted full report. `compact_bad`
+    may replace an oversized bad list (> BAD_LIST_MAX_CHARS chars) with one
+    counter line per run, but only when `report_path` is set: without a
+    stored report the rich lines are the only copy of the details."""
     counts_by_label = Counter(r["label"] for r in records)
     skill_counts = Counter(
         skill for r in records if "skills_touched" in r for skill in r["skills_touched"]
@@ -174,15 +225,37 @@ def render(
             lines.append("ALERT — 0 runs collected: data source outage or collector failure")
     bad = [r for r in records if r["label"] != "ok"]
     if bad:
-        lines.append(f"ALERT — {len(bad)} run(s) worth mining:")
-        for rec in sorted(bad, key=lambda r: r["agent_id"]):
+        sorted_bad = sorted(bad, key=lambda r: r["agent_id"])
+        rich_lines: list[str] = []
+        for rec in sorted_bad:
             task = (rec["task_prompt"] or "").strip().replace("\n", " ")
             if len(task) > 120:
                 task = task[:117] + "..."
             line = f"  #{rec['agent_id']} {rec['label']} — {', '.join(_why(rec))}"
             if task:
                 line += f" | task: {task}"
-            lines.append(line)
+            rich_lines.append(line)
+        head = f"ALERT — {len(bad)} run(s) worth mining:"
+        # Compaction needs a stored report: the closing pointer keeps the
+        # dropped task text one hop away and survives tail truncation.
+        if (
+            compact_bad
+            and report_path is not None
+            and sum(len(line) for line in rich_lines) > BAD_LIST_MAX_CHARS
+        ):
+            lines.append(f"{head} (compact; details in report)")
+            lines.extend(_compact_bad_line(rec) for rec in sorted_bad)
+        else:
+            lines.append(head)
+            lines.extend(rich_lines)
+    if report_path is not None:
+        lines.append(
+            f"summary: {len(records)} runs (ok {counts_by_label['ok']} / "
+            f"fumbled {counts_by_label['fumbled']} / failed {counts_by_label['failed']})"
+            f" | corrections {corrections} | peer {peer} | breached {breached} "
+            f"| exec-fail runs {execfail}"
+        )
+        lines.append(f"full report: {report_path}")
     return "\n".join(lines)
 
 
@@ -203,7 +276,26 @@ def main() -> None:
         print("error: --days must be >= 1", file=sys.stderr)
         raise SystemExit(1)
     records, path, counts = scan(args.days, include_test=args.include_test)
-    print(render(records, path, args.days, counts))
+    full = render(records, path, args.days, counts)
+    report_path = path.with_suffix(".report.txt")
+    try:
+        # Publish atomically (tmp + rename): a reader never sees a partial
+        # report, and a failed rerun leaves the previous file in place.
+        tmp_path = report_path.with_name(report_path.name + ".tmp")
+        tmp_path.write_text(full, encoding="utf-8")
+        tmp_path.replace(report_path)
+    except OSError as exc:
+        print(f"warning: could not write full report {report_path}: {exc}", file=sys.stderr)
+        report_path = None
+    out = render(
+        records,
+        path,
+        args.days,
+        counts,
+        report_path=report_path,
+        compact_bad=True,
+    )
+    print(out)
     raise SystemExit(alert_exit(records, counts))
 
 
