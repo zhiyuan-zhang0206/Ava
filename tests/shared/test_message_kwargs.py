@@ -93,3 +93,34 @@ def test_read_ava_kwargs_is_live_view() -> None:
     kw = read_ava_kwargs(msg)
     assert kw is msg.additional_kwargs  # pyright: ignore[reportUnknownMemberType]
     assert kw.get("ava_msg_type") == AvaMsgType.INBOUND
+
+
+def test_exec_output_sdk_calls_present_empty_and_omitted() -> None:
+    """The exec_output's `sdk_calls` (the run's real SDK-call tally) is written
+    when known — `[]` stays a present, real zero — and omitted when unknown."""
+    sized = exec_output_message(
+        content="ok",
+        tool_call_id="t1",
+        exit_code=0,
+        sdk_calls=[{"method": "files.read", "count": 3}],
+    )
+    assert sized.additional_kwargs["sdk_calls"] == [{"method": "files.read", "count": 3}]  # pyright: ignore[reportUnknownMemberType]
+
+    empty = exec_output_message(content="ok", tool_call_id="t2", exit_code=0, sdk_calls=[])
+    assert empty.additional_kwargs["sdk_calls"] == []  # pyright: ignore[reportUnknownMemberType]
+
+    unknown = exec_output_message(content="ok", tool_call_id="t3", exit_code=0)
+    assert "sdk_calls" not in unknown.additional_kwargs  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_exec_output_sdk_calls_survive_checkpoint_roundtrip() -> None:
+    """The metadata is plain JSON and survives the checkpoint serializer as-is."""
+    serde = JsonPlusSerializer()
+    msg = exec_output_message(
+        content="ok",
+        tool_call_id="t1",
+        exit_code=0,
+        sdk_calls=[{"method": "files.read", "count": 3}],
+    )
+    restored = serde.loads_typed(serde.dumps_typed(msg))
+    assert restored.additional_kwargs["sdk_calls"] == [{"method": "files.read", "count": 3}]  # pyright: ignore[reportUnknownMemberType]

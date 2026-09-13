@@ -179,6 +179,17 @@ def test_plugin_wrapped_signature_survives_and_counts_once(
     assert calls[0][2] is not None and calls[0][2] >= 0
 
 
+def test_recorder_feeds_the_recording_tally(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The wrapped surface bumps the recording's full tally (two calls count two),
+    independent of the emit sampler."""
+    _spy_emit(monkeypatch)
+    rec = sdk_metering._make_recorder(lambda: "ok", "ns.fn")
+    with sdk_telemetry.recording() as tally:
+        assert rec() == "ok"
+        assert rec() == "ok"
+    assert tally == {"ns.fn": 2}
+
+
 def test_recorder_recognized_by_identity_not_copied_dict() -> None:
     """P3: ava.extend._install_metadata copies a wrapped callable's __dict__ onto its
     wrapper, so a plugin wrapper built over a recorder inherits the recorder's dict.

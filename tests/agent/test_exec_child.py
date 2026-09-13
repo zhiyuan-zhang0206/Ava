@@ -105,6 +105,45 @@ def test_child_simple_code_done_envelope(tmp_path: Path) -> None:
     assert payload.state_update is None
     assert payload.findings == []
     assert payload.attachments == []
+    assert payload.sdk_calls == []  # ran, executed no SDK calls
+
+
+def test_child_sdk_call_tally_reports_real_executions(tmp_path: Path) -> None:
+    """Acceptance: the envelope's `sdk_calls` is the REAL runtime tally — a loop
+    counts per execution, an unexecuted branch counts zero, and the counts come
+    from what ran, never from a scan of the source text."""
+    sample = tmp_path / "sample.txt"
+    sample.write_text("hello", encoding="utf-8")
+    code = f"""
+import ava
+ava.files.read({str(sample)!r})
+for _ in range(3):
+    ava.files.read({str(sample)!r})
+if False:
+    ava.files.read('/never-executed')
+print('tally done')
+"""
+    proc, _request, result = _spawn(tmp_path, code)
+    assert proc.returncode == 0, proc.stderr
+    payload = read_result(result)
+    assert payload.kind == "done"
+    assert payload.sdk_calls == [{"method": "files.read", "count": 4}]
+
+
+def test_child_sdk_call_tally_keeps_what_ran_before_a_crash(tmp_path: Path) -> None:
+    """A crash mid-block still reports the calls that really executed before it."""
+    sample = tmp_path / "sample.txt"
+    sample.write_text("hello", encoding="utf-8")
+    code = f"""
+import ava
+ava.files.read({str(sample)!r})
+raise ValueError('boom')
+"""
+    proc, _request, result = _spawn(tmp_path, code)
+    assert proc.returncode == 0
+    payload = read_result(result)
+    assert payload.kind == "crashed"
+    assert payload.sdk_calls == [{"method": "files.read", "count": 1}]
 
 
 def test_boot_config_failure_writes_crashed_envelope(

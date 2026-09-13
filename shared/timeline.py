@@ -16,7 +16,7 @@ and produced a snapshot missing the just-claimed inbound.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, cast
 
@@ -39,7 +39,7 @@ from shared.message_kwargs import (
     message_content,
     read_ava_kwargs,
 )
-from shared.sdk_call_extract import SdkCall, extract_sdk_calls
+from shared.sdk_telemetry import SdkCall, sdk_calls_by_tool_call_id
 
 
 class TimelineItem(BaseModel):
@@ -112,9 +112,8 @@ class TimelineItem(BaseModel):
     # legacy attach messages whose caption was a single text block (no pairing
     # information survives there).
     image_captions: list[str] | None = None
-    # SDK calls extracted from agent_code payload via AST parsing (None on
-    # other kinds). Drives the collapsed-code chip ("files.read x3" etc.)
-    # with zero false positives from string literals or comments.
+    # SDK calls the block really executed (the runtime tally, read from its
+    # exec_output ToolMessage's `sdk_calls`; None until that lands / other kinds).
     sdk_calls: list[SdkCall] | None = None
     # Wall-clock the code-generation took, set only on `agent_code` items (None
     # elsewhere). Read from the AIMessage's ava_code_ms_by_block (keyed by code
@@ -246,6 +245,7 @@ def build_timeline_items(
     a missing branch immediately instead of a silently truncated timeline.
     """
     items: list[TimelineItem] = []
+    sdk_by_id = sdk_calls_by_tool_call_id(messages, start)
     anchor_positions = {anchor.id: index for index, anchor in enumerate(chat_anchors)}
     next_anchor_idx = 0
     # Fallback anchor for "no inbound seen yet" — epoch 0 sorts these items
@@ -323,7 +323,7 @@ def build_timeline_items(
             # list-of-blocks: thinking / text / tool_use each takes a slot;
             # one timeline item per block, block_idx = anthropic
             # content_block_index, aligned with streaming SSE item_id.
-            items.extend(_ai_message_items(msg, msg_idx, next_ts))
+            items.extend(_ai_message_items(msg, msg_idx, next_ts, sdk_by_id))
         elif isinstance(msg, HumanMessage):
             items.append(_fallback_human_item(msg_idx, content, next_ts(msg)))
     if segment_prefix:
@@ -599,26 +599,23 @@ def _fold_addl_reasoning_into_content(
 
 
 def _ai_message_items(
-    msg: AIMessage, msg_idx: int, next_ts: Callable[[BaseMessage | None], str]
+    msg: AIMessage,
+    msg_idx: int,
+    next_ts: Callable[[BaseMessage | None], str],
+    sdk_by_id: Mapping[str, list[SdkCall]],
 ) -> list[TimelineItem]:
     """Split one AIMessage into per-block timeline items.
 
-    Narration (text) and reasoning (thinking) are content blocks, rendered
-    at their content position. Code items are rendered from the normalized
-    `msg.tool_calls` view rather than from provider-specific content blocks:
-    anthropic carries each tool call as a `tool_use` content block, but
-    gemini / openai expose tool calls only in `tool_calls` with nothing in
-    `content`. Deriving code from `tool_calls` is provider-agnostic and lets
-    a single rule produce code items for every provider.
+    Narration (text) and reasoning (thinking) are content blocks, rendered at
+    their content position. Code items come from the normalized `msg.tool_calls`
+    view, not provider blocks: anthropic carries each call as a `tool_use`
+    block, gemini / openai only in `tool_calls` — one provider-agnostic rule.
 
     Each tool call's `block_idx = <number of distinct text/thinking content
-    block indices> + <ordinal in tool_calls>`. Because providers emit tool
-    calls only after all narration/reasoning (a tool call terminates the
-    turn), this offset equals anthropic's `tool_use` content_block_index, so
-    anthropic item_ids are unchanged; gemini / openai get well-defined
-    non-colliding ids. The streaming side (`agent/graph/_callbacks.py`)
-    computes the same offset (over the distinct indices it has streamed) so
-    SSE `*_start` ids align with the committed snapshot.
+    block indices> + <ordinal in tool_calls>` — equal to anthropic's
+    `tool_use` content_block_index, well-defined for gemini / openai, and
+    aligned with the streaming side's identical offset (`agent/graph/_callbacks.py`)
+    so SSE `*_start` ids match the committed snapshot.
 
     legacy / no-tools coerce path: when msg.content is a string, treat the
     whole thing as chat with block_idx=0.
@@ -684,7 +681,9 @@ def _ai_message_items(
     else:
         return out
 
-    out.extend(_tool_call_items(msg, msg_idx, content_indices, code_ms_by_block, next_ts))
+    out.extend(
+        _tool_call_items(msg, msg_idx, content_indices, code_ms_by_block, next_ts, sdk_by_id)
+    )
     return out
 
 
@@ -765,12 +764,13 @@ def _tool_call_items(
     content_indices: set[int],
     code_ms_by_block: Any,
     next_ts: Callable[[BaseMessage | None], str],
+    sdk_by_id: Mapping[str, list[SdkCall]],
 ) -> list[TimelineItem]:
-    """Render each tool call as an `agent_code` item from `msg.tool_calls`.
+    """Render each tool call as an `agent_code` item from `msg.tool_calls`,
+    its `sdk_calls` read from `sdk_by_id` by the tool call's id.
 
-    Each item's ``block_idx = <number of distinct text/thinking content block
-    indices> + <ordinal in tool_calls>`` — the same offset the streaming side
-    computes, so SSE ids align with the committed snapshot.
+    Each item's ``block_idx = <distinct text/thinking block indices> + <ordinal
+    in tool_calls>`` — the same offset the streaming side computes (SSE ids align).
     """
     out: list[TimelineItem] = []
     tool_calls: list[ToolCall] = getattr(msg, "tool_calls", None) or []
@@ -793,7 +793,7 @@ def _tool_call_items(
                 payload=code,
                 created_at=next_ts(msg),
                 inbound_id=None,
-                sdk_calls=extract_sdk_calls(code) if code else None,
+                sdk_calls=sdk_by_id.get(tc.get("id") or ""),
                 code_elapsed_ms=block_code_elapsed_ms,
             )
         )

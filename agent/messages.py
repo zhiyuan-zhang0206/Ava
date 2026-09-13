@@ -12,7 +12,9 @@ Convention for adding a new metadata type:
     2. add the discriminator to `AvaMsgType` and stuff `ava_msg_type: <member>.value`
        so the read side dispatches
     3. metadata keys use the `ava_` prefix (to avoid colliding with other framework
-       metadata) and are declared in `AvaMessageKwargs`
+       metadata) and are declared in `AvaMessageKwargs` — the exec_output's
+       `sdk_calls` is the one frozen exception: an unprefixed cross-process wire
+       name shared with the exec child and the timeline projection
 
 Serialization: LangGraph PostgresSaver msgpack goes through standard
 langchain message classes, automatically entering SAFE_MSGPACK_TYPES
@@ -168,6 +170,7 @@ def exec_output_message(
     cancelled: bool = False,
     timed_out: bool = False,
     exec_ms: int | None = None,
+    sdk_calls: list[dict[str, Any]] | None = None,
     created_at: datetime | None = None,
 ) -> ToolMessage:
     """Envelope-wrapped stdout/stderr block after subprocess exec completes
@@ -185,22 +188,26 @@ def exec_output_message(
         ava_timed_out: bool (set True on timeout path)
         ava_exec_ms: int (wall-clock the code ran; surfaced on the code_output
             timeline item so the collapsed chip can read "ran in 1.3s")
+        sdk_calls: the run's real SDK-call tally, `[{"method": ..., "count": N},
+            ...]` (from the exec child; surfaced on the agent_code timeline item
+            as the collapsed-code chip). Omitted when unknown — a boot-crashed
+            child — while `[]` means "ran, called no SDK".
         ava_created_at: ISO-8601 wall-clock the output was produced. Omitted when
             not supplied.
     """
+    kwargs: dict[str, object] = {
+        "ava_msg_type": AvaMsgType.EXEC_OUTPUT.value,
+        "ava_exit_code": exit_code,
+        "ava_cancelled": cancelled,
+        "ava_timed_out": timed_out,
+        "ava_exec_ms": exec_ms,
+    }
+    if sdk_calls is not None:
+        kwargs["sdk_calls"] = sdk_calls
     return ToolMessage(
         content=content,
         tool_call_id=tool_call_id,
-        additional_kwargs=_stamp_created_at(
-            {
-                "ava_msg_type": AvaMsgType.EXEC_OUTPUT.value,
-                "ava_exit_code": exit_code,
-                "ava_cancelled": cancelled,
-                "ava_timed_out": timed_out,
-                "ava_exec_ms": exec_ms,
-            },
-            created_at,
-        ),
+        additional_kwargs=_stamp_created_at(kwargs, created_at),
     )
 
 
