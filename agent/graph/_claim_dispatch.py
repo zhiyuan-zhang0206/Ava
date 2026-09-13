@@ -28,6 +28,7 @@ from agent.hooks.compact import (
     conversation_messages,
     generate_summary,
 )
+from agent.hooks.compact_events import emit_compact_finished, emit_compact_started
 from agent.messages import NoteTag, system_note_message
 from agent.state_channels import CIRCUIT_REASON_CONTEXT_OVERFLOW
 from ava.security import scan_content
@@ -52,7 +53,10 @@ class _BatchState:
     """Messages appended this pass — HumanMessages from the handlers plus,
     for a fork, the `RemoveMessage` strip entries (issue #1320)."""
     next_goto: ClaimGoto = BEFORE_LLM
-    compact_payload: tuple[str, str] | None = None  # (summary_text, compact_kind)
+    compact_payload: tuple[str, str, str | None] | None = None
+    """(summary_text, compact_kind, compact_run_id) — the run id pairs the
+    live CompactStarted/CompactFinished events; None for the agent-authored
+    compact_summary path (not a forced run, emits no ticking block)."""
     cancelled: bool = False
     restart_preserves_idle: bool = False
     restart_requested: bool = False
@@ -198,16 +202,34 @@ async def _handle_system_note(
     )
 
 
+def _close_superseded_compact(ctx: AvaContext, agent_id: int, st: _BatchState) -> None:
+    """Close the tracked compact run sitting in the payload slot.
+
+    A later compact outcome in this dispatch pass supersedes it: the slot
+    holds one (summary, kind, run id) and the earlier run's result can never
+    be applied once a newer one wins the batch. Its live block therefore gets
+    its terminal `replaced` signal here — every started run must reach
+    exactly one terminal state (success / failure / replaced).
+    """
+    prior = st.compact_payload
+    if prior is not None and prior[2] is not None:
+        emit_compact_finished(ctx.event_publisher, agent_id, prior[2], status="replaced")
+
+
 async def _handle_compact_summary(
+    ctx: AvaContext,
+    agent_id: int,
     item: ClaimedInbound,
     st: _BatchState,
 ) -> None:
     """COMPACT_SUMMARY: agent-authored summary — used directly, no LLM run."""
-    st.compact_payload = (item.content, AvaMsgType.COMPACT_SUMMARY.value)
+    _close_superseded_compact(ctx, agent_id, st)
+    st.compact_payload = (item.content, AvaMsgType.COMPACT_SUMMARY.value, None)
 
 
 async def _handle_compact_request(
     ctx: AvaContext,
+    agent_id: int,
     state: _state.AgentState,
     _item: ClaimedInbound,
     st: _BatchState,
@@ -228,6 +250,11 @@ async def _handle_compact_request(
             event="compact_request",
         )
         return
+    # Past the no-op check this handler always ends by overwriting the payload
+    # slot or by raising — a run already sitting in the slot can never be
+    # applied, so its live block closes as `replaced` before this run starts.
+    _close_superseded_compact(ctx, agent_id, st)
+    compact_run_id = emit_compact_started(ctx.event_publisher, agent_id, mode="request")
     # The compaction LLM call can fail (provider error, empty output). Retry
     # like the auto path (COMPACT_MAX_ATTEMPTS); when every attempt fails,
     # raise CompactionFailedError — the runloop turns that into a turn-abort
@@ -250,6 +277,7 @@ async def _handle_compact_request(
                 body=f"attempt {attempt}/{COMPACT_MAX_ATTEMPTS}: {e}; retrying",
             )
     else:
+        emit_compact_finished(ctx.event_publisher, agent_id, compact_run_id, status="failure")
         raise CompactionFailedError(
             f"Compaction LLM produced no usable summary across {COMPACT_MAX_ATTEMPTS}"
             f" attempts (last: {last_error!r}) — compact_request not applied"
@@ -260,7 +288,7 @@ async def _handle_compact_request(
         body=f"request summary {len(summary)} chars",
         event="compact_request",
     )
-    st.compact_payload = (summary, AvaMsgType.COMPACT_REQUEST.value)
+    st.compact_payload = (summary, AvaMsgType.COMPACT_REQUEST.value, compact_run_id)
 
 
 async def _handle_cancel(
@@ -547,9 +575,9 @@ async def dispatch_batch(
         elif kind == InboundKind.SYSTEM_NOTE:
             await _handle_system_note(item, st)
         elif kind == InboundKind.COMPACT_SUMMARY:
-            await _handle_compact_summary(item, st)
+            await _handle_compact_summary(ctx, agent_id, item, st)
         elif kind == InboundKind.COMPACT_REQUEST:
-            await _handle_compact_request(ctx, state, item, st)
+            await _handle_compact_request(ctx, agent_id, state, item, st)
         elif kind == InboundKind.CANCEL:
             await _handle_cancel(ctx, agent_id, st)
         elif kind == InboundKind.HEARTBEAT:

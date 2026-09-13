@@ -49,6 +49,8 @@ const REQUIRED_FIELDS: Record<SystemEvent["role"], readonly string[]> = {
   exec_output: ["agent_id", "role", "item_id", "content"],
   compact_request: ["agent_id", "role", "content"],
   compact_done: ["agent_id", "role"],
+  compact_started: ["agent_id", "role", "compact_id", "started_at", "mode"],
+  compact_finished: ["agent_id", "role", "compact_id", "status", "finished_at"],
   error: ["agent_id", "role", "content"],
   cancelled: ["agent_id", "role"],
   inbound_arrived: ["agent_id", "role", "inbound_id", "kind", "source", "content"],
@@ -104,6 +106,8 @@ function assertSystemEventShape(obj: unknown): asserts obj is SystemEvent {
     case "exec_output":
     case "compact_request":
     case "compact_done":
+    case "compact_started":
+    case "compact_finished":
     case "error":
     case "cancelled":
     case "inbound_arrived":

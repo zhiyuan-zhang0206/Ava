@@ -92,10 +92,11 @@ class AvaMessageKwargs(TypedDict, total=False):
     """The `ava_*` metadata bag on a message's `additional_kwargs`. Every key is
     contextual to the message kind (total=False): an `inbound` carries source /
     inbound_id / image_urls, an `exec_output` carries exit_code / exec_ms /
-    sdk_calls, a `system_note` carries note_tag, an AIMessage carries the reasoning
-    timings. `sdk_calls` is the one framework key without the `ava_` prefix — the
-    frozen wire name for the exec_output's runtime SDK-call tally (`agent/graph/_exec.py`
-    writes it; the timeline projection reads it back).
+    sdk_calls, a `system_note` carries note_tag, a compact summary carries
+    `ava_compact_id`, an AIMessage carries the reasoning timings. `sdk_calls`
+    is the one framework key without the `ava_` prefix — the frozen wire name
+    for the exec_output's runtime SDK-call tally (`agent/graph/_exec.py` writes
+    it; the timeline projection reads it back).
 
     `ava_msg_type` / `ava_note_tag` are typed `str` (not `AvaMsgType` / `NoteTag`)
     to mirror what is persisted: the value is a plain string (`<member>.value`),
@@ -113,6 +114,7 @@ class AvaMessageKwargs(TypedDict, total=False):
     ava_source: str
     ava_inbound_id: int
     ava_created_at: str
+    ava_compact_id: str
     ava_image_urls: list[str]
     ava_note_tag: str
     ava_task_id: int

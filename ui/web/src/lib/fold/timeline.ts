@@ -422,6 +422,12 @@ export function applySystemEvent(
       // The timeline reload triggered by useTimeline still fires; only the
       // visible marker is suppressed.
       return items;
+    case "compact_started":
+    case "compact_finished":
+      // Forced-compact live run pair (task #3323) — the ticking "Compacting"
+      // block is owned by its own compact_id-keyed consumer; the delta
+      // reducer stays a no-op (the pair never becomes a timeline item).
+      return items;
     case "error": {
       const blockedError =
         ev.blocked === true &&

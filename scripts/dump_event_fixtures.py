@@ -83,6 +83,20 @@ def _samples() -> dict[str, dict]:
             "content": "[compact requested, 5 chars]",
         },
         "compact_done": {"role": "compact_done", "agent_id": agent_id},
+        "compact_started": {
+            "role": "compact_started",
+            "agent_id": agent_id,
+            "compact_id": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d",
+            "started_at": "2026-09-14T02:15:00+00:00",
+            "mode": "request",
+        },
+        "compact_finished": {
+            "role": "compact_finished",
+            "agent_id": agent_id,
+            "compact_id": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d",
+            "status": "success",
+            "finished_at": "2026-09-14T02:15:24+00:00",
+        },
         "error": {
             "role": "error",
             "agent_id": agent_id,

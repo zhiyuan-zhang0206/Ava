@@ -7644,6 +7644,8 @@ export interface components {
             created_at?: string | null;
             /** Inbound Id */
             inbound_id?: number | null;
+            /** Compact Id */
+            compact_id?: string | null;
             /** Reasoning Ms */
             reasoning_ms?: number | null;
             /** Reasoning Tokens */

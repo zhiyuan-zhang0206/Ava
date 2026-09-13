@@ -1,0 +1,7 @@
+{
+  "agent_id": 7,
+  "role": "compact_started",
+  "compact_id": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d",
+  "started_at": "2026-09-14T02:15:00+00:00",
+  "mode": "request"
+}

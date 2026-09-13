@@ -15,6 +15,7 @@ After compact, history = `[RemoveAll, SystemMessage, HumanMessage(header+summary
 summary is complete memory; framework no longer appends any original messages (no tail).
 """
 
+import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -463,10 +464,19 @@ async def test_auto_compact_hook_raises_when_summary_short_every_attempt(
     _patch_compact_config(monkeypatch, auto_compact_tokens=1)
     llm = _fake_llm("too short")  # 9 chars < floor, on every call
     state = _over_threshold_state()
+    publisher = MagicMock()
+    ctx = AvaContext(ops_pool=None, llm=llm, event_publisher=publisher)
 
     with pytest.raises(CompactionFailedError, match="no usable summary across"):
-        await auto_compact_before_llm(state, _runtime_with_llm(llm), _fake_config())
+        await auto_compact_before_llm(state, Runtime(context=ctx), _fake_config())
+
     assert _compaction_ainvoke(llm).call_count == COMPACT_MAX_ATTEMPTS
+    # Task #3323: the failed run still reaches its terminal signal — the live
+    # block stops ticking instead of hanging.
+    events = [json.loads(c.args[0]) for c in publisher.emit.call_args_list]
+    assert [e["role"] for e in events] == ["compact_started", "compact_finished"]
+    assert events[1]["status"] == "failure"
+    assert events[0]["compact_id"] == events[1]["compact_id"]
 
 
 async def test_auto_compact_hook_retries_short_then_accepts_long(monkeypatch: pytest.MonkeyPatch):
@@ -483,7 +493,11 @@ async def test_auto_compact_hook_retries_short_then_accepts_long(monkeypatch: py
 
 
 async def test_auto_compact_hook_emits_compact_done_on_success(monkeypatch: pytest.MonkeyPatch):
-    """After successful compact on auto path, emit CompactDone (with this agent id), so UI refreshes."""
+    """After successful compact on auto path, emit CompactDone (with this agent id), so UI refreshes.
+
+    Task #3323: the same run also emits its live start/terminal pair
+    (compact_started / compact_finished, same compact_id, status=success) and
+    the summary message carries the durable anchor ava_compact_id."""
     _patch_compact_config(monkeypatch, auto_compact_tokens=1)
     publisher = MagicMock()
     pool = AsyncMock()
@@ -508,9 +522,19 @@ async def test_auto_compact_hook_emits_compact_done_on_success(monkeypatch: pyte
     result = await auto_compact_before_llm(state, Runtime(context=ctx), _fake_config())
 
     assert result is not None
-    publisher.emit.assert_called_once()
-    emitted = publisher.emit.call_args.args[0]
-    assert '"compact_done"' in emitted
+    events = [json.loads(c.args[0]) for c in publisher.emit.call_args_list]
+    assert [e["role"] for e in events] == [
+        "compact_started",
+        "compact_done",
+        "compact_finished",
+    ]
+    started, finished = events[0], events[2]
+    assert started["mode"] == "auto"
+    assert finished["status"] == "success"
+    assert started["compact_id"] == finished["compact_id"]
+    assert started["started_at"] and finished["finished_at"]
+    tail = result["context_reset"].tail  # pyright: ignore[reportUnknownMemberType]
+    assert tail[0].additional_kwargs["ava_compact_id"] == started["compact_id"]  # pyright: ignore[reportUnknownMemberType]
 
 
 # --- _auto_compact_with_version_bump (plugins/ava_compact/plugin.py) tests ---
