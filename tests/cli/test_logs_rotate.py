@@ -101,14 +101,17 @@ def test_utc_day_change_rotates_a_small_file(tmp_path: Path) -> None:
     assert _archive(log).read_bytes() == b"x"
 
 
-def test_prior_utc_day_rotates_even_an_empty_file(tmp_path: Path) -> None:
+def test_prior_utc_day_keeps_an_empty_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     from cli.commands.logs import cmd_logs_rotate
 
     log = _dated_file(tmp_path / "ava-ops.out.log", b"", _NOW - timedelta(days=1))
 
     assert cmd_logs_rotate(dry_run=False, size_mib=64, logs_path=tmp_path, now=_NOW) == 0
-    assert _archive(log).exists()
-    assert _archive(log).read_bytes() == b""
+    assert not _archive(log).exists()
+    assert log.read_bytes() == b""
+    assert f"rotate_state\tpath={log}\tbytes=0\taction=kept" in capsys.readouterr().out
 
 
 def test_native_scope_excludes_grafana_archives_symlinks_and_nested_files(
