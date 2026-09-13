@@ -71,12 +71,20 @@ venv and the user present:
   first (same signing identity), then run this tool.
 - **Full Disk Access is out of scope.** The audit found no evidence it is
   needed; the tool ignores it.
+- **Multiple helper instances on one host share the same TCC identity.** A
+  second cluster instance (its own build, launchd service and socket -- e.g. a
+  dev/test instance) needs no separate onboarding when its helper is built
+  from the same signing identity: TCC grants are keyed to the bundle
+  identifier plus certificate, so every instance carrying the same designated
+  requirement inherits the same grants. Observed on macmini 2026-09-14: a
+  dev-instance helper came up alongside the main one with no prompts. Only a
+  new signing identity requires a fresh onboarding pass.
 
-## Per-machine requirements (state as of 2026-09-12)
+## Per-machine requirements (state as of 2026-09-14; first audit 2026-09-12)
 
 | Machine | Helper | Folder rows | SR / AX | Notes |
 |---|---|---|---|---|
-| macmini | running, spawn wire OK | Desktop/Documents/Downloads granted | granted | Onboarded 2026-09-12; spawn backend enabled + verified (probe attributed to the helper) |
+| macmini | running, spawn wire OK (rebuilt 2026-09-13, same signing identity) | Desktop/Documents/Downloads granted | granted | Onboarded 2026-09-12; spawn backend enabled + verified. Rebuild 2026-09-13 kept every grant (stable identity); re-verified 2026-09-14: spawn-chain PASS, preflight matrix green. |
 | company-mini | running, build predates `spawn` | to onboard after rebuild | granted | Rebuild first, same signing identity (an identity change silently drops the Accessibility grant) |
 | macbook-air | running, build predates `spawn` | to onboard after rebuild | granted | Same as company-mini |
 | company-air | not installed | all first-time | first-time | Fresh install + sign + first grants in one user-present session |
