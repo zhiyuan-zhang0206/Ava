@@ -420,9 +420,10 @@ def test_agent_host_liveness_is_probed_only_on_a_runner(
         ("idle", True, True, True, "maintenance"),
         ("idle", True, False, True, "maintenance"),
         # No readable deploy state is the verdict's first clause — it outranks
-        # every other cause, including a parked gate.
+        # every other cause, including a hold and a parked gate.
         (None, False, True, True, "no_state"),
         (None, False, False, True, "no_state"),
+        (None, True, True, True, "no_state"),
         # No clause fired.
         ("idle", False, True, False, None),
     ],

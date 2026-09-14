@@ -63,10 +63,10 @@ class MachineStatus(BaseModel):
     up_since_at: datetime
     online: bool
     paused: bool | None  # None = unknown (probe failed)
-    # Which clause of the host's paused verdict fired, when this row resolved
-    # one (no_state / business_pause / maintenance / startup — see
-    # ops/cluster_status.py::_paused_reason). None = not paused, or the row path
-    # could not resolve a cause (probe failed / lightweight local row).
+    # Which clause of the host's paused verdict fired, when known (no_state /
+    # business_pause / maintenance / startup — see
+    # ops/cluster_status.py::_paused_reason). None = not paused, or the row
+    # carries no verdict to decompose (probe failed / abnormal-state row).
     paused_reason: PausedReason | None = None
     description: str | None = None  # free-text machine metadata; NULL when unset
     # Set when the host announced an intentional `ava stop` (cleared on next

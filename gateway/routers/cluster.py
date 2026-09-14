@@ -71,12 +71,16 @@ def _local_snapshot_blocking() -> ClusterStatus:
     must not run on the event loop."""
     from shared import process_sha as _process_sha
 
+    paused = cluster_is_paused()
     return ClusterStatus(
         machine_name=machine_name(),
         serve_gateway=is_gateway(),
         serve_agent_runner=is_agent_runner(),
         serve_observability_station=is_observability_station(),
-        paused=cluster_is_paused(),
+        paused=paused,
+        # This local snapshot resolves paused from the posture row alone, so a
+        # true verdict here has exactly one possible cause.
+        paused_reason="business_pause" if paused else None,
         current_orchestration=current_orchestration(),
         head_sha=prod_source_head_sha(),
         # This gateway process's own frozen commit — not a disk bookmark, so a
