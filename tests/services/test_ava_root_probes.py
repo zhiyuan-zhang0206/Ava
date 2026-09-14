@@ -48,7 +48,7 @@ class _Spec:
 
 def _write_probe_module(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str) -> None:
     (tmp_path / f"{name}.py").write_text(textwrap.dedent(_PROBE_MODULE))
-    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.syspath_prepend(str(tmp_path))  # pyright: ignore[reportUnknownMemberType]
     importlib.invalidate_caches()
 
 
@@ -115,7 +115,7 @@ def test_register_ref_missing_attribute_and_non_callable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     (tmp_path / "tmp_probe_attrs.py").write_text("value = 3\n")
-    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.syspath_prepend(str(tmp_path))  # pyright: ignore[reportUnknownMemberType]
     importlib.invalidate_caches()
     registry = ProbeRegistry()
     registry.register_ref("alpha", "tmp_probe_attrs:ghost")
