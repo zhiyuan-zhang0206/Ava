@@ -559,11 +559,16 @@ def load_cache(path: Path) -> dict[str, dict[str, Any]]:
 
 
 def save_json(path: Path, payload: dict[str, Any]) -> None:
-    """Atomic write (tmp + rename) so a crash never leaves a torn file."""
+    """Atomic write (tmp + rename) so a crash never leaves a torn file; a
+    failed rename keeps the previous file and clears the stranded tmp."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, indent=1, sort_keys=True) + "\n", encoding="utf-8")
-    tmp.replace(path)
+    try:
+        tmp.replace(path)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def collect_records(

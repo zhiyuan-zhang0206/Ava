@@ -385,6 +385,26 @@ def test_save_json_is_atomic_and_load_cache_heals_corruption(tmp_path: Path) -> 
     assert not list(target.parent.glob("*.tmp"))
 
 
+def test_save_json_failed_replace_keeps_the_prior_file_and_no_tmp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed rename must leave the previous snapshot intact and must not
+    strand the temporary beside it -- the atomicity the write-and-rename
+    actually buys (QA fold-in from the #2510 review)."""
+    target = tmp_path / "state" / "cache.json"
+    pr_flow.save_json(target, {"version": 1, "prs": {}})
+
+    def fail_replace(_source: Path, _target: str | Path) -> None:
+        raise OSError("simulated replace failure")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+    with pytest.raises(OSError, match="simulated replace failure"):
+        pr_flow.save_json(target, {"version": 2, "prs": {"1": {"x": 1}}})
+
+    assert json.loads(target.read_text(encoding="utf-8")) == {"version": 1, "prs": {}}
+    assert list(target.parent.glob("*.tmp")) == []
+
+
 def test_emit_snapshot_skips_the_pipeline_in_dry_run(monkeypatch: pytest.MonkeyPatch) -> None:
     emitted: list[object] = []
     monkeypatch.setattr(pr_flow, "_emit_events", emitted.append)
