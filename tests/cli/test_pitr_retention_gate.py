@@ -342,3 +342,15 @@ def test_inspect_reports_the_live_gate_state(
     capsys.readouterr()
     assert cmd_pitr_retention_inspect() == 0
     assert json.loads(capsys.readouterr().out)["delete_enabled"] is True
+
+
+def test_inspect_degrades_without_a_plan(
+    gate_env: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """No dry-run plan on disk: a stderr note and exit 1, not a traceback."""
+    from cli.commands import cmd_pitr_retention_inspect
+
+    assert cmd_pitr_retention_inspect() == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "no dry-run plan on disk" in captured.err

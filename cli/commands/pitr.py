@@ -187,7 +187,15 @@ def cmd_pitr_retention_run_once(*, confirm: bool) -> int:
 def cmd_pitr_retention_inspect() -> int:
     from services.pitr.retention_gate import CarrierState
 
-    plan = inspect_dry_run_plan(ava_home() / "physical-backup")
+    try:
+        plan = inspect_dry_run_plan(ava_home() / "physical-backup")
+    except FileNotFoundError:
+        print(
+            "no dry-run plan on disk yet; the scheduler writes one each tick - "
+            "wait for the next tick, then re-run",
+            file=sys.stderr,
+        )
+        return 1
     print(
         json.dumps(
             {
