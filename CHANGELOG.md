@@ -115,6 +115,12 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
   accepted any id shape of 8+ characters as a suffix. The fallback now only
   triggers for the exact 8-character masked form and excludes the current
   session from matches.
+- The `qa-approved-gate` label check now reads the PR's labels live from the
+  API at evaluation time instead of the event payload: a run queued before the
+  label was applied can no longer execute late and flip the check's newest
+  result back to failure after the labeled run passed, and a stale payload
+  that still lists a removed label can no longer pass. An unlabeled PR is
+  still red; the Trunk exemption is unchanged (task #3334).
 
 ### Added
 - Browser-mcp daemon now keeps a valid gateway session cookie in the shared
