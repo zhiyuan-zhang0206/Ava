@@ -313,6 +313,28 @@ def test_clear_wraps_restores_and_empties(probe: tuple[Any, Any]):
     assert _extend.wrappers() == {}
 
 
+def test_wrap_captures_the_base_callable_below_a_metering_recorder(
+    probe: tuple[Any, Any],
+) -> None:
+    """Task #3427: the SDK metering recorder (installed at SDK import, before
+    plugins load) is not a wrap layer. A wrap captures and chains over the base
+    callable below it — so clear_wraps restores the base, and no stale recorder
+    stays alive inside the wrap chain."""
+    from ava import _sdk_metering
+
+    ns, fn = probe
+    ns.fn = _sdk_metering._make_recorder(fn, "probe.fn")
+
+    with PluginContext("myplugin"):
+        wrap("probe.fn", lambda inner, *a, **kw: inner(*a, **kw))  # pyright: ignore[reportUnknownArgumentType]
+
+    assert _extend._ORIGINALS["probe.fn"] is fn  # the base, not the proxy
+    assert ns.fn("x") == "fn(x,1,2)"  # the chain still runs
+
+    _extend.clear_wraps()
+    assert ns.fn is fn
+
+
 def test_wrap_invalid_target_raises(probe: tuple[Any, Any]):
     with pytest.raises(_extend.WrapTargetError, match="dotted path"):
         wrap("probe..fn", lambda inner: inner())  # pyright: ignore[reportUnknownArgumentType]
