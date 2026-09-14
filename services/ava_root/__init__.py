@@ -30,6 +30,12 @@ from services.ava_root.singleton import (
     release_instance_lock,
 )
 from services.ava_root.supervisor import Supervisor, SupervisorConfig, UnitState
+from services.ava_root.wiring import (
+    WiringContext,
+    WiringError,
+    WiringParticipant,
+    load_wiring,
+)
 
 __all__ = [
     "ROOT_ID",
@@ -51,7 +57,11 @@ __all__ = [
     "UnitRegistry",
     "UnitState",
     "UnknownUnitError",
+    "WiringContext",
+    "WiringError",
+    "WiringParticipant",
     "acquire_instance_lock",
     "load_manifests",
+    "load_wiring",
     "release_instance_lock",
 ]

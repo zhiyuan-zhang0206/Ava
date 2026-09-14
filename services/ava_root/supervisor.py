@@ -401,7 +401,10 @@ class Supervisor:
         instance lock cannot leak into the tree.
         """
         manifest = runtime.manifest
-        log_path = self._log_dir / f"{manifest.id}.log"
+        # One directory per unit (G5): the unit owns its log space, so naming /
+        # rotation policy can land inside it without another layout change.
+        log_path = self._log_dir / manifest.id / "output.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
         log_fd = os.open(log_path, os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o644)
         try:
             proc = await asyncio.create_subprocess_exec(
