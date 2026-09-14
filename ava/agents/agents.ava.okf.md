@@ -18,7 +18,7 @@ tags:
 
 ### Lifecycle
 - `spawn(prompt=None, fork_from=None, machine=None, config_overlay=None, preset=None) → int` — start a new agent, returns agent ID, non-blocking. `prompt` is the first message (should be self-contained); `fork_from` copies the parent agent's conversation state; `machine` defaults to self; `preset` loads config from a preset template, when passed with `config_overlay` the latter overrides field-by-field. `config_overlay={"eval_isolation": true}` starts an eval-isolated agent; `eval_network_allowlist` can explicitly retain `web` or `understand`, while `mcps` and `ui` have no allowlist. Identity-class config you do NOT name (model, reasoning effort, skill set, prompt shaping) is resolved from the cluster default at spawn and frozen onto the new agent for its life — a later default change never re-brains it. (The `ava_fleet` plugin appends `label=` parameter to `spawn` to set initial role label.)
-- `terminate(agent_id, *, message=None, force=False) → TerminateResult` — agent exits after completing the current turn; `message` is retained without another response and is visible after resurrection; `force=True` kills the process immediately.
+- `terminate(agent_id, *, message=None, force=False) → TerminateOutcome` — agent exits after completing the current turn; `message` is retained without another response and is visible after resurrection; `force=True` kills the process immediately. The outcome compares as the acceptance status string and carries `open_tasks` — the tasks the agent still owns as it goes down (at most five, newest first; None when none).
 - `restart(agent_id) → RestartResult` — agent restarts as a fresh process with the same ID after completing the current turn.
 - `resurrect(agent_id, prompt) → ResurrectResult` — wake up a terminated agent, preserving its conversation state; `prompt` required.
 
@@ -39,6 +39,8 @@ tags:
 - `AgentStatus`: RUNNING / IDLING / RESTARTING / TERMINATED — four states, no ops-only states to project away.
 - `Neighbor`: agent_id, label, status, depth (hops from the queried agent — out for neighbors, up for ancestors), score (connection strength)
 - `Machine`: name, description, live (detected at call time, not cached)
+- `TerminateOutcome`: reads as the status string (`enqueued` / `already_terminated`); `status` is the enum, `open_tasks` the still-open task hint (or None).
+- `OpenTasksHint`: count of open tasks, up to five `tasks` newest first (id, title, status, updated_at), and `more` — how many beyond those five remain.
 
 ## Key Dependencies
 - [[state.ava.okf.md]] — agent state storage

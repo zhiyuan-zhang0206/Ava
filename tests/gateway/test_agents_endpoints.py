@@ -357,7 +357,7 @@ class TestTerminate:
             agent_id = client.post("/api/agents", json={}).json()["id"]
             resp = client.post(f"/api/agents/{agent_id}/terminate")
         assert resp.status_code == 200
-        assert resp.json() == {"status": "enqueued"}
+        assert resp.json() == {"status": "enqueued", "open_tasks": None}
         assert _inbound_rows(db_conn, agent_id) == [("", "terminate", "user")]
 
     def test_terminate_already_terminated_is_noop(self, db_conn: psycopg.Connection) -> None:
@@ -370,7 +370,7 @@ class TestTerminate:
             db_conn.commit()
             resp = client.post(f"/api/agents/{agent_id}/terminate")
         assert resp.status_code == 200
-        assert resp.json() == {"status": "already_terminated"}
+        assert resp.json() == {"status": "already_terminated", "open_tasks": None}
         assert _inbound_rows(db_conn, agent_id) == []  # not delivered
 
     def test_terminate_nonexistent_404(
@@ -391,7 +391,7 @@ class TestTerminate:
             agent_id = client.post("/api/agents", json={}).json()["id"]
             resp = client.post(f"/api/agents/{agent_id}/terminate", json={"force": True})
         assert resp.status_code == 200
-        assert resp.json() == {"status": "enqueued"}
+        assert resp.json() == {"status": "enqueued", "open_tasks": None}
 
         # status should become 'terminated'
         row = _agent_row(db_conn, agent_id)
@@ -411,7 +411,7 @@ class TestTerminate:
                 f"/api/agents/{agent_id}/terminate",
                 json={"force": True, "source": "agent:42"},
             )
-        assert resp.json() == {"status": "enqueued"}
+        assert resp.json() == {"status": "enqueued", "open_tasks": None}
 
         # inbound source should be agent:42, not default user
         rows = _inbound_rows(db_conn, agent_id)
@@ -436,7 +436,7 @@ class TestTerminate:
                 )
                 before = cur.fetchone()
             resp = client.post(f"/api/agents/{agent_id}/terminate", json={"force": True})
-        assert resp.json() == {"status": "enqueued"}
+        assert resp.json() == {"status": "enqueued", "open_tasks": None}
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT status_changed_at, last_force_terminate_inbound_id "

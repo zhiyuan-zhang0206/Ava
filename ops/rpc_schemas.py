@@ -4,6 +4,10 @@ contract. These types are produced/consumed on BOTH sides of the ops RPC
 services/), so by the import layering (shared < ops < gateway) they live in
 the ops layer: gateway imports them downward, and ops/services never have to
 reach up into gateway. Split out of the former monolithic ops/schemas.py.
+
+The terminate exchange (request / response / open-task hint) lives in
+`ops/rpc_terminate.py` and the shared content guardrail in `ops/rpc_content.py`;
+both are re-exported here so every import path stays stable.
 """
 
 from datetime import datetime
@@ -18,20 +22,14 @@ from pydantic import (
     model_validator,
 )
 
+from ops.rpc_content import UserContent
+
+# Re-exported so existing `ops.rpc_schemas` importers keep their import paths.
+from ops.rpc_terminate import OpenTaskRow as OpenTaskRow
+from ops.rpc_terminate import OpenTasksHint as OpenTasksHint
+from ops.rpc_terminate import TerminateAgentRequest as TerminateAgentRequest
+from ops.rpc_terminate import TerminateAgentResponse as TerminateAgentResponse
 from shared.envelope import reject_unnegotiated_caller, validate_source, validate_writable_source
-
-_MAX_CONTENT_CHARS = 1_000_000
-"""Prompt/reply content needs a memory-abuse guardrail, not a 64 KiB wire contract.
-
-The model provider context window is the downstream input bound; one million
-characters is roughly 1 MiB, leaving legitimate handoffs and reports intact
-while failing fast on abusive request bodies.
-"""
-
-_UserContent = Annotated[
-    str,
-    StringConstraints(strip_whitespace=True, min_length=1, max_length=_MAX_CONTENT_CHARS),
-]
 
 
 class TextContentBlock(BaseModel):
@@ -127,7 +125,7 @@ class SpawnAgentRequest(BaseModel):
     explicitly identify themselves.
     """
 
-    prompt: _UserContent | None = None
+    prompt: UserContent | None = None
     spawner: str = Field(default="user", min_length=1, max_length=64)
     fork_from: int | None = Field(default=None, gt=0)
     prompt_source: str | None = Field(default=None, min_length=1, max_length=64)
@@ -231,7 +229,7 @@ class ResurrectAgentRequest(BaseModel):
     """
 
     resurrected_by: str = Field(default="user", min_length=1, max_length=64)
-    prompt: _UserContent | None = None
+    prompt: UserContent | None = None
 
     @field_validator("resurrected_by")
     @classmethod
@@ -282,52 +280,6 @@ class AgentMessageIn(BaseModel):
             if not has_image and not has_text:
                 raise ValueError("content blocks must include an image or non-empty text")
         return self
-
-
-class TerminateAgentRequest(BaseModel):
-    """POST /api/agents/{id}/terminate request body — fully optional.
-
-    `force` defaults to False for graceful termination. True directly kills the
-    detached process and force-updates status when the agent cannot reach claim.
-
-    `source` defaults to "user"; SDK paths pass f"agent:{my_id}". Claim
-    includes this source in the lifecycle marker shown to the agent.
-
-    `message`, when present, is queued as chat immediately before the terminate
-    inbound. Lifecycle acceptance claims only the terminate row, so the chat
-    remains pending for the next resurrection without another LLM turn.
-    """
-
-    force: bool = Field(default=False)
-    source: str = Field(default="user", min_length=1, max_length=64)
-    message: _UserContent | None = None
-
-    @field_validator("source")
-    @classmethod
-    def _check_source(cls, value: str) -> str:
-        # Lifecycle audit reasons include opaque legacy values such as
-        # machine-pause; they are not chat envelope source identifiers.
-        reject_unnegotiated_caller(value)
-        return value
-
-    @model_validator(mode="after")
-    def _validate_message_source(self) -> "TerminateAgentRequest":
-        if self.message is not None:
-            validate_writable_source(self.source)
-        return self
-
-
-class TerminateAgentResponse(BaseModel):
-    """POST /api/agents/{id}/terminate response.
-
-    `enqueued`: termination accepted, including hosted force. Actual work may
-        still be draining; this result does not prove exit.
-    `already_terminated`: agent was already dead. Graceful termination is a
-        no-op. Hosted force instead returns enqueued until its exact original
-        host can prove quiescence; metadata status alone is not exit evidence.
-    """
-
-    status: Literal["enqueued", "already_terminated"]
 
 
 class RestartAgentRequest(BaseModel):

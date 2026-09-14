@@ -40,7 +40,9 @@ CLI launch paths share the session backend; stop verifies captured process
 identity before signalling. No K8s runtime or image deployment is involved.
 
 The import boundary is `shared < ops < {gateway, cli}`. Shared RPC contracts
-stay in `ops/rpc_schemas.py`; gateway-only schemas stay in `gateway/schemas/`.
+live in the ops schema modules (`ops/rpc_schemas.py` with the focused
+`ops/rpc_terminate.py` / `ops/rpc_content.py` siblings); gateway-only schemas
+stay in `gateway/schemas/`.
 Cluster identity remains the installed home path, resolved before runtime
 configuration construction.
 

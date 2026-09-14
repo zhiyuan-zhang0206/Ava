@@ -444,12 +444,40 @@ class TestLifecycle:
         mock_resp = MagicMock(spec=httpx.Response)
         mock_resp.status_code = 200
         mock_resp.is_success = True
-        mock_resp.json.return_value = {"status": wire_status}
+        mock_resp.json.return_value = {"status": wire_status, "open_tasks": None}
         mock_client.post.return_value = mock_resp
 
-        status = terminate(42, source="agent:1", force=True)
-        assert status == wire_status
+        result = terminate(42, source="agent:1", force=True)
+        # The client hands back the full wire payload — status plus the
+        # open-tasks hint — no longer just the status string (task #3361).
+        assert result == {"status": wire_status, "open_tasks": None}
         assert mock_client.post.call_args.kwargs["json"]["force"] is True
+
+    @patch("ava._gateway_transport._client")
+    def test_terminate_passes_open_tasks_hint_through(self, mock_client: MagicMock):
+        """A non-null hint rides the client verbatim; the SDK converts it."""
+        from ava._gateway_client import terminate
+
+        hint = {
+            "count": 6,
+            "tasks": [
+                {
+                    "id": 11,
+                    "title": "sync terminate tests",
+                    "status": "in_progress",
+                    "updated_at": "2026-09-14T05:00:00+00:00",
+                }
+            ],
+            "more": 1,
+        }
+        mock_resp = MagicMock(spec=httpx.Response)
+        mock_resp.status_code = 200
+        mock_resp.is_success = True
+        mock_resp.json.return_value = {"status": "enqueued", "open_tasks": hint}
+        mock_client.post.return_value = mock_resp
+
+        result = terminate(42)
+        assert result == {"status": "enqueued", "open_tasks": hint}
 
     @patch("ava._gateway_transport._client")
     def test_restart_returns_status(self, mock_client: MagicMock):

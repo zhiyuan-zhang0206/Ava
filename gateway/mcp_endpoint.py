@@ -45,7 +45,7 @@ from gateway.error_envelope import error_response
 from gateway.request_principal import AuthPrincipal, PrincipalScopeError, principal_key
 from gateway.routers import agents as _agents_router
 from gateway.routers._delivery import deliver_chat_inbound
-from gateway.routers.agents_lifecycle import post_agent_terminate
+from gateway.routers.agents_lifecycle import terminate_agent_with_open_tasks
 from gateway.schemas import AgentRow, AgentSummary
 from ops.agents import get_agent_status
 from ops.rpc_schemas import SpawnAgentRequest, TerminateAgentRequest
@@ -543,13 +543,16 @@ def _register_fleet_tools(
         The agent's history survives either way, and `send_message` revives
         it, so this is reversible; it is destructive in that it stops running
         work. `message` saves a final instruction for that later revival
-        without asking the agent to respond before exiting.
+        without asking the agent to respond before exiting. The result also
+        reports `open_tasks` — the tasks the agent still owns as it goes down
+        (at most five, most recently updated first; null when it owns none).
         """
         _require_write_scope("terminate_agent")
         try:
-            result = await post_agent_terminate(
+            result = await terminate_agent_with_open_tasks(
                 agent_id,
                 TerminateAgentRequest(message=message, force=force),
+                pool,
             )
         except AvaAgentError as exc:
             raise ToolError(str(exc)) from exc

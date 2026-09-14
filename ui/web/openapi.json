@@ -563,7 +563,7 @@
     "/api/agents/{agent_id}/terminate": {
       "post": {
         "summary": "Post Agent Terminate",
-        "description": "Terminate through the home runner's durable native control path.\n\nClaim returns to END and the host flushes before applying normal termination.\nAn optional message is committed as pending work before the command, retained\nfor later resurrection without causing another model turn. Force returns\nenqueued while the exact original host settles its task and execution\nresources; acceptance and metadata status are not proof of completed exit.\n\nBoth paths forward to the home runner. A missing agent returns 404; an\nalready-terminated identity is a no-op for graceful termination.",
+        "description": "Terminate through the home runner's durable native control path.\n\nClaim returns to END and the host flushes before applying normal termination.\nAn optional message is committed as pending work before the command, retained\nfor later resurrection without causing another model turn. Force returns\nenqueued while the exact original host settles its task and execution\nresources; acceptance and metadata status are not proof of completed exit.\n\nBoth paths forward to the home runner. A missing agent returns 404; an\nalready-terminated identity is a no-op for graceful termination.\n\nOn success the response additionally carries `open_tasks` — the tasks the\nagent still owns (in_progress / ongoing; at most five, most recently\nupdated first) as it goes down. The hint is advisory: a failed read leaves\nit null and never changes the termination result.",
         "operationId": "post_agent_terminate_api_agents__agent_id__terminate_post",
         "parameters": [
           {
@@ -11678,6 +11678,66 @@
         "title": "OpenNotice",
         "description": "One open notice from ava.ui.notify() (migration 0053).\n\nThe agent snapshot's `notices_awaiting_response` carries only the require_response\nsubset (the \"needs response\" worklist); this model also serves the per-agent\ninspector panel where the single open notice (since #152) may be either kind.\n\n`title` is the one-line headline; `content` is the optional detail\nbody (possibly long). `priority` is P0..P3 (the stakes axis) and `blocking`\nsays whether the agent is stalled waiting on the answer (the urgency axis) —\nthe two triage axes (color + sort). `require_response` is True when the agent\nneeds a user decision, False for a one-way FYI; defaults to True for backward\ncompat with the snapshot's notices_awaiting_response subquery (which only\nselects require_response rows)."
       },
+      "OpenTaskRow": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "in_progress",
+              "ongoing"
+            ],
+            "title": "Status"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "status",
+          "updated_at"
+        ],
+        "title": "OpenTaskRow",
+        "description": "One open task a terminating agent still owns; `updated_at` is ISO-8601.\n\nThe terminate hint shows at most five, most recently updated first."
+      },
+      "OpenTasksHint": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/OpenTaskRow"
+            },
+            "type": "array",
+            "title": "Tasks"
+          },
+          "more": {
+            "type": "integer",
+            "title": "More"
+          }
+        },
+        "type": "object",
+        "required": [
+          "count",
+          "tasks",
+          "more"
+        ],
+        "title": "OpenTasksHint",
+        "description": "The open tasks (in_progress / ongoing) a terminating agent still owns.\n\nAdvisory only — termination proceeds either way. `tasks` holds at most the\nfive most recently updated rows; `more` counts the ones beyond those."
+      },
       "OpsMonitorMeta": {
         "properties": {
           "window": {
@@ -14575,6 +14635,16 @@
               "already_terminated"
             ],
             "title": "Status"
+          },
+          "open_tasks": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OpenTasksHint"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -14582,7 +14652,7 @@
           "status"
         ],
         "title": "TerminateAgentResponse",
-        "description": "POST /api/agents/{id}/terminate response.\n\n`enqueued`: termination accepted, including hosted force. Actual work may\n    still be draining; this result does not prove exit.\n`already_terminated`: agent was already dead. Graceful termination is a\n    no-op. Hosted force instead returns enqueued until its exact original\n    host can prove quiescence; metadata status alone is not exit evidence."
+        "description": "POST /api/agents/{id}/terminate response.\n\n`enqueued`: termination accepted, including hosted force. Actual work may\n    still be draining; this result does not prove exit.\n`already_terminated`: agent was already dead. Graceful termination is a\n    no-op. Hosted force instead returns enqueued until its exact original\n    host can prove quiescence; metadata status alone is not exit evidence.\n\n`open_tasks`: the still-open tasks the agent owned as it went down — an\n    advisory hint, null when it owned none or the hint read failed."
       },
       "TextContentBlock": {
         "properties": {

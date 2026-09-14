@@ -14,16 +14,20 @@ state reads in routers/agents_state.py.
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Literal
 
+import psycopg
 from fastapi import APIRouter, Body, HTTPException, Request
-from psycopg_pool import ConnectionPool
+from psycopg_pool import ConnectionPool, PoolTimeout
 
 from gateway.routers.agents_forward import _forward_to_home_machine
 from gateway.schemas import CancelRequest, CompactEnqueued
 from ops import ops_lifecycle as _ops
 from ops.rpc_schemas import (
     CancelRequested,
+    OpenTaskRow,
+    OpenTasksHint,
     RestartAgentRequest,
     RestartAgentResponse,
     ResurrectAgentRequest,
@@ -34,6 +38,11 @@ from ops.rpc_schemas import (
 from shared.db import agent_exists, insert_compact_request_inbound
 
 router = APIRouter()
+
+_log = logging.getLogger(__name__)
+
+# The open-task hint shows at most this many rows; `more` counts the rest.
+_OPEN_TASKS_SHOWN = 5
 
 
 @router.post("/api/agents/{agent_id}/compact")
@@ -101,6 +110,7 @@ def _compact_request_blocking(pool: ConnectionPool, agent_id: int) -> int:
 @router.post("/api/agents/{agent_id}/terminate")
 async def post_agent_terminate(
     agent_id: int,
+    request: Request,
     body: TerminateAgentRequest = Body(default_factory=TerminateAgentRequest),  # noqa: B008
 ) -> TerminateAgentResponse:
     """Terminate through the home runner's durable native control path.
@@ -112,11 +122,60 @@ async def post_agent_terminate(
     resources; acceptance and metadata status are not proof of completed exit.
 
     Both paths forward to the home runner. A missing agent returns 404; an
-    already-terminated identity is a no-op for graceful termination."""
+    already-terminated identity is a no-op for graceful termination.
+
+    On success the response additionally carries `open_tasks` — the tasks the
+    agent still owns (in_progress / ongoing; at most five, most recently
+    updated first) as it goes down. The hint is advisory: a failed read leaves
+    it null and never changes the termination result."""
+    return await terminate_agent_with_open_tasks(agent_id, body, request.app.state.db_pool)
+
+
+async def terminate_agent_with_open_tasks(
+    agent_id: int, body: TerminateAgentRequest, pool: ConnectionPool
+) -> TerminateAgentResponse:
+    """Forward the terminate op to the home runner, then attach the agent's
+    open-task hint — read once from `agent_tasks` after acceptance.
+
+    Advisory by design: a failed hint read is logged and leaves `open_tasks`
+    null, so it can never block or alter the termination itself."""
     forwarded = await _forward_to_home_machine(
         agent_id, f"/api/agents/{agent_id}/terminate", body.model_dump()
     )
-    return TerminateAgentResponse.model_validate(forwarded)
+    response = TerminateAgentResponse.model_validate(forwarded)
+    try:
+        hint = await asyncio.to_thread(_open_tasks_hint_blocking, pool, agent_id)
+    except (psycopg.Error, PoolTimeout) as exc:
+        _log.error(
+            "[lifecycle] open-tasks hint for terminate of agent %s failed: %r",
+            agent_id,
+            exc,
+        )
+        return response
+    return response.model_copy(update={"open_tasks": hint})
+
+
+def _open_tasks_hint_blocking(pool: ConnectionPool, agent_id: int) -> OpenTasksHint | None:
+    """One `agent_tasks` read — the agent's open tasks, most recently updated
+    first; None when it owns none."""
+    with pool.connection() as conn:
+        rows = conn.execute(
+            "SELECT id, title, status, updated_at FROM agent_tasks "
+            "WHERE owner = %s AND status IN ('in_progress', 'ongoing') "
+            "ORDER BY updated_at DESC, id DESC",
+            (agent_id,),
+        ).fetchall()
+    if not rows:
+        return None
+    shown = rows[:_OPEN_TASKS_SHOWN]
+    return OpenTasksHint(
+        count=len(rows),
+        tasks=[
+            OpenTaskRow(id=row[0], title=row[1], status=row[2], updated_at=row[3].isoformat())
+            for row in shown
+        ],
+        more=len(rows) - len(shown),
+    )
 
 
 @router.post("/api/agents/{agent_id}/resurrect")
