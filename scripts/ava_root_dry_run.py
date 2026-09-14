@@ -9,18 +9,23 @@ the G5 per-unit log layout — against a dev directory, never production.
 
 Phases:
   generate   build the light manifest (validated by load_manifests) and, when
-             this host has a resolvable machine role, exercise the production
-             generator into the evidence directory
+             `--capabilities` is passed, exercise the production generator
+             into the evidence directory
   launch     start the daemon with the drill wiring hook and wait for ready
   status     verify the attach surfaces (health/metrics), a real probe round,
              and the per-unit log layout
   ops        client verbs on the live tree: down / up / restart
+  revive     SIGSTOP the heartbeat unit (pid stays, beats stop) and let the
+             root's own health path revive it: probe down -> restart ->
+             verified alive
   stop       SIGTERM; the daemon must exit 0
 
 Nothing here touches production: the run dir lives under --workdir
 (/tmp/ava-root-dry-run by default), the units are sleepers, and the script
-refuses a workdir under ~/.ava. Evidence (manifests, status snapshots, logs)
-is retained under <workdir>/evidence unless --cleanup is passed.
+refuses a workdir under a protected home — the one exception is the agent
+scratch tree `<home>/workspaces/`, so a drill's evidence can live in a worker
+workspace. Evidence (manifests, status snapshots, logs) is retained under
+<workdir>/evidence unless --cleanup is passed.
 
 Exit 0 = every phase passed.
 """
@@ -29,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import signal
 import subprocess
@@ -45,13 +51,16 @@ from services.ava_root.ipc import ResponsePayload  # noqa: E402
 from services.ava_root.manifest import ManifestError, load_manifests  # noqa: E402
 from services.ava_root_glue.manifests import generate  # noqa: E402
 from shared.config import settings  # noqa: E402
+from shared.proc import process_alive  # noqa: E402
 
 _DEFAULT_WORKDIR = Path("/tmp/ava-root-dry-run")  # noqa: S108 - scratch evidence dir, never secret
 _SOCKET_NAME = "ava-root.sock"
 _WIRING = "services.ava_root_glue.drill:build_drill_wiring"
-_UNIT_IDS = ("light-a", "light-a-child", "light-b")
+_REVIVE_UNIT = "light-beat"
+_UNIT_IDS = ("light-a", "light-a-child", "light-b", _REVIVE_UNIT)
 _READY_TIMEOUT_S = 30.0
 _ROUND_TIMEOUT_S = 45.0
+_REVIVE_DEADLINE_S = 120.0
 _POLL_S = 0.25
 
 
@@ -69,7 +78,22 @@ def _unit_exec(python: str, unit_id: str) -> list[str]:
     return [python, "-u", "-c", script]
 
 
-def _light_manifest(python: str) -> dict[str, object]:
+def _beat_exec(python: str, heartbeat_path: Path) -> list[str]:
+    """A unit that touches `heartbeat_path` every second (the revive drill's surface)."""
+    script = (
+        "import time\n"
+        "from pathlib import Path\n"
+        f"beat = Path({str(heartbeat_path)!r})\n"
+        "beat.parent.mkdir(parents=True, exist_ok=True)\n"
+        f"print('{_REVIVE_UNIT} ready', flush=True)\n"
+        "while True:\n"
+        "    beat.touch()\n"
+        "    time.sleep(1)\n"
+    )
+    return [python, "-u", "-c", script]
+
+
+def _light_manifest(python: str, *, heartbeat_path: Path) -> dict[str, object]:
     return {
         "units": [
             {"id": "light-a", "exec": _unit_exec(python, "light-a"), "restart": "always"},
@@ -80,6 +104,7 @@ def _light_manifest(python: str) -> dict[str, object]:
                 "attach": "light-a",
             },
             {"id": "light-b", "exec": _unit_exec(python, "light-b"), "restart": "always"},
+            {"id": _REVIVE_UNIT, "exec": _beat_exec(python, heartbeat_path), "restart": "always"},
         ]
     }
 
@@ -105,6 +130,14 @@ def _pid_of(status: dict[str, object], unit_id: str) -> int | None:
     unit = _units_by_id(status)[unit_id]
     pid = unit.get("pid")
     return pid if isinstance(pid, int) else None
+
+
+def _beat_mtime(path: Path) -> float | None:
+    """The heartbeat file's last-touch wall time; None when the file is absent."""
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return None
 
 
 def _wait_ready(run_dir: Path, proc: subprocess.Popen[bytes], log_path: Path) -> RootClient:
@@ -176,7 +209,11 @@ def main() -> int:  # noqa: PLR0915 - one bounded drill lifecycle: every phase, 
         _fail("args", f"workdir must be absolute: {workdir}")
     protected = {Path.home() / ".ava", Path(settings.general.ava_home).expanduser()}
     for base in protected:
-        if base in workdir.parents or workdir == base:
+        under_home = workdir == base or base in workdir.parents
+        # The one carve-out is the agent scratch tree: a root-side drill is
+        # expected to retain its evidence in a worker's workspace.
+        in_scratch = (base / "workspaces") in workdir.parents
+        if under_home and not in_scratch:
             _fail("args", f"refusing a workdir under {base}: {workdir} is for dev drills only")
 
     workdir.mkdir(parents=True, exist_ok=True)
@@ -187,7 +224,8 @@ def main() -> int:  # noqa: PLR0915 - one bounded drill lifecycle: every phase, 
     daemon_log = workdir / "root.log"
 
     # -- generate ---------------------------------------------------------
-    light = _light_manifest(args.python)
+    heartbeat_path = run_dir / "heartbeat" / f"{_REVIVE_UNIT}.beat"
+    light = _light_manifest(args.python, heartbeat_path=heartbeat_path)
     manifests_path.write_text(json.dumps(light, indent=2) + "\n", encoding="utf-8")
     load_manifests(manifests_path)  # the daemon's own reader must accept it
     _save(evidence, "manifests.light.json", light)
@@ -200,7 +238,11 @@ def main() -> int:  # noqa: PLR0915 - one bounded drill lifecycle: every phase, 
             production_note = f"{len(prod_units)} unit(s) -> {prod_path.name}"
         except ManifestError as exc:
             _fail("generate", f"production manifest generation failed: {exc}")
-    _phase_pass("generate", f"light manifest 3 units; production generator: {production_note}")
+    light_units = cast("list[object]", light["units"])
+    _phase_pass(
+        "generate",
+        f"light manifest {len(light_units)} units; production generator: {production_note}",
+    )
 
     # -- launch -----------------------------------------------------------
     command = [
@@ -282,6 +324,126 @@ def main() -> int:  # noqa: PLR0915 - one bounded drill lifecycle: every phase, 
         _phase_pass(
             "ops",
             f"down/up subtree (light-a + child) ok; restart replaced pid {pid_before_restart} -> {pid_after_restart}",
+        )
+
+        # -- revive -------------------------------------------------------
+        # The probe-driven revival: wedge the heartbeat unit (SIGSTOP — pid
+        # alive, beats stopped), let the ROOT's own health path judge it down
+        # and replace the generation, then confirm alive. No watchdog,
+        # healthchecks or session process takes part.
+        beat = run_dir / "heartbeat" / f"{_REVIVE_UNIT}.beat"
+        before = _status(client)
+        unit_before = _units_by_id(before)[_REVIVE_UNIT]
+        pid_before = _pid_of(before, _REVIVE_UNIT)
+        restarts_before = cast("int", unit_before.get("restart_count", -1))
+        beat_before = _beat_mtime(beat)
+        if pid_before is None or beat_before is None or time.time() - beat_before > 5.0:
+            _fail(
+                "revive",
+                f"{_REVIVE_UNIT} not wedge-ready: pid={pid_before} beat_mtime={beat_before}",
+            )
+        try:
+            os.kill(pid_before, signal.SIGSTOP)
+        except OSError as exc:
+            _fail("revive", f"cannot SIGSTOP pid {pid_before}: {exc}")
+        wedged_at = time.time()
+        _save(
+            evidence,
+            "revive.wedged.json",
+            {
+                "unit": _REVIVE_UNIT,
+                "pid": pid_before,
+                "restart_count": restarts_before,
+                "status": before,
+            },
+        )
+
+        deadline = time.monotonic() + _REVIVE_DEADLINE_S
+        down_snapshot: dict[str, object] | None = None
+        revived: dict[str, object] = {}
+        while time.monotonic() < deadline:
+            snapshot = _status(client)
+            unit = _units_by_id(snapshot)[_REVIVE_UNIT]
+            health = cast("dict[str, object]", snapshot.get("health") or {})
+            unit_health = cast("dict[str, object]", health.get(_REVIVE_UNIT) or {})
+            verdict = unit_health.get("last_verdict")
+            if verdict == "down" and down_snapshot is None:
+                down_snapshot = snapshot
+            pid_now = unit.get("pid")
+            beat_now = _beat_mtime(beat)
+            if (
+                down_snapshot is not None
+                and unit.get("state") == "running"
+                and isinstance(pid_now, int)
+                and pid_now != pid_before
+                and verdict == "alive"
+                and beat_now is not None
+                and beat_now > wedged_at
+                and not process_alive(pid_before)
+            ):
+                revived = snapshot
+                break
+            time.sleep(_POLL_S)
+        if not revived:
+            _fail(
+                "revive",
+                f"no probe-driven revive within {_REVIVE_DEADLINE_S:.0f}s"
+                f" (down_seen={down_snapshot is not None}); log:\n{_tail(daemon_log)}",
+            )
+        if down_snapshot is not None:
+            _save(evidence, "revive.down.json", down_snapshot)
+
+        unit_after = _units_by_id(revived)[_REVIVE_UNIT]
+        pid_after = _pid_of(revived, _REVIVE_UNIT)
+        restarts_after = cast("int", unit_after.get("restart_count", -1))
+        if pid_after is None or restarts_after != restarts_before + 1:
+            _fail(
+                "revive",
+                f"restart bookkeeping off: pid {pid_before} -> {pid_after},"
+                f" restart_count {restarts_before} -> {restarts_after}",
+            )
+
+        log_text = _tail(daemon_log, limit=200_000)
+        for marker in (
+            f"unit {_REVIVE_UNIT}: down (pid {pid_before} alive but heartbeat stale",
+            f"unit {_REVIVE_UNIT} started (pid {pid_after}",
+            f"unit {_REVIVE_UNIT}: restarted, verified alive",
+        ):
+            if marker not in log_text:
+                _fail("revive", f"daemon log lacks {marker!r};\n{_tail(daemon_log)}")
+        revive_lines = [line for line in log_text.splitlines() if _REVIVE_UNIT in line]
+        (evidence / "revive.daemon-lines.txt").write_text(
+            "\n".join(revive_lines) + "\n", encoding="utf-8"
+        )
+        _save(evidence, "revive.after.json", revived)
+        _save(
+            evidence,
+            "revive.json",
+            {
+                "unit": _REVIVE_UNIT,
+                "wedge": f"SIGSTOP pid {pid_before}",
+                "pid_before": pid_before,
+                "pid_after": pid_after,
+                "restart_count_before": restarts_before,
+                "restart_count_after": restarts_after,
+                "verdict_sequence": "alive -> down -> generation replaced -> verified alive",
+                "old_pid_dead": not process_alive(pid_before),
+                "old_gen_stop": (
+                    "escalated to SIGKILL after the stop timeout"
+                    if f"unit {_REVIVE_UNIT} did not stop within" in log_text
+                    else "terminated within the stop window (no escalation needed)"
+                ),
+                "watchdog_participation": (
+                    "none: revival came from the root's own HealthMonitor -> Supervisor.restart;"
+                    " the drill rig runs sleepers only (no watchdog/healthchecks/sessions)"
+                ),
+            },
+        )
+        _phase_pass(
+            "revive",
+            f"{_REVIVE_UNIT} SIGSTOP wedge -> probe down -> generation replaced"
+            f" (pid {pid_before} -> {pid_after}, restart_count {restarts_before} -> {restarts_after})"
+            " -> verified alive",
         )
     finally:
         if proc.poll() is None:

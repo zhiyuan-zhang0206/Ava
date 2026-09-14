@@ -1928,30 +1928,38 @@ needs Playwright chromium) — no Docker, no shared engine.
 > image — is operator-specific and lives in their private deployment notes, not
 > in this repo.
 
-## ava-root dev dry run (W1.2e)
+## ava-root dev dry run (W1.2e / S2)
 
 The root supervisor's wiring surfaces — the roster-to-manifest generator, the
 daemon's `--wiring` hook, the reference/drill assemblies, and the per-unit log
 layout — have a dev-side acceptance run of their own:
 
-    cd <repo> && env -u VIRTUAL_ENV .venv/bin/python scripts/ava_root_dry_run.py
+    cd <repo> && env -u VIRTUAL_ENV .venv/bin/python scripts/ava_root_dry_run.py --capabilities agent-runner
 
-It writes a light three-unit manifest (`light-a` plus an attached child, and
-`light-b`) and a production sample generated from the ops roster, starts the
+It writes a light four-unit manifest (`light-a` plus an attached child,
+`light-b`, and the heartbeat unit `light-beat`) and a production sample
+generated from the ops roster (without `--capabilities` the sample is
+skipped), starts the
 daemon with `--wiring services.ava_root_glue.drill:build_drill_wiring` under
 `/tmp/ava-root-dry-run`, and verifies over the live tree: the attach surfaces
 (`health` / `metrics` in `status`), a real probe round with `alive` verdicts,
-per-unit log directories (`<run-dir>/logs/<unit>/output.log`), and the client
-verbs (`down` / `up` on a subtree, `restart` replacing a generation). Five
+per-unit log directories (`<run-dir>/logs/<unit>/output.log`), the client
+verbs (`down` / `up` on a subtree, `restart` replacing a generation), and the
+probe-driven revive: the drill SIGSTOPs `light-beat` (pid stays alive, its
+beats stop), the root's own health path judges the stale heartbeat down and
+the supervisor replaces the generation — `down -> restarted, verified alive`
+in the daemon log, no watchdog/healthchecks/sessions process involved. Six
 phases must pass, each printed as `PASS(phase=...)`: generate / launch / status
-/ ops / stop (SIGTERM, exit 0).
+/ ops / revive / stop (SIGTERM, exit 0).
 
 Safety: the workdir defaults to `/tmp/ava-root-dry-run` and must stay outside
-`~/.ava` — the script refuses anything under a protected home, the units are
-sleepers, and nothing production is started or probed. Evidence (manifests,
-status snapshots, the daemon log) is retained under `<workdir>/evidence`; pass
-`--cleanup` to remove the workdir. Flags: `--workdir DIR` (absolute, outside
-`~/.ava`), `--python PATH` (interpreter for the daemon and the units),
+a protected home — the one exception is the agent scratch tree
+(`<home>/workspaces/`), allowed so a drill's evidence can live in a worker
+workspace; the units are sleepers, and nothing production is started or
+probed. Evidence (manifests, status snapshots, the daemon log) is retained
+under `<workdir>/evidence`; pass `--cleanup` to remove the workdir. Flags:
+`--workdir DIR` (absolute, outside a protected home except the scratch tree),
+`--python PATH` (interpreter for the daemon and the units),
 `--capabilities gateway,agent-runner` (capability set for the
 production-generator sample; omit to skip the sample), and `--cleanup`. This is the root-side counterpart of
 `scripts/two_section_chain_smoke.py` (which drives the OS-edge chain); that
