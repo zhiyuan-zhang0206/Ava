@@ -18,6 +18,7 @@ from services.ava_root.probes import Probe
 from services.ava_root.supervisor import Supervisor
 from services.ava_root.wiring import WiringContext
 from services.ava_root_glue import drill, glue
+from shared.config import settings
 from shared.daemon_health import DaemonProbe
 
 _SLEEPER = [sys.executable, "-u", "-c", "import time; time.sleep(60)"]
@@ -53,6 +54,13 @@ def _context(tmp_path: Path, registry: UnitRegistry) -> WiringContext:
     )
 
 
+@pytest.fixture(autouse=True)
+def _helper_gate_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the helper gate's platform input to a non-macOS value so tests are
+    deterministic on every host; tests that exercise the helper opt back in."""
+    monkeypatch.setattr(glue, "IS_MACOS", False)
+
+
 async def test_reference_wiring_registers_gated_specs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -77,6 +85,52 @@ async def test_reference_wiring_registers_gated_specs(
         assert health["svc-a"]["last_verdict"] == "alive"
         status = await context.supervisor.status()
         assert "health" in status and "metrics" in status
+    finally:
+        await context.supervisor.shutdown()
+
+
+def test_helper_probe_gate_needs_macos_and_the_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(glue, "IS_MACOS", True)
+    monkeypatch.setattr(settings.services, "permissions_helper_enabled", True)
+    assert glue._helper_probe_enabled() is True
+    monkeypatch.setattr(glue, "IS_MACOS", False)
+    assert glue._helper_probe_enabled() is False
+    monkeypatch.setattr(glue, "IS_MACOS", True)
+    monkeypatch.setattr(settings.services, "permissions_helper_enabled", False)
+    assert glue._helper_probe_enabled() is False
+
+
+async def test_helper_probe_seam_is_gated_and_held(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The helper rides the static path; a down verdict is surfaced and held —
+    the unit sits outside the supervisor's tree, so nothing ever restarts it."""
+    registry = _registry(("svc-a",))
+    context = _context(tmp_path, registry)
+    monkeypatch.setattr(glue, "build_services", lambda: ())
+    await context.supervisor.start()
+    try:
+        # Gate off (the autouse default): no helper entry in the roster.
+        monitor = glue.build_wiring(context)[0]
+        assert isinstance(monitor, HealthMonitor)
+        await monitor.run_round()
+        health = cast("dict[str, dict[str, object]]", monitor.health_snapshot())
+        assert glue.HELPER_PROBE_UNIT_ID not in health
+
+        # Gate on: registered through the static ref; the round surfaces the
+        # down verdict and the round completes (no crash on the out-of-tree
+        # deferral, no restart verb reached).
+        monkeypatch.setattr(glue, "IS_MACOS", True)
+        monkeypatch.setattr(settings.services, "permissions_helper_enabled", True)
+        monkeypatch.setattr(glue, "HELPER_PROBE_REF", "wiring_fixture_helper_probe:probe")
+        module = types.ModuleType("wiring_fixture_helper_probe")
+        setattr(module, "probe", lambda: DaemonProbe.down("lwcr-stuck: job state=spawn failed"))  # noqa: B010 - dynamic module attr
+        monkeypatch.setitem(sys.modules, "wiring_fixture_helper_probe", module)
+        monitor = glue.build_wiring(context)[0]
+        assert isinstance(monitor, HealthMonitor)
+        await monitor.run_round()
+        health = cast("dict[str, dict[str, object]]", monitor.health_snapshot())
+        assert "lwcr-stuck" in cast("str", health[glue.HELPER_PROBE_UNIT_ID]["last_detail"])
     finally:
         await context.supervisor.shutdown()
 

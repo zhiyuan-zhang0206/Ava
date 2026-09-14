@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 24 | events table |
-| telemetry (category=telemetry) | `events` | 170 | events table |
+| telemetry (category=telemetry) | `events` | 172 | events table |
 | log (category=log) | `events` | 11 | events table |
 | file-only (destination=file) | file log | 1 | file only (not the events table) |
 | SSE live | Redis → frontend (not persisted) | 31 role | live projection |
@@ -91,7 +91,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 170)
+## 3. Telemetry events (category=telemetry, 172)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -237,6 +237,8 @@ consumers: see the comments at each emit point.
 | `respawn_breaker_open` | watchdog respawn circuit breaker opened — repeated failed respawns held until a probe-alive round | anomaly | — | — | events |
 | `root_chain_broken` | root self-check found a managed unit no longer a live child of the root process — one alert per episode, held until intact | anomaly | — | — | events |
 | `root_restart_breaker_open` | root health monitor restart breaker opened — repeated non-alive probe rounds held until a probe-alive round | anomaly | — | — | events |
+| `permissions_helper_unhealthy` | permissions helper failed its healthcheck (ping plus launchd job classification) — one alert per episode, held until a ping-alive round | anomaly | — | — | events |
+| `permissions_helper_repair_failed` | permissions helper launchd repair (bootout+bootstrap) did not restore ping — escalating; the episode retries under backoff | anomaly | — | — | events |
 | `schedule_stalled` | enabled non-completed schedule has had no live session for more than two hours | anomaly | schedule_id, status, stalled_seconds | — | events |
 | `history_dump` | pre-compact history dumped to workspace | noise | — | — | events |
 | `checkpoint_trim` | checkpoint trimmed | noise | — | — | events |

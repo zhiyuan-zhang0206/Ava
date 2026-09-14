@@ -15,6 +15,11 @@ are adapter/window inputs (W1.3 / G4), and an empty slot reads `unavailable`
 Deployment freedom lives here, not in the root package: a spec-less unit is
 one `STATIC_PROBES` entry (`"module:attribute"`, resolved lazily), and a
 drill can assemble over its own probe source (see `drill.py`).
+
+The macOS permissions helper rides the same static path but is registered
+conditionally (`_helper_probe_enabled`): it exists only where the helper does.
+Its probe detects and classifies — repair stays with the helper's own
+lifecycle (task #3393).
 """
 
 from __future__ import annotations
@@ -26,6 +31,8 @@ from services.ava_root.health import HealthConfig, HealthMonitor
 from services.ava_root.probes import ProbeRegistry
 from services.ava_root.selfcheck import SelfCheckConfig, TreeSelfCheck
 from services.ava_root.wiring import WiringContext, WiringParticipant
+from shared.config import settings
+from shared.platform import IS_MACOS
 
 STATIC_PROBES: Mapping[str, str] = {}
 """Spec-less unit id -> `"module:attribute"` probe reference.
@@ -36,6 +43,16 @@ reference is validated eagerly and imported lazily (the `register_ref`
 contract).
 """
 
+HELPER_PROBE_UNIT_ID = "permissions-helper"
+"""The launchd-owned permissions helper's unit id in the health roster (the
+name the watchdog era also uses)."""
+
+HELPER_PROBE_REF = "services.healthchecks.permissions_helper:probe"
+"""The helper's total verdict probe (task #3393): reads the launchd job state,
+classifies an LWCR-stuck job, and never acts. Repair stays with the helper's
+own lifecycle (CLI converge / the era-1 loop) — this entry detects and the
+health monitor escalates; it is not a revival path."""
+
 
 def build_wiring(context: WiringContext) -> list[WiringParticipant]:
     """The reference participant set: health monitor + tree self-check."""
@@ -43,7 +60,14 @@ def build_wiring(context: WiringContext) -> list[WiringParticipant]:
     registry.register_specs(build_services())
     for unit_id, ref in STATIC_PROBES.items():
         registry.register_ref(unit_id, ref)
+    if _helper_probe_enabled():
+        registry.register_ref(HELPER_PROBE_UNIT_ID, HELPER_PROBE_REF)
     return assemble(context, registry)
+
+
+def _helper_probe_enabled() -> bool:
+    """A launchd helper job worth watching exists only where it was enabled."""
+    return IS_MACOS and settings.services.permissions_helper_enabled
 
 
 def assemble(

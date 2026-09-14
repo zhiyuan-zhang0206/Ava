@@ -38,6 +38,7 @@ from contextlib import suppress
 from dataclasses import dataclass, replace
 from typing import Protocol
 
+from services.ava_root.manifest import UnknownUnitError
 from services.ava_root.probes import Probe, ProbeError, ProbeRegistry
 from shared.daemon_health import DaemonProbe
 
@@ -143,6 +144,11 @@ class UnitHealth:
 # reason a down verdict neither counts toward the breaker nor alerts. Every
 # other reason (an in-flight retry, a `never` policy) suppresses the action only.
 _HELD_DOWN = "held down"
+
+# The reason held for a unit that is not in this tree at all (the static probe
+# path — a deployment-registered observer outside the supervisor's registry,
+# task #3393): the runner reports it but has no restart verb to reach for.
+_NO_REVIVAL_VERB = "no revival verb (not a tree unit)"
 
 
 class HealthMonitor:
@@ -270,7 +276,7 @@ class HealthMonitor:
             _log.debug("[health] unit %s: alive (%s)", unit_id, result.detail)
             return
 
-        deferral = self._supervisor.revival_deferral(unit_id)
+        deferral = self._deferral(unit_id)
         if deferral == _HELD_DOWN:
             # Operator stop: expected state, not a failure — no action, no
             # counting, no alert (the operator's own stop must not become noise).
@@ -312,38 +318,14 @@ class HealthMonitor:
                 )
                 return
 
-        failures = state.consecutive_failures + 1
-        state.consecutive_failures = failures
-        if failures >= self._config.breaker_rounds and state.breaker_since is None:
-            state.breaker_since = _monotonic()
-            # One alert per hold episode — a registered event; the per-round
-            # hold line below carries the continuing state.
-            self._emit_breaker_open(unit_id, failures, state.respawn_attempts, result.detail)
-        if state.breaker_since is not None:
-            _log.warning(
-                "[health] unit %s: down, restart held for %.0fs (%s) — not restarting%s",
-                unit_id,
-                _monotonic() - state.breaker_since,
-                result.detail,
-                deferred_note,
-            )
+        if not self._count_and_gate(unit_id, state, result.detail, deferred_note):
             return
-        if failures < self._config.failures_before_restart:
-            _log.warning(
-                "[health] unit %s: probe failed (%d/%d) — not restarting yet",
-                unit_id,
-                failures,
-                self._config.failures_before_restart,
-            )
-            return
-        backoff = self._backoff_remaining(state)
-        if backoff > 0:
-            _log.warning(
-                "[health] unit %s: down (%s) — backing off after a failed restart; "
-                "next attempt in %ds",
+        if deferral == _NO_REVIVAL_VERB:
+            _log.info(
+                "[health] unit %s: down (%s) — outside this tree (no revival verb); "
+                "reporting only, not restarting",
                 unit_id,
                 result.detail,
-                int(backoff),
             )
             return
         if deferral is not None:
@@ -378,6 +360,66 @@ class HealthMonitor:
             after.detail,
             int(delay_s),
         )
+
+    def _count_and_gate(
+        self, unit_id: str, state: UnitHealth, detail: str, deferred_note: str
+    ) -> bool:
+        """Count the round, run the breaker, and answer whether to restart now.
+
+        Same order and log lines as the original inline block: breaker check
+        first, then the consecutive-failure threshold, then the post-restart
+        backoff; the restart itself stays with the caller.
+        """
+        failures = state.consecutive_failures + 1
+        state.consecutive_failures = failures
+        if failures >= self._config.breaker_rounds and state.breaker_since is None:
+            state.breaker_since = _monotonic()
+            # One alert per hold episode — a registered event; the per-round
+            # hold line below carries the continuing state.
+            self._emit_breaker_open(unit_id, failures, state.respawn_attempts, detail)
+        if state.breaker_since is not None:
+            _log.warning(
+                "[health] unit %s: down, restart held for %.0fs (%s) — not restarting%s",
+                unit_id,
+                _monotonic() - state.breaker_since,
+                detail,
+                deferred_note,
+            )
+            return False
+        if failures < self._config.failures_before_restart:
+            _log.warning(
+                "[health] unit %s: probe failed (%d/%d) — not restarting yet",
+                unit_id,
+                failures,
+                self._config.failures_before_restart,
+            )
+            return False
+        backoff = self._backoff_remaining(state)
+        if backoff > 0:
+            _log.warning(
+                "[health] unit %s: down (%s) — backing off after a failed restart; "
+                "next attempt in %ds",
+                unit_id,
+                detail,
+                int(backoff),
+            )
+            return False
+        return True
+
+    def _deferral(self, unit_id: str) -> str | None:
+        """Why a would-be reviver must not act — with out-of-tree units folded in.
+
+        A unit registered by probe only (the static path — a
+        deployment-registered observer outside this registry, task #3393) is
+        absent from the supervisor's registry, and `revival_deferral` raises
+        `UnknownUnitError` for it. Nothing in this tree can revive it, so it
+        holds under `_NO_REVIVAL_VERB` like any other suppressed action —
+        counted toward the breaker, surfaced, never restarted.
+        """
+        try:
+            return self._supervisor.revival_deferral(unit_id)
+        except UnknownUnitError:
+            return _NO_REVIVAL_VERB
 
     async def _probe(self, unit_id: str, probe: Probe) -> DaemonProbe:
         """Run one probe off the event loop; a raise is wrapped into `down`."""
