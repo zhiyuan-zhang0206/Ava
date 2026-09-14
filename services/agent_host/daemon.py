@@ -596,7 +596,7 @@ async def run() -> None:
 
 
 def _require_helper_parent_chain() -> None:
-    """Exit a helper-spawned host whose direct-parent chain was broken."""
+    """Exit a helper-spawned host whose ancestor chain no longer holds the helper."""
     if parent_chain_intact():
         return
     _log.warning(
