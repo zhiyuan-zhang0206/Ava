@@ -39,6 +39,9 @@ def incarnation() -> Iterator[RuntimeIncarnation]:
 def _session(status: str = "active", **values: Any) -> dict[str, Any]:
     return {
         "id": "lease-1",
+        "automatic": False,
+        "handoff_applied_at": None,
+        "process_metadata": {},
         "source": "external_agent:codex:task1",
         "status": status,
         "reason": "Finish the assigned task",
@@ -449,7 +452,7 @@ def test_establish_relay_codex_provisions_spawns_and_waits_for_heartbeat(
     assert impersonation.establish_relay(_relay_session(), incarnation) is True
     provision.assert_called_once()
     provision_token = provision.call_args.args[2]
-    spawn.assert_called_once_with(42, "lease-1", provision_token, "thread-1", None)
+    spawn.assert_called_once_with(42, "lease-1", provision_token, "thread-1", None, None)
     assert impersonation._relay_children[42].token == provision_token
     impersonation._relay_children.clear()
 
@@ -526,7 +529,7 @@ async def test_claim_gate_respawns_a_dead_codex_relay(
 
     decision = await impersonation.claim_gate(BaseAgentState(), 42)
     assert decision is not None and decision.goto == END
-    spawn.assert_called_once_with(42, "lease-1", "old-token", "thread-1", None)
+    spawn.assert_called_once_with(42, "lease-1", "old-token", "thread-1", None, None)
     assert impersonation._relay_children[42].process is new_process
     impersonation._relay_children.clear()
 

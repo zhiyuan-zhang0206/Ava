@@ -128,7 +128,7 @@ def expire(conn: psycopg.Connection, lease: dict[str, Any]) -> dict[str, Any]:
     if fresh == (True,):
         return lease
     inbound_id = None
-    if lease["status"] == "active":
+    if lease["status"] == "active" and not lease["automatic"]:
         inbound_id = insert_handoff(
             conn,
             lease,
@@ -145,6 +145,11 @@ def expire(conn: psycopg.Connection, lease: dict[str, Any]) -> dict[str, Any]:
     # A pending renewal reminder only matters to the external session; the
     # lease is over, so it must never reach the native agent's inbox.
     dismiss_reminders(conn, lease)
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute("SELECT * FROM agent_impersonations WHERE id=%s", (lease["id"],))
+        refreshed = cur.fetchone()
+        assert refreshed is not None  # noqa: S101 - locked session exists
+        lease = refreshed
     lease["status"] = "expired"
     lease["summary_inbound_id"] = inbound_id
     return lease

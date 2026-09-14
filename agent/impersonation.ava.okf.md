@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Cooperative external impersonation
-description: Native consent, durable pause boundaries, and external plugin state restoration.
+description: Automatic safe-boundary takeover, durable native handoff notes, and external plugin state restoration.
 tags: [agent-lifecycle, concurrency]
 ---
 
@@ -11,19 +11,13 @@ tags: [agent-lifecycle, concurrency]
 `shared/impersonation.py` to the native graph. The native runtime remains the
 only checkpoint writer; an external process executes the SDK directly.
 
-The claim gate reads the request table and presents the external caller's real
-source in a deterministic consent message. The checkpoint stores request ID and
-consent version, so compaction cannot duplicate a request and a replacement
-incarnation can require new consent. This private negotiation does not activate
-the generic caller protocol or bypass its old-writer rollout barrier.
-
-`ava.impersonation.accept` verifies the exec child's captured native incarnation
-and ends execution through `AgentImpersonation`. Parent execution resources
-close before the exec result enters the graph. Accepted leases end at claim;
-the invocation driver activates only after graph return and the optional
-N-step checkpoint flush. A surviving process parks outside graph execution,
-retaining its liveness renewer and claim progress. Hosted turns return their
-slot and reject ordinary active-lease wakes before runtime preparation.
+The claim gate accepts named automatic requests without a model decision and
+ends the invocation. The driver drains resources, reconciles the session's
+checkpoint marker (including an accepted request whose initial write failed),
+flushes it and verifies relay readiness before activation. Hosted turns return
+their slot and reject ordinary active-session wakes before runtime preparation.
+The legacy consent version and accept/reject calls remain available only for
+requests already created by older clients during an upgrade.
 
 `supervise_relay` is the native supervision seam for the bound relay, called
 from two places: the claim gate (native loop paused or resuming) and the
@@ -47,12 +41,11 @@ an accepted intent whose target was replaced receives the existing explicit
 `superseded` result. Restart preserves the external lease; termination revokes it atomically
 through the database lifecycle trigger. New runtime incarnations read the same
 lease before normal execution. Database-clock expiry and explicit release
-restore the ordinary inbound path, including unacknowledged external input and
-the durable handoff message.
+begin durable handoff before reopening the ordinary input path.
 
 Cancel requests remain pending in the external inbox while held. The controller
 stops its current work and explicitly acknowledges the request; an unacknowledged
-cancel returns to normal native claim processing when the lease ends. The native
+cancel remains in the handoff JSON for the resumed native agent when the lease ends. The native
 dispatcher cannot interrupt an external host's in-flight tools.
 
 External plugin deltas are an ordered lease log using the checkpoint codec.
@@ -66,3 +59,14 @@ Tests: `tests/agent/test_impersonation.py` covers gates and receipt recovery;
 `tests/agent/test_impersonation_integration.py` exercises PostgreSQL, buffered
 checkpoints, the compiled graph, a real exec child, peer inbox acknowledgement,
 release summary, and native resumption with plugin state.
+
+`agent/impersonation_handoff.py` saves one JSON file under the agent workspace,
+then appends the impersonator summary and path as the first new system note.
+The stable note id and `impersonation_handoff_id` channel survive retries.
+Checkpoint flush is unconditional before setting `handoff_applied_at`; only
+that receipt consumes captured pending input and opens the normal claim gate.
+The file retains incoming ACK state and every recorded body. Input arriving
+after release remains queued behind the note. File or checkpoint errors retain
+the native gate. An unavailable event backend leaves accounting explicitly
+pending without blocking the control handoff; the registered agent-host event
+reconciler supplements the same file after late events become readable.

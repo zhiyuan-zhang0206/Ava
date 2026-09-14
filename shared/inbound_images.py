@@ -1,11 +1,4 @@
-"""Image reference urls for the pending strip (gateway/routers/agents_state.py).
-
-The strip above the composer renders thumbnails for queued multimodal
-messages; deciding which references are renderable is a pure function of the
-stored content-block payload. Split out of agents_state.py so the router
-module stays under the 800-line budget (same shape as _roster_rows.py), and
-so the reference gate lives in one named place.
-"""
+"""Validated upload references shared by pending and impersonation timelines."""
 
 from __future__ import annotations
 
@@ -14,8 +7,8 @@ from typing import Any, cast
 from shared.uploads import image_mime_for, parse_upload_url
 
 
-def pending_image_urls(agent_id: int, payload: dict[str, Any] | None) -> list[str] | None:
-    """Image reference urls of a queued multimodal inbound, or None.
+def inbound_image_urls(agent_id: int, payload: dict[str, Any] | None) -> list[str] | None:
+    """Image reference urls of a stored multimodal inbound, or None.
 
     The stored `content_blocks` mirror the POST body; a block counts as a
     renderable image only when it passes the same gate `_validate_image_ref`

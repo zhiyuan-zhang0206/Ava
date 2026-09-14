@@ -386,8 +386,7 @@ async def _rotate_stdout_log_forever() -> None:
 
 
 def _spawn_background_tasks(pool: AsyncConnectionPool) -> dict[str, asyncio.Task[object]]:
-    """Create the daemon's three long-lived background tasks — the plugins
-    watch, the page reconciler, and the raw-stdout size rotation.
+    """Create the daemon's background tasks for plugins, pages, event replay and logs.
 
     Split out of `run()` so the wiring is testable without booting the
     dispatcher: the reconciler's existence is what closes the
@@ -396,7 +395,10 @@ def _spawn_background_tasks(pool: AsyncConnectionPool) -> dict[str, asyncio.Task
     (task #2356), and a regression that dropped either creation must turn a
     test red rather than silently reopen the gap.
     """
+    from services.agent_host.impersonation_events import reconcile_forever
+
     return {
+        "impersonation_events": asyncio.create_task(reconcile_forever()),
         "plugins_watch": asyncio.create_task(_watch_plugins_for_restart()),
         "page_reconciler": asyncio.create_task(_page_reconcile_forever(pool)),
         "stdout_log_rotate": asyncio.create_task(_rotate_stdout_log_forever()),

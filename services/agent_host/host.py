@@ -146,8 +146,6 @@ class AgentHost:
         self._turn_slots = asyncio.Semaphore(turn_limit) if turn_limit else nullcontext()
         self.stats = HostStats()
 
-    # ── the scheduler's entry point ──────────────────────────────────────────
-
     async def run_turn(self, agent_id: int) -> None:
         """Retain the scheduler slot until real work, including threads, settles.
 
@@ -611,7 +609,8 @@ class AgentHost:
                     "    WHERE pending.agent_id = m.id AND pending.status = 'pending'"
                     "  ) OR EXISTS (SELECT 1 FROM agent_impersonations lease "
                     "    WHERE lease.agent_id=m.id AND (lease.status IN "
-                    "    ('requested','accepted','active') OR lease.delta_version>lease.applied_version)))) "
+                    "    ('requested','accepted','active') OR lease.delta_version>lease.applied_version "
+                    "    OR (lease.automatic AND lease.handoff_applied_at IS NULL))))) "
                     "  OR (m.status='running' AND m.runtime_kind='hosted' "
                     "      AND m.runtime_owner IS DISTINCT FROM %s "
                     "      AND (m.lease_expires_at IS NULL OR m.lease_expires_at<=now()))) "

@@ -101,3 +101,9 @@ context for compaction and to END for idle or lifecycle control. Routing uses
 Agents are allocated through `POST /api/agents`; the gateway commits their row
 and work, then the home runner wakes its agent host. No agent Python process is
 started directly.
+
+Impersonation event reconciliation runs as a registered host background task,
+independent of model turns and ownership heartbeats. It pages due sessions on
+this machine even after native handoff or agent termination, respects unit
+quiescence, and persists progress and explicit upstream completion receipts.
+See [[impersonation.ava.okf.md]].

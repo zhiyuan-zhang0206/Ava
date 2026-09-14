@@ -5,7 +5,7 @@ description: 'Operating an Ava impersonation lease as the external agent: Ava CL
 
 # Acting as an Ava impersonator
 
-An Ava agent approved your takeover: while the lease is active, you act as that
+A trusted takeover has reached active status: while the lease is active, you act as that
 agent on this machine under a borrowed identity, and inbound messages to the
 agent reach you. This skill is the complete operating manual for the lease —
 how to use the Ava CLI and Python SDK, how messages flow, when to renew, and
@@ -15,7 +15,7 @@ in your start message.
 ## Operating contract
 
 - **Start.** Your work begins with the start message: the Ava agent records a
-  handoff brief when it approves the lease, and that brief is pushed to you
+  handoff brief during takeover preparation, and that brief is pushed to you
   first at activation. It names the task and points at any context you need
   (workspace paths, checkouts, people to report to). Read it before acting.
 - **End.** You end by releasing control with a summary. The release summary is
@@ -28,8 +28,8 @@ in your start message.
 
 Three values anchor every command in this skill:
 
-- **Lease id** — appears in the activation push and in the ACK command of
-  every delivered batch. Keep it handy.
+- **Agent id and session id** — appears in the activation push and in the ACK command of
+  every delivered batch. The session id is an integer scoped to its Ava agent; keep both handy.
 - **Token** — `AVA_IMPERSONATION_TOKEN` is set in your environment. Never print
   it, put it in a prompt, a command argument, a log, or a file.
 - **The cluster executable** — use the `ava` CLI and Python interpreter of the
@@ -40,11 +40,11 @@ Three values anchor every command in this skill:
 Check state any time:
 
 ```bash
-ava impersonate status <lease_id>
+ava impersonate status <session_id> --agent <agent_id>
 ```
 
 The response shows the lease status and its expiry. Statuses you will see:
-`requested` / `accepted` (not yet active), `active` (you may act), and terminal
+`preparing` (not yet active), `active` (you may act), and terminal
 `released`, `expired`, `rejected`.
 
 ## Messages: receive, process, acknowledge
@@ -66,7 +66,7 @@ After processing a batch, acknowledge exactly the ids you handled, within the
 five-minute ACK window:
 
 ```bash
-ava impersonate ack <lease_id> 101 102
+ava impersonate ack <session_id> 101 102 --agent <agent_id>
 ```
 
 (The envelope gives you the exact command, with the lease id filled in.)
@@ -79,7 +79,7 @@ Rules that keep delivery honest:
   batch you already handled harmless. Never ACK a message to silence delivery;
   if you cannot handle it, leave it unacknowledged and say so in your release
   summary.
-- **Never poll, never write inbox code.** `ava impersonate inbox <lease_id>`
+- **Never poll, never write inbox code.** `ava impersonate inbox <session_id> --agent <agent_id>`
   remains only as a fallback read — for a missed or truncated push, or for a
   message's payload. The pushes are the delivery.
 - **`cancel`**: stop the current work and ACK the cancel once stopped. To
@@ -87,8 +87,17 @@ Rules that keep delivery honest:
   the ACK comes after the stop, not instead of it. An unacknowledged cancel
   stays pending for the Ava agent when control returns.
 
-You can also send messages outward with the borrowed identity — questions to
-the delegating agent, updates to peers — via the SDK below.
+Send user-facing progress, questions and results to the normal Ava UI:
+
+```bash
+ava impersonate say <session_id> --agent <agent_id> --key progress-1 'Checking the fix.'
+```
+
+Choose a new stable key for each message; retry with the same key and identical
+content after ambiguous delivery. Use `--phase final` for a final reply.
+`--as` is your freely chosen display name; the session has its own `--name`.
+The UI shows both beside your messages. The CLI records observed process facts
+separately. For peers, use the borrowed identity through the SDK below.
 
 ## Renewal: only when the Ava side reminds you
 
@@ -114,7 +123,7 @@ The correct model:
 3. To renew, extend from now for the time you still need:
 
 ```bash
-ava impersonate renew <lease_id> --ttl 3600
+ava impersonate renew <session_id> --agent <agent_id> --ttl 3600
 ```
 
 Pick the smallest TTL that covers the remaining work (1..86400 seconds; the
@@ -148,13 +157,12 @@ Attach from the cluster's interpreter (the checkout's `.venv/bin/python`):
 import os
 import ava
 
-lease_id = "<lease_id>"          # from the activation push / ACK commands
-delegator_id = 405               # TODO: the Ava agent that delegated this work
+session_id = 0                 # from the activation push
+agent_id = 405                 # the Ava agent you are replacing
 
-with ava.external.attach(lease_id, token=os.environ["AVA_IMPERSONATION_TOKEN"]):
-    print(ava.self.AGENT_ID)     # the borrowed agent id
-    ava.agents.send_message(delegator_id, "Status: implementation done, verifying now")
-    # any other ava.* SDK call that needs the agent identity
+with ava.external.attach(session_id, agent_id=agent_id, token=os.environ["AVA_IMPERSONATION_TOKEN"]):
+    ava.impersonation.say("Implementation done, verifying now", key="verification-started")
+    # Call any other ava.* capability under the borrowed identity.
 ```
 
 Inside the attachment the SDK resolves identity, plugins, and configuration as
@@ -166,7 +174,7 @@ For a one-shot operation, the CLI form runs a local Python file inside an
 attachment without involving any Ava model:
 
 ```bash
-ava impersonate exec <lease_id> --file operation.py
+ava impersonate exec <session_id> --agent <agent_id> --file operation.py
 ```
 
 Omit `--file` to read the program from stdin.
@@ -185,12 +193,15 @@ When the work is done — or when you must stop before it is — close your
 attachments, ACK the messages you handled, and release:
 
 ```bash
-ava impersonate release <lease_id> \
+ava impersonate release <session_id> --agent <agent_id> \
   --summary 'Implemented X and verified Y. Z remains open; resume from its failing case.'
 ```
 
 The summary is required, nonempty, and concrete: state what you did, what you
-verified, what remains open, and where to resume. It is queued as your final
-message to the Ava agent, and release wakes the agent to continue from its
-checkpoint. Release, not silence, is the ending: never leave an active lease
+verified, what remains open, and where to resume. Ava writes one JSON file at
+`<agent workspace>/impersonation/<session_id>.json`, containing every incoming
+and outgoing message, ACK state, lifecycle history, consumed SDK/API events and
+statistics. Your summary plus that file path is the first new system note in
+the resumed agent's input. History is permanent. The resumed agent must read
+unacknowledged incoming messages in the file. Expiry has no invented summary. Release, not silence, is the ending: never leave an active lease
 behind when you are finished.

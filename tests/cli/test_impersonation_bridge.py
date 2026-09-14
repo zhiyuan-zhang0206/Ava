@@ -23,6 +23,11 @@ import pytest
 
 from cli.commands import impersonation_relay as relay
 
+
+def _public_relay_session(*_args: object, **_kwargs: object) -> dict[str, int]:
+    return {"session_id": 0}
+
+
 LEASE_ID = UUID("767fb040-aa54-42ae-b2c8-594039fbbf46")
 THREAD_ID = UUID("b9d32d0d-bd27-40fc-83e8-692769b21523")
 
@@ -718,6 +723,7 @@ def test_command_passes_remote_to_queue(monkeypatch: pytest.MonkeyPatch) -> None
     listener = Listener(inbox)
     queued: list[tuple[UUID, str | None]] = []
     monkeypatch.setattr(impersonation, "relay_token_from_env", lambda: "test-credential")
+    monkeypatch.setattr("shared.impersonation.relay_get", _public_relay_session)
 
     def read(*_args: object) -> relay.InboxSnapshot:
         return relay.InboxSnapshot(frozenset(), {}, inbox.expires_at, inbox.status)
@@ -781,6 +787,7 @@ def test_codex_relay_caps_pushed_content_before_queue(
     listener = Listener(inbox)
     queued: list[str] = []
     monkeypatch.setattr(impersonation, "relay_token_from_env", lambda: "test-credential")
+    monkeypatch.setattr("shared.impersonation.relay_get", _public_relay_session)
 
     def read(*_args: object) -> relay.InboxSnapshot:
         page = frozenset(sorted(inbox.messages)[: inbox.page_size])
@@ -818,7 +825,7 @@ def test_codex_relay_caps_pushed_content_before_queue(
     assert args.func(args) == 0
     push = queued[-1]
     assert "truncated" in push
-    assert relay.ack_command(LEASE_ID, [5]) in push
+    assert relay.ack_command(0, [5], agent_id=42) in push
     body_line = [line for line in push.splitlines() if line.startswith("x" * 10)]
     assert body_line
     assert len(body_line[0]) <= relay._PUSH_MAX_CHARS + len(

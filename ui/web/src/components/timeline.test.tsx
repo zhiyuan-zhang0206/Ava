@@ -109,7 +109,7 @@ vi.mock("@/lib/use-user-settings", () => ({
 }));
 
 import { TimelineView } from "./timeline";
-import { streamingParseIntervalMs } from "./timeline/item";
+import { ItemView, streamingParseIntervalMs } from "./timeline/item";
 import { LIFECYCLE_TAGS, MEMORY_SOURCES, NOTE_SOURCES } from "./timeline/markers";
 
 afterEach(() => {
@@ -141,6 +141,7 @@ function makeItem(overrides: Partial<BackendTimelineItem> & Pick<BackendTimeline
     code_elapsed_ms: overrides.code_elapsed_ms,
     execStartedAt: overrides.execStartedAt,
     exec_ms: overrides.exec_ms,
+    impersonation: overrides.impersonation,
     images: overrides.images ?? null,
     image_captions: overrides.image_captions ?? null,
     sdk_calls: overrides.sdk_calls,
@@ -4468,4 +4469,23 @@ describe("TimelineView sticky message header (task #3136)", () => {
     expect(cardToggle().className).not.toContain("sticky");
     expect(cardToggle().getAttribute("data-stuck")).toBe("false");
   });
+});
+
+
+it("preserves every paragraph of a human message during impersonation", () => {
+  const item = makeItem({ kind: "inbound_chat", source: "user", payload: "First paragraph.\n\nSecond paragraph.",
+    impersonation: { agent_id: 42, session_id: 0, name: "Fix login", executor_name: "Claude: helper", provider: "claude", process: {} } });
+  const { container } = render(<ItemView item={item} streaming={false} />);
+  expect(container.querySelector("[data-testid=chat-markdown]")?.textContent).toContain("First paragraph.");
+  expect(container.textContent).toContain("Second paragraph.");
+});
+
+
+it("renders image-only human messages during impersonation as thumbnails", () => {
+  const item = makeItem({ kind: "inbound_chat", source: "user", payload: "[image]",
+    images: ["/api/agents/42/uploads/screenshot.png"],
+    impersonation: { agent_id: 42, session_id: 0, name: "Fix login", executor_name: "Claude: helper", provider: "claude", process: {} } });
+  const { container } = render(<ItemView item={item} streaming={false} />);
+  expect(container.querySelector("img")?.getAttribute("src")).toContain("/api/agents/42/uploads/screenshot.png");
+  expect(container.textContent).not.toContain("[image]");
 });

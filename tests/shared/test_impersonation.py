@@ -438,9 +438,12 @@ def test_rollback_refuses_active_lease_or_pending_handoff(db_conn: psycopg.Conne
         "UPDATE inbound_messages SET status='done' WHERE agent_id=%s", (owner.agent_id,)
     )
     db_conn.commit()
-    with db_conn.transaction(force_rollback=True):
+    # New permanent records intentionally fence old destructive rollbacks.
+    with (
+        db_conn.transaction(force_rollback=True),
+        pytest.raises(psycopg.errors.DependentObjectsStillExist),
+    ):
         db_conn.execute(migration_sql)
-        assert db_conn.execute("SELECT to_regclass('agent_impersonations')").fetchone() == (None,)
 
 
 def test_reaper_expires_offline_lease_and_keeps_unconsumed_handoff(
@@ -471,7 +474,7 @@ def test_reaper_expires_offline_lease_and_keeps_unconsumed_handoff(
         )
         db_conn.commit()
         reap_impersonations(reaper_pool)
-    assert db_conn.execute("SELECT count(*) FROM agent_impersonations").fetchone() == (0,)
+    assert db_conn.execute("SELECT count(*) FROM agent_impersonations").fetchone() == (1,)
     assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (1,)
 
 
@@ -554,8 +557,8 @@ def test_accept_without_relay_binding_fails_loudly(db_conn: psycopg.Connection) 
     legacy_id = uuid4()
     db_conn.execute(
         "INSERT INTO agent_impersonations(id,agent_id,source,machine,token_hash,reason,"
-        "status,ttl_seconds,expires_at) VALUES(%s,%s,'external_agent:codex:old',%s,%s,'',"
-        "'requested',300,clock_timestamp()+interval '5 minutes')",
+        "status,ttl_seconds,expires_at,session_id) VALUES(%s,%s,'external_agent:codex:old',%s,%s,'',"
+        "'requested',300,clock_timestamp()+interval '5 minutes',0)",
         (legacy_id, owner.agent_id, machine_name(), "legacy-hash"),
     )
     db_conn.commit()
@@ -737,7 +740,8 @@ def test_reminder_is_inserted_once_per_lease_and_wakes(
     assert reminder is not None
     assert reminder[1:4] == ("reminder", "system", "pending")
     assert reminder[4]["lease_id"] == str(lease["id"])
-    assert str(lease["id"]) in reminder[0]
+    assert f"session {lease['session_id']}" in reminder[0]
+    assert f"--agent {owner.agent_id}" in reminder[0]
     assert "renew" in reminder[0] and "release" in reminder[0]
 
 

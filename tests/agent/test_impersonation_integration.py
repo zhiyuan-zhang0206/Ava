@@ -1,5 +1,6 @@
 """Real PostgreSQL + compiled graph + exec child cooperative handoff."""
 
+from pathlib import Path
 from typing import Annotated, Any
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -32,6 +33,14 @@ from shared.runtime_incarnation import RuntimeIncarnation
 from shared.turn_identity import bind_turn_identity
 
 
+def _relay_ready(*_args: object) -> bool:
+    return True
+
+
+def _no_events(_session: dict[str, Any]) -> None:
+    pass
+
+
 def _add(left: int, right: int) -> int:
     return left + right
 
@@ -44,6 +53,8 @@ async def _prepare_graph(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    automatic: bool = False,
 ) -> tuple[
     Any,
     AsyncPostgresSaver,
@@ -80,6 +91,9 @@ async def _prepare_graph(
         agent_id,
         caller=CallerIdentity(kind="external_agent", subject="codex"),
         reason="Do the task",
+        automatic=automatic,
+        name="Integration test",
+        executor_name="Codex: integration",
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
     )
@@ -87,7 +101,7 @@ async def _prepare_graph(
 
     async def model(state: Any) -> Command[str]:
         model_calls.append(state)
-        if len(model_calls) == 1:
+        if len(model_calls) == 1 and not automatic:
             code = (
                 "import ava\n"
                 f"ava.impersonation.accept({requested['id']!r}, "
@@ -307,3 +321,147 @@ async def test_replacement_host_adopts_held_agent_without_model(
         assert leases.require_active(lease["id"], lease["token"])["status"] == "active"
     graph.ainvoke.assert_not_called()
     impersonation._relay_children.clear()
+
+
+async def test_automatic_takeover_handoff_precedes_queued_input(
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import json
+    from pathlib import Path
+
+    from shared import impersonation_history as history
+
+    graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
+        db_conn,
+        aops_pool,
+        monkeypatch,
+        automatic=True,
+    )
+    monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
+
+    def workspace_for_agent(_agent_id: int) -> Path:
+        return tmp_path
+
+    monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
+    monkeypatch.setattr("ava._impersonation_events.consume_recorded_events", _no_events)
+    with bind_turn_identity(owner.agent_id, incarnation=owner):
+        await graph.ainvoke(reset, config, context=ctx)
+        assert not model_calls  # No native model acceptance turn.
+        assert leases.get(requested["id"], requested["token"])["status"] == "accepted"
+        await flush_checkpoint(saver, owner.agent_id)
+        assert await settle_checkpoint(graph, owner.agent_id)
+        inbound_id = insert_inbound_message(
+            db_conn, owner.agent_id, "During takeover", source="user"
+        )
+        db_conn.commit()
+        leases.inbox(requested["id"], requested["token"])
+        leases.ack(requested["id"], requested["token"], [inbound_id])
+        history.say(requested["id"], requested["token"], "Work completed", message_key="result")
+        leases.release(requested["id"], requested["token"], "Fixed login and verified the result.")
+        later = insert_inbound_message(db_conn, owner.agent_id, "Next task", source="user")
+        db_conn.commit()
+        await graph.ainvoke(reset, config, context=ctx)
+        assert not model_calls
+        await flush_checkpoint(saver, owner.agent_id)
+        assert not await settle_checkpoint(graph, owner.agent_id)
+        snapshot = await graph.aget_state(config)
+        last = snapshot.values["messages"][-1]
+        assert last.additional_kwargs["ava_note_tag"] == "impersonation"
+        assert "Fixed login and verified" in last.content
+        document = json.loads((tmp_path / "impersonation" / "0.json").read_text())
+        assert [m["payload"]["content"] for m in document["messages"]] == [
+            "During takeover",
+            "Work completed",
+        ]
+        assert document["messages"][0]["acknowledged"]
+        assert str(Path(tmp_path) / "impersonation" / "0.json") in last.content
+        assert db_conn.execute(
+            "SELECT status FROM inbound_messages WHERE id=%s", (later,)
+        ).fetchone() == ("pending",)
+        # Repeated settlement must not duplicate the first resumed input.
+        assert not await settle_checkpoint(graph, owner.agent_id)
+        await graph.ainvoke(reset, config, context=ctx)
+        assert len(model_calls) == 1
+        messages = model_calls[0].messages
+        handoff_index = next(
+            i for i, m in enumerate(messages) if m.id.startswith("impersonation-handoff:")
+        )
+        next_index = next(i for i, m in enumerate(messages) if "Next task" in m.content)
+        assert handoff_index < next_index
+
+
+async def test_accepted_session_repairs_missing_start_checkpoint(
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graph, saver, _ctx, config, _reset, owner, requested, calls = await _prepare_graph(
+        db_conn,
+        aops_pool,
+        monkeypatch,
+        automatic=True,
+    )
+    monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
+    # Emulate a committed acceptance followed by a crash before claim's update.
+    leases.accept(requested["id"], owner.agent_id, owner, "Saved request, lost checkpoint")
+    with bind_turn_identity(owner.agent_id, incarnation=owner):
+        assert await settle_checkpoint(graph, owner.agent_id)
+    assert not calls
+    durable = await saver.aget_tuple(config)
+    assert durable is not None
+    messages = durable.checkpoint["channel_values"]["messages"]
+    assert [m.id for m in messages] == [f"impersonation-start:{owner.agent_id}:0"]
+    assert leases.get(requested["id"], requested["token"])["status"] == "active"
+
+
+async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from agent.impersonation_handoff import deliver_handoff
+    from shared import impersonation_history as history
+
+    graph, saver, ctx, config, reset, owner, requested, calls = await _prepare_graph(
+        db_conn,
+        aops_pool,
+        monkeypatch,
+        automatic=True,
+    )
+    monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
+
+    def workspace_for_agent(_agent_id: int) -> Path:
+        return tmp_path
+
+    monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
+    monkeypatch.setattr("ava._impersonation_events.consume_recorded_events", _no_events)
+    with bind_turn_identity(owner.agent_id, incarnation=owner):
+        await graph.ainvoke(reset, config, context=ctx)
+        await flush_checkpoint(saver, owner.agent_id)
+        assert await settle_checkpoint(graph, owner.agent_id)
+        leases.release(requested["id"], requested["token"], "Done; please continue")
+        lease = history.resolve(owner.agent_id, 0)
+
+        async def failed_flush(*_: object) -> None:
+            raise OSError("checkpoint temporarily unavailable")
+
+        monkeypatch.setattr(impersonation, "flush_checkpoint", failed_flush)
+        with pytest.raises(OSError, match="checkpoint temporarily"):
+            await deliver_handoff(graph, lease, owner)
+        assert history.resolve(owner.agent_id, 0)["handoff_applied_at"] is None
+        assert not calls
+        monkeypatch.setattr(impersonation, "flush_checkpoint", flush_checkpoint)
+        await deliver_handoff(graph, lease, owner)
+        durable = await saver.aget_tuple(config)
+        assert durable is not None
+        notes = [
+            m
+            for m in durable.checkpoint["channel_values"]["messages"]
+            if m.id == f"impersonation-handoff:{owner.agent_id}:0"
+        ]
+        assert len(notes) == 1
+        assert history.resolve(owner.agent_id, 0)["handoff_applied_at"] is not None

@@ -64,6 +64,7 @@
 -- back to NULL) sets true; the LLM CAS adds `AND NOT label_user_set` — after a user reset, the LLM no
 -- longer overwrites (otherwise it would break the "I want default to show #N" intent).
 CREATE TABLE agents (
+    impersonation_index BIGINT NOT NULL DEFAULT 0,
     id              BIGSERIAL PRIMARY KEY,
     label           TEXT,
     label_user_set  BOOLEAN NOT NULL DEFAULT FALSE,
@@ -1451,8 +1452,22 @@ COMMENT ON TABLE llm_usage_hourly IS
 -- Cooperative, same-machine external execution. PostgreSQL owns the lease;
 -- Redis only announces changes. Existing agents and messages remain untouched.
 CREATE TABLE IF NOT EXISTS agent_impersonations (
-    id UUID PRIMARY KEY,
+    id UUID NOT NULL UNIQUE,
     agent_id BIGINT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    session_id BIGINT NOT NULL CHECK (session_id >= 0),
+    name TEXT NOT NULL DEFAULT '',
+    executor_name TEXT NOT NULL DEFAULT '',
+    process_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    automatic BOOLEAN NOT NULL DEFAULT FALSE,
+    summary TEXT,
+    handoff_document JSONB,
+    handoff_path TEXT,
+    handoff_applied_at TIMESTAMPTZ,
+    events_cursor JSONB,
+    events_next_read_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    events_completed_at TIMESTAMPTZ,
+    next_entry BIGINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (agent_id,session_id),
     source TEXT NOT NULL,
     machine TEXT NOT NULL,
     token_hash TEXT NOT NULL,
@@ -1495,7 +1510,8 @@ CREATE TABLE IF NOT EXISTS agent_impersonations (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS agent_impersonations_one_open
     ON agent_impersonations(agent_id)
-    WHERE status IN ('requested', 'accepted', 'active') OR delta_version > applied_version;
+    WHERE status IN ('requested', 'accepted', 'active') OR delta_version > applied_version
+        OR (automatic AND handoff_applied_at IS NULL);
 CREATE INDEX IF NOT EXISTS agent_impersonations_expiry ON agent_impersonations(expires_at)
     WHERE status IN ('requested', 'accepted', 'active');
 CREATE INDEX IF NOT EXISTS agent_impersonations_retention ON agent_impersonations(ended_at)
@@ -1507,7 +1523,7 @@ CREATE INDEX IF NOT EXISTS agent_impersonations_relay_heartbeat
 -- Reading delivers without consuming. Only the explicit processing ACK changes
 -- an inbound to done; an expired borrower leaves every unacknowledged row pending.
 CREATE TABLE IF NOT EXISTS agent_impersonation_messages (
-    lease_id UUID NOT NULL REFERENCES agent_impersonations(id) ON DELETE CASCADE,
+    lease_id UUID NOT NULL REFERENCES agent_impersonations(id) ON DELETE RESTRICT,
     inbound_id BIGINT NOT NULL REFERENCES inbound_messages(id) ON DELETE CASCADE,
     acknowledged_at TIMESTAMPTZ,
     PRIMARY KEY (lease_id, inbound_id)
@@ -1551,6 +1567,88 @@ CREATE TRIGGER agent_impersonations_restore_native_owner
     WHEN (OLD.status IN ('requested', 'accepted', 'active')
           AND NEW.status IN ('released', 'expired'))
     EXECUTE FUNCTION restore_native_impersonation_owner();
+
+CREATE TABLE agent_impersonation_entries (
+    lease_id UUID NOT NULL REFERENCES agent_impersonations(id) ON DELETE RESTRICT,
+    seq BIGINT NOT NULL CHECK (seq >= 0),
+    kind TEXT NOT NULL CHECK (kind IN ('message','lifecycle','sdk_call','api_event')),
+    event_key TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    payload JSONB NOT NULL,
+    PRIMARY KEY(lease_id,seq),
+    UNIQUE(lease_id,event_key)
+);
+CREATE INDEX agent_impersonations_events_pending ON agent_impersonations(machine,events_next_read_at)
+WHERE automatic AND activated_at IS NOT NULL AND ended_at IS NOT NULL AND events_completed_at IS NULL;
+CREATE INDEX agent_impersonation_entries_created ON agent_impersonation_entries(lease_id,created_at,seq);
+
+
+CREATE FUNCTION allocate_impersonation_session() RETURNS trigger AS $$
+BEGIN
+    PERFORM id FROM agents_meta WHERE id=NEW.agent_id FOR UPDATE;
+    UPDATE agents SET impersonation_index=impersonation_index+1 WHERE id=NEW.agent_id
+        RETURNING impersonation_index-1 INTO NEW.session_id;
+    IF NEW.name='' THEN NEW.name='Session ' || NEW.session_id; END IF;
+    IF NEW.executor_name='' THEN NEW.executor_name=NEW.source; END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER agent_impersonations_allocate BEFORE INSERT ON agent_impersonations
+    FOR EACH ROW EXECUTE FUNCTION allocate_impersonation_session();
+
+CREATE FUNCTION preserve_impersonation_history() RETURNS trigger AS $$
+BEGIN
+    RAISE EXCEPTION 'Impersonation history is permanent; updates and deletes are forbidden';
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER agent_impersonations_preserve_history BEFORE DELETE ON agent_impersonations
+    FOR EACH ROW EXECUTE FUNCTION preserve_impersonation_history();
+CREATE TRIGGER agent_impersonation_entries_preserve_history
+    BEFORE UPDATE OR DELETE ON agent_impersonation_entries
+    FOR EACH ROW EXECUTE FUNCTION preserve_impersonation_history();
+
+CREATE FUNCTION record_impersonation_lifecycle() RETURNS trigger AS $$
+DECLARE entry_no BIGINT;
+BEGIN
+    IF TG_OP='UPDATE' AND (NEW.status,NEW.expires_at) IS NOT DISTINCT FROM (OLD.status,OLD.expires_at) THEN
+        RETURN NEW;
+    END IF;
+    UPDATE agent_impersonations SET next_entry=next_entry+1 WHERE id=NEW.id RETURNING next_entry-1 INTO entry_no;
+    INSERT INTO agent_impersonation_entries(lease_id,seq,kind,payload)
+    VALUES(NEW.id,entry_no,'lifecycle',jsonb_build_object(
+        'status',NEW.status,'expires_at',NEW.expires_at,'executor_name',NEW.executor_name,
+        'session_id',NEW.session_id,'name',NEW.name,'machine',NEW.machine,
+        'summary',NEW.summary,'reason',NEW.reason,'rejection_reason',NEW.rejection_reason,
+        'source',COALESCE(NULLIF(current_setting('ava.impersonation_actor',true),''),'system:impersonation'),
+        'previous_status',CASE WHEN TG_OP='UPDATE' THEN OLD.status ELSE NULL END,
+        'previous_expires_at',CASE WHEN TG_OP='UPDATE' THEN OLD.expires_at ELSE NULL END));
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER agent_impersonations_lifecycle AFTER INSERT OR UPDATE OF status,expires_at
+    ON agent_impersonations FOR EACH ROW EXECUTE FUNCTION record_impersonation_lifecycle();
+
+-- Preserve every inbound body independently of pending/ACK state and inbox retention.
+CREATE FUNCTION record_impersonation_inbound() RETURNS trigger AS $$
+DECLARE lease UUID; entry_no BIGINT;
+BEGIN
+    IF NEW.kind NOT IN ('chat','system_note','cancel','reminder') THEN RETURN NEW; END IF;
+    -- Match native admission, activation and inbox claim lock order.
+    PERFORM id FROM agents_meta WHERE id=NEW.agent_id FOR UPDATE;
+    SELECT id INTO lease FROM agent_impersonations
+    WHERE agent_id=NEW.agent_id AND status='active'
+        AND expires_at>clock_timestamp() FOR UPDATE;
+    IF lease IS NULL THEN RETURN NEW; END IF;
+    UPDATE agent_impersonations SET next_entry=next_entry+1 WHERE id=lease RETURNING next_entry-1 INTO entry_no;
+    INSERT INTO agent_impersonation_entries(lease_id,seq,kind,event_key,created_at,payload)
+    VALUES(lease,entry_no,'message','inbound:' || NEW.id,NEW.created_at,jsonb_build_object(
+        'direction','in','inbound_id',NEW.id,'kind',NEW.kind,'source',NEW.source,
+        'content',NEW.content,'payload',NEW.payload));
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER inbound_messages_impersonation_history AFTER INSERT ON inbound_messages
+    FOR EACH ROW EXECUTE FUNCTION record_impersonation_inbound();
 
 -- ─────────────── plugin_stats ───────────────
 -- Runtime values behind declared statistics-panel cards
@@ -1704,3 +1802,6 @@ INSERT INTO schema_migrations (name) VALUES ('20260911T180406_host-deploy-strand
 -- The stranded-hold recovery columns are already represented above. Fresh DBs
 -- must not replay the strict ADD COLUMN against the baseline schema.
 INSERT INTO schema_migrations (name) VALUES ('20260911T192500_stranded-hold-recovery');
+
+-- Named impersonation sessions and permanent history are represented above.
+INSERT INTO schema_migrations (name) VALUES ('20260913T180056_named-impersonation-history');

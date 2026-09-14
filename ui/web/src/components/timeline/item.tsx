@@ -248,6 +248,7 @@ function EnvelopeContent({
   images,
   showCopy = false,
   attachMode = false,
+  plainMessage = false,
   imageCaptions = null,
 }: {
   payload: string;
@@ -258,11 +259,13 @@ function EnvelopeContent({
   showCopy?: boolean;
   /** Attach items render their caption lines interleaved with thumbnails. */
   attachMode?: boolean;
+  /** Impersonation messages store the original body without an envelope. */
+  plainMessage?: boolean;
   /** Backend caption line per image (1:1 with `images`) — attach items only. */
   imageCaptions?: string[] | null;
 }) {
   const t = useTranslations("timeline");
-  const { header, body } = splitEnvelope(payload);
+  const { header, body } = plainMessage ? { header: "", body: payload } : splitEnvelope(payload);
   // An image-only message stores "[image]" as its text placeholder; suppress that
   // literal in the body when real thumbnails render below.
   const showBody = body && !(images?.length && body === "[image]");
@@ -292,7 +295,7 @@ function EnvelopeContent({
         </div>
       ) : null}
       {showBody ? (
-        showCopy ? (
+        plainMessage ? <ChatMarkdown content={body} /> : showCopy ? (
           <div className="group relative">
             <CopyButton text={body} label={t("commandOutput")} />
             <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[13px] leading-relaxed text-foreground/90 m-0">
@@ -353,6 +356,7 @@ export const ItemView = memo(function ItemView({
 
   switch (item.kind) {
     case "inbound_chat":
+      return <EnvelopeContent payload={item.payload} images={item.images} plainMessage={!!item.impersonation} />;
     case "inbound_compact_summary":
     case "inbound_compact_request":
       return <EnvelopeContent payload={item.payload} images={item.images} />;

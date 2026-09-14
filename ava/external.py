@@ -1,4 +1,4 @@
-"""Attach local Python tools to an agent-approved external controller lease."""
+"""Attach local Python tools to a trusted external controller lease."""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ from ._external_state import (
 __all_for_ava__ = ["attach", "Attachment"]
 
 _attachment_lock = Lock()
+_active_attachment: Attachment | None = None
 
 
 class Attachment:
@@ -36,6 +37,7 @@ class Attachment:
     def __init__(self, lease_id: str, token: str) -> None:
         import ava
 
+        global _active_attachment  # noqa: PLW0603 — one process attachment, guarded by _attachment_lock
         if _boot._external_identity is not None:
             raise RuntimeError("this process already has an external attachment")
         if _boot.current_turn_agent_id() is not None or (
@@ -53,6 +55,8 @@ class Attachment:
         try:
             lease = self._lease()
             self.agent_id = int(lease["agent_id"])
+            self.session_id = int(lease["session_id"])
+            _active_attachment = self
             self._version = int(lease["delta_version"])
             _boot._external_identity = self._validate
             _boot._external_agent_id = self.agent_id
@@ -119,6 +123,8 @@ class Attachment:
 
         if self._closed:
             return
+        global _active_attachment  # noqa: PLW0603 — one process attachment, guarded by _attachment_lock
+        _active_attachment = None
         self._closed = True
         try:
             _boot._external_identity = None
@@ -145,17 +151,19 @@ class Attachment:
         self.close()
 
 
-def attach(lease_id: str, *, token: str) -> Attachment:
-    """Borrow an approved, unexpired agent identity in this local Python process.
+def attach(session_id: int | str, *, agent_id: int | None = None, token: str) -> Attachment:
+    """Borrow an active, unexpired agent identity in this local Python process.
 
-    Example::
-
-        with ava.external.attach(lease_id, token=token):
-            ava.agents.send_message(other_agent, "Update from the borrowed agent")
-
-    SDK identity resolution, MCP calls, plugin state handles and flush recheck
-    the lease. Direct reads of loaded Python objects do not.
-    This call loads the agent's plugins, pinned config and saved state; it never
-    starts a model turn, renews the lease, or acquires control without approval.
+    Use the session's integer id together with its owning agent id.
+    The attachment loads the agent's saved configuration and plugin state.
+    SDK calls and plugin-state operations recheck the lease. Direct reads of
+    loaded Python objects do not. Attaching never renews the lease.
     """
-    return Attachment(lease_id, token)
+    from shared.impersonation_sessions import private_id
+
+    if isinstance(session_id, int) and not isinstance(session_id, bool) and agent_id is not None:
+        return Attachment(private_id(agent_id, session_id), token)
+    if isinstance(session_id, str) and agent_id is None:
+        # Compatibility for existing controller processes during an upgrade.
+        return Attachment(session_id, token)
+    raise ValueError("attach requires an agent_id and an integer session_id")
