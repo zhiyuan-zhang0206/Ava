@@ -15,6 +15,8 @@ from cli.commands import _cluster_rollback, _update_dryrun, _update_git, _update
 from cli.commands._update_recover import _print_pre_update_data_snapshot_restore
 from services import backup
 from services.pitr.base_manifest import BaseObject, CandidateManifest, WalRange
+from services.pitr.checksums import ObjectChecksum
+from services.pitr.object_store import RemoteObjectAck
 from services.pitr.restore_manifest import (
     ProtectedManifest,
     RestoreObject,
@@ -22,8 +24,6 @@ from services.pitr.restore_manifest import (
     candidate_sha256,
     required_archive_names,
 )
-from services.pitr.retention_inventory import InventorySnapshot
-from services.pitr.retention_manifest import RetentionObject
 from services.pitr.uploader import AckManifest
 
 
@@ -128,23 +128,20 @@ def test_fresh_point_is_complete_and_published_before_returning(
     for name in names:
         (root / "ack" / f"{name}.ack.json").write_text(json.dumps(asdict(_ack(name))))
     wal = _update_pitr._wait_wal(root, names)
-    remote = tuple(
-        RetentionObject(
+    remote = {
+        item.object_name: RemoteObjectAck(
             item.object_name,
             item.pin_token,
             item.size,
-            None if item == proof.base else item.archive_name,
-            "base" if item == proof.base else "wal",
-            item.checksum_algo,
-            item.checksum_value,
-            item.metadata,
+            ObjectChecksum(item.checksum_algo, item.checksum_value),
+            dict(item.metadata),
+            False,
         )
         for item in (proof.base, *wal)
-    )
+    }
     group = MagicMock()
-    group.retention_inventory_reader.return_value.snapshot.return_value = InventorySnapshot(
-        remote, ()
-    )
+    group.viewer_object_store.return_value.stat.side_effect = remote.get
+    group.retention_inventory_reader.side_effect = AssertionError("must not scan unrelated chains")
     publish = group.protected_manifest_publisher.return_value.put_manifest_if_absent
     if publication_fails:
         publish.side_effect = RuntimeError("object store unavailable")
@@ -222,32 +219,33 @@ def test_corrupt_newest_chain_never_falls_back(tmp_path: Path) -> None:
     [
         {"pin_token": "replaced"},
         {"size": 101},
-        {"checksum_value": "corrupt"},
-        {"metadata": (("ava-key-id", "another-key"),)},
+        {"checksum": ObjectChecksum("crc32c", "corrupt")},
+        {"metadata": {"ava-key-id": "another-key"}},
     ],
 )
 def test_remote_generation_and_bytes_must_match(tmp_path: Path, changed: dict[str, object]) -> None:
     expected = _protected(tmp_path).base
-    actual = RetentionObject(
+    actual = RemoteObjectAck(
         expected.object_name,
         expected.pin_token,
         expected.size,
-        None,
-        "base",
-        expected.checksum_algo,
-        expected.checksum_value,
-        expected.metadata,
+        ObjectChecksum(expected.checksum_algo, expected.checksum_value),
+        dict(expected.metadata),
+        False,
     )
-    _update_pitr.verify_inventory((expected,), InventorySnapshot((actual,), ()))
+    reader = MagicMock()
+    reader.stat.return_value = actual
+    _update_pitr.verify_remote_objects((expected,), lambda: reader)
+    reader.stat.return_value = replace(actual, **changed)
     with pytest.raises(RuntimeError, match="missing or differs"):
-        _update_pitr.verify_inventory(
-            (expected,), InventorySnapshot((replace(actual, **changed),), ())
-        )
+        _update_pitr.verify_remote_objects((expected,), lambda: reader)
 
 
 def test_missing_remote_object_refuses(tmp_path: Path) -> None:
+    reader = MagicMock()
+    reader.stat.return_value = None
     with pytest.raises(RuntimeError, match="missing or differs"):
-        _update_pitr.verify_inventory((_protected(tmp_path).base,), InventorySnapshot((), ()))
+        _update_pitr.verify_remote_objects((_protected(tmp_path).base,), lambda: reader)
 
 
 def test_hole_between_base_and_fresh_target_refuses(

@@ -31,3 +31,10 @@ publication. Offsite receipts deliberately remain immutable audit metadata
 under the existing no-delete publisher authority; their complete WAL identity
 lists grow with chain length and accumulate per update attempt. They do not
 pin backup objects beyond the configured chain retention window.
+
+Production-scale read-only verification also ruled out using the retention
+inventory as an update gate: the OSS adapter serially reads the whole bucket,
+including unrelated chains. The updater instead checks only required base/WAL
+objects with at most eight viewer clients, one per thread. It retains the
+exact pin, size, checksum and metadata comparisons without requiring listing
+permission or serial full-store work.
