@@ -20,6 +20,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import cast
 
+import pytest
+
+from services.ava_root import daemon as daemon_module
 from services.ava_root.client import RootClient, RootClientError
 from services.ava_root.ipc import ResponsePayload
 
@@ -181,10 +184,6 @@ def test_daemon_end_to_end(short_tmp: Path) -> None:
         revived_pid = cast(int, revived["pid"])
         assert revived_pid != unit_pid
 
-        response = client.upgrade()
-        assert response["ok"] is False
-        assert response.get("code") == "not_implemented"
-
         response = client.restart("svc")
         assert response["ok"] is True
 
@@ -345,3 +344,108 @@ def test_per_unit_log_directories(short_tmp: Path) -> None:
         assert (run_dir / "logs" / "unit-a" / "output.log").exists()
         assert (run_dir / "logs" / "unit-b" / "output.log").exists()
         assert not (run_dir / "logs" / "unit-a.log").exists()
+
+
+def _root_pid(result: dict[str, object]) -> int:
+    return cast(int, cast("dict[str, object]", result["root"])["pid"])
+
+
+def _root_uptime(result: dict[str, object]) -> float:
+    return cast(float, cast("dict[str, object]", result["root"])["uptime_s"])
+
+
+def _wait_after_upgrade(client: RootClient, baseline_uptime: float) -> dict[str, object]:
+    """Poll until the successor generation answers: reset uptime, same socket.
+
+    Tolerates the rebind window (refused connections) and stale reads from the
+    outgoing generation.
+    """
+    deadline = time.monotonic() + 15.0
+    threshold = baseline_uptime / 2.0
+    while time.monotonic() < deadline:
+        try:
+            response = client.status()
+        except RootClientError:
+            response = None
+        if response is not None and response["ok"]:
+            result = cast("dict[str, object]", response.get("result"))
+            if _root_uptime(result) < threshold:
+                return result
+        time.sleep(0.05)
+    raise AssertionError("the successor generation did not come up")
+
+
+def test_upgrade_exec_replaces_in_place_and_adopts_the_tree(short_tmp: Path) -> None:
+    run_dir = short_tmp / "run"
+    manifests = _write_manifests(short_tmp, [{"id": "svc", "exec": _SLEEPER, "restart": "always"}])
+    with _daemon(run_dir, manifests) as (proc, log_path):
+        client = _wait_ready(run_dir, proc, log_path)
+        time.sleep(1.5)  # accrue a distinguishable uptime
+        status_before = client.status()
+        before = cast("dict[str, object]", status_before.get("result"))
+        uptime_before = _root_uptime(before)
+        assert _root_pid(before) == proc.pid
+        unit_pid = cast(int, _units_of(status_before)[0]["pid"])
+
+        response = client.upgrade()
+        assert response["ok"] is True
+        result = cast("dict[str, object]", response.get("result"))
+        assert result["accepted"] is True
+        assert result["root_pid"] == proc.pid
+
+        after = _wait_after_upgrade(client, uptime_before)
+        assert _root_pid(after) == proc.pid  # the exec kept the pid
+        (unit_after,) = cast("list[dict[str, object]]", after["units"])
+        assert unit_after["state"] == "running"
+        assert unit_after["pid"] == unit_pid  # adopted in place, not respawned
+        assert _root_uptime(after) < uptime_before  # uptime reset
+        assert not (run_dir / "handoff.json").exists()  # consumed and purged
+
+        log_text = _read_log(log_path)
+        assert "upgrade accepted: handoff for 1 unit(s), 1 live" in log_text
+        assert f"unit svc: attached to the carried generation (pid {unit_pid})" in log_text
+        assert "upgrade: exec replacement now" in log_text
+
+        # The successor is itself upgradable: the protocol is not one-shot.
+        time.sleep(1.5)
+        uptime_two = _root_uptime(cast("dict[str, object]", client.status().get("result")))
+        assert client.upgrade()["ok"] is True
+        after_two = _wait_after_upgrade(client, uptime_two)
+        assert _root_pid(after_two) == proc.pid
+        (unit_two,) = cast("list[dict[str, object]]", after_two["units"])
+        assert unit_two["pid"] == unit_pid
+
+        proc.terminate()
+        assert proc.wait(timeout=10) == 0
+        assert not (run_dir / _SOCKET_NAME).exists()
+
+
+def test_takeover_marker_and_env_roundtrip(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AVA_ROOT_HANDOFF", "1")
+    assert daemon_module._take_takeover_marker() is True
+    assert daemon_module._take_takeover_marker() is False  # one-shot
+    env = daemon_module._takeover_env()
+    assert env["AVA_ROOT_HANDOFF"] == "1"
+    assert env.get("PATH")  # the live environment is carried through
+
+
+def test_exec_failure_logs_and_exits_for_the_keepalive_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        raise OSError("exec refused (test)")
+
+    exits: list[int] = []
+    shutdowns: list[int] = []
+
+    def fake_exit(code: int) -> None:
+        exits.append(code)
+        raise SystemExit(code)
+
+    monkeypatch.setattr(daemon_module.os, "execve", refuse)
+    monkeypatch.setattr(daemon_module.os, "_exit", fake_exit)
+    monkeypatch.setattr(daemon_module.logging, "shutdown", lambda: shutdowns.append(1))
+    with pytest.raises(SystemExit):
+        daemon_module._exec_upgrade(["--run-dir", "r", "--manifests", "m"])
+    assert exits == [1]
+    assert shutdowns == [1]

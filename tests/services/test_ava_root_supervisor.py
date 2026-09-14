@@ -9,18 +9,22 @@ stay this process — no double-fork, no detaching).
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import signal
 import subprocess
 import sys
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import suppress
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
+from services.ava_root.handoff import HandoffFile, HandoffUnit
 from services.ava_root.manifest import (
+    DesiredState,
     RestartPolicy,
     UnitManifest,
     UnitRegistry,
@@ -50,8 +54,8 @@ def _unit(
     return UnitManifest(id=unit_id, exec=tuple(cmd), restart=RestartPolicy(restart), attach=attach)
 
 
-def _make(units: list[UnitManifest], log_dir: Path, **cfg: float) -> Supervisor:
-    return Supervisor(UnitRegistry(units), log_dir=log_dir, config=SupervisorConfig(**cfg))
+def _make(units: list[UnitManifest], run_dir: Path, **cfg: float) -> Supervisor:
+    return Supervisor(UnitRegistry(units), run_dir=run_dir, config=SupervisorConfig(**cfg))
 
 
 StartFactory = Callable[..., Awaitable[Supervisor]]
@@ -63,7 +67,7 @@ async def started(short_tmp: Path) -> AsyncIterator[StartFactory]:
     created: list[Supervisor] = []
 
     async def factory(units: list[UnitManifest], **cfg: float) -> Supervisor:
-        supervisor = _make(units, short_tmp / "logs", **cfg)
+        supervisor = _make(units, short_tmp, **cfg)
         created.append(supervisor)
         await supervisor.start()
         return supervisor
@@ -460,10 +464,6 @@ async def test_dispatch_translates_business_errors(started: StartFactory) -> Non
     assert response.get("code") == "unknown_unit"
     assert "ghost" in str(response.get("error"))
 
-    response = await supervisor.dispatch({"verb": "upgrade"})
-    assert response["ok"] is False
-    assert response.get("code") == "not_implemented"
-
     response = await supervisor.dispatch({"verb": "status"})
     assert response["ok"] is True
     result = cast("dict[str, object]", response.get("result"))
@@ -560,3 +560,235 @@ async def test_tree_view_reports_the_raw_recorded_pid(started: StartFactory) -> 
     assert units[0]["pid"] == pid
 
     await supervisor.up("svc")  # leave a healthy generation for teardown
+
+
+# -- the upgrade handoff: snapshot, fail-fast write, steady-state warnings -------
+
+
+def _kill_quietly(pid: int) -> None:
+    with suppress(ProcessLookupError):
+        os.kill(pid, signal.SIGKILL)
+
+
+def _wait_zombie(pid: int, *, timeout: float = 5.0) -> None:
+    """Wait until a killed child is an unreaped zombie (its exit is pending)."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        out = subprocess.run(  # noqa: S603 — fixed system tool, literal argv, no shell
+            ["ps", "-o", "state=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if out.stdout.strip().startswith("Z"):
+            return
+        time.sleep(0.05)
+    raise AssertionError(f"pid {pid} did not become an unreaped zombie")
+
+
+async def test_upgrade_snapshots_the_tree_and_answers_accepted(
+    started: StartFactory, short_tmp: Path
+) -> None:
+    supervisor = await started([_unit("svc", _SLEEP_FOREVER)])
+    unit_pid = cast(int, (await _unit_status(supervisor, "svc"))["pid"])
+
+    response = await supervisor.dispatch({"verb": "upgrade"})
+    assert response["ok"] is True
+    result = cast("dict[str, object]", response.get("result"))
+    assert result["accepted"] is True
+    assert result["root_pid"] == os.getpid()
+    assert result["units_total"] == 1 and result["units_running"] == 1
+
+    raw = cast("dict[str, object]", json.loads((short_tmp / "handoff.json").read_text("utf-8")))
+    assert raw["writer_pid"] == os.getpid()
+    (carried,) = cast("list[dict[str, object]]", raw["units"])
+    assert carried["id"] == "svc" and carried["pid"] == unit_pid
+    assert carried["desired"] == "running"
+    assert cast(float, carried["started_at"]) > 0.0
+    assert not (short_tmp / "handoff.json.tmp").exists()
+
+    assert supervisor.take_pending_upgrade() is True
+    assert supervisor.take_pending_upgrade() is False
+
+
+async def test_upgrade_write_failure_is_an_error_and_leaves_the_tree(
+    started: StartFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    supervisor = await started([_unit("svc", _SLEEP_FOREVER)])
+
+    def fail_write(*_args: object, **_kwargs: object) -> None:
+        raise OSError("disk full (test)")
+
+    monkeypatch.setattr("services.ava_root.supervisor.write_handoff", fail_write)
+    response = await supervisor.dispatch({"verb": "upgrade"})
+    assert response["ok"] is False
+    assert response.get("code") == "internal"
+    assert supervisor.take_pending_upgrade() is False
+    assert (await _unit_status(supervisor, "svc"))["state"] == "running"
+
+
+async def test_upgrade_warns_when_a_unit_is_not_in_steady_state(
+    started: StartFactory, caplog: pytest.LogCaptureFixture
+) -> None:
+    supervisor = await started([_unit("svc", _exit_now(1))], backoff_base_s=100.0)
+
+    async def in_backoff() -> bool:
+        return (await _unit_status(supervisor, "svc"))["state"] == "backoff"
+
+    await _wait_until(in_backoff)
+    with caplog.at_level("WARNING", logger="services.ava_root.supervisor"):
+        response = await supervisor.dispatch({"verb": "upgrade"})
+    assert response["ok"] is True
+    assert any("not in steady state" in record.getMessage() for record in caplog.records)
+
+
+# -- taking over an inherited tree: attach instead of respawn --------------------
+
+
+async def test_start_from_handoff_attaches_live_children_without_spawning(
+    short_tmp: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = subprocess.Popen(_SLEEP_FOREVER, cwd=short_tmp)  # noqa: S603 — test's own child
+    second = subprocess.Popen(_SLEEP_FOREVER, cwd=short_tmp)  # noqa: S603 — test's own child
+    handoff = HandoffFile.stamp(
+        os.getpid(),
+        (
+            HandoffUnit(
+                "svc-a",
+                DesiredState.RUNNING,
+                pid=first.pid,
+                pgid=os.getpgid(first.pid),
+                started_at=time.monotonic(),
+            ),
+            HandoffUnit(
+                "svc-b",
+                DesiredState.RUNNING,
+                pid=second.pid,
+                pgid=os.getpgid(second.pid),
+                started_at=time.monotonic(),
+            ),
+        ),
+    )
+    spawns: list[str] = []
+    original_spawn = Supervisor._spawn
+
+    async def spy(self: Supervisor, runtime: Any) -> None:
+        spawns.append(runtime.manifest.id)
+        await original_spawn(self, runtime)
+
+    monkeypatch.setattr(Supervisor, "_spawn", spy)
+    supervisor = _make([_unit("svc-a", _SLEEP_FOREVER), _unit("svc-b", _SLEEP_FOREVER)], short_tmp)
+    try:
+        await supervisor.start(handoff=handoff)
+        assert spawns == []  # both attached in place
+        assert (await _unit_status(supervisor, "svc-a"))["pid"] == first.pid
+        assert (await _unit_status(supervisor, "svc-b"))["pid"] == second.pid
+
+        # The reaper is re-attached: a child's exit still drives the policy.
+        os.kill(first.pid, signal.SIGKILL)
+
+        async def svc_a_replaced() -> bool:
+            entry = await _unit_status(supervisor, "svc-a")
+            return entry["pid"] is not None and entry["pid"] != first.pid
+
+        await _wait_until(svc_a_replaced)
+        assert spawns == ["svc-a"]
+    finally:
+        await supervisor.shutdown()
+        _kill_quietly(first.pid)
+        _kill_quietly(second.pid)
+
+
+async def test_start_from_handoff_starts_a_unit_whose_child_already_exited(
+    short_tmp: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dead = subprocess.Popen(_SLEEP_FOREVER, cwd=short_tmp)  # noqa: S603 — test's own child
+    dead.kill()
+    _wait_zombie(dead.pid)  # keep it unreaped: the handoff probe must reap it
+    handoff = HandoffFile.stamp(
+        os.getpid(),
+        (
+            HandoffUnit(
+                "svc",
+                DesiredState.RUNNING,
+                pid=dead.pid,
+                pgid=None,
+                started_at=time.monotonic(),
+            ),
+        ),
+    )
+    spawns: list[str] = []
+    original_spawn = Supervisor._spawn
+
+    async def spy(self: Supervisor, runtime: Any) -> None:
+        spawns.append(runtime.manifest.id)
+        await original_spawn(self, runtime)
+
+    monkeypatch.setattr(Supervisor, "_spawn", spy)
+    supervisor = _make([_unit("svc", _SLEEP_FOREVER)], short_tmp)
+    try:
+        await supervisor.start(handoff=handoff)
+        assert spawns == ["svc"]  # gone at takeover: the start path
+        entry = await _unit_status(supervisor, "svc")
+        assert entry["state"] == "running"
+        assert entry["pid"] != dead.pid
+        assert entry["last_exit"] == "signal 9"
+    finally:
+        await supervisor.shutdown()
+        _kill_quietly(dead.pid)
+
+
+async def test_start_from_handoff_keeps_a_stopped_unit_stopped(
+    short_tmp: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    alive = subprocess.Popen(_SLEEP_FOREVER, cwd=short_tmp)  # noqa: S603 — test's own child
+    handoff = HandoffFile.stamp(
+        os.getpid(),
+        (
+            HandoffUnit("held", DesiredState.STOPPED),
+            HandoffUnit(
+                "svc",
+                DesiredState.RUNNING,
+                pid=alive.pid,
+                pgid=os.getpgid(alive.pid),
+                started_at=time.monotonic(),
+            ),
+        ),
+    )
+    spawns: list[str] = []
+    original_spawn = Supervisor._spawn
+
+    async def spy(self: Supervisor, runtime: Any) -> None:
+        spawns.append(runtime.manifest.id)
+        await original_spawn(self, runtime)
+
+    monkeypatch.setattr(Supervisor, "_spawn", spy)
+    supervisor = _make([_unit("held", _SLEEP_FOREVER), _unit("svc", _SLEEP_FOREVER)], short_tmp)
+    try:
+        await supervisor.start(handoff=handoff)
+        assert spawns == []  # operator intent survives: stopped stays stopped
+        assert (await _unit_status(supervisor, "held"))["state"] == "stopped"
+        assert (await _unit_status(supervisor, "svc"))["pid"] == alive.pid
+    finally:
+        await supervisor.shutdown()
+        _kill_quietly(alive.pid)
+
+
+async def test_start_from_handoff_warns_about_unknown_carried_units(
+    short_tmp: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    handoff = HandoffFile.stamp(
+        os.getpid(),
+        (
+            HandoffUnit("svc", DesiredState.RUNNING),
+            HandoffUnit("ghost", DesiredState.RUNNING),
+        ),
+    )
+    supervisor = _make([_unit("svc", _SLEEP_FOREVER)], short_tmp)
+    try:
+        with caplog.at_level("WARNING", logger="services.ava_root.supervisor"):
+            await supervisor.start(handoff=handoff)
+        assert (await _unit_status(supervisor, "svc"))["state"] == "running"
+        assert any("not in this registry" in record.getMessage() for record in caplog.records)
+    finally:
+        await supervisor.shutdown()

@@ -11,6 +11,13 @@ exercised by its own tests only (`tests/services/test_ava_root_*.py`).
 """
 
 from services.ava_root.client import RootClient, RootClientError
+from services.ava_root.handoff import (
+    HandoffError,
+    HandoffFile,
+    HandoffUnit,
+    load_handoff,
+    write_handoff,
+)
 from services.ava_root.health import HealthConfig, HealthMonitor
 from services.ava_root.manifest import (
     ROOT_ID,
@@ -30,6 +37,7 @@ from services.ava_root.singleton import (
     release_instance_lock,
 )
 from services.ava_root.supervisor import Supervisor, SupervisorConfig, UnitState
+from services.ava_root.survival import UPDATE_SURVIVAL_UNIT_IDS, is_update_survival_unit
 from services.ava_root.wiring import (
     WiringContext,
     WiringError,
@@ -39,8 +47,12 @@ from services.ava_root.wiring import (
 
 __all__ = [
     "ROOT_ID",
+    "UPDATE_SURVIVAL_UNIT_IDS",
     "AlreadyRunningError",
     "ControlServer",
+    "HandoffError",
+    "HandoffFile",
+    "HandoffUnit",
     "HealthConfig",
     "HealthMonitor",
     "ManifestError",
@@ -61,7 +73,10 @@ __all__ = [
     "WiringError",
     "WiringParticipant",
     "acquire_instance_lock",
+    "is_update_survival_unit",
+    "load_handoff",
     "load_manifests",
     "load_wiring",
     "release_instance_lock",
+    "write_handoff",
 ]

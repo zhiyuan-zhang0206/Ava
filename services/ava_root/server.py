@@ -5,6 +5,10 @@ The handler passed in owns all business semantics (the supervisor's
 forward it, write one line back. A malformed message is answered with an error
 response; a message that overruns the line cap breaks the stream boundary and
 the connection is dropped instead.
+
+An optional `after_response` hook runs right after a response line has been
+written and flushed — the daemon uses it to run the exec replacement exactly
+once the accepted upgrade response is out (`daemon.py`).
 """
 
 from __future__ import annotations
@@ -35,9 +39,16 @@ RequestHandler = Callable[[RequestPayload], Awaitable[ResponsePayload]]
 class ControlServer:
     """Serves the control protocol on a unix socket."""
 
-    def __init__(self, socket_path: Path, handler: RequestHandler) -> None:
+    def __init__(
+        self,
+        socket_path: Path,
+        handler: RequestHandler,
+        *,
+        after_response: Callable[[RequestPayload], None] | None = None,
+    ) -> None:
         self._socket_path = socket_path
         self._handler = handler
+        self._after_response = after_response
         self._server: asyncio.AbstractServer | None = None
 
     async def start(self) -> None:
@@ -93,6 +104,8 @@ class ControlServer:
                 _log.exception("control handler failed for %r", request)
                 response = error_response(ErrorCode.INTERNAL, "internal error")
             await self._write(writer, response)
+            if self._after_response is not None:
+                self._after_response(request)
         finally:
             writer.close()
             with suppress(ConnectionError, OSError):

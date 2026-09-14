@@ -61,7 +61,14 @@ class RootClient:
         return self.call("status")
 
     def upgrade(self) -> ResponsePayload:
-        """Ask for a supervisor upgrade (a stub in this slice)."""
+        """Ask the root to replace itself in place (exec, same pid).
+
+        The response is acceptance-shaped: the exec happens once it has been
+        flushed. Confirm completion through `status()` — root pid unchanged,
+        uptime reset, units continuous on their existing pids. A refused
+        connection right after the response is the sub-second socket-rebind
+        window, not a dead tree.
+        """
         return self.call("upgrade")
 
     def _roundtrip(self, payload: bytes) -> bytes:
