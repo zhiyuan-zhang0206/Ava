@@ -112,7 +112,7 @@ def _count(pipeline: str, window: str, matchers: str | None = None) -> str:
 core_metrics.register_core_metric(
     MetricSpec(
         name="ava_obs_llm_cost_usd",
-        title="LLM cost (USD)",
+        title="LLM cost (USD, per minute)",
         description=(
             "LLM call cost per minute — unwrap of the cost_usd field every "
             "llm_usage payload carries (task #2626; the producer computes it "
@@ -164,7 +164,7 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="ava_obs_llm_error_rate",
-        title="LLM errors",
+        title="LLM errors (per minute)",
         description=(
             "LLM failure signals per minute (5-minute buckets / 5): "
             "llm_provider_error (provider rejection / classification error), "
@@ -276,7 +276,7 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="ava_obs_compaction_rate",
-        title="Completed compactions",
+        title="Completed compactions (per minute)",
         description=(
             "Applied history replacements per minute (5-minute buckets / 5). "
             "Counts compaction_completed rather than compact requests, so the "
@@ -300,7 +300,7 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="ava_obs_exec_success_rate",
-        title="Exec outcomes",
+        title="Exec outcomes (per minute)",
         description=(
             "Exec outcome breakdown per minute (5-minute buckets / 5): ok = "
             "event_name='exec'; failures split by event_name (exec_failed / "
@@ -372,7 +372,7 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="ava_obs_syntax_fix_by_kind",
-        title="Syntax fix triggers (by kind)",
+        title="Syntax fix triggers (per minute, by kind)",
         description=(
             "Syntax-fix trigger counts per minute (5-minute buckets / 5), "
             "bucketed by the fix kinds in attributes.fixes (substring regex "
@@ -569,7 +569,7 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="ava_obs_halt_breakdown",
-        title="Halt classes",
+        title="Halt classes (per minute)",
         description=(
             "Halt events classified by body per minute (5-minute buckets / "
             "5): idle ('no tool_call (idle)'), compact ('system_halt "
@@ -695,7 +695,7 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="ava_obs_frontend_interactions",
-        title="Frontend interactions",
+        title="Frontend interactions (per minute)",
         description=(
             "Frontend interaction volume per minute (5-minute buckets / 5, "
             "total frontend_interaction events): the entry panel of "

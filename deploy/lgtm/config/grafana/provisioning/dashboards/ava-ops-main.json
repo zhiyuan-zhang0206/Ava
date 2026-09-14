@@ -63,7 +63,7 @@
     },
     "textMode": "auto"
    },
-   "title": "LLM calls",
+   "title": "LLM calls (window)",
    "type": "stat",
    "targets": [
     {
@@ -123,7 +123,7 @@
     },
     "textMode": "auto"
    },
-   "title": "Warning",
+   "title": "Warning (window)",
    "type": "stat",
    "targets": [
     {
@@ -184,7 +184,7 @@
     "textMode": "auto",
     "noValue": "0"
    },
-   "title": "Error",
+   "title": "Error (window)",
    "type": "stat",
    "targets": [
     {
@@ -432,7 +432,7 @@
     },
     "textMode": "auto"
    },
-   "title": "LLM cost",
+   "title": "LLM cost (window)",
    "type": "stat",
    "targets": [
     {
@@ -492,7 +492,7 @@
     },
     "textMode": "auto"
    },
-   "title": "Tokens",
+   "title": "Tokens (window)",
    "type": "stat",
    "targets": [
     {
@@ -552,7 +552,7 @@
     },
     "textMode": "auto"
    },
-   "title": "LLM input tokens",
+   "title": "LLM input tokens (window)",
    "type": "stat",
    "targets": [
     {
@@ -612,7 +612,7 @@
     },
     "textMode": "auto"
    },
-   "title": "LLM output tokens",
+   "title": "LLM output tokens (window)",
    "type": "stat",
    "targets": [
     {
@@ -673,7 +673,7 @@
     },
     "textMode": "auto"
    },
-   "title": "Cache hit",
+   "title": "Cache hit (window)",
    "type": "stat",
    "targets": [
     {
@@ -734,7 +734,7 @@
     },
     "textMode": "auto"
    },
-   "title": "Avg turn duration",
+   "title": "Avg turn duration (window)",
    "type": "stat",
    "targets": [
     {
@@ -931,7 +931,7 @@
      "sort": "desc"
     }
    },
-   "title": "Event health \u2014 WARNING+ERROR vs total",
+   "title": "Event health \u2014 WARNING+ERROR vs total (per minute)",
    "type": "timeseries",
    "targets": [
     {
@@ -1079,7 +1079,7 @@
      "sort": "desc"
     }
    },
-   "title": "Token usage \u2014 Input",
+   "title": "Token usage \u2014 Input (per minute)",
    "type": "timeseries",
    "targets": [
     {
@@ -1146,7 +1146,7 @@
      "sort": "desc"
     }
    },
-   "title": "Token usage \u2014 Output + Reasoning",
+   "title": "Token usage \u2014 Output + Reasoning (per minute)",
    "type": "timeseries",
    "targets": [
     {
@@ -1921,7 +1921,7 @@
      "sort": "desc"
     }
    },
-   "title": "LLM cost (USD)",
+   "title": "LLM cost (USD, per minute)",
    "type": "timeseries",
    "description": "LLM call cost per minute \u2014 unwrap of the cost_usd field every llm_usage payload carries (task #2626; the producer computes it from one versioned-catalog quote in shared/lm/pricing.py, unpriced models carry no cost_usd and are skipped); 30-minute buckets normalized to per-minute USD (bucket sum / 30). event_name='llm_usage', category='telemetry'.",
    "targets": [
@@ -1991,7 +1991,7 @@
      "sort": "desc"
     }
    },
-   "title": "LLM errors",
+   "title": "LLM errors (per minute)",
    "type": "timeseries",
    "description": "LLM failure signals per minute (5-minute buckets / 5): llm_provider_error (provider rejection / classification error), stream_stalled_retry (stalled stream retry), llm_turn_aborted (turn aborted after retries exhausted), stream_overloaded_retry (overload retry). The event_name field is spec metadata; the query covers all 4 failure events (all telemetry).",
    "targets": [
@@ -2539,7 +2539,7 @@
      "sort": "desc"
     }
    },
-   "title": "Exec outcomes",
+   "title": "Exec outcomes (per minute)",
    "type": "timeseries",
    "description": "Exec outcome breakdown per minute (5-minute buckets / 5): ok = event_name='exec'; failures split by event_name (exec_failed / exec(timeout) / exec(cancelled) / exec_node_timeout, legacy parenthesized spellings counted in; unknown exec* events fall into other). event_name='exec', category='telemetry'.",
    "targets": [
@@ -2664,7 +2664,7 @@
      "sort": "desc"
     }
    },
-   "title": "Syntax fix triggers (by kind)",
+   "title": "Syntax fix triggers (per minute, by kind)",
    "type": "timeseries",
    "description": "Syntax-fix trigger counts per minute (5-minute buckets / 5), bucketed by the fix kinds in attributes.fixes (substring regex matching; an event with several fix kinds counts once per kind, 'none'/null/unknown goes to other). event_name='syntax_fix', category='telemetry' (90d retention).",
    "targets": [
@@ -2800,7 +2800,7 @@
      "sort": "desc"
     }
    },
-   "title": "Halt classes",
+   "title": "Halt classes (per minute)",
    "type": "timeseries",
    "description": "Halt events classified by body per minute (5-minute buckets / 5): idle ('no tool_call (idle)'), compact ('system_halt (compact)'), lifecycle ('lifecycle AgentTermination / AgentRestart'), other. event_name='halt', category='telemetry'.",
    "targets": [
@@ -2968,7 +2968,7 @@
      "sort": "desc"
     }
    },
-   "title": "Frontend interactions",
+   "title": "Frontend interactions (per minute)",
    "type": "timeseries",
    "description": "Frontend interaction volume per minute (5-minute buckets / 5, total frontend_interaction events): the entry panel of user-modeling telemetry, doubling as volume monitoring \u2014 an abnormal interaction spike (an instrumentation loop bug) is immediately visible here. event_name='frontend_interaction', category='telemetry', source='user'.",
    "targets": [
@@ -3755,7 +3755,7 @@
      "sort": "desc"
     }
    },
-   "title": "Syntax fix count",
+   "title": "Syntax fix count (per minute)",
    "type": "timeseries",
    "description": "Syntax_fix events per minute (5-minute buckets / 5) \u2014 how often the repair pipeline fixes syntax errors in LLM-produced code (event_name='syntax_fix', category='telemetry', 90d retention).",
    "targets": [
@@ -3956,7 +3956,7 @@
      "sort": "desc"
     }
    },
-   "title": "Memory recall filter runs",
+   "title": "Memory recall filter runs (per minute)",
    "type": "timeseries",
    "description": "Recall_filter INFO events per minute (5-minute buckets / 5) \u2014 how often passive memory recall filters retrieval results for relevance (event_name='recall_filter', level='info', category='telemetry', 90d retention).",
    "targets": [
@@ -5445,7 +5445,7 @@
      "sort": "desc"
     }
    },
-   "title": "Completed compactions",
+   "title": "Completed compactions (per minute)",
    "type": "timeseries",
    "targets": [
     {

@@ -269,8 +269,8 @@ def test_cost_dashboard_windows_and_telemetry_contract() -> None:
     assert data["timezone"] == "Asia/Shanghai"
     assert all(panel["collapsed"] is False for panel in data["panels"] if panel["type"] == "row")
     for title in (
-        "LLM cost",
-        "Tokens",
+        "LLM cost (window)",
+        "Tokens (window)",
         "LLM cost estimate — day pace",
         "LLM cost estimate — 30-day pace",
         "LLM cost / minute",

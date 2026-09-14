@@ -70,7 +70,7 @@ def _count(pipeline: str, window: str, matchers: str | None = None) -> str:
 register_metric(
     MetricSpec(
         name="ava_memory_recall_filter_runs",
-        title="Memory recall filter runs",
+        title="Memory recall filter runs (per minute)",
         description=(
             "Recall_filter INFO events per minute (5-minute buckets / 5) — how "
             "often passive memory recall filters retrieval results for relevance "
