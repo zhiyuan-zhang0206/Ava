@@ -402,6 +402,26 @@ def _stop_plan(
     return roles, selected, preserved
 
 
+def _services_phase_action(
+    *, preserved: frozenset[str], selected: frozenset[str], deadline: float
+) -> Callable[[], object]:
+    """The "services" phase's action: root-driven tree stop, or the session stop.
+
+    Root-driven hosts stop the tree through ava-root; `preserved` (pause's
+    browser, --keep-service) becomes a selective unit stop, and an empty
+    preserve set stops the tree and the root together. The choice is read at
+    call time, like every other phase, so it sees the settings of the process
+    actually running the stop.
+    """
+    import cli.commands as _ns
+
+    if _ns._root_driven_enabled():
+        return lambda: _ns._stop_root_service_tree(
+            preserve=preserved, timeout_s=remaining(deadline)
+        )
+    return lambda: stop_services(remaining(deadline), keep_terminals=True, selected=selected)
+
+
 def stop(
     *,
     require_confirmation: bool,
@@ -486,7 +506,7 @@ def stop(
         _timed_phase(
             phases,
             "services",
-            lambda: stop_services(remaining(deadline), keep_terminals=True, selected=selected),
+            _services_phase_action(preserved=preserved, selected=selected, deadline=deadline),
         )
         if not keep_browser and "browser" not in preserved:
             _timed_phase(phases, "browser", lambda: _stop_browser(deadline))

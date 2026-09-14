@@ -6,8 +6,12 @@ unix socket, and the K2 unit-manifest registry. What launches the root process
 by itself (the OS edge) is out of scope here by design: the tree's own code
 carries no platform-specific concepts.
 
-Not wired into the cluster yet — nothing else imports this package, and it is
-exercised by its own tests only (`tests/services/test_ava_root_*.py`).
+W1.2e-2 wires it into the cluster's dev path: `cli.commands._root_driver`
+drives this package over K1 when a host's `AVA_ROOT_DRIVER_ENABLED` switch is
+on (default off — the production flip is S3/S4). Besides its own tests
+(`tests/services/test_ava_root_*.py`), it is exercised by the launch dry run
+(`scripts/ava_root_dry_run.py`) and the start/stop drill
+(`scripts/ava_root_e2_drill.py`).
 """
 
 from services.ava_root.client import RootClient, RootClientError
