@@ -4,6 +4,9 @@ This is the platform-neutral core of the root supervisor. It owns the process
 table of one tree:
 
 - `up` / `down` / `restart` act on subtrees (a unit and its attach descendants);
+- `revival_deferral` answers why a would-be reviver must not act on a unit
+  right now — operator intent, an in-flight retry, or a `never` policy — so a
+  second reviver (the health runner) never fights this supervisor;
 - an unexpected exit follows the unit's restart policy, with exponential
   backoff for repeats;
 - every child process is reaped through its own wait task — no orphaned exit
@@ -264,6 +267,32 @@ class Supervisor:
             "running": self._running,
         }
         return {"root": root, "units": units, "restarts_total": restarts_total}
+
+    def revival_deferral(self, unit_id: str) -> str | None:
+        """Why a would-be reviver must not act on `unit_id` right now, if any.
+
+        The health runner asks this before restarting a unit; a non-None answer
+        means somebody else owns the situation and the round only reports:
+
+        - ``"held down"`` — the operator stops it (`desired` is STOPPED);
+          deliberate operator intent is never fought.
+        - ``"already scheduled"`` — a policy retry is already in flight; there
+          is a single scheduling source, and it is this supervisor.
+        - ``"policy never"`` — the manifest says this unit is not brought back.
+
+        Raises `UnknownUnitError` for a unit outside this registry.
+        """
+        runtime = self._units.get(unit_id)
+        if runtime is None:
+            raise UnknownUnitError(f"unknown unit {unit_id!r}")
+        if runtime.desired is not DesiredState.RUNNING:
+            return "held down"
+        task = runtime.restart_task
+        if task is not None and not task.done():
+            return "already scheduled"
+        if runtime.manifest.restart is RestartPolicy.NEVER:
+            return "policy never"
+        return None
 
     async def dispatch(self, request: RequestPayload) -> ResponsePayload:
         """Serve one validated K1 request; business errors become error codes."""
