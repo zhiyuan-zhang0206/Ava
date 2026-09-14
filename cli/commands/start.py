@@ -60,6 +60,7 @@ from cli.commands._session_lifecycle import _launch_roster, _launch_sessions
 from cli.commands._setup import _print_missing_setup_error
 from cli.commands._start_bookmarks import record_running_sha as _record_running_sha
 from cli.commands._start_gui_chain import _warn_when_chain_outside_gui_session
+from cli.commands._start_gui_handover import _maybe_handover_start
 from cli.commands._update_uv_sync import run_uv_sync
 from cli.commands.migrations import cmd_migrations_apply
 from cli.commands.status import _update_in_flight, cmd_status
@@ -401,6 +402,18 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
 
     roles = machine_role()
     print(f"\n→ roles = {','.join(sorted(roles))}, machine = {resolved['machine_name']}")
+    # Handover-or-warn: a chain outside the GUI session must not bring services
+    # up in place (tasks #3346/#3348).
+    handover_rc = _maybe_handover_start(
+        roles,
+        disabled_services=disabled_services,
+        persist_services=persist_services,
+        updater_telemetry=updater_telemetry,
+        parent_handoff=parent_handoff,
+        readiness_gate=readiness_gate,
+    )
+    if handover_rc is not None:
+        return handover_rc
     _warn_when_chain_outside_gui_session(roles)
 
     from shared.platform import raise_fd_limit

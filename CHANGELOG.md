@@ -20,6 +20,17 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
   a `chrome_page_ttl_expired` / `chrome_page_ttl_renewed` event (task #3035).
 
 ### Changed
+- A macOS `ava start` whose own chain runs outside the GUI login session no
+  longer brings services up in place (they would inherit the wrong launchd
+  domain — the state that wedges the shared browser): an operator-shaped start
+  hands the bring-up to the cluster's GUI-domain autostart job (`kickstart -p`,
+  which never kills a running instance), waits for the job to reach its launch
+  step, and answers with the same readiness exit contract as a normal start.
+  Internal restart legs (update / `ava restart` / the stop compensator) keep
+  their in-place behavior — their credential-handover marker cannot cross
+  domains and their flags are not equivalent to the canonical job — and
+  `AVA_START_GUI_HANDOVER=0` restores the previous warn-only behavior
+  (task #3348).
 - PR merge automation now uses Trunk Merge Queue: queued PRs are tested
   together in batches (target 4, max wait 5 min) via draft-PR runs on `trunk-merge/*`
   branches; the merge gate is the full CI job set (12 required statuses: the three
