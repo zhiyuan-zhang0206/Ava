@@ -440,6 +440,15 @@ def _enforce_cluster_env_authority() -> None:
     # (2026-08-21). A pure agent-runner is unaffected: the gateway's
     # /api/bootstrap fetch re-injects the authoritative value at Settings build
     # regardless of what its env carried.
+    # The host-scope tempo URLs keep the same declaration-wins rule: they are
+    # baked into converge-rendered artifacts (the station's Prometheus scrape
+    # target, Grafana datasources, collector exports), while session children
+    # receive host-scope facts BY FORWARD — a parent that booted before a .env
+    # change pins the old value into every child it spawns, and a converge run
+    # inside such a session re-renders the stale value silently (2026-09-14
+    # wave: the tempo target flipped back to the tailnet address,
+    # up{job="tempo"}=0 for ~14 min; task #3339). Declared -> force;
+    # undeclared -> untouched.
     _force_also = {
         "AVA_CLUSTER_SECRET",
         "AVA_GATEWAY_URL",
@@ -447,6 +456,8 @@ def _enforce_cluster_env_authority() -> None:
         "AVA_GATEWAY_HEALTH_URL",
         "AVA_FRONTEND_HEALTHCHECK_URL",
         "AVA_TIMEZONE",
+        "AVA_TELEMETRY_TEMPO_QUERY_URL",
+        "AVA_TELEMETRY_TEMPO_ENDPOINT",
     } | set(health_port_env_aliases().values())
     file_vals = {**dotenv_values(AVA_ENV_PATH), **dotenv_values(AVA_MIRROR_ENV_PATH)}
     role = "gateway" if _is_gateway_process() else "agent"
