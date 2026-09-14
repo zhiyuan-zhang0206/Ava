@@ -686,7 +686,10 @@ jobs:
         # the failing tests from the uploaded JUnit when the gate rejects
         # them, so a red step reads as "tests failed and were not
         # quarantined" (a real gate block) instead of an uploader outage.
-        if: ${{ steps.trunk-gate.outcome == 'failure' }}
+        # failure() is load-bearing: without a status-check function GHA applies
+        # an implicit success(), so the bare outcome check silently skipped in
+        # exactly the failure case this step exists to explain.
+        if: ${{ failure() && steps.trunk-gate.outcome == 'failure' }}
         shell: bash
         run: |
           python3 - <<'EOF'
@@ -844,7 +847,10 @@ jobs:
         # the failing tests from the uploaded JUnit when the gate rejects
         # them, so a red step reads as "tests failed and were not
         # quarantined" (a real gate block) instead of an uploader outage.
-        if: ${{ steps.trunk-gate.outcome == 'failure' }}
+        # failure() is load-bearing: without a status-check function GHA applies
+        # an implicit success(), so the bare outcome check silently skipped in
+        # exactly the failure case this step exists to explain.
+        if: ${{ failure() && steps.trunk-gate.outcome == 'failure' }}
         shell: bash
         run: |
           python3 - <<'EOF'
@@ -937,7 +943,10 @@ jobs:
         # the failing tests from the uploaded JUnit when the gate rejects
         # them, so a red step reads as "tests failed and were not
         # quarantined" (a real gate block) instead of an uploader outage.
-        if: ${{ steps.trunk-gate.outcome == 'failure' }}
+        # failure() is load-bearing: without a status-check function GHA applies
+        # an implicit success(), so the bare outcome check silently skipped in
+        # exactly the failure case this step exists to explain.
+        if: ${{ failure() && steps.trunk-gate.outcome == 'failure' }}
         shell: bash
         run: |
           python3 - <<'EOF'
@@ -1458,7 +1467,10 @@ jobs:
         # the failing tests from the uploaded JUnit when the gate rejects
         # them, so a red step reads as "tests failed and were not
         # quarantined" (a real gate block) instead of an uploader outage.
-        if: ${{ steps.trunk-gate.outcome == 'failure' }}
+        # failure() is load-bearing: without a status-check function GHA applies
+        # an implicit success(), so the bare outcome check silently skipped in
+        # exactly the failure case this step exists to explain.
+        if: ${{ failure() && steps.trunk-gate.outcome == 'failure' }}
         shell: bash
         run: |
           python3 - <<'EOF'
@@ -1579,7 +1591,10 @@ jobs:
         # the failing tests from the uploaded JUnit when the gate rejects
         # them, so a red step reads as "tests failed and were not
         # quarantined" (a real gate block) instead of an uploader outage.
-        if: ${{ steps.trunk-gate.outcome == 'failure' }}
+        # failure() is load-bearing: without a status-check function GHA applies
+        # an implicit success(), so the bare outcome check silently skipped in
+        # exactly the failure case this step exists to explain.
+        if: ${{ failure() && steps.trunk-gate.outcome == 'failure' }}
         shell: bash
         run: |
           python3 - <<'EOF'
@@ -1702,7 +1717,10 @@ jobs:
         # the failing tests from the uploaded JUnit when the gate rejects
         # them, so a red step reads as "tests failed and were not
         # quarantined" (a real gate block) instead of an uploader outage.
-        if: ${{ steps.trunk-gate.outcome == 'failure' }}
+        # failure() is load-bearing: without a status-check function GHA applies
+        # an implicit success(), so the bare outcome check silently skipped in
+        # exactly the failure case this step exists to explain.
+        if: ${{ failure() && steps.trunk-gate.outcome == 'failure' }}
         shell: bash
         run: |
           python3 - <<'EOF'
@@ -1831,7 +1849,10 @@ jobs:
         # the failing tests from the uploaded JUnit when the gate rejects
         # them, so a red step reads as "tests failed and were not
         # quarantined" (a real gate block) instead of an uploader outage.
-        if: ${{ steps.trunk-gate.outcome == 'failure' }}
+        # failure() is load-bearing: without a status-check function GHA applies
+        # an implicit success(), so the bare outcome check silently skipped in
+        # exactly the failure case this step exists to explain.
+        if: ${{ failure() && steps.trunk-gate.outcome == 'failure' }}
         shell: bash
         run: |
           python3 - <<'EOF'
