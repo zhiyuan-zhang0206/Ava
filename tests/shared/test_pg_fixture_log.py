@@ -19,7 +19,8 @@ from pathlib import Path
 
 import pytest
 
-from shared import pg_tools
+from shared import pg_throwaway_base, pg_tools
+from shared.config import settings
 from shared.platform import IS_WINDOWS
 
 pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="throwaway clusters are POSIX-only")
@@ -33,7 +34,12 @@ def scratch_tmpfs(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     Teardown force-stops anything still running under the root and deletes
     it, so a failing test cannot leak a cluster."""
     root = Path(tempfile.mkdtemp(prefix="ava-pglog-", dir="/tmp"))
-    monkeypatch.setattr(pg_tools, "_tmpfs_base", str(root))
+    monkeypatch.setattr(pg_throwaway_base, "_tmpfs_base", str(root))
+    # Pin the other throwaway roots the same way (the sweep runs over all of them):
+    # the disk fallback at this scratch dir and the override cleared, so a host's
+    # configured base cannot redirect an instance out from under the teardown.
+    monkeypatch.setattr(pg_throwaway_base, "disk_fallback_base", lambda: root)
+    monkeypatch.setattr(settings.data_plane, "pg_throwaway_base", "")
     yield root
     for data in root.glob("ava-pg-*/data"):
         if (data / "PG_VERSION").is_file():

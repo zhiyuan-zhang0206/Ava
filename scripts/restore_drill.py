@@ -12,6 +12,7 @@ cluster.
 from __future__ import annotations
 
 import argparse
+import shutil
 import subprocess
 import tempfile
 import time
@@ -23,6 +24,8 @@ import psycopg
 from services import backup
 from shared import checkpoint as checkpoint_reader
 from shared.config import settings
+from shared.log import logger
+from shared.pg_throwaway_base import format_bytes, select_throwaway_base
 from shared.pg_tools import pg_tool, throwaway_postgres
 
 
@@ -64,7 +67,7 @@ def _ensure_restore_roles(db_url: str) -> None:
                 conn.execute(pgsql.SQL("CREATE ROLE {} LOGIN").format(pgsql.Identifier(role)))
 
 
-def _restore(raw_dump: Path, db_url: str) -> None:
+def _restore(raw_dump: Path, db_url: str, *, base: Path) -> None:
     """Load the custom dump into the disposable target database."""
     proc = subprocess.run(  # noqa: S603
         [
@@ -80,7 +83,26 @@ def _restore(raw_dump: Path, db_url: str) -> None:
         timeout=backup._DUMP_TIMEOUT_S,
     )
     if proc.returncode != 0:
-        raise RuntimeError(f"pg_restore exited {proc.returncode}")
+        raise RuntimeError(_restore_failure_message(proc, base))
+
+
+def _restore_failure_message(proc: subprocess.CompletedProcess[bytes], base: Path) -> str:
+    """The pg_restore failure with the capacity context an operator needs.
+
+    A scratch restore that outgrows its base dies server-side mid-COPY, so the
+    client-side failure carries no diagnosis of its own: the 2026-09-14 WSL run
+    surfaced only `pg_restore exited 1` while the postmaster had been killed by
+    the full tmpfs (dmesg signal 6; PQputCopyData: server closed the connection).
+    Naming the base and its free space makes the next occurrence diagnosable from
+    the drill's own output."""
+    hint = (
+        f"pg_restore exited {proc.returncode} against the throwaway cluster on {base} "
+        f"({format_bytes(shutil.disk_usage(base).free)} free). If the server closed "
+        f"the connection mid-copy, the scratch base ran out of room — free space on "
+        f"{base} or point AVA_PG_THROWAWAY_BASE at a larger volume."
+    )
+    stderr_tail = "\n".join((proc.stderr or b"").decode(errors="replace").splitlines()[-5:])
+    return f"{hint}\npg_restore stderr tail:\n{stderr_tail}" if stderr_tail else hint
 
 
 def verify_restored_database(db_url: str) -> RestoreReport:
@@ -136,6 +158,21 @@ def verify_restored_database(db_url: str) -> RestoreReport:
     )
 
 
+_SCRATCH_SPACE_FACTOR = 2.0
+"""Scratch space the drill reserves on the base holding the restored copy, as a
+multiple of the (decrypted) dump's size. A floor for picking the base, not a size
+prediction: the restore holds the dump's content decompressed, and in-dump zstd
+ratios vary with content mix — the 2026-09-14 WSL drill restored >=17 GiB from a
+10.16 GiB artifact (~1.7x), and 2x rounds that up with margin. A base that clears
+it is not guaranteed to fit; one that fails it is almost certainly too small."""
+
+
+def _scratch_space_requirement(raw_dump: Path) -> int:
+    """Bytes the base holding this dump's restore must offer (an estimate — see
+    `_SCRATCH_SPACE_FACTOR`)."""
+    return int(raw_dump.stat().st_size * _SCRATCH_SPACE_FACTOR)
+
+
 def run_drill(artifact: Path | None = None) -> tuple[RestoreReport, float]:
     """Run the complete decrypt, restore, and verification drill."""
     artifact = artifact or _newest_artifact()
@@ -148,9 +185,15 @@ def run_drill(artifact: Path | None = None) -> tuple[RestoreReport, float]:
         backup.decrypt_artifact(artifact, raw_dump)
         # Legacy artifacts carry a gzip layer; current ones are raw archives.
         backup.gunzip_if_needed(raw_dump)
-        with throwaway_postgres() as scratch_db_url:
+        required = _scratch_space_requirement(raw_dump)
+        base = select_throwaway_base(required)
+        logger.info(
+            f"restore drill: scratch cluster on {base} "
+            f"(estimate {format_bytes(required)} for artifact {artifact.name})"
+        )
+        with throwaway_postgres(base=base) as scratch_db_url:
             _ensure_restore_roles(scratch_db_url)
-            _restore(raw_dump, scratch_db_url)
+            _restore(raw_dump, scratch_db_url, base=base)
             report = verify_restored_database(scratch_db_url)
     return report, time.monotonic() - started
 
