@@ -27,6 +27,7 @@ from shared import impersonation as leases
 from shared.caller_identity import CallerIdentity
 from shared.context import AvaContext
 from shared.db import create_agent, insert_inbound_message
+from shared.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from shared.machine import machine_name
 from shared.plugin_context import PluginContext
 from shared.runtime_incarnation import RuntimeIncarnation
@@ -128,6 +129,8 @@ async def _prepare_graph(
     saver = AsyncPostgresSaver(aops_pool)
     await saver.setup()
     _wrap_saver_writes_with_nstep_interval(saver, 100)
+    # Delta write model (#3180): fold delta-written messages on read (daemon parity).
+    wrap_saver_reads_with_delta_reconstruction(saver)
     # The registered plugin fields are a dynamically constructed state schema.
     builder: Any = StateGraph(state_cls, context_schema=AvaContext)
     builder.add_node("claim", claim_node, destinations=("before_llm", "__end__", "claim"))

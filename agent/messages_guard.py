@@ -15,14 +15,16 @@ exactly as the model saw it) and silently destroys prompt-caching hit
 rates, which are extremely prefix-sensitive: a mid-history edit changes
 every later prefix.
 
-``guarded_add_messages`` wraps langgraph's ``add_messages`` and is installed
-as the ``messages`` channel reducer on ``BaseAgentState`` (agent/state.py).
-LangGraph invokes the channel reducer once per write at commit time with
-``(checkpoint_value, delta)`` — so every persisted mutation — nodes, hooks,
-plugins, the boot-pass crash repair, compaction — funnels through the guard
-at the single choke point. The plugin state handle routes its working-copy
-merges through the same guard, so an in-turn plugin violation fails inside
-execute_code instead of only at commit.
+``guarded_add_messages`` wraps langgraph's ``add_messages`` and guards every
+single merge. Since the 2026-09-14 write switch (task #3180) the ``messages``
+channel on ``BaseAgentState`` (agent/state.py) is a ``DeltaChannel`` whose
+reducer is ``guarded_delta_reducer`` — it replays stored writes through
+``guarded_add_messages`` — so every persisted mutation — nodes, hooks,
+plugins, the boot-pass crash repair, compaction — still funnels through the
+guard at the single choke point, whether it arrives as one write or is
+replayed in combined batches at read time. The plugin state handle routes its
+working-copy merges through the same guard, so an in-turn plugin violation
+fails inside execute_code instead of only at commit.
 
 Validation model (per the ruling):
 

@@ -26,6 +26,7 @@ from agent.startup import _wrap_saver_writes_with_nstep_interval
 from services.agent_host.host import AgentHost
 from shared.config import settings
 from shared.context import AvaContext
+from shared.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from shared.runtime_incarnation import RuntimeIncarnation
 from shared.turn_identity import bind_turn_identity
 from tests.agent.test_inbound_ownership import _admit, _agent
@@ -112,7 +113,9 @@ async def test_abort_survives_database_loss_before_halted_state_write(
         for call in publisher.emit.call_args_list
         if json.loads(call.args[0])["role"] == "error"
     ]
-    cold = await AsyncPostgresSaver(aops_pool).aget(config)
+    reader = AsyncPostgresSaver(aops_pool)
+    wrap_saver_reads_with_delta_reconstruction(reader)
+    cold = await reader.aget(config)
     assert cold is not None
     values = cold["channel_values"]
     assert values["halted"] is True and values["messages"] == history
@@ -197,7 +200,9 @@ async def test_interrupted_abort_preparation_does_not_repeat_notifications(
     ).fetchall()
     assert len(reports) == (0 if interrupted_at == "circuit_read" else 1)
     assert len(errors) == 1 and errors[0]["agent_id"] == agent
-    cold = await AsyncPostgresSaver(aops_pool).aget(config)
+    reader = AsyncPostgresSaver(aops_pool)
+    wrap_saver_reads_with_delta_reconstruction(reader)
+    cold = await reader.aget(config)
     assert cold is not None
     values = cold["channel_values"]
     assert values["halted"] is True and values["messages"] == history

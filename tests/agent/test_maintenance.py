@@ -27,6 +27,7 @@ from services.agent_host.runtime import TurnOutcome
 from shared import maintenance, maintenance_cohort, pause_owner
 from shared.context import AvaContext
 from shared.db import create_agent, insert_inbound_message
+from shared.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from shared.machine import machine_name
 
 WHEN = datetime(2026, 9, 6, tzinfo=UTC)
@@ -287,7 +288,9 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
         assert current.maintenance is not None
         assert current.maintenance.drained == (agent,)
         maintenance_cohort.verify_drained(db_conn, current.maintenance)
-        cold = await AsyncPostgresSaver(aops_pool).aget_tuple(config)
+        reader = AsyncPostgresSaver(aops_pool)
+        wrap_saver_reads_with_delta_reconstruction(reader)
+        cold = await reader.aget_tuple(config)
         assert cold is not None
         messages = cold.checkpoint["channel_values"]["messages"]
         assert any(
