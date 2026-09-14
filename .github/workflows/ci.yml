@@ -686,7 +686,10 @@ jobs:
         # the failing tests from the uploaded JUnit when the gate rejects
         # them, so a red step reads as "tests failed and were not
         # quarantined" (a real gate block) instead of an uploader outage.
-        if: ${{ steps.trunk-gate.outcome == 'failure' }}
+        # failure() is load-bearing: without a status-check function GHA applies
+        # an implicit success(), so the bare outcome check silently skipped in
+        # exactly the failure case this step exists to explain.
+        if: ${{ failure() && steps.trunk-gate.outcome == 'failure' }}
         shell: bash
         run: |
           python3 - <<'EOF'
@@ -844,7 +847,10 @@ jobs:
         # the failing tests from the uploaded JUnit when the gate rejects
         # them, so a red step reads as "tests failed and were not
         # quarantined" (a real gate block) instead of an uploader outage.
-        if: ${{ steps.trunk-gate.outcome == 'failure' }}
+        # failure() is load-bearing: without a status-check function GHA applies
+        # an implicit success(), so the bare outcome check silently skipped in
+        # exactly the failure case this step exists to explain.
+        if: ${{ failure() && steps.trunk-gate.outcome == 'failure' }}
         shell: bash
         run: |
           python3 - <<'EOF'
@@ -928,7 +934,10 @@ jobs:
         uses: trunk-io/analytics-uploader@385f1ccdf345b4532dc4b6c665dd432b702b8e28 # v2.1.2
         with:
           cli-version: 0.15.4
-          junit-paths: tmp/junit-backend-serial.xml
+          # TEMP verify injection (task #3450 throwaway): force the gate to fail
+          # so the fixed summary step runs. Never merge.
+          allow-missing-junit-files: false
+          junit-paths: tmp/does-not-exist-3450-verify.xml
           org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
           token: ${{ secrets.TRUNK_API_TOKEN }}
       - name: Show unquarantined failure summary
@@ -937,7 +946,10 @@ jobs:
         # the failing tests from the uploaded JUnit when the gate rejects
         # them, so a red step reads as "tests failed and were not
         # quarantined" (a real gate block) instead of an uploader outage.
-        if: ${{ steps.trunk-gate.outcome == 'failure' }}
+        # failure() is load-bearing: without a status-check function GHA applies
+        # an implicit success(), so the bare outcome check silently skipped in
+        # exactly the failure case this step exists to explain.
+        if: ${{ failure() && steps.trunk-gate.outcome == 'failure' }}
         shell: bash
         run: |
           python3 - <<'EOF'
@@ -1458,7 +1470,10 @@ jobs:
         # the failing tests from the uploaded JUnit when the gate rejects
         # them, so a red step reads as "tests failed and were not
         # quarantined" (a real gate block) instead of an uploader outage.
-        if: ${{ steps.trunk-gate.outcome == 'failure' }}
+        # failure() is load-bearing: without a status-check function GHA applies
+        # an implicit success(), so the bare outcome check silently skipped in
+        # exactly the failure case this step exists to explain.
+        if: ${{ failure() && steps.trunk-gate.outcome == 'failure' }}
         shell: bash
         run: |
           python3 - <<'EOF'
@@ -1579,7 +1594,10 @@ jobs:
         # the failing tests from the uploaded JUnit when the gate rejects
         # them, so a red step reads as "tests failed and were not
         # quarantined" (a real gate block) instead of an uploader outage.
-        if: ${{ steps.trunk-gate.outcome == 'failure' }}
+        # failure() is load-bearing: without a status-check function GHA applies
+        # an implicit success(), so the bare outcome check silently skipped in
+        # exactly the failure case this step exists to explain.
+        if: ${{ failure() && steps.trunk-gate.outcome == 'failure' }}
         shell: bash
         run: |
           python3 - <<'EOF'
@@ -1702,7 +1720,10 @@ jobs:
         # the failing tests from the uploaded JUnit when the gate rejects
         # them, so a red step reads as "tests failed and were not
         # quarantined" (a real gate block) instead of an uploader outage.
-        if: ${{ steps.trunk-gate.outcome == 'failure' }}
+        # failure() is load-bearing: without a status-check function GHA applies
+        # an implicit success(), so the bare outcome check silently skipped in
+        # exactly the failure case this step exists to explain.
+        if: ${{ failure() && steps.trunk-gate.outcome == 'failure' }}
         shell: bash
         run: |
           python3 - <<'EOF'
@@ -1831,7 +1852,10 @@ jobs:
         # the failing tests from the uploaded JUnit when the gate rejects
         # them, so a red step reads as "tests failed and were not
         # quarantined" (a real gate block) instead of an uploader outage.
-        if: ${{ steps.trunk-gate.outcome == 'failure' }}
+        # failure() is load-bearing: without a status-check function GHA applies
+        # an implicit success(), so the bare outcome check silently skipped in
+        # exactly the failure case this step exists to explain.
+        if: ${{ failure() && steps.trunk-gate.outcome == 'failure' }}
         shell: bash
         run: |
           python3 - <<'EOF'
