@@ -53,7 +53,7 @@ def _count(pipeline: str, window: str, matchers: str | None = None) -> str:
 register_metric(
     MetricSpec(
         name="ava_code_syntax_fix_count",
-        title="Syntax fix count",
+        title="Syntax fix count (per minute)",
         description=(
             "Syntax_fix events per minute (5-minute buckets / 5) — how often "
             "the repair pipeline fixes syntax errors in LLM-produced code "

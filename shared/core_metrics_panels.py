@@ -102,7 +102,7 @@ def _count(pipeline: str, window: str, matchers: str | None = None) -> str:
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_llm_calls",
-        title="LLM calls",
+        title="LLM calls (window)",
         event_name="llm_usage",
         category="telemetry",
         unit="short",
@@ -118,7 +118,7 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_warning",
-        title="Warning",
+        title="Warning (window)",
         event_name="warning",
         category="telemetry",
         unit="short",
@@ -135,7 +135,7 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_error",
-        title="Error",
+        title="Error (window)",
         event_name="error",
         category="telemetry",
         unit="s",
@@ -206,7 +206,7 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_llm_cost_24h",
-        title="LLM cost",
+        title="LLM cost (window)",
         event_name="llm_usage",
         category="telemetry",
         unit="currencyUSD",
@@ -225,7 +225,7 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_tokens_24h",
-        title="Tokens",
+        title="Tokens (window)",
         event_name="llm_usage",
         category="telemetry",
         unit="short",
@@ -358,7 +358,7 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_llm_input_tokens_24h",
-        title="LLM input tokens",
+        title="LLM input tokens (window)",
         event_name="llm_usage",
         category="telemetry",
         unit="short",
@@ -377,7 +377,7 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_llm_output_tokens_24h",
-        title="LLM output tokens",
+        title="LLM output tokens (window)",
         event_name="llm_usage",
         category="telemetry",
         unit="short",
@@ -396,7 +396,7 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_cache_hit_rate_24h",
-        title="Cache hit",
+        title="Cache hit (window)",
         event_name="llm_usage",
         category="telemetry",
         unit="percent",
@@ -419,7 +419,7 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_avg_turn_duration_24h",
-        title="Avg turn duration",
+        title="Avg turn duration (window)",
         event_name="turn_end",
         category="telemetry",
         unit="s",
@@ -505,7 +505,7 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_token_output_reasoning",
-        title="Token usage — Output + Reasoning",
+        title="Token usage — Output + Reasoning (per minute)",
         description="Tokens per minute (5-minute buckets / 5): output and reasoning tokens.",
         event_name="llm_usage",
         category="telemetry",
@@ -696,7 +696,7 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_event_health",
-        title="Event health — WARNING+ERROR vs total",
+        title="Event health — WARNING+ERROR vs total (per minute)",
         description="Per-minute event counts (5-minute buckets / 5): warning+error+critical vs all telemetry/log events.",
         event_name="event",
         category="telemetry",
@@ -716,7 +716,7 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_token_input",
-        title="Token usage — Input",
+        title="Token usage — Input (per minute)",
         description="Tokens per minute (5-minute buckets / 5): input tokens.",
         event_name="llm_usage",
         category="telemetry",
