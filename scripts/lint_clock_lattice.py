@@ -205,6 +205,12 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "_STALL_CHECK_INTERVAL_S",
     ): "independent family (schedule breaker): settings alias, not part of the audited lattice",
     (
+        "shared/watcher.py",
+        "AT_SESSION_TTL_GRACE_SECONDS",
+    ): "independent: the at-watcher session's post-fire reclamation window (wake delivery + "
+    "exit-notice latency); the TTL reaper's poll cadence only delays the kill beyond it — "
+    "no lattice neighbour and no ordering safety depends on this value",
+    (
         "ava_builtins/skills/ava-use-claude-code-and-codex/reference/watch_work.py",
         "STALL_SECONDS",
     ): "example script (skill reference), not cluster runtime — its own stall judgment, no lattice neighbour",

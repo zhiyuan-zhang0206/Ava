@@ -13,6 +13,7 @@ scheduler was removed.
 from __future__ import annotations
 
 import datetime as _dt
+import re as _re
 import textwrap as _tw
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -24,6 +25,7 @@ class CronExprError(Exception):
 
 
 __all__ = [
+    "AT_SESSION_TTL_GRACE_SECONDS",
     "DEFAULT_STANDING_CRON_MAX_SECONDS",
     "TEMPLATE_VERSION",
     "CronExprError",
@@ -32,6 +34,7 @@ __all__ = [
     "next_fire",
     "normalize_when",
     "previous_fire",
+    "session_deadline",
     "validate_cron",
     "validate_timezone",
 ]
@@ -44,6 +47,15 @@ __all__ = [
 # schedule renews it (see ava/watcher.py::cron and shared/watcher_registry.
 # register_cron_renewal).
 DEFAULT_STANDING_CRON_MAX_SECONDS = 7 * 24 * 3600
+
+# The one-shot (`at`) session's hard-deadline grace (user ruling 2026-09-14,
+# task #3411): a watcher session's shell TTL IS its target deadline — for an
+# at watcher that is `fires_at + this grace`, so the child's wake delivery,
+# exit notice, and self-close all finish before the TTL reaper may reclaim
+# the session (it also absorbs the reaper's poll cadence). The fire moment
+# itself is never extended: an at watcher still wakes at `fires_at` or not
+# at all.
+AT_SESSION_TTL_GRACE_SECONDS = 300
 
 # Template version: bumped whenever a generated watcher script's loop
 # semantics change (issue #1330). The registry stores the version a session was
@@ -188,6 +200,83 @@ def normalize_when(when: _dt.datetime | _dt.timedelta | str) -> _dt.datetime:
             )
         return parsed.astimezone(_dt.UTC)
     raise TypeError(f"when must be datetime / timedelta / str, got {type(when).__name__}")
+
+
+# Timeout parsing
+
+
+_DURATION_RE = _re.compile(r"^(\d+)([smhd])$")
+
+
+def _parse_timeout(timeout: float | _dt.timedelta | str) -> float:
+    """Coerce a timeout to a positive number of seconds.
+
+    Accepts a number of seconds, a `timedelta`, or a `"<n>{s,m,h,d}"` duration
+    string (e.g. `"30m"`, `"2h"`). Lives here (not in the SDK) so both the
+    SDK's `ava.watcher.launch` and any system-side caller parse one grammar.
+    """
+    if isinstance(timeout, _dt.timedelta):
+        secs = timeout.total_seconds()
+    elif isinstance(timeout, bool):  # bool is an int subclass — reject explicitly
+        raise TypeError("timeout must be seconds, a timedelta, or a duration string")
+    elif isinstance(timeout, (int, float)):
+        secs = float(timeout)
+    elif isinstance(timeout, str):
+        m = _DURATION_RE.match(timeout)
+        if not m:
+            raise ValueError(
+                f"timeout={timeout!r} not recognized — use '<n>s/m/h/d' (e.g. '30m', '2h'), "
+                "a number of seconds, or a timedelta"
+            )
+        n, unit = int(m.group(1)), m.group(2)
+        secs = n * {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit]
+    else:
+        raise TypeError("timeout must be seconds, a timedelta, or a duration string")
+    if secs <= 0:
+        raise ValueError("timeout must be positive")
+    return secs
+
+
+# Session deadlines
+
+
+def session_deadline(
+    kind: str,
+    *,
+    created_at: _dt.datetime | None = None,
+    timeout_secs: float | None = None,
+    fires_at: _dt.datetime | None = None,
+    cron_end_at: _dt.datetime | None = None,
+) -> _dt.datetime | None:
+    """The moment a watcher's session must be reclaimed — its target deadline.
+
+    One derivation for every surface of the lifecycle (user ruling
+    2026-09-14, task #3411: a watcher session's shell TTL IS its target
+    deadline, one system — never the registry and the TTL disagreeing). The
+    spawn write path (`ava.watcher._spawn`, which folds the remaining TTL on
+    every (re)mount), the boot reconcile (rebuild vs reaped), and the
+    gateway reaper (reclaim vs heal) all derive through THIS function, so
+    they cannot drift apart:
+
+    - ``launch`` — ``created_at + timeout_secs`` (the watchdog horizon; the
+      session is created with its watchdog, so created_at is the launch);
+    - ``cron`` — ``cron_end_at`` (None = legacy standing row without one);
+    - ``at`` — ``fires_at + AT_SESSION_TTL_GRACE_SECONDS``.
+
+    Returns None when the row cannot answer (missing payload — legacy
+    rows); callers keep their conservative path.
+    """
+    if kind == "launch":
+        if created_at is None or timeout_secs is None:
+            return None
+        return created_at + _dt.timedelta(seconds=timeout_secs)
+    if kind == "cron":
+        return cron_end_at
+    if kind == "at":
+        if fires_at is None:
+            return None
+        return fires_at + _dt.timedelta(seconds=AT_SESSION_TTL_GRACE_SECONDS)
+    raise ValueError(f"unknown watcher kind {kind!r}")
 
 
 # Script generation

@@ -139,7 +139,7 @@ def _resolve(session_id: int) -> str:
 _NAME_RE = re.compile(r"[a-z][a-z0-9-]*")
 
 
-_MAX_TTL_SECONDS = 86_400  # 24h — a session lives at most one day (user ruling 2026-09-01)
+_MAX_TTL_SECONDS = 86_400  # 24h — user-facing sessions only; watchers exempt (see _validate_ttl)
 
 
 def _cwd_is_inside_checkout(session_cwd: Path, checkout_root: Path) -> bool:
@@ -156,10 +156,19 @@ def _cwd_is_inside_checkout(session_cwd: Path, checkout_root: Path) -> bool:
     )
 
 
-def _validate_ttl(ttl: float) -> float:
+def _validate_ttl(ttl: float, *, system: bool = False) -> float:
+    """Validate a TTL. The 24h cap protects user calls only.
+
+    `system=True` marks a system-side session (a watcher spawn): its ttl is
+    the watcher's true target deadline (user ruling 2026-09-14, task #3411)
+    and is exempt from the sessions.new cap of 2026-09-01 — a 7-day standing
+    cron is a normal watcher, not a user session. A non-finite or
+    non-positive ttl is refused on every path: a session whose deadline has
+    already passed must never be created (the reconcile's no-rebuild guard).
+    """
     if not math.isfinite(ttl) or ttl <= 0:
         raise ValueError("ttl must be finite and greater than zero")
-    if ttl > _MAX_TTL_SECONDS:
+    if not system and ttl > _MAX_TTL_SECONDS:
         raise ValueError(
             f"ttl must be at most {_MAX_TTL_SECONDS} seconds (24 hours) — "
             "sessions live at most one day"
@@ -201,6 +210,7 @@ def _create_session(
     *,
     cwd: str | None = None,
     ttl: float,
+    system: bool = False,
 ) -> tuple[int, str]:
     # Allocate the next session id and create the shell session. `name` becomes
     # a `-<name>` suffix on the session identifier (None = unnamed). `cwd` sets
@@ -212,17 +222,20 @@ def _create_session(
     # `ttl` is REQUIRED: user ruling 2026-08-27 made shell TTL mandatory (the
     # idle-shell-reminder daemon is gone and TTL is the only reclamation
     # mechanism). Every caller — shells and watchers alike — records its
-    # deadline in `agent_shell_ttls`; a watcher's registry + boot reconcile
-    # handles its liveness, but its session is still a resource that must
-    # carry a deadline (task #2614).
+    # deadline in `agent_shell_ttls`. For a watcher that deadline IS the
+    # watcher's target (launch timeout / cron end / at moment + grace; user
+    # ruling 2026-09-14, task #3411) — one lifecycle system, not a registry
+    # lifetime beside a decorative shell TTL.
     if name is not None and not _NAME_RE.fullmatch(name):
         raise ValueError(
             f"session name {name!r} invalid — use a lowercase slug like 'dev-server' "
             "([a-z][a-z0-9-]*)"
         )
     # Validate here, not at call sites, so every caller is capped at the
-    # write point (ruling 2026-09-01: sessions live at most 24h).
-    ttl = _validate_ttl(ttl)
+    # write point (ruling 2026-09-01: sessions live at most 24h) — except
+    # system-side callers (watcher spawns), whose ttl IS the watcher's true
+    # target deadline and is exempt (ruling 2026-09-14, task #3411).
+    ttl = _validate_ttl(ttl, system=system)
     session_id = _next_session_index_from_db()
     full = f"{_shell_prefix()}{session_id}" + (f"-{name}" if name is not None else "")
     # Forward this agent process's AVA_* env onto the session. The detached
@@ -379,9 +392,15 @@ def renew(id: int, *, ttl: float) -> datetime:
     expired deadline means the session is reclaimed automatically (TTL expiry
     = immediate reclamation; no renewable expired state — user ruling
     2026-09-08), so renewal past the deadline is rejected. Watcher sessions
-    are rejected too: their lifetime is governed by the watcher registry /
-    timeout, not by the shell TTL, so renewing their row would be a no-op
-    that only pretends to extend anything.
+    are rejected too, on one-lifecycle grounds (user ruling 2026-09-14, task
+    #3411): a watcher's shell TTL IS its target deadline (launch timeout /
+    cron end / at moment + grace, derived by
+    `shared.watcher.session_deadline`), so renewing the row would
+    desynchronize the TTL from that target — a longer deadline the watcher
+    itself will not honor (the generated script, the rebuild payload, and
+    any display all still end at the target). To extend a schedule,
+    re-register it (`ava.watcher.cron` / `ava.watcher.at`), which re-mounts
+    the session with the folded remaining deadline.
 
     Returns:
         The new deadline (DB clock).
@@ -395,8 +414,10 @@ def renew(id: int, *, ttl: float) -> datetime:
 
     if id in watcher_session_ids(agent_id):
         raise ValueError(
-            f"session {id} is a watcher — its lifetime is governed by the watcher "
-            "registry/timeout, not the shell TTL; renewal would have no effect"
+            f"session {id} is a watcher — its TTL is derived from the watcher's "
+            "target deadline (launch timeout / cron end / at moment), so renewal "
+            "would desync the TTL from that target; extend the schedule by "
+            "re-registering it (ava.watcher.cron/at), which re-mounts the session"
         )
     return _record_renewal(agent_id, id, ttl)
 

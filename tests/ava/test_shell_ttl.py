@@ -170,8 +170,10 @@ def test_renew_rejects_unknown_session() -> None:
 
 
 def test_renew_rejects_watcher_session(db_conn: psycopg.Connection, _agent_row: int) -> None:
-    """A watcher's lifetime is governed by the watcher registry/timeout, not
-    the shell TTL — renewing its row would pretend to extend nothing."""
+    """Task #3411: a watcher's TTL is derived from its target deadline
+    (launch timeout / cron end / at moment + grace) — renewing would desync
+    the TTL from that target, so the call is rejected; extending a schedule
+    means re-registering it."""
     session_id = ava.shell.sessions.new("test-renew-watcher", ttl=120)
     try:
         with db_conn.cursor() as cur:
