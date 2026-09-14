@@ -504,10 +504,12 @@ def _run_with_progress(
     `size_path` is the file the child writes — the bytes on disk so far. The
     pre-update snapshot depends on this: it runs inside a rollout whose stall
     watchdog reclaims log silence after `shared.deploy_timing.NO_PROGRESS_TIMEOUT_S`
-    (900 s), and the dump alone is allowed 20 min (2026-09-14 incident). The
-    heartbeat does not weaken the watchdog — if this loop stops speaking the
-    watchdog reclaims exactly as before, and the `timeout_s` bound below still
-    kills the child.
+    (900 s), and the dump alone is allowed 20 min (2026-09-14 incident). While
+    these heartbeats flow the silence rule is deliberately superseded: an alive
+    but stuck child rides to its own `timeout_s` bound (enforced below) instead
+    of being reclaimed at 900 s of log silence. A snapshot that stops
+    heartbeating — a wedged loop or process — is still reclaimed by the watchdog
+    exactly as before.
 
     Timeout semantics match `subprocess.run`: expiry kills the child, reaps it,
     and raises `TimeoutExpired`, so callers keep scheduling their retry off the

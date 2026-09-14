@@ -642,9 +642,11 @@ def snapshot_pre_update_data(target_sha: str) -> Path | None:
     lines while `pg_dump` / encryption run (see `_snapshot_progress`) — because
     the rollout stall watchdog reclaims log silence after 900 s
     (`ops.controllers.stalled_rollout`): without the heartbeats, a healthy dump
-    using its allowed 20 min is indistinguishable from a hung rollout. The
-    heartbeat does not weaken the watchdog; it only gives the dump its own
-    voice. If this process stops speaking, the watchdog reclaims as before.
+    using its allowed 20 min is indistinguishable from a hung rollout. While the
+    heartbeats flow, an alive-but-stuck dump rides to its own 20-min bound
+    (`_PRE_UPDATE_DUMP_TIMEOUT_S`), enforced by the same loop that heartbeats,
+    instead of being reclaimed at 900 s of silence; a snapshot that stops
+    heartbeating is still reclaimed by the watchdog as before.
     """
     from cli.commands._cluster_rollback import _migration_set_at_commit
 

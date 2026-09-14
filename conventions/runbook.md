@@ -620,8 +620,14 @@ run and the cluster is stopped + paused until the lease lapses — `ava cluster 
 is the faster path. A healthy Phase B is not mistaken for this: the poll writes a
 `still polling Phase B (Nm)` heartbeat on the lease-renewal cadence, and the
 pre-update data snapshot writes `→ pre-update data snapshot: pg_dump <Ns>, <N MiB>
-written` progress lines while its dump runs (that stage alone is allowed 20 min), so no
-phase of a working rollout is silent for anything close to the bound.
+written` progress lines while its dump runs (that stage alone is allowed 20 min).
+During that dump the silence rule is deliberately superseded: the heartbeats are
+unconditional, so an alive-but-stuck dump is no longer reclaimed at 900 s of log
+silence — it rides to its own 20-minute bound (`_PRE_UPDATE_DUMP_TIMEOUT_S`), which the
+same loop that heartbeats enforces (`TimeoutExpired` aborts the rollout before anything
+is stopped). A snapshot that stops heartbeating (its loop wedged) is still reclaimed by
+the silence rule, and no other phase of a working rollout is silent for anything close
+to the bound.
 
 Commands in the "long-running processes" / "E2E tests" sections below default to cwd = `$AVA_HOME/source/` (prod context). Dev work goes through `~/Ava/.worktrees/<task>/`.
 
