@@ -416,7 +416,10 @@ async def _loop(state: BaseCandidateState) -> None:  # noqa: PLR0915
         if config.pitr_retention_planner_enabled:
             state.retention.last_attempt = time.time()
             try:
-                state.retention.plan = refresh_retention_plan(config)
+                # The inventory read is synchronous and network-bound (66-90s
+                # measured), and the health server shares this loop, so run it
+                # off-loop.
+                state.retention.plan = await asyncio.to_thread(refresh_retention_plan, config)
                 state.retention.last_success = time.time()
                 state.retention.last_error = None
             except Exception as exc:
