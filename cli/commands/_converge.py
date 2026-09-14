@@ -26,6 +26,7 @@ from cli.commands._converge_os_jobs import (
     ensure_health_probe_cron,
     ensure_logs_maintenance,
     ensure_packages_refresh_job,
+    ensure_pr_flow_job,
     ensure_watchdog_probe,
     reap_stale_schtasks,
 )
@@ -620,6 +621,14 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     ConvergeStep(
         "packages refresh job",
         ensure_packages_refresh_job,
+        requires_unit_config=True,
+    ),
+    # The PR-flow sampler's daily job: registers only on a production home
+    # whose machine holds the sampler's credentials (gh + Trunk token) — in
+    # the fleet, macmini; the step itself owns the gating and skips elsewhere.
+    ConvergeStep(
+        "PR flow sampler job",
+        ensure_pr_flow_job,
         requires_unit_config=True,
     ),
     ConvergeStep(

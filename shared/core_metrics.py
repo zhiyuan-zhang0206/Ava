@@ -44,6 +44,7 @@ _CORE_DEFINITION_MODULES = (
     "shared.core_metrics_panels",
     "shared.core_metrics_dismissed",
     "shared.core_metrics_fleet",
+    "shared.core_metrics_pr_flow",
     "shared.core_metrics_observability",
 )
 

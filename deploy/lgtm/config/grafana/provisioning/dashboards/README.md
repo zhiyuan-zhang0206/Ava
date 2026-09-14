@@ -18,7 +18,7 @@ merged into one, sectioned like Ava Ops (user ruling: "merge into one big
 dashboard"). `uid` is fixed at `ava-ops-main` — the dashboard link and user
 bookmarks depend on it; never change it.
 
-Seven sections, one row per section — `core` is the 2026-08-06 user-ruling
+Eight sections, one row per section — `core` is the 2026-08-06 user-ruling
 row header. All sections are **expanded by default** (`collapsed: false`,
 2026-08-23 #382):
 
@@ -53,6 +53,9 @@ row header. All sections are **expanded by default** (`collapsed: false`,
    Top-20 cost drill-downs by model and agent. Every panel reads usage-time
    `attributes_cost_usd` snapshots from telemetry `llm_usage` events
    (2026-08-23 #384).
+8. **`PR flow`** — PR ready→merged median/p90 by day, Trunk queue depth,
+   QA rounds (mean + re-review share) by day, and new flaky quarantines by
+   day, from the daily export job's Prometheus gauges (task #2139).
 
 The dashboard timezone is `Asia/Shanghai` (2026-08-23 #384). All panels follow
 the dashboard time picker; there are no per-panel `timeFrom` overrides.
@@ -64,12 +67,25 @@ average over `$__range`. Rates whose unit is already self-evident (`/ minute`,
 `/s`, TPS, `events/s`) carry no extra qualifier, and smoothing-bucket widths
 stay in panel descriptions.
 
-The dashboard now has 82 panel entries (75 panels + 7 row headers): core
+The `PR flow` row (task #2139) reads the daily macmini export job
+(`scripts/pr_flow_export.py`, 00:25 cluster time) back as Prometheus gauges:
+one absolute sample per complete cluster-tz day, re-emitted on every run so
+the trailing window stays visible. Each by-day tile is a **fixed-lookback**
+instant query, `max by (day) (last_over_time(<gauge>[26h]))` — 26h keeps a
+day's last sample alive across the daily cadence, and a day drops out of its
+table once the sample ages past it (a missed run shows as a gap, not a stale
+number). The three tables need their joinByField(`day`) transformation for
+the same reason: the instant queries return one frame per day series, and
+without the join the table falls back to a per-series frame picker instead
+of one row per day.
+
+The dashboard now has 92 panel entries (84 panels + 8 row headers): core
 ids remain below 1000 (the four new stat tiles are 44–47), plugin ids are
 >= 1000, host/data-plane panels are 2101–2112, the cost-analysis panels are
 38, 39, 41–43, the event panels are 2201–2203 (business/anomaly logs,
-event-type table, raw stream), and the Fleet growth panels are 2301–2302
-(Max Agent ID + deriv rate, task #2010). The
+event-type table, raw stream), the Fleet growth panels are 2301–2302
+(Max Agent ID + deriv rate, task #2010), and the PR-flow row is 2008 with
+panels 2401–2404 (task #2139). The
 duplicate plugin spawn-rate panel (1006) was removed because the Fleet
 summaries cover the same information.
 
@@ -95,7 +111,9 @@ summaries cover the same information.
 Datasources (provisioned in `../datasources/datasources.yml`): **Loki**
 (fixed uid `loki`) for event panels; **Postgres** (uid `ops`) for the `Live
 agents` stat (`agents_meta` is not in Loki); **Prometheus** (uid `prometheus`)
-for the four resolution tiles, turn-duration percentile alerting, and the
+for the four resolution tiles, the fixed gauges published by the gateway and
+the PR-flow export job (Fleet growth task #2010, PR flow task #2139),
+turn-duration percentile alerting, and the
 host & data-plane panels
 (per-machine OTel Collector sidecar scrapes, `job="ava-infra"` + `host` (OS
 hostname) and `machine_name` (Ava roster name) labels; panels group by
@@ -108,8 +126,10 @@ Core metric definitions live in `shared/core_metrics_panels.py` (the core
 dashboard panels, including the Statistics-coverage tiles) and
 `shared/core_metrics_observability.py` (the former `ava_observability`
 plugin pack, promoted to core the same day — the repo's own observability
-is not a plugin, per user ruling). Both register through
-`register_core_metric()` in `shared/core_metrics.py`, which runs the **same
+is not a plugin, per user ruling), and the smaller registration modules
+beside them (`core_metrics_dismissed`, `core_metrics_fleet`,
+`core_metrics_pr_flow`). All register through `register_core_metric()` in
+`shared/core_metrics.py`, which runs the **same
 SQL-template safety validation as plugin metrics** (`validate_spec_sql`) and
 fills `plugin = "core"`.
 
@@ -124,7 +144,8 @@ registrations: `name` / `title` / `description` / `event_name` / `category` /
 `unit` / `panel` (`timeseries` / `stat` / `barchart` / `table`) / `query`
 (Grafana query template — LogQL over the Loki event stream,
 `query_type="logql"`, for event-stream metrics; `query_type="promql"` for the
-two fixed-window unresolved gauges; the one SQL holdout is the core `Live
+Prometheus-gauge tiles (resolution, Fleet growth, memory search, PR flow);
+the one SQL holdout is the core `Live
 agents` stat over `agents_meta`), plus the Task #882 fields:
 
 - `targets` — extra query templates rendered as refId B/C/... targets on the

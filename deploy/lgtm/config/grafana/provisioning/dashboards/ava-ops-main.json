@@ -5460,6 +5460,326 @@
      "legendFormat": "compactions/min"
     }
    ]
+  },
+  {
+   "collapsed": false,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 285
+   },
+   "id": 2008,
+   "panels": [],
+   "title": "PR flow",
+   "type": "row"
+  },
+  {
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "description": "Ready-for-review to merge latency by complete cluster-tz day \u2014 median and p90 seconds, sampled by the daily PR-flow export job (scripts/pr_flow_export.py) into the ava_pr_flow_daily_ready_to_merge_median_seconds / _p90_seconds gauges. One row per day; a day leaves the table once its last sample ages past the 26h lookback (a missed run shows as a gap).",
+   "fieldConfig": {
+    "defaults": {
+     "thresholds": {
+      "mode": "absolute",
+      "steps": []
+     },
+     "unit": "s"
+    }
+   },
+   "gridPos": {
+    "h": 7,
+    "w": 12,
+    "x": 0,
+    "y": 286
+   },
+   "id": 2401,
+   "options": {
+    "cellHeight": "sm",
+    "footer": {
+     "countRows": false,
+     "enablePagination": true,
+     "show": false
+    },
+    "showHeader": true,
+    "showTypeIcons": false,
+    "sortBy": []
+   },
+   "title": "PR ready to merged \u2014 median / p90 (by day)",
+   "type": "table",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "max by (day) (last_over_time(ava_pr_flow_daily_ready_to_merge_median_seconds[26h]))",
+     "format": "table",
+     "instant": true,
+     "range": false,
+     "refId": "A",
+     "legendFormat": "median"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "max by (day) (last_over_time(ava_pr_flow_daily_ready_to_merge_p90_seconds[26h]))",
+     "format": "table",
+     "instant": true,
+     "range": false,
+     "refId": "B",
+     "legendFormat": "p90"
+    }
+   ],
+   "transformations": [
+    {
+     "id": "joinByField",
+     "options": {
+      "byField": "day",
+      "mode": "outer"
+     }
+    },
+    {
+     "id": "organize",
+     "options": {
+      "excludeByName": {
+       "Time 1": true,
+       "Time 2": true
+      },
+      "renameByName": {
+       "Value #A": "median",
+       "Value #B": "p90"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "description": "Trunk merge-queue depth sampled once per PR-flow export run (ava_pr_flow_run_queue_depth_ratio gauge, macmini daily job). The run event is emitted even when Trunk is unreachable, so the breadcrumb survives an outage while the depth sample stays absent.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "blue"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "short",
+     "custom": {
+      "drawStyle": "line",
+      "lineWidth": 1,
+      "fillOpacity": 8,
+      "showPoints": "never"
+     }
+    }
+   },
+   "gridPos": {
+    "h": 7,
+    "w": 12,
+    "x": 12,
+    "y": 286
+   },
+   "id": 2402,
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "title": "Trunk queue depth",
+   "type": "timeseries",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "ava_pr_flow_run_queue_depth_ratio",
+     "legendFormat": "queue depth",
+     "queryType": "range",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "description": "QA traffic per merged PR by complete cluster-tz day \u2014 mean ava-qa receipt count and the share of merges whose head moved after the receipt (re-review), from the daily PR-flow export job (ava_pr_flow_daily_qa_rounds_mean_ratio / ava_pr_flow_daily_qa_rereview_share_ratio gauges).",
+   "fieldConfig": {
+    "defaults": {
+     "thresholds": {
+      "mode": "absolute",
+      "steps": []
+     },
+     "unit": "short"
+    }
+   },
+   "gridPos": {
+    "h": 7,
+    "w": 12,
+    "x": 0,
+    "y": 293
+   },
+   "id": 2403,
+   "options": {
+    "cellHeight": "sm",
+    "footer": {
+     "countRows": false,
+     "enablePagination": true,
+     "show": false
+    },
+    "showHeader": true,
+    "showTypeIcons": false,
+    "sortBy": []
+   },
+   "title": "QA rounds \u2014 mean / re-review share (by day)",
+   "type": "table",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "max by (day) (last_over_time(ava_pr_flow_daily_qa_rounds_mean_ratio[26h]))",
+     "format": "table",
+     "instant": true,
+     "range": false,
+     "refId": "A",
+     "legendFormat": "mean rounds"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "max by (day) (last_over_time(ava_pr_flow_daily_qa_rereview_share_ratio[26h]))",
+     "format": "table",
+     "instant": true,
+     "range": false,
+     "refId": "B",
+     "legendFormat": "re-review share"
+    }
+   ],
+   "transformations": [
+    {
+     "id": "joinByField",
+     "options": {
+      "byField": "day",
+      "mode": "outer"
+     }
+    },
+    {
+     "id": "organize",
+     "options": {
+      "excludeByName": {
+       "Time 1": true,
+       "Time 2": true
+      },
+      "renameByName": {
+       "Value #A": "mean rounds",
+       "Value #B": "re-review share"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "description": "Tests newly quarantined by Trunk\u2019s flaky detector per complete cluster-tz day (ava_pr_flow_daily_flake_new_quarantines_ratio gauge, daily PR-flow export job). A day whose flaky source was unreachable is omitted rather than shown as zero.",
+   "fieldConfig": {
+    "defaults": {
+     "thresholds": {
+      "mode": "absolute",
+      "steps": []
+     },
+     "unit": "short"
+    }
+   },
+   "gridPos": {
+    "h": 7,
+    "w": 12,
+    "x": 12,
+    "y": 293
+   },
+   "id": 2404,
+   "options": {
+    "cellHeight": "sm",
+    "footer": {
+     "countRows": false,
+     "enablePagination": true,
+     "show": false
+    },
+    "showHeader": true,
+    "showTypeIcons": false,
+    "sortBy": []
+   },
+   "title": "Flake \u2014 new quarantines (by day)",
+   "type": "table",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "max by (day) (last_over_time(ava_pr_flow_daily_flake_new_quarantines_ratio[26h]))",
+     "format": "table",
+     "instant": true,
+     "range": false,
+     "refId": "A",
+     "legendFormat": "new quarantines"
+    }
+   ],
+   "transformations": [
+    {
+     "id": "joinByField",
+     "options": {
+      "byField": "day",
+      "mode": "outer"
+     }
+    },
+    {
+     "id": "organize",
+     "options": {
+      "excludeByName": {
+       "Time": true
+      },
+      "renameByName": {
+       "Value": "new quarantines"
+      }
+     }
+    }
+   ]
   }
  ],
  "refresh": "10m",

@@ -125,8 +125,11 @@ def test_dashboard_json_matches_core_registrations() -> None:
     queries, datasource, and query mode against either registry or JSON
     drifting independently. A ``$__range`` aggregate is a window total and
     must be instant; fixed-width bucket queries must be range queries. The
-    class-resolution gauges are the deliberate Prometheus exception. Every
-    panel also owns a unique rectangle in the classic Grafana grid.
+    class-resolution gauges are the deliberate Prometheus exception, and the
+    Prometheus tiles in general keep their OTLP-gauge shape: stat and table
+    tiles query instant vectors (``instant: true, range: false``), chart
+    tiles use range queries. Every panel also owns a unique rectangle in the
+    classic Grafana grid.
     """
     specs = [spec for spec in _load_core() if "grafana" in spec.output]
     path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
@@ -160,7 +163,7 @@ def test_dashboard_json_matches_core_registrations() -> None:
         if spec.query_type == "promql":
             assert panel["datasource"] == {"type": "prometheus", "uid": "prometheus"}
             assert [target["expr"] for target in targets] == expected
-            if spec.panel == "stat":
+            if spec.panel in {"stat", "table"}:
                 assert all(
                     target.get("instant") is True and target.get("range") is False
                     for target in targets
@@ -239,6 +242,78 @@ def test_agent_max_id_gauge_names_match_the_otlp_contract() -> None:
     assert specs["core_agent_max_id"].panel == "timeseries"
     assert specs["core_agent_max_id_growth_rate"].query_type == "promql"
     assert f"deriv(max({gauge})[1h:])" in (specs["core_agent_max_id_growth_rate"].query)
+
+
+def test_pr_flow_panels_match_the_otlp_contract() -> None:
+    """Export-job emission, Prometheus instruments, and dashboard tiles share names.
+
+    The daily PR-flow export job (``scripts/pr_flow_export.py``, task #2139)
+    re-emits one absolute sample per complete cluster-tz day as day-labeled
+    OTLP gauges, so each by-day tile reads its series back with ``max by
+    (day) (last_over_time(...[26h]))`` — 26h keeps the last sample alive
+    across the one-shot job's daily cadence, and ``max by (day)`` collapses
+    the per-run process dimensions onto one series per day. The tables
+    additionally join on ``day`` (without the join a table falls back to a
+    per-series frame picker, not one row per day), which is why the JSON
+    carries the joinByField transformation.
+    """
+
+    from shared.telemetry_otlp import _METRIC_DISPOSITION, _strip_unit_suffix
+
+    specs = {spec.name: spec for spec in _load_core()}
+    path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
+    by_title = {panel.get("title"): panel for panel in json.loads(path.read_text())["panels"]}
+
+    def latency_query(field: str) -> str:
+        name = f"ava_pr_flow_daily_{_strip_unit_suffix(field)}_seconds"
+        return f"max by (day) (last_over_time({name}[26h]))"
+
+    def ratio_query(field: str) -> str:
+        name = f"ava_pr_flow_daily_{_strip_unit_suffix(field)}_ratio"
+        return f"max by (day) (last_over_time({name}[26h]))"
+
+    # Every payload field behind the panels is absolute state, never a count
+    # to accrue across re-emissions.
+    for field in (
+        "ready_to_merge_median_seconds",
+        "ready_to_merge_p90_seconds",
+        "qa_rounds_mean",
+        "qa_rereview_share",
+        "flake_new_quarantines",
+    ):
+        assert _METRIC_DISPOSITION[("pr_flow_daily", field)] == "gauge"
+    assert _METRIC_DISPOSITION[("pr_flow_run", "queue_depth")] == "gauge"
+
+    latency = specs["core_pr_flow_ready_to_merge"]
+    assert latency.query_type == "promql"
+    assert latency.panel == "table"
+    assert latency.unit == "s"
+    assert latency.query == latency_query("ready_to_merge_median_seconds")
+    assert (latency.targets or []) == [latency_query("ready_to_merge_p90_seconds")]
+    assert latency.target_names == ["median", "p90"]
+
+    queue = specs["core_pr_flow_queue_depth"]
+    assert queue.query_type == "promql"
+    assert queue.panel == "timeseries"
+    assert queue.query == f"ava_pr_flow_run_{_strip_unit_suffix('queue_depth')}_ratio"
+
+    qa = specs["core_pr_flow_qa_rounds"]
+    assert qa.query == ratio_query("qa_rounds_mean")
+    assert (qa.targets or []) == [ratio_query("qa_rereview_share")]
+    assert qa.target_names == ["mean rounds", "re-review share"]
+
+    flakes = specs["core_pr_flow_flakes"]
+    assert flakes.query == ratio_query("flake_new_quarantines")
+    assert flakes.target_names == ["new quarantines"]
+
+    for spec in (latency, queue, qa, flakes):
+        assert by_title[spec.title]["description"] == spec.description
+    for spec in (latency, qa, flakes):
+        joins = [
+            t for t in by_title[spec.title].get("transformations", []) if t["id"] == "joinByField"
+        ]
+        assert joins, spec.title
+        assert joins[0]["options"] == {"byField": "day", "mode": "outer"}
 
 
 def test_dashboard_legends_and_time_ranges_are_explicit() -> None:
