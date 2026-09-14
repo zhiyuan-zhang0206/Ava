@@ -87,6 +87,17 @@ def test_job_verdict_reads_running_pid(monkeypatch: pytest.MonkeyPatch) -> None:
     assert verdict["last_exit_code"] is None
 
 
+def test_reproduced_reads_job_state_not_scheduler_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(common, "_cap", _cap_stub(_STUCK_PRINT))
+    stuck = common._job_verdict("stuck")
+    assert stuck["state"] == "spawn scheduled"  # the trap this fixture pins
+    assert common._reproduced(stuck) is True
+    monkeypatch.setattr(common, "_cap", _cap_stub(_RUNNING_PRINT))
+    assert common._reproduced(common._job_verdict("running")) is False
+
+
 def test_exit_code_int_tolerates_suffixes_and_words() -> None:
     assert common._exit_code_int("78: EX_CONFIG") == 78
     assert common._exit_code_int("0") == 0

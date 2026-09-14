@@ -78,6 +78,7 @@ from scripts.f5_lwcr_common import (
     _fail,
     _job_verdict,
     _log_window,
+    _reproduced,
     _sign_app,
     _start_lwcr_stream,
     _stop_lwcr_stream,
@@ -290,9 +291,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded lifecycle: phases, waits, evid
 
         verdict_after = _job_verdict(label)
         evidence.save("06-inject-state.txt", verdict_after["raw"])
-        reproduced = (
-            verdict_after["state"] == "spawn failed" and verdict_after["last_exit_code"] == 78
-        )
+        reproduced = _reproduced(verdict_after)
         alive = _ping(sock) is not None
         summary.update(
             {

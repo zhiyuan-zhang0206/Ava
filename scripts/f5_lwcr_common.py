@@ -91,6 +91,16 @@ def _cdhash(target: Path) -> str:
     return match.group(1) if match else "<unreadable>"
 
 
+def _reproduced(verdict: dict[str, Any]) -> bool:
+    """True when launchd parks the job in its spawn-failed state.
+
+    On macOS 26 the plain `state` field reports the scheduler\'s current phase
+    (`spawn scheduled` while retrying); the semantic verdict lives on the
+    `job state` line (`spawn failed`).
+    """
+    return verdict.get("job_state") == "spawn failed"
+
+
 def _wait_for(what: str, predicate: Callable[[], Any], timeout: float, phase: str) -> Any:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
