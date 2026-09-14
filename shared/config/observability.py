@@ -23,6 +23,30 @@ _OTLP_INGRESS_PORT_DEFAULT = 4318
 
 
 class ObservabilitySettings(EnvSettings):
+    sdk_call_sampling_enabled: bool = Field(
+        default=False,
+        alias="AVA_SDK_CALL_SAMPLING_ENABLED",
+        description="Sample SDK-call events instead of recording every call. Background refresh every five seconds; execution tallies always remain complete.",
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+    sdk_call_sample_every: int = Field(
+        default=10,
+        ge=1,
+        alias="AVA_SDK_CALL_SAMPLE_EVERY",
+        description="When SDK sampling is enabled, retain each event with probability 1/N. Background refresh every five seconds; 1 records every call.",
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     trace_tags: str = Field(
         default="",
         alias="AVA_TRACE_TAGS",

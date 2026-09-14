@@ -13,12 +13,17 @@ def record_gauge(
     key: tuple[str, str],
     value: int | float,
     attrs: dict[str, Any],
+    *,
+    max_only: bool = False,
 ) -> None:
-    """Replace one ObservableGauge series with its latest absolute value."""
+    """Replace an absolute value, or retain the greatest observed timestamp."""
 
     series = tuple(sorted(attrs.items()))
     with gauge_lock:
-        gauge_values.setdefault(key, {})[series] = (float(value), dict(attrs))
+        values = gauge_values.setdefault(key, {})
+        if max_only and series in values:
+            value = max(value, values[series][0])
+        values[series] = (float(value), dict(attrs))
 
 
 def observable_gauge_callback(

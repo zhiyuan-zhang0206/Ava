@@ -3,8 +3,7 @@
 SDK function body in the ``ava`` layer can ``annotate()`` its own call).
 
 Every public ``ava.*`` callable is wrapped, once, by a transparent recorder installed
-at agent-graph build time (``agent/graph/_build.py:_load_extensions``, after plugins
-load). On each top-level call the recorder (via ``run_metered``) writes one ``sdk_call``
+at SDK import and again at agent-graph build time after plugins load. On each top-level call the recorder (via ``run_metered``) writes one ``sdk_call``
 event into the unified ``events`` stream, carrying the dotted function name in ``attributes.fn``
 (``files.read``, ``shell.run``, ``self.compact``) plus any ``detail`` the call
 annotated. ``shared.metrics_aggregate``'s sdk_usage counts those events — replacing the old regex
@@ -22,38 +21,26 @@ Transparency contract — the recorder MUST NOT perturb the SDK surface:
     arguments, return value, or exceptions. Lifecycle exceptions
     (``AgentTermination`` / ``AgentRestart``) propagate untouched.
 
-Scope + top-level gating live in ``run_metered``: metering is armed only inside
-``recording()`` (which the exec child wraps around ``exec(compile(agent_code))``), so a
-call counts only when it comes from agent-authored code — framework-internal ``ava.*``
-calls (system-prompt rendering via ``ava.help``, hooks) never count. A per-call frame
-stack records only the outermost call, so one agent statement that calls
-``ava.self.compact()`` (which itself calls other ``ava.*`` helpers) counts once, not once
-per internal fan-out. The recorder is installed *outermost* of any plugin
-``ava.extend.wrap`` layer, so a plugin-wrapped member (e.g. fleet's ``agents.spawn`` +
-``label``) still counts exactly once per agent call, whether the plugin short-circuits
-or calls ``inner`` several times.
-
-Coverage is agent-authored code inside execute_code (the exec child) — the dominant SDK-call path. Static namespaces
-are wrapped by the walk; ``ava.mcps``'s module helpers (``servers`` / ``description`` /
-``help``) are wrapped via the dir() fallback, and its dynamic tools are metered at their
-single call funnel (``_call_raw``, keyed by runtime server/tool). ``ava.skills`` is left
-to its own ``skill_invoked`` tracking. A bare ``python x.py`` launched child does not
-inherit ``recording()`` or the agent process's event sink, so its SDK calls are an
-intentional unmetered blind spot. It also carries no task attribution and therefore
-cannot contribute to a task budget; use execute_code's normal child path when that
-accounting matters.
+Every public call is metered, including bare Python, CLI and external attachments.
+Only outermost calls count, so SDK-internal fan-out does not inflate usage.
+``recording()`` collects an optional per-execution tally; it is not an event gate.
+Static functions are wrapped at SDK import and again after plugin loading; dynamic
+MCP calls are wrapped at their common call funnel.
 """
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import inspect
 import weakref
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import ava
+from ava import _boot
+from shared import sdk_telemetry
 from shared.sdk_telemetry import run_metered
 
 # Identity set of live recorder objects. install() skips a target only when the
@@ -63,13 +50,52 @@ from shared.sdk_telemetry import run_metered
 _RECORDERS: weakref.WeakSet[Callable[..., Any]] = weakref.WeakSet()
 
 
+@contextlib.contextmanager
+def _caller() -> Generator[None, None, None]:
+    """Snapshot provenance before the call; metering never changes SDK behavior."""
+    from shared.external_caller import external_caller
+
+    identity = {}
+    with contextlib.suppress(Exception):
+        _boot._try_establish_from_env()
+        borrowed = _boot._external_agent_id
+        turn = _boot.current_turn_agent_id()
+        agent_id = borrowed if borrowed is not None else turn
+        if agent_id is None:
+            agent_id = _boot._agent_id
+        external = external_caller()
+        source = f"agent:{agent_id}" if agent_id else (_boot._actor or "system")
+        if external and borrowed is None and turn is None:
+            source = external.source()
+        identity = {
+            "agent_id": agent_id,
+            "source": source,
+        }
+    token = sdk_telemetry._identity.set(identity)
+    try:
+        yield
+    finally:
+        sdk_telemetry._identity.reset(token)
+
+
 def _make_recorder(original: Callable[..., Any], fq: str) -> Callable[..., Any]:
     """Transparent proxy around ``original`` that meters the call as ``fq`` (the frame /
-    active-gate / emit logic lives in ``shared.sdk_telemetry.run_metered``)."""
+    tally / emit logic lives in ``shared.sdk_telemetry.run_metered``)."""
 
     @functools.wraps(original)
     def recorder(*args: Any, **kwargs: Any) -> Any:
-        return run_metered(fq, original, args, kwargs)
+        with _caller():
+            return run_metered(fq, original, args, kwargs)
+
+    if inspect.iscoroutinefunction(original):
+
+        @functools.wraps(original)
+        async def async_recorder(*args: Any, **kwargs: Any) -> Any:
+            with _caller():
+                return await sdk_telemetry.run_metered_async(fq, original, args, kwargs)
+
+        _RECORDERS.add(async_recorder)
+        return async_recorder
 
     _RECORDERS.add(recorder)
     return recorder
@@ -87,7 +113,8 @@ def _make_mcp_recorder(original: Callable[..., Any]) -> Callable[..., Any]:
 
     @functools.wraps(original)
     def recorder(server: str, tool: str, *args: Any, **kwargs: Any) -> Any:
-        return run_metered(f"mcps.{server}.{tool}", original, (server, tool, *args), kwargs)
+        with _caller():
+            return run_metered(f"mcps.{server}.{tool}", original, (server, tool, *args), kwargs)
 
     _RECORDERS.add(recorder)
     return recorder

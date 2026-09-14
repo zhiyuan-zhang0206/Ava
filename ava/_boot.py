@@ -52,6 +52,8 @@ _actor: str | None = None
 # An explicitly attached external controller revalidates its borrowed identity
 # at every SDK read. Unset in native runtimes and ordinary launched children.
 _external_identity: Callable[[], int] | None = None
+# Observational provenance only; never grants authority or replaces lease validation.
+_external_agent_id: int | None = None
 
 
 def validate_external_identity() -> int | None:

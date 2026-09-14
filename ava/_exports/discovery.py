@@ -3,7 +3,7 @@
 The kind predicates, the `_Constant` wrapper, and the module/class child
 walkers that power `help()` rendering, SDK-expand discovery, doc linting, and
 metering. `agent_visible_names` is the single source of truth the rest of the
-framework imports (`agent/graph/_system_prompt.py`, `agent/sdk_metering.py`,
+framework imports (`agent/graph/_system_prompt.py`, `ava/_sdk_metering.py`,
 `scripts/lint_doc_symbols.py`). Split out of `ava/__init__.py`; the package
 entry re-exports the names tests and framework code reach as `ava.<name>`.
 """
@@ -143,7 +143,7 @@ def agent_visible_names(container: Any) -> list[str]:
     if isinstance(container, ModuleType):
         return [
             n
-            for n in dir(container)
+            for n in vars(container)
             if not n.startswith("_")
             and inspect.isroutine(attr := inspect.getattr_static(container, n, None))
             and getattr(attr, "__module__", "") == container.__name__

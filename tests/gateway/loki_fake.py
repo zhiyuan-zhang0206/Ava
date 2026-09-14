@@ -130,7 +130,8 @@ class FakeLoki:
                 k = str(r.get(group_by, ""))
             if exclude_empty and k == "":
                 continue
-            counts[k] = counts.get(k, 0) + 1
+            weight = r["attributes"][kwargs["weight_by"]] if kwargs.get("weight_by") else 1
+            counts[k] = counts.get(k, 0) + weight
         return counts
 
     def count_event_classes(self, **kwargs: Any) -> dict[Any, int]:

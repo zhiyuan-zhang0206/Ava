@@ -23,7 +23,7 @@ tags:
 ### Metric units
 Currently 6: `syntax_fix`, `exec`, `llm_turns`, `agent_activity`, `sdk_usage`, `plugin_activation` — the list `_sections_from_aggregate` returns in `shared/metrics_aggregate.py`. Each is a `MetricSection` containing both a text block (human-/agent-readable ASCII digest) and a `data` fragment (machine-readable shape).
 
-- `sdk_usage` counts **runtime calls**: one `sdk_call` event per top-level `ava.*` invocation from agent-authored code (`agent/sdk_metering.py`), grouped by the dotted function name. It measures what actually ran, not what the model wrote — the earlier regex scan of `code` event source text counted `ava.X(` inside comments, string literals, and example code. `data["functions"]` is the full list of functions sorted by count (for a sortable frontend table), while the text digest renders only the top 20 to stay readable.
+- `sdk_usage` counts **runtime calls**: one `sdk_call` event per top-level `ava.*` invocation on every SDK entry path (`ava/_sdk_metering.py`), including external Python and borrowed identities. The default is full collection; optional live sampling retains each call with probability 1/N. Aggregates and the Grafana ranking sum each event's own `sample_rate`, preserving historical weights across policy changes. Calls are grouped by the dotted function name. It measures what actually ran, not what the model wrote — the earlier regex scan of `code` event source text counted `ava.X(` inside comments, string literals, and example code. `data["functions"]` is the full list of functions sorted by count (for a sortable frontend table), while the text digest renders only the top 20 to stay readable.
 - `plugin_activation` counts **plugin injection surfaces that fired**: one `plugin_activation` event per firing (`shared/plugin_activation.py`), keyed by the same `<plugin>/<surface>/<identifier>` triple `ava plugins inspect` lists as a registered contribution, plus the model in force. A contribution registered but never counted here is philosophy §6's removal evidence.
 - `pctiles()` returns a typed `Pctiles` (`TypedDict`: `n`/`p50`/`p90`/`max`/`mean`), consumed by `render_pctiles` with the same shape.
 
@@ -40,3 +40,25 @@ Currently 6: `syntax_fix`, `exec`, `llm_turns`, `agent_activity`, `sdk_usage`, `
 
 - [[db.ava.okf.md]] — `events` table (the unified event stream)
 - [[log.ava.okf.md]] — `events` is written by the unified emitter (`shared/telemetry.py`), fed by `shared/log.py`
+
+## SDK event collection
+
+The SDK wraps its public static functions at import and after plugin loading; dynamic
+MCP tools share a wrapped call funnel. `recording()` only collects the complete
+per-execution tally. Async wrappers measure the awaited call, including errors and
+cancellation; context-local frames prevent concurrent tasks from suppressing one
+another. Nested SDK implementation calls count once at the outer public boundary.
+
+`AVA_SDK_CALL_SAMPLING_ENABLED=false` is the default (every call). When enabled,
+`AVA_SDK_CALL_SAMPLE_EVERY=N` sets inclusion probability 1/N, with N >= 1. These
+cluster fields use the existing config API/CLI. Processes start with their boot
+policy and refresh active-call policy snapshots in the background every five
+seconds from local `.env` on gateways and unenrolled tools, or the existing
+authenticated bootstrap endpoint on an enrolled runner. Fetch failures warn and retain the last valid policy. SDK
+calls never wait for a remote configuration fetch.
+
+Events go directly to the unified emitter, so external callers need no logger
+initialization or `recording()` context. Call-time agent/source attribution uses
+cached SDK provenance, including borrowed identities, without validating a lease
+or doing database I/O. Sampling is an explicit
+loss of detail: sampled events cannot reconstruct a complete call history.

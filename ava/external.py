@@ -55,6 +55,7 @@ class Attachment:
             self.agent_id = int(lease["agent_id"])
             self._version = int(lease["delta_version"])
             _boot._external_identity = self._validate
+            _boot._external_agent_id = self.agent_id
             ava._ensure_plugins_loaded()
             state, overlay, birth = load_snapshot(self.agent_id)
             self._stack.enter_context(bind_agent_config(resolve_agent_config_pins(overlay, birth)))
@@ -121,6 +122,7 @@ class Attachment:
         self._closed = True
         try:
             _boot._external_identity = None
+            _boot._external_agent_id = None
             ava.state, ava.state_update = self._prior_state, self._prior_update
             self._stack.close()
         finally:
