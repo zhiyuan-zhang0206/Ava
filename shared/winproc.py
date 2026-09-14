@@ -9,9 +9,13 @@ Cross-session control (issue #1930): `AttachConsole` cannot cross a session
 boundary, so every new session also spawns a resident control steward in the
 *same* session as the target (the spawner's own session) — see
 `shared/windows_session_steward.py`. A graceful-stop caller in a different
-session routes the break request over the steward's AF_UNIX control socket
-(whose path embeds the record's exact pid + create_time identity); the steward
-executes the same verified private-console helper. Same-session callers keep
+session routes the break request over the steward's loopback control socket
+(whose endpoint and delivery token are bound to the record's exact pid +
+create_time identity); the steward executes the same verified private-console
+helper. The channel is loopback TCP rather than a filesystem socket: Windows
+CPython has no AF_UNIX (CPython issue #77589; `shared/platform_probes.py`
+tracks the capability), so a filesystem-socket channel could never bind on the
+platform this path exists for. Same-session callers keep
 the direct one-shot helper. A cross-session target without a steward (legacy
 record) or with a dead steward is an explicit refusal — never an escalation to
 force. The kill boundary spares recorded stewards the same way it spares
@@ -24,6 +28,7 @@ from __future__ import annotations
 import contextlib
 import math
 import os
+import secrets
 import shlex
 import socket
 import subprocess
@@ -92,26 +97,34 @@ def _sessions_dir() -> Path:
     return d
 
 
-def _ctrl_dir() -> Path:
-    """Control sockets for the resident per-session stewards ($AVA_HOME/run/ctrl).
+def _steward_endpoint() -> tuple[str, int]:
+    """Reserve a loopback endpoint for a new session's control steward.
 
-    Under the run dir so the socket files inherit the home's access control:
-    opening a control socket requires the session owner's token (plus SYSTEM /
-    Administrators via the inherited directory ACL).
+    Loopback TCP is the transport because it is the one stream family the
+    Windows CPython this leaf must run on actually implements: AF_UNIX does
+    not exist there (CPython issue #77589; `shared/platform_probes.py` tracks
+    the capability), so a filesystem-socket channel could never bind at
+    launch. The port is reserved here (bound, then closed) and the steward
+    binds it moments later at spawn; if another process wins the port in
+    between, the steward logs the bind error and exits, and cross-session
+    control degrades to the designed refusal — never to a wrong delivery.
     """
-    d = run_dir() / "ctrl"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        probe.bind(("127.0.0.1", 0))
+        return "127.0.0.1", int(probe.getsockname()[1])
+    finally:
+        probe.close()
 
 
-def _steward_socket_path(pid: int, create_time: float) -> Path:
-    """The control socket for one exact session identity.
+def _new_steward_nonce() -> str:
+    """The steward's delivery token: 128 opaque bits, record-scoped.
 
-    The path embeds (pid, create_time) so it cannot collide with a restarted
-    session on a recycled pid, and so a caller can only address a steward by
-    knowing the record's verified identity.
+    Only a caller that knows the record (or was handed its fields) can address
+    the steward meaningfully; the token never leaves memory, the record file,
+    and the steward's own argv.
     """
-    return _ctrl_dir() / f"ava-ctrl-{pid}-{create_time:.6f}.sock"
+    return secrets.token_hex(16)
 
 
 def _steward_script() -> Path:
@@ -247,22 +260,22 @@ def has_session(name: str) -> bool:
 
 def _spawn_steward(
     name: str, record_path: Path, pid: int, create_time: float
-) -> tuple[int, str] | None:
+) -> tuple[int, str, str] | None:
     """Launch the resident control steward beside a freshly spawned session.
 
     Same session as the target by construction (the spawner's own session),
     no console (it never needs one — the helper it runs attaches transiently),
-    stdio to ``$AVA_HOME/logs/<name>.ctrl.log``. Returns (steward pid, socket
-    path) so the session record can bind the control channel to this exact
-    identity, or None when the spawn fails — the session still runs, but
-    cross-session graceful control is unavailable for it (logged below).
+    stdio to ``$AVA_HOME/logs/<name>.ctrl.log``. Returns (steward pid,
+    endpoint, nonce) so the session record can bind the control channel to
+    this exact identity, or None when the spawn fails — the session still
+    runs, but cross-session graceful control is unavailable for it (logged
+    below).
     """
-    socket_path = _steward_socket_path(pid, create_time)
+    endpoint_host, endpoint_port = _steward_endpoint()
+    nonce = _new_steward_nonce()
     creationflags = _DETACHED
     if in_attached_exec_job():
         creationflags |= _BREAKAWAY
-    with contextlib.suppress(OSError):
-        socket_path.unlink()  # a crashed predecessor may have left a dead socket
     log = logs_dir() / f"{name}.ctrl.log"
     try:
         with log.open("ab") as out:
@@ -274,7 +287,8 @@ def _spawn_steward(
                     str(record_path),
                     str(pid),
                     str(create_time),
-                    str(socket_path),
+                    str(endpoint_port),
+                    nonce,
                     name,
                 ],
                 stdin=subprocess.DEVNULL,
@@ -291,7 +305,7 @@ def _spawn_steward(
             exc=exc,
         )
         return None
-    return proc.pid, str(socket_path)
+    return proc.pid, f"{endpoint_host}:{endpoint_port}", nonce
 
 
 def kill_session_with_verdict(
@@ -378,7 +392,7 @@ def new_session(
         # accept the pid's next innocent occupant — a later kill_session
         # could then kill an unrelated process tree (audit 2026-08-08 P2).
         create_time = _DEAD_CHILD_SENTINEL
-    steward: tuple[int, str] | None = None
+    steward: tuple[int, str, str] | None = None
     if create_time != _DEAD_CHILD_SENTINEL:
         # A sentinel create_time names no real process, so a steward could
         # never verify the target — spawn one only for a live identity.
@@ -391,7 +405,8 @@ def new_session(
         started_at=time.time(),
         control_mode="private-console-v1",
         steward_pid=steward[0] if steward else None,
-        steward_socket=steward[1] if steward else None,
+        steward_endpoint=steward[1] if steward else None,
+        steward_nonce=steward[2] if steward else None,
     ).write(_record_path(name))
     return True
 
@@ -473,7 +488,7 @@ def _steward_deliver(name: str, rec: SessionRecord, deadline: float) -> bool:
     identity, so a caller can only address a steward by knowing that identity;
     the steward re-verifies record and target before the helper runs.
     """
-    if rec.steward_socket is None or rec.steward_pid is None:
+    if rec.steward_endpoint is None or rec.steward_pid is None or rec.steward_nonce is None:
         raise RuntimeError(
             f"graceful stop of {name} would cross a session boundary, but its session "
             f"record predates the resident control channel — restart the service once, "
@@ -482,20 +497,21 @@ def _steward_deliver(name: str, rec: SessionRecord, deadline: float) -> bool:
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise TimeoutError(f"graceful delivery deadline passed before reaching {name}'s steward")
-    connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     connection.settimeout(remaining)
     try:
         try:
-            connection.connect(rec.steward_socket)
+            host, port_text = rec.steward_endpoint.rsplit(":", 1)
+            connection.connect((host, int(port_text)))
         except TimeoutError:
             raise  # a connect timeout is already the explicit "did not answer"
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             raise RuntimeError(
                 f"control steward for {name} is not reachable (pid {rec.steward_pid}): "
                 f"cross-session graceful stop unavailable for this session"
             ) from exc
         try:
-            connection.sendall(b"break\n")
+            connection.sendall(f"break {rec.steward_nonce}\n".encode())
             reply = connection.recv(512)
         except TimeoutError as exc:
             raise TimeoutError(
@@ -729,10 +745,5 @@ def list_sessions(prefix: str = "") -> list[str]:
         if has_session(name):
             out.append(name)
             continue
-        rec = SessionRecord.read(rec_file)
         rec_file.unlink(missing_ok=True)
-        if rec is not None and rec.steward_socket is not None:
-            # The steward self-exits when its target dies and unlinks its own
-            # socket; this removes the socket a *crashed* steward left behind.
-            Path(rec.steward_socket).unlink(missing_ok=True)
     return out

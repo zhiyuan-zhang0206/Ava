@@ -3,7 +3,8 @@
 `AttachConsole` cannot cross a session boundary, so `winproc.graceful_signal`
 routes by session: same-session targets keep the direct one-shot private-console
 helper; cross-session targets go through the resident control steward whose
-socket path the session record binds to its exact (pid, create_time) identity.
+endpoint and delivery token the session record binds to its exact
+(pid, create_time) identity.
 Every refusal below must be loud (raise) and never escalate to force — the stop
 flow reports an incomplete stop and the operator decides.
 
@@ -14,7 +15,9 @@ conventions.
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 from typing import ClassVar
 
@@ -33,7 +36,8 @@ def _record(*, steward: bool = True, pid: int = 123) -> SessionRecord:
         5.0,
         control_mode="private-console-v1",
         steward_pid=999 if steward else None,
-        steward_socket="/run/ctrl/ava-ctrl-123-5.000000.sock" if steward else None,
+        steward_endpoint="127.0.0.1:40123" if steward else None,
+        steward_nonce="ab" * 16 if steward else None,
     )
 
 
@@ -77,10 +81,10 @@ class _FakeSocket:
     def settimeout(self, timeout: float) -> None:
         self._timeout = timeout
 
-    def connect(self, path: str) -> None:
+    def connect(self, address: tuple[str, int]) -> None:
         if _FakeSocket.connect_errors is not None:
             raise _FakeSocket.connect_errors
-        assert path == "/run/ctrl/ava-ctrl-123-5.000000.sock"
+        assert address == ("127.0.0.1", 40123)
 
     def sendall(self, data: bytes) -> None:
         _FakeSocket.sent.append(data)
@@ -155,7 +159,7 @@ def test_cross_session_delivers_through_the_steward(
     _cross_session(monkeypatch)
     monkeypatch.setattr(winproc, "run_job_process", forbidden)
     assert winproc.graceful_signal("service", expected=record, timeout=5.0)
-    assert fake_socket.sent == [b"break\n"]
+    assert fake_socket.sent == [b"break " + b"ab" * 16 + b"\n"]
 
 
 def test_cross_session_legacy_record_refuses_without_steward(
@@ -261,3 +265,39 @@ def test_expected_identity_still_gates_before_any_routing(
     monkeypatch.setattr(winproc, "current_session_id", forbidden)
     monkeypatch.setattr(winproc, "run_job_process", forbidden)
     assert not winproc.graceful_signal("service", expected=replace(record, pid=124), timeout=5.0)
+
+
+def test_cross_session_pre_swap_record_refuses(
+    record: SessionRecord,
+    fake_socket: type[_FakeSocket],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A record written by the filesystem-socket transport (steward_socket
+    field, no loopback endpoint or token) reads back without a usable channel
+    and refuses with the designed message — old records degrade to refusal,
+    never to a crash."""
+    legacy_path = tmp_path / "legacy.json"
+    legacy_path.write_text(
+        json.dumps(
+            {
+                "pid": 123,
+                "create_time": 5.0,
+                "cmd": "fixture",
+                "cwd": "/private-test",
+                "started_at": 5.0,
+                "control_mode": "private-console-v1",
+                "steward_pid": 999,
+                "steward_socket": "/run/ctrl/ava-ctrl-123-5.000000.sock",
+            }
+        )
+    )
+    legacy = SessionRecord.read(legacy_path)
+    assert legacy is not None
+    assert legacy.steward_endpoint is None and legacy.steward_nonce is None
+    _cross_session(monkeypatch)
+    monkeypatch.setattr(winproc, "_read_record", _returning(legacy))
+    monkeypatch.setattr(winproc, "run_job_process", forbidden)
+    with pytest.raises(RuntimeError, match="predates the resident control channel"):
+        winproc.graceful_signal("service", expected=legacy, timeout=5.0)
+    assert fake_socket.sent == []

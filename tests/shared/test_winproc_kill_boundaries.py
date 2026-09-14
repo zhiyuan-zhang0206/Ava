@@ -153,9 +153,8 @@ def fleet(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> _Fleet:
             cwd=str(unit_home),
             started_at=time.time(),
             steward_pid=steward_pid,
-            steward_socket=(
-                f"/ctrl/ava-ctrl-{pid}-1.000000.sock" if steward_pid is not None else None
-            ),
+            steward_endpoint=("127.0.0.1:59999" if steward_pid is not None else None),
+            steward_nonce="ef" * 16 if steward_pid is not None else None,
         ).write(winproc._record_path(name))
 
     def _for_record(rec: SessionRecord) -> _FakeProc | None:
