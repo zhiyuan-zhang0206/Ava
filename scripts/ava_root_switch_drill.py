@@ -814,29 +814,41 @@ def _phase_cycle_old(repo: Path, home: Path, evidence: Path) -> None:
     _phase_pass("cycle-old", "session stop->start clean under the helper state")
 
 
-def _phase_teardown(repo: Path, home: Path, evidence: Path) -> None:
-    """destroy + the keeper cleanup destroy does not do (known gap, W1.4/S4)."""
-    import psutil
+def _keeper_plists(home: Path) -> list[tuple[str, Path]]:
+    """(label, plist) of keeper jobs pointing at this home — socket-anchored.
 
-    keeper_label = None
-    for plist in (Path.home() / "Library" / "LaunchAgents").glob(
-        "com.ava.*permissions-helper*.plist"
+    The keeper plist carries no AVA_HOME; its identity is the
+    AVA_PERMISSIONS_HELPER_SOCKET path under this home (the lifecycle writer's
+    convention). The prod cluster's plist never matches a dev home.
+    """
+    prefix = str(home / "run" / "permissions-helper.")
+    found: list[tuple[str, Path]] = []
+    for plist in sorted(
+        (Path.home() / "Library" / "LaunchAgents").glob("com.ava.*permissions-helper*.plist")
     ):
         try:
             data = plistlib.loads(plist.read_bytes())
         except (OSError, plistlib.InvalidFileException):
             continue
         env = data.get("EnvironmentVariables") or {}
-        if str(env.get("AVA_HOME", "")) == str(home):
-            keeper_label = str(data.get("Label", plist.stem))
-            break
+        if str(env.get("AVA_PERMISSIONS_HELPER_SOCKET", "")).startswith(prefix):
+            found.append((str(data.get("Label", plist.stem)), plist))
+    return found
+
+
+def _phase_teardown(repo: Path, home: Path, evidence: Path) -> None:
+    """destroy + the keeper cleanup destroy does not do (known gap, W1.4/S4)."""
+    import psutil
+
+    keepers = _keeper_plists(home)
+    keeper_labels = [label for label, _ in keepers]
     keeper_pid = None
-    if keeper_label is not None:
+    if keeper_labels:
         for line in subprocess.run(
             ["launchctl", "list"], capture_output=True, text=True, check=False
         ).stdout.splitlines():
             parts = line.split()
-            if len(parts) >= 3 and parts[2] == keeper_label:
+            if len(parts) >= 3 and parts[2] in keeper_labels:
                 keeper_pid = int(parts[0]) if parts[0].isdigit() else None
     _ava_must(
         repo,
@@ -846,25 +858,16 @@ def _phase_teardown(repo: Path, home: Path, evidence: Path) -> None:
         evidence=evidence,
         tag="teardown-destroy",
     )
-    cleanup: dict[str, object] = {"keeper_label": keeper_label, "keeper_pid": keeper_pid}
-    if keeper_label is not None:
-        uid = os.getuid()
+    cleanup: dict[str, object] = {"keeper_labels": keeper_labels, "keeper_pid": keeper_pid}
+    uid = os.getuid()
+    for label, plist in keepers:
         subprocess.run(  # noqa: S603 -- fixed argv
-            ["launchctl", "bootout", f"gui/{uid}/{keeper_label}"],
+            ["launchctl", "bootout", f"gui/{uid}/{label}"],
             capture_output=True,
             text=True,
             check=False,
         )
-        for plist in (Path.home() / "Library" / "LaunchAgents").glob(
-            "com.ava.*permissions-helper*.plist"
-        ):
-            try:
-                data = plistlib.loads(plist.read_bytes())
-            except (OSError, plistlib.InvalidFileException):
-                continue
-            env = data.get("EnvironmentVariables") or {}
-            if str(env.get("AVA_HOME", "")) == str(home):
-                plist.unlink(missing_ok=True)
+        plist.unlink(missing_ok=True)
     if keeper_pid is not None:
         deadline = time.monotonic() + 10.0
         while time.monotonic() < deadline and psutil.pid_exists(keeper_pid):
@@ -873,8 +876,12 @@ def _phase_teardown(repo: Path, home: Path, evidence: Path) -> None:
     problems: list[str] = []
     if _job_labels(home):
         problems.append(f"probe plists left: {_job_labels(home)}")
-    if keeper_label is not None and _launchctl_has(str(keeper_label)):
-        problems.append(f"keeper label still registered: {keeper_label}")
+    leftover = _keeper_plists(home)
+    if leftover:
+        problems.append(f"keeper plists left: {[str(path) for _, path in leftover]}")
+    registered = [label for label in keeper_labels if _launchctl_has(label)]
+    if registered:
+        problems.append(f"keeper labels still registered: {registered}")
     cleanup["problems"] = problems
     _save(evidence, "teardown.json", cleanup)
     if problems:
