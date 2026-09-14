@@ -153,9 +153,11 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # exec_request_quarantine (issue #2157's stale exec-evidence preservation)
     # raises it to 164; chrome_page_ttl_renewed (task #3035's Chrome page TTL)
     # raises it to 165; compact_boundary_stamp (task #3180's failed compact
-    # boundary anchor stamp) raises it to 166.
+    # boundary anchor stamp) raises it to 166; the root self-check (P7 W1.2b,
+    # task #3338) adds root_chain_broken + root_restart_breaker_open, raising
+    # it to 168.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 166
+    assert len(_TELEMETRY_KINDS) == 168
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:

@@ -25,6 +25,28 @@ from services.ava_root.supervisor import Supervisor
 from shared.daemon_health import DaemonProbe
 
 
+class _Recorder:
+    """Stands in for shared.log.logger; records every structured call."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def warning(self, message: str, **extra: object) -> None:
+        self.calls.append({"message": message, **extra})
+
+    def events(self, name: str) -> list[dict[str, object]]:
+        return [c for c in self.calls if c.get("event") == name]
+
+
+@pytest.fixture
+def recorder(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
+    import shared.log as shared_log
+
+    rec = _Recorder()
+    monkeypatch.setattr(shared_log, "logger", rec)
+    return rec
+
+
 class StubSupervisor:
     """RevivalHost stand-in: records restart calls; deferral answers from a map."""
 
@@ -106,6 +128,12 @@ def test_config_validation() -> None:
         _config(interval_s=0)
     with pytest.raises(ValueError, match="verify_interval_s"):
         _config(verify_interval_s=0)
+    with pytest.raises(ValueError, match="verify_deadline_s"):
+        _config(verify_deadline_s=0)
+    with pytest.raises(ValueError, match="backoff_base_s"):
+        _config(backoff_base_s=0)
+    with pytest.raises(ValueError, match="backoff_cap_s"):
+        _config(backoff_base_s=60.0, backoff_cap_s=10.0)
 
 
 # -- round policy --------------------------------------------------------------
@@ -163,7 +191,7 @@ async def test_failed_restart_backs_off_until_due(
 
 
 async def test_breaker_opens_once_then_holds(
-    clock: FakeClock, caplog: pytest.LogCaptureFixture
+    clock: FakeClock, recorder: _Recorder, caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level(logging.DEBUG, logger="services.ava_root.health")
     probe = CellProbe(DaemonProbe.down("no"))
@@ -178,9 +206,12 @@ async def test_breaker_opens_once_then_holds(
     await monitor.run_round()  # 3: the third non-alive round opens the breaker
     await monitor.run_round()  # 4: held
     assert stub.restart_calls == ["svc"]
-    opens = [r for r in caplog.records if "breaker OPEN" in str(r.message)]
-    holds = [r for r in caplog.records if "restart held" in str(r.message)]
+    opens = recorder.events("root_restart_breaker_open")
     assert len(opens) == 1
+    assert opens[0]["unit"] == "svc"
+    assert opens[0]["rounds"] == 3
+    assert opens[0]["respawn_attempts"] == 1
+    holds = [r for r in caplog.records if "restart held" in str(r.message)]
     assert len(holds) == 2
     assert monitor.snapshot()["svc"].breaker_since is not None
 
@@ -274,7 +305,7 @@ async def test_expected_stop_counts_nothing_and_alerts_nothing(
 
 
 async def test_inflight_retry_counts_to_breaker_but_never_acts(
-    clock: FakeClock, caplog: pytest.LogCaptureFixture
+    clock: FakeClock, recorder: _Recorder, caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level(logging.DEBUG, logger="services.ava_root.health")
     probe = CellProbe(DaemonProbe.down("no"))
@@ -287,13 +318,12 @@ async def test_inflight_retry_counts_to_breaker_but_never_acts(
     assert stub.restart_calls == []
     assert state.consecutive_failures == 3
     assert state.breaker_since is not None
-    opens = [r for r in caplog.records if "breaker OPEN" in str(r.message)]
-    assert len(opens) == 1
+    assert len(recorder.events("root_restart_breaker_open")) == 1
     assert "restart deferred (already scheduled)" in caplog.text
 
 
 async def test_policy_never_counts_and_surfaces_via_breaker(
-    clock: FakeClock, caplog: pytest.LogCaptureFixture
+    clock: FakeClock, recorder: _Recorder, caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level(logging.DEBUG, logger="services.ava_root.health")
     probe = CellProbe(DaemonProbe.down("no"))
@@ -308,8 +338,7 @@ async def test_policy_never_counts_and_surfaces_via_breaker(
     state = monitor.snapshot()["svc"]
     assert stub.restart_calls == []
     assert state.consecutive_failures == 3
-    opens = [r for r in caplog.records if "breaker OPEN" in str(r.message)]
-    assert len(opens) == 1
+    assert len(recorder.events("root_restart_breaker_open")) == 1
     assert "policy never" in caplog.text
 
 
@@ -453,3 +482,24 @@ async def test_integration_unconfirmed_restart_backs_off(
     assert supervisor._units["svc"].restart_count == 1
     assert supervisor._units["svc"].generation is second
     assert "backing off" in caplog.text
+
+
+async def test_health_snapshot_exposes_the_status_view(clock: FakeClock) -> None:
+    probe = CellProbe(DaemonProbe.down("no"))
+    stub = StubSupervisor()
+    monitor = HealthMonitor(stub, _registry("svc", probe), config=_config(breaker_rounds=2))
+    await monitor.run_round()  # a failed restart arms the backoff
+    entry = cast("dict[str, object]", monitor.health_snapshot()["svc"])
+    assert entry["consecutive_failures"] == 1
+    assert entry["respawn_attempts"] == 1
+    assert entry["breaker_open"] is False
+    assert entry["breaker_for_s"] is None
+    remaining = entry["next_restart_in_s"]
+    assert remaining is not None and cast(float, remaining) > 0
+    assert entry["last_verdict"] == "down"
+
+    await monitor.run_round()  # second round opens the breaker (breaker_rounds=2)
+    entry = cast("dict[str, object]", monitor.health_snapshot()["svc"])
+    assert entry["breaker_open"] is True
+    age = entry["breaker_for_s"]
+    assert age is not None and cast(float, age) >= 0.0

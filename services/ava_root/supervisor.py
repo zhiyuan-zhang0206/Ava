@@ -4,6 +4,8 @@ This is the platform-neutral core of the root supervisor. It owns the process
 table of one tree:
 
 - `up` / `down` / `restart` act on subtrees (a unit and its attach descendants);
+- `tree_view` and the `attach_*` seams give the health runner and the tree
+  self-check their read/write surfaces on `status()`;
 - `revival_deferral` answers why a would-be reviver must not act on a unit
   right now — operator intent, an in-flight retry, or a `never` policy — so a
   second reviver (the health runner) never fights this supervisor;
@@ -30,6 +32,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from time import monotonic
+from typing import Protocol
 
 from services.ava_root.ipc import (
     ErrorCode,
@@ -111,6 +114,22 @@ class _UnitRuntime:
     restart_task: asyncio.Task[None] | None = None
 
 
+class HealthSource(Protocol):
+    """The health runner slice `status()` embeds (W1.2a's `HealthMonitor`)."""
+
+    def health_snapshot(self) -> dict[str, object]:
+        """A plain-dict health view, keyed by unit id."""
+        ...
+
+
+class MetricsSource(Protocol):
+    """The self-check slice `status()` embeds (W1.2b's `TreeSelfCheck`)."""
+
+    def metrics_snapshot(self) -> dict[str, object]:
+        """The B7 metrics block (chain gauges + injectable slots)."""
+        ...
+
+
 class Supervisor:
     """Owns the lifecycle of every unit in one registry.
 
@@ -135,6 +154,8 @@ class Supervisor:
         self._lock = asyncio.Lock()
         self._started_at: float | None = None
         self._running = False
+        self._health: HealthSource | None = None
+        self._metrics: MetricsSource | None = None
 
     # ── lifecycle ────────────────────────────────────────────────────────────
 
@@ -266,7 +287,42 @@ class Supervisor:
             "unit_count": len(self._units),
             "running": self._running,
         }
-        return {"root": root, "units": units, "restarts_total": restarts_total}
+        snapshot: dict[str, object] = {
+            "root": root,
+            "units": units,
+            "restarts_total": restarts_total,
+        }
+        if self._health is not None:
+            snapshot["health"] = self._health.health_snapshot()
+        if self._metrics is not None:
+            snapshot["metrics"] = self._metrics.metrics_snapshot()
+        return snapshot
+
+    def attach_health(self, source: HealthSource) -> None:
+        """Embed the health runner's snapshot in `status()`; absent until wired."""
+        self._health = source
+
+    def attach_metrics(self, source: MetricsSource) -> None:
+        """Embed the self-check's metrics in `status()`; absent until wired."""
+        self._metrics = source
+
+    def tree_view(self) -> dict[str, object]:
+        """Raw per-unit facts for the self-check: `{"root_pid", "units": [...]}`.
+
+        Unlike `status()`, the pid is the generation's *recorded* pid even after
+        its process exited (waiting for the watch task) — the self-check
+        verifies the tree's claims against the OS, so the claim must stay
+        visible; `status()` masks a dead generation's pid to None.
+        """
+        units: list[dict[str, object]] = [
+            {
+                "id": runtime.manifest.id,
+                "state": runtime.state.value,
+                "pid": None if runtime.generation is None else runtime.generation.proc.pid,
+            }
+            for runtime in self._units.values()
+        ]
+        return {"root_pid": os.getpid(), "units": units}
 
     def revival_deferral(self, unit_id: str) -> str | None:
         """Why a would-be reviver must not act on `unit_id` right now, if any.

@@ -20,6 +20,7 @@ import pytest
 from shared.paths import run_dir
 from shared.platform import IS_LINUX, IS_WINDOWS
 from shared.proc import (
+    child_state,
     hosting_supervised_session,
     kill_process_tree,
     process_alive,
@@ -372,3 +373,54 @@ def test_git_driving_modules_do_not_bound_with_subprocess_run(rel: str) -> None:
         and any(kw.arg == "timeout" for kw in node.keywords)
     ]
     assert not offenders, f"{rel}: use shared.proc.run_bounded at line(s) {offenders}"
+
+
+# -- child_state: the tree self-check's chain probe ----------------------------
+
+
+def test_child_state_attached_for_a_live_child() -> None:
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        assert child_state(proc.pid, os.getpid()) == "attached"
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+def test_child_state_detached_for_a_live_non_child() -> None:
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        # The child's parent is THIS process, never this process's own parent.
+        assert child_state(proc.pid, os.getppid()) == "detached"
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+def test_child_state_missing_for_a_reaped_pid() -> None:
+    proc = subprocess.Popen([sys.executable, "-c", "import sys; sys.exit(0)"])
+    proc.wait()
+    assert child_state(proc.pid, os.getpid()) == "missing"
+
+
+@pytest.mark.skipif(IS_WINDOWS, reason="Windows has no zombie state")
+def test_child_state_missing_for_a_zombie() -> None:
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    proc.kill()
+    handle = psutil.Process(proc.pid)
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline and handle.status() != psutil.STATUS_ZOMBIE:
+        time.sleep(0.01)
+    try:
+        assert handle.status() == psutil.STATUS_ZOMBIE, "child never became a zombie"
+        assert child_state(proc.pid, os.getpid()) == "missing"
+    finally:
+        proc.wait()
+
+
+def test_child_state_unverifiable_when_the_read_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    def raiser(pid: int) -> object:
+        raise psutil.AccessDenied
+
+    monkeypatch.setattr(psutil, "Process", raiser)
+    assert child_state(999999, os.getpid()) == "unverifiable"
