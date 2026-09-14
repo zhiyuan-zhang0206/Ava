@@ -14,6 +14,7 @@ import inspect
 import io
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -281,6 +282,68 @@ def test_a_plugin_load_is_undone_by_the_autouse_teardown(request: pytest.Fixture
     assert not [
         fq for p, a, fq in sdk_metering._instrument_targets() if getattr(p, a) in _RECORDERS
     ]
+
+
+def test_uninstall_restores_from_the_install_record_without_a_namespace_walk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Task #3426: teardown restores from the install() ledger, not a fresh
+    namespace walk — the walk re-resolves dynamic member surfaces (the `ava.skills`
+    index scans the skills tree and reads the install registry), which state a
+    passing test arranged can poison after the test itself went green."""
+    sdk_metering.uninstall()  # clean baseline, as in the sibling tests above
+    target = SimpleNamespace()
+
+    def demo() -> str:
+        return "ok"
+
+    target.demo = demo
+
+    def _stub_targets() -> list[tuple[object, str, str]]:
+        return [(target, "demo", "demo")]
+
+    monkeypatch.setattr(sdk_metering, "_instrument_targets", _stub_targets)
+    sdk_metering.install()
+    wrapped = target.demo
+    assert wrapped is not demo
+    assert wrapped in sdk_metering._RECORDERS
+
+    def _no_walk() -> list[tuple[object, str, str]]:
+        pytest.fail("uninstall() must not re-walk the namespace (task #3426)")
+
+    monkeypatch.setattr(sdk_metering, "_instrument_targets", _no_walk)
+    sdk_metering.uninstall()
+    assert target.demo is demo
+
+
+def test_teardown_survives_a_poisoned_dynamic_surface(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Task #3426 acceptance shape: arm metering first, then poison the skills
+    surface (simulating the broken-registry state a test deliberately leaves
+    behind); uninstall() must complete without touching the surface and restore
+    every recorded pair."""
+    sdk_metering.uninstall()
+    before = set(sdk_metering._RECORDERS)
+    sdk_metering.install()
+    assert sdk_metering._RECORDERS
+    recorded = list(sdk_metering._WRAPPED)
+
+    def _poisoned(_self: object) -> list[str]:
+        raise RuntimeError("simulated corrupt install registry")
+
+    monkeypatch.setattr(type(ava.skills), "__all_for_ava__", property(_poisoned))  # pyright: ignore[reportUnknownArgumentType]
+    with pytest.raises(RuntimeError):
+        sdk_metering._instrument_targets()  # the old teardown path explodes here
+
+    sdk_metering.uninstall()
+    # Completeness on the precise unit of the guarantee: no recorded pair still
+    # holds a recorder. (The set itself may retain recorders that
+    # `ava._extend._ORIGINALS` captured before this test armed metering — that
+    # retention predates task #3426 and is not this fix's business.)
+    for parent, attr in recorded:
+        assert getattr(parent, attr, None) not in sdk_metering._RECORDERS
+    assert ava.files.read not in sdk_metering._RECORDERS
+    assert ava.mcps._call_raw not in sdk_metering._RECORDERS
+    assert set(sdk_metering._RECORDERS) <= before
 
 
 @pytest.mark.asyncio
