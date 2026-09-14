@@ -40,7 +40,7 @@ _RUNNING_PRINT = """gui/501/com.ava.test.f5-lwcr-smagent = {
 """
 
 
-def _load_script() -> object:
+def _load_script():
     spec = importlib.util.spec_from_file_location("f5_lwcr_common", _SCRIPT)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)

@@ -18,7 +18,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _REPO_ROOT / "scripts" / "f5_lwcr_smappservice.py"
 
 
-def _load_script() -> object:
+def _load_script():
     spec = importlib.util.spec_from_file_location("f5_lwcr_smappservice", _SCRIPT)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
