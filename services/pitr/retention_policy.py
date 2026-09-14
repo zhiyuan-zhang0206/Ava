@@ -238,6 +238,9 @@ def _pin_proof(
         keep[identity] = reason
 
 
+_BACKUP_HISTORY_SUFFIX = ".backup"
+
+
 def _pin_contiguous_wal(
     keep: dict[tuple[str, str], str],
     oldest: CandidateManifest,
@@ -262,7 +265,14 @@ def _pin_contiguous_wal(
     start = (_lsn(latest_range.end_lsn) + segment_size - 1) // segment_size
     on_timeline: dict[int, RetentionObject] = {}
     for item in wal:
-        item_timeline, segment = _segment(item.archive_name or "", segment_size)
+        name = item.archive_name or ""
+        if name.endswith(_BACKUP_HISTORY_SUFFIX):
+            # A backup-history file anchors the segment in its prefix; it is
+            # not a segment itself. Keeping it out of the contiguity map
+            # avoids a false `forked` verdict against that segment's real
+            # object; the frontier classification owns its retention.
+            continue
+        item_timeline, segment = _segment(name, segment_size)
         if item_timeline == timeline:
             if segment in on_timeline:
                 blockers.add("forked WAL pin token at one segment")
@@ -290,10 +300,22 @@ def _segment(name: str, segment_size: int) -> tuple[int, int]:
     return timeline, int(name[8:16], 16) * segments_per_log + int(name[16:], 16)
 
 
+def _segment_origin(name: str, segment_size: int) -> tuple[int, int]:
+    """The WAL segment a ``wal/`` archive name anchors.
+
+    A segment name anchors itself; a backup-history file
+    (``<segment>.<time>.backup``) anchors the segment in its prefix - it is
+    archived beside that segment and is not a segment itself.
+    """
+    if name.endswith(_BACKUP_HISTORY_SUFFIX):
+        name = name[:24]
+    return _segment(name, segment_size)
+
+
 def _before_frontier(item: RetentionObject, oldest: CandidateManifest) -> bool:
     if item.archive_name is None:
         return False
-    timeline, segment = _segment(item.archive_name, oldest.wal_segment_size)
+    timeline, segment = _segment_origin(item.archive_name, oldest.wal_segment_size)
     start_timeline = oldest.wal_ranges[0].timeline
     start_segment = _lsn(oldest.start_lsn) // oldest.wal_segment_size
     return timeline < start_timeline or (timeline == start_timeline and segment < start_segment)
