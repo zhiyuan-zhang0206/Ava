@@ -61,6 +61,21 @@ def probe() -> Iterator[tuple[Any, Any]]:
     delattr(ava, "probe")
 
 
+@pytest.fixture(autouse=True)
+def _drop_fake_plugin_modules() -> Iterator[None]:
+    """The `scan_and_load` tests import the fake plugin packages they write under
+    tmp dirs (`plugins.codex_usage.plugin` / `.refresh`); a leftover in
+    `sys.modules` poisons a later same-process file's negatives (a boot loader
+    must never import a *disabled* plugin — `test_plugin_load_containment` read
+    the leftovers as exactly that). Drop whatever a test here adds."""
+    before = {name for name in sys.modules if name == "plugins" or name.startswith("plugins.")}
+    yield
+    for name in [
+        n for n in sys.modules if (n == "plugins" or n.startswith("plugins.")) and n not in before
+    ]:
+        del sys.modules[name]
+
+
 def test_wrap_installs_and_stack_lists(probe: tuple[Any, Any]):
     """wrap replaces the target; stack reports one (plugin, wrapper) layer."""
     ns, fn = probe
