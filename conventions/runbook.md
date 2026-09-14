@@ -715,7 +715,8 @@ accepted by the cluster's private loopback `pg_hba.conf`; its password must not
 be embedded in commands or logs. This foundation does not create that identity
 or enable PostgreSQL archiving. Until the activation runbook provisions and
 verifies it, keep `AVA_PITR_BASE_BACKUP_ENABLED=false`. Candidate success never
-replaces or prunes the daily and migration-bearing pre-update logical dumps.
+replaces or prunes daily logical dumps. A migration-bearing update can reuse a
+protected base plus freshly verified WAL as described in the update procedure.
 
 Physical PITR is disabled by default. Converge only prepares
 `$AVA_HOME/physical-backup/{spool,ack}` (0700) and atomically publishes the
@@ -784,8 +785,10 @@ base locally under `$AVA_HOME/physical-backup/restore/`. Insufficient space
 defers protection; do not reduce the WAL/spool, logical-backup, or emergency
 reserves to force a run. A candidate remains `protected=false` until the real
 isolated replay, promotion, fingerprints, live-Postgres identity check, and
-immutable proof publication all succeed. Keep daily and pre-update logical
-dumps regardless; this boundary has no retention or remote-delete operation.
+immutable proof publication all succeed. Keep daily logical dumps; this
+boundary has no retention or remote-delete operation. Enabled PITR replaces
+the migration-bearing update's logical export only after its separate fresh
+recovery-point verification succeeds.
 To re-prove a protected chain at an operator-chosen target LSN, run the
 isolated drill: `ava pitr drill` (procedure:
 `.agents/skills/operating-ava-cluster/references/physical-restore-drill.md`).
@@ -1258,6 +1261,30 @@ In a mixed-version fleet, split the wave instead of rolling the whole cluster â€
 see [bootstrap-update-runbook.md](bootstrap-update-runbook.md).
 
 Down-failure drill: see [down-failure-drill.md](down-failure-drill.md).
+
+**Incremental pre-update recovery.** Before a migration-bearing update pauses
+any runner, an enabled PITR deployment reuses the newest protected scheduled
+base and creates a named PostgreSQL restore point. The updater verifies the
+live database/system/timeline identity, switches WAL, waits for every segment
+from the base to that point, and compares all required objects against a fresh
+viewer-only remote inventory. It publishes an immutable recovery receipt
+offsite and fsyncs the local copy under
+`$AVA_HOME/physical-backup/update-recovery/`. The entire gate is bounded to
+600 seconds, below the rollout watchdog's 900-second silence threshold.
+Broken or incomplete enabled PITR fails before maintenance; it never silently
+starts another full export. With PITR disabled, updates retain the verified
+logical dump. Code-only updates need neither artifact.
+
+The receipt identifies a physical, whole-instance recovery point, not a
+`pg_restore` input or a new restore-drill result. Recover into an isolated
+instance with its pinned base, WAL objects and `target_lsn`, then verify the
+result before any production replacement. The base's completed drill is
+reused; each update verifies the later WAL's archival, not a fresh replay of
+the whole database. Recovery remains subject to the configured PITR chain
+retention window; a surviving receipt does not extend object retention.
+The point is captured before runner drain, so writes after it are outside
+that recovery point, as with the preceding logical snapshot. Daily logical
+backups and PITR activation's initial logical recovery floor remain separate.
 
 **Rollback health guard and observation window.** `ava cluster health-probe` retries
 gateway liveness three times, 30 seconds apart, before declaring it unhealthy. A
