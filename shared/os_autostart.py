@@ -327,14 +327,23 @@ def unregister_autostart(home: Path | None = None) -> None:
 
 
 def gui_domain_kickstart_command() -> str:
-    """The `launchctl kickstart` line that re-runs this cluster's autostart job in
-    the current user's GUI domain.
+    """The shell line that (re)runs this cluster's autostart job in the current
+    user's GUI domain, safe on a domain that has never loaded it.
 
-    The remedy `relaunch_via_gui_domain` executes, exposed for operator-facing
-    messages: a start chain outside the GUI login session must be re-homed
-    through the GUI-domain job instead of bringing services up in place
-    (task #3346)."""
-    return f"launchctl kickstart -k gui/{os.getuid()}/{_autostart_label(_home_slug())}"
+    The remedy operator-facing messages print (task #3346): ensure the GUI
+    domain knows the job — a fresh registration is only loaded at the next
+    login, so a bare kickstart would fail with "Could not find service" — then
+    kickstart it. One copy-pasteable line, the same two steps
+    `relaunch_via_gui_domain` performs."""
+    slug = _home_slug()
+    label = _autostart_label(slug)
+    domain = f"gui/{os.getuid()}"
+    plist_path = _autostart_plist_path(slug)
+    return (
+        f"(launchctl print {domain}/{label} >/dev/null 2>&1 "
+        f"|| launchctl bootstrap {domain} {plist_path}) "
+        f"&& launchctl kickstart -k {domain}/{label}"
+    )
 
 
 def relaunch_via_gui_domain() -> tuple[bool, str]:
