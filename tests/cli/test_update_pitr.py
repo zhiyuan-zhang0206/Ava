@@ -181,7 +181,9 @@ def test_fresh_point_is_complete_and_published_before_returning(
         return
     path = _update_pitr.create_recovery_point(SHA)
     receipt = json.loads(path.read_text())
-    assert receipt["target_lsn"] == target
+    assert receipt["archive_end_lsn"] == target
+    assert receipt["recovery_target_name"].startswith("ava_update_")
+    assert "target_lsn" not in receipt
     assert receipt["target_sha"] == SHA
     assert len(receipt["wal"]) == 3
     assert receipt["protected_base"] == json.loads(proof.to_json())
@@ -329,4 +331,22 @@ def test_physical_receipt_is_not_uploaded_or_restored_as_logical_dump(
     monkeypatch.setattr(_update_dryrun.subprocess, "Popen", no_upload)
     _update_dryrun.spawn_async_offsite_upload(tmp_path, path)
     _print_pre_update_data_snapshot_restore(path)
-    assert "whole-instance recovery" in capsys.readouterr().err
+    guidance = capsys.readouterr().err
+    assert "whole-instance recovery" in guidance
+    assert "recovery_target_name" in guidance
+    assert "archive_end_lsn is coverage only" in guidance
+
+
+def test_receipt_cleanup_keeps_seven_and_preserves_unmanaged_files(tmp_path: Path) -> None:
+    for number in range(12):
+        (
+            tmp_path / f"ava_update_{'a' * 12}_{number:012x}{_update_pitr.RECOVERY_SUFFIX}"
+        ).write_text("old")
+    current = tmp_path / f"ava_update_{'b' * 12}_{'c' * 12}{_update_pitr.RECOVERY_SUFFIX}"
+    current.write_text("new")
+    unmanaged = tmp_path / "operator-recovery.json"
+    unmanaged.write_text("keep")
+    _update_pitr._prune_receipts(current)
+    assert current.exists()
+    assert unmanaged.exists()
+    assert len(list(tmp_path.glob(f"*{_update_pitr.RECOVERY_SUFFIX}"))) == 7

@@ -42,6 +42,7 @@ from shared.private_storage import ensure_private_dir
 
 RECOVERY_SUFFIX = ".pre-update.pitr.json"
 WAL_WAIT_SECONDS = 300
+LOCAL_RECEIPTS_KEEP = 7
 
 
 class RecoveryPointError(RuntimeError):
@@ -152,6 +153,22 @@ def _write_receipt(path: Path, payload: bytes) -> None:
         os.close(fd)
 
 
+def _prune_receipts(current: Path) -> None:
+    """Bound local audit copies after publication; never delete backup objects."""
+    owned_name = r"ava_update_[0-9a-f]{12}_[0-9a-f]{12}\.pre-update\.pitr\.json"
+    older = [
+        path
+        for path in current.parent.iterdir()
+        if path != current
+        and not path.is_symlink()
+        and path.is_file()
+        and re.fullmatch(owned_name, path.name)
+    ]
+    older.sort(key=lambda path: (path.stat().st_mtime_ns, path.name), reverse=True)
+    for path in older[LOCAL_RECEIPTS_KEEP - 1 :]:
+        path.unlink()
+
+
 def create_recovery_point(target_sha: str) -> Path:
     if re.fullmatch(r"[0-9a-f]{40}", target_sha) is None:
         raise ValueError("PITR recovery point requires the full target commit")
@@ -177,14 +194,14 @@ def create_recovery_point(target_sha: str) -> Path:
             row = conn.execute("SELECT pg_create_restore_point(%s)::text", (point_name,)).fetchone()
             if row is None:
                 raise RecoveryPointError("PostgreSQL omitted the pre-update restore point")
-            target_lsn = str(row[0])
-            if _lsn(target_lsn) < _lsn(proof.target_lsn):
+            archive_end_lsn = str(row[0])
+            if _lsn(archive_end_lsn) < _lsn(proof.target_lsn):
                 raise RecoveryPointError("PITR restore point precedes the protected base")
             conn.execute("SELECT pg_switch_wal()")
             if _identity(conn) != identity:
                 raise RecoveryPointError("PostgreSQL identity changed during the WAL switch")
         names = required_archive_names(
-            (WalRange(identity.timeline, proof.candidate.start_lsn, target_lsn),),
+            (WalRange(identity.timeline, proof.candidate.start_lsn, archive_end_lsn),),
             identity.wal_segment_size,
         )
         wal = _wait_wal(root, names)
@@ -200,8 +217,11 @@ def create_recovery_point(target_sha: str) -> Path:
             "kind": "pre-update-pitr",
             "target_sha": target_sha,
             "created_at": datetime.now(UTC).isoformat(),
-            "restore_point_name": point_name,
-            "target_lsn": target_lsn,
+            # pg_create_restore_point returns the record's END. Recovery's LSN
+            # target compares record START positions, so restoring to this LSN
+            # can replay the following record. Stop at the unique name instead.
+            "recovery_target_name": point_name,
+            "archive_end_lsn": archive_end_lsn,
             "identity": asdict(identity),
             "protected_base": json.loads(proof.to_json()),
             "wal": [asdict(item) for item in wal],
@@ -216,6 +236,7 @@ def create_recovery_point(target_sha: str) -> Path:
         )
         destination = ensure_private_dir(root / "update-recovery") / name
         _write_receipt(destination, payload)
+        _prune_receipts(destination)
         return destination
 
 

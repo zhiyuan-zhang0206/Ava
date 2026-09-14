@@ -22,3 +22,12 @@ Do not bootstrap this change by editing production source, inventing a
 completed backup, disabling the backup gate, or changing migration history.
 The first deployment needs an independently verified transition through the
 installed updater; a merged PR alone cannot change its imported code.
+
+Review correction: PostgreSQL returns the restore-point record's end LSN,
+while LSN-target recovery compares record starts. The receipt therefore names
+`recovery_target_name` as the recovery stop and `archive_end_lsn` only as the
+WAL coverage endpoint. Local receipts keep seven copies after successful
+publication. Offsite receipts deliberately remain immutable audit metadata
+under the existing no-delete publisher authority; their complete WAL identity
+lists grow with chain length and accumulate per update attempt. They do not
+pin backup objects beyond the configured chain retention window.
