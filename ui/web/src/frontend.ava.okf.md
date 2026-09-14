@@ -50,12 +50,13 @@ Ava's web user interface — Next.js 16 (App Router) + React 19 + Tailwind CSS 4
 
 ## Provider composition (`app/layout.tsx` → `components/providers.tsx`)
 
-`<html lang="zh-CN">` → `Providers` (QueryClientProvider → AuthProvider → EventStreamProvider → [fold owner + `SettingsMigration`] → ThemeProvider → `AppConnectionBanner` + `ToastHost`) → `AuthGuard` → page.
+`<html lang="zh-CN">` → `Providers` (QueryClientProvider → AuthProvider → EventStreamProvider → [fold owner + `SettingsMigration`] → ThemeProvider → `AppConnectionBanner` + `ToastHost` + `OpenTasksNoticeHost`) → `AuthGuard` → page.
 
 - **QueryClient**: `staleTime` default 5min, `gcTime` 30min, `refetchOnWindowFocus` off (SSE-driven queries set `staleTime: Infinity`; bounded snapshots opt into polling explicitly). Sidebar stats consumers share one QueryClient-level 30s poll coordinator, so responsive/header/footer observers cannot mint independent intervals. A 401 is never retried and globally invalidates the session so `AuthGuard` redirects to `/login` and unmounts polling observers (Task #1326).
 - **EventStreamProvider** sits above the route tree: global `/api/system` broadcast persists across page navigation (one EventSource shared across routes; closed while the tab is hidden, reopened on return).
 - **Fold owner** (`useFoldOwner`, inside `EventStreamProvider`): the SOLE root writer — one subscriber folds every global-broadcast event into the query caches (`["agents", "live"]` + `["agents", "terminated"]` — both scopes always seeded, / `["notices"]` / `["agent-pages"]` / `["tasks"]` / `["fleet-graph"]` families, debounced per family) and runs the central reconnect reconcile. Hooks only read their keys now.
 - **ToastHost**: root-level renderer for the store's toast slot, so error toasts reach the user on every route (not just Home).
+- **OpenTasksNoticeHost** (#3374): root-level renderer for the store's open-tasks notice slot — a terminate response carrying `open_tasks` (wire #2488) raises a dialog (count + up to five rows + "and N more"); dismissal is explicit; lazily imported.
 - **SettingsMigration** (#657): empty-rendering component that runs once after auth, migrates legacy localStorage preferences into DB `user_settings` then deletes the keys.
 - **AppConnectionBanner** (#648): root-mounted; drives cluster health polling (`useClusterHealth`), mirrors SSE status into store (`ConnectionNotice`), stranded-cluster recovery banner (the only root banner, requires operator action); self-gated by `useAuth().status`. All Providers self-gate on auth state—no outer auth guard layer.
 
@@ -67,7 +68,7 @@ Ava's web user interface — Next.js 16 (App Router) + React 19 + Tailwind CSS 4
 
 ## Three deeper topics
 
-- [[frontend-state.ava.okf.md|State management]] — three mechanisms division of labor + per-thread timeline cache + sticky controller
+- [[ui/web/src/frontend-state/frontend-state.ava.okf.md|State management]] — three mechanisms division of labor + per-thread timeline cache + sticky controller
 - [[ui/web/src/frontend-data-flow/frontend-data-flow.ava.okf.md|Data flow]] — dual SSE Provider architecture + hook directory
 - [[frontend-components.ava.okf.md|Components]] — chat view / Fleet view / settings page components
 

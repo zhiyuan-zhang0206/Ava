@@ -877,5 +877,10 @@
     "retryWindowed": "重试窗口化数据",
     "openRunTimeline": "打开运行时间线",
     "jumpNotice": "通知"
+  },
+  "openTasksNotice": {
+    "title": "该 agent 仍有 {count} 个未关闭任务",
+    "more": "还有 {more} 个",
+    "dismiss": "知道了"
   }
 }

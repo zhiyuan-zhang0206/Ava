@@ -16,7 +16,7 @@ the memory graph.
 - No Next rewrites proxy for `/api` — the frontend connects to the gateway
   directly (`API_BASE` resolution in `src/lib/api.ts`); same-origin reverse
   proxy in prod.
-- State rules live in `src/frontend-state.ava.okf.md` and
+- State rules live in `src/frontend-state/frontend-state.ava.okf.md` and
   `src/frontend-data-flow/frontend-data-flow.ava.okf.md`; the R4 concept model is in
   `okf/design/r4-frontend-projection.ava.okf.md` (repo root).
 
