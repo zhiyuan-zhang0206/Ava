@@ -155,9 +155,10 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # raises it to 165; compact_boundary_stamp (task #3180's failed compact
     # boundary anchor stamp) raises it to 166; the root self-check (P7 W1.2b,
     # task #3338) adds root_chain_broken + root_restart_breaker_open, raising
-    # it to 168.
+    # it to 168; the PR-flow sampler (task #2139's pr_flow_daily + pr_flow_run
+    # gauges) raises the current total to 170.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 168
+    assert len(_TELEMETRY_KINDS) == 170
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:
@@ -242,6 +243,36 @@ def test_compaction_completion_payload_exposes_ratio_and_frequency() -> None:
         "summary_chars",
         "summary_history_ratio",
     )
+
+
+def test_pr_flow_payloads_and_metric_dispositions() -> None:
+    """The PR-flow sampler re-emits its whole trailing window every run, so
+    every numeric field is per-day absolute state: an int would default to a
+    Counter and accrue across re-emissions, a float to a Histogram — each
+    must be dispositioned as a gauge (task #2139)."""
+    from shared.events.contract import payload_keys
+    from shared.telemetry_otlp import _METRIC_DISPOSITION
+
+    assert payload_keys("pr_flow_daily") == (
+        "day",
+        "merged_count",
+        "ready_to_merge_median_seconds",
+        "ready_to_merge_p90_seconds",
+        "qa_rounds_mean",
+        "qa_rereview_share",
+        "flake_new_quarantines",
+    )
+    assert payload_keys("pr_flow_run") == ("queue_depth",)
+    for field in (
+        "merged_count",
+        "ready_to_merge_median_seconds",
+        "ready_to_merge_p90_seconds",
+        "qa_rounds_mean",
+        "qa_rereview_share",
+        "flake_new_quarantines",
+    ):
+        assert _METRIC_DISPOSITION[("pr_flow_daily", field)] == "gauge", field
+    assert _METRIC_DISPOSITION[("pr_flow_run", "queue_depth")] == "gauge"
 
 
 def test_agent_registry_payload_and_metric_disposition() -> None:
