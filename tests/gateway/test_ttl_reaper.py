@@ -22,14 +22,16 @@ from psycopg_pool import ConnectionPool
 
 from gateway import ttl_reaper
 from gateway.ttl_reaper import (
+    _PASS_BATCH,
+    _SHELL_KILL_TIMEOUT_S,
     _claim_shell_row_still_expired,
     _reap_expired_notices_blocking,
     _reap_expired_pages_blocking,
     _reap_expired_shells,
     _reap_expired_web_sessions_blocking,
-    _reap_terminated_owner_watchers,
     _reaper_loop,
 )
+from gateway.watcher_ttl import reap_terminated_owner_watchers
 from ops.rpc_schemas import ShellKillResult
 from shared.config import settings
 from shared.db import create_agent
@@ -47,6 +49,13 @@ def reaper_pool() -> Iterator[ConnectionPool]:
 
 def _empty_page_reap(_pool: ConnectionPool) -> list[tuple[int, str, int]]:
     return []
+
+
+async def _reap_terminated_watchers(reaper_pool: ConnectionPool) -> list[tuple[int, int]]:
+    """The terminated-owner watcher pass with the reaper loop's run parameters."""
+    return await reap_terminated_owner_watchers(
+        reaper_pool, timeout_s=_SHELL_KILL_TIMEOUT_S, batch=_PASS_BATCH
+    )
 
 
 def _empty_web_session_reap(_pool: ConnectionPool) -> int:
@@ -415,15 +424,14 @@ async def test_reap_expired_shells_keeps_row_on_unreachable(
         assert row is not None and row[0] == 1
 
 
-async def test_reap_expired_shells_skips_live_watcher_rows(
+async def test_reap_expired_shells_kills_watcher_past_deadline(
     db_conn: psycopg.Connection, reaper_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A TTL row whose (agent, session) is a live watcher is never reaped.
-
-    The watcher registry owns the session's lifecycle (its own deadline +
-    the boot reconcile); a shell TTL must not kill it. The skip is SQL-side
-    (NOT EXISTS), so no shell_kill is dispatched and the TTL row stays.
-    """
+    """One lifecycle (task #3411): a watcher session whose deadline passed is
+    reclaimed like any other — no registry skip — and its still-running row
+    is marked `reaped` so no later boot rebuilds it. The shell-shaped
+    interruption notice is suppressed (the reclaim ends a scheduled window,
+    not a user task)."""
     aid = _running_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute(
@@ -432,9 +440,55 @@ async def test_reap_expired_shells_skips_live_watcher_rows(
             (aid,),
         )
         cur.execute(
-            "INSERT INTO agent_watchers (agent_id, session_id, kind, name, status) "
-            "VALUES (%s, 21, 'cron', 'escalation-check', 'running')",
+            "INSERT INTO agent_watchers (agent_id, session_id, kind, name, status, cron_end_at) "
+            "VALUES (%s, 21, 'cron', 'escalation-check', 'running', now() - interval '1 minute')",
             (aid,),
+        )
+        cur.execute("UPDATE agents_meta SET machine = 'macmini' WHERE id = %s", (aid,))
+    db_conn.commit()
+
+    dispatched: list[tuple[str, object]] = []
+
+    async def _dispatch(
+        machine: str, kind: str, payload: dict[str, object], **kwargs: object
+    ) -> dict[str, object]:
+        dispatched.append((kind, payload))
+        return ShellKillResult(mode="killed", interrupted=True, name="x").model_dump()
+
+    monkeypatch.setattr(ttl_reaper.cluster_rpc, "dispatch_to_machine", _dispatch)
+    reaped = await _reap_expired_shells(reaper_pool)
+
+    assert reaped == [(aid, 21)]
+    assert [d[0] for d in dispatched] == ["shell_kill"]
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s", (aid,))
+        row = cur.fetchone()
+        assert row is not None and row[0] == 0
+    assert _watcher_status(db_conn, aid, 21) == "reaped"
+    assert (
+        _system_inbounds(db_conn, aid) == []
+    )  # watcher reclaim is not an "interrupted task" notice
+
+
+async def test_reap_expired_shells_heals_legacy_watcher_before_deadline(
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Task #3411 migration: a running watcher whose recorded TTL is a stale
+    placeholder (spawned before the unified write path) while its true
+    deadline is still ahead is healed to that deadline — never reclaimed —
+    and the heal is idempotent (a second pass finds nothing)."""
+    aid = _running_agent(db_conn)
+    end = datetime.now(UTC) + timedelta(hours=6)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at, created_at) "
+            "VALUES (%s, 21, now() - interval '1 minute', now() - interval '1 hour 1 minute')",
+            (aid,),
+        )
+        cur.execute(
+            "INSERT INTO agent_watchers (agent_id, session_id, kind, name, status, cron_end_at) "
+            "VALUES (%s, 21, 'cron', 'escalation-check', 'running', %s)",
+            (aid, end),
         )
         cur.execute("UPDATE agents_meta SET machine = 'macmini' WHERE id = %s", (aid,))
     db_conn.commit()
@@ -453,9 +507,56 @@ async def test_reap_expired_shells_skips_live_watcher_rows(
     assert reaped == []
     assert dispatched == []
     with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT expires_at FROM agent_shell_ttls WHERE agent_id = %s AND session_id = 21",
+            (aid,),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    assert abs((row[0] - end).total_seconds()) < 5  # rewritten to the true deadline
+    assert _watcher_status(db_conn, aid, 21) == "running"
+
+    # Idempotent: the healed row is no longer expired, so a second pass has
+    # nothing to heal and nothing to kill.
+    assert await _reap_expired_shells(reaper_pool) == []
+    assert dispatched == []
+
+
+async def test_reap_expired_shells_reaps_zombie_session_of_rebuilt_row(
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """1482-class: a terminal (`rebuilt`) row no longer pins the old session
+    it names — a live session with an expired TTL is reclaimed like any
+    other, while the history row keeps its status."""
+    aid = _running_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at, created_at) "
+            "VALUES (%s, 23, now() - interval '1 minute', now() - interval '1 hour 1 minute')",
+            (aid,),
+        )
+        cur.execute(
+            "INSERT INTO agent_watchers (agent_id, session_id, kind, name, status) "
+            "VALUES (%s, 23, 'at', 'orphaned-one-shot', 'rebuilt')",
+            (aid,),
+        )
+        cur.execute("UPDATE agents_meta SET machine = 'macmini' WHERE id = %s", (aid,))
+    db_conn.commit()
+
+    async def _dispatch(
+        machine: str, kind: str, payload: dict[str, object], **kwargs: object
+    ) -> dict[str, object]:
+        return ShellKillResult(mode="killed", interrupted=False).model_dump()
+
+    monkeypatch.setattr(ttl_reaper.cluster_rpc, "dispatch_to_machine", _dispatch)
+    reaped = await _reap_expired_shells(reaper_pool)
+
+    assert reaped == [(aid, 23)]
+    with db_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s", (aid,))
         row = cur.fetchone()
-        assert row is not None and row[0] == 1
+        assert row is not None and row[0] == 0
+    assert _watcher_status(db_conn, aid, 23) == "rebuilt"
 
 
 async def test_reap_expired_shells_reaps_closed_watcher_rows(
@@ -850,11 +951,22 @@ async def test_reap_expired_shells_skips_row_renewed_after_select(
         )
     db_conn.commit()
 
-    stale_rows: list[tuple[int, int, datetime, datetime]] = [
-        (aid, 44, datetime.now(UTC) - timedelta(minutes=1), datetime.now(UTC) - timedelta(hours=2))
+    stale_rows: list[dict[str, object]] = [
+        {
+            "agent_id": aid,
+            "session_id": 44,
+            "expires_at": datetime.now(UTC) - timedelta(minutes=1),
+            "created_at": datetime.now(UTC) - timedelta(hours=2),
+            "watcher_kind": None,
+            "watcher_status": None,
+            "watcher_created_at": None,
+            "watcher_timeout_secs": None,
+            "watcher_fires_at": None,
+            "watcher_cron_end_at": None,
+        }
     ]
 
-    def _stale_select(_pool: ConnectionPool) -> list[tuple[int, int, datetime, datetime]]:
+    def _stale_select(_pool: ConnectionPool) -> list[dict[str, object]]:
         return stale_rows
 
     monkeypatch.setattr(ttl_reaper, "_expired_shell_rows_blocking", _stale_select)
@@ -940,7 +1052,7 @@ async def test_reap_terminated_owner_watcher_killed_marks_reaped(
         return ShellKillResult(mode="killed", interrupted=True, name="daily").model_dump()
 
     monkeypatch.setattr(ttl_reaper.cluster_rpc, "dispatch_to_machine", _dispatch)
-    reaped = await _reap_terminated_owner_watchers(reaper_pool)
+    reaped = await _reap_terminated_watchers(reaper_pool)
 
     assert reaped == [(aid, 31)]
     assert _watcher_status(db_conn, aid, 31) == "reaped"
@@ -960,7 +1072,7 @@ async def test_reap_terminated_owner_watcher_absent_marks_reaped(
         return ShellKillResult(mode="absent").model_dump()
 
     monkeypatch.setattr(ttl_reaper.cluster_rpc, "dispatch_to_machine", _dispatch)
-    reaped = await _reap_terminated_owner_watchers(reaper_pool)
+    reaped = await _reap_terminated_watchers(reaper_pool)
 
     assert reaped == [(aid, 32)]
     assert _watcher_status(db_conn, aid, 32) == "reaped"
@@ -993,7 +1105,7 @@ async def test_reap_terminated_owner_watcher_queues_reclamation_notice(
         return ShellKillResult(mode="killed", interrupted=False, name="daily").model_dump()
 
     monkeypatch.setattr(ttl_reaper.cluster_rpc, "dispatch_to_machine", _dispatch)
-    reaped = await _reap_terminated_owner_watchers(reaper_pool)
+    reaped = await _reap_terminated_watchers(reaper_pool)
 
     assert reaped == [(aid, 35)]
     assert _watcher_status(db_conn, aid, 35) == "reaped"
@@ -1020,7 +1132,7 @@ async def test_reap_terminated_owner_watcher_unreachable_keeps_row(
         raise ttl_reaper.cluster_rpc.ClusterOpUnreachable("boom")
 
     monkeypatch.setattr(ttl_reaper.cluster_rpc, "dispatch_to_machine", _dispatch)
-    reaped = await _reap_terminated_owner_watchers(reaper_pool)
+    reaped = await _reap_terminated_watchers(reaper_pool)
 
     assert reaped == []
     assert _watcher_status(db_conn, aid, 33) == "running"
@@ -1050,7 +1162,7 @@ async def test_reap_terminated_owner_watcher_resurrected_mid_pass_keeps_row_runn
         return ShellKillResult(mode="killed", interrupted=True, name="daily").model_dump()
 
     monkeypatch.setattr(ttl_reaper.cluster_rpc, "dispatch_to_machine", _dispatch)
-    reaped = await _reap_terminated_owner_watchers(reaper_pool)
+    reaped = await _reap_terminated_watchers(reaper_pool)
 
     assert reaped == []
     assert _watcher_status(db_conn, aid, 34) == "running"
@@ -1082,7 +1194,7 @@ async def test_crash_corpse_watchers_are_not_reaped(
         return ShellKillResult(mode="killed", interrupted=True, name="x").model_dump()
 
     monkeypatch.setattr(ttl_reaper.cluster_rpc, "dispatch_to_machine", _dispatch)
-    reaped = await _reap_terminated_owner_watchers(reaper_pool)
+    reaped = await _reap_terminated_watchers(reaper_pool)
 
     assert reaped == []
     assert dispatched == []
@@ -1109,7 +1221,7 @@ async def test_live_owner_watchers_are_not_reaped(
         return ShellKillResult(mode="killed", interrupted=True, name="x").model_dump()
 
     monkeypatch.setattr(ttl_reaper.cluster_rpc, "dispatch_to_machine", _dispatch)
-    reaped = await _reap_terminated_owner_watchers(reaper_pool)
+    reaped = await _reap_terminated_watchers(reaper_pool)
 
     assert reaped == []
     assert dispatched == []
@@ -1133,7 +1245,7 @@ async def test_terminal_watcher_rows_are_not_reaped(
         return ShellKillResult(mode="killed", interrupted=True, name="x").model_dump()
 
     monkeypatch.setattr(ttl_reaper.cluster_rpc, "dispatch_to_machine", _dispatch)
-    reaped = await _reap_terminated_owner_watchers(reaper_pool)
+    reaped = await _reap_terminated_watchers(reaper_pool)
 
     assert reaped == []
     assert dispatched == []

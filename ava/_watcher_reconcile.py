@@ -9,7 +9,7 @@ import pathlib
 from collections.abc import Callable
 from typing import Any
 
-from shared.watcher import TEMPLATE_VERSION
+from shared.watcher import TEMPLATE_VERSION, session_deadline
 
 _agent_id: Callable[[], int]
 _watchers_dir: Callable[[], pathlib.Path]
@@ -149,9 +149,12 @@ def _reconcile_missing(
     alive: set[int],
 ) -> str | None:
     """Handle one registry row whose session is gone: rebuild a standing
-    schedule / future one-shot, mark a passed one-shot or launch watcher missed,
-    drop an ended schedule. Returns the action sentence (None when nothing was
-    done — an ended cron schedule deletes its row without an action).
+    schedule / future one-shot while its deadline is still ahead (the rebuild
+    re-mounts with the remaining lifetime — `ava.watcher._spawn` folds
+    `deadline - now`, never a fresh default), mark a passed one-shot or
+    launch watcher missed, and mark a cron past its deadline `reaped` — past
+    the deadline nothing is rebuilt (task #3411: TTL <= 0 never rebuilds).
+    Returns the action sentence (None when nothing was done).
 
     `alive` is the caller's live-session set, used to spot a live duplicate
     before rebuilding a cron (Task #1825)."""
@@ -169,9 +172,17 @@ def _reconcile_missing(
         _kill_watcher_orphan_processes(session_id)
         if row["kind"] == "cron":
             end_at = row["cron_end_at"]
-            if end_at is not None and end_at < now:
-                delete_watcher(agent_id, session_id)
-                return f"cron watcher '{name}': schedule ended; row dropped"
+            deadline = session_deadline("cron", cron_end_at=end_at)
+            if deadline is not None and deadline <= now:
+                # Deadline passed: the schedule's window is over — never
+                # rebuilt (a rebuild would mount a stillborn session; the
+                # reconcile-side TTL<=0 guard, task #3411). Retaining the row
+                # as `reaped` keeps the decision auditable, stops every later
+                # boot from reconsidering it, and keeps one rule shared with
+                # the reaper: past the deadline, a watcher is reclaimed, not
+                # resurrected.
+                mark_status(agent_id, session_id, "reaped")
+                return f"cron watcher '{name}': deadline {end_at} passed; row marked reaped"
             # Dedupe (Task #1825, schedule-level): the schedule may already be
             # live under another session (a duplicate registration survived a
             # kill/restart cycle — #2811, CEO #228; or a renewal's kill half
@@ -202,6 +213,11 @@ def _reconcile_missing(
             mark_status(agent_id, session_id, "rebuilt")
             return f"cron watcher '{name}' rebuilt as session {new_id}"
         if row["kind"] == "at":
+            # Rebuild only while the FIRE moment is still ahead: once
+            # `fires_at` has passed the wake is lost, and re-spawning it would
+            # be a stillborn session (`at()` refuses a past moment). The
+            # session deadline (fires_at + AT_SESSION_TTL_GRACE_SECONDS)
+            # governs the reclaim window, not this rebuild gate.
             if row["fires_at"] is not None and row["fires_at"] > now:
                 new_id = at(row["fires_at"], row["message"] or "", name=name)
                 mark_status(agent_id, session_id, "rebuilt")
@@ -327,9 +343,11 @@ def reconcile() -> list[str]:
       to the current allocation generation (the standing schedule is
       the whole point of the registry: a rollout reaped its session and nothing
       else knew it should exist). A row from a superseded generation is reaped
-      and retained as history instead. A schedule whose `end_time` has passed is
-      deleted instead — it ended, just not cleanly. The old row is marked
-      `rebuilt`; the new session gets its own `running` row.
+      and retained as history instead. A schedule past its deadline
+      (`cron_end_at`) is marked `reaped` instead — it ended, just not cleanly,
+      and a rebuild could never be viable (its folded TTL would be <= 0). The
+      old row is marked `rebuilt`; the new session gets its own `running` row
+      and a shell TTL folded to the remaining time.
     - `at` — re-spawned while its moment is still in the future; once the
       moment has passed the wake is lost, so the row is marked `missed` and the
       agent is told (it created the one-shot; it should know it never fired).

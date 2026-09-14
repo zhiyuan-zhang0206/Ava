@@ -187,36 +187,73 @@ def test_launch_registers_ttl_row_from_timeout(
         ava.shell.kill(wid)
 
 
-def test_cron_registers_default_24h_ttl(db_conn: psycopg.Connection, _agent_row: int) -> None:
-    """Task #2614: a cron watcher has no timeout — its session records the
-    24h hard cap as the TTL (the reaper still never kills it while its
-    registry row is live; task #2589's NOT EXISTS guard)."""
+def test_cron_registers_ttl_folded_to_end_time(
+    db_conn: psycopg.Connection, _agent_row: int
+) -> None:
+    """Task #3411: a cron watcher's session TTL IS its deadline — the
+    registration's end_time (defaulted to now + 7 days, task #2617), folded
+    as `deadline - now` at the (re)mount — never the old 24h placeholder."""
     before = datetime.datetime.now(datetime.UTC)
     wid = watcher.cron("0 4 * * *", "wake", name="test-cron-ttl")
     try:
         deadline = _ttl_deadline(db_conn, _agent_row, wid)
         assert deadline is not None
-        assert (
-            before + datetime.timedelta(hours=23, minutes=59)
-            <= deadline
-            <= datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=24, minutes=1)
+        delta = deadline - before
+        # Default end = the registration minute + 7 days (minute-truncated).
+        assert datetime.timedelta(days=7) - datetime.timedelta(minutes=1) <= delta
+        assert delta <= datetime.timedelta(days=7, minutes=1)
+        # The system-side true value is exempt from the 24h sessions.new cap.
+        assert deadline > datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=6)
+    finally:
+        ava.shell.kill(wid)
+
+
+def test_cron_registers_ttl_from_explicit_end(db_conn: psycopg.Connection, _agent_row: int) -> None:
+    """An explicit end_time beyond the user-session cap still folds exactly:
+    the watcher TTL is the stored deadline, uncapped (task #3411)."""
+    end = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=30)
+    wid = watcher.cron("0 4 * * *", "wake", end_time=end, name="test-cron-ttl-explicit")
+    try:
+        deadline = _ttl_deadline(db_conn, _agent_row, wid)
+        assert deadline is not None
+        assert abs((deadline - end).total_seconds()) < 10
+    finally:
+        ava.shell.kill(wid)
+
+
+def test_launch_timeout_beyond_24h_is_not_capped(
+    db_conn: psycopg.Connection, _agent_row: int
+) -> None:
+    """Task #3411: a launch watcher's timeout IS its deadline — a 48h
+    watchdog registers a ~48h session TTL. The 24h cap protects user sessions
+    (sessions.new / run_background), not system watchers."""
+    wid = watcher.launch("import time\ntime.sleep(60)\n", timeout="48h", name="test-cap-ttl")
+    try:
+        deadline = _ttl_deadline(db_conn, _agent_row, wid)
+        assert deadline is not None
+        assert deadline >= datetime.datetime.now(datetime.UTC) + datetime.timedelta(
+            hours=47, minutes=59
         )
     finally:
         ava.shell.kill(wid)
 
 
-def test_launch_timeout_beyond_24h_caps_session_ttl(
+def test_at_registers_ttl_row_from_fires_at_plus_grace(
     db_conn: psycopg.Connection, _agent_row: int
 ) -> None:
-    """A launch watcher's watchdog may outlive one session day, but the
-    session TTL is still capped at the 24h ruling (2026-09-01)."""
-    wid = watcher.launch("import time\ntime.sleep(60)\n", timeout="48h", name="test-cap-ttl")
+    """Task #3411: an at watcher's session TTL is its fire moment plus the
+    grace (`shared.watcher.AT_SESSION_TTL_GRACE_SECONDS`), so the wake
+    delivery and the session's exit notice complete before the reaper may
+    reclaim it."""
+    from shared.watcher import AT_SESSION_TTL_GRACE_SECONDS
+
+    when = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=2)
+    wid = watcher.at(when, "wake", name="test-at-ttl")
     try:
         deadline = _ttl_deadline(db_conn, _agent_row, wid)
         assert deadline is not None
-        assert deadline <= datetime.datetime.now(datetime.UTC) + datetime.timedelta(
-            hours=24, minutes=1
-        )
+        expected = when + datetime.timedelta(seconds=AT_SESSION_TTL_GRACE_SECONDS)
+        assert abs((deadline - expected).total_seconds()) < 10
     finally:
         ava.shell.kill(wid)
 
@@ -1117,8 +1154,9 @@ def test_spawn_binds_registry_generation_to_the_created_session_record(
     def _create_session(
         _name: str | None = None,
         *,
-        _cwd: str | None = None,
+        cwd: str | None = None,
         ttl: float | None = None,
+        system: bool = False,
     ) -> tuple[int, str]:
         return 424271, "ava-agent-1-shell-424271-record-bound"
 
@@ -1317,7 +1355,7 @@ def test_spawn_back_to_back_keeps_all_files(
     alive: set[int] = set()
     counter = iter(range(1000, 1003))
 
-    def _fake_create(name: str, *, ttl: float) -> tuple[int, str]:
+    def _fake_create(name: str, *, ttl: float, system: bool = False) -> tuple[int, str]:
         sid = next(counter)
         alive.add(sid)
         return sid, name
@@ -1648,6 +1686,87 @@ def test_reconcile_missing_session_still_rebuilds_cron(
     assert len(spawned) == 1
     assert statuses == [(_TEST_AGENT_BASE, 68, "rebuilt")]
     assert any("rebuilt as session 999" in a for a in actions)
+
+
+def test_reconcile_marks_reaped_when_cron_deadline_passed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Task #3411: a dead cron row past its deadline (cron_end_at) is marked
+    `reaped`, never rebuilt — the folded TTL would be <= 0 and the rebuild
+    would mount a stillborn session (the rebuild-expire storm guard)."""
+    from shared import watcher_registry
+
+    past = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=5)
+    monkeypatch.setattr(
+        watcher_registry,
+        "watcher_rows",
+        lambda _agent_id: [_cron_row(cron_end_at=past)],  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(ava.shell.sessions, "list", set)
+    statuses: list[tuple[object, object, object]] = []
+    monkeypatch.setattr(
+        watcher_registry,
+        "mark_status",
+        lambda a, s, st: statuses.append((a, s, st)),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    spawned: list[object] = []
+    monkeypatch.setattr(
+        _watcher_reconcile,
+        "cron",
+        lambda *a, **k: spawned.append((a, k)) or 999,  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    actions = watcher.reconcile()
+
+    from tests.ava.conftest import _TEST_AGENT_BASE
+
+    assert spawned == []
+    assert statuses == [(_TEST_AGENT_BASE, 68, "reaped")]
+    assert any("reaped" in a for a in actions)
+
+
+def test_reconcile_rebuild_folds_remaining_deadline(
+    db_conn: psycopg.Connection, _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Task #3411: the rebuild re-mounts with the REMAINING time — the new
+    session's TTL is the stored deadline minus now, not a fresh default
+    (a rebuild of a schedule with 2h left gets ~2h, never 24h/7d)."""
+    from ava.shell import sessions as _sessions
+    from shared.watcher_registry import register_watcher
+
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    end = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=2)
+    register_watcher(
+        _agent_row,
+        424273,
+        kind="cron",
+        name="fold-remaining",
+        message="wake",
+        cron_expr="0 9 * * *",
+        cron_timezone="UTC",
+        cron_end_at=end,
+    )
+    try:
+        actions = watcher.reconcile()
+        assert any("rebuilt" in a for a in actions)
+        rows = [
+            r
+            for r in _registry_rows(_agent_row)
+            if r["name"] == "fold-remaining" and r["status"] == "running"
+        ]
+        assert rows, "the rebuild registered its own running row"
+        new_id = rows[0]["session_id"]
+        try:
+            deadline = _ttl_deadline(db_conn, _agent_row, new_id)
+            assert deadline is not None
+            assert abs((deadline - end).total_seconds()) < 10
+        finally:
+            ava.shell.kill(new_id)
+    finally:
+        with contextlib.suppress(Exception):
+            from shared.watcher_registry import delete_watcher
+
+            delete_watcher(_agent_row, 424273)
 
 
 # ─── register-before-start (tech audit 2026-08-24 P1) ────────────────────────
