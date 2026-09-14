@@ -373,6 +373,40 @@ def test_enforce_keeps_timezone_supplied_by_env_alone(
     assert os.environ["AVA_TIMEZONE"] == "Asia/Shanghai"
 
 
+def test_enforce_forces_declared_tempo_urls_over_forwarded_snapshot(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The host-scope tempo URLs the unit's .env declares win over an inherited
+    copy. Session children receive host-scope facts by env forward, so a parent
+    that booted before the .env change hands its stale pair to every child and
+    the station's converge re-renders with the old URL (2026-09-14 wave, task
+    #3339)."""
+    monkeypatch.setitem(os.environ, "AVA_TELEMETRY_TEMPO_QUERY_URL", "http://10.55.0.9:3200")
+    monkeypatch.setitem(os.environ, "AVA_TELEMETRY_TEMPO_ENDPOINT", "http://10.55.0.9:14318")
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "AVA_TELEMETRY_TEMPO_QUERY_URL=http://127.0.0.1:3200\n"
+        "AVA_TELEMETRY_TEMPO_ENDPOINT=http://127.0.0.1:14318\n"
+    )
+    _point_env_at(monkeypatch, env_file, tmp_path)
+    dotenv_boot._enforce_cluster_env_authority()
+    assert os.environ["AVA_TELEMETRY_TEMPO_QUERY_URL"] == "http://127.0.0.1:3200"
+    assert os.environ["AVA_TELEMETRY_TEMPO_ENDPOINT"] == "http://127.0.0.1:14318"
+
+
+def test_enforce_keeps_tempo_urls_supplied_by_env_alone(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Undeclared tempo URLs stay untouched — env-only supply remains legitimate
+    (a not-yet-enrolled unit, the test suites)."""
+    monkeypatch.setitem(os.environ, "AVA_TELEMETRY_TEMPO_QUERY_URL", "http://tempo.test:3200")
+    env_file = tmp_path / ".env"
+    env_file.write_text("AVA_TIMEZONE=Asia/Shanghai\n")
+    _point_env_at(monkeypatch, env_file, tmp_path)
+    dotenv_boot._enforce_cluster_env_authority()
+    assert os.environ["AVA_TELEMETRY_TEMPO_QUERY_URL"] == "http://tempo.test:3200"
+
+
 def test_spawned_child_reads_forwarded_timezone_without_env_key(
     tmp_path: Path,
 ) -> None:

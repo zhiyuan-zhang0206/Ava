@@ -107,6 +107,44 @@ def test_platform_tag_supports_darwin_arm64_and_linux_amd64(
     assert _lgtm_native.platform_tag() == "linux_amd64"
 
 
+def test_render_warns_when_a_value_diverges_from_the_env_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A rendered host-scope value disagreeing with the unit's .env is called
+    out — the divergence mode behind the 2026-09-14 tempo revert (task #3339)."""
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".env").write_text(
+        "AVA_TELEMETRY_TEMPO_QUERY_URL=http://127.0.0.1:3200\n", encoding="utf-8"
+    )
+    _lgtm_native._warn_env_file_divergence(
+        home, {"AVA_TELEMETRY_TEMPO_QUERY_URL": "http://10.55.0.9:3200"}
+    )
+    err = capsys.readouterr().err
+    assert "AVA_TELEMETRY_TEMPO_QUERY_URL resolved to http://10.55.0.9:3200" in err
+    assert "inherited environment value is in effect" in err
+
+
+def test_render_value_divergence_check_stays_quiet_when_consistent(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".env").write_text(
+        "AVA_TELEMETRY_TEMPO_QUERY_URL=http://127.0.0.1:3200\nAVA_LGTM_LOKI_PORT=53100\n",
+        encoding="utf-8",
+    )
+    _lgtm_native._warn_env_file_divergence(
+        home,
+        {
+            "AVA_TELEMETRY_TEMPO_QUERY_URL": "http://127.0.0.1:3200",
+            "AVA_LGTM_LOKI_PORT": "53100",
+            "AVA_LGTM_GRAFANA_PORT": "53003",  # undeclared in the file: skipped
+        },
+    )
+    assert capsys.readouterr().err == ""
+
+
 def test_ensure_skips_download_when_markers_match(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
