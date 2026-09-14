@@ -11,6 +11,7 @@ exercised by its own tests only (`tests/services/test_ava_root_*.py`).
 """
 
 from services.ava_root.client import RootClient, RootClientError
+from services.ava_root.health import HealthConfig, HealthMonitor
 from services.ava_root.manifest import (
     ROOT_ID,
     ManifestError,
@@ -20,6 +21,7 @@ from services.ava_root.manifest import (
     UnknownUnitError,
     load_manifests,
 )
+from services.ava_root.probes import ProbeError, ProbeRegistry
 from services.ava_root.server import ControlServer
 from services.ava_root.singleton import (
     AlreadyRunningError,
@@ -32,7 +34,11 @@ __all__ = [
     "ROOT_ID",
     "AlreadyRunningError",
     "ControlServer",
+    "HealthConfig",
+    "HealthMonitor",
     "ManifestError",
+    "ProbeError",
+    "ProbeRegistry",
     "RestartPolicy",
     "RootClient",
     "RootClientError",
