@@ -75,8 +75,7 @@ See future/infra/self-evolution-rollback.md for the full design.
 
 from __future__ import annotations
 
-import os
-import subprocess
+import shutil
 import sys
 import time
 from datetime import UTC, datetime, timedelta
@@ -115,10 +114,12 @@ PENDING_LKG_MIN_AGE_S = 600.0
 PENDING_LKG_PASSES_FILE = "health_probe_pending_lkg_passes"
 
 # Data-volume used fraction at which the probe fails (alert-only, see
-# `_disk_usage_failure`). Same line the 312 resource watcher alerts at
-# (90% CRITICAL) and the 2026-08-08 incident crossed (92.4%): the disk the
-# checkpoint/trace mirrors grow on filling is the gateway-can't-start outage
-# class, so the owner should hear before trace auto-degrade at 0.9 kicks in.
+# `_disk_usage_failure`). One line shared across the statvfs family: the
+# trace auto-degrade watermark (`AVA_TRACE_DISK_WATERMARK=0.9`), the 312
+# resource watcher's CRITICAL threshold, and the 2026-08-08 incident level.
+# The disk the checkpoint/trace mirrors grow on filling is the
+# gateway-can't-start outage class, so the owner should hear as the trace
+# auto-degrade line is reached, not after (metric canon: `_disk_usage_fraction`).
 DEFAULT_DISK_USAGE_WATERMARK = 0.90
 
 
@@ -479,34 +480,25 @@ def _redis_bridge_probe() -> str | None:
 
 
 def _disk_usage_fraction() -> float | None:
-    """Used fraction of the data volume, df-style, or None when unmeasurable.
+    """Used fraction of the data volume, statvfs-family, or None when unmeasurable.
 
-    Uses the df(1) numbers (used / (used + free)) — the same Capacity column
-    operators read — not shutil.disk_usage: on macOS APFS, statvfs on the data
-    volume reports the whole container (sealed system volume and APFS
-    snapshots included), which reads ~3 points higher than df and would fire
-    the watermark early. Linux falls back to ``/``. None when df is missing or
-    its output is unparsable — a disk-full alarm must never be synthesized
-    from a broken measurement.
+    Uses ``shutil.disk_usage`` — the same measurement the trace disk-watermark
+    guard (``AVA_TRACE_DISK_WATERMARK``, ``shared/trace_mirror.py``) and the
+    macmini resource watcher make, so the probe fires at the line the owner is
+    already told about. df(1) was the original measure, but its offset to the
+    statvfs family is unstable in both directions (2026-08-24: ~0.8 points
+    higher; 2026-09-14: ~2-4 points lower), and a df-calibrated 0.90 fires at
+    ≈ statvfs 0.938 — later than the trace auto-degrade this alert exists to
+    precede (metric canon 2026-09-14: judge disk waterlines in the statvfs
+    family only). Linux falls back to ``/``. None when unmeasurable — a
+    disk-full alarm must never be synthesized from a broken measurement.
     """
     volume = "/System/Volumes/Data" if Path("/System/Volumes/Data").is_dir() else "/"
     try:
-        out = subprocess.run(
-            ["df", "-Pk", volume],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-            env={**os.environ, "LC_ALL": "C"},
-        ).stdout
-    except (OSError, subprocess.SubprocessError):
+        usage = shutil.disk_usage(volume)
+    except OSError:
         return None
-    try:
-        fields = out.strip().splitlines()[-1].split()
-        used, avail = int(fields[2]), int(fields[3])
-        return used / (used + avail)
-    except (ValueError, IndexError):
-        return None
+    return usage.used / usage.total
 
 
 def _disk_usage_failure(watermark: float = DEFAULT_DISK_USAGE_WATERMARK) -> str | None:

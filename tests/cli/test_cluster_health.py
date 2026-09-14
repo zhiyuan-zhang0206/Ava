@@ -548,33 +548,32 @@ def test_disk_under_watermark_passes(_all_checks_pass: None, _home: Path) -> Non
     assert rc == 0
 
 
-def test_disk_usage_fraction_parses_df_output(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The df-style fraction is used/(used+free) — the same Capacity column
-    operators read, not the APFS container share statvfs reports."""
+def test_disk_usage_fraction_uses_statvfs_family(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The fraction comes from shutil.disk_usage — the statvfs family shared
+    with the trace disk-watermark guard and the 312 watcher — not df(1),
+    whose offset to statvfs is unstable and fires late."""
 
-    def _fake_df(cmd: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(
-            cmd,
-            0,
-            stdout=(
-                "Filesystem 1024-blocks Used Available Capacity Mounted on\n"
-                "/dev/disk3s5 239965624 180572268 37021744 83% /System/Volumes/Data\n"
-            ),
-        )
+    class _Usage:
+        total = 200
+        used = 174
+        free = 26
 
-    monkeypatch.setattr(_cluster_health.subprocess, "run", _fake_df)
+    def _disk_usage(_path: object) -> _Usage:
+        return _Usage()
+
+    monkeypatch.setattr(_cluster_health.shutil, "disk_usage", _disk_usage)
     frac = _cluster_health._disk_usage_fraction()
     assert frac is not None
-    assert abs(frac - 180572268 / (180572268 + 37021744)) < 1e-9
+    assert abs(frac - 0.87) < 1e-9
 
 
-def test_disk_usage_fraction_unparsable_is_quiet(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A broken df measurement must not synthesize a disk-full alarm."""
+def test_disk_usage_fraction_oserror_is_quiet(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A broken measurement must not synthesize a disk-full alarm."""
 
-    def _raise_df(*a: object, **kw: object) -> subprocess.CompletedProcess[str]:
-        raise OSError("df missing")
+    def _raise_usage(*a: object, **kw: object) -> object:
+        raise OSError("statvfs unavailable")
 
-    monkeypatch.setattr(_cluster_health.subprocess, "run", _raise_df)
+    monkeypatch.setattr(_cluster_health.shutil, "disk_usage", _raise_usage)
     assert _cluster_health._disk_usage_fraction() is None
     assert _cluster_health._disk_usage_failure() is None
 
