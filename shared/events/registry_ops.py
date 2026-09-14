@@ -136,6 +136,19 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         "watchdog respawn circuit breaker opened — repeated failed respawns held until a probe-alive round",
         tier="anomaly",
     ),
+    # root supervisor self-check (P7 W1.2b, task #3338) — the root tree's own
+    # chain episodes and restart breaker, named distinctly from the watchdog
+    # era so the two layers stay attributable during the transition
+    "root_chain_broken": _telemetry(
+        "root_chain_broken",
+        "root self-check found a managed unit no longer a live child of the root process — one alert per episode, held until intact",
+        tier="anomaly",
+    ),
+    "root_restart_breaker_open": _telemetry(
+        "root_restart_breaker_open",
+        "root health monitor restart breaker opened — repeated non-alive probe rounds held until a probe-alive round",
+        tier="anomaly",
+    ),
     "schedule_stalled": _telemetry(
         "schedule_stalled",
         "enabled non-completed schedule has had no live session for more than two hours",
