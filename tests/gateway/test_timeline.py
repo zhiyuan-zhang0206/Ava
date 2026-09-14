@@ -294,6 +294,7 @@ class TestAiMessageItems:
             # A task notification is an event (the assignment / update /
             # reminder happened at a moment) — the wall clock belongs.
             NoteTag.TASK,
+            NoteTag.IMPERSONATION,
         }
         hidden = {
             NoteTag.MEMORY,

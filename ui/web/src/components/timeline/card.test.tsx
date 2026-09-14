@@ -636,3 +636,21 @@ describe("CardHeader sticky header (task #3136)", () => {
     expect(btn.className).not.toContain("top-11");
   });
 });
+
+describe("impersonation provenance", () => {
+  it.each(["agent_chat", "inbound_chat"] as const)("shows the declared executor without changing %s identity", (kind) => {
+    const message = item(kind, {
+      source: kind === "inbound_chat" ? "user" : "agent:42",
+      impersonation: {
+        agent_id: 42, session_id: 0, name: "Fix login", executor_name: "Codex: my helper",
+        provider: "codex", process: { name: "python", pid: 123 }, seq: 2,
+      },
+    });
+    const { getByTestId } = renderWithQuery(
+      <CardHeader item={message} config={messageCardConfig(message)!} expanded onToggle={noop} />,
+    );
+    expect(getByTestId("impersonation-badge").textContent).toBe(
+      `${kind === "inbound_chat" ? "→ " : ""}Codex: my helper · #0 Fix login`,
+    );
+  });
+});

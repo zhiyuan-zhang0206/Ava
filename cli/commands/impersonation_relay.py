@@ -106,16 +106,25 @@ class WakeListener(Protocol):
     async def close(self) -> None: ...
 
 
-def ack_command(lease_id: UUID, ids: Sequence[int]) -> str:
+def ack_command(lease_id: int | UUID, ids: Sequence[int], agent_id: int | None = None) -> str:
     """The exact ACK command for one pushed batch, on this interpreter."""
     return shlex.join(
-        [sys.executable, "-m", "cli", "impersonate", "ack", str(lease_id), *map(str, ids)]
+        [
+            sys.executable,
+            "-m",
+            "cli",
+            "impersonate",
+            "ack",
+            str(lease_id),
+            *map(str, ids),
+            *(["--agent", str(agent_id)] if isinstance(lease_id, int) else []),
+        ]
     )
 
 
 def message_push(
     agent_id: int,
-    lease_id: UUID,
+    lease_id: int | UUID,
     messages: Sequence[InboxMessage],
     *,
     redelivery: bool = False,
@@ -145,7 +154,7 @@ def message_push(
         blocks.append(f"[id={message.id}] kind={message.kind} from={message.source}")
         blocks.append(content)
         blocks.append("")
-    blocks.append(f"ACK after processing: {ack_command(lease_id, ids)}")
+    blocks.append(f"ACK after processing: {ack_command(lease_id, ids, agent_id)}")
     blocks.append(
         f"Unacknowledged messages are re-delivered every {_ACK_WINDOW_SECONDS:g}s "
         "until acknowledged."
@@ -153,7 +162,7 @@ def message_push(
     return "\n".join(blocks)
 
 
-def activation_hint(agent_id: int, lease_id: UUID) -> str:
+def activation_hint(agent_id: int, lease_id: int | UUID) -> str:
     """Fallback opener for a lease accepted without a start message.
 
     New accepts require a nonempty start message, so this only serves leases
@@ -161,8 +170,9 @@ def activation_hint(agent_id: int, lease_id: UUID) -> str:
     messages arrive here, ACK each batch, inbox is the fallback read.
     """
     prefix = [sys.executable, "-m", "cli", "impersonate"]
-    inbox = shlex.join([*prefix, "inbox", str(lease_id)])
-    ack = shlex.join([*prefix, "ack", str(lease_id)])
+    scope = ["--agent", str(agent_id)] if isinstance(lease_id, int) else []
+    inbox = shlex.join([*prefix, "inbox", str(lease_id), *scope])
+    ack = shlex.join([*prefix, "ack", str(lease_id), *scope])
     return (
         f"Ava control active: agent={agent_id} lease={lease_id}. "
         "Inbox messages are pushed to this session; after processing each batch "
@@ -172,7 +182,7 @@ def activation_hint(agent_id: int, lease_id: UUID) -> str:
 
 
 def _ended(
-    snapshot: InboxSnapshot, agent_id: int, lease_id: UUID, emit: Callable[[str], None]
+    snapshot: InboxSnapshot, agent_id: int, lease_id: int | UUID, emit: Callable[[str], None]
 ) -> bool:
     if snapshot.status not in _TERMINAL:
         return False
@@ -314,7 +324,7 @@ def _window_wait(
 
 async def relay_inbox(  # noqa: PLR0915 — one lease-driven state machine: terminal, window, push, re-deliver
     agent_id: int,
-    lease_id: UUID,
+    lease_id: int | UUID,
     *,
     read_inbox: Callable[[], Awaitable[InboxSnapshot]],
     listener: WakeListener,
@@ -372,7 +382,10 @@ async def relay_inbox(  # noqa: PLR0915 — one lease-driven state machine: term
                 continue
             if not start_sent:
                 activation_pending = snapshot.message_ids
-                emit(snapshot.start_message or activation_hint(agent_id, lease_id))
+                opener = snapshot.start_message or activation_hint(agent_id, lease_id)
+                if snapshot.start_message and isinstance(lease_id, int):
+                    opener += "\n\n" + activation_hint(agent_id, lease_id)
+                emit(opener)
                 start_sent = True
                 last_emit = _loop_time()
                 continue
@@ -497,11 +510,18 @@ def cmd_relay(args: argparse.Namespace) -> int:
     from cli.commands import impersonation
 
     try:
-        lease_id = UUID(args.lease_id)
+        from shared.impersonation import relay_get
+        from shared.impersonation_history import resolve
+
+        if args.lease_id is None:
+            lease_id = UUID(str(resolve(args.agent_id, args.session_id)["id"]))
+        else:
+            lease_id = UUID(args.lease_id)
         if args.token_stdin:
             token = impersonation.relay_token_from_stdin()
         else:
             token = impersonation.relay_token_from_env()
+        session_id = relay_get(str(lease_id), token)["session_id"]
         emit = host_emitter(args.provider, args.thread_id, codex_remote=args.codex_remote)
         max_chars = _PUSH_MAX_CHARS
 
@@ -518,7 +538,7 @@ def cmd_relay(args: argparse.Namespace) -> int:
                 )
                 await relay_inbox(
                     args.agent_id,
-                    lease_id,
+                    session_id,
                     read_inbox=read_inbox,
                     listener=listener,
                     emit=emit,

@@ -48,17 +48,18 @@ def _h_impersonate_relay(args: argparse.Namespace) -> int:
 def _add_impersonation_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     from cli.main import _h_impersonate, _h_impersonate_relay
 
-    group = sub.add_parser("impersonate", help="request and use an agent-approved external lease")
+    group = sub.add_parser("impersonate", help="start and use named external sessions")
     commands = group.add_subparsers(dest="impersonation_cmd", required=True)
     request = commands.add_parser(
         "request",
-        help="ask an agent to lend its identity",
+        help="prepare a trusted external takeover",
         description="Request identity authority; start and verify a host relay for inbox wake-up.",
     )
     request.add_argument("--agent", dest="agent_id", required=True, type=int)
     request.add_argument(
-        "--as", dest="caller", required=True, help="codex[:instance] or claude[:instance]"
+        "--as", dest="caller", required=True, help="free executor name, e.g. Codex: database-work"
     )
+    request.add_argument("--name", required=True, help="name of this impersonation session")
     request.add_argument(
         "--ttl",
         type=partial(_integer_range, maximum=86400),
@@ -93,13 +94,24 @@ def _add_impersonation_parser(sub: argparse._SubParsersAction[argparse.ArgumentP
     )
     request.set_defaults(func=_h_impersonate)
     parsers: dict[str, argparse.ArgumentParser] = {}
-    for name in ("status", "renew", "release", "inbox", "ack", "exec"):
+    listing = commands.add_parser("list", help="page permanent session history")
+    listing.add_argument("--agent", dest="agent_id", required=True, type=int)
+    listing.add_argument("--before", type=int)
+    listing.add_argument("--limit", type=partial(_integer_range, maximum=1000), default=100)
+    listing.set_defaults(func=_h_impersonate)
+    for name in ("status", "renew", "release", "inbox", "ack", "exec", "say"):
         parser = commands.add_parser(name)
         parser.add_argument(
-            "lease_id", help="lease UUID; credential comes from AVA_IMPERSONATION_TOKEN"
+            "session_id",
+            type=partial(_integer_range, minimum=0, maximum=2**63 - 1),
+            help="per-agent session number; credential comes from AVA_IMPERSONATION_TOKEN",
         )
+        parser.add_argument("--agent", dest="agent_id", required=True, type=int)
         parser.set_defaults(func=_h_impersonate)
         parsers[name] = parser
+    parsers["say"].add_argument("content", help="user-visible message; '-' reads stdin")
+    parsers["say"].add_argument("--key", required=True, help="stable key for retry deduplication")
+    parsers["say"].add_argument("--phase", choices=("commentary", "final"), default="commentary")
     parsers["renew"].add_argument(
         "--ttl",
         type=partial(_integer_range, maximum=86400),
@@ -127,7 +139,9 @@ def _add_impersonation_parser(sub: argparse._SubParsersAction[argparse.ArgumentP
     parsers["exec"].add_argument("--file", help="local Python file; omitted or '-' reads stdin")
     relay = commands.add_parser("relay", help="forward inbound wake hints to an external session")
     relay.add_argument("agent_id", type=int)
-    relay.add_argument("--lease-id", required=True)
+    handle = relay.add_mutually_exclusive_group(required=True)
+    handle.add_argument("--lease-id", help=argparse.SUPPRESS)
+    handle.add_argument("--session", dest="session_id", type=int)
     relay.add_argument("--provider", choices=("codex", "claude"), required=True)
     relay.add_argument("--thread-id")
     relay.add_argument(

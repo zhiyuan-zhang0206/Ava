@@ -45,6 +45,7 @@ export type MarkerClass =
   | { readonly kind: "ephemeral" };
 
 export const NOTE_SOURCES = new Set([
+  "impersonation",
   "sdk_hint",
   "agent_reply",
   "task",

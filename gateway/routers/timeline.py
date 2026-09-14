@@ -29,6 +29,7 @@ from shared.checkpoint import (
 )
 from shared.config import settings
 from shared.db import agent_exists, list_inbound_messages
+from shared.impersonation_timeline import hydrate
 from shared.timeline import (
     DEFAULT_TIMELINE_LIMIT,
     TimelineItem,
@@ -73,7 +74,12 @@ def _standing_head_note_ids(items: list[TimelineItem]) -> set[str]:
         idx += 1  # past the prompt itself
     else:
         idx = 0  # no prompt (historical segment): its notes start at the front
-    while idx < len(items) and items[idx].kind == "system_marker" and items[idx].source is not None:
+    while (
+        idx < len(items)
+        and items[idx].kind == "system_marker"
+        and items[idx].source is not None
+        and items[idx].impersonation is None
+    ):
         head.add(items[idx].item_id)
         idx += 1
     return head
@@ -233,7 +239,7 @@ def _load_history_tail(
     """Load and window one exact older segment, tolerating bad blobs."""
     if rank > len(boundary_ids) or not _depth_allows(rank, depth):
         return [], False
-    items = _load_history_segment(agent_id, boundary_ids[rank - 1], rank)
+    items = _load_history_segment(agent_id, boundary_ids[rank - 1], rank, limit=limit)
     if not items:
         return [], False
     window, segment_has_more = tail_window(items, limit)
@@ -241,7 +247,12 @@ def _load_history_tail(
 
 
 def _load_history_segment(
-    agent_id: int, checkpoint_id: str, rank: int
+    agent_id: int,
+    checkpoint_id: str,
+    rank: int,
+    *,
+    limit: int = DEFAULT_TIMELINE_LIMIT,
+    before: str | None = None,
 ) -> list[TimelineItem] | None:
     """Load and render one persisted segment; damaged data is terminal."""
     try:
@@ -267,7 +278,7 @@ def _load_history_segment(
             exc,
         )
         return None
-    return items
+    return hydrate(items, agent_id, limit=limit, before=before)
 
 
 def _load_boundary_ids(agent_id: int, depth: int) -> list[str]:
@@ -316,7 +327,9 @@ def _historical_window(
         return [], False
     if not _depth_allows(rank, depth):
         return [], False
-    segment_items = _load_history_segment(agent_id, checkpoint_id, rank)
+    segment_items = _load_history_segment(
+        agent_id, checkpoint_id, rank, limit=limit, before=cursor.item_id()
+    )
     if not segment_items:
         return [], False
     segment_prefix = f"s{rank}.{checkpoint_id}"
@@ -465,6 +478,7 @@ def get_timeline(
         _log.warning("timeline cold load: checkpoint read failed for agent %s: %r", agent_id, exc)
         messages = []
     items, msg_count = build_timeline_items(messages, chat_anchors)
+    items = hydrate(items, agent_id, limit=limit, before=before)
     items.sort(key=lambda it: _item_sort_key(it.item_id))
     if before is None:
         window, has_more = _initial_window(

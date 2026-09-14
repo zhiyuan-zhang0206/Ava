@@ -16,6 +16,16 @@ from cli.commands import impersonation as cli
 from cli.commands.agent_timeline import cmd_agents_timeline
 from cli.parsers import build_parser
 from shared import impersonation as control
+from shared import impersonation_sessions as sessions
+
+
+def _private_id(agent_id: int, session_id: int) -> str:
+    assert (agent_id, session_id) == (405, 0)
+    return "lease"
+
+
+def _public_session(value: dict[str, Any]) -> dict[str, Any]:
+    return value
 
 
 def _args(*args: str) -> Namespace:
@@ -76,15 +86,17 @@ def test_request_uses_external_identity_and_returns_token_once(
             "expires_at": datetime(2026, 9, 5, tzinfo=UTC),
         }
 
-    monkeypatch.setattr(control, "request", request)
+    monkeypatch.setattr(sessions, "request", request)
     assert (
         cli.cmd_impersonate(
             _args(
                 "request",
+                "--name",
+                "Fix login",
                 "--agent",
                 "405",
                 "--as",
-                "codex:task1",
+                "Codex: task1",
                 "--ttl",
                 "600",
                 "--provider",
@@ -95,11 +107,13 @@ def test_request_uses_external_identity_and_returns_token_once(
         )
         == 0
     )
-    assert seen["caller"].source() == "external_agent:codex:task1"
+    assert seen["executor_name"] == "Codex: task1"
+    assert seen["name"] == "Fix login"
+    assert seen["process_metadata"]["pid"] > 0
     assert seen["ttl_seconds"] == 600
-    assert seen["relay_provider"] == "codex"
-    assert seen["relay_thread_id"] == "thread-1"
-    assert seen["relay_codex_remote"] is None
+    assert seen["provider"] == "codex"
+    assert seen["thread_id"] == "thread-1"
+    assert seen["codex_remote"] is None
     output = capsys.readouterr()
     assert json.loads(output.out)["token"] == "new-credential"
     assert "starts the codex relay automatically" in output.err
@@ -112,10 +126,20 @@ def test_claude_request_reports_the_relay_handoff(
     def request(agent_id: int, **kwargs: Any) -> dict[str, Any]:
         return {"id": "lease", "token": "controller-token", "relay_token": "relay-token"}
 
-    monkeypatch.setattr(control, "request", request)
+    monkeypatch.setattr(sessions, "request", request)
     assert (
         cli.cmd_impersonate(
-            _args("request", "--agent", "405", "--as", "claude:task1", "--provider", "claude")
+            _args(
+                "request",
+                "--name",
+                "Fix login",
+                "--agent",
+                "405",
+                "--as",
+                "claude:task1",
+                "--provider",
+                "claude",
+            )
         )
         == 0
     )
@@ -132,7 +156,7 @@ def test_request_requires_a_relay_provider(
     # --provider is mandatory at parse time; the codex thread requirement is
     # enforced by shared.impersonation.request (covered in the shared tests).
     with pytest.raises(SystemExit) as raised:
-        _args("request", "--agent", "405", "--as", "codex")
+        _args("request", "--name", "Fix login", "--agent", "405", "--as", "codex")
     assert raised.value.code == 2
 
 
@@ -158,9 +182,14 @@ def test_ack_uses_explicit_processed_ids_only(
     def ack(lease: str, token: str, ids: list[int]) -> None:
         seen.append((lease, token, ids))
 
+    monkeypatch.setattr(
+        sessions,
+        "private_id",
+        _private_id,
+    )
     monkeypatch.setenv("AVA_IMPERSONATION_TOKEN", "credential")
     monkeypatch.setattr(control, "ack", ack)
-    assert cli.cmd_impersonate(_args("ack", "lease", "11", "13")) == 0
+    assert cli.cmd_impersonate(_args("ack", "0", "11", "13", "--agent", "405")) == 0
     assert seen == [("lease", "credential", [11, 13])]
     assert json.loads(capsys.readouterr().out) == {"acknowledged": [11, 13]}
 
@@ -169,7 +198,7 @@ def test_missing_credential_fails_without_network(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.delenv("AVA_IMPERSONATION_TOKEN", raising=False)
-    assert cli.cmd_impersonate(_args("status", "lease")) == 1
+    assert cli.cmd_impersonate(_args("status", "0", "--agent", "405")) == 1
     output = capsys.readouterr()
     assert output.out == ""
     assert "AVA_IMPERSONATION_TOKEN" in output.err
@@ -182,9 +211,20 @@ def test_release_preserves_summary(monkeypatch: pytest.MonkeyPatch) -> None:
         seen.append(summary)
         return {"status": "released"}
 
+    monkeypatch.setattr(
+        sessions,
+        "private_id",
+        _private_id,
+    )
     monkeypatch.setenv("AVA_IMPERSONATION_TOKEN", "credential")
     monkeypatch.setattr(control, "release", release)
-    assert cli.cmd_impersonate(_args("release", "lease", "--summary", "Completed X.\nNext Y.")) == 0
+    monkeypatch.setattr("shared.impersonation_history.public_session", _public_session)
+    assert (
+        cli.cmd_impersonate(
+            _args("release", "0", "--agent", "405", "--summary", "Completed X.\nNext Y.")
+        )
+        == 0
+    )
     assert seen == ["Completed X.\nNext Y."]
 
 
@@ -195,6 +235,8 @@ def test_batch_window_zero_disables_merge() -> None:
     for value in ("0", "300"):
         args = _args(
             "request",
+            "--name",
+            "Fix login",
             "--agent",
             "405",
             "--as",
@@ -239,6 +281,8 @@ def test_relay_parser(remote: str | None) -> None:
         (
             [
                 "request",
+                "--name",
+                "Fix login",
                 "--agent",
                 "405",
                 "--as",
@@ -251,9 +295,9 @@ def test_relay_parser(remote: str | None) -> None:
             "--ttl",
             ["0", "86401"],
         ),
-        (["renew", "lease"], "--ttl", ["-1", "86401"]),
-        (["inbox", "lease"], "--limit", ["0", "1001"]),
-        (["inbox", "lease"], "--wait", ["-1", "nan", "inf"]),
+        (["renew", "0", "--agent", "405"], "--ttl", ["-1", "86401"]),
+        (["inbox", "0", "--agent", "405"], "--limit", ["0", "1001"]),
+        (["inbox", "0", "--agent", "405"], "--wait", ["-1", "nan", "inf"]),
         (
             ["relay", "405", "--lease-id", "lease", "--provider", "claude"],
             "--debounce",
@@ -262,6 +306,8 @@ def test_relay_parser(remote: str | None) -> None:
         (
             [
                 "request",
+                "--name",
+                "Fix login",
                 "--agent",
                 "405",
                 "--as",
@@ -298,6 +344,8 @@ def test_numeric_options_reject_out_of_bounds_values_during_parsing(
         (
             [
                 "request",
+                "--name",
+                "Fix login",
                 "--agent",
                 "405",
                 "--as",
@@ -310,9 +358,9 @@ def test_numeric_options_reject_out_of_bounds_values_during_parsing(
             "--ttl",
             ["1", "86400"],
         ),
-        (["renew", "lease"], "--ttl", ["1", "86400"]),
-        (["inbox", "lease"], "--limit", ["1", "1000"]),
-        (["inbox", "lease"], "--wait", ["0", "0.5", "86400"]),
+        (["renew", "0", "--agent", "405"], "--ttl", ["1", "86400"]),
+        (["inbox", "0", "--agent", "405"], "--limit", ["1", "1000"]),
+        (["inbox", "0", "--agent", "405"], "--wait", ["0", "0.5", "86400"]),
         (
             ["relay", "405", "--lease-id", "lease", "--provider", "claude"],
             "--debounce",

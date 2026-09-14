@@ -1,8 +1,8 @@
 """The TimelineItem model — one element of the rendered timeline view.
 
 Extracted from `shared/timeline.py` (file line budget; task #3323): the model
-is a leaf (pydantic + typing only) while the projection logic that builds the
-items stays in `shared/timeline.py`, which re-exports this class so existing
+contains the wire fields and their metadata models. The projection logic
+that builds the items stays in `shared/timeline.py`, which re-exports this class so existing
 importers keep working.
 """
 
@@ -12,12 +12,15 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from shared.impersonation_history import ImpersonationMetadata
 from shared.sdk_telemetry import SdkCall
 
 
 class TimelineItem(BaseModel):
     """One element of a timeline view of LangGraph state.messages, using the
-    inbound_messages table only as ts anchor.
+    inbound_messages table as a timestamp anchor and impersonation history
+    expanded at its checkpoint marker. External session metadata identifies
+    the actual executor without changing the cursor grammar.
 
     `item_id` is the stable key coordinating frontend timeline with
     streaming SSE; the current segment uses `f"{msg_idx}.{block_idx}"`
@@ -54,6 +57,7 @@ class TimelineItem(BaseModel):
     source: str | None = None
     payload: str  # rendered content
     created_at: str | None = None  # ISO-8601
+    impersonation: ImpersonationMetadata | None = None
     inbound_id: int | None = None
     # The compact run this item belongs to (None elsewhere): a forced/auto
     # compact's summary message carries `ava_compact_id`, pairing the item

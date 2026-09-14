@@ -74,6 +74,7 @@ segments stay globally distinct.
 | `label_updated` | `agents.label` written (spawn-time generation / rename / reset) | `label` (nullable) |
 | `notice_posted` | `ava.ui.notify()` row created | `notice_id`, `priority`, `title`, `task_id` (nullable) |
 | `notice_resolved` | notice dismissed | `notice_id` |
+| `impersonation_changed` | committed impersonation status or reply | `agent_id`; invalidates the unified timeline |
 | `task_created` / `task_updated` | task registry write | `task_id` |
 | `page_opened` | `ava.ui.show` registered a page | `page_id`, `name`, `port`, `title`, `url` |
 | `page_closed` | `ava.ui.close` | `name` |

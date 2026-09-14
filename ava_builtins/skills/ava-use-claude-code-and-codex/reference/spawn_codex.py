@@ -328,6 +328,7 @@ def _launch(
     work_file: Path,
     ttl_seconds: float,
     caller_instance: str | None = None,
+    impersonation_name: str | None = None,
 ) -> int:
     from shared.external_caller import launch_caller_assignment
 
@@ -343,6 +344,10 @@ def _launch(
         ttl_seconds=ttl_seconds,
     )
     if claim.action == "adopt":
+        if impersonation_name is not None:
+            raise RuntimeError(
+                "A takeover needs a fresh coding workspace; this workspace already has a generation"
+            )
         _print_owner(claim.owner, adopted=True)
         return 0
     owner = claim.owner
@@ -376,7 +381,21 @@ def _launch(
         )
         ava.shell.sessions.send(sid, _codex_command(owner, workspace, caller_instance))
         _wait_for_ready(sid)
-        ava.shell.sessions.send(sid, _bootstrap_message(workspace, tasks_file, work_file))
+        message = _bootstrap_message(workspace, tasks_file, work_file)
+        if impersonation_name is not None:
+            from ava._impersonation_launch import bootstrap_message
+
+            guide = (
+                Path(__file__).resolve().parents[4]
+                / ".agents"
+                / "skills"
+                / "impersonator-guide"
+                / "SKILL.md"
+            )
+            message = bootstrap_message(
+                owner.owner_agent_id, impersonation_name, "codex", tasks_file, work_file, guide
+            )
+        ava.shell.sessions.send(sid, message)
         _verify_submitted(sid, owner.state_dir)
     except BaseException:
         # A replacement may own the canonical record by now, so its generation
@@ -431,7 +450,19 @@ def main() -> int:
         metavar="GENERATION",
         help="Stop and terminalize exactly this canonical generation.",
     )
+    parser.add_argument(
+        "--impersonate-self", action="store_true", help="replace the launching Ava agent"
+    )
+    parser.add_argument("--impersonation-name", help="display name for the takeover session")
     args = parser.parse_args()
+    if args.impersonate_self:
+        from ava._boot import require_agent_id
+
+        require_agent_id()
+        if args.status or args.cancel_generation:
+            parser.error("--impersonate-self requires a new launch")
+    elif args.impersonation_name is not None:
+        parser.error("--impersonation-name requires --impersonate-self")
 
     workspace = Path(args.workspace).expanduser().resolve()
     if not args.status and not args.cancel_generation:
@@ -447,6 +478,7 @@ def main() -> int:
         _resolve_file(workspace, args.work_file),
         args.ttl_seconds,
         args.caller_instance,
+        (args.impersonation_name or workspace.name) if args.impersonate_self else None,
     )
 
 

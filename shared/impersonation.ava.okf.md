@@ -1,101 +1,96 @@
 ---
 type: doc
-title: Cooperative agent impersonation
-description: Same-machine DB leases, native consent and checkpoint ownership, external inbox ACKs, and return handoffs.
+title: Named agent impersonation sessions
+description: Trusted same-machine controllers, per-agent session numbers, permanent messages, and durable native handoffs.
 tags:
 - shared
 - identity
 - lifecycle
 ---
 
-# Cooperative agent impersonation
+# Named agent impersonation sessions
 
-`shared/impersonation.py` implements a local trusted-controller protocol.
-`agent_impersonations` is the authoritative lease and ordered plugin journal;
-`agent_impersonation_messages` records which inbox rows that lease has read and
-acknowledged. The raw random capability is returned once. Only its SHA-256 hash
-is stored. A capability and the agent's local machine identity are required for
-external operations. This is cooperative identity binding for processes already
-holding cluster credentials, not a sandbox for untrusted Python or native tools.
+`shared/impersonation_sessions.py` exposes `(agent_id, session_id)` handles.
+Each agent allocates increasing integers starting at zero, through a database
+counter and allocation trigger, including when an older client inserts a row.
+The session `name` and free `executor_name` are separate from the CLI's observed
+process metadata (PID, name, executable, birth time and ancestors). `relay_provider`
+selects transport; no name or process observation proves a provider's identity.
+The former UUID remains a private compatibility reference for existing leases,
+checkpoint receipts and plugin journals. Public commands, file paths and badges
+use the scoped integer. Credentials are returned once and stored as hashes.
 
-## State and ownership
+## Ownership and return
 
-`requested -> accepted -> active -> released | expired`; native rejection goes
-from requested to rejected. The request deadline prevents abandoned requests
-from blocking later ones. The active TTL starts only after native acceptance,
-execution resource closure and checkpoint flush. Explicit renewal replaces the
-deadline; neither attaching nor relaying renews it. Mutations check the database
-clock after locking. New requests serialize on the agent row and cannot
-overlap an existing request, active lease or unapplied plugin journal.
+The public state machine is `preparing -> active -> released | expired | rejected`.
+Internally, preparing uses requested/accepted to preserve the drain handshake.
+A trusted controller does not require a native model approval. The native claim
+gate accepts automatically, ends that invocation, drains execution resources,
+repairs and flushes a checkpoint timeline anchor, verifies the relay heartbeat,
+then activates. Only one executor owns decisions. A new native incarnation
+reconciles preparation; active control survives native restarts. Administrative
+restart/terminate still reach the native dispatcher; termination revokes control.
+Legacy live requests retain their original consent flow during an upgrade.
 
-SDK identity reads validate one joined lease/agent snapshot without row locks;
-this authorizes the call at that boundary, not a lock across arbitrary SDK or
-native-tool work. Native node gates check ownership and lease existence in one
-read snapshot. With no lease they return without locking; a concurrent request
-still needs native consent before it can activate. Any open lease or unapplied
-journal enters the locked reconciliation path and rechecks native ownership.
+Explicit renewal replaces the database deadline; attaching and relay heartbeats
+never renew. The existing TTL reaper expires abandoned sessions even when the
+runner is offline, and sends a reminder once per approaching deadline. This is
+coordination among processes already holding local cluster authority, not a
+security boundary against arbitrary shell execution. Capability, machine and
+incarnation checks still prevent accidental cross-session control.
 
-Requests stay in the protocol's private table until the native claim gate
-renders their real external sender and asks for consent. Native acceptance ends
-the current execute-code call. Only the invocation driver can activate after
-the result is durably checkpointed. A replacement incarnation before activation
-increments the consent version and asks again; a fully active lease survives
-native process/host restarts. Every hosted restart or host takeover mints a
-fresh incarnation (restart clears the row's runtime identity; admission
-re-mints it), so at the first native-status read after the replacement the
-active lease's accepting-incarnation binding is inherited by the current
-runtime — `require_native` proves it is the row's one admitted owner, and a
-lingering predecessor fails its own row check, so the transfer can never race a
-dead incarnation. Relay supervision therefore re-provisions under the live
-incarnation instead of needing manual database alignment. Updated native
-drivers gate recovered graph nodes, automatic compaction and normal inbox claims. Hosted agents release their turn
-slot while paused. Administrative restart/terminate still reach the
-native lifecycle dispatcher, without consuming ordinary chats. Every database
-termination writer revokes the lease through the same status transaction's
-trigger; restart preserves it. Native status metadata remains native: an active
-controller's busy/idle turns are not mirrored. Idle watchers can observe the
-parked runtime as idling; external completion requires an explicit message or
-the return handoff.
+`ava.external.attach(session_id, agent_id=..., token=...)` loads saved state and
+binds SDK identity in the external process. Plugin changes append ordered deltas;
+only the native graph writes checkpoints. On return it applies the journal with
+a durable lease/version receipt. It then writes the handoff file, checkpoints
+the first resumed system note, and finally marks the handoff applied in the DB.
+A crash retries the same note identity and flushes even when its checkpoint
+receipt is already visible. New sessions and ordinary input remain gated until
+this receipt succeeds. File or checkpoint failures cannot resume native work.
 
-`ava.external.attach` binds identity in the external Python process and hydrates
-the existing checkpoint, pinned config and plugin state. It validates identity
-and plugin-state accesses against the lease. SDK operations execute directly.
-The native graph remains the only checkpoint writer: external state updates
-append serialized reducer inputs with a version CAS. On return, the driver
-applies those deltas and checkpoints a lease/version receipt before acknowledging
-the journal. A crash between those steps replays the receipt, not the mutation.
-Native shell/editor actions outside Ava are not intercepted or rolled back.
+## Permanent messages and unified timeline
 
-## Messages and wakeups
+`agent_impersonations` retains every session and lifecycle endpoint.
+`agent_impersonation_entries` retains immutable, sequenced lifecycle, inbound,
+outbound, SDK and API records. DELETE guards protect sessions; UPDATE/DELETE
+guards protect entries. There is no retention cleanup. Migration rollback
+refuses to discard recorded history. The export is regenerable from the DB.
 
-Peers continue addressing `agent:<id>`. Redis's existing per-agent inbound
-channel supplies wake hints; the database supplies messages after connection
-loss. External inbox reads leave messages pending. Only an explicit ACK after
-processing marks them done. Cancel requests are also external inbox entries:
-the native control-only claim leaves them pending for the controller to process.
-Unacknowledged messages and cancellations return to the native agent.
-Newly acknowledged cancellations publish the existing `Cancelled` event after
-commit; repeated ACKs do not emit another completion event.
-Host relay delivery is at least once: a relay restart repeats pending hints.
+Activation captures pending input, and committed inbound inserts capture arrivals
+while active. Idempotent chat retries produce one history entry. Inbox reads leave
+messages pending; explicit ACK records processing without removing their bodies.
+`ava impersonate say` / `ava.impersonation.say` commits an outbound message with
+a stable retry key, then publishes `impersonation_changed`. Logical identity
+remains the Ava agent; `impersonation` metadata names the session and executor.
+Incoming user messages remain incoming messages.
 
-Voluntary release atomically inserts a normal inbound with the actual external
-sender and summary, then closes the lease. Every transition from an open lease
-to released or expired restores its recorded accepting generation and owner in the same
-transaction through `agent_impersonations_restore_native_owner`. The trigger
-only updates running/idling rows on the lease's machine with non-NULL ownership;
-already-consistent identities are not rewritten. Runtime kind, protocol version
-and runtime lease deadline remain unchanged. This narrow handoff follows explicit
-native consent to this protocol; it does not enable generic caller-protocol v1
-or weaken the existing external-message/lifecycle write fences. Expiration
-instead records a system notice, without inventing an external summary. Redis
-wakes occur after commit. Migration rollback refuses outstanding leases,
-unapplied deltas, and unconsumed handoffs.
+The existing timeline endpoint hydrates the checkpoint's session anchor with
+bounded pages of retained message entries. Numeric block cursors preserve ordering
+inside a session and historical compact segments. The frontend uses its existing
+timeline query and merge machinery; the refresh event does not carry another
+message store. It displays the executor and session badge on the normal cards.
 
-The existing gateway TTL reaper expires abandoned leases even when the runner
-is offline. Native gates and external SDK calls independently enforce the
-deadline. The same reaper removes completed lease/capability/journal records
-after seven days, only after state application and handoff consumption; the
-handoff inbound remains in normal history.
+## Structured handoff
+
+One session produces `<workspace>/impersonation/<session_id>.json` containing
+session/process metadata, all input/output bodies and inbound ACK state,
+lifecycle facts, original consumed SDK/API events and statistics. Normal release
+requires the impersonator's own summary. Expiry/rejection states their reason and
+absence of an external summary. The first new system note contains that summary
+and the JSON path, before ordinary queued input. Captured pending inputs become
+processed only after the note is durable; unacknowledged incoming content remains
+in the file for the resumed agent to handle.
+
+SDK collection, sampling and instrumentation belong to the upstream collector.
+The consumption boundary is `shared/impersonation_events.py`: explicit scoped
+session binding, stable event IDs, time validation, deduplication and export
+refresh when late facts arrive. The agent-host background reconciler selects
+one due local session and consumes at most four pages per pass; a saved cursor
+continues large sweeps, and completed sweeps restart to recover late indexing.
+`complete_delivery` accepts an upstream manifest of exact event IDs, validates
+the durable set and certifies completion. Until then, accounting remains pending
+even after the native handoff receipt. Statistics count recorded events without
+extrapolating samples. See the consumer module for delivery-completion semantics.
 
 See [[../ava/external.ava.okf.md]],
 [external agent procedure](../conventions/agent-impersonation.md), and

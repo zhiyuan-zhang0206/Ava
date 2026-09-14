@@ -1,6 +1,6 @@
 ---
 name: ava-use-claude-code-and-codex
-description: Drives Claude Code or Codex CLI as supervised long-running coding agents. Use when outsourcing multi-step implementation or review, choosing between the two CLIs, resuming a coding session, or monitoring delegated coding work.
+description: Drives Claude Code or Codex CLI as supervised long-running coding agents. Use when outsourcing multi-step implementation or review, choosing between the two CLIs, resuming a coding session, monitoring delegated coding work, or launching either CLI to impersonate the launching Ava agent.
 ---
 
 # Use Claude Code and Codex
@@ -36,6 +36,9 @@ those here.
 many turns — the collaboration pattern below builds on this. Headless one-shot (`claude -p`,
 `codex exec`) exists but is rarely needed; avoid it unless the task is truly self-contained and
 needs no supervision.
+
+**Take over your own identity:** use `--impersonate-self --impersonation-name 'Fix login'` on either spawn script
+when it should take over your identity and human chat. Read the [takeover procedure](reference/impersonate_self.md) before launching.
 
 ## File-driven collaboration (the pattern for long tasks)
 

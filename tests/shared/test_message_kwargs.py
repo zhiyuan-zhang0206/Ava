@@ -37,6 +37,7 @@ def test_note_tag_value_set() -> None:
         "sdk_hint",
         "agent_reply",
         "task",
+        "impersonation",
         "compact_reminder",
         "history_dump",
         "silent_idle_continue",

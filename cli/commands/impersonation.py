@@ -1,7 +1,7 @@
-"""Thin cluster-local client for approved external-agent leases.
+"""Cluster-local client for trusted named impersonation sessions.
 
 Only request prints the newly minted credential. All subsequent commands read
-AVA_IMPERSONATION_TOKEN; no token, conversation or session files are created.
+AVA_IMPERSONATION_TOKEN. Session history is retained by the shared service.
 """
 
 from __future__ import annotations
@@ -64,17 +64,6 @@ def _emit(value: object) -> None:
     print(json.dumps(value, ensure_ascii=False, default=_json_value))
 
 
-def _caller(value: str) -> Any:
-    from shared.caller_identity import CallerIdentity
-
-    parts = value.split(":")
-    if len(parts) not in (1, 2):
-        raise ValueError("--as must be tool[:instance]")
-    return CallerIdentity(
-        kind="external_agent", subject=parts[0], instance=parts[1] if len(parts) == 2 else None
-    )
-
-
 async def _wait_inbox(lease_id: str, token: str, limit: int, wait: float) -> list[dict[str, Any]]:
     from shared import impersonation as control
     from shared.config import settings
@@ -108,7 +97,7 @@ def _run_local(args: argparse.Namespace, token: str) -> int:
     )
     if not code.strip():
         raise ValueError("Python input must be nonempty")
-    with ava.external.attach(args.lease_id, token=token):
+    with ava.external.attach(args.session_id, agent_id=args.agent_id, token=token):
         exec(
             compile(code, args.file or "<ava-external>", "exec"),
             {"__name__": "__main__", "ava": ava},
@@ -117,25 +106,30 @@ def _run_local(args: argparse.Namespace, token: str) -> int:
 
 
 def _dispatch(args: argparse.Namespace) -> int:
+    from cli.commands.impersonation_process import process_metadata
     from shared import impersonation as control
+    from shared import impersonation_sessions as sessions
+    from shared.impersonation_history import public_session, say
 
     command = args.impersonation_cmd
     if command == "request":
         _emit(
-            control.request(
+            sessions.request(
                 args.agent_id,
-                caller=_caller(args.caller),
+                name=args.name,
+                executor_name=args.caller,
+                process_metadata=process_metadata(),
                 ttl_seconds=args.ttl,
                 reason=args.reason,
-                relay_provider=args.relay_provider,
-                relay_thread_id=args.relay_thread_id,
-                relay_codex_remote=args.relay_codex_remote,
-                relay_batch_window_seconds=args.relay_batch_window_seconds,
+                provider=args.relay_provider,
+                thread_id=args.relay_thread_id,
+                codex_remote=args.relay_codex_remote,
+                batch_window_seconds=args.relay_batch_window_seconds,
             )
         )
         if args.relay_provider == "codex":
             print(
-                "The accepting agent starts the codex relay automatically at activation; "
+                "The runtime starts the codex relay automatically at activation; "
                 "no relay process starts here. A relay that cannot start rolls the "
                 "takeover back loudly (status becomes rejected with the reason).",
                 file=sys.stderr,
@@ -144,23 +138,30 @@ def _dispatch(args: argparse.Namespace) -> int:
             print(
                 "Start the claude relay (ava impersonate relay) inside the controller "
                 "session immediately, with AVA_IMPERSONATION_RELAY_TOKEN set to the "
-                "relay token printed above. Acceptance fails loudly without its heartbeat.",
+                "relay token printed above. Preparation fails without its heartbeat.",
                 file=sys.stderr,
             )
         return 0
+    if command == "list":
+        _emit(sessions.list_sessions(args.agent_id, before=args.before, limit=args.limit))
+        return 0
     token = token_from_env()
+    args.lease_id = sessions.private_id(args.agent_id, args.session_id)
     if command == "status":
-        _emit(control.get(args.lease_id, token))
+        _emit(public_session(control.get(args.lease_id, token)))
     elif command == "renew":
-        _emit(control.renew(args.lease_id, token, ttl_seconds=args.ttl))
+        _emit(public_session(control.renew(args.lease_id, token, ttl_seconds=args.ttl)))
     elif command == "release":
         summary = sys.stdin.read() if args.summary == "-" else args.summary
-        _emit(control.release(args.lease_id, token, summary))
+        _emit(public_session(control.release(args.lease_id, token, summary)))
     elif command == "inbox":
         _emit(asyncio.run(_wait_inbox(args.lease_id, token, args.limit, args.wait)))
     elif command == "ack":
         control.ack(args.lease_id, token, args.message_ids)
         _emit({"acknowledged": args.message_ids})
+    elif command == "say":
+        content = sys.stdin.read() if args.content == "-" else args.content
+        _emit({"seq": say(args.lease_id, token, content, phase=args.phase, message_key=args.key)})
     elif command == "exec":
         return _run_local(args, token)
     else:

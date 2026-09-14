@@ -1,7 +1,7 @@
 ---
 type: doc
 title: External SDK Attachment
-description: Local external Python processes borrow an approved agent identity and journal plugin state while the native graph owns checkpoints.
+description: Local external Python processes borrow a leased agent identity and journal plugin state while the native graph owns checkpoints.
 tags:
 - sdk
 - agents
@@ -9,7 +9,7 @@ tags:
 
 # External SDK Attachment
 
-`ava.external.attach(lease_id, token=...)` binds one active, same-machine controller
+`ava.external.attach(session_id, agent_id=..., token=...)` binds one active, same-machine controller
 lease to a Python process. The external model keeps its own tools; SDK calls execute
 in that external process. The attachment is a context manager with explicit `flush`
 and `close` methods, and never starts or renews a lease.
@@ -39,6 +39,10 @@ reducer rules. Encoding, decoding, and applying a delta reject
 before changing any state. Full-history resets remain exclusive to native
 compaction and crash repair; external controllers request compaction in their
 handoff summary.
+
+User-visible replies use `ava.impersonation.say` with a stable retry key. They
+are recorded immediately in permanent session history and rendered on the normal
+timeline, independently of plugin-state flush.
 
 The usage procedure and CLI commands live in
 [External agent impersonation](../conventions/agent-impersonation.md).

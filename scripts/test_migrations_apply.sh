@@ -81,12 +81,31 @@ INSERT INTO agents_meta (id, status, machine, runtime_generation, runtime_owner)
             '00000000-0000-0000-0000-000000000004');
 INSERT INTO agent_impersonations (
     id, agent_id, source, machine, token_hash, status, ttl_seconds, expires_at,
-    accepted_generation, accepted_owner
+    accepted_generation, accepted_owner, automatic
 ) VALUES (
     '00000000-0000-0000-0000-000000000005', 991005, 'external_agent:smoke',
     'smoke-machine', 'smoke-token', 'active', 300, clock_timestamp() + interval '5 minutes',
-    '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002'
+    '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', TRUE
 );
+-- Exercise allocation, both history writers, and the permanent-history guard.
+INSERT INTO inbound_messages(agent_id,kind,source,content)
+VALUES(991005,'chat','user','Permanent smoke message');
+UPDATE agent_impersonations SET expires_at=expires_at+interval '1 minute' WHERE agent_id=991005;
+DO $$
+DECLARE protected BOOLEAN := FALSE;
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM agent_impersonations WHERE agent_id=991005 AND session_id=0 AND name='Session 0') THEN
+        RAISE EXCEPTION 'Agent-scoped session allocation failed';
+    END IF;
+    IF (SELECT count(*) FROM agent_impersonation_entries) <> 3 THEN
+        RAISE EXCEPTION 'Lifecycle or inbound history trigger did not run';
+    END IF;
+    BEGIN
+        DELETE FROM agent_impersonation_entries;
+    EXCEPTION WHEN raise_exception THEN protected := TRUE;
+    END;
+    IF NOT protected THEN RAISE EXCEPTION 'Permanent history allowed deletion'; END IF;
+END $$;
 UPDATE agent_impersonations SET status = 'released' WHERE agent_id = 991005;
 DO $$
 BEGIN

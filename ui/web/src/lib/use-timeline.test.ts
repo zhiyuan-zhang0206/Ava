@@ -901,8 +901,8 @@ describe("useTimeline SSE inbound flow", () => {
     expect(result.current.items).toHaveLength(1);
     // turnActive still flips true immediately (managed by store.processSseEvent)
     expect(result.current.turnActive).toBe(true);
-    // inbound_committed not received yet; should not trigger reload
-    expect(api.getTimeline).toHaveBeenCalledTimes(1);
+    // A paused impersonation has no native commit event; re-read server history.
+    expect(api.getTimeline).toHaveBeenCalledTimes(2);
   });
 
   it("timeline_snapshot push delivers envelope-wrap inbound_chat into the timeline", async () => {
@@ -1637,5 +1637,23 @@ describe("useTimeline SSE batch path", () => {
     expect(result.current.items[0].payload).toBe("print");
     expect(result.current.streamingCode).toBe(true);
     expect(noteTurnStart).toHaveBeenCalledWith(42);
+  });
+});
+
+describe("impersonation timeline refresh", () => {
+  it("loads committed external replies through the normal timeline query", async () => {
+    const anchor = snapshotItem({ item_id: "4.0", kind: "inbound_chat", payload: "Session started" });
+    const reply = snapshotItem({ item_id: "4.2", payload: "Fix verified", source: "agent:42",
+      impersonation: { agent_id: 42, session_id: 0, name: "Fix login", executor_name: "Codex: helper",
+        provider: "codex", process: {}, anchor_item_id: "4.0", seq: 1 } });
+    vi.mocked(api.getTimeline).mockResolvedValueOnce(tlResp([anchor])).mockResolvedValue(tlResp([anchor, reply]));
+    const { result } = renderHook(() => useTimeline(42, vi.fn()), { wrapper });
+    await waitFor(() => expect(result.current.items).toHaveLength(1));
+    pushEvent({ role: "impersonation_changed", agent_id: 42 });
+    await waitFor(() => expect(result.current.items.map((entry) => entry.payload)).toContain("Fix verified"));
+    pushEvent({ role: "impersonation_changed", agent_id: 42 });
+    await waitFor(() => expect(api.getTimeline).toHaveBeenCalledTimes(3));
+    expect(result.current.items.filter((entry) => entry.item_id === "4.2")).toHaveLength(1);
+    expect(result.current.items.find((entry) => entry.item_id === "4.2")?.impersonation?.executor_name).toBe("Codex: helper");
   });
 });

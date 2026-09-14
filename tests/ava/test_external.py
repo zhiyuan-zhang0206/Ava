@@ -44,6 +44,7 @@ def attached_runtime(
 ) -> tuple[dict[str, Any], Any, list[dict[str, Any]]]:
     lease: dict[str, Any] = {
         "id": "lease",
+        "session_id": 0,
         "agent_id": 405,
         "machine": "local-runner",
         "status": "active",
