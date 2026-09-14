@@ -57,12 +57,13 @@ from types import SimpleNamespace
 from typing import Annotated, Any
 
 from langchain_core.messages import AnyMessage
+from langgraph.channels.delta import DeltaChannel
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
 from pydantic.fields import FieldInfo
 
-from agent.messages_guard import guarded_add_messages
+from agent.messages_guard import guarded_add_messages, guarded_delta_reducer
 
 # The five nested sub-state channel models live in agent/state_channels
 # (issue #156 — this module sat at the 800-line ceiling). They are RE-EXPORTED
@@ -88,6 +89,13 @@ from shared.plugin_context import current_plugin_name
 
 AttachEntry = _AttachEntry
 
+# The messages channel's delta form and snapshot cadence (write switch,
+# task #3180 — see BaseAgentState.messages).
+_MESSAGES_DELTA_SNAPSHOT_FREQUENCY = 1000
+_MESSAGES_DELTA_CHANNEL = DeltaChannel(
+    guarded_delta_reducer, snapshot_frequency=_MESSAGES_DELTA_SNAPSHOT_FREQUENCY
+)
+
 
 class BaseAgentState(BaseModel):
     """Framework static state — base fields all agents have.
@@ -98,13 +106,19 @@ class BaseAgentState(BaseModel):
     channel holding a BaseModel.
     """
 
-    # The messages channel runs the guarded reducer: add_messages + the
-    # append-only invariant (user ruling 2026-08-13, task #1256 — only a
-    # full wipe, a tail append, or modifying the last message is allowed;
-    # see agent/messages_guard.py). Every persisted mutation — nodes,
-    # hooks, plugins, boot repair, compaction — funnels through it at
-    # commit time.
-    messages: Annotated[list[AnyMessage], guarded_add_messages] = Field(default_factory=list)
+    # The messages channel is a LangGraph DeltaChannel since the 2026-09-14
+    # write switch (task #3180): each super-step appends its messages delta
+    # to `checkpoint_writes` (periodic `_DeltaSnapshot` blobs at
+    # _MESSAGES_DELTA_SNAPSHOT_FREQUENCY); readers fold at read time, and the
+    # read-compat layer keeps pre-switch threads readable through rollback
+    # (shared/delta_read_compat.py). The reducer is the delta form of the
+    # append-only guard — guarded_delta_reducer replays stored writes through
+    # guarded_add_messages, so the invariant (user ruling 2026-08-13, task
+    # #1256 — only a full wipe, a tail append, or modifying the last message
+    # is allowed; see agent/messages_guard.py) holds on every replay. The
+    # single-merge form (guarded_add_messages) stays the working-copy /
+    # plugin-update merge.
+    messages: Annotated[list[AnyMessage], _MESSAGES_DELTA_CHANNEL] = Field(default_factory=list)
     halted: bool = False
     turn_active: bool = False
     """This invocation is mid-turn (claim routed work). One invocation = one
@@ -261,9 +275,10 @@ _PLUGIN_STATE_CLASSES: set[type[BaseModel]] = set()
 
 
 # LangGraph style: `Annotated[T, reducer_fn]` stuffs reducer into Pydantic
-# FieldInfo.metadata, same as `messages: Annotated[list[AnyMessage], add_messages]`
-# on BaseAgentState. When plugin fields don't declare a reducer, default is
-# last-value (overwrite) — same semantics as LangGraph LastValue channel.
+# FieldInfo.metadata, same as the `messages` channel annotation on
+# BaseAgentState (its delta form since the write switch, task #3180). When
+# plugin fields don't declare a reducer, default is last-value (overwrite) —
+# same semantics as LangGraph LastValue channel.
 
 
 # Canonical sentinel for the messages-channel reducer in annotation
@@ -271,21 +286,31 @@ _PLUGIN_STATE_CLASSES: set[type[BaseModel]] = set()
 _MESSAGES_REDUCER = object()
 
 
+def _is_messages_reducer_form(m: Any) -> bool:
+    """Every spelling of the messages-channel reducer contract: plain
+    `add_messages` (what plugins declare), `guarded_add_messages` (the
+    pre-switch channel reducer), and the delta form the channel runs since
+    the 2026-09-14 write switch (`DeltaChannel(guarded_delta_reducer, ...)`,
+    task #3180). All three are the same contract."""
+    if m is add_messages or m is guarded_add_messages:
+        return True
+    return isinstance(m, DeltaChannel) and m.reducer is guarded_delta_reducer
+
+
 def _messages_annotation_key(annotation: Any) -> tuple[Any, ...]:
     """Canonical key for comparing base-field annotations: the messages
     reducer may be spelled `add_messages` (the contract plugins declare in
-    their own BaseModel) or `guarded_add_messages` (the channel's actual
-    reducer, task #1256 — add_messages plus the append-only invariant); the
-    two are the same contract. Anything else compares as-is and differs."""
+    their own BaseModel), `guarded_add_messages` (the pre-switch channel
+    reducer, task #1256 — add_messages plus the append-only invariant), or
+    the channel's delta form (`DeltaChannel(guarded_delta_reducer, ...)`,
+    the write switch, task #3180); all are the same contract. Anything else
+    compares as-is and differs."""
     meta = getattr(annotation, "__metadata__", None)
     if meta:
         origin = getattr(annotation, "__origin__", None)
         return (
             origin,
-            *(
-                _MESSAGES_REDUCER if m is add_messages or m is guarded_add_messages else m
-                for m in meta
-            ),
+            *(_MESSAGES_REDUCER if _is_messages_reducer_form(m) else m for m in meta),
         )
     return (annotation,)
 
@@ -299,13 +324,24 @@ def _resolve_reducer(field: FieldInfo) -> Callable[[Any, Any], Any]:
     Annotated[T, int]-style false-positives treating int as reducer).
     """
     for m in field.metadata:
+        if isinstance(m, DeltaChannel):
+            # The messages channel's delta form (write switch, task #3180).
+            # The single-merge used by the working copy / plugin updates /
+            # external deltas stays the guarded merge (`guarded_add_messages`)
+            # — one delta = one guarded merge, which is what the channel-side
+            # replay (guarded_delta_reducer) applies per stored write. Never
+            # the last-value fallback: that would silently overwrite the
+            # message list.
+            if m.reducer is guarded_delta_reducer:
+                return guarded_add_messages
+            continue
         if callable(m) and not isinstance(m, type):
             # A plugin declaring the base `messages` field spells the contract
-            # annotation `add_messages`; the channel's actual reducer is the
-            # guarded wrapper (same semantics + the append-only invariant,
-            # task #1256). Route the working-copy merge through the guard too,
-            # so an in-turn plugin violation fails inside execute_code
-            # instead of only at commit.
+            # annotation `add_messages`; the channel's reducer is the guarded
+            # form (same semantics + the append-only invariant, task #1256).
+            # Route the working-copy merge through the guard too, so an
+            # in-turn plugin violation fails inside execute_code instead of
+            # only at commit.
             return guarded_add_messages if m is add_messages else m
     return lambda _old, new: new  # last-value (overwrite)
 
@@ -331,7 +367,7 @@ def _accumulate_delta(acc: Any, new: Any, reducer: Callable[[Any, Any], Any]) ->
     reducer(state, xs + ys)`); the commit side processes the concatenated
     list in order and produces exactly the working copy.
     """
-    if reducer is add_messages or reducer is guarded_add_messages:
+    if _is_messages_reducer_form(reducer):
         acc_list = acc if isinstance(acc, list) else [acc]
         new_list = new if isinstance(new, list) else [new]
         return acc_list + new_list
@@ -520,8 +556,9 @@ def register_plugin_state[T: BaseModel](cls: type[T]) -> PluginStateHandle[T]:
         # `model_field.annotation` (bare T) + `model_field.metadata`
         # (Annotated's extras list); we reconstruct the full Annotated to
         # compare with the original Annotated on BaseAgentState.model_fields
-        # (BaseAgentState declares `Annotated[list, guarded_add_messages]`; the
-        # comparison normalizes the two spellings — see _messages_annotation_key).
+        # (the channel may be spelled by its delta form or the guarded
+        # reducer; the comparison normalizes the contract spellings — see
+        # _messages_annotation_key).
         #
         # Don't read `cls.__annotations__` — under `from __future__ import
         # annotations`, plugin modules have strings (`"Annotated[set[str],
