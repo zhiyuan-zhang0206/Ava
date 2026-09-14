@@ -244,9 +244,9 @@ register(
     },
     pricing={
         "deepseek-v4-pro": PriceRates(
-            cache_miss=0.66,
-            cache_hit=0.022,
-            output=1.98,
+            cache_miss=0.15,
+            cache_hit=0.003,
+            output=0.6,
             source_url="https://api-docs.deepseek.com/quick_start/pricing/",
             source_checked_at="2026-09-11",
             vendor="deepseek",
