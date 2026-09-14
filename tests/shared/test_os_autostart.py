@@ -352,3 +352,14 @@ def test_relaunch_via_gui_domain_reports_a_failed_bootstrap(
     assert ok is False
     assert "Bootstrap failed" in detail
     assert [cmd[1] for cmd in calls] == ["print", "bootstrap"]
+
+
+def test_gui_domain_kickstart_command_names_the_job_and_domain() -> None:
+    """The operator-facing remedy `ava start`'s background-chain warning prints
+    (task #3346): the exact kickstart line for THIS cluster's autostart job."""
+    import os
+
+    assert (
+        os_autostart.gui_domain_kickstart_command()
+        == f"launchctl kickstart -k gui/{os.getuid()}/com.ava.ava-t-cafe0123.autostart"
+    )

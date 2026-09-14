@@ -326,6 +326,17 @@ def unregister_autostart(home: Path | None = None) -> None:
     get_backend().unregister_autostart(slug_for_home(home))
 
 
+def gui_domain_kickstart_command() -> str:
+    """The `launchctl kickstart` line that re-runs this cluster's autostart job in
+    the current user's GUI domain.
+
+    The remedy `relaunch_via_gui_domain` executes, exposed for operator-facing
+    messages: a start chain outside the GUI login session must be re-homed
+    through the GUI-domain job instead of bringing services up in place
+    (task #3346)."""
+    return f"launchctl kickstart -k gui/{os.getuid()}/{_autostart_label(_home_slug())}"
+
+
 def relaunch_via_gui_domain() -> tuple[bool, str]:
     """Run this cluster's autostart job in the GUI login session, now.
 

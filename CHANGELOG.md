@@ -28,6 +28,16 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
   admission).
 
 ### Fixed
+- Every automatic ava-browser rebuild now routes through the GUI domain when
+  the healthcheck's own chain runs outside the macOS GUI login session — the
+  session-gone sweep and the live-session dead-CDP respawn stop the stuck
+  session and kickstart the cluster's GUI-domain autostart job instead of
+  re-creating a context-less session in place (the residual path that kept the
+  wrong-domain loop alive after the task #3149 heal). The rebuild line is a
+  WARNING naming the trigger and a cumulative attempt count, service respawns
+  record their chain's launchd domain for attribution, and `ava start` warns
+  loudly when an agent-runner host is started from a chain outside the GUI
+  login session (task #3346).
 - A browser daemon chain that lost the GUI login session no longer waits
   forever for a Keychain it can never read: the macOS readiness probe names
   the missing context (`launchctl managername` ≠ `Aqua` — the state a respawn

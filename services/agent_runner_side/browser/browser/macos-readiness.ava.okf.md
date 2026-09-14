@@ -63,6 +63,15 @@ one episode-gated ERROR naming the manual recipe. A session-gone round inside
 the relaunch window defers its own in-context rebuild so the relaunch is not
 undone; the episode clears on the first healthy round or context-healthy wait.
 
+Every automatic browser rebuild routes through that same stop + kick whenever
+this chain runs outside the GUI login session — the session-gone sweep and the
+live-session respawn stop the stuck session and kick instead of re-creating a
+context-less session in place (`respawn_service` is not reached there) — so the
+residual path that kept re-seeding the wrong-domain loop is closed. The success
+line is a WARNING naming the trigger (`context-missing` / `session-gone` /
+`cdp-down`) and the cumulative attempt total, and service respawns record their
+chain's launchd domain for attribution (task #3346).
+
 ## Profile Safety
 
 Automatic provisioning copies a daily profile only into an absent destination;

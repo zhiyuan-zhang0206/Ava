@@ -30,6 +30,7 @@ non-alive rounds, holds with a single alert until a round probes alive.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from collections.abc import Callable
@@ -40,7 +41,8 @@ from shared.cluster import session_name
 from shared.config import settings
 from shared.daemon_health import EXIT_PORT_TAKEN, DaemonProbe
 from shared.paths import prod_service_checkout_error
-from shared.platform import raise_fd_limit
+from shared.platform import IS_MACOS, raise_fd_limit
+from shared.platform_probes import gui_session_domain
 from shared.source_switch import is_switching
 
 _log = logging.getLogger("shared.service_respawn")
@@ -229,6 +231,19 @@ def respawn_service(
     env = forward_env_dict()
     if extra_env:
         env.update(extra_env)
+    if IS_MACOS:
+        # The session inherits this chain's launchd management domain, and a
+        # chain outside the GUI login session lands its children there — the
+        # wrong domain survives every in-place respawn and is what the browser
+        # heal has to repair (task #3346). Recording the launch context here
+        # closes the "which respawner put this session in Background?"
+        # attribution gap.
+        _log.info(
+            "[service_respawn] %s: launching (chain domain: %s, caller pid: %d)",
+            session,
+            gui_session_domain() or "unknown",
+            os.getpid(),
+        )
     return backend.new_session(session, cmd, repo, env=env)
 
 
