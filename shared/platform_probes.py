@@ -233,7 +233,10 @@ def unix_sockets_available() -> bool:
     True on POSIX, False on Windows — where the constant is simply absent from
     the ``socket`` module, so naming it raises ``AttributeError`` rather than
     failing a connect. Probed by attribute presence, not by ``sys.platform``,
-    because the attribute IS the thing every caller actually needs.
+    because the attribute IS the thing every caller actually needs. Windows-only
+    IPC must not depend on it: the winproc control steward
+    (``shared/winproc.py``) uses loopback TCP for exactly this reason (CPython
+    issue #77589).
     """
     return hasattr(socket, "AF_UNIX")
 

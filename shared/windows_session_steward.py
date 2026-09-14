@@ -4,7 +4,11 @@
 different session than the target cannot deliver Ctrl-Break directly. This leaf
 solves the problem at *launch* time instead of control time: `winproc.new_session`
 spawns it in the same session the target runs in (the spawner's own session),
-and it serves one AF_UNIX socket whose path embeds the session record identity.
+and it serves one loopback TCP control socket whose endpoint and delivery
+token live only in the session record (and this process's argv). Loopback TCP,
+not a filesystem socket: Windows CPython has no AF_UNIX (CPython issue
+#77589), so the channel must use the one stream family the platform
+implements.
 
 A `break` request makes it execute the existing one-shot private-console helper
 (`shared/windows_console_signal.py`) — every identity and console-membership
@@ -114,14 +118,20 @@ def _handle_request(
     pid: int,
     birth: float,
     name: str,
+    nonce: str,
     *,
     record_names_me: bool,
 ) -> None:
-    """Answer one accepted connection; each exchange is one line in, one out."""
+    """Answer one accepted connection; each exchange is one line in, one out.
+
+    The first line must carry the record's delivery token, so a plain `break`
+    (what a squatter or a stale client would send) is refused exactly like an
+    unknown request.
+    """
     connection.settimeout(_HELPER_TIMEOUT_S + _POLL_S)
     request = connection.recv(_MAX_REQUEST_BYTES)
-    if request.strip() != b"break":
-        connection.sendall(b"err: unknown request\n")
+    if request.strip() != f"break {nonce}".encode():
+        connection.sendall(b"err: unknown request or bad token\n")
         return
     if not record_names_me:
         connection.sendall(b"err: session record no longer names this steward\n")
@@ -138,23 +148,22 @@ def _handle_request(
         connection.sendall(f"err: {detail}\n".encode("utf-8", errors="replace"))
 
 
-def serve(record_path: Path, pid: int, birth: float, socket_path: Path, name: str) -> int:
+def serve(record_path: Path, pid: int, birth: float, port: int, nonce: str, name: str) -> int:
     """Serve control requests until the session identity is no longer live."""
     if sys.platform != "win32":
         raise RuntimeError("session steward is Windows-only")
     if not _target_alive(pid, birth):
         _log(f"target {pid} is already gone at start; refusing to serve {name}")
         return 1
-    if socket_path.exists():
-        socket_path.unlink(missing_ok=True)
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(_POLL_S)
     try:
-        sock.bind(str(socket_path))
+        sock.bind(("127.0.0.1", port))
+        sock.listen(1)
     except OSError as error:
-        _log(f"cannot bind control socket for {name} ({socket_path}): {error}")
+        _log(f"cannot bind control port for {name} (127.0.0.1:{port}): {error}")
         return 1
-    _log(f"serving control socket for {name} (pid {pid}, birth {birth}): {socket_path}")
+    _log(f"serving control port for {name} (pid {pid}, birth {birth}): 127.0.0.1:{port}")
     try:
         while True:
             # Exit truth table: see should_exit (module docstring for why).
@@ -172,27 +181,37 @@ def serve(record_path: Path, pid: int, birth: float, socket_path: Path, name: st
                 continue
             try:
                 _handle_request(
-                    connection, record_path, pid, birth, name, record_names_me=record_names_me
+                    connection,
+                    record_path,
+                    pid,
+                    birth,
+                    name,
+                    nonce,
+                    record_names_me=record_names_me,
                 )
+            except OSError as error:
+                # A local peer that connects and vanishes must not take the
+                # control channel down with it (any local process can reach a
+                # loopback port; the token check already gated every action).
+                _log(f"connection dropped for {name}: {error}")
             finally:
                 with contextlib.suppress(OSError):
                     connection.close()
     finally:
         with contextlib.suppress(OSError):
             sock.close()
-        with contextlib.suppress(OSError):
-            socket_path.unlink(missing_ok=True)
     return 0
 
 
 if __name__ == "__main__":
-    _record, _pid, _birth, _socket, _name = sys.argv[1:6]
+    _record, _pid, _birth, _port, _nonce, _name = sys.argv[1:7]
     raise SystemExit(
         serve(
             Path(_record),
             int(_pid),
             float(_birth),
-            Path(_socket),
+            int(_port),
+            _nonce,
             _name,
         )
     )

@@ -326,7 +326,7 @@ def test_new_session_spawns_a_control_steward_bound_to_the_record_identity(
     unit_home: Path, fake_popen: type[_FakePopen], tmp_path: Path
 ) -> None:
     """Every Windows session gets a resident cross-session control steward in
-    the same session as the target, with its socket path bound to the exact
+    the same session as the target, with its endpoint and delivery token bound to the exact
     (pid, create_time) identity the record carries — a caller can only address
     it by knowing that identity (issue #1930)."""
     assert winproc.new_session("zz-daemon", ["python", "-m", "svc"], tmp_path, env={})
@@ -337,15 +337,20 @@ def test_new_session_spawns_a_control_steward_bound_to_the_record_identity(
     assert isinstance(command, list)
     assert command[0] == sys.executable and command[1] == "-I"
     assert command[2].endswith("windows_session_steward.py")
-    # record path, pid, create_time, socket path, session name
-    assert len(command) == 8
+    # record path, pid, create_time, control port, delivery token, session name
+    assert len(command) == 9
     rec = winproc._read_record("zz-daemon")
-    assert rec is not None and rec.steward_pid is not None and rec.steward_socket is not None
+    assert rec is not None and rec.steward_pid is not None
+    assert rec.steward_endpoint is not None and rec.steward_nonce is not None
     assert command[3] == str(winproc._record_path("zz-daemon"))
     assert command[4] == str(rec.pid)
     assert command[5] == str(rec.create_time)
-    assert command[6] == rec.steward_socket
-    assert command[7] == "zz-daemon"
+    host, port_text = rec.steward_endpoint.rsplit(":", 1)
+    assert host == "127.0.0.1" and 0 < int(port_text) < 65536
+    assert command[6] == port_text
+    assert command[7] == rec.steward_nonce
+    assert len(rec.steward_nonce) == 32 and int(rec.steward_nonce, 16) >= 0
+    assert command[8] == "zz-daemon"
     # No console for the steward (it only transiently attaches the target's
     # via the helper); the ABI constant, asserted off-box like the other flags.
     assert call.creationflags == winproc._DETACHED
@@ -353,15 +358,15 @@ def test_new_session_spawns_a_control_steward_bound_to_the_record_identity(
     ctrl_log = unit_home / "logs" / "zz-daemon.ctrl.log"
     assert call.stdout == ctrl_log.stat()
     assert call.stderr == ctrl_log.stat()
-    assert rec.steward_socket == str(winproc._steward_socket_path(rec.pid, rec.create_time))
+    assert rec.steward_endpoint is not None and rec.steward_endpoint.startswith("127.0.0.1:")
 
 
-def test_list_sessions_reaps_a_crashed_stewards_dead_socket(
+def test_list_sessions_reaps_a_dead_record(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A steward that crashed (not a graceful exit) leaves its socket file
-    behind; reaping the dead session's record must take the socket with it so
-    no later steward can mistake it for a live channel."""
+    """A dead session's record is removed by the listing. The loopback control
+    channel leaves no filesystem residue, so the record is the only artifact
+    reaping has to take."""
     from shared.session_record import SessionRecord
 
     rec = SessionRecord(
@@ -371,16 +376,12 @@ def test_list_sessions_reaps_a_crashed_stewards_dead_socket(
         str(unit_home),
         1.0,
         steward_pid=900001,
-        steward_socket=str(unit_home / "run" / "ctrl" / "ava-ctrl-900000-1.000000.sock"),
+        steward_endpoint="127.0.0.1:59999",
+        steward_nonce="cd" * 16,
     )
     rec.write(winproc._record_path("zz-gone"))
-    assert rec.steward_socket is not None
-    socket_path = Path(rec.steward_socket)
-    socket_path.parent.mkdir(parents=True, exist_ok=True)
-    socket_path.write_text("")
     assert winproc.list_sessions() == []
     assert not winproc._record_path("zz-gone").exists()
-    assert not socket_path.exists()
 
 
 def test_dead_child_gets_no_steward_and_no_control_fields(
@@ -394,7 +395,7 @@ def test_dead_child_gets_no_steward_and_no_control_fields(
     assert _steward_calls(fake_popen) == []
     rec = winproc._read_record("zz-dead")
     assert rec is not None
-    assert rec.steward_pid is None and rec.steward_socket is None
+    assert rec.steward_pid is None and rec.steward_endpoint is None
 
 
 class _DeadProcess:
