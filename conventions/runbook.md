@@ -1257,8 +1257,9 @@ Down-failure drill: see [down-failure-drill.md](down-failure-drill.md).
 any runner, an enabled PITR deployment reuses the newest protected scheduled
 base and creates a named PostgreSQL restore point. The updater verifies the
 live database/system/timeline identity, switches WAL, waits for every segment
-from the base to that point, and compares all required objects against a fresh
-viewer-only remote inventory. It publishes an immutable recovery receipt
+from the base to that point, and re-reads each required object's exact remote
+identity with at most eight concurrent viewer clients. It does not scan
+unrelated backup chains. It publishes an immutable recovery receipt
 offsite and fsyncs the local copy under
 `$AVA_HOME/physical-backup/update-recovery/`. The entire gate is bounded to
 600 seconds, below the rollout watchdog's 900-second silence threshold.

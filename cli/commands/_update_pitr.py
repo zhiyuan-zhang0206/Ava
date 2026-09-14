@@ -13,7 +13,10 @@ import json
 import os
 import re
 import sys
+import threading
 import time
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,14 +28,13 @@ from psycopg.conninfo import conninfo_to_dict
 from services.pitr.activation_runtime import pitr_admin_url
 from services.pitr.activation_state import lock_path
 from services.pitr.base_manifest import CandidateManifest, WalRange, _lsn
+from services.pitr.object_store import ObjectStore
 from services.pitr.restore_manifest import (
     ProtectedManifest,
     RestoreObject,
     required_archive_names,
     wal_objects_from_acks,
 )
-from services.pitr.retention_inventory import InventorySnapshot
-from services.pitr.retention_manifest import RetentionObject
 from services.pitr.store_factory import get_store_group
 from shared.cluster import _swap_db
 from shared.config import settings
@@ -102,22 +104,36 @@ def select_chain(root: Path, identity: DatabaseIdentity) -> ProtectedManifest:
     return proof
 
 
-def verify_inventory(objects: tuple[RestoreObject, ...], inventory: InventorySnapshot) -> None:
-    """Require every byte range's ACK to match a fresh viewer-only remote listing."""
-    by_name: dict[str, RetentionObject] = {}
-    for item in inventory.objects:
-        if item.object_name in by_name:
-            raise RecoveryPointError("PITR inventory has ambiguous object generations")
-        by_name[item.object_name] = item
-    for expected in objects:
-        actual = by_name.get(expected.object_name)
+class _ViewerThread(threading.local):
+    def __init__(self) -> None:
+        self.store: ObjectStore | None = None
+
+
+def verify_remote_objects(
+    objects: tuple[RestoreObject, ...],
+    reader_factory: Callable[[], ObjectStore],
+) -> None:
+    """Check only required objects with bounded I/O and one SDK client per thread.
+
+    Retention inventories scan unrelated chains too; OSS additionally performs
+    serial HEAD requests for every object. That whole-bucket operation is not
+    an update prerequisite and can exceed the gate's process deadline.
+    """
+    readers = _ViewerThread()
+
+    def verify(expected: RestoreObject) -> None:
+        if readers.store is None:
+            readers.store = reader_factory()
+        actual = readers.store.stat(expected.object_name)
         if actual is None or (
+            actual.object_name,
             actual.pin_token,
             actual.size,
-            actual.checksum_algo,
-            actual.checksum_value,
-            actual.metadata,
+            actual.checksum.algo,
+            actual.checksum.value,
+            tuple(sorted(actual.metadata.items())),
         ) != (
+            expected.object_name,
             expected.pin_token,
             expected.size,
             expected.checksum_algo,
@@ -127,6 +143,10 @@ def verify_inventory(objects: tuple[RestoreObject, ...], inventory: InventorySna
             raise RecoveryPointError(
                 "PITR recovery object is missing or differs from its immutable ACK"
             )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        for _ in executor.map(verify, objects):
+            pass
 
 
 def _wait_wal(root: Path, names: tuple[str, ...]) -> tuple[RestoreObject, ...]:
@@ -211,7 +231,7 @@ def create_recovery_point(target_sha: str) -> Path:
         if any(dict(item.metadata)["ava-key-id"] != config.pitr_backup_key_id for item in objects):
             raise RecoveryPointError("PITR recovery chain requires a different decryption key")
         group = get_store_group()
-        verify_inventory(objects, group.retention_inventory_reader().snapshot())
+        verify_remote_objects(objects, group.viewer_object_store)
         receipt = {
             "version": 1,
             "kind": "pre-update-pitr",
