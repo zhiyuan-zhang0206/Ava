@@ -24,8 +24,10 @@ Nothing here touches production: the run dir lives under --workdir
 (/tmp/ava-root-dry-run by default), the units are sleepers, and the script
 refuses a workdir under a protected home — the one exception is the agent
 scratch tree `<home>/workspaces/`, so a drill's evidence can live in a worker
-workspace. Evidence (manifests, status snapshots, logs) is retained under
-<workdir>/evidence unless --cleanup is passed.
+workspace. The path is resolved before the guard and only the resolved form is
+used afterwards, so `..` / symlink spellings cannot slip past it. Evidence
+(manifests, status snapshots, logs) is retained under <workdir>/evidence
+unless --cleanup is passed.
 
 Exit 0 = every phase passed.
 """
@@ -71,6 +73,39 @@ def _fail(phase: str, detail: str) -> NoReturn:
 
 def _phase_pass(phase: str, detail: str) -> None:
     print(f"PASS(phase={phase}): {detail}")
+
+
+def _guard_workdir(raw: Path) -> Path:
+    """Validate `--workdir` and return its resolved form.
+
+    Resolution happens BEFORE the comparison: a `..` or symlink component
+    cannot smuggle a protected directory past the guard (`~/.ava/workspaces/..`
+    reads as an allowed scratch path but resolves to the production home). The
+    resolved path is returned and the caller uses it for mkdir / writes / the
+    `--cleanup` rmtree, so no later step ever acts on the raw form.
+    """
+    if not raw.is_absolute():
+        _fail("args", f"workdir must be absolute: {raw}")
+    workdir = raw.resolve()
+    protected = {Path.home() / ".ava", Path(settings.general.ava_home).expanduser()}
+    for base in protected:
+        base_resolved = base.resolve()
+        under_home = workdir == base_resolved or base_resolved in workdir.parents
+        if not under_home:
+            continue
+        # The one carve-out is the agent scratch tree: a root-side drill is
+        # expected to retain its evidence in a worker's workspace. Subtrees
+        # only — the scratch root itself stays refused (a --cleanup there
+        # would erase every agent workspace).
+        scratch = base_resolved / "workspaces"
+        if scratch in workdir.parents:
+            continue
+        _fail(
+            "args",
+            f"refusing a workdir under {base}: {raw} resolves to {workdir},"
+            " which is for dev drills only",
+        )
+    return workdir
 
 
 def _unit_exec(python: str, unit_id: str) -> list[str]:
@@ -188,7 +223,11 @@ def main() -> int:  # noqa: PLR0915 - one bounded drill lifecycle: every phase, 
     parser.add_argument(
         "--workdir",
         default=str(_DEFAULT_WORKDIR),
-        help="throwaway directory for the drill (default: /tmp/ava-root-dry-run)",
+        help=(
+            "throwaway directory for the drill (default: /tmp/ava-root-dry-run);"
+            " resolved before the guard, so `..`/symlink forms cannot escape the"
+            " protected-home check (agent scratch: <home>/workspaces/)"
+        ),
     )
     parser.add_argument(
         "--python", default=sys.executable, help="interpreter for the daemon + units"
@@ -204,17 +243,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded drill lifecycle: every phase, 
     parser.add_argument("--cleanup", action="store_true", help="remove the workdir at the end")
     args = parser.parse_args()
 
-    workdir = Path(args.workdir).expanduser()
-    if not workdir.is_absolute():
-        _fail("args", f"workdir must be absolute: {workdir}")
-    protected = {Path.home() / ".ava", Path(settings.general.ava_home).expanduser()}
-    for base in protected:
-        under_home = workdir == base or base in workdir.parents
-        # The one carve-out is the agent scratch tree: a root-side drill is
-        # expected to retain its evidence in a worker's workspace.
-        in_scratch = (base / "workspaces") in workdir.parents
-        if under_home and not in_scratch:
-            _fail("args", f"refusing a workdir under {base}: {workdir} is for dev drills only")
+    workdir = _guard_workdir(Path(args.workdir).expanduser())
 
     workdir.mkdir(parents=True, exist_ok=True)
     evidence = workdir / "evidence"
