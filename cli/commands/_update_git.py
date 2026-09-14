@@ -618,14 +618,8 @@ def _verify_snapshot_artifact_inner(artifact: Path) -> None:
 
 
 def _snapshot_progress(line: str) -> None:
-    """One heartbeat line for the pre-update snapshot, straight to stdout.
-
-    The rollout log is the `tee` of this process's output, and
-    `ops.controllers.stalled_rollout` reads that log's mtime as the rollout's
-    progress signal: the snapshot may legitimately hold the log silent for the
-    full `_PRE_UPDATE_DUMP_TIMEOUT_S` bound, so it must narrate itself or a
-    healthy slow dump is reclaimed as a hung rollout (2026-09-14 incident).
-    """
+    """Narrate the snapshot on stdout — the rollout `tee`'s log source, whose
+    mtime `stalled_rollout` reads as progress (2026-09-14 silent-dump reclaim)."""
     print(f"→ pre-update data snapshot: {line}", flush=True)
 
 
@@ -638,15 +632,11 @@ def snapshot_pre_update_data(target_sha: str) -> Path | None:
     Code-only updates return None. Recovery reports the returned artifact's
     actual restore method; physical recovery follows PITR's retention window.
 
-    The dump narrates itself on the rollout output — a start line plus progress
-    lines while `pg_dump` / encryption run (see `_snapshot_progress`) — because
-    the rollout stall watchdog reclaims log silence after 900 s
-    (`ops.controllers.stalled_rollout`): without the heartbeats, a healthy dump
-    using its allowed 20 min is indistinguishable from a hung rollout. While the
-    heartbeats flow, an alive-but-stuck dump rides to its own 20-min bound
-    (`_PRE_UPDATE_DUMP_TIMEOUT_S`), enforced by the same loop that heartbeats,
-    instead of being reclaimed at 900 s of silence; a snapshot that stops
-    heartbeating is still reclaimed by the watchdog as before.
+    The dump narrates itself on the rollout output — a start line plus per-stage
+    progress lines (see `_snapshot_progress`): the stall watchdog reclaims log
+    silence at 900 s, and while these heartbeats flow an alive-but-stuck dump
+    rides to its own `_PRE_UPDATE_DUMP_TIMEOUT_S` bound instead (enforced by the
+    same loop); a snapshot that stops heartbeating is reclaimed as before.
     """
     from cli.commands._cluster_rollback import _migration_set_at_commit
 
@@ -676,10 +666,7 @@ def snapshot_pre_update_data(target_sha: str) -> Path | None:
 
     from services.backup import backup_lock, run_backup
 
-    _snapshot_progress(
-        f"started (pg_dump before the stop may take up to "
-        f"{_PRE_UPDATE_DUMP_TIMEOUT_S / 60:.0f} min; progress lines follow)"
-    )
+    _snapshot_progress(f"started (dump bounded at {_PRE_UPDATE_DUMP_TIMEOUT_S / 60:.0f} min)")
 
     # Hold the same lock as the daily writer through the restore listing. A
     # verified dump must remain untouched until this function hands its path to

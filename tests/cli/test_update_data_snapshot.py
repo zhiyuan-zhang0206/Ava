@@ -153,7 +153,7 @@ def test_pre_update_data_snapshot_narrates_the_dump_on_stdout(
     assert _git.snapshot_pre_update_data("TARGETSHA") == dump
 
     out = capsys.readouterr().out
-    assert "→ pre-update data snapshot: started (pg_dump before the stop may take up to" in out
+    assert "→ pre-update data snapshot: started (dump bounded at 20 min)" in out
     assert "→ pre-update data snapshot: pg_dump started (bounded at 20 min)" in out
     assert "→ pre-update data snapshot: pg_dump 61s, 512.4 MiB written" in out
     assert f"→ pre-update data snapshot: {dump} (verified)" in out
