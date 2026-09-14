@@ -21,7 +21,15 @@ This loop is the enforcer, scanning
   owner's ``ava.shell.sessions.renew()`` extends a live session's deadline
   before it passes; each kill dispatch re-checks the row is still expired
   first (renewal's own ``expires_at > clock_timestamp()`` guard makes the pair airtight),
-  so a renewed session is never killed.
+  so a renewed session is never killed. **Watcher sessions follow this same
+  path** (user ruling 2026-09-14, task #3411: one lifecycle system — a
+  watcher session's recorded deadline IS its target: launch = created +
+  timeout, cron = end, at = moment + grace). An expired watcher session is
+  reclaimed, and its still-``running`` registry row is marked ``reaped`` —
+  past the deadline a watcher is never rebuilt (the boot reconcile shares
+  the rule). The one exception is a legacy row whose recorded TTL predates
+  the unified write path while its true deadline is still ahead: it is
+  healed to that deadline, never reclaimed.
 - **Browser sessions** — expired rows are deleted in the gateway's periodic
   pass, so cleanup does not depend on the next login.
 - **Work failures** — a gateway crash after recording an event but before
@@ -32,8 +40,9 @@ This loop is the enforcer, scanning
   newest claim per schedule so the catch-up baseline never regresses.
 - **Terminated owners' watchers** — a watcher whose owning agent is
   terminated for good (never auto-resurrect-eligible) has its session killed
-  and its registry row marked ``reaped``. Watcher sessions deliberately carry
-  no shell TTL row, so this pass is their only reclamation path (task #2617).
+  and its registry row marked ``reaped``. The TTL pass above may reclaim
+  such a session first; this pass stays the reclamation path for owners
+  that never come back to reconcile (task #2617).
   Each definitive reap queues a reclamation notice for the owner (delivered
   on its next resurrect, never resurrecting it itself) — the #2060 ruling:
   reaped is terminal and never auto-restored, so the agent must be told it
@@ -68,9 +77,17 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import psycopg
+from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from gateway.routers import work_failed as work_failed_router
+from gateway.watcher_ttl import (
+    heal_legacy_ttl,
+    mark_reaped_and_notify_if_owner_still_terminated,
+    mark_reaped_live_owner,
+    reap_terminated_owner_watchers,
+    watcher_deadline_of,
+)
 from ops import cluster_rpc, ops_lifecycle
 from shared import telemetry
 from shared.config import cluster_tz, settings
@@ -113,94 +130,6 @@ class TtlReaper:
 
     task: asyncio.Task[None]
     stop: asyncio.Event
-
-
-def _terminated_owner_watcher_rows_blocking(
-    pool: ConnectionPool,
-) -> list[tuple[int, int, str]]:
-    """Watcher rows whose owner agent is terminated for good, newest first.
-
-    Only ``status='running'`` rows carry live sessions; the other statuses
-    are terminal history. Owners terminated by crash recovery
-    (``reaper`` / ``launch-confirm``) are KEPT — they are auto-resurrect-
-    eligible and their own cron wakes are a revival channel; killing them
-    would race the crash-resurrect controller (the #2589 / #1938 lesson:
-    never reap what may come back). Every other terminated source (user /
-    exit / integrity / legacy NULL) is permanent, so its watchers are dead
-    weight — exactly the task #2617 leak. The machine is carried in the
-    same SELECT so the kill dispatch never re-reads the owner.
-    """
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT w.agent_id, w.session_id, m.machine
-            FROM agent_watchers w
-            JOIN agents_meta m ON m.id = w.agent_id
-            WHERE m.status = 'terminated'
-              AND COALESCE(m.termination_source, '') NOT IN ('reaper', 'launch-confirm')
-              AND w.status = 'running'
-            ORDER BY w.created_at DESC, w.session_id DESC
-            LIMIT %s
-            """,
-            (_PASS_BATCH,),
-        )
-        return [(int(r[0]), int(r[1]), r[2]) for r in cur.fetchall()]
-
-
-def _mark_watcher_reaped_and_notify_if_owner_still_terminated(
-    pool: ConnectionPool, agent_id: int, session_id: int
-) -> str | None:
-    """Terminalize a reclaimed watcher row and queue its reclamation notice,
-    re-verifying its owner in the SAME statement (the #2589 atomic-guard
-    discipline).
-
-    The owner may have been resurrected between the scan and the kill — then
-    the row must stay ``running`` so the resurrected agent's boot reconcile
-    rebuilds the schedule from it. When the row IS marked, the #2060 notice
-    (user ruling 2026-09-10: reaped is terminal, the schedule never
-    auto-restores — the owner must be told it was reclaimed so it can
-    re-register) is inserted in the SAME transaction, so a crash between the
-    mark and the notice cannot lose the notice.
-
-    The owner is terminated at mark time, so the notice is inserted WITHOUT
-    the live-owner gate of ``_notify_owner``: it stays a pending inbound and
-    delivers on the agent's next resurrect through any channel, without
-    resurrecting it (a reclamation notice never resurrects — the wake
-    publish reaches no listener of a terminated agent, and the pending row
-    is claimed when the agent comes back). Returns the watcher's name when
-    the row was marked, None otherwise.
-    """
-    with write_transaction(pool) as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            UPDATE agent_watchers SET status = 'reaped'
-            WHERE agent_id = %s AND session_id = %s AND status = 'running'
-              AND EXISTS (
-                  SELECT 1 FROM agents_meta m
-                  WHERE m.id = agent_watchers.agent_id
-                    AND m.status = 'terminated'
-                    AND COALESCE(m.termination_source, '') NOT IN ('reaper', 'launch-confirm')
-              )
-            RETURNING name
-            """,
-            (agent_id, session_id),
-        )
-        row = cur.fetchone()
-        if row is None:
-            return None
-        name = row[0]
-        insert_inbound_message(
-            conn,
-            agent_id,
-            (
-                f"Watcher schedule {name!r} (agent {agent_id}) was reclaimed "
-                "after its TTL expired. Re-register it with ava.watcher.cron() "
-                "if it is still needed."
-            ),
-            source="system",
-            provenance=InboundProvenance(source_verified_by=None, source_transport="ops"),
-        )
-        return name
 
 
 def _agent_machine(pool: ConnectionPool, agent_id: int) -> str | None:
@@ -358,35 +287,39 @@ def _reap_expired_web_sessions_blocking(pool: ConnectionPool) -> int:
         return cur.rowcount
 
 
-def _expired_shell_rows_blocking(pool: ConnectionPool) -> list[tuple[int, int, datetime, datetime]]:
+def _expired_shell_rows_blocking(pool: ConnectionPool) -> list[dict[str, Any]]:
     """TTL-expired shell tracking rows, oldest deadline first.
 
-    A row whose (agent, session) pair still carries a live watcher registry
-    entry (``agent_watchers.status IN ('running', 'rebuilt')``) is skipped in
-    the same SQL: a watcher session owns its lifecycle through the registry
-    (its own deadline + the boot reconcile), never through a shell TTL. The
-    NOT EXISTS guard makes that atomic — no TOCTOU window between a registry
-    check and the kill. Schedule sessions never carry rows at all (they have
-    no agent id; the ScheduleManager reaps them — see
-    ``gateway/schedule_manager._launch``).
+    Each row carries its watcher facts when the (agent, session) pair is a
+    watcher session (LEFT JOIN — the pair is unique per the registry PK): the
+    kind / status plus the deadline payload. The caller applies the one
+    watcher rule: a session whose TRUE deadline has not passed is never
+    reclaimed (only a legacy row whose recorded TTL predates the unified
+    write path can land in that state) — user ruling 2026-09-14, task #3411
+    removed the blanket registry skip this query used to carry, so no
+    watcher status shields a session from reclamation any more. Schedule
+    sessions never carry rows at all (they have no agent id; the
+    ScheduleManager reaps them — see ``gateway/schedule_manager._launch``).
 
     Each row carries ``expires_at`` and ``created_at`` so the interruption
     notice can state when the TTL expired and how long it was (the duration
     is ``expires_at - created_at``; no extra column needed)."""
-    with pool.connection() as conn, conn.cursor() as cur:
+    with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
-            "SELECT t.agent_id, t.session_id, t.expires_at, t.created_at "
+            "SELECT t.agent_id, t.session_id, t.expires_at, t.created_at, "
+            "w.kind AS watcher_kind, w.status AS watcher_status, "
+            "w.created_at AS watcher_created_at, "
+            "w.timeout_secs AS watcher_timeout_secs, "
+            "w.fires_at AS watcher_fires_at, "
+            "w.cron_end_at AS watcher_cron_end_at "
             "FROM agent_shell_ttls t "
+            "LEFT JOIN agent_watchers w "
+            "ON w.agent_id = t.agent_id AND w.session_id = t.session_id "
             "WHERE t.expires_at <= clock_timestamp() "
-            "AND NOT EXISTS ("
-            "SELECT 1 FROM agent_watchers w "
-            "WHERE w.agent_id = t.agent_id AND w.session_id = t.session_id "
-            "AND w.status IN ('running', 'rebuilt')"
-            ") "
             "ORDER BY t.agent_id, t.session_id LIMIT %s",
             (_PASS_BATCH,),
         )
-        return [(row[0], row[1], row[2], row[3]) for row in cur.fetchall()]
+        return [dict(row) for row in cur.fetchall()]
 
 
 def _claim_still_expired(cur: psycopg.Cursor[Any], agent_id: int, session_id: int) -> bool:
@@ -455,6 +388,7 @@ def _delete_shell_row_blocking(
     session_id: int,
     *,
     interrupted: bool,
+    notify: bool = True,
     name: str | None = None,
     expires_at: datetime | None = None,
     created_at: datetime | None = None,
@@ -462,14 +396,19 @@ def _delete_shell_row_blocking(
     """Drop a reclaimed shell's tracking row; notify its live owner only when
     the reclamation interrupted a running job (an empty shell's reaping is
     silent — user ruling 2026-08-27). The notice states when the TTL expired
-    and how long it was (``expires_at`` / ``created_at`` from the row)."""
+    and how long it was (``expires_at`` / ``created_at`` from the row).
+
+    Watcher sessions pass ``notify=False``: their reclaim ends a scheduled
+    window at its own deadline, not a user task — the watcher's record
+    (``reaped`` registry status + telemetry) is its report, and the
+    shell-shaped "interrupted a running task" notice would misstate it."""
     with write_transaction(pool) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "DELETE FROM agent_shell_ttls WHERE agent_id = %s AND session_id = %s",
                 (agent_id, session_id),
             )
-        if interrupted:
+        if interrupted and notify:
             label = (
                 f"Shell session {name!r} (id {session_id}, agent {agent_id})"
                 if name
@@ -493,6 +432,16 @@ def _delete_shell_row_blocking(
 async def _reap_expired_shells(pool: ConnectionPool) -> list[tuple[int, int]]:
     """Kill TTL-expired shell sessions on their home machines.
 
+    One lifecycle for every session, watcher sessions included (user ruling
+    2026-09-14, task #3411): a watcher session's recorded TTL IS its target
+    deadline, so an expired one is reclaimed like any other, and its
+    still-``running`` registry row is marked ``reaped`` on the definitive
+    verdict — past the deadline a watcher is never rebuilt, and the boot
+    reconcile's deadline check shares that rule. The one exception is a
+    legacy row whose recorded TTL predates the unified write path while its
+    true deadline is still ahead: the row is healed to the true deadline and
+    never reclaimed (``gateway.watcher_ttl.heal_legacy_ttl``).
+
     The row is deleted only on a definitive verdict (killed / absent); an
     unreachable machine or a version-skewed runner leaves it for the next
     pass — deleting the row would orphan the live session. All DB work runs
@@ -500,7 +449,35 @@ async def _reap_expired_shells(pool: ConnectionPool) -> list[tuple[int, int]]:
     """
     rows = await asyncio.to_thread(_expired_shell_rows_blocking, pool)
     reaped: list[tuple[int, int]] = []
-    for agent_id, session_id, expires_at, created_at in rows:
+    healed = 0
+    heal_samples: list[str] = []
+    now = datetime.now(UTC)
+    for row in rows:
+        agent_id = row["agent_id"]
+        session_id = row["session_id"]
+        deadline = watcher_deadline_of(row)
+        if row["watcher_status"] == "running" and deadline is None:
+            # A running watcher whose payload cannot answer has no deadline
+            # to enforce — the recorded TTL is exactly the pre-unification
+            # placeholder this pass must not act on. Unreachable for rows
+            # written after task #2617 (every kind carries its payload);
+            # leave it loudly rather than mis-kill what cannot be judged.
+            _log.warning(
+                "[ttl-reaper] watcher %s of agent %s has no derivation deadline — leaving its session",
+                session_id,
+                agent_id,
+            )
+            continue
+        if row["watcher_status"] == "running" and deadline is not None and deadline > now:
+            # Legacy placeholder TTL on a watcher still living its real
+            # window: re-align the recorded deadline instead of reclaiming
+            # (idempotent CAS; the fleet-wide migration count is the
+            # `watcher_ttl_healed` telemetry event below).
+            if await asyncio.to_thread(heal_legacy_ttl, pool, agent_id, session_id, deadline):
+                healed += 1
+                if len(heal_samples) < 3:
+                    heal_samples.append(f"{agent_id}:{session_id}->{deadline.isoformat()}")
+            continue
         if not await asyncio.to_thread(_claim_shell_row_still_expired, pool, agent_id, session_id):
             # Renewed between the select and this pass — the deadline moved
             # forward, so the session is no longer reaper business.
@@ -546,18 +523,51 @@ async def _reap_expired_shells(pool: ConnectionPool) -> list[tuple[int, int]]:
         # `interrupted` field means a pre-policy runner — default True so a
         # version-skewed fleet keeps the old notify-always behavior instead of
         # silently swallowing a legit interruption notice. Absent sessions
-        # never notify (nothing was interrupted).
+        # never notify (nothing was interrupted). Watcher sessions suppress
+        # the shell-shaped notice — their reclaim is the deadline's own
+        # scheduled end, recorded by the registry status below.
         interrupted = mode == "killed" and bool(result.get("interrupted", True))
+        is_watcher = row["watcher_kind"] is not None
         await asyncio.to_thread(
             _delete_shell_row_blocking,
             pool,
             agent_id,
             session_id,
             interrupted=interrupted,
+            notify=not is_watcher,
             name=result.get("name"),
-            expires_at=expires_at,
-            created_at=created_at,
+            expires_at=row["expires_at"],
+            created_at=row["created_at"],
         )
+        if is_watcher and row["watcher_status"] == "running":
+            # The reclaim is the watcher's deadline verdict: terminalize the
+            # desired-state record so no later boot rebuilds it (task #3411).
+            # Owner-appropriate bookkeeping: a terminated-for-good owner gets
+            # the #2060 reclamation notice (the same mark+notice the
+            # terminated-owner pass uses — the TTL pass must not beat it to a
+            # silent mark); a live owner gets a silent `reaped`; a
+            # crash-terminated (auto-resurrect-eligible) owner's row is left
+            # running for its own resurrect + boot reconcile. Fail-soft: the
+            # reconcile's deadline check reaches the same verdict if a write
+            # is lost.
+            reaped_name = await asyncio.to_thread(
+                mark_reaped_and_notify_if_owner_still_terminated,
+                pool,
+                agent_id,
+                session_id,
+            )
+            if reaped_name is None:
+                reaped_name = await asyncio.to_thread(
+                    mark_reaped_live_owner, pool, agent_id, session_id
+                )
+            if reaped_name is not None:
+                telemetry.emit(
+                    "log",
+                    "watcher_reaped",
+                    level="info",
+                    agent_id=agent_id,
+                    attributes={"agent_id": agent_id, "session_id": session_id, "mode": mode},
+                )
         telemetry.emit(
             "log",
             "shell_ttl_expired",
@@ -571,71 +581,18 @@ async def _reap_expired_shells(pool: ConnectionPool) -> list[tuple[int, int]]:
             },
         )
         reaped.append((agent_id, session_id))
-    return reaped
-
-
-async def _reap_terminated_owner_watchers(
-    pool: ConnectionPool,
-) -> list[tuple[int, int]]:
-    """Kill watcher sessions whose owner agent is terminated for good.
-
-    Mirrors ``_reap_expired_shells`` discipline: the row is terminalized
-    only on a definitive kill verdict (killed / absent); an unreachable
-    machine or a failed op leaves the row for the next pass — marking it
-    first would orphan the live session. The post-kill mark re-checks the
-    owner in SQL, so a mid-flight resurrect leaves the row ``running`` for
-    the agent's own reconcile to rebuild (never a silent loss). A definitive
-    mark also queues the #2060 reclamation notice for the owner — reaped is
-    terminal, so the owner must be told to re-register if it still needs the
-    schedule (the notice delivers on the owner's next resurrect; it never
-    resurrects the owner itself).
-    """
-    rows = await asyncio.to_thread(_terminated_owner_watcher_rows_blocking, pool)
-    reaped: list[tuple[int, int]] = []
-    for agent_id, session_id, machine in rows:
-        try:
-            result = await cluster_rpc.dispatch_to_machine(
-                machine,
-                "shell_kill",
-                {"agent_id": agent_id, "session_id": session_id},
-                timeout_s=_SHELL_KILL_TIMEOUT_S,
-            )
-        except (cluster_rpc.ClusterOpUnreachable, cluster_rpc.ClusterOpFailed) as exc:
-            _log.warning(
-                "[ttl-reaper] terminated-owner watcher kill for agent %s session %s deferred: %r",
-                agent_id,
-                session_id,
-                exc,
-            )
-            continue
-        mode = result.get("mode")
-        if mode not in ("killed", "absent"):
-            _log.warning(
-                "[ttl-reaper] terminated-owner watcher kill for agent %s session %s returned %r",
-                agent_id,
-                session_id,
-                result,
-            )
-            continue
-        marked = await asyncio.to_thread(
-            _mark_watcher_reaped_and_notify_if_owner_still_terminated, pool, agent_id, session_id
+    if healed:
+        _log.info(
+            "[ttl-reaper] healed %d legacy watcher TTL row(s) to their true deadline: %s",
+            healed,
+            ", ".join(heal_samples),
         )
-        if not marked:
-            _log.info(
-                "[ttl-reaper] watcher %s of agent %s — owner no longer terminated; "
-                "leaving the row for the agent's boot reconcile",
-                session_id,
-                agent_id,
-            )
-            continue
         telemetry.emit(
             "log",
-            "watcher_reaped",
+            "watcher_ttl_healed",
             level="info",
-            agent_id=agent_id,
-            attributes={"agent_id": agent_id, "session_id": session_id, "mode": mode},
+            attributes={"count": healed, "samples": ", ".join(heal_samples)},
         )
-        reaped.append((agent_id, session_id))
     return reaped
 
 
@@ -698,7 +655,9 @@ async def _reaper_loop(pool: ConnectionPool, stop: asyncio.Event) -> None:
             pages = await asyncio.to_thread(_reap_expired_pages_blocking, pool)
             shells = await _reap_expired_shells(pool)
             sessions = await asyncio.to_thread(_reap_expired_web_sessions_blocking, pool)
-            terminated_watchers = await _reap_terminated_owner_watchers(pool)
+            terminated_watchers = await reap_terminated_owner_watchers(
+                pool, timeout_s=_SHELL_KILL_TIMEOUT_S, batch=_PASS_BATCH
+            )
             notices = await asyncio.to_thread(_reap_expired_notices_blocking, pool)
             for agent_id, nid in notices:
                 with suppress(Exception):

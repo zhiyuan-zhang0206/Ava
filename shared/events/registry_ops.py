@@ -421,6 +421,12 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         name="watcher_reaped",
         category="log",
         tier="observation",
-        doc="the gateway TTL reaper reclaimed a watcher whose owner agent is terminated for good; attributes carry agent_id, session_id, mode",
+        doc="the gateway TTL reaper reclaimed a watcher session — its deadline passed, or its owner agent is terminated for good; attributes carry agent_id, session_id, mode",
+    ),
+    "watcher_ttl_healed": EventSpec(
+        name="watcher_ttl_healed",
+        category="log",
+        tier="observation",
+        doc="the gateway TTL reaper re-aligned a legacy watcher session's recorded TTL to the watcher's true deadline (rows spawned before the unified write path, task #3411) instead of reclaiming it; attributes carry count and samples",
     ),
 }

@@ -18,9 +18,11 @@ from ava.shell import sessions as _sessions
 from shared.watcher import (
     DEFAULT_STANDING_CRON_MAX_SECONDS,
     TEMPLATE_VERSION,
+    _parse_timeout,
     build_at_script,
     build_cron_script,
     normalize_when,
+    session_deadline,
     validate_cron,
     validate_timezone,
 )
@@ -129,37 +131,6 @@ def _prune_stale_watcher_files(keep: _pl.Path) -> None:
                 if m and int(m.group(1)) in alive:
                     continue  # that watcher's session still exists — possibly still launching
             f.unlink(missing_ok=True)
-
-
-_DURATION_RE = _re.compile(r"^(\d+)([smhd])$")
-
-
-def _parse_timeout(timeout: float | datetime.timedelta | str) -> float:
-    """Coerce a timeout to a positive number of seconds.
-
-    Accepts a number of seconds, a `timedelta`, or a `"<n>{s,m,h,d}"` duration
-    string (e.g. `"30m"`, `"2h"`).
-    """
-    if isinstance(timeout, datetime.timedelta):
-        secs = timeout.total_seconds()
-    elif isinstance(timeout, bool):  # bool is an int subclass — reject explicitly
-        raise TypeError("timeout must be seconds, a timedelta, or a duration string")
-    elif isinstance(timeout, (int, float)):
-        secs = float(timeout)
-    elif isinstance(timeout, str):
-        m = _DURATION_RE.match(timeout)
-        if not m:
-            raise ValueError(
-                f"timeout={timeout!r} not recognized — use '<n>s/m/h/d' (e.g. '30m', '2h'), "
-                "a number of seconds, or a timedelta"
-            )
-        n, unit = int(m.group(1)), m.group(2)
-        secs = n * {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit]
-    else:
-        raise TypeError("timeout must be seconds, a timedelta, or a duration string")
-    if secs <= 0:
-        raise ValueError("timeout must be positive")
-    return secs
 
 
 def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: int) -> str:
@@ -437,18 +408,35 @@ def _spawn(
     import sys
 
     agent_id = _agent_id()
-    # Every persistent session must carry a TTL (task #2614). A launch
-    # watcher's timeout IS its deadline; cron/at watchers have no timeout —
-    # the 24h session cap is the default. The gateway reaper never kills a
-    # live watcher (its expired-row query skips (agent, session) pairs with a
-    # running/rebuilt registry row — task #2589), so a standing cron watcher
-    # outliving its row is expected and safe.
-    watcher_ttl = (
-        min(timeout_secs, _sessions._MAX_TTL_SECONDS)
-        if timeout_secs is not None
-        else _sessions._MAX_TTL_SECONDS
+    # The session's shell TTL IS this watcher's target deadline (user ruling
+    # 2026-09-14, task #3411): launch = created + timeout, cron = cron_end_at,
+    # at = fires_at + grace — derived by `shared.watcher.session_deadline`,
+    # the one function the boot reconcile and the gateway reaper also read.
+    # Written as the system-side TRUE value: a 7-day standing cron is a
+    # normal watcher, exempt from the 24h user-session cap — and a rebuild
+    # (this same path, re-entered by the reconcile with the stored payload)
+    # inherits the remaining time instead of a fresh default.
+    now = datetime.datetime.now(datetime.UTC)
+    deadline = session_deadline(
+        kind,
+        created_at=now,
+        timeout_secs=timeout_secs,
+        fires_at=fires_at,
+        cron_end_at=cron_end_at,
     )
-    session_id, session_name = _sessions._create_session(name, ttl=watcher_ttl)
+    if deadline is None or deadline <= now:
+        # Callers hand a future target (cron()/at() validate theirs; launch
+        # requires a positive timeout) — a missing or already-passed deadline
+        # here is a call-site bug, never a reason to mount a stillborn
+        # session. The reconcile's deadline-passed guard is the sibling of
+        # this check on the rebuild path.
+        raise ValueError(
+            f"watcher {kind!r} target deadline is not in the future "
+            f"({deadline!r}) — refusing to spawn its session"
+        )
+    session_id, session_name = _sessions._create_session(
+        name, ttl=(deadline - now).total_seconds(), system=True
+    )
     # The registry is desired state, so it must remember the generation of
     # the exact PTY record it can later rebuild. Reading the backend record
     # (rather than today's marker) binds the row to the session actually

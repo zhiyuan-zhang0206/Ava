@@ -496,7 +496,10 @@ repos:
         name: "shared/events/registry.md in sync with EVENTS registry (drift: run .venv/bin/python scripts/gen_event_registry.py)"
         entry: ./scripts/check-events-registry-fresh.sh
         language: system
-        files: ^(shared/events/contract\.py$|shared/live_events\.py$|scripts/gen_event_registry\.py$|shared/events/registry\.md$)
+        # The EVENTS shards feed the registry too: a spec added/edited in
+        # shared/events/registry*.py (e.g. registry_ops.py) must re-run the
+        # freshness check locally, not only in the CI --all-files pass.
+        files: ^(shared/events/contract\.py$|shared/events/registry\.py$|shared/events/registry_ops\.py$|shared/events/system\.py$|shared/live_events\.py$|scripts/gen_event_registry\.py$|shared/events/registry\.md$)
         pass_filenames: false
 
   - repo: local

@@ -10,8 +10,11 @@ marks missed one-shots — the #1014 fix (4th recurrence: rollouts reaped
 watcher sessions and nothing knew they should exist).
 
 Liveness is the session itself — a watcher process IS its session — so the
-registry deliberately holds no lease: a session gone means the watcher is gone,
-and the reconcile is the only reader that needs to know.
+registry deliberately holds no lease: a session gone means the watcher is gone.
+Since the 2026-09-14 ruling (task #3411) the session's shell TTL IS the
+watcher's target deadline, and two readers act on it: the boot reconcile
+(rebuild a session that died before its deadline) and the gateway TTL reaper
+(reclaim at the deadline, `running` -> `reaped`).
 
 Pure DB: no SDK imports, so the watcher child's bootstrap finally can call
 `delete_watcher` without pulling the SDK into a short-lived child.
