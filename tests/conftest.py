@@ -1600,9 +1600,17 @@ def _guard_service_readiness(
         return
     from cli.commands import ReadinessWait
 
+    ready = ReadinessWait((), 0.0, sessions_gone=False)
     monkeypatch.setattr(
         "cli.commands._wait_for_services_ready",
-        lambda *_a, **_kw: ReadinessWait((), 0.0, sessions_gone=False),
+        lambda *_a, **_kw: ready,
+    )
+    # The root-driven path's wait has the same bound and the same reason to be
+    # stubbed for tests that are not about it (the root-driver tests opt out
+    # through their own module fixture).
+    monkeypatch.setattr(
+        "cli.commands._wait_for_root_services_ready",
+        lambda *_a, **_kw: ready,
     )
 
 

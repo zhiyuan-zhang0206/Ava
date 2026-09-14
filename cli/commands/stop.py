@@ -186,8 +186,19 @@ def _force_stop(
     service_sessions, runner_only, skip_infra = _compute_stop_scope(
         preserve_sessions=preserve_sessions, keep_browser=keep_browser, keep_infra=keep_infra
     )
+    # Root-driven hosts stop the tree through ava-root instead of the
+    # per-service sessions; the plan names the units that will actually stop
+    # (preserved ones excluded), plus any legacy session a pre-switch start
+    # left behind.
+    root_driven = _ns._root_driven_enabled()
+    root_preserve = preserve_sessions | (
+        frozenset({_BROWSER_SESSION}) if keep_browser else frozenset[str]()
+    )
+    plan_sessions = service_sessions
+    if root_driven:
+        plan_sessions = sorted(set(service_sessions) | set(_ns._root_tree_plan(root_preserve)))
     _print_stop_plan(
-        service_sessions,
+        plan_sessions,
         reap_agents=reap_agents,
         keep_browser=keep_browser,
         runner_only=runner_only,
@@ -208,7 +219,18 @@ def _force_stop(
     # Explicit force interrupts the host process. Agent metadata/checkpoints
     # remain untouched; the next host uses its existing owner recovery. This
     # path does not fabricate drain receipts and remains usable offline.
-    _stop_sessions(service_sessions)
+    if root_driven:
+        # The tree stop carries the whole roster; any legacy session from a
+        # pre-switch start is still swept by the session leg below.
+        _ns._stop_root_service_tree(preserve=root_preserve)
+        if service_sessions:
+            print(
+                f"  (also stopping {len(service_sessions)} service session(s) left by a "
+                "pre-switch start)"
+            )
+            _stop_sessions(service_sessions)
+    else:
+        _stop_sessions(service_sessions)
 
     # 1.4) a teardown that asked for the browser down finishes the job: kill any
     # Chrome still running on THIS cluster's profile. The session kill above

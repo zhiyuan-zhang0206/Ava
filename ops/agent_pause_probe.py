@@ -11,6 +11,8 @@ from shared.config import settings
 from shared.daemon_health import health_port
 from shared.paths import ava_home
 
+_ROOT_SOCKET_NAME = "ava-root.sock"  # the K1 control socket under root_run_dir()
+
 
 @dataclass(frozen=True)
 class HostIdentity:
@@ -19,7 +21,13 @@ class HostIdentity:
 
 
 def host_running() -> bool:
-    """A down recorded service has no hosted work; reject live unrecorded owners."""
+    """A down recorded service has no hosted work; reject live unrecorded owners.
+
+    A root-driven host (W1.2e-2) keeps its services as ava-root tree units, not
+    session records — the pidfile is the same, so the pidfile-only inconsistency
+    check would misread that normal state as a live unrecorded owner. The root's
+    own status settles it: a unit running at exactly that pid is owned.
+    """
     import psutil
 
     from shared.cluster import session_name
@@ -31,6 +39,8 @@ def host_running() -> bool:
     if path.exists():
         pid = int(path.read_text().strip())
         if psutil.pid_exists(pid):
+            if _root_supervises_agent_host(pid):
+                return True
             raise RuntimeError("agent-host PID exists without its owned service session")
     # A missing record is not evidence that a daemon which lost that record
     # exited. Check the stable launch module and its private home identity too.
@@ -49,6 +59,32 @@ def host_running() -> bool:
             raise RuntimeError("cannot identify an unrecorded agent-host home") from exc
         if raw_home is None or Path(raw_home).resolve() == home:
             raise RuntimeError("agent-host is still running without its service record")
+    return False
+
+
+def _root_supervises_agent_host(pid: int) -> bool:
+    """True when this home's ava-root runs its agent-host unit at `pid`."""
+    from services.ava_root.client import RootClient, RootClientError
+    from shared.paths import root_run_dir
+
+    try:
+        response = RootClient(root_run_dir() / _ROOT_SOCKET_NAME, timeout=2.0).status()
+    except RootClientError:
+        return False
+    if not response.get("ok"):
+        return False
+    result_raw: object = response.get("result")
+    if not isinstance(result_raw, dict):
+        return False
+    result = cast("dict[str, object]", result_raw)
+    units_raw = result.get("units")
+    units = cast("list[object]", units_raw) if isinstance(units_raw, list) else []
+    for unit_raw in units:
+        if not isinstance(unit_raw, dict):
+            continue
+        unit = cast("dict[str, object]", unit_raw)
+        if unit.get("id") == "agent-host":
+            return unit.get("state") == "running" and unit.get("pid") == pid
     return False
 
 

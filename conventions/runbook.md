@@ -1977,3 +1977,20 @@ under `<workdir>/evidence`; pass `--cleanup` to remove the workdir. Flags:
 production-generator sample; omit to skip the sample), and `--cleanup`. This is the root-side counterpart of
 `scripts/two_section_chain_smoke.py` (which drives the OS-edge chain); that
 smoke's operator notes live in the memory pool under `ava/runtime/`.
+
+## ava-root-driven `ava start` / `ava stop` (W1.2e-2, dev)
+
+With `AVA_ROOT_DRIVER_ENABLED=1` in the unit's environment (default off — the
+production path stays session-driven until the S3/S4 swap), `ava start` hands
+the roster to ava-root (`cli/commands/_root_driver.py`): the manifests are
+generated from the ops roster, the root is seeded through the permissions
+helper when it is committed (a direct spawn otherwise), and the readiness gate
+reads the root's own status surface. `ava stop` stops the tree through the
+root with the same preserve semantics (`--keep-service`, pause's browser).
+Acceptance is `scripts/ava_root_e2_drill.py` — one worktree cluster driven
+through baseline (switch off) → start/stop → restart and idempotence → final
+stop, asserting tree == manifest, unit health verdicts, and the pid continuity
+rules (fresh start changes pids, idempotent start keeps them); evidence lands
+under `<workdir>/evidence`. The drill switches OS-job registration off
+wholesale (`AVA_OS_JOBS_ENABLED=false`) so the cluster's probe jobs never race
+the drill tree.
