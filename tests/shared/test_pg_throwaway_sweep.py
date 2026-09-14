@@ -18,7 +18,7 @@ while its cluster survives (same directory, same age), and it cannot collide wit
 another UNIX user on a shared tmpfs (`mkdtemp` makes the instance dir `0700`, so the
 glob never sees theirs — asserted below).
 
-Every test pins the throwaway root at a scratch dir, so a sweep here can only see
+Every test pins the throwaway roots at a scratch dir, so a sweep here can only see
 locks the test itself made — never this worker's own live session cluster.
 """
 
@@ -36,7 +36,8 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from shared import pg_tools
+from shared import pg_throwaway_base, pg_tools
+from shared.config import settings
 from shared.paths import repo_root
 from shared.platform import IS_WINDOWS
 
@@ -84,7 +85,13 @@ def throwaway_root(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     Teardown force-stops anything still running under the root, so a failing test
     cannot leak the very orphan this module exists to prevent."""
     root = Path(tempfile.mkdtemp(prefix="ava-sweep-", dir="/tmp"))
-    monkeypatch.setattr(pg_tools, "_tmpfs_base", str(root))
+    monkeypatch.setattr(pg_throwaway_base, "_tmpfs_base", str(root))
+    # The sweep covers every throwaway root now (disk fallback and the
+    # AVA_PG_THROWAWAY_BASE override included): pin the fallback at the same scratch
+    # dir and clear the override, so a host's real /var/tmp orphan or configured
+    # base can never be touched — or counted — by these tests.
+    monkeypatch.setattr(pg_throwaway_base, "disk_fallback_base", lambda: root)
+    monkeypatch.setattr(settings.data_plane, "pg_throwaway_base", "")
     yield root
     for data in root.glob("ava-pg-*/data"):
         if (data / "PG_VERSION").is_file():
@@ -100,9 +107,10 @@ def throwaway_root(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
 
 _ORPHAN_OWNER = """
 import os, sys, time
+import shared.pg_throwaway_base as pg_base
 import shared.pg_tools as pg_tools
 
-pg_tools._tmpfs_base = sys.argv[1]
+pg_base._tmpfs_base = sys.argv[1]
 # `cm` must stay referenced: a dropped context manager is finalized, and its
 # GeneratorExit would run the very teardown this test needs never to happen.
 cm = pg_tools.throwaway_postgres()
@@ -159,6 +167,25 @@ def test_sweep_reaps_an_instance_whose_lock_was_released(throwaway_root: Path) -
     assert pg_tools.sweep_orphaned_throwaway_clusters() == 1
     assert not instance.exists()
     assert not registration.lock.exists()
+
+
+def test_sweep_reaps_an_orphan_on_the_disk_fallback_base(
+    throwaway_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Instances on the disk fallback are first-class: the sweep and the reap
+    predicate cover every root `throwaway_roots` names, not just the platform
+    default. The 2026-09-14 restore demotion made fallback-base instances a real
+    shape (a restore that outgrows the tmpfs now lands on /var/tmp)."""
+    fallback = Path(tempfile.mkdtemp(prefix="ava-fb-", dir="/tmp"))
+    monkeypatch.setattr(pg_throwaway_base, "disk_fallback_base", lambda: fallback)
+    try:
+        instance = _write_instance(fallback, "ava-pg-disk")
+        _write_lock(instance)
+        assert pg_tools._resolved_throwaway_dir(instance) is not None
+        assert pg_tools.sweep_orphaned_throwaway_clusters() == 1
+        assert not instance.exists()
+    finally:
+        shutil.rmtree(fallback, ignore_errors=True)
 
 
 # ── Direction 2: nothing live, and no real cluster, is ever selected ──

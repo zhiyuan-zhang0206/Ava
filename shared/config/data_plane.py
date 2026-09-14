@@ -180,6 +180,33 @@ class DataPlaneSettings(EnvSettings):
             )
         return value
 
+    pg_throwaway_base: str = Field(
+        default="",
+        alias="AVA_PG_THROWAWAY_BASE",
+        description="Absolute directory that throwaway Postgres clusters (test fixtures, "
+        "the migration smoke, the restore drill's scratch restore) are created under. "
+        "Empty keeps the platform default — /dev/shm on Linux, the OS temp dir "
+        "elsewhere — and a caller that knows its data volume (the restore drill) demotes "
+        "to the disk fallback (/var/tmp where present) when the default cannot hold it. "
+        "Read from this home's .env, never an inherited override.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    @field_validator("pg_throwaway_base")
+    @classmethod
+    def _absolute_pg_throwaway_base(cls, value: str) -> str:
+        if value and (not Path(value).is_absolute() or any(ord(c) < 32 for c in value)):
+            raise ValueError(
+                "pg_throwaway_base must be an absolute directory without control characters"
+            )
+        return value
+
     pgbouncer_enabled: bool = Field(
         default=True,
         alias="AVA_PGBOUNCER_ENABLED",

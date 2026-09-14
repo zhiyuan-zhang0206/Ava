@@ -43,6 +43,15 @@ the path is not distributed in runner bootstrap. A nonempty directory must
 contain both executable Redis tools; an invalid pair fails instead of choosing
 a different version from PATH.
 
+`pg_throwaway_base` is the host-scoped scratch-cluster selection: where
+`shared/pg_tools.throwaway_postgres` creates disposable Postgres instance dirs
+(test fixtures, smokes, the restore drill). Empty keeps the platform default —
+`/dev/shm` on Linux, the OS temp dir elsewhere — and `shared/pg_throwaway_base.py`
+demotes a caller that declares its required capacity to the disk fallback
+(`/var/tmp` where present) when the tmpfs cannot hold it. It rides the same
+home-authority projection as `AVA_REDIS_BIN_DIR`, so a parent's selection cannot
+leak into a sibling home.
+
 Authenticated Linux Redis uses the caller's cluster bearer posture to bind
 loopback plus this host's reachable address after the bounded address wait.
 macOS keeps its loopback relay workaround; an empty caller bearer stays

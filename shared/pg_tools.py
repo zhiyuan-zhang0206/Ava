@@ -29,6 +29,7 @@ from functools import cache
 from pathlib import Path
 from typing import NamedTuple, TypedDict, cast
 
+from shared import pg_throwaway_base as _throwaway_base
 from shared.log import logger
 from shared.pg_stall_watchdog import fixture_log_artifact_dir, stall_guard
 from shared.platform import IS_MACOS, IS_WINDOWS
@@ -97,17 +98,13 @@ def pg_tz_args() -> str:
 
 
 # Prefix of every throwaway instance directory this module creates. Load-bearing:
-# the sweep below reaps ONLY `<throwaway root>/<this prefix>*` directories.
+# the sweep below reaps ONLY `<a throwaway root>/<this prefix>*` directories.
 _THROWAWAY_PREFIX = "ava-pg-"
 
-# tmpfs base for throwaway data dirs: /dev/shm on Linux (RAM), else the OS temp
-# dir (mac has no /dev/shm; its SSD-backed $TMPDIR is fast enough).
-_tmpfs_base: str | None = None
-if Path("/dev/shm").is_dir():  # noqa: S108 — deliberate tmpfs for throwaway cluster data
-    _tmpfs_base = "/dev/shm"  # noqa: S108
-# Windows: use %TEMP% (no /dev/shm equivalent)
-elif sys.platform == "win32":
-    _tmpfs_base = tempfile.gettempdir()
+# Where throwaway instance dirs live — the platform default (/dev/shm on Linux,
+# else the OS temp dir), the AVA_PG_THROWAWAY_BASE override, and the
+# capacity-aware pick — is shared.pg_throwaway_base, extracted to keep this
+# module under its line ceiling.
 
 
 @cache
@@ -202,7 +199,8 @@ def _free_port() -> int:
 #   deleting files under a live postmaster (a far louder failure, and one that
 #   predates any of this).
 # - **No cross-user contention.** `mkdtemp` creates the instance dir `0700`, so on
-#   a shared tmpfs (`/dev/shm` on Linux) another user's instances are invisible to
+#   a shared tmpfs (`/dev/shm` on Linux, `/var/tmp` on the disk fallback) another
+#   user's instances are invisible to
 #   this user's glob and vice versa — correctly, since neither could stop the
 #   other's postmaster anyway. A single well-known registry dir owned by whoever
 #   ran tests first would instead have made the SECOND user's every run fail on an
@@ -224,11 +222,16 @@ def _free_port() -> int:
 _OWNER_LOCK_NAME = "owner.lock"
 
 
-def _throwaway_root() -> Path:
-    """The directory throwaway instance dirs live in. Same base
-    `throwaway_postgres` hands to `mkdtemp`, so instances and their locks share one
-    lifetime and vanish together on reboot."""
-    return Path(_tmpfs_base or tempfile.gettempdir())
+def _throwaway_locks() -> list[Path]:
+    """Every owner lock under any throwaway root
+    (`shared.pg_throwaway_base.throwaway_roots`), sorted for a deterministic reap
+    order. The single enumeration the sweep and the port registry share, so both
+    see the same set of instance roots."""
+    return sorted(
+        lock
+        for root in _throwaway_base.throwaway_roots()
+        for lock in root.glob(f"{_THROWAWAY_PREFIX}*/{_OWNER_LOCK_NAME}")
+    )
 
 
 class _Registration(NamedTuple):
@@ -267,15 +270,16 @@ def _unregister_throwaway(registration: _Registration | None) -> None:
 def _resolved_throwaway_dir(instance_dir: Path) -> Path | None:
     """`instance_dir` resolved, when it really is a throwaway instance dir this
     module created: `_THROWAWAY_PREFIX`-named, a real directory that resolves to a
-    direct child of the throwaway root under that same name, holding a `data` entry
+    direct child of a throwaway root under that same name, holding a `data` entry
     that is not a symlink. None otherwise, and the sweeper then touches nothing.
 
     The name-preservation and non-symlink checks are what stop a stray symlink from
-    aiming `pg_ctl` (or the rmtree) at a path outside the throwaway root."""
+    aiming `pg_ctl` (or the rmtree) at a path outside every throwaway root."""
     if not instance_dir.name.startswith(_THROWAWAY_PREFIX) or not instance_dir.is_dir():
         return None
     resolved = instance_dir.resolve()
-    if resolved.parent != _throwaway_root().resolve() or resolved.name != instance_dir.name:
+    roots = {root.resolve() for root in _throwaway_base.throwaway_roots()}
+    if resolved.parent not in roots or resolved.name != instance_dir.name:
         return None
     if (resolved / "data").is_symlink():
         return None
@@ -354,7 +358,7 @@ def sweep_orphaned_throwaway_clusters() -> int:
     import fcntl
 
     reaped = 0
-    for lock in sorted(_throwaway_root().glob(f"{_THROWAWAY_PREFIX}*/{_OWNER_LOCK_NAME}")):
+    for lock in _throwaway_locks():
         try:
             fd = os.open(lock, os.O_RDWR)
         except OSError:
@@ -405,7 +409,7 @@ def _live_throwaway_ports() -> set[int]:
     import fcntl
 
     ports: set[int] = set()
-    for lock in _throwaway_root().glob(f"{_THROWAWAY_PREFIX}*/{_OWNER_LOCK_NAME}"):
+    for lock in _throwaway_locks():
         try:
             fd = os.open(lock, os.O_RDWR)
         except OSError:
@@ -424,6 +428,15 @@ def _live_throwaway_ports() -> set[int]:
     return ports
 
 
+def _port_lock_root() -> Path:
+    """Where the host-wide port-allocation flock lives. Every allocator locks the
+    SAME directory, whatever base its own instances use — a per-base lock would let
+    two allocators serialize on different roots and hand out the same port. The
+    platform default is settings-independent, so processes that disagree on
+    AVA_PG_THROWAWAY_BASE still rendezvous here."""
+    return _throwaway_base.default_base()
+
+
 def _allocate_port(instance_dir: Path) -> tuple[int, _Registration | None]:
     """Reserve a localhost TCP port no LIVE throwaway cluster already holds, and
     register it under `instance_dir`'s owner lock. Probe, registry check, and
@@ -436,7 +449,7 @@ def _allocate_port(instance_dir: Path) -> tuple[int, _Registration | None]:
         return port, _register_throwaway(instance_dir, port)
     import fcntl
 
-    root_fd = os.open(_throwaway_root(), os.O_RDONLY)
+    root_fd = os.open(_port_lock_root(), os.O_RDONLY)
     try:
         fcntl.flock(root_fd, fcntl.LOCK_EX)
         try:
@@ -543,7 +556,9 @@ def _teardown_throwaway(tmp: Path, data: Path, registration: _Registration | Non
 
 
 @contextmanager
-def throwaway_postgres(schema_sql: str | None = None) -> Generator[str]:
+def throwaway_postgres(
+    schema_sql: str | None = None, *, base: Path | None = None
+) -> Generator[str]:
     """initdb a throwaway Postgres cluster on an ephemeral port, optionally
     apply schema + checkpoint tables, and yield a psycopg connection URL.
     The cluster is destroyed on context exit.
@@ -560,6 +575,12 @@ def throwaway_postgres(schema_sql: str | None = None) -> Generator[str]:
             run too. If None, yields a bare `ava_citest` database (the caller applies
             its own DDL, e.g. the migration smoke replaying migrations/* onto a
             blank DB).
+        base: where the instance dir is created. None — every existing caller —
+            resolves through `shared.pg_throwaway_base.select_throwaway_base` (the
+            configured override, else the platform default); a caller that knows its
+            data footprint (the restore drill) passes a base from
+            `select_throwaway_base(required_bytes)`, so the base it reports is the
+            base used here.
 
     Yields:
         A postgresql:// URL string.
@@ -573,7 +594,11 @@ def throwaway_postgres(schema_sql: str | None = None) -> Generator[str]:
     attempt = 0
     while True:
         attempt += 1
-        tmp = Path(tempfile.mkdtemp(prefix=_THROWAWAY_PREFIX, dir=_tmpfs_base))
+        tmp = Path(
+            tempfile.mkdtemp(
+                prefix=_THROWAWAY_PREFIX, dir=base or _throwaway_base.select_throwaway_base()
+            )
+        )
         data = tmp / "data"
         log = tmp / "pg.log"
         # Registered BEFORE initdb (inside `_allocate_port`): a kill in the window

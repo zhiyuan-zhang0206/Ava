@@ -132,15 +132,19 @@ System V shared-memory segment, and macOS ships `kern.sysv.shmmni=32`
 `initdb`/`pg_ctl start` fails for **every** cluster, including a real `ava start`.
 
 This is self-limiting now: each throwaway instance holds an `flock` on an
-`owner.lock` inside its own instance dir (`<tmpfs base>/ava-pg-*/owner.lock`) for
-its whole life, and the next `throwaway_postgres` reaps the instances whose lock
-the kernel has released. So a killed run's orphan lives until the next test run,
-not until reboot, and only instances that positively identify as throwaway are
-ever touched (`shared/pg_tools.py` documents the safety argument). The lock sits
-in the instance dir rather than a side registry so that it shares that cluster's
-exact lifetime — nothing can prune the lock while the cluster it describes keeps
-running — and so two UNIX users on one `/dev/shm` never contend for a shared
-directory.
+`owner.lock` inside its own instance dir (`<throwaway base>/ava-pg-*/owner.lock`)
+for its whole life, and the next `throwaway_postgres` reaps the instances whose
+lock the kernel has released. So a killed run's orphan lives until the next test
+run, not until reboot, and only instances that positively identify as throwaway
+are ever touched (`shared/pg_tools.py` documents the safety argument). The lock
+sits in the instance dir rather than a side registry so that it shares that
+cluster's exact lifetime — nothing can prune the lock while the cluster it
+describes keeps running — and so two UNIX users on one shared scratch base
+(`/dev/shm`, `/var/tmp`) never contend for a shared directory. The base is the
+platform default (`/dev/shm` on Linux, else the OS temp dir); a restore that
+declares its footprint may land on the disk fallback (`/var/tmp`, or
+`AVA_PG_THROWAWAY_BASE` when set) — the sweep covers every base
+(`shared/pg_throwaway_base.throwaway_roots`).
 
 To sweep without starting a test run — e.g. a box wedged right now:
 
@@ -158,18 +162,21 @@ Doing that by hand, two things save you from stopping the wrong postmaster:
 - **`ppid` does not discriminate.** Every postmaster on the box has `ppid 1`, real
   clusters included — they are all detached, which is the whole reason they survive.
 - **The path does.** A real cluster's data dir is `$AVA_HOME/pg` (`~/.ava`,
-  `~/.ava-<worktree>`); a throwaway's is `<tmpfs base>/ava-pg-*/data`. That is the
-  same distinction `_resolved_throwaway_dir` encodes, and on a live box it separates
-  real clusters from corpses immediately.
+  `~/.ava-<worktree>`); a throwaway's is `<throwaway base>/ava-pg-*/data`. That is
+  the same distinction `_resolved_throwaway_dir` encodes, and on a live box it
+  separates real clusters from corpses immediately.
 
 Inspect first — a live `ava-pg-*` postmaster may be a test run in flight in another
 worktree rather than an orphan, and age is what tells them apart:
 
 ```bash
-base=${TMPDIR:-/tmp}; [ -d /dev/shm ] && base=/dev/shm
-for d in "$base"/ava-pg-*/data; do
-  pid=$(sed -n 1p "$d/postmaster.pid" 2>/dev/null) || continue
-  kill -0 "$pid" 2>/dev/null && echo "$(ps -o etime= -p "$pid") $d"
+# every throwaway base: the operator override, the platform default, the disk fallback
+for base in "${AVA_PG_THROWAWAY_BASE:-}" /dev/shm /var/tmp "${TMPDIR:-/tmp}"; do
+  [ -d "$base" ] || continue
+  for d in "$base"/ava-pg-*/data; do
+    pid=$(sed -n 1p "$d/postmaster.pid" 2>/dev/null) || continue
+    kill -0 "$pid" 2>/dev/null && echo "$(ps -o etime= -p "$pid") $d"
+  done
 done
 ```
 
