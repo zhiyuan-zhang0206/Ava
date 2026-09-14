@@ -28,6 +28,7 @@ from typing import Any, cast
 from urllib.parse import urlparse
 
 import yaml
+from dotenv import dotenv_values
 
 from cli.commands._converge_spec import ConvergeCtx
 from cli.commands._lgtm import is_station_ctx, roles_declare_station
@@ -365,6 +366,33 @@ def _warn_listen_read_mismatches() -> None:
         )
 
 
+def _warn_env_file_divergence(ava_home: Path, values: dict[str, str]) -> None:
+    """Warn when a value about to be rendered disagrees with this unit's .env.
+
+    Settings give an inherited environment value precedence over the file for
+    host-scope keys, and a long-lived parent forwards its snapshot to every
+    child it spawns — so a converge run inside such a session bakes the stale
+    value into the rendered tree silently (2026-09-14 wave: the tempo target
+    was re-rendered with the pre-change tailnet URL while .env said loopback;
+    task #3339). Comparing against the file makes the divergence loud, whatever
+    key it hits. A key the file does not declare is skipped: env-only supply is
+    legitimate (a not-yet-enrolled unit, the test suites).
+    """
+    env_file = ava_home / ".env"
+    if not env_file.exists():
+        return
+    declared = dotenv_values(env_file)
+    for alias, value in values.items():
+        file_value = declared.get(alias)
+        if file_value is None or file_value.rstrip("/") == value.rstrip("/"):
+            continue
+        print(
+            f"lgtm native: {alias} resolved to {value} but {env_file} declares "
+            f"{file_value} — an inherited environment value is in effect",
+            file=sys.stderr,
+        )
+
+
 def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
     """Render native templates from this checkout and host configuration."""
     from shared.config import settings
@@ -385,6 +413,21 @@ def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
             file=sys.stderr,
         )
     _warn_listen_read_mismatches()
+    _warn_env_file_divergence(
+        ava_home,
+        {
+            "AVA_TELEMETRY_TEMPO_QUERY_URL": tempo_query_url,
+            "AVA_TELEMETRY_TEMPO_ENDPOINT": tempo_intake_endpoint,
+            "AVA_TELEMETRY_LOKI_URL": settings.observability.telemetry_loki_url,
+            "AVA_TELEMETRY_PROMETHEUS_URL": settings.observability.telemetry_prometheus_url,
+            "AVA_TELEMETRY_GRAFANA_URL": settings.observability.telemetry_grafana_url,
+            "AVA_OBSERVABILITY_URL": settings.observability.observability_url,
+            "AVA_LGTM_LISTEN_HOST": lgtm_listen_host,
+            "AVA_LGTM_GRAFANA_LISTEN_HOST": settings.observability.lgtm_grafana_listen_host,
+            "AVA_LGTM_LOKI_PORT": str(settings.observability.lgtm_loki_port),
+            "AVA_LGTM_GRAFANA_PORT": str(settings.observability.lgtm_grafana_port),
+        },
+    )
     loki_url, prometheus_url, pg_url = _observability_datasource_urls()
     substitutions = {
         "AVA_HOME": str(ava_home),
