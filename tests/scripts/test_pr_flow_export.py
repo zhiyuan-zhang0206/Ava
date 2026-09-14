@@ -8,6 +8,7 @@ import json
 import types
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -32,8 +33,12 @@ _TZ = ZoneInfo("Asia/Shanghai")
 
 
 def _meta(
-    number: int, *, created="2026-09-12T02:00:00Z", merged="2026-09-12T03:00:00Z", updated=None
-):
+    number: int,
+    *,
+    created: str = "2026-09-12T02:00:00Z",
+    merged: str = "2026-09-12T03:00:00Z",
+    updated: str | None = None,
+) -> dict[str, Any]:
     return {
         "number": number,
         "created_at": created,
@@ -42,7 +47,9 @@ def _meta(
     }
 
 
-def _receipt(sha: str, verdict: str = "approved", at="2026-09-12T02:30:00Z"):
+def _receipt(
+    sha: str, verdict: str = "approved", at: str = "2026-09-12T02:30:00Z"
+) -> dict[str, Any]:
     body = (
         "```ava-qa\n"
         + json.dumps(
@@ -197,9 +204,9 @@ def test_collect_records_reuses_cache_only_when_updated_at_is_unchanged() -> Non
     assert records[0].ready_at == meta["created_at"]
 
     moved = _meta(7, updated="2026-09-12T09:00:00Z")
-    fetched = []
+    fetched: list[int] = []
 
-    def fetch(_repo, number, _stats):
+    def fetch(_repo: str, number: int, _stats: object) -> list[object]:
         fetched.append(number)
         return []
 
@@ -246,7 +253,9 @@ def test_collect_records_falls_back_to_cache_then_partial_on_fetch_failure() -> 
 # ── fetchers: pagination, stops, failure paths ──────────────────────────────
 
 
-def test_fetch_closed_prs_stops_when_a_page_tail_predates_the_window(monkeypatch) -> None:
+def test_fetch_closed_prs_stops_when_a_page_tail_predates_the_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     since = datetime(2026, 8, 15, tzinfo=UTC)  # time-bomb-ok: explicit fixture window input
     recent = [_meta(n, updated="2026-09-12T03:00:00Z") for n in range(100, 200)]
     tail_old = [_meta(n, updated="2026-09-12T03:00:00Z") for n in range(99)]
@@ -254,7 +263,7 @@ def test_fetch_closed_prs_stops_when_a_page_tail_predates_the_window(monkeypatch
     pages = {1: recent, 2: tail_old, 3: "MUST NOT FETCH"}
     fetched: list[int] = []
 
-    def run_gh(args, **_kwargs):
+    def run_gh(args: list[str], **_kwargs: object) -> str:
         page_no = int(args[1].rsplit("page=", 1)[1])
         fetched.append(page_no)
         return json.dumps(pages[page_no])
@@ -266,11 +275,11 @@ def test_fetch_closed_prs_stops_when_a_page_tail_predates_the_window(monkeypatch
     assert len(prs) == 200
 
 
-def test_fetch_closed_prs_returns_on_a_short_page(monkeypatch) -> None:
+def test_fetch_closed_prs_returns_on_a_short_page(monkeypatch: pytest.MonkeyPatch) -> None:
     pages = {1: [_meta(2, updated="2026-09-12T03:00:00Z")]}
     fetched: list[int] = []
 
-    def run_gh(args, **_kwargs):
+    def run_gh(args: list[str], **_kwargs: object) -> str:
         page_no = int(args[1].rsplit("page=", 1)[1])
         fetched.append(page_no)
         return json.dumps(pages[page_no])
@@ -281,24 +290,34 @@ def test_fetch_closed_prs_returns_on_a_short_page(monkeypatch) -> None:
     assert len(prs) == 1
 
 
-def test_fetch_closed_prs_raises_when_the_walk_exceeds_its_budget(monkeypatch) -> None:
+def test_fetch_closed_prs_raises_when_the_walk_exceeds_its_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     page = [_meta(n, updated="2026-09-12T03:00:00Z") for n in range(100)]
-    monkeypatch.setattr(pr_flow, "_run_gh", lambda _args, **_kw: json.dumps(page))
+
+    def run_gh(_args: list[str], **_kw: object) -> str:
+        return json.dumps(page)
+
+    monkeypatch.setattr(pr_flow, "_run_gh", run_gh)
     monkeypatch.setattr(pr_flow, "_MAX_LIST_PAGES", 2)
     with pytest.raises(pr_flow.PrFlowError, match="budget"):
         pr_flow.fetch_closed_prs("r/x", datetime(2026, 8, 15, tzinfo=UTC), pr_flow.RunStats())
 
 
-def test_fetch_timeline_bounds_pagination(monkeypatch) -> None:
+def test_fetch_timeline_bounds_pagination(monkeypatch: pytest.MonkeyPatch) -> None:
     page = [{"event": "committed", "sha": "a" * 40, "commit_date": "2026-09-12T02:00:00Z"}] * 100
-    monkeypatch.setattr(pr_flow, "_run_gh", lambda _args, **_kw: json.dumps(page))
+
+    def run_gh(_args: list[str], **_kw: object) -> str:
+        return json.dumps(page)
+
+    monkeypatch.setattr(pr_flow, "_run_gh", run_gh)
     stats = pr_flow.RunStats()
     events = pr_flow.fetch_timeline("r/x", 5, stats)
     assert len(events) == pr_flow._MAX_TIMELINE_PAGES * 100
     assert stats.gh_api_calls == pr_flow._MAX_TIMELINE_PAGES
 
 
-def test_fetch_queue_depth_returns_none_on_trunk_error(monkeypatch) -> None:
+def test_fetch_queue_depth_returns_none_on_trunk_error(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = types.SimpleNamespace(
         _trunk_post=lambda *_a, **_k: (None, "HTTP 503"),
         _trunk_target_payload=lambda _repo: {},
@@ -309,10 +328,12 @@ def test_fetch_queue_depth_returns_none_on_trunk_error(monkeypatch) -> None:
     assert stats.trunk_error == "HTTP 503"
 
 
-def test_fetch_quarantined_walks_next_page_token(monkeypatch) -> None:
-    calls: list[dict] = []
+def test_fetch_quarantined_walks_next_page_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, Any]] = []
 
-    def trunk_post(endpoint, payload, token):
+    def trunk_post(
+        endpoint: str, payload: dict[str, Any], token: str
+    ) -> tuple[dict[str, Any] | None, str | None]:
         calls.append(payload)
         if len(calls) == 1:
             return (
@@ -364,8 +385,8 @@ def test_save_json_is_atomic_and_load_cache_heals_corruption(tmp_path: Path) -> 
     assert not list(target.parent.glob("*.tmp"))
 
 
-def test_emit_snapshot_skips_the_pipeline_in_dry_run(monkeypatch) -> None:
-    emitted = []
+def test_emit_snapshot_skips_the_pipeline_in_dry_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    emitted: list[object] = []
     monkeypatch.setattr(pr_flow, "_emit_events", emitted.append)
 
     snapshot = {"days": {}, "run": {}}

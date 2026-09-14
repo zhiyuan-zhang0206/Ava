@@ -689,7 +689,7 @@ def _emit_events(snapshot: dict[str, Any]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--repo", default=DEFAULT_REPO, help="owner/name to sample")
     parser.add_argument(
         "--window-days",

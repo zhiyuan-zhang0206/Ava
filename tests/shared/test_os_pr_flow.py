@@ -27,6 +27,18 @@ def _ok() -> types.SimpleNamespace:
     return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
 
+def _which_gh(_name: str) -> str | None:
+    return "/opt/homebrew/bin/gh"
+
+
+def _which_missing(_name: str) -> str | None:
+    return None
+
+
+def _fake_slug(_home: object) -> str:
+    return "ava-deadbeef"
+
+
 def test_launchd_plist_schedules_the_daily_sampler(tmp_path: Path) -> None:
     content = job._launchd_plist_content()
     root = ET.fromstring(content)  # noqa: S314 — self-generated plist
@@ -99,7 +111,7 @@ def test_linux_registration_replaces_only_this_clusters_line(
 
 def _passing_credentials(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr("shared.observability.production_identity", lambda: True)
-    monkeypatch.setattr(job.shutil, "which", lambda _name: "/opt/homebrew/bin/gh")
+    monkeypatch.setattr(job.shutil, "which", _which_gh)
     token = tmp_path / ".trunk" / "api-token"
     token.parent.mkdir(parents=True, exist_ok=True)
     token.write_text("tok\n", encoding="utf-8")
@@ -112,10 +124,10 @@ def test_credential_blocker_names_each_missing_piece(
     assert job.credential_blocker() == "not the registered production home"
 
     monkeypatch.setattr("shared.observability.production_identity", lambda: True)
-    monkeypatch.setattr(job.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(job.shutil, "which", _which_missing)
     assert job.credential_blocker() == "gh CLI not on PATH"
 
-    monkeypatch.setattr(job.shutil, "which", lambda _name: "/opt/homebrew/bin/gh")
+    monkeypatch.setattr(job.shutil, "which", _which_gh)
     assert job.credential_blocker() == f"no Trunk API token at {tmp_path}/.trunk/api-token"
 
     token = tmp_path / ".trunk" / "api-token"
@@ -149,7 +161,7 @@ def test_register_skips_without_credentials(
 
     monkeypatch.setattr(os_cron, "os_jobs_enabled", lambda: True)
     monkeypatch.setattr("shared.observability.production_identity", lambda: True)
-    monkeypatch.setattr(job.shutil, "which", lambda _name: None)  # no gh
+    monkeypatch.setattr(job.shutil, "which", _which_missing)  # no gh
 
     def no_backend():
         raise AssertionError("backend must not be touched without credentials")
@@ -175,7 +187,7 @@ def test_register_delegates_when_credentials_pass(
     job.register_pr_flow_job()
     assert calls == ["register"]
 
-    monkeypatch.setattr("shared.cluster.slug_for_home", lambda _home: "ava-deadbeef")
+    monkeypatch.setattr("shared.cluster.slug_for_home", _fake_slug)
     job.unregister_pr_flow_job()
     assert calls == ["register", "unregister:ava-deadbeef"]
 
