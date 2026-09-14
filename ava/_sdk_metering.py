@@ -49,6 +49,14 @@ from shared.sdk_telemetry import run_metered
 # onto a plugin wrapper built over a recorder and make install() wrongly skip it).
 _RECORDERS: weakref.WeakSet[Callable[..., Any]] = weakref.WeakSet()
 
+# Restore ledger (task #3426): the ``(parent, attr)`` pairs install() actually
+# wrapped, in wrap order. uninstall() restores from this record rather than
+# re-walking the namespace — the walk resolves dynamic member surfaces
+# (``ava.skills``'s ``__all_for_ava__`` scans the skills tree and reads the
+# install registry), so teardown would otherwise be exposed to state a passing
+# test deliberately arranged (macOS local: 8 teardowns exploded after green).
+_WRAPPED: list[tuple[Any, str]] = []
+
 
 @contextlib.contextmanager
 def _caller() -> Generator[None, None, None]:
@@ -173,12 +181,14 @@ def install() -> None:
         if current is None or current in _RECORDERS:
             continue
         setattr(parent, attr, _make_recorder(current, fq))
+        _WRAPPED.append((parent, attr))
 
     mcps_mod = getattr(ava, "mcps", None)
     if mcps_mod is not None:
         funnel = getattr(mcps_mod, _MCP_CALL_FUNNEL, None)
         if callable(funnel) and funnel not in _RECORDERS:
             setattr(mcps_mod, _MCP_CALL_FUNNEL, _make_mcp_recorder(funnel))
+            _WRAPPED.append((mcps_mod, _MCP_CALL_FUNNEL))
 
 
 def uninstall() -> None:
@@ -190,21 +200,29 @@ def uninstall() -> None:
     ``tests/conftest.py``), because ``install()`` is a side effect of
     ``_load_extensions()`` and is reached lazily on any ``ava.*`` miss — so merely
     touching the namespace metered it for every later test in the worker (issue #83).
+
+    Restores from the ``install()`` record (``_WRAPPED``), never by re-walking the
+    namespace: the walk resolves dynamic member surfaces (``ava.skills``'s index
+    scans the skills tree and reads the install registry) and must not run at
+    teardown, where a test's deliberately-broken state can make it raise — the
+    failure shape of task #3426 (macOS local: 8 teardowns exploded after the test
+    bodies had gone green).
     """
     # O(1) early-out: _RECORDERS is a WeakSet, and an installed recorder is held
     # strongly by the namespace it sits on, so an empty set proves nothing is
-    # installed. Without it every per-test teardown would pay the full namespace
-    # walk below (~7 ms) to restore nothing.
+    # installed. Without it every per-test teardown would pay for a full restore
+    # pass that could only find nothing.
     if not _RECORDERS:
+        _WRAPPED.clear()
         return
 
-    for parent, attr, _fq in _instrument_targets():
+    # Restore from the install() ledger, never by walking the namespace (task
+    # #3426): the walk re-resolves dynamic member surfaces (`ava.skills` scans the
+    # skills tree and reads the install registry), which test-arranged state can
+    # poison. Every wrapped pair was recorded at wrap time, so the restore stays
+    # complete.
+    for parent, attr in _WRAPPED:
         current = getattr(parent, attr, None)
         if current is not None and current in _RECORDERS:
             setattr(parent, attr, current.__wrapped__)
-
-    mcps_mod = getattr(ava, "mcps", None)
-    if mcps_mod is not None:
-        funnel = getattr(mcps_mod, _MCP_CALL_FUNNEL, None)
-        if funnel is not None and funnel in _RECORDERS:
-            setattr(mcps_mod, _MCP_CALL_FUNNEL, funnel.__wrapped__)
+    _WRAPPED.clear()
