@@ -56,7 +56,6 @@ from pathlib import Path
 from cli.commands._pause_resume import resume_after_start
 from cli.commands._probe import _probe_judges_a_fresh_launch
 from cli.commands._repo import ServiceSpec, _repo_root, session_name
-from cli.commands._session_lifecycle import _launch_roster, _launch_sessions
 from cli.commands._setup import _print_missing_setup_error
 from cli.commands._start_bookmarks import record_running_sha as _record_running_sha
 from cli.commands._start_gui_chain import _warn_when_chain_outside_gui_session
@@ -601,18 +600,22 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
 
     launch_skip = resolve_launch_skip(set(disabled_services), persist=persist_services)
 
+    # 4.1) a root_driven_enabled host drives this roster through ava-root.
+    root_driven, roster = _ns._start_roster(roles, launch_skip)
+
     # 4a) probe before binding: refuse to launch a daemon onto a health port
-    # another unit already answers on. Placed here because this is the last point
-    # at which nothing has been spawned, and the roster is only knowable once the
-    # skip set is resolved.
-    rc = _refuse_occupied_health_ports(_launch_roster(roles, launch_skip))
+    # another unit already answers on — this is the last point at which nothing
+    # has been spawned, and the roster is knowable only after the skip resolves.
+    rc = _refuse_occupied_health_ports(roster)
     if rc != 0:
         return rc
 
     # Failed start attempts must leave recovery actions gated.
     serving_generation = start_serving.begin_start()
     _record_running_sha(repo)
-    launch = _launch_sessions(roles, launch_skip, repo)
+    launch = _ns._launch_service_tree(
+        root_driven, roster, repo, roles, launch_skip, reconcile=persist_services
+    )
     started = launch.started
     # 4a) hand the launch failures to whoever runs this start from another process.
     # Written unconditionally so a clean start clears a previous run's list; the
@@ -653,7 +656,9 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # for exactly the same reason.
     print("\n→ waiting for services to come up")
     with updater_stage("readiness") if updater_telemetry else nullcontext():
-        wait = _ns._wait_for_services_ready(
+        # The root path judges its status surface; the session path probes.
+        wait = _ns._wait_for_service_tree(
+            root_driven,
             tuple(s for s in started if _probe_judges_a_fresh_launch(s)),
             timeout_s=SERVICE_READY_TIMEOUT_S,
         )
