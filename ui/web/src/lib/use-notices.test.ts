@@ -20,6 +20,7 @@ import type { NoticesFeed } from "./types";
 import {
   NOTICES_QUERY_KEY,
   NOTICES_RESOLVED_QUERY_KEY,
+  __dropTombstonesResetForTest,
   dropOpenNotices,
   useNotices,
   type NoticesFeedWire,
@@ -101,6 +102,7 @@ function feed(over: Partial<NoticesFeed> = {}): NoticesFeed {
 let queryClient: QueryClient;
 beforeEach(() => {
   vi.clearAllMocks();
+  __dropTombstonesResetForTest();
   lastEventSource = null;
   vi.mocked(api.getNotices).mockResolvedValue(feed());
   vi.mocked(api.checkAuth).mockResolvedValue({ authenticated: true });
@@ -352,5 +354,51 @@ describe("dropOpenNotices (Task #1814)", () => {
     expect(
       queryClient.getQueryData<NoticesFeedWire>(NOTICES_QUERY_KEY)?.open.map((n) => n.id),
     ).toEqual([2]);
+  });
+
+  it("hides a snapshot initiated after the drop until the server stops listing the row (task #3272)", async () => {
+    const preResolve = feed({
+      open: [{ id: 1, title: "a" } as never, { id: 2, title: "b" } as never],
+    });
+    vi.mocked(api.getNotices).mockResolvedValue(preResolve);
+    queryClient.setQueryData(NOTICES_QUERY_KEY, preResolve);
+    const { result } = renderHook(() => useNotices(), { wrapper });
+    await waitFor(() => expect(result.current.open.map((n) => n.id)).toEqual([1, 2]));
+
+    // The user resolves notice 1 (optimistic drop + tombstone).
+    dropOpenNotices(queryClient, [1]);
+    expect(queryClient.getQueryData<NoticesFeedWire>(NOTICES_QUERY_KEY)?.open.map((n) => n.id)).toEqual([2]);
+
+    // A refetch STARTING after the drop still returns the pre-resolve
+    // snapshot (the server has not processed the resolve yet) — the row must
+    // stay hidden.
+    await queryClient.refetchQueries({ queryKey: NOTICES_QUERY_KEY });
+    expect(queryClient.getQueryData<NoticesFeedWire>(NOTICES_QUERY_KEY)?.open.map((n) => n.id)).toEqual([2]);
+
+    // The post-resolve snapshot no longer lists the row: the tombstone
+    // retires, so a later snapshot is trusted again.
+    vi.mocked(api.getNotices).mockResolvedValue(feed({ open: [{ id: 2, title: "b" } as never] }));
+    await queryClient.refetchQueries({ queryKey: NOTICES_QUERY_KEY });
+    vi.mocked(api.getNotices).mockResolvedValue(preResolve);
+    await queryClient.refetchQueries({ queryKey: NOTICES_QUERY_KEY });
+    expect(queryClient.getQueryData<NoticesFeedWire>(NOTICES_QUERY_KEY)?.open.map((n) => n.id)).toEqual([1, 2]);
+  });
+
+  it("an expired tombstone stops hiding a row the server keeps listing (task #3272)", async () => {
+    const stillOpen = feed({ open: [{ id: 7, title: "a" } as never] });
+    vi.mocked(api.getNotices).mockResolvedValue(stillOpen);
+    queryClient.setQueryData(NOTICES_QUERY_KEY, stillOpen);
+    renderHook(() => useNotices(), { wrapper });
+    await waitFor(() =>
+      expect(queryClient.getQueryData<NoticesFeedWire>(NOTICES_QUERY_KEY)?.open.map((n) => n.id)).toEqual([7]),
+    );
+
+    dropOpenNotices(queryClient, [7]);
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 20_000);
+    await queryClient.refetchQueries({ queryKey: NOTICES_QUERY_KEY });
+    nowSpy.mockRestore();
+    // Past the 15s bound the guard releases: a resolve that never landed
+    // server-side cannot hide an open row forever.
+    expect(queryClient.getQueryData<NoticesFeedWire>(NOTICES_QUERY_KEY)?.open.map((n) => n.id)).toEqual([7]);
   });
 });

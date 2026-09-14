@@ -65,10 +65,38 @@ export interface NoticesFeed {
   isLoading: boolean;
 }
 
+/** Ids dropped optimistically whose server snapshot may still list them: one
+ *  refetch initiated after the drop is enough to revive a row until the
+ *  server resolve lands (task #3272). The deadline bounds how long a drop
+ *  can hide a row when no confirmation ever arrives. */
+const dropTombstones = new Map<number, number>(); // id -> deadline (ms epoch)
+const TOMBSTONE_MS = 15_000;
+
+/** Drop tombstoned ids from one incoming open-queue snapshot. A snapshot
+ *  that no longer lists an id proves the server resolved it — retire that
+ *  tombstone; the deadline retires any tombstone no confirmation reaches. */
+function withoutDroppedRows(wire: NoticesFeedWire): NoticesFeedWire {
+  if (dropTombstones.size === 0) return wire;
+  const now = Date.now();
+  for (const [id, deadline] of dropTombstones) {
+    if (deadline <= now) dropTombstones.delete(id);
+  }
+  const listed = new Set([...wire.open.map((n) => n.id), ...wire.awaiting.map((n) => n.id)]);
+  for (const id of [...dropTombstones.keys()]) {
+    if (!listed.has(id)) dropTombstones.delete(id);
+  }
+  if (dropTombstones.size === 0) return wire;
+  return {
+    ...wire,
+    open: wire.open.filter((n) => !dropTombstones.has(n.id)),
+    awaiting: wire.awaiting.filter((n) => !dropTombstones.has(n.id)),
+  };
+}
+
 export function useNotices(): NoticesFeed {
   const feedQuery = useQuery({
     queryKey: NOTICES_QUERY_KEY,
-    queryFn: () => api.getNotices({ limit: OPEN_LIMIT }),
+    queryFn: async () => withoutDroppedRows(await api.getNotices({ limit: OPEN_LIMIT })),
   });
 
   const resolvedQuery = useInfiniteQuery({
@@ -112,9 +140,17 @@ export function useNotices(): NoticesFeed {
  *  filtered too (defensive).
  *
  *  Any in-flight open-queue refetch is cancelled first so a pre-resolve
- *  snapshot cannot land over the drop and resurrect the row (task #3269). */
+ *  snapshot cannot land over the drop and resurrect the row (task #3269),
+ *  and the dropped ids stay tombstoned for a beat so a refetch newly
+ *  initiated after the drop cannot either (task #3272). */
 export function dropOpenNotices(queryClient: QueryClient, noticeIds: number[]): void {
   if (noticeIds.length === 0) return;
+  // Arm the tombstone before the optimistic drop: a refetch newly initiated
+  // after this point (e.g. an SSE invalidation inside the resolve window)
+  // still returns the pre-resolve snapshot, and would revive the rows for
+  // the seconds until the resolve lands without this guard (task #3272).
+  const deadline = Date.now() + TOMBSTONE_MS;
+  for (const id of noticeIds) dropTombstones.set(id, deadline);
   // Cancel the in-flight open-queue refetch first: its snapshot predates this
   // drop, and letting it land would resurrect the just-resolved row until the
   // next SSE-driven refetch corrects it — visible as the row bouncing back
@@ -130,4 +166,9 @@ export function dropOpenNotices(queryClient: QueryClient, noticeIds: number[]): 
       awaiting: old.awaiting.filter((n) => !gone.has(n.id)),
     };
   });
+}
+
+/** Test-only: clear pending drop tombstones between cases. */
+export function __dropTombstonesResetForTest(): void {
+  dropTombstones.clear();
 }
