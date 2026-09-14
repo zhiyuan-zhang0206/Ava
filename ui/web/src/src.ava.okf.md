@@ -13,6 +13,6 @@ Overview of Ava frontend `ui/web/src/`—all source code of the Next.js App Rout
 ## Sub-concepts
 
 - [[ui/web/web.ava.okf.md|Frontend UI]]
-- [[ui/web/src/frontend-state.ava.okf.md|Frontend State]]
+- [[ui/web/src/frontend-state/frontend-state.ava.okf.md|Frontend State]]
 - [[ui/web/src/frontend-data-flow/frontend-data-flow.ava.okf.md|Frontend Data Flow]]
 - [[ui/web/src/frontend-components/frontend-components.ava.okf.md|Frontend Components]]

@@ -154,6 +154,7 @@ export type MemoryGraphResponse = Schemas["MemoryGraphResponse"];
 export type MemoryNoteResponse = Schemas["MemoryNoteResponse"];
 
 export type TerminateAgentResponse = Schemas["TerminateAgentResponse"];
+export type OpenTasksHint = Schemas["OpenTasksHint"];
 export type RestartAgentResponse = Schemas["RestartAgentResponse"];
 export type ResurrectAgentResponse = Schemas["ResurrectAgentResponse"];
 

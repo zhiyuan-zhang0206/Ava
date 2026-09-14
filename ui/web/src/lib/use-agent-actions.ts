@@ -119,6 +119,14 @@ export function useAgentActions(
       };
       useStore.getState().showToast(messages[data.status]);
       track("terminate");
+      // Advisory open-tasks hint (task #3374; wire field #2488): show the
+      // notice when the agent still owned open tasks as it went down. An old
+      // gateway omits the field and null means none (or a failed hint read) —
+      // both stay silent and never block the termination.
+      const openTasks = data.open_tasks;
+      if (openTasks && openTasks.count > 0) {
+        useStore.getState().showOpenTasksNotice(openTasks);
+      }
     },
     onError: (e: unknown) => showError(`Terminate failed: ${errMsg(e)}`),
   });
