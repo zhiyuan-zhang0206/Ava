@@ -15,6 +15,7 @@ Pins:
 from typing import Annotated, Any
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.channels.delta import DeltaChannel
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
@@ -68,8 +69,10 @@ def test_resolve_reducer_ignores_foreign_delta_channels() -> None:
 def test_accumulate_delta_concatenates_for_every_messages_spelling() -> None:
     acc = [HumanMessage(content="a", id="a")]
     new = [HumanMessage(content="b", id="b")]
+    # The delta form is a sanctioned spelling (see _is_messages_reducer_form);
+    # the parameter's Callable type cannot express that runtime contract.
     for reducer in (add_messages, guarded_add_messages, _MESSAGES_DELTA_CHANNEL):
-        merged = _accumulate_delta(acc, new, reducer)
+        merged = _accumulate_delta(acc, new, reducer)  # pyright: ignore[reportArgumentType]
         assert [m.id for m in merged] == ["a", "b"]
 
 
@@ -113,7 +116,7 @@ async def test_flipped_channel_writes_delta_and_resumes_folded() -> None:
 
     saver = InMemorySaver()
     graph = _build(saver)
-    cfg: dict[str, Any] = {"configurable": {"thread_id": "switch-rt"}}
+    cfg: RunnableConfig = {"configurable": {"thread_id": "switch-rt"}}
     final = await graph.ainvoke({"n": 0, "target": 6}, cfg)
     assert final["n"] == 6
     ids = [m.id for m in final["messages"]]

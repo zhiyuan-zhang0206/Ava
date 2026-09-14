@@ -25,10 +25,18 @@ from services.agent_host.runtime import TurnOutcome
 from shared.config import settings
 from shared.context import AvaContext
 from shared.db import insert_inbound_message
+from shared.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from shared.event_publisher import AgentEventPublisher
 from shared.live_events import Error
 from shared.redis_client import open_async_redis
 from tests.agent.test_inbound_ownership import _agent
+
+
+def _cold_reader(pool: AsyncConnectionPool[Any]) -> AsyncPostgresSaver:
+    """Cold inspector saver that folds delta-written messages (#3180 write switch)."""
+    reader = AsyncPostgresSaver(pool)
+    wrap_saver_reads_with_delta_reconstruction(reader)
+    return reader
 
 
 async def _prepare_graph(
@@ -44,6 +52,8 @@ async def _prepare_graph(
     saver = AsyncPostgresSaver(pool)
     await saver.setup()
     _wrap_saver_writes_with_nstep_interval(saver, interval)
+    # Delta write model (#3180): fold delta-written messages on read (daemon parity).
+    wrap_saver_reads_with_delta_reconstruction(saver)
     builder: Any = StateGraph(states.AgentState, context_schema=AvaContext)
     builder.add_node("claim", claim_node, destinations=("before_llm", "claim", "__end__"))
     builder.add_node("before_llm", model, destinations=("claim",))
@@ -118,7 +128,7 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
             )
             assert not replies
             assert summary.await_count == COMPACT_MAX_ATTEMPTS
-            cold = await AsyncPostgresSaver(aops_pool).aget_tuple(config)
+            cold = await _cold_reader(aops_pool).aget_tuple(config)
             assert cold is not None
             persisted = cold.checkpoint["channel_values"]
             assert persisted["halted"] is True
@@ -134,7 +144,7 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
             await asyncio.wait_for(host.run_turn(agent), 5)
             assert replies == ["continued"]
             assert summary.await_count == COMPACT_MAX_ATTEMPTS
-            resumed = await AsyncPostgresSaver(aops_pool).aget_tuple(config)
+            resumed = await _cold_reader(aops_pool).aget_tuple(config)
             assert resumed is not None
             messages = resumed.checkpoint["channel_values"]["messages"]
             assert messages[:2] == history

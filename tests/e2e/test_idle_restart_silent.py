@@ -13,6 +13,7 @@ from langgraph.checkpoint.postgres import PostgresSaver
 
 from shared.agents import AgentStatus
 from shared.config import settings
+from shared.delta_read_compat import reconstruct_delta_messages
 from tests.e2e._ports import GATEWAY_URL
 
 
@@ -20,6 +21,9 @@ def _checkpoint_values(agent_id: int) -> dict[str, Any]:
     """Read agent's latest checkpoint channel_values (returns {} if no checkpoint)."""
     with PostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
         tup = saver.get_tuple({"configurable": {"thread_id": str(agent_id)}})
+        if tup is not None:
+            # Delta write model (#3180): fold delta-written messages on read.
+            reconstruct_delta_messages(saver, tup)
     if tup is None:
         return {}
     return tup.checkpoint.get("channel_values", {})  # pyright: ignore[reportUnknownMemberType]

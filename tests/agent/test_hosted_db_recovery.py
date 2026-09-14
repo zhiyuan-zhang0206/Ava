@@ -28,6 +28,7 @@ from shared import maintenance, maintenance_cohort, pause_owner
 from shared.config import settings
 from shared.context import AvaContext
 from shared.db import insert_inbound_message
+from shared.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from shared.hosted_force import install_hosted_force
 from shared.incarnation_resources import ResourceBirth
 from shared.machine import machine_name
@@ -64,6 +65,8 @@ async def _graph(
 ) -> tuple[Any, AsyncPostgresSaver]:
     saver = AsyncPostgresSaver(pool)
     await saver.setup()
+    # Delta write model (#3180): fold delta-written messages on read (daemon parity).
+    wrap_saver_reads_with_delta_reconstruction(saver)
     builder: Any = StateGraph(states.AgentState, context_schema=AvaContext)
     builder.add_node("work", node)
     builder.add_edge(START, "work")
@@ -387,6 +390,8 @@ async def _seed_stalled_repair_scenario(
     saver = AsyncPostgresSaver(aops_pool)
     await saver.setup()
     _wrap_saver_writes_with_nstep_interval(saver, 100)
+    # Delta write model (#3180): fold delta-written messages on read (daemon parity).
+    wrap_saver_reads_with_delta_reconstruction(saver)
     builder: Any = StateGraph(states.AgentState, context_schema=AvaContext)
     builder.add_node("work", work)
     builder.add_edge(START, "work")
@@ -408,9 +413,9 @@ async def _seed_stalled_repair_scenario(
             },
             config,
         )
-        # The superstep checkpoint (with the dangling tool call) stays in the
-        # nstep buffer, unflushed — exactly the crash shape: recovery's own
-        # flush_checkpoint must persist it before reconcile/repair see it.
+        # The superstep checkpoint (with the dangling tool call) is durable
+        # at once — delta threads retire the nstep buffer (#3180), so the
+        # crash shape is the dangling call persisted, not a buffered tail.
     at = datetime.now(UTC)
     pause_owner.begin_maintenance("private-slow-recovery", at)
     hold = maintenance_cohort.prepare(
@@ -438,9 +443,14 @@ async def test_healthy_stages_each_get_their_own_deadline(
     saver, graph, config, inbound, hold, graph_calls, at = await _seed_stalled_repair_scenario(
         db_conn, aops_pool, incarnation
     )
-    cold = await AsyncPostgresSaver(aops_pool).aget(config)  # type: ignore[arg-type]
+    reader = AsyncPostgresSaver(aops_pool)  # type: ignore[arg-type]
+    wrap_saver_reads_with_delta_reconstruction(reader)
+    cold = await reader.aget(config)
     assert cold is not None
-    assert not any(
+    # Delta write model (#3180): delta threads retire the nstep throttle, so
+    # the superstep's writes are durable at once — the crash shape here is the
+    # dangling call persisted (and not yet repaired), not a buffered tail.
+    assert any(
         getattr(msg, "id", None) == "unfinished-tool" for msg in cold["channel_values"]["messages"]
     )
     events: list[tuple[str, str, float]] = []
@@ -479,7 +489,9 @@ async def test_healthy_stages_each_get_their_own_deadline(
                 15,
             )
     finally:
-        cold = await AsyncPostgresSaver(aops_pool).aget(config)  # type: ignore[arg-type]
+        reader = AsyncPostgresSaver(aops_pool)  # type: ignore[arg-type]
+        wrap_saver_reads_with_delta_reconstruction(reader)
+        cold = await reader.aget(config)
         assert cold is not None
         msgs = cold["channel_values"]["messages"]
         assert any(getattr(msg, "id", None) == "unfinished-tool" for msg in msgs)
