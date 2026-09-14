@@ -513,3 +513,50 @@ async def test_revival_deferral_unknown_unit(started: StartFactory) -> None:
     supervisor = await started([_unit("svc", _SLEEP_FOREVER)])
     with pytest.raises(UnknownUnitError):
         supervisor.revival_deferral("ghost")
+
+
+# -- status attach seams + tree_view (W1.2b) -----------------------------------
+
+
+async def test_status_embeds_attached_surfaces_only(started: StartFactory) -> None:
+    supervisor = await started([_unit("svc", _SLEEP_FOREVER)])
+    status = await supervisor.status()
+    assert "health" not in status
+    assert "metrics" not in status
+
+    class _Health:
+        def health_snapshot(self) -> dict[str, object]:
+            return {"svc": {"breaker_open": False}}
+
+    class _Metrics:
+        def metrics_snapshot(self) -> dict[str, object]:
+            return {"chain": {"broken": False}}
+
+    supervisor.attach_health(_Health())
+    supervisor.attach_metrics(_Metrics())
+    status = await supervisor.status()
+    assert status["health"] == {"svc": {"breaker_open": False}}
+    assert status["metrics"] == {"chain": {"broken": False}}
+    assert "units" in status and "root" in status and "restarts_total" in status
+
+
+async def test_tree_view_reports_the_raw_recorded_pid(started: StartFactory) -> None:
+    supervisor = await started([_unit("svc", _SLEEP_FOREVER)])
+    view = supervisor.tree_view()
+    assert view["root_pid"] == os.getpid()
+    units = cast("list[dict[str, object]]", view["units"])
+    assert units[0]["id"] == "svc" and units[0]["state"] == "running"
+    pid = cast(int, units[0]["pid"])
+
+    # Disarm the watch and kill: status() masks the dead generation's pid to
+    # None, but tree_view keeps carrying the recorded pid the self-check judges.
+    runtime = supervisor._units["svc"]
+    assert runtime.watch_task is not None
+    runtime.watch_task.cancel()
+    os.kill(pid, signal.SIGKILL)
+    await asyncio.sleep(0.15)
+    assert (await _unit_status(supervisor, "svc"))["pid"] is None
+    units = cast("list[dict[str, object]]", supervisor.tree_view()["units"])
+    assert units[0]["pid"] == pid
+
+    await supervisor.up("svc")  # leave a healthy generation for teardown

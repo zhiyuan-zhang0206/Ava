@@ -22,6 +22,7 @@ from services.ava_root.manifest import (
     load_manifests,
 )
 from services.ava_root.probes import ProbeError, ProbeRegistry
+from services.ava_root.selfcheck import SelfCheckConfig, TreeSelfCheck
 from services.ava_root.server import ControlServer
 from services.ava_root.singleton import (
     AlreadyRunningError,
@@ -42,8 +43,10 @@ __all__ = [
     "RestartPolicy",
     "RootClient",
     "RootClientError",
+    "SelfCheckConfig",
     "Supervisor",
     "SupervisorConfig",
+    "TreeSelfCheck",
     "UnitManifest",
     "UnitRegistry",
     "UnitState",
