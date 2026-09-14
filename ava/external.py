@@ -1,4 +1,4 @@
-"""Attach local Python tools to an agent-approved external controller lease."""
+"""Attach local Python tools to a trusted external controller lease."""
 
 from __future__ import annotations
 
