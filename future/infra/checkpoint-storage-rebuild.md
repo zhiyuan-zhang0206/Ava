@@ -57,12 +57,12 @@ counts or write volume). The write switch runs in the next user-supervised windo
   allowlist (`agent/state.py`). In production, every blob row is `type='msgpack'`.
 - Durability: default `"async"` — one checkpoint row per super-step
   (node boundary); a turn spans several super-steps.
-- N-step wrapper `_wrap_saver_writes_with_nstep_interval` (`agent/startup.py:171`,
+- N-step wrapper `_wrap_saver_writes_with_nstep_interval` (`agent/startup.py:212`,
   interval = `AVA_CHECKPOINT_INTERVAL`, default 4):
   - retained steps (`step % 4 == 0`) and non-`loop`/`update` sources (input, fork) write;
     skipped steps write nothing.
   - On retained/flush writes it merges the checkpoint's full `channel_versions` into
-    `new_versions` (`_versions_with_current_blobs`, `agent/startup.py:153`). Because the
+    `new_versions` (`_versions_with_current_blobs`, `agent/startup.py:189`). Because the
     saver writes a blob for every channel listed there (values are present in
     `channel_values`), **each retained checkpoint persists the current full value of every
     channel whose version changed since the last write** — this fixed a dangling-reference bug but is exactly the full-rewrite
