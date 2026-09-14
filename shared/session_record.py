@@ -77,12 +77,14 @@ class SessionRecord:
     generation: str | None = None
     control_mode: str | None = None
     # Windows only: the resident cross-session control steward (issue #1930).
-    # Both fields are absent on legacy records, which therefore support
-    # same-session console delivery only. `steward_socket` is the absolute
-    # AF_UNIX path under $AVA_HOME/run/ctrl; its name embeds this record's
-    # exact (pid, create_time) identity.
+    # All three fields are absent on legacy records, which therefore support
+    # same-session console delivery only. `steward_endpoint` is the steward's
+    # loopback TCP endpoint ("127.0.0.1:<port>") and `steward_nonce` its
+    # delivery token; the spawner writes both, so a caller can address the
+    # steward only by possessing this record.
     steward_pid: int | None = None
-    steward_socket: str | None = None
+    steward_endpoint: str | None = None
+    steward_nonce: str | None = None
     # POSIX only: the session's process group at spawn (the reparent helper's
     # setsid pgid). The durable ownership proof for a leader that already died:
     # while the group is occupied, its surviving members are still this
@@ -119,9 +121,14 @@ class SessionRecord:
             steward_pid=(
                 int(record["steward_pid"]) if isinstance(record.get("steward_pid"), int) else None
             ),
-            steward_socket=(
-                record["steward_socket"]
-                if isinstance(record.get("steward_socket"), str) and record["steward_socket"]
+            steward_endpoint=(
+                record["steward_endpoint"]
+                if isinstance(record.get("steward_endpoint"), str) and record["steward_endpoint"]
+                else None
+            ),
+            steward_nonce=(
+                record["steward_nonce"]
+                if isinstance(record.get("steward_nonce"), str) and record["steward_nonce"]
                 else None
             ),
             pgid=int(record["pgid"]) if isinstance(record.get("pgid"), int) else None,
