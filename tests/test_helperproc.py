@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import os
 import signal
+import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -14,7 +15,7 @@ import pytest
 
 from services.permissions_helper import client
 from services.permissions_helper.client import PermissionsHelperError
-from shared import helperproc
+from shared import helper_chain_guard, helperproc
 from shared.helper_chain_guard import parent_chain_intact
 from shared.session_record import SessionRecord, pid_starttime_ticks
 
@@ -354,21 +355,100 @@ def test_pty_host_uses_direct_helper_child_when_enabled(
     assert call["stderr"] == unit_home / "logs" / "ava-shell.host.log"
 
 
-def test_parent_chain_guard_allows_unmanaged_and_requires_direct_helper_parent(
+def test_parent_chain_guard_allows_unmanaged_and_rejects_malformed_markers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("AVA_PERMISSIONS_HELPER_PID", raising=False)
-    monkeypatch.setattr(os, "getppid", lambda: 100)
+    monkeypatch.setattr(helper_chain_guard, "_read_ppid", {os.getpid(): 100}.get)
     assert parent_chain_intact()
 
     monkeypatch.setenv("AVA_PERMISSIONS_HELPER_PID", "100")
     assert parent_chain_intact()
 
-    monkeypatch.setattr(os, "getppid", lambda: 101)
-    assert not parent_chain_intact()
-
     monkeypatch.setenv("AVA_PERMISSIONS_HELPER_PID", "not-an-int")
     assert not parent_chain_intact()
+
+    monkeypatch.setenv("AVA_PERMISSIONS_HELPER_PID", "0")
+    assert not parent_chain_intact()
+
+    monkeypatch.setenv("AVA_PERMISSIONS_HELPER_PID", "-3")
+    assert not parent_chain_intact()
+
+
+def test_parent_chain_guard_rejects_a_helper_outside_the_chain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chain = {os.getpid(): 100, 100: 1}
+    monkeypatch.setattr(helper_chain_guard, "_read_ppid", chain.get)
+    monkeypatch.setenv("AVA_PERMISSIONS_HELPER_PID", "101")
+    assert not parent_chain_intact()
+
+
+def test_parent_chain_guard_accepts_the_helper_above_an_intermediate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # unit -> root -> helper: the geometry under the root supervisor, which
+    # the former direct-parent check misread as an orphan and killed at boot.
+    chain = {os.getpid(): 101, 101: 100}
+    monkeypatch.setattr(helper_chain_guard, "_read_ppid", chain.get)
+    monkeypatch.setenv("AVA_PERMISSIONS_HELPER_PID", "100")
+    assert parent_chain_intact()
+
+
+def test_parent_chain_guard_rejects_a_broken_intermediate_link(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(helper_chain_guard, "_read_ppid", {os.getpid(): 101}.get)
+    monkeypatch.setenv("AVA_PERMISSIONS_HELPER_PID", "100")
+    assert not parent_chain_intact()
+
+
+def test_parent_chain_guard_stops_at_the_depth_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    links: dict[int, int] = {os.getpid(): 7000}
+    for step in range(40):
+        links[7000 + step] = 7001 + step
+    monkeypatch.setattr(helper_chain_guard, "_read_ppid", links.get)
+
+    monkeypatch.setenv("AVA_PERMISSIONS_HELPER_PID", "7030")  # 31 links up
+    assert parent_chain_intact()
+
+    monkeypatch.setenv("AVA_PERMISSIONS_HELPER_PID", "7040")  # 41 links up
+    assert not parent_chain_intact()
+
+
+def _run_probe_chain(marker_dir: Path, *, marker_value: str | None = None) -> str:
+    env = None
+    if marker_value is not None:
+        env = {**os.environ, "AVA_TEST_HELPER_MARKER_VALUE": marker_value}
+    result = subprocess.run(  # noqa: S603 — fixed test-internal probe
+        [
+            sys.executable,
+            str(Path(__file__).parent / "shared" / "helper_chain_probe.py"),
+            "helper",
+            str(marker_dir / "marker"),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=True,
+        env=env,
+    )
+    return result.stdout.strip()
+
+
+def test_parent_chain_guard_on_a_real_process_chain(tmp_path: Path) -> None:
+    assert _run_probe_chain(tmp_path) == "intact"
+
+
+def test_parent_chain_guard_rejects_an_outside_pid_on_a_real_chain(tmp_path: Path) -> None:
+    outsider = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        assert _run_probe_chain(tmp_path, marker_value=str(outsider.pid)) == "broken"
+    finally:
+        outsider.kill()
+        outsider.wait(timeout=10)
 
 
 def test_parent_chain_checks_are_wired_at_host_boot_and_heartbeat() -> None:
