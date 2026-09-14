@@ -86,10 +86,55 @@ _FIRST_PARTY_LOGGER_NAMES = (
 )
 
 
+# langchain-google-genai's `_parse_chat_history` substitutes an empty text part
+# and logs one of two WARNING variants for every AI message whose content
+# converts to no Gemini parts:
+#
+#   AI message at index N converted to no Gemini parts; using an empty text part.
+#   AI message at index N converted to no Gemini parts after all M content
+#   block(s) were dropped; using an empty text part.
+#
+# They fire again on every later conversion of a history containing such a
+# message, so one benign substitution becomes a per-turn flood — a single
+# long-context agent wrote 2,072 of these records into the file sink and the
+# events table in one day (2026-09-13, #3317).
+_GENAI_LOGGER_NAME = "langchain_google_genai"
+_GENAI_EMPTY_PARTS_MARKER = "converted to no Gemini parts"
+
+
+class _GenaiEmptyPartsWarningFilter(logging.Filter):
+    """Drop those two `_parse_chat_history` warnings, and only those (#3317).
+
+    Nothing is lost: the record announces a substitution the library performs
+    itself (the empty text part). Gating the whole `langchain_google_genai`
+    logger to ERROR — the `psycopg.pool` treatment — was rejected because it
+    also hides this library's real warnings, e.g. the "cannot be represented as
+    a Gemini part" per-block record the flood variant comes with.
+
+    Attached to the root intercept handler rather than to the library's logger:
+    a logger's filters apply only to records logged through that exact logger,
+    while a handler's filters run for every record on its way into loguru —
+    i.e. for every sub-logger the library emits under. `record.msg` (the raw
+    format string) is matched instead of `record.getMessage()`, whose
+    %-formatting can raise and would then throw into the logging call site
+    (see `_StdlibInterceptHandler.emit`).
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.name != _GENAI_LOGGER_NAME and not record.name.startswith(
+            f"{_GENAI_LOGGER_NAME}."
+        ):
+            return True
+        return not (isinstance(record.msg, str) and _GENAI_EMPTY_PARTS_MARKER in record.msg)
+
+
 def _install_stdlib_intercept() -> None:
     """Install the intercept handler on the root logger. Idempotent — the
     `init_*` functions can call it on every startup; we replace the
     handler list rather than appending, so reinit doesn't accumulate.
+
+    The handler also carries the one targeted record filter this file needs
+    (`_GenaiEmptyPartsWarningFilter`, #3317).
 
     Level INFO is the floor for everyone — it keeps third-party DEBUG spam
     (httpx / psycopg / urllib3) out without an extra filter, matching
@@ -103,7 +148,11 @@ def _install_stdlib_intercept() -> None:
     occurrences of a line that fires every time the respawn controller's
     gateway-health gate defers a restart.
     """
-    logging.basicConfig(handlers=[_StdlibInterceptHandler()], level=logging.INFO, force=True)
+    intercept_handler = _StdlibInterceptHandler()
+    # #3317: the langchain-google-genai 'no Gemini parts' chatter is dropped at
+    # this stdlib→loguru boundary — see `_GenaiEmptyPartsWarningFilter`.
+    intercept_handler.addFilter(_GenaiEmptyPartsWarningFilter())
+    logging.basicConfig(handlers=[intercept_handler], level=logging.INFO, force=True)
 
     for _name in _FIRST_PARTY_LOGGER_NAMES:
         logging.getLogger(_name).setLevel(logging.DEBUG)

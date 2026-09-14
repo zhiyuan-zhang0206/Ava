@@ -89,6 +89,9 @@ from shared.log_sinks import (
     _add_file_sink as _add_file_sink,
 )
 from shared.log_sinks import (
+    _GenaiEmptyPartsWarningFilter as _GenaiEmptyPartsWarningFilter,
+)
+from shared.log_sinks import (
     _install_stdlib_intercept as _install_stdlib_intercept,
 )
 from shared.log_sinks import (
