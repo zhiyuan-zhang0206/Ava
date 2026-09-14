@@ -37,14 +37,28 @@ jobs:
       - name: Check QA approval label
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if [[ "$HEAD_REF" == trunk-merge/* || "$HEAD_REF" == trunk-temp/* ]]; then
             echo "Trunk Merge Queue test PRs are exempt from the QA approval label gate."
             exit 0
           fi
 
-          if jq -e 'any(.pull_request.labels[]?; .name == "qa-approved")' "$GITHUB_EVENT_PATH" > /dev/null; then
+          # The verdict is the label set at evaluation time, read live — never
+          # the event payload: a run queued by an older event can execute
+          # after a newer event's run, and its payload is a snapshot, not
+          # current state. 2026-09-14 (#2444): a run created before `labeled`
+          # executed late and its failure became the newest same-named
+          # check-run, after the labeled run had passed.
+          if ! labels="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/labels" \
+            --jq 'any(.[]; .name == "qa-approved")')"; then
+            echo "Could not read the PR's labels from GitHub; failing the gate."
+            exit 1
+          fi
+
+          if [[ "$labels" == "true" ]]; then
             echo "The PR has the qa-approved label."
             exit 0
           fi
