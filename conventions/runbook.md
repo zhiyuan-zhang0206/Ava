@@ -864,8 +864,9 @@ time, like `AVA_PITR_GCS_PREFIX`; align it before the shadow period starts so th
 observed digests describe the opening configuration instead of the default. The
 pre-open cost comparison (task #3292) measured about 30 GB of WAL per day on the
 live prefix and put each extra week near CNY 19/month; the opening parameter is
-`4` (roughly a 30-day window, about CNY 77/month). Deepening through the bucket's
-90-day lifecycle ceiling stays deferred until after the shadow period.
+`2` (the user's ruling on 2026-09-14: roughly a 14-day window, about CNY
+39/month). Deepening through the bucket's 90-day lifecycle ceiling stays
+deferred until after the shadow period.
 
 The full procedure and the pre-open cost comparison live with the retention
 design (task #2150).
