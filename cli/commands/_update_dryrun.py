@@ -17,6 +17,7 @@ from typing import cast
 from uuid import uuid4
 
 from cli.commands import _update_uv_sync
+from cli.commands._update_pitr import RECOVERY_SUFFIX
 from shared.gitenv import git_env
 from shared.paths import ava_home
 from shared.proc import run_bounded
@@ -434,7 +435,7 @@ def prepare_commit(
 
 def spawn_async_offsite_upload(repo: Path, dump_path: Path | None) -> None:
     """Detach remote backup publication after recovery has finished."""
-    if dump_path is None:
+    if dump_path is None or dump_path.name.endswith(RECOVERY_SUFFIX):
         return
     log = ava_home() / "backups" / "db" / f"upload-{dump_path.name}.log"
     try:
