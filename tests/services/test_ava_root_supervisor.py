@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -19,7 +20,12 @@ from typing import cast
 
 import pytest
 
-from services.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
+from services.ava_root.manifest import (
+    RestartPolicy,
+    UnitManifest,
+    UnitRegistry,
+    UnknownUnitError,
+)
 from services.ava_root.supervisor import Supervisor, SupervisorConfig
 
 
@@ -463,3 +469,47 @@ async def test_dispatch_translates_business_errors(started: StartFactory) -> Non
     result = cast("dict[str, object]", response.get("result"))
     root = cast("dict[str, object]", result["root"])
     assert root["pid"] == os.getpid()
+
+
+# -- revival_deferral: the seam that keeps a second reviver from fighting ------
+
+
+async def test_revival_deferral_none_for_a_healthy_unit(started: StartFactory) -> None:
+    supervisor = await started([_unit("svc", _SLEEP_FOREVER)])
+    assert supervisor.revival_deferral("svc") is None
+
+
+async def test_revival_deferral_held_down_after_operator_stop(started: StartFactory) -> None:
+    supervisor = await started([_unit("svc", _SLEEP_FOREVER)])
+    await supervisor.down("svc")
+    assert supervisor.revival_deferral("svc") == "held down"
+
+
+async def test_revival_deferral_already_scheduled_during_retry(started: StartFactory) -> None:
+    supervisor = await started(
+        [_unit("svc", _SLEEP_FOREVER)], backoff_base_s=60.0, backoff_max_s=120.0
+    )
+    pid = cast(int, (await _unit_status(supervisor, "svc"))["pid"])
+    os.kill(pid, signal.SIGKILL)
+
+    async def scheduled() -> bool:
+        return supervisor.revival_deferral("svc") == "already scheduled"
+
+    await _wait_until(scheduled)
+
+
+async def test_revival_deferral_policy_never(started: StartFactory) -> None:
+    supervisor = await started([_unit("svc", _SLEEP_FOREVER, restart="never")])
+    assert supervisor.revival_deferral("svc") == "policy never"
+
+
+async def test_revival_deferral_held_down_wins_over_never(started: StartFactory) -> None:
+    supervisor = await started([_unit("svc", _SLEEP_FOREVER, restart="never")])
+    await supervisor.down("svc")
+    assert supervisor.revival_deferral("svc") == "held down"
+
+
+async def test_revival_deferral_unknown_unit(started: StartFactory) -> None:
+    supervisor = await started([_unit("svc", _SLEEP_FOREVER)])
+    with pytest.raises(UnknownUnitError):
+        supervisor.revival_deferral("ghost")
