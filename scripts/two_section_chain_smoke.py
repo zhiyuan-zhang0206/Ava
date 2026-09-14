@@ -12,7 +12,9 @@ chain plus the keeper's crash semantics:
   chain      launchd -> helper -> root -> unit parentage via ps + root status
   attribute  a unit's TCCAccessPreflight requests resolve to the helper (F11)
   restart    kill -9 the root: the helper restarts it; the old unit keeps
-             running (the design's "lose attribution, not service")
+             running (the design's "lose attribution, not service"); with
+             --sample-restart the phase also samples the whole tree chain +
+             TCC attribution around the crash (F12, task #3377)
   conflict   kill -9 the helper: launchd relaunches it; the relaunched helper
              finds the orphan root, rests in `conflict` (no double-spawn, no
              kill), `root_stop` without force is refused, force disposes the
@@ -34,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import datetime
 import json
 import os
 import plistlib
@@ -56,6 +59,9 @@ _HELPER_WAIT_S = 30.0
 _ROOT_WAIT_S = 30.0
 _RESTART_WAIT_S = 20.0
 _POLL_S = 0.25
+_F12_STABLE_S = 6.0
+_F12_ROUND_WAIT_S = 10.0
+_UNIT_IDS = ("heartbeat", "heartbeat-b", "heartbeat-c")
 
 _ATTRIBUTION_RE = re.compile(
     r"responsible=\{TCCDProcess: identifier=(?P<responsible_id>[^,]*), pid=(?P<responsible_pid>\d+)"
@@ -63,9 +69,17 @@ _ATTRIBUTION_RE = re.compile(
     r"pid=(?P<requesting_pid>\d+)"
 )
 
+_F12_REQUESTING_RE = re.compile(
+    r"requesting=\{TCCDProcess: identifier=(?P<requesting_id>[^,]*), pid=(?P<requesting_pid>\d+)"
+)
+_F12_RESPONSIBLE_RE = re.compile(
+    r"responsible=\{TCCDProcess: identifier=(?P<responsible_id>[^,]*), pid=(?P<responsible_pid>\d+)"
+)
+_LOG_STAMP_RE = re.compile(r"^(?P<stamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
+
 _UNIT_PROBE = '''\
 \
-"""Unit probe: side-effect-free preflight queries + heartbeat.
+"""Unit probe: side-effect-free preflight queries + heartbeat; answers sampled rounds.
 
 TCCAccessPreflight never prompts and never touches protected data; tccd still
 records every call with this process's attribution, which the smoke reads back
@@ -99,14 +113,35 @@ def preflight(service):
 
 def main():
     results_path, beat_path = sys.argv[1], sys.argv[2]
+    request_path = results_path + ".req"
+    rounds_path = results_path + ".rounds"
     results = {}
     for service in SERVICES:
         results[service] = preflight(service)
     with open(results_path, "w") as handle:
         json.dump({"pid": os.getpid(), "ppid": os.getppid(), "services": results}, handle)
+    seen = None
     while True:
         with open(beat_path, "a") as handle:
             handle.write("%.0f\\n" % time.time())
+        try:
+            with open(request_path) as handle:
+                current = handle.read().strip()
+        except OSError:
+            current = None
+        if current and current != seen:
+            seen = current
+            record = {
+                "round": current,
+                "ts": round(time.time(), 3),
+                "pid": os.getpid(),
+                "ppid": os.getppid(),
+                "pgid": os.getpgid(0),
+                "sid": os.getsid(0),
+                "services": {service: preflight(service) for service in SERVICES},
+            }
+            with open(rounds_path, "a") as handle:
+                handle.write(json.dumps(record) + "\\n")
         time.sleep(1)
 
 
@@ -285,6 +320,111 @@ def _root_status(run_dir: Path) -> dict[str, Any]:
     return cast("dict[str, Any]", response["result"])
 
 
+def _f12_chain_line(pid: int) -> str:
+    proc = _run(["ps", "-o", "pid=,ppid=,pgid=,lstart=,command=", "-p", str(pid)], check=False)
+    return proc.stdout.strip() or f"{pid} <gone>"
+
+
+def _f12_round(workdir: Path, unit_id: str, tag: str, pid: int, timeout: float) -> dict[str, Any]:
+    rounds_path = workdir / f"unit-results-{unit_id}.json.rounds"
+
+    def _found():
+        if not rounds_path.exists():
+            return None
+        for line in reversed(rounds_path.read_text().splitlines()):
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if record.get("round") == tag and record.get("pid") == pid:
+                return record
+        return None
+
+    return _wait_for(f"round {tag} from unit {unit_id} pid {pid}", _found, timeout, "f12")
+
+
+def _f12_point(
+    workdir: Path, tag: str, units: list[tuple[str, int]], pids: list[int]
+) -> dict[str, Any]:
+    """Trigger one probe round per unit id; collect per-pid replies; snapshot chains."""
+    smoke_ts = round(time.time(), 3)
+    for unit_id in sorted({unit_id for unit_id, _ in units}):
+        (workdir / f"unit-results-{unit_id}.json.req").write_text(tag)
+    rows = []
+    for unit_id, pid in units:
+        try:
+            record = _f12_round(workdir, unit_id, tag, pid, _F12_ROUND_WAIT_S)
+        except SmokeError:
+            record = {"round": tag, "pid": pid}
+        record["unit"] = unit_id
+        rows.append(record)
+    return {"smoke_ts": smoke_ts, "rows": rows, "chains": [_f12_chain_line(pid) for pid in pids]}
+
+
+def _f12_join_tccd(evidence: Path, samples: dict[str, Any]) -> None:
+    """Join sampled probe rounds against the tccd AUTHREQ_ATTRIBUTION log window."""
+    first = min(point["smoke_ts"] for point in samples["points"].values())
+    span = max(2, int((time.time() - first) / 60) + 2)
+    log_text = _run(
+        [
+            "/usr/bin/log",
+            "show",
+            "--last",
+            f"{span}m",
+            "--style",
+            "compact",
+            "--predicate",
+            'eventMessage CONTAINS "AUTHREQ_ATTRIBUTION"',
+        ],
+        timeout=120.0,
+    ).stdout
+    _save(evidence, "f12-tccd-window.txt", log_text)
+    lines: dict[int, list[tuple[float, str]]] = {}
+    for line in log_text.splitlines():
+        stamp = _LOG_STAMP_RE.match(line)
+        requesting = _F12_REQUESTING_RE.search(line)
+        if stamp is None or requesting is None:
+            continue
+        ts = (
+            datetime.datetime.strptime(stamp.group("stamp"), "%Y-%m-%d %H:%M:%S.%f")
+            .astimezone()
+            .timestamp()
+        )
+        lines.setdefault(int(requesting.group("requesting_pid")), []).append((ts, line))
+    joined = []
+    for point in samples["points"].values():
+        for record in point["rows"]:
+            if not isinstance(record.get("ts"), (int, float)):
+                continue
+            requests = []
+            for ts, line in lines.get(int(record["pid"]), []):
+                if ts < record["ts"] - 0.15:
+                    continue
+                responsible = _F12_RESPONSIBLE_RE.search(line)
+                requests.append(
+                    {
+                        "line_ts": ts,
+                        "responsible_id": responsible.group("responsible_id")
+                        if responsible
+                        else None,
+                        "responsible_pid": int(responsible.group("responsible_pid"))
+                        if responsible
+                        else None,
+                    }
+                )
+                if len(requests) >= 3:
+                    break
+            joined.append(
+                {
+                    "unit": record["unit"],
+                    "point": record["round"],
+                    "pid": record["pid"],
+                    "requests": requests,
+                }
+            )
+    samples["tccd"] = joined
+
+
 def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, wait, and teardown live together on purpose
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument(
@@ -294,6 +434,11 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
     parser.add_argument("--label", default=DEFAULT_LABEL)
     parser.add_argument("--python", default=sys.executable, help="interpreter for root + units")
     parser.add_argument("--skip-attribution", action="store_true", help="skip the F11 tccd check")
+    parser.add_argument(
+        "--sample-restart",
+        action="store_true",
+        help="sample chains + TCC attribution across the root crash restart (F12)",
+    )
     parser.add_argument("--cleanup", action="store_true", help="remove the workdir at the end")
     args = parser.parse_args()
 
@@ -369,15 +514,14 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         # Fresh run surface: stale fixtures/logs from an earlier run must not
         # satisfy this run's waits (the attribution split and the graceful-stop
         # check read files, not memory).
-        for stale in (
-            "unit-results.json",
-            "unit.beat",
-            "root.stdout.log",
-            "root.stderr.log",
-            "helper.stdout.log",
-            "helper.stderr.log",
-        ):
-            (workdir / stale).unlink(missing_ok=True)
+        for stale in [
+            *workdir.glob("unit-*"),
+            workdir / "root.stdout.log",
+            workdir / "root.stderr.log",
+            workdir / "helper.stdout.log",
+            workdir / "helper.stderr.log",
+        ]:
+            stale.unlink(missing_ok=True)
         probe = workdir / "unit_probe.py"
         probe.write_text(_UNIT_PROBE)
         manifests = workdir / "manifests.json"
@@ -386,16 +530,17 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
                 {
                     "units": [
                         {
-                            "id": "heartbeat",
+                            "id": unit_id,
                             "exec": [
                                 args.python,
                                 str(probe),
-                                str(workdir / "unit-results.json"),
-                                str(workdir / "unit.beat"),
+                                str(workdir / f"unit-results-{unit_id}.json"),
+                                str(workdir / f"unit-{unit_id}.beat"),
                             ],
                             "restart": "always",
                             "attach": "root",
                         }
+                        for unit_id in _UNIT_IDS
                     ]
                 }
             )
@@ -461,40 +606,54 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         )
         root_pid = int(status["root"]["pid"])
         recorded_pids.add(root_pid)
-        unit_pid = int(_unit_entry(status, "heartbeat")["pid"])
-        recorded_pids.add(unit_pid)
+        initial_units = {unit_id: int(_unit_entry(status, unit_id)["pid"]) for unit_id in _UNIT_IDS}
+        recorded_pids.update(initial_units.values())
 
         helper_ppid = _ppid_of(helper_pid)
         root_ppid = _ppid_of(root_pid)
-        unit_ppid = _ppid_of(unit_pid)
         if root_ppid != helper_pid:
             _fail("chain", f"root ppid {root_ppid} != helper pid {helper_pid}")
-        if unit_ppid != root_pid:
-            _fail("chain", f"unit ppid {unit_ppid} != root pid {root_pid}")
         if helper_ppid != 1:
             _fail("chain", f"helper ppid {helper_ppid} is not launchd(1)")
+        for unit_id, unit_pid in initial_units.items():
+            unit_ppid = _ppid_of(unit_pid)
+            if unit_ppid != root_pid:
+                _fail("chain", f"unit {unit_id} ppid {unit_ppid} != root pid {root_pid}")
         _save(
             evidence,
             "ps-chain.txt",
-            _ps_line(helper_pid, root_pid, unit_pid)
-            + f"\nhelper ppid={helper_ppid} root ppid={root_ppid} unit ppid={unit_ppid}",
+            _ps_line(helper_pid, root_pid, *initial_units.values())
+            + f"\nhelper ppid={helper_ppid} root ppid={root_ppid}"
+            + "".join(f" {unit_id} ppid={_ppid_of(pid)}" for unit_id, pid in initial_units.items()),
         )
         _save(evidence, "root-status-initial.json", json.dumps(status, indent=2))
         _save(evidence, "keeper-status-initial.json", json.dumps(helper_root_status(), indent=2))
-        phase_pass("chain", f"launchd -> helper {helper_pid} -> root {root_pid} -> unit {unit_pid}")
+        phase_pass(
+            "chain",
+            f"launchd -> helper {helper_pid} -> root {root_pid} -> units {list(initial_units.values())}",
+        )
 
         # ---- attribution (F11) --------------------------------------------
         if args.skip_attribution:
             print("PHASE attribute: SKIP (--skip-attribution)")
         else:
-            results_path = workdir / "unit-results.json"
-            _wait_for("unit preflight results", results_path.exists, 30.0, "attribute")
+            unit_results = {}
+            for unit_id in initial_units:
+                results_path = workdir / f"unit-results-{unit_id}.json"
+                _wait_for(
+                    f"unit {unit_id} preflight results", results_path.exists, 30.0, "attribute"
+                )
+                unit_results[unit_id] = json.loads(results_path.read_text())
             time.sleep(2.0)
-            unit_results = json.loads(results_path.read_text())
-            if int(unit_results["ppid"]) != root_pid:
-                _fail("attribute", f"unit ppid {unit_results['ppid']} != root pid {root_pid}")
-            _save(evidence, "unit-results.json", json.dumps(unit_results, indent=2))
-            _save(evidence, "unit-log.txt", _tail(run_dir / "logs" / "heartbeat.log"))
+            for unit_id, results in unit_results.items():
+                if int(results["ppid"]) != root_pid:
+                    _fail(
+                        "attribute", f"unit {unit_id} ppid {results['ppid']} != root pid {root_pid}"
+                    )
+                _save(evidence, f"unit-results-{unit_id}.json", json.dumps(results, indent=2))
+                _save(
+                    evidence, f"unit-log-{unit_id}.txt", _tail(run_dir / "logs" / f"{unit_id}.log")
+                )
             log_text = _run(
                 [
                     "/usr/bin/log",
@@ -509,24 +668,27 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
                 timeout=120.0,
             ).stdout
             _save(evidence, "tccd-attribution-window.txt", log_text)
-            matched = None
-            for line in log_text.splitlines():
-                found = _ATTRIBUTION_RE.search(line)
-                if found and int(found.group("requesting_pid")) == unit_pid:
-                    matched = found
-                    break
-            if matched is None:
-                _fail(
-                    "attribute",
-                    f"no AUTHREQ_ATTRIBUTION line for unit pid {unit_pid}; "
-                    "see evidence/tccd-attribution-window.txt",
-                )
-            if int(matched.group("responsible_pid")) != helper_pid:
-                _fail(
-                    "attribute",
-                    f"unit attributed to pid {matched.group('responsible_pid')} "
-                    f"({matched.group('responsible_id')}), not helper {helper_pid}",
-                )
+            attributed = []
+            for unit_id, unit_pid in initial_units.items():
+                matched = None
+                for line in log_text.splitlines():
+                    found = _ATTRIBUTION_RE.search(line)
+                    if found and int(found.group("requesting_pid")) == unit_pid:
+                        matched = found
+                        break
+                if matched is None:
+                    _fail(
+                        "attribute",
+                        f"no AUTHREQ_ATTRIBUTION line for unit {unit_id} pid {unit_pid}; "
+                        "see evidence/tccd-attribution-window.txt",
+                    )
+                if int(matched.group("responsible_pid")) != helper_pid:
+                    _fail(
+                        "attribute",
+                        f"unit {unit_id} attributed to pid {matched.group('responsible_pid')} "
+                        f"({matched.group('responsible_id')}), not helper {helper_pid}",
+                    )
+                attributed.append(f"{unit_id}={matched.group('responsible_id')}")
             prompting = [
                 line
                 for line in log_text.splitlines()
@@ -535,38 +697,68 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
             if prompting:
                 _fail("attribute", f"unexpected permission prompt line: {prompting[0][:200]}")
             phase_pass(
-                "attribute",
-                f"unit {unit_pid} resolves to helper {helper_pid} "
-                f"(identifier={matched.group('responsible_id')})",
+                "attribute", f"units resolve to helper {helper_pid} ({', '.join(attributed)})"
             )
 
         # ---- restart (root crash) -----------------------------------------
+        f12: dict[str, Any] = {"points": {}}
+        old_chain = [helper_pid, root_pid, *initial_units.values()]
+        if args.sample_restart:
+            f12["points"]["pre"] = _f12_point(
+                workdir, "pre", list(initial_units.items()), old_chain
+            )
         _kill(root_pid, signal.SIGKILL)
+        if args.sample_restart:
+            f12["kill_ts"] = round(time.time(), 3)
+            f12["points"]["gap"] = _f12_point(
+                workdir, "gap", list(initial_units.items()), old_chain
+            )
         restarted = _wait_for(
             "root restarted",
             lambda: _status_if_running(root_status, excluding=root_pid),
             _RESTART_WAIT_S,
             "restart",
         )
+        if args.sample_restart:
+            f12["new_root_ts"] = round(time.time(), 3)
         new_root_pid = int(restarted["root"]["pid"])
         recorded_pids.add(new_root_pid)
-        if not _pid_alive(unit_pid):
-            _fail("restart", f"old unit pid {unit_pid} died with the root")
+        if not _pid_alive(initial_units["heartbeat"]):
+            _fail("restart", f"old unit heartbeat {initial_units['heartbeat']} died with the root")
         keeper = helper_root_status()
         if int(keeper["restarts"]) < 1:
             _fail("restart", f"keeper restarts={keeper['restarts']} did not record the crash")
-        new_unit_pid = int(_unit_entry(restarted, "heartbeat")["pid"])
-        recorded_pids.add(new_unit_pid)
+        new_units = {unit_id: int(_unit_entry(restarted, unit_id)["pid"]) for unit_id in _UNIT_IDS}
+        recorded_pids.update(new_units.values())
+        if args.sample_restart:
+            all_units = [*initial_units.items(), *new_units.items()]
+            chain_pids = [helper_pid, new_root_pid, *new_units.values(), *initial_units.values()]
+            f12["points"]["respawn"] = _f12_point(workdir, "respawn", all_units, chain_pids)
+            time.sleep(_F12_STABLE_S)
+            f12["points"]["stable"] = _f12_point(workdir, "stable", all_units, chain_pids)
+            f12.update(
+                {
+                    "helper_pid": helper_pid,
+                    "old_root_pid": root_pid,
+                    "new_root_pid": new_root_pid,
+                    "keeper": keeper,
+                }
+            )
+            _f12_join_tccd(evidence, f12)
+            _save(evidence, "f12-restart-sampling.json", json.dumps(f12, indent=2))
         _save(
             evidence,
             "restart.txt",
-            _ps_line(helper_pid, new_root_pid, unit_pid, new_unit_pid)
-            + f"\nold unit {unit_pid} alive after root crash: {_pid_alive(unit_pid)}"
-            + f"\nnew root {new_root_pid}, new unit {new_unit_pid}",
+            _ps_line(helper_pid, new_root_pid, *initial_units.values(), *new_units.values())
+            + "\nold units alive after root crash: "
+            + f"{[uid for uid, pid in initial_units.items() if _pid_alive(pid)]}"
+            + f"\nnew root {new_root_pid}, new units {new_units}",
         )
         _save(evidence, "keeper-status-restart.json", json.dumps(keeper, indent=2))
         phase_pass(
-            "restart", f"root {root_pid} -> {new_root_pid}; old unit {unit_pid} kept running"
+            "restart",
+            f"root {root_pid} -> {new_root_pid}; old units kept running"
+            + ("; F12 sampling saved" if args.sample_restart else ""),
         )
 
         # ---- conflict (helper crash) --------------------------------------
@@ -641,8 +833,9 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
             _ps_line(new_helper_pid, new_root_pid, reseeded_pid, reseeded_unit_pid)
             + f"\nreseeded root {reseeded_pid} is child of helper {new_helper_pid}; unit {reseeded_unit_pid}",
         )
-        if _pid_alive(unit_pid):
-            _kill(unit_pid, signal.SIGTERM)
+        old_heartbeat = initial_units["heartbeat"]
+        if _pid_alive(old_heartbeat):
+            _kill(old_heartbeat, signal.SIGTERM)
         phase_pass(
             "conflict", f"orphan {new_root_pid} detected + disposed; reseeded root {reseeded_pid}"
         )
