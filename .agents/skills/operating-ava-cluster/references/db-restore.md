@@ -39,6 +39,15 @@ a native throwaway Postgres cluster, decrypts the artifact (decompressing a
 legacy gzip layer when present), restores with `pg_restore --clean
 --if-exists`, and removes all scratch data and the cluster when it exits.
 
+The drill picks the scratch cluster's base directory with capacity awareness.
+The platform default (`/dev/shm` on Linux) is kept when the estimated restore
+fits; a restore larger than the tmpfs demotes to the disk fallback (`/var/tmp`
+where present). Set `AVA_PG_THROWAWAY_BASE` (absolute path, unit `.env`) to
+force a base. The drill logs the base it uses, and a failing `pg_restore` names
+that base and its free space — if the server closed the connection mid-copy
+(`PQputCopyData`), the scratch base ran out of room: free space on it, or point
+`AVA_PG_THROWAWAY_BASE` at a larger volume.
+
 A successful run prints this shape (counts vary by artifact):
 
 ```text

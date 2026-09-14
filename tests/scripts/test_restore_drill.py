@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
+import types
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -113,3 +115,39 @@ def test_run_drill_restores_an_encrypted_artifact_into_throwaway_postgres(
     assert report.sample_message_count == 1
     assert report.agents_owner == "ava_main"
     assert elapsed > 0
+
+
+def test_scratch_space_requirement_scales_with_the_dump_size(tmp_path: Path) -> None:
+    """The base is picked against a multiple of the decrypted dump's size: the
+    2026-09-14 restore needed >=17 GiB from a 10.16 GiB artifact (~1.7x), and the
+    drill reserves 2x as the floor for choosing a base."""
+    dump = tmp_path / "backup.dump"
+    dump.write_bytes(b"x" * 1000)
+    assert restore_drill._scratch_space_requirement(dump) == 2000
+
+
+def test_restore_failure_message_names_the_base_and_the_capacity_knob(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A server killed mid-COPY must not surface as a bare exit code (the
+    2026-09-14 WSL failure: `pg_restore exited 1` plus a host-side dmesg signal).
+    The message carries the base, its free space, the stderr tail, and the
+    override knob that moves the base."""
+    base = tmp_path / "fallback"
+    base.mkdir()
+    monkeypatch.setattr(
+        restore_drill.shutil,
+        "disk_usage",
+        lambda _path: types.SimpleNamespace(free=512 * 2**20),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    proc = subprocess.CompletedProcess(
+        args=["pg_restore"],
+        returncode=1,
+        stderr=b"pg_restore: error: PQputCopyData: server closed the connection unexpectedly\n",
+    )
+    message = restore_drill._restore_failure_message(proc, base)
+    assert "pg_restore exited 1" in message
+    assert str(base) in message
+    assert "512 MiB free" in message
+    assert "AVA_PG_THROWAWAY_BASE" in message
+    assert "PQputCopyData: server closed the connection" in message
