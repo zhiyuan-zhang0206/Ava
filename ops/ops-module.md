@@ -48,7 +48,10 @@ configuration construction.
 
 The host status snapshot's `paused` field includes native maintenance admission
 and startup that has not reached `start-serving` readiness, in addition to the
-business DB posture. A missing DB snapshot cannot claim ready. This status
+business DB posture; `paused_reason` names the first true clause (`no_state` /
+`business_pause` / `maintenance` / `startup`), so a failed start that parked the
+serving gate reads apart from a deliberate pause. A missing DB snapshot cannot
+claim ready. This status
 projection does not change the business API's pause middleware. Rollout polling
 combines it with the responding ops process SHA and the source checkout SHA;
 these fields do not certify every sibling daemon's running code.

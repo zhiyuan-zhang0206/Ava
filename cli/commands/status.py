@@ -248,4 +248,5 @@ def _print_gateway_cluster_status() -> None:
     )
     print(f"  machine_name: {status.machine_name}")
     print(f"  serves:       {caps}")
-    print(f"  paused:       {status.paused}")
+    paused_note = f" ({status.paused_reason})" if status.paused_reason else ""
+    print(f"  paused:       {status.paused}{paused_note}")

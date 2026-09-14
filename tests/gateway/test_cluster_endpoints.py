@@ -168,6 +168,9 @@ class TestPauseMiddleware:
         assert r.status_code == 200
         body = r.json()
         assert body["paused"] is True
+        # The pure-gateway local snapshot resolves paused from the posture row
+        # alone; the breakdown names that single cause (task #3404).
+        assert body["paused_reason"] == "business_pause"
         assert body["machine_name"] == "test-mc"
         assert body["serve_gateway"] is True
         assert body["serve_agent_runner"] is False
