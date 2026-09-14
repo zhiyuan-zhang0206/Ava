@@ -19,6 +19,10 @@
 // Home seeds that cache through useAgents, but a direct /fleet session never
 // mounts it — this view therefore mounts both roster queries itself (same
 // keys, same cache: no duplicate fetch, and the global fold keeps them fresh).
+// The canvas also holds its first paint until that initial roster load settles
+// (see rosterPending below): a partial re-parent map would paint a layout that
+// flips when the terminated half lands — the same pair of caches the sidebar
+// tree fixed for the same reason (#2074).
 
 "use client";
 
@@ -159,16 +163,29 @@ export function GraphView({
   // rather than a bare getQueryData read — guarantees the terminated cache is
   // fetched on a direct /fleet load AND re-runs the lineage map when a roster
   // lands or a lifecycle fold updates it.
-  const { data: liveRoster } = useQuery({
+  const { data: liveRoster, isLoading: liveRosterLoading } = useQuery({
     queryKey: AGENTS_QUERY_KEY,
     queryFn: () => fetchAgentRoster(queryClient, "live"),
     staleTime: Infinity,
   });
-  const { data: terminatedRoster } = useQuery({
+  const { data: terminatedRoster, isLoading: terminatedRosterLoading } = useQuery({
     queryKey: TERMINATED_AGENTS_QUERY_KEY,
     queryFn: () => fetchAgentRoster(queryClient, "terminated"),
     staleTime: Infinity,
   });
+
+  // While the initial roster load is still in flight the canvas must not
+  // paint. The merged live + terminated roster is the re-parenting input, and
+  // the terminated half (thousands of rows) resolves seconds after the live
+  // half on a cold load. findNearestLiveAncestor walks the parent chain
+  // through lineageById, so a terminated intermediate that has not landed yet
+  // ends the walk at itself: its live descendant paints as an isolated node
+  // (#312 -> #240 -> #228 would float #312) and jumps into place when the
+  // terminated roster arrives — a first-paint flip, the same race the sidebar
+  // tree fixed in #2074. isLoading is true only for the cold fetch — cached
+  // rosters are not gated, so navigation and reconnect refetches still paint
+  // instantly.
+  const rosterPending = liveRosterLoading || terminatedRosterLoading;
 
   const statusLabels: Record<PublicAgentStatus, string> = useMemo(
     () => ({
@@ -295,6 +312,11 @@ export function GraphView({
     return [...byPair.values()];
   }, [graph.edges, liveNodes, liveIds, lineageById]);
 
+  // Paint gate: hold the canvas at its empty state until the cold roster load
+  // has settled (rosterPending above), so the first paint is final.
+  const paintedNodes: ForceGraphNode[] = rosterPending ? [] : nodes;
+  const paintedEdges: ForceGraphEdge[] = rosterPending ? [] : edges;
+
   // When the selected agent disappears from the graph (e.g. it was
   // terminated) — clear the stale selection so the canvas and selection stay in sync.
   useEffect(() => {
@@ -355,8 +377,8 @@ export function GraphView({
   return (
     <div className={cn("relative h-full w-full", OVERFLOW_HIDDEN)}>
       <ForceGraph
-        nodes={nodes}
-        edges={edges}
+        nodes={paintedNodes}
+        edges={paintedEdges}
         shape="circle"
         statusText={STATUS_TEXT}
         selectedId={selectedAgentId}
@@ -366,7 +388,7 @@ export function GraphView({
         setParams={setForceParams}
         resetParams={resetForceParams}
         hoverCard={agentHoverCard}
-        statsText={t("stats", { nodes: nodes.length, edges: edges.length })}
+        statsText={t("stats", { nodes: paintedNodes.length, edges: paintedEdges.length })}
         legend={
           <div aria-label={t("legend")} className="space-y-1">
             <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
@@ -423,9 +445,9 @@ export function GraphView({
           {t("truncated")}
         </p>
       ) : null}
-      {nodes.length === 0 ? (
+      {paintedNodes.length === 0 ? (
         <p className={cn("absolute inset-0 items-center justify-center text-xs text-muted-foreground", FLEX)}>
-          {loading ? t("loading") : error ? t("unavailable") : t("empty")}
+          {loading || rosterPending ? t("loading") : error ? t("unavailable") : t("empty")}
         </p>
       ) : null}
     </div>
