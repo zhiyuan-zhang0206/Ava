@@ -318,9 +318,10 @@ def test_lifecycle_and_spawner_window_aggregates() -> None:
 def test_sdk_call_top_table_shape() -> None:
     _load_pack()
     expr = _all_rendered()["ava_obs_sdk_call_top"][0]
-    assert expr.startswith("topk(20, sum by (attributes_fn) (count_over_time(")
+    assert expr.startswith("topk(20, sum by (attributes_fn) (sum_over_time(")
     assert "$__range" in expr  # instant query over the whole window
-    assert expr.endswith("[$__range])) * 10)")
+    assert 'unwrap attributes_sample_rate | __error__=""' in expr
+    assert "* 10" not in expr
 
 
 def test_events_rate_uses_rate() -> None:

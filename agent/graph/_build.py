@@ -365,7 +365,7 @@ def _load_extensions() -> plugins_cfg.PluginsConfig:
     # wraps plugin-registered namespaces / members and sits outermost of any plugin
     # `ava.extend.wrap` layer (one count per agent call). Idempotent; a plugin reload
     # re-runs it after clear_wraps restores plugin-touched targets.
-    from agent import sdk_metering
+    from ava import _sdk_metering as sdk_metering
 
     sdk_metering.install()
 

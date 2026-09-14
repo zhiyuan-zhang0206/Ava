@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Literal, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 Category = Literal["audit", "telemetry", "log"]
 EventTier = Literal["business", "anomaly", "observation", "noise"]
@@ -245,17 +245,20 @@ class SseDrop(TypedDict):
 
 
 class EventLogDrop(TypedDict):
-    """`event_log_drop` payload."""
+    """Actual queue loss; timestamp drives the cluster error-state window."""
 
     n: int
+    queue: NotRequired[str]
+    last_dropped_at: NotRequired[float]
 
 
 class SdkCall(TypedDict):
-    """`sdk_call` payload — agent/sdk_metering.py recorder."""
+    """`sdk_call` payload — ava/_sdk_metering.py recorder."""
 
     fn: str
     duration: float
     sample_rate: int
+    detail: NotRequired[dict[str, Any]]
 
 
 class PluginActivation(TypedDict):

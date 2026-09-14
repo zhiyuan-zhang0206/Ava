@@ -341,6 +341,9 @@ _init_complete = True
 # export a process-wide AVA_AGENT_ID; gateway / cli do not carry it either.
 # Only an agent-launched child reaches this load.
 from . import _boot as _boot_module
+from . import _sdk_metering
+
+_sdk_metering.install()
 
 if _boot_module.is_launched_child():
     _ensure_plugins_loaded()

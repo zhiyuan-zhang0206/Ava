@@ -21,7 +21,7 @@ the collector sidecar owns durable mirroring after acceptance.
 
 - `shared/telemetry_otlp.py` places events into a bounded 2048-entry queue with
   `put_nowait`; a full queue increments the cumulative drop counter and reports
-  the first and every 50th drop. In-memory metric recording never waits on the
+  the loss outside the saturated log lane. In-memory metric recording never waits on the
   exporter queue.
 - SDK-owned log and metric threads perform network I/O. Both OTLP/HTTP
   exporters and their processors receive explicit 2-second deadlines; errors
@@ -47,3 +47,21 @@ one daemon retry loop on the same cadence. Successful trace recovery reports the
 preceding consecutive failures and cumulative circuit drops.
 
 Parent node: [[telemetry-otlp.ava.okf.md|OTLP export backend and trace ship]].
+
+## Queue loss
+
+The emitter, OTLP log queue, and OTel SDK batch queue report actual loss as `event_log_drop`, with
+`n`, `queue`, and `last_dropped_at`. Local error diagnostics bypass the saturated
+queue and always write stderr, including standalone scripts before logging setup.
+Delayed summaries preserve the actual loss time. OTLP loss reports go straight to the JSONL mirror and metric instruments;
+`ava_event_log_drop_last_dropped_at` drives the immediate error-level
+`ava-ops-telemetry-queue-loss` Grafana alert, resolving after five loss-free minutes.
+The metrics lane can report even while log delivery is saturated. A collector or
+metrics-export outage still delays remote visibility; existing exporter-silence
+alerts cover that failure. These are observable losses, not a durable delivery
+guarantee or a reconstruction of missing calls.
+
+The OTel SDK observer handles its pinned queue-full warning before OTel's
+duplicate-log filter, records each loss, and suppresses the original warning
+after replacing it with an error outside the emitter. A real bounded SDK queue
+test locks this upstream diagnostic contract.

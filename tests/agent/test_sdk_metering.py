@@ -1,4 +1,4 @@
-"""Unit tests for agent/sdk_metering.py — the per-call SDK usage recorder.
+"""Unit tests for ava/_sdk_metering.py — the per-call SDK usage recorder.
 
 The recorder wraps every public `ava.*` callable to emit one `sdk_call` event per
 top-level invocation (counted by shared.metrics.sdk_usage). These tests pin the two
@@ -13,11 +13,12 @@ import contextlib
 import inspect
 import io
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 
 import ava
-from agent import sdk_metering
+from ava import _sdk_metering as sdk_metering
 from shared import sdk_telemetry
 
 
@@ -224,7 +225,7 @@ def test_mcp_recorder_derives_fq_from_runtime_args(monkeypatch: pytest.MonkeyPat
 
     calls.clear()
     rec("chrome", "navigate")  # outside recording()
-    assert calls == []
+    assert calls[0][0] == "mcps.chrome.navigate"
 
 
 def test_install_wraps_and_restores_mcp_call_funnel() -> None:
@@ -261,7 +262,7 @@ def test_a_plugin_load_is_undone_by_the_autouse_teardown(request: pytest.Fixture
     """
     import ava.mcps
     from agent.graph import _build
-    from agent.sdk_metering import _RECORDERS
+    from ava._sdk_metering import _RECORDERS
 
     assert "_restore_sdk_metering" in request.fixturenames
 
@@ -280,3 +281,142 @@ def test_a_plugin_load_is_undone_by_the_autouse_teardown(request: pytest.Fixture
     assert not [
         fq for p, a, fq in sdk_metering._instrument_targets() if getattr(p, a) in _RECORDERS
     ]
+
+
+@pytest.mark.asyncio
+async def test_async_calls_measure_execution_and_isolate_concurrent_frames(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    calls = _spy_emit(monkeypatch)
+
+    async def body(label: str) -> str:
+        sdk_telemetry.annotate(label=label)
+        await asyncio.sleep(0)
+        return label
+
+    wrapped = sdk_metering._make_recorder(body, "plugin.async_call")
+    assert inspect.iscoroutinefunction(wrapped)
+    a, b = wrapped("a"), wrapped("b")
+    assert calls == []
+    assert await asyncio.gather(a, b) == ["a", "b"]
+    assert [row[1] for row in calls] == [{"label": "a"}, {"label": "b"}]
+
+
+def test_plain_python_import_installs_sdk_events(tmp_path: Path) -> None:
+    import json
+    import os
+    import subprocess
+    import sys
+
+    target = tmp_path / "input.txt"
+    target.write_text("hello")
+    code = """
+import json, sys
+import ava
+from shared import telemetry, sdk_call_policy
+sdk_call_policy.policy = sdk_call_policy.SamplingPolicy
+rows = []
+telemetry.emit = lambda *args, **kwargs: rows.append(kwargs)
+assert ava.files.read(sys.argv[1]) == "hello"
+print(json.dumps(rows))
+"""
+    result = subprocess.run(  # noqa: S603 — fixed Python code and an isolated fixture path
+        [sys.executable, "-c", code, str(target)],
+        env={**os.environ, "AVA_AGENT_ID": "42"},
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    )
+    rows = json.loads(result.stdout)
+    assert len(rows) == 1
+    assert rows[0]["agent_id"] == 42
+    assert rows[0]["attributes"]["fn"] == "files.read"
+    assert rows[0]["attributes"]["sample_rate"] == 1
+
+
+def test_borrowed_identity_is_stamped_on_external_sdk_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from typing import Any
+
+    from ava import _boot
+    from shared import sdk_call_policy, telemetry
+
+    rows: list[dict[str, Any]] = []
+
+    def capture(*_args: Any, **kwargs: Any) -> None:
+        rows.append(kwargs)
+
+    def validate() -> int:
+        pytest.fail("observational telemetry must not validate the lease")
+
+    monkeypatch.setattr(_boot, "_external_identity", validate)
+    monkeypatch.setattr(_boot, "_external_agent_id", 99)
+    monkeypatch.setattr(_boot, "_agent_id", 42)
+    monkeypatch.setattr(telemetry, "emit", capture)
+    monkeypatch.setattr(sdk_call_policy, "policy", sdk_call_policy.SamplingPolicy)
+    wrapped = sdk_metering._make_recorder(lambda: "ok", "files.read")
+    assert wrapped() == "ok"
+    assert rows[0]["agent_id"] == 99
+    assert rows[0]["source"] == "agent:99"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("async_wrapper", [False, True])
+async def test_plugin_wrap_preserves_awaited_single_event(
+    monkeypatch: pytest.MonkeyPatch, async_wrapper: bool
+) -> None:
+    import asyncio
+    from collections.abc import Awaitable, Callable
+
+    from ava import _extend
+    from shared.plugin_context import PluginContext
+
+    calls = _spy_emit(monkeypatch)
+    clock = [0.0]
+    monkeypatch.setattr(sdk_telemetry.time, "monotonic", lambda: clock[0])
+
+    async def body() -> str:
+        await asyncio.sleep(0)
+        clock[0] += 2.0
+        sdk_telemetry.annotate(body=True)
+        return "ok"
+
+    def passthrough(inner: Callable[[], Awaitable[str]]) -> Awaitable[str]:
+        return inner()
+
+    async def awaited(inner: Callable[[], Awaitable[str]]) -> str:
+        return await inner()
+
+    ava.register_namespace_member("self", "review_async_test", body)
+    try:
+        sdk_metering.install()
+        with PluginContext("async-test"):
+            ava.extend.wrap("self.review_async_test", awaited if async_wrapper else passthrough)
+        sdk_metering.install()
+        call = ava.self.review_async_test
+        assert inspect.iscoroutinefunction(call)
+        calls.clear()
+        pending = call()
+        assert calls == []
+        assert await pending == "ok"
+        assert calls == [("self.review_async_test", {"body": True}, 2.0)]
+    finally:
+        sdk_metering.uninstall()
+        _extend.clear_wraps()
+        ava.clear_registered_namespaces()
+
+
+def test_install_does_not_evaluate_dynamic_namespace_directory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def dynamic_names() -> list[str]:
+        pytest.fail("instrumentation must not load skills or discover remote MCP servers")
+
+    monkeypatch.setattr(ava.skills, "__dir__", dynamic_names)
+    monkeypatch.setattr(ava.mcps, "__dir__", dynamic_names)
+    sdk_metering.install()
+    sdk_metering.uninstall()

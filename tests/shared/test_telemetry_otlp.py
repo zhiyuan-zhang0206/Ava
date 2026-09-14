@@ -1145,3 +1145,101 @@ def test_warmup_builds_backend_when_enabled(monkeypatch: pytest.MonkeyPatch) -> 
         assert backend._logs is not None
     finally:
         backend.shutdown()
+
+
+def test_queue_loss_metric_survives_full_log_lane(
+    otlp_backend: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import queue
+
+    backend, _logs, reader = otlp_backend
+    assert backend._ensure()
+
+    class FullQueue:
+        def put_nowait(self, event: Event) -> None:
+            raise queue.Full
+
+    mirrors: list[Event] = []
+    monkeypatch.setattr(backend, "_queue", FullQueue())
+    monkeypatch.setattr(telemetry, "_append_jsonl", mirrors.extend)
+    backend.export_batch([_event(), _event()])
+    assert mirrors[0].event_name == "event_log_drop"
+    assert mirrors[0].attributes["n"] == 2
+    metrics = _metrics(reader)
+    assert metrics["ava_event_log_drop_n"].data.data_points[0].value == 2
+    assert metrics["ava_event_log_drop_last_dropped_at"].data.data_points[0].value > 0
+
+
+def test_real_otel_sdk_queue_overflow_is_observed_without_log_recursion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import logging
+
+    from opentelemetry._logs import LogRecord
+    from opentelemetry.sdk._logs import LoggerProvider
+    from opentelemetry.sdk._logs.export import (
+        BatchLogRecordProcessor,
+        LogRecordExporter,
+        LogRecordExportResult,
+    )
+
+    from shared import telemetry_loss
+
+    entered, release = threading.Event(), threading.Event()
+
+    class BlockedExporter(LogRecordExporter):
+        def force_flush(self, timeout_millis: int = 30000) -> bool:
+            return True
+
+        def export(self, batch: Any) -> Any:
+            entered.set()
+            assert release.wait(5)
+            return LogRecordExportResult.SUCCESS
+
+        def shutdown(self) -> None:
+            pass
+
+    sdk_logger = logging.getLogger("opentelemetry.sdk._shared_internal")
+    old_filters = list(sdk_logger.filters)
+    telemetry_loss.install_exporter_drop_observer()
+    reports: list[Event] = []
+    monkeypatch.setattr(telemetry, "_append_jsonl", reports.extend)
+    provider = LoggerProvider()
+    provider.add_log_record_processor(
+        BatchLogRecordProcessor(
+            BlockedExporter(),
+            max_queue_size=1,
+            max_export_batch_size=1,
+            schedule_delay_millis=60000,
+        )
+    )
+    emitter = provider.get_logger("test")
+    try:
+        emitter.emit(LogRecord(body="first"))
+        assert entered.wait(2)
+        for _ in range(3):
+            emitter.emit(LogRecord(body="more"))
+        assert len(reports) == 2
+        assert all(
+            row.attributes["queue"] == "otel-sdk" and row.level == "error" for row in reports
+        )
+    finally:
+        release.set()
+        provider.shutdown()
+        sdk_logger.filters[:] = old_filters
+
+
+def test_delayed_loss_summary_cannot_rewind_newer_loss_metric(otlp_backend: Any) -> None:
+    backend, _logs, reader = otlp_backend
+    assert backend._ensure()
+    for timestamp in (2000.0, 1000.0):
+        backend._record_metrics(
+            _event(
+                category="telemetry",
+                event_name="event_log_drop",
+                attributes={"n": 1, "queue": "emitter", "last_dropped_at": timestamp},
+            )
+        )
+    metrics = _metrics(reader)
+    assert metrics["ava_event_log_drop_last_dropped_at"].data.data_points[0].value == 2000.0
+    assert metrics["ava_event_log_drop_n"].data.data_points[0].value == 2

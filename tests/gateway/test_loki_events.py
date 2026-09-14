@@ -912,6 +912,22 @@ class TestBuildLogql:
         assert loki_events.count_grouped(group_by="level", cluster=".ava-preview") == {"warning": 2}
         assert 'cluster=".ava-preview" or cluster=""' in client.calls[0][1]["query"]
 
+    def test_sdk_weights_are_summed_without_materializing_event_rows(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = _install(
+            monkeypatch,
+            {"data": {"result": [{"metric": {"fn": "files.read"}, "value": [1, "14"]}]}},
+        )
+        assert loki_events.count_grouped(
+            group_by="fn", from_attributes=True, weight_by="sample_rate", event_names=["sdk_call"]
+        ) == {"files.read": 14}
+        query = client.calls[0][1]["query"]
+        assert 'sdk_weight="attributes.sample_rate"' in query
+        assert "sum_over_time" in query
+        assert "| keep fn, sdk_weight" in query
+        assert "unwrap sdk_weight" in query
+
     def test_indexed_selector_narrows_before_pipeline_filters(self) -> None:
         q = loki_events._build_logql(
             era=LokiReadEra.INDEXED,

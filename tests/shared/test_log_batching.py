@@ -26,7 +26,7 @@ from typing import Any, cast
 import pytest
 
 from shared import log as slog
-from shared import telemetry
+from shared import telemetry, telemetry_loss
 
 
 def _event(i: int, category: str = "log") -> telemetry.Event:
@@ -191,12 +191,14 @@ def test_queue_is_bounded_and_counts_what_it_sheds(
         time.sleep(5.0)
         blocked(batch)
 
-    reports: list[dict] = []
-    monkeypatch.setattr(
-        slog.logger,
-        "warning",
-        lambda _msg, **kw: reports.append(kw) if kw.get("event") == "event_log_drop" else None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    )
+    reports: list[dict[str, Any]] = []
+    original_report = telemetry_loss.report_loss
+
+    def report(event: telemetry.Event, count: int, queue_name: str) -> telemetry.Event:
+        reports.append({"event": "event_log_drop", "n": count})
+        return original_report(event, count, queue_name)
+
+    monkeypatch.setattr(telemetry_loss, "report_loss", report)
     # Not stopped in a finally: stop() joins, and this writer sleeps 5s by
     # design. The drain thread is already a daemon, so it cannot hold the
     # interpreter open.
@@ -348,40 +350,28 @@ def test_event_pipeline_filter_keeps_warning_and_named_events() -> None:
 # --- the drop report (ops monitor collection point) ---
 
 
-def test_shed_records_report_one_event_log_drop(
-    tuned: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Queue-full shedding surfaces as a single structured `event_log_drop`
-    report per flush — the ops monitor panel's event-log backlog metric.
+def test_shed_records_report_one_event_log_drop() -> None:
+    """Loss summaries reach the writer directly even while the queue stays full."""
+    import queue
+    import threading
 
-    The report is emitted by the drain thread's `_flush` (at most once per
-    flush interval, when drops occurred), not per dropped record; a burst of
-    sheds collapses into one row with the cumulative n.
-    """
-    tuned(batch=10, interval=0.05, maxsize=100)
-    recorder = _Recorder()
-    sink = _make_sink(recorder, batch=10, interval=0.05, maxsize=100)
-    reports: list[dict] = []
-    monkeypatch.setattr(
-        slog.logger,
-        "warning",
-        lambda _msg, **kw: reports.append(kw) if kw.get("event") == "event_log_drop" else None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    )
-    # Overfill the queue: producer sheds, drain keeps flushing.
-    for i in range(500):
-        sink.enqueue(_event(i))
-    # Wait for at least one drop report (flush cadence is 0.05s in `tuned`).
-    deadline = time.monotonic() + 5.0
-    while time.monotonic() < deadline and not reports:
-        time.sleep(0.01)
-    sink.stop()
-
-    assert reports, "expected at least one event_log_drop report"
-    assert all(r["event"] == "event_log_drop" for r in reports)  # pyright: ignore[reportUnknownArgumentType]
-    assert reports[0]["n"] > 0
-    # Every shed record is accounted for across the reports (a later report
-    # may carry sheds that happened after the first).
-    assert sum(r["n"] for r in reports) <= 500  # pyright: ignore[reportUnknownArgumentType]
+    pipe = telemetry._EventPipeline.__new__(telemetry._EventPipeline)
+    pipe._queue = queue.Queue(maxsize=1)
+    pipe._dropped_lock = threading.Lock()
+    pipe.dropped = 0
+    pipe._drop_example = None
+    written: list[telemetry.Event] = []
+    pipe._writer = written.extend
+    pipe.enqueue(_event(0))
+    for i in range(1, 6):
+        pipe.enqueue(_event(i))
+    assert pipe._queue.full()
+    pipe._flush([])
+    assert pipe._queue.full()
+    assert len(written) == 1
+    assert written[0].event_name == "event_log_drop"
+    assert written[0].attributes["n"] == 5
+    assert written[0].level == "error"
 
 
 # ── emitter self-diagnostics (audit-round2 events-obs P2) ────────────────────
@@ -452,3 +442,39 @@ def test_sync_reports_timeout_when_drain_thread_wedged(
         gate.set()  # release the drain thread so stop() can join
         sink.stop()
         logger.remove(sink_id)
+
+
+def test_delayed_loss_summary_preserves_actual_drop_time() -> None:
+    from datetime import timedelta
+
+    dropped_at = datetime.now(UTC) - timedelta(minutes=10)
+    report = telemetry_loss.loss_event(_event(1), 3, "emitter", dropped_at=dropped_at)
+    assert report.attributes["last_dropped_at"] == dropped_at.timestamp()
+    assert report.ts > dropped_at
+
+
+def test_standalone_overflow_reports_before_logging_or_metrics_initialize() -> None:
+    import subprocess
+    import sys
+
+    code = """
+import queue, threading
+import ava
+from shared import telemetry
+from datetime import UTC, datetime
+pipe = telemetry._EventPipeline.__new__(telemetry._EventPipeline)
+pipe._queue = queue.Queue(maxsize=1)
+pipe._dropped_lock = threading.Lock()
+pipe.dropped = 0
+pipe._drop_example = None
+event = telemetry.Event(ts=datetime.now(UTC), trace_id=None, span_id=None,
+    agent_id=None, machine='test', cluster='test', process='standalone',
+    category='telemetry', event_name='sdk_call', level='info', source='system',
+    target_agent_id=None)
+pipe.enqueue(event)
+pipe.enqueue(event)
+"""
+    result = subprocess.run(  # noqa: S603 — fixed isolated diagnostic regression
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=30, check=True
+    )
+    assert "ERROR: Telemetry queue emitter full: lost 1 event(s)" in result.stderr

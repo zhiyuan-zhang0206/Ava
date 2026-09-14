@@ -174,6 +174,9 @@ def _build_providers(endpoint: str) -> tuple[Any, Any]:
     from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 
+    from shared.telemetry_loss import install_exporter_drop_observer
+
+    install_exporter_drop_observer()
     logs = LoggerProvider()
     log_exporter: Any = _EventDimensionResourceExporter(
         OTLPLogExporter(endpoint=f"{endpoint}/v1/logs", timeout=_OTLP_HTTP_TIMEOUT_S)

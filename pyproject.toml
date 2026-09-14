@@ -398,6 +398,8 @@ ignore = [
 # (allowlist lock, user ruling 2026-08-27, audit #3607). New use points must be
 # justified in the PR description before joining this list.
 "shared/turn_identity.py" = ["TID251"]
+# SDK async tasks must not share active call frames or borrowed identity.
+"shared/sdk_telemetry.py" = ["TID251"]
 "shared/config/turn_view.py" = ["TID251"]
 "shared/plugin_config_view.py" = ["TID251"]
 "shared/plugin_context.py" = ["TID251"]
