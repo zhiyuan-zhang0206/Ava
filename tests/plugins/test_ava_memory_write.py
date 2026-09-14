@@ -228,6 +228,138 @@ def test_shared_subdir_write_leaves_root_index_untouched(
     assert root_index.read_text(encoding="utf-8") == before
 
 
+def test_shared_subdir_write_inserts_pointer_in_filename_order(
+    memory_plugin: Any, tmp_path: Path
+) -> None:
+    """A missing pointer is inserted among the directory index's existing
+    entries in filename order — the consolidation generators' convention."""
+    pool = _pool_with_pointers(tmp_path)
+    health = pool / "health"
+    health.mkdir()
+    (health / "alpha-note.md").write_text(
+        "---\ntitle: Alpha note\ndescription: First note\n---\n\nBody.\n", encoding="utf-8"
+    )
+    (health / "zeta-note.md").write_text(
+        "---\ntitle: Zeta note\ndescription: Last note\n---\n\nBody.\n", encoding="utf-8"
+    )
+    (health / "index.md").write_text(
+        "# health/\n\n## Subdirectories\n\n*(none)*\n\n## Notes\n\n"
+        "* [Alpha note](alpha-note.md) - First note\n"
+        "* [Zeta note](zeta-note.md) - Last note\n",
+        encoding="utf-8",
+    )
+
+    ava.memory.write(
+        "health/mike-note",
+        "Body.\n",
+        title="Mike note",
+        description="Middle note",
+        tags=["type/reference"],
+        store="shared",
+    )
+
+    index = (health / "index.md").read_text(encoding="utf-8")
+    alpha = index.index("* [Alpha note](alpha-note.md) - First note")
+    mike = index.index("* [Mike note](mike-note.md) - Middle note")
+    zeta = index.index("* [Zeta note](zeta-note.md) - Last note")
+    assert alpha < mike < zeta
+    assert _pool_validator().validate_indexes(pool) == []
+
+
+def test_shared_subdir_write_updates_pointer_without_duplicating(
+    memory_plugin: Any, tmp_path: Path
+) -> None:
+    """Re-writing a subdirectory entry replaces its existing index line in
+    place — updated description, exactly one line for the file."""
+    pool = _pool_with_pointers(tmp_path)
+    entry = ava.memory.write(
+        "health/medication-log",
+        "Tracked.\n",
+        title="Medication log",
+        description="Per-topic note",
+        tags=["type/project"],
+        store="shared",
+    )
+    assert entry == (pool / "health" / "medication-log.md").resolve()
+    index = pool / "health" / "index.md"
+    assert index.is_file()
+
+    ava.memory.write(
+        "health/medication-log",
+        "Updated body.\n",
+        title="Medication log",
+        description="Updated description",
+        tags=["type/project"],
+        store="shared",
+    )
+
+    pointers = [
+        line
+        for line in index.read_text(encoding="utf-8").splitlines()
+        if "medication-log.md" in line
+    ]
+    assert pointers == ["* [Medication log](medication-log.md) - Updated description"]
+    assert _pool_validator().validate_indexes(pool) == []
+
+
+def test_shared_subdir_write_renders_missing_index_as_skeleton(
+    memory_plugin: Any, tmp_path: Path
+) -> None:
+    """A subdirectory with no index.md gets the full generator-shaped
+    skeleton, and the pool validator passes on the result."""
+    pool = _pool_with_pointers(tmp_path)
+
+    entry = ava.memory.write(
+        "health/medication-log",
+        "Body.\n",
+        title="Medication log",
+        description="Per-topic note",
+        tags=["type/project"],
+        store="shared",
+    )
+
+    index = (pool / "health" / "index.md").read_text(encoding="utf-8")
+    assert index == (
+        "# health/\n"
+        "\n"
+        "## Subdirectories\n"
+        "\n"
+        "*(none)*\n"
+        "\n"
+        "## Notes\n"
+        "\n"
+        "* [Medication log](medication-log.md) - Per-topic note\n"
+    )
+    assert entry == (pool / "health" / "medication-log.md").resolve()
+    assert _pool_validator().validate_indexes(pool) == []
+
+
+def test_shared_subdir_write_replaces_notes_placeholder(memory_plugin: Any, tmp_path: Path) -> None:
+    """The first note written into a directory whose index lists no notes yet
+    replaces the `*(none)*` placeholder instead of adding a stray line."""
+    pool = _pool_with_pointers(tmp_path)
+    runtime = pool / "ava" / "runtime"
+    runtime.mkdir(parents=True)
+    (runtime / "index.md").write_text(
+        "# ava/runtime/\n\n## Subdirectories\n\n*(none)*\n\n## Notes\n\n*(none)*\n",
+        encoding="utf-8",
+    )
+
+    ava.memory.write(
+        "ava/runtime/worker-crash-loop",
+        "Body.\n",
+        title="Worker crash loop",
+        description="Crash loop facts",
+        tags=["type/reference"],
+        store="shared",
+    )
+
+    index = (runtime / "index.md").read_text(encoding="utf-8")
+    assert "* [Worker crash loop](worker-crash-loop.md) - Crash loop facts" in index
+    assert "*(none)*" not in index.split("## Notes", 1)[1]
+    assert _pool_validator().validate_indexes(pool) == []
+
+
 def test_personal_write_rejects_directory_slug(memory_plugin: Any) -> None:
     with pytest.raises(ValueError, match="kebab-case"):
         ava.memory.write("health/user-health-overview", "body")

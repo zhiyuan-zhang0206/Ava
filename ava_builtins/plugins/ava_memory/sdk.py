@@ -180,16 +180,158 @@ def _locked_update(index_path: Path, update: Callable[[str], str]) -> None:
                 fcntl.flock(index_file.fileno(), fcntl.LOCK_UN)
 
 
+_INDEX_RESERVED = frozenset({"MEMORY.md", "AGENTS.md", "index.md", "log.md"})
+"""Filenames a directory index never lists as note entries (generator convention)."""
+
+_POINTER_TARGET_RE = re.compile(r"\]\(([^)#]+?\.md)\)")
+"""Target filename of a markdown pointer line, as the pool validator reads it."""
+
+
+def _dir_pointer_line(title: str, filename: str, description: str) -> str:
+    """Render one directory-index entry (gen_indexes.py shape, no truncation)."""
+    description = description.replace("\n", " ")
+    return f"* [{title}]({filename}) - {description}"
+
+
+def _disk_frontmatter(path: Path) -> dict[str, object]:
+    """Frontmatter of a note already on disk; empty when absent or unreadable."""
+    try:
+        content = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return {}
+    parts = _frontmatter_parts(content)
+    if parts is None:
+        return {}
+    try:
+        parsed = yaml.safe_load(parts[0])
+    except yaml.YAMLError:
+        return {}
+    return cast("dict[str, object]", parsed) if isinstance(parsed, dict) else {}
+
+
+def _count_dir_notes(directory: Path) -> int:
+    """Recursive count of the note files under a subdirectory (generator's rule)."""
+    return sum(
+        1
+        for path in directory.rglob("*.md")
+        if path.name not in _INDEX_RESERVED
+        and ".git" not in path.parts
+        and ".githooks" not in path.parts
+    )
+
+
+def _render_dir_index(directory: Path, dir_rel: str) -> str:
+    """Render a directory's index.md in the consolidation generators' shape.
+
+    Mirrors gen_indexes.py write_index: entries sort by filename, subdirectory
+    counts are recursive, descriptions flatten to one line, and a note whose
+    frontmatter is missing falls back to its file name."""
+    entries = sorted(path.name for path in directory.iterdir())
+    subdirs = [
+        entry for entry in entries if (directory / entry).is_dir() and not entry.startswith(".")
+    ]
+    filenames = [
+        entry for entry in entries if entry.endswith(".md") and entry not in _INDEX_RESERVED
+    ]
+    lines = [f"# {dir_rel}/", "", "## Subdirectories", ""]
+    for subdir in subdirs:
+        lines.append(f"* [{subdir}/]({subdir}/) - {_count_dir_notes(directory / subdir)} notes")
+    if not subdirs:
+        lines.append("*(none)*")
+    lines.extend(["", "## Notes", ""])
+    for filename in filenames:
+        frontmatter = _disk_frontmatter(directory / filename)
+        title = str(frontmatter.get("title") or filename[:-3])
+        description = str(frontmatter.get("description") or "").replace("\n", " ")
+        lines.append(f"* [{title}]({filename}) - {description}")
+    if not filenames:
+        lines.append("*(none)*")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _insert_dir_pointer(lines: list[str], pointer: str, filename: str) -> str:
+    """Insert one note pointer into a `## Notes` section, filename-sorted."""
+    notes_start = lines.index("## Notes") if "## Notes" in lines else None
+    if notes_start is None:
+        while lines and not lines[-1].strip():
+            lines.pop()
+        lines.extend(["", "## Notes", "", pointer])
+        return "\n".join(lines) + "\n"
+    section_end = next(
+        (index for index in range(notes_start + 1, len(lines)) if lines[index].startswith("## ")),
+        len(lines),
+    )
+    entries: list[tuple[int, str]] = []
+    for index in range(notes_start + 1, section_end):
+        target = _POINTER_TARGET_RE.search(lines[index])
+        if target is not None and lines[index].lstrip().startswith(("*", "-")):
+            entries.append((index, target.group(1)))
+    if not entries:
+        placeholder = next(
+            (
+                index
+                for index in range(notes_start + 1, section_end)
+                if lines[index].strip() == "*(none)*"
+            ),
+            None,
+        )
+        if placeholder is not None:
+            lines[placeholder] = pointer
+        else:
+            insert_at = notes_start + 1
+            while insert_at < section_end and not lines[insert_at].strip():
+                insert_at += 1
+            lines.insert(insert_at, pointer)
+        return "\n".join(lines) + "\n"
+    insert_at = entries[-1][0] + 1
+    for index, target_name in entries:
+        if target_name > filename:
+            insert_at = index
+            break
+    lines.insert(insert_at, pointer)
+    return "\n".join(lines) + "\n"
+
+
+def _upsert_subdir_index(root: Path, relative_path: str, title: str, description: str) -> None:
+    """Upsert one note's line in its own directory's index.md.
+
+    The root index carries root-level notes and directory pointers only; a
+    shared subdirectory entry's line belongs to the directory's own index, in
+    the generators' shape (`* [title](file.md) - description`). A missing
+    index is rendered as the full skeleton; an existing one has only its one
+    pointer line replaced, or inserted in filename order."""
+    dir_rel, _, filename = relative_path.rpartition("/")
+    directory = root / dir_rel
+    pointer = _dir_pointer_line(title, filename, description)
+    target = re.compile(rf"^[*-] \[[^]]+\]\({re.escape(filename)}\) [-\u2014] .*$")
+
+    def update(text: str) -> str:
+        if not text.strip():
+            return _render_dir_index(directory, dir_rel)
+        lines = text.splitlines()
+        matches = [index for index, line in enumerate(lines) if target.fullmatch(line)]
+        if matches:
+            lines[matches[0]] = pointer
+            for index in reversed(matches[1:]):
+                del lines[index]
+            return "\n".join(lines) + "\n"
+        return _insert_dir_pointer(lines, pointer, filename)
+
+    _locked_update(directory / "index.md", update)
+
+
 def _upsert_index(
     root: Path, relative_path: str, title: str, description: str, *, shared: bool
 ) -> None:
     """Replace or append one index pointer without disturbing other entries.
 
-    Shared subdirectory entries are exempt: the root index carries root-level
-    notes and directory pointers only, and the entry's own directory index.md
-    carries its line (built by consolidation).
+    Shared subdirectory entries are routed to their own directory's index.md:
+    the root index carries root-level notes and directory pointers only, and
+    the entry's directory index is upserted in the generators' shape.
     """
     if shared and "/" in relative_path:
+        _upsert_subdir_index(root, relative_path, title, description)
         return
     index_path = root / "MEMORY.md"
     pointer = _pointer_line(title, relative_path, description)
@@ -442,8 +584,9 @@ def write(
     Personal entries use a flat kebab-case name in the calling agent's
     workspace; shared entries may use topic directories in the memory pool.
     Both targets are absolute store paths. A shared subdirectory entry is
-    exempt from the root index: its line belongs to the entry's own
-    directory index.md, so the write leaves the root MEMORY.md untouched.
+    indexed by its own directory's index.md — created when missing and
+    upserted in place otherwise — so the write leaves the root MEMORY.md
+    untouched.
 
     Content may open with its own frontmatter block: that block is kept as
     the note's only one, gains whichever required fields it is missing, and
