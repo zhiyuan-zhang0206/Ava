@@ -109,9 +109,10 @@ class WrapLayer:
     chained: Callable[..., Any]
 
 
-# target -> the base callable captured before any plugin wrapped it. Restored by
-# clear_wraps so a reload re-wraps from a pristine core (the job the old
-# exclusivity assert did by refusing to run twice).
+# target -> the base callable captured before any plugin wrapped it (below any
+# SDK-metric recorder layers — see `_base_callable`). Restored by clear_wraps so
+# a reload re-wraps from a pristine core (the job the old exclusivity assert did
+# by refusing to run twice).
 _ORIGINALS: dict[str, Callable[..., Any]] = {}
 
 # target -> layers in registration (= plugin load) order, innermost first.
@@ -214,6 +215,23 @@ def _install_metadata(chained: Callable, wrapper: Callable, current: Callable) -
         chained.__signature__ = sig.replace(parameters=params[1:])  # type: ignore[attr-defined]
 
 
+def _base_callable(current: Callable[..., Any]) -> Callable[..., Any]:
+    """`current` with any SDK-metric recorder layers stripped (task #3427).
+
+    The metering recorder is installed at SDK import, *before* plugins load, so a
+    real target usually carries it when a plugin wraps. The recorder is not a
+    plugin layer: chaining over it would keep a stale recorder alive inside the
+    wrap forever (so the metering `uninstall()` WeakSet never empties and its
+    O(1) early-out dies) and would make `clear_wraps` restore a proxy where the
+    registry promises the base callable. Recorders always carry `__wrapped__`
+    (functools.wraps); the lazy import avoids the ava <-> submodule cycle."""
+    from ava import _sdk_metering
+
+    while current in _sdk_metering._RECORDERS:
+        current = current.__wrapped__  # pyright: ignore[reportFunctionMemberAccess]
+    return current
+
+
 def wrap(target: str, wrapper: Callable[..., Any]) -> Callable[..., Any]:
     """Install `wrapper` around the `ava` callable at dotted `target`.
 
@@ -239,6 +257,7 @@ def wrap(target: str, wrapper: Callable[..., Any]) -> Callable[..., Any]:
         raise WrapTargetError(
             f"ava.{target} is {type(current).__name__}, not callable — wrap targets are functions."
         )
+    current = _base_callable(current)
 
     plugin = _current_plugin_name()
 
