@@ -40,6 +40,11 @@ production. Usage:
     .venv/bin/python scripts/ava_root_switch_drill.py \
         --workdir ~/.ava/workspaces/<id>/switch-drill-<ts> \
         --home ~/.ava-<worktree-dir> [--teardown]
+
+Runs from a plain session env as well as `env -i`: `services.*` is only ever
+imported in sanitized children (`_minimal_env`), never in this process, so a
+launcher session's AVA_HOME cannot break the run. A `--workdir` under /tmp is
+refused.
 """
 
 from __future__ import annotations
@@ -198,18 +203,38 @@ def _keeper_status_or_none(home: Path) -> dict[str, object] | None:
 
 
 def _root_status(home: Path) -> dict[str, object] | None:
-    from services.ava_root.client import RootClient, RootClientError
+    """Query the root daemon over its control socket (session-safe subprocess).
 
-    try:
-        response = RootClient(home / "run" / "ava-root" / _SOCKET_NAME, timeout=5.0).status()
-    except RootClientError:
-        return None
-    result = response.get("result")
-    return (
-        cast("dict[str, object]", result)
-        if response.get("ok") and isinstance(result, dict)
-        else None
+    Out-of-process like `_keeper_call`: children get `_minimal_env(home)` while
+    this process's env is the launcher's, and an in-process `services.*` import
+    would resolve that launcher home and raise against a conflicting session
+    AVA_HOME (QA 3242 repro, 16:45).
+    """
+    socket_path = home / "run" / "ava-root" / _SOCKET_NAME
+    code = (
+        "import json\n"
+        "from services.ava_root.client import RootClient, RootClientError\n"
+        "try:\n"
+        f"    response = RootClient({str(socket_path)!r}, timeout=5.0).status()\n"
+        "except RootClientError:\n"
+        "    response = None\n"
+        "result = None if response is None else response.get('result')\n"
+        "ok = bool(response) and bool(response.get('ok')) and isinstance(result, dict)\n"
+        "print(json.dumps({'ok': ok, 'result': result if ok else None}))\n"
     )
+    result = subprocess.run(  # noqa: S603 -- fixed argv
+        [sys.executable, "-c", code],
+        cwd=REPO_ROOT,
+        env=_minimal_env(home),
+        capture_output=True,
+        text=True,
+        timeout=30.0,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise _DrillError(f"root status failed: {result.stderr.strip() or result.stdout.strip()}")
+    parsed = cast("dict[str, object]", json.loads(result.stdout))
+    return cast("dict[str, object]", parsed["result"]) if parsed.get("ok") else None
 
 
 def _units(status: dict[str, object] | None) -> dict[str, dict[str, object]]:
@@ -889,6 +914,22 @@ def _phase_teardown(repo: Path, home: Path, evidence: Path) -> None:
     _phase_pass("teardown", f"destroyed; keeper cleanup {cleanup}")
 
 
+def _workdir_rejection(workdir: Path) -> str | None:
+    """Validation error for the evidence workdir, or None when usable.
+
+    Evidence must persist across review; `/tmp` is swept, so the help's
+    "not /tmp" is enforced here rather than merely promised.
+    """
+    if not workdir.is_absolute():
+        return "workdir must be absolute"
+    # Refusing /tmp is this check's point; S108 concerns creating temp files.
+    tmp_root = Path("/tmp").resolve()  # noqa: S108
+    resolved = workdir.resolve()
+    if resolved == tmp_root or tmp_root in resolved.parents:
+        return "workdir must not be under /tmp"
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="ava-root-switch-drill", description=(__doc__ or "").splitlines()[0]
@@ -906,8 +947,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    if not args.workdir.is_absolute():
-        print("FAIL(args): workdir must be absolute", file=sys.stderr)
+    workdir_error = _workdir_rejection(args.workdir)
+    if workdir_error:
+        print(f"FAIL(args): {workdir_error}", file=sys.stderr)
         return 1
     evidence = args.workdir / "evidence"
     evidence.mkdir(parents=True, exist_ok=True)
