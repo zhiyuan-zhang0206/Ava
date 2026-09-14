@@ -618,8 +618,10 @@ log ends mid-phase and the next lines are the abort banner, with
 you see `force-killed session ava-rollout`, the orchestration's own abort did **not**
 run and the cluster is stopped + paused until the lease lapses — `ava cluster recover`
 is the faster path. A healthy Phase B is not mistaken for this: the poll writes a
-`still polling Phase B (Nm)` heartbeat on the lease-renewal cadence, so no phase of a
-working rollout is silent for anything close to the bound.
+`still polling Phase B (Nm)` heartbeat on the lease-renewal cadence, and the
+pre-update data snapshot writes `→ pre-update data snapshot: pg_dump <Ns>, <N MiB>
+written` progress lines while its dump runs (that stage alone is allowed 20 min), so no
+phase of a working rollout is silent for anything close to the bound.
 
 Commands in the "long-running processes" / "E2E tests" sections below default to cwd = `$AVA_HOME/source/` (prod context). Dev work goes through `~/Ava/.worktrees/<task>/`.
 

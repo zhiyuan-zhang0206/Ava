@@ -617,6 +617,18 @@ def _verify_snapshot_artifact_inner(artifact: Path) -> None:
             )
 
 
+def _snapshot_progress(line: str) -> None:
+    """One heartbeat line for the pre-update snapshot, straight to stdout.
+
+    The rollout log is the `tee` of this process's output, and
+    `ops.controllers.stalled_rollout` reads that log's mtime as the rollout's
+    progress signal: the snapshot may legitimately hold the log silent for the
+    full `_PRE_UPDATE_DUMP_TIMEOUT_S` bound, so it must narrate itself or a
+    healthy slow dump is reclaimed as a hung rollout (2026-09-14 incident).
+    """
+    print(f"→ pre-update data snapshot: {line}", flush=True)
+
+
 def snapshot_pre_update_data(target_sha: str) -> Path | None:
     """Verify pre-upgrade recovery evidence before anything is stopped.
 
@@ -625,6 +637,14 @@ def snapshot_pre_update_data(target_sha: str) -> Path | None:
     broken enabled chain fails before maintenance, without a full-dump fallback.
     Code-only updates return None. Recovery reports the returned artifact's
     actual restore method; physical recovery follows PITR's retention window.
+
+    The dump narrates itself on the rollout output — a start line plus progress
+    lines while `pg_dump` / encryption run (see `_snapshot_progress`) — because
+    the rollout stall watchdog reclaims log silence after 900 s
+    (`ops.controllers.stalled_rollout`): without the heartbeats, a healthy dump
+    using its allowed 20 min is indistinguishable from a hung rollout. The
+    heartbeat does not weaken the watchdog; it only gives the dump its own
+    voice. If this process stops speaking, the watchdog reclaims as before.
     """
     from cli.commands._cluster_rollback import _migration_set_at_commit
 
@@ -654,6 +674,11 @@ def snapshot_pre_update_data(target_sha: str) -> Path | None:
 
     from services.backup import backup_lock, run_backup
 
+    _snapshot_progress(
+        f"started (pg_dump before the stop may take up to "
+        f"{_PRE_UPDATE_DUMP_TIMEOUT_S / 60:.0f} min; progress lines follow)"
+    )
+
     # Hold the same lock as the daily writer through the restore listing. A
     # verified dump must remain untouched until this function hands its path to
     # recovery; otherwise a scheduled writer can sweep its partial or replace
@@ -664,6 +689,7 @@ def snapshot_pre_update_data(target_sha: str) -> Path | None:
                 timeout_s=_PRE_UPDATE_DUMP_TIMEOUT_S,
                 pre_update=True,
                 publish=False,
+                progress=_snapshot_progress,
             )
         except subprocess.TimeoutExpired:
             raise RuntimeError(

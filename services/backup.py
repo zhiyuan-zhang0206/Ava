@@ -70,7 +70,8 @@ import re
 import subprocess
 import tempfile
 import threading
-from collections.abc import Generator, Iterable
+import time
+from collections.abc import Callable, Generator, Iterable
 from contextlib import contextmanager, suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -99,10 +100,17 @@ _ACTIVATION_MARKER = "pitr-activation"
 # never surface as unknown inventory entries).
 _REMOTE_ROOT = "ava-logical"
 # Generous ceiling for one dump (the DB is far smaller); see the comment at the
-# subprocess.run call for why an unbounded pg_dump is not acceptable here.
+# run call in `_run_backup` for why an unbounded pg_dump is not acceptable here.
 # 60 min: a full dump with checkpoint history takes about 6.3 min. This is
 # headroom against a stall, not an expected runtime.
 _DUMP_TIMEOUT_S = 60 * 60
+# Heartbeat cadence while a dump or an encryption runs with a progress sink
+# attached. A pre-update snapshot runs inside a rollout whose stall watchdog
+# reclaims `shared.deploy_timing.NO_PROGRESS_TIMEOUT_S` (900 s) of log silence,
+# while the snapshot itself is allowed 20 min — so a healthy but silent dump
+# read as a hung rollout (2026-09-14 incident). 60 s keeps fifteen missed beats
+# of headroom inside the stall window.
+_PROGRESS_INTERVAL_S = 60.0
 # Bound the composition-sample connection (a dead DB must stall the backup log
 # line only this long before degrading to "unavailable", never hang it).
 _BREAKDOWN_CONNECT_TIMEOUT_S = 10
@@ -461,6 +469,73 @@ def _available_target(
     raise RuntimeError("could not choose a distinct backup filename within 60 seconds")
 
 
+# A one-line progress report, called at most every `_PROGRESS_INTERVAL_S` while a
+# long, otherwise-silent pipeline stage runs (see `_run_with_progress`).
+_ProgressSink = Callable[[str], None]
+
+
+def _written_suffix(size_path: Path | None) -> str:
+    """`, N MiB written` for a child's output file — "" when it cannot be read."""
+    if size_path is None:
+        return ""
+    try:
+        written = size_path.stat().st_size
+    except OSError:
+        return ""
+    return f", {written / 2**20:.1f} MiB written"
+
+
+def _run_with_progress(
+    argv: list[str],
+    *,
+    timeout_s: float,
+    label: str,
+    progress: _ProgressSink | None,
+    env: dict[str, str] | None = None,
+    size_path: Path | None = None,
+) -> subprocess.CompletedProcess[bytes]:
+    """`subprocess.run(argv, capture_output=True, check=False)` that narrates its wait.
+
+    With `progress=None` this is exactly `subprocess.run`; every caller that does
+    not opt in (the nightly scheduler above all) is untouched. With a sink, the
+    wait is split so a stage that can legitimately run for many minutes is not
+    silent: one line when the child starts (naming its bound) and one every
+    `_PROGRESS_INTERVAL_S` while it runs, carrying the elapsed time and — when
+    `size_path` is the file the child writes — the bytes on disk so far. The
+    pre-update snapshot depends on this: it runs inside a rollout whose stall
+    watchdog reclaims log silence after `shared.deploy_timing.NO_PROGRESS_TIMEOUT_S`
+    (900 s), and the dump alone is allowed 20 min (2026-09-14 incident). The
+    heartbeat does not weaken the watchdog — if this loop stops speaking the
+    watchdog reclaims exactly as before, and the `timeout_s` bound below still
+    kills the child.
+
+    Timeout semantics match `subprocess.run`: expiry kills the child, reaps it,
+    and raises `TimeoutExpired`, so callers keep scheduling their retry off the
+    same exception.
+    """
+    if progress is None:
+        return subprocess.run(  # noqa: S603
+            argv, capture_output=True, check=False, env=env, timeout=timeout_s
+        )
+    started = time.monotonic()
+    progress(f"{label} started (bounded at {timeout_s / 60:.0f} min)")
+    with subprocess.Popen(  # noqa: S603
+        argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env
+    ) as proc:
+        while True:
+            remaining_s = timeout_s - (time.monotonic() - started)
+            if remaining_s <= 0:
+                proc.kill()
+                proc.wait()
+                raise subprocess.TimeoutExpired(argv, timeout_s)
+            try:
+                stdout, stderr = proc.communicate(timeout=min(_PROGRESS_INTERVAL_S, remaining_s))
+            except subprocess.TimeoutExpired:
+                progress(f"{label} {time.monotonic() - started:.0f}s{_written_suffix(size_path)}")
+                continue
+            return subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
+
+
 def run_backup(
     now: datetime | None = None,
     *,
@@ -469,6 +544,7 @@ def run_backup(
     pre_update: bool = False,
     pitr_activation: str | None = None,
     publish: bool = True,
+    progress: _ProgressSink | None = None,
 ) -> Path:
     """Dump the cluster DB into backup_dir() and prune; return the dump path.
 
@@ -482,6 +558,9 @@ def run_backup(
     retention slot (newest one) instead of consuming a daily-dump slot.
     `publish=False` keeps the completed artifact local; the rollout prepare
     phase uses it so off-site network latency cannot extend maintenance.
+
+    `progress` narrates the stages that may run for minutes without writing
+    anything (`pg_dump` and the encryption pass) — see `_run_with_progress`.
     """
     with backup_lock():
         return _run_backup(
@@ -491,6 +570,7 @@ def run_backup(
             pre_update=pre_update,
             pitr_activation=pitr_activation,
             publish=publish,
+            progress=progress,
         )
 
 
@@ -546,12 +626,16 @@ def _run_backup(
     pre_update: bool = False,
     pitr_activation: str | None = None,
     publish: bool = True,
+    progress: _ProgressSink | None = None,
 ) -> Path:
     """Write one managed dump while `backup_lock` is held.
 
     Pipeline: `pg_dump --format=custom --compress=zstd:3` (the custom archive
     compresses in-dump; there is no separate gzip stage), then AES-CBC
     encryption. `timeout_s` bounds every subprocess; the caller owns the lock.
+
+    `progress` narrates the two stages that may run for minutes without writing
+    anything: `pg_dump` and the encryption pass (see `_run_with_progress`).
     """
     now = _require_aware(now) if now is not None else datetime.now(UTC)
     # direct_db_url() (the admin-plane direct URL, derived from the
@@ -600,14 +684,15 @@ def _run_backup(
     ]
     try:
         # The scheduler owns this subprocess in its own process, so its bound
-        # cannot delay watchdog supervision. subprocess.run kills the child on
-        # expiry and TimeoutExpired lets the scheduler schedule its retry.
-        proc = subprocess.run(  # noqa: S603
+        # cannot delay watchdog supervision. Expiry kills the child and
+        # TimeoutExpired lets the scheduler schedule its retry.
+        proc = _run_with_progress(
             dump_cmd,
-            capture_output=True,
-            check=False,
+            timeout_s=timeout_s,
+            label="pg_dump",
+            progress=progress,
             env=dump_env,
-            timeout=timeout_s,
+            size_path=dump_partial,
         )
         if proc.returncode != 0:
             raise RuntimeError(f"pg_dump exited {proc.returncode}")
@@ -616,7 +701,7 @@ def _run_backup(
         encrypted_partial.chmod(0o600)
         key_file = _key_file(directory)
         try:
-            proc = subprocess.run(  # noqa: S603
+            proc = _run_with_progress(
                 [
                     "openssl",
                     "enc",
@@ -630,9 +715,10 @@ def _run_backup(
                     "-out",
                     str(encrypted_partial),
                 ],
-                capture_output=True,
-                check=False,
-                timeout=timeout_s,
+                timeout_s=timeout_s,
+                label="backup encryption",
+                progress=progress,
+                size_path=encrypted_partial,
             )
             if proc.returncode != 0:
                 raise RuntimeError(f"backup encryption exited {proc.returncode}")
