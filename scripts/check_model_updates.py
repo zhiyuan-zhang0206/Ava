@@ -30,6 +30,7 @@ from urllib3.poolmanager import PoolManager
 from shared.lm._plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.registry import MODELS
 from shared.paths import ava_home
+from shared.resilience import ExponentialBackoff, Policy, http_classifier, retry
 from shared.runtime_config import read_env_aliases
 
 _USER_AGENT = "Ava model-update tracker"
@@ -267,20 +268,61 @@ def _id_rows(value: object, field: str, source: str) -> list[str]:
     return ids
 
 
+# requests' transport-level failure families: connection setup (refused,
+# proxy, SSL), timeouts, and a truncated response body. The rest of
+# RequestException is either status-carrying (HTTPError) or a deterministic
+# caller bug (InvalidURL & co.) — never a retry candidate on its own.
+_TRANSPORT_FAILURES = (
+    requests.exceptions.ConnectionError
+    | requests.exceptions.Timeout
+    | requests.exceptions.ChunkedEncodingError
+)
+
+
+def _retryable_fetch_failure(exc: Exception) -> bool:
+    """The shared classification plus requests' transport failures.
+
+    ``http_classifier`` recognizes the transport errors of urllib and httpx;
+    this script's client is requests, whose connection-level failures carry
+    no HTTP status and would classify as permanent there. Statuses keep the
+    shared semantics: 429/5xx retry, other 4xx is a deterministic bug and
+    fails on the first attempt.
+    """
+    if isinstance(exc, _TRANSPORT_FAILURES):
+        return True
+    return http_classifier(exc)
+
+
+# The fetch path absorbs transient network blips instead of reporting them:
+# the daily schedule treats a status flip (ok <-> error) as an actionable
+# alarm and wakes the P0 lead. 2026-09-14 06:00: one SSL EOF towards
+# generativelanguage.googleapis.com through the local proxy was reported as
+# a dead provider, and the next morning's recovery added a second false
+# alarm. A real outage still exhausts the retry budget and marks the error.
+_FETCH_POLICY = Policy(
+    max_attempts=3,
+    backoff=ExponentialBackoff(base=1.0, factor=2.0, cap=8.0),
+    classify=_retryable_fetch_failure,
+)
+
+
 def fetch_json(
     url: str, *, headers: dict[str, str], params: dict[str, str | int]
 ) -> dict[str, Any]:
-    host = urlparse(url).hostname or ""
-    session = _session_for_host(host)
-    requester = session.get if session is not None else requests.get
-    response = requester(
-        url,
-        headers={"User-Agent": _USER_AGENT, **headers},
-        params=params,
-        timeout=_TIMEOUT_SECONDS,
-    )
-    response.raise_for_status()
-    return _response_object(response.json(), url)
+    def _attempt() -> dict[str, Any]:
+        host = urlparse(url).hostname or ""
+        session = _session_for_host(host)
+        requester = session.get if session is not None else requests.get
+        response = requester(
+            url,
+            headers={"User-Agent": _USER_AGENT, **headers},
+            params=params,
+            timeout=_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        return _response_object(response.json(), url)
+
+    return retry(_FETCH_POLICY)(_attempt)
 
 
 def _headers(source: SourceDescriptor, api_key: str) -> dict[str, str]:

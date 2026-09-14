@@ -64,6 +64,16 @@ def _missing_environment_value(_alias: str) -> None:
     return None
 
 
+def _no_retry_sleep(_seconds: float) -> None:
+    return None
+
+
+def _pin_retry_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin shared.resilience's sleep seam (its own tests' pattern) so the
+    retry-path tests exercise the backoff loop without waiting it out."""
+    monkeypatch.setattr("shared.resilience._sleep", _no_retry_sleep)
+
+
 class _JSONResponse:
     def __init__(self, payload: object) -> None:
         self._payload = payload
@@ -648,3 +658,162 @@ def test_write_report_persists_markdown_and_json(
     )
     assert "## Actionable candidates" in (report_dir / "last-report.md").read_text()
     assert json.loads((report_dir / "last-report.json").read_text())["providers"]
+
+
+def test_fetch_json_retries_a_transient_connection_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracker = _load_script()
+    _pin_retry_sleep(monkeypatch)
+    url = "https://api.example.com/models"
+    payload: dict[str, object] = {"data": []}
+    calls: list[str] = []
+
+    def get(request_url: str, **kwargs: object) -> _JSONResponse:
+        calls.append(request_url)
+        if len(calls) == 1:
+            raise tracker.requests.exceptions.SSLError("EOF occurred in violation of protocol")
+        return _JSONResponse(payload)
+
+    def no_session_for_host(_host: str) -> None:
+        return None
+
+    monkeypatch.setattr(tracker, "_session_for_host", no_session_for_host)
+    monkeypatch.setattr(tracker.requests, "get", get)
+
+    assert tracker.fetch_json(url, headers={}, params={}) == payload
+    assert calls == [url, url]
+
+
+def test_fetch_json_raises_after_the_retry_budget_is_exhausted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracker = _load_script()
+    _pin_retry_sleep(monkeypatch)
+    calls: list[str] = []
+
+    def get(request_url: str, **kwargs: object) -> _JSONResponse:
+        calls.append(request_url)
+        raise tracker.requests.exceptions.SSLError("EOF occurred in violation of protocol")
+
+    def no_session_for_host(_host: str) -> None:
+        return None
+
+    monkeypatch.setattr(tracker, "_session_for_host", no_session_for_host)
+    monkeypatch.setattr(tracker.requests, "get", get)
+
+    with pytest.raises(tracker.requests.exceptions.SSLError):
+        tracker.fetch_json("https://api.example.com/models", headers={}, params={})
+    assert len(calls) == 3
+
+
+def test_permanent_http_error_is_not_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracker = _load_script()
+    _pin_retry_sleep(monkeypatch)
+    url = "https://api.example.com/models"
+    calls: list[str] = []
+
+    def get(request_url: str, **kwargs: object) -> Any:
+        calls.append(request_url)
+        response = tracker.requests.Response()
+        response.status_code = 400
+        return response
+
+    def no_session_for_host(_host: str) -> None:
+        return None
+
+    monkeypatch.setattr(tracker, "_session_for_host", no_session_for_host)
+    monkeypatch.setattr(tracker.requests, "get", get)
+
+    with pytest.raises(tracker.requests.exceptions.HTTPError):
+        tracker.fetch_json(url, headers={}, params={})
+    assert calls == [url]
+
+
+def test_transient_ssl_eof_is_retried_without_marking_the_provider_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    tracker = _load_script()
+    _pin_retry_sleep(monkeypatch)
+    env_file = tmp_path / ".env"
+    _write_env_file(tracker, env_file)
+    monkeypatch.setattr(tracker, "_environment_value", _missing_environment_value)
+    real_fetch = tracker.fetch_provider_models
+
+    def fetch(source: Any, api_key: str) -> list[str]:
+        if source.provider == "gemini":
+            return real_fetch(source, api_key)
+        return _known_models(tracker, source)
+
+    monkeypatch.setattr(tracker, "fetch_provider_models", fetch)
+
+    gemini_calls: list[str] = []
+
+    def get(request_url: str, **kwargs: object) -> _JSONResponse:
+        gemini_calls.append(request_url)
+        if len(gemini_calls) == 1:
+            raise tracker.requests.exceptions.SSLError("EOF occurred in violation of protocol")
+        return _JSONResponse({"models": []})
+
+    def no_session_for_host(_host: str) -> None:
+        return None
+
+    monkeypatch.setattr(tracker, "_session_for_host", no_session_for_host)
+    monkeypatch.setattr(tracker.requests, "get", get)
+
+    args = ["--env-file", str(env_file), "--state-dir", str(tmp_path / "state")]
+    assert tracker.main(args) == 0
+    assert len(gemini_calls) == 2
+    state = json.loads((tmp_path / "state" / "state.json").read_text())
+    assert state["providers"]["gemini"]["status"] == "ok"
+
+
+def test_repeated_provider_failure_stays_error_without_repeating_the_status_alarm(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    tracker = _load_script()
+    _pin_retry_sleep(monkeypatch)
+    env_file = tmp_path / ".env"
+    _write_env_file(tracker, env_file)
+    monkeypatch.setattr(tracker, "_environment_value", _missing_environment_value)
+    real_fetch = tracker.fetch_provider_models
+
+    def fetch(source: Any, api_key: str) -> list[str]:
+        if source.provider == "gemini":
+            return real_fetch(source, api_key)
+        return _known_models(tracker, source)
+
+    monkeypatch.setattr(tracker, "fetch_provider_models", fetch)
+
+    calls: list[str] = []
+
+    def ok_get(request_url: str, **kwargs: object) -> _JSONResponse:
+        calls.append(request_url)
+        return _JSONResponse({"models": []})
+
+    def failing_get(request_url: str, **kwargs: object) -> _JSONResponse:
+        calls.append(request_url)
+        raise tracker.requests.exceptions.SSLError("EOF occurred in violation of protocol")
+
+    def no_session_for_host(_host: str) -> None:
+        return None
+
+    monkeypatch.setattr(tracker, "_session_for_host", no_session_for_host)
+    args = ["--env-file", str(env_file), "--state-dir", str(tmp_path / "state")]
+
+    monkeypatch.setattr(tracker.requests, "get", ok_get)
+    assert tracker.main(args) == 0
+    assert len(calls) == 1
+
+    monkeypatch.setattr(tracker.requests, "get", failing_get)
+    calls.clear()
+    assert tracker.main(args) == 2
+    assert len(calls) == 3
+
+    calls.clear()
+    assert tracker.main(args) == 1
+    assert len(calls) == 3
+    state = json.loads((tmp_path / "state" / "state.json").read_text())
+    assert state["providers"]["gemini"]["status"].startswith("error:")

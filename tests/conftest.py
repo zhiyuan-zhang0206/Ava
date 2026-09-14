@@ -281,6 +281,17 @@ os.environ["AVA_TELEMETRY_TEMPO_ENDPOINT"] = "http://127.0.0.1:14318"
 # operator's .env would move every rendered endpoint off the pinned 4318 the
 # render tests assert. Pinned for the same leak class as the Tempo URLs.
 os.environ["AVA_TELEMETRY_OTLP_PORT"] = "4318"
+# The collector endpoint is a value AND a signal: any env value marks the
+# field explicitly set (killing the port-derived default) and opens the OTLP
+# export gates for every identity (endpoint_override_is_explicit). So unlike
+# the pins around it, an ambient value cannot be neutralized by pinning a
+# loopback default — a box's .env (its host-port block on 4319) would still
+# move derived endpoints and flip gate outcomes, while CI (no such variable)
+# stayed green (test_exec_subprocess.py, test_otel_bootstrap_relay.py,
+# 2026-09-14). Popped, never set: absent is the state CI runs in — the
+# endpoint derives from the pinned port, and a test that needs an explicit
+# endpoint monkeypatches it.
+os.environ.pop("AVA_TELEMETRY_OTLP_ENDPOINT", None)
 os.environ["AVA_MACHINE_HOST"] = "localhost"
 
 # ── Grafana admin credential: the suite never carries a live one ──
@@ -475,6 +486,7 @@ from shared.daemon_health import _HEALTH_PORT_OVERRIDES
 assert os.environ.get("AVA_TELEMETRY_TEMPO_QUERY_URL") == "http://127.0.0.1:3200"
 assert os.environ.get("AVA_TELEMETRY_TEMPO_ENDPOINT") == "http://127.0.0.1:14318"
 assert os.environ.get("AVA_TELEMETRY_OTLP_PORT") == "4318"
+assert "AVA_TELEMETRY_OTLP_ENDPOINT" not in os.environ
 assert os.environ.get("AVA_MACHINE_HOST") == "localhost"
 assert os.environ.get("GRAFANA_ADMIN_PASSWORD") == ""
 assert settings.observability.telemetry_tempo_query_url == "http://127.0.0.1:3200"
