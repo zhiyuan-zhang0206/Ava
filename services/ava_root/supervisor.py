@@ -12,7 +12,11 @@ table of one tree:
 - an unexpected exit follows the unit's restart policy, with exponential
   backoff for repeats;
 - every child process is reaped through its own wait task — no orphaned exit
-  status is left behind anywhere in the tree.
+  status is left behind anywhere in the tree;
+- an upgrade is prepared under this same lock — the tree snapshot lands in the
+  handoff file (see `handoff.py`); the daemon replaces the process image by
+  exec after flushing the accepted response, and the successor generation
+  attaches the very same children by pid instead of respawning them.
 
 Chain discipline (I2) shows up here as what this code deliberately does *not*
 do: units are spawned as plain children (no double-fork, no new session, no
@@ -34,6 +38,15 @@ from pathlib import Path
 from time import monotonic
 from typing import Protocol
 
+from services.ava_root.handoff import (
+    ChildState,
+    HandoffFile,
+    HandoffUnit,
+    ProcessHandle,
+    adopt_child,
+    probe_child,
+    write_handoff,
+)
 from services.ava_root.ipc import (
     ErrorCode,
     RequestPayload,
@@ -43,6 +56,7 @@ from services.ava_root.ipc import (
     ok_response,
 )
 from services.ava_root.manifest import (
+    DesiredState,
     RestartPolicy,
     UnitManifest,
     UnitRegistry,
@@ -77,13 +91,6 @@ class UnitState(StrEnum):
     BACKOFF = "backoff"
 
 
-class DesiredState(StrEnum):
-    """What the supervisor has been told to make true for a unit."""
-
-    RUNNING = "running"
-    STOPPED = "stopped"
-
-
 @dataclass(slots=True)
 class _Generation:
     """One process instance of a unit.
@@ -92,7 +99,7 @@ class _Generation:
     that observes the event also observes the exit fully processed.
     """
 
-    proc: asyncio.subprocess.Process
+    proc: ProcessHandle
     started_at: float
     exited: asyncio.Event = field(default_factory=asyncio.Event)
 
@@ -142,11 +149,12 @@ class Supervisor:
         self,
         registry: UnitRegistry,
         *,
-        log_dir: Path,
+        run_dir: Path,
         config: SupervisorConfig | None = None,
     ) -> None:
         self._registry = registry
-        self._log_dir = log_dir
+        self._run_dir = run_dir
+        self._log_dir = run_dir / "logs"
         self._config = config if config is not None else SupervisorConfig()
         self._units: dict[str, _UnitRuntime] = {
             manifest.id: _UnitRuntime(manifest=manifest) for manifest in registry.units
@@ -156,18 +164,108 @@ class Supervisor:
         self._running = False
         self._health: HealthSource | None = None
         self._metrics: MetricsSource | None = None
+        self._upgrade_pending = False
 
     # ── lifecycle ────────────────────────────────────────────────────────────
 
-    async def start(self) -> None:
-        """Bring up the whole tree: parallel bring-up, no dependency order."""
+    async def start(self, *, handoff: HandoffFile | None = None) -> None:
+        """Bring up the whole tree — fresh, or as the executor of a handoff.
+
+        Fresh bring-up: parallel, no dependency order, every unit goes through
+        the start path. Given a handoff (this process is the exec'd successor
+        of its writer), still-running units are attached in place — same
+        processes, same pids, no spawn — and every other unit follows its
+        carried desired state (stopped stays stopped; running goes through the
+        start path).
+        """
         self._log_dir.mkdir(parents=True, exist_ok=True)
         async with self._lock:
             self._running = True
             self._started_at = monotonic()
-            for runtime in self._units.values():
+            if handoff is None:
+                for runtime in self._units.values():
+                    runtime.desired = DesiredState.RUNNING
+                await asyncio.gather(
+                    *(self._start_unit(runtime) for runtime in self._units.values())
+                )
+                return
+            await self._start_from_handoff(handoff)
+
+    async def _start_from_handoff(self, handoff: HandoffFile) -> None:
+        """Execute a handoff: attach what is still running, start the rest."""
+        entries = {unit.unit_id: unit for unit in handoff.units}
+        attached = 0
+        started = 0
+        for runtime in self._units.values():
+            entry = entries.pop(runtime.manifest.id, None)
+            if entry is None:
+                # A unit the outgoing generation did not know about (roster
+                # grew mid-upgrade — out of scope): normal bring-up semantics.
                 runtime.desired = DesiredState.RUNNING
-            await asyncio.gather(*(self._start_unit(runtime) for runtime in self._units.values()))
+                await self._start_unit(runtime)
+                started += 1
+                continue
+            runtime.desired = entry.desired
+            pid = entry.pid
+            started_at = entry.started_at
+            if (
+                pid is not None
+                and started_at is not None
+                and self._attach(runtime, pid, started_at)
+            ):
+                attached += 1
+                continue
+            if runtime.desired is DesiredState.RUNNING:
+                await self._start_unit(runtime)
+                started += 1
+        if entries:
+            _log.warning(
+                "handoff carries %d unit(s) not in this registry %s; their processes "
+                "are left untouched (roster shrink mid-upgrade is out of scope)",
+                len(entries),
+                sorted(entries),
+            )
+        _log.info(
+            "handoff takeover: %d unit(s) attached to their carried pids, %d started",
+            attached,
+            started,
+        )
+
+    def _attach(self, runtime: _UnitRuntime, pid: int, started_at: float) -> bool:
+        """Adopt an inherited live child in place of spawning; False if it is gone.
+
+        The child predates this process image but not the process: the exec kept
+        the pid and the parent/child relation, so it is simply this process's to
+        wait for — the reaper is re-attached (see `handoff.adopt_child`) and no
+        new process is spawned.
+        """
+        probe = probe_child(pid)
+        if probe.state is ChildState.LIVE:
+            generation = _Generation(proc=adopt_child(pid), started_at=started_at)
+            runtime.generation = generation
+            runtime.state = UnitState.RUNNING
+            runtime.watch_task = asyncio.create_task(self._watch(runtime, generation))
+            _log.info(
+                "unit %s: attached to the carried generation (pid %s)",
+                runtime.manifest.id,
+                pid,
+            )
+            return True
+        if probe.state is ChildState.EXITED and probe.returncode is not None:
+            runtime.last_exit = _describe_exit(probe.returncode)
+            _log.info(
+                "unit %s: carried pid %s had already exited (%s); starting fresh",
+                runtime.manifest.id,
+                pid,
+                runtime.last_exit,
+            )
+        else:
+            _log.warning(
+                "unit %s: carried pid %s is not this process's child anymore; starting fresh",
+                runtime.manifest.id,
+                pid,
+            )
+        return False
 
     async def shutdown(self) -> None:
         """Stop the whole tree (children before parents) and drain the tasks."""
@@ -258,6 +356,81 @@ class Supervisor:
                 if old is not None:
                     await self._stop_generation(runtime, old)
         return {"verb": Verb.RESTART.value, "units": results}
+
+    async def upgrade(self) -> dict[str, object]:
+        """Prepare the in-place exec replacement: snapshot the tree to handoff.
+
+        Runs under the mutation lock, so the snapshot is consistent with every
+        verb this supervisor serves. The response is acceptance-shaped: actual
+        completion is observed by the caller through `status()` — same root
+        pid, reset uptime, continuous units — because the exec happens only
+        after this response is flushed (the daemon owns that step). Steady
+        state is assumed: a unit mid-restart or mid-backoff is recorded with a
+        warning and carried as best the handoff can.
+        """
+        async with self._lock:
+            entries: list[HandoffUnit] = []
+            running = 0
+            for runtime in self._units.values():
+                entry = self._handoff_entry(runtime)
+                if entry.pid is not None:
+                    running += 1
+                entries.append(entry)
+            handoff = HandoffFile.stamp(os.getpid(), tuple(entries))
+            path = write_handoff(self._run_dir, handoff)
+            self._upgrade_pending = True
+            _log.info(
+                "upgrade accepted: handoff for %d unit(s), %d live, written to %s",
+                len(entries),
+                running,
+                path,
+            )
+            return {
+                "verb": Verb.UPGRADE.value,
+                "accepted": True,
+                "root_pid": os.getpid(),
+                "units_total": len(entries),
+                "units_running": running,
+            }
+
+    def take_pending_upgrade(self) -> bool:
+        """One-shot: True when an accepted upgrade awaits its exec.
+
+        The daemon calls this after the upgrade response has been flushed;
+        True means the handoff is on disk and the process image may now be
+        replaced.
+        """
+        pending = self._upgrade_pending
+        self._upgrade_pending = False
+        return pending
+
+    def _handoff_entry(self, runtime: _UnitRuntime) -> HandoffUnit:
+        """One unit's carried state; warns when the steady-state assumption bends."""
+        restart_task = runtime.restart_task
+        if runtime.state is UnitState.BACKOFF or (
+            restart_task is not None and not restart_task.done()
+        ):
+            _log.warning(
+                "upgrade: unit %s is not in steady state (state=%s); carrying its "
+                "desired state only",
+                runtime.manifest.id,
+                runtime.state.value,
+            )
+        generation = runtime.generation
+        if generation is None or generation.proc.returncode is not None:
+            return HandoffUnit(unit_id=runtime.manifest.id, desired=runtime.desired)
+        pid = generation.proc.pid
+        try:
+            pgid = os.getpgid(pid)
+        except ProcessLookupError:
+            pgid = None
+        return HandoffUnit(
+            unit_id=runtime.manifest.id,
+            desired=runtime.desired,
+            pid=pid,
+            pgid=pgid,
+            started_at=generation.started_at,
+        )
 
     async def status(self) -> dict[str, object]:
         """The tree snapshot: structure, health, and restart counters."""
@@ -358,11 +531,13 @@ class Supervisor:
             if verb is Verb.STATUS:
                 return ok_response(await self.status())
             if verb is Verb.UPGRADE:
-                return error_response(
-                    ErrorCode.NOT_IMPLEMENTED,
-                    "upgrade is a stub in this slice; the exec-replacement protocol "
-                    "lands with a later change",
-                )
+                try:
+                    return ok_response(await self.upgrade())
+                except OSError as exc:
+                    _log.error("upgrade handoff write failed: %s", exc)
+                    return error_response(
+                        ErrorCode.INTERNAL, f"upgrade handoff write failed: {exc}"
+                    )
             if name is None:
                 # parse_request already rejects this shape; kept as a guard so a
                 # future verb cannot fall through to a confusing failure.

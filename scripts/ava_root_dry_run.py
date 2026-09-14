@@ -18,6 +18,9 @@ Phases:
   revive     SIGSTOP the heartbeat unit (pid stays, beats stop) and let the
              root's own health path revive it: probe down -> restart ->
              verified alive
+  upgrade    exec the root in place (same pid): the successor attaches every
+             unit by pid; status proves same root pid + same unit pids + reset
+             uptime, and the daemon log records the handoff takeover
   stop       SIGTERM; the daemon must exit 0
 
 Nothing here touches production: the run dir lives under --workdir
@@ -63,6 +66,7 @@ _UNIT_IDS = ("light-a", "light-a-child", "light-b", _REVIVE_UNIT)
 _READY_TIMEOUT_S = 30.0
 _ROUND_TIMEOUT_S = 45.0
 _REVIVE_DEADLINE_S = 120.0
+_UPGRADE_SETTLE_S = 1.5
 _POLL_S = 0.25
 
 
@@ -204,6 +208,35 @@ def _wait_rounds(client: RootClient, *, timeout: float) -> dict[str, object]:
                 return status
         time.sleep(_POLL_S)
     return _status(client)
+
+
+def _root_uptime(status: dict[str, object]) -> float:
+    """The root block's uptime from a status snapshot."""
+    root = cast("dict[str, object]", status["root"])
+    return cast(float, root["uptime_s"])
+
+
+def _wait_new_generation(
+    client: RootClient, baseline_uptime: float, *, timeout: float = 15.0
+) -> dict[str, object]:
+    """Poll until the successor generation answers: reset uptime, same socket.
+
+    Tolerates the rebind window (refused connections) and stale reads from the
+    generation being replaced.
+    """
+    deadline = time.monotonic() + timeout
+    threshold = baseline_uptime / 2.0
+    while time.monotonic() < deadline:
+        try:
+            response = client.status()
+        except RootClientError:
+            response = None
+        if response is not None and response.get("ok"):
+            result = cast("dict[str, object]", response.get("result"))
+            if _root_uptime(result) < threshold:
+                return result
+        time.sleep(_POLL_S)
+    _fail("upgrade", "the successor generation did not come up (no uptime reset)")
 
 
 def _tail(path: Path, limit: int = 3000) -> str:
@@ -473,6 +506,95 @@ def main() -> int:  # noqa: PLR0915 - one bounded drill lifecycle: every phase, 
             f"{_REVIVE_UNIT} SIGSTOP wedge -> probe down -> generation replaced"
             f" (pid {pid_before} -> {pid_after}, restart_count {restarts_before} -> {restarts_after})"
             " -> verified alive",
+        )
+
+        # -- upgrade -------------------------------------------------------
+        # In-place exec replacement: the root execve()s itself (same pid), the
+        # successor attaches every unit by pid, and status proves the tree
+        # never broke — same root pid, same unit pids, reset uptime.
+        time.sleep(_UPGRADE_SETTLE_S)  # accrue an uptime the reset is visible against
+        before_upgrade = _status(client)
+        uptime_before = _root_uptime(before_upgrade)
+        pids_before = {unit_id: _pid_of(before_upgrade, unit_id) for unit_id in _UNIT_IDS}
+        if any(pid is None for pid in pids_before.values()):
+            _fail("upgrade", f"tree not fully running before the upgrade: {pids_before}")
+        beat_before_upgrade = _beat_mtime(beat)
+        if beat_before_upgrade is None:
+            _fail("upgrade", f"heartbeat file missing before the upgrade: {beat}")
+        upgrade_response = client.upgrade()
+        if not upgrade_response.get("ok"):
+            _fail("upgrade", f"upgrade refused: {upgrade_response}")
+        accepted = cast("dict[str, object]", upgrade_response.get("result"))
+        if accepted.get("accepted") is not True or accepted.get("root_pid") != proc.pid:
+            _fail("upgrade", f"unexpected upgrade response: {upgrade_response}")
+
+        after_upgrade = _wait_new_generation(client, uptime_before)
+        root_after = cast("dict[str, object]", after_upgrade["root"])
+        if root_after.get("pid") != proc.pid:
+            _fail(
+                "upgrade",
+                f"root pid changed across the exec: {root_after.get('pid')} != {proc.pid}",
+            )
+        pids_after = {unit_id: _pid_of(after_upgrade, unit_id) for unit_id in _UNIT_IDS}
+        if pids_after != pids_before:
+            _fail(
+                "upgrade",
+                f"units were not carried across the exec: {pids_before} -> {pids_after}",
+            )
+        uptime_after = _root_uptime(after_upgrade)
+        if uptime_after >= uptime_before:
+            _fail(
+                "upgrade",
+                f"successor uptime was not reset: {uptime_before:.2f}s -> {uptime_after:.2f}s",
+            )
+        if (run_dir / "handoff.json").exists():
+            _fail("upgrade", "handoff.json survived the takeover")
+        for unit_id, carried_pid in pids_before.items():
+            if not process_alive(cast("int", carried_pid)):
+                _fail("upgrade", f"carried pid {carried_pid} for {unit_id} is dead")
+        deadline = time.monotonic() + 5.0
+        beat_now = None
+        while time.monotonic() < deadline:
+            beat_now = _beat_mtime(beat)
+            if beat_now is not None and beat_now > beat_before_upgrade:
+                break
+            time.sleep(_POLL_S)
+        if beat_now is None or beat_now <= beat_before_upgrade:
+            _fail(
+                "upgrade",
+                f"carried heartbeat unit stopped beating: {beat_before_upgrade} -> {beat_now}",
+            )
+
+        upgrade_log_text = _tail(daemon_log, limit=200_000)
+        unit_count = len(_UNIT_IDS)
+        for marker in (
+            f"upgrade accepted: handoff for {unit_count} unit(s), {unit_count} live",
+            f"handoff accepted: {unit_count} unit(s) carried from generation {proc.pid}",
+            f"unit {_REVIVE_UNIT}: attached to the carried generation",
+            f"upgrade: exec replacement now (pid stays {proc.pid})",
+        ):
+            if marker not in upgrade_log_text:
+                _fail("upgrade", f"daemon log lacks {marker!r};\n{_tail(daemon_log)}")
+        _save(evidence, "status.before-upgrade.json", before_upgrade)
+        _save(evidence, "status.after-upgrade.json", after_upgrade)
+        _save(
+            evidence,
+            "upgrade.json",
+            {
+                "root_pid": proc.pid,
+                "unit_pids": pids_before,
+                "uptime_before_s": round(uptime_before, 3),
+                "uptime_after_s": round(uptime_after, 3),
+                "exec": "same pid, same argv; the successor attached every unit (no respawn)",
+                "handoff": "consumed and purged",
+                "heartbeat": "carried unit kept beating across the replacement",
+            },
+        )
+        _phase_pass(
+            "upgrade",
+            f"in-place exec: root pid {proc.pid} kept; {unit_count} unit pids carried"
+            f" ({', '.join(f'{u}={p}' for u, p in pids_before.items())});"
+            f" uptime {uptime_before:.1f}s -> {uptime_after:.1f}s; heartbeat still beating",
         )
     finally:
         if proc.poll() is None:

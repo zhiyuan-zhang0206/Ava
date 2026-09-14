@@ -15,11 +15,20 @@ Process contract for an OS-edge launcher (the K3 face this program freezes):
 - **Ready**: the control socket appearing on disk — the server starts only
   after the tree is up.
 - **Stop**: SIGTERM (or SIGINT) triggers the graceful stop of the whole tree,
-  then exit 0. SIGHUP is currently ignored.
+  then exit 0; SIGHUP is ignored (no reloads — reloads go through upgrade).
+- **Upgrade**: `upgrade` (K1) makes this daemon exec-replace itself — same
+  pid, same argv, environment carrying the takeover marker — once the accepted
+  response is flushed. The successor validates `<run-dir>/handoff.json`
+  against its own pid (exec keeps the pid), attaches the still-running units
+  without respawning them, and rebinds the control socket. Between the exec
+  and the rebind, K1 refuses connections for well under a second. A failed
+  handoff write is answered as an error (no exec happens); an exec failure
+  exits 1.
 - **Exit codes**: 0 = clean stop; 1 = startup refused (malformed manifests, a
   broken wiring reference, or another live supervisor already owns the run dir
   — a keeper launching into a held tree must read that as "already running",
-  not as a crash).
+  not as a crash) or an upgrade exec failure (the launch edge then restarts a
+  cold generation).
 - **Run-dir layout**: `ava-root.lock` (instance lock, held for the process
   lifetime), `ava-root.sock` (control socket, mode 0600),
   `logs/<unit>/output.log` (per-unit directory; output appended across
@@ -36,11 +45,16 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import signal
+import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NoReturn
 
+from services.ava_root.handoff import discard_handoff, load_handoff
+from services.ava_root.ipc import RequestPayload, Verb
 from services.ava_root.manifest import ManifestError, load_manifests
 from services.ava_root.server import ControlServer
 from services.ava_root.singleton import (
@@ -57,6 +71,7 @@ from services.ava_root.wiring import (
     start_participants,
     stop_participants,
 )
+from shared.process_env import consume_process_marker, inherited_process_env
 
 _log = logging.getLogger("ava_root")
 
@@ -103,12 +118,60 @@ def parse_args(argv: Sequence[str] | None = None) -> DaemonOptions:
     )
 
 
-async def run(options: DaemonOptions) -> int:
+# The exec handoff marker: the one piece of process state that must cross the
+# `execve` boundary of an in-place upgrade. It rides the environment through
+# `shared.process_env` — the seam built for exactly this class (Settings is
+# per-process configuration loaded at import time; this marker lives only
+# between one generation's exec and its successor's startup).
+_HANDOFF_ENV = "AVA_ROOT_HANDOFF"
+
+
+def _take_takeover_marker() -> bool:
+    """Consume the exec-handoff marker this process was launched with, if any."""
+    return consume_process_marker(_HANDOFF_ENV, armed_value="1")
+
+
+def _takeover_env() -> dict[str, str]:
+    """The environment for a replacement generation: this one plus the marker."""
+    return inherited_process_env({_HANDOFF_ENV: "1"})
+
+
+def _exec_upgrade(exec_args: Sequence[str]) -> NoReturn:
+    """Replace this process image with a fresh generation (same pid, same args).
+
+    Called only after the accepted upgrade response has been flushed. On
+    success this never returns — `execve` keeps the pid, the parent, and the
+    inherited children, so the successor attaches the same units. An exec
+    failure exits the process with status 1: the launch edge's keepalive then
+    starts a cold generation (resolving the old tree's fate is G4's recovery
+    territory, not silently re-adopted here).
+    """
+    argv = [sys.executable, "-m", "services.ava_root", *exec_args]
+    _log.info("upgrade: exec replacement now (pid stays %s)", os.getpid())
+    try:
+        os.execve(  # noqa: S606 — replaces this process image with the same trusted interpreter
+            sys.executable, argv, _takeover_env()
+        )
+    except OSError as exc:
+        _log.error(
+            "upgrade: exec failed: %s — exiting; the launch edge restarts a cold generation",
+            exc,
+        )
+        logging.shutdown()
+        os._exit(1)
+    os._exit(1)  # unreachable: execve replaces the image or raises
+
+
+async def run(options: DaemonOptions, *, exec_args: Sequence[str]) -> int:
     """Bring up one tree and serve until a stop signal arrives."""
     registry = load_manifests(options.manifests_path)
     lock_fd = acquire_instance_lock(options.run_dir)
+    takeover = _take_takeover_marker()
+    handoff = load_handoff(
+        options.run_dir, expected_writer_pid=os.getpid(), takeover_marker=takeover
+    )
     log_dir = options.run_dir / "logs"
-    supervisor = Supervisor(registry, log_dir=log_dir)
+    supervisor = Supervisor(registry, run_dir=options.run_dir)
     context = WiringContext(
         supervisor=supervisor,
         registry=registry,
@@ -119,17 +182,31 @@ async def run(options: DaemonOptions) -> int:
     # refuse startup, not leave a half-wired daemon behind.
     participants = load_wiring(options.wiring, context)
     socket_path = options.run_dir / _SOCKET_NAME
-    server = ControlServer(socket_path, supervisor.dispatch)
     stop = asyncio.Event()
+
+    def after_response(request: RequestPayload) -> None:
+        """Exec exactly once the accepted upgrade response is flushed."""
+        if request.get("verb") != Verb.UPGRADE.value:
+            return
+        if not supervisor.take_pending_upgrade():
+            return
+        if stop.is_set():
+            _log.warning("upgrade exec skipped: the daemon is already shutting down")
+            return
+        _exec_upgrade(exec_args)
+
+    server = ControlServer(socket_path, supervisor.dispatch, after_response=after_response)
     loop = asyncio.get_running_loop()
     for signum in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(signum, stop.set)
-    # SIGHUP does not reload anything yet; ignoring it keeps a stray terminal
-    # hangup from killing the tree before the upgrade protocol exists.
+    # SIGHUP does not reload anything; ignoring it keeps a stray terminal
+    # hangup from killing the tree (reloads go through the upgrade protocol).
     loop.add_signal_handler(signal.SIGHUP, lambda: _log.info("SIGHUP ignored"))
     started: list[WiringParticipant] = []
     try:
-        await supervisor.start()
+        await supervisor.start(handoff=handoff)
+        if handoff is not None:
+            discard_handoff(options.run_dir)
         await server.start()
         started = await start_participants(participants)
         if started:
@@ -164,9 +241,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    options = parse_args(argv)
+    tokens = list(sys.argv[1:] if argv is None else argv)
+    options = parse_args(tokens)
     try:
-        return asyncio.run(run(options))
+        return asyncio.run(run(options, exec_args=tokens))
     except (ManifestError, AlreadyRunningError, WiringError) as exc:
         _log.error("%s", exc)
         return 1
