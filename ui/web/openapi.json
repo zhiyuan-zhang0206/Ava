@@ -8199,6 +8199,23 @@
             "type": "boolean",
             "title": "Paused"
           },
+          "paused_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "no_state",
+                  "business_pause",
+                  "maintenance",
+                  "startup"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paused Reason"
+          },
           "current_orchestration": {
             "anyOf": [
               {
@@ -10441,6 +10458,23 @@
               }
             ],
             "title": "Paused"
+          },
+          "paused_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "no_state",
+                  "business_pause",
+                  "maintenance",
+                  "startup"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paused Reason"
           },
           "description": {
             "anyOf": [

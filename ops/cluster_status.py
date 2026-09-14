@@ -28,6 +28,7 @@ from ops import cluster_pause, cluster_session
 from ops.cluster_session import OrchestrationKind
 from ops.rpc_schemas import AgentSessionGroup, SessionInfo, ShellInfo
 from ops.updater_outcome import UpdaterOutcome, last_updater_outcome
+from shared.api_contracts.status import PausedReason
 from shared.config import cluster_tz
 from shared.machine import is_agent_runner, is_gateway, is_observability_station, machine_name
 from shared.proc import process_alive
@@ -64,9 +65,17 @@ class ClusterStatus(BaseModel):
     serve_gateway: bool
     serve_agent_runner: bool
     serve_observability_station: bool = False
-    # Status only: business pause, native admission hold, or startup not yet serving.
-    # Does not alter the business HTTP middleware's DB-posture policy.
+    # Status only: an unreadable deploy state, business pause, native admission
+    # hold, or startup not yet serving — the compound reads true whenever this
+    # host cannot claim readiness, whichever clause fired. Does not alter the
+    # business HTTP middleware's DB-posture policy.
     paused: bool
+    # Which clause of the `paused` verdict fired — the first true one, in the
+    # verdict's own order: no_state / business_pause / maintenance / startup.
+    # None when not paused. Splitting it apart keeps a failed start's parked
+    # serving gate (`startup`) legible from a deliberate pause, instead of one
+    # opaque bool that a consumer can only guess at.
+    paused_reason: PausedReason | None = None
     # The whole-cluster orchestration alive on this host ('rollout' / 'restart' /
     # 'update'), or None when idle. This endpoint bypasses the cluster-paused 503
     # middleware, so it is the one status source readable *during* a pause — which
@@ -419,6 +428,29 @@ def _read_resource_sample() -> ResourceSample | None:
         return None
 
 
+def _paused_reason(state: shared.host_deploy_state.HostDeployState | None) -> PausedReason | None:
+    """The first true clause of the `paused` verdict, in its own clause order.
+
+    `no_state` (the deploy state was unreadable or absent), then a deliberate
+    `business_pause` posture, then a native `maintenance` admission hold, then
+    `startup` (the serving gate has not reached `serving` — a start is in
+    flight, or a failed start parked it and recovery stays gated). None when no
+    clause fired. `state` is the snapshot's already-read row, so this adds no
+    central-DB dial of its own.
+    """
+    from shared import maintenance, start_serving
+
+    if state is None:
+        return "no_state"
+    if cluster_pause.is_paused(state):
+        return "business_pause"
+    if maintenance.held():
+        return "maintenance"
+    if not start_serving.is_serving():
+        return "startup"
+    return None
+
+
 def status_snapshot(pool: Any | None = None) -> ClusterStatus:
     """Assemble this host's cluster state — used by `/api/cluster/status`.
 
@@ -427,7 +459,6 @@ def status_snapshot(pool: Any | None = None) -> ClusterStatus:
     through and FastAPI surfaces as default 500 (admin endpoint, not
     consumed by SDK).
     """
-    from shared import maintenance, start_serving
     from shared import process_sha as _process_sha
     from shared.cluster_drift import prod_source_head_sha
     from shared.config import settings
@@ -458,17 +489,16 @@ def status_snapshot(pool: Any | None = None) -> ClusterStatus:
         resource_future = executor.submit(_read_resource_sample)
         state, lease, agent_count = _read_deploy_snapshot(pool)
         resource = resource_future.result()
+    # One source of truth for the pair: `paused` is exactly "a clause fired",
+    # so the bool can never drift from its reason.
+    paused_reason = _paused_reason(state)
     return ClusterStatus(
         machine_name=machine_name(),
         serve_gateway=is_gateway(),
         serve_agent_runner=is_agent_runner(),
         serve_observability_station=is_observability_station(),
-        paused=(
-            state is None
-            or cluster_pause.is_paused(state)
-            or maintenance.held()
-            or not start_serving.is_serving()
-        ),
+        paused=paused_reason is not None,
+        paused_reason=paused_reason,
         current_orchestration=cluster_session.current_orchestration(state, lease),
         last_updater_outcome=last_updater_outcome(state),
         head_sha=prod_source_head_sha(),

@@ -531,3 +531,43 @@ def test_read_deploy_lease_degrades_on_operational_error(monkeypatch: pytest.Mon
 
     monkeypatch.setattr("shared.cluster_lock.read_update_lease", _boom)
     assert status_mod._read_deploy_lease() is None
+
+
+def test_gather_cluster_status_carries_probe_paused_reason(monkeypatch: pytest.MonkeyPatch):
+    """A host parked by its serving gate must arrive on the roster with the
+    breakdown attached (task #3404): paused=true + paused_reason='startup', not
+    one opaque bool a consumer can misread as a deliberate pause."""
+
+    async def _fake_dispatch(
+        *,
+        target_machine,
+        kind,
+        payload,
+        timeout_s=None,
+        ops_url=None,
+        retries=None,
+        idempotency_key=None,
+    ):
+        assert kind == "status_probe"
+        assert target_machine == "m1"
+        return {
+            "machine_name": "m1",
+            "serve_gateway": True,
+            "serve_agent_runner": True,
+            "paused": True,
+            "paused_reason": "startup",
+            "head_sha": "abc123",
+        }
+
+    monkeypatch.setattr(status_mod._cluster_rpc, "dispatch_to_machine", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
+
+    rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]] = [
+        ("m1", "http://localhost:9", ["agent-runner"], datetime.now(UTC), None, None, False)
+    ]
+    machines = asyncio.run(status_mod.gather_cluster_status(rows, "m1"))
+
+    assert len(machines) == 1
+    m = machines[0]
+    assert m.online is True
+    assert m.paused is True
+    assert m.paused_reason == "startup"
