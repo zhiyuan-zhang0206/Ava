@@ -53,12 +53,19 @@ from pathlib import Path
 from typing import TypedDict, cast
 
 import shared.paths
+from services.permissions_helper.launchd_job import (
+    HELPER_BUNDLE_ID,
+    helper_job_agents_dir,
+    helper_job_domain,
+    helper_job_label,
+    helper_job_plist_path,
+)
 from shared.config import settings
 from shared.paths import logs_dir, permissions_helper_socket
 from shared.proc import run_bounded
 
 _CERT_CN = "Ava Permissions Helper Code Signing"
-_BUNDLE_ID = "com.ava.permissions-helper"  # fixed across clusters so one grant covers all
+_BUNDLE_ID = HELPER_BUNDLE_ID  # alias: the job identity lives in launchd_job
 _SERVICE_DIR = Path(__file__).resolve().parent
 _SOURCE = _SERVICE_DIR / "helper" / "main.swift"
 _INFO_PLIST = _SERVICE_DIR / "helper" / "Info.plist"
@@ -110,7 +117,6 @@ _TIMEOUTS_S = {
     "security": 30.0,  # keychain queries and a PKCS#12 import, all local
     "openssl": 60.0,  # RSA-2048 keygen + export; slow only on a starved entropy pool
     "launchctl": 30.0,  # local IPC with launchd
-    "id": 10.0,  # reads the uid
 }
 
 # Stands in for the exit status of a call the bound killed. 124 is `timeout(1)`'s
@@ -619,25 +625,19 @@ def build_and_sign() -> tuple[Path, bool]:
 
 
 def _label() -> str:
-    # Per-cluster job keyed on the home-path slug (path-only identity); the
-    # bundle id (the TCC grant) stays shared across clusters.
-    from shared.cluster import home_slug
-    from shared.paths import ava_home
-
-    return f"{_BUNDLE_ID}.{home_slug(ava_home())}"
+    return helper_job_label()
 
 
 def _agents_dir() -> Path:
-    return Path.home() / "Library" / "LaunchAgents"
+    return helper_job_agents_dir()
 
 
 def _plist_path() -> Path:
-    return _agents_dir() / f"{_label()}.plist"
+    return helper_job_plist_path()
 
 
 def _domain() -> str:
-    uid = _run(["id", "-u"]).stdout.decode().strip()
-    return f"gui/{uid}"
+    return helper_job_domain()
 
 
 def _is_loaded() -> bool:
