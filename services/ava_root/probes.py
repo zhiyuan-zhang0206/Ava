@@ -39,12 +39,18 @@ class ProbeSource(Protocol):
     """The slice of a service spec the registry reads.
 
     Duck-typed rather than imported: the registry only needs these three facts,
-    and the spec type lives a layer away.
+    and the spec type lives a layer away. Declared read-only so immutable
+    providers (frozen dataclass specs) satisfy it as well as plain attributes.
     """
 
-    session: str
-    healthcheck_module: str | None
-    identity_probe: Probe | None
+    @property
+    def session(self) -> str: ...
+
+    @property
+    def healthcheck_module(self) -> str | None: ...
+
+    @property
+    def identity_probe(self) -> Probe | None: ...
 
 
 class ProbeError(ValueError):

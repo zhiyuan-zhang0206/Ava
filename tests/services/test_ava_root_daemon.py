@@ -36,8 +36,8 @@ def _write_manifests(base: Path, units: list[dict[str, object]]) -> Path:
     return path
 
 
-def _daemon_command(run_dir: Path, manifests: Path) -> list[str]:
-    return [
+def _daemon_command(run_dir: Path, manifests: Path, *, wiring: str | None = None) -> list[str]:
+    command = [
         sys.executable,
         "-m",
         "services.ava_root",
@@ -46,19 +46,29 @@ def _daemon_command(run_dir: Path, manifests: Path) -> list[str]:
         "--manifests",
         str(manifests),
     ]
+    if wiring is not None:
+        command.extend(["--wiring", wiring])
+    return command
 
 
 @contextmanager
-def _daemon(run_dir: Path, manifests: Path) -> Generator[tuple[subprocess.Popen[bytes], Path]]:
+def _daemon(
+    run_dir: Path,
+    manifests: Path,
+    *,
+    wiring: str | None = None,
+    env: dict[str, str] | None = None,
+) -> Generator[tuple[subprocess.Popen[bytes], Path]]:
     """Run a daemon; guarantee it is gone (TERM, then KILL) at scope exit."""
     run_dir.mkdir(parents=True, exist_ok=True)
     log_path = run_dir / "daemon.log"
     with log_path.open("ab") as log_file:
         proc = subprocess.Popen(  # noqa: S603 — fixed argv, this module's own command, no shell
-            _daemon_command(run_dir, manifests),
+            _daemon_command(run_dir, manifests, wiring=wiring),
             cwd=REPO_ROOT,
             stdout=log_file,
             stderr=subprocess.STDOUT,
+            env=env,
         )
     try:
         yield proc, log_path
@@ -157,7 +167,7 @@ def test_daemon_end_to_end(short_tmp: Path) -> None:
         assert [u["id"] for u in units] == ["svc"]
         assert units[0]["state"] == "running"
         unit_pid = cast(int, units[0]["pid"])
-        assert (run_dir / "logs" / "svc.log").exists()
+        assert (run_dir / "logs" / "svc" / "output.log").exists()
 
         response = client.down("svc")
         assert response["ok"] is True
@@ -244,3 +254,94 @@ def test_bad_manifests_exit_nonzero(short_tmp: Path) -> None:
     assert result.returncode == 1
     assert "not valid JSON" in result.stderr
     assert not (run_dir / _SOCKET_NAME).exists()
+
+
+_WIRING_FIXTURE = '''\
+"""Recording wiring participant for the daemon wiring tests (written to tmp)."""
+
+import os
+from pathlib import Path
+
+
+def build(context):
+    markers = Path(os.environ["AVA_ROOT_WIRING_MARKERS"])
+    markers.mkdir(parents=True, exist_ok=True)
+
+    class Participant:
+        def start(self):
+            (markers / "started").write_text("yes", encoding="utf-8")
+
+        def stop(self):
+            (markers / "stopped").write_text("yes", encoding="utf-8")
+
+    return [Participant()]
+'''
+
+
+def _wiring_env(fixture_dir: Path, markers: Path) -> dict[str, str]:
+    env = dict(os.environ)
+    existing = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = str(fixture_dir) if not existing else f"{fixture_dir}{os.pathsep}{existing}"
+    env["AVA_ROOT_WIRING_MARKERS"] = str(markers)
+    return env
+
+
+def test_wiring_hook_start_stop_lifecycle(short_tmp: Path) -> None:
+    run_dir = short_tmp / "run"
+    manifests = _write_manifests(short_tmp, [{"id": "svc", "exec": _SLEEPER, "restart": "always"}])
+    fixture_dir = short_tmp / "fixtures"
+    fixture_dir.mkdir()
+    (fixture_dir / "record_wiring.py").write_text(_WIRING_FIXTURE, encoding="utf-8")
+    markers = short_tmp / "markers"
+    with _daemon(
+        run_dir, manifests, wiring="record_wiring:build", env=_wiring_env(fixture_dir, markers)
+    ) as (proc, log_path):
+        client = _wait_ready(run_dir, proc, log_path)
+        assert (markers / "started").exists()
+        assert "wired participant(s)" in _read_log(log_path)
+        assert client.status()["ok"] is True
+    assert proc.returncode == 0
+    assert (markers / "stopped").exists()
+
+
+def test_wiring_failure_refuses_startup(short_tmp: Path) -> None:
+    run_dir = short_tmp / "run"
+    manifests = _write_manifests(short_tmp, [{"id": "svc", "exec": _SLEEPER, "restart": "always"}])
+    broken = subprocess.run(  # noqa: S603 — fixed argv, this module's own command
+        _daemon_command(run_dir, manifests, wiring="no_such_module_xyz:build"),
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    assert broken.returncode == 1
+    assert "cannot import wiring module" in broken.stderr
+    assert not (run_dir / _SOCKET_NAME).exists()
+
+    malformed = subprocess.run(  # noqa: S603 — fixed argv, this module's own command
+        _daemon_command(run_dir, manifests, wiring="no_colon"),
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    assert malformed.returncode == 1
+    assert "module:attribute" in malformed.stderr
+
+
+def test_per_unit_log_directories(short_tmp: Path) -> None:
+    run_dir = short_tmp / "run"
+    manifests = _write_manifests(
+        short_tmp,
+        [
+            {"id": "unit-a", "exec": _SLEEPER, "restart": "always"},
+            {"id": "unit-b", "exec": _SLEEPER, "restart": "always"},
+        ],
+    )
+    with _daemon(run_dir, manifests) as (proc, log_path):
+        _wait_ready(run_dir, proc, log_path)
+        assert (run_dir / "logs" / "unit-a" / "output.log").exists()
+        assert (run_dir / "logs" / "unit-b" / "output.log").exists()
+        assert not (run_dir / "logs" / "unit-a.log").exists()

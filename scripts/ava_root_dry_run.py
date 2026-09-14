@@ -1,0 +1,310 @@
+#!/usr/bin/env python
+"""ava-root dev dry run: manifests + wiring over a throwaway tree (W1.2e).
+
+The root-side counterpart of `scripts/two_section_chain_smoke.py`: where the
+two-section smoke drives the OS-edge chain (launchd -> helper -> root), this
+drill drives the ROOT's own new surfaces over a throwaway tree — the manifest
+generator, the daemon's `--wiring` hook, the reference/drill assemblies, and
+the G5 per-unit log layout — against a dev directory, never production.
+
+Phases:
+  generate   build the light manifest (validated by load_manifests) and, when
+             this host has a resolvable machine role, exercise the production
+             generator into the evidence directory
+  launch     start the daemon with the drill wiring hook and wait for ready
+  status     verify the attach surfaces (health/metrics), a real probe round,
+             and the per-unit log layout
+  ops        client verbs on the live tree: down / up / restart
+  stop       SIGTERM; the daemon must exit 0
+
+Nothing here touches production: the run dir lives under --workdir
+(/tmp/ava-root-dry-run by default), the units are sleepers, and the script
+refuses a workdir under ~/.ava. Evidence (manifests, status snapshots, logs)
+is retained under <workdir>/evidence unless --cleanup is passed.
+
+Exit 0 = every phase passed.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import NoReturn, cast
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+from services.ava_root.client import RootClient, RootClientError  # noqa: E402
+from services.ava_root.ipc import ResponsePayload  # noqa: E402
+from services.ava_root.manifest import ManifestError, load_manifests  # noqa: E402
+from services.ava_root_glue.manifests import generate  # noqa: E402
+from shared.config import settings  # noqa: E402
+
+_DEFAULT_WORKDIR = Path("/tmp/ava-root-dry-run")  # noqa: S108 - scratch evidence dir, never secret
+_SOCKET_NAME = "ava-root.sock"
+_WIRING = "services.ava_root_glue.drill:build_drill_wiring"
+_UNIT_IDS = ("light-a", "light-a-child", "light-b")
+_READY_TIMEOUT_S = 30.0
+_ROUND_TIMEOUT_S = 45.0
+_POLL_S = 0.25
+
+
+def _fail(phase: str, detail: str) -> NoReturn:
+    print(f"FAIL(phase={phase}): {detail}")
+    raise SystemExit(1)
+
+
+def _phase_pass(phase: str, detail: str) -> None:
+    print(f"PASS(phase={phase}): {detail}")
+
+
+def _unit_exec(python: str, unit_id: str) -> list[str]:
+    script = f"import time; print({unit_id!r} + ' ready', flush=True); time.sleep(3600)"
+    return [python, "-u", "-c", script]
+
+
+def _light_manifest(python: str) -> dict[str, object]:
+    return {
+        "units": [
+            {"id": "light-a", "exec": _unit_exec(python, "light-a"), "restart": "always"},
+            {
+                "id": "light-a-child",
+                "exec": _unit_exec(python, "light-a-child"),
+                "restart": "always",
+                "attach": "light-a",
+            },
+            {"id": "light-b", "exec": _unit_exec(python, "light-b"), "restart": "always"},
+        ]
+    }
+
+
+def _status(client: RootClient) -> dict[str, object]:
+    response = client.status()
+    if not response.get("ok"):
+        _fail("status", f"root answered not-ok: {response}")
+    return cast("dict[str, object]", response.get("result"))
+
+
+def _ok_call(phase: str, response: ResponsePayload, what: str) -> None:
+    if not response.get("ok"):
+        _fail(phase, f"{what} failed: {response}")
+
+
+def _units_by_id(status: dict[str, object]) -> dict[str, dict[str, object]]:
+    units = cast("list[dict[str, object]]", status["units"])
+    return {cast("str", unit["id"]): unit for unit in units}
+
+
+def _pid_of(status: dict[str, object], unit_id: str) -> int | None:
+    unit = _units_by_id(status)[unit_id]
+    pid = unit.get("pid")
+    return pid if isinstance(pid, int) else None
+
+
+def _wait_ready(run_dir: Path, proc: subprocess.Popen[bytes], log_path: Path) -> RootClient:
+    client = RootClient(run_dir / _SOCKET_NAME, timeout=5.0)
+    deadline = time.monotonic() + _READY_TIMEOUT_S
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            _fail("launch", f"daemon exited early with {proc.returncode}; log:\n{_tail(log_path)}")
+        if (run_dir / _SOCKET_NAME).exists():
+            try:
+                if client.status().get("ok"):
+                    return client
+            except RootClientError:
+                pass
+        time.sleep(_POLL_S)
+    _fail("launch", f"daemon did not become ready; log:\n{_tail(log_path)}")
+
+
+def _wait_rounds(client: RootClient, *, timeout: float) -> dict[str, object]:
+    """Wait until a health round and a self-check round have both landed."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        status = _status(client)
+        health = status.get("health")
+        metrics = status.get("metrics")
+        if isinstance(health, dict) and health and isinstance(metrics, dict):
+            chain = metrics.get("chain")
+            if isinstance(chain, dict) and cast("int", chain.get("rounds", 0)) >= 1:
+                return status
+        time.sleep(_POLL_S)
+    return _status(client)
+
+
+def _tail(path: Path, limit: int = 3000) -> str:
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")[-limit:]
+    except OSError:
+        return "(no log)"
+
+
+def _save(evidence: Path, name: str, payload: object) -> None:
+    path = evidence / name
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def main() -> int:  # noqa: PLR0915 - one bounded drill lifecycle: every phase, wait, and teardown live together on purpose
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
+    parser.add_argument(
+        "--workdir",
+        default=str(_DEFAULT_WORKDIR),
+        help="throwaway directory for the drill (default: /tmp/ava-root-dry-run)",
+    )
+    parser.add_argument(
+        "--python", default=sys.executable, help="interpreter for the daemon + units"
+    )
+    parser.add_argument(
+        "--capabilities",
+        default=None,
+        help=(
+            "capability set for the production-generator sample (e.g. gateway,agent-runner);"
+            " omit to skip the sample"
+        ),
+    )
+    parser.add_argument("--cleanup", action="store_true", help="remove the workdir at the end")
+    args = parser.parse_args()
+
+    workdir = Path(args.workdir).expanduser()
+    if not workdir.is_absolute():
+        _fail("args", f"workdir must be absolute: {workdir}")
+    protected = {Path.home() / ".ava", Path(settings.general.ava_home).expanduser()}
+    for base in protected:
+        if base in workdir.parents or workdir == base:
+            _fail("args", f"refusing a workdir under {base}: {workdir} is for dev drills only")
+
+    workdir.mkdir(parents=True, exist_ok=True)
+    evidence = workdir / "evidence"
+    evidence.mkdir(parents=True, exist_ok=True)
+    run_dir = workdir / "root-run"
+    manifests_path = workdir / "manifests.json"
+    daemon_log = workdir / "root.log"
+
+    # -- generate ---------------------------------------------------------
+    light = _light_manifest(args.python)
+    manifests_path.write_text(json.dumps(light, indent=2) + "\n", encoding="utf-8")
+    load_manifests(manifests_path)  # the daemon's own reader must accept it
+    _save(evidence, "manifests.light.json", light)
+    production_note = "skipped (no --capabilities given)"
+    if args.capabilities is not None:
+        caps = [p.strip() for p in args.capabilities.split(",") if p.strip()]
+        try:
+            prod_path = generate(evidence / "manifests.production.json", capabilities=caps)
+            prod_units = load_manifests(prod_path).units
+            production_note = f"{len(prod_units)} unit(s) -> {prod_path.name}"
+        except ManifestError as exc:
+            _fail("generate", f"production manifest generation failed: {exc}")
+    _phase_pass("generate", f"light manifest 3 units; production generator: {production_note}")
+
+    # -- launch -----------------------------------------------------------
+    command = [
+        args.python,
+        "-m",
+        "services.ava_root",
+        "--run-dir",
+        str(run_dir),
+        "--manifests",
+        str(manifests_path),
+        "--wiring",
+        _WIRING,
+    ]
+    with daemon_log.open("wb") as log_file:
+        proc = subprocess.Popen(  # noqa: S603 - fixed argv, this drill's own children
+            command, cwd=REPO_ROOT, stdout=log_file, stderr=subprocess.STDOUT
+        )
+    try:
+        client = _wait_ready(run_dir, proc, daemon_log)
+        log_text = _tail(daemon_log)
+        if "wired participant(s)" not in log_text:
+            _fail("launch", f"ready line does not show wired participants; log:\n{log_text}")
+        _phase_pass("launch", f"socket ready; {log_text.strip().splitlines()[-1]}")
+
+        # -- status -------------------------------------------------------
+        status = _status(client)
+        units = _units_by_id(status)
+        for unit_id in _UNIT_IDS:
+            unit = units.get(unit_id)
+            if unit is None or unit.get("state") != "running":
+                _fail("status", f"unit {unit_id} not running: {unit}")
+        for unit_id in _UNIT_IDS:
+            log_path = run_dir / "logs" / unit_id / "output.log"
+            if not log_path.exists():
+                _fail("status", f"missing per-unit log {log_path}")
+            text = log_path.read_text(encoding="utf-8", errors="replace")
+            if f"{unit_id} ready" not in text:
+                _fail("status", f"unit log {log_path} lacks its own marker")
+            for other in _UNIT_IDS:
+                if other != unit_id and f"{other} ready" in text:
+                    _fail("status", f"unit log {log_path} leaked {other} output")
+        drilled = _wait_rounds(client, timeout=_ROUND_TIMEOUT_S)
+        health = cast("dict[str, object]", drilled["health"])
+        for unit_id in _UNIT_IDS:
+            verdict = cast("dict[str, object]", health.get(unit_id, {})).get("last_verdict")
+            if verdict != "alive":
+                _fail("status", f"health verdict for {unit_id} is {verdict!r}: {drilled}")
+        metrics = cast("dict[str, object]", drilled["metrics"])
+        _save(evidence, "status.with-rounds.json", drilled)
+        _phase_pass(
+            "status",
+            f"health+metrics attached; rounds={cast('dict[str, object]', metrics['chain'])['rounds']};"
+            " per-unit logs isolated",
+        )
+
+        # -- ops ----------------------------------------------------------
+        _ok_call("ops", client.down("light-a"), "down light-a")
+        after_down = _status(client)
+        units_down = _units_by_id(after_down)
+        for unit_id in ("light-a", "light-a-child"):
+            if units_down[unit_id].get("state") != "stopped":
+                _fail("ops", f"down light-a left {unit_id} {units_down[unit_id].get('state')}")
+        _ok_call("ops", client.up("light-a"), "up light-a")
+        after_up = _status(client)
+        pid_before_restart = _pid_of(after_up, "light-a")
+        units_up = _units_by_id(after_up)
+        for unit_id in ("light-a", "light-a-child"):
+            if units_up[unit_id].get("state") != "running":
+                _fail("ops", f"up light-a left {unit_id} {units_up[unit_id].get('state')}")
+        _ok_call("ops", client.restart("light-a"), "restart light-a")
+        after_restart = _status(client)
+        pid_after_restart = _pid_of(after_restart, "light-a")
+        if pid_before_restart is None or pid_after_restart == pid_before_restart:
+            _fail(
+                "ops",
+                f"restart did not replace the generation: {pid_before_restart} -> {pid_after_restart}",
+            )
+        _save(evidence, "status.after-ops.json", after_restart)
+        _phase_pass(
+            "ops",
+            f"down/up subtree (light-a + child) ok; restart replaced pid {pid_before_restart} -> {pid_after_restart}",
+        )
+    finally:
+        if proc.poll() is None:
+            proc.send_signal(signal.SIGTERM)
+
+    # -- stop -------------------------------------------------------------
+    try:
+        proc.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=5)
+        _fail("stop", f"daemon ignored SIGTERM; log:\n{_tail(daemon_log)}")
+    if proc.returncode != 0:
+        _fail("stop", f"daemon exited {proc.returncode}; log:\n{_tail(daemon_log)}")
+    _save(evidence, "daemon.log", _tail(daemon_log, limit=100000))
+    _phase_pass("stop", "daemon exited 0 after SIGTERM")
+
+    print(f"workdir: {workdir}")
+    if args.cleanup:
+        shutil.rmtree(workdir, ignore_errors=True)
+        print("workdir removed (--cleanup)")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
