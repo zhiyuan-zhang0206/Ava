@@ -138,7 +138,7 @@ async def test_start_brings_up_tree_with_intact_parent_chain(
     assert os.getsid(parent_pid) == os.getsid(0)
     assert os.getsid(child_pid) == os.getsid(0)
     # Unit output is captured under the run directory.
-    assert (Path(supervisor._log_dir) / "parent.log").exists()
+    assert (Path(supervisor._log_dir) / "parent" / "output.log").exists()
 
 
 async def test_up_is_idempotent(started: StartFactory) -> None:
