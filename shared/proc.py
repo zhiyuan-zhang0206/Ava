@@ -23,7 +23,7 @@ import os
 import signal
 import subprocess
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, Literal
 
 import psutil
 
@@ -234,6 +234,32 @@ def process_cmdline(pid: int) -> list[str] | None:
     except (psutil.Error, OSError):
         return None
     return cmdline or None
+
+
+ChildState = Literal["attached", "detached", "missing", "unverifiable"]
+
+
+def child_state(pid: int, parent_pid: int) -> ChildState:
+    """How live process `pid` reads relative to its expected chain parent.
+
+    The root supervisor's self-check probes each managed child with this:
+    ``attached`` — a genuinely live (zombie ≠ live, the reaper's own rule)
+    direct child of `parent_pid`; ``detached`` — live but parented elsewhere
+    (reparented out of the chain, or the pid was recycled); ``missing`` — no
+    such process, or a corpse awaiting its reaper (neither can serve);
+    ``unverifiable`` — the read itself failed; the answer is never guessed.
+    """
+    try:
+        proc = psutil.Process(pid)
+        status = proc.status()
+        ppid = proc.ppid()
+    except psutil.NoSuchProcess:
+        return "missing"
+    except (psutil.Error, OSError):
+        return "unverifiable"
+    if status == psutil.STATUS_ZOMBIE:
+        return "missing"
+    return "attached" if ppid == parent_pid else "detached"
 
 
 def force_kill(pid: int) -> None:
