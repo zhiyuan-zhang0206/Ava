@@ -179,6 +179,18 @@ _METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {
     ("resolution_status", "unresolved_errors"): "gauge",
     ("resolution_status", "dismissed_warnings"): "gauge",
     ("resolution_status", "dismissed_errors"): "gauge",
+    # PR-flow daily aggregates (task #2139): the macmini sampler re-emits its
+    # whole trailing window on every run, so every numeric field is per-day
+    # absolute state — a gauge replaces the value; a counter/histogram default
+    # would accrue across re-emissions. queue_depth is a point-in-time
+    # reading of the Trunk queue, same class.
+    ("pr_flow_daily", "merged_count"): "gauge",
+    ("pr_flow_daily", "ready_to_merge_median_seconds"): "gauge",
+    ("pr_flow_daily", "ready_to_merge_p90_seconds"): "gauge",
+    ("pr_flow_daily", "qa_rounds_mean"): "gauge",
+    ("pr_flow_daily", "qa_rereview_share"): "gauge",
+    ("pr_flow_daily", "flake_new_quarantines"): "gauge",
+    ("pr_flow_run", "queue_depth"): "gauge",
     # The agent registry max id is an absolute high-water mark, not a sum —
     # as an int it would default to a Counter and accrue value on every
     # sample. A gauge holds the latest sample (task #2010).

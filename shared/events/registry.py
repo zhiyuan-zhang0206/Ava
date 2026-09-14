@@ -32,6 +32,8 @@ from shared.events.payloads import (
     LokiWritePathProbeFailed,
     NodeExit,
     PluginActivation,
+    PrFlowDaily,
+    PrFlowRun,
     RetentionClass,
     SdkCall,
     ServiceStarted,
@@ -465,6 +467,17 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         "ci_usage_daily",
         "daily CI-minute reconciliation totals (C9)",
         payload=CiUsageDaily,
+    ),
+    "pr_flow_daily": _telemetry(
+        "pr_flow_daily",
+        "daily PR-flow aggregates — ready->merged percentiles, QA rounds, "
+        "flake discoveries (absolute gauges, one sample per complete day)",
+        payload=PrFlowDaily,
+    ),
+    "pr_flow_run": _telemetry(
+        "pr_flow_run",
+        "PR-flow sampler run — point-in-time Trunk queue depth (absolute state)",
+        payload=PrFlowRun,
     ),
     "task_reminder_digest": _telemetry(
         "task_reminder_digest",

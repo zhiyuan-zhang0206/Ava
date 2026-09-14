@@ -140,6 +140,28 @@ class PlatformBackend(abc.ABC):
         """Remove the recurring content-refresh pass for ``slug``."""
         ...
 
+    # -- pr flow -------------------------------------------------------------
+
+    @abc.abstractmethod
+    def register_pr_flow_job(self) -> None:
+        """Register the daily PR-flow sampler job (task #2139).
+
+        Reached only through ``shared.os_pr_flow.register_pr_flow_job``, which
+        applies the ``os_jobs_enabled()`` gate plus the credential gate (gh +
+        Trunk token + production home) — call that, not this.
+
+        Idempotent — re-running replaces the definition. Raises ``RuntimeError``
+        on registration failure (POSIX). Windows carries no registration path
+        for a script-mode command and stays a no-op.
+        """
+        ...
+
+    @abc.abstractmethod
+    def unregister_pr_flow_job(self, slug: str) -> None:
+        """Remove the daily PR-flow sampler job for ``slug``. Safe when none is
+        registered."""
+        ...
+
     # -- watchdog probe -----------------------------------------------------
 
     @abc.abstractmethod
@@ -293,6 +315,19 @@ class MacPlatformBackend(PlatformBackend):
 
         _unregister_macos(slug)
 
+    # -- pr flow --
+
+    def register_pr_flow_job(self) -> None:
+        from shared.os_pr_flow import _register_macos
+
+        if _register_macos() != 0:
+            raise RuntimeError("PR-flow registration failed on macOS")
+
+    def unregister_pr_flow_job(self, slug: str) -> None:
+        from shared.os_pr_flow import _unregister_macos
+
+        _unregister_macos(slug)
+
     # -- watchdog probe --
 
     def register_watchdog_probe(self, role: str, interval_s: int = 60) -> None:
@@ -402,6 +437,19 @@ class LinuxPlatformBackend(PlatformBackend):
 
     def unregister_packages_job(self, slug: str) -> None:
         from shared.os_packages import _unregister_linux
+
+        _unregister_linux(slug)
+
+    # -- pr flow --
+
+    def register_pr_flow_job(self) -> None:
+        from shared.os_pr_flow import _register_linux
+
+        if _register_linux() != 0:
+            raise RuntimeError("PR-flow registration failed on Linux")
+
+    def unregister_pr_flow_job(self, slug: str) -> None:
+        from shared.os_pr_flow import _unregister_linux
 
         _unregister_linux(slug)
 
@@ -583,6 +631,24 @@ class WindowsPlatformBackend(PlatformBackend):
         from shared.os_packages import _unregister_windows
 
         _unregister_windows(slug)
+
+    # -- pr flow --
+
+    def register_pr_flow_job(self) -> None:
+        # Deliberate no-op: this job's command is a script invocation, while
+        # schtasks tasks here run the CLI (`python -m cli.main <argv>`) — and
+        # the credential gate keeps the job off Windows machines in practice
+        # (shared/os_pr_flow.py explains both).
+        from loguru import logger
+
+        logger.info("PR-flow sampler job: no Windows registration path; skipped")
+
+    def unregister_pr_flow_job(self, slug: str) -> None:
+        # Nothing to remove (see register_pr_flow_job); kept symmetric so the
+        # ABC contract holds on every platform.
+        from loguru import logger
+
+        logger.debug("PR-flow sampler job: no Windows registration path (slug={})", slug)
 
     # -- watchdog probe --
 

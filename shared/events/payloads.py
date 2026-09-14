@@ -450,6 +450,41 @@ class CiUsageDaily(TypedDict):
     est_usd: float
 
 
+class PrFlowDaily(TypedDict):
+    """`pr_flow_daily` payload — scripts/pr_flow_export.py (macmini daily job).
+
+    One event per complete cluster-tz day in the trailing window, re-emitted
+    on every run so the whole window stays inside Prometheus's retention.
+    Every numeric field is absolute per-day state, never a sum, and the OTLP
+    disposition records each as an ObservableGauge
+    (``shared/telemetry_otlp.py``) — a counter or histogram would accrue
+    across re-emissions. Fields are absent when the day has no such sample
+    (no merges -> no percentile/round values; an unreachable flaky source
+    omits ``flake_new_quarantines`` rather than claiming zero).
+    """
+
+    day: str  # cluster-tz date (Asia/Shanghai fleet clock)
+    merged_count: int  # PRs whose merged_at falls on the day
+    ready_to_merge_median_seconds: NotRequired[float]
+    ready_to_merge_p90_seconds: NotRequired[float]
+    qa_rounds_mean: NotRequired[float]  # ava-qa receipts per merged PR
+    qa_rereview_share: NotRequired[float]  # share with a post-receipt head change
+    flake_new_quarantines: NotRequired[int]  # tests quarantined on the day
+
+
+class PrFlowRun(TypedDict):
+    """`pr_flow_run` payload — scripts/pr_flow_export.py (macmini daily job).
+
+    One event per run: the point-in-time Trunk queue depth sample. Absolute
+    state -> ObservableGauge (``ava_pr_flow_run_queue_depth_ratio``). The
+    event is emitted even when the depth sample is unavailable, so the daily
+    breadcrumb survives a Trunk outage; the missing field stays absent (an
+    absent optional metric is not zero).
+    """
+
+    queue_depth: NotRequired[int]
+
+
 class TaskReminderDigest(TypedDict):
     """`task_reminder_digest` payload — task-maintenance daemon."""
 

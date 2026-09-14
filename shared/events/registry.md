@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 24 | events table |
-| telemetry (category=telemetry) | `events` | 168 | events table |
+| telemetry (category=telemetry) | `events` | 170 | events table |
 | log (category=log) | `events` | 11 | events table |
 | file-only (destination=file) | file log | 1 | file only (not the events table) |
 | SSE live | Redis → frontend (not persisted) | 30 role | live projection |
@@ -91,7 +91,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 168)
+## 3. Telemetry events (category=telemetry, 170)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -161,6 +161,8 @@ consumers: see the comments at each emit point.
 | `heartbeat_backoff_raised` | no-op nudge backoff level raised | noise | level, interval_seconds | — | events |
 | `heartbeat_backoff_reset` | nudge backoff reset by real inbound or pause | noise | previous_level, reason | — | events |
 | `ci_usage_daily` | daily CI-minute reconciliation totals (C9) | observation | day, window_start, window_end, runs, attributed_runs, unattributed_runs, total_minutes, attributed_minutes, linux_minutes, macos_minutes, appended_runs, est_usd | — | events |
+| `pr_flow_daily` | daily PR-flow aggregates — ready->merged percentiles, QA rounds, flake discoveries (absolute gauges, one sample per complete day) | observation | day, merged_count, ready_to_merge_median_seconds, ready_to_merge_p90_seconds, qa_rounds_mean, qa_rereview_share, flake_new_quarantines | — | events |
+| `pr_flow_run` | PR-flow sampler run — point-in-time Trunk queue depth (absolute state) | observation | queue_depth | — | events |
 | `task_reminder_digest` | overdue-task owner digest | noise | owner_id, task_count, task_ids | — | events |
 | `task_escalation` | stalled-task escalation | observation | owner_id, task_count, task_ids, leg | — | events |
 | `delivery_stalled` | delivery backlog | anomaly | inbound_id, age_s | — | events |
