@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import gzip
 import subprocess
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -97,9 +97,17 @@ def test_migration_update_creates_and_verifies_pre_update_dump(
     dump.write_bytes(b"custom-pg-dump")
     backup_calls: list[float] = []
     verified: list[Path] = []
+    sinks: list[Callable[[str], None] | None] = []
 
-    def _run_backup(*, timeout_s: float, pre_update: bool, publish: bool) -> Path:
+    def _run_backup(
+        *,
+        timeout_s: float,
+        pre_update: bool,
+        publish: bool,
+        progress: Callable[[str], None] | None = None,
+    ) -> Path:
         backup_calls.append(timeout_s)
+        sinks.append(progress)
         assert pre_update is True
         assert publish is False
         return dump
@@ -109,9 +117,58 @@ def test_migration_update_creates_and_verifies_pre_update_dump(
 
     assert _git.snapshot_pre_update_data("TARGETSHA") == dump
     assert backup_calls == [_git._PRE_UPDATE_DUMP_TIMEOUT_S]
+    assert callable(sinks[0]), "the dump must be narrated for the stall watchdog"
     assert verified == [dump]
     out = capsys.readouterr().out
     assert f"→ pre-update data snapshot: {dump} (verified)" in out
+
+
+def test_pre_update_data_snapshot_narrates_the_dump_on_stdout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The dump's heartbeat reaches stdout — what the rollout `tee` turns into the
+    log the stall watchdog reads — so a slow snapshot reads as progress, not silence."""
+    _patch_migration_sets(monkeypatch, {"baseline", "20260825T010101_expand"}, {"baseline"})
+    dump = tmp_path / "pre-update.dump"
+
+    def _run_backup(
+        *,
+        timeout_s: float,
+        pre_update: bool,
+        publish: bool,
+        progress: Callable[[str], None] | None = None,
+    ) -> Path:
+        _ = timeout_s, pre_update, publish
+        assert progress is not None
+        progress("pg_dump started (bounded at 20 min)")
+        progress("pg_dump 61s, 512.4 MiB written")
+        return dump
+
+    def _no_verify(_artifact: Path) -> None:
+        pass
+
+    monkeypatch.setattr(backup, "run_backup", _run_backup)
+    monkeypatch.setattr(_git, "_verify_snapshot_artifact", _no_verify)
+
+    assert _git.snapshot_pre_update_data("TARGETSHA") == dump
+
+    out = capsys.readouterr().out
+    assert "→ pre-update data snapshot: started (dump bounded at 20 min)" in out
+    assert "→ pre-update data snapshot: pg_dump started (bounded at 20 min)" in out
+    assert "→ pre-update data snapshot: pg_dump 61s, 512.4 MiB written" in out
+    assert f"→ pre-update data snapshot: {dump} (verified)" in out
+
+
+def test_snapshot_heartbeat_cadence_leaves_headroom_inside_the_stall_window() -> None:
+    """The dump heartbeat must beat far inside the rollout stall window.
+
+    The 2026-09-14 kill was a healthy 20-minute dump sitting silent past the
+    900 s no-progress clock; the cadence is the fix's premise, so it is pinned
+    here rather than left to drift apart from either constant.
+    """
+    from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S
+
+    assert backup._PROGRESS_INTERVAL_S * 3 <= NO_PROGRESS_TIMEOUT_S
 
 
 def test_pre_update_data_snapshot_wraps_backup_failure(
@@ -120,8 +177,13 @@ def test_pre_update_data_snapshot_wraps_backup_failure(
     """A migration-bearing rollout fails before the stop when pg_dump cannot run."""
     _patch_migration_sets(monkeypatch, {"baseline", "20260825T010101_expand"}, {"baseline"})
 
-    def _run_backup(*, timeout_s: float, pre_update: bool) -> Path:
-        _ = timeout_s
+    def _run_backup(
+        *,
+        timeout_s: float,
+        pre_update: bool,
+        progress: Callable[[str], None] | None = None,
+    ) -> Path:
+        _ = timeout_s, progress
         assert pre_update is True
         raise RuntimeError("pg_dump failed")
 
@@ -138,8 +200,13 @@ def test_pre_update_data_snapshot_never_exposes_backup_db_url(
     _patch_migration_sets(monkeypatch, {"baseline", "20260825T010101_expand"}, {"baseline"})
     db_url = "postgresql://ava:secret-token@db.example/ava"
 
-    def _run_backup(*, timeout_s: float, pre_update: bool) -> Path:
-        _ = pre_update
+    def _run_backup(
+        *,
+        timeout_s: float,
+        pre_update: bool,
+        progress: Callable[[str], None] | None = None,
+    ) -> Path:
+        _ = pre_update, progress
         raise subprocess.TimeoutExpired(["pg_dump", "--dbname", db_url], timeout_s)
 
     monkeypatch.setattr(backup, "run_backup", _run_backup)
@@ -232,7 +299,14 @@ def test_pre_update_data_snapshot_holds_backup_lock_through_verification(
         finally:
             events.append("lock-exit")
 
-    def _run_backup(*, timeout_s: float, pre_update: bool, publish: bool) -> Path:
+    def _run_backup(
+        *,
+        timeout_s: float,
+        pre_update: bool,
+        publish: bool,
+        progress: Callable[[str], None] | None = None,
+    ) -> Path:
+        assert callable(progress)
         assert timeout_s == _git._PRE_UPDATE_DUMP_TIMEOUT_S
         assert pre_update is True
         assert publish is False

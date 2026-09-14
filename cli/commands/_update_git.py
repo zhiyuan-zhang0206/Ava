@@ -617,6 +617,12 @@ def _verify_snapshot_artifact_inner(artifact: Path) -> None:
             )
 
 
+def _snapshot_progress(line: str) -> None:
+    """Narrate the snapshot on stdout — the rollout `tee`'s log source, whose
+    mtime `stalled_rollout` reads as progress (2026-09-14 silent-dump reclaim)."""
+    print(f"→ pre-update data snapshot: {line}", flush=True)
+
+
 def snapshot_pre_update_data(target_sha: str) -> Path | None:
     """Verify pre-upgrade recovery evidence before anything is stopped.
 
@@ -625,6 +631,12 @@ def snapshot_pre_update_data(target_sha: str) -> Path | None:
     broken enabled chain fails before maintenance, without a full-dump fallback.
     Code-only updates return None. Recovery reports the returned artifact's
     actual restore method; physical recovery follows PITR's retention window.
+
+    The dump narrates itself on the rollout output — a start line plus per-stage
+    progress lines (see `_snapshot_progress`): the stall watchdog reclaims log
+    silence at 900 s, and while these heartbeats flow an alive-but-stuck dump
+    rides to its own `_PRE_UPDATE_DUMP_TIMEOUT_S` bound instead (enforced by the
+    same loop); a snapshot that stops heartbeating is reclaimed as before.
     """
     from cli.commands._cluster_rollback import _migration_set_at_commit
 
@@ -654,6 +666,8 @@ def snapshot_pre_update_data(target_sha: str) -> Path | None:
 
     from services.backup import backup_lock, run_backup
 
+    _snapshot_progress(f"started (dump bounded at {_PRE_UPDATE_DUMP_TIMEOUT_S / 60:.0f} min)")
+
     # Hold the same lock as the daily writer through the restore listing. A
     # verified dump must remain untouched until this function hands its path to
     # recovery; otherwise a scheduled writer can sweep its partial or replace
@@ -664,6 +678,7 @@ def snapshot_pre_update_data(target_sha: str) -> Path | None:
                 timeout_s=_PRE_UPDATE_DUMP_TIMEOUT_S,
                 pre_update=True,
                 publish=False,
+                progress=_snapshot_progress,
             )
         except subprocess.TimeoutExpired:
             raise RuntimeError(
