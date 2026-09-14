@@ -272,6 +272,13 @@ def make_hook_runner(
                                 if callable(m) and not isinstance(m, type):
                                     reducer = m
                                     break
+                                if _state._is_messages_reducer_form(m):
+                                    # The messages channel's delta form (write
+                                    # switch, task #3180): co-writes merge
+                                    # through the guarded single-merge, same
+                                    # as the working-copy / plugin path.
+                                    reducer = _state.guarded_add_messages
+                                    break
                         if reducer is None:
                             raise RuntimeError(
                                 f"{hook_name} hooks {prior!r} and {this!r} both wrote "

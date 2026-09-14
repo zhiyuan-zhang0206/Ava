@@ -20,6 +20,7 @@ from shared import maintenance, maintenance_cohort, pause_owner
 from shared.config import settings
 from shared.context import AvaContext
 from shared.db import insert_inbound_message
+from shared.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from shared.machine import machine_name
 from tests.agent.test_maintenance import WHEN, _agent
 from tests.agent.test_maintenance import isolate as isolate
@@ -66,9 +67,15 @@ async def _failed_turn(
     with pytest.raises(RuntimeError, match="ordinary node failure"):
         await host.run_turn(agent)
     assert calls == ["save", "fail"]
-    cold = await AsyncPostgresSaver(pool).aget_tuple(config)
+    reader = AsyncPostgresSaver(pool)
+    wrap_saver_reads_with_delta_reconstruction(reader)
+    cold = await reader.aget_tuple(config)
     assert cold is not None
-    assert tail not in cold.checkpoint["channel_values"]["messages"]
+    # Delta write model (#3180): the nstep throttle retires once a thread
+    # shows a DeltaChannel, so a failed superstep's writes are durable at
+    # once — the crash shape is "tail persisted, turn failed" (the buffered
+    # and unflushed shape no longer exists for delta threads).
+    assert tail in cold.checkpoint["channel_values"]["messages"]
     return host, saver, config, tail, calls
 
 
@@ -100,7 +107,9 @@ async def test_prior_ordinary_failure_can_drain_without_replaying_work(
     assert current.maintenance.drained == (agent,)
     maintenance_cohort.verify_drained(db_conn, current.maintenance)
     assert calls == ["save", "fail"]
-    cold = await AsyncPostgresSaver(aops_pool).aget_tuple(config)
+    reader = AsyncPostgresSaver(aops_pool)
+    wrap_saver_reads_with_delta_reconstruction(reader)
+    cold = await reader.aget_tuple(config)
     assert cold is not None and tail in cold.checkpoint["channel_values"]["messages"]
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE id=%s", (chat,)
@@ -142,9 +151,11 @@ async def test_prior_tail_flush_outage_defers_receipt_until_reflushed(
         with pytest.raises(psycopg.OperationalError):
             await host.run_turn(agent)
     # A database-outage flush failure is crash-equivalent: recorded as an
-    # undelivered receipt, never latched as a blocking failure. The buffered
-    # tail is NOT silently cleared or dropped — it stays unflushed, and the
-    # drain must not certify before a real re-flush succeeds.
+    # undelivered receipt, never latched as a blocking failure. The tail must
+    # stay durable — never silently cleared or dropped — and the drain must
+    # not certify before a successful re-flush; for delta threads the flush
+    # itself is a no-op (#3180), and what this pins is the deferral path and
+    # its failure handling.
     current = maintenance.require_operation("failed-flush", WHEN)
     assert current.maintenance is not None
     assert current.maintenance.failures == {}
@@ -154,8 +165,10 @@ async def test_prior_tail_flush_outage_defers_receipt_until_reflushed(
         "SELECT status,claimed_at,applied_at FROM inbound_messages WHERE id=%s",
         (hold.commands[agent],),
     ).fetchone() == ("pending", None, None)
-    cold = await AsyncPostgresSaver(aops_pool).aget_tuple(config)
-    assert cold is not None and tail not in cold.checkpoint["channel_values"]["messages"]
+    reader = AsyncPostgresSaver(aops_pool)
+    wrap_saver_reads_with_delta_reconstruction(reader)
+    cold = await reader.aget_tuple(config)
+    assert cold is not None and tail in cold.checkpoint["channel_values"]["messages"]
     # Restoring the channel re-drives the receipt through the held-control
     # path: the wake scan keeps the agent woken (no failure fence), the held
     # controls re-flush the buffered tail BEFORE claiming the restart, and
@@ -176,6 +189,8 @@ async def test_prior_tail_flush_outage_defers_receipt_until_reflushed(
         "SELECT runtime_owner,runtime_generation,incarnation_resources FROM agents_meta WHERE id=%s",
         (agent,),
     ).fetchone() == (None, None, None)
-    cold = await AsyncPostgresSaver(aops_pool).aget_tuple(config)
+    reader = AsyncPostgresSaver(aops_pool)
+    wrap_saver_reads_with_delta_reconstruction(reader)
+    cold = await reader.aget_tuple(config)
     assert cold is not None and tail in cold.checkpoint["channel_values"]["messages"]
     assert calls == ["save", "fail"]
