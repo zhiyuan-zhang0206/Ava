@@ -360,8 +360,8 @@ os.environ["AVA_PERMISSIONS_HELPER_SPAWN"] = "false"
 # close: the signed helper stamps AVA_PERMISSIONS_HELPER_PID (its own pid)
 # into every direct child (services/permissions_helper/helper/main.swift),
 # descendants inherit it, and shared/helper_chain_guard.parent_chain_intact
-# treats a marked process whose ppid is not the helper as an orphaned helper
-# child — the agent-host heartbeat then self-terminates with os._exit(70),
+# treats a marked process whose ancestor chain lacks the helper as an
+# orphaned child — the agent-host heartbeat then self-terminates with os._exit(70),
 # killing an in-process test run (test_host_turn_progress_publish.py,
 # 2026-09-12; 4 passed then rc=70). Popped, never set empty: an empty value
 # is a MALFORMED marker, i.e. a broken chain. PORT (which helper instance)
