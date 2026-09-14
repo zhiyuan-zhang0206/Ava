@@ -816,7 +816,9 @@ digest, blockers, object counts and byte totals with:
 ava pitr retention inspect
 ```
 
-A blocked plan exits 2 and always has zero eligible objects. The planner flag
+A blocked plan exits 2 and always has zero eligible objects; with no plan on
+disk (before the first tick, or on a unit without a retention daemon) `retention
+inspect` prints a note and exits 1. The planner flag
 alone grants no delete credential and calls no remote delete API; deletion has
 its own gate -- the arm carriers and the explicit commands below. The gate does
 not alter Cloud Storage soft delete and leaves daily/pre-update `pg_dump`

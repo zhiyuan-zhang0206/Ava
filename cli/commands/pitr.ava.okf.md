@@ -10,8 +10,9 @@ tags:
 # PITR CLI Commands
 
 `cli/commands/pitr.py` backs the `ava pitr` command group. `retention inspect`
-renders the newest local retention dry-run plan without a delete surface. The
-retention deletion gate adds its only sanctioned flip commands: `retention
+renders the newest local retention dry-run plan without a delete surface; with
+no plan on disk it prints a note to stderr and exits 1. The retention deletion
+gate adds its only sanctioned flip commands: `retention
 status` (carriers, latest plan, daemon state machine, journal tail), `retention
 arm --digest <SHA256> --confirm` (approve the current plan digest; fails closed
 on a blocked plan or a stale digest), `retention disable --confirm` (clear the
