@@ -57,6 +57,13 @@ row header. All sections are **expanded by default** (`collapsed: false`,
 The dashboard timezone is `Asia/Shanghai` (2026-08-23 #384). All panels follow
 the dashboard time picker; there are no per-panel `timeFrom` overrides.
 
+Panel titles state their time basis wherever the rendered number would not
+reveal it (user ruling 2026-09-14, task #3362): `(per minute)` on per-minute
+rate panels, `(window)` on panels whose value is a selected-window total or
+average over `$__range`. Rates whose unit is already self-evident (`/ minute`,
+`/s`, TPS, `events/s`) carry no extra qualifier, and smoothing-bucket widths
+stay in panel descriptions.
+
 The dashboard now has 82 panel entries (75 panels + 7 row headers): core
 ids remain below 1000 (the four new stat tiles are 44–47), plugin ids are
 >= 1000, host/data-plane panels are 2101–2112, the cost-analysis panels are
