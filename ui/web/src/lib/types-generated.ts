@@ -419,6 +419,11 @@ export interface paths {
          *
          *     Both paths forward to the home runner. A missing agent returns 404; an
          *     already-terminated identity is a no-op for graceful termination.
+         *
+         *     On success the response additionally carries `open_tasks` — the tasks the
+         *     agent still owns (in_progress / ongoing; at most five, most recently
+         *     updated first) as it goes down. The hint is advisory: a failed read leaves
+         *     it null and never changes the termination result.
          */
         post: operations["post_agent_terminate_api_agents__agent_id__terminate_post"];
         delete?: never;
@@ -6203,6 +6208,40 @@ export interface components {
             task_id?: number | null;
         };
         /**
+         * OpenTaskRow
+         * @description One open task a terminating agent still owns; `updated_at` is ISO-8601.
+         *
+         *     The terminate hint shows at most five, most recently updated first.
+         */
+        OpenTaskRow: {
+            /** Id */
+            id: number;
+            /** Title */
+            title: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "in_progress" | "ongoing";
+            /** Updated At */
+            updated_at: string;
+        };
+        /**
+         * OpenTasksHint
+         * @description The open tasks (in_progress / ongoing) a terminating agent still owns.
+         *
+         *     Advisory only — termination proceeds either way. `tasks` holds at most the
+         *     five most recently updated rows; `more` counts the ones beyond those.
+         */
+        OpenTasksHint: {
+            /** Count */
+            count: number;
+            /** Tasks */
+            tasks: components["schemas"]["OpenTaskRow"][];
+            /** More */
+            more: number;
+        };
+        /**
          * OpsMonitorMeta
          * @description Window + provenance of one `/api/ops/monitor` response.
          */
@@ -7584,6 +7623,9 @@ export interface components {
          *     `already_terminated`: agent was already dead. Graceful termination is a
          *         no-op. Hosted force instead returns enqueued until its exact original
          *         host can prove quiescence; metadata status alone is not exit evidence.
+         *
+         *     `open_tasks`: the still-open tasks the agent owned as it went down — an
+         *         advisory hint, null when it owned none or the hint read failed.
          */
         TerminateAgentResponse: {
             /**
@@ -7591,6 +7633,7 @@ export interface components {
              * @enum {string}
              */
             status: "enqueued" | "already_terminated";
+            open_tasks?: components["schemas"]["OpenTasksHint"] | null;
         };
         /**
          * TextContentBlock

@@ -335,7 +335,9 @@ def build_server() -> MCPServer:
         The agent's history survives either way, and `send_message` revives it,
         so this is reversible; it is destructive in that it stops running work.
         `message` saves a final instruction for that later revival without
-        asking the agent to respond before exiting.
+        asking the agent to respond before exiting. The result also reports
+        `open_tasks` — the tasks the agent still owns as it goes down (at most
+        five, most recently updated first; null when it owns none).
         """
         return await _request(
             "POST",

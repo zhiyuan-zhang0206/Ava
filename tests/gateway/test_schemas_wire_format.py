@@ -132,7 +132,7 @@ def test_resolve_notice_in_strips_and_rejects_empty_reply() -> None:
     import pytest
     from pydantic import ValidationError
 
-    # reply rides _UserContent: stripped, and whitespace-only is rejected.
+    # reply rides UserContent: stripped, and whitespace-only is rejected.
     assert ResolveNoticeIn(action="answer", reply="  hi  ").reply == "hi"
     with pytest.raises(ValidationError):
         ResolveNoticeIn(action="answer", reply="   ")

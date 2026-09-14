@@ -3,10 +3,14 @@
 Both graceful and force requests route to the home runner. It owns the hosted
 turn and local execution resources; gateway placement must not choose a local
 shortcut for a remote agent.
+
+`TestTerminateOpenTasksHint` covers the advisory `open_tasks` hint the gateway
+attaches to the response once the forward returns.
 """
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 import psycopg
@@ -95,7 +99,7 @@ class TestTerminateRouting:
                 json={"message": "retain this note"},
             )
         assert resp.status_code == 200
-        assert resp.json() == {"status": "enqueued"}
+        assert resp.json() == {"status": "enqueued", "open_tasks": None}
         assert captured["agent_id"] == agent_id
         assert captured["path"] == f"/api/agents/{agent_id}/terminate"
         assert captured["json_body"]["message"] == "retain this note"
@@ -122,7 +126,7 @@ class TestTerminateRouting:
                 json={"force": True, "source": "user"},
             )
         assert resp.status_code == 200
-        assert resp.json() == {"status": "enqueued"}
+        assert resp.json() == {"status": "enqueued", "open_tasks": None}
         assert captured["json_body"]["force"] is True
         assert captured["json_body"]["source"] == "user"
 
@@ -187,5 +191,110 @@ def test_remote_home_machine_is_forwarded(
         monkeypatch.setattr(forward_module, "_enqueue_lifecycle", _capture_enqueue)  # pyright: ignore[reportUnknownArgumentType]
         resp = client.post(f"/api/agents/{agent_id}/terminate")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "enqueued"}
+    assert resp.json() == {"status": "enqueued", "open_tasks": None}
     assert captured["target"] == "stale-wsl"
+
+
+def _insert_open_task(
+    db_conn: psycopg.Connection,
+    *,
+    owner: int,
+    title: str,
+    status: str = "in_progress",
+    age_minutes: int = 0,
+) -> int:
+    """Seed one agent_tasks row for `owner`, `age_minutes` old."""
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_tasks (title, description, status, created_by, owner, updated_at) "
+            "VALUES (%s, '', %s, 'user', %s, now() - make_interval(mins => %s)) RETURNING id",
+            (title, status, owner, age_minutes),
+        )
+        task_id: int = cur.fetchone()[0]  # type: ignore[index]
+    db_conn.commit()
+    return task_id
+
+
+class TestTerminateOpenTasksHint:
+    """The terminate response carries `open_tasks` — the agent's still-open
+    tasks, read at the gateway after the home runner accepts the termination."""
+
+    def test_no_open_tasks_reports_null(
+        self, _force_local_machine: str, db_conn: psycopg.Connection
+    ) -> None:
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            _set_agent_machine(db_conn, agent_id, "local-test")
+            resp = client.post(f"/api/agents/{agent_id}/terminate")
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "enqueued", "open_tasks": None}
+
+    def test_open_tasks_reported_newest_first(
+        self, _force_local_machine: str, db_conn: psycopg.Connection
+    ) -> None:
+        """Only in_progress / ongoing count; rows come newest first."""
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            _set_agent_machine(db_conn, agent_id, "local-test")
+            _insert_open_task(
+                db_conn, owner=agent_id, title="done task", status="done", age_minutes=1
+            )
+            _insert_open_task(
+                db_conn, owner=agent_id, title="cancelled task", status="cancelled", age_minutes=2
+            )
+            older = _insert_open_task(
+                db_conn, owner=agent_id, title="older open task", age_minutes=30
+            )
+            newer = _insert_open_task(
+                db_conn, owner=agent_id, title="newer ongoing task", status="ongoing", age_minutes=5
+            )
+            resp = client.post(f"/api/agents/{agent_id}/terminate")
+        assert resp.status_code == 200
+        hint = resp.json()["open_tasks"]
+        assert hint["count"] == 2
+        assert hint["more"] == 0
+        assert [(task["id"], task["status"]) for task in hint["tasks"]] == [
+            (newer, "ongoing"),
+            (older, "in_progress"),
+        ]
+        assert hint["tasks"][0]["title"] == "newer ongoing task"
+        assert datetime.fromisoformat(hint["tasks"][0]["updated_at"])
+
+    def test_more_than_five_truncates_to_the_five_newest(
+        self, _force_local_machine: str, db_conn: psycopg.Connection
+    ) -> None:
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            _set_agent_machine(db_conn, agent_id, "local-test")
+            seeded = [
+                _insert_open_task(
+                    db_conn, owner=agent_id, title=f"open task {i}", age_minutes=10 - i
+                )
+                for i in range(7)
+            ]
+            resp = client.post(f"/api/agents/{agent_id}/terminate")
+        assert resp.status_code == 200
+        hint = resp.json()["open_tasks"]
+        assert hint["count"] == 7
+        assert hint["more"] == 2
+        assert [task["id"] for task in hint["tasks"]] == list(reversed(seeded))[:5]
+
+    def test_hint_read_failure_never_blocks_termination(
+        self,
+        _force_local_machine: str,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The hint is advisory: a failed read leaves it null and the
+        termination result is unchanged."""
+
+        def _boom(_pool: object, _agent_id: int) -> None:
+            raise psycopg.OperationalError("hint read failed")
+
+        monkeypatch.setattr(lifecycle_module, "_open_tasks_hint_blocking", _boom)
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            _set_agent_machine(db_conn, agent_id, "local-test")
+            resp = client.post(f"/api/agents/{agent_id}/terminate")
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "enqueued", "open_tasks": None}

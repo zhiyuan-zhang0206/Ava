@@ -35,8 +35,11 @@ __all_for_ava__ = [
     "CommandInfo",
     "Machine",
     "Neighbor",
+    "OpenTaskRow",
+    "OpenTasksHint",
     "RestartResult",
     "ResurrectResult",
+    "TerminateOutcome",
     "TerminateResult",
     "commands",
     "get_ancestors",
@@ -142,6 +145,60 @@ def _relative_time(dt: datetime) -> str:
     return f"{days}d ago"
 
 
+@dataclass
+class OpenTaskRow:
+    """One open task a terminated agent still owns: its id, title, status and
+    last update time."""
+
+    id: int
+    title: str
+    status: str
+    updated_at: datetime
+
+    def __str__(self) -> str:
+        return f"#{self.id} | {self.title} | {self.status} | {_relative_time(self.updated_at)}"
+
+
+@dataclass
+class OpenTasksHint:
+    """The open tasks a terminated agent still owns as it goes down: the total
+    `count`, at most the five most recently updated `tasks`, and `more` — how
+    many beyond those five remain."""
+
+    count: int
+    tasks: list[OpenTaskRow]
+    more: int
+
+    def __str__(self) -> str:
+        lines = [f"{self.count} open task(s):", *(str(task) for task in self.tasks)]
+        if self.more:
+            lines.append(f"... and {self.more} more")
+        return "\n".join(lines)
+
+
+class TerminateOutcome(str):
+    """What a terminate call returned: the acceptance status as a string —
+    compare it directly ("enqueued" / "already_terminated") — plus `status` as
+    the enum, and `open_tasks`: the tasks the agent still owned as it went
+    down, or None."""
+
+    __slots__ = ("open_tasks", "status")
+
+    status: TerminateResult
+    open_tasks: OpenTasksHint | None
+
+    def __new__(
+        cls, status: TerminateResult, open_tasks: OpenTasksHint | None = None
+    ) -> TerminateOutcome:
+        self = super().__new__(cls, status.value)
+        self.status = status
+        self.open_tasks = open_tasks
+        return self
+
+    def __repr__(self) -> str:
+        return f"TerminateOutcome(status={self.status.value!r}, open_tasks={self.open_tasks!r})"
+
+
 def get_neighbors(agent_id: int, depth: int = 1, limit: int = 20) -> list[Neighbor]:
     """Rank the agents most strongly tied to `agent_id`.
 
@@ -220,6 +277,25 @@ def _row_from_dict(data: dict) -> AgentRow:
             if data.get("heartbeat_paused_until")
             else None
         ),
+    )
+
+
+def _open_tasks_from_dict(data: dict | None) -> OpenTasksHint | None:
+    """Gateway JSON dict → OpenTasksHint; null passes through."""
+    if data is None:
+        return None
+    return OpenTasksHint(
+        count=data["count"],
+        tasks=[
+            OpenTaskRow(
+                id=row["id"],
+                title=row["title"],
+                status=row["status"],
+                updated_at=datetime.fromisoformat(row["updated_at"]),
+            )
+            for row in data["tasks"]
+        ],
+        more=data["more"],
     )
 
 
@@ -327,14 +403,22 @@ def terminate(
     *,
     message: str | None = None,
     force: bool = False,
-) -> TerminateResult:
+) -> TerminateOutcome:
     """End an agent after its current step. `message` is saved without another
     response and is available if the agent is later revived. `force=True`
-    interrupts work; an `enqueued` result confirms acceptance, not exit."""
+    interrupts work; an `enqueued` result confirms acceptance, not exit.
+
+    The result compares as the status string (`== "enqueued"` works as before)
+    and carries `open_tasks`: the tasks the agent still owns as it goes down
+    (at most five, most recently updated first), or None when it leaves none."""
     agent_id = coerce_typed(agent_id, "agent_id", int)
     message = coerce_str(message, "message", allow_none=True)
     force = coerce_typed(force, "force", bool)
-    return TerminateResult(_client.terminate(agent_id, message=message, force=force))
+    data = _client.terminate(agent_id, message=message, force=force)
+    return TerminateOutcome(
+        TerminateResult(data["status"]),
+        _open_tasks_from_dict(data["open_tasks"]),
+    )
 
 
 def restart(agent_id: int) -> RestartResult:
