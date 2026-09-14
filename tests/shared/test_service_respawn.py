@@ -143,6 +143,67 @@ def test_respawn_can_give_a_session_a_bounded_graceful_stop(
     assert service.kill_calls == [("t-otel-collector", True, 5.0)]
 
 
+# ── launch-context instrument (task #3346) ──────────────────────────────────
+
+
+def test_respawn_logs_the_chain_domain_on_macos(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Every service-session launch records the launchd domain of the chain that
+    made it (plus the caller pid): the session inherits that domain, so this is
+    the line that answers "which respawner put this session in Background?"
+    (the browser-heal attribution gap of task #3346)."""
+    monkeypatch.setattr(_sr_mod, "session_name", lambda svc: f"t-{svc}")  # pyright: ignore[reportUnknownArgumentType]
+    service = _FakeBackend("service")
+    monkeypatch.setattr("shared.session_backend.get_backend", lambda: service)
+    monkeypatch.setattr(_sr_mod, "IS_MACOS", True)
+    monkeypatch.setattr(_sr_mod, "gui_session_domain", lambda: "Background")
+
+    with caplog.at_level(logging.INFO, logger="shared.service_respawn"):
+        assert respawn_service(
+            "browser", ".venv/bin/python -m services.browser.daemon", Path("/repo")
+        )
+
+    assert any(
+        "t-browser: launching (chain domain: Background, caller pid:" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_respawn_logs_an_unknown_domain_when_the_probe_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(_sr_mod, "session_name", lambda svc: f"t-{svc}")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("shared.session_backend.get_backend", lambda: _FakeBackend("service"))
+    monkeypatch.setattr(_sr_mod, "IS_MACOS", True)
+    monkeypatch.setattr(_sr_mod, "gui_session_domain", lambda: None)
+
+    with caplog.at_level(logging.INFO, logger="shared.service_respawn"):
+        assert respawn_service("browser", "cmd", Path("/repo"))
+
+    assert any("chain domain: unknown" in r.getMessage() for r in caplog.records)
+
+
+def test_respawn_is_silent_off_macos(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The launchd domain only exists on macOS; other platforms skip the probe
+    entirely (no line, no launchctl call)."""
+    monkeypatch.setattr(_sr_mod, "session_name", lambda svc: f"t-{svc}")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("shared.session_backend.get_backend", lambda: _FakeBackend("service"))
+    monkeypatch.setattr(_sr_mod, "IS_MACOS", False)
+
+    def _boom() -> str | None:
+        raise AssertionError("the domain probe must not run off macOS")
+
+    monkeypatch.setattr(_sr_mod, "gui_session_domain", _boom)
+
+    with caplog.at_level(logging.INFO, logger="shared.service_respawn"):
+        assert respawn_service("browser", "cmd", Path("/repo"))
+
+    assert not any("chain domain" in r.getMessage() for r in caplog.records)
+
+
 # ── source-switch window (an update is mid-checkout) ───────────────────────
 
 

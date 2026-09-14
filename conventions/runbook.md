@@ -1094,7 +1094,10 @@ sides derive the CDP port + socket path from `settings.browser_cdp_port`
   matter how ready it is; the marker records that as `context_missing`, and the
   healthcheck stops the stuck session and kickstarts the cluster's GUI-domain
   autostart job (at most twice per episode, 600 seconds apart), deferring its
-  own in-context rebuild while the relaunch lands. If the wait marker cannot be
+  own in-context rebuild while the relaunch lands; every automatic browser
+  rebuild takes that same GUI-domain route when the chain is outside the
+  session (task #3346), and `ava start` warns loudly when an agent-runner host
+  is started from a chain outside the GUI login session. If the wait marker cannot be
   written, the probe and healthcheck use the same bounded read-only readiness
   check instead. The gate never
   unlocks a Keychain or changes Chrome data;

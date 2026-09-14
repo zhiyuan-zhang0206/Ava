@@ -63,6 +63,16 @@ any open episode and logs one INFO recovery line. The exit codes are unchanged
 de-duplicates its own "reported failure (exit N)" line per check+code, so the
 whole chain lands one ERROR per episode.
 
+## Rebuilds route through the GUI domain (macOS)
+
+Both automatic rebuild paths — the session-gone sweep and the live-session
+dead-CDP respawn — go through `_rebuild_session`: when this chain runs outside
+the macOS GUI login session, the stuck session is stopped and this cluster's
+GUI-domain autostart job is kicked instead of relaunching in place. The launchd
+management domain is inherited from the spawning chain and survives every
+in-place relaunch, so an in-place rebuild from such a chain only re-seeds the
+context-less session that the heal below would then have to stop (task #3346).
+
 The episode record lives under `$AVA_HOME/run/healthcheck-state/browser.json`
 and only ever gates REPORTING: it can never suppress a reap or a respawn, and
 an unreadable record fails open toward reporting.
@@ -90,6 +100,7 @@ from shared.log import init_gateway_process
 from shared.os_autostart import relaunch_via_gui_domain
 from shared.paths import run_dir
 from shared.platform import IS_MACOS
+from shared.platform_probes import gui_session_domain
 from shared.service_respawn import respawn_service
 from shared.session_backend import get_backend
 
@@ -141,7 +152,92 @@ def _restart_daemon() -> bool:
     )
 
 
-def _sweep_and_rebuild() -> bool:
+def _chain_outside_gui_session() -> bool:
+    """True when this process chain runs outside the macOS GUI login session.
+
+    The answer is a property of the chain, not of the browser or its session:
+    `launchctl managername` answers `Aqua` for the GUI login session and e.g.
+    `Background` for a daemon spawned from an agent/SSH chain. An unavailable
+    answer is not evidence either way — never reroute a rebuild on it."""
+    if not IS_MACOS:
+        return False
+    domain = gui_session_domain()
+    return domain is not None and domain != "Aqua"
+
+
+def _rebuild_via_gui_domain(heal: _ContextHeal, *, trigger: str) -> bool:
+    """Stop the ava-browser session and rebuild it through the GUI domain.
+
+    The one remedy for a wrong launchd domain (macOS): the domain is inherited
+    from the spawning chain and survives every in-chain relaunch, so the stuck
+    session is stopped (a live one would make the GUI `ava start` skip the
+    browser) and this cluster's GUI-domain autostart job is kicked. The attempt
+    is booked before the stop, so a crash mid-round cannot turn into a
+    per-round retry; `trigger` names the branch that asked (context-missing /
+    session-gone / cdp-down) for the log lines.
+
+    Returns True when the GUI-domain relaunch was started. The callers own the
+    episode budgets and the failure reporting."""
+    heal.record_attempt()
+    try:
+        stopped, _mode = get_backend().kill_session(
+            session_name("browser"),
+            graceful=True,
+            timeout=_CONTEXT_HEAL_STOP_TIMEOUT_S,
+            expected=True,
+        )
+    except Exception as exc:  # a healthcheck must not crash on its own rebuild
+        _log.error(
+            "[browser healthcheck] context heal (trigger=%s): stopping the ava-browser "
+            "session raised %s: %s",
+            trigger,
+            type(exc).__name__,
+            exc,
+        )
+        return False
+    if not stopped:
+        _log.error(
+            "[browser healthcheck] context heal (trigger=%s): the ava-browser session "
+            "survived its stop; not kicking a GUI relaunch (it would skip the live session)",
+            trigger,
+        )
+        return False
+    try:
+        ok, detail = relaunch_via_gui_domain()
+    except Exception as exc:  # a healthcheck must not crash on its own rebuild
+        ok, detail = False, f"{type(exc).__name__}: {exc}"
+    if ok:
+        _log.warning(
+            "[browser healthcheck] context heal (trigger=%s): rebuilt the ava-browser "
+            "session via the GUI domain (%s; total=%d)",
+            trigger,
+            detail,
+            heal.total(),
+        )
+        return True
+    _log.error(
+        "[browser healthcheck] context heal (trigger=%s): stopped the session but could "
+        "not relaunch it via the GUI domain (%s)",
+        trigger,
+        detail,
+    )
+    return False
+
+
+def _rebuild_session(heal: _ContextHeal, *, trigger: str) -> bool:
+    """Rebuild the ava-browser session, through the GUI domain when needed.
+
+    A session rebuilt from this chain inherits this chain's launchd domain; when
+    that chain is outside the GUI login session, the rebuild would re-seed the
+    exact context-less state the heal then has to repair — so it goes through
+    `_rebuild_via_gui_domain` instead, while the heal still has budget for a
+    kick. Everywhere else the in-place respawn stands."""
+    if _chain_outside_gui_session() and heal.due():
+        return _rebuild_via_gui_domain(heal, trigger=trigger)
+    return _restart_daemon()
+
+
+def _sweep_and_rebuild(heal: _ContextHeal, *, trigger: str) -> bool:
     """Sweep the unsupervised Chrome off this cluster's profile, then rebuild the
     ava-browser session — the operator's `ava stop --stop-browser` + `ava start`
     remedy, automated. The reap is identity-verified (profile + process-table
@@ -150,7 +246,9 @@ def _sweep_and_rebuild() -> bool:
 
     The reap's own exceptions are logged at DEBUG with a traceback and folded
     into a False return — the caller's episode-gated ERROR reports the failed
-    heal without a new traceback per round."""
+    heal without a new traceback per round. The rebuild goes through
+    `_rebuild_session`, so a chain outside the GUI login session does it via the
+    GUI domain instead of re-seeding a context-less session (task #3346)."""
     try:
         reaped = reap_cluster_chrome()
     except Exception:
@@ -165,7 +263,7 @@ def _sweep_and_rebuild() -> bool:
         _log.info(
             "[browser healthcheck] no unsupervised Chrome left to sweep; rebuilding the session"
         )
-    return _restart_daemon()
+    return _rebuild_session(heal, trigger=trigger)
 
 
 @dataclass(frozen=True)
@@ -270,10 +368,14 @@ def _episode_reporter() -> _Episode:
 
 @dataclass(frozen=True)
 class _ContextHealRecord:
-    """One context-heal episode's persisted bookkeeping."""
+    """The context-heal bookkeeping: `attempts` counts the attempts of the
+    episode currently open (0 when none is — the chain is back in context),
+    `last_attempt_at` is when the last attempt ran, and `total` counts every
+    attempt ever spent, across episodes, for visibility — it never gates."""
 
     attempts: int
     last_attempt_at: float
+    total: int = 0
 
 
 class _ContextHeal:
@@ -296,6 +398,10 @@ class _ContextHeal:
     All bookkeeping failures fall back to acting (or to deferring to the
     in-flight relaunch): de-noising must never be why a stuck browser stays
     stuck, and a failed write only means the next round may attempt again.
+
+    ``clear()`` ends an episode by resetting ``attempts`` to zero, so a later
+    recurrence heals fresh; the cumulative ``total`` is the one field that
+    survives, because it exists for the log line, not for gating.
     """
 
     def __init__(
@@ -314,7 +420,11 @@ class _ContextHeal:
     def _read(self) -> _ContextHealRecord | None:
         try:
             data = json.loads(self._path.read_text())
-            return _ContextHealRecord(int(data["attempts"]), float(data["last_attempt_at"]))
+            return _ContextHealRecord(
+                int(data["attempts"]),
+                float(data["last_attempt_at"]),
+                int(data.get("total", 0)),
+            )
         except (OSError, ValueError, KeyError, TypeError):
             return None
 
@@ -322,7 +432,13 @@ class _ContextHeal:
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             self._path.write_text(
-                json.dumps({"attempts": record.attempts, "last_attempt_at": record.last_attempt_at})
+                json.dumps(
+                    {
+                        "attempts": record.attempts,
+                        "last_attempt_at": record.last_attempt_at,
+                        "total": record.total,
+                    }
+                )
             )
         except OSError:
             _log.debug(
@@ -337,26 +453,51 @@ class _ContextHeal:
     def in_flight(self) -> bool:
         """True while a just-kicked GUI relaunch may still be landing."""
         record = self._read()
-        return record is not None and self._now() - record.last_attempt_at < self._cooldown_s
+        return (
+            record is not None
+            and record.attempts > 0
+            and self._now() - record.last_attempt_at < self._cooldown_s
+        )
 
     def due(self) -> bool:
         """True when another stop + kick may run now."""
         if self.exhausted():
             return False
         record = self._read()
-        return record is None or self._now() - record.last_attempt_at >= self._cooldown_s
+        if record is None or record.attempts == 0:
+            # No episode open: nothing bounds a fresh attempt.
+            return True
+        return self._now() - record.last_attempt_at >= self._cooldown_s
 
     def record_attempt(self) -> None:
         """Count a stop + kick round as spent, before it runs (a crash mid-round
-        must not turn into a per-round retry)."""
+        must not turn into a per-round retry). `total` counts across episodes."""
         record = self._read()
         attempts = 1 if record is None else record.attempts + 1
-        self._write(_ContextHealRecord(attempts, self._now()))
+        total = (0 if record is None else record.total) + 1
+        self._write(_ContextHealRecord(attempts, self._now(), total))
 
     def clear(self) -> None:
-        """End the episode — the chain is in the right context again."""
-        with contextlib.suppress(OSError):
-            self._path.unlink(missing_ok=True)
+        """End the episode — the chain is in the right context again.
+
+        The episode counters reset to zero so a later recurrence heals again
+        with a full budget and no leftover cooldown window; the cumulative
+        `total` survives. Nothing is written when no episode is open."""
+        record = self._read()
+        if record is None or record.attempts == 0:
+            return
+        self._write(
+            _ContextHealRecord(
+                attempts=0,
+                last_attempt_at=record.last_attempt_at,
+                total=record.total,
+            )
+        )
+
+    def total(self) -> int:
+        """Cumulative stop + kick rounds across episodes (visibility only)."""
+        record = self._read()
+        return 0 if record is None else record.total
 
 
 def _context_heal_reporter() -> _ContextHeal:
@@ -366,10 +507,10 @@ def _context_heal_reporter() -> _ContextHeal:
 def _heal_context_missing(episode: _Episode, heal: _ContextHeal, wait: StartupReadiness) -> None:
     """React to a daemon chain outside the GUI login session (macOS).
 
-    Stop the stuck ava-browser session (so the GUI-domain `ava start` does not
-    skip a live session and walk away), then kickstart this cluster's autostart
-    job. Episodes are bounded by `_ContextHeal`: a couple of attempts, then one
-    episode-gated ERROR carrying the manual recipe.
+    Delegate to `_rebuild_via_gui_domain` (stop the stuck ava-browser session so
+    the GUI-domain `ava start` does not skip a live one, then kickstart this
+    cluster's autostart job). Episodes are bounded by `_ContextHeal`: a couple
+    of attempts, then one episode-gated ERROR carrying the manual recipe.
     """
     if heal.exhausted():
         if episode.should_report(_Episode.CONTEXT_MISSING):
@@ -394,44 +535,7 @@ def _heal_context_missing(episode: _Episode, heal: _ContextHeal, wait: StartupRe
             "relaunch to land"
         )
         return
-    heal.record_attempt()
-    try:
-        stopped, _mode = get_backend().kill_session(
-            session_name("browser"),
-            graceful=True,
-            timeout=_CONTEXT_HEAL_STOP_TIMEOUT_S,
-            expected=True,
-        )
-    except Exception as exc:  # a healthcheck must not crash on its own heal
-        _log.error(
-            "[browser healthcheck] context heal: stopping the context-less ava-browser session "
-            "raised %s: %s",
-            type(exc).__name__,
-            exc,
-        )
-        return
-    if not stopped:
-        _log.error(
-            "[browser healthcheck] context heal: the context-less ava-browser session survived "
-            "its stop; not kicking a GUI relaunch (it would skip the live session)"
-        )
-        return
-    try:
-        ok, detail = relaunch_via_gui_domain()
-    except Exception as exc:  # a healthcheck must not crash on its own heal
-        ok, detail = False, f"{type(exc).__name__}: {exc}"
-    if ok:
-        _log.info(
-            "[browser healthcheck] context heal: stopped the context-less ava-browser session "
-            "and relaunched it via the GUI domain (%s)",
-            detail,
-        )
-    else:
-        _log.error(
-            "[browser healthcheck] context heal: stopped the stuck session but could not relaunch "
-            "it via the GUI domain (%s)",
-            detail,
-        )
+    _rebuild_via_gui_domain(heal, trigger="context-missing")
 
 
 def main() -> None:
@@ -510,7 +614,7 @@ def main() -> None:
             "unsupervised Chrome (identity-verified ours) and rebuilding the session",
             probe.detail,
         )
-        if _sweep_and_rebuild():
+        if _sweep_and_rebuild(heal, trigger="session-gone"):
             _log.info(
                 "[browser healthcheck] unsupervised Chrome swept; ava-browser session rebuilt"
             )
@@ -524,7 +628,7 @@ def main() -> None:
             _log.debug("[browser healthcheck] sweep + rebuild still failing; reported this episode")
         sys.exit(EXIT_RESPAWN_FAILED)
     _log.info("[browser healthcheck] dead (%s), restarting...", probe.detail)
-    if _restart_daemon():
+    if _rebuild_session(heal, trigger="cdp-down"):
         _log.info("[browser healthcheck] daemon restarted")
         return
     if episode.should_report(_Episode.RESPAWN_FAILED):
