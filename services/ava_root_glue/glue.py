@@ -2,10 +2,11 @@
 
 This is the deployment-side assembly the daemon's `--wiring` hook drives
 (`--wiring services.ava_root_glue.glue:build_wiring`). It is deliberately
-thin: probes come from the roster specs (the same membership rule the old
-watchdog used — a spec with a `healthcheck_module` and a shared identity
-probe gates in), the two monitors run at their 60s defaults, and their
-snapshots attach to the supervisor's status surface through the W1.2b seams.
+thin: probes come from the roster specs — the old watchdog's
+`healthcheck_module` gate, with the shared identity probe `register_specs`
+requires on top (a spec missing that probe is skipped — the one deliberate
+rule delta), the two monitors run at their 60s defaults, and their snapshots
+attach to the supervisor's status surface through the W1.2b seams.
 
 The metric slots stay empty here: attribution coverage and reseeding latency
 are adapter/window inputs (W1.3 / G4), and an empty slot reads `unavailable`

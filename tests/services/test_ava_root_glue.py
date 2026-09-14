@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 import types
 from dataclasses import dataclass
 from pathlib import Path
@@ -183,3 +184,28 @@ def test_drill_liveness_probe_reads_the_raw_tree() -> None:
 
     broken = drill._liveness_probe(_TreeStub(error=RuntimeError("no tree")), "u1")
     assert broken().verdict.value == "unavailable"
+
+
+def test_drill_heartbeat_probe_requires_freshness(tmp_path: Path) -> None:
+    heartbeat_dir = tmp_path / "heartbeat"
+    heartbeat_dir.mkdir()
+    beat = heartbeat_dir / "u1.beat"
+    beat.touch()
+    probe = drill._liveness_probe(
+        _TreeStub(_view({"id": "u1", "state": "running", "pid": os.getpid()})),
+        "u1",
+        heartbeat_dir=heartbeat_dir,
+    )
+
+    fresh = probe()
+    assert fresh.verdict.value == "alive"
+    assert "heartbeat" in fresh.detail
+
+    stale_at = time.time() - 30.0
+    os.utime(beat, (stale_at, stale_at))
+    stale = probe()
+    assert stale.verdict.value == "down"
+    assert "stale" in stale.detail
+
+    beat.unlink()
+    assert probe().verdict.value == "alive"  # no heartbeat published -> liveness only
