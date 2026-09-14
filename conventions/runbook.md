@@ -1985,7 +1985,10 @@ production path stays session-driven until the S3/S4 swap), `ava start` hands
 the roster to ava-root (`cli/commands/_root_driver.py`): the manifests are
 generated from the ops roster, the root is seeded through the permissions
 helper when it is committed (a direct spawn otherwise), and the readiness gate
-reads the root's own status surface. `ava stop` stops the tree through the
+reads the root's own status surface. While the switch is on, converge retires
+the OS watchdog-probe jobs (the root health path absorbs the watchdogs, so a
+probe-revived legacy watchdog would race the tree) and re-registers them when
+the switch goes back off. `ava stop` stops the tree through the
 root with the same preserve semantics (`--keep-service`, pause's browser).
 Acceptance is `scripts/ava_root_e2_drill.py` — one worktree cluster driven
 through baseline (switch off) → start/stop → restart and idempotence → final

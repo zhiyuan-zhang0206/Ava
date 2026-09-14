@@ -1578,6 +1578,94 @@ def test_watchdog_probe_step_runs_on_both_roles():
     assert step.requires_unit_config is True
 
 
+# Root mode (W1.2e-2 gray rollout): the root supervisor's HealthMonitor absorbs
+# the watchdogs, so the probe must be RETIRED instead of registered — a
+# probe-revived legacy watchdog would run a second supervision path beside the
+# root tree. Retirement is deliberately not gated on `os_jobs_enabled()` (the
+# same rule `shared.os_cron` states for deregistration), so cleanup keeps
+# working wherever registration is forbidden.
+
+
+def _record_unregistrations(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    seen: list[str] = []
+    monkeypatch.setattr("shared.os_watchdog_probe.unregister_watchdog_probe", seen.append)
+    return seen
+
+
+def test_watchdog_probe_root_driven_retires_both_capabilities(
+    home, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.services, "root_driver_enabled", True)
+    registered = _record_registrations(monkeypatch)
+    unregistered = _record_unregistrations(monkeypatch)
+    _converge.ensure_watchdog_probe(
+        _ctx(tmp_path, home, roles=frozenset({"gateway", "agent-runner"}))  # pyright: ignore[reportUnknownArgumentType]
+    )
+    assert registered == []
+    assert sorted(unregistered) == ["agent-runner", "gateway"]
+
+
+def test_watchdog_probe_root_driven_retires_only_carried_roles(
+    home, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.services, "root_driver_enabled", True)
+    registered = _record_registrations(monkeypatch)
+    unregistered = _record_unregistrations(monkeypatch)
+    _converge.ensure_watchdog_probe(_ctx(tmp_path, home, roles=frozenset({"agent-runner"})))  # pyright: ignore[reportUnknownArgumentType]
+    assert registered == []
+    assert unregistered == ["agent-runner"]
+
+
+def test_watchdog_probe_root_driven_no_capabilities_retires_nothing(
+    home, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A unit that does not know what it runs must not touch any probe job."""
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.services, "root_driver_enabled", True)
+    registered = _record_registrations(monkeypatch)
+    unregistered = _record_unregistrations(monkeypatch)
+    _converge.ensure_watchdog_probe(_ctx(tmp_path, home, roles=None))  # pyright: ignore[reportUnknownArgumentType]
+    assert registered == []
+    assert unregistered == []
+
+
+def test_watchdog_probe_retirement_not_gated_on_os_jobs(
+    home, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Deregistration must work where registration is forbidden: the retirement
+    path is the cleanup leg and stays ungated (shared.os_cron's stated rule)."""
+    from shared import os_cron
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.services, "root_driver_enabled", True)
+    monkeypatch.setattr(os_cron, "os_jobs_enabled", lambda: False)
+    unregistered = _record_unregistrations(monkeypatch)
+    _converge.ensure_watchdog_probe(_ctx(tmp_path, home, roles=frozenset({"gateway"})))  # pyright: ignore[reportUnknownArgumentType]
+    assert unregistered == ["gateway"]
+
+
+def test_watchdog_probe_switch_off_registers_again(
+    home, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The revert: with the switch back off, the next converge registers the
+    probe through the session branch — legacy supervision restores itself."""
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.services, "root_driver_enabled", False)
+    registered = _record_registrations(monkeypatch)
+    unregistered = _record_unregistrations(monkeypatch)
+    _converge.ensure_watchdog_probe(
+        _ctx(tmp_path, home, roles=frozenset({"gateway", "agent-runner"}))  # pyright: ignore[reportUnknownArgumentType]
+    )
+    assert sorted(registered) == ["agent-runner", "gateway"]
+    assert unregistered == []
+
+
 # --- stale schtasks reap ---------------------------------------------------
 # A home-slug change leaves ghost tasks firing under the old \Ava\ folder,
 # racing the current slug's /Create on every converge (win 2026-08-11, task
