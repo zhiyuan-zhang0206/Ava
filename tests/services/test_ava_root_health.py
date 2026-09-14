@@ -19,7 +19,7 @@ import pytest
 
 from services.ava_root import health as health_mod
 from services.ava_root.health import HealthConfig, HealthMonitor
-from services.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
+from services.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry, UnknownUnitError
 from services.ava_root.probes import ProbeRegistry
 from services.ava_root.supervisor import Supervisor
 from shared.daemon_health import DaemonProbe
@@ -48,11 +48,21 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
 
 
 class StubSupervisor:
-    """RevivalHost stand-in: records restart calls; deferral answers from a map."""
+    """RevivalHost stand-in: records restart calls; deferral answers from a map.
 
-    def __init__(self, deferrals: dict[str, str] | None = None) -> None:
+    `unknown_units` mimic the real supervisor's `revival_deferral` raise for
+    units outside its registry (the static probe path).
+    """
+
+    def __init__(
+        self,
+        deferrals: dict[str, str] | None = None,
+        *,
+        unknown_units: set[str] | None = None,
+    ) -> None:
         self.restart_calls: list[str] = []
         self.deferrals: dict[str, str] = dict(deferrals or {})
+        self.unknown_units: set[str] = set(unknown_units or ())
         self.on_restart: Callable[[], None] | None = None
 
     async def restart(self, unit_id: str) -> dict[str, object]:
@@ -62,6 +72,8 @@ class StubSupervisor:
         return {"verb": "restart", "units": []}
 
     def revival_deferral(self, unit_id: str) -> str | None:
+        if unit_id in self.unknown_units:
+            raise UnknownUnitError(f"unknown unit {unit_id!r}")
         return self.deferrals.get(unit_id)
 
 
@@ -340,6 +352,27 @@ async def test_policy_never_counts_and_surfaces_via_breaker(
     assert state.consecutive_failures == 3
     assert len(recorder.events("root_restart_breaker_open")) == 1
     assert "policy never" in caplog.text
+
+
+async def test_out_of_tree_unit_counts_and_surfaces_via_breaker(
+    clock: FakeClock, recorder: _Recorder, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A registered probe for a unit outside the tree (static path — e.g. the
+    launchd-owned permissions helper): counted, surfaced, never restarted."""
+    caplog.set_level(logging.DEBUG, logger="services.ava_root.health")
+    probe = CellProbe(DaemonProbe.down("lwcr-stuck: job state=spawn failed"))
+    stub = StubSupervisor(unknown_units={"permissions-helper"})
+    monitor = HealthMonitor(stub, _registry("permissions-helper", probe), config=_config())
+    for _ in range(3):
+        await monitor.run_round()
+    state = monitor.snapshot()["permissions-helper"]
+    assert stub.restart_calls == []
+    assert state.consecutive_failures == 3
+    assert state.breaker_since is not None
+    opens = recorder.events("root_restart_breaker_open")
+    assert len(opens) == 1
+    assert "lwcr-stuck" in cast("str", opens[0]["detail"])
+    assert "no revival verb" in caplog.text
 
 
 async def test_deferral_clears_then_the_round_acts(clock: FakeClock) -> None:

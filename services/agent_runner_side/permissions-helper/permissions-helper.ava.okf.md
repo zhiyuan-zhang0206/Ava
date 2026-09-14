@@ -8,16 +8,12 @@ tags: []
 # Permissions Helper — macOS Desktop Automation Daemon
 
 ## What is it
-A macOS permissions helper on agent-runner — a signed Swift `.app` owned by **launchd**, outside the session roster, holding Screen Recording / Accessibility permissions. The agent-runner watchdog pings its real protocol and can reload its launchd job. Desktop-driving and protected-file skills call it via Unix socket, centralizing privileged actions in this process.
+A macOS permissions helper on agent-runner — a signed Swift `.app` owned by **launchd**, outside the session roster, holding Screen Recording / Accessibility permissions. The agent-runner watchdog pings its real protocol, classifies the launchd job state on failure (an LWCR/EX_CONFIG spawn-failed loop is named; a failed repair escalates and retries under backoff), and can reload its launchd job. The root era watches the same job through a total probe (task #3393). Desktop-driving and protected-file skills call it via Unix socket, centralizing privileged actions in this process.
 
 **Role affiliation**: agent-runner side (macOS only) — launched by launchd, not in the session service roster (`build_services`), with capability probe `permissions_helper_incapability` gating.
 
 ## Why launchd + Stable Signing is Required
-- **launchd launch**: the helper must be its own responsible process to independently hold permission grants, rather than borrowing the grant from the terminal that launched it.
-- **Stable self-signed certificate**: TCC permissions are tracked by code signing identity; a fixed certificate (`Ava Permissions Helper Code Signing`) + fixed bundle id (`com.ava.permissions-helper`, one grant shared across clusters) avoids re-prompting for permissions on each rebuild.
-- **Never ad-hoc**: `codesign --sign -` mints a throwaway identity per build, so every rebuild drops the grants. A locked login keychain (the norm over SSH) therefore fails the build with an unlock instruction instead of downgrading; only a real rebuild consults the keychain, so an up-to-date host converges over SSH unaffected.
-- **The signing key must work headlessly**: an unlocked keychain can still block on a SecurityAgent ACL prompt. On real rebuilds only, a short scratch-sign probe diagnoses that prompt and names the ACL remedy; the following hard smoke signs a scratch file with the production designated requirement, reads it back through `codesign`, and rejects any signing, output, parse, or identity failure before compilation.
-- The first-time authorization in System Settings is a one-time manual step (OS forces human click).
+The launchd-ownership and stable-signing constraint set moved to its own node: [[launchd-and-stable-signing.ava.okf.md]].
 
 ## Authorization Model
 
@@ -44,6 +40,7 @@ The helper also seeds `ava-root` (`root_seed` / `root_status` / `root_stop`): [[
 
 ## Entry Points
 - `services/permissions_helper/lifecycle.py` — bring-up called by converge
+- `services/permissions_helper/launchd_job.py` — the launchd job surface (label/plist/`launchctl print` read + parse) shared by lifecycle and the helper healthcheck
 - `services/permissions_helper/client.py` — Python-side call entry
 - `services/permissions_helper/helper/main.swift` — Swift daemon
 - `scripts/tcc-preauth.sh` — read-only helper/TCC diagnostics and manual grant list
@@ -51,4 +48,4 @@ The helper also seeds `ava-root` (`root_seed` / `root_status` / `root_stop`): [[
 ## Notes
 - macOS + Windows; configuration gate `AVA_PERMISSIONS_HELPER_ENABLED`, capability probe `shared.platform_probes.permissions_helper_incapability` (macOS: swift/codesign/display; Windows: csc.exe — the helper's session capability is checked at runtime, converge runs in Session 0).
 - Windows: C# helper (`services/permissions_helper/windows/helper.cs`, built with the .NET Framework csc.exe every Windows install ships; DPI-aware via SetProcessDPIAware so click coordinates are physical pixels), served over the named pipe `\\.\pipe\ava-permissions-helper`, registered as the logon scheduled task `AvaPermissionsHelper` (`/IT` so it starts in the user's interactive session). Client dials the pipe automatically (`_IS_WINDOWS` transport switch in `client.py`).
-- Outside `ServiceSpec`: launchd owns keepalive; the agent-runner watchdog adds a DB-free protocol check, one ERROR/episode, repair at failure three, and next-round verification.
+- Outside `ServiceSpec`: launchd owns keepalive; the agent-runner watchdog adds a DB-free protocol check that classifies launchd failures (LWCR-stuck named), repairs at failure three, and escalates a failed repair with backoff retries (verified again next round).
