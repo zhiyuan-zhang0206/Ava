@@ -334,8 +334,11 @@ def terminate(
     source: str | None = None,
     message: str | None = None,
     force: bool = False,
-) -> str:
-    """POST /api/agents/{id}/terminate → status string.
+) -> dict:
+    """POST /api/agents/{id}/terminate → response dict.
+
+    `status` is "enqueued" / "already_terminated"; `open_tasks` carries what
+    the agent still owned as it went down, if anything.
 
     source defaults to f"agent:{ava.self.AGENT_ID}" so the lifecycle marker
     tells the peer who terminated it. Pass source=None to use the gateway
@@ -358,7 +361,7 @@ def terminate(
         body["force"] = True
     resp = _post(f"/api/agents/{agent_id}/terminate", body)
     _raise_from_response(resp)
-    return resp.json()["status"]
+    return resp.json()
 
 
 def restart(agent_id: int, *, source: str | None = None) -> str:

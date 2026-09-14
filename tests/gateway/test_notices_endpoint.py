@@ -620,7 +620,7 @@ def test_answer_empty_reply_422(db_conn: psycopg.Connection) -> None:
         resp = client.post(
             f"/api/agents/{a}/notices/{nid}/resolve", json={"action": "answer", "reply": "   "}
         )
-    assert resp.status_code == 422  # _UserContent strips -> empty -> rejected
+    assert resp.status_code == 422  # UserContent strips -> empty -> rejected
     snap = select_one(db_conn, a)
     assert snap is not None
     assert [n.id for n in snap.notices_awaiting_response] == [nid]

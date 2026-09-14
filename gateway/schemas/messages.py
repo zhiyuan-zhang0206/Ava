@@ -16,7 +16,7 @@ from pydantic import (
     model_validator,
 )
 
-from ops.rpc_schemas import _UserContent
+from ops.rpc_content import UserContent
 from shared.agents import AgentStatus
 from shared.envelope import validate_writable_source
 from shared.message_kwargs import NoteTag
@@ -55,7 +55,7 @@ class UserMessageIn(BaseModel):
     characters returns 422 from pydantic; the endpoint does not 400 anymore.
     """
 
-    content: _UserContent
+    content: UserContent
 
 
 class MessageEnqueued(BaseModel):
@@ -138,7 +138,7 @@ class ResolveNoticeIn(BaseModel):
     """
 
     action: Literal["answer", "dismiss", "read"]
-    reply: _UserContent | None = None
+    reply: UserContent | None = None
 
 
 class NoticeCreateIn(BaseModel):
