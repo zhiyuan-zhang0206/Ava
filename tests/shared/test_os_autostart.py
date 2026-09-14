@@ -373,3 +373,82 @@ def test_gui_domain_kickstart_command_loads_the_job_if_missing_then_kicks(
         in command
     )
     assert command.endswith(f"&& launchctl kickstart -k {domain}/{label}")
+
+
+def test_ensure_via_gui_domain_kicks_without_killing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The handover's kick (task #3348): `kickstart -p` — never `-k` — because
+    an already-running GUI job must not be killed; `-p` reports the pid of the
+    running (or newly started) instance either way."""
+    import os
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    plist = tmp_path / "Library" / "LaunchAgents" / "com.ava.ava-t-cafe0123.autostart.plist"
+    plist.parent.mkdir(parents=True)
+    plist.write_text("plist")
+    domain = f"gui/{os.getuid()}"
+    calls = _fake_launchctl(
+        monkeypatch,
+        {"kickstart": types.SimpleNamespace(returncode=0, stdout="4242\n", stderr="")},
+    )
+    ok, detail = os_autostart.ensure_via_gui_domain()
+    assert ok is True
+    assert "com.ava.ava-t-cafe0123.autostart" in detail
+    assert "pid 4242" in detail
+    assert calls == [
+        ["launchctl", "print", f"{domain}/com.ava.ava-t-cafe0123.autostart"],
+        ["launchctl", "kickstart", "-p", f"{domain}/com.ava.ava-t-cafe0123.autostart"],
+    ]
+
+
+def test_ensure_via_gui_domain_bootstraps_when_unloaded_then_kicks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import os
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    plist = tmp_path / "Library" / "LaunchAgents" / "com.ava.ava-t-cafe0123.autostart.plist"
+    plist.parent.mkdir(parents=True)
+    plist.write_text("plist")
+    domain = f"gui/{os.getuid()}"
+    calls = _fake_launchctl(
+        monkeypatch,
+        {
+            "print": types.SimpleNamespace(returncode=1, stdout="", stderr="Could not find"),
+            "kickstart": types.SimpleNamespace(returncode=0, stdout="77", stderr=""),
+        },
+    )
+    ok, detail = os_autostart.ensure_via_gui_domain()
+    assert ok is True
+    assert "com.ava.ava-t-cafe0123.autostart" in detail
+    assert calls == [
+        ["launchctl", "print", f"{domain}/com.ava.ava-t-cafe0123.autostart"],
+        ["launchctl", "bootstrap", domain, str(plist)],
+        ["launchctl", "kickstart", "-p", f"{domain}/com.ava.ava-t-cafe0123.autostart"],
+    ]
+
+
+def test_ensure_via_gui_domain_reports_a_failed_kick(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    plist = tmp_path / "Library" / "LaunchAgents" / "com.ava.ava-t-cafe0123.autostart.plist"
+    plist.parent.mkdir(parents=True)
+    plist.write_text("plist")
+    _fake_launchctl(
+        monkeypatch,
+        {"kickstart": types.SimpleNamespace(returncode=1, stdout="", stderr="denied")},
+    )
+    ok, detail = os_autostart.ensure_via_gui_domain()
+    assert ok is False
+    assert "failed" in detail and "denied" in detail
+
+
+def test_ensure_via_gui_domain_refuses_off_macos(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(os_autostart, "IS_MACOS", False)
+    calls = _fake_launchctl(monkeypatch, {})
+    ok, detail = os_autostart.ensure_via_gui_domain()
+    assert ok is False
+    assert "macOS" in detail
+    assert calls == []

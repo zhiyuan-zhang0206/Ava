@@ -346,6 +346,33 @@ def gui_domain_kickstart_command() -> str:
     )
 
 
+def _ensure_macos_job_loaded(label: str, plist_path: Path, domain: str) -> str | None:
+    """Load this cluster's autostart job into `domain` if it is not there yet.
+
+    None on success (already loaded, or just bootstrapped), else why it could
+    not be ensured. The shared prelude of the two kickstart entry points; the
+    caller owns what it then does with the job."""
+    if not plist_path.exists():
+        return f"no autostart plist at {plist_path} (registered on the next `ava start`)"
+    loaded = subprocess.run(  # noqa: S603
+        ["launchctl", "print", f"{domain}/{label}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if loaded.returncode != 0:
+        bootstrapped = subprocess.run(  # noqa: S603
+            ["launchctl", "bootstrap", domain, str(plist_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if bootstrapped.returncode != 0:
+            error = bootstrapped.stderr.strip() or f"exit {bootstrapped.returncode}"
+            return f"launchctl bootstrap {label} failed: {error}"
+    return None
+
+
 def relaunch_via_gui_domain() -> tuple[bool, str]:
     """Run this cluster's autostart job in the GUI login session, now.
 
@@ -375,24 +402,9 @@ def relaunch_via_gui_domain() -> tuple[bool, str]:
     label = _autostart_label(slug)
     plist_path = _autostart_plist_path(slug)
     domain = f"gui/{os.getuid()}"
-    if not plist_path.exists():
-        return False, (f"no autostart plist at {plist_path} (registered on the next `ava start`)")
-    loaded = subprocess.run(  # noqa: S603
-        ["launchctl", "print", f"{domain}/{label}"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if loaded.returncode != 0:
-        bootstrapped = subprocess.run(  # noqa: S603
-            ["launchctl", "bootstrap", domain, str(plist_path)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if bootstrapped.returncode != 0:
-            error = bootstrapped.stderr.strip() or f"exit {bootstrapped.returncode}"
-            return False, f"launchctl bootstrap {label} failed: {error}"
+    error = _ensure_macos_job_loaded(label, plist_path, domain)
+    if error is not None:
+        return False, error
     kicked = subprocess.run(  # noqa: S603
         ["launchctl", "kickstart", "-k", f"{domain}/{label}"],
         capture_output=True,
@@ -403,3 +415,40 @@ def relaunch_via_gui_domain() -> tuple[bool, str]:
         error = kicked.stderr.strip() or f"exit {kicked.returncode}"
         return False, f"launchctl kickstart {label} failed: {error}"
     return True, f"{label} relaunched in {domain}"
+
+
+def ensure_via_gui_domain() -> tuple[bool, str]:
+    """Run this cluster's autostart job in the GUI login session, without killing
+    a running instance.
+
+    The handover sibling of `relaunch_via_gui_domain` (task #3348): an `ava
+    start` that must not bring services up in its own wrong launchd domain asks
+    launchd to run the job now. `kickstart -p` (no ``-k``) never kills an
+    already-running instance — measured: the same pid comes back and no second
+    process exists (``-k`` is the kill-first variant the heal uses) — and ``-p``
+    reports the running pid either way. macOS only; nothing is written to disk.
+
+    Returns:
+        ``(ok, detail)`` — ``detail`` names the job, domain and pid on success,
+        or why the job could not be ensured.
+    """
+    if not IS_MACOS:
+        return False, "the GUI domain only exists on macOS"
+    slug = _home_slug()
+    label = _autostart_label(slug)
+    plist_path = _autostart_plist_path(slug)
+    domain = f"gui/{os.getuid()}"
+    error = _ensure_macos_job_loaded(label, plist_path, domain)
+    if error is not None:
+        return False, error
+    kicked = subprocess.run(  # noqa: S603
+        ["launchctl", "kickstart", "-p", f"{domain}/{label}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if kicked.returncode != 0:
+        error = kicked.stderr.strip() or f"exit {kicked.returncode}"
+        return False, f"launchctl kickstart {label} failed: {error}"
+    pid = kicked.stdout.strip()
+    return True, f"{label} running in {domain}" + (f" (pid {pid})" if pid else "")

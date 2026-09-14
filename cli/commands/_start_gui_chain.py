@@ -32,16 +32,30 @@ def _current_account_name() -> str | None:
         return None
 
 
-def _warn_when_chain_outside_gui_session(roles: MachineRoles) -> None:
-    """Warn when this start's chain is outside the macOS GUI login session."""
+def _rehomeable_domain(roles: MachineRoles) -> str | None:
+    """This start's non-Aqua launchd domain when a re-home through the GUI-domain
+    job is possible, else None.
+
+    One gate for both the warning and the handover (task #3348): macOS, the
+    agent-runner role, an answer other than Aqua (None is not evidence), and a
+    GUI login owned by this account (else there is no session to re-home into).
+    """
     if not IS_MACOS or "agent-runner" not in roles:
-        return
+        return None
     domain = gui_session_domain()
     if domain is None or domain == "Aqua":
-        return
+        return None
     account = _current_account_name()
     console_user = gui_login_user()
     if account is None or console_user is None or console_user != account:
+        return None
+    return domain
+
+
+def _warn_when_chain_outside_gui_session(roles: MachineRoles) -> None:
+    """Warn when this start's chain is outside the macOS GUI login session."""
+    domain = _rehomeable_domain(roles)
+    if domain is None:
         return
     print(
         "  ! this start chain is outside the macOS GUI login session "
