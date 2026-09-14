@@ -61,6 +61,21 @@ def probe() -> Iterator[tuple[Any, Any]]:
     delattr(ava, "probe")
 
 
+@pytest.fixture(autouse=True)
+def _drop_fake_plugin_modules() -> Iterator[None]:
+    """The `scan_and_load` tests import the fake plugin packages they write under
+    tmp dirs (`plugins.codex_usage.plugin` / `.refresh`); a leftover in
+    `sys.modules` poisons a later same-process file's negatives (a boot loader
+    must never import a *disabled* plugin — `test_plugin_load_containment` read
+    the leftovers as exactly that). Drop whatever a test here adds."""
+    before = {name for name in sys.modules if name == "plugins" or name.startswith("plugins.")}
+    yield
+    for name in [
+        n for n in sys.modules if (n == "plugins" or n.startswith("plugins.")) and n not in before
+    ]:
+        del sys.modules[name]
+
+
 def test_wrap_installs_and_stack_lists(probe: tuple[Any, Any]):
     """wrap replaces the target; stack reports one (plugin, wrapper) layer."""
     ns, fn = probe
@@ -311,6 +326,28 @@ def test_clear_wraps_restores_and_empties(probe: tuple[Any, Any]):
     assert ns.fn is fn  # restored to the captured original
     assert _extend.stack("probe.fn") == []
     assert _extend.wrappers() == {}
+
+
+def test_wrap_captures_the_base_callable_below_a_metering_recorder(
+    probe: tuple[Any, Any],
+) -> None:
+    """Task #3427: the SDK metering recorder (installed at SDK import, before
+    plugins load) is not a wrap layer. A wrap captures and chains over the base
+    callable below it — so clear_wraps restores the base, and no stale recorder
+    stays alive inside the wrap chain."""
+    from ava import _sdk_metering
+
+    ns, fn = probe
+    ns.fn = _sdk_metering._make_recorder(fn, "probe.fn")
+
+    with PluginContext("myplugin"):
+        wrap("probe.fn", lambda inner, *a, **kw: inner(*a, **kw))  # pyright: ignore[reportUnknownArgumentType]
+
+    assert _extend._ORIGINALS["probe.fn"] is fn  # the base, not the proxy
+    assert ns.fn("x") == "fn(x,1,2)"  # the chain still runs
+
+    _extend.clear_wraps()
+    assert ns.fn is fn
 
 
 def test_wrap_invalid_target_raises(probe: tuple[Any, Any]):
