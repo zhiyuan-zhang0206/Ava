@@ -110,7 +110,8 @@ def _classify(*, ping_ok: bool, job: HelperJobState | None) -> str:
     """The LWCR truth table (pure): one failure class per observation.
 
     ``job`` is None when launchd has no readable job. The LWCR class needs the
-    spawn-failed ``job state`` plus one LWCR marker — never the bare 78.
+    spawn-failed ``job state`` plus one LWCR signal — the ``needs LWCR update``
+    marker or the 78 exit code; a bare 78 without spawn-failed is not one.
     """
     if ping_ok:
         return HEALTHY

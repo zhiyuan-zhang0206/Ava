@@ -35,6 +35,15 @@ _STUCK_MARKER_ONLY = """gui/501/com.ava.test.f5-lwcr-stub = {
 	properties = keepalive | needs LWCR update | has LWCR
 }"""
 
+# The mirror lag: the 78 exit is recorded but no LWCR marker shows in the
+# properties — the exit code alone already identifies the stuck class.
+_STUCK_78_NO_MARKER = """gui/501/com.ava.test.f5-lwcr-stub = {
+	state = spawn scheduled
+	job state = spawn failed
+	properties = keepalive
+	last exit code = 78: EX_CONFIG
+}"""
+
 # Spawn failed without any LWCR mark: the next round re-classifies.
 _SPAWN_FAILED_BARE = """gui/501/com.ava.test.f5-lwcr-stub = {
 	state = spawn scheduled
@@ -193,6 +202,7 @@ def test_parse_tolerates_a_missing_exit_code_and_empty_text() -> None:
     [
         (_STUCK_JOB, hc.LWCR_STUCK),  # spawn failed + 78 + marker
         (_STUCK_MARKER_ONLY, hc.LWCR_STUCK),  # spawn failed + marker, exit lagging
+        (_STUCK_78_NO_MARKER, hc.LWCR_STUCK),  # spawn failed + 78, marker lagging
         (_SPAWN_FAILED_BARE, hc.SPAWN_FAILED),  # spawn failed, no LWCR mark
         (_EXIT_78_ONLY, hc.UNRESPONSIVE),  # 78 without spawn-failed is not LWCR
         (_RUNNING_JOB, hc.UNRESPONSIVE),  # running but not answering ping
@@ -209,6 +219,15 @@ def test_ping_alive_short_circuits_to_healthy() -> None:
 
 
 # -- the watchdog round (era 1) ------------------------------------------------
+
+
+def test_repair_backoff_doubles_then_caps() -> None:
+    assert hc._repair_backoff_s(1) == 300.0
+    assert hc._repair_backoff_s(2) == 600.0
+    assert hc._repair_backoff_s(3) == 1200.0
+    assert hc._repair_backoff_s(4) == 2400.0
+    assert hc._repair_backoff_s(5) == 3600.0  # 4800 clamped to the cap
+    assert hc._repair_backoff_s(7) == 3600.0  # stays clamped
 
 
 def test_unhealthy_reports_once_and_escalates_with_backoff(
