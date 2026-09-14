@@ -1934,7 +1934,7 @@ needs Playwright chromium) — no Docker, no shared engine.
 > image — is operator-specific and lives in their private deployment notes, not
 > in this repo.
 
-## ava-root dev dry run (W1.2e / S2)
+## ava-root dev dry run (W1.2e / S2 / W1.2c)
 
 The root supervisor's wiring surfaces — the roster-to-manifest generator, the
 daemon's `--wiring` hook, the reference/drill assemblies, and the per-unit log
@@ -1954,9 +1954,16 @@ verbs (`down` / `up` on a subtree, `restart` replacing a generation), and the
 probe-driven revive: the drill SIGSTOPs `light-beat` (pid stays alive, its
 beats stop), the root's own health path judges the stale heartbeat down and
 the supervisor replaces the generation — `down -> restarted, verified alive`
-in the daemon log, no watchdog/healthchecks/sessions process involved. Six
-phases must pass, each printed as `PASS(phase=...)`: generate / launch / status
-/ ops / revive / stop (SIGTERM, exit 0).
+in the daemon log, no watchdog/healthchecks/sessions process involved; then
+the in-place upgrade: the drill asks the root to exec-replace itself, and the
+successor attaches all four units — same root pid, every unit pid carried
+unchanged (no respawn), successor uptime reset, the handoff file consumed and
+purged. Seven phases must pass, each printed as `PASS(phase=...)`: generate /
+launch / status / ops / revive / upgrade / stop (SIGTERM, exit 0). The upgrade
+protocol itself lives in `services/ava_root/handoff.py` (handoff wire format +
+adoption) and `services/ava_root/daemon.py` (exec once the accepted response
+is flushed); `services/ava_root/survival.py` carries the update-survival
+roster hook (G6a(2)).
 
 Safety: the workdir defaults to `/tmp/ava-root-dry-run` and must stay outside
 a protected home — the one exception is the agent scratch tree

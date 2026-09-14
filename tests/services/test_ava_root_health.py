@@ -419,7 +419,7 @@ async def started(short_tmp: Path) -> AsyncIterator[StartFactory]:
     created: list[Supervisor] = []
 
     async def factory(units: list[UnitManifest]) -> Supervisor:
-        supervisor = Supervisor(UnitRegistry(units), log_dir=short_tmp / "logs")
+        supervisor = Supervisor(UnitRegistry(units), run_dir=short_tmp)
         created.append(supervisor)
         await supervisor.start()
         return supervisor

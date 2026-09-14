@@ -24,7 +24,7 @@ from services.ava_root.wiring import (
 def _context(tmp_path: Path) -> WiringContext:
     registry = UnitRegistry([])
     return WiringContext(
-        supervisor=Supervisor(registry, log_dir=tmp_path / "logs"),
+        supervisor=Supervisor(registry, run_dir=tmp_path),
         registry=registry,
         run_dir=tmp_path,
         log_dir=tmp_path / "logs",

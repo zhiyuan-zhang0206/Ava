@@ -46,7 +46,7 @@ def _registry(unit_ids: tuple[str, ...]) -> UnitRegistry:
 def _context(tmp_path: Path, registry: UnitRegistry) -> WiringContext:
     log_dir = tmp_path / "logs"
     return WiringContext(
-        supervisor=Supervisor(registry, log_dir=log_dir),
+        supervisor=Supervisor(registry, run_dir=tmp_path),
         registry=registry,
         run_dir=tmp_path,
         log_dir=log_dir,
