@@ -1268,14 +1268,23 @@ logical dump. Code-only updates need neither artifact.
 
 The receipt identifies a physical, whole-instance recovery point, not a
 `pg_restore` input or a new restore-drill result. Recover into an isolated
-instance with its pinned base, WAL objects and `target_lsn`, then verify the
-result before any production replacement. The base's completed drill is
+instance with its pinned base and WAL objects, setting PostgreSQL's
+`recovery_target_name` to the receipt's exact value. `archive_end_lsn` marks
+archival coverage only: do not use it as `recovery_target_lsn`, which can replay
+the following record. Verify the result before any production replacement.
+The base's completed drill is
 reused; each update verifies the later WAL's archival, not a fresh replay of
 the whole database. Recovery remains subject to the configured PITR chain
 retention window; a surviving receipt does not extend object retention.
 The point is captured before runner drain, so writes after it are outside
 that recovery point, as with the preceding logical snapshot. Daily logical
 backups and PITR activation's initial logical recovery floor remain separate.
+After successful publication, local audit copies retain the newest seven
+receipts. Offsite receipts are intentionally immutable audit metadata under
+the publisher's existing no-delete authority. Each carries the complete
+current-chain WAL identity list, so its size scales with that chain's length;
+offsite metadata accumulates with update attempts. Neither local cleanup nor
+keeping an offsite receipt extends the base/WAL retention window.
 
 **Rollback health guard and observation window.** `ava cluster health-probe` retries
 gateway liveness three times, 30 seconds apart, before declaring it unhealthy. A

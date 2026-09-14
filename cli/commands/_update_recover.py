@@ -66,7 +66,8 @@ def _print_pre_update_data_snapshot_restore(data_snapshot: Path | None) -> None:
     if data_snapshot is not None and data_snapshot.name.endswith(RECOVERY_SUFFIX):
         print(
             f"  · pre-update PITR recovery point: {data_snapshot} — restore the pinned "
-            "physical base plus WAL to target_lsn in an isolated instance; this is "
+            "physical base plus WAL using the receipt's recovery_target_name in an "
+            "isolated instance (archive_end_lsn is coverage only); this is "
             "whole-instance recovery within the PITR retention window, not a pg_restore dump "
             "(conventions/runbook.md)",
             file=sys.stderr,
