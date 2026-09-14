@@ -71,6 +71,22 @@ def _remote_wal(
     )
 
 
+def _remote_backup_history(
+    segment: int, *, timeline: int = 1, pin_token: str | None = None
+) -> RetentionObject:
+    name = f"{_wal_name(segment, timeline=timeline)}.{0x28:08X}.backup"
+    return RetentionObject(
+        f"pitr/wal/{timeline:08X}/{name}.enc",
+        str(segment) if pin_token is None else pin_token,
+        20,
+        name,
+        "wal",
+        "crc32c",
+        "crc",
+        _metadata(name),
+    )
+
+
 def _metadata(name: str) -> tuple[tuple[str, str], ...]:
     return tuple(
         sorted(
@@ -240,6 +256,43 @@ def test_gap_or_pin_token_replacement_blocks_every_eligible_object() -> None:
     assert plan.eligible == ()
     assert "gap before remote ACK high-water" in plan.blocked_reasons
     assert "ambiguous remote object pin token" in plan.blocked_reasons
+
+
+def test_backup_history_rides_the_wal_frontier_without_forking_its_segment() -> None:
+    first = _candidate("20260801T000001Z", SEGMENT, 2 * SEGMENT)
+    second = _candidate("20260808T000002Z", 2 * SEGMENT, 3 * SEGMENT)
+    third = _candidate("20260815T000003Z", 3 * SEGMENT, 4 * SEGMENT)
+    history_before = _remote_backup_history(1)
+    history_inside = _remote_backup_history(3)
+    inventory = _inventory(first, second, third)
+    inventory += (history_before, history_inside)
+    plan = plan_retention(
+        _evidence(
+            (first, second, third),
+            (_proof(first), _proof(second), _proof(third)),
+            inventory,
+        )
+    )
+    assert plan.blocked_reasons == ()
+    eligible = {item.object.object_name for item in plan.eligible}
+    retained = {item.object.object_name for item in plan.retained}
+    assert history_before.object_name in eligible
+    assert history_inside.object_name in retained
+
+
+def test_backup_history_file_does_not_satisfy_a_missing_segment() -> None:
+    first = _candidate("20260801T000001Z", SEGMENT, 2 * SEGMENT)
+    second = _candidate("20260808T000002Z", 2 * SEGMENT, 3 * SEGMENT)
+    third = _candidate("20260815T000003Z", 3 * SEGMENT, 4 * SEGMENT)
+    inventory = tuple(
+        item for item in _inventory(first, second, third) if item.archive_name != _wal_name(2)
+    )
+    inventory += (_remote_backup_history(2),)
+    plan = plan_retention(
+        _evidence((first, second, third), (_proof(first), _proof(second), _proof(third)), inventory)
+    )
+    assert plan.eligible == ()
+    assert "gap inside oldest retained recovery chain" in plan.blocked_reasons
 
 
 def test_unknown_or_concurrent_snapshot_blocks_fail_closed() -> None:
