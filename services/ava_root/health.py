@@ -100,6 +100,12 @@ class HealthConfig:
             raise ValueError("interval_s must be positive")
         if self.verify_interval_s <= 0:
             raise ValueError("verify_interval_s must be positive")
+        if self.verify_deadline_s <= 0:
+            raise ValueError("verify_deadline_s must be positive")
+        if self.backoff_base_s <= 0:
+            raise ValueError("backoff_base_s must be positive")
+        if self.backoff_cap_s < self.backoff_base_s:
+            raise ValueError("backoff_cap_s must be at least backoff_base_s")
         if self.failures_before_restart < 1:
             raise ValueError("failures_before_restart must be at least 1")
         if self.breaker_rounds <= self.failures_before_restart:
@@ -192,6 +198,45 @@ class HealthMonitor:
         """A copy of every known unit's health state, keyed by unit id."""
         return {unit_id: replace(state) for unit_id, state in self._units.items()}
 
+    def health_snapshot(self) -> dict[str, object]:
+        """A plain-dict view for `Supervisor.status()` (the B7 health surface)."""
+        now = _monotonic()
+        units: dict[str, object] = {}
+        for unit_id, state in self._units.items():
+            units[unit_id] = {
+                "consecutive_failures": state.consecutive_failures,
+                "respawn_attempts": state.respawn_attempts,
+                "breaker_open": state.breaker_since is not None,
+                "breaker_for_s": (
+                    None if state.breaker_since is None else max(0.0, now - state.breaker_since)
+                ),
+                "next_restart_in_s": (
+                    None if state.next_respawn_at is None else self._backoff_remaining(state)
+                ),
+                "last_verdict": state.last_verdict,
+                "last_detail": state.last_detail,
+            }
+        return units
+
+    @staticmethod
+    def _emit_breaker_open(unit_id: str, rounds: int, attempts: int, detail: str) -> None:
+        """The one alert per hold episode — a registered event (loguru `event=`).
+
+        Mirrors the watchdog's `respawn_breaker_open` shape, named distinctly so
+        the two layers stay attributable during the transition.
+        """
+        from shared.log import logger
+
+        logger.warning(
+            "[health] unit {unit}: restart breaker OPEN after {rounds} rounds without a "
+            "live probe ({detail}) — holding restarts; manual intervention needed",
+            event="root_restart_breaker_open",
+            unit=unit_id,
+            rounds=rounds,
+            respawn_attempts=attempts,
+            detail=detail,
+        )
+
     async def _loop(self) -> None:
         while True:
             await asyncio.sleep(self._config.interval_s)
@@ -271,15 +316,9 @@ class HealthMonitor:
         state.consecutive_failures = failures
         if failures >= self._config.breaker_rounds and state.breaker_since is None:
             state.breaker_since = _monotonic()
-            # One alert per hold episode; the per-round hold line carries the state.
-            _log.warning(
-                "[health] unit %s: restart breaker OPEN after %d rounds without a live "
-                "probe (%s) — holding restarts; manual intervention needed%s",
-                unit_id,
-                failures,
-                result.detail,
-                deferred_note,
-            )
+            # One alert per hold episode — a registered event; the per-round
+            # hold line below carries the continuing state.
+            self._emit_breaker_open(unit_id, failures, state.respawn_attempts, result.detail)
         if state.breaker_since is not None:
             _log.warning(
                 "[health] unit %s: down, restart held for %.0fs (%s) — not restarting%s",
