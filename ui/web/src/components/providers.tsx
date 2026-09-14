@@ -6,6 +6,7 @@ import { useState } from "react";
 
 import { AppConnectionBanner } from "@/components/app-connection-banner";
 import { GateMaintenanceProvider } from "@/components/gate-maintenance-provider";
+import { OpenTasksNoticeHost } from "@/components/open-tasks-notice";
 import { ThemePackTokens } from "@/components/theme-pack-tokens";
 import { ToastHost } from "@/components/toast";
 import { LanguageProvider } from "@/i18n/language-provider";
@@ -104,6 +105,10 @@ export function Providers({ children, nonce }: { children: React.ReactNode; nonc
                   {/* The toast renderer is root-level so error toasts reach the
                       user on every route, not just the Home page (Task #1051). */}
                   <ToastHost />
+                  {/* Terminate open-tasks notice — same root-level slot pattern
+                      as the toast: a terminate response that reports open tasks
+                      must surface wherever the action was taken (task #3374). */}
+                  <OpenTasksNoticeHost />
                 </LanguageProvider>
               </ThemeProvider>
             </AlertsProvider>

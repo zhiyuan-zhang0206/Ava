@@ -26,6 +26,8 @@
 
 import { create } from "zustand";
 
+import type { OpenTasksHint } from "@/lib/types";
+
 // Single dismiss timer for the toast slot (see showToast).
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -61,6 +63,13 @@ interface UISlice {
   /** toast message — when non-null, shows in the bottom-right; auto-clears after 3s */
   toast: string | null;
   showToast: (msg: string) => void;
+
+  /** Terminate open-tasks notice (task #3374) — set when a terminate response
+   *  reports the agent still owned open tasks; the root-level
+   *  OpenTasksNoticeHost renders it. Never auto-clears: dismiss explicitly. */
+  openTasksNotice: OpenTasksHint | null;
+  showOpenTasksNotice: (notice: OpenTasksHint) => void;
+  dismissOpenTasksNotice: () => void;
 
   // Spawn picker selections (model / preset / reasoning effort) are DB-backed
   // user preferences now (behavior.spawn_* via useUserSettings), so they sync
@@ -145,6 +154,10 @@ export const useStore = create<Store>()((set) => ({
       set({ toast: null });
     }, 3000);
   },
+
+  openTasksNotice: null,
+  showOpenTasksNotice: (notice) => set({ openTasksNotice: notice }),
+  dismissOpenTasksNotice: () => set({ openTasksNotice: null }),
 
   searchQuery: "",
   setSearchQuery: (q) => set({ searchQuery: q }),

@@ -877,5 +877,10 @@
     "retryWindowed": "Retry windowed data",
     "openRunTimeline": "Open run timeline",
     "jumpNotice": "Notification"
+  },
+  "openTasksNotice": {
+    "title": "This agent still has {count, plural, one {# open task} other {# open tasks}}",
+    "more": "and {more} more",
+    "dismiss": "Got it"
   }
 }
