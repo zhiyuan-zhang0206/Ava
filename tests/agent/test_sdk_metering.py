@@ -210,7 +210,7 @@ def test_recorder_recognized_by_identity_not_copied_dict() -> None:
 
 def test_mcp_recorder_derives_fq_from_runtime_args(monkeypatch: pytest.MonkeyPatch) -> None:
     """MCP tools are dynamic, so the funnel recorder builds the fq from server/tool at
-    call time, and (like the rest) only records inside agent code."""
+    call time, both inside and outside an execution tally."""
     calls = _spy_emit(monkeypatch)
 
     def _fake_call(server: str, tool: str, **_kw: object) -> dict[str, str]:

@@ -53,11 +53,12 @@ another. Nested SDK implementation calls count once at the outer public boundary
 `AVA_SDK_CALL_SAMPLE_EVERY=N` sets inclusion probability 1/N, with N >= 1. These
 cluster fields use the existing config API/CLI. Processes start with their boot
 policy and refresh active-call policy snapshots in the background every five
-seconds from the gateway-owned `.env` or the existing authenticated bootstrap
-endpoint on a runner. Fetch failures warn and retain the last valid policy. SDK
+seconds from local `.env` on gateways and unenrolled tools, or the existing
+authenticated bootstrap endpoint on an enrolled runner. Fetch failures warn and retain the last valid policy. SDK
 calls never wait for a remote configuration fetch.
 
 Events go directly to the unified emitter, so external callers need no logger
 initialization or `recording()` context. Call-time agent/source attribution uses
-the SDK identity resolver, including borrowed identities. Sampling is an explicit
+cached SDK provenance, including borrowed identities, without validating a lease
+or doing database I/O. Sampling is an explicit
 loss of detail: sampled events cannot reconstruct a complete call history.
