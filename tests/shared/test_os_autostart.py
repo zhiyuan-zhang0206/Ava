@@ -352,3 +352,24 @@ def test_relaunch_via_gui_domain_reports_a_failed_bootstrap(
     assert ok is False
     assert "Bootstrap failed" in detail
     assert [cmd[1] for cmd in calls] == ["print", "bootstrap"]
+
+
+def test_gui_domain_kickstart_command_loads_the_job_if_missing_then_kicks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The operator-facing remedy `ava start`'s background-chain warning prints
+    (task #3346): load-if-missing then kickstart in one line — a freshly
+    registered job is only loaded at the next login, and a bare kickstart would
+    fail with "Could not find service" in that window (QA #3242)."""
+    import os
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    domain = f"gui/{os.getuid()}"
+    label = "com.ava.ava-t-cafe0123.autostart"
+    command = os_autostart.gui_domain_kickstart_command()
+    assert f"launchctl print {domain}/{label} >/dev/null 2>&1" in command
+    assert (
+        f"|| launchctl bootstrap {domain} {tmp_path / 'Library' / 'LaunchAgents' / f'{label}.plist'}"
+        in command
+    )
+    assert command.endswith(f"&& launchctl kickstart -k {domain}/{label}")

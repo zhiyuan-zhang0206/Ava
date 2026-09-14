@@ -5,6 +5,7 @@ Path / shutil / settings) and consumed by services.browser.daemon,
 ava._mcp_config, ops.spec, and shared.host_config_validators.
 """
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -259,6 +260,97 @@ def test_browser_mcp_incapability_inherits_browser_prongs(monkeypatch: pytest.Mo
     monkeypatch.setattr(pp, "unix_sockets_available", lambda: True)
     monkeypatch.setattr(pp.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
     assert pp.browser_mcp_incapability() == pp.browser_incapability()
+
+
+# ─── gui_session_domain / gui_login_user (task #3346) ────────────────────
+
+
+def _unexpected_probe(argv: list[str]) -> str | None:
+    raise AssertionError(f"probe should not run here: {argv}")
+
+
+def test_gui_session_domain_reads_launchctl_managername(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pp, "sys", _FakeSys("darwin"))
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        pp,
+        "_bounded_stdout",
+        lambda argv: calls.append(argv) or "Background",  # pyright: ignore[reportUnknownArgumentType]
+    )
+    assert pp.gui_session_domain() == "Background"
+    assert calls == [["/bin/launchctl", "managername"]]
+
+
+def test_gui_session_domain_none_off_macos(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pp, "sys", _FakeSys("linux"))
+    monkeypatch.setattr(pp, "_bounded_stdout", _unexpected_probe)
+    assert pp.gui_session_domain() is None
+
+
+def test_gui_login_user_reads_the_console_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pp, "sys", _FakeSys("darwin"))
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        pp,
+        "_bounded_stdout",
+        lambda argv: calls.append(argv) or "zyonzhang",  # pyright: ignore[reportUnknownArgumentType]
+    )
+    assert pp.gui_login_user() == "zyonzhang"
+    assert calls == [["/usr/bin/stat", "-f%Su", "/dev/console"]]
+
+
+def test_gui_login_user_none_off_macos(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pp, "sys", _FakeSys("win32"))
+    monkeypatch.setattr(pp, "_bounded_stdout", _unexpected_probe)
+    assert pp.gui_login_user() is None
+
+
+class _Completed:
+    """Minimal CompletedProcess stand-in for the bounded runner."""
+
+    def __init__(self, returncode: int, stdout: str) -> None:
+        self.returncode = returncode
+        self.stdout = stdout
+
+
+def _runner_returning(completed: _Completed) -> Callable[..., _Completed]:
+    def _run(*_args: object, **_kwargs: object) -> _Completed:
+        return completed
+
+    return _run
+
+
+def test_bounded_stdout_returns_the_stripped_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("shared.proc.run_bounded", _runner_returning(_Completed(0, " Aqua\n")))
+    assert pp._bounded_stdout(["/bin/launchctl", "managername"]) == "Aqua"
+
+
+def test_bounded_stdout_none_on_nonzero_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("shared.proc.run_bounded", _runner_returning(_Completed(1, "error")))
+    assert pp._bounded_stdout(["/bin/launchctl", "managername"]) is None
+
+
+def test_bounded_stdout_none_on_empty_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("shared.proc.run_bounded", _runner_returning(_Completed(0, "  \n")))
+    assert pp._bounded_stdout(["/bin/launchctl", "managername"]) is None
+
+
+def test_bounded_stdout_none_on_missing_binary(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _missing(*_a: object, **_k: object) -> None:
+        raise FileNotFoundError("no launchctl")
+
+    monkeypatch.setattr("shared.proc.run_bounded", _missing)
+    assert pp._bounded_stdout(["/bin/launchctl", "managername"]) is None
+
+
+def test_bounded_stdout_none_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    import subprocess
+
+    def _timeout(*_a: object, **_k: object) -> None:
+        raise subprocess.TimeoutExpired(["launchctl"], 5.0)
+
+    monkeypatch.setattr("shared.proc.run_bounded", _timeout)
+    assert pp._bounded_stdout(["/bin/launchctl", "managername"]) is None
 
 
 # ─── helpers ─────────────────────────────────────────────────────────────

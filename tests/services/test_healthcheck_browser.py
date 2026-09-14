@@ -44,11 +44,13 @@ def _probes(
     *,
     probe: DaemonProbe,
     session: bool,
+    gui_chain: bool = False,
 ) -> tuple[list[str], list[str], hc._Episode, _FakeClock, hc._ContextHeal]:
     """Wire probe/session/reap/restart to fixed answers; return the restarts, the
     reaped pids, the episode reporter, its clock, and the context-heal reporter.
     Every test gets fresh state files (tmp_path) so no episode leaks between
-    tests."""
+    tests. `gui_chain` pins the launchd-domain question (True = this test chain
+    is outside the GUI login session), so no test ever probes the real host."""
     restarts: list[str] = []
     reaped: list[str] = []
     clock = _FakeClock()
@@ -65,6 +67,7 @@ def _probes(
 
     monkeypatch.setattr(hc, "_probe", lambda: probe)
     monkeypatch.setattr(hc, "_session_alive", lambda: session)
+    monkeypatch.setattr(hc, "_chain_outside_gui_session", lambda: gui_chain)
     monkeypatch.setattr(hc.macos_readiness, "degraded_wait_state", lambda: None)
     monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(hc, "_restart_daemon", _restart)
@@ -84,6 +87,20 @@ class _FakeBackend:
     def kill_session(self, name: str, **kwargs: object) -> tuple[bool, str]:
         self._stops.append((name, kwargs))
         return (True, "graceful") if self._ok else (False, "survived")
+
+
+def _fake_gui_rebuild(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    stop_ok: bool = True,
+    kick: tuple[bool, str] = (True, "com.ava.t.autostart relaunched in gui/501"),
+) -> tuple[list[tuple[str, dict[str, object]]], list[str]]:
+    """Record the heal's stop and kick without touching any real session."""
+    stops: list[tuple[str, dict[str, object]]] = []
+    kicks: list[str] = []
+    monkeypatch.setattr(hc, "get_backend", lambda: _FakeBackend(stops, ok=stop_ok))
+    monkeypatch.setattr(hc, "relaunch_via_gui_domain", lambda: kicks.append("kick") or kick)
+    return stops, kicks
 
 
 def _seed_context_wait(monkeypatch: pytest.MonkeyPatch, *, context_missing: bool = True) -> None:
@@ -642,3 +659,128 @@ def test_context_missing_on_a_non_macos_unit_stays_a_plain_wait(
         hc.main()
     assert stops == []
     assert any("DEGRADED" in r.getMessage() for r in caplog.records)
+
+
+# ─── rebuild routing through the GUI domain (task #3346) ────────────────────
+
+
+def test_session_gone_rebuilds_via_the_gui_domain_when_the_chain_is_outside_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A chain outside the GUI login session cannot rebuild the session in
+    place (the wrong launchd domain survives it): the sweep's rebuild stops the
+    session and kicks the GUI-domain autostart job instead — respawn_service is
+    never reached, and the round reports at WARNING with the running total."""
+    restarts, reaped, _episode, _clock, heal = _probes(
+        monkeypatch, tmp_path, probe=DaemonProbe.down("gone"), session=False, gui_chain=True
+    )
+    stops, kicks = _fake_gui_rebuild(monkeypatch)
+    with caplog.at_level(logging.WARNING, logger="services.healthchecks.browser"):
+        hc.main()
+    assert reaped == ["reap"]
+    assert restarts == []
+    assert [name for name, _ in stops] == [hc.session_name("browser")]
+    assert stops[0][1]["graceful"] is True
+    assert stops[0][1]["expected"] is True
+    assert kicks == ["kick"]
+    warns = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert len(warns) == 1
+    assert "context heal (trigger=session-gone)" in warns[0]
+    assert "rebuilt the ava-browser session via the GUI domain" in warns[0]
+    assert "total=1" in warns[0]
+    assert heal.total() == 1
+
+    # The next round sits inside the relaunch window: it defers, not rebuilds.
+    hc.main()
+    assert len(stops) == 1
+    assert len(kicks) == 1
+
+
+def test_dead_cdp_rebuilds_via_the_gui_domain_when_the_chain_is_outside_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Live session, dead CDP, a chain that cannot see the GUI login session:
+    the same reroute applies — stop the pane, then let the GUI-domain job
+    rebuild it."""
+    restarts, reaped, _episode, _clock, _heal = _probes(
+        monkeypatch,
+        tmp_path,
+        probe=DaemonProbe.down("CDP unreachable"),
+        session=True,
+        gui_chain=True,
+    )
+    stops, kicks = _fake_gui_rebuild(monkeypatch)
+    with caplog.at_level(logging.WARNING, logger="services.healthchecks.browser"):
+        hc.main()
+    assert restarts == []
+    assert reaped == []
+    assert [name for name, _ in stops] == [hc.session_name("browser")]
+    assert kicks == ["kick"]
+    assert any(
+        "context heal (trigger=cdp-down)" in r.getMessage() and "total=1" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_gui_rebuild_stop_failure_reports_and_never_kicks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A survivor session would make the GUI `ava start` skip the browser, so a
+    failed stop must not kick — and the round reports through the episode gate
+    without an in-place respawn."""
+    restarts, _reaped, _episode, _clock, _heal = _probes(
+        monkeypatch, tmp_path, probe=DaemonProbe.down("gone"), session=False, gui_chain=True
+    )
+    stops, kicks = _fake_gui_rebuild(monkeypatch, stop_ok=False)
+    with (
+        caplog.at_level(logging.ERROR, logger="services.healthchecks.browser"),
+        pytest.raises(SystemExit) as exc,
+    ):
+        hc.main()
+    assert exc.value.code == EXIT_RESPAWN_FAILED
+    assert stops != []  # the stop was attempted
+    assert kicks == []
+    assert restarts == []
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("survived its stop" in m for m in messages)
+    assert any("sweep + session rebuild FAILED" in m for m in messages)
+
+
+def test_outside_chain_stops_kicking_once_the_gui_budget_is_spent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The GUI-domain route is bounded by the heal budget: with the attempts
+    spent (and the cooldown window past), a session-gone round falls back to
+    the in-place respawn instead of kicking again."""
+    restarts, _reaped, _episode, clock, heal = _probes(
+        monkeypatch, tmp_path, probe=DaemonProbe.down("gone"), session=False, gui_chain=True
+    )
+    stops, kicks = _fake_gui_rebuild(monkeypatch)
+    heal.record_attempt()
+    heal.record_attempt()
+    clock.t += hc._CONTEXT_HEAL_COOLDOWN_S + 1  # the relaunch window has passed
+    hc.main()
+    assert restarts == ["restart"]
+    assert stops == [] and kicks == []
+
+
+def test_context_heal_total_survives_clear_and_recurrence(tmp_path: Path) -> None:
+    """`total` is the cumulative visibility counter: it grows per attempt,
+    survives the episode reset, and never gates — while a cleared record lets
+    the next recurrence heal with a full budget and no cooldown wait."""
+    clock = _FakeClock()
+    heal = hc._ContextHeal(tmp_path / "browser-context-heal.json", now=clock)
+    heal.record_attempt()
+    heal.record_attempt()
+    assert heal.total() == 2
+
+    heal.clear()
+    assert heal.total() == 2
+    assert heal.exhausted() is False
+    assert heal.due() is True
+    assert heal.in_flight() is False
+
+    heal.record_attempt()
+    assert heal.total() == 3
+    assert heal.due() is False  # a fresh attempt restarts the cooldown
+    assert heal.in_flight() is True

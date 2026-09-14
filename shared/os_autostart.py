@@ -326,6 +326,26 @@ def unregister_autostart(home: Path | None = None) -> None:
     get_backend().unregister_autostart(slug_for_home(home))
 
 
+def gui_domain_kickstart_command() -> str:
+    """The shell line that (re)runs this cluster's autostart job in the current
+    user's GUI domain, safe on a domain that has never loaded it.
+
+    The remedy operator-facing messages print (task #3346): ensure the GUI
+    domain knows the job — a fresh registration is only loaded at the next
+    login, so a bare kickstart would fail with "Could not find service" — then
+    kickstart it. One copy-pasteable line, the same two steps
+    `relaunch_via_gui_domain` performs."""
+    slug = _home_slug()
+    label = _autostart_label(slug)
+    domain = f"gui/{os.getuid()}"
+    plist_path = _autostart_plist_path(slug)
+    return (
+        f"(launchctl print {domain}/{label} >/dev/null 2>&1 "
+        f"|| launchctl bootstrap {domain} {plist_path}) "
+        f"&& launchctl kickstart -k {domain}/{label}"
+    )
+
+
 def relaunch_via_gui_domain() -> tuple[bool, str]:
     """Run this cluster's autostart job in the GUI login session, now.
 

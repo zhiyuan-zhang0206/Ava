@@ -7,6 +7,11 @@ needs to know about the local machine:
   default)?
 - Does this machine have a window server a headed browser can draw on?
 - Does it have AF_UNIX sockets (the browser-mcp daemon's transport)?
+- On macOS: does this process chain run inside the user's GUI login session
+  (and which account owns the console)? The launchd management domain is
+  inherited down the spawning chain and decides whether the login Keychain is
+  reachable — a chain outside the GUI session can never reach it by relaunching
+  in place (task #3346).
 
 These probes lived in three places (the browser daemon, the MCP config loader,
 and the host-config validators) and had already drifted apart. They now live
@@ -24,6 +29,7 @@ from __future__ import annotations
 import os
 import shutil
 import socket
+import subprocess
 import sys
 from pathlib import Path
 
@@ -121,6 +127,55 @@ def display_available() -> bool:
         # headless Windows Server is rare and can use AVA_CHROME_BINARY override)
         return True
     return False
+
+
+# Both GUI-session probes below run local launchctl/stat calls; the bound only
+# exists so a wedged launchd can never stall a healthcheck round or a start.
+_GUI_PROBE_TIMEOUT_S = 5.0
+
+
+def _bounded_stdout(argv: list[str]) -> str | None:
+    """Run a fixed read-only query, bounded; return its stripped stdout or None.
+
+    None is "no answer" — a missing binary, a timeout, a non-zero exit, or
+    empty output — never evidence about the fact being probed. ``shared.proc``
+    is imported lazily because this module must stay importable without
+    ``shared.config`` (the install/enroll-time callers depend on that) and
+    ``shared.proc`` reaches it through ``shared.paths``."""
+    from shared.proc import run_bounded
+
+    try:
+        completed = run_bounded(argv, timeout=_GUI_PROBE_TIMEOUT_S, capture_output=True, text=True)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if completed.returncode != 0:
+        return None
+    return str(completed.stdout or "").strip() or None
+
+
+def gui_session_domain() -> str | None:
+    """This process chain's launchd management domain (macOS), or None.
+
+    ``Aqua`` means the chain runs inside the user's GUI login session and can
+    reach the login Keychain. A daemon respawned from an agent/SSH/Background
+    chain answers e.g. ``Background``, and the domain is inherited from the
+    spawning chain — no in-place relaunch can move it, only launchd can cross
+    domains (``shared.os_autostart.relaunch_via_gui_domain``). None off macOS,
+    and None when the answer is unavailable — never evidence either way."""
+    if sys.platform != "darwin":
+        return None
+    return _bounded_stdout(["/bin/launchctl", "managername"])
+
+
+def gui_login_user() -> str | None:
+    """The account owning the GUI console session (macOS), or None.
+
+    ``/dev/console`` belongs to the user physically attached to the GUI — the
+    same check ``services.browser.macos_readiness`` runs before trusting a
+    GUI-domain verdict. None off macOS and when the answer is unavailable."""
+    if sys.platform != "darwin":
+        return None
+    return _bounded_stdout(["/usr/bin/stat", "-f%Su", "/dev/console"])
 
 
 def browser_incapability() -> str | None:
