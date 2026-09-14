@@ -24,6 +24,7 @@ from cli.commands._update_git import (
     git_reset_hard,
     rollback_schema_to,
 )
+from cli.commands._update_pitr import RECOVERY_SUFFIX
 from cli.commands._update_uv_sync import run_uv_sync
 from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 
@@ -62,6 +63,16 @@ class RolloutOutcome(StrEnum):
 
 def _print_pre_update_data_snapshot_restore(data_snapshot: Path | None) -> None:
     """Name the verified restore point without exposing the cluster DB URL."""
+    if data_snapshot is not None and data_snapshot.name.endswith(RECOVERY_SUFFIX):
+        print(
+            f"  · pre-update PITR recovery point: {data_snapshot} — restore the pinned "
+            "physical base plus WAL using the receipt's recovery_target_name in an "
+            "isolated instance (archive_end_lsn is coverage only); this is "
+            "whole-instance recovery within the PITR retention window, not a pg_restore dump "
+            "(conventions/runbook.md)",
+            file=sys.stderr,
+        )
+        return
     if data_snapshot is not None:
         print(
             f"  · pre-update data snapshot: {data_snapshot} — restore: decrypt, then "

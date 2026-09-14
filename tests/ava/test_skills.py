@@ -39,11 +39,14 @@ def _overlay_all_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def fake_skills_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def fake_skills_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     d = tmp_path / "skills"
     d.mkdir()
-    monkeypatch.setattr(skills_mod, "_skills_dir", lambda: d)
-    return d
+    # Restore discovery before the global SDK-metering teardown rescans public
+    # names: collision tests intentionally leave a tree that cannot be scanned.
+    with monkeypatch.context() as patch:
+        patch.setattr(skills_mod, "_skills_dir", lambda: d)
+        yield d
 
 
 def _write_skill(root: Path, dirname: str, frontmatter: str, body: str = "") -> None:

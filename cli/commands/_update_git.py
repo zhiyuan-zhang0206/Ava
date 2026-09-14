@@ -618,29 +618,39 @@ def _verify_snapshot_artifact_inner(artifact: Path) -> None:
 
 
 def snapshot_pre_update_data(target_sha: str) -> Path | None:
-    """Verified pre-upgrade data snapshot, taken BEFORE anything is stopped.
+    """Verify pre-upgrade recovery evidence before anything is stopped.
 
-    Returns the dump path when the update will apply migrations (the target's
-    required migration set differs from the DB's current applied set), else None
-    (a code-only update cannot damage data; the daily backup already covers it).
-
-    The dump is a normal managed backup (`services.backup.run_backup`), so it
-    lands in `<home>/backups/db/`; the `pre_update=True` marker names it
-    `<db>-<ts>.pre-update.dump.enc`, and prune keeps the newest such snapshot
-    in its own retention slot rather than consuming a daily-dump slot. The
-    returned path is threaded through the
-    recovery context so a failed rollout names the exact restore point, and is
-    printed to the rollout output once verified so the snapshot is visible.
-
-    Raises RuntimeError when the dump cannot be created OR verified: a rollout
-    that will migrate with no recoverable data snapshot is exactly the P1 the
-    audit names, so blowing up loudly — while the gateway is still up — is the
-    right outcome (same philosophy as `_snapshot_known_good`'s schema read).
+    Migration-bearing updates reuse an enabled PITR chain plus a fresh WAL
+    restore point. Disabled PITR retains the managed logical dump path. A
+    broken enabled chain fails before maintenance, without a full-dump fallback.
+    Code-only updates return None. Recovery reports the returned artifact's
+    actual restore method; physical recovery follows PITR's retention window.
     """
     from cli.commands._cluster_rollback import _migration_set_at_commit
 
     if _migration_set_at_commit(target_sha) == current_schema_state():
         return None
+
+    if settings.physical_backup.pitr_enabled:
+        from cli.commands._update_pitr import RECOVERY_SUFFIX
+
+        print("→ pre-update recovery: verifying protected base + incremental WAL", flush=True)
+        try:
+            result = run_bounded(
+                [sys.executable, "-m", "cli.commands._update_pitr", target_sha],
+                timeout=600,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("PITR pre-update recovery proof timed out after 600s") from None
+        if result.returncode != 0:
+            raise RuntimeError("PITR pre-update recovery proof failed; no update started")
+        receipt = Path(result.stdout.strip())
+        if not receipt.name.endswith(RECOVERY_SUFFIX) or not receipt.is_file():
+            raise RuntimeError("PITR pre-update recovery proof omitted its receipt")
+        print(f"→ pre-update PITR recovery point: {receipt} (verified; already offsite)")
+        return receipt
 
     from services.backup import backup_lock, run_backup
 

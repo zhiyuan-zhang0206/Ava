@@ -20,7 +20,7 @@ host's: reading a host timezone can make a current dump appear to be future.
 - **Daily dump**: `pg_dump --format=custom --compress=zstd:3` full database (the custom archive compresses in-dump, including the LangGraph checkpoint tables that hold conversation history), then encrypts it to `$AVA_HOME/backups/db/<dbname>-YYYYMMDDTHHMMSSZ.dump.enc` — under path-only cluster identity, `$AVA_HOME` itself already uniquely locates the cluster, so dump directories no longer need a cluster token (historical dumps under old `backups/<cluster-name>/` are kept in place, not migrated).
 - **UTC-stamped names**: the stamp is UTC with an explicit `Z`, so prune's oldest-first ordering is a total order over real instants. Pre-update snapshots carry a `.pre-update` kind segment (`<db>-<ts>.pre-update.dump.enc`). Legacy `<dbname>-YYYYMMDD-HHMMSS.dump` names (host wall clock, no offset) stay managed and are read in cluster time, so a week of pre-cutover dumps still prunes out instead of stranding; legacy `<db>-<ts>.dump.gz.enc` artifacts (pre-double-gzip-removal) also stay managed and restorable.
 - **Atomic write**: writes private plaintext and encrypted `.partial` files first, then publishes the encrypted artifact only after both commands succeed — half-finished dumps won't be mistaken for complete backups by due/prune logic or manual recovery.
-- **Keep a week, plus the newest update snapshot**: only manages dumps matching this module's naming convention (`_NAME_RE`); manually placed dumps in the same directory are never touched; deletes those beyond the newest `BACKUP_KEEP=7` **daily** dumps, and keeps the newest `<db>-<ts>.pre-update.dump.enc` snapshot (`ava cluster update` writes one per migration-bearing rollout) in its own slot.
+- **Keep a week, plus the newest update snapshot**: only manages dumps matching this module's naming convention (`_NAME_RE`); manually placed dumps in the same directory are never touched; deletes those beyond the newest `BACKUP_KEEP=7` **daily** dumps, and keeps the newest `<db>-<ts>.pre-update.dump.enc` snapshot (migration-bearing updates with PITR disabled) in its own slot.
 - **Timeout guard**: `_DUMP_TIMEOUT_S=60min` bounds pg_dump inside the scheduler; a stalled dump cannot freeze watchdog supervision.
 
 ## Key Dependencies
@@ -54,9 +54,10 @@ host's: reading a host timezone can make a current dump appear to be future.
   A local archived segment is not a remote ACK. When explicitly enabled, the
   GCS uploader encrypts each spooled segment, conditionally creates one immutable
   object, verifies its generation/CRC32C/metadata, and only then fsyncs an ACK
-  before removing local staging and spool files. Base chains, migration gate,
-  and isolated physical restore arrive in follow-up PRs; logical
-  daily/pre-update dumps remain the active recovery contract throughout.
+  before removing local staging and spool files. Enabled PITR protects a
+  migration-bearing update through the newest drilled base and freshly
+  verified continuous WAL (`cli/commands/_update_pitr.py`). Daily logical
+  dumps and activation's initial logical floor remain independent.
   `AVA_PITR_BASE_BACKUP_ENABLED` is a second, default-off gate: enabling WAL
   upload alone cannot accidentally start a multi-GiB weekly base. A candidate
   is born as one plain `pg_basebackup -Fp -X none` tree under the shared backup
