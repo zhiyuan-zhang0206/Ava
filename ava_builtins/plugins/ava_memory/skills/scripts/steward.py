@@ -4,6 +4,9 @@ Usage: python3 steward.py -m "memory: <machine> <date> local sync"
 
 The multi-host flow: each machine runs this on its own checkout, creating a
 PR from machine-<name> → main. It never merges — that is the arbiter's job.
+The runner refuses to start outside this machine's own branch: the push
+carries whatever branch the checkout is on, so a run from `main` would push
+straight to main and bypass the PR flow.
 After it returns, message the Memory Arbiter that the PR is ready.
 """
 
@@ -14,7 +17,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import branch_name, pool_dir, repo_slug, run, stage_and_commit
+from _common import branch_name, current_branch, pool_dir, repo_slug, run, stage_and_commit
 
 
 def main() -> int:
@@ -25,6 +28,17 @@ def main() -> int:
     pool = pool_dir()
     branch = branch_name()
     print(f"memory pool: {pool}  branch: {branch}")
+
+    current = current_branch(pool)
+    if current != branch:
+        print(
+            f"✗ refusing: the checkout is on {current or 'a detached HEAD'}, not {branch} —\n"
+            f"  the steward pushes whatever branch is checked out (a run from `main`\n"
+            f"  would push straight to main). Check out this machine's branch first:\n"
+            f"    git -C {pool} checkout -B {branch} origin/main",
+            file=sys.stderr,
+        )
+        return 2
 
     stage_and_commit(args.message, pool)
     run(["git", "-C", str(pool), "push", "origin", "HEAD"])

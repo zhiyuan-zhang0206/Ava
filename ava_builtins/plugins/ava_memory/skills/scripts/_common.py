@@ -34,6 +34,18 @@ def branch_name() -> str:
     return f"machine-{machine_name()}"
 
 
+def current_branch(pool: Path) -> str:
+    """The branch checked out in the pool ("" when HEAD is detached)."""
+    r = subprocess.run(
+        ["git", "-C", str(pool), "branch", "--show-current"],
+        capture_output=True,
+        text=True,
+    )
+    if r.returncode != 0:
+        raise SystemExit(f"✗ cannot read current branch: {r.stderr.strip()}")
+    return r.stdout.strip()
+
+
 def repo_slug(pool: Path) -> str:
     """user/repo from the pool's origin remote."""
     r = subprocess.run(
