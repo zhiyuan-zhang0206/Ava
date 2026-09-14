@@ -18,7 +18,10 @@ chain plus the keeper's crash semantics:
   conflict   kill -9 the helper: launchd relaunches it; the relaunched helper
              finds the orphan root, rests in `conflict` (no double-spawn, no
              kill), `root_stop` without force is refused, force disposes the
-             orphan, and an explicit re-seed brings a fresh tree up
+             orphan, and an explicit re-seed brings a fresh tree up; with
+             --sample-conflict the phase also samples the whole tree chain +
+             TCC attribution across the helper death/replacement window
+             (F12b, task #3380)
 
 Nothing here touches production: the binary is throwaway-signed, every path
 lives under the workdir, and the launchd job uses its own test label (never
@@ -346,39 +349,31 @@ def _f12_round(workdir: Path, unit_id: str, tag: str, pid: int, timeout: float) 
 def _f12_point(
     workdir: Path, tag: str, units: list[tuple[str, int]], pids: list[int]
 ) -> dict[str, Any]:
-    """Trigger one probe round per unit id; collect per-pid replies; snapshot chains."""
+    """Trigger one probe round per unit id; collect per-pid replies; snapshot chains.
+
+    A unit that is already dead gets an `error` marker without waiting; a live
+    unit that never answers times out into `error: no probe response`. The join
+    skips error rows; the summary counts them as missing rounds.
+    """
     smoke_ts = round(time.time(), 3)
     for unit_id in sorted({unit_id for unit_id, _ in units}):
         (workdir / f"unit-results-{unit_id}.json.req").write_text(tag)
     rows = []
     for unit_id, pid in units:
-        try:
-            record = _f12_round(workdir, unit_id, tag, pid, _F12_ROUND_WAIT_S)
-        except SmokeError:
-            record = {"round": tag, "pid": pid}
+        if not _pid_alive(pid):
+            record: dict[str, Any] = {"round": tag, "pid": pid, "error": "unit dead"}
+        else:
+            try:
+                record = _f12_round(workdir, unit_id, tag, pid, _F12_ROUND_WAIT_S)
+            except SmokeError:
+                record = {"round": tag, "pid": pid, "error": "no probe response"}
         record["unit"] = unit_id
         rows.append(record)
     return {"smoke_ts": smoke_ts, "rows": rows, "chains": [_f12_chain_line(pid) for pid in pids]}
 
 
-def _f12_join_tccd(evidence: Path, samples: dict[str, Any]) -> None:
-    """Join sampled probe rounds against the tccd AUTHREQ_ATTRIBUTION log window."""
-    first = min(point["smoke_ts"] for point in samples["points"].values())
-    span = max(2, int((time.time() - first) / 60) + 2)
-    log_text = _run(
-        [
-            "/usr/bin/log",
-            "show",
-            "--last",
-            f"{span}m",
-            "--style",
-            "compact",
-            "--predicate",
-            'eventMessage CONTAINS "AUTHREQ_ATTRIBUTION"',
-        ],
-        timeout=120.0,
-    ).stdout
-    _save(evidence, "f12-tccd-window.txt", log_text)
+def _f12_parse_window(log_text: str) -> dict[int, list[tuple[float, str]]]:
+    """Index AUTHREQ_ATTRIBUTION lines by requesting pid: pid -> [(ts, line)]."""
     lines: dict[int, list[tuple[float, str]]] = {}
     for line in log_text.splitlines():
         stamp = _LOG_STAMP_RE.match(line)
@@ -391,6 +386,13 @@ def _f12_join_tccd(evidence: Path, samples: dict[str, Any]) -> None:
             .timestamp()
         )
         lines.setdefault(int(requesting.group("requesting_pid")), []).append((ts, line))
+    return lines
+
+
+def _f12_join(
+    samples: dict[str, Any], lines: dict[int, list[tuple[float, str]]]
+) -> list[dict[str, Any]]:
+    """Join probe rounds against the parsed window: first 3 requests at/after ts - 0.15s."""
     joined = []
     for point in samples["points"].values():
         for record in point["rows"]:
@@ -422,7 +424,111 @@ def _f12_join_tccd(evidence: Path, samples: dict[str, Any]) -> None:
                     "requests": requests,
                 }
             )
-    samples["tccd"] = joined
+    return joined
+
+
+def _f12_attribution_summary(samples: dict[str, Any]) -> dict[str, Any]:
+    """Aggregate sampled rounds: per-point + total requests/unattributed/missing."""
+    blank = {"requests": 0, "attributed": 0, "unattributed": 0, "missing_rounds": 0}
+    by_point: dict[str, dict[str, int]] = {}
+    for point in samples["points"].values():
+        for record in point["rows"]:
+            counts = by_point.setdefault(record["round"], dict(blank))
+            if not isinstance(record.get("ts"), (int, float)):
+                counts["missing_rounds"] += 1
+    for row in samples["tccd"]:
+        counts = by_point.setdefault(row["point"], dict(blank))
+        for request in row["requests"]:
+            counts["requests"] += 1
+            if request["responsible_pid"] is None:
+                counts["unattributed"] += 1
+            else:
+                counts["attributed"] += 1
+    totals = {key: sum(counts[key] for counts in by_point.values()) for key in blank}
+    return {"totals": totals, "by_point": by_point}
+
+
+def _f12_expect_attribution(
+    samples: dict[str, Any], expectations: list[tuple[str, list[int] | None, int]]
+) -> list[str]:
+    """Check sampled requests resolve to the expected responsible pid.
+
+    Each expectation is (point, pids, want_pid): at `point`, every request of
+    every joined row whose pid is listed (None = all joined rows) must carry a
+    responsible pid equal to `want_pid`, and each listed pid must have a joined
+    row. Points absent from `expectations` are pure observations. Returns one
+    human-readable violation string per failed check.
+    """
+    rows_by_point: dict[str, list[dict[str, Any]]] = {}
+    for row in samples["tccd"]:
+        rows_by_point.setdefault(row["point"], []).append(row)
+    violations: list[str] = []
+    for point, pids, want_pid in expectations:
+        joined = rows_by_point.get(point, [])
+        if pids is None:
+            selected = joined
+            if not selected:
+                violations.append(f"{point}: no sampled rows")
+                continue
+        else:
+            wanted = set(pids)
+            selected = [row for row in joined if row["pid"] in wanted]
+            seen = {row["pid"] for row in selected}
+            for pid in sorted(wanted - seen):
+                violations.append(f"{point}: no sampled row for pid {pid} (dead or no response)")
+        for row in selected:
+            if not row["requests"]:
+                violations.append(f"{point} {row['unit']} pid {row['pid']}: no requests observed")
+                continue
+            for request in row["requests"]:
+                if request["responsible_pid"] is None:
+                    violations.append(
+                        f"{point} {row['unit']} pid {row['pid']}: request has no responsible"
+                    )
+                elif request["responsible_pid"] != want_pid:
+                    violations.append(
+                        f"{point} {row['unit']} pid {row['pid']}: responsible pid "
+                        f"{request['responsible_pid']} != expected {want_pid}"
+                    )
+    return violations
+
+
+def _f12_summary_text(label: str, samples: dict[str, Any]) -> str:
+    """One log line with the aggregate request counts for a sampling phase."""
+    totals = samples["summary"]["totals"]
+    return (
+        f"{label}: {totals['requests']} requests, {totals['unattributed']} unattributed, "
+        f"{totals['missing_rounds']} missing rounds"
+    )
+
+
+def _f12_join_tccd(
+    evidence: Path, samples: dict[str, Any], *, name: str = "f12-tccd-window.txt"
+) -> None:
+    """Join sampled probe rounds against the tccd AUTHREQ_ATTRIBUTION log window.
+
+    The only IO on the F12b attribution path: pulls the log window, saves it as
+    `name` under `evidence`, then joins + summarizes (pure helpers above) into
+    `samples`.
+    """
+    first = min(point["smoke_ts"] for point in samples["points"].values())
+    span = max(2, int((time.time() - first) / 60) + 2)
+    log_text = _run(
+        [
+            "/usr/bin/log",
+            "show",
+            "--last",
+            f"{span}m",
+            "--style",
+            "compact",
+            "--predicate",
+            'eventMessage CONTAINS "AUTHREQ_ATTRIBUTION"',
+        ],
+        timeout=120.0,
+    ).stdout
+    _save(evidence, name, log_text)
+    samples["tccd"] = _f12_join(samples, _f12_parse_window(log_text))
+    samples["summary"] = _f12_attribution_summary(samples)
 
 
 def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, wait, and teardown live together on purpose
@@ -438,6 +544,11 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         "--sample-restart",
         action="store_true",
         help="sample chains + TCC attribution across the root crash restart (F12)",
+    )
+    parser.add_argument(
+        "--sample-conflict",
+        action="store_true",
+        help="sample chains + TCC attribution across the helper crash conflict phase (F12b)",
     )
     parser.add_argument("--cleanup", action="store_true", help="remove the workdir at the end")
     args = parser.parse_args()
@@ -723,8 +834,9 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
             f12["new_root_ts"] = round(time.time(), 3)
         new_root_pid = int(restarted["root"]["pid"])
         recorded_pids.add(new_root_pid)
-        if not _pid_alive(initial_units["heartbeat"]):
-            _fail("restart", f"old unit heartbeat {initial_units['heartbeat']} died with the root")
+        dead_units = {unit_id: pid for unit_id, pid in initial_units.items() if not _pid_alive(pid)}
+        if dead_units:
+            _fail("restart", f"old units died with the root: {dead_units}")
         keeper = helper_root_status()
         if int(keeper["restarts"]) < 1:
             _fail("restart", f"keeper restarts={keeper['restarts']} did not record the crash")
@@ -745,7 +857,21 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
                 }
             )
             _f12_join_tccd(evidence, f12)
+            print(_f12_summary_text("f12-restart", f12))
+            violations = _f12_expect_attribution(
+                f12,
+                [
+                    ("pre", list(initial_units.values()), helper_pid),
+                    ("gap", list(initial_units.values()), helper_pid),
+                    ("respawn", [*initial_units.values(), *new_units.values()], helper_pid),
+                    ("stable", [*initial_units.values(), *new_units.values()], helper_pid),
+                ],
+            )
+            if violations:
+                f12["violations"] = violations
             _save(evidence, "f12-restart-sampling.json", json.dumps(f12, indent=2))
+            if violations:
+                _fail("f12", f"restart attribution violations: {'; '.join(violations)}")
         _save(
             evidence,
             "restart.txt",
@@ -762,7 +888,22 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         )
 
         # ---- conflict (helper crash) --------------------------------------
+        # F12b (task #3380): sample the whole tree + TCC attribution across the
+        # helper death/replacement window at five points -- h0 before the kill
+        # (control: every request must resolve to the old helper), h1 right
+        # after it, h2 once the relaunched helper reports `conflict`, h3 after
+        # the orphan tree is disposed, h4 once the re-seed is stable (re-seeded
+        # units must resolve to the new helper). h1-h3 are the measurement:
+        # what responsibility looks like between death and replacement.
+        conflict_f12: dict[str, Any] = {"points": {}}
+        ab_units = [*initial_units.items(), *new_units.items()]
+        ab_chain = [helper_pid, new_root_pid, *new_units.values(), *initial_units.values()]
+        if args.sample_conflict:
+            conflict_f12["points"]["h0"] = _f12_point(workdir, "h0", ab_units, ab_chain)
         _kill(helper_pid, signal.SIGKILL)
+        if args.sample_conflict:
+            conflict_f12["kill_ts"] = round(time.time(), 3)
+            conflict_f12["points"]["h1"] = _f12_point(workdir, "h1", ab_units, ab_chain)
         new_helper_pid = _wait_for(
             "helper relaunched",
             lambda: _relaunched_helper(label, helper_pid),
@@ -782,6 +923,10 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
                 f"conflict pid {conflict['conflict']['pid']} != orphan root {new_root_pid}",
             )
         _save(evidence, "keeper-status-conflict.json", json.dumps(conflict, indent=2))
+        if args.sample_conflict:
+            conflict_f12["points"]["h2"] = _f12_point(
+                workdir, "h2", ab_units, [new_helper_pid, *ab_chain]
+            )
 
         refused = False
         try:
@@ -802,6 +947,10 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
             "orphan root gone", lambda: not _pid_alive(new_root_pid), _RESTART_WAIT_S, "conflict"
         )
         _save(evidence, "keeper-status-disposed.json", json.dumps(stopped, indent=2))
+        if args.sample_conflict:
+            conflict_f12["points"]["h3"] = _f12_point(
+                workdir, "h3", ab_units, [new_helper_pid, *ab_chain]
+            )
         if (
             "stop signal received; stopping the tree"
             not in (workdir / "root.stderr.log").read_text()
@@ -823,8 +972,11 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         reseeded_status = _wait_for(
             "reseeded tree", lambda: _status_if_running(root_status), _ROOT_WAIT_S, "conflict"
         )
-        reseeded_unit_pid = int(_unit_entry(reseeded_status, "heartbeat")["pid"])
-        recorded_pids.add(reseeded_unit_pid)
+        reseeded_units = {
+            unit_id: int(_unit_entry(reseeded_status, unit_id)["pid"]) for unit_id in _UNIT_IDS
+        }
+        reseeded_unit_pid = reseeded_units["heartbeat"]
+        recorded_pids.update(reseeded_units.values())
         if _ppid_of(reseeded_pid) != new_helper_pid:
             _fail("conflict", "reseeded root is not the relaunched helper's child")
         _save(
@@ -833,6 +985,36 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
             _ps_line(new_helper_pid, new_root_pid, reseeded_pid, reseeded_unit_pid)
             + f"\nreseeded root {reseeded_pid} is child of helper {new_helper_pid}; unit {reseeded_unit_pid}",
         )
+        if args.sample_conflict:
+            time.sleep(_F12_STABLE_S)
+            conflict_f12["points"]["h4"] = _f12_point(
+                workdir,
+                "h4",
+                [*ab_units, *reseeded_units.items()],
+                [new_helper_pid, reseeded_pid, *reseeded_units.values(), *initial_units.values()],
+            )
+            _f12_join_tccd(evidence, conflict_f12, name="f12-conflict-tccd-window.txt")
+            print(_f12_summary_text("f12b", conflict_f12))
+            violations = _f12_expect_attribution(
+                conflict_f12,
+                [
+                    ("h0", [*initial_units.values(), *new_units.values()], helper_pid),
+                    ("h4", list(reseeded_units.values()), new_helper_pid),
+                ],
+            )
+            if violations:
+                conflict_f12["violations"] = violations
+            conflict_f12.update(
+                {
+                    "old_helper_pid": helper_pid,
+                    "new_helper_pid": new_helper_pid,
+                    "new_root_pid": new_root_pid,
+                    "reseeded": reseeded_units,
+                }
+            )
+            _save(evidence, "f12-conflict-sampling.json", json.dumps(conflict_f12, indent=2))
+            if violations:
+                _fail("f12b", f"conflict attribution violations: {'; '.join(violations)}")
         old_heartbeat = initial_units["heartbeat"]
         if _pid_alive(old_heartbeat):
             _kill(old_heartbeat, signal.SIGTERM)
