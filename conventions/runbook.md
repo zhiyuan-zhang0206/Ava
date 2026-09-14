@@ -1097,7 +1097,10 @@ sides derive the CDP port + socket path from `settings.browser_cdp_port`
   own in-context rebuild while the relaunch lands; every automatic browser
   rebuild takes that same GUI-domain route when the chain is outside the
   session (task #3346), and `ava start` warns loudly when an agent-runner host
-  is started from a chain outside the GUI login session. If the wait marker cannot be
+  is started from a chain outside the GUI login session — and (task #3348)
+  hands such an operator-shaped start's bring-up to the GUI-domain job instead
+  of running it in place, waiting with the normal readiness contract;
+  `AVA_START_GUI_HANDOVER=0` restores the warn-only behavior. If the wait marker cannot be
   written, the probe and healthcheck use the same bounded read-only readiness
   check instead. The gate never
   unlocks a Keychain or changes Chrome data;

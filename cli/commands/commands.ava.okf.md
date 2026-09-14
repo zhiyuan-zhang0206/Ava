@@ -38,7 +38,8 @@ Most command modules follow these two naming groups:
   `_update_normal_release` / `_update_uv_sync` /
   `_updater_lease` / `_updater_stage` (the cmd.exe ladder's per-step telemetry marker) / `_update_recover` /
   `_gateway_ready` (the staged upgrade), `_probe`, `_setup`, `_session_lifecycle`, `_repo`,
-  `_start_gui_chain` (the macOS GUI-chain warning), `_ownership_preflight`,
+  `_start_gui_chain` (the macOS GUI-chain warning) / `_start_gui_handover` (the
+  GUI-domain handover it guards), `_ownership_preflight`,
   `_pkg_source`, `_pgbouncer`, `_lgtm`,
   `_claude_code_plugin`, `_cluster_health` /
   `_cluster_rollback` / `_cluster_cron` / `_cluster_watchdog_probe`.

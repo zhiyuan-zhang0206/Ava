@@ -152,6 +152,24 @@ class GeneralSettings(EnvSettings):
         },
     )
 
+    start_gui_handover: bool = Field(
+        default=True,
+        alias="AVA_START_GUI_HANDOVER",
+        description=(
+            "macOS only: an `ava start` whose own chain runs outside the GUI login session hands "
+            "the bring-up to the cluster's GUI-domain job instead of starting sessions that would "
+            "inherit the wrong launchd domain (operator-shaped starts only; internal restart legs "
+            "never hand over). Off = the old warn-and-continue behavior."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     cluster_registry: Path = Field(
         default_factory=lambda: Path.home() / ".ava" / "clusters.json",
         alias="AVA_CLUSTER_REGISTRY",
