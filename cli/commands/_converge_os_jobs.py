@@ -4,7 +4,7 @@ Five jobs, one concept — everything Ava asks the platform scheduler (launchd /
 crontab) to run on its behalf:
 
 - **health probe** — periodic cluster health check with auto-rollback (gateway).
-- **watchdog probe** — revives a dead per-capability watchdog (any serving role).
+- **watchdog probe** — revives a dead per-capability watchdog (any serving role); retired instead on a root-driven host (the root supervisor absorbs the watchdogs).
 - **boot autostart** — brings the whole cluster back after a reboot (prod only).
 - **logs maintenance** — daily copytruncate rotation followed by tiered retention.
 - **packages refresh** — the content channel's recurring pass (skills fast lane).
@@ -84,22 +84,42 @@ def ensure_packages_refresh_job(_ctx: ConvergeCtx) -> None:
 
 
 def ensure_watchdog_probe(ctx: ConvergeCtx) -> None:
-    """Register the OS-scheduled probe that revives a dead watchdog.
+    """Keep the OS-scheduled watchdog probe in step with this host's service driver.
 
-    ONE job per capability this unit carries, not one per host: the watchdog
-    daemons are per-capability (a single box runs both `ava-gateway-watchdog`
-    and `ava-agent-runner-watchdog`), so a single probe would leave the other
-    capability's watchdog unsupervised — the same collision that motivated
-    splitting the watchdog itself.
+    Session mode (the default): register ONE job per capability this unit
+    carries, not one per host — the watchdog daemons are per-capability (a
+    single box runs both `ava-gateway-watchdog` and `ava-agent-runner-watchdog`),
+    so a single probe would leave the other capability's watchdog unsupervised —
+    the same collision that motivated splitting the watchdog itself.
+
+    Root mode (`services.root_driver_enabled` on for this host — the same rule
+    `ava start`/`ava stop` fork on): RETIRE the probe instead. The root
+    supervisor's own HealthMonitor absorbs the watchdogs (the unit manifests
+    drop `ABSORBED_WATCHDOGS`), so a probe-revived legacy watchdog would run a
+    second supervision path beside the root tree. Retirement is idempotent, and
+    the next converge with the switch back off falls through to the register
+    branch — the gray-rollout revert restores legacy supervision by itself.
+    Deliberately NOT gated on `os_jobs_enabled()`: cleanup has to work wherever
+    registration is forbidden too, the same rule `shared.os_cron` states for
+    deregistration.
 
     `ctx.roles` is the unit's capability SET and is `frozenset[str]` off the DB,
     so it is filtered through the known capabilities rather than trusted: a
-    gateway-only host registers one job, an agent-runner-only host registers one,
-    a single box registers two, and an unknown token registers nothing. Delegates
-    to `shared.os_watchdog_probe`; idempotent."""
-    from shared.os_watchdog_probe import register_watchdog_probe
+    gateway-only host carries one job, an agent-runner-only host one, a single
+    box two, and an unknown token none. Delegates to `shared.os_watchdog_probe`;
+    idempotent either way."""
+    import cli.commands as _ns
 
     carried = ctx.roles or frozenset()
+    if _ns._root_driven_enabled():
+        from shared.os_watchdog_probe import unregister_watchdog_probe
+
+        for role in CAPABILITY_ORDER:
+            if role in carried:
+                unregister_watchdog_probe(role)
+        return
+    from shared.os_watchdog_probe import register_watchdog_probe
+
     for role in CAPABILITY_ORDER:
         if role in carried:
             # POSIX: failure propagates so converge fails fast (a dead watchdog
