@@ -4520,6 +4520,8 @@ export interface components {
             serve_observability_station: boolean;
             /** Paused */
             paused: boolean;
+            /** Paused Reason */
+            paused_reason?: ("no_state" | "business_pause" | "maintenance" | "startup") | null;
             /** Current Orchestration */
             current_orchestration?: ("rollout" | "restart" | "update") | null;
             last_updater_outcome?: components["schemas"]["UpdaterOutcome"] | null;
@@ -5650,6 +5652,8 @@ export interface components {
             online: boolean;
             /** Paused */
             paused: boolean | null;
+            /** Paused Reason */
+            paused_reason?: ("no_state" | "business_pause" | "maintenance" | "startup") | null;
             /** Description */
             description?: string | null;
             /** Stopped At */

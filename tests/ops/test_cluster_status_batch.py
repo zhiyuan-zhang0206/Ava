@@ -404,3 +404,66 @@ def test_agent_host_liveness_is_probed_only_on_a_runner(
     assert snapshot.agent_host_online is (True if runner else None)
     assert (str(settings.services.agent_host_pidfile) in probes) is runner
     assert "restarter_online" not in snapshot.model_dump()
+
+
+@pytest.mark.parametrize(
+    ("posture", "held_flag", "serving", "expected_paused", "expected_reason"),
+    [
+        # A failed start parked the serving gate at `starting` while the DB
+        # posture is idle — the exact misread behind task #3404 (paused=true
+        # read like a deliberate pause). The reason must name the gate.
+        ("idle", False, False, True, "startup"),
+        # Deliberate posture pause.
+        ("paused", False, True, True, "business_pause"),
+        # Clause order: posture outranks a hold, a hold outranks the gate.
+        ("paused", True, True, True, "business_pause"),
+        ("idle", True, True, True, "maintenance"),
+        ("idle", True, False, True, "maintenance"),
+        # No readable deploy state is the verdict's first clause — it outranks
+        # every other cause, including a parked gate.
+        (None, False, True, True, "no_state"),
+        (None, False, False, True, "no_state"),
+        # No clause fired.
+        ("idle", False, True, False, None),
+    ],
+)
+def test_status_snapshot_paused_reason_names_the_first_true_clause(
+    monkeypatch: pytest.MonkeyPatch,
+    snapshot_dependencies: tuple[HostDeployState, DeployLease],
+    posture: str | None,
+    held_flag: bool,
+    serving: bool,
+    expected_paused: bool,
+    expected_reason: str | None,
+) -> None:
+    """`paused` stays an additive-compatible bool; `paused_reason` tells the causes apart."""
+    del snapshot_dependencies
+    state: HostDeployState | None = None
+    if posture is not None:
+        state = HostDeployState(
+            machine="win",
+            posture=posture,
+            updated_at=datetime.now(UTC),
+            updater_lease_expires_at=None,
+        )
+    pool = _Pool(object())
+
+    def _read_state(
+        _machine: str | None = None, *, conn: object | None = None
+    ) -> HostDeployState | None:
+        del conn
+        return state
+
+    def _read_lease(*, conn: object | None = None) -> None:
+        del conn
+
+    monkeypatch.setattr("shared.host_deploy_state.read", _read_state)
+    monkeypatch.setattr("shared.cluster_lock.read_update_lease", _read_lease)
+    monkeypatch.setattr("shared.maintenance.held", lambda: held_flag)
+    monkeypatch.setattr("shared.start_serving.is_serving", lambda: serving)
+    monkeypatch.setattr("shared.resource_sample.resource_sample", lambda: _RESOURCE)
+
+    snapshot = cluster_status.status_snapshot(pool=pool)
+
+    assert snapshot.paused is expected_paused
+    assert snapshot.paused_reason == expected_reason

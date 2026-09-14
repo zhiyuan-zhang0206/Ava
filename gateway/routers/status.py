@@ -420,6 +420,7 @@ async def _probe_agent_runner(
         up_since_at=up_since_at,
         online=True,
         paused=status.paused,
+        paused_reason=status.paused_reason,
         description=description,
         stopped_at=stopped_at,
         is_staging=is_staging,
@@ -562,6 +563,7 @@ def _local_machine_status_blocking(
     the psutil resource snapshot must not run on the event loop."""
     from shared import process_sha as _process_sha
 
+    paused = cluster_is_paused()
     return MachineStatus(
         name=name,
         serve_gateway="gateway" in role,
@@ -570,7 +572,10 @@ def _local_machine_status_blocking(
         gateway_url=url or "",
         up_since_at=up_since,
         online=True,
-        paused=cluster_is_paused(),
+        paused=paused,
+        # This row resolves paused from the posture row alone, so a true verdict
+        # here has exactly one possible cause.
+        paused_reason="business_pause" if paused else None,
         description=description,
         stopped_at=stopped_at,
         is_staging=is_staging,
