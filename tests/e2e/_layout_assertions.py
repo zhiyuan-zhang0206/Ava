@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import TypedDict, cast
 
 from playwright.sync_api import Page
@@ -16,8 +17,42 @@ class LayoutFailure(TypedDict):
     bbox: dict[str, float] | None
 
 
-_STRUCTURAL_PROBE = """
+_COUNT_VISIBLE_MATCHES = """
+const countVisibleMatches = (selector) => {
+  return Array.from(document.querySelectorAll(selector)).filter((element) => {
+    element.scrollIntoView({ block: "nearest", inline: "nearest" });
+    const style = getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return element.checkVisibility({checkOpacity: true, checkVisibilityCSS: true}) &&
+      style.display !== "none" && style.visibility !== "hidden" &&
+      Number(style.opacity) !== 0 && rect.width > 0 && rect.height > 0 &&
+      rect.left >= -1 && rect.top >= -1 &&
+      rect.right <= window.innerWidth + 1 && rect.bottom <= window.innerHeight + 1;
+  }).length;
+};
+"""
+
+_VISIBLE_COUNT_PROBE = (
+    """
+(selectors) => {
+"""
+    + _COUNT_VISIBLE_MATCHES
+    + """
+  const counts = {};
+  for (const selector of selectors) {
+    counts[selector] = countVisibleMatches(selector);
+  }
+  return counts;
+}
+"""
+)
+
+_STRUCTURAL_PROBE = (
+    """
 ({ visibleSelectors, controlSelectors, nonemptySelectors, minimumVisibleCounts }) => {
+"""
+    + _COUNT_VISIBLE_MATCHES
+    + """
   const failures = [];
   const bbox = (rect) => ({
     x: rect.x, y: rect.y, width: rect.width, height: rect.height,
@@ -93,12 +128,7 @@ _STRUCTURAL_PROBE = """
   }
 
   for (const [selector, minimum] of Object.entries(minimumVisibleCounts)) {
-    const count = Array.from(document.querySelectorAll(selector)).filter((element) => {
-      element.scrollIntoView({ block: "nearest", inline: "nearest" });
-      const rect = element.getBoundingClientRect();
-      return visible(element) && rect.left >= -1 && rect.top >= -1 &&
-        rect.right <= window.innerWidth + 1 && rect.bottom <= window.innerHeight + 1;
-    }).length;
+    const count = countVisibleMatches(selector);
     if (count < minimum) {
       failures.push({
         kind: "visible-panel", selector,
@@ -110,6 +140,7 @@ _STRUCTURAL_PROBE = """
   return failures;
 }
 """
+)
 
 _SETTLED_PREDICATE = """
 ({ readySelector }) => {
@@ -136,6 +167,43 @@ def wait_for_layout_settled(page: Page, ready_selector: str, *, timeout_ms: int 
         arg={"readySelector": ready_selector},
         timeout=timeout_ms,
     )
+
+
+def visible_in_viewport_counts(page: Page, selectors: tuple[str, ...]) -> dict[str, int]:
+    """Count visible in-viewport matches per selector.
+
+    The same rules as the structural probe's minimum-count check, from the one
+    shared predicate — a wait built on these counts and the probe's verdict can
+    never disagree about what "visible in viewport" means.
+    """
+    counts = page.evaluate(_VISIBLE_COUNT_PROBE, list(selectors))
+    return cast(dict[str, int], counts)
+
+
+def wait_for_minimum_visible_counts(
+    page: Page,
+    minimum_counts: dict[str, int],
+    *,
+    timeout_ms: int = 5_000,
+    poll_ms: int = 100,
+) -> dict[str, int]:
+    """Wait, bounded, until every selector reaches its minimum visible count.
+
+    A panel that mounts only after async data resolves can race an immediate
+    structural probe, so a caller that declares minimums first waits for them.
+    Returns the counts observed when the wait ended: satisfying the minimums on
+    the happy path (the first observation already satisfies them when nothing
+    is delayed — no sleep), otherwise the still-short counts at the deadline.
+    """
+    selectors = tuple(minimum_counts)
+    counts = visible_in_viewport_counts(page, selectors)
+    deadline = time.monotonic() + timeout_ms / 1000
+    while not all(counts[selector] >= minimum for selector, minimum in minimum_counts.items()):
+        if time.monotonic() >= deadline:
+            break
+        page.wait_for_timeout(poll_ms)
+        counts = visible_in_viewport_counts(page, selectors)
+    return counts
 
 
 def structural_failures(

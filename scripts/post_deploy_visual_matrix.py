@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import json
 import shutil
+from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, cast
@@ -29,7 +30,12 @@ from scripts.post_deploy_visual_policy import (
     classify_stable_diff,
     route_for_surface,
 )
-from tests.e2e._layout_assertions import structural_failures, wait_for_layout_settled
+from tests.e2e._layout_assertions import (
+    LayoutFailure,
+    structural_failures,
+    wait_for_layout_settled,
+    wait_for_minimum_visible_counts,
+)
 
 
 class VisualGateBudgetExceeded(RuntimeError):  # noqa: N818 - reads as the outcome, not an error kind
@@ -41,6 +47,13 @@ class VisualGateBudgetExceeded(RuntimeError):  # noqa: N818 - reads as the outco
     teardown) still runs and the hard-exit grace is not wasted on the
     remaining combinations.
     """
+
+
+# Bounded delayed-mount wait (ms): the combinations that declare minimum
+# counts may wait up to this long for their counts to appear before probing.
+# Paid only while a declared count is still short — an already-satisfied
+# count costs one observation and no sleep.
+DELAYED_MOUNT_WAIT_MS = 5_000
 
 
 def load_ignore_registry(path: Path) -> dict[str, object]:
@@ -225,6 +238,64 @@ def capture_crop(
     }
 
 
+def structural_minimum_counts(surface: str, viewport: str) -> dict[str, int]:
+    """Declared minimum visible counts for one combination; {} keeps the
+    immediate single-shot probe.
+
+    Home desktop's inspector aside mounts only after settings
+    (display.inspector_open) and the active agent resolve — both after the
+    layout has settled — so that combination declares the two-aside contract,
+    which arms the bounded delayed-mount wait in measure_structure. The
+    declared selectors also join the visible-must-hold list.
+    """
+    if surface == "home" and viewport == "desktop":
+        return {"#main-content aside": 2}
+    return {}
+
+
+def measure_structure(
+    page: Page, *, surface: str, viewport: str, spec: Mapping[str, object]
+) -> list[LayoutFailure]:
+    """Structural failures for one combination, with delayed-mount waits.
+
+    A combination that declares minimum counts waits (bounded by
+    DELAYED_MOUNT_WAIT_MS) until they hold, then probes; a count still short
+    at the deadline fails as before, with the wait recorded in the failure
+    detail. Combinations without declared counts keep the immediate
+    single-shot measurement.
+    """
+    minimum_counts = structural_minimum_counts(surface, viewport)
+    observed: dict[str, int] = {}
+    if minimum_counts:
+        observed = wait_for_minimum_visible_counts(
+            page, minimum_counts, timeout_ms=DELAYED_MOUNT_WAIT_MS
+        )
+    failures = structural_failures(
+        page,
+        visible_selectors=cast(tuple[str, ...], spec["visible"]) + tuple(minimum_counts),
+        control_selectors=cast(tuple[str, ...], spec["controls"]),
+        nonempty_selectors=cast(tuple[str, ...], spec["nonempty"]),
+        minimum_visible_counts=minimum_counts,
+    )
+    if minimum_counts:
+        _record_delayed_mount_wait(failures, minimum_counts, observed)
+    return failures
+
+
+def _record_delayed_mount_wait(
+    failures: list[LayoutFailure], minimum_counts: dict[str, int], observed: dict[str, int]
+) -> None:
+    """Record on a count failure that the bounded wait was already applied."""
+    for failure in failures:
+        selector = failure["selector"]
+        if failure["kind"] != "visible-panel" or selector not in minimum_counts:
+            continue
+        failure["detail"] += (
+            f" (a bounded {DELAYED_MOUNT_WAIT_MS} ms wait for the delayed mount"
+            f" was applied; observed {observed[selector]} when it ended)"
+        )
+
+
 def inspect_combination(
     browser: Browser,
     *,
@@ -246,18 +317,7 @@ def inspect_combination(
         spec = STRUCTURAL_SPECS[surface]
         ready_selector = cast(str, spec["ready"])
         wait_for_layout_settled(page, ready_selector)
-        visible = cast(tuple[str, ...], spec["visible"])
-        if surface == "home" and viewport == "desktop":
-            visible += ("#main-content aside",)
-        failures = structural_failures(
-            page,
-            visible_selectors=visible,
-            control_selectors=cast(tuple[str, ...], spec["controls"]),
-            nonempty_selectors=cast(tuple[str, ...], spec["nonempty"]),
-            minimum_visible_counts={"#main-content aside": 2}
-            if surface == "home" and viewport == "desktop"
-            else None,
-        )
+        failures = measure_structure(page, surface=surface, viewport=viewport, spec=spec)
         diffs = []
         for crop_surface, selector in pixel_crops(surface, viewport).items():
             key = f"{crop_surface}-{viewport}-{theme}"

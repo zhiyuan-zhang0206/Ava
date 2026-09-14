@@ -27,8 +27,9 @@ tags:
 
 `tests/e2e/_layout_assertions.py` is the shared real-browser structural layer for
 document overflow, viewport containment, center-point occlusion, nonempty blocks,
-and settle-before-capture. Both the layout-invariant suite and the post-deploy
-visual gate consume it so their definitions cannot drift.
+settle-before-capture, and the bounded wait that absorbs asynchronously mounted
+panels before declared minimum visible counts are probed. Both the layout-invariant
+suite and the post-deploy visual gate consume it so their definitions cannot drift.
 
 ### Test coverage scope
 - `tests/agent/` — agent core (loop, graph, messages, state, hooks)
