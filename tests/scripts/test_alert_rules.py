@@ -46,6 +46,7 @@ _EXPECTED_UIDS = {
     "ava-ops-warning-error-spike",
     "ava-ops-llm-rate-limit",
     "ava-ops-sse-drop-backlog",
+    "ava-ops-telemetry-queue-loss",
     "ava-ops-agent-restart-spike",
     "ava-ops-llm-latency-p95",
     "ava-ops-delivery-stalled-backlog",
@@ -108,7 +109,7 @@ def _load_groups() -> list[dict[str, Any]]:
     assert [group["name"] for group in groups] == ["ava-ops", "ava-ops-slow"]
     assert [group["folder"] for group in groups] == ["Ava", "Ava"]
     assert [group["interval"] for group in groups] == ["1m", "5m"]
-    assert [len(group["rules"]) for group in groups] == [24, 10]
+    assert [len(group["rules"]) for group in groups] == [25, 10]
     return groups
 
 
@@ -805,3 +806,14 @@ def test_tempo_backend_down_rule_tracks_the_remote_scrape() -> None:
         "metric": "tempo_up",
         "team": "ava-ops",
     }
+
+
+def test_telemetry_queue_loss_is_an_immediate_error_on_independent_metrics() -> None:
+    rule = next(r for r in _load_rules() if r["uid"] == "ava-ops-telemetry-queue-loss")
+    assert rule["labels"]["severity"] == "error"
+    assert rule["for"] == "0s"
+    query = next(q for q in rule["data"] if q["refId"] == "A")
+    assert query["datasourceUid"] == "prometheus"
+    assert "ava_event_log_drop_last_dropped_at" in query["model"]["expr"]
+    threshold = next(q for q in rule["data"] if q["refId"] == "D")
+    assert threshold["model"]["conditions"][0]["evaluator"] == {"type": "lt", "params": [300]}

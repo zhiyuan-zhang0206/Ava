@@ -93,12 +93,14 @@ def test_attach_borrows_identity_even_with_explicit_external_profile(
 ) -> None:
     monkeypatch.setenv("AVA_CALLER_IDENTITY", '{"kind":"external_agent","subject":"codex"}')
     with external.attach("lease", token="credential"):
+        assert _boot._external_agent_id == 405
         assert ava.self.AGENT_ID == 405
         assert _boot.require_agent_id() == 405
         assert _boot.require_actor() == "agent:405"
         assert _boot.default_actor() == "agent:405"
         assert turn_settings.lm.llm_model == "external-test"
     assert _boot._external_identity is None
+    assert _boot._external_agent_id is None
     assert _boot.require_actor() == "external_agent:codex"
     assert ava.state is None
 
@@ -121,6 +123,7 @@ def test_expiry_blocks_identity_and_plugin_state_before_new_effects(
     with pytest.raises(RuntimeError, match="expired"):
         attachment.close()
     assert _boot._external_identity is None
+    assert _boot._external_agent_id is None
     assert not staged
 
 
@@ -151,6 +154,7 @@ def test_stale_attachment_refuses_sdk_identity_and_removes_identity_on_close(
     with pytest.raises(RuntimeError, match="another attachment"):
         attachment.close()
     assert _boot._external_identity is None
+    assert _boot._external_agent_id is None
 
 
 @pytest.mark.parametrize("invalidated", ["expiry", "state_version"])
@@ -181,6 +185,7 @@ def test_failed_context_entry_restores_prior_binding_and_allows_next_attachment(
         with pytest.raises(RuntimeError, match=reason), attachment:
             pytest.fail("an invalid attachment entered its context")
         assert _boot._external_identity is None
+        assert _boot._external_agent_id is None
         assert ava.state is prior_state
         assert ava.state_update is prior_update
         assert current_agent_config_pins() is prior_config
@@ -196,6 +201,7 @@ def test_failed_context_entry_restores_prior_binding_and_allows_next_attachment(
 
         monkeypatch.setattr(external.control, "require_active", require_next)
         with external.attach("next", token="credential"):
+            assert _boot._external_agent_id == 405
             assert ava.self.AGENT_ID == 405
         assert ava.state is prior_state
         assert ava.state_update is prior_update
@@ -220,6 +226,7 @@ def test_concurrent_constructor_fails_before_lease_lookup(
 
     def attach_in_worker() -> None:
         with external.attach("lease", token="credential"):
+            assert _boot._external_agent_id == 405
             assert ava.self.AGENT_ID == 405
 
     monkeypatch.setattr(external.control, "require_active", blocked_require)
@@ -236,7 +243,9 @@ def test_concurrent_constructor_fails_before_lease_lookup(
             continue_lookup.set()
             first.result(timeout=5)
     assert _boot._external_identity is None
+    assert _boot._external_agent_id is None
     with external.attach("lease", token="credential"):
+        assert _boot._external_agent_id == 405
         assert ava.self.AGENT_ID == 405
 
 
@@ -269,12 +278,14 @@ def test_constructor_failure_restores_binding_and_allows_next_attachment(
             with pytest.raises(RuntimeError, match="constructor interrupted"):
                 external.attach("lease", token="credential")
         assert _boot._external_identity is None
+        assert _boot._external_agent_id is None
         assert ava.state is prior_state
         assert ava.state_update is prior_update
         assert current_agent_config_pins() is prior_config
         assert current_plugin_config_view() is prior_plugin_config
         assert not staged
         with external.attach("lease", token="credential"):
+            assert _boot._external_agent_id == 405
             assert ava.self.AGENT_ID == 405
 
 
@@ -285,6 +296,7 @@ def test_repeated_close_cannot_release_another_attachment(
     first.close()
     with external.attach("lease", token="credential"):
         first.close()
+        assert _boot._external_agent_id == 405
         assert ava.self.AGENT_ID == 405
         with pytest.raises(RuntimeError, match="already has an external attachment"):
             external.attach("lease", token="credential")
@@ -361,6 +373,7 @@ def test_attach_rejects_other_machine_without_binding_identity(
     with pytest.raises(RuntimeError, match="agent machine"):
         external.attach("lease", token="credential")
     assert _boot._external_identity is None
+    assert _boot._external_agent_id is None
 
 
 def test_delta_codec_preserves_sets_and_message_objects(
@@ -448,4 +461,5 @@ def test_external_attachment_refuses_to_journal_a_full_history_reset(
         attachment.close()
     assert not staged
     assert _boot._external_identity is None
+    assert _boot._external_agent_id is None
     assert snapshot.messages == [HumanMessage(content="Native history", id="native")]

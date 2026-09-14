@@ -162,6 +162,7 @@ _MAX_METRIC_ATTR_CHARS = 64
 #     `increase(ava_llm_usage_cost_usd_total[...])` is the exact windowed
 #     spend at usage-time rates.
 _METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {
+    ("event_log_drop", "last_dropped_at"): "gauge",
     ("llm_usage", "price_miss"): None,
     ("llm_usage", "price_hit"): None,
     ("llm_usage", "price_out"): None,
@@ -342,18 +343,24 @@ class _OtlpBackend:
         metrics record in memory (lock-free atomics)."""
         if not events or not self._enabled() or not self._ensure():
             return
+        lost = 0
+        example = None
         for event in events:
             try:
                 self._queue.put_nowait(event)
             except queue.Full:
-                with self._dropped_lock:
-                    self._dropped += 1
-                    n = self._dropped
-                if n == 1 or n % 50 == 0:
-                    self._report(
-                        f"OTLP log queue full — shed {n} event(s) cumulative "
-                        "(OTLP side only; the JSONL mirror is unaffected)"
-                    )
+                lost += 1
+                example = event
+        if lost and example is not None:
+            from shared.telemetry import _append_jsonl
+            from shared.telemetry_loss import report_loss
+
+            with self._dropped_lock:
+                self._dropped += lost
+            report = report_loss(example, lost, "otlp")
+            # The alarm itself bypasses both queues. Metrics can still export
+            # while the log lane is full; the local mirror retains the evidence.
+            _append_jsonl([report])
         for event in events:
             with contextlib.suppress(Exception):
                 self._record_metrics(event)
@@ -629,6 +636,7 @@ class _OtlpBackend:
                     (event.event_name, key),
                     value,
                     attrs,
+                    max_only=(event.event_name, key) == ("event_log_drop", "last_dropped_at"),
                 )
 
     def _metric_attributes(self, event: Event) -> dict[str, Any]:

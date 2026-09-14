@@ -29,14 +29,8 @@ JSONL mirror remains the local debugging backfill; its filtered rollup-source
 mirror is the automated ledger-gap recovery source, and its filtered lineage
 mirror is the local copy of the permanently retained lineage class.
 
-Backpressure: the queue is bounded (10 000); a producer that outruns the drain
-thread sheds records instead of growing memory, and the shed count is reported
-as one structured `event_log_drop` event per flush — the same semantics the
-former loguru Postgres sink had. Audit-category events get a durable lane:
-they block briefly for a slot (bounded backpressure, `_AUDIT_BLOCK_S`) so an
-overloaded queue sheds telemetry/log before audit evidence — a shed record is
-lost from every sink, JSONL mirror included, so the audit lane is what keeps
-the compliance stream intact under load.
+Backpressure: bounded queues shed on overload, producing immediate local error
+logs and loss metrics, plus structured summaries bypassing the saturated queue.
 
 `trace_id` / `span_id` are captured from the active OTel span at *enqueue* time
 (the drain thread runs outside the span context), so every event emitted inside
@@ -71,7 +65,7 @@ import socket
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from hashlib import blake2b
 from typing import Any, Literal
@@ -455,6 +449,8 @@ class _EventPipeline:
         self._batch_size = batch_size
         self._flush_interval_s = flush_interval_s
         self._queue: queue.Queue[Event | _SyncMarker | None] = queue.Queue(maxsize=queue_maxsize)
+        self._drop_reported_at = 0.0
+        self._drop_example: Event | None = None
         self.dropped = 0  # records shed because the queue was full since the last flush
         # enqueue() runs on producer threads while _flush() (drain thread)
         # reads and zeroes the counter — `+=` is not atomic under the GIL, so
@@ -479,14 +475,25 @@ class _EventPipeline:
             try:
                 self._queue.put(event, timeout=_AUDIT_BLOCK_S)
             except queue.Full:
-                with self._dropped_lock:
-                    self.dropped += 1
+                self._record_drop(event)
             return
         try:
             self._queue.put_nowait(event)
         except queue.Full:
-            with self._dropped_lock:
-                self.dropped += 1
+            self._record_drop(event)
+
+    def _record_drop(self, event: Event) -> None:
+        with self._dropped_lock:
+            self.dropped += 1
+            self._drop_example = replace(event, ts=datetime.now(UTC))
+            now = time.monotonic()
+            due = self.dropped == 1 or now - getattr(self, "_drop_reported_at", 0.0) >= 5
+            if due:
+                self._drop_reported_at = now
+        if due:
+            from shared.telemetry_loss import report_loss
+
+            report_loss(event, 1, "emitter")
 
     def flush(self) -> None:
         """Synchronously drain whatever is queued (tests, shutdown seams).
@@ -538,26 +545,16 @@ class _EventPipeline:
         self._thread.join(timeout=5.0)
 
     def _flush(self, batch: list[Event]) -> None:
-        """Best-effort write of one batch, plus the shed-record report.
-
-        Runs on the drain thread at least every `_flush_interval_s`. The drop
-        report goes through loguru like any other line — if the queue is STILL
-        full it is shed too and `dropped` bumps again, bounding the report to
-        one per interval with no recursion (enqueue() never logs)."""
+        """Write loss summaries directly; a saturated queue cannot shed its own alarm."""
         with self._dropped_lock:
             n = self.dropped
             self.dropped = 0
-        if n:
-            with contextlib.suppress(Exception):
-                from shared.log import logger
+            example = self._drop_example
+            self._drop_example = None
+        if n and example is not None:
+            from shared.telemetry_loss import loss_event
 
-                logger.warning(
-                    "[event-emitter] dropped {n} event(s) (queue full) — shed "
-                    "before any sink; audit events block first and are only "
-                    "dropped past their own cap",
-                    event="event_log_drop",
-                    n=n,
-                )
+            batch = [*batch, loss_event(example, n, "emitter", dropped_at=example.ts)]
         if not batch:
             return
         self._writer(batch)

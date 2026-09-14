@@ -87,7 +87,7 @@ def test_equivalence_full_thread() -> None:
     _add(fake, event="turn_end", agent_id=aid, payload={"ok": True, "duration_seconds": 4.0})
     _add(fake, event="agent_spawned", agent_id=aid, payload={"spawner": "agent:1"})
     _add(fake, event="halt", agent_id=aid, payload={"body": "no tool_call (idle)"})
-    _add(fake, event="sdk_call", agent_id=aid, payload={"fn": "files.read"})
+    _add(fake, event="sdk_call", agent_id=aid, payload={"fn": "files.read", "sample_rate": 10})
 
     text, data, roll = _run_aggregate(fake)
     # ── text digest ──
@@ -254,7 +254,13 @@ def test_equivalence_sdk_ties_and_namespaces() -> None:
     aid = 1
     fns = ["files.read", "shell.run", "files.read", "shell.run", "agents.spawn", "files.write"]
     for i, fn in enumerate(fns):
-        _add(fake, event="sdk_call", agent_id=aid, payload={"fn": fn}, ts_offset_days=i / 100)
+        _add(
+            fake,
+            event="sdk_call",
+            agent_id=aid,
+            payload={"fn": fn, "sample_rate": 10},
+            ts_offset_days=i / 100,
+        )
     _run_aggregate(fake)
 
 
@@ -345,7 +351,7 @@ def _random_payload(rng: random.Random, event_name: str) -> dict[str, Any]:
             "duration_seconds": round(rng.uniform(0.1, 30.0), 3),
         }
     if event_name == "sdk_call":
-        return {"fn": rng.choice(_SDK)}
+        return {"fn": rng.choice(_SDK), "sample_rate": 10}
     if event_name == "halt":
         return {"body": rng.choice(_HALT)}
     if event_name == "agent_spawned":
@@ -405,3 +411,11 @@ def test_equivalence_randomized() -> None:
     assert data["meta"]["agent_filter"] == agents[0]
     # the window header names the single agent
     assert str(agents[0]) in text or "1 agents" in _norm(text)
+
+
+def test_sdk_counts_weight_each_historical_sampling_policy() -> None:
+    fake = FakeLoki()
+    for rate in (10, 1, 3, 1):
+        _add(fake, event="sdk_call", agent_id=1, payload={"fn": "files.read", "sample_rate": rate})
+    _, data, _ = _run_aggregate(fake)
+    assert data["metrics"]["sdk_usage"]["total_calls"] == 15

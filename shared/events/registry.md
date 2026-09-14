@@ -185,10 +185,10 @@ consumers: see the comments at each emit point.
 | `launch_force_terminated` | launch force-terminated | anomaly | — | — | events |
 | `launch_force_terminated_skipped` | launch force-terminate skipped | noise | — | — | events |
 | `launch_retry` | launch retried | observation | — | — | events |
-| `sdk_call` | SDK call metering | noise | fn, duration, sample_rate | — | events |
+| `sdk_call` | SDK call metering | noise | fn, duration, sample_rate, detail | — | events |
 | `plugin_activation` | a plugin injection surface fired (hook / wrap / prompt section) | noise | plugin, surface, identifier, detail, model | — | events |
 | `sse_drop` | SSE event dropped | anomaly | kind, n | — | events |
-| `event_log_drop` | event-pipeline row shed | anomaly | n | — | events |
+| `event_log_drop` | event-pipeline row shed | anomaly | n, queue, last_dropped_at | — | events |
 | `heartbeat_paused` | heartbeat paused | observation | duration_s | — | events |
 | `shell_ttl_renewed` | shell TTL deadline renewed | observation | session_id, ttl_s, prev_expires_at, new_expires_at | — | events |
 | `code` | LLM generated code block | noise | body, ok, duration_seconds | — | events |

@@ -73,7 +73,8 @@ import importlib.util
 import inspect
 import os.path
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
@@ -241,19 +242,11 @@ def wrap(target: str, wrapper: Callable[..., Any]) -> Callable[..., Any]:
 
     plugin = _current_plugin_name()
 
-    def chained(*args: Any, **kwargs: Any) -> Any:
+    @contextmanager
+    def invocation() -> Generator[Callable[..., Any], None, None]:
         if plugin == UNATTRIBUTED:
-            return wrapper(current, *args, **kwargs)
-        # Activation telemetry (philosophy §6). A wrapper that calls `inner`
-        # exactly once left control flow alone; a short-circuit (0 calls) or a
-        # retry (>1) is the layer actually changing what happened, and that is
-        # the fact issue #40 wants attributed. `counted` carries `current`'s
-        # metadata so a wrapper that introspects `inner` (signature, attached
-        # members) sees no difference — the same transparency contract
-        # `agent/sdk_metering.py` keeps.
-        # A one-element list rather than `nonlocal`: pyright cannot see the
-        # nested increment and narrows a rebound local to the literal 0, which
-        # makes the read below an "unnecessary comparison" error.
+            yield current
+            return
         calls = [0]
 
         @functools.wraps(current)
@@ -262,10 +255,22 @@ def wrap(target: str, wrapper: Callable[..., Any]) -> Callable[..., Any]:
             return current(*inner_args, **inner_kwargs)
 
         try:
-            return wrapper(counted, *args, **kwargs)
+            yield counted
         finally:
             if calls[0] != 1:
                 _record_activation(target, plugin, calls[0])
+
+    def chained(*args: Any, **kwargs: Any) -> Any:
+        with invocation() as inner:
+            return wrapper(inner, *args, **kwargs)
+
+    if inspect.iscoroutinefunction(current) or inspect.iscoroutinefunction(wrapper):
+
+        async def async_chained(*args: Any, **kwargs: Any) -> Any:
+            with invocation() as inner:
+                return await wrapper(inner, *args, **kwargs)
+
+        chained = async_chained
 
     _install_metadata(chained, wrapper, current)
     setattr(parent, attr, chained)

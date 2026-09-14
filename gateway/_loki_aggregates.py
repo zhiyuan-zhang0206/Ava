@@ -549,6 +549,7 @@ def _query_instant(
 def count_grouped(
     *,
     group_by: str,
+    weight_by: str | None = None,
     from_attributes: bool = False,
     exclude_empty: bool = False,
     agent_id: int | None = None,
@@ -571,7 +572,8 @@ def count_grouped(
     as an instant query at the window end. `group_by` is a stream label
     (agent_id / event_name) or, with `from_attributes=True`, a nested payload
     key (extracted via one `| json` stage). Returns {key: count}; keys with
-    count 0 never appear. `exclude_empty` drops the "" group (absent label)."""
+    count 0 never appear. ``weight_by`` sums a numeric payload weight instead
+    of counting rows (SDK events carry their own historical sample rate). `exclude_empty` drops the "" group (absent label)."""
     window = _loki_logql._window(from_, to)
     if window is None:
         return {}
@@ -596,7 +598,13 @@ def count_grouped(
         pipeline = base_pipeline
         if from_attributes:
             pipeline += f' | json {key}="attributes.{key}"'
-        logql = f"sum by ({key}) (count_over_time(({pipeline})[{_loki_logql._slice_duration_s(slice_)}s]))"
+        duration = _loki_logql._slice_duration_s(slice_)
+        if weight_by is None:
+            logql = f"sum by ({key}) (count_over_time(({pipeline})[{duration}s]))"
+        else:
+            weight = _loki_logql._escape_label(weight_by)
+            pipeline += f' | json sdk_weight="attributes.{weight}" | keep {key}, sdk_weight | unwrap sdk_weight | __error__=""'
+            logql = f"sum by ({key}) (sum_over_time({pipeline}[{duration}s]))"
         for series in _query_instant(logql, slice_.end, timeout_s=timeout_s):
             value = _loki_transport._result_value(series)
             if value is None:

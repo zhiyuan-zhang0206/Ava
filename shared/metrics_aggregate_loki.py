@@ -7,8 +7,6 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any, Protocol
 
-from shared.sdk_telemetry import SDK_CALL_SAMPLE_EVERY
-
 _MAX_WORKERS = 4
 
 
@@ -40,6 +38,7 @@ class LokiBackend(Protocol):
         self,
         *,
         group_by: str,
+        weight_by: str | None = None,
         from_attributes: bool = False,
         exclude_empty: bool = False,
         agent_id: int | None = None,
@@ -170,16 +169,14 @@ def _aggregate_tasks(loki: LokiBackend) -> dict[str, Callable[[dict[str, Any]], 
         "spawners": lambda p: loki.query_projected_lines(
             fields=["spawner"], template=_T_SPAWNER, event_names=["agent_spawned"], **p
         ),
-        "sdk_fns": lambda p: {
-            key: count * SDK_CALL_SAMPLE_EVERY
-            for key, count in loki.count_grouped(
-                group_by="fn",
-                from_attributes=True,
-                exclude_empty=True,
-                event_names=["sdk_call"],
-                **p,
-            ).items()
-        },
+        "sdk_fns": lambda p: loki.count_grouped(
+            group_by="fn",
+            weight_by="sample_rate",
+            from_attributes=True,
+            exclude_empty=True,
+            event_names=["sdk_call"],
+            **p,
+        ),
         "fix": lambda p: loki.query_projected_lines(
             fields=["fixes"],
             template=_T_EVENT_FIXES,

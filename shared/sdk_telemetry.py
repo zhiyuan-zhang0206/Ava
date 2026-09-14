@@ -1,95 +1,49 @@
-"""SDK-usage telemetry primitives — the runtime state + emit path behind the Metrics
-page's SDK Usage panel, kept in ``shared`` so an SDK function body (``ava`` layer) can
-enrich its own call while the wrapping machinery lives in ``agent/sdk_metering.py``.
+"""SDK-call events and optional per-execution tallies.
 
-One in every ten top-level ``ava.*`` invocations writes an ``sdk_call`` event to the
-unified ``events`` stream (via the emitter). Payload shape:
-
-    {"event": "sdk_call", "fn": "<ns>.<fn>", "detail": {<semantic k/v>},
-     "duration": <s>, "sample_rate": 10}
-
-``duration`` is the wall-clock seconds of the whole top-level call, measured by
-``run_metered`` (declared by the registry's ``SdkCall`` TypedDict).
-
-``fn`` is the count key (``shared.metrics_aggregate``'s sdk_usage groups on it) and the discriminator
-for ``detail`` — the same discipline ``shared/live_events.py`` uses with ``role``. ``detail``
-holds semantic facts an SDK function chooses to record about a specific call via
-``annotate()`` — e.g. a shell helper noting that this run was a ``grep``. It defaults to
-absent; the semantic layer fills per-``fn`` shapes later without changing the event
-structure or needing a migration (``events.attributes`` is free-form JSONB).
-
-``detail`` is derived from the call's **real runtime arguments** (ground truth) — it is
-NOT, and must never regress to, a scan of the code's source text. The old metric matched
-``ava.X(`` textually and so counted private calls, comments, strings, and example code;
-this path only ever reflects a call that actually ran, with the arguments it ran with.
-
-The same state feeds a second channel: each ``recording()`` block counts
-its top-level calls in full (``fn -> count``, unsampled — the 1-in-10 gate stays in the
-emitter) and yields that tally; ``tally_entries()`` materializes it as the wire list
-(``[{"method": "<ns>.<fn>", "count": N}, ...]``) that the exec child ships in its result
-envelope, ``agent/graph/_exec.py`` attaches to the exec_output ToolMessage as
-``additional_kwargs["sdk_calls"]``, and ``sdk_calls_by_tool_call_id()`` reads back for
-the timeline projection (``SdkCall`` is that list's entry model).
-
-Discipline (shared with the recorder in ``agent/sdk_metering.py``): a pure side channel.
-An emit / annotate failure is swallowed (``Exception`` only, so cancel/timeout injection
-still propagates) and never changes an SDK call's arguments, result, or exceptions.
+Every outermost wrapped SDK call emits by default, including external Python and
+framework callers. Live sampling policy affects events only. ``recording()``
+collects a full tally for an execute_code result; it never gates instrumentation.
+Semantic details come from real calls via ``annotate()``, never source scanning.
 """
 
 from __future__ import annotations
 
 import contextlib
-import itertools
-import threading
 import time
-from collections.abc import Callable, Generator, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Generator, Mapping, Sequence
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 from typing import Any
 
 from langchain_core.messages import BaseMessage, ToolMessage
 from pydantic import BaseModel
 
-from shared.log import logger
 from shared.message_kwargs import AvaMsgType, read_ava_kwargs
 
 # Event name written to events for one top-level SDK call.
 SDK_CALL_EVENT = "sdk_call"
-SDK_CALL_SAMPLE_EVERY = 10
-_sdk_call_counter = itertools.count()
 
-# Thread-local state, all per exec child (single-threaded, one exec at a time):
-#   .active — inside agent-authored code (armed by `recording()`); metering is off
-#             elsewhere so framework-internal ava.* calls are never counted.
-#   .frames — a stack of per-call `detail` dicts, one pushed per metered call. Its
-#             length is the SDK-call nesting depth; only the depth-0 (bottom) call
-#             emits an event. annotate() targets the top of the stack, so a nested
-#             SDK call's annotations attach to its own frame and are discarded with
-#             it (nested calls are not counted), never polluting the outer event.
-#   .tally  — the full per-recording call tally (fn -> count) while recording() is
-#             armed, None outside it; every top-level call bumps it, sampled or not.
-_local = threading.local()
+
+@dataclass
+class _CallFrame:
+    fn: str
+    detail: dict[str, Any] = field(default_factory=dict[str, Any])
+
+
+_frames: ContextVar[tuple[_CallFrame, ...]] = ContextVar("sdk_frames", default=())
+_tally: ContextVar[dict[str, int] | None] = ContextVar("sdk_tally", default=None)
+_identity: ContextVar[dict[str, Any] | None] = ContextVar("sdk_identity", default=None)
 
 
 @contextlib.contextmanager
 def recording() -> Generator[dict[str, int], None, None]:
-    """Arm SDK-call metering for the enclosed block — the exec worker wraps the
-    ``exec(compile(agent_code))`` call with this, so only agent-authored ``ava.*``
-    calls are metered. Framework-internal calls (system-prompt rendering, hooks) run
-    outside it and are never counted.
-
-    Yields the block's full tally (``fn -> count`` of top-level calls — a call that
-    raises still counts, like its event). Reentrant: restores the previous flag and
-    tally on exit, so a nested block counts into its own fresh tally.
-    """
-    prev = getattr(_local, "active", False)
-    prev_tally = getattr(_local, "tally", None)
+    """Collect full top-level counts for an execution block, independently of events."""
     tally: dict[str, int] = {}
-    _local.active = True
-    _local.tally = tally
+    token = _tally.set(tally)
     try:
         yield tally
     finally:
-        _local.active = prev
-        _local.tally = prev_tally
+        _tally.reset(token)
 
 
 def annotate(**detail: Any) -> None:
@@ -102,9 +56,9 @@ def annotate(**detail: Any) -> None:
     outside any metered call. Pure side channel: swallows all errors, never raises into
     the SDK call, never changes its result."""
     with contextlib.suppress(Exception):
-        frames: list[dict[str, Any]] | None = getattr(_local, "frames", None)
+        frames = _frames.get()
         if frames:
-            frames[-1].update(detail)
+            frames[-1].detail.update(detail)
 
 
 def emit(fn: str, detail: Mapping[str, Any] | None = None, duration: float | None = None) -> None:
@@ -114,47 +68,59 @@ def emit(fn: str, detail: Mapping[str, Any] | None = None, duration: float | Non
     ``run_metered``) rides as a top-level payload key — the registry declares it
     (``contract.SdkCall``), so a reader may reference ``attributes->>'duration'``."""
     with contextlib.suppress(Exception):
-        if next(_sdk_call_counter) % SDK_CALL_SAMPLE_EVERY != 0:
-            return
-        extra: dict[str, Any] = {"fn": fn, "sample_rate": SDK_CALL_SAMPLE_EVERY}
+        from shared.sdk_call_policy import policy
+
+        current = policy()
+        every = current.sample_every if current.sampling_enabled else 1
+        if every > 1:
+            import random
+
+            if random.randrange(every) != 0:  # noqa: S311 — telemetry sampling, not security
+                return
+        extra: dict[str, Any] = {"fn": fn, "sample_rate": every}
         if detail:
             extra["detail"] = dict(detail)
         if duration is not None:
             extra["duration"] = duration
-        logger.bind(event=SDK_CALL_EVENT, **extra).info("sdk_call")
+        from shared import telemetry
+
+        telemetry.emit("telemetry", SDK_CALL_EVENT, attributes=extra, **(_identity.get() or {}))
+
+
+@contextlib.contextmanager
+def _measure(fn: str) -> Generator[None, None, None]:
+    frames = _frames.get()
+    # Reinstalled recorders around plugin layers share one public call frame.
+    # Keep semantic annotations from the original function, without duplicate rows.
+    if frames and frames[-1].fn == fn:
+        yield
+        return
+    frame = _CallFrame(fn)
+    token = _frames.set((*frames, frame))
+    t0 = time.monotonic()
+    try:
+        yield
+    finally:
+        _frames.reset(token)
+        if not frames:
+            tally = _tally.get()
+            if tally is not None:
+                tally[fn] = tally.get(fn, 0) + 1
+            emit(fn, frame.detail, duration=time.monotonic() - t0)
 
 
 def run_metered(fn: str, original: Callable[..., Any], args: Any, kwargs: Any) -> Any:
-    """Run ``original(*args, **kwargs)`` as a metered SDK call.
+    """Record a synchronous invocation, preserving its return and exceptions."""
+    with _measure(fn):
+        return original(*args, **kwargs)
 
-    Outside ``recording()`` (framework-internal), calls straight through with no frame
-    and no event. Inside it, pushes a ``detail`` frame for the duration of the call so
-    the body's ``annotate()`` lands on this frame; only the outermost (depth-0) call
-    emits an event and bumps the recording's tally (unsampled), carrying whatever it
-    accumulated — a nested call's frame is popped and discarded. The event is emitted
-    after the call returns (so ``detail`` is complete), on success and on exception
-    alike. The call's result and exceptions pass through untouched.
-    """
-    if not getattr(_local, "active", False):
-        return original(*args, **kwargs)
-    frames: list[dict[str, Any]] | None = getattr(_local, "frames", None)
-    if frames is None:
-        frames = _local.frames = []
-    is_top = len(frames) == 0
-    frames.append({})
-    t0 = time.monotonic()
-    try:
-        return original(*args, **kwargs)
-    finally:
-        detail = frames.pop()
-        if is_top:
-            tally = getattr(_local, "tally", None)
-            if tally is not None:
-                tally[fn] = tally.get(fn, 0) + 1
-            # Wall-clock seconds for the whole top-level call — the registry's
-            # SdkCall payload declares `duration`; before this the TypedDict
-            # key had no producer (audit-round2 events-obs P2).
-            emit(fn, detail, duration=time.monotonic() - t0)
+
+async def run_metered_async(
+    fn: str, original: Callable[..., Awaitable[Any]], args: Any, kwargs: Any
+) -> Any:
+    """Record an async invocation when awaited, including cancellation and duration."""
+    with _measure(fn):
+        return await original(*args, **kwargs)
 
 
 # ── the wire-side counts: entry model + materialization + read-back ───────────
