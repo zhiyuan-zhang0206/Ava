@@ -114,6 +114,9 @@ def test_exec_prefix_only_for_simple_commands() -> None:
     assert assignment[2] == "cd /checkout/repo && FOO=1 .venv/bin/python -m x"
     quoted = gen._exec_argv(".venv/bin/python -c 'print(1)'", _REPO)
     assert "exec " not in quoted[2]
+    already_exec = gen._exec_argv("exec foo", _REPO)
+    assert already_exec[2] == "cd /checkout/repo && exec foo"
+    assert "exec exec" not in already_exec[2]
 
 
 def test_generated_manifest_is_consumed_by_load_manifests(tmp_path: Path) -> None:

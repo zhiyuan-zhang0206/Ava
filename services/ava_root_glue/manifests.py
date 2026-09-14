@@ -78,8 +78,9 @@ SESSION_HOST_ATTACH: dict[str, str] = {
 
 # A command is "simple" when the shell adds nothing: bare tokens only. The
 # `exec` prefix then replaces the shell with the service itself (chain
-# discipline, I2). Anything with metacharacters, quoting, or a leading
-# assignment keeps the plain form.
+# discipline, I2). Anything with metacharacters, quoting, a leading
+# assignment, or a command already starting with `exec` keeps the plain form
+# (never `exec exec ...`).
 _SHELL_WORD = r"[A-Za-z0-9_./@%+:,=^-]+"
 _SIMPLE_COMMAND_RE = re.compile(rf"{_SHELL_WORD}(?: {_SHELL_WORD})*\Z")
 
@@ -88,7 +89,7 @@ def _exec_argv(cmd: str, repo_root: Path) -> list[str]:
     """The unit argv for a roster command: `cd <repo> && [exec] <cmd>`."""
     cd = f"cd {shlex.quote(str(repo_root))}"
     first = cmd.split(" ", 1)[0]
-    if _SIMPLE_COMMAND_RE.match(cmd) and "=" not in first:
+    if _SIMPLE_COMMAND_RE.match(cmd) and "=" not in first and first != "exec":
         return ["/bin/sh", "-c", f"{cd} && exec {cmd}"]
     return ["/bin/sh", "-c", f"{cd} && {cmd}"]
 
