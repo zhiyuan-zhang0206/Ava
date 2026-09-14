@@ -66,15 +66,19 @@ def _field(text: str, name: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
+def _exit_code_int(exit_code: str | None) -> int | None:
+    """Leading integer of a `last exit code` value (`78: EX_CONFIG` -> 78)."""
+    match = re.match(r"(\d+)", exit_code) if exit_code else None
+    return int(match.group(1)) if match else None
+
+
 def _job_verdict(label: str) -> dict[str, Any]:
     _, text = _cap(["launchctl", "print", f"{_domain()}/{label}"], timeout=30.0)
-    exit_code = _field(text, "last exit code")
-    exit_match = re.match(r"(\d+)", exit_code) if exit_code else None
     pid = _field(text, "pid")
     return {
         "state": _field(text, "state"),
         "job_state": _field(text, "job state"),
-        "last_exit_code": int(exit_match.group(1)) if exit_match else None,
+        "last_exit_code": _exit_code_int(_field(text, "last exit code")),
         "runs": _field(text, "runs"),
         "pid": int(pid) if pid and pid.isdigit() else None,
         "raw": text,

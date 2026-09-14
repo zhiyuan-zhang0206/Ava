@@ -32,6 +32,15 @@ Modes:
                     kickstarts/re-signing).
 
 Phases: build / launch / inject / repair / teardown (teardown always runs).
+
+Exit codes: 0 = expectation met (resign: reproduced and repaired; control: the
+job stayed healthy); 3 = resign expectation unmet; 4 = control expectation
+unmet; 2 = usage guard (--workdir relative or under /tmp); 1 = harness error
+(evidence is still written).
+
+A run killed hard (SIGKILL) before teardown can leave its test plist in
+~/Library/LaunchAgents; the next run sweeps it at launch and its own teardown
+removes it again.
 """
 
 from __future__ import annotations
@@ -209,6 +218,13 @@ def main() -> int:  # noqa: PLR0915 - one bounded lifecycle: phases, waits, evid
         )
 
         # ---- launch --------------------------------------------------------
+        leftover = _LAUNCH_AGENTS_DIR / f"{label}.plist"
+        if args.plist == "launchagents" and leftover.exists():
+            evidence.save(
+                "02b-launch-sweep.txt",
+                f"unlinked leftover from a previous run: {leftover}",
+            )
+            leftover.unlink()
         plist_path = _write_plist(workdir, label, exe, sock, args.plist)
         _bootout(label)
         sock.unlink(missing_ok=True)
