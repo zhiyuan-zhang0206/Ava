@@ -47,7 +47,6 @@ class ErrorCode(StrEnum):
     INVALID_REQUEST = "invalid_request"
     UNKNOWN_VERB = "unknown_verb"
     UNKNOWN_UNIT = "unknown_unit"
-    NOT_IMPLEMENTED = "not_implemented"
     INTERNAL = "internal"
 
 

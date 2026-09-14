@@ -51,6 +51,18 @@ class RestartPolicy(StrEnum):
     NEVER = "never"
 
 
+class DesiredState(StrEnum):
+    """What the supervisor has been told to make true for a unit.
+
+    Carried across an exec upgrade in the handoff file; the vocabulary lives
+    beside the other closed tree-model enums so both sides of the handoff can
+    share it without an import cycle.
+    """
+
+    RUNNING = "running"
+    STOPPED = "stopped"
+
+
 @dataclass(frozen=True, slots=True)
 class UnitManifest:
     """One declared unit (K2): the minimal, closed field set."""
