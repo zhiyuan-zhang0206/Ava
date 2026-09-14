@@ -149,6 +149,18 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         "root health monitor restart breaker opened — repeated non-alive probe rounds held until a probe-alive round",
         tier="anomaly",
     ),
+    # permissions helper healthcheck (task #3393) — the launchd-owned helper's
+    # LWCR-class detection and repair escalation (F5 findings section 6)
+    "permissions_helper_unhealthy": _telemetry(
+        "permissions_helper_unhealthy",
+        "permissions helper failed its healthcheck (ping plus launchd job classification) — one alert per episode, held until a ping-alive round",
+        tier="anomaly",
+    ),
+    "permissions_helper_repair_failed": _telemetry(
+        "permissions_helper_repair_failed",
+        "permissions helper launchd repair (bootout+bootstrap) did not restore ping — escalating; the episode retries under backoff",
+        tier="anomaly",
+    ),
     "schedule_stalled": _telemetry(
         "schedule_stalled",
         "enabled non-completed schedule has had no live session for more than two hours",

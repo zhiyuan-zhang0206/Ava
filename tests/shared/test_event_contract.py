@@ -155,10 +155,12 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # raises it to 165; compact_boundary_stamp (task #3180's failed compact
     # boundary anchor stamp) raises it to 166; the root self-check (P7 W1.2b,
     # task #3338) adds root_chain_broken + root_restart_breaker_open, raising
-    # it to 168; the PR-flow sampler (task #2139's pr_flow_daily + pr_flow_run
-    # gauges) raises the current total to 170.
+    # it to 168; the permissions-helper healthcheck (task #3393) adds
+    # permissions_helper_unhealthy + permissions_helper_repair_failed, raising
+    # it to 170; the PR-flow sampler (task #2139's pr_flow_daily + pr_flow_run
+    # gauges) raises the current total to 172.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 170
+    assert len(_TELEMETRY_KINDS) == 172
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:
