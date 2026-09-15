@@ -119,6 +119,8 @@ async def _put_turns(
         messages = [*messages, HumanMessage(content=f"turn {turn}")]
         msg_version = saver.get_next_version(msg_version, None)
         ckpt = empty_checkpoint()
+        # The graph writes v4; empty_checkpoint() alone still defaults to v1.
+        ckpt["v"] = 4
         ckpt_id = ckpt["id"]
         channel_values: dict = {"messages": messages}
         channel_versions: dict = {"messages": msg_version}
@@ -186,6 +188,74 @@ async def test_trim_keeps_latest_deletes_old(aops_pool: AsyncConnectionPool) -> 
     assert await count_checkpoints(aops_pool, "1") == 3
     # The survivors are exactly the latest 3 written.
     assert await _surviving_ids(aops_pool, "1") == set(ids[-3:])
+
+
+async def test_interrupted_trim_keeps_every_survivor_readable(
+    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A committed batch must stand alone if no later batch ever executes."""
+    import shared.checkpoint_cleanup as cleanup
+
+    ids = await _put_turns(aops_pool, "1", 8, with_scratch=True)
+    monkeypatch.setattr(cleanup, "_TRIM_MAX_ROUNDS", 1)
+    counts = await trim_checkpoints(aops_pool, "1", keep=3, batch=2)
+    assert counts.checkpoints == 2
+    saver = _saver(aops_pool)
+    for index, checkpoint_id in enumerate(ids[2:], start=2):
+        checkpoint = await saver.aget(_config("1", checkpoint_id))
+        assert checkpoint is not None
+        assert [m.content for m in checkpoint["channel_values"]["messages"]] == [
+            f"turn {turn}" for turn in range(index + 1)
+        ]
+        assert checkpoint["channel_values"]["scratch"] == ["fixed-on-turn-0"]
+    assert counts.blobs == 2
+
+
+async def test_trim_preserves_compaction_ancestors_for_fork(
+    aops_pool: AsyncConnectionPool, db_conn: psycopg.Connection
+) -> None:
+    """Fork's real recursive chain copy must still reach retained segments."""
+    from ops.agent_spawn import _copy_checkpoint_chain
+
+    ids = await _put_turns(aops_pool, "1", 8)
+    async with aops_pool.connection() as conn:
+        await conn.execute(
+            "UPDATE checkpoints SET metadata = '{\"compact_boundary\": true}'::jsonb"
+            " WHERE thread_id = '1' AND checkpoint_id = %s",
+            (ids[1],),
+        )
+    await trim_checkpoints(aops_pool, "1", keep=3, batch=2)
+    with db_conn.cursor() as cursor:
+        _copy_checkpoint_chain(cursor, 1, ids[-1], 2)
+    db_conn.commit()
+    assert await _surviving_ids(aops_pool, "2") == {ids[1], *ids[-3:]}
+    for thread in ("1", "2"):
+        boundary = await _saver(aops_pool).aget(_config(thread, ids[1]))
+        assert boundary is not None
+        assert [m.content for m in boundary["channel_values"]["messages"]] == ["turn 0", "turn 1"]
+
+
+async def test_trim_parks_legacy_parent_send_format(aops_pool: AsyncConnectionPool) -> None:
+    ids = await _put_turns(aops_pool, "1", 6)
+    async with aops_pool.connection() as conn:
+        await conn.execute(
+            "UPDATE checkpoints SET checkpoint = jsonb_set(checkpoint, '{v}', '3')"
+            " WHERE thread_id = '1' AND checkpoint_id = %s",
+            (ids[-1],),
+        )
+    assert await trim_checkpoints(aops_pool, "1", keep=2) == (0, 0, 0)
+    assert await _surviving_ids(aops_pool, "1") == set(ids)
+
+
+async def test_trim_retains_unstamped_operator_segment_endpoint(
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    ids = await _put_turns(aops_pool, "1", 8)
+    await trim_checkpoints(aops_pool, "1", keep=3, batch=2, preserve_checkpoint_ids=[ids[1]])
+    assert await _surviving_ids(aops_pool, "1") == {ids[1], *ids[-3:]}
+    oldest = await _saver(aops_pool).aget(_config("1", ids[1]))
+    assert oldest is not None
+    assert [m.content for m in oldest["channel_values"]["messages"]] == ["turn 0", "turn 1"]
 
 
 async def test_trim_only_touches_target_thread(aops_pool: AsyncConnectionPool) -> None:
