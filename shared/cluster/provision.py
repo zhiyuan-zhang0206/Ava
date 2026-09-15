@@ -616,9 +616,9 @@ def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: s
         # SELECT them back. Append-only — the preserve trigger rejects rewrites
         # and no runner path updates rows — so UPDATE/DELETE stay out.
         # Regression for task #3549: the table shipped (20260913T180056)
-        # without this entry, and creating a lease failed with
-        # InsufficientPrivilege on agent_impersonation_entries until prod was
-        # patched by hand.
+        # without this entry, and every cluster past the runner-role cutover
+        # rejected lease creation with InsufficientPrivilege on
+        # agent_impersonation_entries until the role could write the trail.
         conn.execute(
             pgsql.SQL("GRANT SELECT, INSERT ON agent_impersonation_entries TO {}").format(
                 pgsql.Identifier(RUNNER_ROLE)
