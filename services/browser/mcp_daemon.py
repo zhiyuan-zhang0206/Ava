@@ -107,7 +107,11 @@ _NO_PAGE_MARKER = "No page selected"
 
 # new_page / select_page / list_pages render the active tab as `  <id>: <url>
 # [selected]`; that id is how the daemon learns a connection's current page.
-_SELECTED_RE = re.compile(r"^\s*(\d+):.*\[selected\]\s*$", re.MULTILINE)
+# The marker is not always last on the line: an isolated-context tab renders
+# `[selected] isolatedContext=<name>` (e.g. `29: Discord (url) [selected]
+# isolatedContext=reg-7`), so trailing content after the marker is tolerated --
+# the leading `id:` + marker still identifies the line.
+_SELECTED_RE = re.compile(r"^\s*(\d+):.*\[selected\].*$", re.MULTILINE)
 
 # Upstream session teardown (chrome-devtools-mcp died: Chrome restart, npx crash,
 # OOM). The next upstream call raises one of these from the MCP stdio transport.
@@ -149,6 +153,23 @@ def _selected_id(result: types.CallToolResult) -> int | None:
     """The `[selected]` page id in a page-list result, or None on format drift."""
     m = _SELECTED_RE.search(_text_of(result))
     return int(m.group(1)) if m else None
+
+
+def _page_id(value: Any) -> int | None:
+    """An int page id from a JSON argument, or None when the value names none.
+
+    The MCP schema declares `pageId` as a number, so a JSON client may send an
+    integral float (`29.0` for page 29): normalize it to the int the upstream
+    selected, or the affinity never moves. A non-integral float, a string, or
+    a bool (which would alias page 1) names no page -- None.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return None
 
 
 def _no_page_result() -> types.CallToolResult:
@@ -336,8 +357,8 @@ class ChromeMcpDaemon:
         if name == "new_page":
             return _selected_id(result) or current_page  # the freshly opened tab
         if name == "select_page":
-            pid = args.get("pageId")
-            return pid if isinstance(pid, int) else current_page
+            pid = _page_id(args.get("pageId"))
+            return pid if pid is not None else current_page
         if name == "close_page" and args.get("pageId") == current_page:
             return None
         # navigate_page (forwarded) and every other page-scoped op stay re-pinned.
