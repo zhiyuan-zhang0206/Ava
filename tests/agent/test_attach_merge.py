@@ -6,7 +6,7 @@ from pathlib import Path
 
 from agent.graph._attach_merge import merge_attachments
 from agent.state import AttachEntry, AttachState
-from shared.lm.attach import ATTACH_MAX_FILE_BYTES
+from shared.lm.attach_constants import ATTACH_MAX_FILE_BYTES
 
 
 def test_merge_preserves_order_and_last_label_wins(tmp_path: Path) -> None:

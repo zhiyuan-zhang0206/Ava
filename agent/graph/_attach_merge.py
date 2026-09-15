@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from agent.state import AttachEntry, AttachState
-from shared.lm.attach import ATTACH_MAX_FILE_BYTES, ATTACH_MEDIA_MIME
+from shared.lm.attach_constants import ATTACH_MAX_FILE_BYTES, ATTACH_MEDIA_MIME
 from shared.log import logger
 
 
