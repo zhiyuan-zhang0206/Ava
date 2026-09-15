@@ -187,11 +187,13 @@ export function TurnBlock({
     const measure = () =>
       root.style.setProperty("--turn-header-h", `${header.getBoundingClientRect().height}px`);
     // Sync set before first paint (no 1-frame flash at the header line), then
-    // keep it live across wraps / streaming / stuck-border changes.
+    // keep it live across wraps / streaming / expand-time reflows.
     measure();
     const observer = new ResizeObserver(measure);
-    // border-box: the stuck-state border-b grows only the border box, so a
-    // content-box observer would not fire on it (task #3215 review nit).
+    // border-box: the pin offset consumes the header's full occupied height
+    // (the child line rides the header's bottom), so observe the border box —
+    // a content-box observer would miss border-only growth (task #3215 review
+    // nit; the stuck-state border that motivated it is gone since #3536).
     observer.observe(header, { box: "border-box" });
     return () => observer.disconnect();
   }, [expanded]);
