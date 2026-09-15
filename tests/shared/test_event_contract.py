@@ -158,9 +158,11 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # it to 168; the permissions-helper healthcheck (task #3393) adds
     # permissions_helper_unhealthy + permissions_helper_repair_failed, raising
     # it to 170; the PR-flow sampler (task #2139's pr_flow_daily + pr_flow_run
-    # gauges) raises the current total to 172.
+    # gauges) raises the current total to 172; host_admission_wait_exceeded
+    # (task #3584's fair admission queue — one report per wait episode) raises
+    # the current total to 173.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 172
+    assert len(_TELEMETRY_KINDS) == 173
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:

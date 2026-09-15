@@ -196,6 +196,29 @@ async def _publish_turn_progress_heartbeat(
         _log.debug("[agent-host] turn-progress heartbeat publish failed", exc_info=True)
 
 
+def _report_long_admission_waits(host: AgentHost) -> None:
+    """One anomaly event per wait episode past the admission alert bound.
+
+    Queueing is the configured memory/runtime trade-off working — not an error.
+    A wait past the bound means the queue is backing up: raise the limit (after
+    the joint capacity check) or inspect the turns holding slots. The wait
+    itself is already exempt from stall cancellation; this event is the signal
+    that replaces the (wrong) cancellation.
+    """
+    threshold = settings.daemon.host_admission_wait_alert_seconds
+    for agent_id, waited_s in host.admission.long_waiters(threshold):
+        logger.warning(
+            "hosted turn for agent {agent_id} has queued at the admission gate "
+            "for {waited_s:.0f}s (limit {limit}, {queued} queued) — raise the "
+            "limit or inspect the turns holding slots; the turn stays queued",
+            event="host_admission_wait_exceeded",
+            agent_id=agent_id,
+            waited_s=round(waited_s, 1),
+            limit=host.admission.limit,
+            queued=host.admission.waiting,
+        )
+
+
 async def _beat_forever(
     liveness: Liveness,
     host: AgentHost,
@@ -220,6 +243,7 @@ async def _beat_forever(
             except Exception:
                 _log.exception("[agent-host] ownership renewal failed — retrying next beat")
         await _publish_turn_progress_heartbeat(machine, scheduler.active_agents)
+        _report_long_admission_waits(host)
         await asyncio.sleep(_LIVENESS_BEAT_STEP_S)
 
 
@@ -712,6 +736,7 @@ def _stats_route(host: AgentHost, scheduler: TurnScheduler):  # noqa: ANN202 —
                 active_progress[agent_id] = round(age, 1)
         payload = {
             **host.stats.as_payload(),
+            **host.admission.payload(),
             "maintenance_protocol": 1,
             "runtime_owner": str(host._owner),
             "home": str(paths.ava_home()),

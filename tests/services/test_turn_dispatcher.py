@@ -1116,6 +1116,59 @@ class TestTurnLevelStaleScan:
         await scheduler.aclose()
 
 
+class TestAdmissionWaitExemption:
+    """Task #3584: a turn queued at the admission gate must never be treated as
+    a stalled turn. Its progress clock is silent by design, and cancelling a
+    waiter would only re-queue it at the tail of the same queue — starvation
+    amplification, not recovery."""
+
+    async def test_a_queued_turn_is_exempt_from_the_turn_level_scan(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from agent import _turn_progress as progress
+
+        scheduler = _ScanScheduler({23})
+        monkeypatch.setattr(dispatcher, "turn_progress_age_s", _stale_age)
+        progress.begin_admission_wait(23)
+        try:
+
+            async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+                return []
+
+            disp = InboundWakeDispatcher(
+                "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
+            )
+            await disp.scan_once()
+        finally:
+            progress.end_admission_wait(23)
+
+        assert scheduler.cancelled == []
+        assert scheduler.woken == []
+
+    async def test_a_queued_stale_candidate_is_not_cancelled_before_its_wake(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from agent import _turn_progress as progress
+
+        scheduler = _ScanScheduler({17})
+        monkeypatch.setattr(dispatcher, "turn_progress_age_s", _stale_age)
+        progress.begin_admission_wait(17)
+        try:
+
+            async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+                return [dispatcher.PendingInboundWake(agent_id=17, stale=True)]
+
+            disp = InboundWakeDispatcher(
+                "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
+            )
+            await disp.scan_once()
+        finally:
+            progress.end_admission_wait(17)
+
+        assert scheduler.cancelled == []
+        assert scheduler.woken == [17]
+
+
 class _QueueingPubSub:
     """Subscription fake that stays live while tests inject wake frames."""
 

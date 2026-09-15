@@ -1417,6 +1417,39 @@ class TestBounds:
         await asyncio.wait_for(asyncio.gather(*tasks), 2)
         assert host.stats.turns_started == 3
 
+    async def test_a_waiting_turn_holds_no_database_claim(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Admission precedes the runtime claim: an agent queued for a slot has
+        touched no row, runtime or checkpoint — and the queue is visible while
+        it waits (task #3584 review: lock the pre-claim property in)."""
+        from shared.config import settings
+
+        monkeypatch.setattr(settings.daemon, "host_max_concurrent_turns", 1)
+        host, graph, _ = wired({1: _Row(), 2: _Row()})
+        graph.gate(1)
+        graph.arrival(1)
+
+        tasks: list[asyncio.Task[None]] = [asyncio.create_task(host.run_turn(1))]
+        try:
+            await asyncio.wait_for(graph.arrival(1).wait(), 2)
+            tasks.append(asyncio.create_task(host.run_turn(2)))
+            await poll_until_async(
+                lambda: host.admission.waiting == 1,
+                timeout=2,
+                what="agent 2 queued at the admission gate",
+            )
+
+            assert not graph.arrival(2).is_set(), "a queued turn must not reach the graph"
+            assert 2 not in host._in_flight, "a queued turn holds no runtime claim"
+            assert host.stats.turns_started == 1, "only the admitted turn started"
+        finally:
+            graph.gates[1].set()
+            await asyncio.wait_for(asyncio.gather(*tasks), 2)
+
+        assert host.stats.turns_started == 2
+        assert graph.arrived[2].is_set(), "the queued turn runs once a slot frees"
+
     async def test_the_lru_cap_evicts_the_least_recently_used(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -54,7 +54,11 @@ from datetime import UTC, datetime
 from functools import partial
 from typing import Protocol, cast
 
-from agent._turn_progress import turn_progress_age_s, turn_progress_snapshot
+from agent._turn_progress import (
+    admission_wait_age_s,
+    turn_progress_age_s,
+    turn_progress_snapshot,
+)
 from services.agent_host.runtime import _active_turn_config_fingerprint
 from shared import maintenance
 from shared.hosted_db_wait import database_wait_snapshot
@@ -121,6 +125,17 @@ def _database_waiting(agent_id: int) -> bool:
     progress = turn_progress_snapshot(agent_id)
     last = progress["last_marks"][-1] if progress is not None else None
     return database_wait_snapshot(agent_id, last_progress=last) is not None
+
+
+def _admission_waiting(agent_id: int) -> bool:
+    """True while the agent's turn queues at the admission gate — not a stall.
+
+    A queued turn shows no progress by design; cancelling it would only send its
+    next attempt to the tail of the queue (a successor is a new ticket),
+    punishing the oldest waiters. Wait length is observability (host stats +
+    host_admission_wait_exceeded), never a cancellation trigger.
+    """
+    return admission_wait_age_s(agent_id) is not None
 
 
 def _raise_if_cancellation_pending() -> None:
@@ -673,6 +688,7 @@ class InboundWakeDispatcher:
                 candidate.stale
                 and candidate.agent_id in self._scheduler.active_agents
                 and not _database_waiting(candidate.agent_id)
+                and not _admission_waiting(candidate.agent_id)
                 and (age := turn_progress_age_s(candidate.agent_id)) is not None
                 and age >= self._stale_after_s
             ):
@@ -702,7 +718,7 @@ class InboundWakeDispatcher:
             # A task just started by this scan has not entered its pump yet.
             # Neither an idle agent's old clock nor its predecessor's clock
             # justifies cancelling that new task before it can run.
-            if agent_id in started or _database_waiting(agent_id):
+            if agent_id in started or _database_waiting(agent_id) or _admission_waiting(agent_id):
                 continue
             age = turn_progress_age_s(agent_id)
             if age is None or age < self._stale_after_s:

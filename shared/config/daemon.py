@@ -30,6 +30,20 @@ class DaemonSettings(EnvSettings):
         },
     )
 
+    host_admission_wait_alert_seconds: float = Field(
+        default=2400.0,
+        gt=0,
+        alias="AVA_HOST_ADMISSION_WAIT_ALERT_SECONDS",
+        description="Hosted agent-runner: a turn queued on the admission gate (AVA_HOST_MAX_CONCURRENT_TURNS) for at least this many seconds emits one host_admission_wait_exceeded anomaly event per wait episode. Default 2400s mirrors the wedged-turn budget (AVA_WEDGED_AGENT_INBOUND_AGE_SECONDS) so 'too long' has one dialect, but the two knobs are independent: queue wait is capacity pressure, not a stalled turn, and the wait is exempt from stall cancellation. The event is a signal, never a cancellation; raise the limit or inspect the turns holding slots.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     host_db_pool_max_size: int = Field(
         default=64,
         gt=0,
