@@ -414,6 +414,18 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         "the checkpoint",
         tier="anomaly",
     ),
+    "host_admission_wait_exceeded": _telemetry(
+        "host_admission_wait_exceeded",
+        "a hosted turn has queued at the host admission gate "
+        "(AVA_HOST_MAX_CONCURRENT_TURNS) for at least "
+        "AVA_HOST_ADMISSION_WAIT_ALERT_SECONDS — carries the agent, its current "
+        "wait, the limit and the queue depth; reported once per wait episode. "
+        "Queueing is the configured memory/runtime trade-off working, not an "
+        "error; a wait this long means the queue is backing up (raise the limit "
+        "or inspect the turns holding slots). The wait is exempt from stall "
+        "cancellation — cancelling it would only re-queue it at the tail",
+        tier="anomaly",
+    ),
     "host_turn_stall_detected": _telemetry(
         "host_turn_stall_detected",
         "the hosted dispatcher's durable scan found an in-flight turn whose "
