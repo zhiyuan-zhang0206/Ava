@@ -241,7 +241,7 @@ def send_system_note(
 
 
 def get_last_message(agent_id: int, caller: str) -> str | None:
-    """GET /api/agents/{id}/last-message → text of the last AI message."""
+    """GET /api/agents/{id}/last-message → the agent's most recent AI turn text."""
     resp = _get(f"/api/agents/{agent_id}/last-message", params={"caller": caller})
     _raise_from_response(resp)
     return resp.json()["text"]
