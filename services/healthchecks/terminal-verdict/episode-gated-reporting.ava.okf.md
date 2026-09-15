@@ -23,7 +23,7 @@ The user ruled: error lines fire on **state change**, not per probe.
 
 The episode record lives at `$AVA_HOME/run/healthcheck-state/browser.json`. Three properties are load-bearing:
 
-1. **It gates only REPORTING.** It can never suppress a reap or a respawn — the action path is unconditional, and the exit codes are unchanged (a quiet terminal round still exits `EXIT_PORT_TAKEN`).
+1. **It gates only REPORTING.** The record is never read on an action path, so it can never suppress a reap or a respawn — the one deferral the module has (the cdp-down respawn's cold-start grace for a session younger than `_RESPAWN_GRACE_S`) is a read of the live session record instead (task #3559) — and the exit codes are unchanged (a quiet terminal round still exits `EXIT_PORT_TAKEN`).
 2. **It fails open.** An unreadable/corrupt record reports as a new episode, never as silence.
 3. **It self-clears.** The verdict itself persists nothing ([[services/healthchecks/terminal-verdict/terminal-verdict.ava.okf.md]]'s "no state" rule); the record only exists while an episode is open.
 
