@@ -153,18 +153,18 @@ class LmSettings(EnvSettings):
     )
 
     llm_max_concurrent: str = Field(
-        default="deepseek:31",
+        default="",
         alias="AVA_LLM_MAX_CONCURRENT",
         description=(
             "Per-provider outbound LLM concurrency caps, format "
             "'provider:limit,provider:limit' (e.g. 'deepseek:31,anthropic:200'; "
             "provider keys are the model prefixes: deepseek/claude/gpt/gemini/"
-            "mimo/kimi/glm/qwen). Empty disables all caps. The default "
-            "deepseek:31 caps concurrent async calls across the hosted process, "
-            "not per agent. Sync callers use a separate process-local limiter. "
-            "The cap wraps "
+            "mimo/kimi/glm/qwen). Empty (the default) disables all caps. A "
+            "configured cap limits concurrent async calls across the hosted "
+            "process, not per agent. Sync callers use a separate process-local "
+            "limiter. The cap wraps "
             "the whole SDK call (SDK-internal retries included) and queues "
-            "excess calls instead of 429ing the provider. Reserved for when "
+            "excess calls instead of 429ing the provider. Set it only when "
             "agent count or batch jobs approach a provider's account "
             "concurrency ceiling; allocate that budget across processes and "
             "hosts independently of agent admission or database pool sizes. An unknown "

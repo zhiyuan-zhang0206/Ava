@@ -11,11 +11,12 @@ tags:
 # LLM Outbound Concurrency
 
 `LLMConcurrencyLimiter` holds one synchronous or asynchronous slot across the
-entire provider call, including SDK-internal retries. Its default `deepseek:31`
-limits asynchronous calls across the hosted process; synchronous calls have a
-separate process-local limiter. Agent admission and database pool sizes do not
-resize these caps. Operators allocate the provider's account budget across hosts
-and processes; an explicit empty `AVA_LLM_MAX_CONCURRENT` disables caps.
+entire provider call, including SDK-internal retries. `AVA_LLM_MAX_CONCURRENT`
+is empty by default (no caps); a configured limit such as `deepseek:31` limits
+asynchronous calls across the hosted process. Synchronous calls have a separate
+process-local limiter. Agent admission and database pool sizes do not resize
+these caps. Operators allocate the provider's account budget across hosts and
+processes.
 
 `shared/lm/errors.py:emit_provider_error()` emits `llm_provider_error` for both
 agent streams and synchronous SDK calls, so Grafana's provider-grouped HTTP 429

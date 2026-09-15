@@ -1,8 +1,9 @@
 """`shared/lm/_concurrency.py` unit tests — per-provider LLM concurrency.
 
-DeepSeek Pro is capped by default; explicit empty configuration remains an
-operator escape hatch. These tests pin both the disabled pass-through and the
-enabled cap semantics, plus the config parse fail-fast.
+Caps are disabled by default (empty `AVA_LLM_MAX_CONCURRENT`, task #3590); an
+explicit `provider:limit` configuration enables them. These tests pin both the
+disabled pass-through and the enabled cap semantics, plus the config parse
+fail-fast.
 """
 
 from __future__ import annotations
@@ -25,11 +26,11 @@ def _load_provider_plugins() -> None:
     ensure_provider_plugins_loaded()
 
 
-def test_deepseek_concurrency_cap_is_enabled_by_default() -> None:
-    """The default protects DeepSeek Pro's 500-slot account across 16 turns."""
+def test_concurrency_cap_is_disabled_by_default() -> None:
+    """No cap applies unless `AVA_LLM_MAX_CONCURRENT` is set (task #3590)."""
     from shared.config.lm import LmSettings
 
-    assert parse_limits(LmSettings().llm_max_concurrent) == {"deepseek": 31}
+    assert parse_limits(LmSettings().llm_max_concurrent) == {}
 
 
 # ─── parse_limits ─────────────────────────────────────────────────────────
