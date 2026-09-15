@@ -16,11 +16,11 @@ replaces the pre-compact history) is kept regardless of age, so each past
 compaction segment stays recoverable as one full snapshot — the user's
 "preserve information, bound storage" retention rule (Task #1125).
 
-Safety invariant — full-snapshot channels only; delta threads are exempt:
+Safety invariant — version-4 full snapshots only; other formats are exempt:
     This naive "keep the latest K, drop the rest" trim is correct ONLY because
-    every Ava state channel stores a self-contained full value in its blob. The
-    `messages` channel is `Annotated[list, add_messages]` — a plain accumulator,
-    so each checkpoint's blob holds the entire message list, not a delta.
+    legacy Ava state channels store self-contained full values in their blobs.
+    The pre-cutover `messages` channel is a plain accumulator, so each legacy
+    checkpoint's blob holds the entire message list, not a delta.
     LangGraph's beta `DeltaChannel` instead stores deltas and reconstructs by
     walking the parent chain back to a snapshot ancestor; dropping intermediate
     checkpoints would silently sever that chain (the channel reconstructs as
@@ -35,6 +35,11 @@ Safety invariant — full-snapshot channels only; delta threads are exempt:
     doubt the bias is always "park": a false positive costs a no-op, a false
     negative deletes the chain.
 
+    Older checkpoint formats also recover pending sends from their parent's
+    writes. They cannot use this full-snapshot pruning path. Surviving v4
+    checkpoints retain their own pending writes and reconnect to their nearest
+    surviving ancestor, so a later fork still copies the retained segments.
+
 Blob retention is keyed on the (channel, version) pairs a surviving checkpoint's
 `channel_versions` still references — NOT on which (deleted) checkpoint wrote the
 blob. An unchanged channel keeps the same blob version across many turns, so the
@@ -45,6 +50,7 @@ any survivor is the correct rule.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from typing import NamedTuple
 
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
@@ -80,8 +86,8 @@ class TrimCounts(NamedTuple):
 # is committed and no higher messages counter is visible. A missing messages
 # version means that checkpoint has nothing to await.
 _TRIM_SQL = """
-WITH ranked AS (
-    SELECT checkpoint_id, checkpoint, metadata,
+WITH RECURSIVE ranked AS (
+    SELECT checkpoint_id, parent_checkpoint_id, checkpoint, metadata,
            ROW_NUMBER() OVER (ORDER BY checkpoint_id DESC) AS rn
     FROM checkpoints
     WHERE thread_id = %(thread_id)s AND checkpoint_ns = %(ns)s
@@ -128,6 +134,11 @@ delta_thread AS (
 trim_guard AS (
     SELECT (
         NOT (SELECT is_delta FROM delta_thread)
+        AND NOT EXISTS (
+            SELECT 1 FROM ranked
+            WHERE checkpoint ->> 'v' IS DISTINCT FROM '4'
+               OR parent_checkpoint_id >= checkpoint_id
+        )
         AND (
             newest.version IS NULL
             OR (
@@ -159,18 +170,40 @@ doomed AS (
     -- transaction that blocks nothing (row locks only) but delays VACUUM
     -- bloat reclamation and holds the reaper's connection. The caller loops
     -- the statement until a short batch comes back (see trim_checkpoints).
-    SELECT checkpoint_id FROM ranked
+    SELECT checkpoint_id, parent_checkpoint_id FROM ranked
     WHERE rn > %(keep)s
       AND COALESCE((SELECT ready FROM trim_guard), false)
       AND NOT COALESCE((metadata ->> 'compact_boundary')::boolean, false)
+      AND checkpoint_id <> ALL(%(preserve)s)
     ORDER BY checkpoint_id ASC
     LIMIT %(batch)s
 ),
+survivors AS (
+    -- Retain this batch's survivors, including rows a LATER batch may delete.
+    -- A crash between batches must not leave checkpoints without their blobs.
+    SELECT r.* FROM ranked r
+    WHERE NOT EXISTS (SELECT 1 FROM doomed d WHERE d.checkpoint_id = r.checkpoint_id)
+),
 kept_blob_refs AS (
     SELECT DISTINCT cv.key AS channel, cv.value AS version
-    FROM ranked, jsonb_each_text(ranked.checkpoint -> 'channel_versions') AS cv
-    WHERE ranked.rn <= %(keep)s
-       OR COALESCE((ranked.metadata ->> 'compact_boundary')::boolean, false)
+    FROM survivors, jsonb_each_text(survivors.checkpoint -> 'channel_versions') AS cv
+),
+bypassed_parents AS (
+    SELECT s.checkpoint_id, s.parent_checkpoint_id FROM survivors s
+    WHERE EXISTS (SELECT 1 FROM doomed d WHERE d.checkpoint_id = s.parent_checkpoint_id)
+    UNION ALL
+    SELECT p.checkpoint_id, d.parent_checkpoint_id
+    FROM bypassed_parents p JOIN doomed d ON d.checkpoint_id = p.parent_checkpoint_id
+),
+relinked AS (
+    UPDATE checkpoints c SET parent_checkpoint_id = p.parent_checkpoint_id
+    FROM bypassed_parents p
+    WHERE c.thread_id = %(thread_id)s AND c.checkpoint_ns = %(ns)s
+      AND c.checkpoint_id = p.checkpoint_id
+      AND NOT EXISTS (
+          SELECT 1 FROM doomed d WHERE d.checkpoint_id = p.parent_checkpoint_id
+      )
+    RETURNING 1
 ),
 del_checkpoints AS (
     DELETE FROM checkpoints
@@ -289,6 +322,7 @@ async def trim_checkpoints(
     keep: int = 5,
     checkpoint_ns: str = "",
     batch: int = _TRIM_BATCH,
+    preserve_checkpoint_ids: Collection[str] = (),
 ) -> TrimCounts:
     """Delete a thread's older checkpoints, keeping the latest `keep`.
 
@@ -297,6 +331,8 @@ async def trim_checkpoints(
     checkpoint references is removed. The latest checkpoint is always kept
     (keep >= 1), so the next resume reads intact state. Compaction boundaries
     are exempt from every trim — a stamped segment anchor is never deleted.
+    `preserve_checkpoint_ids` additionally retains operator-verified segment
+    endpoints when the original best-effort boundary stamp was absent.
 
     Trimming is a legacy operation: the cluster default parks it (never-delete
     ruling, 2026-09-12, task #3180), and a delta-written thread is refused
@@ -313,7 +349,13 @@ async def trim_checkpoints(
         async with async_write_transaction(pool) as conn, conn.cursor() as cur:
             await cur.execute(
                 _TRIM_SQL,
-                {"thread_id": thread_id, "ns": checkpoint_ns, "keep": keep, "batch": batch},
+                {
+                    "thread_id": thread_id,
+                    "ns": checkpoint_ns,
+                    "keep": keep,
+                    "batch": batch,
+                    "preserve": list(preserve_checkpoint_ids),
+                },
             )
             row = await cur.fetchone()
         assert row is not None, "the trailing SELECT always returns one row"  # noqa: S101
@@ -342,6 +384,7 @@ def trim_checkpoints_sync(
     keep: int = 5,
     checkpoint_ns: str = "",
     batch: int = _TRIM_BATCH,
+    preserve_checkpoint_ids: Collection[str] = (),
 ) -> TrimCounts:
     """Synchronous twin of `trim_checkpoints` for gateway-side maintenance
     loops (the events-maintenance daemon's checkpoint reaper runs on a sync
@@ -358,7 +401,13 @@ def trim_checkpoints_sync(
         with write_transaction(pool) as conn, conn.cursor() as cur:
             cur.execute(
                 _TRIM_SQL,
-                {"thread_id": thread_id, "ns": checkpoint_ns, "keep": keep, "batch": batch},
+                {
+                    "thread_id": thread_id,
+                    "ns": checkpoint_ns,
+                    "keep": keep,
+                    "batch": batch,
+                    "preserve": list(preserve_checkpoint_ids),
+                },
             )
             row = cur.fetchone()
         assert row is not None, "the trailing SELECT always returns one row"  # noqa: S101

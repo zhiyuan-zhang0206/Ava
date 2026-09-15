@@ -148,7 +148,7 @@ def _thread(
                     thread_id,
                     checkpoint_ns,
                     checkpoint_id,
-                    f'{{"channel_versions": {{"messages": "{version}"}}}}',
+                    f'{{"v": 4, "channel_versions": {{"messages": "{version}"}}}}',
                     metadata,
                 ),
             )
