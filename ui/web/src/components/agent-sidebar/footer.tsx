@@ -263,7 +263,7 @@ function PluginStatCard({ card }: { card: PluginStatCardModel }) {
         card.stale && "opacity-60",
       )}
     >
-      <span className="truncate text-[10px] tracking-wide text-muted-foreground">
+      <span className="truncate text-[10px] tracking-wide text-muted-foreground" title={card.label}>
         {card.label}
       </span>
       <span
