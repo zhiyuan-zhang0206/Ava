@@ -90,10 +90,10 @@ Not the coverage percentage (CI gates that already) — the judgment:
 ## Review comment template
 
 Post exactly this structure. Omit a severity section if it has no items (don't
-leave empty headers). Replace `<agent-id>` with your own id (`ava.self.AGENT_ID`).
+leave empty headers). The comment is repository-facing — it carries no agent identity or brand marks.
 
 ```
-## 🤖 Ava Auto-Review
+## Auto-Review
 
 ### Summary
 <one paragraph: what the change does + overall assessment>
@@ -118,7 +118,7 @@ leave empty headers). Replace `<agent-id>` with your own id (`ava.self.AGENT_ID`
 - [x/~] Architecture Consistency
 
 ---
-*Reviewed by Ava #<agent-id>*
+*Reviewed by automated review*
 ```
 
 ## Review principles
