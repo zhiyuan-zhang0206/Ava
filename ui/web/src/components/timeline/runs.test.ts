@@ -133,6 +133,19 @@ describe("summarizeTurn / formatTurnSummary", () => {
     expect(formatTurnSummary(s)).toBe("1 system note · 1 agent message");
   });
 
+  it("never labels the system prompt (task #3557) — the compact summary label stays", () => {
+    const s = summarizeTurn([
+      item("system_prompt"),
+      item("inbound_compact_summary"),
+    ]);
+    const line = formatTurnSummary(s);
+    // The always-present prompt carries no information in the collapsed line…
+    expect(line).not.toContain("system prompt");
+    // …while the compact-summary marker stays (user decision: humans read it
+    // as "this agent has compacted").
+    expect(line).toBe("compact summary");
+  });
+
   it("a turn with only thinking shows the rounds count", () => {
     const s = summarizeTurn([
       item("agent_reasoning"),
@@ -450,8 +463,10 @@ describe("groupIntoTurns", () => {
     const turn = groups[0];
     if (turn.kind !== "turn") throw new Error("expected turn");
     expect(turn.summary.total).toBe(6);
-    // The two guidance notes land in the systemNotes bucket.
-    expect(formatTurnSummary(turn.summary)).toBe("system prompt · 2 compact summaries · 1 memory · 2 system notes");
+    // The two guidance notes land in the systemNotes bucket. The system
+    // prompt folds in as data but carries no label (task #3557); the two
+    // compact summaries (summary + request) keep their fragment.
+    expect(formatTurnSummary(turn.summary)).toBe("2 compact summaries · 1 memory · 2 system notes");
   });
 
   it("context-only items after real content fold normally (e.g. restart lifecycle marker + new system prompt)", () => {
@@ -480,8 +495,9 @@ describe("groupIntoTurns", () => {
     expect(turn.summary.thinking).toBe(0);
     expect(turn.summary.code).toBe(0);
     expect(turn.summary.output).toBe(0);
-    // The lifecycle_restart marker lands in the systemNotes bucket.
-    expect(formatTurnSummary(turn.summary)).toBe("system prompt · 2 memories · 1 system note");
+    // The lifecycle_restart marker lands in the systemNotes bucket; the
+    // system prompt folds in but is not labeled (task #3557).
+    expect(formatTurnSummary(turn.summary)).toBe("2 memories · 1 system note");
   });
 
   it("context items mixed with agent actions before first primary — all fold together", () => {

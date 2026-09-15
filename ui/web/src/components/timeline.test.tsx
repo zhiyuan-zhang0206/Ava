@@ -352,15 +352,18 @@ describe("ItemView: agent_code + agent_reasoning", () => {
 describe("ItemView: system_prompt", () => {
   const PROMPT = "You are Ava.\nAct via execute_code.\nThird line.";
 
-  it("collapsed by default in 'none' mode: turn wraps system prompt, body is hidden", () => {
+  it("collapsed by default in 'none' mode: turn wraps the prompt unlabeled, body is hidden", () => {
     setToggleState({ detailsMode: "none" });
     render(
       <TimelineView
         items={[makeItem({ kind: "system_prompt", payload: PROMPT, created_at: null })]}
       />,
     );
-    // Turn header shows the summary ("system prompt")
-    expect(screen.getByText("system prompt")).toBeTruthy();
+    // The collapsed turn header no longer labels the system prompt
+    // (task #3557) — the prompt is always present, zero information.
+    expect(screen.queryByText("system prompt")).toBeNull();
+    // The turn still wraps the prompt (the collapsed block header exists).
+    expect(screen.getByTestId("turn-toggle")).toBeTruthy();
     // The prompt body is hidden (turn is collapsed in none mode)
     expect(screen.queryByText(/Act via execute_code/)).toBeNull();
     // The card's chip summary ("· 3 lines") is inside the collapsed turn — not in DOM
