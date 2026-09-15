@@ -57,10 +57,11 @@ def _frontend_probe() -> DaemonProbe:
     """The frontend's identity probe, imported at call time.
 
     Next.js serves no /healthz it can sign, so the frontend is identified by
-    process ownership: the app-port listener must belong to the current
-    frontend session's recorded identity (services/healthchecks/frontend.py).
-    An old orphan that answers 200 without a live session is not frontend
-    health (issue #2123).
+    process ownership: the app-port listener must belong to the frontend's
+    expected owner — the recorded session, or, on a root-driven host, the
+    ava-root tree unit (services/healthchecks/frontend.py, task #3370). An old
+    orphan that answers 200 without either is not frontend health (issue
+    #2123).
     """
     from services.healthchecks.frontend import probe_frontend
 

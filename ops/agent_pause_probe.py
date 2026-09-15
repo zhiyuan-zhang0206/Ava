@@ -62,20 +62,26 @@ def host_running() -> bool:
     return False
 
 
-def _root_supervises_agent_host(pid: int) -> bool:
-    """True when this home's ava-root runs its agent-host unit at `pid`."""
+def _root_unit(unit_id: str) -> dict[str, object] | None:
+    """This home's ava-root tree row for `unit_id`, or None when no root answers.
+
+    A root-driven host (W1.2e) keeps its services as ava-root tree units, not
+    session records — "is this service up" is a question for the tree. An
+    unreachable root reads as "no unit", the conservative rule `host_running`
+    applies too: a claim the root cannot make is not made.
+    """
     from services.ava_root.client import RootClient, RootClientError
     from shared.paths import root_run_dir
 
     try:
         response = RootClient(root_run_dir() / _ROOT_SOCKET_NAME, timeout=2.0).status()
     except RootClientError:
-        return False
+        return None
     if not response.get("ok"):
-        return False
+        return None
     result_raw: object = response.get("result")
     if not isinstance(result_raw, dict):
-        return False
+        return None
     result = cast("dict[str, object]", result_raw)
     units_raw = result.get("units")
     units = cast("list[object]", units_raw) if isinstance(units_raw, list) else []
@@ -83,9 +89,21 @@ def _root_supervises_agent_host(pid: int) -> bool:
         if not isinstance(unit_raw, dict):
             continue
         unit = cast("dict[str, object]", unit_raw)
-        if unit.get("id") == "agent-host":
-            return unit.get("state") == "running" and unit.get("pid") == pid
-    return False
+        if unit.get("id") == unit_id:
+            return unit
+    return None
+
+
+def _root_unit_running(unit_id: str) -> bool:
+    """True when this home's ava-root runs its `unit_id` unit right now."""
+    unit = _root_unit(unit_id)
+    return unit is not None and unit.get("state") == "running"
+
+
+def _root_supervises_agent_host(pid: int) -> bool:
+    """True when this home's ava-root runs its agent-host unit at `pid`."""
+    unit = _root_unit("agent-host")
+    return unit is not None and unit.get("state") == "running" and unit.get("pid") == pid
 
 
 def host_identity() -> HostIdentity:
@@ -115,13 +133,19 @@ def host_identity() -> HostIdentity:
 
 
 def ops_quiescent(timeout: float) -> None:
-    """Wait for admitted HTTP requests and actual executor work, after closing admission."""
+    """Wait for admitted HTTP requests and actual executor work, after closing admission.
+
+    "Is ops even running" is answered in the unit's own management mode: a
+    session host records `ava-ops`; a root-driven host keeps ops as an ava-root
+    tree unit with no record — without the tree check this gate silently
+    skipped the whole wait there (task #3370).
+    """
     import time
 
     from shared.cluster import session_name
     from shared.session_backend import get_backend
 
-    if not get_backend().has_session(session_name("ops")):
+    if not get_backend().has_session(session_name("ops")) and not _root_unit_running("ops"):
         return
     deadline = time.monotonic() + timeout
     while True:

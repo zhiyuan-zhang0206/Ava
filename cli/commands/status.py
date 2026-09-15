@@ -79,6 +79,29 @@ def _update_in_flight() -> bool:
         return False
 
 
+def _root_tree_units() -> dict[str, dict[str, object]] | None:
+    """This host's ava-root tree rows by unit id, or None when sessions drive it.
+
+    A root-driven host (`settings.services.root_driver_enabled` — the same
+    switch `ava start`/`ava stop` fork on) keeps its services as ava-root tree
+    units, not session records, so the status table's session column must read
+    the tree or every serving row reports ✗. An unreachable root yields an
+    empty map: the tree claims nothing, so nothing reads as running. A session
+    host returns None and the column keeps its session reading. One snapshot
+    per `ava status` — the column is not a per-row root roundtrip.
+    """
+    import cli.commands as _ns
+
+    if not _ns._root_driven_enabled():
+        return None
+    from cli.commands import _root_driver
+
+    status = _root_driver._root_status(_root_driver._root_client())
+    if status is None:
+        return {}
+    return _root_driver._root_units(status)
+
+
 def cmd_status() -> int:
     # Dynamic lookup for monkeypatch-aware tests.
     import cli.commands as _ns
@@ -98,11 +121,15 @@ def cmd_status() -> int:
     else:
         services_to_show = _services_for_roles_annotated(roles)
     name_w = max(len(session_name(spec.session)) for spec, _reason in services_to_show)
+    # Root-driven hosts keep their services as tree units: read one tree
+    # snapshot for the whole table (None on session hosts — the column keeps
+    # its session reading; an unreachable root reads as an empty tree).
+    root_units = _root_tree_units()
     header = f"{'service'.ljust(name_w)}  sess  probe"
     print(header)
     print("-" * len(header))
     for spec, skip_reason in services_to_show:
-        _print_service_row(spec, name_w, skip_reason)
+        _print_service_row(spec, name_w, skip_reason, root_units=root_units)
 
     # infra section: a runner-only host has no local pg/redis.
     runner_only = roles is not None and "agent-runner" in roles and "gateway" not in roles
