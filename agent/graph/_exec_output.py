@@ -129,14 +129,20 @@ def wrap_code_output(
         logger.info("[exec output chars] {n}", n=produced)
         preview = None
         crop_after = settings.sandbox.exec_output_crop_after_lines
-        if stream_cap is None and crop_after and len(output.splitlines()) > crop_after:
-            preview = crop_output(
-                output,
-                _overflow_dir(),
-                settings.sandbox,
-                referenced_messages=referenced_messages,
-                max_chars=max_chars,
+        if stream_cap is None and crop_after:
+            over = (
+                len(output.splitlines()) > crop_after
+                or len(output) > settings.sandbox.exec_output_crop_after_chars
+                or len(output.encode("utf-8")) > settings.sandbox.exec_output_crop_after_bytes
             )
+            if over:
+                preview = crop_output(
+                    output,
+                    _overflow_dir(),
+                    settings.sandbox,
+                    referenced_messages=referenced_messages,
+                    max_chars=max_chars,
+                )
         if preview is not None:
             output = preview
         elif len(output) > max_chars:

@@ -19,8 +19,8 @@ def archive_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return directory
 
 
-def _output(count: int = 140) -> str:
-    return "".join(f"line {index:03d} {'content ' * 12}\n" for index in range(count))
+def _output(count: int = 340, repeats: int = 9) -> str:
+    return "".join(f"line {index:03d} {'content ' * repeats}\n" for index in range(count))
 
 
 def test_default_crop_keeps_25_lines_at_each_end_and_recoverable_body(archive_dir: Path):
@@ -29,9 +29,9 @@ def test_default_crop_keeps_25_lines_at_each_end_and_recoverable_body(archive_di
 
     assert "line 024 " in wrapped
     assert "line 025 " not in wrapped
-    assert "line 114 " not in wrapped
-    assert "line 115 " in wrapped
-    assert "line 139 " in wrapped
+    assert "line 314 " not in wrapped
+    assert "line 315 " in wrapped
+    assert "line 339 " in wrapped
     files = list(archive_dir.glob("crop_*.txt"))
     assert len(files) == 1
     assert str(files[0]) in wrapped
@@ -127,10 +127,47 @@ def test_reasoning_reference_protects_archive(
     assert body in wrapped
 
 
-@pytest.mark.parametrize("body", [_output(120), "\n" * 121, "x" * 12_000])
+@pytest.mark.parametrize("body", [_output(120), _output(300), "\n" * 121, "x" * 12_000])
 def test_threshold_short_lines_and_single_line_do_not_create_archive(body: str, archive_dir: Path):
     assert body in _exec_output.wrap_code_output(body)
     assert not archive_dir.exists()
+
+
+def test_line_trigger_crops_at_one_over_the_limit(archive_dir: Path):
+    wrapped = _exec_output.wrap_code_output(_output(301))
+    assert "line 024 " in wrapped
+    assert "line 025 " not in wrapped
+    assert "line 275 " not in wrapped
+    assert "line 276 " in wrapped
+    assert "line 300 " in wrapped
+    assert len(list(archive_dir.glob("crop_*.txt"))) == 1
+
+
+def test_char_trigger_crops_below_the_line_count(archive_dir: Path):
+    body = "".join(f"line {index:03d} {'y' * 330}\n" for index in range(200))
+    assert len(body) > 64 * 1024
+    wrapped = _exec_output.wrap_code_output(body)
+    assert "line 024 " in wrapped
+    assert "line 025 " not in wrapped
+    assert "line 174 " not in wrapped
+    assert "line 175 " in wrapped
+    assert "line 199 " in wrapped
+    files = list(archive_dir.glob("crop_*.txt"))
+    assert len(files) == 1
+    assert files[0].read_text() == body
+
+
+def test_byte_trigger_crops_multibyte_text_below_char_and_line_triggers(archive_dir: Path):
+    body = "".join(f"line {index:03d} {'\u6d4b' * 100}\n" for index in range(250))
+    assert len(body) <= 64 * 1024 < len(body.encode("utf-8"))
+    wrapped = _exec_output.wrap_code_output(body)
+    assert "line 024 " in wrapped
+    assert "line 025 " not in wrapped
+    assert "line 224 " not in wrapped
+    assert "line 225 " in wrapped
+    files = list(archive_dir.glob("crop_*.txt"))
+    assert len(files) == 1
+    assert files[0].read_text() == body
 
 
 def test_zero_threshold_disables_soft_crop_only(archive_dir: Path, monkeypatch: pytest.MonkeyPatch):
@@ -181,7 +218,7 @@ def test_head_tail_counts_are_independent_of_trigger(
     monkeypatch.setattr(settings.sandbox, "exec_output_crop_tail_lines", 2)
     wrapped = _exec_output.wrap_code_output(_output())
     assert "line 002 " in wrapped and "line 003 " not in wrapped
-    assert "line 137 " not in wrapped and "line 138 " in wrapped
+    assert "line 337 " not in wrapped and "line 338 " in wrapped
     assert "first 3 + last 2 lines" in wrapped
 
 
@@ -207,6 +244,8 @@ def test_failed_archive_cleanup_cannot_drop_original_tool_output(
     "field,value",
     [
         ("exec_output_crop_after_lines", -1),
+        ("exec_output_crop_after_chars", 0),
+        ("exec_output_crop_after_bytes", 0),
         ("exec_output_crop_head_lines", 0),
         ("exec_output_crop_tail_lines", 0),
         ("exec_output_crop_archive_max_bytes", 0),
@@ -219,7 +258,9 @@ def test_invalid_crop_config_is_rejected(field: str, value: int):
 
 def test_config_defaults_and_disabled_trigger():
     config = SandboxSettings.model_validate({})
-    assert config.exec_output_crop_after_lines == 120
+    assert config.exec_output_crop_after_lines == 300
+    assert config.exec_output_crop_after_chars == 64 * 1024
+    assert config.exec_output_crop_after_bytes == 64 * 1024
     assert config.exec_output_crop_head_lines == config.exec_output_crop_tail_lines == 25
     assert config.exec_output_crop_archive_max_bytes == 16 * 1024 * 1024
     assert (
@@ -228,3 +269,15 @@ def test_config_defaults_and_disabled_trigger():
         ).exec_output_crop_after_lines
         == 0
     )
+
+
+def test_crop_size_triggers_must_not_sit_below_the_hard_cap():
+    with pytest.raises(ValidationError, match="exec_output_crop_after_chars"):
+        SandboxSettings.model_validate({"exec_output_crop_after_chars": 20_000})
+    with pytest.raises(ValidationError, match="exec_output_crop_after_bytes"):
+        SandboxSettings.model_validate({"exec_output_crop_after_bytes": 20_000})
+    config = SandboxSettings.model_validate(
+        {"exec_output_crop_after_chars": 30_000, "exec_output_crop_after_bytes": 30_000}
+    )
+    assert config.exec_output_crop_after_chars == 30_000
+    assert config.exec_output_crop_after_bytes == 30_000
