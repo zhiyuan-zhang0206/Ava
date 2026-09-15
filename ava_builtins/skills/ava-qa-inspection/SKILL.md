@@ -55,6 +55,10 @@ detect it, its severity, and the evidence a finding must carry. The list is the
 contract; extend it (see "Graduating a finding") rather than improvising new
 classes ad hoc.
 
+Judge with `reference/judgment-standards.md` as well — severity floors, the
+diff-only rule, and the negative-sample discipline; attach it to any sweep or
+review brief.
+
 Cover every top-level route and the states that are easy to miss: empty states
 (no agents / no notices), long-content states (overflow), the mobile viewport
 (≤ 430px wide — the sidebar/hamburger and picker live only there), and both
