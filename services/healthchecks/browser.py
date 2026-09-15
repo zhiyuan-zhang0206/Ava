@@ -152,8 +152,9 @@ _CONTEXT_HEAL_STOP_TIMEOUT_S = 10.0
 # rebuilds in one window, ending only when the load collapsed). A session
 # younger than this grace is spared the rebuild; past it the respawn runs as
 # before. 300s = five rounds: the observed post-collapse recovery was ~90s and
-# the churn spanned two or more consecutive rounds, so this leaves ~3x margin.
-# or wedged Chrome is still rebuilt within the window plus one round.
+# the churn spanned two or more consecutive rounds, so this leaves ~3x margin
+# while a truly dead or wedged Chrome is still rebuilt within the window plus
+# one round.
 _RESPAWN_GRACE_S = 300.0
 
 
