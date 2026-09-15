@@ -43,6 +43,9 @@ export function InspectWidgetSection({ widget }: { widget: InspectWidget }) {
       <ul className="space-y-1">
         {tasks.map((task) => (
           <li key={task.id}>
+            {/* The #id leads the row so the ids line up on the left edge,
+                mirroring the shell rows (task #3563 — user: the tasks id should
+                sit left "like shell"); the title takes the remaining width. */}
             <Link
               href={fleetTaskHref(task.id)}
               className={cn(
@@ -51,10 +54,10 @@ export function InspectWidgetSection({ widget }: { widget: InspectWidget }) {
                 MIN_W_0,
               )}
             >
-              <span className={cn("truncate text-foreground", MIN_W_0, FLEX_1)}>{task.title}</span>
               <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
                 #{task.id}
               </span>
+              <span className={cn("truncate text-foreground", MIN_W_0, FLEX_1)}>{task.title}</span>
             </Link>
           </li>
         ))}
