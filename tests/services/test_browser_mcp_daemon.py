@@ -51,6 +51,7 @@ class FakeUpstream:
         self.next_id = 1
         self.pages: dict[int, str] = {}
         self.selected: int | None = None
+        self.isolated_contexts: dict[int, str] = {}
         self.calls: list[tuple[str, dict[str, Any], int | None]] = []
 
     async def list_tools(self) -> Any:
@@ -63,6 +64,9 @@ class FakeUpstream:
             pid = self.next_id
             self.next_id += 1
             self.pages[pid] = args.get("url", "about:blank")
+            context = args.get("isolatedContext")
+            if isinstance(context, str) and context:
+                self.isolated_contexts[pid] = context
             self.selected = pid
             return self._listing()
         if name == "select_page":
@@ -90,10 +94,18 @@ class FakeUpstream:
         return _ok(f"ran {name} on page {self.selected}")
 
     def _listing(self) -> types.CallToolResult:
-        lines = [
-            f"  {pid}: {url}{' [selected]' if pid == self.selected else ''}"
-            for pid, url in self.pages.items()
-        ]
+        """Render like chrome-devtools-mcp: `id: url [selected]`, with an
+        isolated-context page carrying its suffix after the marker on the same
+        line (`[selected] isolatedContext=<name>`)."""
+        lines: list[str] = []
+        for pid, url in self.pages.items():
+            line = f"  {pid}: {url}"
+            if pid == self.selected:
+                line += " [selected]"
+            context = self.isolated_contexts.get(pid)
+            if context:
+                line += f" isolatedContext={context}"
+            lines.append(line)
         return _ok("\n".join(lines))
 
 
@@ -157,6 +169,17 @@ async def test_select_and_close_track_current() -> None:
     assert page is None  # closing our own clears it
 
 
+async def test_select_page_accepts_integral_float_page_id() -> None:
+    """The MCP schema declares pageId as a number, so a JSON client sends 1.0
+    for page 1; the connection's current page must still move -- the int-only
+    check left it behind, and the next page-scoped call read as no-page."""
+    d, _ = _daemon()
+    await d.call_tool("new_page", {"url": "a"}, None)  # page 1
+    _, page = await d.call_tool("new_page", {"url": "b"}, None)  # page 2
+    _, page = await d.call_tool("select_page", {"pageId": 1.0}, page)
+    assert page == 1 and isinstance(page, int)
+
+
 async def test_repin_failure_falls_back_to_no_page() -> None:
     """If the pinned page vanished, re-pin errors -> treat as page-less rather
     than run the op against whatever is globally selected."""
@@ -180,6 +203,38 @@ async def test_list_pages_is_not_repinned() -> None:
 def test_selected_id_parses_marked_line() -> None:
     assert _selected_id(_ok("  1: https://a\n  2: https://b [selected]")) == 2
     assert _selected_id(_ok("  1: https://a")) is None
+
+
+def test_selected_id_parses_isolated_context_suffix() -> None:
+    """An isolated-context tab renders its suffix AFTER `[selected]` on the
+    same line; the id must still parse -- the drift left the page with no TTL
+    slot and the affinity on the previous tab."""
+    text = "  29: Discord (https://discord.com/app) [selected] isolatedContext=reg-7"
+    assert _selected_id(_ok(text)) == 29
+    # A line without the marker parses to None, isolated suffix or not.
+    assert _selected_id(_ok("  1: https://a\n  2: https://b isolatedContext=x")) is None
+
+
+def test_selected_id_rejects_marker_inside_title() -> None:
+    """A title containing a literal `[selected]` followed by more title text is
+    not the marker: the suffix grammar admits only `key=value` tokens, so such
+    a line must parse to None (a false pick would mis-affinity the page)."""
+    assert _selected_id(_ok("  3: my [selected] title (https://url)")) is None
+    # The real marker stays parseable when a title contains the literal too.
+    line = "  3: my [selected] title (https://url) [selected] isolatedContext=reg-7"
+    assert _selected_id(_ok(line)) == 3
+
+
+def test_next_page_select_normalizes_page_id() -> None:
+    """select_page tracks the id the caller asked for: an integral float (the
+    JSON `number` shape) normalizes to the int; a value that names no page
+    keeps the current one, and a bool never aliases page 1."""
+    ok = _ok("  1: https://a")
+    assert ChromeMcpDaemon._next_page("select_page", {"pageId": 1}, ok, 3) == 1
+    assert ChromeMcpDaemon._next_page("select_page", {"pageId": 1.0}, ok, 3) == 1
+    assert ChromeMcpDaemon._next_page("select_page", {"pageId": 1.5}, ok, 3) == 3
+    assert ChromeMcpDaemon._next_page("select_page", {"pageId": True}, ok, 3) == 3
+    assert ChromeMcpDaemon._next_page("select_page", {"pageId": "1"}, ok, 3) == 3
 
 
 def test_no_page_result_is_marked_error() -> None:
@@ -382,6 +437,41 @@ async def test_agent_affinity_management_tools_update_slot() -> None:
     assert get_agent_page(7, d.generation) == 1
     await d.call_tool_for_agent("close_page", {"pageId": 1}, 7)
     assert get_agent_page(7, d.generation) is None
+
+
+async def test_agent_affinity_accepts_integral_float_page_id() -> None:
+    """The incident shape: select_page(1.0) must move the per-agent slot to
+    page 1; the int-only check kept slot 2 and the following page-scoped call
+    re-pinned to the wrong tab (no-page)."""
+    d, _up = _daemon()
+    await d.call_tool_for_agent("new_page", {"url": "a"}, 7)  # page 1
+    await d.call_tool_for_agent("new_page", {"url": "b"}, 7)  # page 2
+    await d.call_tool_for_agent("select_page", {"pageId": 1.0}, 7)
+    assert get_agent_page(7, d.generation) == 1
+
+
+async def test_agent_affinity_isolated_context_suffix_registers_page() -> None:
+    """An isolated-context new_page (suffix after `[selected]`) must update the
+    agent's slot AND register the page's TTL slot; the drift left the slot on
+    the old page and the page unmanaged (never auto-closed)."""
+    d, _up = _daemon()
+    await d.call_tool_for_agent(
+        "new_page", {"url": "https://discord.com/app", "isolatedContext": "reg-7"}, 7
+    )
+    assert get_agent_page(7, d.generation) == 1
+    deadline, generation = page_lifecycle._PAGE_TTL_DEADLINES[1]
+    assert generation == d.generation and deadline > time.monotonic()
+
+
+async def test_agent_close_with_integral_float_drops_ttl_slot() -> None:
+    """close_page(2.0) must drop page 2's TTL slot like an integer close --
+    the int-only guard left the slot for the sweep to clean up late."""
+    d, _up = _daemon()
+    await d.call_tool_for_agent("new_page", {"url": "a"}, 7)  # page 1
+    await d.call_tool_for_agent("new_page", {"url": "b"}, 7)  # page 2
+    assert 2 in page_lifecycle._PAGE_TTL_DEADLINES
+    await d.call_tool_for_agent("close_page", {"pageId": 2.0}, 7)
+    assert 2 not in page_lifecycle._PAGE_TTL_DEADLINES
 
 
 async def test_handle_client_agent_id_adopts_agent_page(tmp_path: Path) -> None:
