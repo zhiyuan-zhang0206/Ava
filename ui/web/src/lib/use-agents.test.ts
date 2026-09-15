@@ -1031,7 +1031,7 @@ describe("useAgents.terminate", () => {
           {
             id: 3,
             title: "Winding down",
-            status: "ongoing",
+            status: "in_progress",
             updated_at: "2026-09-14T05:00:00+00:00",
           },
         ],

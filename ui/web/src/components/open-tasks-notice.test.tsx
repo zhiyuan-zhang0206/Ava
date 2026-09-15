@@ -43,7 +43,7 @@ function makeHint(overrides: Partial<OpenTasksHint> = {}): OpenTasksHint {
       {
         id: 7,
         title: "Close the loop",
-        status: "ongoing",
+        status: "in_progress",
         updated_at: new Date(Date.now() - 65 * 60 * 1000).toISOString(),
       },
     ],
@@ -76,7 +76,7 @@ describe("OpenTasksNoticeDialog", () => {
     const rows = screen.getAllByRole("listitem");
     expect(rows).toHaveLength(2);
     expect(rowText(rows[0])).toBe("#12 | Ship the hint | In progress | 2h ago");
-    expect(rowText(rows[1])).toBe("#7 | Close the loop | Ongoing | 1h ago");
+    expect(rowText(rows[1])).toBe("#7 | Close the loop | In progress | 1h ago");
   });
 
   it("keeps id, status and age visible when the title overflows", () => {

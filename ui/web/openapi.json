@@ -563,7 +563,7 @@
     "/api/agents/{agent_id}/terminate": {
       "post": {
         "summary": "Post Agent Terminate",
-        "description": "Terminate through the home runner's durable native control path.\n\nClaim returns to END and the host flushes before applying normal termination.\nAn optional message is committed as pending work before the command, retained\nfor later resurrection without causing another model turn. Force returns\nenqueued while the exact original host settles its task and execution\nresources; acceptance and metadata status are not proof of completed exit.\n\nBoth paths forward to the home runner. A missing agent returns 404; an\nalready-terminated identity is a no-op for graceful termination.\n\nOn success the response additionally carries `open_tasks` — the tasks the\nagent still owns (in_progress / ongoing; at most five, most recently\nupdated first) as it goes down. The hint is advisory: a failed read leaves\nit null and never changes the termination result.",
+        "description": "Terminate through the home runner's durable native control path.\n\nClaim returns to END and the host flushes before applying normal termination.\nAn optional message is committed as pending work before the command, retained\nfor later resurrection without causing another model turn. Force returns\nenqueued while the exact original host settles its task and execution\nresources; acceptance and metadata status are not proof of completed exit.\n\nBoth paths forward to the home runner. A missing agent returns 404; an\nalready-terminated identity is a no-op for graceful termination.\n\nOn success the response additionally carries `open_tasks` — the tasks the\nagent still owns (in_progress; at most five, most recently\nupdated first) as it goes down. The hint is advisory: a failed read leaves\nit null and never changes the termination result.",
         "operationId": "post_agent_terminate_api_agents__agent_id__terminate_post",
         "parameters": [
           {
@@ -6129,7 +6129,7 @@
     "/api/tasks/{task_id}": {
       "patch": {
         "summary": "Patch Task",
-        "description": "Partially update a task; omitted fields stay unchanged.\n\nstatus, priority, title, description, and results are taken when non-null\n(priority must be one of P0..P3; ongoing marks long-running active work; a\ntitle colliding with another in_progress task's is rejected). owner reassigns to another\nagent (an explicit null is rejected — a task cannot be released).\nremind_interval_seconds must be a positive number of seconds <= 24h (an explicit\nnull is rejected — reminders cannot be disabled). Any write resets the\nreminder counters, same as the SDK update path. An owner reassignment sends\nthe SDK-equivalent task system notes after the database write commits.\n\nThe system root task is immutable: any PATCH targeting it is rejected with\n422 (mirrors the SDK update() guard), so the task-tree anchor can never be\nreassigned, completed, cancelled, or otherwise edited.\n\nA status change to done or cancelled is rejected with 422 while any direct\nchild remains active (in progress or ongoing). Close or cancel those children first.",
+        "description": "Partially update a task; omitted fields stay unchanged.\n\nstatus, priority, title, description, and results are taken when non-null\n(status must be one of in_progress/done/cancelled and priority one of\nP0..P3 — both are shared enums, so pydantic 422s anything else; a title\ncolliding with another in_progress task's is rejected). owner reassigns to\nanother agent (an explicit null is rejected — a task cannot be released).\nremind_interval_seconds must be a positive number of seconds <= 24h (an explicit\nnull is rejected — reminders cannot be disabled). Any write resets the\nreminder counters, same as the SDK update path. An owner reassignment sends\nthe SDK-equivalent task system notes after the database write commits.\n\nThe system root task is immutable: any PATCH targeting it is rejected with\n422 (mirrors the SDK update() guard), so the task-tree anchor can never be\nreassigned, completed, cancelled, or otherwise edited.\n\nA status change to done or cancelled is rejected with 422 while any direct\nchild remains in progress. Close or cancel those children first.",
         "operationId": "patch_task_api_tasks__task_id__patch",
         "parameters": [
           {
@@ -11793,10 +11793,7 @@
           },
           "status": {
             "type": "string",
-            "enum": [
-              "in_progress",
-              "ongoing"
-            ],
+            "const": "in_progress",
             "title": "Status"
           },
           "updated_at": {
@@ -11839,7 +11836,7 @@
           "more"
         ],
         "title": "OpenTasksHint",
-        "description": "The open tasks (in_progress / ongoing) a terminating agent still owns.\n\nAdvisory only — termination proceeds either way. `tasks` holds at most the\nfive most recently updated rows; `more` counts the ones beyond those."
+        "description": "The open tasks (in_progress) a terminating agent still owns.\n\nAdvisory only — termination proceeds either way. `tasks` holds at most the\nfive most recently updated rows; `more` counts the ones beyond those."
       },
       "OpsMonitorMeta": {
         "properties": {
@@ -14339,8 +14336,7 @@
             "title": "Results"
           },
           "status": {
-            "type": "string",
-            "title": "Status"
+            "$ref": "#/components/schemas/TaskStatus"
           },
           "priority": {
             "$ref": "#/components/schemas/Priority"
@@ -14461,6 +14457,16 @@
         "title": "TaskRow",
         "description": "One full task row for PATCH and GET /api/tasks?fields=full."
       },
+      "TaskStatus": {
+        "type": "string",
+        "enum": [
+          "in_progress",
+          "done",
+          "cancelled"
+        ],
+        "title": "TaskStatus",
+        "description": "Lifecycle state of a task: born `in_progress`; `done`/`cancelled` close it."
+      },
       "TaskSummaryRow": {
         "properties": {
           "id": {
@@ -14483,8 +14489,7 @@
             "title": "Title"
           },
           "status": {
-            "type": "string",
-            "title": "Status"
+            "$ref": "#/components/schemas/TaskStatus"
           },
           "owner": {
             "anyOf": [
@@ -14608,13 +14613,12 @@
           "status": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/TaskStatus"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Status"
+            ]
           },
           "title": {
             "anyOf": [

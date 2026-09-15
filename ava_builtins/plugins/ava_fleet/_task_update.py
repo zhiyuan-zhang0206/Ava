@@ -10,12 +10,13 @@ import psycopg
 from shared.audit_events import insert_event_log
 from shared.priority import DEFAULT_REMIND_INTERVAL_SECONDS, Priority, validate_priority
 from shared.task_notes import task_note_line
+from shared.task_status import TaskStatus
 
-# The statuses update() may assign to a regular task. 'ongoing' marks
-# long-running active work, so it is exempt from reminder scans that only read
-# in_progress rows. The root remains permanently ongoing and immutable (see
-# _write_task_update); create() still begins every regular task in_progress.
-_STATUSES = frozenset({"in_progress", "ongoing", "done", "cancelled"})
+# The statuses update() may assign to a task. shared/task_status.TaskStatus is
+# the one source of the set (SDK + gateway + DB CHECK + generated frontend
+# types; the system root is permanently in_progress and immutable — see
+# _write_task_update; create() begins every regular task in_progress).
+_STATUSES = frozenset(s.value for s in TaskStatus)
 
 # The stakes axis of a task (P0 highest .. P3 lowest) — same four rungs as a
 # notice, both validated against the shared Priority enum. Orders the board
@@ -236,20 +237,20 @@ def _write_task_update(
 ) -> tuple[int | None, str, int | None]:
     """Apply an update() row write inside the caller's transaction.
 
-    Holds the row FOR UPDATE, enforces root immutability, ongoing ownership,
-    parent-close, and title-uniqueness rules, writes the row + optional note,
-    and records the event log. Returns (old_owner, current_title, new_owner)
-    for the post-commit notification."""
+    Holds the row FOR UPDATE, enforces root immutability, parent-close, and
+    title-uniqueness rules, writes the row + optional note, and records the
+    event log. Returns (old_owner, current_title, new_owner) for the
+    post-commit notification."""
     # FOR UPDATE holds the row across the read -> write so two concurrent
     # reassignments cannot both act on the same stale owner.
     cur.execute(
-        "SELECT owner, title, is_root, status FROM agent_tasks WHERE id = %s FOR UPDATE",
+        "SELECT owner, title, is_root FROM agent_tasks WHERE id = %s FOR UPDATE",
         (task_id,),
     )
     row = cur.fetchone()
     if row is None:
         raise ValueError(f"task {task_id} does not exist")
-    old_owner, current_title, is_root, current_status = row
+    old_owner, current_title, is_root = row
     # The system root task is immutable: it is the anchor of the task tree
     # and the parent of the cluster's top-level tasks, so it can never be
     # reassigned, completed, cancelled, or otherwise edited. Fail fast rather
@@ -259,30 +260,10 @@ def _write_task_update(
             f"task {task_id} is the system root task and is immutable — "
             f"it cannot be reassigned, completed, cancelled, or otherwise edited"
         )
-    # A process identity is the same value agents read as ava.self.AGENT_ID.
-    # System tooling runs without one and deliberately remains outside this
-    # agent-to-agent ownership gate.
-    if (
-        status == "ongoing"
-        and status != current_status
-        and actor is not None
-        and actor != old_owner
-    ):
-        cur.execute(
-            "WITH RECURSIVE owner_lineage(id, spawner) AS ("
-            "SELECT id, spawner FROM agents_meta WHERE id = %s "
-            "UNION "
-            "SELECT parent.id, parent.spawner FROM agents_meta parent "
-            "JOIN owner_lineage child ON child.spawner = 'agent:' || parent.id::TEXT"
-            ") SELECT 1 FROM owner_lineage WHERE id = %s LIMIT 1",
-            (old_owner, actor),
-        )
-        if cur.fetchone() is None:
-            raise ValueError("only the owner or a delegator can set a task to ongoing")
     if status in ("done", "cancelled"):
         cur.execute(
             "SELECT id, count(*) OVER () FROM agent_tasks "
-            "WHERE parent_id = %s AND status IN ('in_progress', 'ongoing') "
+            "WHERE parent_id = %s AND status = 'in_progress' "
             "ORDER BY id LIMIT 1",
             (task_id,),
         )
@@ -290,7 +271,7 @@ def _write_task_update(
         if active_child is not None:
             child_id, child_count = active_child
             raise ValueError(
-                f"task {task_id} has {child_count} active child tasks "
+                f"task {task_id} has {child_count} in_progress child tasks "
                 f"(e.g. #{child_id}) — close or cancel them first"
             )
     # A rename must keep create()'s invariant: no two in_progress

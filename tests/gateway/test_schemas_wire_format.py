@@ -11,6 +11,7 @@ goes red immediately.
 
 import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from gateway.schemas import (
     AgentRow,
@@ -179,3 +180,23 @@ def test_user_message_in_accepts_long_content_and_rejects_abuse_cap() -> None:
 
     with pytest.raises(ValidationError):
         UserMessageIn(content="a" * 1_000_001)
+
+
+def test_task_status_enum_is_single_sourced_across_wire_and_frontend() -> None:
+    """The task status set has one source (shared/task_status.TaskStatus): the
+    gateway schemas serialize it, the generated OpenAPI spec / TS types must
+    carry exactly its values, and the hand-written TS mirror aliases the
+    generated schema instead of restating a union ('ongoing' was removed by
+    user ruling 2026-09-15)."""
+    from shared.task_status import TaskStatus
+
+    root = Path(__file__).resolve().parents[2]
+    openapi = json.loads((root / "ui" / "web" / "openapi.json").read_text(encoding="utf-8"))
+    enum = openapi["components"]["schemas"]["TaskStatus"]["enum"]
+    assert set(enum) == {s.value for s in TaskStatus}
+
+    types_ts = (root / "ui" / "web" / "src" / "lib" / "types.ts").read_text(encoding="utf-8")
+    assert 'export type TaskStatus = Schemas["TaskStatus"];' in types_ts, (
+        "lib/types.ts must alias the generated TaskStatus schema (single source), "
+        "not restate a status union"
+    )

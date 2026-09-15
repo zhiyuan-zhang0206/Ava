@@ -671,9 +671,11 @@ export type FleetGraph = Omit<WireFleetGraph, "nodes" | "edges"> & {
 // The task registry — persistent, process-decoupled work items that outlive
 // the agent doing them. Backs the Task Graph (a free D3-force view).
 
-// 'ongoing' marks long-running active work. Regular tasks reach it through
-// update/PATCH; the system root is permanently ongoing and immutable.
-export type TaskStatus = "in_progress" | "done" | "cancelled" | "ongoing";
+// The task lifecycle status set — the backend's shared/task_status.py enum,
+// surfaced through the generated wire schema (a pytest locks db/schema.sql and
+// openapi.json to it; 'ongoing' was removed by user ruling 2026-09-15). The
+// system root is not a status: it is pinned in_progress and immutable.
+export type TaskStatus = Schemas["TaskStatus"];
 
 // The task's stakes axis (P0 highest .. P3 lowest) — the same four rungs as a
 // notice priority, so it reuses the PRIORITY_* style maps in lib/notices.ts.

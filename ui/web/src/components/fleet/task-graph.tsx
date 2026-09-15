@@ -27,7 +27,7 @@ import { WindowSelect, type WindowOption } from "@/components/window-select";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
 import { PRIORITY_BG } from "@/lib/notices";
 import { formatRelative, formatUptime } from "@/lib/time";
-import type { TaskRow } from "@/lib/types";
+import type { TaskRow, TaskStatus } from "@/lib/types";
 import { useTasks, type TaskWindow } from "@/lib/use-tasks";
 import { useUserSettings } from "@/lib/use-user-settings";
 import { cn } from "@/lib/utils";
@@ -45,16 +45,45 @@ import {
 import { TaskKanban } from "./task-kanban";
 
 // Task status → color class for the node's fill (and the Kanban left strip).
-// 'ongoing' marks long-running active work and gets a dedicated color so it is
-// distinguishable from ordinary in-progress tasks in both views.
-const STATUS_FILL: Record<string, string> = {
+// The status set is the backend's (shared/task_status.py::TaskStatus, mirrored
+// in lib/types.ts): in_progress / done / cancelled.
+export const STATUS_FILL: Record<TaskStatus, string> = {
   // The old 'open' color — 'open' was dropped (tasks are born in_progress)
   // and the graph no longer separates the two shades (user ruling 2026-08-29).
   in_progress: "text-slate-400",
   done: "text-emerald-500",
   cancelled: "text-destructive",
-  ongoing: "text-violet-500",
 };
+
+// The system root task's fill. Violet is reserved for the root alone (user
+// ruling 2026-08-27, reinstated 2026-09-15): the root is NOT a status — it is
+// pinned `in_progress` and immutable — so it renders through its own sentinel
+// category in the canvas's status→color map, and nothing else may use it.
+const ROOT_NODE_STATUS = "root";
+const ROOT_FILL = "text-violet-500";
+
+// Node fill map the shared canvas reads (status key → color class), including
+// the root sentinel.
+const NODE_FILL: Record<string, string> = {
+  ...STATUS_FILL,
+  [ROOT_NODE_STATUS]: ROOT_FILL,
+};
+
+// Fill for a task's node / status dot: reserved violet for the root (the sole
+// parent-less row), otherwise the task's status color.
+function taskFill(task: TaskRow): string {
+  return task.parent_id == null ? ROOT_FILL : STATUS_FILL[task.status];
+}
+
+// The legend lists exactly the categories the canvas renders in its default
+// view (user ruling 2026-09-15): active work (in_progress) and the root's
+// reserved violet. done/cancelled get no legend line — they are toggle-hidden
+// by default. Exported so the consistency test locks legend items to the
+// rendered categories.
+export const TASK_LEGEND_ENTRIES = [
+  { key: "in_progress", fill: STATUS_FILL.in_progress, labelKey: "status.inProgress" },
+  { key: ROOT_NODE_STATUS, fill: ROOT_FILL, labelKey: "root" },
+] as const;
 
 // ── Hover detail card ──
 //
@@ -95,7 +124,6 @@ function TaskHoverCard({
     in_progress: t("status.inProgress"),
     done: t("status.done"),
     cancelled: t("status.canceled"),
-    ongoing: t("status.ongoing"),
   };
   const creator =
     task.created_by === "user"
@@ -112,7 +140,7 @@ function TaskHoverCard({
       {/* Header — status dot + title + id, priority badge on the right. */}
       <div className={cn(FLEX, "items-start gap-2")}>
         <span
-          className={cn("mt-1 size-2 shrink-0 rounded-full bg-current", STATUS_FILL[task.status] ?? "text-slate-400")}
+          className={cn("mt-1 size-2 shrink-0 rounded-full bg-current", taskFill(task))}
         />
         <div className={cn(MIN_W_0, FLEX_1)}>
           <p className="line-clamp-2 break-words text-xs font-semibold leading-snug text-popover-foreground">
@@ -331,7 +359,6 @@ export function TaskGraph({
     in_progress: t("status.inProgress"),
     done: t("status.done"),
     cancelled: t("status.canceled"),
-    ongoing: t("status.ongoing"),
   };
   // Time filter (default 24 hours, user ruling 2026-08-30): a garbage stored
   // value falls back to the default instead of exploding.
@@ -537,7 +564,9 @@ export function TaskGraph({
       graphTasks.map((t) => ({
         id: t.id,
         label: t.title,
-        status: t.status,
+        // The root renders through its own sentinel category (reserved
+        // violet); every other task's status key maps through STATUS_FILL.
+        status: t.parent_id == null ? ROOT_NODE_STATUS : t.status,
         // Uniform node size (user ruling 2026-08-09 #1070): every task
         // node sits at the minimum radius — subtree size no longer drives
         // the square. The Agent Graph keeps its score-driven sizing.
@@ -684,7 +713,7 @@ export function TaskGraph({
           nodes={graphNodes}
           edges={graphEdges}
           shape="square"
-          statusText={STATUS_FILL}
+          statusText={NODE_FILL}
           selectedId={selectedTaskId}
           onSelect={handleSelectTask}
           onOpen={openTaskTimeline}
@@ -696,10 +725,10 @@ export function TaskGraph({
           legend={
             <div aria-label={t("legend")} className="space-y-1">
               <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
-                {Object.entries(statusLabels).map(([status, label]) => (
-                  <span key={status} className={cn("items-center gap-1.5", FLEX)}>
-                    <span className={cn("size-2 rounded-full bg-current", STATUS_FILL[status])} />
-                    {label}
+                {TASK_LEGEND_ENTRIES.map((entry) => (
+                  <span key={entry.key} className={cn("items-center gap-1.5", FLEX)}>
+                    <span className={cn("size-2 rounded-full bg-current", entry.fill)} />
+                    {t(entry.labelKey)}
                   </span>
                 ))}
               </div>

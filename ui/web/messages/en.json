@@ -765,9 +765,9 @@
       "status": {
         "inProgress": "In progress",
         "done": "Done",
-        "canceled": "Canceled",
-        "ongoing": "Ongoing"
+        "canceled": "Canceled"
       },
+      "root": "Root",
       "agent": "Agent #{id}",
       "unowned": "Unowned",
       "user": "User",

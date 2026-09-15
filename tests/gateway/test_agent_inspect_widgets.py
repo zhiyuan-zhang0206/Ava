@@ -89,7 +89,7 @@ def _root_task_id(db: psycopg.Connection) -> int:
         if row is None:
             cur.execute(
                 "INSERT INTO agent_tasks (title, description, status, created_by, is_root) "
-                "VALUES ('Root', 'd', 'ongoing', 'system', TRUE) RETURNING id"
+                "VALUES ('Root', 'd', 'in_progress', 'system', TRUE) RETURNING id"
             )
             row = cur.fetchone()
     assert row is not None
@@ -161,12 +161,12 @@ def test_lists_only_the_agents_active_tasks_newest_first(
     root = _root_task_id(db_conn)
     older = _insert_task(db_conn, owner=aid, parent_id=root, title="older", updated_seconds_ago=600)
     newer = _insert_task(db_conn, owner=aid, parent_id=root, title="newer")
-    ongoing = _insert_task(
+    mid = _insert_task(
         db_conn,
         owner=aid,
         parent_id=root,
-        title="ongoing",
-        status="ongoing",
+        title="mid",
+        status="in_progress",
         updated_seconds_ago=60,
     )
     # Not active / not ours: none of these may appear.
@@ -188,7 +188,7 @@ def test_lists_only_the_agents_active_tasks_newest_first(
         "taskList",
         50,
     )
-    assert [t["id"] for t in widget["tasks"]] == [newer, ongoing, older]
+    assert [t["id"] for t in widget["tasks"]] == [newer, mid, older]
     assert widget["tasks"][0] == {"id": newer, "title": "newer"}
 
 

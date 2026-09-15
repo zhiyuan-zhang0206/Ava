@@ -29,8 +29,9 @@ export interface OpenTasksNoticeDialogProps {
 export function OpenTasksNoticeDialog({ notice, onClose }: OpenTasksNoticeDialogProps) {
   const t = useTranslations("openTasksNotice");
   const tTask = useTranslations("fleet.task");
-  const statusLabel = (status: string) =>
-    status === "in_progress" ? tTask("status.inProgress") : tTask("status.ongoing");
+  // Every open task the terminate hint carries is in_progress (the wire field
+  // is the single-value literal) — no per-row status branch.
+  const statusLabel = tTask("status.inProgress");
 
   return (
     <Dialog
@@ -49,7 +50,7 @@ export function OpenTasksNoticeDialog({ notice, onClose }: OpenTasksNoticeDialog
               <span className="shrink-0">{`#${task.id} |`}</span>
               <span className={cn("truncate", MIN_W_0)}>{task.title}</span>
               <span className="shrink-0">
-                {`| ${statusLabel(task.status)} | ${formatRelativeTime(task.updated_at)}`}
+                {`| ${statusLabel} | ${formatRelativeTime(task.updated_at)}`}
               </span>
             </li>
           ))}

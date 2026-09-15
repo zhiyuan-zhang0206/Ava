@@ -11,16 +11,14 @@ import { useTranslations } from "next-intl";
 import { useEffect, useRef } from "react";
 
 import { PRIORITY_BG, PRIORITY_RANK } from "@/lib/notices";
-import type { TaskRow } from "@/lib/types";
+import type { TaskRow, TaskStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout";
 
 const KANBAN_LANE_KEYS = ["inProgress", "done", "canceled"] as const;
 
-export const STATUS_TO_LANE: Record<string, number> = {
+export const STATUS_TO_LANE: Record<TaskStatus, number> = {
   in_progress: 0,
-  // Ongoing tasks are active long-running work, so they share In progress.
-  ongoing: 0,
   done: 1,
   cancelled: 2,
 };
@@ -89,7 +87,7 @@ export function TaskKanban({
         // Priority-first within the section (P0 on top); Array.sort is stable, so
         // same-priority cards keep the incoming created_at-desc order.
         const cards = tasks
-          .filter((t) => (STATUS_TO_LANE[t.status] ?? 0) === lane && t.parent_id !== null)
+          .filter((t) => STATUS_TO_LANE[t.status] === lane && t.parent_id !== null)
           .sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority]);
         if (cards.length === 0) return null;
         return (
