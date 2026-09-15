@@ -135,8 +135,8 @@ Example (the shape `ava_code` would declare):
 The inspector-widget registry resolves each widget's payload server-side —
 the console never receives a row it cannot address — and a widget with no
 payload drops out of the response, matching the panel's empty-section rule.
-The shipped kind is `taskList`: the agent's active tasks (`in_progress` /
-`ongoing`, newest first, capped at 8 kernel-side), each row a link to the
+The shipped kind is `taskList`: the agent's active tasks (`in_progress`,
+newest first, capped at 8 kernel-side), each row a link to the
 task in the fleet view; `title` may be left unset to take the console's
 localized default ("Today's tasks"). v1 covers builtin
 plugins (the gateway imports no third-party plugin code; the plugin-metric

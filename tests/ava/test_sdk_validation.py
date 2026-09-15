@@ -627,7 +627,7 @@ class TestTasksEntries:
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO agent_tasks (title, description, status, created_by, is_root) "
-                "VALUES ('Root', 'root', 'ongoing', 'system', TRUE) RETURNING id"
+                "VALUES ('Root', 'root', 'in_progress', 'system', TRUE) RETURNING id"
             )
             row = cur.fetchone()
             assert row is not None

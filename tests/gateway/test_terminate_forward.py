@@ -232,7 +232,7 @@ class TestTerminateOpenTasksHint:
     def test_open_tasks_reported_newest_first(
         self, _force_local_machine: str, db_conn: psycopg.Connection
     ) -> None:
-        """Only in_progress / ongoing count; rows come newest first."""
+        """Only in_progress counts; rows come newest first."""
         with TestClient(app) as client:
             agent_id = client.post("/api/agents", json={}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "local-test")
@@ -246,7 +246,7 @@ class TestTerminateOpenTasksHint:
                 db_conn, owner=agent_id, title="older open task", age_minutes=30
             )
             newer = _insert_open_task(
-                db_conn, owner=agent_id, title="newer ongoing task", status="ongoing", age_minutes=5
+                db_conn, owner=agent_id, title="newer in-progress task", age_minutes=5
             )
             resp = client.post(f"/api/agents/{agent_id}/terminate")
         assert resp.status_code == 200
@@ -254,10 +254,10 @@ class TestTerminateOpenTasksHint:
         assert hint["count"] == 2
         assert hint["more"] == 0
         assert [(task["id"], task["status"]) for task in hint["tasks"]] == [
-            (newer, "ongoing"),
+            (newer, "in_progress"),
             (older, "in_progress"),
         ]
-        assert hint["tasks"][0]["title"] == "newer ongoing task"
+        assert hint["tasks"][0]["title"] == "newer in-progress task"
         assert datetime.fromisoformat(hint["tasks"][0]["updated_at"])
 
     def test_more_than_five_truncates_to_the_five_newest(

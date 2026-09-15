@@ -53,12 +53,12 @@ class OpenTaskRow(BaseModel):
 
     id: int
     title: str
-    status: Literal["in_progress", "ongoing"]
+    status: Literal["in_progress"]
     updated_at: str
 
 
 class OpenTasksHint(BaseModel):
-    """The open tasks (in_progress / ongoing) a terminating agent still owns.
+    """The open tasks (in_progress) a terminating agent still owns.
 
     Advisory only — termination proceeds either way. `tasks` holds at most the
     five most recently updated rows; `more` counts the ones beyond those."""

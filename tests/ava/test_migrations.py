@@ -2036,6 +2036,128 @@ def test_allow_non_root_ongoing_migration_down_restores_bidirectional_pin() -> N
             cur.execute("UPDATE agent_tasks SET status = 'ongoing' WHERE id = 2")
 
 
+# ─── drop-task-ongoing-status migration: current-schema execution ────────────
+
+
+_DROP_TASK_ONGOING_UP = (
+    Path(__file__).resolve().parents[2]
+    / "migrations"
+    / "20260915T064420_drop-task-ongoing-status.sql"
+)
+_DROP_TASK_ONGOING_DOWN = (
+    Path(__file__).resolve().parents[2]
+    / "migrations"
+    / "20260915T064420_drop-task-ongoing-status.down.sql"
+)
+
+# The pre-removal agent_tasks shape: 4-value status CHECK including 'ongoing',
+# the root pin permitting regular ongoing tasks, and one row of each shape the
+# backfill must handle (root + a regular ongoing + a regular in_progress).
+_PRE_REMOVAL_ONGOING_AGENT_TASKS = """
+CREATE TABLE agent_tasks (
+    id BIGSERIAL PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'in_progress'
+        CHECK (status IN ('in_progress', 'done', 'cancelled', 'ongoing')),
+    is_root BOOLEAN NOT NULL DEFAULT FALSE
+);
+ALTER TABLE agent_tasks ADD CONSTRAINT agent_tasks_root_status_ongoing
+    CHECK (NOT is_root OR status = 'ongoing');
+INSERT INTO agent_tasks (id, status, is_root) VALUES
+    (1, 'ongoing', TRUE),
+    (2, 'ongoing', FALSE),
+    (3, 'in_progress', FALSE);
+"""
+
+
+def test_drop_task_ongoing_migration_moves_ongoing_rows_and_pins_root() -> None:
+    """Up: every 'ongoing' row (root + regular) returns to 'in_progress', the
+    status CHECK loses 'ongoing' entirely, and the root is re-pinned to its
+    permanent in_progress state — asserted at the DB level, no API involved."""
+    with _throwaway_database("drop-task-ongoing-up") as url:
+        _run_sql(url, _PRE_REMOVAL_ONGOING_AGENT_TASKS)
+        _run_sql(url, _DROP_TASK_ONGOING_UP.read_text())
+
+        with psycopg.connect(url) as conn, conn.cursor() as cur:
+            cur.execute("SELECT id, status FROM agent_tasks ORDER BY id")
+            assert cur.fetchall() == [
+                (1, "in_progress"),
+                (2, "in_progress"),
+                (3, "in_progress"),
+            ]
+            cur.execute(
+                """SELECT pg_get_constraintdef(oid) FROM pg_constraint
+                   WHERE conrelid = 'agent_tasks'::regclass
+                     AND conname = 'agent_tasks_status_check'"""
+            )
+            status_row = cur.fetchone()
+            assert status_row is not None
+            status_check = status_row[0]
+            assert "in_progress" in status_check and "done" in status_check
+            assert "cancelled" in status_check and "ongoing" not in status_check
+            cur.execute(
+                """SELECT pg_get_constraintdef(oid) FROM pg_constraint
+                   WHERE conrelid = 'agent_tasks'::regclass
+                     AND conname = 'agent_tasks_root_status_in_progress'"""
+            )
+            root_row = cur.fetchone()
+            assert root_row is not None
+            root_pin = root_row[0]
+            assert "NOT is_root" in root_pin and "status = 'in_progress'" in root_pin
+
+        # 'ongoing' is no longer a legal value at all (direct DB write).
+        with (
+            psycopg.connect(url) as conn,
+            conn.cursor() as cur,
+            pytest.raises(psycopg.errors.CheckViolation),
+        ):
+            cur.execute("UPDATE agent_tasks SET status = 'ongoing' WHERE id = 2")
+
+        # The root cannot leave in_progress; a regular task may still close.
+        with (
+            psycopg.connect(url) as conn,
+            conn.cursor() as cur,
+            pytest.raises(psycopg.errors.CheckViolation),
+        ):
+            cur.execute("UPDATE agent_tasks SET status = 'done' WHERE id = 1")
+        with psycopg.connect(url) as conn, conn.cursor() as cur:
+            cur.execute("UPDATE agent_tasks SET status = 'done' WHERE id = 3")
+            cur.execute("SELECT status FROM agent_tasks WHERE id = 3")
+            assert cur.fetchone() == ("done",)
+
+
+def test_drop_task_ongoing_migration_down_restores_ongoing_shape() -> None:
+    """Down: 'ongoing' is a legal value again, the root moves back to its
+    pre-removal pin, and regular tasks stay 'in_progress' (their pre-removal
+    value is not guessed back)."""
+    with _throwaway_database("drop-task-ongoing-down") as url:
+        _run_sql(url, _PRE_REMOVAL_ONGOING_AGENT_TASKS)
+        _run_sql(url, _DROP_TASK_ONGOING_UP.read_text())
+        _run_sql(url, _DROP_TASK_ONGOING_DOWN.read_text())
+
+        with psycopg.connect(url) as conn, conn.cursor() as cur:
+            cur.execute("SELECT status FROM agent_tasks WHERE id = 1")
+            assert cur.fetchone() == ("ongoing",)
+            cur.execute("SELECT status FROM agent_tasks WHERE id = 2")
+            assert cur.fetchone() == ("in_progress",)
+            cur.execute("SELECT status FROM agent_tasks WHERE id = 3")
+            assert cur.fetchone() == ("in_progress",)
+
+        # 'ongoing' is assignable to a regular task again under the restored
+        # pin...
+        with psycopg.connect(url) as conn, conn.cursor() as cur:
+            cur.execute("UPDATE agent_tasks SET status = 'ongoing' WHERE id = 2")
+            cur.execute("SELECT status FROM agent_tasks WHERE id = 2")
+            assert cur.fetchone() == ("ongoing",)
+
+        # ...while the root stays pinned to it.
+        with (
+            psycopg.connect(url) as conn,
+            conn.cursor() as cur,
+            pytest.raises(psycopg.errors.CheckViolation),
+        ):
+            cur.execute("UPDATE agent_tasks SET status = 'done' WHERE id = 1")
+
+
 # ─── failure-feedback migration: additive up/down ────────────────────────────
 
 

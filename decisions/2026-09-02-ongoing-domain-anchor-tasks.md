@@ -1,5 +1,10 @@
 # Ongoing status for domain-anchor resident tasks
 
+> **Superseded 2026-09-15** — `ongoing` was removed entirely (user ruling):
+> task statuses are in_progress/done/cancelled, and the root is permanently
+> `in_progress` + immutable, rendered violet. Kept as history for why the
+> 2026-09-01 allowance existed.
+
 ## Context
 
 The 2026-08-27 root-only ruling reserved `ongoing` for the system tree anchor. Task #2165 established that long-running domain-anchor resident tasks need the same reminder-exempt active state. QA adversarial review of PR #1354 identified the remaining root-only assumptions in presentation and machine pause draining. Task #405 sign-off authorizes the operational boundary and ownership control.
@@ -21,3 +26,7 @@ The 2026-08-27 root-only ruling reserved `ongoing` for the system tree anchor. T
 ## Consequences
 
 The active-task definition now consistently includes both `in_progress` and `ongoing` where work must remain owned, drained, or block parent closure. The partial title uniqueness invariant remains intentionally scoped to `in_progress`; ongoing residents may share titles.
+
+---
+
+Superseded by: [decisions/2026-09-15-remove-task-ongoing-status.md](2026-09-15-remove-task-ongoing-status.md) — `ongoing` removed entirely; the root is pinned to in_progress.

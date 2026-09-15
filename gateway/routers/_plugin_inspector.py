@@ -113,12 +113,12 @@ TASK_LIST_LIMIT = 8
 def _resolve_tasks(cur: Cursor[Any], agent_id: int) -> list[InspectWidgetTask]:
     """The agent's active tasks, newest first — the ``taskList`` payload.
 
-    "Active" = ``in_progress`` / ``ongoing``; the system root is excluded by
+    "Active" = ``in_progress``; the system root is excluded by
     its NULL owner, and the kernel-side cap (``TASK_LIST_LIMIT``) keeps the
     panel section an overview, not a board."""
     cur.execute(
         "SELECT id, title FROM agent_tasks "
-        "WHERE owner = %s AND status IN ('in_progress', 'ongoing') "
+        "WHERE owner = %s AND status = 'in_progress' "
         "ORDER BY updated_at DESC, id DESC LIMIT %s",
         (agent_id, TASK_LIST_LIMIT),
     )

@@ -10,6 +10,7 @@ from pydantic import (
 )
 
 from shared.priority import Priority
+from shared.task_status import TaskStatus
 
 
 class TaskRow(BaseModel):
@@ -22,7 +23,7 @@ class TaskRow(BaseModel):
     title: str
     description: str
     results: str | None
-    status: str
+    status: TaskStatus
     priority: Priority  # P0 (highest) .. P3 (lowest); the board's within-column sort key
     owner: int | None
     owner_label: str | None = None
@@ -47,7 +48,7 @@ class TaskSummaryRow(BaseModel):
     id: int
     parent_id: int | None
     title: str
-    status: str
+    status: TaskStatus
     owner: int | None
     owner_label: str | None = None
     created_by: str
@@ -84,7 +85,7 @@ class TaskUpdateRequest(BaseModel):
     and the move must not create a cycle). Owner changes through this endpoint
     send the SDK-equivalent task system notes to affected agents."""
 
-    status: str | None = None
+    status: TaskStatus | None = None
     title: str | None = None
     description: str | None = None
     results: str | None = None
