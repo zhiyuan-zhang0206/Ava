@@ -611,6 +611,19 @@ def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: s
                     pgsql.Identifier(table), pgsql.Identifier(RUNNER_ROLE)
                 )
             )
+        # The named-impersonation session trail: the lifecycle and inbound
+        # triggers, plus the handoff writer, INSERT rows; the relay and readers
+        # SELECT them back. Append-only — the preserve trigger rejects rewrites
+        # and no runner path updates rows — so UPDATE/DELETE stay out.
+        # Regression for task #3549: the table shipped (20260913T180056)
+        # without this entry, and creating a lease failed with
+        # InsufficientPrivilege on agent_impersonation_entries until prod was
+        # patched by hand.
+        conn.execute(
+            pgsql.SQL("GRANT SELECT, INSERT ON agent_impersonation_entries TO {}").format(
+                pgsql.Identifier(RUNNER_ROLE)
+            )
+        )
         # A watcher that exits cleanly deletes its OWN registry row from the
         # watcher child's finally (shared/watcher_registry.delete_watcher) —
         # without DELETE the row survives and the boot reconcile later treats
