@@ -113,7 +113,9 @@ export interface TurnSummary {
   // complete round — `turns` is their max. The header shows this single count
   // ("5 turns") in place of the former per-kind labels.
   readonly turns: number;
-  // Non-work item counts — shown when present alongside or in lieu of work items.
+  // Non-work item counts. All are still counted; the compact-summary count is
+  // the one that renders in the collapsed line — the system-prompt count is
+  // kept as data but no longer emitted (user ruling 2026-09-15, task #3557).
   readonly systemPrompts: number;
   readonly compactSummaries: number;
   readonly memories: number;
@@ -121,9 +123,10 @@ export interface TurnSummary {
   // Catch-all for the remaining secondary chatter: card-family system_marker
   // notes that are not memories (lifecycle events, guidance notes) and
   // system-sourced inbound messages (wake-ups / framework notices). Every
-  // secondary kind lands in SOME count, so formatTurnSummary is never empty
-  // for a non-empty turn — a turn of one system note reads "1 system note"
-  // instead of rendering a blank header.
+  // secondary kind lands in SOME count, so a turn still reads as a non-empty
+  // line ("1 system note") instead of a blank header — with one deliberate
+  // exception: a turn of only system prompts renders blank, because the
+  // system-prompt fragment is not emitted (task #3557).
   readonly systemNotes: number;
   // Aggregate wall-clock, both backend-authoritative and both zero-able (a turn
   // with no reasoning items has thinkingMs 0; no execution has execMs 0):
@@ -284,19 +287,12 @@ export function formatTurnSummary(summary: TurnSummary, t: TurnTranslator = EN_T
       }),
     );
   }
-  // Singular system prompts / compact summaries drop the count prefix
-  // ("system prompt · 2 compact summaries …"), mirroring the original English
-  // copy — the singular label stands alone.
-  if (summary.systemPrompts > 0) {
-    parts.push(
-      summary.systemPrompts === 1
-        ? t("systemPromptSingular")
-        : t("systemPrompts", {
-            count: summary.systemPrompts,
-            unit: t("systemPromptsPlural"),
-          }),
-    );
-  }
+  // The "system prompt" fragment is deliberately NOT emitted (user ruling
+  // 2026-09-15, task #3557): the prompt is present in every turn, so the
+  // label carries no information in the collapsed line. The count stays in
+  // summarizeTurn — display-layer change only.
+  // Singular compact summaries drop the count prefix ("compact summary …"),
+  // mirroring the original English copy — the singular label stands alone.
   if (summary.compactSummaries > 0) {
     parts.push(
       summary.compactSummaries === 1
