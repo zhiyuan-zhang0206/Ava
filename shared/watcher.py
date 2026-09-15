@@ -69,8 +69,11 @@ AT_SESSION_TTL_GRACE_SECONDS = 300
 # hard-exits within seconds of its pty host dying — task #1726, 49/85 watchers
 # were multi-generation orphans still firing cron/at); v5 = standing-cron cap
 # (the reconcile rebuilds live standing crons so the SDK's now+7d default end
-# replaces their NULL end — task #2617).
-TEMPLATE_VERSION = 5
+# replaces their NULL end — task #2617); v6 = wake retry (a gateway restart at
+# a fire raised out of the bare `_wake` call and killed a live cron watcher —
+# 2026-09-15 evidence, task #3525; `_wake` now retries with bounded backoff and
+# logs a final failure instead of raising).
+TEMPLATE_VERSION = 6
 
 
 # Cron
@@ -286,21 +289,51 @@ def session_deadline(
 # the bootstrap's inlined AVA_AGENT_ID — `_boot.agent_id()` reads it lazily;
 # N from the session-id env var the run command sets). Inlined into the
 # generated script — the SDK deliberately has no public remind primitive, and
-# a generated script may use internal plumbing.
+# a generated script may use internal plumbing. Delivery retries 3x with
+# bounded backoff on gateway/transport errors and, when every attempt fails,
+# logs the failure on stderr and returns False instead of raising — a gateway
+# restart must not kill the watcher (task #3525).
 # Must stay free of literal braces: the templates below go through .format().
 _WAKE_HELPER = """\
 import os as _os
+import sys as _sys
+import time as _time
 
 import ava._boot as _boot
 from ava import _gateway_client as _gateway_client
 
+# A wake must survive a gateway restart: until 2026-09-15 the bare
+# send_message call raised GatewayUnavailable out of this helper and killed
+# the watcher at its fire (a short ConnectError window; task #3525). Three
+# attempts with bounded backoff ride out a restart; a final failure is logged
+# on stderr (the session log + the wrapper tail) and does not raise, so a cron
+# loop keeps its schedule instead of dying silently.
+_WAKE_ATTEMPTS = 3
+_WAKE_BACKOFF_S = (10.0, 40.0)
+
 
 def _wake(message):
-    _gateway_client.send_message(
-        _boot.agent_id(),
-        content=message,
-        source="watcher:" + _os.environ["AVA_WATCHER_SESSION_ID"],
+    for _attempt in range(_WAKE_ATTEMPTS):
+        try:
+            _gateway_client.send_message(
+                _boot.agent_id(),
+                content=message,
+                source="watcher:" + _os.environ["AVA_WATCHER_SESSION_ID"],
+            )
+            return True
+        except Exception as _exc:
+            _last_exc = _exc
+            if _attempt + 1 < _WAKE_ATTEMPTS:
+                _time.sleep(_WAKE_BACKOFF_S[_attempt])
+    print(
+        "[watcher] wake delivery failed after "
+        + str(_WAKE_ATTEMPTS)
+        + " attempts: "
+        + repr(_last_exc),
+        file=_sys.stderr,
+        flush=True,
     )
+    return False
 """
 
 _AT_TEMPLATE = """\
