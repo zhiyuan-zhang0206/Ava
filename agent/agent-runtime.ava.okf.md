@@ -59,6 +59,14 @@ context for compaction and to END for idle or lifecycle control. Routing uses
 - `services/agent_host/host.py` admits the exact runtime incarnation, binds
   per-agent context/config, reuses model state, drives graph invocations, flushes
   checkpoints and settles lifecycle state before releasing the turn.
+  Its durable scan also wakes expired or released foreign hosted owners with
+  no inbound work, including quiet idle agents. Normal admission fences remain;
+  a halted empty-inbox claim returns idle without a model call. Unowned intent
+  and crash-marked rows stay outside this ownership-recovery scan.
+- `services/agent_host/daemon.py` joins background tasks, drains scheduled turns,
+  stops ownership renewal, then releases settled ownership before closing pools.
+  A background failure, including plugin-triggered `KeyboardInterrupt`, cannot
+  skip the remaining cleanup stages and is propagated after cleanup.
 - `agent/hosted_ownership.py` can replace a local owner before its lease expires
   only when the same locked row proves its exact host process has exited and
   its managed resource set is empty and unfrozen. A living host, another machine,

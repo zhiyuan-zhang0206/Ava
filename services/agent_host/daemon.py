@@ -230,6 +230,33 @@ async def _stop_ownership_beat(beat: asyncio.Task[None] | None) -> None:
             await beat
 
 
+async def _join_background_task(task: asyncio.Task[object]) -> None:
+    """Join a cancelled task while retaining any failure that preceded cancel."""
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+
+async def _close_host_runtime(
+    host: AgentHost,
+    scheduler: TurnScheduler,
+    beat: asyncio.Task[None] | None,
+    background: dict[str, asyncio.Task[object]],
+) -> None:
+    """Drain turns and release settled ownership even if background joins fail."""
+    for task in background.values():
+        if not task.cancelling():
+            task.cancel()
+    # A failed task can retain even KeyboardInterrupt. Every cleanup stage must
+    # run before that failure propagates; closing the pools first strands
+    # ownership and active turns. Callbacks unwind in reverse.
+    async with contextlib.AsyncExitStack() as cleanup:
+        cleanup.push_async_callback(host.aclose)
+        cleanup.push_async_callback(_stop_ownership_beat, beat)
+        cleanup.push_async_callback(scheduler.aclose)
+        for task in background.values():
+            cleanup.push_async_callback(_join_background_task, task)
+
+
 class _PageEventPublisher:
     """Best-effort page events on the shared Redis channel — the daemon's
     stand-in for a per-agent SSE publisher (turns build their own; none
@@ -576,18 +603,10 @@ async def run() -> None:
                 subscription_read_timeout_s=float(settings.agent.db_notify_wait_timeout_seconds),
             ).run()
         finally:
-            for task in background.values():
-                task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                for task in background.values():
-                    await task
-            # Turns are checkpointed, so cancelling one loses at most the
-            # in-flight step — the same recovery path a runner restart already
-            # exercises, and the reason a rolling restart is cheap here.
-            await scheduler.aclose()
-            await _stop_ownership_beat(beat)
-            beat = None
-            await host.aclose()
+            try:
+                await _close_host_runtime(host, scheduler, beat, background)
+            finally:
+                beat = None  # Runtime cleanup attempted its join even when another stage failed.
     finally:
         await _stop_ownership_beat(beat)
         if health is not None:
