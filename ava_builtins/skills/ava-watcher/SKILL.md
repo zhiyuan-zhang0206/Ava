@@ -76,7 +76,8 @@ one that goes *blind* while still running, so make blindness loud yourself
 startup, plus alerts when the probe itself fails):
 
 - **Send a baseline at startup.** One message with the current reading
-  ("watch armed for PR #N — state: OPEN"). It proves the probe and the notify
+  ("watch armed for PR #N — state: OPEN"; when the reading comes from a copy
+  or an API, include its as-of timestamp). It proves the probe and the notify
   path both work, and makes later silence unambiguous: nothing changed.
 - **Never flush a probe error into "unmet".** A `try/except` that folds the
   exception into the value being tested (`data = f"probe error: {exc}"`, then
@@ -84,8 +85,9 @@ startup, plus alerts when the probe itself fails):
   Count consecutive probe failures and send a throttled alert after 3; if the
   target is definitively gone, message and exit non-zero.
 - **Keep `cwd` and probe targets on stable paths.** A worktree or temp dir
-  can be cleaned up under you; once `cwd` is deleted every `subprocess.run`
-  raises `FileNotFoundError` — silently, forever, if the loop swallows it.
+  can be cleaned up under you; once it is deleted, any probe that passes it
+  as `cwd=` (or resolves paths through it) raises `FileNotFoundError` on
+  every poll — silently, forever, if the loop swallows it.
 - **Refresh what you read.** If the probe reads a local clone or copy, fetch
   first (or read the remote ref) — a stale copy reads exactly like "no
   change".
