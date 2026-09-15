@@ -1,4 +1,4 @@
-"""Line previews with bounded archives protected by current context references.
+"""Size previews (lines / chars / bytes) with bounded archives protected by current context references.
 
 Soft crop files have their own namespace: the legacy hard-overflow ring cannot
 evict them. Native execs for one agent are serial. Only unreferenced soft files
@@ -22,14 +22,31 @@ _CROP_NAME = re.compile(r"\bcrop_[0-9a-f]{32}\.txt\b")
 
 
 def format_crop_preview(
-    output: str, path: Path, *, after_lines: int, head_lines: int, tail_lines: int
+    output: str,
+    path: Path,
+    *,
+    after_lines: int,
+    after_chars: int,
+    after_bytes: int,
+    head_lines: int,
+    tail_lines: int,
 ) -> str | None:
-    """Return a smaller preview or None; pure so offline tuning uses real markers."""
+    """Return a smaller preview or None; pure so offline tuning uses real markers.
+
+    The trigger is a three-way OR - too many lines, too many characters, or
+    too many UTF-8 bytes; `after_lines == 0` disables soft cropping entirely.
+    """
     if after_lines == 0:
         return None
     lines = output.splitlines(keepends=True)
     count = len(lines)
-    if count <= after_lines or count <= head_lines + tail_lines:
+    if count <= head_lines + tail_lines:
+        return None
+    if (
+        count <= after_lines
+        and len(output) <= after_chars
+        and len(output.encode("utf-8")) <= after_bytes
+    ):
         return None
     head = "".join(lines[:head_lines])
     tail = "".join(lines[-tail_lines:])
@@ -102,6 +119,8 @@ def crop_output(
         output,
         path,
         after_lines=config.exec_output_crop_after_lines,
+        after_chars=config.exec_output_crop_after_chars,
+        after_bytes=config.exec_output_crop_after_bytes,
         head_lines=config.exec_output_crop_head_lines,
         tail_lines=config.exec_output_crop_tail_lines,
     )

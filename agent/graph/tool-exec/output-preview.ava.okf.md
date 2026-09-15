@@ -23,19 +23,27 @@ the `AVA_` prefix and uppercase field names.
 
 | Field | Default | Meaning |
 |---|---:|---|
-| `exec_output_crop_after_lines` | 120 | Crop only above this `splitlines()` count; 0 disables soft cropping |
+| `exec_output_crop_after_lines` | 300 | Crop above this `splitlines()` count — one of three OR triggers; 0 disables soft cropping entirely |
+| `exec_output_crop_after_chars` | 65536 | Crop above this character count (long lines); must be >= the hard inline limit |
+| `exec_output_crop_after_bytes` | 65536 | Crop above this UTF-8 byte size (multibyte text); must be >= the hard inline limit |
 | `exec_output_crop_head_lines` | 25 | Original leading lines to retain |
 | `exec_output_crop_tail_lines` | 25 | Original trailing lines to retain |
 | `exec_output_crop_archive_max_bytes` | 16 MiB | Per-agent UTF-8 byte budget for soft archives |
 
-The trigger is independent of retained line counts. Overlapping head and tail
-are never duplicated. The exact marker and path count toward the preview size:
-if they make it no smaller, or it would exceed the existing hard inline limit,
-soft cropping is skipped. Original line endings and an unterminated last line
-are preserved. Short output, very short lines and single-line blobs can therefore
-remain unchanged even when another limit would select them. The fixed threshold
-is an offline tuning choice, not an online percentile or a promise to crop an
-exact fraction of future traffic.
+Three OR triggers select an output for preview: more than `exec_output_crop_after_lines`
+lines, more than `exec_output_crop_after_chars` characters, or more than
+`exec_output_crop_after_bytes` UTF-8 bytes; `exec_output_crop_after_lines = 0`
+disables soft cropping entirely. The char and byte triggers are validated to sit
+at or above the hard inline limit, so a preview never fires below what the hard
+cap would have shown in full. Triggering is independent of the retained line
+counts. Overlapping head and tail are never duplicated. The exact marker and
+path count toward the preview size: if they make it no smaller, or it would
+exceed the existing hard inline limit, soft cropping is skipped. Original line
+endings and an unterminated last line are preserved. Outputs that are short, or
+whose head and tail already cover every line, can therefore remain unchanged
+even when a size trigger would select them. The fixed thresholds are offline
+tuning choices, not an online percentile or a promise to crop an exact fraction
+of future traffic.
 
 ## Recoverability and space
 
