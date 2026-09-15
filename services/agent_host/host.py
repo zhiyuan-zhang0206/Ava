@@ -35,7 +35,6 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import OrderedDict
-from contextlib import nullcontext
 from datetime import datetime
 from uuid import uuid4
 
@@ -75,6 +74,7 @@ from agent.startup import (
 )
 from agent.state import BaseAgentState
 from services.agent_host import maintenance as maintenance_receipts
+from services.agent_host.admission import TurnAdmission
 from services.agent_host.db_recovery import database_phase, recover_database
 from services.agent_host.dispatcher import PendingInboundWake
 from services.agent_host.runtime import (
@@ -142,8 +142,7 @@ class AgentHost:
         self._in_flight: set[int] = set()
         self._watcher_recovery_pending: set[int] = set()
         self._maintenance_failed: dict[int, tuple[str | None, datetime | None]] = {}
-        turn_limit = settings.daemon.host_max_concurrent_turns
-        self._turn_slots = asyncio.Semaphore(turn_limit) if turn_limit else nullcontext()
+        self.admission = TurnAdmission(settings.daemon.host_max_concurrent_turns)
         self.stats = HostStats()
 
     async def run_turn(self, agent_id: int) -> None:
@@ -260,7 +259,7 @@ class AgentHost:
             await self._run_held_controls(agent_id, stored.status)
             return
 
-        async with self._turn_slots:
+        async with self.admission.admit(agent_id):
             pins = resolve_agent_config_pins(stored.config_overlay, stored.birth_config)
             plugin_pins = resolve_agent_plugin_pins(stored.config_overlay)
             # Fail fast before ANY turn work — the status flip included: an

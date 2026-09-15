@@ -304,7 +304,7 @@ async def test_held_host_wake_returns_before_runtime_or_slot(
     settlement = AsyncMock(return_value=True)
     monkeypatch.setattr("services.agent_host.host.admit_hosted_runtime", admission)
     monkeypatch.setattr("services.agent_host.host.settle_hosted_runtime", settlement)
-    # No _turn_slots or graph exists: touching either is a test failure.
+    # No admission slot or graph exists: touching either is a test failure.
     await host._run_turn(42)
     host._runtime_for.assert_not_awaited()
     admission.assert_awaited_once()

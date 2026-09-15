@@ -23,6 +23,14 @@ Three consumers read the clock:
   15-second Redis heartbeat. The gateway delivery watchdog can therefore make
   the same liveness judgment outside the process whose event loop may freeze.
 
+A companion registry lives here too: the **admission-wait** registry, which the
+host's admission gate (``services/agent_host/admission.py``) fills while a turn
+queues for a slot. A queued turn's clock is silent by design, so the
+dispatcher's stall scan reads ``admission_wait_age_s`` to tell "queued" from
+"stuck" — cancelling a waiter would only re-queue it at the tail. Wait length
+is observability (``/stats`` + the ``host_admission_wait_exceeded`` event),
+never a cancellation trigger.
+
 Process mode does not use this registry: its wedged controller already owns
 per-agent recovery over a pid, and a process-internal clock would be invisible
 to the controller that lives in another daemon.
@@ -98,3 +106,33 @@ def reset_turn_progress(agent_id: int) -> None:
     previous turn instead of starting at zero.
     """
     _PROGRESS[agent_id] = [time.monotonic()]
+
+
+# --- admission-wait registry -------------------------------------------------
+# One agent's turn parked at the admission gate (services/agent_host/admission.py)
+# is invisible to the progress clock above: it shows no activity because it is
+# not running, and it must NOT read as a stalled turn. The gate registers the
+# waiter here before its acquire await (no await in between), and the
+# dispatcher's fake-alive scan exempts registered agents.
+_ADMISSION_WAIT: dict[int, float] = {}  # agent_id -> wait start (time.monotonic())
+
+
+def begin_admission_wait(agent_id: int) -> None:
+    """Register that ``agent_id``'s turn is about to queue for an admission slot."""
+    _ADMISSION_WAIT[agent_id] = time.monotonic()
+
+
+def end_admission_wait(agent_id: int) -> None:
+    """Clear ``agent_id``'s admission-queue registration (served or cancelled)."""
+    _ADMISSION_WAIT.pop(agent_id, None)
+
+
+def admission_wait_age_s(agent_id: int) -> float | None:
+    """Seconds ``agent_id``'s turn has queued for a slot, or None.
+
+    ``None`` means the turn is not waiting at the gate — either it is running
+    (the progress clock applies) or it has not reached the gate. Callers must
+    read ``None`` as "not queued", never as "fresh".
+    """
+    started = _ADMISSION_WAIT.get(agent_id)
+    return None if started is None else time.monotonic() - started

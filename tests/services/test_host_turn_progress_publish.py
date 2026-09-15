@@ -13,6 +13,24 @@ from agent import _turn_progress as progress
 from services.agent_host import daemon as host_daemon
 
 
+class _FakeAdmission:
+    """Minimal stand-in for `AgentHost.admission` — the beat loop's long-wait scan.
+
+    These tests drive `_beat_forever` with a host double; the real host always
+    carries a `TurnAdmission` (`services/agent_host/admission.py`), so the double
+    carries the same empty-shaped surface.
+    """
+
+    limit = 0
+    waiting = 0
+
+    def long_waiters(self, threshold: float) -> list[tuple[int, float]]:
+        return []
+
+    def payload(self) -> dict[str, object]:
+        return {}
+
+
 def test_turn_progress_snapshot_keeps_only_the_latest_three_marks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -104,6 +122,8 @@ async def test_hung_progress_set_does_not_stop_repeated_ownership_renewal(
                 calls.append("set_cancelled")
 
     class FakeHost:
+        admission = _FakeAdmission()
+
         async def renew_ownership(self) -> None:
             calls.append("renew")
 
@@ -156,6 +176,8 @@ async def test_beat_skips_ownership_renewal_while_quiesced(
     state = {"quiesced": True}
 
     class FakeHost:
+        admission = _FakeAdmission()
+
         async def renew_ownership(self) -> None:
             calls.append("renew")
 
@@ -308,6 +330,8 @@ async def test_ownership_renewal_timeout_logs_warning_without_traceback(
         pass
 
     class FakeHost:
+        admission = _FakeAdmission()
+
         async def renew_ownership(self) -> None:
             await asyncio.Event().wait()
 
@@ -353,6 +377,8 @@ async def test_agent_host_beats_liveness_before_renewing_ownership(
         pass
 
     class FakeHost:
+        admission = _FakeAdmission()
+
         async def renew_ownership(self) -> None:
             calls.append("renew")
 
@@ -398,6 +424,8 @@ async def test_agent_host_liveness_continues_when_ownership_renewal_hangs(
     second_renewal_started = asyncio.Event()
 
     class FakeHost:
+        admission = _FakeAdmission()
+
         async def renew_ownership(self) -> None:
             nonlocal renew_calls
             renew_calls += 1
@@ -449,6 +477,8 @@ async def test_agent_host_liveness_continues_when_ownership_renewal_raises(
     second_beat = asyncio.Event()
 
     class FakeHost:
+        admission = _FakeAdmission()
+
         async def renew_ownership(self) -> None:
             nonlocal renew_calls
             renew_calls += 1
