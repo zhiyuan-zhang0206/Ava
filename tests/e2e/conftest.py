@@ -585,20 +585,38 @@ def gateway_proc(scenario_env: None, monkeypatch: pytest.MonkeyPatch) -> Iterato
 @pytest.fixture
 def truncated_db(e2e_db: None) -> Iterator[None]:
     """Before each test, clear all business tables in e2e DB (FK order)."""
-    with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
+    with psycopg.connect(settings.data_plane.db_url) as conn:
         # TRUNCATE without RESTART IDENTITY: ids grow monotonically from the
         # session-level `_apply_e2e_seq_offset` PID base and are never reused
         # across tests (the same no-reuse contract as the non-e2e suite — see
         # decisions/2026-06-30-monotonic-test-ids.md). Leaving the sequence untouched also
         # preserves the per-worker PID offset without re-applying it, so
         # cross-worker session names stay disjoint.
-        cur.execute(
-            # `events` was dropped with the task #1281/#1823 cleanup.
-            "TRUNCATE inbound_messages, agents_meta, agents, "
-            "checkpoint_blobs, checkpoint_writes, checkpoints, checkpoint_migrations "
-            "CASCADE"
-        )
-        conn.commit()
+        #
+        # Retried on DeadlockDetected, same shape as the non-e2e suite's
+        # per-test truncate (tests/conftest.py `_clean_state` — keep the two in
+        # sync): a process left over from a prior test (a spawned agent or
+        # gateway still draining its work) can hold relation locks in the
+        # opposite order to this TRUNCATE list, so Postgres aborts one side
+        # after deadlock_timeout; when it picks this TRUNCATE, the straggler
+        # has by then finished or died and the retry wins. Two CI runs on
+        # 2026-09-15 (34978385461, 34976810515) died at this fixture's setup
+        # with the identical AccessExclusiveLock/AccessShareLock DETAIL.
+        for attempt in range(3):
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        # `events` was dropped with the task #1281/#1823 cleanup.
+                        "TRUNCATE inbound_messages, agents_meta, agents, "
+                        "checkpoint_blobs, checkpoint_writes, checkpoints, "
+                        "checkpoint_migrations CASCADE"
+                    )
+                conn.commit()
+                break
+            except psycopg.errors.DeadlockDetected:
+                if attempt == 2:
+                    raise
+                conn.rollback()
     # checkpoint_migrations truncated, saver runs setup again (idempotent)
     with PostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
         saver.setup()
