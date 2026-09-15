@@ -25,6 +25,8 @@ from fastapi.testclient import TestClient
 from gateway.app import app
 from gateway.sse import (
     _decode_frames_for_test,
+    _sse_batch_frame,
+    _sse_frame,
     event_stream,
     throttled_event_stream,
 )
@@ -473,12 +475,15 @@ def _decode_throttled_frames(chunks: list[bytes]) -> list[list[dict]]:
     out: list[list[dict]] = []
     text = b"".join(chunks).decode()
     for frame in text.split("\n\n"):
+        # Split/rejoin exactly like the browser: "\n" only. str.splitlines()
+        # would also break on U+0085 / U+2028 / U+2029, masking a frame the
+        # writer split there instead of failing the parse.
         data_lines = [
-            line[len("data: ") :] for line in frame.splitlines() if line.startswith("data: ")
+            line[len("data: ") :] for line in frame.split("\n") if line.startswith("data: ")
         ]
         if not data_lines:
             continue
-        payload = json.loads("".join(data_lines))
+        payload = json.loads("\n".join(data_lines))
         assert isinstance(payload, list), f"throttled frame is not a JSON array: {payload!r}"
         for elem in payload:
             assert isinstance(elem, dict), (
@@ -622,7 +627,7 @@ def test_throttled_wire_format_is_json_array(
     # Extract the raw data payload
     text = b"".join(frames).decode()
     for frame in text.split("\n\n"):
-        for line in frame.splitlines():
+        for line in frame.split("\n"):
             if line.startswith("data: "):
                 payload = json.loads(line[len("data: ") :])
                 assert isinstance(payload, list), f"Expected JSON array, got {type(payload)}"
@@ -777,3 +782,61 @@ def test_sse_survives_redis_typeerror(monkeypatch: pytest.MonkeyPatch) -> None:
     assert frames[0] == b": stream open\n\n"
     assert frames[1].startswith(b"data: "), f"expected an error frame, got {frames[1]!r}"
     assert b"event stream interrupted" in frames[1], frames[1]
+
+
+# --- frame encoding: Unicode line separators that are legal raw in JSON ---
+#
+# U+0085 / U+2028 / U+2029 may appear unescaped inside a JSON string
+# (pydantic model_dump_json emits them raw; JSON.parse accepts them), so
+# str.splitlines() must never split a data payload: the client rejoins the
+# data lines with "\n", planting a raw newline inside the JSON literal,
+# and JSON.parse fails with "Bad control character in string literal".
+
+
+@pytest.mark.parametrize("ch", ("\u0085", "\u2028", "\u2029"), ids=("U+0085", "U+2028", "U+2029"))
+def test_sse_frame_keeps_unicode_line_separators(ch: str) -> None:
+    """One frame, one data line; the payload round-trips unchanged."""
+    payload = json.dumps({"content": f"a{ch}b"}, ensure_ascii=False)
+    frame = _sse_frame(payload)
+    assert frame.decode().count("\ndata: ") == 0
+    assert _decode_frames_for_test([frame]) == [{"content": f"a{ch}b"}]
+
+
+@pytest.mark.parametrize("ch", ("\u0085", "\u2028", "\u2029"), ids=("U+0085", "U+2028", "U+2029"))
+def test_sse_batch_frame_keeps_unicode_line_separators(ch: str) -> None:
+    """A poisoned event must not split, and thereby corrupt, the batch."""
+    events = [
+        json.dumps({"content": f"a{ch}b"}, ensure_ascii=False),
+        json.dumps({"content": "ok"}, ensure_ascii=False),
+    ]
+    frame = _sse_batch_frame(events)
+    assert frame.decode().count("\ndata: ") == 0
+    assert _decode_throttled_frames([frame]) == [[{"content": f"a{ch}b"}, {"content": "ok"}]]
+
+
+def test_decode_frames_for_test_rejects_split_payload() -> None:
+    """The test helper models the browser: a frame whose data was split at
+    a Unicode line separator (the old bug) must fail the parse here."""
+    poisoned = json.dumps({"content": "a\u2028b"}, ensure_ascii=False)
+    split_frame = ("data: " + poisoned.replace("\u2028", "\ndata: ") + "\n\n").encode()
+    with pytest.raises(json.JSONDecodeError):
+        _decode_frames_for_test([split_frame])
+
+
+def test_throttled_stream_keeps_unicode_line_separators(
+    db_conn: psycopg.Connection,
+    redis_client: sync_redis.Redis,
+) -> None:
+    """All three chars in one event survive the throttled wire path."""
+    tid = create_agent(db_conn)
+    content = "a\u0085b\u2028c\u2029d"
+    payloads = [
+        ChatDelta(agent_id=tid, item_id="5.0", content=content).model_dump_json(),
+    ]
+    frames = asyncio.run(
+        _collect_throttled_frames(redis_client, payloads, n_data_frames=1, throttle_rate=1000.0)
+    )
+    decoded = _decode_throttled_frames(frames)
+    all_events = [e for batch in decoded for e in batch]
+    assert len(all_events) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert all_events[0]["content"] == content
