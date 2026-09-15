@@ -1,5 +1,6 @@
 """Local CLI phases must retain the hold across failures and explicit startup."""
 
+import json
 import os
 from datetime import datetime
 from pathlib import Path
@@ -11,7 +12,7 @@ import pytest
 
 from cli.commands import _maintenance as command
 from cli.commands._maintenance_probe import HostIdentity
-from shared import maintenance, pause_owner, start_serving
+from shared import hold_driver, maintenance, pause_owner, start_serving
 from shared.maintenance_state import MaintenanceHold
 from tests.agent.test_maintenance import WHEN
 from tests.agent.test_maintenance import isolate as isolate
@@ -337,3 +338,60 @@ def test_real_parser_exposes_repair_with_operator() -> None:
     assert parsed.maintenance_cmd == "repair"
     assert parsed.operation == "local"
     assert parsed.operator == "Ava #5870"
+
+
+def test_status_prints_recorded_shepherd_with_liveness(
+    capsys: pytest.CaptureFixture[str],
+    isolate: None,
+) -> None:
+    """Task #3276: `maintenance status` surfaces the recorded shepherd.
+
+    The driver block carries the binding process (pid + argv), its session
+    leader, and the judged liveness -- all read from local process state, so a
+    stuck hold stays inspectable exactly when the gateway is down.
+    """
+    from cli.parsers import build_parser
+
+    driver = hold_driver.mint_driver()
+    pause_owner.begin_maintenance("local", WHEN, driver=driver)
+    args = build_parser().parse_args(["maintenance", "status"])
+    assert command.run(args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    block = payload["driver"]
+    assert block is not None
+    assert block["liveness"] == "alive"
+    assert block["root"]["pid"] > 0
+    assert block["root"]["argv"]
+    assert "leader" in block
+
+
+def test_status_keeps_dead_shepherd_visible_as_evidence(
+    capsys: pytest.CaptureFixture[str],
+    isolate: None,
+) -> None:
+    """A dead binding stays visible: pid/argv retained, liveness verdict `dead`."""
+    from cli.parsers import build_parser
+
+    ghost = hold_driver.ProcessRef(pid=99999, birth=0.0, starttime=1, argv="ghost")
+    pause_owner.begin_maintenance("local", WHEN, driver=hold_driver.HoldDriver(root=ghost))
+    args = build_parser().parse_args(["maintenance", "status"])
+    assert command.run(args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    block = payload["driver"]
+    assert block["liveness"] == "dead"
+    assert block["root"] == {"pid": 99999, "argv": "ghost"}
+    assert block["leader"] is None
+
+
+def test_status_without_recorded_shepherd_prints_null_driver(
+    capsys: pytest.CaptureFixture[str],
+    isolate: None,
+) -> None:
+    """No identity recorded (legacy journal / daemon pause) reads as null, not a guess."""
+    from cli.parsers import build_parser
+
+    pause_owner.begin_maintenance("local", WHEN)
+    args = build_parser().parse_args(["maintenance", "status"])
+    assert command.run(args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["driver"] is None
