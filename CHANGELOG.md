@@ -39,6 +39,12 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
   admission).
 
 ### Fixed
+- The hosted dispatcher re-asserts a pending cancellation after crossing its
+  database scan: a cancel that lands inside psycopg_pool's async connection
+  check is absorbed there (the pool returns the connection and retries without
+  re-raising that `CancelledError` — upstream psycopg#1345, still present in
+  3.3.1), which left the cancelled task looping forever with its canceller hung
+  in `await task` (task #3513).
 - Every automatic ava-browser rebuild now routes through the GUI domain when
   the healthcheck's own chain runs outside the macOS GUI login session — the
   session-gone sweep and the live-session dead-CDP respawn stop the stuck

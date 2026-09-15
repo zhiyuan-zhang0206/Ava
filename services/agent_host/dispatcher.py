@@ -123,6 +123,22 @@ def _database_waiting(agent_id: int) -> bool:
     return database_wait_snapshot(agent_id, last_progress=last) is not None
 
 
+def _raise_if_cancellation_pending() -> None:
+    """Unwind when a cancellation request was swallowed at a library boundary.
+
+    `Task.cancel()` delivers its `CancelledError` exactly once. A delivery that
+    lands in psycopg_pool's async connection check is absorbed there — the pool
+    returns the connection and retries without re-raising (upstream
+    psycopg#1345, present in 3.3.1) — leaving the task running with an
+    outstanding cancellation nothing will ever deliver again. The scan and the
+    subscription loop re-assert it, so a cancelled dispatcher still unwinds
+    instead of looping forever while its canceller hangs in `await task`.
+    """
+    task = asyncio.current_task()
+    if task is not None and task.cancelling():
+        raise asyncio.CancelledError
+
+
 class TurnScheduler:
     """Per-agent turn-task registry with wake coalescing.
 
@@ -562,6 +578,7 @@ class InboundWakeDispatcher:
                 next_scan_at = 0.0
                 scan_backoff_s = self._scan_interval_s
                 while True:
+                    _raise_if_cancellation_pending()
                     self._raise_if_restart_required()
                     now = time.monotonic()
                     if now >= next_scan_at:
@@ -649,7 +666,9 @@ class InboundWakeDispatcher:
         # freshly resumed stream may have old pending rows until its next claim.
         # Only the current monotonic progress clock can license cancellation.
         started: set[int] = set()
-        for candidate in await self._pending_scan(self._stale_after_s):
+        candidates = await self._pending_scan(self._stale_after_s)
+        _raise_if_cancellation_pending()
+        for candidate in candidates:
             if (
                 candidate.stale
                 and candidate.agent_id in self._scheduler.active_agents
