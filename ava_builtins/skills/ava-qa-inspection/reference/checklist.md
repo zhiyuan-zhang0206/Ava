@@ -17,6 +17,7 @@ report.
 | duplicate-control | two controls doing the same thing — redundant buttons, a duplicated action | probe `duplicateControl`: 2+ visible buttons/links sharing an accessible name; confirm they aren't intentionally repeated (per-row actions) | warn | the accessible name + count + selectors | — |
 | redundant-tooltip | a tooltip whose text just repeats the visible label — adds nothing | hover to reveal; compare tooltip text to the trigger's visible text/aria-label | nit | tooltip text vs label text | — |
 | off-canvas | a visible element partly outside the viewport — clipped at an edge, horizontal bleed on mobile | probe `offCanvas`: visible element with `rect.right > innerWidth` or `rect.left < 0` | block | rect vs viewport | — |
+| overlay-occlusion | a graph/panel element (node, label, badge) hidden or clipped by an absolutely-positioned overlay (stats bar, legend, HUD panel) with no node avoidance | visual pass: on graph/panel pages look for labels/nodes intersecting overlay rects; confirm the occluded element would be visible without the overlay | warn | screenshot region showing the occluded element + the overlay selector | — |
 | overflow-clip | text or a control clipped by its container (`overflow:hidden` eating content) — truncation with no ellipsis, a cut-off label | probe `overflow` with clipped + no `text-overflow:ellipsis`; confirm in screenshot | block | selector + clipped px | — |
 | contrast/theme | copy invisible in one theme — same-color-on-same-color after a dark/light switch | screenshot both themes; look for vanished text | warn | the element + theme | — |
 | empty-state | an empty state that shows a raw/blank panel instead of guidance — no "nothing here yet" affordance | navigate to the no-data route; check for an intentional empty state | warn | the route + screenshot | — |
@@ -31,5 +32,6 @@ report.
 - `duplicateControl` → duplicate-control
 - `offCanvas` → off-canvas
 
-`casing`, `redundant-tooltip`, `contrast/theme`, `empty-state` have no probe —
-they are the perceptual pass (screenshot + judgment) until they graduate.
+`casing`, `redundant-tooltip`, `contrast/theme`, `empty-state`, `overlay-occlusion`
+have no probe — they are the perceptual pass (screenshot + judgment) until they
+graduate.
