@@ -227,8 +227,8 @@ export function TurnBlock({
   const actionSummary = formatTurnSummary(summary);
 
   // Build the header line: "Worked for Xs · 5 turns · 2 agent messages".
-  // actionSummary is non-empty for every non-empty turn (summarizeTurn counts
-  // every member kind), so the header never renders blank.
+  // actionSummary covers every member kind except the deliberately-unlabeled
+  // system prompt (task #3557) — a turn of only prompts renders a blank label.
   const headerParts: string[] = [];
   if (workedLabel) headerParts.push(workedLabel);
   if (actionSummary) headerParts.push(actionSummary);
