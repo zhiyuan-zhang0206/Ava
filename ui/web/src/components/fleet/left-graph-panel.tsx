@@ -5,7 +5,8 @@
 // The view choice persists (display.fleet_left_view) so a refresh returns to
 // it; a route-opened task (task #2909) temporarily forces the Tasks view —
 // the jump must land on the task — until the user picks a tab themselves,
-// without rewriting the stored preference.
+// without rewriting the stored preference. The route id is forwarded to
+// TaskGraph as the pin that outranks an ambient agent selection (#3500).
 
 import { memo, useState } from "react";
 import { useTranslations } from "next-intl";
@@ -23,19 +24,19 @@ export const LeftGraphPanel = memo(function LeftGraphPanel({
   setSelectedAgentId,
   selectedTaskId,
   setSelectedTaskId,
-  routeTasksView,
+  routeTaskId,
 }: {
   selectedAgentId: number | null;
   setSelectedAgentId: (id: number | null) => void;
   selectedTaskId: number | null;
   setSelectedTaskId: (id: number | null) => void;
-  routeTasksView?: boolean;
+  routeTaskId?: number | null;
 }) {
   const t = useTranslations("fleet");
   const { settings, setSetting } = useUserSettings();
   const [userPickedView, setUserPickedView] = useState(false);
   const durableView: LeftView = settings["display.fleet_left_view"] === "tasks" ? "tasks" : "graph";
-  const view: LeftView = !userPickedView && routeTasksView ? "tasks" : durableView;
+  const view: LeftView = !userPickedView && routeTaskId != null ? "tasks" : durableView;
   const setView = (v: LeftView) => {
     setUserPickedView(true);
     setSetting("display.fleet_left_view", v);
@@ -70,6 +71,7 @@ export const LeftGraphPanel = memo(function LeftGraphPanel({
               onSelectTask={setSelectedTaskId}
               selectedAgentId={selectedAgentId}
               onSelectAgent={setSelectedAgentId}
+              routeTaskId={routeTaskId}
             />
           </div>
         )}
