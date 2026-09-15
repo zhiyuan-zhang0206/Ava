@@ -3,9 +3,7 @@
 -- lifecycle / inbound triggers that INSERT into it) without adding it to the
 -- runner-grant layer, so every cluster past the runner-role cutover rejects
 -- lease creation with InsufficientPrivilege on agent_impersonation_entries —
--- impersonation is unusable until the role can write the trail. (Prod is
--- patched by hand as the immediate unblock; this migration is the rollout for
--- the rest of the fleet.)
+-- impersonation is unusable until the role can write the trail.
 --
 -- Applying this file trips the start-path grant refresh
 -- (refresh_runner_grants_after_migration in cli/commands/ensure_db_role.py),
