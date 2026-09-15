@@ -67,6 +67,29 @@ provide: it shows up in `ava.shell.sessions.list()` as `{"id": wid, "name":
 asked it to stop). When the watcher stops on its own, the session closes
 itself; the exit notice points at the log file holding its full output.
 
+## Fail loud, not silent
+
+A watcher is only useful while you can tell "condition not met yet" from
+"probe broken". The exit notice covers a watcher that *stops*; nothing covers
+one that goes *blind* while still running, so make blindness loud yourself
+(this is not the heartbeat the next section rules out — it is one message at
+startup, plus alerts when the probe itself fails):
+
+- **Send a baseline at startup.** One message with the current reading
+  ("watch armed for PR #N — state: OPEN"). It proves the probe and the notify
+  path both work, and makes later silence unambiguous: nothing changed.
+- **Never flush a probe error into "unmet".** A `try/except` that folds the
+  exception into the value being tested (`data = f"probe error: {exc}"`, then
+  `if "MERGED" in data`) keeps looping quietly while nothing is being probed.
+  Count consecutive probe failures and send a throttled alert after 3; if the
+  target is definitively gone, message and exit non-zero.
+- **Keep `cwd` and probe targets on stable paths.** A worktree or temp dir
+  can be cleaned up under you; once `cwd` is deleted every `subprocess.run`
+  raises `FileNotFoundError` — silently, forever, if the loop swallows it.
+- **Refresh what you read.** If the probe reads a local clone or copy, fetch
+  first (or read the remote ref) — a stale copy reads exactly like "no
+  change".
+
 ## Report on change, not on every poll
 
 A watcher's `send_message` wakes you for a full turn, so every message is a
