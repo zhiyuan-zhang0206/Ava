@@ -2,6 +2,7 @@
 normalization, and watcher script generation (pure string builders)."""
 
 import datetime as dt
+from collections.abc import Callable
 
 import pytest
 
@@ -295,6 +296,8 @@ def _exec_watcher(
     script: str,
     wall: _FakeWall,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    send: Callable[..., None] | None = None,
 ) -> list[tuple[object, object]]:
     """Execute a generated watcher script against the fake wall clock; return
     the (args, kwargs) of every `_wake` call.
@@ -302,7 +305,8 @@ def _exec_watcher(
     The generated scripts import `datetime` / `time` at the top; `datetime.datetime`
     is an immutable C type, so instead of patching it we substitute the two imports
     with fakes before exec — the template itself stays untouched. `_wake`'s delivery
-    is stubbed through ava._gateway_client."""
+    is stubbed through ava._gateway_client; pass `send` to script a failing stub
+    (the wake-retry tests, task #3525)."""
     from ava import _boot, _gateway_client
 
     script = script.replace("import datetime as _dt\n", "_dt = _FakeDT\n").replace(
@@ -312,12 +316,12 @@ def _exec_watcher(
     _FakeDateTime._wall = wall
 
     sent: list[tuple[object, object]] = []
+
+    def _record(*a: object, **k: object) -> None:
+        sent.append((a, k))
+
     monkeypatch.setattr(_boot, "agent_id", lambda: 3115)
-    monkeypatch.setattr(
-        _gateway_client,
-        "send_message",
-        lambda *a, **k: sent.append((a, k)),  # pyright: ignore[reportUnknownArgumentType]
-    )
+    monkeypatch.setattr(_gateway_client, "send_message", send if send is not None else _record)
     monkeypatch.setenv("AVA_WATCHER_SESSION_ID", "77")
     exec(script, {"__name__": "__watcher__", "_FakeDT": _FakeDT, "_fake_time": fake_time})
     return sent
@@ -396,14 +400,14 @@ def test_cron_script_stamps_template_version() -> None:
     from — the registry records it at spawn so the boot reconcile can rebuild
     live watchers whose script predates a template fix (issue #1330)."""
     script = build_cron_script(expr="0 * * * *", message="tick", timezone="UTC", end_time_iso=None)
-    assert "_TEMPLATE_VERSION = 5" in script
+    assert "_TEMPLATE_VERSION = 6" in script
     assert "TEMPLATE_VERSION" in __import__("shared.watcher", fromlist=["TEMPLATE_VERSION"]).__all__
 
 
 def test_at_script_stamps_template_version() -> None:
     when = dt.datetime(2030, 1, 1, 0, 0, tzinfo=dt.UTC)
     script = build_at_script(when_iso=when.isoformat(), message="wake", timezone="UTC")
-    assert "_TEMPLATE_VERSION = 5" in script
+    assert "_TEMPLATE_VERSION = 6" in script
 
 
 # -- schedule-state announcement (v3, task #1620) -----------------------------
@@ -460,3 +464,82 @@ def test_at_script_announces_when(
     # cluster clock), matching the cron script's tz-aware display; the
     # isoformat with offset is the same instant.
     assert f"[watcher] one-shot -> fires at {when.astimezone(dt.UTC).isoformat()}" in out
+
+
+# -- wake retry (v6, task #3525) ----------------------------------------------
+
+
+def test_build_scripts_carry_wake_retry() -> None:
+    """A generated `_wake` retries a transient delivery failure instead of
+    crashing the watcher (2026-09-15: a gateway restart at a fire killed a
+    live cron watcher — task #3525)."""
+    when = dt.datetime(2030, 1, 1, 0, 0, tzinfo=dt.UTC)
+    at_script = build_at_script(when_iso=when.isoformat(), message="hi", timezone="UTC")
+    cron_script = build_cron_script(
+        expr="0 * * * *", message="tick", timezone="UTC", end_time_iso=None
+    )
+    for script in (at_script, cron_script):
+        assert "_WAKE_ATTEMPTS = 3" in script
+        assert "_WAKE_BACKOFF_S = (10.0, 40.0)" in script
+        assert "wake delivery failed" in script
+        compile(script, "<script>", "exec")
+
+
+def test_wake_retries_transient_failure_then_delivers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two failing attempts must not lose the wake — the third delivers."""
+    when = dt.datetime(2026, 8, 20, 16, 0, 0, tzinfo=dt.UTC)
+    wall = _FakeWall(dt.datetime(2026, 8, 20, 15, 59, 30, tzinfo=dt.UTC), corrections=[])
+    script = build_at_script(when_iso=when.isoformat(), message="wake", timezone="UTC")
+    attempts: list[int] = []
+
+    def flaky(*_args: object, **_kwargs: object) -> None:
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise ConnectionError("gateway restarting")
+
+    _exec_watcher(script, wall, monkeypatch, send=flaky)
+    assert len(attempts) == 3  # two failures, then delivery
+    assert 10.0 in wall.sleeps and 40.0 in wall.sleeps  # bounded backoff between attempts
+
+
+def test_wake_final_failure_is_logged_not_raised(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A sustained outage must not crash the watcher: three failed attempts,
+    the failure lands on stderr, and the script exits without raising."""
+    when = dt.datetime(2026, 8, 20, 16, 0, 0, tzinfo=dt.UTC)
+    wall = _FakeWall(dt.datetime(2026, 8, 20, 15, 59, 30, tzinfo=dt.UTC), corrections=[])
+    script = build_at_script(when_iso=when.isoformat(), message="wake", timezone="UTC")
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise ConnectionError("connection refused")
+
+    _exec_watcher(script, wall, monkeypatch, send=boom)  # must not raise
+    err = capsys.readouterr().err
+    assert "wake delivery failed after 3 attempts" in err
+
+
+def test_cron_wake_failure_keeps_the_schedule(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """When one fire's wake cannot be delivered, the cron loop survives and
+    the next fire's wake is delivered (2026-09-15: the bare call killed it)."""
+    wall = _FakeWall(dt.datetime(2026, 8, 20, 23, 57, 58, tzinfo=dt.UTC), corrections=[])
+    script = build_cron_script(
+        expr="*/2 * * * *",
+        message="tick",
+        timezone="UTC",
+        end_time_iso="2026-08-20T16:01:00-08:00",  # 00:01 UTC -> fires 23:58, 00:00
+    )
+    attempts: list[int] = []
+
+    def first_fire_down(*_args: object, **_kwargs: object) -> None:
+        attempts.append(1)
+        if len(attempts) <= 3:  # fire 1: all three attempts fail
+            raise ConnectionError("gateway down")
+
+    _exec_watcher(script, wall, monkeypatch, send=first_fire_down)
+    assert len(attempts) == 4  # fire 2 delivered on its first attempt
+    assert "wake delivery failed after 3 attempts" in capsys.readouterr().err
