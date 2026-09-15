@@ -47,7 +47,28 @@ The failure shapes get different treatment, and the split is the standard
 - **CDP down** (`DOWN`) with the session alive — nothing is serving (or the
   endpoint is wedged, see `services/browser/probe.py`). Respawn in the
   ava-browser pane via `shared.service_respawn.respawn_service` (which kills
-  the stale session first, so a live-but-wedged pane is covered too).
+  the stale session first, so a live-but-wedged pane is covered too). One
+  bounded exception: a session (re)spawned within `_RESPAWN_GRACE_S` is given
+  the grace before the next rebuild — under memory pressure a fresh Chrome's
+  CDP endpoint outlasts both the probe timeout and the 60s round, and the
+  per-round rebuild kept killing the Chrome the previous round had launched
+  (2026-09-15, below).
+
+## Respawn grace for a fresh session
+
+A `DOWN` verdict against a session younger than `_RESPAWN_GRACE_S` is a
+DEFERRAL, not a rebuild: waiting is the action. The 2026-09-15 macmini
+pressure window measured what a per-round rebuild costs there — 53 rebuilds in
+one window, each round killing the Chrome the previous round had launched,
+because the swap/jetsam pressure stretched a cold start past both the 3s probe
+and the 60s round; the loop only ended when the load collapsed. The grace is
+bounded by the constant: past it the respawn runs as before (a truly dead or
+wedged Chrome is rebuilt within the window plus one round), an unreadable
+session record falls through to the respawn (fail open toward acting — only
+the age question is asked, and it is read off the same session record
+`_session_alive` consults, so no rebuild path can bypass it), and deferral
+rounds are episode-gated (`waiting-for-cdp-warmup`: INFO on the first, DEBUG
+after) with no exit code — a wait is not a failure.
 
 ## Episode-gated reporting
 
@@ -124,6 +145,18 @@ _CONTEXT_HEAL_COOLDOWN_S = 600.0
 # before the backend's force fallback — a fraction of the watchdog's 90s tick.
 _CONTEXT_HEAL_STOP_TIMEOUT_S = 10.0
 
+# After a (re)spawn, a Chrome needs time before its CDP endpoint answers —
+# normally seconds, but the 2026-09-15 macmini swap/jetsam window stretched the
+# cold start past both the 3s probe and the 60s round, so the per-round
+# cdp-down rebuild kept killing the Chrome the previous round had launched (53
+# rebuilds in one window, ending only when the load collapsed). A session
+# younger than this grace is spared the rebuild; past it the respawn runs as
+# before. 300s = five rounds: the observed post-collapse recovery was ~90s and
+# the churn spanned two or more consecutive rounds, so this leaves ~3x margin
+# while a truly dead or wedged Chrome is still rebuilt within the window plus
+# one round.
+_RESPAWN_GRACE_S = 300.0
+
 
 def _probe() -> DaemonProbe:
     """Identity-verified liveness — see `services.browser.probe.probe_browser`.
@@ -140,6 +173,22 @@ def _session_alive() -> bool:
     the native supervisor's session record (pid + create_time) on POSIX, the
     winproc session record on Windows."""
     return get_backend().has_session(session_name("browser"))
+
+
+def _session_age_s(*, now: Callable[[], float] = time.time) -> float | None:
+    """Age of the live ava-browser session in seconds, or None when unknown.
+
+    Read off the same session record `_session_alive` judges
+    (`SessionBackend.session_started_at` is None when the session is not alive
+    or the record is unreadable): the moment the session's process chain was
+    launched. That is the fact the respawn grace needs, and one no rebuild
+    path can bypass — a respawn from this healthcheck, the GUI-domain heal, or
+    `ava start` alike lands a fresh record. Unknown is not evidence of
+    freshness; callers fall back to acting."""
+    started_at = get_backend().session_started_at(session_name("browser"))
+    if started_at is None:
+        return None
+    return now() - started_at
 
 
 def _restart_daemon() -> bool:
@@ -296,6 +345,7 @@ class _Episode:
     ORPHAN_HEAL_FAILED = "orphan-heal-failed"
     RESPAWN_FAILED = "respawn-failed"
     WAITING_FOR_MACOS_READINESS = "waiting-for-macos-readiness"
+    WAITING_FOR_CDP_WARMUP = "waiting-for-cdp-warmup"
     CONTEXT_MISSING = "context-missing"
 
     def __init__(
@@ -538,6 +588,41 @@ def _heal_context_missing(episode: _Episode, heal: _ContextHeal, wait: StartupRe
     _rebuild_via_gui_domain(heal, trigger="context-missing")
 
 
+def _defer_respawn_for_fresh_session(episode: _Episode, probe: DaemonProbe) -> bool:
+    """Whether this round defers the live-session cdp-down respawn.
+
+    True when the session was (re)spawned within `_RESPAWN_GRACE_S`: the fresh
+    Chrome may still be cold-starting, so waiting is the action (the constant
+    carries the evidence and the bound). False — the caller respawns exactly as
+    it always did — when the age cannot be read or defies the arithmetic (a
+    clock stepped behind the record): fail open toward acting, and the
+    deferral can never outlast the grace. The deferral is episode-gated like
+    the module's other conditions (`waiting-for-cdp-warmup`: INFO on the first
+    round, DEBUG after), and the round takes no exit code — a wait is not a
+    failure."""
+    age = _session_age_s()
+    if age is None or not (0.0 <= age < _RESPAWN_GRACE_S):
+        return False
+    if episode.should_report(_Episode.WAITING_FOR_CDP_WARMUP):
+        _log.info(
+            "[browser healthcheck] ava-browser session is %.0fs old and CDP is still "
+            "down (%s) — holding the restart for the %.0fs cold-start grace instead of "
+            "killing a browser that may still be coming up",
+            age,
+            probe.detail,
+            _RESPAWN_GRACE_S,
+        )
+    else:
+        _log.debug(
+            "[browser healthcheck] still inside the %.0fs cold-start grace (session "
+            "%.0fs old, CDP down: %s); not restarting",
+            _RESPAWN_GRACE_S,
+            age,
+            probe.detail,
+        )
+    return True
+
+
 def main() -> None:
     init_gateway_process(name="browser-healthcheck")
     episode = _episode_reporter()
@@ -587,8 +672,13 @@ def main() -> None:
                     wait_reason,
                 )
             return
-        # Live session, dead CDP: Chrome crashed or hung inside its own pane.
+        # Live session, dead CDP: Chrome crashed or hung inside its own pane —
         # respawn_service kills the stale session first, so the restart applies.
+        # A session (re)spawned within the grace window is the exception: the
+        # fresh Chrome may still be cold-starting, so waiting is the action
+        # (see `_defer_respawn_for_fresh_session`).
+        if _defer_respawn_for_fresh_session(episode, probe):
+            return
     else:
         # The supervised session is gone. Whether the probe reads ALIVE (our
         # unsupervised Chrome holding the port — a SingletonLock handoff, or
