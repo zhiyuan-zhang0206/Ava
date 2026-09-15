@@ -180,10 +180,15 @@ def renew_page_tool_dump() -> dict[str, Any]:
     ).model_dump(mode="json", by_alias=True)
 
 
-# Page-list line shape: `  <id>: <url> [selected]` — management tools render
-# ids and URLs from the shared page namespace; `[selected]` marks the active
-# tab and is optional in the parse.
-_PAGE_LINE_RE = re.compile(r"^\s*(\d+):\s*(\S+)(?:\s+\[selected\])?\s*$")
+# Page-list line shapes, mirroring chrome-devtools-mcp's renderer: an untitled
+# page is `  <id>: <url>`, a titled one `  <id>: <title> (<url>)`; either may
+# end in ` [selected]` and zero or more ` key=value` suffixes (an isolated-
+# context tab appends ` isolatedContext=<name>`). The URL is the bare second
+# token, or the last `(…)` group of a titled label -- a URL that itself
+# contains parens stays whole for the untitled shape.
+_PAGE_LINE_RE = re.compile(
+    r"^\s*(\d+):\s*(?:.+\s\((\S+)\)|(\S+))(?:\s+\[selected\])?(?:\s+\S+=\S+)*\s*$"
+)
 
 
 class _PageDaemon(Protocol):
@@ -301,7 +306,8 @@ def parse_page_listing(text: str) -> dict[int, str]:
     for line in text.splitlines():
         m = _PAGE_LINE_RE.match(line)
         if m:
-            pages[int(m.group(1))] = m.group(2)
+            # Titled label -> the `(…)` group; untitled -> the bare token.
+            pages[int(m.group(1))] = m.group(2) or m.group(3)
     return pages
 
 
