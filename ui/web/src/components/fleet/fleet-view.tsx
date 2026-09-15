@@ -141,7 +141,7 @@ export function FleetView() {
           setSelectedTaskId={setSelectedTaskId}
           anchorAgentId={anchorAgentId}
           focusNoticeId={focusNoticeId}
-          routeTasksView={routeTaskId != null}
+          routeTaskId={routeTaskId}
         />
       ) : (
         <MobileLayout
@@ -156,6 +156,7 @@ export function FleetView() {
           inboxCount={inboxCount}
           anchorAgentId={anchorAgentId}
           focusNoticeId={focusNoticeId}
+          routeTaskId={routeTaskId}
         />
       )}
     </div>
@@ -173,7 +174,7 @@ const DesktopLayout = memo(function DesktopLayout({
   setSelectedTaskId,
   anchorAgentId,
   focusNoticeId,
-  routeTasksView,
+  routeTaskId,
 }: {
   aliveCount: number;
   agents: AgentRow[];
@@ -183,7 +184,7 @@ const DesktopLayout = memo(function DesktopLayout({
   setSelectedTaskId: (id: number | null) => void;
   anchorAgentId: number | null;
   focusNoticeId: number | null;
-  routeTasksView: boolean;
+  routeTaskId: number | null;
 }) {
   const t = useTranslations("fleet");
   // Queue panel collapse (RCS): collapsed leaves only a STATIC handle — no
@@ -231,7 +232,7 @@ const DesktopLayout = memo(function DesktopLayout({
               setSelectedAgentId={setSelectedAgentId}
               selectedTaskId={selectedTaskId}
               setSelectedTaskId={setSelectedTaskId}
-              routeTasksView={routeTasksView}
+              routeTaskId={routeTaskId}
             />
           </div>
           {/* Static expand handle — deliberately free of any dynamic signal. */}
@@ -264,7 +265,7 @@ const DesktopLayout = memo(function DesktopLayout({
               setSelectedAgentId={setSelectedAgentId}
               selectedTaskId={selectedTaskId}
               setSelectedTaskId={setSelectedTaskId}
-              routeTasksView={routeTasksView}
+              routeTaskId={routeTaskId}
             />
           </ResizablePanel>
           <ResizableHandle />
@@ -299,6 +300,7 @@ const MobileLayout = memo(function MobileLayout({
   inboxCount,
   anchorAgentId,
   focusNoticeId,
+  routeTaskId,
 }: {
   aliveCount: number;
   agents: AgentRow[];
@@ -311,6 +313,7 @@ const MobileLayout = memo(function MobileLayout({
   inboxCount: number;
   anchorAgentId: number | null;
   focusNoticeId: number | null;
+  routeTaskId: number | null;
 }) {
   const t = useTranslations("fleet");
   return (
@@ -348,6 +351,7 @@ const MobileLayout = memo(function MobileLayout({
               onSelectTask={setSelectedTaskId}
               selectedAgentId={selectedAgentId}
               onSelectAgent={setSelectedAgentId}
+              routeTaskId={routeTaskId}
             />
           </div>
         ) : null}

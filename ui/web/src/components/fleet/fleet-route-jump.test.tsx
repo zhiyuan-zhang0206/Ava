@@ -29,8 +29,18 @@ vi.mock("@/components/fleet/graph-view", () => ({
   GraphView: () => <div data-testid="graph-view" />,
 }));
 vi.mock("@/components/fleet/task-graph", () => ({
-  TaskGraph: ({ selectedTaskId }: { selectedTaskId: number | null }) => (
-    <div data-testid="task-graph" data-selected={String(selectedTaskId)} />
+  TaskGraph: ({
+    selectedTaskId,
+    routeTaskId,
+  }: {
+    selectedTaskId: number | null;
+    routeTaskId?: number | null;
+  }) => (
+    <div
+      data-testid="task-graph"
+      data-selected={String(selectedTaskId)}
+      data-route={String(routeTaskId ?? "")}
+    />
   ),
 }));
 
@@ -185,6 +195,9 @@ describe("fleet route jumps", () => {
       expect(screen.getByTestId("task-graph").getAttribute("data-selected")).toBe("42");
     });
     expect(screen.queryByTestId("graph-view")).toBeNull();
+    // The route id flows down as the pin that outranks an ambient agent
+    // selection (task #3500).
+    expect(screen.getByTestId("task-graph").getAttribute("data-route")).toBe("42");
     // The jump reveals the view but does not rewrite the durable preference.
     expect(mockSetSettingCalls().some((c) => c.key === "display.fleet_left_view")).toBe(false);
   });
@@ -245,6 +258,7 @@ describe("fleet route jumps", () => {
     await waitFor(() => {
       expect(screen.getByTestId("task-graph").getAttribute("data-selected")).toBe("42");
     });
+    expect(screen.getByTestId("task-graph").getAttribute("data-route")).toBe("42");
   });
 
   it("malformed route ids are inert (default view, no crash)", () => {
