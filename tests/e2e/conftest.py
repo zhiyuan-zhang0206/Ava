@@ -62,6 +62,7 @@ from tests.e2e._proc import (
     sweep_stale_e2e_processes,
     wait_for_port,
 )
+from tests.e2e._truncate import truncate_with_deadlock_retry
 
 # ---- module-level overrides (run after top-level conftest) ---------------------
 
@@ -602,21 +603,13 @@ def truncated_db(e2e_db: None) -> Iterator[None]:
         # has by then finished or died and the retry wins. Two CI runs on
         # 2026-09-15 (34978385461, 34976810515) died at this fixture's setup
         # with the identical AccessExclusiveLock/AccessShareLock DETAIL.
-        for attempt in range(3):
-            try:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        # `events` was dropped with the task #1281/#1823 cleanup.
-                        "TRUNCATE inbound_messages, agents_meta, agents, "
-                        "checkpoint_blobs, checkpoint_writes, checkpoints, "
-                        "checkpoint_migrations CASCADE"
-                    )
-                conn.commit()
-                break
-            except psycopg.errors.DeadlockDetected:
-                if attempt == 2:
-                    raise
-                conn.rollback()
+        truncate_with_deadlock_retry(
+            conn,
+            # `events` was dropped with the task #1281/#1823 cleanup.
+            "TRUNCATE inbound_messages, agents_meta, agents, "
+            "checkpoint_blobs, checkpoint_writes, checkpoints, "
+            "checkpoint_migrations CASCADE",
+        )
     # checkpoint_migrations truncated, saver runs setup again (idempotent)
     with PostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
         saver.setup()
