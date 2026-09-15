@@ -765,9 +765,9 @@
       "status": {
         "inProgress": "进行中",
         "done": "已完成",
-        "canceled": "已取消",
-        "ongoing": "进行中"
+        "canceled": "已取消"
       },
+      "root": "根任务",
       "agent": "Agent #{id}",
       "unowned": "未分配",
       "user": "用户",

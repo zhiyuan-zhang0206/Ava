@@ -421,7 +421,7 @@ export interface paths {
          *     already-terminated identity is a no-op for graceful termination.
          *
          *     On success the response additionally carries `open_tasks` — the tasks the
-         *     agent still owns (in_progress / ongoing; at most five, most recently
+         *     agent still owns (in_progress; at most five, most recently
          *     updated first) as it goes down. The hint is advisory: a failed read leaves
          *     it null and never changes the termination result.
          */
@@ -3477,9 +3477,10 @@ export interface paths {
          * @description Partially update a task; omitted fields stay unchanged.
          *
          *     status, priority, title, description, and results are taken when non-null
-         *     (priority must be one of P0..P3; ongoing marks long-running active work; a
-         *     title colliding with another in_progress task's is rejected). owner reassigns to another
-         *     agent (an explicit null is rejected — a task cannot be released).
+         *     (status must be one of in_progress/done/cancelled and priority one of
+         *     P0..P3 — both are shared enums, so pydantic 422s anything else; a title
+         *     colliding with another in_progress task's is rejected). owner reassigns to
+         *     another agent (an explicit null is rejected — a task cannot be released).
          *     remind_interval_seconds must be a positive number of seconds <= 24h (an explicit
          *     null is rejected — reminders cannot be disabled). Any write resets the
          *     reminder counters, same as the SDK update path. An owner reassignment sends
@@ -3490,7 +3491,7 @@ export interface paths {
          *     reassigned, completed, cancelled, or otherwise edited.
          *
          *     A status change to done or cancelled is rejected with 422 while any direct
-         *     child remains active (in progress or ongoing). Close or cancel those children first.
+         *     child remains in progress. Close or cancel those children first.
          */
         patch: operations["patch_task_api_tasks__task_id__patch"];
         trace?: never;
@@ -6248,15 +6249,15 @@ export interface components {
             title: string;
             /**
              * Status
-             * @enum {string}
+             * @constant
              */
-            status: "in_progress" | "ongoing";
+            status: "in_progress";
             /** Updated At */
             updated_at: string;
         };
         /**
          * OpenTasksHint
-         * @description The open tasks (in_progress / ongoing) a terminating agent still owns.
+         * @description The open tasks (in_progress) a terminating agent still owns.
          *
          *     Advisory only — termination proceeds either way. `tasks` holds at most the
          *     five most recently updated rows; `more` counts the ones beyond those.
@@ -7489,8 +7490,7 @@ export interface components {
             description: string;
             /** Results */
             results: string | null;
-            /** Status */
-            status: string;
+            status: components["schemas"]["TaskStatus"];
             priority: components["schemas"]["Priority"];
             /** Owner */
             owner: number | null;
@@ -7532,6 +7532,12 @@ export interface components {
             ghost: boolean;
         };
         /**
+         * TaskStatus
+         * @description Lifecycle state of a task: born `in_progress`; `done`/`cancelled` close it.
+         * @enum {string}
+         */
+        TaskStatus: "in_progress" | "done" | "cancelled";
+        /**
          * TaskSummaryRow
          * @description One metadata-only task-list row.
          */
@@ -7542,8 +7548,7 @@ export interface components {
             parent_id: number | null;
             /** Title */
             title: string;
-            /** Status */
-            status: string;
+            status: components["schemas"]["TaskStatus"];
             /** Owner */
             owner: number | null;
             /** Owner Label */
@@ -7598,8 +7603,7 @@ export interface components {
          *     send the SDK-equivalent task system notes to affected agents.
          */
         TaskUpdateRequest: {
-            /** Status */
-            status?: string | null;
+            status?: components["schemas"]["TaskStatus"] | null;
             /** Title */
             title?: string | null;
             /** Description */

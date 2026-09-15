@@ -17,6 +17,7 @@ owned-task invariants at the HTTP boundary:
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from typing import Literal, cast
 
@@ -71,7 +72,7 @@ def _make_root_task(db: psycopg.Connection) -> int:
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO agent_tasks (title, description, status, created_by, is_root) "
-            "VALUES ('Root', 'root', 'ongoing', 'system', TRUE) RETURNING id"
+            "VALUES ('Root', 'root', 'in_progress', 'system', TRUE) RETURNING id"
         )
         tid = cur.fetchone()[0]  # type: ignore[index]
     db.commit()
@@ -301,7 +302,7 @@ class TestRootTaskImmutable:
             resp = client.patch(f"/api/tasks/{root_id}", json={"status": "done"})
         assert resp.status_code == 422
         assert "root task" in resp.json()["detail"]
-        assert _status(db_conn, root_id) == "ongoing"  # unchanged
+        assert _status(db_conn, root_id) == "in_progress"  # unchanged
 
     def test_reassign_is_rejected(self, db_conn: psycopg.Connection) -> None:
         root_id = _make_root_task(db_conn)
@@ -316,49 +317,29 @@ class TestRootTaskImmutable:
             resp = client.patch("/api/tasks/999999", json={"status": "done"})
         assert resp.status_code == 404
 
-    def test_patch_ongoing_status_succeeds(self, db_conn: psycopg.Connection) -> None:
-        """PATCH mirrors the SDK by allowing a regular task to become ongoing."""
+    @pytest.mark.parametrize("removed_status", ["open", "ongoing"])
+    def test_patch_removed_status_rejected(
+        self, db_conn: psycopg.Connection, removed_status: str
+    ) -> None:
+        """Removed statuses 422 through the shared TaskStatus enum (user rulings
+        2026-08-29 'open', 2026-09-15 'ongoing') — zero shim, and the row is
+        untouched."""
         owner = _make_agent(db_conn)
-        tid = _make_task(db_conn, owner=owner, title="regular")
+        tid = _make_task(db_conn, owner=owner, title=f"regular-{removed_status}")
         with TestClient(app) as client:
-            resp = client.patch(f"/api/tasks/{tid}", json={"status": "ongoing"})
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "ongoing"
-        assert _status(db_conn, tid) == "ongoing"
-
-    def test_patch_open_status_rejected(self, db_conn: psycopg.Connection) -> None:
-        """The 'open' status is gone (user ruling 2026-08-29): PATCHing it
-        into a task 422s through the narrowed valid-status list — zero shim."""
-        owner = _make_agent(db_conn)
-        tid = _make_task(db_conn, owner=owner, title="regular-open")
-        with TestClient(app) as client:
-            resp = client.patch(f"/api/tasks/{tid}", json={"status": "open"})
+            resp = client.patch(f"/api/tasks/{tid}", json={"status": removed_status})
         assert resp.status_code == 422
-        assert "Must be one of: in_progress, ongoing, done, cancelled" in resp.json()["detail"]
+        body = resp.json()
+        assert body["code"] == "validation_error"
+        # FastAPI's field errors ride the envelope's `errors` extension: the
+        # rejected input and the three allowed values are all named.
+        rendered = json.dumps(body["errors"])
+        assert removed_status in rendered
+        assert "in_progress" in rendered and "done" in rendered and "cancelled" in rendered
         assert _status(db_conn, tid) == "in_progress"  # unchanged
 
 
 class TestParentClose:
-    def test_done_with_ongoing_child_is_rejected_and_unchanged(
-        self, db_conn: psycopg.Connection
-    ) -> None:
-        owner = _make_agent(db_conn)
-        parent = _make_task(db_conn, owner=owner, title="parent-ongoing-child")
-        child = _make_task(
-            db_conn,
-            owner=owner,
-            title="ongoing-child",
-            status="in_progress",
-            parent_id=parent,
-        )
-        with TestClient(app) as client:
-            child_response = client.patch(f"/api/tasks/{child}", json={"status": "ongoing"})
-            parent_response = client.patch(f"/api/tasks/{parent}", json={"status": "done"})
-        assert child_response.status_code == 200
-        assert parent_response.status_code == 422
-        assert f"#{child}" in parent_response.json()["detail"]
-        assert _status(db_conn, parent) == "in_progress"
-
     def test_done_with_in_progress_child_is_rejected_and_unchanged(
         self, db_conn: psycopg.Connection
     ) -> None:
@@ -375,7 +356,7 @@ class TestParentClose:
             resp = client.patch(f"/api/tasks/{parent}", json={"status": "done"})
         assert resp.status_code == 422
         assert resp.json()["detail"] == (
-            f"task {parent} has 1 active child tasks (e.g. #{child}) — close or cancel them first"
+            f"task {parent} has 1 in_progress child tasks (e.g. #{child}) — close or cancel them first"
         )
         assert _status(db_conn, parent) == "in_progress"
 

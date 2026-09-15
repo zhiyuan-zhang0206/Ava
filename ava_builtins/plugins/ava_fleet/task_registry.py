@@ -135,7 +135,7 @@ def _ensure_parent_exists(cur: psycopg.Cursor, parent: int) -> None:
     A closed (done / cancelled) parent is rejected too: a closed task must
     never gain children -- tasks created after a parent closed are what
     produced the false-orphan rows in the task graph (task #1975). The system
-    root is exempt by construction (its status is 'ongoing', never closed).
+    root is exempt by construction (its status is 'in_progress' — never closed).
     The parent row is locked FOR UPDATE: the close path holds the same lock,
     so a concurrent close cannot slip between this status read and the child
     INSERT (TOCTOU, QA #993).
@@ -410,11 +410,8 @@ def update(
     a notification.
 
     Args:
-        status: one of "in_progress", "ongoing", "done", "cancelled".
-            ongoing marks long-running active work. Closing a task is rejected
-            while any direct child is in progress or ongoing. Only the owner or
-            its delegator may change a task into ongoing; calls without an
-            agent identity remain allowed for system tooling.
+        status: one of "in_progress", "done", "cancelled". Closing a task is
+            rejected while any direct child is in progress.
         results: replaces the whole field; use note to append instead.
         owner: agent id to reassign to. None means no change — a task always
             has an owner.
@@ -779,8 +776,8 @@ def list(
     owner = coerce_typed(owner, "owner", int, allow_none=True)
     status = coerce_str(status, "status", allow_none=True)
     recursive = coerce_typed(recursive, "recursive", bool)
-    if status is not None and status not in _STATUSES and status != "ongoing":
-        raise ValueError(f"status must be one of {sorted(_STATUSES)} or 'ongoing', got {status!r}")
+    if status is not None and status not in _STATUSES:
+        raise ValueError(f"status must be one of {sorted(_STATUSES)}, got {status!r}")
 
     sql, params = _build_list_query(parent, owner, status, recursive)
     with ava.DB.cursor() as cur:

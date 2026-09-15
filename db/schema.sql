@@ -824,7 +824,7 @@ CREATE TABLE agent_tasks (
     description TEXT NOT NULL,                          -- full detail of what to do; read before working
     results     TEXT,                                   -- result log (what was done, output paths); replaced by update, appended by log
     status      TEXT NOT NULL DEFAULT 'in_progress'
-                CHECK (status IN ('in_progress', 'done', 'cancelled', 'ongoing')),
+                CHECK (status IN ('in_progress', 'done', 'cancelled')),
     priority    TEXT NOT NULL DEFAULT 'P2'
                 CHECK (priority IN ('P0', 'P1', 'P2', 'P3')),  -- stakes axis (P0 highest); orders the board within a status column and seeds a stall-escalation notice's priority
     owner       BIGINT REFERENCES agents(id),           -- current owner agent; NULL only on the system root task (every other task always has an owner)
@@ -844,14 +844,14 @@ CREATE TABLE agent_tasks (
     usd_budget_notified_at   TIMESTAMPTZ   -- first USD-ceiling breach notification
 );
 
--- The system root task is permanently 'ongoing': it is the tree anchor and can
--- never be completed, cancelled, or reopened (update()/PATCH reject it, and this
--- CHECK makes the state itself self-verifying against direct DB writes too).
--- Root-pinning only: regular tasks may also use 'ongoing' for long-running
--- active work, but the root itself must never leave its permanent state.
+-- The system root task is permanently 'in_progress': it is the tree anchor and
+-- can never be completed, cancelled, or reopened (update()/PATCH reject it, and
+-- this CHECK makes the state itself self-verifying against direct DB writes
+-- too). Root-pinning only: regular tasks move freely among the three statuses,
+-- but the root must never leave its permanent state.
 ALTER TABLE agent_tasks
-    ADD CONSTRAINT agent_tasks_root_status_ongoing
-    CHECK (NOT is_root OR status = 'ongoing');
+    ADD CONSTRAINT agent_tasks_root_status_in_progress
+    CHECK (NOT is_root OR status = 'in_progress');
 
 CREATE INDEX idx_agent_tasks_owner_status   ON agent_tasks (owner, status);
 CREATE INDEX idx_agent_tasks_parent         ON agent_tasks (parent_id);
@@ -864,12 +864,12 @@ CREATE INDEX idx_agent_tasks_status_created ON agent_tasks (status, created_at);
 -- earlier task leaves in_progress.
 CREATE UNIQUE INDEX agent_tasks_title_unique_in_progress ON agent_tasks (title) WHERE status = 'in_progress';
 
--- The root task: system-owned, permanently 'ongoing', parent of the cluster's
+-- The root task: system-owned, permanently 'in_progress', parent of the cluster's
 -- top-level tasks only. task_registry.create() requires an explicit parent,
 -- and the root (id 1) is the one id callers pass for a top-level task.
 -- Idempotent so re-bootstrapping is a no-op.
 INSERT INTO agent_tasks (title, description, results, status, created_by, is_root)
-SELECT 'Root', 'System root task -- all tasks descend from here.', 'Root task for the task registry tree.', 'ongoing', 'system', TRUE
+SELECT 'Root', 'System root task -- all tasks descend from here.', 'Root task for the task registry tree.', 'in_progress', 'system', TRUE
 WHERE NOT EXISTS (SELECT 1 FROM agent_tasks WHERE is_root = TRUE);
 
 -- Deferred FK: agent_notices.task_id -> agent_tasks(id). Declared here, not
@@ -1805,3 +1805,14 @@ INSERT INTO schema_migrations (name) VALUES ('20260911T192500_stranded-hold-reco
 
 -- Named impersonation sessions and permanent history are represented above.
 INSERT INTO schema_migrations (name) VALUES ('20260913T180056_named-impersonation-history');
+
+-- The root-ongoing pin is superseded: the baseline now pins the root to
+-- 'in_progress' (agent_tasks_root_status_in_progress), so replaying the old
+-- migration's root-to-ongoing backfill would violate that pin. Fresh DBs
+-- stamp it; existing DBs already applied it.
+INSERT INTO schema_migrations (name) VALUES ('20260827T021440_root-task-ongoing');
+
+-- allow-non-root-ongoing is superseded by the 2026-09-15 removal of the
+-- 'ongoing' status (drop-task-ongoing-status migration): replaying it would
+-- re-pin the root to 'ongoing' against the baseline's in_progress pin.
+INSERT INTO schema_migrations (name) VALUES ('20260901T181810_allow-non-root-ongoing');

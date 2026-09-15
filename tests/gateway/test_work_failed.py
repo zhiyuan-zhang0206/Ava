@@ -296,7 +296,7 @@ def test_all_dead_creates_task_registry_alert(
     )
     db_conn.execute(
         "INSERT INTO agent_tasks (title, description, status, created_by, is_root) "
-        "SELECT 'Root', 'root', 'ongoing', 'system', TRUE "
+        "SELECT 'Root', 'root', 'in_progress', 'system', TRUE "
         "WHERE NOT EXISTS (SELECT 1 FROM agent_tasks WHERE is_root)"
     )
     db_conn.commit()
@@ -414,7 +414,7 @@ async def test_reconcile_sends_attempts_over_limit_directly_to_task_alert(
     )
     db_conn.execute(
         "INSERT INTO agent_tasks (title, description, status, created_by, is_root) "
-        "SELECT 'Root', 'root', 'ongoing', 'system', TRUE "
+        "SELECT 'Root', 'root', 'in_progress', 'system', TRUE "
         "WHERE NOT EXISTS (SELECT 1 FROM agent_tasks WHERE is_root)"
     )
     db_conn.commit()

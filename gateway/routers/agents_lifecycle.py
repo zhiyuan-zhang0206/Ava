@@ -125,7 +125,7 @@ async def post_agent_terminate(
     already-terminated identity is a no-op for graceful termination.
 
     On success the response additionally carries `open_tasks` — the tasks the
-    agent still owns (in_progress / ongoing; at most five, most recently
+    agent still owns (in_progress; at most five, most recently
     updated first) as it goes down. The hint is advisory: a failed read leaves
     it null and never changes the termination result."""
     return await terminate_agent_with_open_tasks(agent_id, body, request.app.state.db_pool)
@@ -161,7 +161,7 @@ def _open_tasks_hint_blocking(pool: ConnectionPool, agent_id: int) -> OpenTasksH
     with pool.connection() as conn:
         rows = conn.execute(
             "SELECT id, title, status, updated_at FROM agent_tasks "
-            "WHERE owner = %s AND status IN ('in_progress', 'ongoing') "
+            "WHERE owner = %s AND status = 'in_progress' "
             "ORDER BY updated_at DESC, id DESC",
             (agent_id,),
         ).fetchall()

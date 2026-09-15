@@ -70,7 +70,7 @@ def _drain_tasks_blocking(pool: ConnectionPool, name: str) -> int:
                 "SELECT t.id, a.id FROM agent_tasks t "
                 "JOIN agents_meta a ON t.owner = a.id "
                 "WHERE a.machine = %s AND a.status != 'terminated' "
-                "AND t.status IN ('in_progress', 'ongoing')",
+                "AND t.status = 'in_progress'",
                 (name,),
             )
             rows = cur.fetchall()

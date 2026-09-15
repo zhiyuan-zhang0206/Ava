@@ -3,7 +3,7 @@
 GET /api/tasks — the task list (optionally narrowed by a last-activity window).
 PATCH /api/tasks/{id} — partial update (status / title / description /
 results / remind_interval_seconds / owner). Closing a parent is rejected while
-any child remains active.
+any child remains in progress.
 """
 
 from __future__ import annotations
@@ -127,8 +127,8 @@ def _windowed_tasks(
 ) -> list[TaskRow | TaskSummaryRow]:
     """Narrow the registry to a last-activity window, keeping tree structure.
 
-    Kept tasks: the system root (parent_id NULL), every not-finished task
-    (in_progress / ongoing) regardless of age, and every task whose updated_at
+    Kept tasks: the system root (parent_id NULL), every in_progress task
+    regardless of age, and every task whose updated_at
     falls inside the window. Each kept task's ancestors that fall outside the
     window are delivered too, flagged ghost=True — the graph renders them
     dimmed so a kept task never dangles as a fake orphan (the client renders
@@ -140,7 +140,7 @@ def _windowed_tasks(
     for t in tasks:
         if (
             t.parent_id is None
-            or t.status in ("in_progress", "ongoing")
+            or t.status == "in_progress"
             or datetime.fromisoformat(t.updated_at) >= cutoff
         ):
             kept.add(t.id)
@@ -203,14 +203,12 @@ def _collect_updates(body: TaskUpdateRequest) -> tuple[list[str], list[object]]:
     raises HTTPException 422 on an invalid field."""
     sets: list[str] = []
     params: list[object] = []
+    # status is typed as the shared TaskStatus enum, so pydantic already 422s
+    # any value outside in_progress/done/cancelled before this runs ('ongoing'
+    # included — removed by user ruling 2026-09-15).
     if body.status is not None:
-        if body.status not in ("in_progress", "ongoing", "done", "cancelled"):
-            raise HTTPException(
-                status_code=422,
-                detail=f"Invalid status: {body.status!r}. Must be one of: in_progress, ongoing, done, cancelled.",
-            )
         sets.append("status = %s")
-        params.append(body.status)
+        params.append(body.status.value)
     # priority is typed as the shared Priority enum, so pydantic already 422s
     # any value outside P0..P3 before this runs.
     if body.priority is not None:
@@ -298,7 +296,7 @@ def _patch_task_blocking(
         if body.status in ("done", "cancelled"):
             cur.execute(
                 "SELECT id, count(*) OVER () FROM agent_tasks "
-                "WHERE parent_id = %s AND status IN ('in_progress', 'ongoing') "
+                "WHERE parent_id = %s AND status = 'in_progress' "
                 "ORDER BY id LIMIT 1",
                 (task_id,),
             )
@@ -307,7 +305,7 @@ def _patch_task_blocking(
                 child_id, child_count = active_child
                 raise HTTPException(
                     status_code=422,
-                    detail=f"task {task_id} has {child_count} active child tasks "
+                    detail=f"task {task_id} has {child_count} in_progress child tasks "
                     f"(e.g. #{child_id}) — close or cancel them first",
                 )
         # Reparenting mirrors the SDK update() checks (shared validation):
@@ -376,9 +374,10 @@ async def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) ->
     """Partially update a task; omitted fields stay unchanged.
 
     status, priority, title, description, and results are taken when non-null
-    (priority must be one of P0..P3; ongoing marks long-running active work; a
-    title colliding with another in_progress task's is rejected). owner reassigns to another
-    agent (an explicit null is rejected — a task cannot be released).
+    (status must be one of in_progress/done/cancelled and priority one of
+    P0..P3 — both are shared enums, so pydantic 422s anything else; a title
+    colliding with another in_progress task's is rejected). owner reassigns to
+    another agent (an explicit null is rejected — a task cannot be released).
     remind_interval_seconds must be a positive number of seconds <= 24h (an explicit
     null is rejected — reminders cannot be disabled). Any write resets the
     reminder counters, same as the SDK update path. An owner reassignment sends
@@ -389,7 +388,7 @@ async def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) ->
     reassigned, completed, cancelled, or otherwise edited.
 
     A status change to done or cancelled is rejected with 422 while any direct
-    child remains active (in progress or ongoing). Close or cancel those children first.
+    child remains in progress. Close or cancel those children first.
     """
     task, notes = await asyncio.to_thread(
         _patch_task_blocking, request.app.state.db_pool, task_id, body

@@ -51,7 +51,7 @@ def root_task_id(db_conn: psycopg.Connection) -> Iterator[int]:
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO agent_tasks (title, description, status, created_by, is_root) "
-            "VALUES ('Root', 'root', 'ongoing', 'system', TRUE) RETURNING id"
+            "VALUES ('Root', 'root', 'in_progress', 'system', TRUE) RETURNING id"
         )
         rid = cur.fetchone()[0]  # type: ignore[index]
     db_conn.commit()
@@ -415,34 +415,11 @@ def test_update_rejects_closing_parent_with_in_progress_child(
         parent = task_registry.create(f"parent-{closing_status}", "detail", parent=root_task_id)
         child = task_registry.create(f"active-child-{closing_status}", "detail", parent=parent.id)
         message = (
-            f"task {parent.id} has 1 active child tasks (e.g. #{child.id}) — "
+            f"task {parent.id} has 1 in_progress child tasks (e.g. #{child.id}) — "
             "close or cancel them first"
         )
 
         with pytest.raises(ValueError, match=re.escape(message)):
-            task_registry.update(parent.id, status=closing_status)
-
-        assert task_registry.get(parent.id).status == "in_progress"
-    finally:
-        ava._boot._agent_id = original
-
-
-@pytest.mark.parametrize("closing_status", ["done", "cancelled"])
-def test_update_rejects_closing_parent_with_ongoing_child(
-    db_conn: psycopg.Connection, closing_status: str, root_task_id: int
-) -> None:
-    """An ongoing child is still open, so it blocks closing its parent."""
-    agent_id = _seed_agent(db_conn)
-    original = ava._boot._agent_id
-    ava._boot._agent_id = agent_id
-    try:
-        parent = task_registry.create(
-            f"parent-ongoing-{closing_status}", "detail", parent=root_task_id
-        )
-        child = task_registry.create(f"ongoing-child-{closing_status}", "detail", parent=parent.id)
-        task_registry.update(child.id, status="ongoing")
-
-        with pytest.raises(ValueError, match=rf"#{child.id}"):
             task_registry.update(parent.id, status=closing_status)
 
         assert task_registry.get(parent.id).status == "in_progress"
@@ -1905,108 +1882,22 @@ def test_update_root_task_is_rejected(db_conn: psycopg.Connection, root_task_id:
             task_registry.update(root_id, owner=agent_id)
         # The rejected writes never landed — the root row is unchanged.
         root = task_registry.get(root_id)
-        assert root.status == "ongoing"
+        assert root.status == "in_progress"
         assert root.owner is None
     finally:
         ava._boot._agent_id = original
 
 
 @pytest.mark.parametrize("next_status", ["in_progress", "done", "cancelled"])
-def test_update_non_root_allows_ongoing_status(
-    db_conn: psycopg.Connection, root_task_id: int, next_status: str
-) -> None:
-    """An owning agent can enter ongoing and later return to each allowed state."""
-    agent_id = _seed_agent(db_conn)
-    original = ava._boot._agent_id
-    ava._boot._agent_id = agent_id
-    try:
-        task = task_registry.create("regular-task", "detail", parent=root_task_id)
-        task_registry.update(task.id, status="ongoing")
-        assert task_registry.get(task.id).status == "ongoing"
-
-        task_registry.update(task.id, status=next_status)
-        assert task_registry.get(task.id).status == next_status
-    finally:
-        ava._boot._agent_id = original
-
-
-def test_update_ongoing_allows_owner_delegator(
-    db_conn: psycopg.Connection, root_task_id: int, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The agent that spawned the owner may make its task ongoing."""
-    delegator = _seed_agent(db_conn)
-    owner = _seed_agent(db_conn, spawner=f"agent:{delegator}")
-    original = ava._boot._agent_id
-    ava._boot._agent_id = owner
-    try:
-        task = task_registry.create("delegated-ongoing", "detail", parent=root_task_id, owner=owner)
-        ava._boot._agent_id = delegator
-        monkeypatch.setattr(ava.agents, "send_system_note", _ignore_system_note)
-
-        task_registry.update(task.id, status="ongoing")
-
-        assert task_registry.get(task.id).status == "ongoing"
-    finally:
-        ava._boot._agent_id = original
-
-
-def test_update_ongoing_rejects_unrelated_agent(
-    db_conn: psycopg.Connection, root_task_id: int, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A peer outside the owner's spawn lineage cannot set ongoing."""
-    owner = _seed_agent(db_conn)
-    stranger = _seed_agent(db_conn)
-    original = ava._boot._agent_id
-    ava._boot._agent_id = owner
-    try:
-        task = task_registry.create("protected-ongoing", "detail", parent=root_task_id, owner=owner)
-        ava._boot._agent_id = stranger
-        monkeypatch.setattr(ava.agents, "send_system_note", _ignore_system_note)
-
-        with pytest.raises(
-            ValueError, match="only the owner or a delegator can set a task to ongoing"
-        ):
-            task_registry.update(task.id, status="ongoing")
-
-        assert task_registry.get(task.id).status == "in_progress"
-    finally:
-        ava._boot._agent_id = original
-
-
-def test_update_ongoing_allows_non_agent_context(
-    db_conn: psycopg.Connection, root_task_id: int, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """System tooling without an agent identity is outside the ownership gate."""
-    owner = _seed_agent(db_conn)
-    original = ava._boot._agent_id
-    ava._boot._agent_id = owner
-    try:
-        task = task_registry.create("system-ongoing", "detail", parent=root_task_id)
-        ava._boot._agent_id = None
-        monkeypatch.delenv("AVA_AGENT_ID", raising=False)
-        live_events: list[tuple[int, int]] = []
-
-        def _record_live_event(agent_id: int, task_id: int) -> None:
-            live_events.append((agent_id, task_id))
-
-        monkeypatch.setattr(task_registry, "publish_task_updated_sync", _record_live_event)
-
-        task_registry.update(task.id, status="ongoing")
-
-        assert task_registry.get(task.id).status == "ongoing"
-        assert live_events == []
-    finally:
-        ava._boot._agent_id = original
-
-
-@pytest.mark.parametrize("next_status", ["in_progress", "done", "cancelled"])
-def test_update_statuses_other_than_ongoing_ignore_ownership_gate(
+def test_update_statuses_are_peer_open(
     db_conn: psycopg.Connection,
     root_task_id: int,
     next_status: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The ongoing ownership rule leaves all other peer status writes unchanged."""
+    """Any peer may write in_progress/done/cancelled — the 'ongoing' ownership
+    gate was removed with the status itself (user ruling 2026-09-15), so no
+    ownership rule remains on the status path."""
     owner = _seed_agent(db_conn)
     stranger = _seed_agent(db_conn)
     original = ava._boot._agent_id
@@ -2042,18 +1933,36 @@ def test_zero_shim_update_status_open_is_rejected(
         ava._boot._agent_id = original
 
 
-def test_zero_shim_list_status_open_is_rejected(
+def test_zero_shim_update_status_ongoing_is_rejected(
     db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    """list(status="open") is refused too — the read filter lost the value
-    with the enum (the root stays addressable via 'ongoing')."""
+    """The 'ongoing' status is gone entirely (user ruling 2026-09-15): update()
+    refuses it with the three-value enum's error — no backward-compat shim."""
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    try:
+        task = task_registry.create("shim-check-ongoing", "detail", parent=root_task_id)
+        with pytest.raises(ValueError, match="status must be one of"):
+            task_registry.update(task.id, status="ongoing")
+        assert task_registry.get(task.id).status == "in_progress"
+    finally:
+        ava._boot._agent_id = original
+
+
+@pytest.mark.parametrize("removed_status", ["open", "ongoing"])
+def test_zero_shim_list_status_is_rejected(
+    db_conn: psycopg.Connection, root_task_id: int, removed_status: str
+) -> None:
+    """list() refuses a removed status too — the read filter is the same enum
+    ('open' went 2026-08-29, 'ongoing' went 2026-09-15)."""
     agent_id = _seed_agent(db_conn)
     original = ava._boot._agent_id
     ava._boot._agent_id = agent_id
     try:
         task_registry.create("shim-check-list", "detail", parent=root_task_id)
         with pytest.raises(ValueError, match="status must be one of"):
-            task_registry.list(status="open")
+            task_registry.list(status=removed_status)
     finally:
         ava._boot._agent_id = original
 
@@ -2175,7 +2084,7 @@ def test_create_rejects_parent_1_when_not_root(db_conn: psycopg.Connection) -> N
             cur.execute(
                 "INSERT INTO agent_tasks (id, title, description, status, created_by, owner, is_root) "
                 "VALUES (1, 'not-root', 'd', 'in_progress', %s, %s, FALSE), "
-                "(2, 'Root', 'root', 'ongoing', 'system', NULL, TRUE)",
+                "(2, 'Root', 'root', 'in_progress', 'system', NULL, TRUE)",
                 (str(agent_id), agent_id),
             )
         db_conn.commit()

@@ -16,7 +16,7 @@ import { mockSetSettingCalls, resetMockSettings } from "@/test-support/user-sett
 
 import { FORCE_DEFAULTS, FORCE_GROUPS, TASK_FORCE_GROUPS, type ForceGroup } from "./force-controls";
 import { STATUS_TO_LANE } from "./task-kanban";
-import { TASK_FORCE_KEY } from "./task-graph";
+import { STATUS_FILL, TASK_FORCE_KEY, TASK_LEGEND_ENTRIES } from "./task-graph";
 import { TaskGraph } from "./task-graph";
 
 vi.mock("@/lib/use-user-settings", () => import("@/test-support/user-settings-mock"));
@@ -50,7 +50,7 @@ function task(id: number, over: Partial<TaskRow> = {}): TaskRow {
 
 function sampleTasks(): TaskRow[] {
   return [
-    task(1, { title: "root", status: "ongoing" }),
+    task(1, { title: "root", status: "in_progress" }),
     task(2, { title: "subtask-active", status: "in_progress", parent_id: 1 }),
     task(3, { title: "subtask-ip", status: "in_progress", parent_id: 1 }),
     task(4, { title: "subtask-done", status: "done", parent_id: 1 }),
@@ -71,23 +71,10 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-it("maps ongoing tasks into the In progress Kanban lane", () => {
-  expect(STATUS_TO_LANE.ongoing).toBe(0);
-});
-
-it("labels a regular ongoing Kanban card as Ongoing", async () => {
-  useTasks.mockReturnValue(
-    ok([
-      task(1, { title: "root", status: "ongoing" }),
-      task(2, { title: "long-running child", status: "ongoing", parent_id: 1 }),
-    ]),
-  );
-  render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
-
-  await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
-  fireEvent.click(screen.getByText("Kanban"));
-
-  await waitFor(() => expect(screen.getByText("Ongoing")).toBeTruthy());
+it("maps each task status into its Kanban lane", () => {
+  expect(STATUS_TO_LANE.in_progress).toBe(0);
+  expect(STATUS_TO_LANE.done).toBe(1);
+  expect(STATUS_TO_LANE.cancelled).toBe(2);
 });
 
 describe("TaskGraph (graph mode)", () => {
@@ -98,17 +85,55 @@ describe("TaskGraph (graph mode)", () => {
     expect(useTasks).toHaveBeenCalledWith("24h", "full");
   });
 
-  it("explains task status colors", () => {
+  it("legend lists only the categories the canvas renders", () => {
+    // User ruling 2026-09-15: the legend shows exactly what the default view
+    // draws — active work (in progress) and the root's reserved violet. Done /
+    // Canceled are toggle-hidden, so they carry no legend line; the root is
+    // not a status and has no status entry.
     useTasks.mockReturnValue(ok(sampleTasks()));
     render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
 
     const legend = screen.getByLabelText("Task graph legend");
-    for (const label of ["In progress", "Done", "Canceled", "Ongoing"]) {
-      expect(legend.textContent).toContain(label);
-    }
+    expect(legend.textContent).toContain("In progress");
+    expect(legend.textContent).toContain("Root");
+    expect(legend.textContent).not.toContain("Done");
+    expect(legend.textContent).not.toContain("Canceled");
+    expect(legend.textContent).not.toContain("Ongoing");
+    // Each entry carries the fill the canvas actually uses.
+    expect(legend.querySelector("span.text-slate-400")).toBeTruthy();
+    expect(legend.querySelector("span.text-violet-500")).toBeTruthy();
     // The "Uniform node size" legend line was removed (user ruling 2026-08-29):
     // the sizing itself is unchanged, the copy was clutter.
     expect(legend.textContent).not.toContain("Uniform node size");
+  });
+
+  it("status set and legend stay single-sourced (displayable == backend set)", () => {
+    // The FE displayable set is exactly the three backend statuses (the type
+    // is the generated wire schema; a pytest locks the schema to
+    // shared/task_status.py + db/schema.sql).
+    expect(Object.keys(STATUS_FILL).sort()).toEqual(["cancelled", "done", "in_progress"]);
+    // Legend entries == the categories rendered in the default view: the
+    // in-progress swatch + the root's reserved violet.
+    expect(TASK_LEGEND_ENTRIES.map((entry) => entry.key)).toEqual(["in_progress", "root"]);
+    expect(TASK_LEGEND_ENTRIES.find((entry) => entry.key === "root")?.fill).toBe("text-violet-500");
+    expect(TASK_LEGEND_ENTRIES.find((entry) => entry.key === "in_progress")?.fill).toBe(
+      STATUS_FILL.in_progress,
+    );
+  });
+
+  it("renders the root violet, active tasks slate — and no toggle-hidden category by default", async () => {
+    useTasks.mockReturnValue(ok(sampleTasks()));
+    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
+    // The root node (#1, the sole parent-less row) is the violet one.
+    expect(document.querySelectorAll("rect.text-violet-500").length).toBe(1);
+    // Visible in_progress tasks render slate.
+    expect(document.querySelectorAll("rect.text-slate-400").length).toBeGreaterThan(0);
+    // Done / Canceled are toggled off: neither their nodes nor legend lines
+    // exist in the default view, so their colors stay off the canvas.
+    expect(document.querySelector("rect.text-emerald-500")).toBeNull();
+    expect(document.querySelector("rect.text-destructive")).toBeNull();
   });
 
   it("renders only in-progress cards by default", async () => {
@@ -171,7 +196,7 @@ describe("TaskGraph (graph mode)", () => {
     // Use tasks where the done task has a parent_id so it shows in kanban
     // (kanban filters to parent_id !== null — subtasks only).
     const tasks: TaskRow[] = [
-      task(1, { title: "root", status: "ongoing" }),
+      task(1, { title: "root", status: "in_progress" }),
       task(2, { title: "child", status: "in_progress", parent_id: 1 }),
       task(3, { title: "done-child", status: "done", parent_id: 1 }),
     ];
@@ -210,8 +235,7 @@ describe("TaskGraph (graph mode)", () => {
     // #5 (cancelled) is hidden.
     expect(screen.queryByText(/#5/)).toBeNull();
 
-    // Click the Canceled toggle to reveal Canceled tasks. The legend now
-    // also spells it "Canceled", so target the toggle button by role.
+    // Click the Canceled toggle to reveal Canceled tasks.
     fireEvent.click(screen.getByRole("button", { name: /^Canceled/ }));
     await waitFor(() => expect(screen.getAllByText(/#5/).length).toBeGreaterThan(0), { timeout: 4000 });
   });
@@ -248,7 +272,7 @@ describe("TaskGraph (graph mode)", () => {
     const onSelectAgent = vi.fn();
     useTasks.mockReturnValue(
       ok([
-        task(1, { title: "root", status: "ongoing" }),
+        task(1, { title: "root", status: "in_progress" }),
         task(2, { title: "jumped-into", parent_id: 1, owner: 7 }),
       ]),
     );
@@ -268,7 +292,7 @@ describe("TaskGraph (graph mode)", () => {
     const onSelectAgent = vi.fn();
     useTasks.mockReturnValue(
       ok([
-        task(1, { title: "root", status: "ongoing" }),
+        task(1, { title: "root", status: "in_progress" }),
         task(2, { title: "jumped-into", parent_id: 1, owner: 7 }),
       ]),
     );
@@ -326,7 +350,7 @@ describe("TaskGraph (graph mode)", () => {
     resetMockSettings({ "display.task_graph_mode": "kanban" });
     useTasks.mockReturnValue(
       ok([
-        task(1, { title: "root", status: "ongoing" }),
+        task(1, { title: "root", status: "in_progress" }),
         task(10, { title: "agent-7-work", parent_id: 1, owner: 7 }),
         task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
       ]),
@@ -373,7 +397,7 @@ describe("TaskGraph (graph mode)", () => {
     resetMockSettings({ "display.task_graph_mode": "kanban" });
     useTasks.mockReturnValue(
       ok([
-        task(1, { title: "root", status: "ongoing" }),
+        task(1, { title: "root", status: "in_progress" }),
         task(10, { title: "agent-7-work", parent_id: 1, owner: 7 }),
         task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
       ]),
@@ -466,7 +490,7 @@ describe("TaskGraph (graph mode)", () => {
     // The list arrives while the board is already up and crossed.
     useTasks.mockReturnValue(
       ok([
-        task(1, { title: "root", status: "ongoing" }),
+        task(1, { title: "root", status: "in_progress" }),
         task(10, { title: "agent-7-work", parent_id: 1, owner: 7 }),
         task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
       ]),
@@ -497,7 +521,7 @@ describe("TaskGraph (graph mode)", () => {
     });
     useTasks.mockReturnValue(
       ok([
-        task(1, { title: "root", status: "ongoing" }),
+        task(1, { title: "root", status: "in_progress" }),
         task(10, { title: "agent-7-work", parent_id: 1, owner: 7 }),
         task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
       ]),
@@ -519,7 +543,7 @@ describe("TaskGraph (graph mode)", () => {
     resetMockSettings({ "display.task_graph_mode": "kanban" });
     useTasks.mockReturnValue(
       ok([
-        task(1, { title: "root", status: "ongoing" }),
+        task(1, { title: "root", status: "in_progress" }),
         task(10, { title: "agent-7-work", parent_id: 1, owner: 7 }),
         task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
       ]),
@@ -603,7 +627,7 @@ describe("TaskGraph (graph mode)", () => {
     const onSelectAgent = vi.fn();
     useTasks.mockReturnValue(
       ok([
-        task(1, { title: "root", status: "ongoing" }),
+        task(1, { title: "root", status: "in_progress" }),
         task(2, { title: "jumped-into", parent_id: 1, owner: 7 }),
         task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
       ]),
@@ -626,7 +650,7 @@ describe("TaskGraph (graph mode)", () => {
     resetMockSettings({ "display.task_graph_mode": "kanban" });
     useTasks.mockReturnValue(
       ok([
-        task(1, { title: "root", status: "ongoing" }),
+        task(1, { title: "root", status: "in_progress" }),
         task(2, { title: "jumped-into", parent_id: 1, owner: 7 }),
         task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
       ]),
@@ -650,7 +674,7 @@ describe("TaskGraph (graph mode)", () => {
     resetMockSettings({ "display.task_graph_mode": "kanban" });
     useTasks.mockReturnValue(
       ok([
-        task(1, { title: "root", status: "ongoing" }),
+        task(1, { title: "root", status: "in_progress" }),
         task(2, { title: "jumped-into", parent_id: 1, owner: 7 }),
         task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
         task(30, { title: "agent-11-work", parent_id: 1, owner: 11 }),
@@ -712,7 +736,7 @@ describe("TaskGraph (graph mode)", () => {
     // registry but is done — hidden while the Done toggle is off. Before the
     // ghost fix the child dangled with no visible parent ("orphan").
     const tasks: TaskRow[] = [
-      task(1, { title: "root", status: "ongoing" }),
+      task(1, { title: "root", status: "in_progress" }),
       task(1815, { title: "done-parent", status: "done", parent_id: 1 }),
       task(1848, { title: "child", status: "in_progress", parent_id: 1815 }),
     ];
@@ -739,7 +763,7 @@ describe("TaskGraph (graph mode)", () => {
 
   it("walks a chain of hidden ancestors so a deep subtree stays connected", async () => {
     const tasks: TaskRow[] = [
-      task(1, { title: "root", status: "ongoing" }),
+      task(1, { title: "root", status: "in_progress" }),
       task(10, { title: "g-cancelled", status: "cancelled", parent_id: 1 }),
       task(11, { title: "g-done", status: "done", parent_id: 10 }),
       task(12, { title: "leaf", status: "in_progress", parent_id: 11 }),
@@ -853,7 +877,7 @@ describe("TaskGraph hover detail card", () => {
         reminder_count: 3,
       });
     const tasks: TaskRow[] = [
-      task(1, { title: "root", status: "ongoing" }),
+      task(1, { title: "root", status: "in_progress" }),
       fullTask,
     ];
     useTasks.mockReturnValue(ok(tasks));
@@ -1149,7 +1173,7 @@ describe("TaskGraph hover detail card", () => {
 
   it("shows empty states for unset fields and a plain parent id for orphans", async () => {
     const tasks: TaskRow[] = [
-      task(1, { title: "root", status: "ongoing" }),
+      task(1, { title: "root", status: "in_progress" }),
       task(2, { title: "orphan", parent_id: 999 }), // parent not in the registry
     ];
     useTasks.mockReturnValue(ok(tasks));
@@ -1171,7 +1195,7 @@ describe("TaskGraph hover detail card", () => {
 
   it("shows agent-created tasks by agent id", async () => {
     const tasks: TaskRow[] = [
-      task(1, { title: "root", status: "ongoing" }),
+      task(1, { title: "root", status: "in_progress" }),
       task(2, { title: "agent-made", parent_id: 1, created_by: "405", owner: 405 }),
     ];
     useTasks.mockReturnValue(ok(tasks));
@@ -1317,7 +1341,7 @@ describe("TaskGraph time filter (Task #1969)", () => {
 
   it("renders server-delivered out-of-window ancestors (ghost rows) dimmed in the graph", async () => {
     const tasks: TaskRow[] = [
-      task(1, { title: "root", status: "ongoing" }),
+      task(1, { title: "root", status: "in_progress" }),
       task(1815, { title: "old-parent", status: "done", parent_id: 1, ghost: true }),
       task(1848, { title: "child", status: "in_progress", parent_id: 1815 }),
     ];
@@ -1334,7 +1358,7 @@ describe("TaskGraph time filter (Task #1969)", () => {
 
   it("hides ghost ancestors in the kanban (they are graph-only scaffolding)", async () => {
     const tasks: TaskRow[] = [
-      task(1, { title: "root", status: "ongoing" }),
+      task(1, { title: "root", status: "in_progress" }),
       task(1815, { title: "old-parent", status: "done", parent_id: 1, ghost: true }),
       task(1848, { title: "child", status: "in_progress", parent_id: 1815 }),
     ];
