@@ -508,10 +508,15 @@ def send_system_note(
 
 
 def get_last_message(agent_id: int) -> str | None:
-    """Return the last message, or None when none yet.
+    """Return the agent's most recent AI turn text, or None when none yet.
 
-    The returned text is peer-authored, so it passes through the same
-    prompt-injection scan as inbound chat messages."""
+    The text is the agent's latest output, not necessarily addressed to you:
+    it may be text sent to another agent or an update for the user, and it is
+    not a message inbox. To check whether the agent sent you a message, look
+    at the messages you received, not this text. While the agent is working it
+    can be a half-finished preamble that ends mid-sentence (often with a
+    trailing colon), not a conclusion. The text is peer-authored, so it
+    passes through the same prompt-injection scan as inbound chat messages."""
     from ava.security import scan_content
 
     agent_id = coerce_typed(agent_id, "agent_id", int)
