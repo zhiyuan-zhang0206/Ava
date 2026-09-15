@@ -40,8 +40,6 @@ from typing import Any
 
 import ava
 from ava import _boot
-from shared import sdk_telemetry
-from shared.sdk_telemetry import run_metered
 
 # Identity set of live recorder objects. install() skips a target only when the
 # current top callable *is* one of these — robust to `ava.extend`'s wrap machinery,
@@ -61,6 +59,7 @@ _WRAPPED: list[tuple[Any, str]] = []
 @contextlib.contextmanager
 def _caller() -> Generator[None, None, None]:
     """Snapshot provenance before the call; metering never changes SDK behavior."""
+    from shared import sdk_telemetry
     from shared.external_caller import external_caller
 
     identity = {}
@@ -92,6 +91,8 @@ def _make_recorder(original: Callable[..., Any], fq: str) -> Callable[..., Any]:
 
     @functools.wraps(original)
     def recorder(*args: Any, **kwargs: Any) -> Any:
+        from shared.sdk_telemetry import run_metered
+
         with _caller():
             return run_metered(fq, original, args, kwargs)
 
@@ -99,6 +100,8 @@ def _make_recorder(original: Callable[..., Any], fq: str) -> Callable[..., Any]:
 
         @functools.wraps(original)
         async def async_recorder(*args: Any, **kwargs: Any) -> Any:
+            from shared import sdk_telemetry
+
             with _caller():
                 return await sdk_telemetry.run_metered_async(fq, original, args, kwargs)
 
@@ -121,6 +124,8 @@ def _make_mcp_recorder(original: Callable[..., Any]) -> Callable[..., Any]:
 
     @functools.wraps(original)
     def recorder(server: str, tool: str, *args: Any, **kwargs: Any) -> Any:
+        from shared.sdk_telemetry import run_metered
+
         with _caller():
             return run_metered(f"mcps.{server}.{tool}", original, (server, tool, *args), kwargs)
 

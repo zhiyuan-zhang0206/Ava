@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from ava._attach import attach, take_attachments
-from shared.lm.attach import ATTACH_MAX_FILE_BYTES, ATTACH_MAX_LABEL_CHARS
+from shared.lm.attach_constants import ATTACH_MAX_FILE_BYTES, ATTACH_MAX_LABEL_CHARS
 
 
 @pytest.fixture(autouse=True)
