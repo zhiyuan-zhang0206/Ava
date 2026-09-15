@@ -855,6 +855,30 @@ describe("plugin stat cards", () => {
     expect(screen.getByText("94% used - weekly")).toBeTruthy();
   });
 
+  it("the truncated label and the detail row disclose their full text via title", () => {
+    state.agents = [makeAgent({ agent_id: 1 })];
+    state.pluginStatDeclarations = [
+      { plugin: "codex_usage", id: "codex-a", label: "Codex · zhiyuan0206" },
+    ];
+    state.stats = statsWith([
+      {
+        plugin: "codex_usage",
+        id: "codex-a",
+        value: "6%",
+        detail: "94% used - weekly",
+        status: "ok",
+        updated_at: new Date().toISOString(),
+        updated_by: "macmini",
+      },
+    ]);
+    wrap(<AgentSidebar {...handlers} />);
+    openStats();
+    // the label truncates in the card; hover must disclose the full text
+    expect(screen.getByText("Codex · zhiyuan0206").getAttribute("title")).toBe("Codex · zhiyuan0206");
+    // same disclosure standard as the detail row
+    expect(screen.getByText("94% used - weekly").getAttribute("title")).toBe("94% used - weekly");
+  });
+
   it("a declared card with no value row is the empty state; orphan values stay hidden", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.pluginStatDeclarations = [
