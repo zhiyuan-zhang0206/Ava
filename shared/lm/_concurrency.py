@@ -1,11 +1,12 @@
 """Per-provider outbound LLM concurrency caps.
 
-The default `AVA_LLM_MAX_CONCURRENT=deepseek:31` caps concurrent async calls
-across the hosted process, not per agent. Sync callers use a separate limiter.
-The cap applies per provider *around the whole SDK call* — SDK-internal retries
-included. An explicit empty value disables all caps. Operators allocate provider
-account capacity across processes and hosts independently of agent admission
-and database pools; these process-local caps do not enforce an account-wide sum.
+`AVA_LLM_MAX_CONCURRENT` is empty by default (no caps); a configured value
+such as `deepseek:31` caps concurrent async calls across the hosted process,
+not per agent. Sync callers use a separate limiter. The cap applies per
+provider *around the whole SDK call* — SDK-internal retries included. Operators
+allocate provider account capacity across processes and hosts independently of
+agent admission and database pools; these process-local caps do not enforce an
+account-wide sum.
 
 Two acquire flavors, both pass-through when the provider is unconfigured:
 
@@ -25,8 +26,11 @@ crash.
 
 Design notes (from the 2026-08-05 429 audit, task #786): industry practice
 for an account-level concurrency ceiling is client-side concurrency control
-(primary) + exponential-backoff retry (secondary) — the limiter is the
-primary layer; `invoke_text`'s backoff stays the secondary layer.
+(primary) + exponential-backoff retry (secondary). Default off (2026-09-16,
+task #3590): with no cap the provider's own 429/billing signal stays visible
+through `llm_provider_error`, and the retry/backoff path in
+`agent/graph/_llm.py` remains the backstop; the mechanism stays available for
+operators who must protect an account's concurrency ceiling.
 
 Caveat: a slot held by one LLM call is not
 re-entrant — an agent streaming under a held slot whose `execute_code` then
