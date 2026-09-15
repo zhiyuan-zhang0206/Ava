@@ -109,9 +109,10 @@ _NO_PAGE_MARKER = "No page selected"
 # [selected]`; that id is how the daemon learns a connection's current page.
 # The marker is not always last on the line: an isolated-context tab renders
 # `[selected] isolatedContext=<name>` (e.g. `29: Discord (url) [selected]
-# isolatedContext=reg-7`), so trailing content after the marker is tolerated --
-# the leading `id:` + marker still identifies the line.
-_SELECTED_RE = re.compile(r"^\s*(\d+):.*\[selected\].*$", re.MULTILINE)
+# isolatedContext=reg-7`). Accept only `key=value` suffixes (or nothing) after
+# the marker -- a title that happens to contain a literal `[selected]` followed
+# by other text must not be mistaken for the marker.
+_SELECTED_RE = re.compile(r"^\s*(\d+):.*\[selected\](?:\s+\S+=\S+)*\s*$", re.MULTILINE)
 
 # Upstream session teardown (chrome-devtools-mcp died: Chrome restart, npx crash,
 # OOM). The next upstream call raises one of these from the MCP stdio transport.
@@ -340,11 +341,10 @@ class ChromeMcpDaemon:
                 # that drifted off the parseable shape registers nothing.
                 register_created_page(_selected_id(result), self.generation)
             elif name == "close_page":
-                # A clean close drops the TTL slot with the page; bool is
-                # rejected so a JSON `true` can never alias page id 1.
-                closed_id = args.get("pageId")
-                if isinstance(closed_id, int) and not isinstance(closed_id, bool):
-                    drop_page_ttl(closed_id)
+                # A clean close drops the TTL slot with the page; the shared
+                # `_page_id` normalization accepts an integral-float pageId too
+                # (bool is rejected so a JSON `true` can never alias page id 1).
+                drop_page_ttl(_page_id(args.get("pageId")))
         return result, self._next_page(name, args, result, current_page)
 
     @staticmethod

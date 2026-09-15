@@ -215,6 +215,16 @@ def test_selected_id_parses_isolated_context_suffix() -> None:
     assert _selected_id(_ok("  1: https://a\n  2: https://b isolatedContext=x")) is None
 
 
+def test_selected_id_rejects_marker_inside_title() -> None:
+    """A title containing a literal `[selected]` followed by more title text is
+    not the marker: the suffix grammar admits only `key=value` tokens, so such
+    a line must parse to None (a false pick would mis-affinity the page)."""
+    assert _selected_id(_ok("  3: my [selected] title (https://url)")) is None
+    # The real marker stays parseable when a title contains the literal too.
+    line = "  3: my [selected] title (https://url) [selected] isolatedContext=reg-7"
+    assert _selected_id(_ok(line)) == 3
+
+
 def test_next_page_select_normalizes_page_id() -> None:
     """select_page tracks the id the caller asked for: an integral float (the
     JSON `number` shape) normalizes to the int; a value that names no page
@@ -451,6 +461,17 @@ async def test_agent_affinity_isolated_context_suffix_registers_page() -> None:
     assert get_agent_page(7, d.generation) == 1
     deadline, generation = page_lifecycle._PAGE_TTL_DEADLINES[1]
     assert generation == d.generation and deadline > time.monotonic()
+
+
+async def test_agent_close_with_integral_float_drops_ttl_slot() -> None:
+    """close_page(2.0) must drop page 2's TTL slot like an integer close --
+    the int-only guard left the slot for the sweep to clean up late."""
+    d, _up = _daemon()
+    await d.call_tool_for_agent("new_page", {"url": "a"}, 7)  # page 1
+    await d.call_tool_for_agent("new_page", {"url": "b"}, 7)  # page 2
+    assert 2 in page_lifecycle._PAGE_TTL_DEADLINES
+    await d.call_tool_for_agent("close_page", {"pageId": 2.0}, 7)
+    assert 2 not in page_lifecycle._PAGE_TTL_DEADLINES
 
 
 async def test_handle_client_agent_id_adopts_agent_page(tmp_path: Path) -> None:
