@@ -54,6 +54,27 @@ class SandboxSettings(EnvSettings):
             )
         return self
 
+    @model_validator(mode="after")
+    def _check_exec_output_crop_relation(self) -> Self:
+        """The soft-crop size triggers must not sit below the hard inline cap.
+
+        A char/byte trigger below `exec_output_max_chars` would preview an
+        output the hard limit would have shown in full — the agent would get
+        less than the configured inline limit promises. A violated relation is
+        a config error the operator must fix.
+        """
+        for name, value in (
+            ("exec_output_crop_after_chars", self.exec_output_crop_after_chars),
+            ("exec_output_crop_after_bytes", self.exec_output_crop_after_bytes),
+        ):
+            if value < self.exec_output_max_chars:
+                raise ValueError(
+                    f"{name} ({value}) must be >= exec_output_max_chars "
+                    f"({self.exec_output_max_chars}) - the soft preview must not "
+                    f"trigger below the hard inline limit"
+                )
+        return self
+
     exec_timeout_seconds: float = Field(
         default=300.0,
         alias="AVA_EXEC_TIMEOUT_SECONDS",
@@ -95,10 +116,36 @@ class SandboxSettings(EnvSettings):
     )
 
     exec_output_crop_after_lines: int = Field(
-        default=120,
+        default=300,
         ge=0,
         alias="AVA_EXEC_OUTPUT_CROP_AFTER_LINES",
-        description="Soft preview threshold: crop outputs with more than this many splitlines() lines, keeping the configured head and tail. Zero disables soft cropping. Crop only when the marker-inclusive preview is shorter and the full output can be archived; existing hard caps still apply.",
+        description="Soft preview line trigger: crop outputs with more than this many splitlines() lines. Part of a three-way OR - outputs longer than exec_output_crop_after_chars characters or exec_output_crop_after_bytes UTF-8 bytes also preview. Zero disables soft cropping entirely. Crop only when the marker-inclusive preview is shorter and the full output can be archived; existing hard caps still apply.",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    exec_output_crop_after_chars: int = Field(
+        default=64 * 1024,
+        ge=1,
+        alias="AVA_EXEC_OUTPUT_CROP_AFTER_CHARS",
+        description="Soft preview character trigger: crop outputs longer than this many characters even when their line count is under the line trigger (long lines). Must be >= exec_output_max_chars so a preview never triggers below the hard inline limit. Zero is not allowed; set exec_output_crop_after_lines=0 to disable soft cropping entirely.",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    exec_output_crop_after_bytes: int = Field(
+        default=64 * 1024,
+        ge=1,
+        alias="AVA_EXEC_OUTPUT_CROP_AFTER_BYTES",
+        description="Soft preview UTF-8 byte trigger: crop outputs whose encoded size exceeds this even when both their character count and line count are under their triggers (multibyte text). Must be >= exec_output_max_chars. Zero is not allowed; set exec_output_crop_after_lines=0 to disable soft cropping entirely.",
         json_schema_extra={
             "restart_required": "agent",
             "writable": True,
