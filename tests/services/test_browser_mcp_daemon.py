@@ -538,6 +538,32 @@ def test_parse_page_listing_extracts_urls() -> None:
     assert parse_page_listing("") == {}
 
 
+def test_parse_page_listing_tolerates_titled_and_suffix_shapes() -> None:
+    """chrome-devtools-mcp renders a titled page as `<id>: <title> (<url>)`,
+    optionally followed by ` [selected]` and ` key=value` suffixes (an
+    isolated-context tab appends ` isolatedContext=<name>`). Missing those
+    shapes read a live page as already-closed -- the sweeps then dropped its
+    slot without closing the tab (#3570)."""
+    assert parse_page_listing(
+        "  29: Discord (https://discord.com/app) [selected] isolatedContext=discord-reg-7"
+    ) == {29: "https://discord.com/app"}
+    assert parse_page_listing("  4: My Page (https://example.com/x)") == {
+        4: "https://example.com/x"
+    }
+    # An untitled page with the isolated suffix parses too.
+    assert parse_page_listing("  5: https://x isolatedContext=reg-7") == {5: "https://x"}
+    # A title containing parens: the URL is the last `(…)` group.
+    assert parse_page_listing("  6: My Page (draft) (https://url)") == {6: "https://url"}
+    # A URL that itself contains parens stays whole for the untitled shape ...
+    assert parse_page_listing("  7: https://en.wikipedia.org/wiki/Foo_(bar)") == {
+        7: "https://en.wikipedia.org/wiki/Foo_(bar)"
+    }
+    # ... and for a titled one (the `(` inside the URL is not a label paren).
+    assert parse_page_listing("  8: Wiki Page (https://en.wikipedia.org/wiki/Foo_(bar))") == {
+        8: "https://en.wikipedia.org/wiki/Foo_(bar)"
+    }
+
+
 def test_local_host_port_only_matches_local_http() -> None:
     assert local_host_port("http://localhost:3112/x") == ("localhost", 3112)
     assert local_host_port("http://127.0.0.1/") == ("127.0.0.1", 80)
@@ -881,6 +907,51 @@ async def test_reap_expired_pages_closes_only_expired_stack_pages() -> None:
     assert get_agent_page(8, d.generation) == 2
     assert 1 not in page_lifecycle._PAGE_TTL_DEADLINES
     assert 2 in page_lifecycle._PAGE_TTL_DEADLINES
+
+
+class _TitledListing(FakeUpstream):
+    """Renders titled lines the way chrome-devtools-mcp does --
+    `<id>: <title> (<url>) [selected] [isolatedContext=<name>]` -- so sweep
+    behavior is exercised against the shapes the incident page had (#3570)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.isolated: dict[int, str] = {}
+
+    def _listing(self) -> types.CallToolResult:
+        lines: list[str] = []
+        for pid, url in self.pages.items():
+            line = f"  {pid}: Page {pid} ({url})"
+            if pid == self.selected:
+                line += " [selected]"
+            if pid in self.isolated:
+                line += f" isolatedContext={self.isolated[pid]}"
+            lines.append(line)
+        return _ok("\n".join(lines))
+
+
+async def test_reap_expired_pages_closes_titled_isolated_page() -> None:
+    """End-to-end incident shape: an expired page whose listing line reads
+    `1: Page 1 (url) [selected] isolatedContext=reg-7` must be CLOSED by the
+    TTL sweep. The titled/suffixed line used to parse to no URL, and the sweep
+    dropped the slot as "already closed" without ever closing the tab
+    (2026-09-15 19:04 shape, #3570)."""
+    up = _TitledListing()
+    d = ChromeMcpDaemon(up)  # type: ignore[arg-type]
+    await d.call_tool_for_agent("new_page", {"url": "https://discord.com/app"}, 7)
+    up.isolated[1] = "discord-reg-7"
+    up.calls.clear()
+    _expire(1)
+
+    closed = await page_lifecycle.reap_expired_pages(d)
+
+    assert closed == 1
+    assert up.pages == {}
+    assert [(c[0], c[1]) for c in up.calls if c[0] == "close_page"] == [
+        ("close_page", {"pageId": 1})
+    ]
+    assert 1 not in page_lifecycle._PAGE_TTL_DEADLINES
+    assert get_agent_page(7, d.generation) is None
 
 
 async def test_reap_expired_pages_never_touches_unregistered_page() -> None:
