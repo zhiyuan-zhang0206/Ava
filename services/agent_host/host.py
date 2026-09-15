@@ -561,9 +561,9 @@ class AgentHost:
 
         Database age identifies backlog; cancellation additionally requires the
         dispatcher's current turn-progress clock to be stale. Expired foreign
-        owners are rediscovered even with only claimed/checkpoint work, since
-        their lease may expire after host startup. Wakes retain normal admission
-        and resource fences. Held maintenance only wakes its restart cohort.
+        owners include quiet idle rows whose lease expires after boot. Wakes
+        retain admission/resource fences; an empty halted claim spends no model
+        call. Held maintenance only wakes its restart cohort.
         """
         held_wakes = maintenance_receipts.pending_wakes(self._maintenance_failed)
         if held_wakes is not None:
@@ -611,7 +611,8 @@ class AgentHost:
                     "    WHERE lease.agent_id=m.id AND (lease.status IN "
                     "    ('requested','accepted','active') OR lease.delta_version>lease.applied_version "
                     "    OR (lease.automatic AND lease.handoff_applied_at IS NULL))))) "
-                    "  OR (m.status='running' AND m.runtime_kind='hosted' "
+                    "  OR (m.status IN ('running','idling') AND m.runtime_kind='hosted' "
+                    "      AND m.runtime_owner IS NOT NULL AND m.last_turn_fatal_at IS NULL "
                     "      AND m.runtime_owner IS DISTINCT FROM %s "
                     "      AND (m.lease_expires_at IS NULL OR m.lease_expires_at<=now()))) "
                     "  AND m.machine = %s "

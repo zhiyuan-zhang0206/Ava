@@ -179,9 +179,12 @@ async def test_expired_predecessor_is_rediscovered_after_boot_without_pending_me
         await host.aclose()
 
 
-@pytest.mark.parametrize("boundary", ["fresh", "same_owner", "foreign", "idling", "terminated"])
+@pytest.mark.parametrize("status", ["running", "idling"])
+@pytest.mark.parametrize(
+    "boundary", ["fresh", "same_owner", "foreign", "unowned", "fatal", "terminated"]
+)
 async def test_owner_recovery_scan_excludes_unrelated_rows(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, boundary: str
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, status: str, boundary: str
 ) -> None:
     incarnation = await _admit(aops_pool)
     agent = incarnation.agent_id
@@ -192,18 +195,26 @@ async def test_owner_recovery_scan_excludes_unrelated_rows(
         "UPDATE agents_meta SET status=%s,machine=%s,lease_expires_at=now()+make_interval(secs=>%s) "
         "WHERE id=%s",
         (
-            boundary if boundary in {"idling", "terminated"} else "running",
+            "terminated" if boundary == "terminated" else status,
             "another-machine" if boundary == "foreign" else machine_name(),
             60 if boundary == "fresh" else -60,
             agent,
         ),
     )
+    if boundary == "unowned":
+        db_conn.execute(
+            "UPDATE agents_meta SET runtime_owner=NULL,runtime_generation=NULL WHERE id=%s",
+            (agent,),
+        )
+    if boundary == "fatal":
+        db_conn.execute("UPDATE agents_meta SET last_turn_fatal_at=now() WHERE id=%s", (agent,))
     db_conn.commit()
     assert await host.pending_inbound_wakes(60) == []
 
 
+@pytest.mark.parametrize("status", ["running", "idling"])
 async def test_expired_scan_wake_cannot_steal_a_live_predecessor(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, status: str
 ) -> None:
     incarnation = await _admit(aops_pool)
     agent = incarnation.agent_id
@@ -223,9 +234,10 @@ async def test_expired_scan_wake_cannot_steal_a_live_predecessor(
                 pid=predecessor.pid, birth=psutil.Process(predecessor.pid).create_time()
             )
             db_conn.execute(
-                "UPDATE agents_meta SET incarnation_resources=%s,"
+                "UPDATE agents_meta SET status=%s,incarnation_resources=%s,"
                 "lease_expires_at=now()-interval '1s' WHERE id=%s",
                 (
+                    status,
                     Jsonb(
                         resources.model_copy(update={"host_process": native}).model_dump(
                             mode="json"
