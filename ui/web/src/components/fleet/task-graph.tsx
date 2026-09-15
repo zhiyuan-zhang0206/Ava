@@ -309,11 +309,13 @@ export function TaskGraph({
   onSelectTask,
   selectedAgentId,
   onSelectAgent,
+  routeTaskId,
 }: {
   selectedTaskId: number | null;
   onSelectTask: (id: number | null) => void;
   selectedAgentId: number | null;
   onSelectAgent: (id: number | null) => void;
+  routeTaskId?: number | null;
 }) {
   const t = useTranslations("fleet.task");
   const router = useRouter();
@@ -443,12 +445,23 @@ export function TaskGraph({
     [subtasks, ghostTasks, tasks],
   );
 
+  // A route jump (the inspector's ?task= deep link, task #2909) that is still
+  // the selected task carries the user's freshest intent: it outranks an
+  // ambient agent-only selection — the Inbox auto-selects its default row
+  // right after mount (task #3500) — until the user moves the task selection
+  // somewhere else. The pair-sync effects below read this flag.
+  const routeCarried = routeTaskId != null && selectedTaskId === routeTaskId;
+
   // Bidirectional sync: when an agent is selected externally (from the
   // notification queue, graph, or review panel), auto-select the first task
   // owned by that agent. When user manually selects a task, also propagate
   // its owner as the selected agent so the graph + notification panels sync.
   useEffect(() => {
     if (selectedAgentId == null) return;
+    // A route-carried task is exempt: never re-pair the jump away to the
+    // agent's first task (Effect B syncs the agent to the task's owner at
+    // first resolve instead).
+    if (routeCarried) return;
     // If the currently selected task already belongs to this agent, no change.
     const cur = tasks.find((t) => t.id === selectedTaskId);
     if (cur?.owner === selectedAgentId) return;
@@ -472,7 +485,11 @@ export function TaskGraph({
   //    round 2: 9:10 <-> 7:20 forever);
   //  - on that first resolved run, a still-crossed task side is re-paired
   //    right here (the agent-side effect above only reacts to agent changes,
-  //    so a cold mount never got a second chance to pick the agent's task).
+  //    so a cold mount never got a second chance to pick the agent's task);
+  //  - a route-carried task (the inspector's jump, task #3500) is EXEMPT from
+  //    the seed re-pair — the jump outranks an ambient agent-only selection
+  //    (the Inbox's default row), so the first resolved run syncs the agent
+  //    to the task's owner instead.
   // Either way at most one side of the pair writes per commit; letting both
   // write would let each effect's write re-trigger the other forever.
   const lastSyncedTaskRef = useRef<number | null>(null);
@@ -487,7 +504,7 @@ export function TaskGraph({
     if (!task) return;
     const firstResolvedTaskRun = !taskSyncSeededRef.current;
     taskSyncSeededRef.current = true;
-    if (firstResolvedTaskRun && selectedAgentId != null) {
+    if (firstResolvedTaskRun && selectedAgentId != null && !routeCarried) {
       if (task.owner !== selectedAgentId) {
         const first = tasks.find((t) => t.owner === selectedAgentId);
         if (first) onSelectTask(first.id);
@@ -496,7 +513,7 @@ export function TaskGraph({
       onSelectAgent(task.owner);
     }
     lastSyncedTaskRef.current = selectedTaskId;
-  }, [selectedTaskId, tasks, selectedAgentId, onSelectAgent, onSelectTask]);
+  }, [selectedTaskId, tasks, selectedAgentId, routeCarried, onSelectAgent, onSelectTask]);
 
   // When user clicks a task, sync its owner as the selected agent (bidirectional).
   const handleSelectTask = useCallback((taskId: number | null) => {
@@ -626,6 +643,7 @@ export function TaskGraph({
           onSelectTask={handleSelectTask}
           selectedAgentId={selectedAgentId}
           onSelectAgent={onSelectAgent}
+          routeCarried={routeCarried}
         />
       </div>
     );

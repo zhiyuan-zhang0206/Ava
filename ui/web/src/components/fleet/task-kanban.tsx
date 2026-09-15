@@ -33,6 +33,7 @@ export function TaskKanban({
   onSelectTask,
   selectedAgentId,
   onSelectAgent,
+  routeCarried,
 }: {
   tasks: readonly TaskRow[];
   statusFill: Record<string, string>;
@@ -41,6 +42,7 @@ export function TaskKanban({
   onSelectTask: (id: number | null) => void;
   selectedAgentId: number | null;
   onSelectAgent: (id: number | null) => void;
+  routeCarried?: boolean;
 }) {
   const t = useTranslations("fleet.task");
   const laneLabels = [t("status.inProgress"), t("status.done"), t("status.canceled")] as const;
@@ -54,6 +56,10 @@ export function TaskKanban({
   useEffect(() => {
     if (selectedAgentId == null) return;
     if (lastSyncedAgentRef.current === selectedAgentId) return;
+    // A route-carried task (the inspector's jump, task #3500) outranks the
+    // ambient agent selection: never re-pair it away — TaskGraph syncs the
+    // agent to the task's owner instead.
+    if (routeCarried) return;
     const cur = tasks.find((t) => t.id === selectedTaskId);
     if (cur?.owner === selectedAgentId) { lastSyncedAgentRef.current = selectedAgentId; return; }
     const first = tasks.find((t) => t.owner === selectedAgentId && t.parent_id !== null);

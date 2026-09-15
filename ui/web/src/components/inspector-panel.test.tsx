@@ -1510,7 +1510,7 @@ describe("InspectorPanel plugin widgets", () => {
     render(<InspectorPanel agentId={1} />);
 
     // The console titles a taskList by default (localized copy).
-    expect(await screen.findByText("Today's tasks")).toBeTruthy();
+    expect(await screen.findByText("Tasks")).toBeTruthy();
     const first = await screen.findByRole("link", { name: /Ship the inspector fix/ });
     expect(first.getAttribute("href")).toBe("/fleet?task=42");
     expect(screen.getByRole("link", { name: /Reply to QA/ }).getAttribute("href")).toBe(
@@ -1547,7 +1547,7 @@ describe("InspectorPanel plugin widgets", () => {
   it("renders no widget area when no plugin registers one", async () => {
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(getAgentInspectWidgets).toHaveBeenCalled());
-    expect(screen.queryByText("Today's tasks")).toBeNull();
+    expect(screen.queryByText("Tasks")).toBeNull();
   });
 
   it("a widgets fetch failure leaves the rest of the panel intact", async () => {
@@ -1558,6 +1558,6 @@ describe("InspectorPanel plugin widgets", () => {
     await screen.findByRole("link", { name: "Open run timeline" });
     await screen.findAllByText("Cost");
     expect(screen.getAllByText("Activity").length).toBeGreaterThan(0);
-    expect(screen.queryByText("Today's tasks")).toBeNull();
+    expect(screen.queryByText("Tasks")).toBeNull();
   });
 });

@@ -39,7 +39,7 @@ describe("InspectWidgetSection", () => {
   it("renders one fleet-task link per task row under the console default title", () => {
     render(<InspectWidgetSection widget={widget()} />);
     // The console's own localized title stands in when the plugin set none.
-    expect(screen.getByText("Today's tasks")).toBeTruthy();
+    expect(screen.getByText("Tasks")).toBeTruthy();
     const links = screen.getAllByRole("link");
     expect(links).toHaveLength(2);
     expect(links[0].getAttribute("href")).toBe("/fleet?task=42");
@@ -51,7 +51,7 @@ describe("InspectWidgetSection", () => {
   it("uses a plugin-declared title when given", () => {
     render(<InspectWidgetSection widget={widget({ title: "Agent tasks" })} />);
     expect(screen.getByText("Agent tasks")).toBeTruthy();
-    expect(screen.queryByText("Today's tasks")).toBeNull();
+    expect(screen.queryByText("Tasks")).toBeNull();
   });
 
   it("renders nothing for an unknown kind", () => {

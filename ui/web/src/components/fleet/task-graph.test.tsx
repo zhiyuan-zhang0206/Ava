@@ -566,6 +566,110 @@ describe("TaskGraph (graph mode)", () => {
     expect(harnessRenders).toBeLessThan(30);
   });
 
+  // Stateful harness for the route-carried pin (task #3500): the component
+  // owns the pair; the external button stands in for an ambient agent-only
+  // write (the Inbox's default-row sync, another queue row).
+  function RouteCarriedHarness() {
+    const [agent, setAgent] = useState<number | null>(null);
+    const [task, setTask] = useState<number | null>(2);
+    harnessRenders += 1;
+    if (harnessRenders > 60) {
+      throw new Error("selection oscillation: harness re-rendered more than 60 times");
+    }
+    return (
+      <div>
+        <div data-testid="selection-state">{`${agent}:${task}`}</div>
+        <button type="button" onClick={() => setAgent(9)}>
+          external-select-agent-9
+        </button>
+        <TaskGraph
+          selectedAgentId={agent}
+          onSelectAgent={setAgent}
+          selectedTaskId={task}
+          routeTaskId={2}
+          onSelectTask={setTask}
+        />
+      </div>
+    );
+  }
+
+  it("keeps a route-carried task when an agent is already selected — the jump outranks the Inbox's default row (task #3500)", async () => {
+    // Prod report: ?task=N mounted with an ambient agent selection (the Inbox
+    // auto-selects its default row right after mount) and the first-resolved
+    // run re-paired the jump away to that agent's first task — the ring landed
+    // on the wrong node. A route-carried task is exempt from the seed re-pair;
+    // the agent syncs to the task's owner instead.
+    const onSelectTask = vi.fn();
+    const onSelectAgent = vi.fn();
+    useTasks.mockReturnValue(
+      ok([
+        task(1, { title: "root", status: "ongoing" }),
+        task(2, { title: "jumped-into", parent_id: 1, owner: 7 }),
+        task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
+      ]),
+    );
+    render(
+      <TaskGraph
+        selectedAgentId={9}
+        onSelectAgent={onSelectAgent}
+        selectedTaskId={2}
+        routeTaskId={2}
+        onSelectTask={onSelectTask}
+      />,
+    );
+
+    await waitFor(() => expect(onSelectAgent).toHaveBeenCalledWith(7), { timeout: 2000 });
+    expect(onSelectTask).not.toHaveBeenCalled();
+  });
+
+  it("keeps a route-carried task pinned when an agent-only write lands after the jump settled (task #3500)", async () => {
+    resetMockSettings({ "display.task_graph_mode": "kanban" });
+    useTasks.mockReturnValue(
+      ok([
+        task(1, { title: "root", status: "ongoing" }),
+        task(2, { title: "jumped-into", parent_id: 1, owner: 7 }),
+        task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
+      ]),
+    );
+    harnessRenders = 0;
+    render(<RouteCarriedHarness />);
+
+    // The jump lands on its own: the agent follows the task (7).
+    await waitFor(() => expect(screen.getByTestId("selection-state").textContent).toBe("7:2"), { timeout: 4000 });
+
+    // A later agent-only write must not steal the jump; the pair settles crossed.
+    fireEvent.click(screen.getByText("external-select-agent-9"));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(screen.getByTestId("selection-state").textContent).toBe("9:2");
+    expect(harnessRenders).toBeLessThan(30);
+  });
+
+  it("releases the route pin once the task selection moves off the route (task #3500)", async () => {
+    resetMockSettings({ "display.task_graph_mode": "kanban" });
+    useTasks.mockReturnValue(
+      ok([
+        task(1, { title: "root", status: "ongoing" }),
+        task(2, { title: "jumped-into", parent_id: 1, owner: 7 }),
+        task(20, { title: "agent-9-work", parent_id: 1, owner: 9 }),
+        task(30, { title: "agent-11-work", parent_id: 1, owner: 11 }),
+      ]),
+    );
+    harnessRenders = 0;
+    render(<RouteCarriedHarness />);
+    await waitFor(() => expect(screen.getByTestId("selection-state").textContent).toBe("7:2"), { timeout: 4000 });
+    await waitFor(() => expect(screen.getAllByText(/#30/).length).toBeGreaterThan(0), { timeout: 4000 });
+
+    // User picks another card: the pin no longer applies.
+    fireEvent.click(screen.getAllByText(/#30/)[0]);
+    await waitFor(() => expect(screen.getByTestId("selection-state").textContent).toBe("11:30"));
+
+    // Agent-only writes resolve toward the agent side again (board follows).
+    fireEvent.click(screen.getByText("external-select-agent-9"));
+    await waitFor(() => expect(screen.getByTestId("selection-state").textContent).toBe("9:20"));
+  });
+
   it("renders a static selection ring — no perpetual pulse on the selected node (task #3278)", async () => {
     // User report: the selected item "keeps flashing". The ring used Tailwind's
     // animate-pulse (2s infinite opacity loop); selection stays marked by the
