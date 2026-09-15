@@ -588,13 +588,18 @@ describe("CardHeader sticky header (task #3136)", () => {
     const btn = container.querySelector("button")!;
     expect(btn.getAttribute("data-stuck")).toBe("true");
     expect(btn.className).toContain("backdrop-blur-md");
-    // The stuck variant's edge seals ride on box-shadow (tasks #3224/#3308).
+    // The right-gutter seal rides on box-shadow (#3224); the bottom mask is
+    // a paint-only ::after band with the separator line at its bottom
+    // (#3536) — no element border and no height compensation, so a
+    // stuck/unstuck flip stays layout-neutral by construction (the old +1px
+    // border/-mb-px pair drove the ResizeObserver pin loop, user report
+    // 2026-09-12).
     expect(btn.className).toContain("shadow-[");
-    expect(btn.className).toContain("border-b");
-    // …with the border's height compensated: a bare border made the stuck
-    // header 1px taller than the unstuck one, and that 1px drove the
-    // ResizeObserver pin loop (user report 2026-09-12).
-    expect(btn.className).toContain("-mb-px");
+    expect(btn.className).toContain("16px_0_0_0_var(--background)");
+    expect(btn.className).toContain("after:border-b");
+    expect(btn.className).toContain("after:top-full");
+    expect(btn.className).not.toContain("-mb-px");
+    expect(btn.className).not.toContain("0_2px_0_0_var(--background)");
     expect(btn.className).toContain("motion-reduce:transition-none");
   });
 
