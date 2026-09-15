@@ -98,7 +98,7 @@ def invoke_text(
 
     `provider` is the `shared/lm/factory.py` provider key (`deepseek` /
     `claude` / …) for the outbound concurrency limiter
-    (`shared/lm/_concurrency.py`, DeepSeek capped by default); `None` skips
+    (`shared/lm/_concurrency.py`, no cap unless configured); `None` skips
     the limiter entirely. `usage_source`, when supplied, is persisted with
     the completed `llm_usage` event as an auxiliary-path discriminator.
     """
