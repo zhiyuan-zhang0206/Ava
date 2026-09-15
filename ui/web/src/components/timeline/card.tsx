@@ -303,32 +303,40 @@ export const STICKY_HEADER_CLS = "sticky top-11 z-10";
 // it. Tailwind needs the literal class string (underscores = the calc spaces).
 export const STICKY_CHILD_HEADER_CLS =
   "sticky top-[calc(2.75rem_+_var(--turn-header-h,0px))] z-[5]";
-// The stuck variant must stay LAYOUT-NEUTRAL: the border used to make it
-// 1px taller than the unstuck one, and that 1px fed the timeline's
-// ResizeObserver — every stuck/unstuck flip around a scroll boundary fired
-// a layout change that pinned the reader back to the bottom, and the flips
-// then flip-flopped in a loop (user report 2026-09-12). -mb-px removes the
-// border's 1px from the box the following content sees; the border line
-// itself still renders (sticky z-10 draws it above the body sliding under).
+// The stuck variant must stay LAYOUT-NEUTRAL: a stuck/unstuck flip must not
+// change the header's border box, or the ResizeObserver that feeds
+// --turn-header-h (run-block.tsx) re-fires around a scroll boundary, the
+// resulting layout change pins the reader back to the bottom, and the flips
+// then flip-flop in a loop (user report 2026-09-12). Every edge treatment
+// below is therefore paint-only: no borders, no margins — the former +1px
+// border/-mb-px pair is gone (task #3536).
 //
-// Two paint-only seals close the mask's edges (tasks #3224/#3308). Both are
-// box-shadow copies — layout-neutral like -mb-px; shadows never feed layout:
+// One paint-only seal closes the mask's right edge (task #3224) — a
+// box-shadow copy; shadows never feed layout:
 // - 16px right: the block root ends where the scroller's reserved scrollbar
 //   gutter begins; without the seal the unmasked strip shows the body
-//   scrolling past as a vertical seam (QA #3224).
-// - 2px bottom: sub-pixel / single-frame slits between this header's bottom
-//   edge and a child header pinned just below it (pin-line desync right at a
-//   sticky transition, QA #3308) stay covered by the opaque copy.
-// The border-b goes fully opaque for the same reason: content sliding under
-// the stuck header must not ghost through a translucent 1px line. The seal
-// color is the raw token (var(--background)) — the theme token lives in lab
-// space, so the hsl(var(--background)) form is invalid at computed-value
-// time and silently drops the whole box-shadow (verified in-browser).
+//   scrolling past as a vertical seam. The seal color is the raw token
+//   (var(--background)) — the theme token lives in lab space, so the
+//   hsl(var(--background)) form is invalid at computed-value time and
+//   silently drops the whole box-shadow (verified in-browser).
+//
+// The bottom edge is a paint-only ::after band (task #3536): 2px of the
+// header's own masked surface (bg-background/95 + backdrop-blur-md, so the
+// color matches the header composite rather than the raw token), then the
+// fully-opaque 1px separator line at its bottom. The band covers sub-pixel /
+// single-frame slits between this header and a child header pinned just
+// below it (pin-line desync right at a sticky transition, QA #3308), while
+// the visible signature stays [surface][line][next surface] flush. The raw-
+// token seal + in-flow border it replaced left a constant 1-2px color band
+// under the line that read as a gap (user report 2026-09-15). The line
+// stays fully opaque so content sliding under cannot ghost through it.
 
 export const STUCK_HEADER_CLS =
-  "bg-background/95 backdrop-blur-md border-b border-border " +
-  "-mb-px " +
-  "shadow-[0_1px_2px_0_rgba(0,0,0,0.05),16px_0_0_0_var(--background),0_2px_0_0_var(--background)] " +
+  "bg-background/95 backdrop-blur-md " +
+  "shadow-[16px_0_0_0_var(--background)] " +
+  "after:absolute after:inset-x-0 after:top-full after:h-[3px] after:content-[''] " +
+  "after:bg-background/95 after:backdrop-blur-md after:border-b after:border-border " +
+  "after:pointer-events-none " +
   "transition-[background-color,box-shadow,border-color] duration-150 ease-out motion-reduce:transition-none";
 export const UNSTUCK_HEADER_CLS =
   "bg-transparent transition-[background-color,box-shadow,border-color] duration-150 ease-out motion-reduce:transition-none";

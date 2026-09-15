@@ -327,16 +327,15 @@ describe("TurnBlock component", () => {
     expect(toggle.getAttribute("data-expanded")).toBe("true");
     expect(toggle.getAttribute("data-stuck")).toBe("true");
     expect(toggle.className).toContain("backdrop-blur-md");
-    // The stuck variant carries its paint-only edge seals: 16px right over
-    // the scroller gutter (#3224) and 2px bottom against child-pin slits (#3308).
+    // The stuck variant carries its paint-only edge treatment: a 16px right
+    // box-shadow seal over the scroller gutter (#3224) and a ::after band
+    // covering child-pin slits with the separator line at its bottom (#3308,
+    // retuned by #3536 — no element border, no height compensation).
     expect(toggle.className).toContain("shadow-[");
     expect(toggle.className).toContain("16px_0_0_0_var(--background)");
-    expect(toggle.className).toContain("0_2px_0_0_var(--background)");
-    expect(toggle.className).toContain("border-b");
-    // …with the border's height compensated: a bare border made the stuck
-    // header 1px taller than the unstuck one, and that 1px drove the
-    // ResizeObserver pin loop (user report 2026-09-12).
-    expect(toggle.className).toContain("-mb-px");
+    expect(toggle.className).toContain("after:border-b");
+    expect(toggle.className).not.toContain("0_2px_0_0_var(--background)");
+    expect(toggle.className).not.toContain("-mb-px");
     expect(toggle.className).toContain("motion-reduce:transition-none");
   });
 
@@ -360,7 +359,7 @@ describe("TurnBlock component", () => {
     expect(onToggle).toHaveBeenCalledTimes(1);
   });
 
-  it("observes the header's border box so stuck-border changes re-measure", () => {
+  it("observes the header's full border box for the nested pin offset", () => {
     const observe = vi.fn();
     class FakeResizeObserver {
       observe = observe;
