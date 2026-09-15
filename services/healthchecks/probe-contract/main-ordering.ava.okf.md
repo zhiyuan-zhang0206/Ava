@@ -21,6 +21,13 @@ the daemon being revived. A terminal verdict skips respawn because another
 unit owns the port; see
 [[services/healthchecks/terminal-verdict/terminal-verdict.ava.okf.md]].
 
+One wait is verdict-side rather than between verdict and action: the browser
+healthcheck does not draw `dead` from a CDP-down while the live session is
+younger than its cold-start grace (task #3559) — waiting IS the action, bounded
+by the constant, and the age read can only fail toward the respawn. What this
+rule forbids is a failable step ahead of recovery; it does not ask a respawn to
+run into a cold start.
+
 Any additional recovery work must run after the respawn verdict, be bounded,
 and preserve its failure signal. Healthchecks run in the watchdog's sequential
 tick, so a long wait also delays checks for unrelated services.

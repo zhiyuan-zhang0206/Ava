@@ -45,12 +45,15 @@ def _probes(
     probe: DaemonProbe,
     session: bool,
     gui_chain: bool = False,
+    session_age: float | None = 3600.0,
 ) -> tuple[list[str], list[str], hc._Episode, _FakeClock, hc._ContextHeal]:
     """Wire probe/session/reap/restart to fixed answers; return the restarts, the
     reaped pids, the episode reporter, its clock, and the context-heal reporter.
     Every test gets fresh state files (tmp_path) so no episode leaks between
     tests. `gui_chain` pins the launchd-domain question (True = this test chain
-    is outside the GUI login session), so no test ever probes the real host."""
+    is outside the GUI login session), so no test ever probes the real host.
+    `session_age` answers the respawn grace's age question — an old session by
+    default, so the classic respawn path stays the default."""
     restarts: list[str] = []
     reaped: list[str] = []
     clock = _FakeClock()
@@ -67,6 +70,7 @@ def _probes(
 
     monkeypatch.setattr(hc, "_probe", lambda: probe)
     monkeypatch.setattr(hc, "_session_alive", lambda: session)
+    monkeypatch.setattr(hc, "_session_age_s", lambda: session_age)
     monkeypatch.setattr(hc, "_chain_outside_gui_session", lambda: gui_chain)
     monkeypatch.setattr(hc.macos_readiness, "degraded_wait_state", lambda: None)
     monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
@@ -75,6 +79,16 @@ def _probes(
     monkeypatch.setattr(hc, "_episode_reporter", lambda: episode)
     monkeypatch.setattr(hc, "_context_heal_reporter", lambda: heal)
     return restarts, reaped, episode, clock, heal
+
+
+class _AgeBackend:
+    """Just enough session backend for the respawn grace's age question."""
+
+    def __init__(self, started_at: float | None) -> None:
+        self._started_at = started_at
+
+    def session_started_at(self, name: str) -> float | None:
+        return self._started_at
 
 
 class _FakeBackend:
@@ -146,6 +160,97 @@ def test_restarts_when_session_up_but_cdp_down(
     session first, so the restart is still the right move."""
     restarts, *_ = _probes(
         monkeypatch, tmp_path, probe=DaemonProbe.down("CDP unreachable"), session=True
+    )
+    hc.main()
+    assert restarts == ["restart"]
+
+
+# ─── the respawn grace for a fresh session (2026-09-15 CDP-dead churn) ──────
+
+
+def test_session_age_reads_the_backend_session_record(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(hc, "get_backend", lambda: _AgeBackend(958.0))
+    assert hc._session_age_s(now=lambda: 1_000.0) == pytest.approx(42.0)
+
+
+def test_session_age_is_none_when_the_record_answers_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(hc, "get_backend", lambda: _AgeBackend(None))
+    assert hc._session_age_s(now=lambda: 1_000.0) is None
+
+
+def test_cdp_down_on_a_fresh_session_defers_the_respawn(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A session (re)spawned within the grace window is not rebuilt again — the
+    just-launched Chrome may still be cold-starting, and the per-round rebuild
+    used to kill it before it could ever answer (53 rebuilds in one pressure
+    window). The round returns without an exit code: a deferral is not a
+    failure."""
+    restarts, *_ = _probes(
+        monkeypatch,
+        tmp_path,
+        probe=DaemonProbe.down("CDP unreachable"),
+        session=True,
+        session_age=30.0,
+    )
+    with caplog.at_level(logging.INFO, logger="services.healthchecks.browser"):
+        hc.main()  # returns quietly — no SystemExit
+    assert restarts == []
+    assert any("cold-start grace" in r.getMessage() for r in caplog.records)
+
+
+def test_the_deferral_reports_once_per_episode(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """First deferral round logs INFO, later rounds inside the same episode log
+    DEBUG — the module's episode-gated reporting keeps a wait quiet."""
+    restarts, *_ = _probes(
+        monkeypatch,
+        tmp_path,
+        probe=DaemonProbe.down("CDP unreachable"),
+        session=True,
+        session_age=30.0,
+    )
+    with caplog.at_level(logging.DEBUG, logger="services.healthchecks.browser"):
+        hc.main()
+        hc.main()
+    grace = [r for r in caplog.records if "cold-start grace" in r.getMessage()]
+    assert [r.levelno for r in grace] == [logging.INFO, logging.DEBUG]
+    assert restarts == []
+
+
+def test_cdp_down_on_a_session_past_the_grace_still_rebuilds(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Past the grace the verdict stands: the respawn runs exactly as before."""
+    restarts, *_ = _probes(
+        monkeypatch,
+        tmp_path,
+        probe=DaemonProbe.down("CDP unreachable"),
+        session=True,
+        session_age=hc._RESPAWN_GRACE_S + 1.0,
+    )
+    with caplog.at_level(logging.INFO, logger="services.healthchecks.browser"):
+        hc.main()
+    assert restarts == ["restart"]
+    assert any("restarting" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.parametrize("age", [None, -5.0])
+def test_unusable_session_age_falls_open_to_the_rebuild(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, age: float | None
+) -> None:
+    """An unreadable age (None) or one defying the arithmetic (a clock stepped
+    behind the record) is no evidence of a cold start → today's behavior, and
+    the deferral can never outlast the grace."""
+    restarts, *_ = _probes(
+        monkeypatch,
+        tmp_path,
+        probe=DaemonProbe.down("CDP unreachable"),
+        session=True,
+        session_age=age,
     )
     hc.main()
     assert restarts == ["restart"]

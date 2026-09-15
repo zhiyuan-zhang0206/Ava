@@ -211,6 +211,13 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
     "exit-notice latency); the TTL reaper's poll cadence only delays the kill beyond it — "
     "no lattice neighbour and no ordering safety depends on this value",
     (
+        "services/healthchecks/browser.py",
+        "_RESPAWN_GRACE_S",
+    ): "independent: post-respawn CDP cold-start bound in the ava-browser healthcheck — a "
+    "bounded, consumer-local wait read off the live session record (an unreadable age falls "
+    "through to the respawn); its only cadence reference, the 60s watchdog round it spans, "
+    "is not a lattice clock, so no lattice neighbour",
+    (
         "ava_builtins/skills/ava-use-claude-code-and-codex/reference/watch_work.py",
         "STALL_SECONDS",
     ): "example script (skill reference), not cluster runtime — its own stall judgment, no lattice neighbour",
