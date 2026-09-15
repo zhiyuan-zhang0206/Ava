@@ -13,37 +13,15 @@ from pathlib import Path
 
 from shared.lm import provider_api
 from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+from shared.lm.attach_constants import (
+    ATTACH_MAX_FILE_BYTES,
+    ATTACH_MAX_FILES_PER_TURN,
+    ATTACH_MAX_LABEL_CHARS,
+    ATTACH_MAX_TOTAL_BYTES,
+    ATTACH_MEDIA_MIME,
+)
 from shared.lm.factory import attach_modalities_for_model
 from shared.lm.provider_api import AttachPolicy
-
-# Moved from ava._understand so both paths classify binary media identically.
-ATTACH_MEDIA_MIME: dict[str, str] = {
-    ".mp4": "video/mp4",
-    ".mov": "video/quicktime",
-    ".webm": "video/webm",
-    ".avi": "video/x-msvideo",
-    ".mkv": "video/x-matroska",
-    ".m4v": "video/x-m4v",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".png": "image/png",
-    ".webp": "image/webp",
-    ".gif": "image/gif",
-    ".heic": "image/heic",
-    ".heif": "image/heif",
-    ".mp3": "audio/mpeg",
-    ".wav": "audio/wav",
-    ".m4a": "audio/mp4",
-    ".aac": "audio/aac",
-    ".flac": "audio/flac",
-    ".ogg": "audio/ogg",
-    ".pdf": "application/pdf",
-}
-
-ATTACH_MAX_FILE_BYTES = 20 * 1024 * 1024
-ATTACH_MAX_FILES_PER_TURN = 8
-ATTACH_MAX_TOTAL_BYTES = 48 * 1024 * 1024
-ATTACH_MAX_LABEL_CHARS = 120
 
 # Keep the notice bare: attachments persist in the message history, so any
 # extra instruction is redundant copy (user ruling 2026-08-30).

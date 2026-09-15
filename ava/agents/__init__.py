@@ -25,7 +25,6 @@ from shared.agents import MachineNotRegistered as MachineNotRegistered
 from shared.agents import ResurrectError as ResurrectError
 from shared.agents import SpawnTargetNotAgentRunner as SpawnTargetNotAgentRunner
 from shared.config import cluster_tz
-from shared.message_kwargs import NoteTag
 
 from . import presets as presets
 
@@ -482,6 +481,8 @@ def send_system_note(
 
     Returns the durable inbound id. Does not wait for the target to act.
     """  # lint-docstring: ok "resurrect" is public behaviour, not impl detail
+    from shared.message_kwargs import NoteTag
+
     agent_id = coerce_typed(agent_id, "agent_id", int)
     content = coerce_str(content, "content")
     tag = coerce_str(tag, "tag")

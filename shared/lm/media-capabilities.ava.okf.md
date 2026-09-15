@@ -31,7 +31,9 @@ from the SDK docs and raises on call.
 `attach.py` is a pure turn-boundary packer. It re-stats registered files,
 reports rejected files in a leading text caption, and emits native image,
 document, or media blocks after applying capability, count, size, and image
-dimension limits. `ATTACH_MEDIA_MIME` is its shared suffix-to-MIME table for
-both packing and `ava._understand`. Modality rejection happens at registration
+dimension limits. The limits and the `ATTACH_MEDIA_MIME` suffix table live in
+the import-free `attach_constants.py` leaf, shared with the SDK surfaces
+(`ava._attach`, `ava._understand`, `agent.graph._attach_merge`) so none of
+them pulls the provider stack. Modality rejection happens at registration
 (`attach()`), so the packer's caption-skip is only the safety net for entries
 registered before a model change.

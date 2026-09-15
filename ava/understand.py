@@ -43,15 +43,12 @@ from ava import files as _files
 from ava._batch import DEFAULT_BATCH_MAX_CONCURRENT, run_batch, validate_max_concurrent
 from ava._sdk_validation import coerce_str
 from shared.config import settings
-from shared.lm import provider_api
-from shared.lm._call import invoke_text
 from shared.lm._effort import (
     ReasoningEffort,
     _clamp_effort,
     coerce_effort,
 )
-from shared.lm.attach import ATTACH_MEDIA_MIME
-from shared.lm.factory import provider_key_of_model
+from shared.lm.attach_constants import ATTACH_MEDIA_MIME
 
 # Provider split by modality is config-driven: settings.lm.understand_text_model
 # (default deepseek-v4-flash) handles literal strings / text files;
@@ -357,7 +354,8 @@ def _call_text(content: list[Any], *, effort: str | ReasoningEffort) -> str:
     `shared/lm/_effort.py` maps it onto what the model's provider accepts
     (`max` → deepseek's max, `none` → reasoning off via the thinking switch).
     """
-    from shared.lm.factory import build_chat_model
+    from shared.lm._call import invoke_text
+    from shared.lm.factory import build_chat_model, provider_key_of_model
 
     model = settings.lm.understand_text_model
     try:
@@ -402,6 +400,8 @@ def _call_media(content: list[Any], *, mime: str, effort: str | ReasoningEffort)
     default calls behave exactly as before. (The path is Gemini-only for now —
     see the module docstring — so the knob always applies.)
     """
+    from shared.lm import provider_api
+    from shared.lm._call import invoke_text
     from shared.lm.factory import build_chat_model, provider_key_of_model
 
     model = settings.lm.understand_media_model

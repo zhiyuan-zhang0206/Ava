@@ -12,11 +12,13 @@ from PIL import Image
 from shared.lm import provider_api
 from shared.lm._plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.attach import (
+    AttachEntry,
+    pack_attachments,
+)
+from shared.lm.attach_constants import (
     ATTACH_MAX_FILE_BYTES,
     ATTACH_MAX_FILES_PER_TURN,
     ATTACH_MAX_TOTAL_BYTES,
-    AttachEntry,
-    pack_attachments,
 )
 from shared.lm.factory import media_types_for_model
 from shared.lm.provider_api import AttachPolicy, ProviderBinding
