@@ -48,6 +48,15 @@ describe("InspectWidgetSection", () => {
     expect(links[0].textContent).toContain("#42");
   });
 
+  it("leads each row with the #id column, left-aligned like the shell rows (task #3563)", () => {
+    render(<InspectWidgetSection widget={widget()} />);
+    const link = screen.getAllByRole("link")[0];
+    const spans = [...link.querySelectorAll("span")].map((s) => s.textContent);
+    // The id column renders first (left edge); the title takes the rest.
+    expect(spans[0]).toBe("#42");
+    expect(spans[1]).toBe("Ship the inspector fix");
+  });
+
   it("uses a plugin-declared title when given", () => {
     render(<InspectWidgetSection widget={widget({ title: "Agent tasks" })} />);
     expect(screen.getByText("Agent tasks")).toBeTruthy();
