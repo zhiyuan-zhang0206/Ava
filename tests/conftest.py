@@ -502,6 +502,11 @@ from shared.test_db_guard import assert_test_db_url
 from tests._containers import postgres, redis_server
 from tests._os_jobs import host_ava_os_jobs, is_test_owned_job, remove_os_job
 
+# Stall forensics (task #3513): names the plugin module that arms the asyncio
+# chain probe for every test protocol running under a faulthandler deadline
+# (`-o faulthandler_timeout=N`, the CI shards) — see the module docstring.
+pytest_plugins = ["tests._asyncio_stall_probe"]
+
 # Host job inventory as it stood BEFORE this session — `pytest_sessionfinish`
 # diffs against it and fails the run on anything new (see tests/_os_jobs.py).
 _OS_JOBS_AT_START = host_ava_os_jobs()
