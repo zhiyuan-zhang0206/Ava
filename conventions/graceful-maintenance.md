@@ -180,7 +180,9 @@ nothing left running that owns the pause — recover it by hand.
 
 Read the phase first. Every explicit command takes the same `--operation` and
 timezone-aware `--acquired-at` the hold carries, and `maintenance status`
-prints both plus the phase:
+prints both, the phase, and the recorded shepherd — the
+binding process's pid/argv, its session leader, and the judged liveness
+(`alive`/`dead`/`missing`/`unreadable`; null when no identity was recorded):
 
 ```
 ava maintenance status

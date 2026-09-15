@@ -181,6 +181,30 @@ def _parent_process_identity() -> str:
     return f"pid={parent.pid} {cmdline[:180]}"
 
 
+def _driver_evidence(driver: hold_driver.HoldDriver | None) -> dict[str, object] | None:
+    """The recorded shepherd identity, for humans reading the journal (task #3276).
+
+    `root` is the process the stranded-hold verdict judges; `leader` (the session
+    leader at mint time) is display evidence only. Liveness is probed from local
+    process state (pid + birth), so `status` stays settings-lite. None when no
+    identity was recorded (a pre-#3270 journal or a daemon-driven pause).
+    """
+    if driver is None:
+        return None
+    return {
+        "liveness": hold_driver.liveness(driver),
+        "root": _driver_ref(driver.root),
+        "leader": _driver_ref(driver.leader),
+    }
+
+
+def _driver_ref(ref: hold_driver.ProcessRef | None) -> dict[str, object] | None:
+    """One recorded process reference as the journal reader needs it: pid + argv."""
+    if ref is None:
+        return None
+    return {"pid": ref.pid, "argv": ref.argv}
+
+
 @exclusive_resources
 def _stop_data(
     holder: str, at: datetime, timeout: float, *, gateway_last: bool, keep_terminals: bool = False
@@ -209,6 +233,7 @@ def run(args: argparse.Namespace) -> int:
                     "operation": current.holder,
                     "acquired_at": current.acquired_at.isoformat() if current.acquired_at else None,
                     "maintenance": current.maintenance.encode() if current.maintenance else None,
+                    "driver": _driver_evidence(current.driver),
                     "scope": "local unit; excludes independent OS-managed extras and remote hosts",
                 },
                 sort_keys=True,
