@@ -1582,6 +1582,19 @@ CREATE INDEX agent_impersonations_events_pending ON agent_impersonations(machine
 WHERE automatic AND activated_at IS NOT NULL AND ended_at IS NOT NULL AND events_completed_at IS NULL;
 CREATE INDEX agent_impersonation_entries_created ON agent_impersonation_entries(lease_id,created_at,seq);
 
+-- ava_runner surface for the session trail (task #3549): the lifecycle and
+-- inbound triggers, plus the handoff writer, INSERT rows; readers SELECT them
+-- back. UPDATE/DELETE stay out — the preserve trigger rejects rewrites and no
+-- runner path updates rows. Gated on the role's existence: fresh bootstrap
+-- applies this baseline before install birth creates ava_runner, and
+-- shared/cluster/provision.py's ensure_runner_role grants the surface at birth.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
+        GRANT SELECT, INSERT ON agent_impersonation_entries TO ava_runner;
+    END IF;
+END $$;
+
 
 CREATE FUNCTION allocate_impersonation_session() RETURNS trigger AS $$
 BEGIN
