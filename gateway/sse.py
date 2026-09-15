@@ -397,11 +397,15 @@ def _sse_frame(payload: str) -> bytes:
     """Wrap a data frame per the SSE protocol.
 
     Multi-line payloads must prefix each line with `data:` to be
-    compliant; our event JSON is single-line, but we splitlines
-    defensively. The trailing empty line (`\n\n`) is the SSE frame
-    separator.
+    compliant. Our event JSON is single-line, but we split defensively
+    and only on "\n" - never str.splitlines(): that also breaks on
+    U+0085 / U+2028 / U+2029, which are legal unescaped inside JSON
+    strings, and the client rejoins data lines with "\n", so a split
+    there plants a raw newline inside the JSON literal and JSON.parse
+    fails ("Bad control character in string literal"). The trailing
+    empty line (`\n\n`) is the SSE frame separator.
     """
-    lines = payload.splitlines() or [""]
+    lines = payload.split("\n") or [""]
     return ("".join(f"data: {line}\n" for line in lines) + "\n").encode()
 
 
@@ -427,7 +431,10 @@ def _sse_batch_frame(events: list[str]) -> bytes:
 
 def _decode_frames_for_test(chunks: list[bytes]) -> list[dict]:
     """Test helper: slice an SSE byte stream into frames + parse the JSON
-    on data lines.
+    on data lines, the way the browser does: split lines on "\n" only
+    (str.splitlines() would also break on U+0085 / U+2028 / U+2029 and
+    silently re-merge a payload the writer split there) and rejoin data
+    lines with "\n", so writer corruption fails here as a parse error.
 
     Ignores `:` comment frames (heartbeat / stream open / dropped).
     """
@@ -435,11 +442,11 @@ def _decode_frames_for_test(chunks: list[bytes]) -> list[dict]:
     text = b"".join(chunks).decode()
     for frame in text.split("\n\n"):
         data_lines = [
-            line[len("data: ") :] for line in frame.splitlines() if line.startswith("data: ")
+            line[len("data: ") :] for line in frame.split("\n") if line.startswith("data: ")
         ]
         if not data_lines:
             continue
-        out.append(json.loads("".join(data_lines)))  # pyright: ignore[reportUnknownArgumentType]
+        out.append(json.loads("\n".join(data_lines)))  # pyright: ignore[reportUnknownArgumentType]
     return out
 
 
