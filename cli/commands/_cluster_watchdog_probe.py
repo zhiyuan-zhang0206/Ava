@@ -84,9 +84,7 @@ def cmd_watchdog_probe(role: MachineRole) -> int:
     if state is HeldStopState.FRESH:
         # Deliberately before the pidfile read: during a held stop the pidfile
         # says nothing the probe may act on. Logged so the silence is visible.
-        logger.info(
-            "[watchdog-probe] {}: maintenance stop in progress; leaving watchdog down", role
-        )
+        logger.info("[watchdog-probe] {}: maintenance stop in progress; standing down", role)
         return 0
     if _alive(spec):
         return 0

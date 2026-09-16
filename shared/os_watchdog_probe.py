@@ -436,7 +436,9 @@ def held_stop_state(*, now: float | None = None) -> HeldStopState:
 
     ``now`` overrides the clock (tests). A timestamp in the future (clock step)
     reads FRESH: when the timestamp cannot be trusted, suppression during a
-    possible stop is the safe side, and the TTL still bounds it.
+    possible stop is the safe side. Its horizon is the clock skew plus the TTL
+    (the clock must catch up before the age can pass the TTL) — bounded, not
+    TTL-tight.
     """
     try:
         written = float(held_stop_marker_path().read_text().split()[0])
