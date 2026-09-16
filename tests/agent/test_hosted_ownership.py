@@ -131,7 +131,7 @@ async def test_cancel_during_live_announce_settles_the_committed_admission(
     def allow_model_config(*, model: str | None = None) -> None:
         assert model is not None
 
-    monkeypatch.setattr("services.agent_host.host.validate_model_config", allow_model_config)
+    monkeypatch.setattr("services.agent_host.runtime.validate_model_config", allow_model_config)
 
     host = AgentHost(
         pool=aops_pool,

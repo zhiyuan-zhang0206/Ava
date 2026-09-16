@@ -19,6 +19,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph._claim import claim_node
 from agent.state import BaseAgentState
 from services.agent_host import host as host_module
+from services.agent_host import runtime as runtime_module
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_host.host import AgentHost
 from shared import pause_owner
@@ -73,7 +74,7 @@ async def test_quiet_idle_predecessor_is_recovered_without_a_model_call(
     )
     db_conn.commit()
 
-    monkeypatch.setattr(host_module, "validate_model_config", _accept_model)
+    monkeypatch.setattr(runtime_module, "validate_model_config", _accept_model)
     monkeypatch.setattr(
         host_module, "boot_agent_scope", AsyncMock(return_value=FakeListChatModel(responses=[]))
     )

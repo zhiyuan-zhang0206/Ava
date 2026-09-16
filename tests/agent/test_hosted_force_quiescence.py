@@ -49,7 +49,7 @@ def _host_wakes_need_no_provider_credentials(monkeypatch: pytest.MonkeyPatch) ->
     tests/services/test_agent_host.py's wired fixture).
     """
 
-    monkeypatch.setattr("services.agent_host.host.validate_model_config", _allow_model_config)
+    monkeypatch.setattr("services.agent_host.runtime.validate_model_config", _allow_model_config)
 
 
 def _blocking_work(entered: threading.Event, release: threading.Event) -> None:

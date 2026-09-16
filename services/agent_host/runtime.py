@@ -1,4 +1,5 @@
-"""Per-agent cached runtime state for the hosted agent runner."""
+"""Per-agent cached runtime state for the hosted agent runner, plus the
+wake-time admission of an agent's stored model configuration."""
 
 from __future__ import annotations
 
@@ -7,8 +8,14 @@ import json
 import time
 from contextvars import Context, ContextVar, copy_context
 from dataclasses import dataclass, field
+from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
+
+from shared.config import settings
+from shared.lm.factory import validate_model_config
+from shared.lm.registry import resolve_available_model
+from shared.log import logger
 
 __all__ = [
     "HostStats",
@@ -17,6 +24,7 @@ __all__ = [
     "_active_turn_config_fingerprint",
     "_config_fingerprint",
     "_copy_active_turn_context",
+    "admit_stored_model",
 ]
 
 _active_turn_config_fingerprint: ContextVar[str | None] = ContextVar(
@@ -88,6 +96,8 @@ class HostStats:
     skips the ones it does not own.
 
     `config_rejected` counts wakes whose bound model configuration cannot build.
+    `config_normalized` counts wakes whose stored `llm_model` pin named a
+    withdrawn model and was bound as its registered fallback instead.
     """
 
     cache_hits: int = 0
@@ -95,6 +105,7 @@ class HostStats:
     turns_started: int = 0
     wakes_skipped: int = 0
     config_rejected: int = 0
+    config_normalized: int = 0
 
     def as_payload(self) -> dict[str, int]:
         return {
@@ -103,7 +114,81 @@ class HostStats:
             "turns_started": self.turns_started,
             "wakes_skipped": self.wakes_skipped,
             "config_rejected": self.config_rejected,
+            "config_normalized": self.config_normalized,
         }
+
+
+def admit_stored_model(
+    pins: dict[str, Any],
+    *,
+    agent_id: int,
+    stored: _StoredConfig,
+    stats: HostStats,
+    rejected: dict[int, str],
+    normalized: dict[int, str],
+) -> bool:
+    """Admit the stored model configuration a hosted wake is about to bind.
+
+    Fail fast before ANY turn work — the status flip included: an overlay naming
+    a model the registry does not know would otherwise explode inside
+    `build_chat_model` on every wake (the dispatcher drops the task, the pending
+    scan re-wakes the still-pending inbound, and the host loops on crash
+    tracebacks — incident #2344). The effective model resolves exactly as the
+    turn view does (overlay > birth > cluster default). A wake whose
+    configuration cannot build is consumed without raising: the durable inbound
+    stays pending, and a fixed overlay is served on the next scan.
+
+    A pin naming a model the registry has since withdrawn is not refused: it is
+    rewritten in place to its registered fallback, the same resolution
+    `build_chat_model` would otherwise apply only at the final build. Binding
+    the resolved id here means the turn view reads it, the usage attribution
+    records it, and the exec children re-emitted from these pins inherit it —
+    instead of a withdrawn pin leaking to every reader until the last build.
+
+    Both outcomes are noted once per stored config state (fingerprint) in
+    `rejected` / `normalized` and counted in `stats`; neither writes to the
+    database. `pins` is mutated in place — the caller binds it after this
+    returns True.
+
+    Returns True when the wake may proceed, False when the configuration cannot
+    build (the caller returns without a turn).
+    """
+    model = pins.get("llm_model") or settings.lm.llm_model
+    try:
+        validate_model_config(model=model)
+    except ValueError as exc:
+        stats.config_rejected += 1
+        if rejected.get(agent_id) != stored.fingerprint:
+            rejected[agent_id] = stored.fingerprint
+            logger.error(
+                "hosted wake for agent {agent_id} rejected before turn — "
+                "its model config cannot build: {reason}. Fix the agent's "
+                "llm_model (restart(config_overlay=...) or the spawn "
+                "overlay) and the next wake serves normally.",
+                event="host_config_rejected",
+                agent_id=agent_id,
+                reason=str(exc),
+            )
+        return False
+    rejected.pop(agent_id, None)
+    if "llm_model" in pins:
+        pinned_model = pins["llm_model"]
+        resolved_model = resolve_available_model(pinned_model)
+        if resolved_model != pinned_model:
+            pins["llm_model"] = resolved_model
+            stats.config_normalized += 1
+            if normalized.get(agent_id) != stored.fingerprint:
+                normalized[agent_id] = stored.fingerprint
+                logger.warning(
+                    "hosted wake for agent {agent_id} normalized its stored "
+                    "llm_model {requested} -> {resolved} (withdrawn model); "
+                    "the turn binds the registered fallback",
+                    event="host_config_normalized",
+                    agent_id=agent_id,
+                    requested=pinned_model,
+                    resolved=resolved_model,
+                )
+    return True
 
 
 class TurnOutcome:
