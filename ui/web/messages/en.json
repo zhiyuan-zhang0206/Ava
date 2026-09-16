@@ -411,6 +411,7 @@
     "compactFailed": "Compaction failed",
     "compactSuperseded": "Compaction superseded",
     "compactHistoryDivider": "Original history before compact",
+    "compactBoundaryDivider": "Context compacted",
     "human": "Human",
     "system": "System",
     "agent": "Agent {id}",

@@ -47,6 +47,7 @@ import { errMsg } from "./errors";
 import { noteTurnStart } from "./interaction-timing";
 import { useTimelineStore } from "./timeline-store";
 import { isReattachedTimelineContext, parseItemIdParts, standingHeadNoteIds } from "./timeline";
+import { useCompactHistoryRetention } from "./use-compact-history-retention";
 
 /** Base number of items fetched per scroll-up. Subsequent scroll-ups
  * fetch BASE * 2^olderFetchCount items (capped at 1000), so the window
@@ -402,10 +403,12 @@ export function useTimeline(
   // the callback stays stable and never fires on stale closures. The cursor
   // is the oldest item with a stable backend id (ephemeral `_marker.*` items
   // the backend doesn't know are skipped).
-  const loadOlder = useCallback(() => {
-    if (agentId == null) return;
+  // Resolves true when a fetch actually ran — the compact-history retention
+  // hook (use-compact-history-retention.ts) walks N segments off this.
+  const loadOlderSegment = useCallback(async (): Promise<boolean> => {
+    if (agentId == null) return false;
     const st = useTimelineStore.getState();
-    if (!st.hasMoreOlder || st.loadingOlder) return;
+    if (!st.hasMoreOlder || st.loadingOlder) return false;
     // Current standing context is never a cursor: the re-attached prompt, the
     // standing head notes (exec timeout / timezone / cluster memory / agent id
     // / agent memory — re-attached by the gateway beside the prompt), and
@@ -416,7 +419,7 @@ export function useTimeline(
     // exact checkpoint id lets the server advance one segment without scanning
     // an unbounded chain in one request.
     const headNoteIds = standingHeadNoteIds(st.items);
-    const oldest = st.items.find((it) => {
+    const isRealCursor = (it: BackendTimelineItem): boolean => {
       const parts = parseItemIdParts(it.item_id);
       if (parts === null) return false;
       if (headNoteIds.has(it.item_id)) return false;
@@ -424,29 +427,55 @@ export function useTimeline(
         !isReattachedTimelineContext(it) ||
         (parts.rank > 0 && it.kind === "inbound_compact_summary")
       );
+    };
+    let oldest = st.items.find(isRealCursor);
+    // Head-only segment fallback (task #3698): right after a compact the
+    // current segment can hold nothing but the prompt, the standing head
+    // notes and the compact summary. With no real item, a cursor on the
+    // summary crosses to the previous segment and skips nothing — every
+    // item before it is re-attached context, exactly the gateway's
+    // `_window_or_cross` head rule. This is what lets compact-history
+    // retention re-attach the previous session before any new activity.
+    oldest ??= st.items.find((it, idx) => {
+      if (it.kind !== "inbound_compact_summary") return false;
+      if (parseItemIdParts(it.item_id)?.rank !== 0) return false;
+      return st.items
+        .slice(0, idx)
+        .every((prev) => isReattachedTimelineContext(prev) || headNoteIds.has(prev.item_id));
     });
-    if (!oldest) return;
+    if (oldest === undefined) return false;
     // Exponential growth: first fetch N, second 2N, third 4N, … capped at 1000.
-    const limit = Math.min(
-      OLDER_BASE_LIMIT * Math.pow(2, st.olderFetchCount),
-      1000,
-    );
+    const limit = Math.min(OLDER_BASE_LIMIT * Math.pow(2, st.olderFetchCount), 1000);
     beginLoadOlder();
-    void api
-      .getTimeline(agentId, { before: oldest.item_id, limit })
-      .then((page: TimelineResponse) => {
-        // Agent switch mid-flight: drop the result so it can't contaminate
-        // the now-active thread (switchThread already cleared loadingOlder).
-        if (useTimelineStore.getState().activeThreadId !== agentId) return;
-        prependOlder(page.items, page.has_more);
-        // Bump the counter so the next scroll-up doubles the window.
-        useTimelineStore.getState().incrementOlderFetchCount();
-      })
-      .catch((e: unknown) => {
-        useTimelineStore.setState({ loadingOlder: false });
-        showError(`Failed to load older messages: ${errMsg(e)}`);
-      });
+    try {
+      const page = await api.getTimeline(agentId, { before: oldest.item_id, limit });
+      // Agent switch mid-flight: drop the result so it can't contaminate
+      // the now-active thread (switchThread already cleared loadingOlder).
+      if (useTimelineStore.getState().activeThreadId !== agentId) return false;
+      prependOlder(page.items, page.has_more);
+      // Bump the counter so the next scroll-up doubles the window.
+      useTimelineStore.getState().incrementOlderFetchCount();
+      return true;
+    } catch (e: unknown) {
+      useTimelineStore.setState({ loadingOlder: false });
+      showError(`Failed to load older messages: ${errMsg(e)}`);
+      return false;
+    }
   }, [agentId, beginLoadOlder, prependOlder, showError]);
+  const loadOlder = useCallback(() => {
+    void loadOlderSegment();
+  }, [loadOlderSegment]);
+
+  // Compact-history retention (task #3698; user ruling 2026-09-17): after a
+  // compact wholesale-replace lands on this thread, re-attach the previous
+  // session(s) — the logic lives in use-compact-history-retention.ts.
+  useCompactHistoryRetention({
+    agentId,
+    loadOlderSegment,
+    hasMoreOlder,
+    loadingOlder,
+    itemCount: items.length,
+  });
 
   return {
     items,

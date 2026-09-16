@@ -200,10 +200,12 @@ describe("compact history segment dividers", () => {
     const { container } = render(<TimelineView items={items} />);
 
     const dividers = screen.getAllByTestId("compact-history-divider");
-    expect(dividers).toHaveLength(2);
-    expect(dividers.map((divider) => divider.dataset.segmentRank)).toEqual(["2", "1"]);
-    expect(dividers.map((divider) => divider.getAttribute("aria-live"))).toEqual(["off", "off"]);
+    expect(dividers).toHaveLength(3);
+    expect(dividers.map((divider) => divider.dataset.segmentRank)).toEqual(["2", "1", "0"]);
+    expect(dividers.map((divider) => divider.getAttribute("aria-live"))).toEqual(["off", "off", "off"]);
     expect(screen.getAllByText("Original history before compact")).toHaveLength(2);
+    // The rank-0 divider marks the live boundary into the current segment (task #3698).
+    expect(screen.getAllByText("Context compacted")).toHaveLength(1);
 
     const timelineColumn = container.querySelector("[data-slot='scroll-area-viewport'] > div");
     expect(timelineColumn).not.toBeNull();
@@ -226,6 +228,7 @@ describe("compact history segment dividers", () => {
       "s1.newer-boundary.0.0",
       "divider:1",
       "s1.newer-boundary.1.0",
+      "divider:0",
       "1.0",
     ]);
   });
@@ -250,7 +253,12 @@ describe("compact history segment dividers", () => {
           : node.getAttribute("data-item-id"),
       );
 
-    expect(renderedOrder).toEqual(["divider", "s1.old-boundary.0.0", "1.0"]);
+    expect(renderedOrder).toEqual(["divider", "s1.old-boundary.0.0", "divider", "1.0"]);
+    // First = the scroll-back rule (rank 1); second marks the live boundary
+    // into the current segment (rank 0, task #3698).
+    expect(
+      screen.getAllByTestId("compact-history-divider").map((d) => d.dataset.segmentRank),
+    ).toEqual(["1", "0"]);
   });
 });
 
