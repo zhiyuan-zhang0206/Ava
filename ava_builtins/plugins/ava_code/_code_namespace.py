@@ -11,11 +11,15 @@ __all_for_ava__ = ["get", "set"]
 
 
 def get() -> Path:
-    # state_handle binding happens after register_namespace in plugin.py; lazy
-    # import here keeps `from . import _code_namespace` cycle-free.
-    from .plugin import state_handle
+    # Hold no local name for the handle: until the lazy state slot materializes
+    # the module holds the surface stand-in, and materialization rebinds the
+    # MODULE attribute — a stale local keeps calling the stand-in after
+    # `ava.state` has become the real state (task #3665). The lazy import keeps
+    # `from . import _code_namespace` cycle-free (the binding happens after
+    # register_namespace in plugin.py).
+    from . import plugin as _plugin
 
-    return Path(state_handle.read().cwd)
+    return Path(_plugin.state_handle.read().cwd)
 
 
 def set(path: str | Path) -> None:
@@ -32,8 +36,8 @@ def set(path: str | Path) -> None:
 
     import ava.skills as _ava_skills
 
+    from . import plugin as _plugin
     from ._walk import project_skill_roots
-    from .plugin import state_handle
 
     p = Path(path).expanduser()
     # Single stat avoids the TOCTOU race between exists() → is_dir() syscalls.
@@ -44,13 +48,16 @@ def set(path: str | Path) -> None:
         raise FileNotFoundError(f"ava.cwd.set: path does not exist: {p}") from e
     if not _stat.S_ISDIR(st.st_mode):
         raise NotADirectoryError(f"ava.cwd.set: path is not a directory: {p}")
-    state_handle.update({"cwd": str(p)})
+    # Re-read the module attribute at each use: the first update may
+    # materialize the lazy slot and rebind `plugin.state_handle`, so a name
+    # bound up front would go stale on the updates below (task #3665).
+    _plugin.state_handle.update({"cwd": str(p)})
 
     # Set a cwd-note for the after-exec hook to inject as a system note.
     # Same-turn dedup: each call overwrites cwd_note; only the final
     # value is injected.  Project skills (if any) go through the separate
     # project_skills_note mechanism so they survive across compactions.
-    state_handle.update({"cwd_note": f"Working directory set to {p}"})
+    _plugin.state_handle.update({"cwd_note": f"Working directory set to {p}"})
     try:
         loaded = _ava_skills.skills_in(project_skill_roots(p))
     except AttributeError:
@@ -68,6 +75,6 @@ def set(path: str | Path) -> None:
                 lines.append(f"  - {ident} (ava.skills.{target}) — {desc}")
                 lines.append(f"      {path_str}")
             summary = f"Skills available in this repo ({len(loaded)}):\n" + "\n".join(lines)
-            state_handle.update({"project_skills_note": summary})
+            _plugin.state_handle.update({"project_skills_note": summary})
         else:
-            state_handle.update({"project_skills_note": None})
+            _plugin.state_handle.update({"project_skills_note": None})
