@@ -209,14 +209,16 @@ def get_neighbors(
     ``display.neighbors_default_limit`` - 1 / 20 out of the box).
     """
     agent_id = coerce_typed(agent_id, "agent_id", int)
+    resolved_depth: int
     if depth is None:
-        depth = settings.display.neighbors_default_depth
+        resolved_depth = settings.display.neighbors_default_depth
     else:
-        depth = coerce_typed(depth, "depth", int)
+        resolved_depth = coerce_typed(depth, "depth", int)
+    resolved_limit: int
     if limit is None:
-        limit = settings.display.neighbors_default_limit
+        resolved_limit = settings.display.neighbors_default_limit
     else:
-        limit = coerce_typed(limit, "limit", int)
+        resolved_limit = coerce_typed(limit, "limit", int)
     return [
         Neighbor(
             agent_id=n["agent_id"],
@@ -225,7 +227,7 @@ def get_neighbors(
             depth=n["depth"],
             score=n["score"],
         )
-        for n in _client.get_neighbors(agent_id, depth=depth, limit=limit)
+        for n in _client.get_neighbors(agent_id, depth=resolved_depth, limit=resolved_limit)
     ]
 
 
