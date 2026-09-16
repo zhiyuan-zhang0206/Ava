@@ -166,9 +166,12 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # lifecycle command) raises the current total to 175;
     # exec_request_bounded_quarantine and hosted_boot_recovery_stalled (task
     # #3619's bounded disposition of unreadable exec evidence and its
-    # consecutive-boot recovery escalation) raise the current total to 177.
+    # consecutive-boot recovery escalation) raise the current total to 177;
+    # the settled-abort inbound reconcile (task #3615:
+    # host_abort_reconcile_skipped + host_abort_reconcile_failed) raises the
+    # current total to 179.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 177
+    assert len(_TELEMETRY_KINDS) == 179
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:

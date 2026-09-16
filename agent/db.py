@@ -320,10 +320,12 @@ async def reconcile_claimed_inbounds(
     """Finalize every `'claimed'` row for `agent_id` based on whether its
     HumanMessage actually made it into `state.messages`.
 
-    Called once on agent process startup. The new process reads its
-    LangGraph checkpoint, extracts every `additional_kwargs.ava_inbound_id`
-    from `state.messages` (caller-supplied `committed_inbound_ids`), and
-    passes that set here. Each `'claimed'` row is then either:
+    The inbound reconcile — one helper shared by every settlement point that
+    can leave claimed-but-uncommitted rows behind. The caller reads the
+    agent's LangGraph checkpoint, extracts every
+    `additional_kwargs.ava_inbound_id` from `state.messages` (caller-supplied
+    `committed_inbound_ids`), and passes that set here. Each `'claimed'` row
+    is then either:
 
       - **flipped to `'done'`** if its id is in `committed_inbound_ids` —
         the previous process's claim → langgraph commit chain completed
@@ -347,10 +349,14 @@ async def reconcile_claimed_inbounds(
     logging. All writes happen in a single transaction; pool conns are
     `autocommit=True` so callers don't need an explicit commit.
 
-    A fresh process is the only legitimate caller — the function assumes
-    no other process is concurrently claiming for this agent_id (an agent
-    is process-bound 1:1). Calling it mid-run would race with active claim
-    nodes.
+    The caller must hold the agent's admitted runtime identity (an
+    incarnation whose lease is still fresh) and present a settled checkpoint:
+    the buffered super-step writes must already be flushed, or a message that
+    did commit can read as missing and its row be reset to `'pending'`.
+    Legitimate callers — a cold process's first admission, database recovery,
+    and the hosted turn's own abort settlement — each run single-flight per
+    agent, so no claim cycle for this agent_id is in flight; calling the
+    reconcile while claim nodes are active would race them.
     """
     stale_cutoff_s = settings.daemon.delivery_watchdog_stale_claimed_threshold_seconds
     if not committed_inbound_ids:

@@ -124,6 +124,20 @@ class DaemonSettings(EnvSettings):
         },
     )
 
+    host_abort_reconcile_enabled: bool = Field(
+        default=True,
+        alias="AVA_HOST_ABORT_RECONCILE_ENABLED",
+        description="Hosted agent-runner: at a settled turn abort, dispose the turn's claimed 'chat' inbounds immediately (committed to the flushed checkpoint -> done, uncommitted -> pending for the next claim, past the stale threshold -> dead-lettered) instead of waiting for a cold admission or boot that may never come. Off restores the deferred behavior; every non-abort crash keeps deferring to the next cold admission's reconcile.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": True,
+        },
+    )
+
     page_server_poll_interval_seconds: float = Field(
         default=2.0,
         alias="AVA_PAGE_SERVER_POLL_INTERVAL_SECONDS",
