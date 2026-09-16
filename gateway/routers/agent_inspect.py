@@ -15,9 +15,9 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from opentelemetry import metrics
 from psycopg_pool import ConnectionPool
 
-from gateway import loki_events, loki_query_budget, neighbors
+from gateway import loki_query_budget, neighbors
 from gateway.routers import _agent_cost, _inspect_stats, _plugin_inspector, _plugin_metrics
-from gateway.routers._agent_cost import _query_timeout, window_bounds
+from gateway.routers._agent_cost import window_bounds
 from gateway.routers._backend_failure import raise_backend_unavailable
 from gateway.routers._inspect_cache import InspectCacheFullError, InspectQueryCache
 from gateway.routers._inspect_live import db_rows_blocking, notice_blocking, project_heartbeat
@@ -194,46 +194,22 @@ def _agent_activity(
 _HEARTBEAT_PAUSE_LOOKBACK = timedelta(hours=24)
 
 
-def _heartbeat_last_pause(
-    agent_id: int, *, deadline: float | None = None
-) -> HeartbeatLastPause | None:
-    """Newest recent heartbeat pause from Loki; safe to retain with aggregates.
+def _heartbeat_last_pause(pool: ConnectionPool[Any], agent_id: int) -> HeartbeatLastPause | None:
+    """Read the newest recent committed pause from the indexed durable trail.
 
-    "Last pause" is a recent-history hint; `_inspect_live` reads authoritative
-    active state from `agents_meta.heartbeat_paused_until`. The fixed 24-hour
-    lookback matches the default cluster `heartbeat_pause_max_seconds` cap
-    (86400), so any still-active default pause retains its start event. Raising
-    the cap via `AVA_HEARTBEAT_PAUSE_MAX_SECONDS` or using a longer per-agent
-    `config_overlay` is an accepted residual: the cell may show no recent pause
-    while the authoritative active state remains correct. Older pauses likewise
-    show as no recent pause, matching Loki's pre-existing 168-hour truncation.
+    ``ava.self.pause_heartbeat`` inserts this row in the same transaction as
+    the pause deadline. The fixed 24-hour display horizon is unchanged;
+    current-state reads never depend on telemetry delivery or Loki health.
     """
-    rows, _ = loki_events.query_events(
-        agent_id=agent_id,
-        event_names=["heartbeat_paused"],
-        from_=datetime.now(tz=UTC) - _HEARTBEAT_PAUSE_LOOKBACK,
-        limit=1,
-        timeout_s=_query_timeout(deadline),
-    )
-    row = rows[0] if rows else None
-    return (
-        HeartbeatLastPause(at=row["ts"], duration_s=row["attributes"].get("duration_s"))
-        if row is not None
-        else None
-    )
-
-
-def _heartbeat_last_pause_or_none(agent_id: int) -> HeartbeatLastPause | None:
-    """Best-effort recent pause for the fast live endpoint.
-
-    The authoritative active pause comes from Postgres. A Loki transport or
-    admission failure must not take down the cheap inspector skeleton merely
-    because its optional historical hint is unavailable.
-    """
-    try:
-        return _heartbeat_last_pause(agent_id)
-    except (httpx.HTTPError, ValueError):
-        return None
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT created_at, duration_s FROM heartbeat_pause_log "
+            "WHERE agent_id = %s AND created_at >= %s "
+            "ORDER BY created_at DESC, id DESC LIMIT 1",
+            (agent_id, datetime.now(tz=UTC) - _HEARTBEAT_PAUSE_LOOKBACK),
+        )
+        row = cur.fetchone()
+    return HeartbeatLastPause(at=row[0], duration_s=row[1]) if row is not None else None
 
 
 # Per-op probe deadline for the inspector's shell list. The panel polls every
@@ -503,19 +479,17 @@ def cache_clear() -> None:
 async def get_agent_inspect_live(agent_id: int, request: Request) -> AgentInspectLive:
     """Cheap current-state half of the inspector panel.
 
-    Reads the agent projection and open notice from Postgres, probes shells on
-    the owning runner, and performs only one bounded best-effort Loki lookup for
-    the heartbeat's recent-pause hint. Unknown agents return 404. Shell probe
-    failures set shells_available=False and Loki failures degrade
-    `heartbeat.last_pause` to None, keeping this endpoint useful as the panel's
-    fast skeleton source. No part of this response is cached.
+    Reads the current projection, notice, and recent committed heartbeat pause
+    from Postgres and probes shells on the owning runner. It performs no log
+    queries. Unknown agents return 404; shell probe failures report
+    shells_available=False. No part of this response is cached.
     """
     pool = request.app.state.db_pool
     db = await asyncio.to_thread(db_rows_blocking, pool, agent_id)
     notice, shells, last_pause = await asyncio.gather(
         asyncio.to_thread(notice_blocking, pool, agent_id),
         _probe_agent_shells(agent_id, db.machine, pool),
-        asyncio.to_thread(_heartbeat_last_pause_or_none, agent_id),
+        asyncio.to_thread(_heartbeat_last_pause, pool, agent_id),
     )
     return AgentInspectLive(
         agent_id=agent_id,

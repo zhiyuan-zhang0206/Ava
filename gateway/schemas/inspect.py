@@ -117,8 +117,8 @@ class AgentActivity(BaseModel):
 class HeartbeatLastPause(BaseModel):
     """The agent's most recent heartbeat pause — when it last opted out of idle
     check-ins and the length it asked for. Sourced from the newest
-    `heartbeat_paused` events row; None on AgentInspectLive when the agent has
-    never paused. `at` is when the pause was requested; `duration_s` is the
+    durable heartbeat_pause_log row within the last 24 hours; None when no
+    pause exists in that display window. `at` is when the pause was requested; `duration_s` is the
     requested window in seconds (the agent's `pause_heartbeat(duration)` arg)."""
 
     model_config = ConfigDict(frozen=True)
@@ -171,9 +171,8 @@ class AgentInspectLive(BaseModel):
     """GET /api/agents/{id}/inspect/live response — the inspector's cheap,
     window-independent skeleton.
 
-    Every field reflects current database or runner state except
-    `heartbeat.last_pause`, which is a single bounded recent-history lookup and
-    degrades to None when Loki is unavailable. The response intentionally omits
+    Every field reflects database or runner state. ``heartbeat.last_pause``
+    reads the indexed durable pause trail; no log query is performed. The response omits
     cost, stats, TPS, and activity so switching agents does not wait for the
     expensive event-history aggregate fan-out.
     """

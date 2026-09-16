@@ -922,12 +922,10 @@ export interface paths {
          * Get Agent Inspect Live
          * @description Cheap current-state half of the inspector panel.
          *
-         *     Reads the agent projection and open notice from Postgres, probes shells on
-         *     the owning runner, and performs only one bounded best-effort Loki lookup for
-         *     the heartbeat's recent-pause hint. Unknown agents return 404. Shell probe
-         *     failures set shells_available=False and Loki failures degrade
-         *     `heartbeat.last_pause` to None, keeping this endpoint useful as the panel's
-         *     fast skeleton source. No part of this response is cached.
+         *     Reads the current projection, notice, and recent committed heartbeat pause
+         *     from Postgres and probes shells on the owning runner. It performs no log
+         *     queries. Unknown agents return 404; shell probe failures report
+         *     shells_available=False. No part of this response is cached.
          */
         get: operations["get_agent_inspect_live_api_agents__agent_id__inspect_live_get"];
         put?: never;
@@ -3782,9 +3780,8 @@ export interface components {
          * @description GET /api/agents/{id}/inspect/live response — the inspector's cheap,
          *     window-independent skeleton.
          *
-         *     Every field reflects current database or runner state except
-         *     `heartbeat.last_pause`, which is a single bounded recent-history lookup and
-         *     degrades to None when Loki is unavailable. The response intentionally omits
+         *     Every field reflects database or runner state. ``heartbeat.last_pause``
+         *     reads the indexed durable pause trail; no log query is performed. The response omits
          *     cost, stats, TPS, and activity so switching agents does not wait for the
          *     expensive event-history aggregate fan-out.
          */
@@ -5153,8 +5150,8 @@ export interface components {
          * HeartbeatLastPause
          * @description The agent's most recent heartbeat pause — when it last opted out of idle
          *     check-ins and the length it asked for. Sourced from the newest
-         *     `heartbeat_paused` events row; None on AgentInspectLive when the agent has
-         *     never paused. `at` is when the pause was requested; `duration_s` is the
+         *     durable heartbeat_pause_log row within the last 24 hours; None when no
+         *     pause exists in that display window. `at` is when the pause was requested; `duration_s` is the
          *     requested window in seconds (the agent's `pause_heartbeat(duration)` arg).
          */
         HeartbeatLastPause: {
