@@ -136,9 +136,9 @@ The inspector-widget registry resolves each widget's payload server-side —
 the console never receives a row it cannot address — and a widget with no
 payload drops out of the response, matching the panel's empty-section rule.
 The shipped kind is `taskList`: the agent's active tasks (`in_progress`,
-newest first, capped at 8 kernel-side), each row a link to the
+newest first, complete — no cap), each row a link to the
 task in the fleet view; `title` may be left unset to take the console's
-localized default ("Today's tasks"). v1 covers builtin
+localized default ("Tasks"). v1 covers builtin
 plugins (the gateway imports no third-party plugin code; the plugin-metric
 loader is the sibling precedent). Failure follows the plugin-load fail-soft
 contract (2026-08-28 ava_ledger incident; restated for plugins 2026-09-11):

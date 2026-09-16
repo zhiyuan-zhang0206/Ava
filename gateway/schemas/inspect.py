@@ -350,7 +350,7 @@ class InspectWidgetTask(BaseModel):
 
     Kernel-resolved data, not policy: the row carries only what the console
     renders (id for the `/fleet?task=` link, title for the text). The list is
-    already filtered (the agent's active tasks) and capped kernel-side."""
+    already filtered (the agent's active tasks) and complete — every active row renders (user ruling 2026-09-17)."""
 
     model_config = ConfigDict(frozen=True)
 

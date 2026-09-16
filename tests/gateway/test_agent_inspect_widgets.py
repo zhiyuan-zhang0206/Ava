@@ -4,11 +4,11 @@ taskList payload reshaped in #3216).
 The extension surface where enabled plugins embed inspector widgets: the
 gateway builds the widget registry in process (mocked here by patching
 `_load_inspect_widgets`), resolves each widget's payload for the agent — a
-`taskList` lists the agent's active tasks, capped kernel-side — and drops
+`taskList` lists the agent's active tasks — every one — and drops
 widgets with nothing to show.
 
 Locks: empty registry -> [], unknown agent -> 404, the taskList resolution
-rules (owner filter, active statuses only, newest-first order, the kernel
+rules (owner filter, active statuses only, newest-first order, no
 cap, empty payload -> widget dropped), widget ordering/attribution
 passthrough, the loader's enabled-set filtering, and its fail-soft skip of a
 broken inspector.py.
@@ -192,20 +192,24 @@ def test_lists_only_the_agents_active_tasks_newest_first(
     assert widget["tasks"][0] == {"id": newer, "title": "newer"}
 
 
-def test_task_list_is_capped(db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_task_list_shows_every_active_task(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
     aid = _insert_agent(db_conn)
     root = _root_task_id(db_conn)
+    # Regression (user ruling 2026-09-17): the Inspector shows EVERY active
+    # task — the former kernel-side display cap of 8 is gone.
     ids = [
         _insert_task(db_conn, owner=aid, parent_id=root, title=f"t{i}", updated_seconds_ago=i)
-        for i in range(_plugin_inspector.TASK_LIST_LIMIT + 3)
+        for i in range(11)
     ]
     _patch_loader(monkeypatch, _widget())
     db_conn.commit()
 
     tasks = _get(aid).json()[0]["tasks"]
-    assert len(tasks) == _plugin_inspector.TASK_LIST_LIMIT
-    # Newest-first, capped: the first N ids by ascending age.
-    assert [t["id"] for t in tasks] == ids[: _plugin_inspector.TASK_LIST_LIMIT]
+    assert len(tasks) == 11
+    # Newest-first, complete: the first N ids by ascending age.
+    assert [t["id"] for t in tasks] == ids
 
 
 def test_widget_without_tasks_is_dropped(
