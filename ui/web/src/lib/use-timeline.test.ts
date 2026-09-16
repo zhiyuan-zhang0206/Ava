@@ -961,6 +961,75 @@ describe("useTimeline agentId switch", () => {
     });
   });
 
+  it("walks newest-first across two previous segments when display.compact_history_sessions = 2", async () => {
+    // The Display row's 2/3 values walk further back: each retained session is
+    // one sequential cross-segment fetch off the same scroll-up path.
+    const showError = vi.fn();
+    vi.mocked(api.getSettings).mockResolvedValue({
+      settings: [
+        { key: "display.compact_history_sessions", value: 2, updated_at: "2026-09-17T00:00:00Z" },
+      ],
+    });
+    const fetches: (string | undefined)[] = [];
+    const pageFor = (opts?: { before?: string; limit?: number }): TimelineResponse => {
+      fetches.push(opts?.before);
+      if (opts?.before === "2.0") {
+        return tlResp(
+          [
+            snapshotItem({
+              item_id: "s1.seg.0.0",
+              kind: "inbound_compact_summary",
+              payload: "previous summary",
+            }),
+            snapshotItem({ item_id: "s1.seg.4.0", kind: "agent_chat", payload: "previous session" }),
+          ],
+          true,
+        );
+      }
+      if (opts?.before === "s1.seg.0.0") {
+        return tlResp(
+          [snapshotItem({ item_id: "s2.seg.4.0", kind: "agent_chat", payload: "older session" })],
+          false,
+        );
+      }
+      if (opts?.before !== undefined) return tlResp([], false);
+      return tlResp(postWindow(), true);
+    };
+    vi.mocked(api.getTimeline).mockImplementation((_id: number, opts?: { before?: string; limit?: number }) =>
+      Promise.resolve(pageFor(opts)),
+    );
+
+    const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
+    await waitFor(() => expect(result.current.items).toHaveLength(3));
+    expect(result.current.hasMoreOlder).toBe(true);
+    await waitFor(() => expect(queryClient.getQueryData(SETTINGS_QUERY_KEY)).toBeTruthy());
+
+    pushEvent({ role: "compact_done", agent_id: 42 });
+    pushEvent({
+      role: "timeline_snapshot",
+      agent_id: 42,
+      msg_count: 3,
+      items: postWindow(),
+    });
+
+    await waitFor(() => {
+      expect(api.getTimeline).toHaveBeenCalledWith(42, { before: "s1.seg.0.0", limit: 100 });
+    });
+    await waitFor(() => {
+      expect(result.current.items.map((i) => i.item_id)).toEqual([
+        "s2.seg.4.0",
+        "s1.seg.0.0",
+        "s1.seg.4.0",
+        "0.0",
+        "1.0",
+        "2.0",
+      ]);
+    });
+    // Newest-first walk: the just-compacted session, then the one before it.
+    expect(fetches.filter((b) => b !== undefined)).toEqual(["2.0", "s1.seg.0.0"]);
+    expect(showError).not.toHaveBeenCalled();
+  });
+
   it("display.compact_history_sessions = 0 keeps the legacy clear-on-compact behavior (no retention fetch)", async () => {
     const showError = vi.fn();
     vi.mocked(api.getSettings).mockResolvedValue({
