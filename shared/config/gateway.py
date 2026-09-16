@@ -161,6 +161,27 @@ class GatewaySettings(EnvSettings):
         },
     )
 
+    pause_lifecycle_wait_seconds: float = Field(
+        default=90.0,
+        ge=0,
+        allow_inf_nan=False,
+        alias="AVA_PAUSE_LIFECYCLE_WAIT_SECONDS",
+        description=(
+            "Bounded wait when preparation meets an in-flight agent lifecycle "
+            "command (restart / terminate) it did not author (task #3591): retry "
+            "under the same row locks until it resolves, then abort if it outlives "
+            "the bound. Maintenance-authored commands and claimed ordinary work "
+            "never wait. 0 refuses immediately (pre-#3591 behavior). Must be "
+            "finite and non-negative."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     stranded_hold_recovery: bool = Field(
         default=True,
         alias="AVA_STRANDED_HOLD_RECOVERY",

@@ -1,6 +1,6 @@
 """Operations, gateway, and log event declarations."""
 
-from shared.events.payloads import IdleWake, LlmRetry, SilentIdle
+from shared.events.payloads import IdleWake, LlmRetry, PauseLifecycleWait, SilentIdle
 from shared.events.registry import _audit as _audit
 from shared.events.registry import _telemetry as _telemetry
 from shared.events.registry import _telemetry_audit as _telemetry_audit
@@ -39,6 +39,13 @@ from shared.events.system import (
 )
 
 _EVENTS_OPS: dict[str, EventSpec] = {
+    # pause / rollout lifecycle
+    "pause_lifecycle_wait": _telemetry(
+        "pause_lifecycle_wait",
+        "preparation bounded-waited an in-flight agent lifecycle command",
+        payload=PauseLifecycleWait,
+        tier="anomaly",
+    ),
     # db resilience
     "db_outage_wait": _telemetry("db_outage_wait", "db outage wait", tier="anomaly"),
     "db_outage_pause": _telemetry("db_outage_pause", "db outage pause", tier="anomaly"),

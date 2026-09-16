@@ -19,6 +19,24 @@ from shared.hold_driver import HoldDriver
 from shared.maintenance_state import MaintenanceHold
 
 
+class LifecycleCollisionError(RuntimeError):
+    """Preparation met unfinished lifecycle work it did not author.
+
+    Raised before the cohort is frozen (task #3591) so a bounded retry has a
+    clean boundary: a collision leaves the journal untouched, and the retry
+    re-derives the cohort from the resolved world under the same row locks.
+    ``waitable`` is True only when every competing command is an ordinary
+    agent lifecycle operation (``restart``/``terminate`` without a maintenance
+    payload); maintenance-authored commands and claimed ordinary work keep
+    their refuse-now semantics, and a mix refuses too.
+    """
+
+    def __init__(self, detail: str, agent_ids: list[int], *, waitable: bool) -> None:
+        super().__init__(detail)
+        self.agent_ids = tuple(agent_ids)
+        self.waitable = waitable
+
+
 def prepare(
     conn: psycopg.Connection,
     *,
@@ -35,6 +53,11 @@ def prepare(
     same cohort and finds already committed commands by the exact operation.
     Terminated agents never enter the cohort. A previous lifecycle operation,
     stale/unknown runtime requires separate resolution.
+
+    An unfinished agent lifecycle command belonging to another actor raises
+    ``LifecycleCollisionError`` before the cohort is frozen; the caller may
+    bounded-wait and retry, and the retry re-verifies everything under the
+    same row locks (task #3591).
     """
     current = maintenance.require_operation(holder, acquired_at)
     hold = current.maintenance
@@ -71,6 +94,7 @@ def prepare(
         cold = frozenset(
             row[0] for row in rows if host_absent and _RuntimeRow(*row).cold_hosted_idle()
         )
+        _refuse_inflight_lifecycle(conn, captured, cold, holder=holder, acquired_at=acquired_at)
         _require_resolved(conn, captured, cold=cold)
         if captured != hold:
             pause_owner.change_maintenance(
@@ -218,6 +242,93 @@ def _require_resolved(
         raise RuntimeError(
             f"parked agents have unresolved claimed work: {[row[0] for row in unresolved]}"
         )
+
+
+class _CommandRow(NamedTuple):
+    """One pending/claimed inbound command relevant to a collision decision."""
+
+    agent_id: int
+    command_id: int
+    kind: str
+    status: str
+    applied: bool
+    maintenance: object
+
+
+def _refuse_inflight_lifecycle(
+    conn: psycopg.Connection,
+    hold: MaintenanceHold,
+    cold: frozenset[int],
+    *,
+    holder: str,
+    acquired_at: datetime,
+) -> None:
+    """Declare unfinished lifecycle work before the cohort freezes (task #3591).
+
+    Runs inside preparation's row-locked transaction but BEFORE the capture is
+    persisted: a ``LifecycleCollisionError`` then leaves the journal untouched, so
+    the caller's bounded retry starts from the same clean boundary and
+    re-verifies every condition under the same locks. This mirrors the two
+    downstream refusal checks — the per-member pending-command check in
+    ``_restart`` and the parked-agent predicate of ``_require_resolved`` — one
+    step earlier, carrying the waitability the retry decision needs: ordinary
+    agent lifecycle operations (restart/terminate without a maintenance
+    payload) are waitable; maintenance-authored commands and claimed ordinary
+    work are not.
+    """
+    agents = sorted(set(hold.commands) | set(hold.parked))
+    if not agents:
+        return
+    rows = [
+        _CommandRow(*row)
+        for row in conn.execute(
+            "SELECT agent_id, id, kind, status, applied_at IS NOT NULL, payload->'maintenance' "
+            "FROM inbound_messages WHERE agent_id=ANY(%s) AND status IN ('pending','claimed') "
+            "ORDER BY agent_id, id",
+            (agents,),
+        ).fetchall()
+    ]
+    operation = {"holder": holder, "acquired_at": acquired_at.isoformat()}
+    lines: list[str] = []
+    blocked: list[int] = []
+    waitable = True
+    for agent_id in sorted(hold.commands):
+        member = [
+            row for row in rows if row.agent_id == agent_id and row.kind in ("restart", "terminate")
+        ]
+        if not member or (len(member) == 1 and member[0].maintenance == operation):
+            continue
+        lines.append(_collision_line(agent_id, member))
+        blocked.append(agent_id)
+        waitable = waitable and all(row.maintenance is None for row in member)
+    for agent_id in sorted(hold.parked):
+        for row in rows:
+            if row.agent_id != agent_id or not _unresolved_parked(row, agent_id, cold):
+                continue
+            lines.append(_collision_line(agent_id, [row]))
+            blocked.append(agent_id)
+            waitable = waitable and row.kind in ("restart", "terminate") and row.maintenance is None
+    if not lines:
+        return
+    raise LifecycleCollisionError("; ".join(lines), blocked, waitable=waitable)
+
+
+def _collision_line(agent_id: int, rows: list[_CommandRow]) -> str:
+    detail = ", ".join(f"{row.kind} {row.command_id} ({row.status})" for row in rows)
+    lifecycle = all(row.kind in ("restart", "terminate") for row in rows)
+    problem = "another unfinished lifecycle command" if lifecycle else "unresolved claimed work"
+    return f"agent {agent_id} has {problem}: {detail}"
+
+
+def _unresolved_parked(row: _CommandRow, agent_id: int, cold: frozenset[int]) -> bool:
+    """`_require_resolved`'s predicate, per row, for the waitability decision."""
+    if row.status == "claimed":
+        return (
+            agent_id not in cold
+            or row.kind == "terminate"
+            or (row.kind == "restart" and not row.applied)
+        )
+    return row.kind in ("restart", "terminate")
 
 
 def _restart(conn: psycopg.Connection, agent_id: int, holder: str, acquired_at: datetime) -> int:

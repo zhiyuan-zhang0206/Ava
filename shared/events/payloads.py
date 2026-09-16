@@ -383,6 +383,21 @@ class HeartbeatPaused(TypedDict):
     duration_s: float
 
 
+class PauseLifecycleWait(TypedDict):
+    """`pause_lifecycle_wait` payload — ops/agent_pause.py::_prepare.
+
+    One row per preparation episode that met an unfinished agent lifecycle
+    command it did not author (task #3591). ``waited_s`` is the bounded retry
+    time before the outcome: ``resolved`` (the command finished and
+    preparation proceeded), ``exceeded`` (the bound was spent — abort), or
+    ``refused`` (maintenance-class / non-lifecycle work — no wait by design).
+    """
+
+    waited_s: float
+    outcome: Literal["resolved", "exceeded", "refused"]
+    agents: list[int]
+
+
 class ShellTtlRenewed(TypedDict):
     """`shell_ttl_renewed` payload — ava/shell/sessions.py renew().
 
