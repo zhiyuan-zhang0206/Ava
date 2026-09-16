@@ -9,12 +9,32 @@ tags:
 
 # Configuration and Bootstrap
 
-`shared/config/` defines the per-domain Pydantic settings models and the public
-`settings` facade. Normal runtime import constructs the singleton and preserves
-its fail-fast configuration contract. Existing settings-lite
-`AVA_CONFIG_FETCH=skip` verbs defer construction until first attribute access,
-so metadata-only repair code can load model declarations without reading a
-broken local `.env` or fetching runner configuration.
+`shared/config/` defines the per-domain settings models and the public
+`settings` facade. Runtime import boots **lite** (`shared/config/_lite.py`):
+it loads `.env` plus the env-authority pass, applies the cluster clock, and
+fail-fast validates the boot-path field index, without importing the 15
+sub-models, `pydantic_settings`, or building the registry. The eager chain
+(`shared/config/_full.py`) is constructed once on the first access the lite
+layer does not cover -- an upgrade that replays pending overlay writes and
+rebinds the facade's `settings` name; pre-upgrade bindings keep working. The
+gateway, ops daemons and agent host call `shared.config.ensure_eager()` to
+keep full fail-fast at boot; `AVA_CONFIG_BOOT=eager` (process env only) is the
+operator escape hatch, and existing settings-lite `AVA_CONFIG_FETCH=skip`
+verbs keep deferring everything until first attribute access (`skip` wins over
+`eager`), so metadata-only repair code can load model declarations without
+reading a broken local `.env` or fetching runner configuration.
+
+The boot-path index is generated: `shared/config_lite_table.json` (read by the
+hand-written `shared/config_lite_table.py`, outside this package because
+`shared/env_registry.py` consumes its surfaces before Settings exists) is
+produced from the live registry by `scripts/gen_config_lite_table.py` and
+byte-compared by the `config-lite-table-fresh` gate. A field a process never
+touches is no longer validated at import (the accepted semantic change of task
+#3621): local-source units keep their import-time required-field check, a
+configured runner still fetches bootstrap at the same point, and the
+equivalence windows plus first-error parity with the eager path are pinned by
+tests (`tests/shared/test_config_lite_*.py`); the design record is
+[2026-09-16-config-boot-lite](../decisions/2026-09-16-config-boot-lite.md).
 
 `shared/config_registry.py` is the single projection of field aliases,
 annotations, editor types, choices, and `json_schema_extra` metadata. Both the

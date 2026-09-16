@@ -11,6 +11,12 @@ plugin binding is their declaration:
   is force/dropped by the env-authority pass, forwarded to sessions, and
   distributed via /api/bootstrap with no hand-written set edit (the "env
   allowlist six-gap" incident class is structurally impossible: A3).
+  The projections `load_ava_env` runs BEFORE Settings exists (the env-authority
+  force/drop families) read the generated boot-lite static index
+  (`shared/config_lite_table.py`) instead of the live registry — building the
+  registry there would pull pydantic + all 15 sub-models into every boot
+  (#3621); the index is generated from the same declarations and locked
+  equal to the registry by tests/shared/test_config_lite_table.py.
 - **Non-Settings keys** (ambient display vars, Windows system keys, the
   overlay/birth JSON carriers, temp-dir vars, ...) are registered as
   `EnvField` passthrough rows below — one row per key (A1: exactly one
@@ -51,11 +57,15 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Literal
 
+from shared.config_lite_table import (
+    FIELD_ALIASES,
+    FIELD_CAPABILITIES,
+    FIELD_SCOPES,
+)
 from shared.config_registry import (
     _fields,
     _schema_extra,
     field_alias,
-    field_alias_map,
 )
 from shared.port_block import BLOCK_MAX, BLOCK_SIZE, PORT_OFFSETS
 
@@ -248,7 +258,7 @@ def health_port_env_aliases() -> dict[str, str]:
     """`{service: env-var alias}` for every health-port service — the derive
     surface. Derived from the Settings field names (fail-fast KeyError if a
     declared service has no `<svc>_health_port` field), never hand-copied."""
-    return {svc: field_alias(f"{svc}_health_port") for svc in _HEALTH_PORT_SERVICES}
+    return {svc: FIELD_ALIASES[f"{svc}_health_port"] for svc in _HEALTH_PORT_SERVICES}
 
 
 def health_port_env(base: int) -> dict[str, str]:
@@ -412,12 +422,13 @@ ADMIN_DATA_PLANE_ALIASES = frozenset(
 
 
 def _scope_aliases(*scopes: str) -> frozenset[str]:
-    """Env aliases of every field whose scope is one of `scopes`."""
-    return frozenset(
-        field_alias(name)
-        for name, ref in _fields().items()
-        if _schema_extra(ref.info).get("scope") in scopes
-    )
+    """Env aliases of every field whose scope is one of `scopes`.
+
+    Reads the boot-lite static index, not the live registry: `load_ava_env`
+    runs these projections before Settings exists, and the registry build would
+    drag pydantic + all sub-models into every boot (#3621; index-vs-registry
+    equality locked by tests/shared/test_config_lite_table.py)."""
+    return frozenset(FIELD_ALIASES[name] for name, scope in FIELD_SCOPES.items() if scope in scopes)
 
 
 @lru_cache(maxsize=1)
@@ -439,10 +450,10 @@ def agent_runner_cluster_aliases() -> frozenset[str]:
     capability=agent-runner AND cluster scope (validated against the gateway
     consumption matrix by tests/shared/test_gateway_consumer_guard.py)."""
     return frozenset(
-        field_alias(name)
-        for name, ref in _fields().items()
-        if ref.capability == "agent-runner"
-        and _schema_extra(ref.info).get("scope") in ("cluster-pinned", "cluster-default")
+        FIELD_ALIASES[name]
+        for name, scope in FIELD_SCOPES.items()
+        if FIELD_CAPABILITIES[name] == "agent-runner"
+        and scope in ("cluster-pinned", "cluster-default")
     )
 
 
@@ -454,7 +465,7 @@ def env_identity_keys() -> frozenset[str]:
     process that loads a unit's .env: a key the unit's .env declares is forced
     from the file, an inherited one is dropped (the host-scoped gateway URL
     keys stay env-suppliable — dotenv_boot's `_identity_env_only`)."""
-    return frozenset(field_alias(n) for n in _IDENTITY_FIELDS) | {AVA_PRIMARY_GATEWAY_URL}
+    return frozenset(FIELD_ALIASES[n] for n in _IDENTITY_FIELDS) | {AVA_PRIMARY_GATEWAY_URL}
 
 
 @lru_cache(maxsize=1)
@@ -466,7 +477,7 @@ def derived_env_keys() -> frozenset[str]:
     and thereby loaded its own prod .env into os.environ) would leak prod
     AVA_DB_URL / AVA_REDIS_URL into the child."""
     return (
-        frozenset(field_alias(n) for n in _DERIVED_FIELDS)
+        frozenset(FIELD_ALIASES[n] for n in _DERIVED_FIELDS)
         | frozenset(health_port_env_aliases().values())
         | {REDIS_PASSWORD_ENV}
     )
@@ -537,7 +548,7 @@ def session_forward_keys() -> frozenset[str]:
 
 
 def _agent_guide_keys() -> frozenset[str]:
-    return frozenset(field_alias(n) for n in _GUIDE_FIELDS) | _GUIDE_PASSTHROUGH_KEYS
+    return frozenset(FIELD_ALIASES[n] for n in _GUIDE_FIELDS) | _GUIDE_PASSTHROUGH_KEYS
 
 
 @lru_cache(maxsize=1)
@@ -569,7 +580,7 @@ def _ensure_validated() -> None:
     constants, but the Settings-alias side needs the registry build)."""
     if getattr(_ensure_validated, "_done", False):
         return
-    aliases = set(field_alias_map().values())
+    aliases = set(FIELD_ALIASES.values())
     for row in _PASSTHROUGH_ROWS:
         if row.key in aliases:
             raise RuntimeError(

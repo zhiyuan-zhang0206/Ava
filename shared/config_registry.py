@@ -41,12 +41,25 @@ environment and constructs no Settings.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
 from types import UnionType
-from typing import Any, Literal, Union, cast, get_args, get_origin
+from typing import Any, Literal, Protocol, Union, cast, get_args, get_origin
 
-from pydantic.fields import FieldInfo
+
+class _FieldInfoLike(Protocol):
+    """The pydantic ``FieldInfo`` surface this registry reads.
+
+    Declared structurally rather than importing ``pydantic.fields``: this
+    module must import without pydantic (it is importable before the config
+    package), while the real FieldInfo objects only appear through the build.
+    """
+
+    alias: str | None
+    serialization_alias: str | None
+    json_schema_extra: dict[str, Any] | Callable[[dict[str, Any]], None] | None
+
 
 # The capability a config field configures — the top-level config-panel section.
 # `gateway` / `agent-runner` mirror the `MachineRole` capability tokens
@@ -114,10 +127,10 @@ class _FieldRef:
     domain: str  # attribute on `settings`, e.g. "lm"
     group: str  # frontend group label for the owning domain
     capability: Capability  # top-level config-panel section
-    info: FieldInfo
+    info: _FieldInfoLike
 
 
-def _schema_extra(info: FieldInfo) -> dict[str, Any]:
+def _schema_extra(info: _FieldInfoLike) -> dict[str, Any]:
     """The field's `json_schema_extra` as a plain dict (empty if unset / callable).
 
     pydantic types `json_schema_extra` as a `dict[str, JsonValue] | callable | None`
@@ -301,7 +314,7 @@ def _fields() -> dict[str, _FieldRef]:
 # `field_alias` etc.) and blows up on a clean env (`ImportError: cannot import
 # name 'field_alias' from partially initialized module ...` — Task #1099).
 @lru_cache(maxsize=1)
-def _field_infos() -> dict[str, FieldInfo]:
+def _field_infos() -> dict[str, _FieldInfoLike]:
     return {n: r.info for n, r in _fields().items()}
 
 

@@ -768,8 +768,12 @@ def _stats_route(host: AgentHost, scheduler: TurnScheduler):  # noqa: ANN202 —
 
 def main() -> None:
     """Entry point: schema gate, logging, graceful shutdown, then the loop."""
+    from shared.config import ensure_eager
     from shared.migrations import assert_schema_current
 
+    # Task #3621: the agent host is on the full-validation whitelist — build
+    # the eager config chain before anything else reads config.
+    ensure_eager()
     _require_helper_parent_chain()
     assert_schema_current(settings.data_plane.db_url)
     init_gateway_process(name="agent_host")
