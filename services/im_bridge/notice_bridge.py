@@ -5,8 +5,9 @@ Polls the gateway's /api/notices/live for new fleet notices (an agent's
 chat — a channel independent of the /switch conversation flow. Pushed notices
 carry inline buttons:
 
-- [Reply] (both kinds, Task #1061 made FYI answerable too) arms a 5-minute
-  reply mode: plain-text messages in that window resolve the notice with that
+- [Reply] (both kinds, Task #1061 made FYI answerable too) arms a reply-mode
+  window (``services.im_bridge_notice_reply_window_seconds``, default 5
+  minutes): plain-text messages in that window resolve the notice with that
   text as the answer, so chatting with agents and answering notices never
   collide; /cancel exits early.
 - [OK] / [Close] resolve an FYI as read or dismiss a response-required notice.
@@ -32,8 +33,6 @@ from shared.config import settings
 from shared.db_transaction import write_transaction
 
 _log = logging.getLogger("services.im_bridge.notice_bridge")
-
-REPLY_WINDOW_SECONDS = 300  # reply mode window after tapping [Reply]
 
 _CB_REPLY = "notice:reply:"
 _CB_READ = "notice:read:"
@@ -161,10 +160,15 @@ class NoticeBridge:
             self._cursor = last_delivered
             self._save("notice_cursor.json", self._cursor)
 
-    def _notices_after(self, after: int, limit: int = 200) -> list[dict[str, Any]]:
+    def _notices_after(self, after: int, limit: int | None = None) -> list[dict[str, Any]]:
         """Open notices with id > after, both kinds, oldest-first — the
-        direct-DB twin of the gateway's /api/notices/live query."""
+        direct-DB twin of the gateway's /api/notices/live query. Without an
+        explicit limit the read caps at the same display default the gateway
+        endpoint applies (one source, task #3696)."""
         from shared.db import NOTICE_FYI_TTL_DAYS
+
+        if limit is None:
+            limit = settings.display.notices_open_default_limit
 
         with self.db_pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
@@ -175,10 +179,15 @@ class NoticeBridge:
             )
             return [_row_to_notice(r) for r in cur.fetchall()]
 
-    def _open_notices(self, limit: int = 50) -> list[dict[str, Any]]:
+    def _open_notices(self, limit: int | None = None) -> list[dict[str, Any]]:
         """Every open notice, both kinds, priority-then-newest — the
-        direct-DB twin of the gateway's /api/notices/open query."""
+        direct-DB twin of the gateway's /api/notices/open query. Without an
+        explicit limit the listing caps at services.im_bridge_notice_open_limit;
+        callers may narrow it."""
         from shared.db import NOTICE_FYI_TTL_DAYS
+
+        if limit is None:
+            limit = settings.services.im_bridge_notice_open_limit
 
         with write_transaction(self.db_pool) as conn, conn.cursor() as cur:
             # Lazy FYI expiry, same as the gateway's open feed: expired FYIs
@@ -276,16 +285,17 @@ class NoticeBridge:
     def _arm_reply_mode(self, chat_id: str, agent_id: str, notice_id: str) -> str:
         """Tap [Reply]: arm the reply window on this chat. A new tap replaces
         an older mode; expired modes are dropped first."""
+        window_seconds = settings.services.im_bridge_notice_reply_window_seconds
         self._reply_modes = {
             k: v for k, v in self._reply_modes.items() if time.time() <= v["expires_at"]
         }
         self._reply_modes[str(chat_id)] = {
             "notice_id": int(notice_id),
             "agent_id": int(agent_id),
-            "expires_at": time.time() + REPLY_WINDOW_SECONDS,
+            "expires_at": time.time() + window_seconds,
         }
         return (
-            f"✏️ Reply mode: messages you send in the next {REPLY_WINDOW_SECONDS // 60} min go to"  # emoji-ok: Telegram reply-mode hint (user-facing)
+            f"✏️ Reply mode: messages you send in the next {window_seconds // 60} min go to"  # emoji-ok: Telegram reply-mode hint (user-facing)
             "that notice as replies (/cancel to exit)"
         )
 
@@ -303,10 +313,14 @@ class NoticeBridge:
         hint; each item is pushed like a fresh notice."""
         try:
             if self.db_pool is not None:
-                notices = await asyncio.to_thread(self._open_notices, 50)
+                notices = await asyncio.to_thread(self._open_notices)
             else:
                 notices = await self._get(
-                    "/api/notices/open", {"include_awaiting": True, "limit": 50}
+                    "/api/notices/open",
+                    {
+                        "include_awaiting": True,
+                        "limit": settings.services.im_bridge_notice_open_limit,
+                    },
                 )
         except Exception:
             _log.warning("notice list failed", exc_info=True)

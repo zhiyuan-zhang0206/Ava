@@ -63,6 +63,7 @@ class FakeGateway:
         self.sent: list[tuple[int, str, str]] = []
         self.sent_keys: list[str | None] = []
         self.spawned: list[tuple[str | None, dict[str, object] | None]] = []
+        self.timeline_limits: list[int | None] = []
         self.send_failures = send_failures
         self.stream_failures = stream_failures
 
@@ -96,7 +97,8 @@ class FakeGateway:
         self.spawned.append((preset, config))
         return 777
 
-    async def get_timeline(self, agent_id: int, limit: int = 5) -> list[dict[str, Any]]:
+    async def get_timeline(self, agent_id: int, limit: int | None = None) -> list[dict[str, Any]]:
+        self.timeline_limits.append(limit)
         return self.timeline
 
     async def send_message(
@@ -232,6 +234,28 @@ def test_cmd_switch_replay_caps_at_five() -> None:
     for m in ("m4", "m5", "m6", "m7", "m8"):
         assert m in text
     assert core._last_pushed.get(("telegram", "12345", 405)) == "8.1"
+
+
+def test_cmd_switch_window_and_replay_follow_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The raw fetch window and the replay count are cluster config, resolved
+    per call (task #3696)."""
+    monkeypatch.setattr(settings.services, "im_bridge_timeline_window", 7)
+    monkeypatch.setattr(settings.services, "im_bridge_replay_messages", 2)
+    gateway = FakeGateway(
+        agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")],
+        timeline=[
+            {"kind": "agent_chat", "item_id": f"{i}.1", "payload": f"m{i}"} for i in range(1, 9)
+        ],
+    )
+    core = _core(gateway)
+    state = ChatState("telegram", "12345")
+    out = asyncio.run(core._cmd_switch(state, "405"))
+    text = _text(out)
+    assert gateway.timeline_limits[-1] == 7
+    for m in ("m1", "m2", "m3", "m4", "m5", "m6"):
+        assert m not in text
+    for m in ("m7", "m8"):
+        assert m in text
 
 
 def test_cmd_switch_unknown_agent() -> None:

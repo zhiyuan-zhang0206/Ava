@@ -46,6 +46,10 @@
 > **Update 2026-08-25:** the gateway-owned pg-backup scheduler daemon now owns
 > the local schedule. The watchdog probes and restarts that daemon but never
 > runs `pg_dump` in its supervision round.
+> **Update 2026-09-17:** the schedule and retention are cluster config —
+> `services.backup_hour` / `services.backup_keep` (defaults 3 / 7; task #3696).
+> Earlier bullets quote the constants' old home.
+>
 > **Update 2026-09-16:** scheduled dumps and restore drills use owned worker
 > processes so stopping the scheduler also stops its synchronous work. Restore
 > Postgres stays in that worker group; only verified completion advances success.

@@ -104,11 +104,11 @@ def _await_backup_lock_holder(ready: Path, proc: subprocess.Popen[bytes]) -> Non
 
 
 def test_not_due_before_backup_hour(bdir: Path) -> None:
-    assert not backup.is_due(_dt(2026, 6, 10, backup.BACKUP_HOUR - 1, 59))
+    assert not backup.is_due(_dt(2026, 6, 10, settings.services.backup_hour - 1, 59))
 
 
 def test_due_at_hour_with_no_dumps(bdir: Path) -> None:
-    assert backup.is_due(_dt(2026, 6, 10, backup.BACKUP_HOUR, 0))
+    assert backup.is_due(_dt(2026, 6, 10, settings.services.backup_hour, 0))
 
 
 def test_not_due_again_after_todays_dump(bdir: Path) -> None:
@@ -118,13 +118,20 @@ def test_not_due_again_after_todays_dump(bdir: Path) -> None:
 
 def test_due_again_the_next_day(bdir: Path) -> None:
     _touch(bdir, "ava-20260609-030001.dump")
-    assert backup.is_due(_dt(2026, 6, 10, backup.BACKUP_HOUR, 0))
+    assert backup.is_due(_dt(2026, 6, 10, settings.services.backup_hour, 0))
 
 
 def test_catchup_after_downtime(bdir: Path) -> None:
     """Host down at 03:00 -> the first tick later that day is still due."""
     _touch(bdir, "ava-20260609-030001.dump")
     assert backup.is_due(_dt(2026, 6, 10, 14, 30))
+
+
+def test_due_hour_follows_config(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The due hour resolves from ``services.backup_hour`` at call time."""
+    monkeypatch.setattr(settings.services, "backup_hour", 2)
+    assert not backup.is_due(_dt(2026, 6, 10, 1, 59))
+    assert backup.is_due(_dt(2026, 6, 10, 2, 0))
 
 
 # ─── the clock the schedule is read on ───
@@ -161,7 +168,7 @@ def test_day_boundary_is_cluster_time_not_host_time(
 
 
 def test_backup_hour_is_cluster_time(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """BACKUP_HOUR is 03:00 on the cluster's clock, whatever the host's says."""
+    """The backup hour defaults to 03:00 on the cluster's clock, whatever the host's says."""
     monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
     assert not backup.is_due(datetime(2026, 6, 9, 18, 59, tzinfo=UTC))  # 02:59 Shanghai
     assert backup.is_due(datetime(2026, 6, 9, 19, 0, tzinfo=UTC))  # 03:00 Shanghai
@@ -444,7 +451,7 @@ def test_prune_order_survives_the_dst_fold(bdir: Path) -> None:
     pst = _touch(bdir, "ava-20261101T093000Z.dump")  # 01:30 PST, one hour later
     assert [p for _ts, p in backup._managed_dumps(bdir)] == [pdt, pst]
 
-    for i in range(2, backup.BACKUP_KEEP + 1):
+    for i in range(2, settings.services.backup_keep + 1):
         _touch(bdir, f"ava-202611{i:02d}T090000Z.dump")
     assert backup._prune(bdir) == [pdt]  # the earlier half of the fold, deterministically
     assert pst.exists()
@@ -460,7 +467,7 @@ def test_legacy_named_dumps_stay_managed(bdir: Path) -> None:
     assert [p for _ts, p in backup._managed_dumps(bdir)] == [legacy, modern]
     assert not backup.is_due(_dt(2026, 11, 1, 23, 0))
 
-    for i in range(2, backup.BACKUP_KEEP + 1):
+    for i in range(2, settings.services.backup_keep + 1):
         _touch(bdir, f"ava-202611{i:02d}-030000.dump")
     assert backup._prune(bdir) == [legacy]
 
@@ -482,7 +489,7 @@ def test_prune_keeps_newest(bdir: Path) -> None:
     for name in names:
         _touch(bdir, name)
     removed = backup._prune(bdir)
-    keep = backup.BACKUP_KEEP
+    keep = settings.services.backup_keep
     assert [p.name for p in removed] == names[: len(names) - keep]
     assert sorted(p.name for p in bdir.glob("*.dump")) == names[len(names) - keep :]
 
@@ -507,7 +514,7 @@ def test_prune_keeps_newest_daily_plus_newest_pre_update_snapshot(
         Path(bdir / "ava-20260605T100000Z.pre-update.dump.gz.enc"),
     ]
     assert (bdir / "ava-20260607T100000Z.pre-update.dump.gz.enc").exists()
-    assert len(list(bdir.glob("*.dump"))) == backup.BACKUP_KEEP  # dailies only
+    assert len(list(bdir.glob("*.dump"))) == settings.services.backup_keep  # dailies only
 
 
 def test_prune_with_snapshot_alone_keeps_newest_snapshot(bdir: Path) -> None:
@@ -521,6 +528,16 @@ def test_prune_with_snapshot_alone_keeps_newest_snapshot(bdir: Path) -> None:
     removed = backup._prune(bdir)
     assert removed == [bdir / "ava-20260605T100000Z.pre-update.dump.gz.enc"]
     assert (bdir / "ava-20260607T100000Z.pre-update.dump.gz.enc").exists()
+
+
+def test_prune_keep_follows_config(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The daily retention window resolves from ``services.backup_keep``."""
+    monkeypatch.setattr(settings.services, "backup_keep", 3)
+    for day in range(1, 6):
+        _touch(bdir, f"ava-2026060{day}-030000.dump")
+    removed = backup._prune(bdir)
+    assert len(removed) == 2
+    assert len(backup._managed_dumps(bdir)) == 3
 
 
 def test_prune_bounds_terminal_pitr_activation_snapshots(bdir: Path) -> None:
@@ -622,7 +639,7 @@ def test_run_backup_sweeps_stale_partials(bdir: Path, monkeypatch: pytest.Monkey
 def test_run_backup_real_dump_and_prune(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Real pg_dump against the session's provisioned Postgres: dump lands under
     the managed name, the .partial intermediate is gone, and old dumps prune."""
-    for i in range(1, backup.BACKUP_KEEP + 1):
+    for i in range(1, settings.services.backup_keep + 1):
         _touch(bdir, f"test-2026060{i}-030000.dump")
 
     _disable_offsite(monkeypatch)
@@ -632,8 +649,8 @@ def test_run_backup_real_dump_and_prune(bdir: Path, monkeypatch: pytest.MonkeyPa
     assert logical_dump_names.DUMP_NAME_RE.match(path.name)
     assert path.stat().st_size > 0
     assert not list(bdir.glob("*.partial"))
-    # BACKUP_KEEP pre-seeded + 1 new -> the oldest pre-seed pruned, KEEP remain.
-    assert len(backup._managed_dumps(bdir)) == backup.BACKUP_KEEP
+    # backup_keep pre-seeded + 1 new -> the oldest pre-seed pruned, KEEP remain.
+    assert len(backup._managed_dumps(bdir)) == settings.services.backup_keep
     assert not (bdir / "test-20260601-030000.dump").exists()
     # The fresh dump is restorable input: decrypt, then list its TOC directly
     # (current artifacts are raw custom dumps — no gzip layer).

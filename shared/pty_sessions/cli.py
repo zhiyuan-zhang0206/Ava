@@ -74,6 +74,7 @@ from shared.paths import run_dir
 from shared.platform import LockTimeoutError
 from shared.proc_tree import stable_create_time
 from shared.pty_sessions._paths import (
+    CAPTURE_MAX_LINES,
     host_identity,
     host_log_path,
     host_starttime,
@@ -528,7 +529,7 @@ def _op_capture(name: str, rest: list[str]) -> int:
         from shared.config import settings
 
         lines = settings.display.shell_capture_default_lines
-    if lines < 1 or lines > 100000:
+    if lines < 1 or lines > CAPTURE_MAX_LINES:
         sys.stderr.write(f"capture lines out of range: {lines}\n")
         return 2
     try:

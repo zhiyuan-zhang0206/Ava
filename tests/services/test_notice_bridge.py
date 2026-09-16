@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
 from typing import Any
 
@@ -160,6 +161,20 @@ def test_reply_mode_window_resolves_notice(tmp_path: Any, monkeypatch: pytest.Mo
     assert out is not None
     assert gateway.resolved == [(7, 42, "answer", "\u6211\u540c\u610f")]
     assert "12345" not in bridge._reply_modes
+
+
+def test_reply_window_follows_config(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The reply-mode window is cluster config, resolved when the mode arms
+    (task #3696)."""
+    gateway = FakeGateway()
+    bridge, _ = _bridge(tmp_path, gateway, monkeypatch)
+    monkeypatch.setattr(settings.services, "im_bridge_notice_reply_window_seconds", 600)
+
+    before = time.time()
+    hint = asyncio.run(bridge.handle_callback("12345", "notice:reply:7:42"))
+    assert hint is not None and "10 min" in hint
+    mode = bridge._reply_modes["12345"]
+    assert before + 600 <= mode["expires_at"] <= time.time() + 600
 
 
 def test_reply_mode_cancel_and_expiry(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -414,6 +429,46 @@ def test_list_queue_reads_directly_from_db(
         hint = asyncio.run(bridge.list_queue())
         assert hint is not None and "1 notices open" in hint
         assert any("queue item" in s[0] for s in adapter.sent)  # pyright: ignore[reportUnknownMemberType]
+    finally:
+        pool.close()
+
+
+def test_list_queue_limit_follows_config(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
+) -> None:
+    """The queue listing cap is cluster config, resolved per call: a shortened
+    limit pushes only that many notices (task #3696)."""
+    from tests.conftest import spawn_agent
+
+    agent_id = spawn_agent()
+    for i in range(3):
+        _seed_notice(db_conn, agent_id, f"queue item {i}")
+    monkeypatch.setattr(settings.services, "im_bridge_notice_open_limit", 2)
+    bridge, adapter, pool = _direct_bridge(db_conn, tmp_path, monkeypatch)
+    try:
+        hint = asyncio.run(bridge.list_queue())
+        assert hint is not None and "2 notices open" in hint
+        assert len(adapter.sent) == 2  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    finally:
+        pool.close()
+
+
+def test_notices_after_caps_at_display_default(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
+) -> None:
+    """One source for the live-read cap: the DB-direct twin resolves the same
+    display.notices_open_default_limit the gateway endpoint applies (task
+    #3696)."""
+    from tests.conftest import spawn_agent
+
+    agent_id = spawn_agent()
+    for i in range(3):
+        _seed_notice(db_conn, agent_id, f"live item {i}")
+    monkeypatch.setattr(settings.display, "notices_open_default_limit", 2)
+    bridge, _adapter, pool = _direct_bridge(db_conn, tmp_path, monkeypatch)
+    try:
+        rows = bridge._notices_after(0)
+        assert len(rows) == 2
     finally:
         pool.close()
 

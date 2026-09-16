@@ -15,10 +15,11 @@ from pydantic import Field, field_validator
 from pydantic_settings import NoDecode
 
 from shared.config._base import _unit_home
+from shared.config.service_health_ports_fields import ServiceHealthPortFields
 from shared.config.service_runtime import _ServiceRuntimeSettings
 
 
-class ServiceSettings(_ServiceRuntimeSettings):
+class ServiceSettings(ServiceHealthPortFields, _ServiceRuntimeSettings):
     agent_host_pidfile: Path = Field(
         default_factory=lambda: _unit_home() / "run" / "agent-host.pid",
         alias="AVA_AGENT_HOST_PIDFILE",
@@ -57,6 +58,25 @@ class ServiceSettings(_ServiceRuntimeSettings):
             "sensitive": False,
             "scope": "host",
             "remote_writable": False,
+        },
+    )
+
+    labeler_max_chars: int = Field(
+        default=64,
+        gt=0,
+        alias="AVA_LABELER_MAX_CHARS",
+        description=(
+            "Character ceiling for an auto-generated agent label: the model is "
+            "asked for a label of at most this many characters, and the output is "
+            "truncated to the same number. 64 is a readable single line in the "
+            "fleet view — long enough to distinguish one task from another, short "
+            "enough that labels scan side by side."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
         },
     )
 
@@ -124,6 +144,47 @@ class ServiceSettings(_ServiceRuntimeSettings):
             "remote_writable": False,
         },
     )
+    backup_hour: int = Field(
+        default=3,
+        ge=0,
+        le=23,
+        alias="AVA_BACKUP_HOUR",
+        description=(
+            "Cluster-clock hour (0-23) at which the daily logical dump becomes due: "
+            "the scheduler's first wake at/after this hour starts it, so a host that "
+            "was down at that hour catches up on its next tick. 03:00 runs in the "
+            "quiet window, and the newest dump is then only hours old when the "
+            "morning reads it; the hour is read on AVA_TIMEZONE (cluster time), "
+            "never the host clock."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    backup_keep: int = Field(
+        default=7,
+        gt=0,
+        alias="AVA_BACKUP_KEEP",
+        description=(
+            "How many of the newest daily dumps the local pool keeps; the off-site "
+            "PITR retention planner mirrors this count so the remote namespace "
+            "cannot drift from the local prune. 7 is a week of dailies: a bad "
+            "migration found a day later must not have already overwritten the last "
+            "good copy. The pre-update/activation snapshots and the in-flight "
+            "activation pin are kept in their own slots on top of this window."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     pitr_uploader_pidfile: Path = Field(
         default_factory=lambda: _unit_home() / "run" / "pitr_uploader.pid",
         alias="AVA_PITR_UPLOADER_PIDFILE",
@@ -301,6 +362,81 @@ class ServiceSettings(_ServiceRuntimeSettings):
         },
     )
 
+    im_bridge_timeline_window: int = Field(
+        default=20,
+        gt=0,
+        alias="AVA_IM_BRIDGE_TIMELINE_WINDOW",
+        description=(
+            "Raw timeline items the IM bridge fetches for a /switch replay before "
+            "filtering to dialog messages: the raw feed mixes in non-dialog items "
+            "(agent_updated, task events), so the fetch window must be wider than "
+            "the replayed count. 20 leaves room for the filter to still find a full "
+            "batch behind non-dialog items (user feedback 2026-08-05: a raw limit "
+            "of 5 could yield as few as 2 dialog messages)."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    im_bridge_replay_messages: int = Field(
+        default=5,
+        gt=0,
+        alias="AVA_IM_BRIDGE_REPLAY_MESSAGES",
+        description=(
+            "How many of the most recent dialog messages a /switch replay pushes "
+            "to the chat. 5 gives enough scroll-back to re-orient without flooding "
+            "the chat window (user feedback 2026-08-05: 'only the last 2 is too "
+            "few')."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    im_bridge_notice_reply_window_seconds: int = Field(
+        default=300,
+        gt=0,
+        alias="AVA_IM_BRIDGE_NOTICE_REPLY_WINDOW_SECONDS",
+        description=(
+            "How long after tapping [Reply] on a notice the chat stays in reply "
+            "mode — plain text sent in the window answers the notice. 300 (5 "
+            "minutes) covers reading the notice and typing an answer; shorter "
+            "risks the mode expiring mid-reply, longer leaves a forgotten mode "
+            "swallowing unrelated chat messages (/cancel exits early)."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    im_bridge_notice_open_limit: int = Field(
+        default=50,
+        gt=0,
+        alias="AVA_IM_BRIDGE_NOTICE_OPEN_LIMIT",
+        description=(
+            "Cap on one open-notices listing for the /notice queue view (the "
+            "direct-DB read and the HTTP fallback both pass it). Each listed "
+            "notice is pushed as its own chat message, so 50 bounds the "
+            "worst-case burst a single queue command can send."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     heartbeat_health_url: str = Field(
         default="",
         alias="AVA_HEARTBEAT_HEALTH_URL",
@@ -414,209 +550,6 @@ class ServiceSettings(_ServiceRuntimeSettings):
             "sensitive": False,
             "scope": "host",
             "remote_writable": True,
-        },
-    )
-
-    # ── daemon /healthz ports — host scope, one unit at a time ───────────────
-    #
-    # `host`, not `cluster-pinned`, because a port block is a property of the
-    # CLUSTER while the collision domain is one MACHINE's localhost namespace.
-    # Those coincide until a machine carries two localhost namespaces (WSL2,
-    # containers, netns) — on 2026-07-26 a WSL2 runner and a native Windows
-    # runner of the same cluster held the same ports by construction and the
-    # WSL2 relay republished the Linux daemons on the Windows loopback, so the
-    # Windows watchdog probed its own port and was answered by the other unit
-    # (issue #977). Nothing about a health port is cluster-constrained: the
-    # runner computes its own ops URL from its own `health_port('ops')` and
-    # registers it (`shared/machines.py`), and the gateway reads that URL back
-    # off the machines row. So the gateway no longer serves these to runners
-    # over /api/bootstrap — and a runner's .env never caches a gateway-served
-    # value at all since the 2026-08-01 config refactor (every runner process
-    # fetches at startup), so a per-unit port is durable by construction. A
-    # co-located
-    # second unit states its base once with `ava enroll --health-port-base`;
-    # `ava start` refuses to launch onto a port another unit already answers on.
-    # The sibling `*_health_url` / `*_pidfile` fields were already `host`.
-    gateway_watchdog_health_port: int | None = Field(
-        default=None,
-        alias="AVA_GATEWAY_WATCHDOG_HEALTH_PORT",
-        description="Gateway watchdog /healthz port override (per unit). Unset = shared default 8119.",
-        json_schema_extra={
-            "capability": "gateway",
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    agent_runner_watchdog_health_port: int | None = Field(
-        default=None,
-        alias="AVA_AGENT_RUNNER_WATCHDOG_HEALTH_PORT",
-        description="Agent-runner watchdog /healthz port override (per unit). Unset = shared default 8120.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    labeler_health_port: int | None = Field(
-        default=None,
-        alias="AVA_LABELER_HEALTH_PORT",
-        description="Labeler daemon /healthz port override (per unit). Unset = shared default 8103.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    im_bridge_health_port: int | None = Field(
-        default=None,
-        alias="AVA_IM_BRIDGE_HEALTH_PORT",
-        description="IM Bridge daemon /healthz port override (per unit). Unset = shared default 8111.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    heartbeat_health_port: int | None = Field(
-        default=None,
-        alias="AVA_HEARTBEAT_HEALTH_PORT",
-        description="Heartbeat daemon /healthz port override (per unit). Unset = shared default 8107.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    delivery_watchdog_health_port: int | None = Field(
-        default=None,
-        alias="AVA_DELIVERY_WATCHDOG_HEALTH_PORT",
-        description="Delivery watchdog /healthz port override (per unit). Unset = shared default 8110.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    delivery_watchdog_health_url: str = Field(
-        default="",
-        alias="AVA_DELIVERY_WATCHDOG_HEALTH_URL",
-        description="Delivery watchdog healthcheck URL. Empty = derive via shared.daemon_health.health_port('delivery_watchdog').",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    task_maintenance_health_port: int | None = Field(
-        default=None,
-        alias="AVA_TASK_MAINTENANCE_HEALTH_PORT",
-        description="Task-maintenance daemon /healthz port override (per unit). Unset = shared default 8108.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    events_maintenance_health_port: int | None = Field(
-        default=None,
-        alias="AVA_EVENTS_MAINTENANCE_HEALTH_PORT",
-        description="Events-maintenance daemon /healthz port override (per unit). Unset = shared default 8109.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    pg_backup_health_port: int | None = Field(
-        default=None,
-        alias="AVA_PG_BACKUP_HEALTH_PORT",
-        description="Postgres backup scheduler /healthz port override (per unit). Unset = shared default 8116.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-    pitr_uploader_health_port: int | None = Field(
-        default=None,
-        alias="AVA_PITR_UPLOADER_HEALTH_PORT",
-        description="PITR uploader /healthz port override (per unit). Unset = shared default 8117.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-    pitr_base_backup_health_port: int | None = Field(
-        default=None,
-        alias="AVA_PITR_BASE_BACKUP_HEALTH_PORT",
-        description="PITR base candidate scheduler /healthz port override.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    memory_indexer_health_port: int | None = Field(
-        default=None,
-        alias="AVA_MEMORY_INDEXER_HEALTH_PORT",
-        description="Memory indexer daemon /healthz port override (per unit). Unset = shared default 8105.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    ops_health_port: int | None = Field(
-        default=None,
-        alias="AVA_OPS_HEALTH_PORT",
-        description="ava-ops daemon /healthz + /ops port override (per unit) — the agent-runner's inbound port the gateway dials to run cluster ops; the runner registers the resulting URL itself. Unset = shared default 8106.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
         },
     )
 

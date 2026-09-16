@@ -7,7 +7,8 @@ from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from services.backup import BACKUP_HOUR, _cluster_tz, backup_dir
+from services.backup import _cluster_tz, backup_dir
+from shared.config import settings
 from shared.private_storage import write_private_bytes
 
 _WEEKLY_RESTORE_WEEKDAY = 6
@@ -63,7 +64,7 @@ def _weekly_window(now: datetime, timezone: ZoneInfo) -> datetime:
     scheduled_day = local_now.date() - timedelta(days=days_since_sunday)
     scheduled = datetime.combine(
         scheduled_day,
-        time(hour=BACKUP_HOUR),
+        time(hour=settings.services.backup_hour),
         tzinfo=timezone,
     )
     if scheduled > local_now:

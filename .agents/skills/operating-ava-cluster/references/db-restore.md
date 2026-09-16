@@ -7,7 +7,7 @@ Never restore an artifact into the live database.
 
 ## Recovery objectives
 
-- **RPO:** one day at the daily cluster-time backup window (`BACKUP_HOUR = 03:00`).
+- **RPO:** one day at the daily cluster-time backup window (`services.backup_hour`, default 03:00).
 - **RTO target:** complete a full restore within one maintenance window.
 - **Measured dry run (2026-08-25):** the test-sized encrypted artifact completed
   the full decrypt → gunzip → scratch restore → checkpoint-reader verification

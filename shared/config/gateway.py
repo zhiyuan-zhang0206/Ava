@@ -435,6 +435,45 @@ class GatewaySettings(EnvSettings):
         },
     )
 
+    login_max_failures: int = Field(
+        default=5,
+        gt=0,
+        alias="AVA_GATEWAY_LOGIN_MAX_FAILURES",
+        description=(
+            "Consecutive failed logins from one IP before the login endpoint locks "
+            "that IP out (429 + Retry-After; while locked the credential is not "
+            "evaluated at all). Five is the standard admin-surface lockout threshold: "
+            "a handful of typos never locks anyone out, while a scripted guesser hits "
+            "the wall on its fifth attempt. The failure state is in-memory in the "
+            "single gateway process, so a restart re-arms the counter."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    login_lockout_seconds: int = Field(
+        default=900,
+        gt=0,
+        alias="AVA_GATEWAY_LOGIN_LOCKOUT_SECONDS",
+        description=(
+            "How long (seconds) an IP stays locked once it trips login_max_failures "
+            "consecutive failures. 900 (15 minutes) makes a sustained single-IP "
+            "attack impractically slow and forces IP rotation, yet a genuinely "
+            "confused user is back in after a coffee break; a successful login "
+            "before the threshold resets the streak."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     grafana_proxy_enabled: bool = Field(
         default=False,
         alias="AVA_GRAFANA_PROXY_ENABLED",

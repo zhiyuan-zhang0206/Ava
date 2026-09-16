@@ -19,14 +19,13 @@ failure counters would be shared across every proxied user. Both hold
 today by deployment shape; re-check before adding a proxy or a second
 gateway worker.
 
-Policy (constants below — adjust deliberately, with justification):
+Policy (the threshold and the window are cluster config —
+``gateway.login_max_failures`` / ``gateway.login_lockout_seconds``; those
+fields carry the reasoning for their defaults, while the memory cap below is
+a protective constant):
 
-- ``MAX_FAILURES`` consecutive failed logins per IP lock the IP for
-  ``LOCKOUT_SECONDS`` (15 minutes). Five is the standard lockout threshold
-  for admin surfaces: a handful of typos never locks anyone out, while a
-  scripted guesser hits the wall on its fifth attempt. 15 minutes caps a
-  single-IP attack at 96 attempts/day and forces a new IP to continue, yet
-  a genuinely confused user is back in after a coffee break.
+- ``gateway.login_max_failures`` consecutive failed logins per IP lock the IP
+  for ``gateway.login_lockout_seconds`` — defaults 5 / 900 (15 minutes).
 - A successful login resets the IP's failure counter.
 - While locked, the login endpoint returns 429 + ``Retry-After`` instead of
   401: 401 reads as "wrong password" and invites the retry loop the lockout
@@ -42,11 +41,7 @@ import math
 import threading
 import time
 
-MAX_FAILURES = 5
-"""Consecutive failed logins per IP that trigger a lockout."""
-
-LOCKOUT_SECONDS = 900
-"""How long an IP stays locked after hitting ``MAX_FAILURES`` (15 minutes)."""
+from shared.config import settings
 
 _MAX_ENTRIES = 10_000
 """Soft cap on tracked IPs: when exceeded, expired entries are swept on the
@@ -88,24 +83,27 @@ class LoginRateLimiter:
             return math.ceil(entry.locked_until - now)
 
     def record_failure(self, ip: str) -> None:
-        """Count one failed login for ``ip``, locking it at ``MAX_FAILURES``.
+        """Count one failed login for ``ip``, locking it at the configured
+        ``gateway.login_max_failures``.
 
         A stale streak (lockout expired, or no failure for a full
-        ``LOCKOUT_SECONDS`` window) restarts from one — failures are only
-        "consecutive" while they keep coming.
+        ``gateway.login_lockout_seconds`` window) restarts from one — failures
+        are only "consecutive" while they keep coming.
         """
         now = time.time()
+        max_failures = settings.gateway.login_max_failures
+        lockout_seconds = settings.gateway.login_lockout_seconds
         with self._lock:
             entry = self._entries.get(ip)
-            if entry is None or self._is_stale(entry, now):
+            if entry is None or self._is_stale(entry, now, lockout_seconds):
                 entry = _Entry(failures=0, locked_until=0.0, last_failure_at=now)
                 self._entries[ip] = entry
             entry.failures += 1
             entry.last_failure_at = now
-            if entry.failures >= MAX_FAILURES:
-                entry.locked_until = now + LOCKOUT_SECONDS
+            if entry.failures >= max_failures:
+                entry.locked_until = now + lockout_seconds
             if len(self._entries) > _MAX_ENTRIES:
-                self._sweep(now)
+                self._sweep(now, lockout_seconds)
 
     def record_success(self, ip: str) -> None:
         """Clear ``ip``'s failure state — a successful login proves the IP is
@@ -119,19 +117,22 @@ class LoginRateLimiter:
             self._entries.clear()
 
     @staticmethod
-    def _is_stale(entry: _Entry, now: float) -> bool:
+    def _is_stale(entry: _Entry, now: float, lockout_seconds: float) -> bool:
         """True when a streak no longer counts: any lockout has expired AND no
         failure happened within a full lockout window, so the run is not
         consecutive anymore."""
-        return entry.locked_until <= now and now - entry.last_failure_at > LOCKOUT_SECONDS
+        return entry.locked_until <= now and now - entry.last_failure_at > lockout_seconds
 
-    def _sweep(self, now: float) -> None:
+    def _sweep(self, now: float, lockout_seconds: float) -> None:
         """Drop entries whose streak is stale; over the soft cap, also trim the
         oldest active entries (audit 2026-08-08 P3: stale-only sweeping left
         the dict unbounded under a many-IP attack — each new IP can stay
-        non-stale for a full lockout window by failing just under
-        MAX_FAILURES per window). Caller holds ``self._lock``."""
-        stale = [ip for ip, entry in self._entries.items() if self._is_stale(entry, now)]
+        non-stale for a full lockout window by failing just under the
+        configured ``login_max_failures`` per window). Caller holds
+        ``self._lock``."""
+        stale = [
+            ip for ip, entry in self._entries.items() if self._is_stale(entry, now, lockout_seconds)
+        ]
         for ip in stale:
             del self._entries[ip]
         over = len(self._entries) - _MAX_ENTRIES

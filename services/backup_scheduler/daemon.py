@@ -19,7 +19,7 @@ from datetime import time as clock_time
 from functools import partial
 
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from services.backup import BACKUP_HOUR, _cluster_tz, is_due, run_backup
+from services.backup import _cluster_tz, is_due, run_backup
 from services.backup_scheduler.recovery_drill import (
     load_local_dump_restore_success,
     local_dump_restore_due,
@@ -135,12 +135,13 @@ async def _sleep(seconds: float) -> None:
 async def _sleep_until_next_backup_hour(now: datetime) -> None:
     """Sleep until the next configured backup hour on the cluster clock."""
     local_now = now.astimezone(_cluster_tz())
+    backup_hour = settings.services.backup_hour
     next_date = local_now.date()
-    target = datetime.combine(next_date, clock_time(hour=BACKUP_HOUR), tzinfo=local_now.tzinfo)
+    target = datetime.combine(next_date, clock_time(hour=backup_hour), tzinfo=local_now.tzinfo)
     if local_now >= target:
         target = datetime.combine(
             next_date + timedelta(days=1),
-            clock_time(hour=BACKUP_HOUR),
+            clock_time(hour=backup_hour),
             tzinfo=local_now.tzinfo,
         )
     await _sleep((target.astimezone(UTC) - now).total_seconds())
