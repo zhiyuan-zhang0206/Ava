@@ -129,6 +129,8 @@ def write_fields(
     capture_bytes: bool = False,
     expected_digest: str | None = None,
     audit_site: str | None = None,
+    actor: str | None = None,
+    trace_id: str | None = None,
 ) -> bytes | None:
     """Set each field's alias in this unit's `.env`, and unset each removed field's.
 
@@ -138,6 +140,8 @@ def write_fields(
     absence, so a partial write can't silently unset a key it didn't mention. The
     `.env` is snapshotted before the write (recoverable) and every unset is logged
     (never silent — a silent full-replace once dropped a cluster's secrets).
+    `actor` / `trace_id` describe the initiator for the write audit (the `.env`
+    record and the `env_write` event) whenever `audit_site` is set.
     """
     path = env_file_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -164,6 +168,26 @@ def write_fields(
             current = path.read_bytes() if path.exists() else b""
             if hashlib.sha256(current).hexdigest() != expected_digest:
                 raise RuntimeError(".env changed before owned runtime-config write")
+        changes: list[dict[str, str | None]] | None = None
+        if audit_site is not None:
+            # Capture the pre-write values for the audit diff — after this point
+            # the file is rewritten in place. `_audit_changes` (the record
+            # helper) drops values for everything but `sensitive: false` fields.
+            from shared.env_audit import env_values_from_text
+
+            before = env_values_from_text(
+                path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+            )
+            pending: list[dict[str, str | None]] = [
+                {"alias": amap[name], "old": before.get(amap[name]), "new": env_value_text(value)}
+                for name, value in updates.items()
+            ]
+            pending += [
+                {"alias": amap[name], "old": before.get(amap[name]), "new": None}
+                for name in removals
+            ]
+            pending.sort(key=lambda change: str(change["alias"]))
+            changes = pending
         snapshot_env(path)
         path.touch(exist_ok=True)
         sp = str(path)
@@ -193,6 +217,9 @@ def write_fields(
                 {amap[name] for name in updates},
                 {amap[name] for name in removals},
                 site=audit_site,
+                actor=actor,
+                trace_id=trace_id,
+                changes=changes,
             )
         if capture_bytes:
             captured = path.read_bytes()

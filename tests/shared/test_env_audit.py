@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -193,3 +194,98 @@ def test_env_key_names_read_export_prefixed_assignments(audit_home: Path) -> Non
     env_path = audit_home / ".env"
     env_path.write_text("export AVA_DB_URL=postgresql://x\n# export AVA_SKIP_ME=1\nBARE_KEY\n")
     assert env_audit._env_key_names(env_path) == ["AVA_DB_URL"]
+
+
+def test_record_env_write_redacts_sensitive_and_unregistered_changes(audit_home: Path) -> None:
+    """The v2 `changed` diff keeps values only for `sensitive: false` fields."""
+    env_path = audit_home / ".env"
+    env_path.write_text("AVA_MODEL=test-model\nANTHROPIC_API_KEY=sk-old\nEXTRA_UNKNOWN_KEY=x\n")
+    record_env_write(
+        env_path,
+        {"AVA_MODEL", "ANTHROPIC_API_KEY", "EXTRA_UNKNOWN_KEY"},
+        set(),
+        site="test",
+        actor="user_session:administrator",
+        trace_id="trace-1",
+        changes=[
+            {"alias": "AVA_MODEL", "old": "old-model", "new": "test-model"},
+            {"alias": "ANTHROPIC_API_KEY", "old": "sk-old", "new": "sk-SECRET-NEW"},
+            {"alias": "EXTRA_UNKNOWN_KEY", "old": "x", "new": "y"},
+        ],
+    )
+
+    line = (audit_home / ".env.audit.jsonl").read_text()
+    record = last_env_write_record()
+    assert record is not None
+    assert record["actor"] == "user_session:administrator"
+    assert record["trace_id"] == "trace-1"
+    entries = cast("list[dict[str, object]]", record["changed"])
+    changed = {str(entry["alias"]): entry for entry in entries}
+    assert changed["AVA_MODEL"] == {
+        "alias": "AVA_MODEL",
+        "scope": "cluster-default",
+        "sensitive": False,
+        "old": "old-model",
+        "new": "test-model",
+    }
+    assert changed["ANTHROPIC_API_KEY"]["sensitive"] is True
+    assert changed["ANTHROPIC_API_KEY"]["old"] is None
+    assert changed["ANTHROPIC_API_KEY"]["new"] is None
+    assert changed["EXTRA_UNKNOWN_KEY"]["scope"] is None
+    assert changed["EXTRA_UNKNOWN_KEY"]["sensitive"] is None
+    assert "sk-SECRET-NEW" not in line and "sk-old" not in line
+
+
+def test_write_fields_records_old_to_new_values(audit_home: Path) -> None:
+    """A second write records the actual old→new transition and the actor."""
+    runtime_config.write_fields({"llm_model": "m1"}, set(), audit_site="test")
+    runtime_config.write_fields(
+        {"llm_model": "m2"}, set(), audit_site="test", actor="cluster_bearer:administrator"
+    )
+
+    records = [
+        json.loads(line) for line in (audit_home / ".env.audit.jsonl").read_text().splitlines()
+    ]
+    assert records[-1]["actor"] == "cluster_bearer:administrator"
+    assert records[-1]["changed"] == [
+        {
+            "alias": "AVA_MODEL",
+            "scope": "cluster-default",
+            "sensitive": False,
+            "old": "m1",
+            "new": "m2",
+        }
+    ]
+
+
+def test_write_fields_withholds_sensitive_values(audit_home: Path) -> None:
+    """A secret write lands by name only — its value never reaches the JSONL."""
+    runtime_config.write_fields({"deepseek_api_key": "sk-SECRET-VALUE"}, set(), audit_site="test")
+
+    line = (audit_home / ".env.audit.jsonl").read_text()
+    assert "sk-SECRET-VALUE" not in line
+    record = last_env_write_record()
+    assert record is not None
+    entry = cast("list[dict[str, object]]", record["changed"])[0]
+    assert entry["sensitive"] is True
+    assert entry["old"] is None and entry["new"] is None
+
+
+def test_env_write_event_carries_actor_without_values(
+    audit_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The value-free event stream also gains the initiating actor."""
+    captured: list[dict[str, object]] = []
+
+    def _capture(**kwargs: object) -> None:
+        captured.append(kwargs)
+
+    monkeypatch.setattr("shared.audit_events.insert_event_log", _capture)
+    runtime_config.write_fields(
+        {"llm_model": "m3"}, set(), audit_site="test", actor="user_session:administrator"
+    )
+
+    assert captured and captured[0]["event_type"] == "env_write"
+    payload = cast("dict[str, object]", captured[0]["payload"])
+    assert payload["actor"] == "user_session:administrator"
+    assert "m3" not in json.dumps(captured)

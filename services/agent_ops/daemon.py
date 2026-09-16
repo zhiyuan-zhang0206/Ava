@@ -322,7 +322,7 @@ def _dispatch_sync(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, o
             cw = ConfigWritePayload.model_validate(payload)
             with _state_write_lock:
                 return "completed", ops_config.config_write_op(
-                    cw.overrides, local=cw.local
+                    cw.overrides, local=cw.local, actor=cw.actor, trace_id=cw.trace_id
                 ).model_dump(mode="json")
         case "inventory_read":
             return "completed", ops_inventory.inventory_read_op().model_dump(mode="json")

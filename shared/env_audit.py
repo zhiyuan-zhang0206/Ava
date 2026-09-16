@@ -1,7 +1,9 @@
 """Owner-only `.env` write history and out-of-band modification detection.
 
-The JSONL history records `.env` aliases, metadata, and digests only:
-configuration values never enter either this file or the unified event stream.
+The JSONL history records `.env` aliases, metadata, digests, the initiating
+credential fact, and — for non-sensitive fields only — the old→new value diff:
+configuration values of sensitive (or unregistered) keys never enter this file,
+and configuration values never enter the unified event stream at all.
 Bootstrap provisioning (`cli.install_cluster` and `cli.enroll`) intentionally
 creates a fresh `.env` without audit history or an armed marker, so the guard
 remains unarmed until an audited runtime write.
@@ -9,11 +11,12 @@ remains unarmed until an audited runtime write.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import os
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
@@ -55,6 +58,81 @@ def _env_key_names(env_path: Path) -> list[str]:
         if key is not None:
             names.add(key)
     return sorted(names)
+
+
+def env_values_from_text(text: str) -> dict[str, str]:
+    """Parse `key=value` text into `{alias: value}` for the audit value diff.
+
+    Surrounding matching quotes are stripped, matching how the write paths
+    render values. This feeds ONLY the local audit record — `record_env_write`
+    drops the values of sensitive and unregistered aliases before persisting.
+    """
+    values: dict[str, str] = {}
+    for line in text.splitlines():
+        key = env_line_key(line)
+        if key is None:
+            continue
+        _, _, raw = line.partition("=")
+        raw = raw.strip()
+        if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in {"'", '"'}:
+            raw = raw[1:-1]
+        values[key] = raw
+    return values
+
+
+@functools.cache
+def _load_alias_metadata() -> dict[str, tuple[str, bool]]:
+    from shared.config.metadata import get_config_metadata
+
+    return {meta.env_var: (meta.scope, meta.sensitive) for meta in get_config_metadata()}
+
+
+def _alias_metadata() -> dict[str, tuple[str, bool]]:
+    """`alias -> (scope, sensitive)` from the config registry, possibly empty.
+
+    A value is recorded only for a registered field explicitly marked
+    `sensitive: false`. Every failure path yields an empty mapping, which
+    withholds every value (fail closed); a successful build is cached because
+    the registry derives from class declarations (a failed one is not, so a
+    later call retries rather than withholding for the process lifetime).
+    """
+    try:
+        return _load_alias_metadata()
+    except Exception:
+        logger.opt(exception=True).warning(
+            "could not load config metadata for the .env audit — recording names only"
+        )
+        return {}
+
+
+def _audit_changes(
+    changes: Sequence[Mapping[str, object]] | None,
+) -> list[dict[str, object]] | None:
+    """Redact a raw `{alias, old, new}` diff into its auditable form.
+
+    Values survive only for aliases registered with `sensitive: false`; every
+    other alias — sensitive, or not registered at all — is recorded by name
+    with `old`/`new` withheld, so the record can still answer "this key
+    changed" without becoming a second place secrets live.
+    """
+    if changes is None:
+        return None
+    metadata = _alias_metadata()
+    redacted: list[dict[str, object]] = []
+    for change in changes:
+        alias = str(change["alias"])
+        meta = metadata.get(alias)
+        recordable = meta is not None and meta[1] is False
+        redacted.append(
+            {
+                "alias": alias,
+                "scope": meta[0] if meta is not None else None,
+                "sensitive": meta[1] if meta is not None else None,
+                "old": change.get("old") if recordable else None,
+                "new": change.get("new") if recordable else None,
+            }
+        )
+    return redacted
 
 
 def _process_metadata() -> tuple[str, str]:
@@ -131,13 +209,25 @@ def _last_official_site(record: dict[str, object]) -> str:
 
 
 def record_env_write(
-    env_path: Path, keys_written: set[str], keys_removed: set[str], *, site: str
+    env_path: Path,
+    keys_written: set[str],
+    keys_removed: set[str],
+    *,
+    site: str,
+    actor: str | None = None,
+    trace_id: str | None = None,
+    changes: Sequence[Mapping[str, object]] | None = None,
 ) -> None:
     """Append metadata for an official `.env` write that has already landed.
 
     `keys_written` and `keys_removed` use the `.env` alias vocabulary. Callers
     invoke this while holding `shared.envfile.env_lock_path`'s lock, so the
     recorded digest describes exactly the bytes that their write completed.
+    `changes` is the raw `{alias, old, new}` diff the caller captured before its
+    rewrite; values are redacted here (only `sensitive: false` fields keep
+    theirs). `actor` names the initiating credential fact
+    (`user_session:administrator`, `cluster_bearer:administrator`, `cli:zzy`)
+    and `trace_id` the gateway request, when the write had one.
     """
     process, cmdline = _process_metadata()
     digest_after = hashlib.sha256(env_path.read_bytes() if env_path.exists() else b"").hexdigest()
@@ -147,11 +237,16 @@ def record_env_write(
         "pid": os.getpid(),
         "process": process,
         "cmdline": cmdline,
+        "actor": actor,
+        "trace_id": trace_id,
         "keys_written": sorted(keys_written),
         "keys_removed": sorted(keys_removed),
         "keys_after": _env_key_names(env_path),
         "digest_after": digest_after,
     }
+    audited_changes = _audit_changes(changes)
+    if audited_changes is not None:
+        record["changed"] = audited_changes
     # The marker comes first: a crash can produce an armed repair event, but it
     # cannot leave a history whose deletion recreates the fresh-home branch.
     _write_armed_marker(env_path)
@@ -160,6 +255,7 @@ def record_env_write(
         "env_write",
         {
             "site": site,
+            "actor": actor,
             "pid": os.getpid(),
             "process": process,
             "cmdline": cmdline,

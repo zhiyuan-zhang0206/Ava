@@ -1517,6 +1517,32 @@ async def test_two_config_writes_cannot_interleave(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.asyncio
+async def test_config_write_op_receives_actor_and_trace(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The gateway-stamped actor/trace ride the payload into config_write_op."""
+    captured: dict[str, object] = {}
+
+    class _Result:
+        def model_dump(self, **_kw: object) -> dict[str, object]:
+            return {"ok": True}
+
+    def _capture(*_a: object, **_kw: object) -> _Result:
+        captured.update(_kw)
+        return _Result()
+
+    monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
+    monkeypatch.setattr(daemon.ops_config, "config_write_op", _capture)
+    status, _ = await daemon._dispatch(
+        "config_write",
+        {"overrides": {}, "actor": "user_session:administrator", "trace_id": "trace-9"},
+    )
+    assert status == "completed"
+    assert captured == {
+        "local": False,
+        "actor": "user_session:administrator",
+        "trace_id": "trace-9",
+    }
+
+
 async def test_a_refused_update_says_how_long_the_holder_has_run(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:

@@ -28,7 +28,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Literal, cast
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from gateway.schemas import (
     ConfigFieldView,
@@ -50,6 +50,24 @@ from shared.env_audit import check_env_integrity
 from shared.machine import MachineRole, machine_name
 
 router = APIRouter()
+
+
+def _request_actor(request: Request) -> tuple[str | None, str | None]:
+    """The audit actor + trace id for a config write, from middleware-owned state.
+
+    `source_verified_by` (`cluster_bearer` / `user_session`) is bound by the auth
+    middleware after credential validation, with `auth_principal` beside it —
+    never read from caller JSON (`gateway/request_principal.ava.okf.md`). A
+    no-auth mode has no verified principal and records no actor.
+    """
+    verified_by = getattr(request.state, "source_verified_by", None)
+    principal = getattr(request.state, "auth_principal", None)
+    actor: str | None = None
+    if isinstance(verified_by, str) and verified_by:
+        subject = getattr(principal, "subject", None)
+        actor = f"{verified_by}:{subject}" if isinstance(subject, str) and subject else verified_by
+    trace_id = getattr(request.state, "trace_id", None)
+    return actor, trace_id if isinstance(trace_id, str) else None
 
 
 def _assert_machine_known(target: str) -> None:
@@ -143,7 +161,12 @@ async def _dispatch_config_read(target: str) -> ConfigReadResult:
 
 
 async def _dispatch_config_write(
-    target: str, overrides: dict[str, Any], *, local: bool = False
+    target: str,
+    overrides: dict[str, Any],
+    *,
+    local: bool = False,
+    actor: str | None = None,
+    trace_id: str | None = None,
 ) -> ConfigWriteOpResult:
     """Run config_write on `target` via its ops server — one uniform path.
 
@@ -168,7 +191,12 @@ async def _dispatch_config_write(
             wire = await _cluster_rpc.dispatch_to_machine(
                 target_machine=target,
                 kind="config_write",
-                payload={"overrides": overrides, "local": local},
+                payload={
+                    "overrides": overrides,
+                    "local": local,
+                    "actor": actor,
+                    "trace_id": trace_id,
+                },
             )
         except _cluster_rpc.ClusterOpUnreachable:
             raise HTTPException(
@@ -191,7 +219,9 @@ async def _dispatch_config_write(
             detail=f"machine {target!r} has no agent-runner ops server — its config cannot be written",
         )
     return ConfigWriteOpResult.model_validate(
-        await asyncio.to_thread(ops_config.config_write_op, overrides, local=local)
+        await asyncio.to_thread(
+            ops_config.config_write_op, overrides, local=local, actor=actor, trace_id=trace_id
+        )
     )
 
 
@@ -365,7 +395,9 @@ def get_resolved_config(model: str | None = None) -> ResolvedConfigView:
 
 
 @router.put("/api/config")
-async def put_config(body: dict[str, object], machine: str | None = None) -> ConfigWriteResult:
+async def put_config(
+    request: Request, body: dict[str, object], machine: str | None = None
+) -> ConfigWriteResult:
     """Merge a config patch for `machine` (default = this gateway) into `.env`,
     scope-routed. Persist only — no restart (restart_required says which process
     to restart).
@@ -397,6 +429,7 @@ async def put_config(body: dict[str, object], machine: str | None = None) -> Con
     show inline failures + the per-machine restart banner.
     """
     target = machine or machine_name()
+    actor, trace_id = _request_actor(request)
     await asyncio.to_thread(_assert_machine_known, target)
 
     metas = {m.name: m for m in get_config_metadata()}
@@ -444,7 +477,9 @@ async def put_config(body: dict[str, object], machine: str | None = None) -> Con
         # and we leave the cluster .env untouched (atomic from the cluster's view).
         # No in-memory apply, no restart — the change is persisted and the named
         # process picks it up on its next restart (restart_required says which).
-        host_result = await _dispatch_config_write(target, plan.host_body, local=True)
+        host_result = await _dispatch_config_write(
+            target, plan.host_body, local=True, actor=actor, trace_id=trace_id
+        )
         cluster_changed: set[str] = set()
         if host_result.applied and has_cluster_patch:
             # A successful host write can legitimately change this same local
@@ -463,6 +498,8 @@ async def put_config(body: dict[str, object], machine: str | None = None) -> Con
                     plan.cluster_removals,
                     expected_digest=candidate.expected_digest,
                     audit_site="gateway_config_put",
+                    actor=actor,
+                    trace_id=trace_id,
                 )
             except RuntimeError as exc:
                 if str(exc) != ".env changed before owned runtime-config write":
@@ -483,7 +520,9 @@ async def put_config(body: dict[str, object], machine: str | None = None) -> Con
         # never carries a cluster/agent key — the remote_cluster_keys 400 guards a
         # hand-edited .env, not normal traffic. The host-side op stays the
         # authoritative per-field gate.
-        host_result = await _dispatch_config_write(target, plan.host_body)
+        host_result = await _dispatch_config_write(
+            target, plan.host_body, actor=actor, trace_id=trace_id
+        )
         restart_required = host_result.restart_required
 
     return _assemble_write_result(host_result, restart_required)

@@ -15,8 +15,9 @@ host — a known-but-offline host 503s on ClusterOpUnreachable, an unknown name
 404s. Capability probes are monkeypatched so headless CI is deterministic.
 """
 
+import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import psycopg
@@ -603,6 +604,8 @@ async def test_put_self_host_field_skips_empty_cluster_audit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A host-only self PUT must not append an empty gateway cluster record."""
+    from types import SimpleNamespace
+
     host_result = ConfigWriteOpResult(
         machine=machine_name(),
         results={"cross_machine_transfer_backend": FieldWriteResult(ok=True)},
@@ -622,7 +625,8 @@ async def test_put_self_host_field_skips_empty_cluster_audit(
     monkeypatch.setattr(config_router, "_dispatch_config_write", dispatch)
     monkeypatch.setattr(config_router.runtime_config, "write_fields", _write_fields)
 
-    result = await config_router.put_config({"cross_machine_transfer_backend": "none"})
+    anon = cast("Any", SimpleNamespace(state=SimpleNamespace()))
+    result = await config_router.put_config(anon, {"cross_machine_transfer_backend": "none"})
 
     assert result.applied is True
     assert writes == []
@@ -717,8 +721,8 @@ def test_put_remote_host_field_dispatches_config_write(
     monkeypatch: pytest.MonkeyPatch, _clean_overrides: Path
 ) -> None:
     """PUT ?machine=<remote> with a host remote_writable key -> dispatches a
-    config_write with payload {"overrides": {...}} and returns the stubbed
-    ConfigWriteResult."""
+    config_write carrying the overrides + gateway-stamped actor/trace, and
+    returns the stubbed ConfigWriteResult."""
     _seed_machine(REMOTE)
     stub_result = {
         "machine": REMOTE,
@@ -743,7 +747,11 @@ def test_put_remote_host_field_dispatches_config_write(
     kwargs = enqueue.await_args.kwargs
     assert kwargs["target_machine"] == REMOTE
     assert kwargs["kind"] == "config_write"
-    assert kwargs["payload"] == {"overrides": {"ops_concurrency": 12}, "local": False}
+    payload = kwargs["payload"]
+    assert payload["overrides"] == {"ops_concurrency": 12}
+    assert payload["local"] is False
+    assert payload["actor"] is None  # unauthenticated test client: no verified principal
+    assert isinstance(payload["trace_id"], str) and payload["trace_id"]
 
 
 def test_put_remote_rejects_writable_non_remote_host_field(
@@ -829,3 +837,49 @@ def test_self_machine_name_is_known_without_a_row() -> None:
     # short-circuits it. A bare self GET already exercises this, but assert the
     # name is non-empty so the short-circuit is meaningful.
     assert machine_name()
+
+
+def test_request_actor_reads_only_middleware_state() -> None:
+    """The write-audit actor comes from verified request state, not caller JSON."""
+    from types import SimpleNamespace
+
+    from gateway.routers.config import _request_actor
+
+    anon = cast("Any", SimpleNamespace(state=SimpleNamespace()))
+    assert _request_actor(anon) == (None, None)
+
+    authed = cast(
+        "Any",
+        SimpleNamespace(
+            state=SimpleNamespace(
+                source_verified_by="user_session",
+                auth_principal=SimpleNamespace(subject="administrator"),
+                trace_id="trace-7",
+            ),
+        ),
+    )
+    assert _request_actor(authed) == ("user_session:administrator", "trace-7")
+
+    bearer = cast(
+        "Any",
+        SimpleNamespace(
+            state=SimpleNamespace(source_verified_by="cluster_bearer", auth_principal=None)
+        ),
+    )
+    assert _request_actor(bearer) == ("cluster_bearer", None)
+
+
+def test_put_records_write_audit_with_value_diff(_clean_overrides: Path) -> None:
+    """A cluster PUT lands an audit record carrying the non-sensitive value diff."""
+    with TestClient(app) as client:
+        resp = client.put("/api/config", json={"llm_model": "audit-model-1"})
+    assert resp.status_code == 200, resp.text
+    records = [
+        json.loads(line)
+        for line in (_clean_overrides / ".env.audit.jsonl").read_text().splitlines()
+    ]
+    latest = records[-1]
+    entries = cast("list[dict[str, object]]", latest["changed"])
+    changed = {str(entry["alias"]): entry for entry in entries}
+    assert changed["AVA_MODEL"]["new"] == "audit-model-1"
+    assert "actor" in latest
