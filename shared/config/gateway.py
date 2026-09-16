@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from pydantic import AliasChoices, Field, field_validator
+from pydantic import AliasChoices, Field, HttpUrl, field_validator
 from pydantic_settings import NoDecode
 
 from shared.config._base import EnvSettings
@@ -334,6 +334,42 @@ class GatewaySettings(EnvSettings):
             "remote_writable": False,
         },
     )
+
+    browser_origin: str = Field(
+        default="",
+        alias="AVA_BROWSER_ORIGIN",
+        description=(
+            "Optional HTTPS origin serving the frontend and gateway through one reverse proxy. "
+            "Only browsers visiting this exact origin use same-origin API/SSE; existing direct "
+            "frontend URLs retain their gateway-port routing. Requires a frontend rebuild."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    @field_validator("browser_origin")
+    @classmethod
+    def _browser_origin(cls, value: str) -> str:
+        if not value:
+            return ""
+        parsed = HttpUrl(value)
+        if (
+            parsed.scheme != "https"
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in (None, "/")
+            or parsed.query is not None
+            or parsed.fragment is not None
+        ):
+            raise ValueError(
+                "AVA_BROWSER_ORIGIN must be an HTTPS origin without credentials or path"
+            )
+        return str(parsed).removesuffix("/")
 
     cors_allowed_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=list,

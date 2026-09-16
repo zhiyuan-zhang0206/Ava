@@ -155,7 +155,14 @@ def fe_build_env() -> str:
     (services/healthchecks/frontend.py) — so a watchdog restart can never bake a
     different (stale) gateway port than `ava start` did.
     """
-    return f"NEXT_PUBLIC_GATEWAY_PORT={settings.gateway.gateway_port}"
+    gateway_env = f"NEXT_PUBLIC_GATEWAY_PORT={settings.gateway.gateway_port}"
+    if not (origin := settings.gateway.browser_origin):
+        return gateway_env
+    # The normal build and watchdog rebuild must carry the same browser entry.
+    # Keep this host setting separate from the runner/control-plane gateway URL.
+    if IS_WINDOWS:
+        return f'{gateway_env}" && set "NEXT_PUBLIC_BROWSER_ORIGIN={origin}'
+    return f"{gateway_env} NEXT_PUBLIC_BROWSER_ORIGIN={shlex.quote(origin)}"
 
 
 def frontend_service_cmd(port: int, frontend_dir: str | Path = "ui/web") -> str:
