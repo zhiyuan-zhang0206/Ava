@@ -18,9 +18,11 @@ merged into one, sectioned like Ava Ops (user ruling: "merge into one big
 dashboard"). `uid` is fixed at `ava-ops-main` — the dashboard link and user
 bookmarks depend on it; never change it.
 
-Eight sections, one row per section — `core` is the 2026-08-06 user-ruling
-row header. All sections are **expanded by default** (`collapsed: false`,
-2026-08-23 #382):
+Ten sections, one row per section — `core` is the 2026-08-06 user-ruling
+row header, and every metric-shipping plugin owns a row named after it (the
+per-plugin rows the 2026-08-23 merge had collapsed into `Plugin quality`,
+restored by task #3689). All sections are **expanded by default**
+(`collapsed: false`, 2026-08-23 #382):
 
 1. **`core`** — the user's daily first screen: twelve stat tiles cover the
    entire Statistics popover (LLM calls / Warning / Error / Unresolved Warning /
@@ -44,16 +46,19 @@ row header. All sections are **expanded by default** (`collapsed: false`,
 4. **`Fleet`** — windowed agent spawns by source, windowed lifecycle totals,
    delivery-stalled total, SSE backlog, and the Max Agent ID growth curve
    (the gateway's 60s `agent_registry` gauge + its deriv rate, task #2010).
-5. **`Plugin quality`** — the ava_code / ava_fleet / ava_memory panels
-   (was the plugins dashboard + the plugin rows; deduplicated).
-6. **`Host & data plane`** — the former `ava-host-dataplane` panels: host
+5. **`ava_code`** — the syntax-fix metric panels: fix count (per minute)
+   and fixes (window).
+6. **`ava_fleet`** — the task-completion-rate panel.
+7. **`ava_memory`** — recall-filter runs / empty ratio / error ratio /
+   failures plus the passive-recall search and filter latencies.
+8. **`Host & data plane`** — the former `ava-host-dataplane` panels: host
    CPU / memory / load / filesystem / disk / network throughput + Postgres
    connections / transactions / size + Redis memory / clients / throughput.
-7. **`Cost analysis`** — two cost projections, interval-bucketed cost, and
+9. **`Cost analysis`** — two cost projections, interval-bucketed cost, and
    Top-20 cost drill-downs by model and agent. Every panel reads usage-time
    `attributes_cost_usd` snapshots from telemetry `llm_usage` events
    (2026-08-23 #384).
-8. **`PR flow`** — PR ready→merged median/p90 by day, Trunk queue depth,
+10. **`PR flow`** — PR ready→merged median/p90 by day, Trunk queue depth,
    QA rounds (mean + re-review share) by day, and new flaky quarantines by
    day, from the daily export job's Prometheus gauges (task #2139).
 
@@ -79,9 +84,10 @@ the same reason: the instant queries return one frame per day series, and
 without the join the table falls back to a per-series frame picker instead
 of one row per day.
 
-The dashboard now has 92 panel entries (84 panels + 8 row headers): core
+The dashboard now has 94 panel entries (84 panels + 10 row headers): core
 ids remain below 1000 (the four new stat tiles are 44–47), plugin ids are
->= 1000, host/data-plane panels are 2101–2112, the cost-analysis panels are
+>= 1000 (the three plugin rows are 1001 / 1004 / 1007; their panels are
+1002–1013), host/data-plane panels are 2101–2112, the cost-analysis panels are
 38, 39, 41–43, the event panels are 2201–2203 (business/anomaly logs,
 event-type table, raw stream), the Fleet growth panels are 2301–2302
 (Max Agent ID + deriv rate, task #2010), and the PR-flow row is 2008 with
@@ -200,7 +206,8 @@ of mass-editing targets.
    instant over `[$__range]`; every count wraps in `sum(...)`.
 4. `output` selects the surfaces: `["grafana"]`, `["inspector"]`, or both.
 5. **Then update `ava-ops-main.json` by hand**: add the rendered panel
-   under the `Plugin quality` row (keep ids >= 1000).
+   under the row named after the plugin (`ava_code` / `ava_fleet` /
+   `ava_memory` — every metric-shipping plugin owns a row; keep ids >= 1000).
    `tests/plugins/test_plugin_metrics_logql.py` also locks every registered
    grafana spec against the JSON.
 
