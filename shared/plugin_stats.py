@@ -30,6 +30,7 @@ from typing import Any
 from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
+from shared.config import settings
 from shared.db_transaction import write_transaction
 
 # The status vocabulary. There is deliberately no "empty": a card with no row
@@ -39,10 +40,13 @@ STATUSES = ("ok", "warn", "error")
 # Display text, not storage text: the console shows these verbatim in a
 # sidebar card, so the caps are what keep one runaway error message from
 # becoming the panel. `value` stays glanceable; `detail` carries the rest.
+# The identity and value caps stay constants — they bound structural strings
+# (plugin/id/updated_by names, the one-glance value), not prose. The detail
+# cap is the one free-text bound worth tuning per cluster and is cluster
+# config: display.plugin_stats_max_detail_chars (default 500).
 MAX_PLUGIN_CHARS = 64
 MAX_ID_CHARS = 64
 MAX_VALUE_CHARS = 120
-MAX_DETAIL_CHARS = 500
 MAX_UPDATED_BY_CHARS = 64
 
 _UPSERT = """
@@ -115,7 +119,7 @@ def upsert(
     card = _text(id, "id", limit=MAX_ID_CHARS)
     shown = _text(value, "value", limit=MAX_VALUE_CHARS)
     if detail is not None:
-        detail = _text(detail, "detail", limit=MAX_DETAIL_CHARS)
+        detail = _text(detail, "detail", limit=settings.display.plugin_stats_max_detail_chars)
     if status not in STATUSES:
         raise ValueError(f"plugin_stats status: {status!r} is not one of {', '.join(STATUSES)}")
     if updated_by is not None:

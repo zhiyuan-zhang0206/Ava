@@ -274,3 +274,23 @@ class DisplaySettings(EnvSettings):
             "scope": "cluster-pinned",
         },
     )
+
+    plugin_stats_max_detail_chars: int = Field(
+        default=500,
+        gt=0,
+        alias="AVA_PLUGIN_STATS_MAX_DETAIL_CHARS",
+        description=(
+            "Character cap on a plugin stat card's `detail` — the free-text line the "
+            "console shows under the card's value. 500 is a sidebar-filling sentence "
+            "or two: a refresh error's reason fits without growing the panel, while "
+            "cutting it shorter starts truncating real diagnosis text. The other card "
+            "caps (plugin/id/updated_by/value) stay constants — they bound structural "
+            "strings, not prose."
+        ),
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
