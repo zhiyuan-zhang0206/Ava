@@ -47,4 +47,4 @@ per-role order: [[services/watchdog/checklist.ava.okf.md]].
 - `services/watchdog/daemon.py` — `.venv/bin/python -m services.watchdog.daemon --role gateway`
 
 ## Notes
-- **watchdog itself IS monitored — by the OS scheduler**: [[services/watchdog/os-monitoring.ava.okf.md|OS-level probe]] revives a dead pidfile every 60s; registered by converge, gated by `AVA_OS_JOBS_ENABLED`.
+- **watchdog itself IS monitored — by the OS scheduler**: [[services/watchdog/os-monitoring.ava.okf.md|OS-level probe]] revives a dead pidfile every 60s (stands down during a held stop); job gated by `AVA_OS_JOBS_ENABLED`.
