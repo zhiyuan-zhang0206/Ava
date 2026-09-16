@@ -1,7 +1,7 @@
 ---
 type: doc
 title: ava-use-claude-code-and-codex skill — Drive external coding CLI
-description: Treat claude (Anthropic) / codex (OpenAI) as "another agent", give it tasks, and let it plan+execute. Carries the judgment of when to outsource, to which one, and the file-driven collaboration pattern for supervising long tasks; the session primitives themselves are left to ava.shell, not repeated here.
+description: Treat claude (Anthropic) / codex (OpenAI) as "another agent", give it tasks, and let it plan+execute. Carries the judgment of when to outsource, to which one, its two modes (a supervised file-driven worker, or a file-less takeover of the launching agent), and the collaboration patterns for both; the session primitives themselves are left to ava.shell, not repeated here.
 tags:
 - extensions
 - agent-instruction
@@ -10,12 +10,13 @@ tags:
 # ava-use-claude-code-and-codex skill — Drive external coding CLI
 
 ## What it is
-`claude` and `codex` are both coding-agent CLIs that can be given tasks and let them plan+execute (`$AVA_HOME/skills/ava-use-claude-code-and-codex/`). Treat either as "another agent". This skill carries **judgment**: when to outsource, to which one, and the file-driven collaboration pattern for supervising long tasks. The session primitives themselves (`ava.shell`'s run / sessions, `ava.watcher`) are **not repeated here** — it explicitly points to those, not re-derives.
+`claude` and `codex` are both coding-agent CLIs that can be given tasks and let them plan+execute (`$AVA_HOME/skills/ava-use-claude-code-and-codex/`). Treat either as "another agent". This skill carries **judgment**: when to outsource, to which one, and the **two modes** a session can run in — Mode A, a supervised file-driven worker, and Mode B, a file-less takeover that replaces the launching agent (inline briefing, no task/work files, no supervisor). The session primitives themselves (`ava.shell`'s run / sessions, `ava.watcher`) are **not repeated here** — it explicitly points to those, not re-derives.
 
 ## Judgments carried
 - **When to outsource**: single file read/write / grep / git / a single command → do it yourself; multi-step coding tasks that can be fully described (write+test+fix), expected >10 files with multiple rounds of trial and error → outsource.
 - **Which one**: if you need a specific model's reasoning / long context, choose the tool backed by that model; for diff review, use `codex exec review` or `claude -p`. A machine may only have one installed — verify with `--version`/`--help` beforehand.
 - **Persistent sessions are the default**: start in `ava.shell.sessions`, steer across rounds; headless one-shot (`claude -p` / `codex exec`) is rarely needed. **Flags and models drift with versions**, text is a snapshot not a contract.
+- **Two modes, no leakage**: Mode A's task/work files and supervisor belong to delegated workers only; a takeover runs file-less and supervisor-less, its briefing inlined, with start = interruption (checkpoint + pause) and end = one resume system note.
 
 ## Canonical Codex lifecycle
 
@@ -27,11 +28,15 @@ workspace basename appears only in display suffixes. Launching is serialized by
 
 Every fresh generation receives a private `CODEX_HOME` seeded only with the
 authentication file and a configuration snapshot. Codex always starts fresh
-from task/work/Git state; shared SQLite, logs, and resume state are not copied.
-The launcher starts a quiet supervisor before Codex. It terminalizes the exact
-generation and reclaims its PTY/private state on current-generation `DONE` or
-`HANDOFF`, explicit cancel, owner termination, Codex death, or absolute expiry.
-Notifications use non-resurrecting system notes.
+(supervised workers from task/work/Git state, takeovers from the briefing
+inlined in their launch message); shared SQLite, logs, and resume state are not
+copied. The launcher starts a quiet supervisor before Codex only in the
+supervised mode; it terminalizes the exact generation and reclaims its
+PTY/private state on current-generation `DONE` or `HANDOFF`, explicit cancel,
+owner termination, Codex death, or absolute expiry. A takeover starts no
+supervisor — explicit cancel and expiry are its stop paths, and the next
+launch reclaims a dead takeover record. Notifications use non-resurrecting
+system notes.
 
 ## Key dependencies
 - [[ava_builtins/skills/orchestration/orchestration.ava.okf.md|Workflow orchestration skill]] — belongs to functional group

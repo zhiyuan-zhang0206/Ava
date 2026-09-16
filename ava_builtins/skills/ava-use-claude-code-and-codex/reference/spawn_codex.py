@@ -2,8 +2,10 @@
 """Create, adopt, inspect, or stop the canonical Codex workspace generation.
 
 The active identity is ``(cluster, canonical workspace, codex)``. A launch
-publishes one generation-owned record, starts an automatic lifecycle supervisor,
-and gives that generation a private ``CODEX_HOME``. A concurrent or cross-agent
+publishes one generation-owned record and gives that generation a private
+``CODEX_HOME``. A supervised worker also starts an automatic lifecycle
+supervisor; a takeover (``--impersonate-self``) runs file- and supervisor-less
+with its briefing inlined in the launch message. A concurrent or cross-agent
 caller adopts the live record instead of stacking another Codex process.
 """
 
@@ -248,6 +250,20 @@ def _bootstrap_message(
     )
 
 
+def _takeover_bootstrap_message(agent_id: int, name: str, brief: str) -> str:
+    """Inline the briefing; a takeover reads no task or work file."""
+    from ava._impersonation_launch import bootstrap_message
+
+    guide = (
+        Path(__file__).resolve().parents[4]
+        / ".agents"
+        / "skills"
+        / "impersonator-guide"
+        / "SKILL.md"
+    )
+    return bootstrap_message(agent_id, name, "codex", brief, guide)
+
+
 def _print_owner(owner: coding_session_owner.CodingSessionOwner, *, adopted: bool) -> None:
     print(f"adopted={'true' if adopted else 'false'}")
     print(f"status={owner.status}")
@@ -295,8 +311,8 @@ def _cancel(key: coding_session_owner.CodingSessionKey, generation: str) -> int:
 def _claim_canonical(
     key: coding_session_owner.CodingSessionKey,
     *,
-    tasks_file: Path,
-    work_file: Path,
+    tasks_file: Path | None,
+    work_file: Path | None,
     ttl_seconds: float,
 ) -> coding_session_owner.CodingSessionClaim:
     """Create or adopt, waiting through another claimant's bounded launch."""
@@ -324,18 +340,32 @@ def _claim_canonical(
 
 def _launch(
     workspace: Path,
-    tasks_file: Path,
-    work_file: Path,
+    tasks_file: Path | None,
+    work_file: Path | None,
     ttl_seconds: float,
     caller_instance: str | None = None,
     impersonation_name: str | None = None,
+    brief: str | None = None,
 ) -> int:
     from shared.external_caller import launch_caller_assignment
 
+    takeover_name: str | None = impersonation_name
+    takeover_brief = ""
+    if takeover_name is not None:
+        if not brief or not brief.strip():
+            raise ValueError("a takeover launch needs a non-empty briefing")
+        if tasks_file is not None or work_file is not None:
+            raise ValueError("a takeover launch reads no task or work file")
+        takeover_brief = brief
+    elif tasks_file is None or work_file is None:
+        raise ValueError("a supervised launch needs its task and work files")
+
     # Validate before creating files, owner records, or sessions.
     launch_caller_assignment("codex", caller_instance)
-    _init_file(tasks_file, "")
-    _init_file(work_file, "STATUS: WORKING\n\n## Log\n\n")
+    if takeover_name is None:
+        assert tasks_file is not None and work_file is not None  # noqa: S101 — checked above
+        _init_file(tasks_file, "")
+        _init_file(work_file, "STATUS: WORKING\n\n## Log\n\n")
     key = coding_session_owner.canonical_key(workspace, tool="codex")
     claim = _claim_canonical(
         key,
@@ -344,9 +374,10 @@ def _launch(
         ttl_seconds=ttl_seconds,
     )
     if claim.action == "adopt":
-        if impersonation_name is not None:
+        if takeover_name is not None:
             raise RuntimeError(
-                "A takeover needs a fresh coding workspace; this workspace already has a generation"
+                "a takeover needs a fresh coding workspace; this workspace already has a live "
+                "generation - cancel it with --cancel-generation first"
             )
         _print_owner(claim.owner, adopted=True)
         return 0
@@ -364,13 +395,14 @@ def _launch(
     sid: int | None = None
     try:
         _seed_codex_home(owner.state_dir, workspace)
-        watcher_id, watcher_name = _launch_supervisor(owner, ttl_seconds)
-        owner = coding_session_owner.attach_supervisor(
-            key,
-            generation,
-            session_id=watcher_id,
-            session_name=watcher_name,
-        )
+        if takeover_name is None:
+            watcher_id, watcher_name = _launch_supervisor(owner, ttl_seconds)
+            owner = coding_session_owner.attach_supervisor(
+                key,
+                generation,
+                session_id=watcher_id,
+                session_name=watcher_name,
+            )
         sid = ava.shell.sessions.new(name=expected_suffix, ttl=ttl_seconds)
         full_name = coding_session_owner.full_session_name(owner_agent_id, sid, expected_suffix)
         active = coding_session_owner.publish_active(
@@ -381,20 +413,11 @@ def _launch(
         )
         ava.shell.sessions.send(sid, _codex_command(owner, workspace, caller_instance))
         _wait_for_ready(sid)
-        message = _bootstrap_message(workspace, tasks_file, work_file)
-        if impersonation_name is not None:
-            from ava._impersonation_launch import bootstrap_message
-
-            guide = (
-                Path(__file__).resolve().parents[4]
-                / ".agents"
-                / "skills"
-                / "impersonator-guide"
-                / "SKILL.md"
-            )
-            message = bootstrap_message(
-                owner.owner_agent_id, impersonation_name, "codex", tasks_file, work_file, guide
-            )
+        if takeover_name is not None:
+            message = _takeover_bootstrap_message(owner_agent_id, takeover_name, takeover_brief)
+        else:
+            assert tasks_file is not None and work_file is not None  # noqa: S101 — checked above
+            message = _bootstrap_message(workspace, tasks_file, work_file)
         ava.shell.sessions.send(sid, message)
         _verify_submitted(sid, owner.state_dir)
     except BaseException:
@@ -429,13 +452,15 @@ def main() -> int:
     )
     parser.add_argument(
         "--tasks-file",
-        default="tasks.md",
-        help="Task input file, absolute or relative to the workspace (default: %(default)s).",
+        default=None,
+        help="Task input file, absolute or relative to the workspace "
+        "(default: tasks.md). Supervised worker mode only.",
     )
     parser.add_argument(
         "--work-file",
-        default="work.md",
-        help="STATUS and log file, absolute or relative to the workspace (default: %(default)s).",
+        default=None,
+        help="STATUS and log file, absolute or relative to the workspace "
+        "(default: work.md). Supervised worker mode only.",
     )
     parser.add_argument(
         "--ttl-seconds",
@@ -454,6 +479,12 @@ def main() -> int:
         "--impersonate-self", action="store_true", help="replace the launching Ava agent"
     )
     parser.add_argument("--impersonation-name", help="display name for the takeover session")
+    parser.add_argument(
+        "--brief",
+        default=None,
+        help="Takeover briefing text, inlined verbatim into the launch message. "
+        "Required with --impersonate-self; a takeover reads no files.",
+    )
     args = parser.parse_args()
     if args.impersonate_self:
         from ava._boot import require_agent_id
@@ -461,8 +492,17 @@ def main() -> int:
         require_agent_id()
         if args.status or args.cancel_generation:
             parser.error("--impersonate-self requires a new launch")
-    elif args.impersonation_name is not None:
-        parser.error("--impersonation-name requires --impersonate-self")
+        if args.tasks_file is not None or args.work_file is not None:
+            parser.error(
+                "--tasks-file/--work-file serve the supervised worker mode; a takeover reads no files"
+            )
+        if args.brief is None or not args.brief.strip():
+            parser.error("--impersonate-self requires a non-empty --brief")
+    else:
+        if args.impersonation_name is not None:
+            parser.error("--impersonation-name requires --impersonate-self")
+        if args.brief is not None:
+            parser.error("--brief requires --impersonate-self")
 
     workspace = Path(args.workspace).expanduser().resolve()
     if not args.status and not args.cancel_generation:
@@ -472,13 +512,19 @@ def main() -> int:
         return _status(key)
     if args.cancel_generation:
         return _cancel(key, args.cancel_generation)
+    tasks_file = None
+    work_file = None
+    if not args.impersonate_self:
+        tasks_file = _resolve_file(workspace, args.tasks_file or "tasks.md")
+        work_file = _resolve_file(workspace, args.work_file or "work.md")
     return _launch(
         workspace,
-        _resolve_file(workspace, args.tasks_file),
-        _resolve_file(workspace, args.work_file),
+        tasks_file,
+        work_file,
         args.ttl_seconds,
         args.caller_instance,
         (args.impersonation_name or workspace.name) if args.impersonate_self else None,
+        args.brief,
     )
 
 

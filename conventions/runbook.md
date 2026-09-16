@@ -1046,18 +1046,23 @@ python ava_builtins/skills/ava-use-claude-code-and-codex/reference/spawn_codex.p
 ```
 
 A live record is adopted across agent changes instead of launching a duplicate.
+A record is either a supervised worker (task/work files plus an automatic
+supervisor) or a file-less takeover (no files, no supervisor; the coding
+session alone is its liveness signal).
 Each ownership generation has a private
 `$AVA_HOME/run/coding-tools/codex/<workspace-key>/<generation>/` state
 directory and a fresh numeric PTY identity. `CODEX_HOME` points there and is
 seeded only with the required authentication and configuration snapshot; no
 mutable Codex database, session log, or transcript is shared between
-generations. A rebuilt worker derives context from the workspace task file,
-work log, collaboration contract, and Git state.
+generations. A rebuilt supervised worker derives context from the workspace
+task file, work log, collaboration contract, and Git state; a takeover rebuilds
+from the briefing inlined in its launch message.
 
-The launcher starts a quiet supervisor for the ownership generation. It closes
+For a supervised generation the launcher starts a quiet supervisor. It closes
 the full Codex PTY and terminalizes the record when `work.md` reaches `DONE` or
 `HANDOFF`, the owner agent terminates, the Codex session crashes, the task
-expires, or an operator cancels that exact generation. The default task TTL is
+expires, or an operator cancels that exact generation. A takeover generation
+starts no supervisor: explicit cancel and expiry are its stop paths. The default task TTL is
 four hours and can be changed with `--ttl-seconds`; TTL is the fallback, not
 the normal lifecycle boundary. Cancel only the generation printed by the
 launcher or `--status`:

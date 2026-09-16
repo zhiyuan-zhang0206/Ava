@@ -6,17 +6,38 @@ description: Drives Claude Code or Codex CLI as supervised long-running coding a
 # Use Claude Code and Codex
 
 Both `claude` (Anthropic) and `codex` (OpenAI) are coding-agent CLIs you can hand
-a task to and let plan + execute. Treat either as "another agent". This skill
-covers when to use each, the file-driven pattern
-for supervising a long task. For the session primitives themselves see
-`ava.shell` (`run` for one-shot; `sessions` — `new` / `send` / `send_keys` /
-`capture` / `kill` — for a persistent one) and `ava.watcher`; don't re-derive
-those here.
+a task to and let plan + execute. Treat either as "another agent". A session
+runs in one of **two modes** — as a **delegated worker** you supervise through
+files, or as a **takeover** that replaces you while your own execution pauses.
+Read *Two modes* first and keep the two apart. For the session primitives
+themselves see `ava.shell` (`run` for one-shot; `sessions` — `new` / `send` /
+`send_keys` / `capture` / `kill` — for a persistent one) and `ava.watcher`;
+don't re-derive those here.
 
 > **Flags and models drift between releases.** Everything below is a snapshot,
 > not a contract. Confirm with `claude --help` / `codex exec --help` and `claude
 > --version` / `codex --version` on the actual machine before relying on a flag —
 > and note a machine may have only one of the two installed.
+
+## Two modes — read this first
+
+The two modes share nothing but the CLIs; mixing them is the known failure.
+Pick one before you launch:
+
+- **Mode A — delegated worker.** The default: you hand a long task to the tool
+  and keep steering it through the file-driven pattern — a task file you append
+  to, a work file the tool rewrites, a supervisor that wakes you. You stay the
+  decider; the tool is a worker. Documented under *Mode A* below.
+- **Mode B — takeover (impersonation).** The tool *replaces you*: it talks to
+  the human through your normal Ava chat and calls Ava capabilities under your
+  identity, while your own execution pauses. It is file-less and
+  supervisor-less — the briefing travels inline in its launch message, and the
+  two of you never run at the same time. Documented under *Mode B* below.
+
+No leakage in either direction: a takeover never reads a task file and never
+writes a work file, and no supervisor watches it; a delegated worker's files
+have no meaning to a takeover. If you catch yourself wiring files or a watcher
+into a takeover, stop — you are following the wrong section.
 
 ## When to outsource, and to which
 
@@ -30,17 +51,14 @@ those here.
 | Code review of a diff | `codex exec review`, or `claude -p` with a review prompt |
 | You need tight control over each step | Do it yourself |
 
-## Two ways to run it
+## Mode A — file-driven collaboration (the pattern for long tasks)
 
-**Persistent session is the default.** Start it in `ava.shell.sessions` and steer it across
-many turns — the collaboration pattern below builds on this. Headless one-shot (`claude -p`,
-`codex exec`) exists but is rarely needed; avoid it unless the task is truly self-contained and
-needs no supervision.
-
-**Take over your own identity:** use `--impersonate-self --impersonation-name 'Fix login'` on either spawn script
-when it should take over your identity and human chat. Read the [takeover procedure](reference/impersonate_self.md) before launching. Takeover execution is suspended pending fixes; it resumes with the fix line — do not launch takeovers until the suspension is lifted.
-
-## File-driven collaboration (the pattern for long tasks)
+**Persistent session is the default.** Start it in `ava.shell.sessions` and steer
+it across many turns — everything below builds on this. Headless one-shot
+(`claude -p`, `codex exec`) exists but is rarely needed; avoid it unless the task
+is truly self-contained and needs no supervision. Per-tool launch detail lives in
+the [Claude Code](reference/claude_code.md) and [Codex](reference/codex.md)
+references.
 
 Don't supervise by reading the agent's screen. The screen is a redraw you have to
 parse and it vanishes on restart; a file the agent writes is structured, durable,
@@ -224,77 +242,50 @@ Two levers:
   agent writes its `## Handoff` and sets `STATUS: HANDOFF`; you then `kill` the
   Claude session yourself. For Codex, follow the canonical-owner reference.
 
-## Claude Code (`claude`)
+## Mode B — takeover (impersonation)
 
-For an interactive (persistent) session, use the spawn script instead of
-launching by hand — it pre-trusts the directory and sends the contract message:
+> **Suspended:** takeover execution is suspended pending fixes; it resumes with
+> the fix line. Do not launch takeovers until the suspension is lifted.
 
-```bash
-.venv/bin/python reference/spawn_claude.py <workspace-dir>
-```
+The tool **replaces you**: it talks to the human through your normal Ava chat
+and calls Ava capabilities under your identity while your execution is paused.
+A takeover is **file-less and supervisor-less** — nothing from Mode A applies:
 
-Manual launch (for full control):
+- **The briefing is inline.** `--brief` inlines it verbatim into the launch
+  message. There is no task file to read, no work file to write, and nothing
+  watches a file.
+- **Start — the process interrupts you.** The launch call returns; when the
+  takeover activates, the platform saves your checkpoint and your execution
+  pauses. You and the replacement never run at the same time, so there is no
+  lockstep to maintain and no supervisor to start.
+- **End — one message resumes you.** When the takeover releases, a system note
+  resumes you carrying its summary and the path of the handoff JSON
+  (`impersonation/<session_id>.json`). Read that file before acting on pending
+  human input; it retains all messages, including unACKed ones.
 
-```bash
-cd /path/to/workspace && unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions   # interactive session (the persistent pattern)
-```
-
-Headless one-shot (`claude -p "<task>"` / `claude -p "<task>" --output-format json`) is
-available for rare, self-contained tasks that need no supervision — avoid by default.
-
-- **Required flags on this machine:** `--dangerously-skip-permissions`.
-  Available models: Fable 5 (`--model fable`), Opus 4.8 (`--model opus`).
-  Other flags (verify with
-  `claude --help`): `--output-format
-  json|stream-json` (only with `-p`), `--continue` / `--resume <session_id>`.
-- In an interactive session, `/compact` (and silent auto-compaction near the
-  limit) manage context; `/context` shows usage but as a grid, not a number.
-- `--output-format json` returns per-turn token usage (input / output / cache)
-  and the model's `contextWindow`; it does **not** report cumulative session
-  usage — sum it yourself if you track headroom in headless mode.
-- **Auth & billing trap:** `ANTHROPIC_API_KEY` must be **unset** before launching
-  `claude`. When the env var is present alongside a paid Claude subscription,
-  Claude Code defaults to API-key billing — incurring per-token charges instead
-  of using the subscription. The spawn script already unsets it in the session.
-  For manual launch, prefix the command with `unset ANTHROPIC_API_KEY &&`.
-  (Agents calling Claude through Ava's model layer are unaffected — the key is
-  picked up from the server config, not the agent's environment.)
-
-## OpenAI Codex (`codex`)
-
-For an interactive (persistent) session, use the spawn script instead of
-launching by hand — it pre-trusts the directory and sends the contract message:
+Launch it from your own execution context, briefing inline:
 
 ```bash
-.venv/bin/python reference/spawn_codex.py <workspace-dir>
+.venv/bin/python reference/spawn_codex.py <workspace-dir> --impersonate-self \
+  --impersonation-name 'Fix login' --brief '<the full briefing text>'
 ```
 
-Manual launch (for full control):
+`--brief` is required in this mode; `--tasks-file`/`--work-file` are refused —
+a takeover reads no files. The workspace must not carry a live canonical
+generation (`--cancel-generation <generation>` first). The takeover generation
+is recorded without files or supervisor — its coding session alone is its
+liveness signal — so do not start `watch_work.py` or any other file watcher
+for it. `spawn_claude.py --impersonate-self` refuses to launch: Claude's
+file-less path is still being reworked (task #3688) — use Codex.
 
-```bash
-codex --dangerously-bypass-approvals-and-sandbox -C <dir>   # interactive, hands-off
-```
+The full procedure is [Let the coding agent take over your identity](reference/impersonate_self.md);
+the takeover process's own operating manual is the `impersonator-guide` skill.
 
-Headless one-shot (`codex exec "<task>" ...`) is available for rare, self-contained tasks
-that need no supervision — avoid by default. `codex exec review --uncommitted` is the exception
-for code review; `codex exec resume --last "<follow-up>"` continues a previous session.
+## CLI reference
 
-- `codex exec` **always returns exit code 0**, even when the task failed — judge
-  success from the output, not the return code.
-- Useful flags (verify with `codex exec --help`): `-s/--sandbox`
-  (`read-only` / `workspace-write` / `danger-full-access`), `-a/--ask-for-approval`
-  (`on-request` / `never`), `--ephemeral`, `-C/--cd <dir>`, `--skip-git-repo-check`,
-  `--json` (emit JSONL).
-- For a **hands-off interactive** session use
-  `--dangerously-bypass-approvals-and-sandbox` — the file-driven pattern can't
-  answer approval prompts. `-s danger-full-access` alone is not enough: the
-  default approval policy is `on-request`, so it still pauses to ask. Pair it with
-  `-a never`, or use the single bypass flag. Intended for an already-sandboxed host.
-- `codex exec --json` puts per-turn token usage on `turn.completed` events
-  (`input_tokens` / `cached_input_tokens` / `output_tokens` /
-  `reasoning_output_tokens`); it does **not** include a context-window percentage.
-- In an interactive session, `/status` reports `Context window: NN% left
-  (X used / Y)` and `/compact` (manual + automatic) manages context; the footer's
-  context field is off by default in some builds.
-- Codex expects a git repo; pass `--skip-git-repo-check` if it is not one.
-- Auth: `OPENAI_API_KEY`, or `CODEX_ACCESS_TOKEN` for a ChatGPT-account login.
+Tool versions, models and flags drift — every claim still starts with
+`claude --help` / `codex exec --help` on the actual machine. The per-tool
+references carry the launch variants, auth traps and headless notes:
+
+- [Claude Code (`claude`)](reference/claude_code.md)
+- [OpenAI Codex (`codex`)](reference/codex.md)
