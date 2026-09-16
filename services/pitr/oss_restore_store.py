@@ -15,10 +15,10 @@ from services.pitr.object_store import PermanentObjectStoreError
 from services.pitr.oss_store import (
     OSSObjectStore,
     _is_not_found,
-    _map_error,
     _normalize_etag,
     _ReadResult,
     _user_metadata,
+    map_oss_error,
 )
 from services.pitr.restore_manifest import RestoreObject
 
@@ -106,7 +106,7 @@ class OSSGenerationPinnedObjectReader:
                 raise PermanentObjectStoreError(
                     "pinned restore object does not exist or differs"
                 ) from exc
-            raise _map_error("pinned restore download", exc) from exc
+            raise map_oss_error("pinned restore download", exc) from exc
         if (
             _normalize_etag(body.etag) != etag
             or body.content_length is None

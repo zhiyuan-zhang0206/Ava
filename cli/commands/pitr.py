@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
@@ -368,3 +369,107 @@ def _resolve_drill_candidate(chain: str | None, candidate: str | None) -> Candid
     if not path.is_file():
         raise ValueError(f"no candidate manifest for chain {chain!r} at {path}")
     return CandidateManifest.from_json(path.read_text())
+
+
+def cmd_pitr_multipart_list(*, prefix: str, credentials_file: str | None) -> int:
+    """List every incomplete multipart upload (orphan shard) under ``prefix``."""
+    from services.pitr.object_store import ObjectStoreError
+    from services.pitr.oss_multipart import OSSMultipartUploads
+
+    try:
+        endpoint, bucket, path = _multipart_target(credentials_file)
+        surface = OSSMultipartUploads(endpoint=endpoint, bucket=bucket, credentials_file=path)
+        rows = surface.inventory(prefix=prefix)
+    except (ObjectStoreError, RuntimeError, ValueError) as exc:
+        print(f"pitr multipart list failed: {exc}", file=sys.stderr)
+        return 1
+    if not rows:
+        print("no incomplete multipart uploads")
+        return 0
+    now = int(datetime.now(tz=UTC).timestamp())
+    for row in rows:
+        print(
+            f"{row.key}  upload_id={row.upload_id}  parts={row.part_count} "
+            f"bytes={row.size_bytes}  initiated={_iso_utc(row.initiated)} "
+            f"age={_age_text(now - row.initiated)}"
+        )
+    return 0
+
+
+def cmd_pitr_multipart_abort(
+    *, key: str, upload_id: str, credentials_file: str | None, confirm: bool
+) -> int:
+    """Abort exactly one incomplete multipart upload; --confirm is the switch."""
+    from services.pitr.object_store import ObjectStoreError
+    from services.pitr.oss_multipart import AbortOutcome, OSSMultipartUploads
+
+    try:
+        endpoint, bucket, path = _multipart_target(credentials_file)
+        surface = OSSMultipartUploads(endpoint=endpoint, bucket=bucket, credentials_file=path)
+        target = surface.find(key=key, upload_id=upload_id)
+    except (ObjectStoreError, RuntimeError, ValueError) as exc:
+        print(f"pitr multipart abort failed: {exc}", file=sys.stderr)
+        return 1
+    if target is None:
+        print(
+            f"not found: no incomplete multipart upload key={key} upload_id={upload_id} "
+            "(already completed or aborted?); nothing was changed",
+            file=sys.stderr,
+        )
+        return 1
+    now = int(datetime.now(tz=UTC).timestamp())
+    print(
+        f"target: key={target.key} upload_id={target.upload_id} parts={target.part_count} "
+        f"bytes={target.size_bytes} initiated={_iso_utc(target.initiated)} "
+        f"age={_age_text(now - target.initiated)}"
+    )
+    if not confirm:
+        print("preview only: re-run with --confirm to abort this upload")
+        return 0
+    try:
+        outcome = surface.abort(key=key, upload_id=upload_id)
+    except (ObjectStoreError, RuntimeError, ValueError) as exc:
+        print(f"pitr multipart abort failed: {exc}", file=sys.stderr)
+        return 1
+    if outcome is not AbortOutcome.ABORTED:
+        print(
+            f"nothing to abort: key={key} upload_id={upload_id} vanished mid-confirm "
+            "(completed or aborted concurrently)",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"aborted: key={key} upload_id={upload_id}")
+    return 0
+
+
+def _multipart_target(credentials_file: str | None) -> tuple[str, str, str]:
+    """(endpoint, bucket, credential file) for the OSS multipart surface."""
+    config = settings.physical_backup
+    configured = config.pitr_oss_credentials_file
+    path = credentials_file or (str(configured) if configured is not None else None)
+    if path is None:
+        raise RuntimeError(
+            "no OSS credential file: pass --credentials-file or set AVA_PITR_OSS_CREDENTIALS_FILE"
+        )
+    if not config.pitr_oss_endpoint or not config.pitr_oss_bucket:
+        raise RuntimeError(
+            "OSS endpoint and bucket are not configured "
+            "(AVA_PITR_OSS_ENDPOINT / AVA_PITR_OSS_BUCKET)"
+        )
+    return config.pitr_oss_endpoint, config.pitr_oss_bucket, path
+
+
+def _iso_utc(epoch_seconds: int) -> str:
+    return datetime.fromtimestamp(epoch_seconds, tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _age_text(seconds: int) -> str:
+    seconds = max(seconds, 0)
+    days, remainder = divmod(seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes = remainder // 60
+    if days:
+        return f"{days}d{hours}h"
+    if hours:
+        return f"{hours}h{minutes}m"
+    return f"{minutes}m"
