@@ -10,6 +10,12 @@ from __future__ import annotations
 import argparse
 
 
+def _h_config_audit(args: argparse.Namespace) -> int:
+    from cli.commands.config import h_config_audit
+
+    return h_config_audit(args)
+
+
 def _h_config_get(args: argparse.Namespace) -> int:
     from cli.commands.config import h_config_get
 
@@ -125,7 +131,7 @@ def _h_schedules_provision(args: argparse.Namespace) -> int:
 
 
 def _add_config_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    from cli.main import _h_config_get, _h_config_set, _h_config_unset
+    from cli.main import _h_config_audit, _h_config_get, _h_config_set, _h_config_unset
 
     # `ava config` — read / set / unset cluster + host config via the gateway. The
     # handlers defer the cli.commands.config import (which loads Settings) so
@@ -157,6 +163,14 @@ def _add_config_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     unset_p.add_argument("--machine", default=None, help="target agent-runner (host fields)")
     unset_p.add_argument("--local", action="store_true", help="edit this unit's .env directly")
     unset_p.set_defaults(func=_h_config_unset)
+
+    audit_p = config_sub.add_parser("audit", help="print the .env write audit trail (newest first)")
+    audit_p.add_argument("--last", type=int, default=20, help="how many records to show (1..200)")
+    audit_p.add_argument("--key", default=None, help="only records touching this .env alias")
+    audit_p.add_argument(
+        "--machine", default=None, help="fetch through the gateway: a machine name or 'all'"
+    )
+    audit_p.set_defaults(func=_h_config_audit)
 
 
 def _add_presets_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:

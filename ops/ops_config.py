@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Any
 
 from ops.rpc_schemas import (
+    ConfigAuditReadResult,
     ConfigReadResult,
     ConfigWriteOpResult,
     FieldWriteResult,
@@ -72,6 +73,13 @@ def config_read_op() -> ConfigReadResult:
         host_fields=host_fields,
         raw_overrides=raw_overrides,
     )
+
+
+def config_audit_read_op(last: int) -> ConfigAuditReadResult:
+    """Read this machine's most recent `.env`-write audit records (newest first)."""
+    from shared.env_audit import read_env_write_records
+
+    return ConfigAuditReadResult(machine=machine_name(), records=read_env_write_records(last))
 
 
 def config_write_op(

@@ -23,6 +23,12 @@ tags: []
   entry gains the `actor` and stays value-free — sensitive values enter neither the record nor the
   stream. Motivation: the `AVA_HOST_MAX_CONCURRENT_TURNS=50` write of 2026-09-11 (audit record #18:
   site + key names only) could not be attributed or reconstructed without ssh.
+- **Query surface**: `ava config audit [--last N] [--key K] [--machine M]` reads this unit's
+  history by default (no gateway round-trip); `--machine <name|all>` goes through the gateway.
+  `GET /api/config/audit?machine=<name|all>&last=<1..200, default 20>` merges newest-first: the
+  gateway's own box plus, for `all`, every agent-runner (records tagged with their `machine`;
+  an unreachable machine 503s the whole read — fail-fast). Records are the raw JSONL entries, so
+  the redaction rules above travel with them.
 - **Integrity guard**: the first official write also creates a sibling owner-only
   `.env.audit.armed` marker, so deletion, emptiness, corruption, or a missing digest in an armed
   history is reported and rebuilt rather than silently returning to the fresh-home state.

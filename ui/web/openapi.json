@@ -3557,6 +3557,65 @@
         }
       }
     },
+    "/api/config/audit": {
+      "get": {
+        "summary": "Get Config Audit",
+        "description": "Return the `.env` write audit trail, newest first.\n\n`machine` selects the source: omitted = this gateway's own box; `all` = every\nagent-runner machine plus the gateway's own box, merged (fail-fast — an\nunreachable machine 503s the whole read); a machine name = that machine.\n`last` caps the number of returned records (1..200). Records are the raw\naudit-JSONL entries (`shared/env_audit.py`), each tagged with its `machine`;\nvalues were redacted at write time (non-sensitive fields only), and records\nfrom before record v2 lack `actor` / `trace_id` / `changed`.",
+        "operationId": "get_config_audit_api_config_audit_get",
+        "parameters": [
+          {
+            "name": "machine",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Machine"
+            }
+          },
+          {
+            "name": "last",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 20,
+              "title": "Last"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigAuditView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/config/resolved": {
       "get": {
         "summary": "Get Resolved Config",
@@ -8405,6 +8464,24 @@
         ],
         "title": "CompactEnqueued",
         "description": "POST /api/agents/{id}/compact response — returns immediately after\npending insert, does not wait for the kernel loop to finish."
+      },
+      "ConfigAuditView": {
+        "properties": {
+          "records": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Records"
+          }
+        },
+        "type": "object",
+        "required": [
+          "records"
+        ],
+        "title": "ConfigAuditView",
+        "description": "GET /api/config/audit response — merged `.env`-write audit records, newest first.\n\nEach record is the raw audit-JSONL entry (`shared/env_audit.py`, record v2:\nts / site / pid / process / cmdline / actor / trace_id / keys_written /\nkeys_removed / digest_after / changed), tagged with its `machine`. Values were\nredacted when the record was written (non-sensitive fields only); records from\nbefore record v2 lack `actor` / `trace_id` / `changed`."
       },
       "ConfigFieldView": {
         "properties": {

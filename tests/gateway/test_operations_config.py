@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 
 from ops import ops_config as ops
-from ops.ops_config import config_read_op, config_write_op
+from ops.ops_config import config_audit_read_op, config_read_op, config_write_op
 from ops.rpc_schemas import ConfigReadResult, ConfigWriteOpResult
 from shared import host_config_validators, runtime_config
 from shared.config import get_config_metadata
@@ -571,3 +571,24 @@ async def test_dispatch_config_write_missing_overrides_key_fails(
     status, result = await daemon._dispatch("config_write", {})  # no 'overrides' key
     assert status == "failed"
     assert "overrides" in str(result["error"])
+
+
+# ---------------------------------------------------------------------------
+# config_audit_read_op
+# ---------------------------------------------------------------------------
+
+
+def test_config_audit_read_op_returns_this_hosts_newest_records(
+    isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from shared.env_audit import record_env_write
+
+    monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
+    env_path = isolated_host_home / ".env"
+    env_path.write_text("AVA_MODEL=m\n")
+    record_env_write(env_path, {"AVA_MODEL"}, set(), site="one")
+    record_env_write(env_path, {"AVA_MODEL"}, set(), site="two")
+
+    result = config_audit_read_op(1)
+    assert result.machine == "test-machine"
+    assert [record["site"] for record in result.records] == ["two"]

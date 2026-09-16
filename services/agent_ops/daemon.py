@@ -67,6 +67,7 @@ from ops.rpc_schemas import (
     ClusterSpawnSession,
     ClusterTransitionPayload,
     ClusterUpdatePayload,
+    ConfigAuditReadPayload,
     ConfigWritePayload,
     InventoryWritePayload,
     LaunchAgentRequest,
@@ -318,6 +319,9 @@ def _dispatch_sync(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, o
             return "completed", ops_cluster.cluster_status_op(_db_pool).model_dump(mode="json")
         case "config_read":
             return "completed", ops_config.config_read_op().model_dump(mode="json")
+        case "config_audit_read":
+            ca = ConfigAuditReadPayload.model_validate(payload)
+            return "completed", ops_config.config_audit_read_op(ca.last).model_dump(mode="json")
         case "config_write":
             cw = ConfigWritePayload.model_validate(payload)
             with _state_write_lock:

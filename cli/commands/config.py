@@ -23,7 +23,12 @@ from typing import Any, cast
 
 from pydantic_core import PydanticUndefined
 
-from shared.api_contracts.config import ConfigFieldView, ConfigView, ConfigWriteResult
+from shared.api_contracts.config import (
+    ConfigAuditView,
+    ConfigFieldView,
+    ConfigView,
+    ConfigWriteResult,
+)
 
 _HTTP_TIMEOUT_S = 15.0
 
@@ -129,6 +134,22 @@ def _get_config(machine: str | None) -> ConfigView:
     )
     resp.raise_for_status()
     return ConfigView.model_validate(resp.json())
+
+
+def _get_config_audit(machine: str | None, last: int) -> ConfigAuditView:
+    from shared.http_dial import get as dial_get
+
+    params: dict[str, str] = {"last": str(last)}
+    if machine:
+        params["machine"] = machine
+    resp = dial_get(
+        f"{_gateway_base()}/api/config/audit",
+        params=params,
+        timeout=_HTTP_TIMEOUT_S,
+        headers=_auth_headers(),
+    )
+    resp.raise_for_status()
+    return ConfigAuditView.model_validate(resp.json())
 
 
 def _put_config(body: dict[str, Any], machine: str | None) -> ConfigWriteResult:
@@ -332,6 +353,88 @@ def _print_restart_hint(result: ConfigWriteResult, machine: str | None) -> None:
         print(f"  restart to apply on {where}: {', '.join(targets)}")
     else:
         print("  takes effect on the next process start; no restart required.")
+
+
+def _audit_touches_key(record: dict[str, object], key: str) -> bool:
+    """True when the record names `key` among its written/removed/changed aliases."""
+    names: set[str] = set()
+    for field in ("keys_written", "keys_removed"):
+        value = record.get(field)
+        if isinstance(value, list):
+            names.update(str(item) for item in cast("list[object]", value))
+    changed = record.get("changed")
+    if isinstance(changed, list):
+        for entry in cast("list[object]", changed):
+            if isinstance(entry, dict):
+                alias = cast("dict[str, object]", entry).get("alias")
+                if alias is not None:
+                    names.add(str(alias))
+    return key in names
+
+
+def _shown_value(value: object) -> str:
+    return "(unset)" if value is None else str(value)
+
+
+def _print_audit_record(record: dict[str, object]) -> None:
+    print(
+        f"{record.get('ts')}  [{record.get('machine')}] site={record.get('site')}  "
+        f"actor={record.get('actor') or '(none)'}"
+    )
+    for label, field in (("wrote", "keys_written"), ("removed", "keys_removed")):
+        value = record.get(field)
+        if isinstance(value, list) and value:
+            print(f"    {label}: {', '.join(str(item) for item in cast('list[object]', value))}")
+    changed = record.get("changed")
+    if not isinstance(changed, list):
+        return
+    for entry in cast("list[object]", changed):
+        if not isinstance(entry, dict):
+            continue
+        fields = cast("dict[str, object]", entry)
+        alias = fields.get("alias")
+        if fields.get("sensitive") is not False:
+            # Sensitive or unregistered alias — the record keeps the name only.
+            print(f"    changed: {alias}: (withheld)")
+        else:
+            print(
+                f"    changed: {alias}: {_shown_value(fields.get('old'))}"
+                f" -> {_shown_value(fields.get('new'))}"
+            )
+
+
+def cmd_config_audit(last: int, key: str | None, machine: str | None) -> int:
+    """`ava config audit [--last N] [--key K] [--machine M]` — the `.env` write trail.
+
+    Reads this unit's own audit history by default (no gateway round-trip);
+    `--machine <name|all>` fetches through the gateway (that machine's records, or
+    every agent-runner's merged). `--key K` keeps only records that touched the
+    `.env` alias K. Newest first.
+    """
+    from shared.env_audit import read_env_write_records
+    from shared.machine import machine_name
+
+    if machine is None:
+        records = [{**record, "machine": machine_name()} for record in read_env_write_records(last)]
+    else:
+        import httpx
+
+        try:
+            records = _get_config_audit(machine, last).records
+        except _ConfigError as e:
+            print(f"[ava config audit] {e}", file=sys.stderr)
+            return 1
+        except httpx.HTTPError as e:
+            print(f"[ava config audit] gateway request failed: {e}", file=sys.stderr)
+            return 1
+    if key is not None:
+        records = [record for record in records if _audit_touches_key(record, key)]
+    if not records:
+        print("(no .env write records)")
+        return 0
+    for record in records:
+        _print_audit_record(record)
+    return 0
 
 
 def cmd_config_get(key: str | None, machine: str | None, *, local: bool = False) -> int:
@@ -565,3 +668,7 @@ def h_config_set(args: argparse.Namespace) -> int:
 
 def h_config_unset(args: argparse.Namespace) -> int:
     return cmd_config_unset(keys=args.keys, machine=args.machine, local=args.local)
+
+
+def h_config_audit(args: argparse.Namespace) -> int:
+    return cmd_config_audit(last=args.last, key=args.key, machine=args.machine)

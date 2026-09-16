@@ -291,6 +291,34 @@ def last_env_write_record(env_path: Path | None = None) -> dict[str, object] | N
     return cast("dict[str, object]", record)
 
 
+def read_env_write_records(limit: int, env_path: Path | None = None) -> list[dict[str, object]]:
+    """The newest `limit` audit records for `env_path`, newest first.
+
+    Reads a bounded tail window (a record is far smaller than `_AUDIT_TAIL_BYTES`),
+    so cost is independent of history size. A truncated first line (the window cut
+    a record) is skipped by the same per-line tolerance that drops any corrupt
+    line; a missing history returns [] (nothing has been written yet).
+    """
+    if limit < 1:
+        raise ValueError("limit must be >= 1")
+    audit_path = _audit_path(env_path or _env_path())
+    if not audit_path.exists():
+        return []
+    records: list[dict[str, object]] = []
+    text = audit_path.read_bytes()[-_AUDIT_TAIL_BYTES:].decode("utf-8", errors="replace")
+    for line in reversed(text.splitlines()):
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(record, dict):
+            continue
+        records.append(cast("dict[str, object]", record))
+        if len(records) >= limit:
+            break
+    return records
+
+
 def _history_problem(
     env_path: Path, audit_path: Path
 ) -> tuple[dict[str, object] | None, str | None]:

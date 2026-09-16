@@ -14,6 +14,7 @@ models (ClusterPanel, SystemStatus, ServiceItem, ...) stay in `gateway.schemas`.
 """
 
 from shared.api_contracts.config import (
+    ConfigAuditView,
     ConfigFieldView,
     ConfigFieldWriteResult,
     ConfigView,
@@ -24,6 +25,7 @@ from shared.api_contracts.config import (
 from shared.api_contracts.status import MachineStatus
 
 __all__ = [
+    "ConfigAuditView",
     "ConfigFieldView",
     "ConfigFieldWriteResult",
     "ConfigView",
