@@ -46,7 +46,7 @@ _ACK_WINDOW_SECONDS = 300.0
 # small — one oversized inbound (a large compact summary) used to overflow the
 # argv/queue limit, fail every emit, and crash-loop the relay on the same row
 # until lease expiry (issue #2055). The envelope points the host at the inbox
-# command for the full text either way.
+# command for the full text either way (task #3696 exception inventory).
 _PUSH_MAX_CHARS = 2000
 _TERMINAL = frozenset({"released", "rejected", "expired"})
 type LeaseStatus = Literal["requested", "accepted", "active", "released", "rejected", "expired"]
