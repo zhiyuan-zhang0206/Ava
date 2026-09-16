@@ -16,6 +16,8 @@ Statistics read persisted compact metric observations and day summaries from
 Postgres. Pre-cutover full days preserve the existing cost/turn ledgers without
 adding the same observed day twice. Exact duration observations feed quantiles;
 older ledger-only histograms retain their declared integer-second precision.
+The panel names exact/bucketed/mixed precision and explains missing duration
+denominators or retained historical durations that cannot fit the selected window.
 Missing evidence is null/partial with window and observation timestamps, not a
 zero or a claim of complete collection. No synchronous log scan or completed
 result TTL is part of the statistics path. Since-compact is unavailable without

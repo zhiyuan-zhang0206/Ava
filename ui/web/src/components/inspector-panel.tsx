@@ -706,6 +706,18 @@ function CostSection({ inspect }: { inspect: AgentInspectStatistics }) {
  */
 function ActivitySection({ inspect }: { inspect: AgentInspectStatistics }) {
   const { activity, tps } = inspect;
+  const turnEvidence = inspect.metadata.turns;
+  const precisionLabels = {
+    exact: "metricsDurationExact",
+    one_second_buckets: "metricsDurationBuckets",
+    mixed: "metricsDurationMixed",
+  } as const;
+  const reasonLabels = {
+    historical_coverage_unknown: "metricsPartial",
+    compact_boundary_unknown: "compactBoundaryUnavailable",
+    missing_turn_durations: "metricsMissingDurations",
+    archive_precision_unattributed: "metricsRetainedDurations",
+  } as const;
   const hasLife = activity !== null && activity.alive_seconds > 0;
   const idleSeconds = activity
     ? Math.max(0, activity.alive_seconds - activity.active_seconds)
@@ -720,6 +732,19 @@ function ActivitySection({ inspect }: { inspect: AgentInspectStatistics }) {
             ? t("metricsPartial")
             : t("metricsObserved")}
       </p>
+      {turnEvidence.availability !== "unavailable" && turnEvidence.duration_precision && (
+        <p className="mb-1 text-[10px] text-muted-foreground">
+          {t(precisionLabels[turnEvidence.duration_precision])}
+        </p>
+      )}
+      {turnEvidence.reason && (turnEvidence.reason !== "historical_coverage_unknown" || inspect.metadata.activity.availability === "unavailable") && (
+        <p className="mb-1 text-[10px] text-muted-foreground">
+          {t(reasonLabels[turnEvidence.reason])}
+        </p>
+      )}
+      {!!turnEvidence.retained_unapplied_sources?.length && turnEvidence.reason !== "archive_precision_unattributed" && (
+        <p className="mb-1 text-[10px] text-muted-foreground">{t("metricsRetainedDurations")}</p>
+      )}
       <div className="grid grid-cols-2 gap-1">
         <Metric
           label={t("metricTps")}

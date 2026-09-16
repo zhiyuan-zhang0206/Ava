@@ -5967,7 +5967,7 @@ export interface components {
             /** Retained Unapplied Sources */
             retained_unapplied_sources?: string[];
             /** Reason */
-            reason?: string | null;
+            reason?: ("historical_coverage_unknown" | "compact_boundary_unknown" | "missing_turn_durations" | "archive_precision_unattributed") | null;
             /** Duration Precision */
             duration_precision?: ("exact" | "one_second_buckets" | "mixed") | null;
         };

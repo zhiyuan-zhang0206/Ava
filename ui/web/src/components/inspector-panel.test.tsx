@@ -1681,3 +1681,35 @@ describe("persisted metric evidence", () => {
     expect(screen.queryByText("$0.4213")).toBeNull();
   });
 });
+
+describe("visible duration evidence", () => {
+  it.each([
+    ["one_second_buckets", "Historical durations use one-second buckets."],
+    ["mixed", "Durations combine exact values and historical one-second buckets."],
+  ] as const)("labels %s precision beside activity", async (precision, label) => {
+    const data = fixture();
+    data.metadata.turns.duration_precision = precision;
+    getAgentInspectStatistics.mockResolvedValue(data);
+    render(<InspectorPanel agentId={1} />);
+    expect(await screen.findByText(label)).toBeTruthy();
+  });
+
+  it("explains retained durations without pretending they belong to the window", async () => {
+    const data = fixture();
+    data.metadata.turns.retained_unapplied_sources = ["historical_archive_distribution"];
+    data.metadata.turns.reason = "archive_precision_unattributed";
+    getAgentInspectStatistics.mockResolvedValue(data);
+    render(<InspectorPanel agentId={1} />);
+    expect(await screen.findByText("Older exact durations are retained, but cannot be assigned to this window.")).toBeTruthy();
+    expect(screen.queryByText("historical_archive_distribution")).toBeNull();
+  });
+
+  it("explains missing duration denominators while keeping throughput unknown", async () => {
+    const data = fixture({ tps: { lm_stage_tps: null, agent_lifecycle_tps: null } });
+    data.metadata.turns.reason = "missing_turn_durations";
+    getAgentInspectStatistics.mockResolvedValue(data);
+    render(<InspectorPanel agentId={1} />);
+    expect(await screen.findByText("Some recorded turns have no duration; throughput is unavailable.")).toBeTruthy();
+    expect(screen.queryByText("42.5")).toBeNull();
+  });
+});

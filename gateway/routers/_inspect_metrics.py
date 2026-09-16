@@ -174,7 +174,7 @@ def _evidence(
     return MetricEvidence(
         availability=availability,  # pyright: ignore[reportArgumentType]
         sources=sources,
-        reason="Historical collection coverage is unknown." if historical else None,
+        reason="historical_coverage_unknown" if historical else None,
         duration_precision=precision,  # pyright: ignore[reportArgumentType]
     )
 
@@ -226,7 +226,7 @@ def inspect_snapshot(
             absent = MetricEvidence(
                 availability="unavailable",
                 sources=[],
-                reason="No authoritative completed compaction boundary is available.",
+                reason="compact_boundary_unknown",
             )
             return MetricsSnapshot(
                 None,
@@ -441,16 +441,18 @@ def _read_snapshot(
             row["turn_total"] or row["exec_ok"] or row["exec_failed"] for row in observed.values()
         ),
         sources=["observations", *(["historical_daily_turns"] if turns else [])],
-        precision=precision,
+        precision=precision if distribution else None,
     )
     if not durations_known:
         turn_evidence = turn_evidence.model_copy(
             update={
                 "availability": "partial",
-                "reason": "Some observed turns have no retained duration observation.",
+                "reason": "missing_turn_durations",
             }
         )
-    if historical and (precision != "exact" or turn_evidence.availability == "unavailable"):
+    if historical and (
+        not distribution or precision != "exact" or turn_evidence.availability == "unavailable"
+    ):
         retained = _rows(
             conn,
             "SELECT EXISTS (SELECT 1 FROM agent_archive_stats WHERE agent_id=%s "
@@ -461,7 +463,9 @@ def _read_snapshot(
             turn_evidence = turn_evidence.model_copy(
                 update={
                     "retained_unapplied_sources": ["historical_archive_distribution"],
-                    "reason": "Exact frozen-archive durations remain retained without event timestamps; they cannot be attributed to this window.",
+                    "reason": turn_evidence.reason
+                    if turn_evidence.reason == "missing_turn_durations"
+                    else "archive_precision_unattributed",
                 }
             )
     activity_evidence = _evidence(
