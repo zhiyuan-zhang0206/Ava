@@ -1217,6 +1217,7 @@ def test_child_env_does_not_inherit_spawner_process_profile(sessions: Path) -> N
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.flaky  # quarantine (flake governance C, #2245): kill-tree reap race, 2026-09-16
 def test_kill_reaps_process_tree_no_orphans(sessions: Path) -> None:
     home = sessions
     name = "ava-test-killtree-1"
