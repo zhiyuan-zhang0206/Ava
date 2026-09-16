@@ -40,6 +40,7 @@ from gateway import loki_events, loki_query_budget
 from gateway.routers._backend_failure import raise_backend_unavailable
 from gateway.routers._eval_guard import deny_isolated_result_read
 from gateway.schemas import EventRow, EventsMeta, EventsResponse
+from shared.config import settings
 from shared.events.contract import EventTier, tier_for
 
 router = APIRouter()
@@ -51,6 +52,8 @@ _LEVELS = frozenset({"debug", "info", "warning", "error", "critical"})
 _TIERS = ("business", "anomaly", "observation", "noise")
 
 # Longest retention (audit = 365d); anything longer is a no-op window anyway.
+# Protective constant, evaluated at import for the `hours` Query bound — not
+# configuration (task #3696 exception inventory: KEEP).
 _MAX_HOURS = 24 * 365
 
 # Default window when the request names no lower bound (`from`/`hours`) —
@@ -134,7 +137,9 @@ def get_events(
     from_: Annotated[datetime | None, Query(alias="from")] = None,
     to: Annotated[datetime | None, Query()] = None,
     hours: Annotated[float | None, Query(gt=0, le=_MAX_HOURS)] = None,
-    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+    # `limit`'s range and `offset`'s ceiling stay protective constants (import-
+    # time Query bounds); the default *window* is display.events_default_limit.
+    limit: Annotated[int | None, Query(ge=1, le=1000)] = None,
     offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
     with_total: Annotated[bool, Query()] = False,  # noqa: FBT002 — FastAPI query param
 ) -> EventsResponse:
@@ -174,7 +179,8 @@ def get_events(
         would scan the whole retention history (6M+ rows across every
         month partition), so the API never runs one. `meta.window_from`
         always echoes the effective lower bound.
-      - `limit` (default 100, cap 1000) / `offset` (cap 10,000): offset
+      - `limit` (configured default window — ``display.events_default_limit``,
+        100 out of the box — cap 1000) / `offset` (cap 10,000): offset
         paging with stable ordering across same-`ts` rows. The cap bounds the
         in-memory Loki JSON parse (`limit + offset + 1` rows).
       - `with_total=1`: also compute the exact filtered row count
@@ -189,6 +195,7 @@ def get_events(
     """
     level = _validate(category=category, level=level, from_=from_, to=to, hours=hours)
     tiers = _parse_tiers(tier)
+    effective_limit = limit if limit is not None else settings.display.events_default_limit
 
     now = datetime.now(UTC)
     window_from = from_
@@ -233,7 +240,7 @@ def get_events(
             level=level,
             from_=window_from,
             to=to,
-            limit=limit,
+            limit=effective_limit,
             offset=offset,
         )
     except loki_query_budget.LokiQueryBudgetError:
@@ -268,7 +275,7 @@ def get_events(
         total=total,
         window_from=window_from,
         window_to=to,
-        limit=limit,
+        limit=effective_limit,
         offset=offset,
         has_more=has_more,
         generated_at=now.isoformat(),

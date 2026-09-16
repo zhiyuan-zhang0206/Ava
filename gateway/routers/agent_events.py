@@ -72,7 +72,9 @@ def get_agent_events(
     to: Annotated[datetime | None, Query()] = None,
     event: Annotated[str | None, Query()] = None,
     level: Annotated[str | None, Query()] = None,
-    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+    # `limit`'s range and `offset`'s ceiling stay protective constants (import-
+    # time Query bounds); the default *window* is display.events_default_limit.
+    limit: Annotated[int | None, Query(ge=1, le=1000)] = None,
     offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
 ) -> list[AgentEventRow]:
     """Historical slice of this agent's `events` rows — the REST
@@ -97,13 +99,17 @@ def get_agent_events(
 
     Returns newest-first (`ts DESC`; `id` is a stable surrogate derived
     from the log line, so `limit`/`offset` paging stays deterministic).
-    `limit` defaults to 100, capped at 1000 (over-limit 422s); `offset`
+    `limit` returns the configured default window (``display.events_default_limit``
+    — 100 out of the box), capped at 1000 (over-limit 422s); `offset`
     pages further back and is capped at 10,000. Loki has no native offset,
     so the cap bounds the in-memory parse of `limit + offset + 1` rows.
 
     No agent-existence precondition (same as `…/activity` and `…/pending`):
     an unknown agent or an empty window just returns `[]`.
     """
+    if limit is None:
+        limit = settings.display.events_default_limit
+
     try:
         rows, _ = loki_events.query_events(
             agent_id=agent_id,

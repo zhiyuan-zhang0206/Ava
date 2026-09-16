@@ -125,3 +125,21 @@ class DisplaySettings(EnvSettings):
             "scope": "cluster-pinned",
         },
     )
+
+    events_default_limit: int = Field(
+        default=100,
+        alias="AVA_EVENTS_DEFAULT_LIMIT",
+        description=(
+            "Default page (events) of the agent event-history reads — GET "
+            "/api/agents/{id}/events and GET /api/events — when the caller passes no "
+            "limit. 100 rows covers a debugging glance over the recent activity without "
+            "having the gateway parse a long Loki slice; callers that need more pass an "
+            "explicit limit (1..1000)."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )

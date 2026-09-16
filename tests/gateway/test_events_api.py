@@ -283,6 +283,22 @@ class TestEventsApi:
         assert kw["limit"] == 5
         assert kw["offset"] == 10
 
+    def test_default_limit_comes_from_display_config(
+        self, fake_events: _FakeEvents, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The implicit window is ``settings.display.events_default_limit``
+        (``AVA_EVENTS_DEFAULT_LIMIT``); the literal 100 is only that field's
+        default, not a hard-coded page size. The meta echo reports the
+        resolved window, not the raw None."""
+        from shared.config import settings
+
+        monkeypatch.setattr(settings.display, "events_default_limit", 7)
+        with TestClient(app) as client:
+            r = client.get("/api/events")
+        assert r.status_code == 200
+        assert fake_events.calls[0]["limit"] == 7
+        assert r.json()["meta"]["limit"] == 7
+
     def test_offset_over_hard_cap_422(self, fake_events: _FakeEvents) -> None:
         with TestClient(app) as client:
             response = client.get("/api/events", params={"offset": 10_001})

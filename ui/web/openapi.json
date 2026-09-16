@@ -1268,7 +1268,7 @@
     "/api/agents/{agent_id}/events": {
       "get": {
         "summary": "Get Agent Events",
-        "description": "Historical slice of this agent's `events` rows — the REST\ncounterpart to the live `…/events/stream` SSE tail (which only carries\nevents from the moment you subscribe). Backs ops / SDK / eval consumers\nthat need to query the past.\n\nFilters compose (AND):\n  - `from=<ISO-8601>` / `to=<ISO-8601>`: inclusive time window\n    (`ts >= from AND ts <= to`); `from` omitted defaults to the last\n    24h (same lower-bound contract as /api/events). Bad timestamps 422\n    (FastAPI datetime parse).\n  - `event=<name>`: exact event type, e.g. `llm_usage` / `turn_end` /\n    `exec` / `exec_failed`.\n  - `level=<INFO|WARNING|ERROR|…>`: exact level (case-insensitive, any\n    case accepted; the stored/returned values are LOWERCASE since the W9\n    events-table switch — `agent_events`' uppercase `INFO`/`WARNING`/\n    `ERROR` no longer appears on the wire). This is an *exact* match,\n    unlike `/api/cluster/admin/events` where `level`\n    is a minimum threshold — a per-agent history query reads more\n    predictably as \"give me exactly this level\".\n\nReturns newest-first (`ts DESC`; `id` is a stable surrogate derived\nfrom the log line, so `limit`/`offset` paging stays deterministic).\n`limit` defaults to 100, capped at 1000 (over-limit 422s); `offset`\npages further back and is capped at 10,000. Loki has no native offset,\nso the cap bounds the in-memory parse of `limit + offset + 1` rows.\n\nNo agent-existence precondition (same as `…/activity` and `…/pending`):\nan unknown agent or an empty window just returns `[]`.",
+        "description": "Historical slice of this agent's `events` rows — the REST\ncounterpart to the live `…/events/stream` SSE tail (which only carries\nevents from the moment you subscribe). Backs ops / SDK / eval consumers\nthat need to query the past.\n\nFilters compose (AND):\n  - `from=<ISO-8601>` / `to=<ISO-8601>`: inclusive time window\n    (`ts >= from AND ts <= to`); `from` omitted defaults to the last\n    24h (same lower-bound contract as /api/events). Bad timestamps 422\n    (FastAPI datetime parse).\n  - `event=<name>`: exact event type, e.g. `llm_usage` / `turn_end` /\n    `exec` / `exec_failed`.\n  - `level=<INFO|WARNING|ERROR|…>`: exact level (case-insensitive, any\n    case accepted; the stored/returned values are LOWERCASE since the W9\n    events-table switch — `agent_events`' uppercase `INFO`/`WARNING`/\n    `ERROR` no longer appears on the wire). This is an *exact* match,\n    unlike `/api/cluster/admin/events` where `level`\n    is a minimum threshold — a per-agent history query reads more\n    predictably as \"give me exactly this level\".\n\nReturns newest-first (`ts DESC`; `id` is a stable surrogate derived\nfrom the log line, so `limit`/`offset` paging stays deterministic).\n`limit` returns the configured default window (``display.events_default_limit``\n— 100 out of the box), capped at 1000 (over-limit 422s); `offset`\npages further back and is capped at 10,000. Loki has no native offset,\nso the cap bounds the in-memory parse of `limit + offset + 1` rows.\n\nNo agent-existence precondition (same as `…/activity` and `…/pending`):\nan unknown agent or an empty window just returns `[]`.",
         "operationId": "get_agent_events_api_agents__agent_id__events_get",
         "parameters": [
           {
@@ -1351,10 +1351,16 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer",
-              "maximum": 1000,
-              "minimum": 1,
-              "default": 100,
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 1000,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Limit"
             }
           },
@@ -4842,7 +4848,7 @@
     "/api/events": {
       "get": {
         "summary": "Get Events",
-        "description": "Slice of the unified event stream — every event (audit / telemetry /\nlog) through one query surface, the programmatic read side of the\nunified emitter. Newest-first (`ts DESC`, `id DESC` tiebreak).\n\nFilters compose (AND):\n  - `category=<audit|telemetry|log>`: retention/alerting class (unknown\n    value 422s).\n  - `event_name=<name>`: exact event name, e.g. `llm_usage` /\n    `turn_end` / `spawn` / `send_message` (the legacy `kind=` spelling\n    is accepted as an alias; passing both with different values 422s).\n    The `kind=` alias is retired on 2026-09-30 — pre-alignment clients\n    must move to `event_name` before then, after which the alias and its\n    conflict check are removed.\n  - `agent_id=<n>`: events belonging to that agent; service-level events\n    (NULL) are excluded when set.\n  - `trace_id=<hex>`: one turn's whole call chain — every event that\n    shares the id.\n  - `machine=<name>`: the host dimension.\n  - `level=<debug|info|warning|error|critical>`: exact match,\n    case-insensitive (unknown value 422s).\n  - `tier=<business|anomaly|observation|noise>[,...]`: comma-separated\n    display tiers, ORed within the list and ANDed with every other filter.\n    The Loki predicate is derived before pagination so `meta.total` and\n    page boundaries stay exact.\n  - `from=<ISO-8601>` / `to=<ISO-8601>`: inclusive time window\n    (`ts >= from AND ts <= to`); either side may be omitted. Values\n    MUST carry a timezone offset (`Z` or `+hh:mm`) — a naive timestamp\n    is interpreted in the server's local timezone, so it 422s instead\n    of silently shifting the window.\n  - `hours=<n>`: alternative window — the last N hours\n    (`from = now - hours`). Mutually exclusive with `from`.\n  - Default window: when neither `from` nor `hours` is given, the last\n    24 hours are assumed (`from = now - 24h`) — an unbounded query\n    would scan the whole retention history (6M+ rows across every\n    month partition), so the API never runs one. `meta.window_from`\n    always echoes the effective lower bound.\n  - `limit` (default 100, cap 1000) / `offset` (cap 10,000): offset\n    paging with stable ordering across same-`ts` rows. The cap bounds the\n    in-memory Loki JSON parse (`limit + offset + 1` rows).\n  - `with_total=1`: also compute the exact filtered row count\n    (`meta.total`) via the Loki count path — one extra full-window\n    aggregation, so it is opt-in; without it `meta.total` is null.\n\nResponse: `meta` (opt-in exact filtered `total`, effective\n`window_from`/`window_to`, `limit`/`offset`, `has_more` from the list\nfetch's +1 lookahead) + `items` (the unified `EventRow` shape).\n`window_from` is always set — the default 24h lower bound when the\nrequest named none. An empty window returns `items: []`.",
+        "description": "Slice of the unified event stream — every event (audit / telemetry /\nlog) through one query surface, the programmatic read side of the\nunified emitter. Newest-first (`ts DESC`, `id DESC` tiebreak).\n\nFilters compose (AND):\n  - `category=<audit|telemetry|log>`: retention/alerting class (unknown\n    value 422s).\n  - `event_name=<name>`: exact event name, e.g. `llm_usage` /\n    `turn_end` / `spawn` / `send_message` (the legacy `kind=` spelling\n    is accepted as an alias; passing both with different values 422s).\n    The `kind=` alias is retired on 2026-09-30 — pre-alignment clients\n    must move to `event_name` before then, after which the alias and its\n    conflict check are removed.\n  - `agent_id=<n>`: events belonging to that agent; service-level events\n    (NULL) are excluded when set.\n  - `trace_id=<hex>`: one turn's whole call chain — every event that\n    shares the id.\n  - `machine=<name>`: the host dimension.\n  - `level=<debug|info|warning|error|critical>`: exact match,\n    case-insensitive (unknown value 422s).\n  - `tier=<business|anomaly|observation|noise>[,...]`: comma-separated\n    display tiers, ORed within the list and ANDed with every other filter.\n    The Loki predicate is derived before pagination so `meta.total` and\n    page boundaries stay exact.\n  - `from=<ISO-8601>` / `to=<ISO-8601>`: inclusive time window\n    (`ts >= from AND ts <= to`); either side may be omitted. Values\n    MUST carry a timezone offset (`Z` or `+hh:mm`) — a naive timestamp\n    is interpreted in the server's local timezone, so it 422s instead\n    of silently shifting the window.\n  - `hours=<n>`: alternative window — the last N hours\n    (`from = now - hours`). Mutually exclusive with `from`.\n  - Default window: when neither `from` nor `hours` is given, the last\n    24 hours are assumed (`from = now - 24h`) — an unbounded query\n    would scan the whole retention history (6M+ rows across every\n    month partition), so the API never runs one. `meta.window_from`\n    always echoes the effective lower bound.\n  - `limit` (configured default window — ``display.events_default_limit``,\n    100 out of the box — cap 1000) / `offset` (cap 10,000): offset\n    paging with stable ordering across same-`ts` rows. The cap bounds the\n    in-memory Loki JSON parse (`limit + offset + 1` rows).\n  - `with_total=1`: also compute the exact filtered row count\n    (`meta.total`) via the Loki count path — one extra full-window\n    aggregation, so it is opt-in; without it `meta.total` is null.\n\nResponse: `meta` (opt-in exact filtered `total`, effective\n`window_from`/`window_to`, `limit`/`offset`, `has_more` from the list\nfetch's +1 lookahead) + `items` (the unified `EventRow` shape).\n`window_from` is always set — the default 24h lower bound when the\nrequest named none. An empty window returns `items: []`.",
         "operationId": "get_events_api_events_get",
         "parameters": [
           {
@@ -5030,10 +5036,16 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer",
-              "maximum": 1000,
-              "minimum": 1,
-              "default": 100,
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 1000,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Limit"
             }
           },

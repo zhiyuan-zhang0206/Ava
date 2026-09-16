@@ -868,7 +868,8 @@ export interface paths {
          *
          *     Returns newest-first (`ts DESC`; `id` is a stable surrogate derived
          *     from the log line, so `limit`/`offset` paging stays deterministic).
-         *     `limit` defaults to 100, capped at 1000 (over-limit 422s); `offset`
+         *     `limit` returns the configured default window (``display.events_default_limit``
+         *     — 100 out of the box), capped at 1000 (over-limit 422s); `offset`
          *     pages further back and is capped at 10,000. Loki has no native offset,
          *     so the cap bounds the in-memory parse of `limit + offset + 1` rows.
          *
@@ -2829,7 +2830,8 @@ export interface paths {
          *         would scan the whole retention history (6M+ rows across every
          *         month partition), so the API never runs one. `meta.window_from`
          *         always echoes the effective lower bound.
-         *       - `limit` (default 100, cap 1000) / `offset` (cap 10,000): offset
+         *       - `limit` (configured default window — ``display.events_default_limit``,
+         *         100 out of the box — cap 1000) / `offset` (cap 10,000): offset
          *         paging with stable ordering across same-`ts` rows. The cap bounds the
          *         in-memory Loki JSON parse (`limit + offset + 1` rows).
          *       - `with_total=1`: also compute the exact filtered row count
@@ -9086,7 +9088,7 @@ export interface operations {
                 to?: string | null;
                 event?: string | null;
                 level?: string | null;
-                limit?: number;
+                limit?: number | null;
                 offset?: number;
             };
             header?: never;
@@ -11439,7 +11441,7 @@ export interface operations {
                 from?: string | null;
                 to?: string | null;
                 hours?: number | null;
-                limit?: number;
+                limit?: number | null;
                 offset?: number;
                 with_total?: boolean;
             };
