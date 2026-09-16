@@ -18,6 +18,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import shlex
 import shutil
 import socket
 import subprocess
@@ -31,6 +32,11 @@ from typing import NamedTuple, TypedDict, cast
 
 from shared import pg_throwaway_base as _throwaway_base
 from shared.log import logger
+from shared.pg_foreground import (
+    start_foreground_postgres,
+    stop_foreground_postgres,
+    wait_foreground_postgres,
+)
 from shared.pg_stall_watchdog import fixture_log_artifact_dir, stall_guard
 from shared.platform import IS_MACOS, IS_WINDOWS
 
@@ -542,22 +548,32 @@ def _is_port_bind_failure(exc: subprocess.CalledProcessError, log: Path) -> bool
     return "Address already in use" in f"{exc.stderr or ''}\n{_read_log_tail(log)}"
 
 
-def _teardown_throwaway(tmp: Path, data: Path, registration: _Registration | None) -> None:
+def _teardown_throwaway(
+    tmp: Path,
+    data: Path,
+    registration: _Registration | None,
+    process: subprocess.Popen[bytes] | None = None,
+    *,
+    foreground: bool = False,
+) -> None:
     """Stop (if started), delete, and unregister a throwaway cluster. Shared by the
     retry loop (a lost start attempt is torn down before the next try) and the
     context exit."""
-    subprocess.run(  # noqa: S603 — argv is the resolved pg_ctl path + static flags
-        [pg_tool("pg_ctl"), "-D", str(data), "-m", "immediate", "stop"],
-        check=False,
-        capture_output=True,
-    )
+    if process is not None:
+        stop_foreground_postgres(process)
+    elif not foreground:
+        subprocess.run(  # noqa: S603 — argv is the resolved pg_ctl path + static flags
+            [pg_tool("pg_ctl"), "-D", str(data), "-m", "immediate", "stop"],
+            check=False,
+            capture_output=True,
+        )
     shutil.rmtree(tmp, ignore_errors=True)
     _unregister_throwaway(registration)
 
 
 @contextmanager
 def throwaway_postgres(
-    schema_sql: str | None = None, *, base: Path | None = None
+    schema_sql: str | None = None, *, base: Path | None = None, foreground: bool = False
 ) -> Generator[str]:
     """initdb a throwaway Postgres cluster on an ephemeral port, optionally
     apply schema + checkpoint tables, and yield a psycopg connection URL.
@@ -581,6 +597,9 @@ def throwaway_postgres(
             data footprint (the restore drill) passes a base from
             `select_throwaway_base(required_bytes)`, so the base it reports is the
             base used here.
+        foreground: keep Postgres as a direct child in the caller's process group.
+            Cancellable restore workers use this so their group reaper also owns
+            the postmaster if the worker cannot finish normal cleanup.
 
     Yields:
         A postgresql:// URL string.
@@ -591,6 +610,7 @@ def throwaway_postgres(
     tmp = data = Path()
     port = 0
     registration: _Registration | None = None
+    process: subprocess.Popen[bytes] | None = None
     attempt = 0
     while True:
         attempt += 1
@@ -623,37 +643,62 @@ def throwaway_postgres(
                     check=True,
                     capture_output=True,
                 )
-                subprocess.run(  # noqa: S603 — argv is the resolved pg_ctl path + static flags
-                    [
-                        pg_tool("pg_ctl"),
-                        "-D",
-                        str(data),
-                        "-l",
-                        str(log),
-                        "-w",
-                        "-t",
-                        "60",
-                        "start",
-                        # unix_socket_directories -> the writable tmp dir: Debian/Ubuntu
-                        # defaults it to /var/run/postgresql (owned by the postgres user,
-                        # not the non-root CI user), where the socket lock file can't be
-                        # created. fsync/full_page_writes/synchronous_commit off: the data
-                        # is disposable, so durability is pointless and skipping it keeps
-                        # contended host disk I/O off the path.
-                        "-o",
-                        f"-p {port} -c listen_addresses=127.0.0.1 "
-                        f"-c unix_socket_directories={tmp} "
-                        "-c fsync=off -c full_page_writes=off -c synchronous_commit=off "
-                        f"{pg_tz_args()} {pg_shm_args()}",
-                    ],
-                    check=True,
-                    capture_output=True,
-                )
+                if foreground:
+                    process = start_foreground_postgres(
+                        [
+                            str(pg_tool("postgres")),
+                            "-D",
+                            str(data),
+                            "-p",
+                            str(port),
+                            "-c",
+                            "listen_addresses=127.0.0.1",
+                            "-c",
+                            f"unix_socket_directories={tmp}",
+                            "-c",
+                            "fsync=off",
+                            "-c",
+                            "full_page_writes=off",
+                            "-c",
+                            "synchronous_commit=off",
+                            *shlex.split(f"{pg_tz_args()} {pg_shm_args()}"),
+                        ],
+                        log=log,
+                    )
+                    wait_foreground_postgres(process, log=log, port=port, data=data)
+                else:
+                    subprocess.run(  # noqa: S603 — argv is the resolved pg_ctl path + static flags
+                        [
+                            pg_tool("pg_ctl"),
+                            "-D",
+                            str(data),
+                            "-l",
+                            str(log),
+                            "-w",
+                            "-t",
+                            "60",
+                            "start",
+                            # unix_socket_directories -> the writable tmp dir: Debian/Ubuntu
+                            # defaults it to /var/run/postgresql (owned by the postgres user,
+                            # not the non-root CI user), where the socket lock file can't be
+                            # created. fsync/full_page_writes/synchronous_commit off: the data
+                            # is disposable, so durability is pointless and skipping it keeps
+                            # contended host disk I/O off the path.
+                            "-o",
+                            f"-p {port} -c listen_addresses=127.0.0.1 "
+                            f"-c unix_socket_directories={tmp} "
+                            "-c fsync=off -c full_page_writes=off -c synchronous_commit=off "
+                            f"{pg_tz_args()} {pg_shm_args()}",
+                        ],
+                        check=True,
+                        capture_output=True,
+                    )
             except subprocess.CalledProcessError as exc:
                 if _is_port_bind_failure(exc, log) and attempt < _PG_START_ATTEMPTS:
                     # Lost the race: another process bound our port before the
                     # postmaster could. Tear this attempt down and try a fresh one.
-                    _teardown_throwaway(tmp, data, registration)
+                    _teardown_throwaway(tmp, data, registration, process, foreground=foreground)
+                    process = None
                     continue
                 # The cluster lives on a tmpfs and the teardown rmtree deletes it, so
                 # without this the reason pg_ctl refused to start is unrecoverable after
@@ -663,7 +708,7 @@ def throwaway_postgres(
                 raise ThrowawayPgStartError(exc, log, preserved) from exc
             break
         except BaseException:
-            _teardown_throwaway(tmp, data, registration)
+            _teardown_throwaway(tmp, data, registration, process, foreground=foreground)
             raise
 
     admin = f"postgresql://ava@127.0.0.1:{port}/postgres"
@@ -691,4 +736,4 @@ def throwaway_postgres(
         with stall_guard(admin, port):
             yield url
     finally:
-        _teardown_throwaway(tmp, data, registration)
+        _teardown_throwaway(tmp, data, registration, process, foreground=foreground)
