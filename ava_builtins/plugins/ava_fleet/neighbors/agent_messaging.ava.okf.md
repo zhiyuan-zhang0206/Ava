@@ -52,16 +52,20 @@ def get_last_message(agent_id: int) -> str | None
 
 - Returns the **last AI message text** of the specified agent
 - Returns `None` if there is no AI message, or if the message has no text content (only reasoning / tool_call blocks / empty) — **a pure string content is the normal return case** (returned as-is if not empty)
+- **`None` is not "no reply"**: a peer that answered by `send_message` delivered
+  a message — it is in your inbox, and this endpoint never reads messages;
+  a thinking / tool-call-only turn has no turn text either (task #3656)
+- For liveness use `ava.agents.get_status` / `list_agents` — this read says
+  nothing about whether the peer is running
 - Works for all agents — no spawn-chain restriction
-- Commonly used as a lightweight way to check peer progress
 
 ### Typical Use
 
 ```python
-# Check peer progress
+# Read the peer's last AI turn text
 last = ava.agents.get_last_message(peer_id)
 if last is None:
-    print("peer has not yet produced results")
+    print("no turn text — a send_message reply lives in your inbox, not here")
 else:
     print(f"peer last output: {last[:100]}")
 ```
