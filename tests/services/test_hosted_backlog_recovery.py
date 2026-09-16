@@ -18,6 +18,7 @@ from agent.hosted_ownership import settle_stale_running_rows
 from agent.state import AgentState
 from services.agent_host import dispatcher as dispatch
 from services.agent_host import host as host_module
+from services.agent_host import runtime as runtime_module
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_host.host import AgentHost
 from shared.db import insert_inbound_message
@@ -35,7 +36,7 @@ def _accept_model_config(**_kwargs: object) -> str:
 def isolated_clocks(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(progress, "_PROGRESS", {})
     monkeypatch.setattr(dispatch, "CANCEL_UNWIND_TIMEOUT_S", 0.03)
-    monkeypatch.setattr(host_module, "validate_model_config", _accept_model_config)
+    monkeypatch.setattr(runtime_module, "validate_model_config", _accept_model_config)
     monkeypatch.setattr(
         host_module,
         "boot_agent_scope",

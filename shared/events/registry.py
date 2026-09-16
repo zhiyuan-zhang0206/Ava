@@ -313,6 +313,14 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         "overlay is fixed",
         tier="anomaly",
     ),
+    "host_config_normalized": _telemetry(
+        "host_config_normalized",
+        "a hosted wake bound a stored llm_model pin as its registered fallback "
+        "because the registry has withdrawn the pinned model — the turn and its "
+        "usage attribution run on the fallback; logged once per stored config "
+        "state (fingerprint)",
+        tier="anomaly",
+    ),
     "host_turn_crashed": _telemetry(
         "host_turn_crashed",
         "a hosted turn task raised — the task is dropped and the next wake retries "

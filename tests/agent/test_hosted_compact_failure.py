@@ -109,7 +109,7 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
     ctx = AvaContext(ops_pool=aops_pool, event_publisher=publisher, llm=MagicMock())
     host = AgentHost(pool=aops_pool, checkpointer=saver, graph=graph, machine="claim-test")
     monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
-    monkeypatch.setattr("services.agent_host.host.validate_model_config", MagicMock())
+    monkeypatch.setattr("services.agent_host.runtime.validate_model_config", MagicMock())
 
     async def drive(target: int, _runtime: object) -> TurnOutcome:
         return await host._invoke_until_done(target, ctx)

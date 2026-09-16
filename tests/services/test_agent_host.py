@@ -345,6 +345,7 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
     monkeypatch.setattr("services.agent_host.host.active_lease", AsyncMock(return_value=False))
     monkeypatch.setattr("services.agent_host.host.settle_checkpoint", AsyncMock(return_value=False))
     import services.agent_host.host as host_mod
+    import services.agent_host.runtime as runtime_mod
 
     async def _noop_reconcile(*_a: object, **_k: object) -> None:
         return None
@@ -362,7 +363,7 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
     def _allow_model_config(*, model: str | None = None) -> None:
         """Keep fake host tests independent of installed provider credentials."""
 
-    monkeypatch.setattr(host_mod, "validate_model_config", _allow_model_config)
+    monkeypatch.setattr(runtime_mod, "validate_model_config", _allow_model_config)
 
     def _fake_redis() -> object:
         """The publisher below never touches it; the host only passes it through."""
@@ -1225,8 +1226,9 @@ class TestRejectedModelConfig:
     ) -> None:
         """The real registry rejects an unknown model without a provider key."""
         import services.agent_host.host as host_mod
+        import services.agent_host.runtime as runtime_mod
 
-        monkeypatch.setattr(host_mod, "validate_model_config", validate_model_config)
+        monkeypatch.setattr(runtime_mod, "validate_model_config", validate_model_config)
         boot_calls: list[int] = []
         error_events: list[str] = []
 
@@ -1255,6 +1257,7 @@ class TestRejectedModelConfig:
     ) -> None:
         """A valid replacement clears the rejection note and resumes the turn."""
         import services.agent_host.host as host_mod
+        import services.agent_host.runtime as runtime_mod
 
         boot_calls: list[int] = []
         validated_models: list[str] = []
@@ -1268,7 +1271,7 @@ class TestRejectedModelConfig:
             boot_calls.append(agent_id)
             return _Model(turn_settings.lm.llm_model)
 
-        monkeypatch.setattr(host_mod, "validate_model_config", _validate_model)
+        monkeypatch.setattr(runtime_mod, "validate_model_config", _validate_model)
         monkeypatch.setattr(host_mod, "boot_agent_scope", _record_boot)
         rows = {1: _Row(overlay={"llm_model": "fable"})}
         host, graph, _ = wired(rows)
@@ -1292,6 +1295,7 @@ class TestRejectedModelConfig:
     ) -> None:
         """Repeated pending wakes stay quiet until the stored config changes."""
         import services.agent_host.host as host_mod
+        import services.agent_host.runtime as runtime_mod
 
         error_events: list[str] = []
 
@@ -1301,7 +1305,7 @@ class TestRejectedModelConfig:
         def _record_error(_message: str, *, event: str, **_details: object) -> None:
             error_events.append(event)
 
-        monkeypatch.setattr(host_mod, "validate_model_config", _reject_model)
+        monkeypatch.setattr(runtime_mod, "validate_model_config", _reject_model)
         monkeypatch.setattr(host_mod.logger, "error", _record_error)
         rows = {1: _Row(overlay={"llm_model": "fable"})}
         host, _, _ = wired(rows)
@@ -1313,6 +1317,119 @@ class TestRejectedModelConfig:
 
         assert host.stats.config_rejected == 3
         assert error_events == ["host_config_rejected", "host_config_rejected"]
+
+
+class TestNormalizedModelConfig:
+    """A stored pin naming a model the registry has withdrawn is bound as its
+    registered fallback at the wake, before any consumer reads it — the model
+    the turn view, the usage attribution and the exec children re-emitted from
+    these pins all see."""
+
+    @pytest.fixture(autouse=True)
+    def _load_provider_plugins(self) -> None:
+        from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+
+        ensure_provider_plugins_loaded()
+
+    async def test_a_withdrawn_birth_pin_is_normalized_before_the_turn_binds_it(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A birth_config pin on the withdrawn vision experiment resolves to its
+        registered fallback — the same resolution build_chat_model applies only
+        at the final build."""
+        import services.agent_host.host as host_mod
+
+        warnings: list[tuple[str, dict[str, object]]] = []
+
+        def _record_warning(_message: str, *, event: str, **details: object) -> None:
+            warnings.append((event, details))
+
+        monkeypatch.setattr(host_mod.logger, "warning", _record_warning)
+        host, graph, _ = wired({1: _Row(birth={"llm_model": "deepseek-v4-flash-vision-exp"})})
+
+        await asyncio.wait_for(host.run_turn(1), 2)
+
+        assert [observation.model for observation in graph.observations] == ["deepseek-v4-flash"]
+        assert [observation.llm.name for observation in graph.observations] == ["deepseek-v4-flash"]
+        assert host.stats.config_normalized == 1
+        # The once-per-state warning carries the agent and both ids, so a usage
+        # row attributed to the withdrawn pin can be reconciled against it.
+        assert [event for event, _ in warnings] == ["host_config_normalized"]
+        assert warnings[0][1]["agent_id"] == 1
+        assert warnings[0][1]["requested"] == "deepseek-v4-flash-vision-exp"
+        assert warnings[0][1]["resolved"] == "deepseek-v4-flash"
+
+    async def test_a_withdrawn_pin_normalizes_and_an_available_pin_is_untouched(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """deepseek-v4-pro is withdrawn to the same fallback; an available model
+        passes through unchanged."""
+        import services.agent_host.host as host_mod
+
+        warnings: list[str] = []
+
+        def _record_warning(_message: str, *, event: str, **_details: object) -> None:
+            warnings.append(event)
+
+        monkeypatch.setattr(host_mod.logger, "warning", _record_warning)
+        rows = {
+            1: _Row(overlay={"llm_model": "deepseek-v4-pro"}),
+            2: _Row(overlay={"llm_model": "gemini-3.7-flash"}),
+        }
+        host, graph, _ = wired(rows)
+
+        await asyncio.wait_for(host.run_turn(1), 2)
+        await asyncio.wait_for(host.run_turn(2), 2)
+
+        assert [observation.model for observation in graph.observations] == [
+            "deepseek-v4-flash",
+            "gemini-3.7-flash",
+        ]
+        assert host.stats.config_normalized == 1
+        assert warnings == ["host_config_normalized"]
+
+    async def test_the_normalization_warns_once_per_stored_config_state(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Repeated wakes on the same stale pin stay quiet until the stored
+        config changes; the counter still sees every normalized wake."""
+        import services.agent_host.host as host_mod
+
+        warnings: list[str] = []
+
+        def _record_warning(_message: str, *, event: str, **_details: object) -> None:
+            warnings.append(event)
+
+        monkeypatch.setattr(host_mod.logger, "warning", _record_warning)
+        rows = {1: _Row(overlay={"llm_model": "deepseek-v4-flash-vision-exp"})}
+        host, graph, _ = wired(rows)
+
+        await asyncio.wait_for(host.run_turn(1), 2)
+        await asyncio.wait_for(host.run_turn(1), 2)
+        rows[1] = _Row(overlay={"llm_model": "deepseek-v4-flash"})
+        await asyncio.wait_for(host.run_turn(1), 2)
+
+        assert warnings == ["host_config_normalized"]
+        assert host.stats.config_normalized == 2
+        assert [observation.model for observation in graph.observations] == [
+            "deepseek-v4-flash"
+        ] * 3
+
+    async def test_an_unregistered_pin_is_rejected_not_normalized(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No silent rescue for an id the registry does not know: the wake keeps
+        taking the reject path (the real validator), and no turn starts."""
+        import services.agent_host.runtime as runtime_mod
+
+        monkeypatch.setattr(runtime_mod, "validate_model_config", validate_model_config)
+        host, graph, _ = wired({1: _Row(overlay={"llm_model": "no-such-model-xyz"})})
+
+        await asyncio.wait_for(host.run_turn(1), 2)
+
+        assert graph.observations == []
+        assert host.stats.config_rejected == 1
+        assert host.stats.config_normalized == 0
 
 
 # ── 5. the bounds ────────────────────────────────────────────────────────────
