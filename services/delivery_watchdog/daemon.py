@@ -172,14 +172,20 @@ def select_terminated_owners_with_pending(
     intent. A pile of 250 dead letters for one agent still means one attempt,
     not 250.
 
+    System notices never resurrect: a system-family chat (`system` /
+    `system:<subtype>`) is a framework notification, not a person or peer
+    message — it waits for the owner's next resurrect, or the stale threshold
+    closes it. Machine *wakeups* still wake; exempt is the watchdog's own
+    recovery chat (`hosted_turn_recovery` marker): it revives its wedged owner.
+
     `threshold_s` bounds how long a pending chat keeps its terminated owner a
     resurrect candidate: past it the row is a dead letter (issue #2049) that
-    the reaper's `dead_letter_stale_pending_chats` closes. Retrying an
-    unbounded age resurrect-suicides the agent forever, so the same stale
-    threshold that closes the row also stops it from being a trigger.
+    `dead_letter_stale_pending_chats` closes — and with it the trigger, so no
+    unbounded retry can resurrect-suicide the agent forever.
     """
     from shared.lifecycle_acceptance import (
         FAILED_RESTART_FOR_CURRENT_TARGET,
+        SYSTEM_NOTICE_SOURCE,
         SYSTEM_REAPED_CRASH_ROW,
     )
     from shared.recovery_breaker import RECOVERY_BREAKER_CLEAR
@@ -198,12 +204,14 @@ def select_terminated_owners_with_pending(
                 "  AND (agents_meta.wake_suppressed_until IS NULL "
                 "       OR agents_meta.wake_suppressed_until < now()) "
                 "  AND {} "
+                "  AND NOT {} "
                 "GROUP BY m.agent_id "
                 "ORDER BY m.agent_id"
             ).format(
                 sql.SQL(FAILED_RESTART_FOR_CURRENT_TARGET),
                 sql.SQL(SYSTEM_REAPED_CRASH_ROW),
                 sql.SQL(RECOVERY_BREAKER_CLEAR),
+                sql.SQL(SYSTEM_NOTICE_SOURCE),
             ),
             (threshold_s,),
         )

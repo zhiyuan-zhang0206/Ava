@@ -9,6 +9,7 @@ intent predates the latest resurrection is settled as superseded instead of
 being adopted, so a resurrect can never replay an older terminate (issue #2158).
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, LiteralString
@@ -42,6 +43,61 @@ FAILED_RESTART_FOR_CURRENT_TARGET: LiteralString = (
 SYSTEM_REAPED_CRASH_ROW: LiteralString = (
     "(agents_meta.termination_source = 'reaper' AND agents_meta.last_turn_fatal_at IS NOT NULL)"
 )
+
+# A system-family chat is a platform notification, and notifications never
+# resurrect a terminated owner (user ruling 2026-08-27; task #3687). `system`
+# and its `system:<subtype>` variants are the data-plane shape of framework
+# notices (watcher reclamation notices, operator alerts): they stay queued and
+# deliver on the owner's next resurrect through any other channel, or are
+# dead-lettered past the stale threshold. Machine *wakeups* (watcher: / shell:
+# / schedule:) are deliberately NOT in this family — a crash-reaped owner's
+# watcher wake is a revival channel, and the reap pass clears a permanently
+# terminated owner's watchers. The delivery watchdog's selection and the
+# resurrect endpoint share this predicate; they must be updated together (the
+# parity test pins the SQL fragment and the Python twin to each other).
+#
+# Carve-out: the delivery watchdog's own hosted-turn recovery chat
+# (`HOSTED_TURN_RECOVERY_MARKER` below) is a system-source message that MUST
+# reach both resurrection channels — it is this machinery's durable retry for
+# a wedged hosted turn, not a notification. Any future recovery-class system
+# message must set the same marker or it defaults to "notice, never
+# resurrects". Marker strictness is fail-closed: only the exact JSON boolean
+# `true` exempts — a missing key, JSON null, or any other value (even the
+# string "true") stays a notice. The fragment embeds the marker key literally
+# (the parity test catches drift), `->>` is rejected on purpose (it collapses
+# boolean true and the string "true" into the same text), and
+# `COALESCE(..., false)` keeps the predicate two-valued — never `NOT(NULL)`.
+# The Python twin mirrors both rules exactly (`is not True`, never truthy —
+# `1 == True` in Python).
+#
+# Assumes the `inbound_messages` alias `m`, like the fragments above assume
+# `agents_meta`. `starts_with` (not `LIKE 'system:%'`) on purpose: a literal
+# `%` in a parameterized psycopg query would need `%%` escaping and is one
+# edit away from silently matching the wrong rows; `starts_with` mirrors the
+# Python twin's `startswith` exactly.
+HOSTED_TURN_RECOVERY_MARKER = "hosted_turn_recovery"
+
+SYSTEM_NOTICE_SOURCE: LiteralString = (
+    "((m.source = 'system' OR starts_with(m.source, 'system:')) "
+    "AND NOT COALESCE((m.payload -> 'hosted_turn_recovery') = 'true'::jsonb, false))"
+)
+
+
+def is_system_notice_source(source: str, payload: Mapping[str, object] | None) -> bool:
+    """Python twin of `SYSTEM_NOTICE_SOURCE`, kept adjacent on purpose — a
+    drift between the two would reopen the gap from opposite sides; the parity
+    test fails if they disagree on any `(source, payload)` input.
+
+    Fail-closed on the recovery marker: only the exact JSON boolean `true`
+    exempts; `payload.get(...) is not True` (never truthy — `1 == True` in
+    Python) keeps the notice verdict for a missing key, JSON null, or any
+    other value."""
+    if not (source == "system" or source.startswith("system:")):
+        return False
+    if payload is None:
+        return True
+    return payload.get(HOSTED_TURN_RECOVERY_MARKER) is not True
+
 
 # Every unapplied lifecycle command whose intent predates the recorded
 # resurrection is closed by it, visibly (the payload names the resurrect inbound
