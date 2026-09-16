@@ -548,6 +548,20 @@ class DeliveryWakeSuppressed(TypedDict):
     reason: str
 
 
+class DeliveryRecoveryDecision(TypedDict):
+    """`delivery_recovery_decision` payload — services/delivery_watchdog/daemon.py.
+
+    One decision the delivery watchdog obtained for a stalled chat whose owner
+    is a crash-marked idling corpse (task #3618): `decision` is the home
+    runner's verdict ('harvested' / 'already_terminated' / 'refused') or a
+    local transport outcome ('unreachable' / 'error'); `reason` carries the
+    fail-closed cause of a refusal, else None."""
+
+    inbound_id: int
+    decision: str
+    reason: str | None
+
+
 class FrontendInteraction(TypedDict):
     """`frontend_interaction` payload — gateway/routers/frontend_telemetry.py.
 

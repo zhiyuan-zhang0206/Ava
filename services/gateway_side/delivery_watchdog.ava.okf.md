@@ -1,14 +1,14 @@
 ---
 type: doc
 title: Delivery Watchdog — wake dispatcher + stale-pending alerter
-description: "Gateway-owned wake dispatcher (re-publishes the Redis wake for stale pending inbounds every 0.5s) + stale-pending alerter + terminated-owner resurrect retry + stale-claimed dead-letter sweep — the cluster-wide delivery tripwire (Task #689 G4, user ruling 2026-08-03; Task #654)."
+description: "Gateway-owned wake dispatcher (re-publishes the Redis wake for stale pending inbounds every 0.5s) + stale-pending alerter + terminated-owner resurrect retry + stale-claimed dead-letter sweep + stalled crash-marked harvest request — the cluster-wide delivery tripwire (Task #689 G4, user ruling 2026-08-03; Task #654; Task #3618)."
 tags: []
 ---
 
 # Delivery Watchdog — wake dispatcher + stale-pending alerter
 
 ## What it is
-A gateway daemon with four jobs on one fast tick (user-confirmed design 2026-08-02, `delivery-dispatcher-design-2026-08-02.md`): it is the cluster-wide tripwire that a `pending` inbound actually reaches its owner. Config-gated by `AVA_DELIVERY_WATCHDOG_ENABLED`.
+A gateway daemon with five jobs on one fast tick (user-confirmed design 2026-08-02, `delivery-dispatcher-design-2026-08-02.md`): it is the cluster-wide tripwire that a `pending` inbound actually reaches its owner. Config-gated by `AVA_DELIVERY_WATCHDOG_ENABLED`.
 
 **Role affiliation**: gateway side — `ServiceSpec.capabilities=_GATEWAY` in `ops/spec.py`, `requires_db=True` (polls `inbound_messages`). Kept alive by `services/healthchecks/delivery_watchdog.py` (gateway watchdog).
 
@@ -19,6 +19,8 @@ A gateway daemon with four jobs on one fast tick (user-confirmed design 2026-08-
 4. **Stale-inbound dead-letter sweeps** — every 30s:
    - flip `claimed` chat inbounds of TERMINATED owners older than `AVA_DELIVERY_WATCHDOG_STALE_CLAIMED_THRESHOLD_SECONDS` (default 24h; age from `claimed_at`, falling back to `created_at` for pre-2026-08-02 rows) to `done`.
    - flip `pending` chat inbounds of TERMINATED owners past the same threshold to `done` (issue #2049): the G4 age gate above and this sweep share one threshold, so a closed row is never a resurrect trigger and a trigger row is never closed. Rows are archived (`done`), never deleted; live owners' pending chats are untouched. Terminated agents leave claimed rows behind (reconcile runs only at boot); a resurrect would otherwise flip them all to `pending` and re-deliver ancient messages (Task #654). The reconcile-side cutoff (`agent/db.py::reconcile_claimed_inbounds`) applies the same threshold at boot, closing the resurrect race at the source.
+
+5. **Stalled crash-marked recovery request** (task #3618) — escalate a chat still `pending` past the stall threshold whose owner is a crash-marked idling corpse (`last_turn_fatal_at IS NOT NULL`, not yet terminated) to the owner's home runner over the internal `recover-crash-marked-v2` lifecycle path. The runner adjudicates one row-locked harvest into the corpse reaper's terminal shape (marker kept, so the relaxed reaper trigger then resumes the queued work) or refuses with a reason (`not_marked`, `not_settled:*`, `wrong_machine`, `lease_alive`, the suppression reason — `permanent_provider_reject` when the recovery breaker halted the agent). One request per owner, 60s cooldown, two-way semaphore, gated by `AVA_DELIVERY_STALLED_RECOVERY_ENABLED`; every decision emits `delivery_recovery_decision` (the recovery-decision-rate metric). Owners the recovery breaker halted (durable streak) or with an unexpired suppression window are excluded from the scan — automatic recovery must not start for them.
 
 The same resurrection retry owner also resumes an `idling` allocation with no
 PID only when an existing server-prepared resurrect inbound binds this exact

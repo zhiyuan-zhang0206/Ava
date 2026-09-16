@@ -171,9 +171,11 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # host_abort_reconcile_skipped + host_abort_reconcile_failed) raises the
     # current total to 179; the recovery circuit breaker (task #3617's
     # recovery_breaker_halt — the halt after consecutive permanent provider
-    # rejections) raises the current total to 180.
+    # rejections) raises the current total to 180; the stalled crash-marked
+    # recovery decision (task #3618's delivery_recovery_decision) raises the
+    # current total to 181.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 180
+    assert len(_TELEMETRY_KINDS) == 181
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:
@@ -183,6 +185,10 @@ def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:
         "suppress_count",
         "reason",
     )
+
+
+def test_delivery_recovery_decision_payload_names_the_verdict() -> None:
+    assert payload_keys("delivery_recovery_decision") == ("inbound_id", "decision", "reason")
 
 
 def test_gateway_observability_payloads_and_gauge_dispositions() -> None:

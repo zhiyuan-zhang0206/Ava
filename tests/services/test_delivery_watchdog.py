@@ -1935,3 +1935,177 @@ class TestAlertDedupPersistence:
         prune_alerted(pool, set())
         persist_alerted(pool, set())
         assert select_alerted_ids(pool) == set()
+
+
+def _make_crash_marked_agent(db: psycopg.Connection) -> int:
+    """An idling row with the corpse marker set — the corpse reaper's own
+    predicate (`last_turn_fatal_at IS NOT NULL` on an idling row).
+    spawn_agent leaves the marker NULL, so the scenario stamps it."""
+    from tests.conftest import spawn_agent
+
+    aid = spawn_agent(spawner="user")
+    with db.cursor() as cur:
+        cur.execute(
+            "UPDATE agents_meta SET status = 'idling', last_turn_fatal_at = now() WHERE id = %s",
+            (aid,),
+        )
+    db.commit()
+    return aid
+
+
+class TestStalledCrashMarkedRecovery:
+    """Watchdog escalation for a stalled chat on a crash-marked idling corpse
+    (task #3618; `services.delivery_watchdog.stall_recovery`): the selector,
+    the breaker/suppression exclusions, the single-flight + 60s-cooldown
+    throttle, the knob, and the `delivery_recovery_decision` event."""
+
+    def test_selector_matches_only_marked_idling_owners(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool
+    ) -> None:
+        from services.delivery_watchdog import stall_recovery as sr
+
+        zombie = _make_crash_marked_agent(db_conn)
+        zombie_inbound = _insert_old_inbound(db_conn, zombie, age_s=_THRESHOLD_S + 5)
+        healthy = _make_idling_agent(db_conn)
+        _insert_old_inbound(db_conn, healthy, age_s=_THRESHOLD_S + 5)
+        running = _make_running_agent(db_conn)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET last_turn_fatal_at = now() WHERE id = %s", (running,)
+            )
+        db_conn.commit()
+        _insert_old_inbound(db_conn, running, age_s=_THRESHOLD_S + 5)
+        fresh = _make_crash_marked_agent(db_conn)
+        _insert_old_inbound(db_conn, fresh, age_s=1.0)
+
+        rows = sr.select_stalled_crash_marked(pool, _THRESHOLD_S)
+        assert [(r[0], r[1]) for r in rows] == [(zombie_inbound, zombie)]
+
+    def test_selector_excludes_halted_owners(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool
+    ) -> None:
+        """A tripped recovery breaker (durable streak) or a live suppression
+        window keeps the scan from starting a recovery — task #3617's halt."""
+        from services.delivery_watchdog import stall_recovery as sr
+
+        tripped = _make_crash_marked_agent(db_conn)
+        _insert_old_inbound(db_conn, tripped, age_s=_THRESHOLD_S + 5)
+        suppressed = _make_crash_marked_agent(db_conn)
+        _insert_old_inbound(db_conn, suppressed, age_s=_THRESHOLD_S + 5)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET permanent_reject_streak = 2 WHERE id = %s", (tripped,)
+            )
+            cur.execute(
+                "UPDATE agents_meta SET wake_suppressed_until = now() + interval '1 hour', "
+                "wake_suppress_reason = 'permanent_provider_reject' WHERE id = %s",
+                (suppressed,),
+            )
+        db_conn.commit()
+        assert sr.select_stalled_crash_marked(pool, _THRESHOLD_S) == []
+
+    async def test_request_spawns_once_and_emits_the_decision(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import asyncio
+
+        import ops.ops_lifecycle as ol
+        from services.delivery_watchdog import stall_recovery as sr
+
+        zombie = _make_crash_marked_agent(db_conn)
+        inbound_id = _insert_old_inbound(db_conn, zombie, age_s=_THRESHOLD_S + 5)
+        calls: list[tuple[int, int]] = []
+
+        async def _requester(agent_id: int, *, stalled_inbound_id: int) -> tuple[str, str | None]:
+            calls.append((agent_id, stalled_inbound_id))
+            return "harvested", None
+
+        monkeypatch.setattr(ol, "recover_crash_marked_if_stalled", _requester)
+        emitted: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+        def _record_emit(*args: object, **kwargs: object) -> None:
+            emitted.append((args, kwargs))
+
+        monkeypatch.setattr(sr.telemetry, "emit", _record_emit)
+        sr._harvest_tasks.clear()
+        sr._last_harvest_attempt.clear()
+
+        sr.maybe_request_stall_recovery(pool, _THRESHOLD_S)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+        assert calls == [(zombie, inbound_id)]
+        assert emitted == [
+            (
+                ("telemetry", "delivery_recovery_decision"),
+                {
+                    "agent_id": zombie,
+                    "source": "system",
+                    "attributes": {
+                        "inbound_id": inbound_id,
+                        "decision": "harvested",
+                        "reason": None,
+                    },
+                },
+            )
+        ]
+        assert sr._harvest_tasks == {}
+
+    async def test_cooldown_suppresses_repeat_requests(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import asyncio
+
+        import ops.ops_lifecycle as ol
+        from services.delivery_watchdog import stall_recovery as sr
+
+        zombie = _make_crash_marked_agent(db_conn)
+        _insert_old_inbound(db_conn, zombie, age_s=_THRESHOLD_S + 5)
+        calls: list[int] = []
+
+        async def _requester(agent_id: int, *, stalled_inbound_id: int) -> tuple[str, str | None]:
+            calls.append(agent_id)
+            return "refused", "not_settled:running"
+
+        monkeypatch.setattr(ol, "recover_crash_marked_if_stalled", _requester)
+
+        def _ignore_emit(*_args: object, **_kwargs: object) -> None:
+            return None
+
+        monkeypatch.setattr(sr.telemetry, "emit", _ignore_emit)
+        sr._harvest_tasks.clear()
+        sr._last_harvest_attempt.clear()
+
+        sr.maybe_request_stall_recovery(pool, _THRESHOLD_S)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert calls == [zombie]
+        # In-flight cleared, but the 60s per-owner cooldown still holds.
+        sr.maybe_request_stall_recovery(pool, _THRESHOLD_S)
+        await asyncio.sleep(0)
+        assert calls == [zombie]
+
+    async def test_disabled_knob_skips_the_scan(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import asyncio
+
+        import ops.ops_lifecycle as ol
+        from services.delivery_watchdog import stall_recovery as sr
+
+        zombie = _make_crash_marked_agent(db_conn)
+        _insert_old_inbound(db_conn, zombie, age_s=_THRESHOLD_S + 5)
+        calls: list[int] = []
+
+        async def _requester(agent_id: int, *, stalled_inbound_id: int) -> tuple[str, str | None]:
+            calls.append(agent_id)
+            return "harvested", None
+
+        monkeypatch.setattr(ol, "recover_crash_marked_if_stalled", _requester)
+        monkeypatch.setattr(settings.daemon, "delivery_stalled_recovery_enabled", False)
+        sr._harvest_tasks.clear()
+        sr._last_harvest_attempt.clear()
+
+        sr.maybe_request_stall_recovery(pool, _THRESHOLD_S)
+        await asyncio.sleep(0)
+        assert calls == []

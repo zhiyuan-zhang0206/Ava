@@ -419,6 +419,18 @@ class DaemonSettings(EnvSettings):
         },
     )
 
+    delivery_stalled_recovery_enabled: bool = Field(
+        default=True,
+        alias="AVA_DELIVERY_STALLED_RECOVERY_ENABLED",
+        description="Stalled crash-marked recovery (task #3618): when on, the delivery watchdog asks the owner's home runner for a harvest decision (`recover-crash-marked-v2`) once a chat inbound has been pending past the stall threshold while its owner is a crash-marked idling corpse. Off leaves alerting only — the stalled backlog is reported but never harvested automatically.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     delivery_watchdog_stale_claimed_threshold_seconds: float = Field(
         default=86400.0,
         alias="AVA_DELIVERY_WATCHDOG_STALE_CLAIMED_THRESHOLD_SECONDS",

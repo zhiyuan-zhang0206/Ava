@@ -39,6 +39,7 @@ from shared.events.payloads import ComputerAction as ComputerAction
 from shared.events.payloads import ComputerSessionEnd as ComputerSessionEnd
 from shared.events.payloads import ComputerSessionStart as ComputerSessionStart
 from shared.events.payloads import DeliveryPoisoned as DeliveryPoisoned
+from shared.events.payloads import DeliveryRecoveryDecision as DeliveryRecoveryDecision
 from shared.events.payloads import DeliveryStalled as DeliveryStalled
 from shared.events.payloads import DeliveryWakeSuppressed as DeliveryWakeSuppressed
 from shared.events.payloads import EventLogDrop as EventLogDrop
