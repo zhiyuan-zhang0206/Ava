@@ -15,6 +15,7 @@ from agent import state as states
 from agent.impersonation import flush_checkpoint
 from agent.startup import _wrap_saver_writes_with_nstep_interval
 from services.agent_host import host as host_module
+from services.agent_host import runtime as runtime_module
 from services.agent_host.runtime import TurnOutcome
 from shared import maintenance, maintenance_cohort, pause_owner
 from shared.config import settings
@@ -57,7 +58,7 @@ async def _failed_turn(
     await flush_checkpoint(saver, agent)
     host = host_module.AgentHost(pool=pool, checkpointer=saver, graph=graph, machine=machine_name())
     monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
-    monkeypatch.setattr(host_module, "validate_model_config", MagicMock())
+    monkeypatch.setattr(runtime_module, "validate_model_config", MagicMock())
     ctx = AvaContext(ops_pool=pool, event_publisher=MagicMock())
 
     async def drive(target: int, _runtime: object) -> TurnOutcome:

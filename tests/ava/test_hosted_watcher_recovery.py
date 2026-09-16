@@ -58,7 +58,7 @@ async def cold_host(
     agent_id = _agent_row
     db_conn.execute(
         "UPDATE agents_meta SET machine=%s,status='idling',config_overlay=%s WHERE id=%s",
-        (machine_name(), Jsonb({"llm_model": "deepseek-v4-pro"}), agent_id),
+        (machine_name(), Jsonb({"llm_model": "deepseek-v4-flash"}), agent_id),
     )
     db_conn.commit()
     model = FakeListChatModel(responses=[])
@@ -73,7 +73,7 @@ async def cold_host(
     def allow_model(*, model: str | None = None) -> None:
         assert model is not None
 
-    monkeypatch.setattr("services.agent_host.host.validate_model_config", allow_model)
+    monkeypatch.setattr("services.agent_host.runtime.validate_model_config", allow_model)
     # A missed-watcher alert normally crosses the gateway HTTP boundary. Keep
     # this test local; the durable missed status and addressed alert are asserted.
     monkeypatch.setattr(_watcher_reconcile, "_notify_missed_watcher", MagicMock())
@@ -98,7 +98,7 @@ async def cold_host(
         scheduler = TurnScheduler(host.run_turn)
         try:
             yield agent_id, host, scheduler
-            assert built and set(built) == {"deepseek-v4-pro"}
+            assert built and set(built) == {"deepseek-v4-flash"}
             assert host.stats.turns_started > 0
         finally:
             await scheduler.aclose()

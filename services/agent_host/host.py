@@ -84,6 +84,7 @@ from services.agent_host.runtime import (
     _AgentRuntime,
     _copy_active_turn_context,
     _StoredConfig,
+    admit_stored_model,
 )
 from services.agent_host.stall_guard import run_invocation_with_stall_guard
 from shared import maintenance
@@ -92,7 +93,6 @@ from shared.config.turn_view import bind_agent_config, resolve_agent_config_pins
 from shared.context import AvaContext
 from shared.event_publisher import AgentEventPublisher
 from shared.live_announce import publish_agent_updated
-from shared.lm.factory import validate_model_config
 from shared.log import logger
 from shared.machine import machine_name
 from shared.plugin_config_view import bind_agent_plugin_config, resolve_agent_plugin_pins
@@ -135,6 +135,7 @@ class AgentHost:
         self._owner = uuid4()
         self._runtimes: OrderedDict[int, _AgentRuntime] = OrderedDict()
         self._rejected_configs: dict[int, str] = {}
+        self._normalized_configs: dict[int, str] = {}
         # Agents with a turn in flight right now. Eviction skips them: a running
         # turn holds its own reference, so dropping the entry would not break it
         # — it would just throw the work away and make that agent's NEXT turn
@@ -262,33 +263,21 @@ class AgentHost:
         async with self.admission.admit(agent_id):
             pins = resolve_agent_config_pins(stored.config_overlay, stored.birth_config)
             plugin_pins = resolve_agent_plugin_pins(stored.config_overlay)
-            # Fail fast before ANY turn work — the status flip included: an
-            # overlay naming a model the registry does not know would otherwise
-            # explode inside build_chat_model on every wake (dispatcher drops the
-            # task, the pending scan re-wakes the still-pending inbound, and the
-            # host loops on crash tracebacks — incident #2344). The effective
-            # model resolves exactly as the turn view does (overlay > birth >
-            # cluster default). The wake is consumed without raising: the durable
-            # inbound stays pending, and a fixed overlay is served on the next
-            # scan.
-            model = pins.get("llm_model") or settings.lm.llm_model
-            try:
-                validate_model_config(model=model)
-            except ValueError as exc:
-                self.stats.config_rejected += 1
-                if self._rejected_configs.get(agent_id) != stored.fingerprint:
-                    self._rejected_configs[agent_id] = stored.fingerprint
-                    logger.error(
-                        "hosted wake for agent {agent_id} rejected before turn — "
-                        "its model config cannot build: {reason}. Fix the agent's "
-                        "llm_model (restart(config_overlay=...) or the spawn "
-                        "overlay) and the next wake serves normally.",
-                        event="host_config_rejected",
-                        agent_id=agent_id,
-                        reason=str(exc),
-                    )
+            # The stored model configuration is admitted before ANY turn work,
+            # the status flip included: a wake whose model cannot build is
+            # consumed without a turn (#2344), and a pin the registry has
+            # withdrawn is normalized in place so this turn — and the usage
+            # attribution and exec children it feeds — runs the model that
+            # serves.
+            if not admit_stored_model(
+                pins,
+                agent_id=agent_id,
+                stored=stored,
+                stats=self.stats,
+                rejected=self._rejected_configs,
+                normalized=self._normalized_configs,
+            ):
                 return
-            self._rejected_configs.pop(agent_id, None)
             self.stats.turns_started += 1
             incarnation = await admit_hosted_runtime(
                 self._control_pool,

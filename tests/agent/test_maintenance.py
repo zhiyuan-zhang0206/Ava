@@ -131,7 +131,7 @@ async def _idle_hosted_host(
     graph = builder.compile(checkpointer=saver)
     host = AgentHost(pool=aops_pool, checkpointer=saver, graph=graph, machine=machine_name())
     monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
-    monkeypatch.setattr("services.agent_host.host.validate_model_config", MagicMock())
+    monkeypatch.setattr("services.agent_host.runtime.validate_model_config", MagicMock())
     return host
 
 
@@ -268,7 +268,7 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
     ctx = AvaContext(ops_pool=aops_pool, event_publisher=MagicMock(), llm=MagicMock())
     host = AgentHost(pool=aops_pool, checkpointer=saver, graph=graph, machine=machine_name())
     monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
-    monkeypatch.setattr("services.agent_host.host.validate_model_config", MagicMock())
+    monkeypatch.setattr("services.agent_host.runtime.validate_model_config", MagicMock())
 
     async def drive(_agent: int, _runtime: Any) -> TurnOutcome:
         return await host._invoke_until_done(_agent, ctx)
