@@ -92,13 +92,12 @@ async def test_deliver_degrades_when_badge_step_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The whole post-commit badge step is off the delivery's critical path: even
-    if it raises for a NON-publish reason (e.g. the fresh-connection snapshot READ
-    fails), the delivery must not 500 — the inbound stays committed and the
+    if the hint helper raises unexpectedly, the delivery must not 500 — the inbound stays committed and the
     InboundArrived + resurrect tail still runs (proven by the returned status)."""
     tid = _seed_idling_agent(db_conn)
 
-    def _boom_badge(_conn: psycopg.Connection, _agent_id: int) -> None:
-        raise RuntimeError("snapshot read failed")  # simulate the read, not the publish
+    def _boom_badge(_agent_id: int) -> None:
+        raise RuntimeError("lifecycle hint failed")
 
     monkeypatch.setattr("gateway.routers._delivery.publish_agent_updated_sync", _boom_badge)
 
@@ -367,7 +366,7 @@ async def test_badge_publish_happens_after_commit(
 
     observed: dict[str, bool] = {}
 
-    def _spy_publish(_conn: psycopg.Connection, agent_id: int) -> None:
+    def _spy_publish(agent_id: int) -> None:
         # A DISTINCT connection: it sees the marker only if the delivery txn has
         # already committed by the time the badge publish is invoked.
         probe = psycopg.connect(settings.data_plane.db_url)

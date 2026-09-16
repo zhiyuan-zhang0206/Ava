@@ -4,12 +4,12 @@
 // use-agents / use-agent-pages / use-all-pages / use-notices tests, which now
 // drive the real fold through a stubbed EventSource).
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { AgentRow, PageRow, SystemEvent } from "../types";
-import { AGENTS_QUERY_KEY, foldAgents, TERMINATED_AGENTS_QUERY_KEY } from "./agents";
+import { AGENTS_QUERY_KEY, foldAgents, AGENT_DIRECTORY_QUERY_KEY, AGENT_DETAIL_QUERY_KEY } from "./agents";
 import { foldFleetGraph } from "./graph";
-import { foldAgainstCache, ALL_PAGES_QUERY_KEY } from "./index";
+import { foldAgainstCache, applyEvent, ALL_PAGES_QUERY_KEY } from "./index";
 import { foldNotices, NOTICES_QUERY_KEY, NOTICES_RESOLVED_QUERY_KEY } from "./notices";
 import { foldPages } from "./pages";
 import { foldTasks, TASKS_QUERY_KEY } from "./tasks";
@@ -27,7 +27,7 @@ const baseAgent: AgentRow = {
   started_at: "2026-05-10T00:00:01Z",
   machine: "test",
   supports_vision: true,
-  notices_awaiting_response: [],
+  awaiting_response_count: 0, highest_notice_priority: null,
   unread_notice_count: 0,
   heartbeat_paused_until: null,
   liveness_state: "online",
@@ -50,114 +50,29 @@ function pageClosed(name: string, agentId = 1): SystemEvent {
 }
 
 describe("foldAgents", () => {
-  const base: AgentRow[] = [baseAgent];
-
-  it("agent_spawned appends a new agent", () => {
-    const ev = {
-      role: "agent_spawned",
-      agent_id: 2,
-      snapshot: { ...baseAgent, agent_id: 2, label: "b" },
-    } as unknown as SystemEvent;
-    const next = foldAgents(base, ev);
-    expect(next?.map((a) => a.agent_id)).toEqual([1, 2]);
+  it("treats lifecycle state as a hint for authoritative reads", () => {
+    const event = { role: "agent_updated", agent_id: 1, snapshot: baseAgent } as unknown as SystemEvent;
+    expect(foldAgents(event)).toEqual({ writes: [], invalidations: [
+      { key: AGENTS_QUERY_KEY }, { key: AGENT_DIRECTORY_QUERY_KEY }, { key: [...AGENT_DETAIL_QUERY_KEY, 1] },
+    ] });
   });
-
-  it("agent_updated replaces the row in place (same reference when nothing changed)", () => {
-    const ev = {
-      role: "agent_updated",
-      agent_id: 1,
-      snapshot: { ...baseAgent, label: "renamed" },
-    } as unknown as SystemEvent;
-    const next = foldAgents(base, ev);
-    expect(next?.[0]?.label).toBe("renamed");
-    // heartbeat-ish no-op events keep the same reference (no re-render noise)
-    const noop = foldAgents(base, {
-      role: "agent_updated",
-      agent_id: 1,
-      snapshot: { ...baseAgent, last_active_at: "2026-05-10T02:00:00Z" },
-    } as unknown as SystemEvent);
-    expect(noop).toBe(base);
+  it.each(["notice_posted", "notice_resolved"] as const)("%s repairs scalar attention without a lifecycle hint", (role) => {
+    const event = { role, agent_id: 1, notice_id: 7, priority: "P2", title: "FYI", task_id: null } as SystemEvent;
+    const ctx = { getQueryData: () => undefined, setQueryData: vi.fn(), invalidateQueries: vi.fn() };
+    applyEvent(ctx, event);
+    expect(ctx.invalidateQueries).toHaveBeenCalledWith(AGENTS_QUERY_KEY);
+    expect(ctx.invalidateQueries).toHaveBeenCalledWith(AGENT_DIRECTORY_QUERY_KEY);
+    expect(ctx.invalidateQueries).toHaveBeenCalledWith([...AGENT_DETAIL_QUERY_KEY, 1]);
   });
-
-  it("moves a terminated update out of the live cache and into seeded history", () => {
-    const terminated = {
-      role: "agent_updated",
-      agent_id: 1,
-      snapshot: { ...baseAgent, status: "terminated" },
-    } as unknown as SystemEvent;
-
-    expect(foldAgents(base, terminated, "live")).toEqual([]);
-    expect(foldAgents([], terminated, "terminated")?.[0]).toMatchObject({
-      agent_id: 1,
-      status: "terminated",
-    });
-  });
-
-  it("moves a resurrected update out of terminated history and into live", () => {
-    const previous = [{ ...baseAgent, status: "terminated" as const }];
-    const resurrected = {
-      role: "agent_updated",
-      agent_id: 1,
-      snapshot: { ...baseAgent, status: "idling" },
-    } as unknown as SystemEvent;
-
-    expect(foldAgents(previous, resurrected, "terminated")).toEqual([]);
-    expect(foldAgents([], resurrected, "live")?.[0]?.status).toBe("idling");
-  });
-
-  it("keeps a liveness-only snapshot update even when public status stays idling", () => {
-    const idling = { ...baseAgent, status: "idling" as const };
-    const previous = [idling];
-    const next = foldAgents(previous, {
-      role: "agent_updated",
-      agent_id: 1,
-      snapshot: {
-        ...idling,
-        status: "restarting",
-        liveness_state: "offline",
-        last_probe_at: "2026-05-10T03:00:00Z",
-      },
-    } as unknown as SystemEvent);
-
-    expect(next?.[0]).toMatchObject({
-      status: "idling",
-      liveness_state: "offline",
-    });
-    expect(next?.[0]).not.toHaveProperty("last_probe_at");
-    expect(next).not.toBe(previous);
-  });
-
-  it("keeps a model-capability-only snapshot update", () => {
-    const previous = [baseAgent];
-    const next = foldAgents(previous, {
-      role: "agent_updated",
-      agent_id: 1,
-      snapshot: { ...baseAgent, supports_vision: false },
-    } as unknown as SystemEvent);
-
-    expect(next?.[0]?.supports_vision).toBe(false);
-    expect(next).not.toBe(previous);
-  });
-
-  it("empty-cache guard: never seeds a partial before the initial fetch", () => {
-    const ev = {
-      role: "agent_spawned",
-      agent_id: 7,
-      snapshot: baseAgent,
-    } as unknown as SystemEvent;
-    expect(foldAgents(undefined, ev)).toBeUndefined();
-    // a fetched-empty list IS a real state — the first agent merges in
-    expect(foldAgents([], ev)?.length).toBe(1);
-  });
-
-  it("label_updated patches just the label", () => {
-    const ev = { role: "label_updated", agent_id: 1, label: "renamed" } as unknown as SystemEvent;
-    const next = foldAgents(base, ev);
-    expect(next?.[0]?.label).toBe("renamed");
-  });
-
-  it("unrelated events return undefined (no write)", () => {
-    expect(foldAgents(base, { role: "notice_posted", notice_id: 1, priority: "P2", title: "t", task_id: null } as unknown as SystemEvent)).toBeUndefined();
+  it("cannot accumulate terminated snapshots over an arbitrarily long session", () => {
+    const state = { agents: [baseAgent], ancestors: [] };
+    const writes = vi.fn();
+    const ctx = { getQueryData: () => state, setQueryData: writes, invalidateQueries: vi.fn() };
+    for (let id = 2; id <= 10001; id++) {
+      applyEvent(ctx, { role: "agent_updated", agent_id: id, snapshot: { ...baseAgent, agent_id: id, status: "terminated" } } as unknown as SystemEvent);
+    }
+    expect(writes).not.toHaveBeenCalled();
+    expect(state).toEqual({ agents: [baseAgent], ancestors: [] });
   });
 });
 
@@ -253,25 +168,6 @@ describe("foldAgainstCache — the dispatch", () => {
     expect(writes.has(JSON.stringify(["agent-pages", 1]))).toBe(true);
     expect(writes.has(JSON.stringify(ALL_PAGES_QUERY_KEY))).toBe(true);
     expect((writes.get(JSON.stringify(["agent-pages", 1])) as PageRow[])[0]?.name).toBe("p1");
-  });
-
-  it("writes lifecycle transitions to both seeded roster scopes", () => {
-    const cache = new Map<string, unknown>();
-    cache.set(JSON.stringify(AGENTS_QUERY_KEY), [baseAgent]);
-    cache.set(JSON.stringify(TERMINATED_AGENTS_QUERY_KEY), []);
-    const event = {
-      role: "agent_updated",
-      agent_id: 1,
-      snapshot: { ...baseAgent, status: "terminated" },
-    } as unknown as SystemEvent;
-
-    const outcome = foldAgainstCache(ctxWith(cache), event);
-    const writes = new Map(outcome.writes.map((write) => [JSON.stringify(write.key), write.value]));
-
-    expect(writes.get(JSON.stringify(AGENTS_QUERY_KEY))).toEqual([]);
-    expect(writes.get(JSON.stringify(TERMINATED_AGENTS_QUERY_KEY))).toEqual([
-      expect.objectContaining({ agent_id: 1, status: "terminated" }),
-    ]);
   });
 
   it("never writes an un-fetched per-agent pages key (empty-cache guard)", () => {

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
 
 import ava
 import ava._boot
@@ -29,6 +30,7 @@ from shared.config import cluster_tz
 from . import presets as presets
 
 __all_for_ava__ = [
+    "AgentDirectoryPage",
     "AgentRow",
     "AgentStatus",
     "CommandInfo",
@@ -86,6 +88,7 @@ class AgentRow:
     label: str | None
     status: AgentStatus
     spawner: str
+    fork_source_agent_id: int | None
     machine: str
     spawned_at: datetime
     started_at: datetime | None
@@ -106,6 +109,16 @@ class AgentRow:
         if self.last_active_at != self.spawned_at:
             parts.append(f"last_active={_relative_time(self.last_active_at)}")
         return "  ".join(parts)
+
+
+@dataclass
+class AgentDirectoryPage:
+    """One page, newest agent IDs first. Pass `next_cursor` as `before_id`
+    with the same filters to read the next page; None means no more results.
+    """
+
+    agents: list[AgentRow]
+    next_cursor: int | None
 
 
 @dataclass
@@ -239,16 +252,37 @@ def get_ancestors(agent_id: int) -> list[Neighbor]:
 
 
 def list_agents(
-    filter_by_status: tuple[AgentStatus, ...] | None = (
-        AgentStatus.RUNNING,
-        AgentStatus.IDLING,
-    ),
-) -> list[AgentRow]:
-    filter_by_status = coerce_typed(filter_by_status, "filter_by_status", tuple, allow_none=True)
-    raw_rows = _client.list_agents(
-        filter_by_status=filter_by_status,
+    *,
+    scope: Literal["live", "terminated", "all"] = "live",
+    query: str = "",
+    before_id: int | None = None,
+    limit: int = 100,
+) -> AgentDirectoryPage:
+    """Read one page of agents, newest IDs first.
+
+    `live` includes every agent that has not terminated. Search by label
+    substring or exact ID with `query` (at most 200 characters);
+    use `terminated` for history or `all` for both. The page holds at most
+    `limit` agents (1 through 200). Continue explicitly with `next_cursor`
+    as `before_id`, retaining the same scope and query.
+    """
+    scope = coerce_str(scope, "scope")
+    query = coerce_str(query, "query")
+    if len(query) > 200:
+        raise ValueError("query must be at most 200 characters")
+    before_id = coerce_typed(before_id, "before_id", int, allow_none=True)
+    limit = coerce_typed(limit, "limit", int)
+    if scope not in ("live", "terminated", "all"):
+        raise ValueError("scope must be 'live', 'terminated', or 'all'")
+    if not 1 <= limit <= 200:
+        raise ValueError("limit must be between 1 and 200")
+    if before_id is not None and not 1 <= before_id <= 9223372036854775807:
+        raise ValueError("before_id must be a positive bigint agent ID")
+    page = _client.list_agents(scope=scope, query=query, before_id=before_id, limit=limit)
+    return AgentDirectoryPage(
+        agents=[_row_from_dict(row) for row in page["agents"]],
+        next_cursor=page["next_cursor"],
     )
-    return [_row_from_dict(r) for r in raw_rows]
 
 
 def list_machines() -> list[Machine]:
@@ -265,6 +299,7 @@ def _row_from_dict(data: dict) -> AgentRow:
         label=data.get("label"),
         status=AgentStatus(data["status"]),
         spawner=data["spawner"],
+        fork_source_agent_id=data["fork_source_agent_id"],
         machine=data["machine"],
         spawned_at=datetime.fromisoformat(data["spawned_at"]),
         started_at=datetime.fromisoformat(data["started_at"]) if data.get("started_at") else None,
@@ -530,8 +565,4 @@ def get_last_message(agent_id: int) -> str | None:
 
 def get_status(agent_id: int) -> AgentStatus:
     agent_id = coerce_typed(agent_id, "agent_id", int)
-    agents = _client.list_agents()
-    for a in agents:
-        if a["agent_id"] == agent_id:
-            return AgentStatus(a["status"])
-    raise AgentNotFound(f"Agent {agent_id} not found")
+    return AgentStatus(_client.get_agent(agent_id)["status"])

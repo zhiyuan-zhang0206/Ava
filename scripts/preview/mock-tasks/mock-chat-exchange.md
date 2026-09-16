@@ -10,7 +10,7 @@ send messages to Agents B and C to populate FleetView graph activity.
 
 ## Steps
 
-1. **Find your peers**: use `ava.agents.list_agents()` to confirm B and C exist.
+1. **Find your peers**: search with `ava.agents.list_agents(query="<peer label>")` and inspect the returned `.agents` page to confirm B and C exist.
    Wait a moment if they haven't appeared yet.
 
 2. **Send a greeting to B**: use `ava.agents.send_message(<b_id>, "Hello from preview-chat-a! This is a mock exchange to exercise the FleetView graph. How are you?")`

@@ -120,6 +120,8 @@ function HomeShell({ showError }: HomeShellProps) {
 
   const {
     agents,
+    ancestors,
+    activeAgent,
     activeId,
     pendingActions,
     pendingSpawnCount,
@@ -179,6 +181,7 @@ function HomeShell({ showError }: HomeShellProps) {
     <ErrorBoundary>
       <AgentSidebar
         agents={agents}
+        ancestors={ancestors}
         isLoading={agentsLoading}
         pendingActions={pendingActions}
         pendingSpawnCount={pendingSpawnCount}
@@ -195,7 +198,7 @@ function HomeShell({ showError }: HomeShellProps) {
     <AgentEventStreamProvider>
       <HomeContent
         activeId={activeId}
-        agents={agents}
+        activeAgent={activeAgent}
         forkPending={forkPending}
         showError={showError}
         handleFork={handleFork}
@@ -223,7 +226,7 @@ function HomeShell({ showError }: HomeShellProps) {
 
 interface HomeContentProps {
   activeId: number | null;
-  agents: AgentRow[];
+  activeAgent: AgentRow | undefined;
   forkPending: boolean;
   showError: (msg: string) => void;
   handleFork: () => void;
@@ -231,7 +234,7 @@ interface HomeContentProps {
 
 function HomeContent({
   activeId,
-  agents,
+  activeAgent,
   forkPending,
   showError,
   handleFork,
@@ -366,7 +369,6 @@ function HomeContent({
     }
   }, [activeId, showError]);
 
-  const activeAgent = agents.find((a) => a.agent_id === activeId);
   const activeLabel = activeAgent
     ? `Agent #${activeAgent.agent_id}${activeAgent.label ? ` · ${activeAgent.label}` : ""} · ${activeAgent.status.charAt(0).toUpperCase() + activeAgent.status.slice(1)}`
     : "…";

@@ -182,14 +182,11 @@ export interface paths {
         };
         /**
          * Get Agent
-         * @description Full state of a single agent — spot-check endpoint for frontend / ops.
-         *     Previously also served SDK `get_status` (removed — agents no longer query
-         *     peer status; FleetView uses its own API, self-evo uses `list_agents()`).
+         * @description Full detail addressed by ID, including terminated agents outside loaded pages.
          *
-         *     Shares the AgentRow schema (including last_active_at computation) with
-         *     `GET /api/agents` (list all).
-         *
-         *     404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).
+         *     The browser and SDK status readers use this independent selection boundary.
+         *     Notice bodies stay here and in the Inbox; directory cards contain counts.
+         *     A nonexistent ID returns 404 rather than falling back to another agent.
          */
         get: operations["get_agent_api_agents__agent_id__get"];
         put?: never;
@@ -247,22 +244,7 @@ export interface paths {
         };
         /**
          * Get Agents
-         * @description List agent snapshots for the requested roster scope.
-         *
-         *     ``all`` is the compatibility default for SDK / ops callers.
-         *     Frontend fleet/sidebar readers request ``live`` so Postgres excludes
-         *     terminated history before evaluating the per-agent snapshot lookups, and
-         *     request ``terminated`` alongside it: the sidebar's spawn tree needs the
-         *     terminated rows as lineage joints (an alive child of a terminated parent
-         *     re-parents under the nearest visible ancestor — #312 orphan regression).
-         *     Every scope returns raw spawner / fork-source truth; the show-terminated
-         *     UI toggle only controls rendering, never the fetch.
-         *
-         *     ``fields=full`` preserves the historical response. ``fields=summary`` is
-         *     the reduced SQL projection used by roster consumers; ``fields=compact``
-         *     remains as a legacy narrow projection. The CLI renders four fields from the
-         *     summary projection. Detail and SSE keep the full snapshot.
-         *     All scopes remain unpaginated for wire compatibility.
+         * @description Read one directory page. History is explicit and never fetched implicitly.
          */
         get: operations["get_agents_api_agents_get"];
         put?: never;
@@ -297,6 +279,26 @@ export interface paths {
          *     registry. 409: the fork_from agent has no checkpoint (no LLM/exec step yet).
          */
         post: operations["post_agents_api_agents_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents/roster": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Agent Roster
+         * @description Read the live tree and its necessary ancestor links in one snapshot.
+         */
+        get: operations["get_agent_roster_api_agents_roster_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3685,15 +3687,55 @@ export interface components {
             exec_seconds: number;
         };
         /**
-         * AgentCompact
-         * @description One row of the legacy narrow ``GET /api/agents?fields=compact`` projection.
+         * AgentCard
+         * @description Scalar list state; selected-agent details and notice bodies are separate reads.
          */
-        AgentCompact: {
+        AgentCard: {
             /** Agent Id */
             agent_id: number;
+            /** Spawner */
+            spawner: string;
+            /** Fork Source Agent Id */
+            fork_source_agent_id: number | null;
             status: components["schemas"]["AgentStatus"];
+            /** Pid */
+            pid: number | null;
+            /**
+             * Spawned At
+             * Format: date-time
+             */
+            spawned_at: string;
+            /** Started At */
+            started_at: string | null;
+            /**
+             * Last Active At
+             * Format: date-time
+             */
+            last_active_at: string;
+            /**
+             * Last Inbound At
+             * Format: date-time
+             */
+            last_inbound_at: string;
             /** Label */
             label: string | null;
+            /** Machine */
+            machine: string;
+            /** Supports Vision */
+            supports_vision: boolean;
+            /**
+             * Liveness State
+             * @enum {string}
+             */
+            liveness_state: "online" | "offline" | "unknown";
+            observation: components["schemas"]["AgentObservation"];
+            /** Awaiting Response Count */
+            awaiting_response_count: number;
+            highest_notice_priority: components["schemas"]["Priority"] | null;
+            /** Unread Notice Count */
+            unread_notice_count: number;
+            /** Heartbeat Paused Until */
+            heartbeat_paused_until: string | null;
         };
         /**
          * AgentCost
@@ -3723,6 +3765,16 @@ export interface components {
             tokens_reasoning: number;
             /** Cache Hit Pct */
             cache_hit_pct: number;
+        };
+        /**
+         * AgentDirectoryPage
+         * @description One newest-first directory page; the cursor is the last returned agent ID.
+         */
+        AgentDirectoryPage: {
+            /** Agents */
+            agents: components["schemas"]["AgentCard"][];
+            /** Next Cursor */
+            next_cursor: number | null;
         };
         /**
          * AgentEventRow
@@ -3831,6 +3883,18 @@ export interface components {
             stats: components["schemas"]["AgentStats"];
             tps: components["schemas"]["AgentTps"];
             activity: components["schemas"]["AgentActivity"];
+        };
+        /**
+         * AgentLineage
+         * @description Immutable relationship facts needed to walk a visible node's ancestors.
+         */
+        AgentLineage: {
+            /** Agent Id */
+            agent_id: number;
+            /** Spawner */
+            spawner: string;
+            /** Fork Source Agent Id */
+            fork_source_agent_id: number | null;
         };
         /**
          * AgentMachineRow
@@ -4003,13 +4067,22 @@ export interface components {
             restarts: number;
         };
         /**
+         * AgentRoster
+         * @description A coherent live tree. Ancestors carry links, never historical agent details.
+         */
+        AgentRoster: {
+            /** Agents */
+            agents: components["schemas"]["AgentCard"][];
+            /** Ancestors */
+            ancestors: components["schemas"]["AgentLineage"][];
+        };
+        /**
          * AgentRow
-         * @description One row of GET /api/agents — full state snapshot of the `agents` table.
+         * @description GET /api/agents/{id} detail, including response-required notice bodies.
          *
-         *     Identical schema to `AgentSnapshot` (the SSE-side type); subclassed
-         *     rather than aliased so OpenAPI keeps the historical name `AgentRow` for
-         *     the generated frontend types. `last_active_at` is the real-activity clock
-         *     (agents_meta), `last_inbound_at` the latest inbound (issue #183).
+         *     The directory and live roster use bounded cards from shared.agent_roster.
+         *     last_active_at is the real-activity clock; last_inbound_at is the latest
+         *     inbound message clock.
          */
         AgentRow: {
             /** Agent Id */
@@ -4094,56 +4167,6 @@ export interface components {
          * @enum {string}
          */
         AgentStatus: "running" | "idling" | "restarting" | "terminated";
-        /**
-         * AgentSummary
-         * @description One row of ``GET /api/agents?fields=summary`` for roster consumers.
-         */
-        AgentSummary: {
-            /** Agent Id */
-            agent_id: number;
-            /** Spawner */
-            spawner: string;
-            /** Fork Source Agent Id */
-            fork_source_agent_id: number | null;
-            status: components["schemas"]["AgentStatus"];
-            /** Pid */
-            pid: number | null;
-            /**
-             * Spawned At
-             * Format: date-time
-             */
-            spawned_at: string;
-            /** Started At */
-            started_at: string | null;
-            /**
-             * Last Active At
-             * Format: date-time
-             */
-            last_active_at: string;
-            /**
-             * Last Inbound At
-             * Format: date-time
-             */
-            last_inbound_at: string;
-            /** Label */
-            label: string | null;
-            /** Machine */
-            machine: string;
-            /** Supports Vision */
-            supports_vision: boolean;
-            /**
-             * Liveness State
-             * @enum {string}
-             */
-            liveness_state: "online" | "offline" | "unknown";
-            observation?: components["schemas"]["AgentObservation"] | null;
-            /** Notices Awaiting Response */
-            notices_awaiting_response: components["schemas"]["OpenNotice"][];
-            /** Unread Notice Count */
-            unread_notice_count: number;
-            /** Heartbeat Paused Until */
-            heartbeat_paused_until: string | null;
-        };
         /**
          * AgentTps
          * @description Token-per-second metrics for one agent — two views of throughput.
@@ -8358,8 +8381,10 @@ export interface operations {
     get_agents_api_agents_get: {
         parameters: {
             query?: {
-                scope?: "all" | "live" | "terminated";
-                fields?: "full" | "summary" | "compact";
+                scope?: "live" | "terminated" | "all";
+                query?: string;
+                before_id?: number | null;
+                limit?: number;
             };
             header?: never;
             path?: never;
@@ -8373,7 +8398,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": (components["schemas"]["AgentRow"] | components["schemas"]["AgentSummary"] | components["schemas"]["AgentCompact"])[];
+                    "application/json": components["schemas"]["AgentDirectoryPage"];
                 };
             };
             /** @description Validation Error */
@@ -8416,6 +8441,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_agent_roster_api_agents_roster_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRoster"];
                 };
             };
         };

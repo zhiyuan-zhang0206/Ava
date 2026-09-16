@@ -10,10 +10,12 @@ from __future__ import annotations
 import argparse
 
 
-def _h_agents_ls(_args: argparse.Namespace) -> int:
+def _h_agents_ls(args: argparse.Namespace) -> int:
     from cli.commands.agents import cmd_agents_ls
 
-    return cmd_agents_ls()
+    return cmd_agents_ls(
+        scope=args.scope, query=args.query, before_id=args.before_id, limit=args.limit
+    )
 
 
 def _h_agents_timeline(args: argparse.Namespace) -> int:
@@ -95,11 +97,23 @@ def _add_timeline_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser
     parser.set_defaults(func=_h_agents_timeline)
 
 
+def _add_list_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    from cli.main import _h_agents_ls
+
+    agents_ls_p = sub.add_parser(
+        "ls", help="read one agent directory page (live agents by default)"
+    )
+    agents_ls_p.add_argument("--scope", choices=("live", "terminated", "all"), default="live")
+    agents_ls_p.add_argument("--query", default="", help="search agent IDs and labels")
+    agents_ls_p.add_argument("--before-id", type=int, help="exclusive cursor from a prior page")
+    agents_ls_p.add_argument("--limit", type=int, default=100, help="page size, 1..200")
+    agents_ls_p.set_defaults(func=_h_agents_ls)
+
+
 def _add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     from cli.main import (
         _h_agents_cancel,
         _h_agents_kill,
-        _h_agents_ls,
         _h_agents_restart,
         _h_agents_resurrect,
         _h_agents_send,
@@ -119,10 +133,7 @@ def _add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     )
     agents_sub = agents_p.add_subparsers(dest="agents_cmd", required=True)
 
-    agents_ls_p = agents_sub.add_parser(
-        "ls", help="list all agents (id / status / machine / label) via GET /api/agents"
-    )
-    agents_ls_p.set_defaults(func=_h_agents_ls)
+    _add_list_parser(agents_sub)
 
     _add_timeline_parser(agents_sub)
 

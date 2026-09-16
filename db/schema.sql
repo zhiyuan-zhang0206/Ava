@@ -1869,3 +1869,5 @@ INSERT INTO schema_migrations (name) VALUES ('20260916T054934_permanent-reject-s
 -- while existing DBs without this applied marker still run the migration and fail
 -- loudly if the guard was installed outside migration tracking.
 INSERT INTO schema_migrations (name) VALUES ('20260916T164150_lifecycle-pointer-done-guard');
+CREATE INDEX agents_meta_live_roster_idx ON agents_meta (id) WHERE status <> 'terminated';
+INSERT INTO schema_migrations (name) VALUES ('20260916T171506_index-live-agent-roster');

@@ -12,7 +12,7 @@ import { act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useTimelineStore } from "./timeline-store";
-import type { BackendTimelineItem, SystemEvent, WireAgentRow } from "./types";
+import type { BackendTimelineItem, SystemEvent } from "./types";
 
 // -- helpers ───────────────────────────────────────────────────────────────
 
@@ -1532,29 +1532,6 @@ describe("spawn scenario: first snapshot carries 0.0 (#615)", () => {
 });
 
 describe("processSseEventBatch — frame-level folding", () => {
-  /** Minimal full wire row for sidebar-owned roles the batch must skip. */
-  function agentRow(id: number): WireAgentRow {
-    return {
-      agent_id: id,
-      label: null,
-      status: "running",
-      spawner: "user",
-      fork_source_agent_id: null,
-      fork_source_checkpoint_id: null,
-      pid: null,
-      spawned_at: "2026-01-01T00:00:00Z",
-      started_at: "2026-01-01T00:00:01Z",
-      machine: "test",
-      supports_vision: true,
-      last_active_at: "2026-01-01T00:00:01Z",
-      last_inbound_at: "2026-01-01T00:00:01Z",
-      notices_awaiting_response: [],
-      unread_notice_count: 0,
-      heartbeat_paused_until: null,
-      liveness_state: "online",
-      last_probe_at: null,
-    };
-  }
   it("folds a whole frame's deltas in ONE store notification, in arrival order", () => {
     const listener = vi.fn();
     const unsub = useTimelineStore.subscribe(listener);
@@ -1600,8 +1577,8 @@ describe("processSseEventBatch — frame-level folding", () => {
       useTimelineStore.getState().processSseEventBatch([]);
       // agent_spawned / agent_updated are sidebar-owned — skipped entirely.
       useTimelineStore.getState().processSseEventBatch([
-        { role: "agent_spawned", agent_id: 99, snapshot: agentRow(99) },
-        { role: "agent_updated", agent_id: 99, snapshot: agentRow(99) },
+        { role: "agent_spawned", agent_id: 99 },
+        { role: "agent_updated", agent_id: 99 },
       ]);
     });
     unsub();

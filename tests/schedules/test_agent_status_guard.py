@@ -19,29 +19,14 @@ EXPECTED_STATUS_MEMBERS: dict[str, set[str]] = {
         "IDLING",
         "TERMINATED",
     },
-    "memory-steward-schedule.py": {
-        "IDLING",
-        "RESTARTING",
-        "RUNNING",
-        "TERMINATED",
-    },
+    "memory-steward-schedule.py": {"TERMINATED"},
     "model-update-tracker-schedule.py": {
         "IDLING",
         "RUNNING",
         "TERMINATED",
     },
-    "self-evolution-daily-schedule.py": {
-        "IDLING",
-        "RESTARTING",
-        "RUNNING",
-        "TERMINATED",
-    },
-    "self-evolution-weekly-schedule.py": {
-        "IDLING",
-        "RESTARTING",
-        "RUNNING",
-        "TERMINATED",
-    },
+    "self-evolution-daily-schedule.py": {"TERMINATED"},
+    "self-evolution-weekly-schedule.py": {"TERMINATED"},
     "trace-ship-tempo-schedule.py": set(),
 }
 

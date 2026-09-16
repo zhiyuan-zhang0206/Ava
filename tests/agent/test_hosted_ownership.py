@@ -82,7 +82,7 @@ async def test_hosted_status_changes_publish_agent_updated(
 
     publish.reset_mock()
     assert await settle_hosted_runtime(aops_pool, incarnation)
-    publish.assert_awaited_once_with(aops_pool, agent_id)
+    publish.assert_awaited_once_with(agent_id)
 
     incarnation = await admit_hosted_runtime(
         aops_pool, agent_id, "host-test", owner, expected_from="idling"
@@ -93,7 +93,7 @@ async def test_hosted_status_changes_publish_agent_updated(
     with bind_turn_identity(agent_id, incarnation=incarnation):
         await claim_inbound_batch(aops_pool, agent_id)
         assert await apply_hosted_lifecycle(aops_pool, incarnation) == "terminate"
-    publish.assert_awaited_once_with(aops_pool, agent_id)
+    publish.assert_awaited_once_with(agent_id)
 
 
 async def test_cancel_during_live_announce_settles_the_committed_admission(
@@ -115,7 +115,7 @@ async def test_cancel_during_live_announce_settles_the_committed_admission(
     announce_release = asyncio.Event()
     publish_calls = 0
 
-    async def half_open_publish(_pool: object, published_agent_id: int) -> None:
+    async def half_open_publish(published_agent_id: int) -> None:
         nonlocal publish_calls
         assert published_agent_id == agent_id
         publish_calls += 1
@@ -497,7 +497,7 @@ async def test_reap_crash_corpses_terminates_only_grace_elapsed_idling_corpses(
     monkeypatch.setattr("agent.corpse_reap.insert_event_log_async", _event)
     published: list[int] = []
 
-    async def _publish(pool: object, agent_id: int) -> None:
+    async def _publish(agent_id: int) -> None:
         published.append(agent_id)
 
     monkeypatch.setattr("agent.corpse_reap.publish_agent_updated", _publish)

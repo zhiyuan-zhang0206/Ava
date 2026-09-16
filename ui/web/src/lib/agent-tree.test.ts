@@ -30,7 +30,7 @@ function ag(
     label: null,
     machine: "test",
     supports_vision: true,
-    notices_awaiting_response: [], unread_notice_count: 0,
+    awaiting_response_count: 0, highest_notice_priority: null, unread_notice_count: 0,
     heartbeat_paused_until: null,
     liveness_state: "online",
   };

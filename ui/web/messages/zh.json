@@ -151,7 +151,13 @@
     "expandStatistics": "展开统计",
     "collapseStatistics": "收起统计",
     "noMatch": "没有匹配“{query}”的 agent",
-    "searchAgent": "搜索 agent"
+    "searchAgent": "搜索 agent",
+    "archive": "Agent 历史",
+    "hideArchive": "隐藏历史",
+    "archiveRetry": "历史加载失败，重试",
+    "archiveLatest": "最新",
+    "archiveOlder": "更早",
+    "archiveSearch": "搜索 Agent 历史"
   },
   "spawn": {
     "models": "模型",

@@ -19,6 +19,8 @@ import pytest
 from shared.live_events import (
     GLOBAL_ROLES,
     SYSTEM_ROLES,
+    AgentSpawned,
+    AgentUpdated,
     Cancelled,
     ChatDelta,
     ChatStart,
@@ -49,6 +51,8 @@ from shared.live_events import (
 # Frozen list of (class, expected role, extra fields beyond agent_id/role).
 # When adding a role, append it here — forget and the new Event variant is unpinned.
 FROZEN_WIRE: list[tuple[type, str, dict[str, Any]]] = [
+    (AgentSpawned, "agent_spawned", {}),
+    (AgentUpdated, "agent_updated", {}),
     (ChatStart, "chat_start", {"item_id": "5.0"}),
     (ChatDelta, "chat_delta", {"item_id": "5.0", "content": "hello"}),
     (CompactRequest, "compact_request", {"content": "[compact requested, 5 chars]"}),

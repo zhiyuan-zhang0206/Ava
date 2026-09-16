@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Agent Directory — list_agents / list_machines / commands
-description: List all agents and machines in the fleet. list_agents filters by status, list_machines queries machine liveness, commands lists slash commands accepted by peers. Includes AgentRow, AgentStatus, Machine data class definitions.
+description: Search bounded pages of agents and list cluster machines. Directory scope separates live agents from history; cursors explicitly request more rows.
 tags:
 - fleet
 - agents
@@ -17,13 +17,16 @@ List agents and machines in the fleet — not based on the relationship graph (t
 
 ## `list_agents`
 
-```python
-def list_agents(
-    filter_by_status: tuple[AgentStatus, ...] | None = (RUNNING, IDLING)
-) -> list[AgentRow]
-```
+`list_agents` returns an `AgentDirectoryPage` with `agents` and `next_cursor`.
+The default scope is `live`; use `terminated` for the archive or `all` for
+cross-lifecycle discovery. `query` searches the directory on the server.
+Rows are newest first. Pass the returned cursor as `before_id` to read the
+next page, keeping the same scope and query; `next_cursor=None` ends the
+result. `limit` defaults to 100 and cannot exceed 200.
 
-Filter the agent list by status. Default returns only `RUNNING` and `IDLING` agents; pass `None` to list all (including `TERMINATED`).
+A page is not the complete directory. Consumers that genuinely need every
+matching agent explicitly iterate pages; finding a particular role should
+start with a server-side search. Select an agent by ID to read its detail.
 
 ### `class AgentRow`
 
@@ -87,10 +90,14 @@ class CommandInfo:
 ## Typical Use
 
 ```python
-# Find available idle agents
-agents = ava.agents.list_agents()  # default RUNNING + IDLING
-for a in agents:
-    print(f"#{a.agent_id} {a.label or '(no label)'} on {a.machine}")
+# Search one bounded page of live peers.
+page = ava.agents.list_agents(scope="live", query="reviewer")
+for agent in page.agents:
+    print(f"#{agent.agent_id} {agent.label or '(no label)'} on {agent.machine}")
+if page.next_cursor is not None:
+    next_page = ava.agents.list_agents(
+        scope="live", query="reviewer", before_id=page.next_cursor,
+    )
 
 # Check machine liveness
 for m in ava.agents.list_machines():

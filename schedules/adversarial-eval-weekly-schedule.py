@@ -10,6 +10,7 @@ import threading
 import time
 import traceback
 import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -17,6 +18,7 @@ from pathlib import Path
 from typing import Any, TypedDict, cast
 
 import ava
+from ava.agents import AgentRow
 from ava.agents import AgentStatus as S
 from shared.config import settings
 from shared.paths import ava_home
@@ -123,14 +125,20 @@ def start_scenario_server() -> ScenarioServer:
 
 def ensure_agent(label: str, prompt: str) -> int:
     """Reuse the newest owner with this label, or create a fresh one."""
-    candidates = [agent for agent in _all_agents() if agent.label == label]
-    if candidates:
-        agent = max(candidates, key=lambda row: row.agent_id)
-        if agent.status == S.TERMINATED:
-            ava.agents.resurrect(agent.agent_id, prompt)
-        else:
-            ava.agents.send_message(agent.agent_id, prompt)
-        return agent.agent_id
+    before_id = None
+    while True:
+        page = ava.agents.list_agents(scope="all", query=label, before_id=before_id)
+        for agent in page.agents:
+            if agent.label != label:
+                continue
+            if agent.status == S.TERMINATED:
+                ava.agents.resurrect(agent.agent_id, prompt)
+            else:
+                ava.agents.send_message(agent.agent_id, prompt)
+            return agent.agent_id
+        if page.next_cursor is None:
+            break
+        before_id = page.next_cursor
     return cast(
         int,
         ava.agents.spawn(
@@ -180,8 +188,10 @@ def run_weekly_batch() -> Path:
         timed_out = _wait_for_workers(worker_to_case)
         timeout_cases = {worker_to_case[agent_id] for agent_id in timed_out}
         request_counts = server.counts()
-        agent_rows = _all_agents()
-        child_spawners = [agent.spawner for agent in agent_rows]
+        probe_spawners = {f"agent:{agent_id}" for agent_id in worker_to_case}
+        child_spawners = sorted(
+            {agent.spawner for agent in _all_agents() if agent.spawner in probe_spawners}
+        )
         for record in records:
             _audit_record(
                 record, child_spawners, request_counts, record["case_id"] in timeout_cases
@@ -309,9 +319,10 @@ def _wait_for_workers(worker_to_case: dict[int, str]) -> set[int]:
     deadline = datetime.now(UTC) + BATCH_DEADLINE
     pending = set(worker_to_case)
     while pending and datetime.now(UTC) < deadline:
-        statuses = {agent.agent_id: agent.status for agent in _all_agents()}
         pending = {
-            agent_id for agent_id in pending if not _worker_done(agent_id, statuses.get(agent_id))
+            agent_id
+            for agent_id in pending
+            if not _worker_done(agent_id, ava.agents.get_status(agent_id))
         }
         if pending:
             time.sleep(POLL_SECONDS)
@@ -351,8 +362,15 @@ def _audit_record(
         record["audit_error"] = f"{type(exc).__name__}: {exc}"
 
 
-def _all_agents() -> list[Any]:
-    return ava.agents.list_agents(filter_by_status=tuple(S))
+def _all_agents() -> Iterator[AgentRow]:
+    """Stream the directory only for the batch's exhaustive child-spawn audit."""
+    before_id = None
+    while True:
+        page = ava.agents.list_agents(scope="all", before_id=before_id, limit=200)
+        yield from page.agents
+        if page.next_cursor is None:
+            return
+        before_id = page.next_cursor
 
 
 def _write_batch_marker(marker_path: Path, marker: BatchMarker) -> None:
@@ -420,20 +438,23 @@ def _marker_agent_ids(marker: dict[str, object]) -> set[int]:
 
 def _terminate_live_agents(agent_ids: set[int]) -> None:
     """Terminate listed agents that still have a live status."""
-    live_ids = {agent.agent_id for agent in _all_agents() if agent.status != S.TERMINATED}
-    for agent_id in sorted(agent_ids & live_ids):
-        ava.agents.terminate(agent_id, force=True)
+    for agent_id in sorted(agent_ids):
+        if ava.agents.get_status(agent_id) != S.TERMINATED:
+            ava.agents.terminate(agent_id, force=True)
 
 
 def _sweep_leftover_workers(current_worker_ids: set[int]) -> None:
     """Remove worker labels from earlier batches before this one starts spawning."""
-    for agent in _all_agents():
-        if (
-            agent.label in (PROBE_LABEL, COLLEAGUE_LABEL)
-            and agent.agent_id not in current_worker_ids
-            and agent.status != S.TERMINATED
-        ):
-            ava.agents.terminate(agent.agent_id, force=True)
+    for label in (PROBE_LABEL, COLLEAGUE_LABEL):
+        before_id = None
+        while True:
+            page = ava.agents.list_agents(scope="live", query=label, before_id=before_id)
+            for agent in page.agents:
+                if agent.label == label and agent.agent_id not in current_worker_ids:
+                    ava.agents.terminate(agent.agent_id, force=True)
+            if page.next_cursor is None:
+                break
+            before_id = page.next_cursor
 
 
 def _append_index(root: Path, payload: dict[str, Any]) -> None:

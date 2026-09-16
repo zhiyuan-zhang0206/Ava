@@ -73,7 +73,8 @@ _STUB_STATUS_BODY = {
 # lives in a re-rendered subtree).
 _API_STUBS: dict[str, object] = {
     "/api/status": _STUB_STATUS_BODY,
-    "/api/agents": [],
+    "/api/agents": {"agents": [], "next_cursor": None},
+    "/api/agents/roster": {"agents": [], "ancestors": []},
     "/api/stats/dashboard": {
         "live_count": 0,
         "window_hours": 24,

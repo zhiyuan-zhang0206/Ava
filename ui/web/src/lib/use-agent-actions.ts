@@ -1,23 +1,17 @@
 "use client";
 
-// Lifecycle actions for the agent cache — extracted from use-agents.ts (R4
-// layer-1 line budget: use-agents ≤400). Public API unchanged: useAgents
-// composes useAgentActions and spreads its result, so readers of the hook
-// (and the tests) keep the same surface.
-//
-// No optimistic writes: useMutation drives only the per-row pending flag; the
-// row updates when the SSE event arrives carrying the real new state (folded
-// by the root fold owner). Until then the button shows a spinner.
+// Lifecycle mutations keep server state authoritative. Acceptance updates only
+// pending UI; lifecycle hints and explicit repair read the resulting roster.
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api } from "./api";
 import { errMsg } from "./errors";
-import { AGENTS_QUERY_KEY, TERMINATED_AGENTS_QUERY_KEY } from "./fold/agents";
+import { AGENTS_QUERY_KEY, AGENT_DETAIL_QUERY_KEY } from "./fold/agents";
 import { track } from "./telemetry";
 import { useStore } from "./store";
-import type { AgentRow } from "./types";
+import type { AgentRow, AgentRoster } from "./types";
 
 export type PendingAction = "restarting" | "terminating" | "resurrecting" | "compacting";
 
@@ -40,8 +34,8 @@ export function useAgentActions(
   const queryClient = useQueryClient();
   const setActiveId = useStore((s) => s.setActiveId);
   // ── Lifecycle mutations — useMutation drives the per-row pending flag.
-  // No optimistic writes: the row updates when the SSE event arrives
-  // carrying the real new state. Until then the button shows a spinner. ──
+  // No optimistic writes: lifecycle hints trigger authoritative reads. The
+  // mutation controls pending buttons while the request is in flight. ──
 
   const spawnMutation = useMutation({
     // machine provided → use cross-machine forward; omitted → empty body {},
@@ -74,7 +68,7 @@ export function useAgentActions(
             }
           : {}),
       }),
-    onSuccess: () => track("spawn"),
+    onSuccess: () => { track("spawn"); },
     onError: (e: unknown) => showError(`Spawn failed: ${errMsg(e)}`),
   });
 
@@ -86,16 +80,12 @@ export function useAgentActions(
     // id (the button should not appear for a non-existent agent) —
     // throw directly so the onError path showErrors instead of
     // silently masking the real bug.
-    mutationFn: ({ sourceId, prompt }: { sourceId: number; prompt?: string }) => {
+    mutationFn: async ({ sourceId, prompt }: { sourceId: number; prompt?: string }) => {
       // Fork remains available while a terminated conversation is selected.
-      // Resolve at mutation time from both authoritative scoped caches instead
-      // of a render-time closure, so a recent SSE move between scopes cannot
-      // strand the source row in the sibling cache.
-      const source = [
-        ...(queryClient.getQueryData<AgentRow[]>(AGENTS_QUERY_KEY) ?? []),
-        ...(queryClient.getQueryData<AgentRow[]>(TERMINATED_AGENTS_QUERY_KEY) ?? []),
-      ].find((agent) => agent.agent_id === sourceId);
-      if (!source) throw new Error(`Fork source agent #${sourceId} not in cache`);
+      // Resolve from the live tree or selected detail. An archive row can be
+      // forked before selection, so a cache miss reads that ID directly.
+      const source = queryClient.getQueryData<AgentRow>([...AGENT_DETAIL_QUERY_KEY, sourceId]) ??
+        queryClient.getQueryData<AgentRoster>(AGENTS_QUERY_KEY)?.agents.find((agent) => agent.agent_id === sourceId) ?? await api.getAgent(sourceId);
       // A prompt requires prompt_source (backend rejects prompt without it);
       // a frontend prompt always comes from the user. No prompt → omit both.
       return api.spawnAgent({
@@ -104,7 +94,7 @@ export function useAgentActions(
         ...(prompt !== undefined ? { prompt, prompt_source: "user" } : {}),
       });
     },
-    onSuccess: () => track("fork"),
+    onSuccess: () => { track("fork"); },
     onError: (e: unknown) => showError(`Fork failed: ${errMsg(e)}`),
   });
 
@@ -112,7 +102,7 @@ export function useAgentActions(
     mutationFn: ({ id, force }: { id: number; force: boolean }) =>
       api.terminateAgent(id, force),
     onSuccess: (data) => {
-      // Acceptance is not observed exit; lifecycle rows remain SSE-owned.
+      // Acceptance is not observed exit; lifecycle rows remain read-model-owned.
       const messages = {
         enqueued: "Termination requested",
         already_terminated: "Already terminated",
@@ -140,7 +130,7 @@ export function useAgentActions(
   const resurrectMutation = useMutation({
     mutationFn: ({ id, prompt }: { id: number; prompt?: string }) =>
       api.resurrectAgent(id, prompt),
-    onSuccess: () => track("resurrect"),
+    onSuccess: (_data, { id }) => { track("resurrect"); void queryClient.invalidateQueries({ queryKey: AGENTS_QUERY_KEY }); void queryClient.invalidateQueries({ queryKey: [...AGENT_DETAIL_QUERY_KEY, id] }); },
     onError: (e: unknown) => showError(`Resurrect failed: ${errMsg(e)}`),
   });
 
@@ -181,11 +171,10 @@ export function useAgentActions(
   ]);
 
   // Track ids that have been spawned (mutation returned an id) but whose
-  // AgentSpawned SSE event has not yet landed the row into the cache. The
+  // authoritative roster has not yet returned the new row. The
   // SpawningRow placeholder stays visible for each id in this set, then
-  // is replaced by the real row in the same render frame the snapshot
-  // arrives. Without this, the brief window between mutation-resolve and
-  // SSE-arrival flashes as "no placeholder, no row".
+  // disappears when the card arrives or the post-acceptance read completes. Without this, the brief window between mutation-resolve and
+  // roster-arrival flashes as "no placeholder, no row".
   const [pendingSpawnIds, setPendingSpawnIds] = useState<ReadonlySet<number>>(
     () => new Set(),
   );
@@ -203,7 +192,7 @@ export function useAgentActions(
     () => new Set(),
   );
 
-  // Drop pending ids whose snapshot now lives in the cache.
+  // Drop pending ids whose card now lives in the cache.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- derived-state sync against the query cache; the functional updater returns prev when nothing changed, so no render loop
     setPendingSpawnIds((prev) => {
@@ -223,11 +212,11 @@ export function useAgentActions(
 
   // Placeholder count = in-flight phase + post-resolve phase.
   //   - in-flight: the spawn POST is unresolved. Show one placeholder
-  //     UNLESS this spawn's row already arrived via SSE — a row outside
+  //     UNLESS this spawn's row already arrived through repair — a row outside
   //     spawnBaselineRef means the real idling row is already in cache,
   //     so the placeholder must yield rather than render a second row.
   //   - post-resolve: id is known, held in pendingSpawnIds until its
-  //     snapshot lands in cache (then the agents-change effect drops it).
+  //     card arrives or its post-acceptance read finishes.
   const pendingSpawnCount = useMemo(() => {
     let inFlight = 0;
     if (spawnMutation.isPending) {
@@ -242,14 +231,13 @@ export function useAgentActions(
   // -- Action wrappers --
 
   const markSpawnPending = useCallback(
-    (id: number) => {
-      // If the AgentSpawned event already landed (gateway publishes before
-      // returning the HTTP response, so this is a real race window), the
-      // snapshot is in the cache and we don't need a placeholder at all.
+    async (id: number) => {
+      // If repair already read the spawned row before the HTTP response,
+      // the card is in the cache and we don't need a placeholder at all.
       // Skipping the add here also keeps the agents-change useEffect from
       // having to chase ids that were already resolved.
       const already = (
-        queryClient.getQueryData<AgentRow[]>(AGENTS_QUERY_KEY) ?? []
+        queryClient.getQueryData<AgentRoster>(AGENTS_QUERY_KEY)?.agents ?? []
       ).some((a) => a.agent_id === id);
       if (already) return;
       setPendingSpawnIds((prev) => {
@@ -258,6 +246,18 @@ export function useAgentActions(
         next.add(id);
         return next;
       });
+      try {
+        // Start after acceptance. A short-lived agent may already be terminated
+        // and absent from the live tree; completion, not membership, ends the
+        // placeholder. Errors remain visible through the roster query.
+        await queryClient.invalidateQueries({ queryKey: AGENTS_QUERY_KEY });
+      } finally {
+        setPendingSpawnIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      }
     },
     [queryClient],
   );
@@ -265,20 +265,19 @@ export function useAgentActions(
   const spawn = useCallback(
     async (machine?: string, model?: string, preset?: string, reasoning_effort?: string): Promise<number | null> => {
       // Snapshot current ids so the in-flight placeholder can detect when
-      // this spawn's AgentSpawned row arrives via SSE (which beats the HTTP
+      // this spawn's row arrives through repair (which beats the HTTP
       // response) and yield to it instead of double-rendering.
       setSpawnBaseline(
         new Set(
-          (queryClient.getQueryData<AgentRow[]>(AGENTS_QUERY_KEY) ?? []).map(
+          (queryClient.getQueryData<AgentRoster>(AGENTS_QUERY_KEY)?.agents ?? []).map(
             (a) => a.agent_id,
           ),
         ),
       );
       try {
         const { id } = await spawnMutation.mutateAsync({ machine, model, preset, reasoning_effort });
-        // Hold the SpawningRow placeholder until AgentSpawned arrives.
-        markSpawnPending(id);
         setActiveId(id);
+        await markSpawnPending(id);
         return id;
       } catch {
         return null;
@@ -291,8 +290,8 @@ export function useAgentActions(
     async (sourceId: number, prompt?: string): Promise<number | null> => {
       try {
         const { id } = await forkMutation.mutateAsync({ sourceId, prompt });
-        markSpawnPending(id);
         setActiveId(id);
+        await markSpawnPending(id);
         return id;
       } catch {
         return null;
@@ -312,7 +311,7 @@ export function useAgentActions(
       const prev = useStore.getState().activeId;
       if (prev === id) {
         const list =
-          queryClient.getQueryData<AgentRow[]>(AGENTS_QUERY_KEY) ?? [];
+          queryClient.getQueryData<AgentRoster>(AGENTS_QUERY_KEY)?.agents ?? [];
         const idx = list.findIndex((a) => a.agent_id === id);
         const neighbors = [...list.slice(idx + 1), ...list.slice(0, idx)];
         const next = neighbors.find((a) => a.status !== "terminated");

@@ -121,7 +121,7 @@ export function FleetView() {
   // Inbox tab badge: total open items across the fleet, rolled up from the agent
   // snapshot — decisions awaiting a response plus unread FYI notices.
   const inboxCount = useMemo(
-    () => agents.reduce((n, a) => n + a.notices_awaiting_response.length + a.unread_notice_count, 0),
+    () => agents.reduce((n, a) => n + a.awaiting_response_count + a.unread_notice_count, 0),
     [agents],
   );
 

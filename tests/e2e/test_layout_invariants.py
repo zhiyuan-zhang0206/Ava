@@ -45,30 +45,43 @@ VIEWPORTS = [320, 390, 768]
 _AGENT = {
     "agent_id": 1,
     "spawner": "user",
+    "fork_source_agent_id": None,
     "status": "idling",
     "pid": 100,
     "spawned_at": "2026-08-07T00:00:00Z",
     "started_at": "2026-08-07T00:00:00Z",
     "last_active_at": "2026-08-07T00:00:00Z",
+    "last_inbound_at": "2026-08-07T00:00:00Z",
     "label": "layout-test",
     "machine": "test-host",
     "supports_vision": True,
-    "notices_awaiting_response": [
-        {
-            "id": 1,
-            "agent_id": 1,
-            "agent_label": "layout-test",
-            "title": "Needs a decision",
-            "content": "Pick A or B.",
-            "priority": "P2",
-            "require_response": True,
-            "blocking": False,
-            "created_at": "2026-08-07T00:00:00Z",
-            "updated_at": "2026-08-07T00:00:00Z",
-        }
-    ],
+    "liveness_state": "unknown",
+    "observation": {
+        "machine_probe_at": None,
+        "machine_probe_valid_until": None,
+        "runtime_lease_expires_at": None,
+        "runtime_owner": "unknown",
+    },
+    "heartbeat_paused_until": None,
+    "awaiting_response_count": 1,
+    "highest_notice_priority": "P2",
     "unread_notice_count": 1,
 }
+
+_AWAITING_NOTICES = [
+    {
+        "id": 1,
+        "agent_id": 1,
+        "agent_label": "layout-test",
+        "title": "Needs a decision",
+        "content": "Pick A or B.",
+        "priority": "P2",
+        "require_response": True,
+        "blocking": False,
+        "created_at": "2026-08-07T00:00:00Z",
+        "updated_at": "2026-08-07T00:00:00Z",
+    }
+]
 
 _FYI_NOTICE = {
     "id": 2,
@@ -129,10 +142,17 @@ _TASKS = {
 # Endpoint → stub body. Layout invariants hold on any data state; the fleet
 # Inbox/Tasks tabs get real rows so their layout-driving UI renders.
 _API_STUBS: dict[str, object] = {
-    "/api/agents": [_AGENT],
+    "/api/agents": {"agents": [_AGENT], "next_cursor": None},
+    "/api/agents/roster": {"agents": [_AGENT], "ancestors": []},
+    "/api/agents/1": {
+        **_AGENT,
+        "notices_awaiting_response": _AWAITING_NOTICES,
+        "fork_source_checkpoint_id": None,
+        "last_probe_at": None,
+    },
     "/api/notices": {
         "open": [_FYI_NOTICE],
-        "awaiting": [_AGENT["notices_awaiting_response"]],
+        "awaiting": _AWAITING_NOTICES,
         "resolved_page": [_RESOLVED_NOTICE],
         "next_cursor": None,
     },

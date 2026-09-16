@@ -65,9 +65,35 @@ class FakeGateway:
         self.spawned: list[tuple[str | None, dict[str, object] | None]] = []
         self.send_failures = send_failures
         self.stream_failures = stream_failures
+        self.directory_calls: list[tuple[str, str, int | None]] = []
+        self.detail_calls: list[int] = []
 
-    async def list_agents(self) -> list[dict[str, Any]]:
-        return self.agents
+    async def list_agents(
+        self, *, scope: str, query: str = "", before_id: int | None = None
+    ) -> dict[str, Any]:
+        self.directory_calls.append((scope, query, before_id))
+        matches = sorted(
+            (
+                agent
+                for agent in self.agents
+                if (scope == "all" or (agent["status"] == "terminated") == (scope == "terminated"))
+                and query.casefold() in (agent["label"] or "").casefold()
+                and (before_id is None or agent["agent_id"] < before_id)
+            ),
+            key=lambda agent: agent["agent_id"],
+            reverse=True,
+        )
+        page = matches[:100]
+        return {
+            "agents": [
+                {key: agent[key] for key in ("agent_id", "label", "status")} for agent in page
+            ],
+            "next_cursor": page[-1]["agent_id"] if len(matches) > 100 else None,
+        }
+
+    async def get_agent(self, agent_id: int) -> dict[str, Any] | None:
+        self.detail_calls.append(agent_id)
+        return next((agent for agent in self.agents if agent["agent_id"] == agent_id), None)
 
     async def list_commands(self) -> list[dict[str, Any]]:
         commands = getattr(self, "commands", None)
@@ -162,6 +188,17 @@ def test_cmd_list_no_alive_agents() -> None:
     assert _text(out) == copy.NO_LIVE_AGENTS
 
 
+def test_cmd_list_pages_live_agents_only() -> None:
+    gateway = FakeGateway(
+        agents=[_row(agent_id) for agent_id in range(1, 102)]
+        + [_row(agent_id, status="terminated") for agent_id in range(102, 120)]
+    )
+    text = _text(asyncio.run(_core(gateway)._cmd_list("telegram")))
+    assert len(text.splitlines()) == 102
+    assert gateway.directory_calls == [("live", "", None), ("live", "", 2)]
+    assert gateway.detail_calls == []
+
+
 def test_cmd_switch_matches_agent_id() -> None:
     """/switch 405 selects the row by agent_id and starts the subscription."""
     gateway = FakeGateway(
@@ -178,6 +215,8 @@ def test_cmd_switch_matches_agent_id() -> None:
     assert copy.SWITCHED_TO.format(agent_id=405, label="Ava \u8d1f\u8d23\u4eba") in text
     assert "hello" in text
     assert core._last_pushed.get(("telegram", "12345", 405)) == "3.1"
+    assert gateway.directory_calls == []
+    assert gateway.detail_calls == [405]
 
 
 def test_cmd_switch_matches_label() -> None:
@@ -187,6 +226,31 @@ def test_cmd_switch_matches_label() -> None:
     out = asyncio.run(core._cmd_switch(state, "ava \u8d1f\u8d23\u4eba"))
     assert state.current_agent_id == 405
     assert copy.SWITCHED_TO.format(agent_id=405, label="Ava \u8d1f\u8d23\u4eba") in _text(out)
+    assert gateway.directory_calls == [("live", "ava \u8d1f\u8d23\u4eba", None)]
+
+
+def test_cmd_switch_label_pages_exact_matches_and_prefers_live() -> None:
+    gateway = FakeGateway(
+        agents=[_row(1, label="Target")]
+        + [_row(agent_id, label="target-extra") for agent_id in range(2, 102)]
+        + [_row(102, label="target", status="terminated")]
+    )
+    state = ChatState("telegram", "12345")
+    asyncio.run(_core(gateway)._cmd_switch(state, "TARGET"))
+    assert state.current_agent_id == 1
+    assert gateway.directory_calls == [("live", "TARGET", None), ("live", "TARGET", 2)]
+    assert gateway.detail_calls == []
+
+
+def test_cmd_switch_label_rejects_partial_and_terminated_matches() -> None:
+    gateway = FakeGateway(
+        agents=[_row(1, label="target-extra"), _row(2, label="target", status="terminated")]
+    )
+    state = ChatState("telegram", "12345")
+    reply = asyncio.run(_core(gateway)._cmd_switch(state, "target"))
+    assert state.current_agent_id is None
+    assert _text(reply) == copy.AGENT_CANNOT_SWITCH.format(agent_id=2, status="terminated")
+    assert gateway.directory_calls == [("live", "target", None), ("terminated", "target", None)]
 
 
 def test_cmd_switch_replays_five_dialog_items_amid_non_dialog() -> None:
@@ -252,6 +316,8 @@ def test_cmd_status_reads_agent_id() -> None:
     text = _text(out)
     assert copy.STATUS_DETAIL_LINE.format(agent_id=405, label="Ava \u8d1f\u8d23\u4eba") in text
     assert copy.STATUS_STATE_LINE.format(status="running") in text
+    assert gateway.directory_calls == []
+    assert gateway.detail_calls == [405]
 
 
 def test_cmd_status_clears_vanished_agent() -> None:

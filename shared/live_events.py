@@ -38,8 +38,6 @@ from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-from shared.agent_snapshot import AgentSnapshot
-
 # One SSE event per window: the agent-side publisher coalesces deltas / chunks
 # into this window and the frontend throttles stream parsing to the same value
 # (see ui/web/src/lib/constants-generated.ts, generated from this constant).
@@ -426,23 +424,23 @@ class PageClosed(_Base):
 
 
 class AgentSpawned(_Base):
-    """A new agent was created (INSERT into agents + agents_meta committed).
-    Carries the full snapshot so the frontend upserts into its agents list
-    without re-fetching. Published once per agent, at spawn / resurrect /
-    respawn paths."""
+    """A committed agent creation invalidates the live roster.
+
+    Consumers read authoritative cards and ancestry; the event carries no
+    state that could overwrite a newer snapshot.
+    """
 
     role: Literal["agent_spawned"] = "agent_spawned"
-    snapshot: AgentSnapshot
 
 
 class AgentUpdated(_Base):
-    """An existing agent's snapshot changed — status transition, label
-    update, started_at / pid set, last_active_at advanced. Published from
-    every site that UPDATEs agents_meta. The frontend setQueryData merges
-    by id; the snapshot is authoritative."""
+    """A committed lifecycle or display-state change invalidates agent reads.
+
+    This hint identifies the changed agent; consumers reconcile from their
+    authoritative read surface rather than applying an unversioned snapshot.
+    """
 
     role: Literal["agent_updated"] = "agent_updated"
-    snapshot: AgentSnapshot
 
 
 class LabelUpdated(_Base):
@@ -464,15 +462,15 @@ class NoticePosted(_Base):
     """Published when the agent posts or edits any open notice via
     `ava.ui.notify` / `ava.ui.edit_notice`. Carries only the lightweight header
     (not the body), so the unified Inbox refetches its queue. A notice that needs
-    a response also publishes AgentUpdated, whose snapshot carries its body and
-    response state for inspector consumers."""
+    a response also publishes AgentUpdated, which invalidates the selected
+    agent's authoritative detail read for inspector consumers."""
 
     role: Literal["notice_posted"] = "notice_posted"
     notice_id: int
     priority: str
     title: str
     # The task this notice belongs to, or None when it names none — lets the
-    # frontend group the FYI feed by task the same way the snapshot does.
+    # frontend group the FYI feed by task like the authoritative notice read.
     task_id: int | None = None
 
 

@@ -17,7 +17,11 @@ import type { NoticesFeed,
   InspectWidget,
   AgentMessageEnqueued,
   AgentRow,
-  WireAgentSummary,
+  WireAgentRow,
+  WireAgentRoster,
+  WireAgentDirectoryPage,
+  AgentRoster,
+  AgentDirectoryPage,
   ContextBreakdownResponse,
   DefaultModelView,
   AlertsResponse,
@@ -395,11 +399,21 @@ export const api = {
   // Selecting a sidebar row = selecting the agent to view;
   // spawn / terminate all operate by agent_id.
 
-  listAgents: (scope: "live" | "terminated" | "all" = "live"): Promise<AgentRow[]> => {
-    return f(`/api/agents?scope=${scope}&fields=summary`)
-      .then(ok<WireAgentSummary[]>)
-      .then((rows) => rows.map(projectAgentStatus));
+  getAgentRoster: (signal?: AbortSignal): Promise<AgentRoster> =>
+    f("/api/agents/roster", { signal }).then(ok<WireAgentRoster>).then((roster) => ({
+      agents: roster.agents.map(projectAgentStatus), ancestors: roster.ancestors,
+    })),
+
+  listAgents: (options: { scope?: "live" | "terminated" | "all"; query?: string; beforeId?: number; limit?: number; signal?: AbortSignal } = {}): Promise<AgentDirectoryPage> => {
+    const params = new URLSearchParams({ scope: options.scope ?? "live", limit: String(options.limit ?? 100) });
+    if (options.query) params.set("query", options.query);
+    if (options.beforeId != null) params.set("before_id", String(options.beforeId));
+    return f(`/api/agents?${params}`, { signal: options.signal }).then(ok<WireAgentDirectoryPage>)
+      .then((page) => ({ ...page, agents: page.agents.map(projectAgentStatus) }));
   },
+
+  getAgent: (agentId: number, signal?: AbortSignal): Promise<AgentRow> =>
+    f(`/api/agents/${agentId}`, { signal }).then(ok<WireAgentRow>).then(projectAgentStatus),
 
   spawnAgent: (req: SpawnAgentRequest = {}): Promise<SpawnedAgent> => {
     return f("/api/agents", POST_JSON(req)).then(ok<SpawnedAgent>);

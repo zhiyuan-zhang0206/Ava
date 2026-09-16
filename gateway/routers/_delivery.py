@@ -99,18 +99,11 @@ async def deliver_chat_inbound(
         )
     except CallerProtocolUnavailableError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    # The connection block commits on exit. Publish the badge refresh only AFTER
-    # that commit, on a fresh connection: keeping it inside the block coupled a
-    # redis outage to a rollback of the user's inbound INSERT (a publish raising
-    # inside the `with` unwinds the transaction), and announced an AgentUpdated
-    # snapshot before the write was durable. The whole step is off the delivery's
-    # critical path — the inbound is already durable — so it degrades gracefully:
-    # publish_agent_updated_sync's publish is never-raise, but its fresh-connection
-    # snapshot READ could still fail; a failure there must not 500 the delivery or
-    # skip the InboundArrived + resurrect below, so it is logged and swallowed.
+    # Delivery committed before this best-effort hint. A failure here must
+    # neither roll back the inbound nor skip its arrival/resurrection tail.
     if refresh_badge:
         try:
-            await asyncio.to_thread(_badge_refresh_blocking, pool, agent_id)
+            await asyncio.to_thread(publish_agent_updated_sync, agent_id)
         except Exception as exc:
             logger.warning(
                 "deliver_chat_inbound: badge refresh for agent {aid} failed after "
@@ -245,10 +238,3 @@ def _reconcile_blocking(
             source=source,
             payload=payload,
         )
-
-
-def _badge_refresh_blocking(pool: ConnectionPool, agent_id: int) -> None:
-    """Sync unread-badge snapshot + publish — via to_thread (fresh connection;
-    never-raise publish, but the snapshot read can fail)."""
-    with pool.connection() as conn:
-        publish_agent_updated_sync(conn, agent_id)

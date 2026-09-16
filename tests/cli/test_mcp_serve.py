@@ -141,6 +141,7 @@ async def test_tool_arguments_match_the_gateway_surface() -> None:
     }
     assert set(schemas["send_message"]["required"]) == {"agent_id", "content"}
     assert schemas["list_agents"].get("required", []) == []
+    assert set(schemas["list_agents"]["properties"]) == {"scope", "query", "before_id", "limit"}
     assert set(schemas["terminate_agent"]["properties"]) == {"agent_id", "message", "force"}
     assert schemas["cluster_status"].get("required", []) == []
 
@@ -156,46 +157,57 @@ async def test_descriptions_are_english_and_flag_the_destructive_tool() -> None:
 # ─── each tool proxies to its gateway route ───────────────────────────────
 
 
-async def test_list_agents_compacts_rows(monkeypatch: pytest.MonkeyPatch) -> None:
-    captured = _patch_http(monkeypatch, lambda _r: httpx.Response(200, json=[_summary_agent_row()]))
+async def test_list_agents_returns_one_directory_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    page = {"agents": [_summary_agent_row()], "next_cursor": 7}
+    captured = _patch_http(monkeypatch, lambda _r: httpx.Response(200, json=page))
     result = await _call("list_agents", {})
 
-    assert str(captured["request"].url) == "http://gw:8000/api/agents?fields=summary"
+    assert captured["request"].url.path == "/api/agents"
+    assert dict(captured["request"].url.params) == {"scope": "live", "query": "", "limit": "100"}
     assert captured["request"].method == "GET"
-    assert result == {
-        "result": [
-            {
-                "agent_id": 7,
-                "status": "running",
-                "label": "researcher",
-                "machine": "mac-mini",
-                "spawner": "mcp",
-                "last_active_at": "2026-07-01T00:05:00Z",
-            }
-        ]
+    assert result == page
+
+
+async def test_list_agents_passes_search_scope_and_cursor(monkeypatch: pytest.MonkeyPatch) -> None:
+    page = {"agents": [_summary_agent_row(2, "terminated")], "next_cursor": None}
+    captured = _patch_http(monkeypatch, lambda _r: httpx.Response(200, json=page))
+    result = await _call(
+        "list_agents",
+        {
+            "scope": "terminated",
+            "query": "research",
+            "before_id": 9,
+            "limit": 5,
+        },
+    )
+    assert dict(captured["request"].url.params) == {
+        "scope": "terminated",
+        "query": "research",
+        "before_id": "9",
+        "limit": "5",
     }
+    assert result == page
 
 
-async def test_list_agents_filters_by_status(monkeypatch: pytest.MonkeyPatch) -> None:
-    rows = [_agent_row(1, "running"), _agent_row(2, "terminated")]
-    _patch_http(monkeypatch, lambda _r: httpx.Response(200, json=rows))
-    result = await _call("list_agents", {"status": "terminated"})
-    assert [r["agent_id"] for r in result["result"]] == [2]
-
-
-async def test_unknown_status_filter_errors_instead_of_returning_nothing(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"scope": "active"},
+        {"limit": 0},
+        {"limit": 201},
+        {"before_id": 0},
+        {"query": "x" * 201},
+    ],
+)
+async def test_invalid_directory_arguments_fail_before_dial(
+    monkeypatch: pytest.MonkeyPatch, arguments: dict[str, object]
 ) -> None:
-    """An empty list would read as "the fleet is empty" and get acted on; the
-    error names the legal states so the caller can fix its own argument. Checked
-    before the dial, so a bad filter costs no round trip."""
-
     def _unreached(_r: httpx.Request) -> httpx.Response:
-        pytest.fail("must not dial the gateway with an invalid filter")
+        pytest.fail("must not dial the gateway with invalid directory arguments")
 
     _patch_http(monkeypatch, _unreached)
-    with pytest.raises(ToolError, match=r"unknown agent status 'active'.*idling"):
-        await _call("list_agents", {"status": "active"})
+    with pytest.raises(ToolError):
+        await _call("list_agents", arguments)
 
 
 async def test_get_agent_returns_the_full_row(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -318,7 +330,9 @@ async def test_cluster_status_reads_the_cluster_route(monkeypatch: pytest.Monkey
 async def test_every_call_presents_the_cluster_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     """The gateway's authenticated surface — an unauthenticated proxy would 401
     on every tool."""
-    captured = _patch_http(monkeypatch, lambda _r: httpx.Response(200, json=[]))
+    captured = _patch_http(
+        monkeypatch, lambda _r: httpx.Response(200, json={"agents": [], "next_cursor": None})
+    )
     await _call("list_agents", {})
     assert captured["request"].headers["Authorization"] == "Bearer s"
 

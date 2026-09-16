@@ -35,14 +35,10 @@ IDLE_STATUS = "idling"
 
 
 def _is_target_idle(event: dict, target_id: int) -> bool:
-    """True when `event` reports that agent `target_id` just went idle.
-
-    `event` is one decoded lifecycle update from the shared event stream. Only
-    status-change updates carry a snapshot; everything else is ignored.
-    """
-    if event.get("role") != "agent_updated":
+    """A matching lifecycle hint requests a fresh authoritative status read."""
+    if event.get("role") != "agent_updated" or event["agent_id"] != target_id:
         return False
-    return event["agent_id"] == target_id and event["snapshot"]["status"] == IDLE_STATUS
+    return ava.agents.get_status(target_id) == IDLE_STATUS
 
 
 def _notify(target_id: int) -> None:
@@ -100,7 +96,13 @@ def watch(target_id: int) -> None:
             if _is_target_idle(event, target_id):
                 _notify(target_id)
                 return
-    except (redis.TimeoutError, TimeoutError, ConnectionError, OSError):
+    except (
+        redis.TimeoutError,
+        TimeoutError,
+        ConnectionError,
+        OSError,
+        ava.agents.GatewayUnavailable,
+    ):
         # Stream died mid-watch; poll so the caller is not left waiting blind.
         _watch_via_poll(target_id)
 
