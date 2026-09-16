@@ -80,9 +80,9 @@ from shared.config import field_alias, get_field, settings
 from shared.lm import provider_api
 
 # Reasoning-effort dispatch lives in the companion module shared/lm/_effort.py
-# (split for the file-size ceiling); per-model facts live in
-# shared/lm/registry.py. Both are re-imported here so factory stays the catalog
-# import surface for callers and tests.
+# (split for the file-size ceiling); per-model facts and the media-capability
+# resolution live in shared/lm/registry.py. Both are re-imported here so
+# factory stays the catalog import surface for callers and tests.
 from shared.lm._effort import (
     _clamp_effort as _clamp_effort,
 )  # re-exported (tests import it via factory)
@@ -90,6 +90,9 @@ from shared.lm._plugin_providers import (
     ensure_provider_plugins_loaded as ensure_provider_plugins_loaded,
 )  # re-exported (gateway entry points call it before reading the registry)
 from shared.lm._providers import ThinkingConfig
+from shared.lm.registry import (
+    _VISION_MODEL_PREFIXES as _VISION_MODEL_PREFIXES,  # re-exported legacy fallback
+)
 from shared.lm.registry import (
     MODEL_CONTEXT_WINDOW as MODEL_CONTEXT_WINDOW,  # re-exported catalog view
 )
@@ -107,6 +110,12 @@ from shared.lm.registry import (
 from shared.lm.registry import (
     SUPPORTED_MODELS as SUPPORTED_MODELS,  # re-exported catalog view
 )
+from shared.lm.registry import (
+    attach_modalities_for_model as attach_modalities_for_model,  # re-exported resolution
+)
+from shared.lm.registry import (
+    media_types_for_model as media_types_for_model,  # re-exported resolution
+)
 
 
 class _LLMFactory(Protocol):
@@ -121,31 +130,6 @@ class _LLMFactory(Protocol):
     def __call__(self, model: str) -> BaseChatModel: ...
 
 
-# The legacy core vision-prefix fallback is empty. Registered plugin models are
-# authoritative through `ModelSpec.media_types`; unregistered ids under a
-# plugin prefix use `ProviderBinding.vision`.
-_VISION_MODEL_PREFIXES: tuple[str, ...] = ()
-
-
-def media_types_for_model(model: str) -> frozenset[str]:
-    """Native media capability for `model` across the three provider tiers.
-
-    Registered plugin models use their per-model ``ModelSpec.media_types``. An
-    unregistered id under a plugin prefix gets the binding's v1 image-only
-    ``vision`` capability. No match means text-only.
-    """
-    ensure_provider_plugins_loaded()
-    spec = MODELS.get(model)
-    if spec is not None:
-        return spec.media_types
-    for prefix, binding in provider_api.REGISTRY.bindings.items():
-        if model.startswith(prefix):
-            return frozenset({"image"}) if binding.vision else frozenset()
-    if model.startswith(_VISION_MODEL_PREFIXES):
-        return frozenset({"image"})
-    return frozenset()
-
-
 def model_supports_vision(model: str) -> bool:
     """Whether `model` accepts images via registry media types, plugin vision, or fallback.
 
@@ -153,28 +137,6 @@ def model_supports_vision(model: str) -> bool:
     declared facts here, so callers judging an agent's effective model must
     resolve the withdrawal fallback first (`resolve_available_model`)."""
     return "image" in media_types_for_model(model)
-
-
-def attach_modalities_for_model(model: str) -> frozenset[str]:
-    """The media types `ava.self.attach` accepts for `model`.
-
-    `ModelSpec.attach_modalities` when the entry declares an attach-specific
-    opinion; otherwise the model's native `media_types` — attach registers
-    files into the same message pipeline, so the native matrix is the default
-    contract (user ruling 2026-08-28). Empty result = text-only for attach:
-    no files can be registered, the SDK docs drop the member, and the call
-    raises. Unregistered ids fall through the same provider tiers as
-    `media_types_for_model`.
-
-    Raw-entry semantics: a withdrawn id answers with its declared set; the
-    registration gates resolve the effective model first (task #3212)."""
-    ensure_provider_plugins_loaded()
-    spec = MODELS.get(model)
-    if spec is not None:
-        if spec.attach_modalities is not None:
-            return spec.attach_modalities
-        return spec.media_types
-    return media_types_for_model(model)
 
 
 def vision_capable_provider_names() -> list[str]:
