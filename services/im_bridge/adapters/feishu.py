@@ -336,6 +336,7 @@ class FeishuAdapter(IMAdapter):
         this app; the create-message response carries it, so every outbound
         send teaches the poller one more chat. Fails softly — polling is a
         fallback, never a reason to break a send.
+        Restore the owner open id if the restart seed round found no user message.
         """
         try:
             chat_id = self._sent_chat_ids.get(open_id)
@@ -344,6 +345,8 @@ class FeishuAdapter(IMAdapter):
                 logger.info(
                     "FeishuAdapter: poller registered chat {} for open_id {}", chat_id, open_id
                 )
+            if not self._last_open_id:
+                self._last_open_id = open_id
         except Exception as exc:
             logger.debug("FeishuAdapter: chat registration failed: {}", exc)
 

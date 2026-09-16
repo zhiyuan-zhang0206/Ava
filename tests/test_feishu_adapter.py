@@ -787,6 +787,42 @@ async def test_send_registers_chat_for_polling(adapter: FeishuAdapter) -> None:
     assert "oc_p2p_1" in adapter._poll_chats
 
 
+async def test_send_restores_owner_open_id_when_unseeded(adapter: FeishuAdapter) -> None:
+    """An outbound send restores the owner open id when the seed found no user."""
+    adapter._app_id = "cli_x"
+    adapter._app_secret = "secret_x"  # noqa: S105
+    thread = BlockingThread()
+    thread.start()
+    adapter._ws_thread = thread
+    rest = FakeRestClient()
+    adapter._rest_client = rest
+    try:
+        assert adapter._last_open_id == ""
+        await adapter.send("ou_user_1", "hi")
+    finally:
+        thread.release()
+        thread.join(timeout=2)
+    assert adapter._last_open_id == "ou_user_1"
+
+
+async def test_send_does_not_override_existing_owner_open_id(adapter: FeishuAdapter) -> None:
+    """An outbound send preserves an existing owner open id."""
+    adapter._app_id = "cli_x"
+    adapter._app_secret = "secret_x"  # noqa: S105
+    thread = BlockingThread()
+    thread.start()
+    adapter._ws_thread = thread
+    rest = FakeRestClient()
+    adapter._rest_client = rest
+    adapter._last_open_id = "ou_first"
+    try:
+        await adapter.send("ou_other", "hi")
+    finally:
+        thread.release()
+        thread.join(timeout=2)
+    assert adapter._last_open_id == "ou_first"
+
+
 def test_start_poller_honors_zero_interval(monkeypatch: pytest.MonkeyPatch) -> None:
     """AVA_FEISHU_POLL_INTERVAL_SECONDS=0 disables the poller (WS-only)."""
     from shared.config import settings
