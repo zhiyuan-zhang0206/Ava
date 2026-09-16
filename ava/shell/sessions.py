@@ -4,6 +4,7 @@ __all_for_ava__ = ["capture", "kill", "list", "new", "renew", "send", "send_keys
 
 import builtins
 import contextlib
+import logging
 import math
 import re
 from datetime import datetime
@@ -18,6 +19,8 @@ from shared.cluster import session_name
 from shared.paths import repo_root, workspace_dir
 from shared.session_backend import get_shell_backend
 from shared.session_env import forward_env_dict
+
+logger = logging.getLogger(__name__)
 
 
 def _agent_prefix() -> str:
@@ -347,12 +350,22 @@ def kill(id: int) -> None:
     # R1 (Task #1021): a deliberately killed watcher must not be rebuilt by the
     # next boot reconcile — drop its registry row. A non-watcher session has no
     # row, so this is a no-op there. Fail-soft: a registry blip must not make
-    # the kill itself fail.
-    with contextlib.suppress(Exception):
+    # the kill itself fail — but it must not be silent either: a surviving row
+    # reads at the next boot reconcile as "killed, should exist" and rebuilds
+    # the very watcher this kill ended (the same visibility discipline the boot
+    # script's clean-exit delete follows).
+    try:
         from ava import _boot
         from shared.watcher_registry import delete_watcher
 
         delete_watcher(int(_boot.agent_id()), id)
+    except Exception:
+        logger.warning(
+            "watcher registry row delete failed after killing session %s — "
+            "the next boot reconcile may rebuild the killed watcher",
+            id,
+            exc_info=True,
+        )
 
 
 # Not in __all_for_ava__, so never rendered into the SDK docs: a prefix-scoped
@@ -368,14 +381,20 @@ def kill_all() -> int:
     # killed must not be resurrected by the next boot reconcile (Task #1825 —
     # a kill path that left the registry row behind made a killed cron come
     # back as a second live instance). Fail-soft: a registry blip must not
-    # make the cleanup itself fail.
-    with contextlib.suppress(Exception):
+    # make the cleanup itself fail — visible for the same reason as kill().
+    try:
         from ava import _boot
         from shared.watcher_registry import delete_watcher, watcher_session_ids
 
         agent_id = int(_boot.agent_id())
         for session_id in watcher_session_ids(agent_id=agent_id):
             delete_watcher(agent_id, session_id)
+    except Exception:
+        logger.warning(
+            "watcher registry cleanup after kill_all failed — killed watchers "
+            "may be rebuilt at the next boot",
+            exc_info=True,
+        )
     return len(sessions)
 
 
