@@ -432,6 +432,26 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         "the checkpoint",
         tier="anomaly",
     ),
+    # settled-abort inbound reconcile (task #3615) — at a fatal abort whose
+    # checkpoint settlement already ran, the claimed inbounds are disposed at
+    # the settlement point instead of waiting for a cold admission/boot
+    "host_abort_reconcile_skipped": _telemetry(
+        "host_abort_reconcile_skipped",
+        "the settled hosted turn abort skipped the immediate inbound reconcile "
+        "(fail-closed) — the claimed rows are left to the next cold admission. "
+        "Carries the reason: the soft switch is off (disabled), the turn's "
+        "resources never fully settled (resources_unsettled), or the runtime "
+        "ownership was already replaced (ownership_lost — the replacement "
+        "disposes the rows)",
+        tier="noise",
+    ),
+    "host_abort_reconcile_failed": _telemetry(
+        "host_abort_reconcile_failed",
+        "the immediate inbound reconcile at a settled hosted turn abort raised "
+        "— the host does not treat it as fatal and the next cold admission "
+        "retries the disposal of the claimed rows",
+        tier="anomaly",
+    ),
     "host_admission_wait_exceeded": _telemetry(
         "host_admission_wait_exceeded",
         "a hosted turn has queued at the host admission gate "

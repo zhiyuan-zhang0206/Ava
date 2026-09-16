@@ -199,10 +199,17 @@ class TurnOutcome:
     no-work park (crash-fresh halted claim, open circuit breaker) ends
     `turn_idle` with `crashed` False, and the settle deliberately leaves the
     marker untouched, so the park cannot relabel a corpse healthy.
+
+    `aborted` marks the fatal-abort settlement: the turn's failure was written
+    into the flushed checkpoint (`settle_turn_failure`) before this outcome was
+    returned, so the checkpoint is durable and the settle boundary may
+    reconcile the abort's claimed inbounds. Unclassified exceptions end
+    `crashed` without it — their checkpoint was never settled.
     """
 
-    __slots__ = ("crashed", "exited")
+    __slots__ = ("aborted", "crashed", "exited")
 
-    def __init__(self, *, exited: bool, crashed: bool) -> None:
+    def __init__(self, *, exited: bool, crashed: bool, aborted: bool = False) -> None:
         self.exited = exited
         self.crashed = crashed
+        self.aborted = aborted

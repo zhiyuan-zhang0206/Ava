@@ -39,7 +39,10 @@ without changing the actual node-progress clock.
 Runtime construction binds agent identity and both config layers before model
 creation and startup reconciliation. Cache eviction removes model/runtime
 objects, not agent identity, history or database ownership. A failed or cancelled
-turn drops its runtime so the next admission re-runs reconciliation.
+turn drops its runtime so the next admission re-runs reconciliation; an aborted
+turn (expected provider/compaction failure) keeps its runtime and reconciles its
+claimed inbounds at the settlement boundary itself
+(`host_abort_reconcile_enabled`), so no row waits for a boot that may not come.
 
 ## Entry points
 

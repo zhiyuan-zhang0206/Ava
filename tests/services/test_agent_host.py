@@ -37,10 +37,10 @@ from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, ConfigDict, Field
 
 import ava._boot
-from services.agent_host import dispatcher
+from services.agent_host import dispatcher, settlement
 from services.agent_host.dispatcher import TurnScheduler
 from services.agent_host.host import AgentHost
-from services.agent_host.runtime import _config_fingerprint
+from services.agent_host.runtime import TurnOutcome, _config_fingerprint
 from shared.config import settings
 from shared.config.turn_view import turn_settings
 from shared.context import AvaContext
@@ -326,7 +326,7 @@ def _stub_host_transitions(
             await flip(pool, incarnation.agent_id, "idling", expected_from="running")
 
     monkeypatch.setattr(host_mod, "admit_hosted_runtime", admit)
-    monkeypatch.setattr(host_mod, "settle_and_stamp_turn", settle_and_stamp)
+    monkeypatch.setattr(settlement, "settle_and_stamp_turn", settle_and_stamp)
     return stamps
 
 
@@ -528,7 +528,7 @@ class TestPoolIsolation:
             return False
 
         monkeypatch.setattr(host_mod, "admit_hosted_runtime", admit)
-        monkeypatch.setattr(host_mod, "settle_and_stamp_turn", settle_and_stamp)
+        monkeypatch.setattr(settlement, "settle_and_stamp_turn", settle_and_stamp)
         monkeypatch.setattr("shared.hosted_force.original_host_force", force)
         host = AgentHost(
             pool=cast(AsyncConnectionPool[Any], turn_pool),
@@ -548,6 +548,74 @@ class TestPoolIsolation:
             ("settle", control_pool),
             ("force", control_pool),
         ]
+
+
+class TestAbortSettlementReconcile:
+    """An aborted settlement disposes the turn's claimed inbounds (task #3615).
+
+    This locks WHEN the pass dispatches — only the settled abort, and only
+    after the settle. Its own gates live in
+    `test_agent_host_abort_reconcile.py`; the row-visible split in
+    `tests/agent/test_reconcile_after_abort.py`.
+    """
+
+    async def _run_ending(
+        self,
+        wired: _Build,
+        monkeypatch: pytest.MonkeyPatch,
+        drive: Callable[[int, object], Awaitable[TurnOutcome]],
+        order: list[str],
+    ) -> None:
+        host, _, _ = wired({1: _Row()})
+
+        async def settle_and_stamp(
+            _pool: object, _incarnation: object, *, exited: bool, crashed: bool
+        ) -> None:
+            order.append("settle")
+
+        async def reconcile(_pool: object, _checkpointer: object, _incarnation: object) -> None:
+            order.append("reconcile")
+
+        monkeypatch.setattr(settlement, "settle_and_stamp_turn", settle_and_stamp)
+        monkeypatch.setattr(settlement, "reconcile_inbounds_after_abort", reconcile)
+        monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
+        monkeypatch.setattr(host, "_drive_turns", drive)
+        await asyncio.wait_for(host.run_turn(1), 2)
+
+    async def test_settled_abort_reconciles_after_the_settle(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def drive(_agent: int, _runtime: object) -> TurnOutcome:
+            return TurnOutcome(exited=False, crashed=True, aborted=True)
+
+        order: list[str] = []
+        await self._run_ending(wired, monkeypatch, drive, order)
+        assert order == ["settle", "reconcile"]
+
+    async def test_unclassified_crash_leaves_the_reconcile_to_the_next_admission(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only the fatal-abort settlement proves the checkpoint settled; an
+        unclassified crash drops the runtime instead, and the next admission
+        (or boot) reconciles."""
+
+        async def drive(_agent: int, _runtime: object) -> TurnOutcome:
+            raise ValueError("unclassified crash")
+
+        order: list[str] = []
+        with pytest.raises(ValueError):
+            await self._run_ending(wired, monkeypatch, drive, order)
+        assert order == ["settle"]
+
+    async def test_clean_turn_never_reconciles(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def drive(_agent: int, _runtime: object) -> TurnOutcome:
+            return TurnOutcome(exited=False, crashed=False)
+
+        order: list[str] = []
+        await self._run_ending(wired, monkeypatch, drive, order)
+        assert order == ["settle"]
 
 
 class TestConcurrentAgentIsolation:
