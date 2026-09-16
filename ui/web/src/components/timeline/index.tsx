@@ -1104,7 +1104,9 @@ export function TimelineView({
   // are always groupable — including in-progress / streaming items — so the first
   // streaming chunk lands directly inside a work block (no bare-then-wrap layout
   // shift). Primary/bare items break turns by classifyItem returning non-secondary.
-  const groups = groupTimelineSegments(items);
+  // Scroll/pull indicators and expansion pins do not change the document.
+  // Reuse its grouping until a snapshot, history page, or live item changes it.
+  const groups = useMemo(() => groupTimelineSegments(items), [items]);
 
   const handleScrollToBottom = useCallback(() => {
     const viewport =
