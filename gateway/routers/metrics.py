@@ -33,8 +33,9 @@ router = APIRouter()
 
 @router.get("/api/metrics")
 def get_metrics(
-    # `days`'s range stays a protective constant (import-time Query bound); the
-    # default *window* is display.metrics_default_window_days.
+    # `days`'s range stays a protective constant (import-time Query bound;
+    # task #3696 exception inventory); the default *window* is
+    # display.metrics_default_window_days.
     days: Annotated[int | None, Query(ge=1, le=30)] = None,
     agent: Annotated[int | None, Query()] = None,
     since_compact: Annotated[bool, Query()] = False,  # noqa: FBT002 — FastAPI query param
@@ -59,8 +60,9 @@ def get_metrics(
 @router.get("/api/metrics/agents")
 def get_metrics_agents(
     request: Request,
-    # `days`'s range stays a protective constant (import-time Query bound); the
-    # default *window* is display.metrics_default_window_days.
+    # `days`'s range stays a protective constant (import-time Query bound;
+    # task #3696 exception inventory); the default *window* is
+    # display.metrics_default_window_days.
     days: Annotated[int | None, Query(ge=1, le=30)] = None,
     since_compact: Annotated[bool, Query()] = False,  # noqa: FBT002 — FastAPI query param
 ) -> AgentMetricsReport:

@@ -74,7 +74,8 @@ _ESCALATIONS_SELECT = (
 _ACTION_RESOLUTION = {"answer": "answered", "dismiss": "dismissed", "read": "read"}
 
 # Protective caps on the query parameters - constants, not config (user ruling
-# 2026-09-17, task #3696): the configurable surface is the *default* window
+# 2026-09-17; task #3696 exception inventory): the configurable surface is the
+# *default* window
 # ``display.notices_open_default_limit`` / ``display.notices_resolved_default_page``;
 # these ceilings bound one response's payload and stay fixed.
 _OPEN_FEED_MAX_LIMIT = 500

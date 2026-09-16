@@ -165,7 +165,7 @@ def _select_unlabeled(cur: psycopg.Cursor, cooling: list[int]) -> list[tuple[int
 
     The batch of 10 is an internal scheduling quantity, not a user-facing
     surface, so it stays a literal rather than joining cluster config (task
-    #3696).
+    #3696 exception inventory).
     """
     cur.execute(
         "SELECT t.id, "  # noqa: S608 — _PROMPT_INBOUND_CONDITION is a module constant, never user input

@@ -424,8 +424,8 @@ def inbox(lease_id: str, caller: object, *, limit: int = 100) -> list[dict[str, 
     check; each read records the rows as seen (idempotent).
 
     ``limit`` is one page — 100 covers a burst while the read stays bounded
-    (validated 1..1000), and the CLI's wait loop re-reads until something
-    arrives or its deadline passes.
+    (validated 1..1000; task #3696 exception inventory), and the CLI's wait
+    loop re-reads until something arrives or its deadline passes.
     """
     if not 1 <= limit <= 1000:
         raise ValueError("Inbox limit must be from 1 through 1000")
@@ -538,8 +538,8 @@ def relay_inbox(lease_id: str, relay_token: str, *, limit: int = 100) -> list[di
 
     The controller identity cannot read here and the relay token cannot release,
     renew or ACK anything — the handoff is scoped by construction. ``limit``
-    matches the controller inbox page (default 100, validated 1..1000): one
-    bounded read per relay poll.
+    matches the controller inbox page (default 100, validated 1..1000 — task
+    #3696 exception inventory): one bounded read per relay poll.
     """
     if not 1 <= limit <= 1000:
         raise ValueError("Inbox limit must be from 1 through 1000")

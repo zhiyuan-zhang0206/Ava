@@ -383,8 +383,9 @@ async def get_config(machine: str | None = None) -> ConfigView:
 @router.get("/api/config/audit")
 async def get_config_audit(
     machine: str | None = None,
-    # `last`'s range stays a protective constant (import-time Query bound);
-    # the default *count* is display.config_audit_default_last.
+    # `last`'s range stays a protective constant (import-time Query bound;
+    # task #3696 exception inventory); the default *count* is
+    # display.config_audit_default_last.
     last: int | None = Query(default=None, ge=1, le=200),
 ) -> ConfigAuditView:
     """Return the `.env` write audit trail, newest first.

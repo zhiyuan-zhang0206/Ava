@@ -420,6 +420,9 @@ def _initial_window(
 def get_timeline(
     agent_id: int,
     request: Request,
+    # `limit`'s range stays a protective constant (import-time Query bound;
+    # task #3696 exception inventory); the default *window* is
+    # display.timeline_default_limit.
     limit: int | None = Query(default=None, ge=1, le=1000),
     before: str | None = Query(default=None),
 ) -> TimelineResponse:

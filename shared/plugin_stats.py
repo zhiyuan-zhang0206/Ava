@@ -40,7 +40,8 @@ STATUSES = ("ok", "warn", "error")
 # Display text, not storage text: the console shows these verbatim in a
 # sidebar card, so the caps are what keep one runaway error message from
 # becoming the panel. `value` stays glanceable; `detail` carries the rest.
-# The identity and value caps stay constants — they bound structural strings
+# The identity and value caps stay constants (task #3696 exception
+# inventory) — they bound structural strings
 # (plugin/id/updated_by names, the one-glance value), not prose. The detail
 # cap is the one free-text bound worth tuning per cluster and is cluster
 # config: display.plugin_stats_max_detail_chars (default 500).

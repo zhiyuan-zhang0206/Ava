@@ -670,7 +670,8 @@ def get_agent_neighbors(
     agent_id: int,
     request: Request,
     # `depth`/`limit` ranges stay protective constants (import-time Query
-    # bounds); the default *walk* is display.neighbors_default_depth/limit.
+    # bounds; task #3696 exception inventory); the default *walk* is
+    # display.neighbors_default_depth/limit.
     depth: Annotated[int | None, Query(ge=1, le=5)] = None,
     limit: Annotated[int | None, Query(ge=1, le=100)] = None,
 ) -> NeighborsResponse:
