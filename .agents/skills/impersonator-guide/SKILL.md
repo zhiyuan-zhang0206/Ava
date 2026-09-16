@@ -35,7 +35,9 @@ Three values anchor every command in this skill:
 - **Session authority** — no credential exists to hold or pass. Every control
   command must run from inside this session's own process tree (the executor and
   its children); the session id plus that presence is the authority. A command
-  from any other process tree is refused — never move control to a helper.
+  from any other process tree is refused — never move control to a helper. Run control
+  commands directly in the executor session's own shell: the caller's ancestor chain must
+  contain the recorded executor anchor within 8 levels — deeper wrapping fails closed.
 - **The cluster executable** — use the `ava` CLI and Python interpreter of the
   cluster that hosts the agent (the checkout path was given to you, typically
   `<checkout>/.venv/bin/ava`). A bare `ava` on `PATH` can belong to a different
