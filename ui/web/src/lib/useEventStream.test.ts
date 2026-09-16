@@ -1110,6 +1110,7 @@ describe("fold subscription lifecycle (Task #1033 regression)", () => {
 
   it("every reconnect gap repairs scoped queries, including a second gap within 30 seconds", async () => {
     const { qc, wrapper } = withProviderAndClient();
+    for (const key of RECONNECT_QUERY_KEYS) qc.setQueryData(key, []);
     const spy = vi.spyOn(qc, "invalidateQueries");
     renderHook(() => useEventStream(() => undefined, () => undefined), { wrapper });
     await waitForInstance();
