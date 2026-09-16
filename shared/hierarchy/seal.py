@@ -54,7 +54,7 @@ class NodeSpec:
 
     def budget_tok(self) -> int:
         """The node's narrative budget: min(source/10, hard cap), in tokens."""
-        return min(self.src_tok // 10, NARRATIVE_CAP_TOK)
+        return narrative_budget_tok(self.src_tok)
 
 
 @dataclass(frozen=True)
@@ -75,6 +75,16 @@ class SealResult:
     nodes: tuple[NodeSpec, ...]
     pending: dict[int, tuple[Unit, ...]]
     max_level: int
+
+
+def narrative_budget_tok(src_tok: int) -> int:
+    """The node narrative budget: min(source/10, hard cap), in tokens.
+
+    The single budget formula, two callers with two kinds of source: the seal
+    cascade accounts structurally (nominal sums over ``Unit.tok``), generation
+    checks the actual input text. Keeping one function keeps the two in step.
+    """
+    return min(src_tok // 10, NARRATIVE_CAP_TOK)
 
 
 def _even_sizes(n: int, k: int) -> list[int]:
