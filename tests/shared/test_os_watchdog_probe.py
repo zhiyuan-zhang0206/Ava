@@ -9,8 +9,11 @@ user's real crontab.
 
 from __future__ import annotations
 
+import os
 import shutil
+import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -281,3 +284,100 @@ def test_register_linux_holds_crontab_lock_around_rmw(monkeypatch: pytest.Monkey
     assert seen.get("write_in_lock") is True, "crontab - must run under the lock"
     # the lock lives OUTSIDE $AVA_HOME so two clusters on one host serialize
     assert lock_paths and lock_paths[0].endswith(".ava-crontab.lock")
+
+
+# --- held-stop marker -----------------------------------------------------
+
+
+@pytest.fixture()
+def marker_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setattr(probe.settings.general, "ava_home", str(tmp_path))
+    return tmp_path
+
+
+def test_held_stop_marker_lives_in_the_home_state_dir(marker_home: Path) -> None:
+    """`state/` under the home already holds per-home runtime state; the marker
+    must be home-scoped so a co-located second cluster's stop is unaffected."""
+    assert probe.held_stop_marker_path() == marker_home / "state" / "held-stop"
+
+
+def test_no_marker_reads_absent(marker_home: Path) -> None:
+    assert probe.held_stop_state() is probe.HeldStopState.ABSENT
+
+
+def test_fresh_marker_round_trips_with_diagnostics(marker_home: Path) -> None:
+    """The stop side writes and the probe side reads the SAME path with the
+    same meaning; the text carries ts pid home so an operator can tell which
+    stop wrote it."""
+    probe.write_held_stop_marker()
+    assert probe.held_stop_state() is probe.HeldStopState.FRESH
+    ts, pid, home = probe.held_stop_marker_path().read_text().split()
+    assert abs(float(ts) - time.time()) < 60
+    assert pid == str(os.getpid())
+    assert home == str(marker_home)
+    probe.clear_held_stop_marker()
+    assert probe.held_stop_state() is probe.HeldStopState.ABSENT
+    assert not probe.held_stop_marker_path().exists()
+
+
+def test_marker_at_the_ttl_boundary(marker_home: Path) -> None:
+    """Exactly at the TTL still suppresses; a hair past it does not — the TTL
+    bounds a stop that died without clearing its marker."""
+    # integer-second values: exactly representable, so the boundary math is
+    # the comparison under test, not float noise
+    written = 2_000_000_000.0
+    marked = probe.held_stop_marker_path()
+    marked.parent.mkdir(parents=True)
+    marked.write_text(f"{written:.3f} 1 /x\n")
+    assert probe.held_stop_state(now=written + probe.HELD_STOP_TTL_S) is probe.HeldStopState.FRESH
+    assert (
+        probe.held_stop_state(now=written + probe.HELD_STOP_TTL_S + 0.001)
+        is probe.HeldStopState.STALE
+    )
+
+
+def test_future_marker_timestamp_reads_fresh(marker_home: Path) -> None:
+    """Clock stepped back after the write: with an untrustworthy timestamp,
+    suppression (leave the watchdog down through a possible stop) is the safe
+    side — and the TTL still bounds it."""
+    marked = probe.held_stop_marker_path()
+    marked.parent.mkdir(parents=True)
+    marked.write_text(f"{time.time() + 3600:.3f} 1 /x\n")
+    assert probe.held_stop_state() is probe.HeldStopState.FRESH
+
+
+@pytest.mark.parametrize("content", ["", "not-a-timestamp 1 /x\n"])
+def test_unreadable_marker_fails_open(marker_home: Path, content: str) -> None:
+    """A torn or foreign marker must not disable supervision — that failure
+    (a dead watchdog nobody revives) would outlive the race this guards."""
+    marked = probe.held_stop_marker_path()
+    marked.parent.mkdir(parents=True)
+    marked.write_text(content)
+    assert probe.held_stop_state() is probe.HeldStopState.UNREADABLE
+
+
+def test_clear_is_idempotent(marker_home: Path) -> None:
+    probe.clear_held_stop_marker()
+    probe.clear_held_stop_marker()  # absent marker: still a no-op, never raises
+
+
+def test_write_failure_warns_and_does_not_raise(
+    marker_home: Path, loguru_records: list[dict[str, Any]]
+) -> None:
+    """The marker is advisory: an unwritable state dir must not fail the stop
+    it protects — the write logs a warning and the probe simply sees no
+    (usable) marker."""
+    (marker_home / "state").write_text("a file where the state dir should be")
+    probe.write_held_stop_marker()
+    assert probe.held_stop_state() is probe.HeldStopState.UNREADABLE
+    assert any("held-stop marker" in str(r["message"]) for r in loguru_records)
+
+
+def test_clear_failure_warns_and_does_not_raise(
+    marker_home: Path, loguru_records: list[dict[str, Any]]
+) -> None:
+    """clear runs in the stop's ``finally``: raising here would mask the stop's
+    own error, so an unclearable marker only logs (the TTL is the backstop)."""
+    (marker_home / "state").write_text("a file where the state dir should be")
+    probe.clear_held_stop_marker()
+    assert any("held-stop marker" in str(r["message"]) for r in loguru_records)

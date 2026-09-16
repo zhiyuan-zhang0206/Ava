@@ -22,6 +22,7 @@ from cli.commands._maintenance_stop_report import (
     occupied_groups,
     service_inventory,
 )
+from shared.os_watchdog_probe import clear_held_stop_marker, write_held_stop_marker
 from shared.paths import run_dir
 from shared.proc_tree import OwnedProcess, capture_tree
 from shared.pty_sessions._paths import host_identity, host_starttime
@@ -296,8 +297,33 @@ def stop_services(
     full identity — owning session, leader/descendant role, birth pair,
     cmdline, and the recorded groups still occupied — so an operator can act on
     the exact resource instead of rerunning blind (issue #2162).
+
+    While the stop runs, this home publishes the held-stop marker
+    (`shared.os_watchdog_probe`): while it is fresh the OS watchdog probe skips
+    revival, so a 60s probe tick inside the window cannot revive the watchdog
+    this stop just killed — which would abort the stop as "services appeared
+    during held stop" (2026-09-17 wave-2). The window opens before the first
+    signal and closes in a ``finally`` on every path (success,
+    `StopIncompleteError`, any exception). Stop phases of one home are assumed
+    serial — windows do not nest; parallel stops of one home would need depth
+    counting.
     """
     deadline = deadline_after(timeout)
+    write_held_stop_marker()
+    try:
+        return _stop_services_inner(deadline, keep_terminals=keep_terminals, selected=selected)
+    finally:
+        clear_held_stop_marker()
+
+
+def _stop_services_inner(
+    deadline: float, *, keep_terminals: bool = False, selected: frozenset[str] | None = None
+) -> list[str]:
+    """The stop itself, inside the held-stop window its caller publishes.
+
+    Split from `stop_services` so the window's ``finally`` brackets the whole
+    mechanism — no return path inside can slip out of it.
+    """
     if not keep_terminals:
         require_no_terminals()
     backend = get_backend()
