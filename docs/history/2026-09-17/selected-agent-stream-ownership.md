@@ -27,3 +27,14 @@ readers now reuse the fixed-deadline repair scheduler and abandon it with their
 selection/visibility ownership. Pending-message turn hints use the same scheduler
 instead of a restartable debounce. This guarantees the follow-up read, without
 claiming an order between unversioned live snapshots and durable checkpoints.
+
+Integration with the compact-history retention change preserves its configurable
+previous-session reattachment and head-only summary cursor. Automatic reattachment
+uses the same abortable history reader. Its sequential loop now has explicit
+selection/visibility ownership: late completions cannot consume a newer loop,
+and hidden views resume the pending intent with a fresh request on visibility.
+This is browser request ownership, not durable checkpoint revision ordering.
+The REST reconnect path now emits the same retention edge when it replaces an
+existing view across compact; cold snapshot seeding does not start extra history
+reads. This repairs an omitted consumer notification without changing the
+existing predicate that detects a compact replacement.

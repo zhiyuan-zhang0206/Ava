@@ -959,6 +959,8 @@ describe("compact crossed unseen (SSE-gap heal)", () => {
     expect(s.items.map((i) => i.item_id)).toEqual(["0.0", "1.0", "2.0"]);
     expect(s.items.some((i) => i.payload === "pre-compact reply")).toBe(false);
     expect(s.hasMoreOlder).toBe(true);
+    expect(s.compactReplaceSeq).toBe(1);
+    expect(s.compactReplaceAgent).toBe(1);
   });
 
   it("reloadSnapshot inside an armed reset window replaces when the GET crossed the compact (post-compact GET)", () => {

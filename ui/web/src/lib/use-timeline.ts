@@ -306,7 +306,7 @@ export function useTimeline(
   const loadOlderSegment = useCallback(async (): Promise<boolean> => {
     if (agentId == null || !isVisible) return false;
     const st = useTimelineStore.getState();
-    if (!st.hasMoreOlder || st.loadingOlder) return false;
+    if (st.activeThreadId !== agentId || !st.hasMoreOlder || st.loadingOlder) return false;
     // Current standing context is never a cursor: the re-attached prompt, the
     // standing head notes (exec timeout / timezone / cluster memory / agent id
     // / agent memory — re-attached by the gateway beside the prompt), and
@@ -373,6 +373,7 @@ export function useTimeline(
   // session(s) — the logic lives in use-compact-history-retention.ts.
   useCompactHistoryRetention({
     agentId,
+    isVisible,
     loadOlderSegment,
     hasMoreOlder,
     loadingOlder,

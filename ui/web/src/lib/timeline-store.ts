@@ -436,6 +436,10 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
         items: merged,
         hasMoreOlder,
         resetPending: crossedCompact ? false : s.resetPending,
+        // Reconnect can discover the rewrite without any compact SSE event.
+        // A cold snapshot seeds a view; only an existing view needs retention.
+        compactReplaceSeq: crossedCompact && s.items.length > 0 ? s.compactReplaceSeq + 1 : s.compactReplaceSeq,
+        compactReplaceAgent: crossedCompact && s.items.length > 0 ? s.activeThreadId : s.compactReplaceAgent,
         liveCompact: retireLiveCompact(s.liveCompact, merged),
       };
     });

@@ -752,7 +752,7 @@ describe("useTimeline agentId switch", () => {
     });
 
     await waitFor(() => {
-      expect(api.getTimeline).toHaveBeenCalledWith(42, { before: "2.0", limit: 50 });
+      expect(api.getTimeline).toHaveBeenCalledWith(42, { before: "2.0", limit: 50, signal: expect.any(AbortSignal) as AbortSignal });
     });
     await waitFor(() => {
       expect(result.current.items.map((i) => i.item_id)).toEqual([
@@ -820,7 +820,7 @@ describe("useTimeline agentId switch", () => {
     });
 
     await waitFor(() => {
-      expect(api.getTimeline).toHaveBeenCalledWith(42, { before: "1.0", limit: 50 });
+      expect(api.getTimeline).toHaveBeenCalledWith(42, { before: "1.0", limit: 50, signal: expect.any(AbortSignal) as AbortSignal });
     });
     await waitFor(() => {
       expect(result.current.items.map((i) => i.item_id)).toEqual([
@@ -883,7 +883,7 @@ describe("useTimeline agentId switch", () => {
     });
 
     await waitFor(() => {
-      expect(api.getTimeline).toHaveBeenCalledWith(42, { before: "s1.seg.0.0", limit: 100 });
+      expect(api.getTimeline).toHaveBeenCalledWith(42, { before: "s1.seg.0.0", limit: 100, signal: expect.any(AbortSignal) as AbortSignal });
     });
     await waitFor(() => {
       expect(result.current.items.map((i) => i.item_id)).toEqual([
@@ -1909,5 +1909,106 @@ describe("selected opening-gap repair", () => {
     });
     await waitFor(() => expect(result.current.items[0]?.payload).toBe("committed before stream opened"));
     expect(api.getTimeline).toHaveBeenCalledTimes(2);
+  });
+});
+
+
+describe("compact retention request ownership", () => {
+  it("a reconnect-only compact replacement reattaches the previous session once", async () => {
+    let compacted = false;
+    vi.mocked(api.getTimeline).mockImplementation((_id, opts) => {
+      if (opts?.before) return Promise.resolve(tlResp([
+        snapshotItem({ item_id: "s1.gap.1.0", payload: "retained across reconnect" }),
+      ], false));
+      return Promise.resolve(tlResp(compacted ? postWindow() : [
+        snapshotItem({ item_id: "90.0", payload: "before gap" }),
+      ], true));
+    });
+    const { result } = renderHook(() => useTimeline(1, vi.fn()), { wrapper });
+    await waitFor(() => expect(result.current.items[0]?.payload).toBe("before gap"));
+    compacted = true;
+    pushConnectionEvent({ type: "open" });
+    await waitFor(() => expect(result.current.items.map((item) => item.payload)).toContain("retained across reconnect"));
+    expect(useTimelineStore.getState().compactReplaceSeq).toBe(1);
+    pushConnectionEvent({ type: "open" });
+    await waitFor(() => expect(api.getTimeline).toHaveBeenCalledTimes(4));
+    expect(useTimelineStore.getState().compactReplaceSeq).toBe(1);
+    expect(vi.mocked(api.getTimeline).mock.calls.filter((call) => call[1]?.before)).toHaveLength(1);
+  });
+
+  it.each(["switch", "hidden", "unmount", "clear"])("%s cancels automatic history and rejects its late completion", async (cause) => {
+    const pages: { signal: AbortSignal; resolve: (page: TimelineResponse) => void }[] = [];
+    const showError = vi.fn();
+    vi.mocked(api.getSettings).mockResolvedValue({ settings: [
+      { key: "display.compact_history_sessions", value: 2, updated_at: "2026-09-17T00:00:00Z" },
+    ] });
+    vi.mocked(api.getTimeline).mockImplementation((_id, opts) => {
+      if (!opts?.before) return Promise.resolve(tlResp(postWindow(), true));
+      if (!opts.signal) throw new Error("History requires cancellation");
+      const signal = opts.signal;
+      return new Promise((resolve) => { pages.push({ signal, resolve }); });
+    });
+    const view = renderHook<ReturnType<typeof useTimeline>, { id: number | null }>(
+      ({ id }) => useTimeline(id, showError), { initialProps: { id: 1 }, wrapper },
+    );
+    await waitFor(() => expect(view.result.current.items).toHaveLength(3));
+    await waitFor(() => expect(queryClient.getQueryData(SETTINGS_QUERY_KEY)).toBeTruthy());
+    const compact = () => {
+      pushEvent({ role: "compact_done", agent_id: 1 });
+      pushEvent({ role: "timeline_snapshot", agent_id: 1, msg_count: 3, items: postWindow() });
+    };
+    compact();
+    await waitFor(() => expect(pages).toHaveLength(1));
+    const visibility = vi.spyOn(document, "visibilityState", "get");
+    try {
+      if (cause === "switch") {
+        view.rerender({ id: 2 });
+        view.rerender({ id: 1 });
+        await waitFor(() => expect(view.result.current.items).toHaveLength(3));
+        compact();
+        // The new A owns a new loop even while the old A's server ignores abort.
+        await waitFor(() => expect(pages).toHaveLength(2));
+      } else if (cause === "hidden") {
+        act(() => {
+          visibility.mockReturnValue("hidden");
+          document.dispatchEvent(new Event("visibilitychange"));
+        });
+      } else if (cause === "clear") {
+        view.rerender({ id: null });
+      } else {
+        view.unmount();
+      }
+      expect(pages[0].signal.aborted).toBe(true);
+      await act(async () => {
+        pages[0].resolve(tlResp([snapshotItem({ item_id: "s1.old.1.0", payload: "obsolete retained page" })], true));
+        await Promise.resolve();
+      });
+      expect(useTimelineStore.getState().items.some((item) => item.payload === "obsolete retained page")).toBe(false);
+      expect(pages).toHaveLength(cause === "switch" ? 2 : 1);
+      if (cause === "hidden") {
+        act(() => {
+          visibility.mockReturnValue("visible");
+          document.dispatchEvent(new Event("visibilitychange"));
+        });
+        // Resume the same retention intent through a fresh abortable request.
+        await waitFor(() => expect(pages).toHaveLength(2));
+      }
+      if (cause === "switch" || cause === "hidden") {
+        expect(pages[1].signal.aborted).toBe(false);
+        await act(async () => {
+          pages[1].resolve(tlResp([snapshotItem({ item_id: "s1.new.1.0", payload: "current retained page" })], true));
+          await Promise.resolve();
+        });
+        await waitFor(() => expect(pages).toHaveLength(3));
+        await act(async () => {
+          pages[2].resolve(tlResp([snapshotItem({ item_id: "s2.new.1.0", payload: "older retained page" })], false));
+          await Promise.resolve();
+        });
+        expect(view.result.current.items.map((item) => item.payload)).toContain("older retained page");
+      }
+      expect(showError).not.toHaveBeenCalled();
+    } finally {
+      visibility.mockRestore();
+    }
   });
 });
