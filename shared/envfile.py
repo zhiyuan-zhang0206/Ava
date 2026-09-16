@@ -227,16 +227,6 @@ def upsert_env(
             )
 
 
-def _chmod_private(path: Path) -> None:
-    """Owner-only on a .env write — .env is the cluster's only on-disk secret
-    copy, so its mode must not depend on umask (audit round-2 security P1-3:
-    snapshot_env already chmods 0600, the main file did not)."""
-    try:
-        ensure_private_file(path)
-    except (OSError, RuntimeError):
-        _log.warning("could not chmod 0600 %s", path, exc_info=True)
-
-
 def remove_env(
     path: Path,
     keys: set[str],

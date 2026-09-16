@@ -240,6 +240,22 @@ def test_upsert_noop_is_decided_on_the_whole_result(tmp_path: Path) -> None:
     assert f.read_text() == "A=1\nB=3\n"
 
 
+def test_upsert_noop_leaves_a_symlinked_env_untouched(tmp_path: Path) -> None:
+    """A no-op must not mutate the node: the old unconditional write replaced a
+    symlinked `.env` with a regular file (`os.replace` swaps the link itself);
+    the skip leaves the link and its target exactly as they were."""
+    target = tmp_path / "real.env"
+    target.write_text("A=1\n")
+    link = tmp_path / ".env"
+    link.symlink_to(target)
+
+    upsert_env(link, {"A": "1"})
+
+    assert link.is_symlink()
+    assert link.read_text() == "A=1\n"
+    assert target.read_text() == "A=1\n"
+
+
 # ─── env_line_key: the settings parser's key grammar (export prefix, #2981) ───
 
 
