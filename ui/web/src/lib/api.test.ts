@@ -29,7 +29,7 @@ beforeEach(() => {
     "fetch",
     vi.fn((url: string, init?: RequestInit) => {
       calls.push({ url, init });
-      // GET /api/agents returns an array by contract (listAgents maps over it);
+      // GET /api/agents returns one page (listAgents maps its agents field);
       // every other stubbed endpoint here only has its URL/method asserted, so a
       // bare object suffices.
       const isListAgents = !init?.method && /\/api\/agents(?:\?|$)/.test(url);
