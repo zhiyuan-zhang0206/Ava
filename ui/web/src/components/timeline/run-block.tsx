@@ -291,14 +291,17 @@ export function TurnBlock({
       </button>
       {/* The collapse wrapper must clip (overflow-clip, not overflow-hidden):
           a scroll container here would become the child headers' scrollport
-          and break their nested sticky (task #3215). */}
+          and break their nested sticky (task #3215). min-w-0 keeps the auto
+          grid column from blowing out to the item's min-content width when a
+          run holds wide content — the timeline otherwise overflows sideways
+          (#3305, user report). */}
       <div
         className={cn(
           "grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none",
           expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
         )}
       >
-        <div className={cn(OVERFLOW_CLIP, MIN_H_0)}>
+        <div className={cn(OVERFLOW_CLIP, MIN_H_0, MIN_W_0)}>
           <div className="px-2 pb-2 pt-0.5 space-y-3">{children}</div>
         </div>
       </div>
