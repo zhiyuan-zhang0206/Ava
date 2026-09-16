@@ -25,6 +25,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useLayoutEffect, useRef } from "react";
 
 import { api } from "./api";
+import { useAgentReadRepair } from "./use-agent-read-repair";
 import { useTimelineStore } from "./timeline-store";
 import type { SystemEvent, TokenUsageResponse } from "./types";
 import type { ConnectionEvent } from "./useEventStream";
@@ -48,6 +49,7 @@ export function useTokenUsage(
   showError: (msg: string) => void,
 ): TokenUsageState {
   const queryClient = useQueryClient();
+  const { isVisible, requestRepair } = useAgentReadRepair("token-usage", agentId);
   const tokenUsage = useTimelineStore((s) => s.tokenUsage);
   const maxContextTokens = useTimelineStore((s) => s.maxContextTokens);
   const softCompactTokens = useTimelineStore((s) => s.softCompactTokens);
@@ -63,9 +65,11 @@ export function useTokenUsage(
   // Inactive selections release their cached snapshots.
   const tokenQuery = useQuery({
     queryKey: ["token-usage", agentId] as const,
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- the `enabled` gate below guarantees agentId is set before queryFn runs (standard TanStack idiom the types cannot see)
-    queryFn: () => api.getTokenUsage(agentId!),
-    enabled: agentId != null,
+    queryFn: ({ signal }) => {
+      if (agentId === null) throw new Error("A token read requires an agent");
+      return api.getTokenUsage(agentId, signal);
+    },
+    enabled: agentId !== null && isVisible,
     staleTime: 0,
     gcTime: 0,
     // A transient checkpoint read failure (gateway restart / DB reconnect
@@ -78,7 +82,7 @@ export function useTokenUsage(
     retryDelay: (attempt) => 2 ** attempt * 1000,
   });
 
-  // -- On agent switch: hot cache hit → set cached value instantly; cold cache → reset to 0 --
+  // -- Seed the selected read from available data, otherwise reset to zero --
   // All three token fields (usage / reasoning / max) move through the single
   // applyTokenUsage gate in one set(), so contextTokens and maxContextTokens can
   // never disagree across two renders. This is ungated (no isEventForThread) —
@@ -96,7 +100,7 @@ export function useTokenUsage(
 
     const cached = queryClient.getQueryData<TokenUsageResponse>(["token-usage", agentId]);
     if (cached) {
-      // Hot cache hit: use cached value directly; React Query refreshes in background
+      // Seed an existing snapshot while the activation read runs.
       applyTokenUsage(
         cached.input_tokens,
         cached.reasoning_tokens,
@@ -105,7 +109,7 @@ export function useTokenUsage(
         cached.hard_compact_tokens,
       );
     } else {
-      // Cold cache: reset to 0; React Query is fetching
+      // No snapshot: reset until the selected read completes.
       applyTokenUsage(0, 0, 0, 0, 0);
     }
   }, [agentId, queryClient, applyTokenUsage]);
@@ -144,9 +148,7 @@ export function useTokenUsage(
     (ev: ConnectionEvent) => {
       switch (ev.type) {
         case "open":
-          if (agentId != null) {
-            void queryClient.invalidateQueries({ queryKey: ["token-usage", agentId] });
-          }
+          requestRepair();
           return;
         case "parse-failed": {
           const key = String(ev.error);
@@ -160,7 +162,7 @@ export function useTokenUsage(
           return;
       }
     },
-    [agentId, queryClient, showError],
+    [requestRepair, showError],
   );
 
   useAgentEventStream(onEvent, onConnectionEvent);

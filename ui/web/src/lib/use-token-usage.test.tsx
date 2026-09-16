@@ -1,11 +1,4 @@
-// useTokenUsage agent-switch tests — the context-bar snapshot must reflect the
-// NEW agent's tokens immediately on switch-back (task #1939). The query carries
-// staleTime 30s, so a hot switch-back (within 30s of the previous visit) serves
-// the cached snapshot and — because a key change on an already-mounted observer
-// only refetches when the cache is STALE — never refetches on its own; the hook
-// must invalidate to force the background refresh. An idle agent emits no SSE
-// token_usage event, so without that invalidate the bar would keep the previous
-// visit's numbers until the next switch.
+// Each selected context reads its latest token snapshot on activation.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
@@ -41,11 +34,9 @@ afterEach(() => {
 });
 
 describe("useTokenUsage agent switch", () => {
-  it("forces a background refresh on hot switch-back", async () => {
+  it("refreshes when returning to a previously selected agent", async () => {
     getTokenUsage.mockImplementation((id) => Promise.resolve(tokenFixture(id)));
-    // Mirror the app: the global staleTime makes a just-visited cache NOT stale,
-    // which is exactly the condition under which the key-change path skips the
-    // refetch and the hook's invalidate must carry it.
+    // A global cache default must not suppress activation reads.
     const qc = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: 5 * 60_000 } },
     });
@@ -59,18 +50,17 @@ describe("useTokenUsage agent switch", () => {
 
     // Cold first visit: the observer fetches on its own.
     await waitFor(() => expect(getTokenUsage).toHaveBeenCalledTimes(1));
-    expect(getTokenUsage).toHaveBeenLastCalledWith(1);
+    expect(getTokenUsage).toHaveBeenLastCalledWith(1, expect.any(AbortSignal) as AbortSignal);
 
     // Switch to another agent (cold): fetches on its own.
     rerender({ id: 2 });
     await waitFor(() => expect(getTokenUsage).toHaveBeenCalledTimes(2));
-    expect(getTokenUsage).toHaveBeenLastCalledWith(2);
+    expect(getTokenUsage).toHaveBeenLastCalledWith(2, expect.any(AbortSignal) as AbortSignal);
 
-    // Switch back within staleTime (hot cache): the observer serves the cached
-    // snapshot and would not refetch; the hook must invalidate to refresh.
+    // Returning reads again even when the selection changed only moments ago.
     rerender({ id: 1 });
     await waitFor(() => expect(getTokenUsage).toHaveBeenCalledTimes(3));
-    expect(getTokenUsage).toHaveBeenLastCalledWith(1);
+    expect(getTokenUsage).toHaveBeenLastCalledWith(1, expect.any(AbortSignal) as AbortSignal);
   });
 
   it("reports contextPending until the cold key's first snapshot lands", async () => {

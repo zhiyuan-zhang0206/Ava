@@ -19,10 +19,11 @@
 
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useCallback, useRef } from "react";
 
 import { api } from "./api";
+import { useAgentReadRepair } from "./use-agent-read-repair";
 import { isEventForThread } from "./timeline";
 import type { PendingInbound, SystemEvent } from "./types";
 import type { ConnectionEvent } from "./useEventStream";
@@ -37,7 +38,7 @@ import { useAgentEventStream } from "./useEventStream";
 //    most once per message → refetch immediately so the strip stays responsive.
 //  - the *_start roles fire repeatedly across a multi-step turn, yet the batch
 //    is claimed exactly once (at the first start). Refetching per start was the
-//    R11 storm; collapse the burst into a single debounced refetch instead.
+//    R11 storm; collapse the burst into a coalesced read with a fixed deadline instead.
 const IMMEDIATE_REFETCH_ROLES: ReadonlySet<SystemEvent["role"]> = new Set([
   "inbound_arrived",
   "inbound_committed",
@@ -72,15 +73,16 @@ export function usePendingMessages(
   agentId: number | null,
   showError: (msg: string) => void,
 ): PendingInbound[] {
-  const queryClient = useQueryClient();
+  const { isVisible, requestRepair } = useAgentReadRepair("pending", agentId);
   const seenParseErrors = useRef<Set<string>>(new Set());
-  const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const query = useQuery({
     queryKey: ["pending", agentId] as const,
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- the `enabled` gate below guarantees agentId is set before queryFn runs (standard TanStack idiom the types cannot see)
-    queryFn: () => api.getPendingMessages(agentId!),
-    enabled: agentId != null,
+    queryFn: ({ signal }) => {
+      if (agentId === null) throw new Error("A pending read requires an agent");
+      return api.getPendingMessages(agentId, signal);
+    },
+    enabled: agentId !== null && isVisible,
     staleTime: 0,
     // Retain no inactive selected-detail snapshots.
     gcTime: 0,
@@ -92,33 +94,15 @@ export function usePendingMessages(
       // A fresh inbound / a commit changes the set once and is low-frequency —
       // refetch now so the strip reflects it without lag.
       if (IMMEDIATE_REFETCH_ROLES.has(ev.role)) {
-        void queryClient.invalidateQueries({ queryKey: ["pending", agentId] });
+        requestRepair();
         return;
       }
-      // A multi-step turn fires many *_start events, but the batch is claimed
-      // once. Collapse the burst into ONE refetch on the trailing edge (2s,
-      // matching use-fleet-graph / use-tasks) instead of a GET /pending per
-      // start (R11 storm).
-      if (!TURN_START_ROLES.has(ev.role)) return;
-      if (refetchTimer.current !== null) clearTimeout(refetchTimer.current);
-      refetchTimer.current = setTimeout(() => {
-        refetchTimer.current = null;
-        void queryClient.invalidateQueries({ queryKey: ["pending", agentId] });
-      }, 2_000);
+      // Repeated turn starts share a fixed repair deadline. A start during
+      // the read leaves one trailing repair instead of starving the strip.
+      if (TURN_START_ROLES.has(ev.role)) requestRepair(false);
     },
-    [agentId, queryClient],
+    [agentId, requestRepair],
   );
-
-  // Cancel a pending debounce when the thread changes / on unmount, so a timer
-  // scheduled for the old agent never fires a stray refetch after the switch.
-  useEffect(() => {
-    return () => {
-      if (refetchTimer.current !== null) {
-        clearTimeout(refetchTimer.current);
-        refetchTimer.current = null;
-      }
-    };
-  }, [agentId]);
 
   const onConnectionEvent = useCallback(
     (ev: ConnectionEvent) => {
@@ -127,9 +111,7 @@ export function usePendingMessages(
       // surfaced (deduped) so schema drift doesn't fail silently.
       switch (ev.type) {
         case "open":
-          if (agentId != null) {
-            void queryClient.invalidateQueries({ queryKey: ["pending", agentId] });
-          }
+          requestRepair();
           return;
         case "parse-failed": {
           const key = String(ev.error);
@@ -143,7 +125,7 @@ export function usePendingMessages(
           return;
       }
     },
-    [agentId, queryClient, showError],
+    [requestRepair, showError],
   );
 
   useAgentEventStream(onEvent, onConnectionEvent);

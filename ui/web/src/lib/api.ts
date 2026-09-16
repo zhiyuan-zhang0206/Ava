@@ -220,8 +220,8 @@ export const api = {
     );
   },
 
-  getTokenUsage: (agentId: number): Promise<TokenUsageResponse> => {
-    return f(`/api/agents/${agentId}/token-usage`).then(ok<TokenUsageResponse>);
+  getTokenUsage: (agentId: number, signal?: AbortSignal): Promise<TokenUsageResponse> => {
+    return f(`/api/agents/${agentId}/token-usage`, { signal }).then(ok<TokenUsageResponse>);
   },
 
   getContextBreakdown: (agentId: number): Promise<ContextBreakdownResponse> => {
@@ -313,8 +313,8 @@ export const api = {
     return f(`/api/agents/${agentId}/shell/${sessionId}${qs}`).then(ok<ShellCapture>);
   },
 
-  getPendingMessages: (agentId: number): Promise<PendingInbound[]> => {
-    return f(`/api/agents/${agentId}/pending`).then(ok<PendingInbound[]>);
+  getPendingMessages: (agentId: number, signal?: AbortSignal): Promise<PendingInbound[]> => {
+    return f(`/api/agents/${agentId}/pending`, { signal }).then(ok<PendingInbound[]>);
   },
 
   getCommands: (agentId?: number | null): Promise<CommandItem[]> => {
