@@ -38,7 +38,7 @@ many turns — the collaboration pattern below builds on this. Headless one-shot
 needs no supervision.
 
 **Take over your own identity:** use `--impersonate-self --impersonation-name 'Fix login'` on either spawn script
-when it should take over your identity and human chat. Read the [takeover procedure](reference/impersonate_self.md) before launching.
+when it should take over your identity and human chat. Read the [takeover procedure](reference/impersonate_self.md) before launching. Takeover execution is suspended pending fixes; it resumes with the fix line — do not launch takeovers until the suspension is lifted.
 
 ## File-driven collaboration (the pattern for long tasks)
 
