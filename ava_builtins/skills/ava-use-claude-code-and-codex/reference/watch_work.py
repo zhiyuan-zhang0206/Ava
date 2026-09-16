@@ -4,6 +4,12 @@ Generic use wakes the launching Ava agent on actionable status or a stall.
 Canonical Codex use additionally owns terminal cleanup: DONE, HANDOFF, owner
 termination, process death, expiry, or work-file deletion closes the recorded
 PTY and reclaims its generation-private ``CODEX_HOME`` before this process exits.
+
+Delivery survives a restart window: each wake send retries with doubling gaps
+(10s to a 160s cap, ~10.5 min in total) because a gateway / agent restart
+window (an update wave, `ava cluster update`) outlasts the SDK's own 3 quick
+retries; a wake that never lands exits 2 at the one-shot call sites, while the
+supervision loop keeps its schedule and retries at its next trigger.
 """
 
 from __future__ import annotations
@@ -23,6 +29,10 @@ POLL_SECONDS = 60
 STALL_SECONDS = 600
 HEARTBEAT_SECONDS = 480
 HARD_LIMIT_SECONDS = 7200
+WAKE_ATTEMPTS = 8  # wake delivery tries (first + 7 retries); the gaps below
+# sum to ~10.5 min — long enough to ride out a gateway / agent restart window
+WAKE_BACKOFF_S = 10.0  # first gap between wake tries; doubles per retry
+WAKE_BACKOFF_MAX_S = 160.0  # cap for one gap
 
 ACTIONABLE = ("DONE", "NEED_INPUT", "HANDOFF")
 _STATUS = re.compile(r"^STATUS:\s*(\w+)", re.MULTILINE)
@@ -87,11 +97,28 @@ def _session_crashed(owner: coding_session_owner.CodingSessionOwner) -> bool:
     return not get_shell_backend().has_session(owner.session_name)
 
 
-def _notify(agent_id: int, content: str, *, canonical: bool) -> None:
-    if canonical:
-        ava.agents.send_system_note(agent_id, content, tag="task", resurrect=False)
-    else:
-        ava.agents.send_message(agent_id, content)
+def _notify(agent_id: int, content: str, *, canonical: bool) -> bool:
+    """Deliver one supervision message, retrying across a restart window.
+
+    Delivery retries with growing gaps; returns False when every attempt
+    failed — the one-shot call sites exit 2 on that, while the in-loop call
+    sites keep supervising and retry at their next trigger.
+    """
+    delay = WAKE_BACKOFF_S
+    for attempt in range(1, WAKE_ATTEMPTS + 1):
+        try:
+            if canonical:
+                ava.agents.send_system_note(agent_id, content, tag="task", resurrect=False)
+            else:
+                ava.agents.send_message(agent_id, content)
+            return True
+        except Exception as exc:  # any transport failure retries
+            print(f"wake attempt {attempt}/{WAKE_ATTEMPTS} failed: {exc!r}", flush=True)
+            if attempt < WAKE_ATTEMPTS:
+                time.sleep(delay)
+                delay = min(delay * 2, WAKE_BACKOFF_MAX_S)
+    print(f"wake delivery failed after {WAKE_ATTEMPTS} attempts", flush=True)
+    return False
 
 
 def _canonical_context(
@@ -230,49 +257,55 @@ def watch(
             continue
 
         if status is None and saw_work_file and mtime is None:
-            _notify(
+            if not _notify(
                 target_agent,
                 f"work file deleted: {path} -- the coding agent may have removed its workspace",
                 canonical=False,
-            )
+            ):
+                raise SystemExit(2)
             return
         if elapsed_total > HARD_LIMIT_SECONDS:
-            _notify(
+            if not _notify(
                 target_agent,
                 f"hard limit reached while polling {path} for over {HARD_LIMIT_SECONDS}s",
                 canonical=False,
-            )
+            ):
+                raise SystemExit(2)
             return
         if status in ACTIONABLE:
-            _notify(
+            if not _notify(
                 target_agent,
                 f"coding agent reported STATUS: {status} in {path} -- read that file",
                 canonical=False,
-            )
+            ):
+                raise SystemExit(2)
             return
         if status in (None, "WORKING"):
             if elapsed_change > STALL_SECONDS:
-                _notify(
+                if not _notify(
                     target_agent,
                     f"coding agent has been WORKING with no change to {path} for over "
                     f"{STALL_SECONDS}s -- capture its screen",
                     canonical=False,
-                )
+                ):
+                    raise SystemExit(2)
                 return
             if elapsed_wake > HEARTBEAT_SECONDS:
                 label = status if status else "MISSING"
-                _notify(
+                if not _notify(
                     target_agent,
                     f"coding agent heartbeat: STATUS is {label!r} in {path}",
                     canonical=False,
-                )
+                ):
+                    raise SystemExit(2)
                 return
         else:
-            _notify(
+            if not _notify(
                 target_agent,
                 f"coding agent reported unknown STATUS: {status!r} in {path}",
                 canonical=False,
-            )
+            ):
+                raise SystemExit(2)
             return
         time.sleep(POLL_SECONDS)
 

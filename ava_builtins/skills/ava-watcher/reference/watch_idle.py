@@ -2,8 +2,13 @@
 
 Launch this in the background with `ava.watcher.launch(code=..., timeout=..., name="...")` after
 substituting TARGET_AGENT_ID. It waits until the agent you are watching finishes
-a turn and goes idle, then sends you a message (`ava.agents.send_message`) once so you wake up
-and inspect that agent's progress.
+a turn and goes idle, then delivers one wake message (`ava.agents.send_message`) so you wake
+up and inspect that agent's progress.
+
+Delivery survives a restart window: the wake send retries with doubling gaps
+(10s to a 160s cap, ~10.5 min in total) because a gateway / agent restart
+window (an update wave, `ava cluster update`) outlasts the SDK's own 3 quick
+retries; if every attempt fails the watcher exits 2.
 
 Runtime notes:
 - This program runs under the same Python environment, configuration, and
@@ -19,6 +24,7 @@ Runtime notes:
 """
 
 import json
+import time
 
 import redis
 
@@ -32,6 +38,10 @@ TARGET_AGENT_ID = 0
 # means it ended its turn and is waiting for the next message -- the moment to
 # check whether the goal is met.
 IDLE_STATUS = "idling"
+WAKE_ATTEMPTS = 8  # wake delivery tries (first + 7 retries); the gaps below
+# sum to ~10.5 min — long enough to ride out a gateway / agent restart window
+WAKE_BACKOFF_S = 10.0  # first gap between wake tries; doubles per retry
+WAKE_BACKOFF_MAX_S = 160.0  # cap for one gap
 
 
 def _is_target_idle(event: dict, target_id: int) -> bool:
@@ -42,17 +52,30 @@ def _is_target_idle(event: dict, target_id: int) -> bool:
 
 
 def _notify(target_id: int) -> None:
-    ava.agents.send_message(
-        ava.self.AGENT_ID,
-        f"target agent {target_id} idled -- inspect its recent output "
-        "and judge it against the goal",
+    """Deliver the idle reminder, retrying across a restart window.
+
+    Delivery retries with growing gaps; if every attempt fails the watcher
+    exits 2, so a lost wake surfaces as an exit notice instead of nothing.
+    """
+    message = (
+        f"target agent {target_id} idled -- inspect its recent output and judge it against the goal"
     )
+    delay = WAKE_BACKOFF_S
+    for attempt in range(1, WAKE_ATTEMPTS + 1):
+        try:
+            ava.agents.send_message(ava.self.AGENT_ID, message)
+            return
+        except Exception as exc:  # any transport failure retries
+            print(f"wake attempt {attempt}/{WAKE_ATTEMPTS} failed: {exc!r}", flush=True)
+            if attempt < WAKE_ATTEMPTS:
+                time.sleep(delay)
+                delay = min(delay * 2, WAKE_BACKOFF_MAX_S)
+    print(f"wake delivery failed after {WAKE_ATTEMPTS} attempts", flush=True)
+    raise SystemExit(2)
 
 
 def _watch_via_poll(target_id: int, interval_s: float = 5.0) -> None:
     """Fallback: poll the agents table until the target idles, then remind once."""
-    import time
-
     import psycopg
 
     while True:
