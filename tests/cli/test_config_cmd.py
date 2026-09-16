@@ -794,3 +794,12 @@ def test_config_audit_machine_fetches_via_gateway(
     assert "actor=user_session:administrator" in out
     assert "AVA_MODEL: a -> b" in out
     assert "ANTHROPIC_API_KEY: (withheld)" in out
+
+
+def test_config_audit_rejects_out_of_range_last(capsys: pytest.CaptureFixture[str]) -> None:
+    """--last outside 1..200 is a clean CLI error on both paths, never a traceback."""
+    assert cfg.cmd_config_audit(last=0, key=None, machine=None) == 1
+    assert "--last must be between 1 and 200" in capsys.readouterr().err
+
+    assert cfg.cmd_config_audit(last=201, key=None, machine="m1") == 1
+    assert "--last must be between 1 and 200" in capsys.readouterr().err

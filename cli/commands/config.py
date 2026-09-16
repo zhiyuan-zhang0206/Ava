@@ -409,8 +409,12 @@ def cmd_config_audit(last: int, key: str | None, machine: str | None) -> int:
     Reads this unit's own audit history by default (no gateway round-trip);
     `--machine <name|all>` fetches through the gateway (that machine's records, or
     every agent-runner's merged). `--key K` keeps only records that touched the
-    `.env` alias K. Newest first.
+    `.env` alias K. Newest first. `--last` is validated here (1..200) so the local
+    path reports the same clean error the API's 422 gives, never a traceback.
     """
+    if not 1 <= last <= 200:
+        print("[ava config audit] --last must be between 1 and 200", file=sys.stderr)
+        return 1
     from shared.env_audit import read_env_write_records
     from shared.machine import machine_name
 
