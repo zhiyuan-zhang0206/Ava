@@ -724,14 +724,37 @@ def _resolve_recovered_non_critical_alerts(
             )
 
 
-def _print_service_row(spec: ServiceSpec, name_w: int, skip_reason: str | None = None) -> None:
+_ABSORBED_REASON = (
+    "absorbed by ava-root (health supervision runs in the root tree; no session by design)"
+)
+
+
+def _print_service_row(
+    spec: ServiceSpec,
+    name_w: int,
+    skip_reason: str | None = None,
+    *,
+    root_units: dict[str, dict[str, Any]] | None = None,
+) -> None:
     # Lazy import keeps tests' `monkeypatch.setattr(cli.commands, "_has_session", X)`
     # effective — the call goes through the package namespace which the test
     # rebinds, instead of the sub-module's frozen local binding.
     import cli.commands as _ns
 
     sess = session_name(spec.session)
-    session_mark = "✓" if _ns._has_session(sess) else "✗"
+    if root_units is None:
+        session_mark = "✓" if _ns._has_session(sess) else "✗"
+    else:
+        # Root mode (task #3370): the column's question — "does this host run
+        # this service" — is answered by the tree that actually drives it. The
+        # absorbed watchdogs emit no unit by design; their rows say so instead
+        # of reading as a missing service.
+        from services.ava_root_glue.manifests import ABSORBED_WATCHDOGS
+
+        unit = root_units.get(spec.session)
+        session_mark = "✓" if unit is not None and unit.get("state") == "running" else "✗"
+        if unit is None and spec.session in ABSORBED_WATCHDOGS:
+            skip_reason = skip_reason or _ABSORBED_REASON
 
     probe = _probe_service(spec)
     if probe.alive is True:

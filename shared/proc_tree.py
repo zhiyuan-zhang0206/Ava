@@ -120,6 +120,22 @@ def capture_tree(identity: OwnedProcess) -> set[OwnedProcess]:
         return {identity}
 
 
+def leader_owns_pids(leader: OwnedProcess, pids: set[int]) -> bool:
+    """Whether any pid in `pids` is `leader` or a birth-validated descendant.
+
+    False when the leader is gone: a descendant whose leader died carries no
+    proof of whose it is (the stop path converges such survivors through the
+    recorded process group, a stronger claim than this probe). The identity
+    question is the same whether the leader came from a session record or, on
+    a root-driven host, from a tree unit's row (task #3370) — only the source
+    of `leader` differs, never this rule.
+    """
+    if not leader.live():
+        return False
+    owned = {identity.pid for identity in capture_tree(leader)}
+    return bool(owned & pids)
+
+
 def session_owns_pids(record: SessionRecord, pids: set[int]) -> bool:
     """Whether any pid in `pids` is `record`'s leader or a birth-validated descendant.
 
@@ -128,7 +144,4 @@ def session_owns_pids(record: SessionRecord, pids: set[int]) -> bool:
     recorded process group, a stronger claim than this probe).
     """
     leader = OwnedProcess(record.pid, record.create_time, record.starttime)
-    if not leader.live():
-        return False
-    owned = {identity.pid for identity in capture_tree(leader)}
-    return bool(owned & pids)
+    return leader_owns_pids(leader, pids)

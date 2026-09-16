@@ -1432,6 +1432,102 @@ def test_status_runner_only_has_no_gate_section(monkeypatch: pytest.MonkeyPatch,
     assert "redis bridge (private-network ingress):" not in out
 
 
+def test_status_root_mode_reads_the_tree_for_the_session_column(
+    monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """On a root-driven host the sess column reads the tree's units; the absorbed
+    watchdogs say why they carry none instead of reading as a missing service
+    (task #3370)."""
+    monkeypatch.setattr(_cli, "_root_driven_enabled", lambda: True)
+    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"gateway", "agent-runner"}))
+    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
+
+    class _Client:
+        def __init__(self, _socket_path: Path, *, timeout: float = 5.0) -> None:
+            del timeout
+
+        def status(self) -> dict[str, object]:
+            return {
+                "ok": True,
+                "result": {
+                    "units": [
+                        {"id": "gateway", "state": "running", "pid": os.getpid()},
+                        {"id": "frontend", "state": "running", "pid": os.getpid()},
+                    ]
+                },
+            }
+
+    monkeypatch.setattr("services.ava_root.client.RootClient", _Client)
+
+    def fake_run(_args, **_kwargs):
+        return _FakeResult(returncode=0, stdout="")
+
+    monkeypatch.setattr(_cli.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
+    rc = _cli.cmd_status()
+    assert rc == 0
+    out = cast(str, capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
+    rows = {line.split()[0]: line.split() for line in out.splitlines() if line.startswith("ava-")}
+    assert rows[_sess("gateway")][1] == "✓"
+    assert rows[_sess("frontend")][1] == "✓"
+    assert rows[_sess("gateway-watchdog")][1] == "✗"
+    assert "absorbed by ava-root" in out
+
+
+def test_status_session_mode_does_not_dial_the_root(
+    monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """The session path is untouched: a session-driven host never constructs a
+    root client from `ava status`."""
+    monkeypatch.setattr(settings.services, "root_driver_enabled", False)
+    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"gateway", "agent-runner"}))
+    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
+
+    def _explode(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("RootClient consulted on a session-driven host")
+
+    monkeypatch.setattr("services.ava_root.client.RootClient", _explode)
+
+    def fake_run(_args, **_kwargs):
+        return _FakeResult(returncode=0, stdout="")
+
+    monkeypatch.setattr(_cli.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
+    assert _cli.cmd_status() == 0
+    _ = capsys.readouterr()  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_status_root_mode_survives_an_unreachable_root(
+    monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """Diagnostic-first: a down root reads as an empty tree, not a crash."""
+    monkeypatch.setattr(_cli, "_root_driven_enabled", lambda: True)
+    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
+
+    class _Down:
+        def __init__(self, _socket_path: Path, *, timeout: float = 5.0) -> None:
+            del timeout
+
+        def status(self) -> dict[str, object]:
+            from services.ava_root.client import RootClientError
+
+            raise RootClientError("unreachable in test")
+
+    monkeypatch.setattr("services.ava_root.client.RootClient", _Down)
+
+    def fake_run(_args, **_kwargs):
+        return _FakeResult(returncode=0, stdout="")
+
+    monkeypatch.setattr(_cli.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
+    rc = _cli.cmd_status()
+    assert rc == 0
+    out = cast(str, capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
+    rows = {line.split()[0]: line.split() for line in out.splitlines() if line.startswith("ava-")}
+    assert rows[_sess("gateway")][1] == "✗"
+
+
 def test_start_prints_browser_skip_reason(monkeypatch, capsys, tmp_path) -> None:
     """`ava start` (_launch_sessions) prints the gated-out browser + reason on
     the console — the start-time analogue of the `ava status` row, so the roster
@@ -4196,7 +4292,7 @@ def test_status_prints_a_live_host_reading(monkeypatch: pytest.MonkeyPatch, caps
     monkeypatch.setattr(status_mod, "_detect_prod_source_drift", lambda: None)
     monkeypatch.setattr(status_mod, "_print_gateway_cluster_status", lambda: None)
     monkeypatch.setattr(status_mod, "print_data_plane_status", lambda: None)
-    monkeypatch.setattr(status_mod, "_print_service_row", lambda *_a: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(status_mod, "_print_service_row", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
 
     assert status_mod.cmd_status() == 0
     out = cast(str, capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
@@ -4217,7 +4313,7 @@ def test_status_host_reading_failure_does_not_hide_the_rest(
     monkeypatch.setattr(status_mod, "_detect_prod_source_drift", lambda: None)
     monkeypatch.setattr(status_mod, "_print_gateway_cluster_status", lambda: None)
     monkeypatch.setattr(status_mod, "print_data_plane_status", lambda: None)
-    monkeypatch.setattr(status_mod, "_print_service_row", lambda *_a: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(status_mod, "_print_service_row", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         "shared.resource_sample.resource_sample",
         lambda: (_ for _ in ()).throw(RuntimeError("no psutil here")),

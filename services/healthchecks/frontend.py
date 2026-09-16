@@ -18,6 +18,7 @@ import logging
 import subprocess
 import sys
 from pathlib import Path
+from typing import cast
 
 import psutil
 
@@ -25,9 +26,12 @@ from shared.cluster import frontend_service_cmd, session_name
 from shared.config import settings
 from shared.daemon_health import DaemonProbe
 from shared.log import init_gateway_process
+from shared.proc_tree import OwnedProcess, leader_owns_pids
 from shared.service_respawn import respawn_service
 
 _log = logging.getLogger("services.healthchecks.frontend")
+
+_ROOT_SOCKET_NAME = "ava-root.sock"  # the K1 control socket under root_run_dir()
 
 
 def _app_port() -> int:
@@ -69,22 +73,86 @@ def _listener_pids(port: int) -> set[int]:
     return pids
 
 
-def _session_owns_listener(port: int) -> bool:
-    """Whether the recorded frontend session owns a LISTEN socket on `port`.
+def _root_driven_enabled() -> bool:
+    """Whether this host's services run as ava-root tree units (W1.2e-2).
 
-    A bare HTTP 200 is not frontend health: the answering process must be the
-    current session's leader or one of its descendants (birth-validated). An
-    old orphan that answers the port after its own session record is gone
-    fails this check (issue #2123).
+    The same switch `ava start`/`ava stop` fork on; a configuration failure
+    reads as off (the session path), the rule `cli.commands._root_driver`
+    states for its own copy. This is the unit's management mode read from its
+    own definition — never a per-check sniff of "is a root there".
     """
+    try:
+        return bool(settings.services.root_driver_enabled)
+    except Exception:
+        return False
+
+
+def _root_unit_owner() -> OwnedProcess | None:
+    """The frontend tree unit's leader identity, or None when the tree does not
+    claim it running.
+
+    The tree row carries state + pid only (no birth key), so the identity is
+    captured from the live process the row names — the root masks a dead
+    generation's pid, so a pid that answers here is the generation the tree
+    claims. Everything downstream runs the same birth-validated lineage check
+    a session record feeds (`shared.proc_tree.leader_owns_pids`).
+    """
+    from services.ava_root.client import RootClient, RootClientError
+    from shared.paths import root_run_dir
+
+    try:
+        response = RootClient(root_run_dir() / _ROOT_SOCKET_NAME, timeout=2.0).status()
+    except RootClientError:
+        return None
+    if not response.get("ok"):
+        return None
+    result_raw: object = response.get("result")
+    if not isinstance(result_raw, dict):
+        return None
+    result = cast("dict[str, object]", result_raw)
+    units_raw = result.get("units")
+    units = cast("list[object]", units_raw) if isinstance(units_raw, list) else []
+    for unit_raw in units:
+        if not isinstance(unit_raw, dict):
+            continue
+        unit = cast("dict[str, object]", unit_raw)
+        if unit.get("id") != "frontend":
+            continue
+        pid = unit.get("pid")
+        if unit.get("state") != "running" or not isinstance(pid, int):
+            return None
+        try:
+            return OwnedProcess.capture(psutil.Process(pid))
+        except psutil.NoSuchProcess:
+            return None
+    return None
+
+
+def _expected_owner() -> OwnedProcess | None:
+    """The frontend's expected owner identity, per the unit's management mode.
+
+    THE one mode branch (task #3370, CTO ruling): a root-driven host manages
+    the frontend as an ava-root tree unit (identity = the tree row), a session
+    host records an `ava-frontend` session (identity = the record, birth-
+    exact). Everything after — leader liveness, HTTP 2xx, listener lineage —
+    is shared by both modes; nothing else in this module branches on the mode.
+    """
+    if _root_driven_enabled():
+        return _root_unit_owner()
     from shared.paths import run_dir
-    from shared.proc_tree import session_owns_pids
     from shared.session_record import SessionRecord
 
     record = SessionRecord.read(run_dir() / "sessions" / f"{_session_name()}.json")
     if record is None:
-        return False
-    return session_owns_pids(record, _listener_pids(port))
+        return None
+    return OwnedProcess(record.pid, record.create_time, record.starttime)
+
+
+def _owner_owns_listener(owner: OwnedProcess, port: int) -> bool:
+    """Whether a LISTEN socket on `port` belongs to `owner` or one of its
+    birth-validated descendants (the issue-#2123 rule, on the owner identity
+    the unit's management mode yielded)."""
+    return leader_owns_pids(owner, _listener_pids(port))
 
 
 def _http_ok() -> bool:
@@ -103,28 +171,30 @@ def _http_ok() -> bool:
 
 def _is_alive() -> bool:
     """Identity-bound liveness: 2xx AND the answering listener belongs to the
-    current frontend session. An anonymous 200 (old orphan, gate proxy) does
-    not count."""
-    return _http_ok() and _session_owns_listener(_app_port())
+    expected owner (the current session, or the tree unit on a root-driven
+    host). An anonymous 200 (old orphan, gate proxy) does not count."""
+    owner = _expected_owner()
+    return owner is not None and _http_ok() and _owner_owns_listener(owner, _app_port())
 
 
 def probe_frontend() -> DaemonProbe:
     """The `ava status` / start-path identity probe for the frontend.
 
     Same identity question the watchdog asks, with the verdict granularity a
-    human reading a status row needs: ALIVE only when the session owns the
-    app-port listener and it answers 2xx; PORT_TAKEN when the port is answered
-    by something outside the current session (an old orphan — respawn cannot
-    evict it); DOWN otherwise.
+    human reading a status row needs: ALIVE only when the expected owner (the
+    current session, or the tree unit on a root-driven host) owns the app-port
+    listener and it answers 2xx; PORT_TAKEN when the port is answered by
+    something outside that owner (an old orphan — respawn cannot evict it);
+    DOWN otherwise.
     """
     port = _app_port()
     listeners = sorted(_listener_pids(port))
     if _is_alive():
-        return DaemonProbe.up(f"frontend session owns the {port} listener and it answers 2xx")
+        return DaemonProbe.up(f"frontend owns the {port} listener and it answers 2xx")
     if listeners:
         return DaemonProbe.port_taken(
-            f"port {port} is answered by pid(s) {listeners} outside the current "
-            "frontend session — an old orphan's 200 is not frontend health"
+            f"port {port} is answered by pid(s) {listeners} outside the frontend's "
+            "expected owner — an old orphan's 200 is not frontend health"
         )
     return DaemonProbe.down(f"no frontend listener on {port}")
 

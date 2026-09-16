@@ -30,10 +30,12 @@ health runner's first round lands on its interval) passes, the same way a
 probe-less service never gated the session path. The wait is otherwise the
 same tiered contract as `cli.commands._probe`: critical services keep the
 whole bound, non-critical services get the short window and can never fail a
-start. Two differences from the session path are deliberate and inventoried
-in the W1.2e-2 PR: the verdict is the root's own health surface (rounds land
-on the health interval, not on a fresh probe), and identity probes that are
-session-record-bound (the frontend's) cannot read `alive` under the tree.
+start. Identity probes read the target unit's own management mode (task
+#3370): the frontend's reads the tree unit's pid on a root-driven host, not
+the absent session record, so it no longer reads `port-taken` while the unit
+serves. One difference from the session path remains deliberate and
+inventoried in the W1.2e-2 PR: the verdict is the root's own health surface
+(rounds land on the health interval, not on a fresh probe).
 
 Stop maps `--keep-infra` (infrastructure lives outside the tree — unchanged)
 and every preserved service (pause's browser, `--keep-service`) to a selective
