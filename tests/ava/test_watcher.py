@@ -10,6 +10,7 @@ POSIX-only (skip on Windows — the PTY supervisor is POSIX-only)."""
 
 import contextlib
 import datetime
+import logging
 import os
 import pathlib
 import subprocess
@@ -1870,6 +1871,82 @@ def test_kill_all_unregisters_watchers(_agent_row: int, monkeypatch: pytest.Monk
     assert any(r["session_id"] == wid for r in _registry_rows(_agent_row))
     _sessions.kill_all()
     assert all(r["session_id"] != wid for r in _registry_rows(_agent_row))
+
+
+def test_kill_logs_registry_delete_failure_and_stays_fail_soft(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A failed registry-row delete after a deliberate kill must not fail the
+    kill — but must not be silent either: the surviving row reads as
+    "killed, should exist" at the next boot reconcile, which then rebuilds the
+    very watcher this kill ended (the disconnect-window failure shape)."""
+    from ava.shell import sessions as _sessions
+    from shared import watcher_registry
+
+    class _Backend:
+        def kill_session(self, _name: str, *, graceful: bool = False) -> tuple[bool, str]:
+            assert graceful is False
+            return True, "mode"
+
+        def list_sessions(self) -> list[str]:
+            # The module-wide session teardown also sweeps through this fake.
+            return []
+
+    monkeypatch.setattr(_sessions, "get_shell_backend", _Backend)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_sessions, "_resolve", lambda _sid: "ava-agent-1-shell-7-x")  # pyright: ignore[reportUnknownArgumentType]
+
+    calls = 0
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        nonlocal calls
+        calls += 1
+        # Raise only once: the teardown sweep re-enters the same patch, and a
+        # repeat raise would turn teardown into an error.
+        if calls == 1:
+            raise RuntimeError("registry blip")
+
+    monkeypatch.setattr(watcher_registry, "delete_watcher", _boom)  # pyright: ignore[reportUnknownArgumentType]
+
+    with caplog.at_level(logging.WARNING, logger="ava.shell.sessions"):
+        _sessions.kill(7)  # must not raise
+
+    assert "registry row delete failed" in caplog.text
+
+
+def test_kill_all_logs_registry_delete_failure_and_stays_fail_soft(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Same contract for the prefix-scoped sweep: the sweep itself must not
+    fail, and its failed registry cleanup must be visible."""
+    from ava.shell import sessions as _sessions
+    from shared import watcher_registry
+
+    class _Backend:
+        def kill_session(self, _name: str, *, graceful: bool = False) -> tuple[bool, str]:
+            return True, "mode"
+
+        def list_sessions(self) -> list[str]:
+            return []
+
+    monkeypatch.setattr(_sessions, "get_shell_backend", _Backend)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_sessions, "_own_sessions", lambda: ["ava-agent-1-shell-7-x"])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(watcher_registry, "watcher_session_ids", lambda *_a, **_k: [7])  # pyright: ignore[reportUnknownArgumentType]
+
+    calls = 0
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        nonlocal calls
+        calls += 1
+        # Raise only once: the teardown sweep re-enters the same patch.
+        if calls == 1:
+            raise RuntimeError("registry blip")
+
+    monkeypatch.setattr(watcher_registry, "delete_watcher", _boom)  # pyright: ignore[reportUnknownArgumentType]
+
+    with caplog.at_level(logging.WARNING, logger="ava.shell.sessions"):
+        assert _sessions.kill_all() == 1  # must not raise
+
+    assert "kill_all failed" in caplog.text
 
 
 def test_cron_double_registration_reuses_live_session(
