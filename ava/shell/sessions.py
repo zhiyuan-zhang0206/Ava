@@ -334,15 +334,17 @@ def capture(id: int, lines: int | None = None, *, scrollback: bool = True) -> st
     needed for full-screen programs that redraw in place (`lines` is
     ignored then)."""
     id = coerce_typed(id, "id", int)
+    resolved_lines: int
     if lines is None:
-        lines = settings.display.shell_capture_default_lines
-    lines = coerce_typed(lines, "lines", int)
+        resolved_lines = settings.display.shell_capture_default_lines
+    else:
+        resolved_lines = coerce_typed(lines, "lines", int)
     scrollback = coerce_typed(scrollback, "scrollback", bool)
     # A session holds whatever ran in it — an interactive fetch, a coding agent
     # rendering a web page — so reading one ingests exactly as `shell.run` does.
     # Scanned for the same reason; the text comes back byte-for-byte.
     name = _resolve(id)
-    pane = get_shell_backend().capture_pane(name, lines, scrollback=scrollback)
+    pane = get_shell_backend().capture_pane(name, resolved_lines, scrollback=scrollback)
     return scan_content(pane, source="shell.sessions.capture")
 
 
