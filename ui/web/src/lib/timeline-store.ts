@@ -1,21 +1,9 @@
-// Zustand store — SSE-driven streaming timeline state only.
-//
-// Split out of the app store (store.ts, which now holds pure-client UI +
-// cluster-coordination state) so that the high-frequency SSE fold — one set()
-// per code_delta / chat_delta chunk — notifies ONLY timeline subscribers.
-// Zustand notifies every subscriber of a store on each set() and re-runs their
-// selector; keeping the timeline in its own store means a burst of streaming
-// deltas never runs the sidebar / spawn-dialog / cluster-banner selectors. The
-// two stores never cross-read (the timeline gate `activeThreadId` and the
-// sidebar selection `activeId` are coordinated only at the hook level, in
-// useTimeline), so the split is a clean cut, not a shared-slice carve-out.
-//
-// Server data (agents list, stats, timeline snapshot, token usage) lives in
-// TanStack Query. This store holds the LIVE render state the SSE stream folds
-// into on top of that snapshot.
-//
-// Only the selected conversation owns live state. Switching replaces that
-// state from an HTTP tail snapshot; inactive histories are not live caches.
+// Selected conversation render state: HTTP snapshots plus live SSE folds.
+// A dedicated Zustand store keeps high-frequency timeline updates from waking
+// sidebar, spawn-dialog and cluster-banner subscribers. useTimeline coordinates
+// its activeThreadId with the UI selection; the stores never cross-read.
+// Switching replaces the view from an HTTP tail snapshot and releases inactive
+// histories. Durable history remains available through paging.
 
 "use client";
 
@@ -141,15 +129,9 @@ export interface TimelineState {
   /** Replace the selected view atomically; inactive views retain no live state. */
   switchThread: (agentId: number | null, cached: BackendTimelineItem[] | null, hasMoreOlder: boolean) => void;
 
-  /** Write the three context-window token fields atomically — input usage, the
-   * reasoning portion, and the model's max input ceiling. The single gate for
-   * token state, so `contextTokens` and `maxContextTokens` can never split-brain
-   * across two renders (the old bug: `tokenUsage` through `processSseEvent` +
-   * `maxContextTokens` through a bare `setState`). `useTokenUsage` calls
-   * this for cold reset / hot restore / HTTP snapshot; live per-call SSE
-   * `token_usage` still flows through `processSseEvent`, which leaves
-   * `maxContextTokens` / `softCompactTokens` / `hardCompactTokens` (per-model
-   * constants) untouched. */
+  /** Atomically apply the selected HTTP token snapshot, including its model
+   * ceiling and compact thresholds. Live SSE token_usage changes usage only;
+   * selection resets all fields together. */
   applyTokenUsage: (
     input: number,
     reasoning: number,
