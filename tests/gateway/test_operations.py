@@ -933,6 +933,7 @@ class TestResurrectIfTerminatedPlacement:
     @pytest.fixture(autouse=True)
     def _default_unsuppressed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(ops_lifecycle, "_wake_suppression_active", lambda _aid: False)
+        monkeypatch.setattr(ops_lifecycle, "_recovery_halted", lambda _aid: False)
         monkeypatch.setattr(ops_lifecycle, "_clear_wake_suppression", lambda _aid: None)
 
     @pytest.mark.asyncio
@@ -946,6 +947,27 @@ class TestResurrectIfTerminatedPlacement:
 
         def _no_machine_read(_aid: int) -> str:
             raise AssertionError("suppressed auto-resurrect must not read or contact the home")
+
+        monkeypatch.setattr(ops_lifecycle, "get_agent_machine", _no_machine_read)
+        status = await ops_lifecycle.resurrect_if_terminated(
+            5, trigger_inbound_id=88, trigger_inbound_kind="chat"
+        )
+        assert status is AgentStatus.TERMINATED
+
+    @pytest.mark.asyncio
+    async def test_tripped_recovery_breaker_skips_forward_and_launch(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A tripped recovery breaker (consecutive permanent provider
+        rejections) refuses the automatic resurrect before any home contact,
+        exactly like an active wake suppression (task #3617)."""
+        from shared.agents import AgentStatus
+
+        monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
+        monkeypatch.setattr(ops_lifecycle, "_recovery_halted", lambda _aid: True)
+
+        def _no_machine_read(_aid: int) -> str:
+            raise AssertionError("halted auto-resurrect must not read or contact the home")
 
         monkeypatch.setattr(ops_lifecycle, "get_agent_machine", _no_machine_read)
         status = await ops_lifecycle.resurrect_if_terminated(

@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 24 | events table |
-| telemetry (category=telemetry) | `events` | 179 | events table |
+| telemetry (category=telemetry) | `events` | 180 | events table |
 | log (category=log) | `events` | 12 | events table |
 | file-only (destination=file) | file log | 1 | file only (not the events table) |
 | SSE live | Redis → frontend (not persisted) | 31 role | live projection |
@@ -91,7 +91,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 179)
+## 3. Telemetry events (category=telemetry, 180)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -107,6 +107,7 @@ consumers: see the comments at each emit point.
 | `llm_usage` | LLM call metering | observation | model, calls, in_total, out_total, cache_read, reasoning, latency_ms, decode_ms, cost_usd, price_miss, price_hit, price_out, unpriced, task_id, usage_kind, source, cache_mechanism, cache_scope | — | events |
 | `turn_end` | one turn finished | observation | ok, duration_seconds | — | events |
 | `llm_turn_aborted` | turn aborted after retries | anomaly | — | LLM_ERROR | events |
+| `recovery_breaker_halt` | recovery circuit breaker tripped — consecutive permanent provider rejections halted every automatic recovery path until a turn succeeds (task #3617) | anomaly | — | — | events |
 | `compact_turn_aborted` | turn aborted because compaction failed | anomaly | — | — | events |
 | `llm_provider_error` | LLM provider failure | anomaly | error_class, provider, status, error_type, fatal, billing, vendor, model | LLM_ERROR | events |
 | `stream_stalled_retry` | stream stalled, retried | anomaly | — | LLM_ERROR | events |

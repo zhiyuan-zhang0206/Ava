@@ -182,6 +182,10 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "DELIVERY_POISONED_KEYS",
     ): "SQL key set for the delivery_poisoned view, not a clock",
     (
+        "shared/lifecycle_acceptance.py",
+        "SYSTEM_REAPED_CRASH_ROW",
+    ): "SQL predicate constant for the corpse-reaper's crash-marked rows, not a clock",
+    (
         "ava_builtins/plugins/lm_anthropic/provider.py",
         "_CLAUDE_EXTENDED_THINKING_DEFAULT_BUDGET",
     ): "LLM thinking-token budget, not a wall-clock constant",
