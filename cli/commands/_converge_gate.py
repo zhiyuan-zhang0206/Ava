@@ -177,6 +177,10 @@ def _plist_content(home: Path, repo: Path) -> str:
 def _ensure_app_port(home: Path) -> int:
     """Backfill the record's `app` slot + materialize AVA_APP_PORT in the .env.
 
+    Idempotent at the byte level (task #3637): an `.env` already carrying the
+    value is left untouched — no write, no snapshot, no audit record — so the
+    repeated converge (every `ava start`, every boot-retry attempt) stays silent.
+
     Returns the app port. Raises when the home has no registry record — the
     gate cannot derive ports for a cluster that was never born.
     """
