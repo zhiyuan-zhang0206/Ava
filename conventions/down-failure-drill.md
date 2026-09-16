@@ -131,5 +131,6 @@ After the intentional start failure reaches recovery, verify all of these:
   expand-contract requirements for lossy operations.
 - [`cli/commands/_update_recover.py`](../cli/commands/_update_recover.py) —
   failed-rollout recovery and manual-intervention diagnostics.
-- [`cli/commands/_update_git.py`](../cli/commands/_update_git.py) — verified
-  pre-update snapshot creation.
+- [`cli/commands/_update_git.py`](../cli/commands/_update_git.py) +
+  [`cli/commands/_update_snapshot.py`](../cli/commands/_update_snapshot.py) —
+  verified pre-update snapshot creation.

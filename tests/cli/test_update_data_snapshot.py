@@ -16,7 +16,9 @@ import shared.pg_tools
 from cli.commands import _cluster_rollback as _rollback
 from cli.commands import _update_git as _git
 from cli.commands import _update_local as _local
+from cli.commands import _update_snapshot as _snapshot
 from services import backup
+from shared.platform import LockTimeoutError
 
 
 def _patch_migration_sets(
@@ -50,7 +52,7 @@ def _patch_decrypt_and_listing(
 
     monkeypatch.setattr(backup, "decrypt_artifact", _decrypt)
     monkeypatch.setattr(shared.pg_tools, "pg_tool", _pg_restore_path)
-    monkeypatch.setattr(_git, "run_bounded", _run_bounded)
+    monkeypatch.setattr(_snapshot, "run_bounded", _run_bounded)
 
 
 def test_code_only_update_skips_pre_update_data_snapshot(
@@ -67,7 +69,7 @@ def test_code_only_update_skips_pre_update_data_snapshot(
         pytest.fail("code-only update must not invoke pg_restore")
 
     monkeypatch.setattr(backup, "run_backup", _unexpected_backup)
-    monkeypatch.setattr(_git, "run_bounded", _unexpected_pg_restore)
+    monkeypatch.setattr(_snapshot, "run_bounded", _unexpected_pg_restore)
 
     assert _git.snapshot_pre_update_data("TARGETSHA") is None
 
@@ -113,7 +115,7 @@ def test_migration_update_creates_and_verifies_pre_update_dump(
         return dump
 
     monkeypatch.setattr(backup, "run_backup", _run_backup)
-    monkeypatch.setattr(_git, "_verify_snapshot_artifact", verified.append)
+    monkeypatch.setattr(_snapshot, "_verify_snapshot_artifact", verified.append)
 
     assert _git.snapshot_pre_update_data("TARGETSHA") == dump
     assert backup_calls == [_git._PRE_UPDATE_DUMP_TIMEOUT_S]
@@ -148,7 +150,7 @@ def test_pre_update_data_snapshot_narrates_the_dump_on_stdout(
         pass
 
     monkeypatch.setattr(backup, "run_backup", _run_backup)
-    monkeypatch.setattr(_git, "_verify_snapshot_artifact", _no_verify)
+    monkeypatch.setattr(_snapshot, "_verify_snapshot_artifact", _no_verify)
 
     assert _git.snapshot_pre_update_data("TARGETSHA") == dump
 
@@ -160,15 +162,16 @@ def test_pre_update_data_snapshot_narrates_the_dump_on_stdout(
 
 
 def test_snapshot_heartbeat_cadence_leaves_headroom_inside_the_stall_window() -> None:
-    """The dump heartbeat must beat far inside the rollout stall window.
+    """The dump and lock-wait heartbeats must beat far inside the stall window.
 
     The 2026-09-14 kill was a healthy 20-minute dump sitting silent past the
-    900 s no-progress clock; the cadence is the fix's premise, so it is pinned
-    here rather than left to drift apart from either constant.
+    900 s no-progress clock; the cadences are the fix's premise, so they are
+    pinned here rather than left to drift apart from either constant.
     """
     from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S
 
     assert backup._PROGRESS_INTERVAL_S * 3 <= NO_PROGRESS_TIMEOUT_S
+    assert _git._SNAPSHOT_HEARTBEAT_S * 3 <= NO_PROGRESS_TIMEOUT_S
 
 
 def test_pre_update_data_snapshot_wraps_backup_failure(
@@ -233,7 +236,7 @@ def test_pre_update_data_snapshot_rejects_unrestorable_dump(
     )
 
     with pytest.raises(RuntimeError, match=str(artifact)):
-        _git._verify_snapshot_artifact(artifact)
+        _snapshot._verify_snapshot_artifact(artifact)
 
 
 def test_pre_update_data_snapshot_rejects_header_only_toc(
@@ -246,7 +249,7 @@ def test_pre_update_data_snapshot_rejects_header_only_toc(
     _patch_decrypt_and_listing(monkeypatch, SimpleNamespace(returncode=0, stdout=header, stderr=""))
 
     with pytest.raises(RuntimeError, match="empty table of contents"):
-        _git._verify_snapshot_artifact(artifact)
+        _snapshot._verify_snapshot_artifact(artifact)
 
 
 def test_pre_update_data_snapshot_verifies_legacy_gzip_artifact(
@@ -262,7 +265,7 @@ def test_pre_update_data_snapshot_verifies_legacy_gzip_artifact(
         legacy_gzip=True,
     )
 
-    _git._verify_snapshot_artifact(artifact)  # must not raise
+    _snapshot._verify_snapshot_artifact(artifact)  # must not raise
 
 
 def test_pre_update_data_snapshot_rejects_empty_dump(
@@ -275,10 +278,10 @@ def test_pre_update_data_snapshot_rejects_empty_dump(
     def _unexpected_pg_restore(*_args: object, **_kwargs: object) -> NoReturn:
         pytest.fail("empty dump must not be sent to pg_restore")
 
-    monkeypatch.setattr(_git, "run_bounded", _unexpected_pg_restore)
+    monkeypatch.setattr(_snapshot, "run_bounded", _unexpected_pg_restore)
 
     with pytest.raises(RuntimeError, match=str(artifact)):
-        _git._verify_snapshot_artifact(artifact)
+        _snapshot._verify_snapshot_artifact(artifact)
 
 
 def test_pre_update_data_snapshot_holds_backup_lock_through_verification(
@@ -292,7 +295,7 @@ def test_pre_update_data_snapshot_holds_backup_lock_through_verification(
 
     @contextmanager
     def _backup_lock(*, timeout_s: float) -> Generator[None]:
-        assert timeout_s == _git._PRE_UPDATE_DUMP_TIMEOUT_S
+        assert timeout_s == min(_git._SNAPSHOT_HEARTBEAT_S, _git._PRE_UPDATE_DUMP_TIMEOUT_S)
         events.append("lock-enter")
         try:
             yield
@@ -319,10 +322,88 @@ def test_pre_update_data_snapshot_holds_backup_lock_through_verification(
 
     monkeypatch.setattr(backup, "backup_lock", _backup_lock, raising=False)
     monkeypatch.setattr(backup, "run_backup", _run_backup)
-    monkeypatch.setattr(_git, "_verify_snapshot_artifact", _verify)
+    monkeypatch.setattr(_snapshot, "_verify_snapshot_artifact", _verify)
 
     assert _git.snapshot_pre_update_data("TARGETSHA") == dump
     assert events == ["lock-enter", "dump", "verify", "lock-exit"]
+
+
+def test_pre_update_data_snapshot_lock_wait_narrates_heartbeats(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A contended backup lock narrates one line per heartbeat chunk — the wait
+    is not log silence — and the snapshot proceeds once the lock frees."""
+    _patch_migration_sets(monkeypatch, {"baseline", "20260825T010101_expand"}, {"baseline"})
+    dump = tmp_path / "pre-update.dump"
+    dump.write_bytes(b"custom-pg-dump")
+    attempts: list[float] = []
+    held_chunks = 2
+
+    @contextmanager
+    def _backup_lock(*, timeout_s: float) -> Generator[None]:
+        attempts.append(timeout_s)
+        if len(attempts) <= held_chunks:
+            raise LockTimeoutError("another backup holds it")
+        yield
+
+    def _run_backup(
+        *,
+        timeout_s: float,
+        pre_update: bool,
+        publish: bool,
+        progress: Callable[[str], None] | None = None,
+    ) -> Path:
+        _ = timeout_s, pre_update, publish, progress
+        return dump
+
+    def _no_verify(_artifact: Path) -> None:
+        pass
+
+    monkeypatch.setattr(backup, "backup_lock", _backup_lock)
+    monkeypatch.setattr(backup, "run_backup", _run_backup)
+    monkeypatch.setattr(_snapshot, "_verify_snapshot_artifact", _no_verify)
+
+    assert _git.snapshot_pre_update_data("TARGETSHA") == dump
+
+    assert attempts == [_git._SNAPSHOT_HEARTBEAT_S] * (held_chunks + 1)
+    out = capsys.readouterr().out
+    assert out.count("→ pre-update data snapshot: waiting for the backup lock") == held_chunks
+    assert "another backup is writing)" in out
+
+
+def test_pre_update_data_snapshot_lock_wait_gives_up_at_the_total_budget(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A lock held for the whole budget still expires — the raise names the
+    total `_PRE_UPDATE_DUMP_TIMEOUT_S`, not the final `_SNAPSHOT_HEARTBEAT_S`
+    chunk — and the dump never starts."""
+    _patch_migration_sets(monkeypatch, {"baseline", "20260825T010101_expand"}, {"baseline"})
+    clock = [0.0]
+    attempts: list[float] = []
+
+    @contextmanager
+    def _held_lock(*, timeout_s: float) -> Generator[None]:
+        attempts.append(timeout_s)
+        clock[0] += timeout_s  # each take waits out its chunk, then expires
+        raise LockTimeoutError("another backup holds it")
+
+    def _now() -> float:
+        return clock[0]
+
+    def _unexpected_backup(**_kwargs: object) -> NoReturn:
+        pytest.fail("the dump must not start while the lock is held")
+
+    monkeypatch.setattr(_git, "time", SimpleNamespace(monotonic=_now))
+    monkeypatch.setattr(backup, "backup_lock", _held_lock)
+    monkeypatch.setattr(backup, "run_backup", _unexpected_backup)
+
+    with pytest.raises(LockTimeoutError, match=f"within {_git._PRE_UPDATE_DUMP_TIMEOUT_S:.0f}s"):
+        _git.snapshot_pre_update_data("TARGETSHA")
+
+    expected_chunks = int(_git._PRE_UPDATE_DUMP_TIMEOUT_S / _git._SNAPSHOT_HEARTBEAT_S)
+    assert attempts == [_git._SNAPSHOT_HEARTBEAT_S] * expected_chunks
+    out = capsys.readouterr().out
+    assert out.count("→ pre-update data snapshot: waiting for the backup lock") == expected_chunks
 
 
 def test_pre_update_data_snapshot_propagates_pre_cutover_target_error(
@@ -351,15 +432,23 @@ def test_pre_activation_snapshot_uses_activation_kind(
     dump.write_bytes(b"custom-pg-dump")
     calls: list[float] = []
     verified: list[Path] = []
+    sinks: list[Callable[[str], None] | None] = []
 
-    def _run_backup(*, timeout_s: float, pitr_activation: str, db_url: str) -> Path:
+    def _run_backup(
+        *,
+        timeout_s: float,
+        pitr_activation: str,
+        db_url: str,
+        progress: Callable[[str], None] | None = None,
+    ) -> Path:
         calls.append(timeout_s)
+        sinks.append(progress)
         assert pitr_activation == "11111111-1111-1111-1111-111111111111"
         assert db_url == "dbname=ava"
         return dump
 
     monkeypatch.setattr(backup, "run_backup", _run_backup)
-    monkeypatch.setattr(_git, "_verify_snapshot_artifact", verified.append)
+    monkeypatch.setattr(_snapshot, "_verify_snapshot_artifact", verified.append)
 
     assert (
         _git.snapshot_pre_activation_data(
@@ -369,6 +458,59 @@ def test_pre_activation_snapshot_uses_activation_kind(
         == dump
     )
     assert calls == [_git._PRE_UPDATE_DUMP_TIMEOUT_S]
+    assert callable(sinks[0]), "the activation dump must narrate (task #3442)"
     assert verified == [dump]
     out = capsys.readouterr().out
+    assert f"→ pre-activation data snapshot: {dump} (verified)" in out
+
+
+def test_pre_activation_snapshot_narrates_lock_wait_and_dump_through_the_activation_sink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The pre-activation snapshot narrates through the activation prefix — the
+    lock wait and the dump stages (#2518 residual: its log was silent until the
+    final verified line)."""
+    dump = tmp_path / "pitr-activation.dump"
+    dump.write_bytes(b"custom-pg-dump")
+    attempts: list[float] = []
+
+    @contextmanager
+    def _backup_lock(*, timeout_s: float) -> Generator[None]:
+        attempts.append(timeout_s)
+        if len(attempts) == 1:
+            raise LockTimeoutError("another backup holds it")
+        yield
+
+    def _run_backup(
+        *,
+        timeout_s: float,
+        pitr_activation: str,
+        db_url: str,
+        progress: Callable[[str], None] | None = None,
+    ) -> Path:
+        _ = timeout_s, pitr_activation, db_url
+        assert progress is not None
+        progress("pg_dump 61s, 512.4 MiB written")
+        return dump
+
+    def _no_verify(_artifact: Path) -> None:
+        pass
+
+    monkeypatch.setattr(backup, "backup_lock", _backup_lock)
+    monkeypatch.setattr(backup, "run_backup", _run_backup)
+    monkeypatch.setattr(_snapshot, "_verify_snapshot_artifact", _no_verify)
+
+    assert (
+        _git.snapshot_pre_activation_data(
+            operation_id="11111111-1111-1111-1111-111111111111",
+            db_url="dbname=ava",
+        )
+        == dump
+    )
+    assert attempts == [_git._SNAPSHOT_HEARTBEAT_S] * 2
+    out = capsys.readouterr().out
+    bounded = f"{_git._PRE_UPDATE_DUMP_TIMEOUT_S / 60:.0f} min"
+    assert f"→ pre-activation data snapshot: started (dump bounded at {bounded})" in out
+    assert "→ pre-activation data snapshot: waiting for the backup lock" in out
+    assert "→ pre-activation data snapshot: pg_dump 61s, 512.4 MiB written" in out
     assert f"→ pre-activation data snapshot: {dump} (verified)" in out
