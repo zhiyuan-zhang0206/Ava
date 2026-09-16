@@ -486,6 +486,7 @@ def test_factory_constructs_every_role_for_the_gcs_backend(tmp_path: Path) -> No
     assert group.viewer_object_store() is not None
     assert group.generation_pinned_object_reader() is not None
     assert group.retention_inventory_reader() is not None
+    assert group.logical_retention_inventory_reader() is not None
     assert group.protected_manifest_publisher() is not None
     assert group.retention_delete_store() is not None
 
@@ -507,6 +508,7 @@ def test_factory_constructs_every_role_for_the_baidu_backend(tmp_path: Path) -> 
     assert group.viewer_object_store() is not None
     assert group.generation_pinned_object_reader() is not None
     assert group.retention_inventory_reader() is not None
+    assert group.logical_retention_inventory_reader() is not None
     assert group.protected_manifest_publisher() is not None
     assert group.retention_delete_store() is not None
 
@@ -532,6 +534,7 @@ def test_factory_constructs_every_role_for_the_oss_backend(tmp_path: Path) -> No
     assert group.viewer_object_store() is not None
     assert group.generation_pinned_object_reader() is not None
     assert group.retention_inventory_reader() is not None
+    assert group.logical_retention_inventory_reader() is not None
     assert group.protected_manifest_publisher() is not None
     assert group.retention_delete_store() is not None
 
@@ -573,6 +576,7 @@ def test_factory_constructs_every_role_for_the_cos_backend(tmp_path: Path) -> No
     assert group.viewer_object_store() is not None
     assert group.generation_pinned_object_reader() is not None
     assert group.retention_inventory_reader() is not None
+    assert group.logical_retention_inventory_reader() is not None
     assert group.protected_manifest_publisher() is not None
     assert group.retention_delete_store() is not None
 

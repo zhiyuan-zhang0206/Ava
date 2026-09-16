@@ -27,7 +27,7 @@ from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict
 
 from services import backup
-from services.pitr import store_factory
+from services.pitr import logical_dump_names, store_factory
 from services.pitr.checksums import MD5, ObjectChecksum
 from services.pitr.object_store import RemoteObjectAck
 from shared.config import settings
@@ -277,7 +277,7 @@ def test_publish_offsite_standalone_success_is_visible(tmp_path: Path) -> None:
 
     assert proc.returncode == 0, proc.stderr
     assert "[backup] off-site published" in proc.stderr
-    assert f"{backup._REMOTE_ROOT}/{artifact.name}" in proc.stderr
+    assert f"{logical_dump_names.REMOTE_ROOT}/{artifact.name}" in proc.stderr
 
 
 def test_publish_offsite_standalone_failure_behavior_unchanged(tmp_path: Path) -> None:
@@ -338,7 +338,7 @@ def test_publish_offsite_standalone_publish_failure_keeps_exit_and_artifact(
     )
 
     assert proc.returncode == 0, proc.stderr
-    msg = f"[backup] off-site publish of {backup._REMOTE_ROOT}/{artifact.name} failed"
+    msg = f"[backup] off-site publish of {logical_dump_names.REMOTE_ROOT}/{artifact.name} failed"
     assert msg in proc.stderr
     assert artifact.read_bytes() == b"encrypted artifact"
 
@@ -603,7 +603,7 @@ def test_run_backup_failure_leaves_no_files(bdir: Path, monkeypatch: pytest.Monk
 def test_run_backup_sweeps_stale_partials(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A `.partial` left by an interrupted run (e.g. the process tree killed
     mid-rollout) is swept before the new dump is written, so it cannot pile up
-    unnoticed: the name never matches `_NAME_RE`, so due/prune logic ignores it."""
+    unnoticed: the name never matches the managed grammar, so due/prune logic ignores it."""
     (bdir / "whatever-20260801-030000.dump.partial").write_bytes(b"stale")
     (bdir / "other-20260801-031500.dump.partial").write_bytes(b"stale")
 
@@ -629,7 +629,7 @@ def test_run_backup_real_dump_and_prune(bdir: Path, monkeypatch: pytest.MonkeyPa
     path = backup.run_backup(_dt(2026, 6, 10, 3, 0))
 
     assert path.parent == bdir
-    assert backup._NAME_RE.match(path.name)
+    assert logical_dump_names.DUMP_NAME_RE.match(path.name)
     assert path.stat().st_size > 0
     assert not list(bdir.glob("*.partial"))
     # BACKUP_KEEP pre-seeded + 1 new -> the oldest pre-seed pruned, KEEP remain.
@@ -863,7 +863,7 @@ def test_offsite_publish_goes_through_the_store_contract(
 
     published = backup._publish_offsite(artifact)
 
-    assert published == f"{backup._REMOTE_ROOT}/{artifact.name}"
+    assert published == f"{logical_dump_names.REMOTE_ROOT}/{artifact.name}"
     assert calls[0]["object_name"] == published
     assert calls[0]["metadata"] == {"ava-artifact-kind": "logical-backup"}
     source = cast(Any, calls[0]["source"])
@@ -937,7 +937,7 @@ def test_run_backup_publishes_offsite_via_store_contract(
 
     artifact = backup.run_backup(_dt(2026, 8, 8, 3, 0), db_url="dbname=whatever")
 
-    assert published == [f"{backup._REMOTE_ROOT}/{artifact.name}"]
+    assert published == [f"{logical_dump_names.REMOTE_ROOT}/{artifact.name}"]
     assert artifact.read_bytes() == b"encrypted dump"
 
 

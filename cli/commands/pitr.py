@@ -210,6 +210,13 @@ def cmd_pitr_retention_inspect() -> int:
                 "eligible_objects": len(plan.eligible),
                 "retained_bytes": plan.retained_bytes,
                 "eligible_bytes": plan.eligible_bytes,
+                "logical_retained_objects": sum(
+                    1 for item in plan.retained if item.object.kind == "logical"
+                ),
+                "logical_eligible_objects": sum(
+                    1 for item in plan.eligible if item.object.kind == "logical"
+                ),
+                "weak_evidence_objects": len(plan.weak_evidence),
                 "delete_enabled": CarrierState.read().armed is True,
             },
             sort_keys=True,

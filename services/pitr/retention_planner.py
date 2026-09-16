@@ -20,7 +20,7 @@ from services.pitr.retention_manifest import (
     RetentionPlan,
     SidecarPair,
 )
-from services.pitr.retention_policy import RetentionEvidence, plan_retention
+from services.pitr.retention_policy import LogicalRetention, RetentionEvidence, plan_retention
 from services.pitr.uploader import AckManifest, ack_manifest_from_raw
 
 
@@ -36,12 +36,23 @@ class DryRunResult:
     remote_object_count: int = 0
     remote_bytes: int = 0
     orphan_sidecars: int = 0
+    logical_object_count: int = 0
+    logical_bytes: int = 0
+    logical_eligible_objects: int = 0
+    weak_evidence_objects: int = 0
 
 
 def build_local_evidence(  # noqa: PLR0915
-    root: Path, *, inventory_reader: RetentionInventoryReader | None = None
+    root: Path,
+    *,
+    inventory_reader: RetentionInventoryReader | None = None,
+    logical_reader: RetentionInventoryReader | None = None,
 ) -> RetentionEvidence:
-    """Take a content-addressed local evidence snapshot without changing source state."""
+    """Take a content-addressed local evidence snapshot without changing source state.
+
+    ``logical_reader`` snapshots the flat logical dump namespace as a second,
+    separately-decided surface; None leaves it out of scope.
+    """
 
     before = _evidence_fingerprint(root)
     malformed: list[str] = []
@@ -118,6 +129,18 @@ def build_local_evidence(  # noqa: PLR0915
         malformed.extend(remote_before.unknown_names)
         if remote_after != remote_before:
             malformed.append("remote inventory changed during snapshot")
+    logical_before = logical_reader.snapshot() if logical_reader is not None else None
+    logical_after = logical_reader.snapshot() if logical_reader is not None else None
+    logical_inventory: tuple[RetentionObject, ...] = ()
+    logical_pairs: tuple[SidecarPair, ...] = ()
+    logical_orphans: tuple[OrphanSidecar, ...] = ()
+    if logical_before is not None:
+        logical_inventory = logical_before.objects
+        logical_pairs = logical_before.sidecar_pairs
+        logical_orphans = logical_before.orphan_sidecars
+        malformed.extend(logical_before.unknown_names)
+        if logical_after != logical_before:
+            malformed.append("logical inventory changed during snapshot")
     after = _evidence_fingerprint(root)
     return RetentionEvidence(
         tuple(candidates),
@@ -129,6 +152,9 @@ def build_local_evidence(  # noqa: PLR0915
         after,
         sidecar_pairs,
         orphan_sidecars,
+        logical_inventory,
+        logical_pairs,
+        logical_orphans,
     )
 
 
@@ -137,9 +163,23 @@ def write_dry_run_plan(
     *,
     retain_chains: int = 2,
     inventory_reader: RetentionInventoryReader | None = None,
+    logical_reader: RetentionInventoryReader | None = None,
+    logical_retention: LogicalRetention | None = None,
 ) -> DryRunResult:
-    evidence = build_local_evidence(root, inventory_reader=inventory_reader)
-    plan = plan_retention(evidence, retain_chains=retain_chains)
+    """Snapshot both surfaces, decide, and publish the durable dry-run plan.
+
+    The logical namespace is in scope exactly when both its reader and its
+    retention policy are passed -- one without the other is a caller bug,
+    refused rather than silently planning a half-covered surface.
+    """
+    if (logical_reader is None) != (logical_retention is None):
+        raise ValueError("the logical inventory reader and its retention policy come together")
+    evidence = build_local_evidence(
+        root, inventory_reader=inventory_reader, logical_reader=logical_reader
+    )
+    plan = plan_retention(
+        evidence, retain_chains=retain_chains, logical_retention=logical_retention
+    )
     destination = root / "retention-plans" / "latest.dry-run.json"
     _atomic_bytes(destination, plan.to_json().encode())
     return DryRunResult(
@@ -153,6 +193,10 @@ def write_dry_run_plan(
         len(evidence.inventory),
         sum(item.size for item in evidence.inventory),
         len(plan.orphan_sidecars),
+        logical_object_count=len(evidence.logical_inventory),
+        logical_bytes=sum(item.size for item in evidence.logical_inventory),
+        logical_eligible_objects=sum(1 for item in plan.eligible if item.object.kind == "logical"),
+        weak_evidence_objects=len(plan.weak_evidence),
     )
 
 

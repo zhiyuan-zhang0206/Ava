@@ -1,4 +1,8 @@
-"""Canonical, local-only evidence for a PITR retention dry run."""
+"""Canonical evidence and decisions for a PITR retention dry run.
+
+The vocabulary spans both deletion surfaces: the PITR prefix (base / WAL /
+history archives) and the flat logical dump namespace (``kind="logical"``).
+"""
 
 from __future__ import annotations
 
@@ -76,7 +80,7 @@ class RetentionObject:
     def __post_init__(self) -> None:
         if not self.object_name or not self.pin_token or self.size <= 0 or not self.checksum_value:
             raise ValueError("retention object lacks an exact immutable identity")
-        if self.kind not in {"base", "wal", "history"}:
+        if self.kind not in {"base", "wal", "history", "logical"}:
             raise ValueError("retention object kind is unsupported")
         if self.checksum_algo not in KNOWN_CHECKSUM_ALGOS:
             raise ValueError("retention object checksum algorithm is unsupported")
@@ -110,6 +114,11 @@ class RetentionPlan:
     retained_bytes: int
     eligible_bytes: int
     orphan_sidecars: tuple[RetentionSidecar, ...] = ()
+    weak_evidence: tuple[str, ...] = ()
+    """Object names whose decision rests on weak evidence (strict naming and
+    a live stat only, no verified sidecar binding) -- the honest annotation
+    the logical-namespace design requires. Both retained and eligible
+    decisions are listed; the names are canonical and unique."""
 
     def __post_init__(self) -> None:
         if self.schema_version != PLAN_SCHEMA_VERSION or self.retained_chain_count < 2:
@@ -126,6 +135,8 @@ class RetentionPlan:
             raise ValueError("eligible byte total differs from its decisions")
         if tuple(sorted(set(self.orphan_sidecars))) != self.orphan_sidecars:
             raise ValueError("orphan sidecars must be canonical and unique")
+        if tuple(sorted(set(self.weak_evidence))) != self.weak_evidence:
+            raise ValueError("weak evidence names must be canonical and unique")
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), sort_keys=True, separators=(",", ":"))
@@ -138,8 +149,10 @@ class RetentionPlan:
         raw: dict[str, Any] = json.loads(value)
         # Legacy normalization: dry-run plans written before the sidecar
         # rules carry no ``orphan_sidecars`` field (and decisions carry no
-        # ``sidecar`` field).
+        # ``sidecar`` field); plans written before the logical namespace
+        # carry no ``weak_evidence`` field.
         raw.setdefault("orphan_sidecars", [])
+        raw.setdefault("weak_evidence", [])
         if set(raw) != set(cls.__dataclass_fields__):
             raise ValueError("retention plan fields do not match schema")
         raw["protected_chain_ids"] = tuple(raw["protected_chain_ids"])
@@ -148,6 +161,7 @@ class RetentionPlan:
         raw["retained"] = tuple(_decision(item) for item in raw["retained"])
         raw["eligible"] = tuple(_decision(item) for item in raw["eligible"])
         raw["orphan_sidecars"] = tuple(RetentionSidecar(**item) for item in raw["orphan_sidecars"])
+        raw["weak_evidence"] = tuple(str(item) for item in raw["weak_evidence"])
         return cls(**raw)
 
 

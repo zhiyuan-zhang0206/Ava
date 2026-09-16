@@ -1,13 +1,29 @@
-"""Pure, fail-closed N-chain policy for retention dry-run plans."""
+"""Pure, fail-closed retention policy for dry-run plans.
+
+Two surfaces, one plan: the PITR prefix's N-chain rules and the flat
+logical dump namespace (``ava-logical/``), whose window mirrors the local
+pool's ``services.backup._prune``. Uncertainty on either surface yields
+zero eligibility.
+"""
 
 from __future__ import annotations
 
 import hashlib
 import json
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, tzinfo
 
 from services.pitr.base_manifest import CandidateManifest, _lsn
+from services.pitr.logical_dump_names import (
+    KIND_ACTIVATION,
+    KIND_DAILY,
+    KIND_PRE_UPDATE,
+    KINDS,
+    LogicalDumpName,
+    parse_dump_name,
+    relative_name,
+    stamp_utc,
+)
 from services.pitr.restore_manifest import ProtectedManifest, required_archive_names
 from services.pitr.retention_manifest import (
     PLAN_SCHEMA_VERSION,
@@ -31,12 +47,45 @@ class RetentionEvidence:
     snapshot_after: str = ""
     sidecar_pairs: tuple[SidecarPair, ...] = ()
     orphan_sidecars: tuple[OrphanSidecar, ...] = ()
+    logical_inventory: tuple[RetentionObject, ...] = ()
+    logical_sidecar_pairs: tuple[SidecarPair, ...] = ()
+    logical_orphan_sidecars: tuple[OrphanSidecar, ...] = ()
+
+
+@dataclass(frozen=True)
+class LogicalRetention:
+    """The logical namespace's retention window.
+
+    The defaults mirror the local pool (``services.backup.BACKUP_KEEP`` and
+    ``ACTIVATION_KEEP``); production callers pass the writer's live
+    constants so the off-site mirror cannot drift. ``legacy_tz`` is the
+    cluster wall clock legacy (offset-less) stamps are read in;
+    ``active_pin_name`` is the in-flight activation operation's pinned
+    snapshot, kept regardless of the window.
+    """
+
+    keep_dailies: int = 7
+    keep_pre_updates: int = 1
+    keep_activations: int = 2
+    legacy_tz: tzinfo | None = None
+    active_pin_name: str | None = None
+
+    def __post_init__(self) -> None:
+        if min(self.keep_dailies, self.keep_pre_updates, self.keep_activations) < 1:
+            raise ValueError("logical retention depths must be positive")
 
 
 def plan_retention(  # noqa: PLR0915
-    evidence: RetentionEvidence, *, retain_chains: int = 2
+    evidence: RetentionEvidence,
+    *,
+    retain_chains: int = 2,
+    logical_retention: LogicalRetention | None = None,
 ) -> RetentionPlan:
-    """Return a deterministic dry-run plan; uncertainty always yields zero eligibility."""
+    """Return a deterministic dry-run plan; uncertainty always yields zero eligibility.
+
+    ``logical_retention`` enables the logical-namespace half of the plan;
+    None (the legacy call shape) leaves that namespace out of scope.
+    """
 
     blockers: set[str] = set()
     if retain_chains < 2:
@@ -158,12 +207,37 @@ def plan_retention(  # noqa: PLR0915
     orphan_sidecars = _eligible_orphan_sidecars(
         evidence.orphan_sidecars, protected_objects, oldest, candidates, blockers
     )
+    logical_retained: list[RetentionDecision] = []
+    logical_eligible: list[RetentionDecision] = []
+    logical_orphans: list[RetentionSidecar] = []
+    logical_pair_by_host: dict[str, SidecarPair] = {}
+    if logical_retention is not None:
+        logical_pair_by_host = _sidecar_pairs_by_host(evidence.logical_sidecar_pairs, blockers)
+        logical_retained, logical_eligible, logical_orphans = _plan_logical_namespace(
+            evidence, logical_retention, blockers
+        )
     if blockers:
         retained.extend(eligible)
         eligible = []
+        retained.extend(logical_eligible)
+        logical_eligible = []
         orphan_sidecars = []
-    retained = _canonical_decisions([_attach_sidecar(item, pair_by_host) for item in retained])
-    eligible = _canonical_decisions([_attach_sidecar(item, pair_by_host) for item in eligible])
+        logical_orphans = []
+    retained = _canonical_decisions(
+        [_attach_sidecar(item, pair_by_host) for item in retained]
+        + [_attach_sidecar(item, logical_pair_by_host) for item in logical_retained]
+    )
+    eligible = _canonical_decisions(
+        [_attach_sidecar(item, pair_by_host) for item in eligible]
+        + [_attach_sidecar(item, logical_pair_by_host) for item in logical_eligible]
+    )
+    weak_evidence = tuple(
+        sorted(
+            item.object.object_name
+            for item in (*retained, *eligible)
+            if item.object.kind == "logical" and item.sidecar is None
+        )
+    )
     evidence_sha = hashlib.sha256(_canonical_evidence(evidence).encode()).hexdigest()
     return RetentionPlan(
         PLAN_SCHEMA_VERSION,
@@ -178,7 +252,8 @@ def plan_retention(  # noqa: PLR0915
         tuple(eligible),
         sum(item.object.size for item in retained),
         sum(item.object.size for item in eligible),
-        tuple(sorted(orphan_sidecars)),
+        tuple(sorted(orphan_sidecars + logical_orphans)),
+        weak_evidence,
     )
 
 
@@ -378,6 +453,132 @@ def _eligible_orphan_sidecars(
     return eligible
 
 
+_LOGICAL_WINDOW_REASONS = {
+    KIND_DAILY: "logical daily dump inside the retention window",
+    KIND_PRE_UPDATE: "logical pre-update snapshot inside the retention window",
+    KIND_ACTIVATION: "logical activation snapshot inside the retention window",
+}
+_LOGICAL_BEYOND_REASONS = {
+    KIND_DAILY: "logical daily dump beyond the retention window",
+    KIND_PRE_UPDATE: "logical pre-update snapshot beyond the retention window",
+    KIND_ACTIVATION: "logical activation snapshot beyond the retention window",
+}
+_LOGICAL_PIN_REASON = "active recovery floor pin"
+_LOGICAL_FAIL_CLOSED_REASON = "logical object pinned fail closed outside the managed grammar"
+_LOGICAL_UNREADABLE_REASON = "logical dump pinned fail closed without a readable stamp"
+_LOGICAL_LEGACY_BLOCKER = "logical retention cannot read a legacy stamp without a timezone"
+
+
+def _plan_logical_namespace(
+    evidence: RetentionEvidence,
+    retention: LogicalRetention,
+    blockers: set[str],
+) -> tuple[list[RetentionDecision], list[RetentionDecision], list[RetentionSidecar]]:
+    """Decide the logical dump namespace, mirroring the local pool's prune.
+
+    The newest ``keep_dailies`` daily dumps plus the newest
+    ``keep_pre_updates`` pre-update snapshot plus the newest
+    ``keep_activations`` activation snapshots stay; every other object in
+    the namespace is eligible. The in-flight activation pin keeps its
+    object regardless of the window. A name outside the grammar, an
+    unreadable stamp, or an ambiguous identity blocks the plan -- on a
+    blocker every object lands in the retained side (fail closed).
+    """
+    identities = {(item.object_name, item.pin_token) for item in evidence.logical_inventory}
+    if len(identities) != len(evidence.logical_inventory):
+        blockers.add("duplicate logical object pin token")
+    buckets: dict[str, list[tuple[datetime, RetentionObject]]] = {kind: [] for kind in KINDS}
+    retained: list[RetentionDecision] = []
+    eligible: list[RetentionDecision] = []
+    for item in evidence.logical_inventory:
+        relative = relative_name(item.object_name)
+        parsed = None if relative is None else parse_dump_name(relative)
+        if item.kind != "logical" or item.archive_name is not None or parsed is None:
+            blockers.add("logical object is outside its managed namespace")
+            retained.append(RetentionDecision(item, _LOGICAL_FAIL_CLOSED_REASON))
+            continue
+        stamp = _logical_stamp(parsed, retention)
+        if stamp is None:
+            blockers.add(_LOGICAL_LEGACY_BLOCKER)
+            retained.append(RetentionDecision(item, _LOGICAL_UNREADABLE_REASON))
+            continue
+        buckets[parsed.kind].append((stamp, item))
+    limits = {
+        KIND_DAILY: retention.keep_dailies,
+        KIND_PRE_UPDATE: retention.keep_pre_updates,
+        KIND_ACTIVATION: retention.keep_activations,
+    }
+    windows: dict[str, list[tuple[datetime, RetentionObject]]] = {}
+    for kind, members in buckets.items():
+        ordered = sorted(members, key=lambda pair: (pair[0], pair[1].object_name))
+        window = ordered[-limits[kind] :]
+        windows[kind] = window
+        window_names = {item.object_name for _stamp, item in window}
+        for _stamp, item in members:
+            if item.object_name in window_names:
+                retained.append(RetentionDecision(item, _LOGICAL_WINDOW_REASONS[kind]))
+            elif (
+                retention.active_pin_name is not None
+                and relative_name(item.object_name) == retention.active_pin_name
+            ):
+                retained.append(RetentionDecision(item, _LOGICAL_PIN_REASON))
+            else:
+                eligible.append(RetentionDecision(item, _LOGICAL_BEYOND_REASONS[kind]))
+    orphans = _eligible_logical_orphans(
+        evidence.logical_orphan_sidecars, windows, limits, retention, blockers
+    )
+    return retained, eligible, orphans
+
+
+def _logical_stamp(parsed: LogicalDumpName, retention: LogicalRetention) -> datetime | None:
+    """The parsed name's stamp, or None when the reading rules are unmet."""
+    if parsed.legacy and retention.legacy_tz is None:
+        return None
+    return stamp_utc(parsed.stamp, retention.legacy_tz)
+
+
+def _eligible_logical_orphans(
+    observations: tuple[OrphanSidecar, ...],
+    windows: dict[str, list[tuple[datetime, RetentionObject]]],
+    limits: dict[str, int],
+    retention: LogicalRetention,
+    blockers: set[str],
+) -> list[RetentionSidecar]:
+    """Keep only orphan sidecars whose gone host is provably beyond the window.
+
+    A logical orphan is eligible only when its host's class still holds the
+    full window of live members and the host's stamp is strictly older than
+    the oldest of them: with the host present it would rank outside the
+    window. Fewer live members than the window -- or any doubt about the
+    host's name or stamp -- keeps the sidecar (fail closed).
+    """
+    eligible: list[RetentionSidecar] = []
+    seen: dict[str, RetentionSidecar] = {}
+    for observation in observations:
+        host = observation.host
+        existing = seen.get(host.object_name)
+        if existing is not None:
+            if existing != observation.sidecar:
+                blockers.add("ambiguous orphan sidecar observation")
+            continue
+        seen[host.object_name] = observation.sidecar
+        relative = relative_name(host.object_name)
+        parsed = None if relative is None else parse_dump_name(relative)
+        if host.kind != "logical" or host.archive_name is not None or parsed is None:
+            blockers.add("logical orphan sidecar host is outside its managed namespace")
+            continue
+        host_stamp = _logical_stamp(parsed, retention)
+        if host_stamp is None:
+            blockers.add(_LOGICAL_LEGACY_BLOCKER)
+            continue
+        window = windows[parsed.kind]
+        if len(window) != limits[parsed.kind]:
+            continue
+        if host_stamp < min(stamp for stamp, _item in window):
+            eligible.append(observation.sidecar)
+    return eligible
+
+
 def _canonical_decisions(items: list[RetentionDecision]) -> list[RetentionDecision]:
     by_identity: dict[tuple[str, str], RetentionDecision] = {}
     for item in items:
@@ -405,6 +606,18 @@ def _canonical_evidence(evidence: RetentionEvidence) -> str:
         "orphan_sidecars": [
             json.dumps(asdict(item), sort_keys=True, separators=(",", ":"))
             for item in sorted(evidence.orphan_sidecars)
+        ],
+        "logical_inventory": [
+            json.dumps(item.__dict__, sort_keys=True, separators=(",", ":"))
+            for item in sorted(evidence.logical_inventory)
+        ],
+        "logical_sidecar_pairs": [
+            json.dumps(asdict(item), sort_keys=True, separators=(",", ":"))
+            for item in sorted(evidence.logical_sidecar_pairs)
+        ],
+        "logical_orphan_sidecars": [
+            json.dumps(asdict(item), sort_keys=True, separators=(",", ":"))
+            for item in sorted(evidence.logical_orphan_sidecars)
         ],
     }
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
