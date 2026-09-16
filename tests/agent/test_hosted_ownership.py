@@ -12,11 +12,11 @@ import pytest
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
+from agent.corpse_reap import reap_crash_corpses
 from agent.db import claim_inbound_batch
 from agent.hosted_ownership import (
     admit_hosted_runtime,
     apply_hosted_lifecycle,
-    reap_crash_corpses,
     release_hosted_owner,
     renew_hosted_owner,
     settle_hosted_runtime,
@@ -421,8 +421,10 @@ async def test_stamp_turn_fatal_is_monotonic_and_cas_guarded(
     )
     assert incarnation is not None
 
-    # First crash stamps.
-    assert await stamp_turn_fatal(aops_pool, incarnation)
+    # First crash stamps, and the outcome names it a first death (no mark
+    # existed), not a re-crash.
+    first_stamp = await stamp_turn_fatal(aops_pool, incarnation)
+    assert first_stamp.applied and not first_stamp.recrash
     first = _marker(db_conn, agent_id)
     assert first is not None
 
@@ -430,20 +432,22 @@ async def test_stamp_turn_fatal_is_monotonic_and_cas_guarded(
     # restart the reap grace forever). Capture the old value first: a
     # COALESCE -> now() regression would silently pass a `!= first` check
     # (both stamps read ~now), so the assertion must demand equality with the
-    # pre-existing stamp.
+    # pre-existing stamp. The outcome must also flag the re-crash — the
+    # settle boundary's prompt-reap decision reads it (task #3616).
     _set_marker(db_conn, agent_id, minutes_ago=100)
     old_stamp = _marker(db_conn, agent_id)
-    assert await stamp_turn_fatal(aops_pool, incarnation)
+    recrash = await stamp_turn_fatal(aops_pool, incarnation)
+    assert recrash.applied and recrash.recrash
     assert _marker(db_conn, agent_id) == old_stamp
 
     # A settled (non-running) row is not stamped — the mark names the live
     # incarnation only.
     assert await settle_hosted_runtime(aops_pool, incarnation)
-    assert not await stamp_turn_fatal(aops_pool, incarnation)
+    assert not (await stamp_turn_fatal(aops_pool, incarnation)).applied
 
     # A foreign incarnation's stamp is a no-op.
     foreign = RuntimeIncarnation(agent_id, uuid4(), owner)
-    assert not await stamp_turn_fatal(aops_pool, foreign)
+    assert not (await stamp_turn_fatal(aops_pool, foreign)).applied
 
 
 async def test_settle_never_touches_the_corpse_marker(
@@ -490,13 +494,13 @@ async def test_reap_crash_corpses_terminates_only_grace_elapsed_idling_corpses(
         if payload is not None and payload.get("reason") == "corpse_reaper":
             events.append((agent_id, event_type, "corpse_reaper"))
 
-    monkeypatch.setattr("agent.hosted_ownership.insert_event_log_async", _event)
+    monkeypatch.setattr("agent.corpse_reap.insert_event_log_async", _event)
     published: list[int] = []
 
     async def _publish(pool: object, agent_id: int) -> None:
         published.append(agent_id)
 
-    monkeypatch.setattr("agent.hosted_ownership.publish_agent_updated", _publish)
+    monkeypatch.setattr("agent.corpse_reap.publish_agent_updated", _publish)
     owner = uuid4()
 
     async def _row(

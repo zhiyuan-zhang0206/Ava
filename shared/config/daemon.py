@@ -138,6 +138,20 @@ class DaemonSettings(EnvSettings):
         },
     )
 
+    hosted_recrash_prompt_reap_enabled: bool = Field(
+        default=False,
+        alias="AVA_HOSTED_RECRASH_PROMPT_REAP_ENABLED",
+        description="Hosted agent-runner: terminate a crash-marked corpse immediately when a second turn crash settles under the same mark (task #3616) — the first grace window is kept whole; a retry that died again has spent its chance, and only a zombie spending the rest claiming and re-dying is left otherwise. Off keeps today's grace-only semantics; gray release off->on, flipped per host after observing the first enable.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": True,
+        },
+    )
+
     page_server_poll_interval_seconds: float = Field(
         default=2.0,
         alias="AVA_PAGE_SERVER_POLL_INTERVAL_SECONDS",

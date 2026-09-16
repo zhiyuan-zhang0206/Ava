@@ -43,6 +43,10 @@ turn drops its runtime so the next admission re-runs reconciliation; an aborted
 turn (expected provider/compaction failure) keeps its runtime and reconciles its
 claimed inbounds at the settlement boundary itself
 (`host_abort_reconcile_enabled`), so no row waits for a boot that may not come.
+A turn that dies again under its own crash mark has spent its grace: the
+settlement boundary terminates that corpse on the spot with the reaper's own
+termination and events (`hosted_recrash_prompt_reap_enabled`), instead of
+letting a zombie keep claiming and re-dying while the window runs out.
 
 ## Entry points
 

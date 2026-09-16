@@ -431,6 +431,15 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         "durable terminated flip already committed",
         tier="noise",
     ),
+    "host_recrash_reap_skipped": _telemetry(
+        "host_recrash_reap_skipped",
+        "the recrash prompt reap skipped terminating a re-crashed corpse "
+        "(fail-closed) — the grace-window reap stays the backstop. Carries the "
+        "reason: the gray switch is off (disabled), the turn never settled to "
+        "idling (settle_incomplete), or the row moved on since the crash "
+        "(row_moved_on)",
+        tier="noise",
+    ),
     "host_turn_stall_aborted": _telemetry(
         "host_turn_stall_aborted",
         "a hosted turn task ended after its no-progress abort: the invocation "

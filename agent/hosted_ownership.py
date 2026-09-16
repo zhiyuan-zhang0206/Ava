@@ -16,7 +16,6 @@ from shared.audit_events import insert_event_log_async
 from shared.db_transaction import async_write_transaction
 from shared.deploy_timing import (
     AGENT_LEASE_TTL_S,
-    CORPSE_REAP_GRACE_S,
     LEGACY_HOST_ADOPTION_SILENCE_S,
 )
 from shared.host_process_evidence import local_host_evidence
@@ -592,7 +591,18 @@ async def renew_hosted_owner(pool: AsyncConnectionPool, machine: str, owner: UUI
         )
 
 
-async def stamp_turn_fatal(pool: AsyncConnectionPool, incarnation: RuntimeIncarnation) -> bool:
+@dataclass(frozen=True)
+class TurnFatalStamp:
+    """One crash's stamp outcome: `applied` is the CAS result, `recrash` says
+    the mark already existed — a retry that died again, not a first death."""
+
+    applied: bool
+    recrash: bool
+
+
+async def stamp_turn_fatal(
+    pool: AsyncConnectionPool, incarnation: RuntimeIncarnation
+) -> TurnFatalStamp:
     """Mark this incarnation's row crash-dead after the hosted runner saw the
     turn die (fatal LLM class or an unclassified exception).
 
@@ -605,93 +615,43 @@ async def stamp_turn_fatal(pool: AsyncConnectionPool, incarnation: RuntimeIncarn
     Best-effort and settle-independent: a settlement blocked by unsettled
     resources must not lose the death evidence (the 5858 corpse settled 3m52s
     after its last turn ended; the stamp landed regardless).
+
+    Returns both facts the settlement boundary needs: whether the stamp
+    applied, and whether the mark pre-existed — read in the same atomic
+    statement that casts the stamp, so "this crash is a re-crash" cannot race
+    a concurrent marker write (task #3616).
     """
     async with async_write_transaction(pool) as conn:
         cur = await conn.execute(
+            "WITH target AS (SELECT id, last_turn_fatal_at AS previous_mark FROM agents_meta "
+            "WHERE id = %s AND status = 'running' AND runtime_kind = 'hosted' "
+            "AND runtime_generation = %s AND runtime_owner = %s FOR UPDATE) "
             "UPDATE agents_meta SET last_turn_fatal_at = "
             "COALESCE(last_turn_fatal_at, clock_timestamp()) "
-            "WHERE id = %s AND status = 'running' AND runtime_kind = 'hosted' "
-            "AND runtime_generation = %s AND runtime_owner = %s",
-            (
-                incarnation.agent_id,
-                incarnation.generation,
-                incarnation.owner,
-            ),
+            "FROM target WHERE agents_meta.id = target.id RETURNING target.previous_mark",
+            (incarnation.agent_id, incarnation.generation, incarnation.owner),
         )
-    changed = cur.rowcount == 1
-    if changed:
+        row = await cur.fetchone()
+    stamp = TurnFatalStamp(applied=row is not None, recrash=row is not None and row[0] is not None)
+    if stamp.applied:
         logger.info(
             "hosted turn crashed — corpse marked for the reaper",
             event="host_turn_corpse_marked",
             agent_id=incarnation.agent_id,
+            recrash=stamp.recrash,
         )
-    return changed
+    return stamp
 
 
-async def reap_crash_corpses(
-    pool: AsyncConnectionPool,
-    machine: str,
-    owner: UUID,
-) -> list[int]:
-    """Terminate crash-marked idling corpses whose grace window has elapsed.
+@dataclass(frozen=True)
+class TurnSettlement:
+    """The settle boundary's facts about one closed turn: `stamp` is the crash
+    stamp (None when the turn did not crash or its stamp failed), and `settled`
+    says the settle wrote the row idling — the reapable state, gated on fully
+    discharged turn resources."""
 
-    The positive death signal is the row's own `last_turn_fatal_at` (stamped
-    firsthand by this host when the turn died), never staleness alone — an
-    unmarked idling row is a live agent and is never touched. Idling-only:
-    a `running` row has a live invocation (or claim park) in flight. The
-    incarnation CAS already happened at stamp time, so the mark names exactly
-    the generation that died; a row woken in the grace window either completes
-    a turn (clears the mark) or parks and keeps it.
-
-    Returns the reaped agent ids (the caller publishes their snapshots).
-
-    Owner scope is lease-qualified, not owner-only: a host restart mints a
-    fresh owner UUID, so a corpse marked under a predecessor instance would
-    otherwise hang offline forever (never adopted, never reaped). A row whose
-    lease is live is protected — it belongs to some live host's beat — while
-    an ownerless or lease-expired row is dead-or-abandoned and fair game.
-    """
-    async with async_write_transaction(pool) as conn:
-        rows = await (
-            await conn.execute(
-                "UPDATE agents_meta SET status = 'terminated', "
-                "termination_source = 'reaper', lease_expires_at = NULL, "
-                "runtime_protocol_version = 0 "
-                "WHERE machine = %s AND runtime_kind = 'hosted' AND status = 'idling' "
-                "AND last_turn_fatal_at IS NOT NULL "
-                "AND last_turn_fatal_at <= now() - make_interval(secs => %s) "
-                "AND (runtime_owner = %s OR lease_expires_at IS NULL "
-                "OR lease_expires_at <= now()) "
-                "RETURNING id",
-                (machine, CORPSE_REAP_GRACE_S, owner),
-            )
-        ).fetchall()
-        for (agent_id,) in rows:
-            await insert_event_log_async(
-                event_type="status_change",
-                agent_id=agent_id,
-                source="system",
-                payload={"from": "idling", "to": "terminated", "reason": "corpse_reaper"},
-            )
-    reaped = [row[0] for row in rows]
-    if reaped:
-        logger.info(
-            "corpse reaper: terminated {n} crash-dead row(s)",
-            event="corpse_reaper_terminated",
-            n=len(reaped),
-        )
-    for agent_id in reaped:
-        # Best-effort by design: the durable flip already committed; the
-        # announce only refreshes mounted frontends.
-        try:
-            await publish_agent_updated(pool, agent_id)
-        except Exception:
-            logger.exception(
-                "corpse reap snapshot publish failed",
-                event="corpse_reaper_publish_failed",
-                agent_id=agent_id,
-            )
-    return reaped
+    stamp: TurnFatalStamp | None
+    settled: bool
 
 
 async def settle_and_stamp_turn(
@@ -700,17 +660,22 @@ async def settle_and_stamp_turn(
     *,
     exited: bool,
     crashed: bool,
-) -> None:
+) -> TurnSettlement:
     """Close one hosted turn: stamp the corpse marker first, then settle.
 
     The stamp is best-effort and independent of settlement (which may be
     blocked by unsettled resources): the death evidence must land even when
     the idling write could not. It must also run BEFORE the settle — its CAS
     matches `status='running'`, so a settled row would refuse the stamp.
+
+    Returns both halves to the settlement boundary: whether this crash is a
+    re-crash under an existing mark, and whether the settle reached idling —
+    the prompt-reap decision reads exactly these facts (task #3616).
     """
+    stamp: TurnFatalStamp | None = None
     if crashed:
         try:
-            await stamp_turn_fatal(pool, incarnation)
+            stamp = await stamp_turn_fatal(pool, incarnation)
         except Exception:
             logger.warning(
                 "corpse marker stamp failed — the row stays alive-"
@@ -719,8 +684,10 @@ async def settle_and_stamp_turn(
                 agent_id=incarnation.agent_id,
                 exc_info=True,
             )
+    settled = False
     if not exited:
-        await settle_hosted_runtime(pool, incarnation)
+        settled = await settle_hosted_runtime(pool, incarnation)
+    return TurnSettlement(stamp=stamp, settled=settled)
 
 
 async def settle_stale_running_rows(pool: AsyncConnectionPool, machine: str) -> list[int]:
