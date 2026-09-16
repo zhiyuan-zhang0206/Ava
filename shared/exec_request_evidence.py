@@ -66,7 +66,6 @@ from shared.incarnation_resources import (
 from shared.log import logger
 from shared.paths import exec_run_dir, quarantined_exec_requests_dir
 from shared.runtime_incarnation import RuntimeIncarnation
-from shared.timing import EXEC_NODE_TIMEOUT_S
 
 # The envelope protocol's own ceiling (agent/graph/_exec_protocol.py). The
 # typed state snapshot rides as one base64 field, so a legitimate envelope is
@@ -85,16 +84,41 @@ _CHILD_LIFETIME_SLACK_S = 60.0
 _EXEC_CHILD_MODULE = "agent.exec_child"
 _REQUEST_REFERENCE_ENV = "AVA_EXEC_REQUEST_FILE"
 
-# Bounded disposition of an envelope whose own bytes cannot be read (task #3619
-# D-2). A readable envelope declares the timeout that bounds its child's
-# lifetime; an unreadable one does not, so the protocol's ceiling stands in for
-# it: the inner exec timeout is validated strictly below the outer node timeout
-# (shared/config/sandbox.py) and the child hard-exits at
-# timeout + kill grace + watchdog margin, so no in-flight request's child
-# outlives twice the node timeout. An unreadable envelope past this age — with
-# no live process reference and no live host process (see classify_request) —
-# cannot belong to an in-flight request and is disposable.
-_UNREADABLE_EXPIRY_AGE_S = 2.0 * EXEC_NODE_TIMEOUT_S
+
+def _exec_node_ceiling_s() -> float:
+    """The outer exec-node timeout, resolved profile-safely.
+
+    Classification also runs in gateway-profile processes (cold prepare),
+    whose profile pops the sandbox domain; the cluster ``.env`` is the
+    configuration authority there (the same resolution as ops/agent_wake.py).
+    The live domain is read only where the profile keeps it, and the declared
+    default is the last resort.
+    """
+    from shared.config import FIELD_INFOS, field_alias, settings
+    from shared.runtime_config import read_env_aliases
+
+    if settings.has_domain("sandbox"):
+        return settings.sandbox.exec_node_timeout_seconds
+    raw = read_env_aliases().get(field_alias("exec_node_timeout_seconds"))
+    if raw is not None:
+        return float(raw)
+    return float(FIELD_INFOS["exec_node_timeout_seconds"].get_default())
+
+
+def _unreadable_expiry_age_s() -> float:
+    """The bounded-disposition age for unreadable envelopes (task #3619 D-2).
+
+    A readable envelope declares the timeout that bounds its child's lifetime;
+    an unreadable one does not, so the protocol's ceiling stands in for it:
+    the inner exec timeout is validated strictly below the outer node timeout
+    (shared/config/sandbox.py) and the child hard-exits at
+    timeout + kill grace + watchdog margin, so no in-flight request's child
+    outlives twice the node timeout. An unreadable envelope past this age —
+    with no live process reference and no live host process (see
+    classify_request) — cannot belong to an in-flight request and is
+    disposable.
+    """
+    return 2.0 * _exec_node_ceiling_s()
 
 
 class Verdict(StrEnum):
@@ -275,7 +299,7 @@ def classify_request(
     # the protocol ceiling stands in, so a hidden-environment exec child born
     # anywhere inside a legitimate request's lifetime is never excluded.
     declared_timeout_s = (
-        attribution.timeout_s if attribution.timeout_s is not None else EXEC_NODE_TIMEOUT_S
+        attribution.timeout_s if attribution.timeout_s is not None else _exec_node_ceiling_s()
     )
     live = live_domain_pids(
         path,
@@ -331,13 +355,15 @@ def _bounded_unreadable(
     """Judge an unreadable envelope by the legs that need no content.
 
     Its bytes carry nothing to attribute, so only what needs no content may
-    decide: it must be older than ``_UNREADABLE_EXPIRY_AGE_S`` (past that age
-    no in-flight request can still own it), no live process may reference it
-    (the caller already checked), and the row's stored host process must not
-    be alive. Anything else keeps deferring recovery with the unmet leg named.
+    decide: it must be older than the bounded-disposition age (past it no
+    in-flight request can still own the file), no live process may reference
+    it (the caller already checked), and the row's stored host process must
+    not be alive. Anything else keeps deferring recovery with the unmet leg
+    named.
     """
     age_s = time.time() - mtime
-    if age_s < _UNREADABLE_EXPIRY_AGE_S:
+    bound_s = _unreadable_expiry_age_s()
+    if age_s < bound_s:
         return RequestEvidence(
             agent_id,
             path,
@@ -346,7 +372,7 @@ def _bounded_unreadable(
             mtime,
             (),
             f"{refusal}; not yet past the bounded-disposition bound "
-            f"({age_s:.0f}s of {_UNREADABLE_EXPIRY_AGE_S:.0f}s)",
+            f"({age_s:.0f}s of {bound_s:.0f}s)",
         )
     if host.state in {HostState.ALIVE, HostState.UNREADABLE}:
         return RequestEvidence(
@@ -360,7 +386,7 @@ def _bounded_unreadable(
         mtime,
         (),
         f"{refusal}; no live process reference; {age_s:.0f}s old, past the "
-        f"{_UNREADABLE_EXPIRY_AGE_S:.0f}s bounded-disposition bound; {host.detail}",
+        f"{bound_s:.0f}s bounded-disposition bound; {host.detail}",
     )
 
 
@@ -426,7 +452,7 @@ def _alert_bounded_disposition(agent_id: int, reason: str, committed: Quarantine
         event="exec_request_bounded_quarantine",
         agent_id=agent_id,
         reason=reason,
-        bound_s=round(_UNREADABLE_EXPIRY_AGE_S, 1),
+        bound_s=round(_unreadable_expiry_age_s(), 1),
         preserved=len(disposed),
         sources=[str(entry.path) for entry in disposed],
         event_dir=None if committed.event_dir is None else str(committed.event_dir),

@@ -340,7 +340,7 @@ def test_unreadable_exec_envelope_past_the_bound_parks_cold_prepare(
     """A zero-byte remnant older than the bound no longer fences cold prepare."""
     agent = _retired(db_conn, restart=True)
     exec_dir, quarantine = _exec_request_dirs(tmp_path, monkeypatch)
-    bound = exec_request_evidence._UNREADABLE_EXPIRY_AGE_S
+    bound = exec_request_evidence._unreadable_expiry_age_s()
     request = exec_dir / str(agent) / f"req-{uuid4().hex}.json"
     request.parent.mkdir(parents=True, exist_ok=True)
     request.write_text("")

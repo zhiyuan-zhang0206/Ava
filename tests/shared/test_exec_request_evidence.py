@@ -164,7 +164,7 @@ def test_unreadable_envelope_past_the_bound_is_disposable_and_moves_with_a_recei
     exec_dir: Path, quarantine_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A 0-byte remnant older than the bound stops fencing recovery (D-2)."""
-    bound = exec_request_evidence._UNREADABLE_EXPIRY_AGE_S
+    bound = exec_request_evidence._unreadable_expiry_age_s()
     request = _write_envelope(exec_dir, age_s=bound + 60)
     request.write_text("")  # the killed parent's zero-byte remnant
     _age(request, bound + 60)
@@ -208,7 +208,7 @@ def test_unreadable_envelope_with_a_live_host_is_retained(
     exec_dir: Path, quarantine_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A stored host identity that is not provably ended vetoes disposal."""
-    bound = exec_request_evidence._UNREADABLE_EXPIRY_AGE_S
+    bound = exec_request_evidence._unreadable_expiry_age_s()
     request = _write_envelope(exec_dir, age_s=bound + 60)
     _unreadable(request, age_s=bound + 60)
     _no_processes(monkeypatch)
@@ -231,7 +231,7 @@ def test_unreadable_envelope_with_a_live_reference_is_deferred(
     exec_dir: Path, quarantine_dir: Path
 ) -> None:
     """A live process naming the unreadable request keeps it deferred."""
-    bound = exec_request_evidence._UNREADABLE_EXPIRY_AGE_S
+    bound = exec_request_evidence._unreadable_expiry_age_s()
     request = _write_envelope(exec_dir, age_s=bound + 60)
     _unreadable(request, age_s=bound + 60)
     child = subprocess.Popen(
@@ -262,7 +262,7 @@ def test_version_drift_envelope_is_still_retained_past_the_bound(
     exec_dir: Path, quarantine_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """D-2 bounds only unreadable bytes; every readable refusal keeps its contract."""
-    bound = exec_request_evidence._UNREADABLE_EXPIRY_AGE_S
+    bound = exec_request_evidence._unreadable_expiry_age_s()
     request = _write_envelope(exec_dir, age_s=bound + 60)
     envelope = json.loads(request.read_text())
     envelope["v"] = 99
@@ -282,7 +282,7 @@ def test_unreadable_bounded_disposition_switch_off_retains(
     exec_dir: Path, quarantine_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """AVA_EXEC_REQUEST_BOUNDED_QUARANTINE_ENABLED=false restores retention."""
-    bound = exec_request_evidence._UNREADABLE_EXPIRY_AGE_S
+    bound = exec_request_evidence._unreadable_expiry_age_s()
     request = _write_envelope(exec_dir, age_s=bound + 60)
     _unreadable(request, age_s=bound + 60)
     _no_processes(monkeypatch)
@@ -296,13 +296,41 @@ def test_unreadable_bounded_disposition_switch_off_retains(
     assert request.exists()
 
 
+def test_bounded_age_tracks_the_registered_exec_node_timeout() -> None:
+    """Where the profile keeps the sandbox domain, the bound is 2x the clock."""
+    from shared.timing import EXEC_NODE_TIMEOUT_S
+
+    assert exec_request_evidence._unreadable_expiry_age_s() == 2.0 * EXEC_NODE_TIMEOUT_S
+
+
+def test_bounded_age_resolves_profile_safely_without_the_sandbox_domain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A sandbox-less process reads the cluster .env, then the declared default."""
+    from shared import config as config_module
+    from shared import runtime_config
+
+    class _NoSandbox:
+        def has_domain(self, _name: str) -> bool:
+            return False
+
+    monkeypatch.setattr(config_module, "settings", _NoSandbox())
+    monkeypatch.setattr(
+        runtime_config, "read_env_aliases", lambda: {"AVA_EXEC_NODE_TIMEOUT_SECONDS": "600"}
+    )
+    assert exec_request_evidence._exec_node_ceiling_s() == 600.0
+
+    monkeypatch.setattr(runtime_config, "read_env_aliases", dict)
+    assert exec_request_evidence._exec_node_ceiling_s() == 1200.0
+
+
 def test_bounded_disposition_raises_the_counted_alert(
     exec_dir: Path, quarantine_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Disposing unreadable evidence without review is itself the alert."""
     from loguru import logger
 
-    bound = exec_request_evidence._UNREADABLE_EXPIRY_AGE_S
+    bound = exec_request_evidence._unreadable_expiry_age_s()
     request = _write_envelope(exec_dir, age_s=bound + 60)
     _unreadable(request, age_s=bound + 60)
     _no_processes(monkeypatch)
@@ -326,7 +354,7 @@ def test_bounded_disposition_raises_the_counted_alert(
     assert extra["reason"] == "unit test"
     assert extra["preserved"] == 1
     assert extra["sources"] == [str(request)]
-    assert extra["bound_s"] == pytest.approx(exec_request_evidence._UNREADABLE_EXPIRY_AGE_S)
+    assert extra["bound_s"] == pytest.approx(exec_request_evidence._unreadable_expiry_age_s())
 
 
 def test_routine_stale_quarantine_is_not_the_bounded_alert(
@@ -554,7 +582,7 @@ def test_cli_quarantines_a_bounded_disposable_entry_without_force(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The manual path treats bounded-disposition evidence like stale evidence."""
-    bound = exec_request_evidence._UNREADABLE_EXPIRY_AGE_S
+    bound = exec_request_evidence._unreadable_expiry_age_s()
     request = _write_envelope(exec_dir, age_s=bound + 60)
     _unreadable(request, age_s=bound + 60)
     _no_processes(monkeypatch)

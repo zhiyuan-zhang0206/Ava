@@ -437,7 +437,7 @@ async def test_exclusive_host_boot_disposes_aged_unreadable_evidence_and_recover
         _, _, _, command = await asyncio.to_thread(
             _force_terminate_transaction, agent_id, pool, source="user"
         )
-    bound = exec_request_evidence._UNREADABLE_EXPIRY_AGE_S
+    bound = exec_request_evidence._unreadable_expiry_age_s()
     request = _unreadable_envelope(tmp_path, agent_id, age_s=bound + 60)
     quarantine = tmp_path / "quarantined-exec-requests"
     monkeypatch.setattr("shared.exec_request_evidence.exec_run_dir", lambda: tmp_path)
