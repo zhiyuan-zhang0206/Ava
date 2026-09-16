@@ -40,7 +40,7 @@ before changing any state. Full-history resets remain exclusive to native
 compaction and crash repair; external controllers request compaction in their
 handoff summary.
 
-User-visible replies use `ava.impersonation.say` with a stable retry key. They
+User-visible replies use `ava impersonate say` with a stable retry key. They
 are recorded immediately in permanent session history and rendered on the normal
 timeline, independently of plugin-state flush.
 

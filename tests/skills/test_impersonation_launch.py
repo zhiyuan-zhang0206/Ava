@@ -25,6 +25,7 @@ def test_self_takeover_bootstrap_links_real_guide_and_separate_handles(
     assert "--agent 42" in message and "--name 'Fix login'" in message
     assert str(guide) in message and str(brief) in message
     assert "ava impersonate say" in message
+    assert "ava.impersonation.say" not in message
     assert "release with your own summary" in message
     if provider == "codex":
         assert "CODEX_THREAD_ID" in message and "CODEX_HOME" in message

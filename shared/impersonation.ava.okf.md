@@ -59,7 +59,7 @@ refuses to discard recorded history. The export is regenerable from the DB.
 Activation captures pending input, and committed inbound inserts capture arrivals
 while active. Idempotent chat retries produce one history entry. Inbox reads leave
 messages pending; explicit ACK records processing without removing their bodies.
-`ava impersonate say` / `ava.impersonation.say` commits an outbound message with
+`ava impersonate say` commits an outbound message with
 a stable retry key, then publishes `impersonation_changed`. Logical identity
 remains the Ava agent; `impersonation` metadata names the session and executor.
 Incoming user messages remain incoming messages.
