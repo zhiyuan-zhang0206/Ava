@@ -82,7 +82,7 @@ const agentsMock = vi.fn<() => AgentRow[]>(() => [
     label: "worker",
     machine: "test",
     supports_vision: true,
-    notices_awaiting_response: [],
+    awaiting_response_count: 0, highest_notice_priority: null,
     unread_notice_count: 0,
     heartbeat_paused_until: null,
     liveness_state: "online",

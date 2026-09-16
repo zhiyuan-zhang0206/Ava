@@ -885,8 +885,12 @@ def test_reap_expired_notices_resolves_and_notifies_live_agent(
     assert "[This notice has expired.]" in inbounds[0][1]
 
 
+@pytest.mark.parametrize("require_response", [False, True])
 def test_reap_expired_notices_does_not_resurrect_terminated_agent(
-    db_conn: psycopg.Connection, reaper_pool: ConnectionPool
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    require_response: bool,
 ) -> None:
     """Terminated agents have their notice closed as expired, but no inbound message is delivered."""
     aid = create_agent(db_conn)
@@ -897,16 +901,28 @@ def test_reap_expired_notices_does_not_resurrect_terminated_agent(
         )
         cur.execute(
             "INSERT INTO agent_notices (agent_id, local_id, title, priority, require_response, blocking, expire_at) "
-            "VALUES (%s, 0, 'dead agent notice', 'P2', FALSE, FALSE, now() - interval '1 minute') RETURNING id",
-            (aid,),
+            "VALUES (%s, 0, 'dead agent notice', 'P2', %s, FALSE, now() - interval '1 minute') RETURNING id",
+            (aid, require_response),
         )
         row = cur.fetchone()
         assert row is not None
         nid = row[0]
     db_conn.commit()
 
+    observed: list[tuple[int, str | None]] = []
+
+    def capture_hint(agent_id: int) -> None:
+        # A different connection must see the expiry before its hint can fire.
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT resolution FROM agent_notices WHERE id = %s", (nid,))
+            row = cur.fetchone()
+        assert row is not None
+        observed.append((agent_id, row[0]))
+
+    monkeypatch.setattr(ttl_reaper, "publish_agent_updated_sync", capture_hint)
     reaped = _reap_expired_notices_blocking(reaper_pool)
     assert reaped == [(aid, nid)]
+    assert observed == ([(aid, "expired")] if require_response else [])
 
     with db_conn.cursor() as cur:
         cur.execute("SELECT resolution FROM agent_notices WHERE id = %s", (nid,))

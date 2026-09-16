@@ -198,7 +198,7 @@ def _terminate_force_blocking(
     body: TerminateAgentRequest,
     db_pool: ConnectionPool,
 ) -> tuple[AgentStatus, int | None, list[str], int]:
-    """Commit the force fence before publishing its wake and updated snapshot."""
+    """Commit the force fence before publishing its wake and lifecycle hint."""
     old_status, pid, killed_page_names, inbound_id = _force_terminate_transaction(
         agent_id,
         db_pool,
@@ -206,8 +206,7 @@ def _terminate_force_blocking(
         message=body.message,
     )
     _publish_force_terminate_inbound(agent_id, inbound_id, body.source)
-    with db_pool.connection() as conn:
-        publish_agent_updated_sync(conn, agent_id)
+    publish_agent_updated_sync(agent_id)
     return old_status, pid, killed_page_names, inbound_id
 
 
@@ -638,10 +637,11 @@ def _recover_crash_marked_blocking(agent_id: int) -> RecoverCrashMarkedResponse:
     )
     try:
         # Best-effort, after the durable flip: refresh mounted frontends.
-        with shared.db.connect() as conn:
-            publish_agent_updated_sync(conn, agent_id)
+        publish_agent_updated_sync(agent_id)
     except Exception:
-        _log.exception("recover-crash-marked-v2: snapshot publish failed for agent %s", agent_id)
+        _log.exception(
+            "recover-crash-marked-v2: lifecycle hint publish failed for agent %s", agent_id
+        )
     return RecoverCrashMarkedResponse(status="harvested")
 
 

@@ -1,100 +1,64 @@
-"""Wire contracts for lifecycle SSE announcements."""
+"""Lifecycle hints remain constant-size and independent of database reads."""
 
 from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from datetime import UTC, datetime
-from typing import Any, cast
 
-import psycopg
 import pytest
 
-from shared import live_announce
-from shared.agent_snapshot import AgentSnapshot
-from shared.agents import AgentStatus
-
-_AT = datetime(2026, 9, 1, 4, 5, 6, tzinfo=UTC)
-_FULL_SNAPSHOT_FIELDS = {
-    "agent_id",
-    "spawner",
-    "fork_source_agent_id",
-    "fork_source_checkpoint_id",
-    "status",
-    "pid",
-    "spawned_at",
-    "started_at",
-    "last_active_at",
-    "last_inbound_at",
-    "label",
-    "machine",
-    "supports_vision",
-    "liveness_state",
-    "last_probe_at",
-    "observation",
-    "notices_awaiting_response",
-    "unread_notice_count",
-    "heartbeat_paused_until",
-}
+from shared import agent_snapshot, live_announce
+from shared.config import settings
 
 
-def _full_snapshot() -> AgentSnapshot:
-    return AgentSnapshot(
-        agent_id=7,
-        spawner="agent:3",
-        fork_source_agent_id=3,
-        fork_source_checkpoint_id="checkpoint-7",
-        status=AgentStatus.IDLING,
-        pid=1234,
-        spawned_at=_AT,
-        started_at=_AT,
-        last_active_at=_AT,
-        last_inbound_at=_AT,
-        label="alpha",
-        machine="runner-a",
-        supports_vision=True,
-        liveness_state="online",
-        last_probe_at=_AT,
-        notices_awaiting_response=[],
-        unread_notice_count=2,
-        heartbeat_paused_until=None,
-    )
+@pytest.fixture(autouse=True)
+def _forbid_snapshot_reads(monkeypatch: pytest.MonkeyPatch) -> None:
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("lifecycle announcements must not read an agent snapshot")
+
+    monkeypatch.setattr(agent_snapshot, "select_one", forbidden)
 
 
 @pytest.mark.parametrize(
-    ("publisher", "expected_role", "expected_context"),
+    ("publisher", "role"),
     [
-        (live_announce.publish_agent_spawned_sync, "agent_spawned", "agent_spawned"),
-        (live_announce.publish_agent_updated_sync, "agent_updated", "agent_updated"),
+        (live_announce.publish_agent_spawned_sync, "agent_spawned"),
+        (live_announce.publish_agent_updated_sync, "agent_updated"),
     ],
 )
-def test_lifecycle_sse_events_serialize_the_full_agent_snapshot(
+def test_sync_lifecycle_hint_has_no_snapshot(
     monkeypatch: pytest.MonkeyPatch,
-    publisher: Callable[[psycopg.Connection[Any], int], None],
-    expected_role: str,
-    expected_context: str,
+    publisher: Callable[[int], None],
+    role: str,
 ) -> None:
-    """SSE lifecycle updates retain fields omitted by the REST roster summary."""
-    snapshot = _full_snapshot()
-    published: list[tuple[str, dict[str, Any]]] = []
+    published: list[tuple[str, str, str]] = []
 
-    def _select_one(_conn: psycopg.Connection[Any], _agent_id: int) -> AgentSnapshot:
-        return snapshot
-
-    def _capture(_channel: str, payload: str, *, context: str) -> int:
-        published.append((context, cast(dict[str, Any], json.loads(payload))))
+    def capture(channel: str, payload: str, *, context: str) -> int:
+        published.append((channel, payload, context))
         return 0
 
-    monkeypatch.setattr(live_announce, "select_one", _select_one)
-    monkeypatch.setattr(live_announce, "publish_best_effort_sync", _capture)
-
-    publisher(cast(psycopg.Connection[Any], object()), snapshot.agent_id)
-
+    monkeypatch.setattr(live_announce, "publish_best_effort_sync", capture)
+    publisher(7)
     assert len(published) == 1
-    context, event = published[0]
-    assert context == expected_context
-    assert event["role"] == expected_role
-    assert event["agent_id"] == snapshot.agent_id
-    assert set(event["snapshot"]) == _FULL_SNAPSHOT_FIELDS
-    assert event["snapshot"]["fork_source_checkpoint_id"] == "checkpoint-7"
-    assert event["snapshot"]["last_probe_at"] == "2026-09-01T04:05:06Z"
+    channel, payload, context = published[0]
+    assert channel == settings.data_plane.events_channel
+    assert context == role
+    assert json.loads(payload) == {"role": role, "agent_id": 7}
+
+
+async def test_async_lifecycle_hint_needs_no_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    published: list[tuple[str, str, str]] = []
+
+    async def capture(channel: str, payload: str, *, context: str) -> int:
+        published.append((channel, payload, context))
+        return 0
+
+    monkeypatch.setattr(live_announce, "publish_best_effort", capture)
+    await live_announce.publish_agent_updated(7)
+    assert len(published) == 1
+    channel, payload, context = published[0]
+    assert channel == settings.data_plane.events_channel
+    assert context == "agent_updated"
+    assert json.loads(payload) == {"role": "agent_updated", "agent_id": 7}

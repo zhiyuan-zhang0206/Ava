@@ -15,6 +15,7 @@ import { useTranslations } from "next-intl";
 import { useMemo } from "react";
 
 import { AgentRow as AgentRowItem } from "@/components/agent-row";
+import { AgentArchive } from "./archive";
 import { SpawnButton } from "@/components/spawn-button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { buildAgentTree, type AgentNode } from "@/lib/agent-tree";
@@ -74,33 +75,14 @@ export function SidebarBody(props: InnerProps & { wide: boolean }) {
   const { settings: userSettings, setSetting } = useUserSettings();
   const showAgentStatus = userSettings["display.show_agent_status"] === true;
   const notifyAwaitingReply = userSettings["notification.awaiting_reply"] === true;
-  const terminatedCount = agents.filter((a) => a.status === "terminated").length;
 
-  // `agents` is the combined live + terminated roster (use-agents always
-  // merges the terminated scope — the tree builder needs terminated parent
-  // rows to re-parent live children under their nearest visible ancestor).
-  // showTerminated is a pure render filter: when hidden, drop terminated
-  // rows from the flat list and let buildAgentTree flatten them out of the
-  // tree (children re-parent under the nearest visible ancestor).
-  const visibleAgents = showTerminated
-    ? agents
-    : agents.filter((a) => a.status !== "terminated");
+
+  const visibleAgents = agents;
 
   const isEmpty = visibleAgents.length === 0 && pendingSpawnCount === 0;
   const hasPending = pendingSpawnCount > 0;
 
-  // While the initial roster load is still in flight, tree mode must not
-  // paint a partial tree. The merged live + terminated roster is the tree's
-  // lineage input, and the terminated half (thousands of rows) resolves
-  // seconds after the live half on a cold load. Painting from live-only
-  // data would surface alive agents whose parent chain runs through
-  // terminated intermediates (#312 -> #240 -> #228, #2894 -> #2147) as
-  // top-level roots, then re-parent them when the terminated roster lands —
-  // a user-visible hierarchy flip. Waiting for the merged roster makes the
-  // tree's first paint final. Flat mode carries no hierarchy claim and may
-  // paint as soon as any row exists.
-  const rosterPending =
-    isLoading && (visibleAgents.length === 0 || viewMode === "tree");
+  const rosterPending = isLoading;
 
   const treeProps: InnerProps & { wide: boolean } = hasPending
     ? { ...props, activeId: null }
@@ -112,17 +94,13 @@ export function SidebarBody(props: InnerProps & { wide: boolean }) {
     [visibleAgents, sort],
   );
 
-  // Fold the tree once per roster/sort/toggle change. The combined roster
-  // (live + terminated history) can be large, so the fold must not re-run on
-  // every unrelated sidebar render. hideTerminated=!showTerminated lets
-  // buildAgentTree re-parent children of hidden terminated nodes to the
-  // nearest visible ancestor (#312 orphan regression).
+  // The coherent roster carries links without loading historical cards.
   const tree = useMemo(
-    () => buildAgentTree(agents, sort, { hideTerminated: !showTerminated }),
-    [agents, sort, showTerminated],
+    () => buildAgentTree(agents, sort, { ancestors: props.ancestors }),
+    [agents, sort, props.ancestors],
   );
 
-  const waiting = agents.reduce((n, a) => n + a.notices_awaiting_response.length, 0);
+  const waiting = agents.reduce((n, a) => n + a.awaiting_response_count, 0);
 
   return (
     <>
@@ -183,8 +161,8 @@ export function SidebarBody(props: InnerProps & { wide: boolean }) {
           <span>{t("status")}</span>
         </button>
 
-        {/* Terminated toggle — only when terminated agents exist */}
-        {terminatedCount > 0 && (
+        {/* History is reachable without fetching it or counting it first. */}
+        {(
           <button
             onClick={onToggleTerminated}
             aria-label={showTerminated ? t("hideTerminatedAgents") : t("showTerminatedAgents")}
@@ -201,7 +179,7 @@ export function SidebarBody(props: InnerProps & { wide: boolean }) {
             ) : (
               <Eye className="size-3.5 shrink-0" />
             )}
-            <span>{showTerminated ? t("hideTerminated", { count: terminatedCount }) : t("showTerminated")}</span>
+            <span>{showTerminated ? t("hideArchive") : t("showTerminated")}</span>
           </button>
         )}
 
@@ -321,6 +299,7 @@ export function SidebarBody(props: InnerProps & { wide: boolean }) {
             ))}
           </ul>
         )}
+        {showTerminated && <AgentArchive props={treeProps} />}
       </ScrollArea>
     </>
   );

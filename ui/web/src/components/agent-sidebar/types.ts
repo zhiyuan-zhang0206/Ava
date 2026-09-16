@@ -1,8 +1,9 @@
-import type { AgentRow } from "@/lib/types";
+import type { AgentRow, AgentLineage } from "@/lib/types";
 
 export interface Props {
   /** Server-driven agent list (TanStack Query cache, kept in sync by useAgents via SSE). */
   agents: AgentRow[];
+  ancestors?: AgentLineage[];
   /** Per-agent lifecycle pending state (mutation isPending → row spinner). */
   pendingActions: Record<number, "restarting" | "terminating" | "resurrecting" | "compacting">;
   /** Number of SpawningRow placeholders to render (in-flight spawns awaiting AgentSpawned). */
@@ -23,6 +24,7 @@ export interface Props {
 
 export interface InnerProps {
   agents: AgentRow[];
+  ancestors?: AgentLineage[];
   activeId: number | null;
   onSelect: (id: number) => void;
   onSpawn: (opts: { machine?: string; model?: string; preset?: string; reasoning_effort?: string }) => void;

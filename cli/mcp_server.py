@@ -29,11 +29,12 @@ server. Both live under one noun because both are "MCP wiring for this machine".
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Annotated, Any, Literal, cast
 
 import httpx
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from pydantic import Field
 
 # Read calls are a single gateway round-trip; a spawn additionally launches a
 # process on the target machine, so it gets its own longer budget.
@@ -136,24 +137,6 @@ async def _request(
     return resp.json()
 
 
-def _compact_agent(row: dict[str, Any]) -> dict[str, Any]:
-    """The fields an external agent steers by, out of a full agent record.
-
-    The gateway's row carries the whole lifecycle snapshot (pids, activity
-    timestamps, notice counters); handing all of it to a model on every list
-    call costs context without changing any decision. `get_agent` returns the
-    full record for the cases that need it.
-    """
-    return {
-        "agent_id": row["agent_id"],
-        "status": row["status"],
-        "label": row["label"],
-        "machine": row["machine"],
-        "spawner": row["spawner"],
-        "last_active_at": row["last_active_at"],
-    }
-
-
 def _message_text(content: Any) -> str:
     """Flatten one message's content to text.
 
@@ -197,24 +180,6 @@ def _project_message(msg: dict[str, Any]) -> dict[str, Any]:
     return projected
 
 
-def _validate_status(status: str) -> None:
-    """Reject a status filter that matches no lifecycle state.
-
-    The filter is applied here rather than by the gateway, so a misremembered
-    value ("active", "done") would otherwise come back as an empty list — which
-    an external model reads as "the fleet is empty" and acts on. Naming the legal
-    set instead lets it correct the call itself.
-
-    Raises:
-        ToolError: `status` is not an agent lifecycle state.
-    """
-    from shared.agents import AgentStatus
-
-    if status not in set(AgentStatus):
-        legal = ", ".join(sorted(s.value for s in AgentStatus))
-        raise ToolError(f"unknown agent status {status!r}; the states are: {legal}")
-
-
 def build_server() -> MCPServer:
     """Assemble the MCP server: one tool per gateway control route.
 
@@ -230,29 +195,31 @@ def build_server() -> MCPServer:
     server = MCPServer("ava", instructions=_INSTRUCTIONS)
 
     @server.tool()
-    async def list_agents(status: str | None = None) -> list[dict[str, Any]]:
-        """List the agents in this Ava cluster with their live state.
+    async def list_agents(
+        scope: Literal["live", "terminated", "all"] = "live",
+        query: Annotated[str, Field(max_length=200)] = "",
+        before_id: Annotated[int | None, Field(ge=1, le=9223372036854775807)] = None,
+        limit: Annotated[int, Field(ge=1, le=200)] = 100,
+    ) -> dict[str, Any]:
+        """Read one agent directory page, newest IDs first.
 
-        Returns one entry per agent: its id, lifecycle status, label, the machine
-        it runs on, who spawned it, and when it was last active. Terminated
-        agents are included — pass `status` to narrow to one state, e.g.
-        "running" (working right now), "idling" (alive, waiting for input) or
-        "terminated" (finished). An unrecognized `status` is an error listing the
-        states that exist, never an empty list.
+        `live` includes all nonterminated agents; use `terminated` for history
+        or `all` for both. `query` matches a label substring or an exact agent
+        ID. Returns `agents` and `next_cursor`: pass that cursor as `before_id`
+        with the same filters to continue. None means no further results.
+        Each call reads at most `limit` agents (1 through 200).
         """
-        if status is not None:
-            _validate_status(status)
-        rows = await _request("GET", "/api/agents", params={"fields": "summary"})
-        if status is not None:
-            rows = [r for r in rows if r["status"] == status]
-        return [_compact_agent(r) for r in rows]
+        params: dict[str, str | int] = {"scope": scope, "query": query, "limit": limit}
+        if before_id is not None:
+            params["before_id"] = before_id
+        return await _request("GET", "/api/agents", params=params)
 
     @server.tool()
     async def get_agent(agent_id: int) -> dict[str, Any]:
         """Read the full state of one agent by id.
 
-        Includes everything `list_agents` returns plus what the agent is doing
-        right now and any questions it is blocked on waiting for an answer —
+        Includes lifecycle details, what the agent is doing right now, and any
+        questions it is blocked on waiting for an answer —
         answer those with `send_message`.
         """
         return await _request("GET", f"/api/agents/{agent_id}")

@@ -82,17 +82,23 @@ import ava
 from ava.agents import AgentStatus as S
 
 def ensure_agent(label: str, prompt: str) -> int:
-    mine = [a for a in ava.agents.list_agents(filter_by_status=(
-                S.RUNNING, S.IDLING, S.TERMINATED, S.RESTARTING))
-            if a.label == label]
-    if mine:
-        a = max(mine, key=lambda r: r.agent_id)   # label is not unique -> newest
-        if a.status == S.TERMINATED:
-            ava.agents.resurrect(a.agent_id, prompt)
-        else:
-            ava.agents.send_message(a.agent_id, prompt)   # idle wakes, running enqueues
-        return a.agent_id
+    before_id = None
+    while True:
+        page = ava.agents.list_agents(scope="all", query=label, before_id=before_id)
+        # Directory pages are newest first; substring search still needs an exact label match.
+        for agent in page.agents:
+            if agent.label != label:
+                continue
+            if agent.status == S.TERMINATED:
+                ava.agents.resurrect(agent.agent_id, prompt)
+            else:
+                ava.agents.send_message(agent.agent_id, prompt)
+            return agent.agent_id
+        if page.next_cursor is None:
+            break
+        before_id = page.next_cursor
     return ava.agents.spawn(prompt=prompt, label=label)
+
 ```
 
 **Actor caveat.** A schedule runs as `schedule:<id>`, not an agent. So
@@ -113,15 +119,24 @@ from ava.agents import AgentStatus as S
 from shared.config import settings
 from shared.watcher import next_fire
 
-def ensure_agent(label, prompt):
-    mine = [a for a in ava.agents.list_agents(filter_by_status=(
-                S.RUNNING, S.IDLING, S.TERMINATED, S.RESTARTING))
-            if a.label == label]
-    if mine:
-        a = max(mine, key=lambda r: r.agent_id)
-        (ava.agents.resurrect if a.status == S.TERMINATED else ava.agents.send_message)(a.agent_id, prompt)
-        return a.agent_id
+def ensure_agent(label: str, prompt: str) -> int:
+    before_id = None
+    while True:
+        page = ava.agents.list_agents(scope="all", query=label, before_id=before_id)
+        # Directory pages are newest first; substring search still needs an exact label match.
+        for agent in page.agents:
+            if agent.label != label:
+                continue
+            if agent.status == S.TERMINATED:
+                ava.agents.resurrect(agent.agent_id, prompt)
+            else:
+                ava.agents.send_message(agent.agent_id, prompt)
+            return agent.agent_id
+        if page.next_cursor is None:
+            break
+        before_id = page.next_cursor
     return ava.agents.spawn(prompt=prompt, label=label)
+
 
 def pool_growth():
     out = ava.shell.run("cd ~/.ava/memory && git diff --numstat | awk '{s+=$1+$2} END{print s+0}'")

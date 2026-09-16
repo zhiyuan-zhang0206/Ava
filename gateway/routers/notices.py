@@ -82,17 +82,16 @@ _OPEN_FEED_MAX_LIMIT = 500
 _RESOLVED_PAGE_MAX_LIMIT = 100
 
 
-def _publish_response_required_snapshot(conn: psycopg.Connection, agent_id: int) -> None:
+def _publish_response_required_hint(agent_id: int) -> None:
     """Refresh the inspector's response-required notice projection after commit."""
     try:
-        publish_agent_updated_sync(conn, agent_id)
+        publish_agent_updated_sync(agent_id)
     except Exception:
         # The notice row is already durable. Like every live announce, an
         # unavailable projection refresh must not turn a successful SDK write
         # into an error; the next roster fetch reconciles it.
-        conn.rollback()
         _log.exception(
-            "unable to publish response-required notice snapshot", extra={"agent_id": agent_id}
+            "unable to publish response-required notice hint", extra={"agent_id": agent_id}
         )
 
 
@@ -595,7 +594,7 @@ async def post_notice_create(agent_id: int, body: NoticeCreateIn, request: Reque
             # query; a pre-commit AgentUpdated would preserve the stale view.
             conn.commit()
             if body.require_response or superseded_response_required:
-                _publish_response_required_snapshot(conn, agent_id)
+                _publish_response_required_hint(agent_id)
             return notice_global_id, notice_local_id, superseded_global, superseded_local
 
     def _pending(pool: ConnectionPool) -> list[dict[str, object]]:
@@ -704,7 +703,7 @@ async def patch_notice_edit(agent_id: int, body: NoticeEditIn, request: Request)
             edited = _edit(conn)
             conn.commit()
             if edited is not None and edited[1]:
-                _publish_response_required_snapshot(conn, agent_id)
+                _publish_response_required_hint(agent_id)
             return edited
 
     edited = await asyncio.to_thread(_edit_wrapper, request.app.state.db_pool)
@@ -735,7 +734,7 @@ async def post_notice_dismiss(agent_id: int, request: Request) -> Response:
                 return None
             dismissed, require_response = int(row[0]), bool(row[1])
             if require_response:
-                _publish_response_required_snapshot(conn, agent_id)
+                _publish_response_required_hint(agent_id)
             return dismissed
 
     dismissed = await asyncio.to_thread(_dismiss, request.app.state.db_pool)

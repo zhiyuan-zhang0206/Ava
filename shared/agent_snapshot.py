@@ -1,16 +1,13 @@
-"""AgentSnapshot — full lifecycle state of one agent. Single source of truth
-for three transports: HTTP (GET /api/agents returns it as AgentRow), SSE
-(AgentSpawned / AgentUpdated events carry it), and frontend rendering.
+"""Full lifecycle detail for one selected agent.
 
-`select_one` / `select_all` helpers wrap the canonical JOIN query so all
-producers (gateway list endpoints + lifecycle publish helpers) compute
-`last_active_at` identically.
+Directory cards and the live tree have their own bounded read contract in
+``shared.agent_roster``; detailed notice bodies never cross that boundary.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal, LiteralString, cast
+from typing import Any, Literal
 
 import psycopg
 from pydantic import BaseModel, Field
@@ -64,28 +61,6 @@ _FULL_COLS = (
     "AND n.created_at > now() - interval '30 days') AS unread_notice_count"
     ", a.config_overlay, mp.last_probe_at, a.lease_expires_at"
 )
-# The list summary deliberately has its own SELECT, rather than serializing a
-# full snapshot and dropping keys afterwards. `effective_model` is the one
-# scalar needed to preserve `supports_vision`; the raw JSONB config overlay
-# never leaves Postgres on this path.
-_SUMMARY_COLS = (
-    "a.id, a.spawner, a.fork_source_agent_id, a.status, a.pid, "
-    "a.spawned_at, a.started_at, "
-    "COALESCE(a.last_active_at, a.started_at, a.spawned_at) AS last_active_at, "
-    "COALESCE(im.last_inbound_at, a.started_at, a.spawned_at) AS last_inbound_at, "
-    "t.label, a.machine, a.heartbeat_paused_until, a.liveness_state, "
-    "COALESCE("
-    "(SELECT json_agg(json_build_object("
-    "'id', n.id, 'title', n.title, 'content', n.content, 'priority', n.priority, "
-    "'blocking', n.blocking, 'created_at', n.created_at, 'task_id', n.task_id, 'expire_at', n.expire_at) ORDER BY n.created_at) "
-    "FROM agent_notices n "
-    "WHERE n.agent_id = a.id AND n.require_response AND n.resolved_at IS NULL), "
-    "'[]'::json) AS notices_awaiting_response, "
-    "(SELECT count(*) FROM agent_notices n "
-    "WHERE n.agent_id = a.id AND NOT n.require_response AND n.resolved_at IS NULL "
-    "AND n.created_at > now() - interval '30 days') AS unread_notice_count, "
-    "a.config_overlay ->> 'llm_model' AS effective_model, mp.last_probe_at, a.lease_expires_at"
-)
 _FROM = (
     "FROM agents_meta a "
     "JOIN agents t ON t.id = a.id "
@@ -103,50 +78,6 @@ _FROM = (
 # Every join above yields at most one row per agent (agents PK, LATERAL MAX),
 # and the notices are scalar subqueries — no GROUP BY needed.
 _GROUP = ""
-
-AgentListScope = Literal["all", "live", "terminated"]
-AgentListFields = Literal["full", "summary", "compact"]
-
-
-# Scope is part of the query text, not a post-fetch Python filter.  The three
-# statements are fixed literals selected from the validated vocabulary, so a
-# live roster never evaluates the per-agent LATERAL / notice subqueries for
-# historical terminated rows.
-def _select_all_sql(columns: str) -> dict[AgentListScope, LiteralString]:
-    """Build the three fixed list statements for one trusted column projection."""
-    return {
-        "all": cast(LiteralString, f"SELECT {columns} {_FROM} {_GROUP} ORDER BY a.id"),
-        "live": cast(
-            LiteralString,
-            f"SELECT {columns} {_FROM} WHERE a.status <> 'terminated' {_GROUP} ORDER BY a.id",
-        ),
-        "terminated": cast(
-            LiteralString,
-            f"SELECT {columns} {_FROM} WHERE a.status = 'terminated' {_GROUP} ORDER BY a.id",
-        ),
-    }
-
-
-_SELECT_ALL_SQL: dict[AgentListFields, dict[AgentListScope, LiteralString]] = {
-    "full": _select_all_sql(_FULL_COLS),
-    "summary": _select_all_sql(_SUMMARY_COLS),
-    # This legacy narrow projection deliberately does not reuse `_FROM`, so it
-    # avoids the roster's LATERAL and notice lookups.
-    "compact": {
-        "all": (
-            "SELECT a.id, a.status, t.label FROM agents_meta a JOIN agents t ON t.id = a.id "
-            "ORDER BY a.id"
-        ),
-        "live": (
-            "SELECT a.id, a.status, t.label FROM agents_meta a JOIN agents t ON t.id = a.id "
-            "WHERE a.status <> 'terminated' ORDER BY a.id"
-        ),
-        "terminated": (
-            "SELECT a.id, a.status, t.label FROM agents_meta a JOIN agents t ON t.id = a.id "
-            "WHERE a.status = 'terminated' ORDER BY a.id"
-        ),
-    },
-}
 
 
 class OpenNotice(BaseModel):
@@ -176,36 +107,6 @@ class OpenNotice(BaseModel):
     # The task this notice belongs to, or None — the human queue groups notices
     # by it (falling back to the owner agent's task when absent).
     task_id: int | None = None
-
-
-class AgentListSummary(BaseModel):
-    """Roster fields used by list consumers; full details stay on demand."""
-
-    agent_id: int
-    spawner: str
-    fork_source_agent_id: int | None
-    status: AgentStatus
-    pid: int | None
-    spawned_at: datetime
-    started_at: datetime | None
-    last_active_at: datetime
-    last_inbound_at: datetime
-    label: str | None
-    machine: str
-    supports_vision: bool
-    liveness_state: Literal["online", "offline", "unknown"]
-    observation: AgentObservation | None = None
-    notices_awaiting_response: list[OpenNotice]
-    unread_notice_count: int
-    heartbeat_paused_until: datetime | None
-
-
-class AgentListCompact(BaseModel):
-    """The legacy narrow list projection."""
-
-    agent_id: int
-    status: AgentStatus
-    label: str | None
 
 
 class AgentSnapshot(BaseModel):
@@ -303,44 +204,6 @@ def _row_to_snapshot(row: tuple[Any, ...]) -> AgentSnapshot:
     )
 
 
-def _row_to_summary(row: tuple[Any, ...]) -> AgentListSummary:
-    from shared.lm.factory import model_supports_vision
-    from shared.lm.registry import resolve_available_model
-
-    effective_model = resolve_available_model(row[15] or settings.lm.llm_model)
-    return AgentListSummary.model_validate(
-        {
-            "agent_id": row[0],
-            "spawner": row[1],
-            "fork_source_agent_id": row[2],
-            "status": AgentStatus(row[3]),
-            "pid": row[4],
-            "spawned_at": row[5],
-            "started_at": row[6],
-            "last_active_at": row[7],
-            "last_inbound_at": row[8],
-            "label": row[9],
-            "machine": row[10],
-            "heartbeat_paused_until": row[11],
-            "liveness_state": row[12],
-            "notices_awaiting_response": row[13],
-            "unread_notice_count": row[14],
-            "supports_vision": model_supports_vision(effective_model),
-            "observation": observation(row[16], row[17]),
-        }
-    )
-
-
-def _row_to_compact(row: tuple[Any, ...]) -> AgentListCompact:
-    return AgentListCompact.model_validate(
-        {
-            "agent_id": row[0],
-            "status": AgentStatus(row[1]),
-            "label": row[2],
-        }
-    )
-
-
 def select_one(conn: psycopg.Connection, agent_id: int) -> AgentSnapshot | None:
     """Look up a single agent's snapshot; returns None when the row does not exist."""
     with conn.cursor() as cur:
@@ -350,48 +213,6 @@ def select_one(conn: psycopg.Connection, agent_id: int) -> AgentSnapshot | None:
         )
         row = cur.fetchone()
     return _row_to_snapshot(row) if row else None
-
-
-async def select_one_async(
-    conn: psycopg.AsyncConnection[Any], agent_id: int
-) -> AgentSnapshot | None:
-    """`select_one` twin for async contexts (agent graph nodes)."""
-    async with conn.cursor() as cur:
-        await cur.execute(
-            f"SELECT {_FULL_COLS} {_FROM} WHERE a.id = %s {_GROUP}",
-            (agent_id,),
-        )
-        row = await cur.fetchone()
-    return _row_to_snapshot(row) if row else None
-
-
-def select_all(
-    conn: psycopg.Connection,
-    *,
-    scope: AgentListScope = "all",
-    fields: AgentListFields = "full",
-) -> list[AgentSnapshot] | list[AgentListSummary] | list[AgentListCompact]:
-    """List full snapshots, roster summaries, or compact legacy rows for ``scope``.
-
-    ``all`` preserves the historical SDK / ops contract.  Frontend roster
-    readers request ``live`` so terminated history is excluded by Postgres
-    before the snapshot's per-agent lookups run; the frontend fetches the
-    ``terminated`` surface alongside it, so tree rendering always has every
-    row it needs to resolve spawn lineage.  ``terminated`` is the explicit
-    history surface. Every scope returns each row's **raw** spawner /
-    fork-source — the immutable lineage truth; attaching a row to its
-    nearest visible/live ancestor is a view-layer derivation (user ruling
-    2026-08-28 -> 09-02), never a payload rewrite.  ``summary`` does not
-    select full-only values; ``compact`` avoids every roster-only lookup.
-    """
-    with conn.cursor() as cur:
-        cur.execute(_SELECT_ALL_SQL[fields][scope])
-        rows = cur.fetchall()
-    if fields == "summary":
-        return [_row_to_summary(r) for r in rows]
-    if fields == "compact":
-        return [_row_to_compact(r) for r in rows]
-    return [_row_to_snapshot(r) for r in rows]
 
 
 class ActivityEntry(BaseModel):

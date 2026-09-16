@@ -1,37 +1,8 @@
 "use client";
 
-// Agent / thread sidebar — agent_id == agent_id 1:1, each row = one agent.
-//
-// Desktop: persistent aside on the left, sized by the homepage's resizable
-//   column frame. The body already wraps its controls at narrower widths.
-// Mobile (< md): fully hidden by default; the header hamburger opens a
-//   full-screen overlay. Tapping a row to select an agent auto-closes
-//   it back to the timeline.
-//
-// Content is a unified spawn tree (no spawner group header) — top level
-// flattens all non-sub-agents (triggered by user / claude-code / any
-// external spawner), sub-agents indent under their spawner. The roster
-// always carries the terminated rows too (use-agents merges both scopes) —
-// they are the lineage joints the tree walker needs, and they keep their
-// true lineage position. Terminated agents are hidden from RENDERING by
-// default: the toggle above the tree reveals them, and while hidden
-// buildAgentTree flattens them out and re-parents their live children
-// under the nearest visible ancestor (user ruling 2026-08-28 -> 09-02).
-//
-// Two view modes (a DB-backed user setting, display.sidebar_view_mode):
-//   tree — spawn lineage tree (default)
-//   flat — sortable flat list (by ID, last active, or status)
-//
-// Redesign (2026-07): view/terminated/sort controls consolidated into a single
-// toolbar row. #723: search moved OUT of the sidebar body into a floating
-// overlay (header / collapsed-rail search button), so it stays reachable even
-// when the sidebar is collapsed; entering the app resets to an expanded
-// sidebar + inspector (user ruling).
-//
-// Quiet by default (RCS): collapsed = a completely blank rail (no mini list,
-// no badges, no counts — only the expand affordance); expanded shows static
-// presence (agent ID / label roster) in a stable ID order. Dynamic signals are
-// opt-in: status colors behind display.show_agent_status (quick toggle in the
+// The sidebar renders one live tree with minimal ancestry. Opening history
+// mounts an independent, bounded directory page; selected conversations remain
+// addressable by ID regardless of directory membership.
 
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, Search, X } from "lucide-react";
@@ -67,9 +38,7 @@ export function AgentSidebar(props: Props) {
   // either place updates the same ["user-settings"] cache, so they stay in
   // lockstep across the sidebar and settings. Default false
   // (USER_SETTING_DEFAULTS); opaque non-boolean DB values remain opt-out.
-  // It is a RENDER-only switch: the terminated roster is fetched and merged
-  // into `agents` unconditionally (its rows anchor spawn-lineage walks),
-  // so this flag never gates a fetch.
+  // This setting opens the bounded archive; live ancestry is a separate read.
   const { settings: userSettings, setSetting } = useUserSettings();
   const showTerminated = userSettings["display.show_terminated"] === true;
   const setShowTerminated = (v: boolean) => setSetting("display.show_terminated", v);
@@ -118,6 +87,7 @@ export function AgentSidebar(props: Props) {
       {!isNarrow ? (
       <DesktopSidebar
         agents={agents}
+        ancestors={props.ancestors}
         activeId={activeId}
         onSelect={handleSelect}
         onSpawn={props.onSpawn}
@@ -142,6 +112,7 @@ export function AgentSidebar(props: Props) {
       ) : (
       <MobileSidebar
         agents={agents}
+        ancestors={props.ancestors}
         activeId={activeId}
         onSelect={handleSelect}
         onSpawn={props.onSpawn}
@@ -165,15 +136,13 @@ export function AgentSidebar(props: Props) {
       )}
       {/* Floating search overlay — search lives here, not inline in the
           sidebar (#723); the query filters the sidebar list in sync. The
-          overlay mirrors the visible roster: terminated rows are always in
-          `agents` (lineage joints), but search only surfaces them when the
-          show-terminated toggle is on. */}
+          overlay searches live cards. The archive has its own server search. */}
       <SearchOverlay
         open={searchOpen}
         onClose={closeSearch}
         searchQuery={searchQuery}
         onSearchQueryChange={setSearchQuery}
-        agents={showTerminated ? agents : agents.filter((a) => a.status !== "terminated")}
+        agents={agents}
         onSelect={handleSelect}
       />
     </>

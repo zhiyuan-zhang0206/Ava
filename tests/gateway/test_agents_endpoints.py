@@ -2,7 +2,7 @@
 
 POST /api/agents (spawn + optional prompt + optional fork_from)
 POST /api/agents/{id}/terminate (INSERT terminate inbound)
-GET /api/agents (full snapshot of agents_meta table)
+GET /api/agents (bounded directory cards and explicit cursor)
 
 Real database rows and gateway/home-runner operation dispatch; no host task is started.
 """
@@ -842,7 +842,7 @@ class TestRestart:
 
 
 class TestList:
-    def test_get_agents_returns_all_with_status_and_lineage(
+    def test_get_agents_returns_page_with_status_and_lineage(
         self, db_conn: psycopg.Connection
     ) -> None:
         with TestClient(app) as client:
@@ -853,13 +853,14 @@ class TestList:
             db_conn.commit()
             resp = client.get("/api/agents")
         assert resp.status_code == 200
-        rows = resp.json()
+        page = resp.json()
+        assert page["next_cursor"] is None
+        rows = page["agents"]
         assert len(rows) == 2
         assert set(rows[0]) == {
             "agent_id",
             "spawner",
             "fork_source_agent_id",
-            "fork_source_checkpoint_id",
             "status",
             "pid",
             "spawned_at",
@@ -870,8 +871,8 @@ class TestList:
             "machine",
             "supports_vision",
             "liveness_state",
-            "last_probe_at",
-            "notices_awaiting_response",
+            "awaiting_response_count",
+            "highest_notice_priority",
             "unread_notice_count",
             "heartbeat_paused_until",
             "observation",
@@ -890,7 +891,7 @@ class TestList:
         self,
         db_conn: psycopg.Connection,
     ) -> None:
-        """The default stays historical; frontend scopes partition the roster."""
+        """History is explicit; the default contains all nonterminated states."""
         with TestClient(app) as client:
             live_id = client.post("/api/agents", json={}).json()["id"]
             terminated_id = client.post("/api/agents", json={}).json()["id"]
@@ -901,11 +902,15 @@ class TestList:
                 )
             db_conn.commit()
 
-            all_rows = client.get("/api/agents").json()
-            live_rows = client.get("/api/agents", params={"scope": "live"}).json()
-            terminated_rows = client.get("/api/agents", params={"scope": "terminated"}).json()
+            all_rows = client.get("/api/agents", params={"scope": "all"}).json()["agents"]
+            default_rows = client.get("/api/agents").json()["agents"]
+            live_rows = client.get("/api/agents", params={"scope": "live"}).json()["agents"]
+            terminated_rows = client.get("/api/agents", params={"scope": "terminated"}).json()[
+                "agents"
+            ]
 
         assert {row["agent_id"] for row in all_rows} == {live_id, terminated_id}
+        assert default_rows == live_rows
         assert [row["agent_id"] for row in live_rows] == [live_id]
         assert [row["agent_id"] for row in terminated_rows] == [terminated_id]
 
@@ -914,15 +919,15 @@ class TestList:
             response = client.get("/api/agents", params={"scope": "future"})
         assert response.status_code == 422
 
-    def test_get_agents_summary_omits_detail_only_fields(self, db_conn: psycopg.Connection) -> None:
+    def test_directory_cards_omit_detail_only_fields(self, db_conn: psycopg.Connection) -> None:
         """List consumers receive only the fields they actually render or parse."""
         with TestClient(app) as client:
             agent_id = client.post("/api/agents", json={}).json()["id"]
-            response = client.get("/api/agents", params={"fields": "summary"})
+            response = client.get("/api/agents")
             detail = client.get(f"/api/agents/{agent_id}")
 
         assert response.status_code == 200
-        row = response.json()[0]
+        row = response.json()["agents"][0]
         assert set(row) == {
             "agent_id",
             "spawner",
@@ -937,7 +942,8 @@ class TestList:
             "machine",
             "supports_vision",
             "liveness_state",
-            "notices_awaiting_response",
+            "awaiting_response_count",
+            "highest_notice_priority",
             "unread_notice_count",
             "heartbeat_paused_until",
             "observation",
@@ -949,20 +955,48 @@ class TestList:
         assert "fork_source_checkpoint_id" in detail.json()
         assert "last_probe_at" in detail.json()
 
-    def test_get_agents_compact_has_only_cli_columns(self, db_conn: psycopg.Connection) -> None:
-        """The CLI projection contains exactly the three columns it renders."""
+    def test_directory_page_search_and_cursor(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
-            client.patch(f"/api/agents/{agent_id}", json={"label": "alpha"})
-            response = client.get("/api/agents", params={"fields": "compact"})
+            ids = [client.post("/api/agents", json={}).json()["id"] for _ in range(4)]
+            for agent_id in ids:
+                client.patch(f"/api/agents/{agent_id}", json={"label": "alpha worker"})
+            client.patch(f"/api/agents/{ids[2]}", json={"label": "unrelated"})
+            first = client.get("/api/agents", params={"query": "alpha", "limit": 2}).json()
+            second = client.get(
+                "/api/agents",
+                params={
+                    "query": "alpha",
+                    "limit": 2,
+                    "before_id": first["next_cursor"],
+                },
+            ).json()
+        assert [row["agent_id"] for row in first["agents"]] == [ids[3], ids[1]]
+        assert first["next_cursor"] == ids[1]
+        assert [row["agent_id"] for row in second["agents"]] == [ids[0]]
+        assert second["next_cursor"] is None
 
-        assert response.status_code == 200
-        assert response.json() == [{"agent_id": agent_id, "status": "idling", "label": "alpha"}]
-
-    def test_get_agents_rejects_unknown_fields_projection(self) -> None:
+    @pytest.mark.parametrize(
+        "params",
+        [
+            {"limit": 0},
+            {"limit": 201},
+            {"before_id": 0},
+            {"query": "x" * 201},
+        ],
+    )
+    def test_directory_rejects_invalid_page_bounds(self, params: dict[str, str | int]) -> None:
         with TestClient(app) as client:
-            response = client.get("/api/agents", params={"fields": "minimal"})
+            response = client.get("/api/agents", params=params)
         assert response.status_code == 422
+
+    def test_directory_has_one_card_contract(self) -> None:
+        parameters = app.openapi()["paths"]["/api/agents"]["get"]["parameters"]
+        assert {parameter["name"] for parameter in parameters} == {
+            "scope",
+            "query",
+            "before_id",
+            "limit",
+        }
 
     def test_get_agents_joins_thread_label(
         self,
@@ -974,7 +1008,7 @@ class TestList:
             client.patch(f"/api/agents/{a_id}", json={"label": "\u6211\u7684 agent"})
             resp = client.get("/api/agents")
         assert resp.status_code == 200
-        by_id = {r["agent_id"]: r for r in resp.json()}
+        by_id = {r["agent_id"]: r for r in resp.json()["agents"]}
         assert by_id[a_id]["label"] == "\u6211\u7684 agent"
 
     def test_get_single_agent_returns_label(self, db_conn: psycopg.Connection) -> None:
@@ -998,18 +1032,18 @@ class TestList:
             single_resp = client.get(f"/api/agents/{a_id}")
         assert list_resp.status_code == 200
         assert single_resp.status_code == 200
-        list_row = next(r for r in list_resp.json() if r["agent_id"] == a_id)
+        list_row = next(r for r in list_resp.json()["agents"] if r["agent_id"] == a_id)
         assert list_row["machine"] == "test-host"
         assert single_resp.json()["machine"] == "test-host"
 
-    def test_get_agents_empty_returns_empty_list(
+    def test_get_agents_empty_returns_page_without_cursor(
         self,
         db_conn: psycopg.Connection,
     ) -> None:
         with TestClient(app) as client:
             resp = client.get("/api/agents")
         assert resp.status_code == 200
-        assert resp.json() == []
+        assert resp.json() == {"agents": [], "next_cursor": None}
 
 
 class TestGetLastMessage:

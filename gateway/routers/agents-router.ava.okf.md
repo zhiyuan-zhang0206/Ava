@@ -38,15 +38,14 @@ source's overlay + preset verbatim. See
 
 ## List projections
 
-`GET /api/agents` keeps `scope=all&fields=full` as its compatibility default
-for SDK and operations callers. Roster consumers request the SQL-projected
-`fields=summary` shape with live or terminated scope; it retains roster state
-and response-required notices while omitting checkpoint and probe internals and
-raw configuration. `ava agents ls` requests that authenticated summary projection
-and renders only `agent_id`, `status`, `machine`, and `label`; runner-local
-workspace paths do not cross this boundary. `fields=compact` remains an available
-legacy narrow projection. `GET /api/agents/{id}` remains the full on-demand detail
-surface.
+`GET /api/agents` is a bounded, newest-first directory page with explicit
+scope, label/ID search and a keyset cursor. `GET /api/agents/roster` returns
+live cards and their minimal ancestor closure in one database snapshot;
+unrelated terminated rows receive no per-agent enrichment. Cards carry
+attention counts/priority, never notice bodies. Selected or bookmarked agents
+use the independent ID detail endpoint. SDK, CLI and MCP consume the same
+page contract; no implicit list-all or field-projection compatibility modes
+remain.
 
 ## Per-agent observability
 

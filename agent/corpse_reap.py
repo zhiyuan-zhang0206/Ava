@@ -76,18 +76,18 @@ async def reap_crash_corpses(
             event="corpse_reaper_terminated",
             n=len(reaped),
         )
-    await _publish_reaped_corpses(pool, reaped)
+    await _publish_reaped_corpses(reaped)
     return reaped
 
 
-async def _publish_reaped_corpses(pool: AsyncConnectionPool, reaped: list[int]) -> None:
+async def _publish_reaped_corpses(reaped: list[int]) -> None:
     """Best-effort refresh of mounted frontends; the durable flip already committed."""
     for agent_id in reaped:
         try:
-            await publish_agent_updated(pool, agent_id)
+            await publish_agent_updated(agent_id)
         except Exception:
             logger.exception(
-                "corpse reap snapshot publish failed",
+                "corpse reap lifecycle hint publish failed",
                 event="corpse_reaper_publish_failed",
                 agent_id=agent_id,
             )
@@ -153,5 +153,5 @@ async def reap_recrashed_corpse(
             n=len(reaped),
             crash_count=RECRASH_CONFIRMED_CRASHES,
         )
-    await _publish_reaped_corpses(pool, reaped)
+    await _publish_reaped_corpses(reaped)
     return reaped

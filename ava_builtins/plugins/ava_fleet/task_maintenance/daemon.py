@@ -86,7 +86,7 @@ def _deliver_message(pool: ConnectionPool, agent_id: int, message: str) -> None:
             (agent_id, message, json.dumps({"note_tag": "task"})),
         )
         inbound_id = int(cur.fetchone()[0])  # type: ignore[index]
-        publish_agent_updated_sync(conn, agent_id)
+    publish_agent_updated_sync(agent_id)
     # The connection context commits before the best-effort wake. A missing
     # subscriber is expected for a terminated agent and does not resurrect it.
     shared.db.publish_inbound_wake(agent_id, str(inbound_id))
@@ -291,33 +291,31 @@ def _escalate_to_user_queue(
         "delegating agent owns its parent to catch it. Reassign it to another agent, "
         "cancel it, or reply to remind the owner once more."
     )
-    with pool.connection() as conn:
-        with conn.transaction(), conn.cursor() as cur:
-            conn.execute("SET TRANSACTION READ WRITE")
-            cur.execute(
-                "SELECT 1 FROM agent_notices WHERE agent_id = %s AND resolved_at IS NULL LIMIT 1",
-                (owner,),
-            )
-            if cur.fetchone() is not None:
-                return False
-            cur.execute(
-                "INSERT INTO agent_notices "
-                "(agent_id, local_id, task_id, title, content, priority, require_response, blocking, expire_at) "
-                "VALUES (%s, COALESCE((SELECT MAX(local_id) FROM agent_notices WHERE agent_id = %s), -1) + 1, "
-                "%s, %s, %s, %s, TRUE, FALSE, now() + make_interval(secs => %s))",
-                (
-                    owner,
-                    owner,
-                    task_id,
-                    notice_title,
-                    notice_content,
-                    priority,
-                    settings.daemon.notice_ttl_limit_seconds,
-                ),
-            )
-        # Refresh the snapshot so the queue shows the notice live — same publish
-        # ava.ui.notify does after a require_response notice.
-        publish_agent_updated_sync(conn, owner)
+    with pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+        conn.execute("SET TRANSACTION READ WRITE")
+        cur.execute(
+            "SELECT 1 FROM agent_notices WHERE agent_id = %s AND resolved_at IS NULL LIMIT 1",
+            (owner,),
+        )
+        if cur.fetchone() is not None:
+            return False
+        cur.execute(
+            "INSERT INTO agent_notices "
+            "(agent_id, local_id, task_id, title, content, priority, require_response, blocking, expire_at) "
+            "VALUES (%s, COALESCE((SELECT MAX(local_id) FROM agent_notices WHERE agent_id = %s), -1) + 1, "
+            "%s, %s, %s, %s, TRUE, FALSE, now() + make_interval(secs => %s))",
+            (
+                owner,
+                owner,
+                task_id,
+                notice_title,
+                notice_content,
+                priority,
+                settings.daemon.notice_ttl_limit_seconds,
+            ),
+        )
+    # Reconcile the notice queue only after the escalation has committed.
+    publish_agent_updated_sync(owner)
     return True
 
 

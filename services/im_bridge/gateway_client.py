@@ -7,11 +7,11 @@ import json
 import logging
 import uuid
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
-from services.im_bridge.types import AgentRow
+from services.im_bridge.types import AgentDetail, AgentDirectoryPage
 from shared.config import settings
 
 _log = logging.getLogger("services.im_bridge.gateway_client")
@@ -46,12 +46,31 @@ class GatewayClient:
     def _headers(self) -> dict[str, str]:
         return {"Cookie": self._cookie} if self._cookie else {}
 
-    async def list_agents(self) -> list[AgentRow]:
-        """GET /api/agents → list of agent rows (id/label/status/...)."""
+    async def list_agents(
+        self,
+        *,
+        scope: Literal["live", "terminated", "all"],
+        query: str = "",
+        before_id: int | None = None,
+    ) -> AgentDirectoryPage:
+        """Read one compact directory page; callers choose scope and pagination."""
         client = await self._http()
-        resp = await client.get("/api/agents", headers=self._headers())
+        params: dict[str, str | int] = {"scope": scope, "query": query, "limit": 100}
+        if before_id is not None:
+            params["before_id"] = before_id
+        resp = await client.get("/api/agents", headers=self._headers(), params=params)
         if resp.status_code != 200:
             raise RuntimeError(f"list agents failed: HTTP {resp.status_code}")
+        return resp.json()
+
+    async def get_agent(self, agent_id: int) -> AgentDetail | None:
+        """Fetch one agent's detail, distinguishing absence from gateway failure."""
+        client = await self._http()
+        resp = await client.get(f"/api/agents/{agent_id}", headers=self._headers())
+        if resp.status_code == 404:
+            return None
+        if resp.status_code != 200:
+            raise RuntimeError(f"get agent {agent_id} failed: HTTP {resp.status_code}")
         return resp.json()
 
     async def send_message(

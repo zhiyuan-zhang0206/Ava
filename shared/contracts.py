@@ -94,8 +94,9 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     # ── gateway/routers/agents.py ───────────────────────────────────
     ("PATCH", "/api/agents/{agent_id}"): RouteContract(note="label patch — CAS update"),
     ("GET", "/api/models"): RouteContract(),
-    ("GET", "/api/agents"): RouteContract(
-        note="agent roster read; fields=full (compatibility default), summary, or compact"
+    ("GET", "/api/agents"): RouteContract(note="bounded agent directory page"),
+    ("GET", "/api/agents/roster"): RouteContract(
+        note="live agent cards and required ancestor links in one snapshot"
     ),
     ("POST", "/api/agents"): RouteContract(
         Idempotency.NON_IDEMPOTENT, note="spawn — pure INSERT; a retry twins the agent (#698)"

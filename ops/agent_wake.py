@@ -203,7 +203,7 @@ def _prepare_resurrect_attempt(
                 (agent_id, prompt, resurrected_by),
             )
         conn.commit()
-        publish_agent_updated_sync(conn, agent_id)
+        publish_agent_updated_sync(agent_id)
     publish_inbound_wake(agent_id, "0")
 
 

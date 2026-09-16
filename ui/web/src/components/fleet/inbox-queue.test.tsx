@@ -152,7 +152,7 @@ function agent(over: {
     label: over.label ?? null,
     machine: "test",
     supports_vision: true,
-    notices_awaiting_response: over.notices_awaiting_response ?? [],
+    awaiting_response_count: (over.notices_awaiting_response ?? []).length, highest_notice_priority: (over.notices_awaiting_response ?? [])[0]?.priority ?? null,
     unread_notice_count: 0,
     heartbeat_paused_until: null,
     liveness_state: "online",
