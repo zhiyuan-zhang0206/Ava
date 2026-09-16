@@ -233,6 +233,33 @@ def test_blocked_physical_plan_keeps_every_logical_decision() -> None:
     assert plan.weak_evidence == tuple(sorted(item.object_name for item in outside))
 
 
+def test_blocked_fold_keeps_bound_sidecars_and_no_weak_evidence() -> None:
+    """Beyond-window objects with a verified binding stay non-weak through a blocked fold.
+
+    Regression: the blocked branch folded logical eligibles into the physical
+    bucket, so the physical sidecar index could not attach their (bound)
+    sidecars and every beyond-window object turned into weak evidence.
+    """
+    outside = (_daily(1), _daily(2), _daily(3))
+    pairs = tuple(_bound_pair(item) for item in outside)
+    plan = _plan(
+        outside,
+        retention=LogicalRetention(keep_dailies=1, legacy_tz=_TZ),
+        physical=_physical(unprotected_first=True),
+        sidecar_pairs=pairs,
+    )
+    assert "unprotected candidate exists" in plan.blocked_reasons
+    attached = {
+        decision.object.object_name: decision.sidecar
+        for decision in plan.retained
+        if decision.object.kind == "logical"
+    }
+    assert set(attached) == {item.object_name for item in outside}
+    for item in outside:
+        assert attached[item.object_name] == _bound_pair(item).sidecar
+    assert plan.weak_evidence == ()
+
+
 def test_out_of_grammar_logical_objects_block_fail_closed() -> None:
     outside = _logical("ava-notes.txt")
     plan = _plan((_daily(1), outside))
