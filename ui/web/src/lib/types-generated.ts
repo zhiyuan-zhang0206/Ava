@@ -525,8 +525,9 @@ export interface paths {
          *     Windowing is an absolute-integer-index analog of the timeline's tail-window
          *     mode (the timeline cursor is an `item_id` string + `has_more`; here the
          *     cursor is an absolute index into `state.messages`). No `limit` returns the
-         *     newest 100 messages; `before=<index>` without a limit returns the newest
-         *     100 messages before that exclusive cursor. An explicit `limit` (1..10000)
+         *     configured default window (``display.messages_default_limit`` — 100 by
+         *     default); `before=<index>` without a limit returns that window immediately
+         *     before the exclusive cursor. An explicit `limit` (1..10000)
          *     preserves the requested page size. `messages[i]` corresponds to
          *     `state.messages[start_index + i]`; `msg_count` is the total length, and
          *     `has_more` tells the caller whether `start_index` can be supplied as the
@@ -1120,7 +1121,8 @@ export interface paths {
          *     own box included). The runner resolves `session_id` against its live shell
          *     sessions for the agent, reconstructs the full session name (carrying
          *     the optional `-<name>` suffix), and captures the last
-         *     `lines` lines.
+         *     `lines` lines. Omit `lines` for the configured default
+         *     (``display.shell_capture_default_lines``, 200 out of the box).
          *
          *     404 if the agent is unknown (no agents_meta row), if the agent has no live
          *     shell with that id on its machine, or if the capture fails (the session
@@ -1148,7 +1150,9 @@ export interface paths {
          * Get Timeline
          * @description Timeline = raw view of LangGraph state.messages, one window at a time.
          *
-         *     Default (no `before`) returns the newest `limit` items. Pass
+         *     Default (no `before`) returns the newest `limit` items; an omitted
+         *     `limit` resolves to the configured `display.timeline_default_limit`
+         *     (50 by default). Pass
          *     `before=<oldest item_id you hold>` to fetch the previous window for
          *     scroll-up history loading. `has_more` reports whether older items exist
          *     before the returned window.
@@ -1383,7 +1387,8 @@ export interface paths {
          *     ones ride the agent snapshot. include_awaiting=True returns both kinds:
          *     the IM bridge's "/notice list" queue view (Task #941) lists everything
          *     still open and hands each item its own processing buttons. A notice is
-         *     open when resolved_at IS NULL. `limit` caps a runaway backlog.
+         *     open when resolved_at IS NULL. Omit `limit` for the configured default cap
+         *     (``display.notices_open_default_limit``, 200 out of the box).
          */
         get: operations["get_open_notices_api_notices_open_get"];
         put?: never;
@@ -1432,7 +1437,8 @@ export interface paths {
          *     notices to Telegram (Task #884) — one query, no event dependency, and it
          *     covers require_response notices (which publish no NoticePosted event) as
          *     well as FYIs. Idempotent: rows are only ever returned while open, so a
-         *     poll after a notice was resolved simply stops seeing it.
+         *     poll after a notice was resolved simply stops seeing it. Omit `limit` for the
+         *     configured default cap (``display.notices_open_default_limit``).
          */
         get: operations["get_notices_live_api_notices_live_get"];
         put?: never;
@@ -1458,6 +1464,8 @@ export interface paths {
          *     one queue's history (the "needs response" tab passes true, the FYI tab false);
          *     omit it for both. Keyset-paginated on (resolved_at, id): pass the last row's
          *     (before_at, before_id) for the next page strictly older. Supply both or neither.
+         *     Omit `limit` for the configured page size (``display.notices_resolved_default_page``,
+         *     30 out of the box).
          */
         get: operations["get_resolved_notices_api_notices_resolved_get"];
         put?: never;
@@ -1494,6 +1502,9 @@ export interface paths {
          *     The standalone endpoints stay for their other consumers (IM bridge,
          *     CLI). The open sweep (FYI TTL auto-resolve) runs once per call, so the
          *     open list, the awaiting list and the history agree within one request.
+         *     The open/awaiting cap and the resolved page default to
+         *     ``display.notices_open_default_limit`` / ``display.notices_resolved_default_page``
+         *     when the caller passes none.
          */
         get: operations["get_notices_feed_api_notices_get"];
         put?: never;
@@ -9306,7 +9317,7 @@ export interface operations {
     get_agent_shell_api_agents__agent_id__shell__session_id__get: {
         parameters: {
             query?: {
-                lines?: number;
+                lines?: number | null;
             };
             header?: never;
             path: {
@@ -9340,7 +9351,7 @@ export interface operations {
     get_timeline_api_agents__agent_id__timeline_get: {
         parameters: {
             query?: {
-                limit?: number;
+                limit?: number | null;
                 before?: string | null;
             };
             header?: never;
@@ -9637,7 +9648,7 @@ export interface operations {
     get_open_notices_api_notices_open_get: {
         parameters: {
             query?: {
-                limit?: number;
+                limit?: number | null;
                 include_awaiting?: boolean;
             };
             header?: never;
@@ -9690,7 +9701,7 @@ export interface operations {
         parameters: {
             query?: {
                 after?: number;
-                limit?: number;
+                limit?: number | null;
             };
             header?: never;
             path?: never;
@@ -9721,7 +9732,7 @@ export interface operations {
     get_resolved_notices_api_notices_resolved_get: {
         parameters: {
             query?: {
-                limit?: number;
+                limit?: number | null;
                 require_response?: boolean | null;
                 before_at?: string | null;
                 before_id?: number | null;
@@ -9755,8 +9766,8 @@ export interface operations {
     get_notices_feed_api_notices_get: {
         parameters: {
             query?: {
-                limit?: number;
-                resolved_limit?: number;
+                limit?: number | null;
+                resolved_limit?: number | null;
                 before_at?: string | null;
                 before_id?: number | null;
             };

@@ -496,11 +496,16 @@ def _fallback_human_item(msg_idx: int, content: str, created_at: str) -> Timelin
 
 
 # Default tail-window size for the timeline (cold-load endpoint default +
-# the agent-published snapshot trim). The unit is timeline items (one turn
-# fans out into reasoning/code/output items), not state.messages, so this is
-# several screenfuls. The same value drives both producers so a streaming
-# turn always lands inside the window the frontend already holds.
-DEFAULT_TIMELINE_LIMIT = 50
+# the agent-published snapshot trim) — config: display.timeline_default_limit
+# (AVA_TIMELINE_DEFAULT_LIMIT, default 50). The unit is timeline items (one
+# turn fans out into reasoning/code/output items), not state.messages, so 50
+# is several screenfuls. The same value drives both producers so a streaming
+# turn always lands inside the window the frontend already holds. Read through
+# `timeline_default_limit()` (this module sits in both the gateway's and the
+# agent's import closure; consumers must not capture the value at import).
+def timeline_default_limit() -> int:
+    """The configured default timeline window (``display.timeline_default_limit``)."""
+    return settings.display.timeline_default_limit
 
 
 def tail_window(items: list[TimelineItem], limit: int) -> tuple[list[TimelineItem], bool]:

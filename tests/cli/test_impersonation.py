@@ -69,7 +69,7 @@ def test_timeline_preserves_existing_payload(
     )
     assert cmd_agents_timeline(405) == 0
     assert seen["url"] == "http://gateway/api/agents/405/timeline"
-    assert seen["params"] == {"limit": 50}
+    assert seen["params"] == {}  # no --limit: the configured gateway default applies
     assert json.loads(capsys.readouterr().out) == payload
 
 

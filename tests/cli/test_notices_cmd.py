@@ -63,7 +63,7 @@ def test_list_passes_include_awaiting(dial: dict[str, list[tuple]]) -> None:
     assert cmd_notices_list(agent_id=None, priority=None, type_filter=None) == 0
     url, kw = dial["get"][0]
     assert url == "http://gw/api/notices/open"
-    assert kw["params"] == {"include_awaiting": True, "limit": 200}
+    assert kw["params"] == {"include_awaiting": True}
 
 
 def test_list_filters_by_agent_and_type(monkeypatch: pytest.MonkeyPatch) -> None:

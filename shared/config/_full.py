@@ -29,6 +29,7 @@ from shared.config.data_plane import DataPlaneSettings
 from shared.config.data_plane import (
     _self_machine_host as _self_machine_host,  # re-export: service_read resolves it through shared.config so tests can monkeypatch it
 )
+from shared.config.display import DisplaySettings
 from shared.config.feishu import FeishuSettings
 from shared.config.gateway import GatewaySettings
 from shared.config.general import GeneralSettings
@@ -82,6 +83,7 @@ class Settings(BaseModel):
     physical_backup: PhysicalBackupSettings = Field(default_factory=PhysicalBackupSettings)
     services: ServiceSettings = Field(default_factory=ServiceSettings)
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
+    display: DisplaySettings = Field(default_factory=DisplaySettings)
     packages: PackagesSettings = Field(default_factory=PackagesSettings)
     feishu: FeishuSettings = Field(default_factory=FeishuSettings)
     telegram: TelegramSettings = Field(default_factory=TelegramSettings)

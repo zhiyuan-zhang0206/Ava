@@ -49,6 +49,9 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             "telegram",
             "feishu",
             "observability",
+            # Display window defaults (task #3696) — served by gateway endpoints
+            # (messages / timeline / notices / shell) for unparameterized reads.
+            "display",
             # The PITR uploader daemon reads the physical-backup plane under
             # the gateway profile (bucket/key/credentials).
             "physical_backup",
@@ -69,6 +72,9 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             "data_plane",
             "general",
             "observability",
+            # Display window defaults (task #3696): the agent-published timeline
+            # snapshot reads display.timeline_default_limit via shared/timeline.
+            "display",
             "gateway",
             "services",
             "daemon",
@@ -96,6 +102,10 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             "lm",  # ops_lifecycle reads llm_model
             "sandbox",
             "observability",
+            # The pty CLI (shared/pty_sessions/cli.py, reachable from the runner
+            # closure) resolves an omitted capture window from
+            # display.shell_capture_default_lines (task #3696).
+            "display",
             # ops/spec.py gates the pitr-uploader roster entry on AVA_PITR_ENABLED.
             "physical_backup",
             # shared.install_registry.resolved_policy() is reachable from the

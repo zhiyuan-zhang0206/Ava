@@ -266,6 +266,9 @@ const BACKEND_GROUP_FALLBACK: Record<string, string> = {
   Observability: "config-observability",
   Telegram: "config-web",
   General: "config-general",
+  // Display windows/limits (backend domain "Display", task #3696) — the
+  // "Display & general" bucket is their home.
+  Display: "config-general",
 };
 
 // (group id, label) in render order — labels come from _sections.ts so the nav

@@ -27,9 +27,6 @@ export const NOTICES_QUERY_KEY = ["notices"] as const;
 /** The resolved-history infinite query. */
 export const NOTICES_RESOLVED_QUERY_KEY = ["notices-resolved"] as const;
 
-const OPEN_LIMIT = 200;
-const PAGE_SIZE = 30;
-
 interface ResolvedCursor {
   beforeAt: string;
   beforeId: number;
@@ -96,17 +93,15 @@ function withoutDroppedRows(wire: NoticesFeedWire): NoticesFeedWire {
 export function useNotices(): NoticesFeed {
   const feedQuery = useQuery({
     queryKey: NOTICES_QUERY_KEY,
-    queryFn: async () => withoutDroppedRows(await api.getNotices({ limit: OPEN_LIMIT })),
+    // Page sizes come from the server defaults
+    // (display.notices_open_default_limit / notices_resolved_default_page,
+    // task #3696); the client pins no window.
+    queryFn: async () => withoutDroppedRows(await api.getNotices()),
   });
 
   const resolvedQuery = useInfiniteQuery({
     queryKey: NOTICES_RESOLVED_QUERY_KEY,
-    queryFn: ({ pageParam }) =>
-      api.getNotices({
-        limit: OPEN_LIMIT,
-        resolvedLimit: PAGE_SIZE,
-        ...pageParam,
-      }),
+    queryFn: ({ pageParam }) => api.getNotices({ ...pageParam }),
     initialPageParam: undefined as ResolvedCursor | undefined,
     // The endpoint returns next_cursor in wire shape (snake_case); the api
     // layer expects camelCase params, so translate here. None = end.
