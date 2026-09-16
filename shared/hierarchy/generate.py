@@ -32,14 +32,10 @@ from typing import Any
 
 from loguru import logger
 
-from shared.hierarchy import ENGINE_VERSION
+from shared.hierarchy import ENGINE_VERSION, PROMPT_VERSION
 from shared.hierarchy.seal import narrative_budget_tok
 from shared.hierarchy.tokens import count_tokens
 from shared.lm._call import invoke_text
-
-# Bump when the prompt templates change: stored rows record the version they
-# were generated with, so a text-quality question can be traced to a template.
-PROMPT_VERSION = "0.3"
 
 # The node kinds `build_prompt` serves: a leaf's input is rendered source
 # blocks, an upper node's input is its children's texts.

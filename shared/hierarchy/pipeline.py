@@ -41,6 +41,7 @@ from shared.hierarchy.generate import (
     input_hash,
     text_hash,
 )
+from shared.hierarchy.nodes import MaterializedNode
 from shared.hierarchy.render import RenderParams, render_block
 from shared.hierarchy.seal import (
     NodeSpec,
@@ -59,24 +60,6 @@ class TriggerBatch:
 
     name: str  # compact@i<idx> | tail
     units: tuple[Unit, ...]
-
-
-@dataclass(frozen=True)
-class MaterializedNode:
-    """One node's outcome, storage-ready."""
-
-    nid: str
-    level: int
-    kind: str  # group | alias
-    span: tuple[int, int]
-    at: tuple[str, str]
-    trigger: str
-    src_tok: int
-    text: str
-    text_hash: str  # sha256 of the text (idempotent-write key)
-    input_hash: str  # the generation cache key this text was produced for
-    children: tuple[str, ...]  # child uids, in stream order
-    children_spans: tuple[tuple[int, int], ...]  # child spans, same order
 
 
 @dataclass(frozen=True)
