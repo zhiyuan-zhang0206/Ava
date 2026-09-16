@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from gateway.routers.run_timeline import aggregate_turn_timeline
+import pytest
+
+from gateway.routers.run_timeline import _narrative_for_window, aggregate_turn_timeline
+from shared.hierarchy.store import StoredNode
 
 
 def _event(
@@ -297,3 +300,49 @@ def test_aggregate_turn_timeline_rail_is_cross_turn_structural_only() -> None:
     # Executions still land on their turn row; the failure stays a row badge.
     assert [execution.ok for execution in timeline.rows[0].execs] == [True, False]
     assert "exec_failed" in timeline.rows[0].anomalies
+
+
+def test_narrative_for_window_uses_the_store_and_skips_summary_on_full_coverage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Wiring lock: stored nodes -> layer nodes; full coverage -> no fallback text."""
+    start = datetime(2026, 9, 12, 4, tzinfo=UTC)
+    end = start + timedelta(hours=2)
+    nodes = [
+        StoredNode(
+            id=7,
+            depth=1,
+            span_start=0,
+            span_end=3,
+            start_ts=start,
+            end_ts=end,
+            text="the window",
+            parent_id=None,
+            engine_version="0.3",
+            prompt_version="0.3",
+        )
+    ]
+
+    def _nodes(*_args: object, **_kwargs: object) -> list[StoredNode]:
+        return nodes
+
+    monkeypatch.setattr("shared.hierarchy.store.load_window_nodes", _nodes)
+    layers, summary = _narrative_for_window(405, start, end)
+    assert summary is None
+    assert layers is not None
+    (layer,) = layers
+    assert (layer.id, layer.depth, layer.summary) == ("7", 0, "the window")
+
+
+def test_narrative_for_window_degrades_to_none_without_nodes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No stored nodes: no layers; an agent without checkpoints has no summary."""
+    start = datetime(2026, 9, 12, 4, tzinfo=UTC)
+
+    def _empty(*_args: object, **_kwargs: object) -> list[StoredNode]:
+        return []
+
+    monkeypatch.setattr("shared.hierarchy.store.load_window_nodes", _empty)
+    layers, summary = _narrative_for_window(424242, start, start + timedelta(hours=1))
+    assert layers is None and summary is None

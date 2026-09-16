@@ -25,12 +25,16 @@ from gateway.schemas.run_timeline import (
     RunTimelineBoundaries,
     RunTimelineEvent,
     RunTimelineExec,
+    RunTimelineLayerNode,
     RunTimelineLlm,
     RunTimelineMeta,
     RunTimelineResponse,
     RunTimelineRow,
+    RunTimelineSummary,
     RunTimelineWindow,
 )
+from shared.config import settings
+from shared.log import logger
 
 router = APIRouter()
 
@@ -627,6 +631,7 @@ def get_run_timeline(
         _event_name(event) in _SESSION_START_EVENTS and _event_ts(event) > window_end
         for event in post_window_events
     )
+    layers, summary = _narrative_for_window(agent_id, window_start, window_end)
     return RunTimelineResponse(
         agent_id=agent_id,
         window=RunTimelineWindow(from_=window_start, to=window_end),
@@ -639,4 +644,76 @@ def get_run_timeline(
             post_window_turns=post_window_turns,
             has_activity_after_window=has_activity_after_window,
         ),
+        layers=layers,
+        summary=summary,
     )
+
+
+def _narrative_for_window(
+    agent_id: int, window_start: datetime, window_end: datetime
+) -> tuple[list[RunTimelineLayerNode] | None, RunTimelineSummary | None]:
+    """The narrative layers and raw-context fallback for one window.
+
+    The event timeline is the primary read; every failure here (store absent on
+    an old cluster, checkpoint read error) degrades to no narrative rather than
+    failing the endpoint. Response shapes follow the three coverage states:
+    no layers -> summary only; full coverage -> layers only; partial coverage ->
+    both (the summary carries the uncovered stretch).
+    """
+    from shared.hierarchy.serve import select_layers
+    from shared.hierarchy.store import load_window_nodes
+
+    try:
+        nodes = load_window_nodes(agent_id, window_start, window_end)
+        selection = select_layers(
+            nodes,
+            window_start=window_start,
+            window_end=window_end,
+            max_nodes=settings.display.run_timeline_layers_max_nodes,
+        )
+    except Exception:
+        logger.exception("run-timeline narrative read failed for agent {}", agent_id)
+        return None, None
+    layers = (
+        [
+            RunTimelineLayerNode(
+                id=layer.id,
+                depth=layer.depth,
+                parent=layer.parent,
+                start=layer.start,
+                end=layer.end,
+                summary=layer.summary,
+            )
+            for layer in selection.layers
+        ]
+        if selection.layers
+        else None
+    )
+    summary = None
+    if selection.coverage != "full":
+        text = _latest_compact_summary(agent_id)
+        if text:
+            summary = RunTimelineSummary(text=text)
+    return layers, summary
+
+
+def _latest_compact_summary(agent_id: int) -> str | None:
+    """The agent's most recent compact summary — the raw-context fallback text.
+
+    One latest-snapshot checkpoint read (the same read the context panel does);
+    a read failure or an agent without a compaction degrades to None.
+    """
+    from shared.checkpoint import load_checkpoint_messages
+    from shared.message_kwargs import AvaMsgType, message_content, read_ava_kwargs
+
+    try:
+        messages = load_checkpoint_messages(agent_id)
+    except Exception:
+        logger.exception("compact summary read failed for agent {}", agent_id)
+        return None
+    for message in reversed(messages):
+        if read_ava_kwargs(message).get("ava_msg_type") == AvaMsgType.COMPACT_SUMMARY:
+            content = message_content(message)
+            if isinstance(content, str) and content.strip():
+                return content
+    return None
