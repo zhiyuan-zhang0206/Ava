@@ -624,6 +624,16 @@ def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: s
                 pgsql.Identifier(RUNNER_ROLE)
             )
         )
+        # The understanding-tree generation pass ships as a gateway-side worker,
+        # but its operational first-run / ad-hoc regeneration path executes from
+        # the agent/runner side (task #3704) — SELECT, INSERT, UPDATE, and
+        # DELETE for the write-side reconciliation that removes rows of a
+        # superseded earlier cut when a rebuild re-cuts the same stretch.
+        conn.execute(
+            pgsql.SQL("GRANT SELECT, INSERT, UPDATE, DELETE ON understanding_nodes TO {}").format(
+                pgsql.Identifier(RUNNER_ROLE)
+            )
+        )
         # A watcher that exits cleanly deletes its OWN registry row from the
         # watcher child's finally (shared/watcher_registry.delete_watcher) —
         # without DELETE the row survives and the boot reconcile later treats

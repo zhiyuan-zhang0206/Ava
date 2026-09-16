@@ -35,6 +35,7 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
   "config-llm": [
     "AVA_MODEL",
     "AVA_LABELER_MODEL",
+    "AVA_HIERARCHY_MODEL",
     "AVA_REASONING_EFFORT",
     "AVA_DASHSCOPE_BASE_URL",
     "AVA_UNDERSTAND_TEXT_MODEL",

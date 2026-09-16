@@ -67,6 +67,29 @@ class LmSettings(EnvSettings):
         },
     )
 
+    hierarchy_model: str = Field(
+        default="deepseek-v4-flash",
+        alias="AVA_HIERARCHY_MODEL",
+        description=(
+            "Model for the understanding-layer generation pass (hierarchical "
+            "run-timeline node summaries, task #3704). Cheap tier by design: a "
+            "full day's recap cards measure at 0.7-0.9% of that day's agent "
+            "input tokens at this tier. Staying inside DeepSeek keeps the "
+            "gateway's required-key surface unchanged (same rationale as "
+            "labeler_model)."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            # The generation worker runs on the gateway side (same landing as
+            # the labeler daemon) — its model key must survive the gateway
+            # profile pop.
+            "capability": "gateway",
+            "scope": "cluster-pinned",
+        },
+    )
+
     llm_non_streaming_fallback_timeout_seconds: float = Field(
         default=600.0,
         alias="AVA_LLM_NON_STREAMING_FALLBACK_TIMEOUT_SECONDS",
