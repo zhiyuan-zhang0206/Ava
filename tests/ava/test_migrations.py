@@ -88,6 +88,11 @@ _RESURRECT_FENCE_MIGRATION = (
     / "migrations"
     / "20260911T005419_add-resurrect-inbound-fence.sql"
 )
+_LIFECYCLE_POINTER_DONE_MIGRATION = (
+    Path(__file__).resolve().parents[2]
+    / "migrations"
+    / "20260916T164150_lifecycle-pointer-done-guard.sql"
+)
 _LAST_CLAIM_LOOP_MIGRATION = (
     Path(__file__).resolve().parents[2]
     / "migrations"
@@ -774,6 +779,125 @@ _SKILL_MATCH_KEYS = (
     "skill_match_min_score",
     "skill_match_budget_ms",
 )
+
+
+def test_lifecycle_pointer_done_migration_repairs_torn_rows() -> None:
+    """The guard migration settles existing torn rows before installing the fence.
+
+    A command at `done` with a live pointer blinds boot recovery (needs
+    `claimed`) and live observation (needs a process identity) at once
+    (6285/200306, 6089/172352; task #3678). The repair is a set predicate —
+    every torn row is settled (observation backfilled where missing, pointer
+    cleared), never a hard-coded id.
+    """
+    with (
+        _throwaway_database("lifecycle_pointer") as url,
+        psycopg.connect(url, autocommit=True) as conn,
+        conn.cursor() as cur,
+    ):
+        cur.execute(sql.SQL(cast(LiteralString, _SCHEMA_SQL.read_text())), prepare=False)
+        # Pre-migration shape: the guard is not installed yet.
+        cur.execute(
+            "DROP TRIGGER inbound_messages_lifecycle_pointer_done_guard ON inbound_messages"
+        )
+        cur.execute("DROP FUNCTION reject_inbound_done_with_lifecycle_pointer()")
+        cur.execute("INSERT INTO agents (id) SELECT generate_series(1, 2)")
+        cur.execute(
+            "INSERT INTO agents_meta (id, status) VALUES (1, 'terminated'), (2, 'terminated')"
+        )
+
+        def _insert_done_terminate(agent_id: int, *, observed: bool) -> int:
+            # INSERT is outside the guard's UPDATE window: building the torn shape
+            # this way mirrors the historical out-of-band write. The target columns
+            # satisfy inbound_lifecycle_target_check: an applied row must carry a
+            # claimed target (kind terminate/restart, status claimed/done).
+            cur.execute(
+                "INSERT INTO inbound_messages "
+                "(agent_id, content, kind, source, status, applied_at, observed_at, "
+                " claimed_at, target_generation, target_owner) "
+                "VALUES (%s, '', 'terminate', 'user', 'done', now(), "
+                "CASE WHEN %s THEN now() ELSE NULL END, now(), "
+                "gen_random_uuid(), gen_random_uuid()) RETURNING id",
+                (agent_id, observed),
+            )
+            row = cur.fetchone()
+            assert row is not None
+            return row[0]
+
+        unobserved = _insert_done_terminate(1, observed=False)
+        cur.execute("UPDATE agents_meta SET lifecycle_command_id=%s WHERE id=1", (unobserved,))
+        observed_torn = _insert_done_terminate(2, observed=True)
+        cur.execute("UPDATE agents_meta SET lifecycle_command_id=%s WHERE id=2", (observed_torn,))
+
+        cur.execute(
+            sql.SQL(cast(LiteralString, _LIFECYCLE_POINTER_DONE_MIGRATION.read_text())),
+            prepare=False,
+        )
+
+        assert cur.execute(
+            "SELECT status, observed_at IS NOT NULL FROM inbound_messages WHERE id=%s",
+            (unobserved,),
+        ).fetchone() == ("done", True)
+        assert cur.execute(
+            "SELECT lifecycle_command_id FROM agents_meta WHERE id=1"
+        ).fetchone() == (None,)
+        # An observed-but-pointed row only needs the pointer cleared; its
+        # observation is not rewritten.
+        assert cur.execute(
+            "SELECT lifecycle_command_id FROM agents_meta WHERE id=2"
+        ).fetchone() == (None,)
+
+
+def test_lifecycle_pointer_done_guard_blocks_torn_commit_and_allows_settle() -> None:
+    """The commit-time fence rejects pointer -> done and passes the same-transaction settle.
+
+    Every legitimate writer clears the pointer in the same transaction, so the
+    deferred fence is invisible to them; only a torn write — e.g. a manual
+    "cleanup" UPDATE that flips a command to done without settling it — crosses
+    a commit and fails.
+    """
+    with _throwaway_database("lifecycle_guard") as url:
+        with psycopg.connect(url, autocommit=True) as setup, setup.cursor() as cur:
+            cur.execute(sql.SQL(cast(LiteralString, _SCHEMA_SQL.read_text())), prepare=False)
+            cur.execute("INSERT INTO agents (id) SELECT generate_series(1, 2)")
+            cur.execute(
+                "INSERT INTO agents_meta (id, status) VALUES (1, 'terminated'), (2, 'terminated')"
+            )
+            claimed: list[int] = []
+            for agent_id in (1, 2):
+                cur.execute(
+                    "INSERT INTO inbound_messages "
+                    "(agent_id, content, kind, source, status, applied_at, claimed_at, "
+                    " target_generation, target_owner) "
+                    "VALUES (%s, '', 'terminate', 'user', 'claimed', now(), now(), "
+                    "gen_random_uuid(), gen_random_uuid()) RETURNING id",
+                    (agent_id,),
+                )
+                row = cur.fetchone()
+                assert row is not None
+                claimed.append(row[0])
+                cur.execute(
+                    "UPDATE agents_meta SET lifecycle_command_id=%s WHERE id=%s",
+                    (row[0], agent_id),
+                )
+
+        # Positive: the documented settle shape — done + pointer cleared in ONE
+        # transaction — commits cleanly under the deferred guard.
+        with psycopg.connect(url) as conn, conn.cursor() as cur:
+            cur.execute("UPDATE inbound_messages SET status='done' WHERE id=%s", (claimed[0],))
+            cur.execute("UPDATE agents_meta SET lifecycle_command_id=NULL WHERE id=1")
+        # (`with` exit committed.)
+
+        # Negative: the pointer left alive across the commit — rejected at commit.
+        conn = psycopg.connect(url)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE inbound_messages SET status='done' WHERE id=%s", (claimed[1],))
+            with pytest.raises(psycopg.errors.RaiseException, match="cannot reach done"):
+                conn.commit()
+            conn.rollback()
+        finally:
+            conn.close()
 
 
 def test_skill_match_config_cleanup_migration_strips_residue() -> None:

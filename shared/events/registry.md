@@ -25,7 +25,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 24 | events table |
 | telemetry (category=telemetry) | `events` | 182 | events table |
-| log (category=log) | `events` | 12 | events table |
+| log (category=log) | `events` | 13 | events table |
 | file-only (destination=file) | file log | 1 | file only (not the events table) |
 | SSE live | Redis → frontend (not persisted) | 31 role | live projection |
 
@@ -301,6 +301,7 @@ consumers: see the comments at each emit point.
 | `chrome_page_ttl_expired` | the browser-mcp TTL sweep closed a Chrome page whose hard deadline passed; attributes carry page_id, url, agent_id (None when no affinity slot still named the page) | observation | — | events |
 | `watcher_reaped` | the gateway TTL reaper reclaimed a watcher session — its deadline passed, or its owner agent is terminated for good; attributes carry agent_id, session_id, mode | observation | — | events |
 | `watcher_ttl_healed` | the gateway TTL reaper re-aligned a legacy watcher session's recorded TTL to the watcher's true deadline (rows spawned before the unified write path, task #3411) instead of reclaiming it; attributes carry count and samples | observation | — | events |
+| `lifecycle_pointer_done_torn` | the gateway TTL reaper's scan found lifecycle command(s) sitting at done while agents_meta.lifecycle_command_id still pointed at them (an out-of-band torn write, task #3678) — every resurrect of the named agent(s) defers until settled; attributes carry count and samples | anomaly | — | events |
 
 ## 5. SSE roles (live channel, not persisted, 31)
 
