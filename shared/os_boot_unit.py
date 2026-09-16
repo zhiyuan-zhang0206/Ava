@@ -326,11 +326,21 @@ exit 0
 
 
 def _privileged(argv: list[str], *, timeout: float = 120.0) -> subprocess.CompletedProcess[str]:
-    """Run one root step: direct when already root, else `sudo -n` (no prompt)."""
+    """Run one root step: direct when already root, else `sudo -n` (no prompt).
+
+    A missing binary (`sudo` on a minimal host, or the tool itself) becomes the
+    same actionable failure shape as a non-zero exit -- never a raw traceback.
+    """
     command = argv if os.geteuid() == 0 else ["sudo", "-n", *argv]
-    return subprocess.run(  # noqa: S603 — sudo -n + fixed verbs/paths from this module
-        command, capture_output=True, text=True, check=False, timeout=timeout
-    )
+    try:
+        return subprocess.run(  # noqa: S603 — sudo -n + fixed verbs/paths from this module
+            command, capture_output=True, text=True, check=False, timeout=timeout
+        )
+    except FileNotFoundError as e:
+        raise RuntimeError(
+            f"{command[0]} not found on this host -- this step needs root: make "
+            "passwordless sudo available, or run the step by hand"
+        ) from e
 
 
 def _privileged_failure(what: str, result: subprocess.CompletedProcess[str]) -> str:
@@ -385,10 +395,17 @@ def install(
     script = script_path(ctx.home)
     script.parent.mkdir(parents=True, exist_ok=True)
     script_content = render_script(ctx)
-    if _read_text(script) != script_content:
+    content_changed = _read_text(script) != script_content
+    if content_changed:
         script.write_text(script_content)
-        script.chmod(0o755)
         steps.append(f"wrote convergence script {script}")
+    if script.stat().st_mode & 0o777 != 0o755:
+        # A content-identical script whose mode drifted (e.g. 0644) would not
+        # run under systemd -- repair it instead of reporting success over a
+        # dead ExecStart.
+        script.chmod(0o755)
+        if not content_changed:
+            steps.append(f"fixed {script} mode to 0755")
 
     destination = unit_path(ctx.home)
     unit_content = render_unit(ctx, proxy_wait_url=proxy_wait_url)
@@ -459,7 +476,12 @@ def uninstall(home: Path | None = None) -> list[str]:
 
 
 def status(home: Path | None = None) -> list[tuple[str, str]]:
-    """Read-only operator report: unit, script, proxy wait, cron entry, last state."""
+    """Read-only operator report: unit, script, proxy wait, cron entry, last state.
+
+    `unit content` compares only for this process's own home: a foreign home
+    renders from its own checkout/user by construction, so comparing it
+    against this process's context would always read as "differs".
+    """
     home = home if home is not None else ava_home()
     ctx = _default_context()
     rows: list[tuple[str, str]] = []
@@ -472,8 +494,13 @@ def status(home: Path | None = None) -> list[tuple[str, str]]:
     if unit_text is not None:
         match = re.search(r'AVA_BOOT_PROXY_WAIT=([^"\n]*)', unit_text)
         proxy_wait = match.group(1) if match else ""
-        rendered = render_unit(ctx, proxy_wait_url=proxy_wait)
-        rows.append(("unit content", "matches rendered" if unit_text == rendered else "differs"))
+        if home == ctx.home:
+            rendered = render_unit(ctx, proxy_wait_url=proxy_wait)
+            rows.append(
+                ("unit content", "matches rendered" if unit_text == rendered else "differs")
+            )
+        else:
+            rows.append(("unit content", "not compared (not this process's home)"))
     if systemd_running():
         state = _systemctl("show", "-p", "ActiveState", "--value", unit_name(home)).stdout.strip()
         rows.append(("systemd state", state or "unknown"))
@@ -500,6 +527,11 @@ def status(home: Path | None = None) -> list[tuple[str, str]]:
 
 
 def _crontab_lines() -> list[str]:
+    if shutil.which("crontab") is None:
+        # Minimal hosts (CI containers, benches) ship no crontab binary: there
+        # is no entry to find, and install/status must degrade to "absent"
+        # instead of raising (the same warn-and-skip stance as os_autostart).
+        return []
     result = subprocess.run(
         ["crontab", "-l"], capture_output=True, text=True, check=False, timeout=30
     )

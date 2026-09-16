@@ -262,6 +262,30 @@ def test_install_enable_writes_both_artifacts_and_swaps_the_boot_path(
     assert f"enabled {unit_name(ctx.home)}" in steps
 
 
+def test_install_enable_skips_the_crontab_step_without_a_crontab_binary(
+    ctx: BootUnitContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no crontab binary there is no entry to remove: the enable flow must
+    report no cron step and must not shell out to a missing binary at all."""
+    _install_seams(monkeypatch, tmp_path, enabled=False)
+    monkeypatch.setattr(os_boot_unit.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
+
+    def unregister_must_not_run(_slug: str) -> int:
+        pytest.fail("no crontab binary: there is no entry to remove")
+
+    monkeypatch.setattr("shared.os_autostart._unregister_linux", unregister_must_not_run)
+    steps = install(context=ctx)
+    assert "removed the crontab autostart entry" not in steps
+
+
+def test_crontab_probes_degrade_without_a_crontab_binary(
+    ctx: BootUnitContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(os_boot_unit.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
+    assert os_boot_unit._crontab_lines() == []
+    assert os_boot_unit._crontab_has_autostart(ctx.home) is False
+
+
 def test_install_staged_leaves_the_crontab_entry_live(
     ctx: BootUnitContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -291,6 +315,23 @@ def test_install_refuses_without_systemd(
     monkeypatch.setattr(os_boot_unit, "systemd_running", lambda: False)
     with pytest.raises(RuntimeError, match="systemd"):
         install(context=ctx)
+
+
+def test_install_restores_a_drifted_executable_mode(
+    ctx: BootUnitContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Content-identical but not executable is a dead ExecStart: the mode is
+    repaired (and reported), not silently accepted."""
+    _install_seams(monkeypatch, tmp_path, enabled=False)
+    script = os_boot_unit.script_path(ctx.home)
+    script.parent.mkdir(parents=True)
+    script.write_text(render_script(ctx))
+    script.chmod(0o644)
+
+    steps = install(context=ctx, enable=False)
+
+    assert script.stat().st_mode & 0o777 == 0o755
+    assert f"fixed {script} mode to 0755" in steps
 
 
 def test_uninstall_removes_only_this_homes_paths(
@@ -341,6 +382,20 @@ def test_uninstall_removes_only_this_homes_paths(
     assert unit.exists()
 
 
+def test_privileged_translates_a_missing_sudo(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A host without sudo must fail actionably (RuntimeError with guidance),
+    not surface a raw FileNotFoundError traceback through the CLI wrappers."""
+
+    def run_missing(_cmd: list[str], **_kw: object) -> None:
+        raise FileNotFoundError(2, "No such file or directory", "sudo")
+
+    monkeypatch.setattr(os_boot_unit.os, "geteuid", lambda: 1000)
+    monkeypatch.setattr(os_boot_unit.subprocess, "run", run_missing)  # pyright: ignore[reportUnknownArgumentType]
+
+    with pytest.raises(RuntimeError, match="passwordless sudo"):
+        os_boot_unit._privileged(["true"])
+
+
 def test_status_reports_the_read_only_surface(
     ctx: BootUnitContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -380,6 +435,36 @@ def test_status_reports_the_read_only_surface(
     assert rows["proxy wait"] == "http://127.0.0.1:7897"
     assert rows["script content"] == "matches rendered"
     assert rows["last convergence"] == "state=ready\n"
+
+
+def test_status_does_not_compare_a_foreign_home(
+    ctx: BootUnitContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A foreign home renders from its own checkout/user by construction; the
+    content comparison must not read as a spurious "differs"."""
+    units = tmp_path / "etc-systemd"
+    units.mkdir()
+    other = tmp_path / "other-home"
+    foreign = BootUnitContext(
+        home=other, repo=ctx.repo, user=ctx.user, group=ctx.group, home_dir=ctx.home_dir
+    )
+    (units / unit_name(other)).write_text(render_unit(foreign))
+
+    monkeypatch.setattr(os_boot_unit, "SYSTEM_UNIT_DIR", units)
+    monkeypatch.setattr(os_boot_unit, "_default_context", lambda: ctx)
+    monkeypatch.setattr(os_boot_unit, "systemd_running", lambda: False)
+
+    def crontab_absent(_home: Path | None = None) -> bool:
+        return False
+
+    monkeypatch.setattr(os_boot_unit, "_crontab_has_autostart", crontab_absent)
+
+    rows = dict(status(other))
+    assert rows["unit content"] == "not compared (not this process's home)"
+
+    # The own home still compares (and matches a unit this code rendered).
+    (units / unit_name(ctx.home)).write_text(render_unit(ctx))
+    assert dict(status(ctx.home))["unit content"] == "matches rendered"
 
 
 def test_paths_and_names_are_home_scoped(tmp_path: Path) -> None:

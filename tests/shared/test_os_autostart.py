@@ -199,6 +199,25 @@ def test_register_linux_writes_cron_while_the_unit_is_staged(
     assert "boot  # ava-autostart.ava-t-cafe0123" in captured["input"]
 
 
+def test_register_linux_defers_when_crontab_is_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The unit-owned branch must survive a host with no crontab binary.
+
+    The stale-entry cleanup runs `crontab -l`; an uncaught FileNotFoundError
+    there would crash `ava start` into the boot unit's uncapped retry -- the
+    failure class this change removes. The cleanup is a no-op instead."""
+
+    def owns_boot_path(_home: Path | None = None) -> bool:
+        return True
+
+    def run_missing(cmd: list[str], **_kw: object) -> None:
+        raise FileNotFoundError(2, "No such file or directory", cmd[0])
+
+    monkeypatch.setattr("shared.os_boot_unit.boot_unit_owns_boot_path", owns_boot_path)
+    monkeypatch.setattr(os_autostart.subprocess, "run", run_missing)  # pyright: ignore[reportUnknownArgumentType]
+
+    assert os_autostart._register_linux() == 0
+
+
 # --- the retry policy, per platform ---------------------------------------
 #
 # One behaviour -- re-run `ava start` every BOOT_RETRY_INTERVAL_S seconds until

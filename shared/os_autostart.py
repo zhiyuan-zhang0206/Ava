@@ -259,7 +259,13 @@ def _register_linux() -> int:
 
 def _unregister_linux(slug: str) -> int:
     with crontab_lock():
-        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=False)
+        try:
+            result = subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=False)
+        except FileNotFoundError:
+            # No crontab binary -> nothing was ever registered, so removal is a
+            # no-op. Keeps minimal hosts destroyable and the unit-owned branch
+            # (which cleans up a stale entry) crash-free.
+            return 0
         if result.returncode != 0:
             return 0
         marker = f"{_CRON_MARKER}.{slug}"
