@@ -273,8 +273,8 @@ def cmd_cluster_destroy(*, path: str, drop_db: bool = False) -> int:
 
 def _unregister_scheduled_jobs(home: Path) -> None:
     """Remove every OS-scheduled job the cluster at `home` registered (health
-    probe, both capabilities' watchdog probes, boot autostart, logs
-    maintenance, packages refresh).
+    probe, both capabilities' watchdog probes, boot autostart, the systemd
+    boot unit, logs maintenance, packages refresh).
 
     `home` is passed to each helper as an argument. It cannot be signalled by
     setting `AVA_HOME`: `settings` is constructed once at import, so a mid-process
@@ -289,14 +289,21 @@ def _unregister_scheduled_jobs(home: Path) -> None:
     """
     from cli.commands._converge_gate import unregister_gate
     from shared.os_autostart import unregister_autostart
+    from shared.os_boot_unit import uninstall as uninstall_boot_unit
     from shared.os_cron import unregister_os_cron
     from shared.os_logs_job import unregister_logs_job
     from shared.os_packages import unregister_packages_job
     from shared.os_watchdog_probe import unregister_watchdog_probe
 
+    def uninstall_boot_unit_job() -> None:
+        # The steps it returns belong to the boot-unit CLI verbs; destroy
+        # reports only success/failure per job.
+        uninstall_boot_unit(home)
+
     jobs: list[tuple[str, Callable[[], None]]] = [
         ("health probe", lambda: unregister_os_cron(home)),
         ("autostart", lambda: unregister_autostart(home)),
+        ("boot unit", uninstall_boot_unit_job),
         ("logs maintenance", lambda: unregister_logs_job(home)),
         ("packages refresh", lambda: unregister_packages_job(home)),
         ("watchdog probe (gateway)", lambda: unregister_watchdog_probe("gateway", home)),
@@ -318,7 +325,7 @@ def _unregister_scheduled_jobs(home: Path) -> None:
     else:
         print(
             f"✓ removed '{home}' OS-scheduled jobs "
-            "(health probe, watchdog probes, autostart, logs maintenance)"
+            "(health probe, watchdog probes, autostart, boot unit, logs maintenance)"
         )
 
 

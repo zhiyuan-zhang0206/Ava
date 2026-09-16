@@ -40,6 +40,15 @@ def _stub(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # any host. The off-macOS refusal test overrides it back to False.
     monkeypatch.setattr(os_autostart, "IS_MACOS", True)
 
+    # CI runners ARE systemd hosts, so the real probe would consult their
+    # systemctl through the crontab fakes; pin "no enabled boot unit" here so
+    # the crontab-path tests describe the cron branch on any host. The
+    # boot-unit-branch tests override this with True/False.
+    def no_boot_unit(_home: Path | None = None) -> bool:
+        return False
+
+    monkeypatch.setattr("shared.os_boot_unit.boot_unit_owns_boot_path", no_boot_unit)
+
 
 def test_plist_runs_ava_start_at_load() -> None:
     xml = os_autostart._autostart_plist_content()
@@ -137,6 +146,75 @@ def test_register_linux_replaces_legacy_cluster_entry(monkeypatch: pytest.Monkey
 def test_register_linux_skips_when_no_crontab(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(os_autostart.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
     # No crontab binary -> degrade to a warning, not a failure.
+    assert os_autostart._register_linux() == 0
+
+
+def test_register_linux_defers_to_an_enabled_boot_unit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An installed AND enabled boot unit owns the boot path: no crontab entry
+    is written, and a stale one is removed -- registering both would race two
+    converge runs at every boot."""
+    unregistered: list[str] = []
+
+    def owns_boot_path(_home: Path | None = None) -> bool:
+        return True
+
+    def unregister_linux(slug: str) -> int:
+        unregistered.append(slug)
+        return 0
+
+    def run_must_not_happen(*_args: str, **_kw: str) -> None:
+        pytest.fail("crontab must not be consulted")
+
+    monkeypatch.setattr("shared.os_boot_unit.boot_unit_owns_boot_path", owns_boot_path)
+    monkeypatch.setattr(os_autostart, "_unregister_linux", unregister_linux)
+    monkeypatch.setattr(os_autostart.subprocess, "run", run_must_not_happen)
+
+    assert os_autostart._register_linux() == 0
+    assert unregistered == ["ava-t-cafe0123"]
+
+
+def test_register_linux_writes_cron_while_the_unit_is_staged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A staged unit (installed, not yet enabled) does not own the path:
+    `boot_unit_owns_boot_path` is True only when enabled, so the crontab entry
+    keeps converging the home until the reviewed switch."""
+    captured: dict = {}
+
+    def fake_run(cmd, **kw):
+        if cmd[:2] == ["crontab", "-l"]:
+            return types.SimpleNamespace(returncode=1, stdout="", stderr="no crontab for u")
+        if cmd == ["crontab", "-"]:
+            captured["input"] = kw.get("input")  # pyright: ignore[reportUnknownMemberType]
+            return types.SimpleNamespace(returncode=0, stderr="")
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    def owns_boot_path(_home: Path | None = None) -> bool:
+        return False
+
+    monkeypatch.setattr("shared.os_boot_unit.boot_unit_owns_boot_path", owns_boot_path)
+    monkeypatch.setattr(os_autostart.shutil, "which", lambda _name: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(os_autostart.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
+    assert os_autostart._register_linux() == 0
+    assert "boot  # ava-autostart.ava-t-cafe0123" in captured["input"]
+
+
+def test_register_linux_defers_when_crontab_is_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The unit-owned branch must survive a host with no crontab binary.
+
+    The stale-entry cleanup runs `crontab -l`; an uncaught FileNotFoundError
+    there would crash `ava start` into the boot unit's uncapped retry -- the
+    failure class this change removes. The cleanup is a no-op instead."""
+
+    def owns_boot_path(_home: Path | None = None) -> bool:
+        return True
+
+    def run_missing(cmd: list[str], **_kw: object) -> None:
+        raise FileNotFoundError(2, "No such file or directory", cmd[0])
+
+    monkeypatch.setattr("shared.os_boot_unit.boot_unit_owns_boot_path", owns_boot_path)
+    monkeypatch.setattr(os_autostart.subprocess, "run", run_missing)  # pyright: ignore[reportUnknownArgumentType]
+
     assert os_autostart._register_linux() == 0
 
 

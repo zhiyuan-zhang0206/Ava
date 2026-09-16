@@ -41,6 +41,9 @@ from cli.parsers.agents import (
     _h_notices_resolve,
 )
 from cli.parsers.cluster import (
+    _h_cluster_boot_unit_install,
+    _h_cluster_boot_unit_status,
+    _h_cluster_boot_unit_uninstall,
     _h_cluster_cancel,
     _h_cluster_destroy,
     _h_cluster_down,
@@ -159,6 +162,9 @@ __all__ = [
     "_h_agents_send",
     "_h_agents_terminate",
     "_h_agents_timeline",
+    "_h_cluster_boot_unit_install",
+    "_h_cluster_boot_unit_status",
+    "_h_cluster_boot_unit_uninstall",
     "_h_cluster_cancel",
     "_h_cluster_destroy",
     "_h_cluster_down",
