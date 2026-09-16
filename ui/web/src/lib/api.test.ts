@@ -527,6 +527,14 @@ describe("stats / config / timeline / system status", () => {
     expect(calls[0].init?.signal?.aborted).toBe(true);
   });
 
+  it.each(["getTokenUsage", "getPendingMessages"] as const)("%s carries cancellation to fetch", async (method) => {
+    const controller = new AbortController();
+    await api[method](22, controller.signal);
+    expect(calls[0].init?.signal?.aborted).toBe(false);
+    controller.abort();
+    expect(calls[0].init?.signal?.aborted).toBe(true);
+  });
+
   it("getSystemStatus GETs /api/status", async () => {
     await api.getSystemStatus();
     expect(calls[0].url).toMatch(/\/api\/status$/);

@@ -16,7 +16,10 @@ or compact-marker subscriptions.
 
 The selected timeline query reads one bounded tail on activation. Inactive
 queries have zero garbage-collection time. Query cancellation reaches `fetch`
-through its AbortSignal. Older-page requests have selection-scoped controllers:
+through its AbortSignal. The selected pending-message and token-usage reads
+share this selection/visibility ownership. A stream open during an existing
+read leaves a trailing read, including the initial no-cache request; leaving
+the view disposes that repair before cancelling the HTTP request. Older-page requests have selection-scoped controllers:
 a late response after A-to-B-to-A cannot append to the new A view, and cancellation
 does not produce an error toast or clear the new view's loading state.
 

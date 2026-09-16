@@ -20,3 +20,10 @@ reads and in-memory timeline snapshots. That requires a separate contract for
 all context-coordinate resets and actual committed checkpoint revisions, not a
 browser timing heuristic or a compaction-only counter. Active deep-history
 retention/rendering is also separate from inactive subscription ownership.
+
+A later opening-gap regression demonstrated that invalidating an initial
+no-cache query can merely join its pre-subscription read. The three selected
+readers now reuse the fixed-deadline repair scheduler and abandon it with their
+selection/visibility ownership. Pending-message turn hints use the same scheduler
+instead of a restartable debounce. This guarantees the follow-up read, without
+claiming an order between unversioned live snapshots and durable checkpoints.

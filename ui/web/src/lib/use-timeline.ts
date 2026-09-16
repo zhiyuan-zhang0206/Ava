@@ -9,7 +9,7 @@ import { startTransition, useCallback, useEffect, useLayoutEffect, useRef } from
 
 import { api } from "./api";
 import { useDisplayLimit } from "./display-limits";
-import { useDocumentVisible } from "./use-document-visible";
+import { useAgentReadRepair } from "./use-agent-read-repair";
 import { inspectLiveQueryKey } from "./inspector-queries";
 import { errMsg } from "./errors";
 import { noteTurnStart } from "./interaction-timing";
@@ -86,7 +86,7 @@ export function useTimeline(
 ): UseTimelineResult {
   const queryClient = useQueryClient();
 
-  const isVisible = useDocumentVisible();
+  const { isVisible, requestRepair } = useAgentReadRepair("timeline", agentId);
   const olderRequest = useRef<AbortController | null>(null);
   const timelineQuery = useQuery({
     queryKey: ["timeline", agentId] as const,
@@ -101,12 +101,11 @@ export function useTimeline(
 
   useEffect(() => {
     if (!isVisible && agentId !== null) {
-      void queryClient.cancelQueries({ queryKey: ["timeline", agentId], exact: true });
       olderRequest.current?.abort();
       useTimelineStore.setState({ loadingOlder: false });
     }
     return () => { olderRequest.current?.abort(); };
-  }, [agentId, isVisible, queryClient]);
+  }, [agentId, isVisible]);
 
   // -- Subscribe to timeline state from the Zustand store --
   const items = useTimelineStore((s) => s.items);
@@ -265,13 +264,9 @@ export function useTimeline(
         case "open":
           processConnectionEvent({ type: "open" });
           seenParseErrors.current.clear();
-          // Reconnect fallback: any events pushed while the stream was down
-          // (a compact, new turns) were missed. Refetch the snapshot so the
-          // timeline catches up to whatever happened during the gap. Harmless
-          // on the initial open — the query is already loading then.
-          if (agentId != null) {
-            void queryClient.invalidateQueries({ queryKey: ["timeline", agentId] });
-          }
+          // Opening during an initial/ongoing read cannot trust that read
+          // to cover the subscription gap; require a trailing repair.
+          requestRepair();
           // A compact whose post-compact snapshot was lost in the gap is now
           // covered by the reconnect refetch — drop any pending marker so a
           // later snapshot does not double-invalidate.
@@ -292,7 +287,7 @@ export function useTimeline(
         }
       }
     },
-    [showError, processConnectionEvent, queryClient, agentId],
+    [showError, processConnectionEvent, requestRepair],
   );
 
   useAgentEventStream(onSystemEvent, onConnectionEvent, onSystemEventBatch);

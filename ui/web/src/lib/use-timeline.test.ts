@@ -1324,7 +1324,7 @@ describe("useTimeline connectionState", () => {
 
     pushConnectionEvent({ type: "open" });
 
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["timeline", 42] });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["timeline", 42] }, { cancelRefetch: false });
   });
 
   it("open with no active agent does not invalidate a timeline snapshot", () => {
@@ -1890,5 +1890,24 @@ describe("selected timeline ownership", () => {
     rerender({ id: 1 });
     await waitFor(() => expect(result.current.items.map((item) => item.payload)).toEqual(["compacted A"]));
     await waitFor(() => expect(queryClient.getQueryCache().findAll({ queryKey: ["timeline"] })).toHaveLength(1));
+  });
+});
+
+
+describe("selected opening-gap repair", () => {
+  it("reads again after a pre-open initial read settles", async () => {
+    let finish!: (value: TimelineResponse) => void;
+    vi.mocked(api.getTimeline)
+      .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }))
+      .mockResolvedValue(tlResp([snapshotItem({ item_id: "1.0", payload: "committed before stream opened" })]));
+    const { result } = renderHook(() => useTimeline(42, vi.fn()), { wrapper });
+    await waitFor(() => expect(api.getTimeline).toHaveBeenCalledTimes(1));
+    pushConnectionEvent({ type: "open" });
+    await act(async () => {
+      finish(tlResp([snapshotItem({ item_id: "1.0", payload: "read before subscription" })]));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(result.current.items[0]?.payload).toBe("committed before stream opened"));
+    expect(api.getTimeline).toHaveBeenCalledTimes(2);
   });
 });
