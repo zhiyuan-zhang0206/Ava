@@ -860,6 +860,8 @@ _PER_TEST_TRUNCATE_TABLES = (
     "event_dismissals",
     "rollup_day_state",
     "llm_usage_hourly",
+    "agent_metric_scans",
+    "agent_metric_file_cursors",
     "agents",
     "alerts",
     "machines",
