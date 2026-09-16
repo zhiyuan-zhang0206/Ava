@@ -294,6 +294,60 @@ async def test_exclusive_host_boot_recovers_resource_free_applied_force(
     ).fetchone() == (None,)
 
 
+async def test_exclusive_host_boot_recovers_torn_pointer_done_force(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A command torn into `done` with the pointer alive (task #3678) is blind to
+    the claimed-only boot recovery; the widened candidate predicate settles it."""
+    agent_id = _agent(db_conn)
+    old_host = AgentHost(pool=aops_pool, checkpointer=Mock(), graph=Mock(), machine="claim-test")
+    assert (
+        await admit_hosted_runtime(
+            aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling"
+        )
+        is not None
+    )
+    monkeypatch.setattr("shared.exec_request_evidence.exec_run_dir", lambda: tmp_path)
+
+    # Build the torn shape directly: done + applied + unobserved with the pointer
+    # still alive. INSERT is outside the commit-time guard's UPDATE window, so this
+    # mirrors the historical out-of-band write.
+    db_conn.execute(
+        "UPDATE agents_meta SET status='terminated', termination_source='user', "
+        "status_changed_at=clock_timestamp() WHERE id=%s",
+        (agent_id,),
+    )
+    row = db_conn.execute(
+        "INSERT INTO inbound_messages "
+        "(agent_id, content, kind, source, status, applied_at, claimed_at, "
+        " target_generation, target_owner) "
+        "SELECT %s, '', 'terminate', 'user', 'done', clock_timestamp(), "
+        "       clock_timestamp(), runtime_generation, runtime_owner "
+        "FROM agents_meta WHERE id=%s RETURNING id",
+        (agent_id, agent_id),
+    ).fetchone()
+    assert row is not None
+    command = row[0]
+    db_conn.execute(
+        "UPDATE agents_meta SET lifecycle_command_id=%s WHERE id=%s", (command, agent_id)
+    )
+    db_conn.commit()
+
+    recovered, deferred = await recover_orphaned_hosted_forces(aops_pool, "claim-test")
+
+    assert recovered == [agent_id]
+    assert deferred == {}
+    assert db_conn.execute(
+        "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (command,)
+    ).fetchone() == ("done", True)
+    assert db_conn.execute(
+        "SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == (None,)
+
+
 async def test_exclusive_host_boot_defers_force_with_persistent_exec_evidence(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,

@@ -150,6 +150,33 @@ BEGIN
 END $$;
 SQL
 
+echo "-> lifecycle pointer->done guard smoke: exercise the commit-time fence"
+psql -d "$TEST_DB" -v ON_ERROR_STOP=1 <<'SQL'
+INSERT INTO agents (id, label) VALUES (992001, 'pointer-guard-smoke');
+INSERT INTO agents_meta (id, status) VALUES (992001, 'terminated');
+-- Same-transaction settle passes: the documented legitimate shape.
+INSERT INTO inbound_messages (id, agent_id, content, kind, source, status, applied_at, claimed_at, target_generation, target_owner)
+    VALUES (9920011, 992001, '', 'terminate', 'user', 'claimed', clock_timestamp(), clock_timestamp(), gen_random_uuid(), gen_random_uuid());
+UPDATE agents_meta SET lifecycle_command_id = 9920011 WHERE id = 992001;
+BEGIN;
+UPDATE inbound_messages SET status = 'done' WHERE id = 9920011;
+UPDATE agents_meta SET lifecycle_command_id = NULL WHERE id = 992001;
+COMMIT;
+SQL
+# A torn commit (done with the pointer left alive) must be REJECTED at COMMIT.
+if psql -d "$TEST_DB" -v ON_ERROR_STOP=1 <<'SQL'
+INSERT INTO inbound_messages (id, agent_id, content, kind, source, status, applied_at, claimed_at, target_generation, target_owner)
+    VALUES (9920012, 992001, '', 'terminate', 'user', 'claimed', clock_timestamp(), clock_timestamp(), gen_random_uuid(), gen_random_uuid());
+UPDATE agents_meta SET lifecycle_command_id = 9920012 WHERE id = 992001;
+BEGIN;
+UPDATE inbound_messages SET status = 'done' WHERE id = 9920012;
+COMMIT;
+SQL
+then
+    echo "lifecycle pointer->done guard did NOT fire on a torn commit"
+    exit 1
+fi
+
 echo "-> born_spawner migration smoke: backfill and append-only trigger"
 psql -d "$ADMIN_DB" -v ON_ERROR_STOP=1 -c "CREATE DATABASE $BORN_SPAWNER_DB"
 psql -d "$BORN_SPAWNER_DB" -v ON_ERROR_STOP=1 <<'SQL'

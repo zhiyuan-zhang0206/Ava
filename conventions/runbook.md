@@ -1645,6 +1645,14 @@ chunk. The full role table (payload fields, publisher, when each fires) is in
 `shared/live_events.ava.okf.md`; interrupt semantics for cancel / terminate are in
 `agent/graph/graph.ava.okf.md`.
 
+**Lifecycle command residue:** never hand-clean a stuck lifecycle command (a row
+left pending/claimed, or a live `agents_meta.lifecycle_command_id` pointing at a
+finished command) with an ad-hoc UPDATE. Settle it through the owning path — boot
+recovery, the settle ops, or the repair script — and clear the pointer in the same
+transaction: a manual flip to `done` is exactly the torn shape the commit-time
+guard rejects (task #3678), and a manual pointer clear without a settle only makes
+the failure invisible.
+
 
 
 ## Observability / Tracing
