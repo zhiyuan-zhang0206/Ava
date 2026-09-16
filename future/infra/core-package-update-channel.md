@@ -64,7 +64,7 @@ Source of requirements: the user's 2026-09-11 request (task #2915).
 
 ## 3. Constraints the design must respect (hard facts)
 
-1. **Skills are hot; plugins are process-bound.** Skill content takes effect on the next scan/read. Plugin code (agent-side) takes effect at agent-process start (`_load_extensions()` at graph build); provider plugins (`provider.py`) load once per process, lazily, in *every* process that builds or validates a chat model — agent, gateway, labeler, eval harness. There is no in-process reload surface today.
+1. **Skills are hot; plugins are process-bound.** Skill content takes effect on the next scan/read. Plugin code (agent-side) takes effect at agent-process start (`load_extensions()` at graph build, `agent/_extensions.py`); provider plugins (`provider.py`) load once per process, lazily, in *every* process that builds or validates a chat model — agent, gateway, labeler, eval harness. There is no in-process reload surface today.
 2. **The prod checkout has an invariant: tree == installed commit.** Converge (and `ava start`) periodically `git reset --hard <installed>` + `git clean -fd` (`shared/source_tree_guard.py`), skipping while an update is in flight. Derived/runtime content must therefore live OUTSIDE the checkout — in `$AVA_HOME` data dirs — or it will be reset away (or force a permanent exception into a core invariant).
 3. **Rollouts own the code channel.** `ava cluster update` (CLI/operator only; agents cannot trigger it — ruling 2026-08-05) is the only path that moves code, schema, and services. Content refresh must be a *distinct, non-service-touching* pass — never a rollout, never a service restart.
 4. **Installs are per-machine today; ownership is moving cluster-side** (`decisions/2026-08-21`, issue #39, S2 landed for skills). The design must work per-machine now and migrate cleanly to cluster rows later (policy as data, not as machine-local law).
@@ -399,7 +399,7 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
 - Explicit update verbs + conflicts: `cli/commands/skill.py` (`cmd_skill_update` L423+, `cmd_skill_upgrade` L510+), `cli/commands/plugins.py` (`cmd_plugins_upgrade` L390+), `cli/commands/mcp.py`.
 - Rollout skill refresh legs: `cli/commands/_update_local.py:85` (`_refresh_builtin_skills`), `cli/commands/_update_agent_runner.py:250`.
 - Registry model: `shared/install_registry.py` (`InstalledPackage`, `Registry.version`, `tree_hash`, `copy_changed`).
-- Plugin discovery + loaders: `shared/plugins_config.py:_discover_plugins`, `agent/graph/_build.py:_load_extensions`, `shared/lm/_plugin_providers.py`; roots: `shared/paths.py:repo_plugins_dir/plugins_dir`, `shared/runtime_interpreter.py:external_plugin_read_root`.
+- Plugin discovery + loaders: `shared/plugins_config.py:_discover_plugins`, `agent/_extensions.py:load_extensions`, `shared/lm/_plugin_providers.py`; roots: `shared/paths.py:repo_plugins_dir/plugins_dir`, `shared/runtime_interpreter.py:external_plugin_read_root`.
 - Manifest/engines gate: `shared/plugin_manifest.py` (`host_version_from_repo`, `check_host_engine`), `conventions/plugin-spec-v2.md`.
 - OS jobs: `shared/os_cron.py` (5-min health tick as the registrar template), `cli/commands/_converge_os_jobs.py`, `AVA_OS_JOBS_ENABLED`.
 - Update coordination: `shared/cluster_lock.py`, `cli/commands/status.py:_update_in_flight` L58, `shared/source_tree_guard.py` (reset --hard + clean -fd; skip while update in flight); objects-only fetch precedent: `shared/cluster_drift.py:prod_source_fetch`.

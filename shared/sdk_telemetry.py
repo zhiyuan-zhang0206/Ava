@@ -13,10 +13,16 @@ import time
 from collections.abc import Awaitable, Callable, Generator, Mapping, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from langchain_core.messages import BaseMessage, ToolMessage
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    # Annotation-only (`sdk_calls_by_tool_call_id`); the runtime isinstance
+    # imports ToolMessage at its call site. This module loads on the exec-child
+    # boot path (`_run_code`), which must stay off the LangChain message stack
+    # (task #3633; `_TYPE_CHECKING_ALLOWED`).
+    from langchain_core.messages import BaseMessage
 
 from shared.message_kwargs import AvaMsgType, read_ava_kwargs
 
@@ -157,6 +163,8 @@ def sdk_calls_by_tool_call_id(
     history) stays absent from the map; a block that ran with zero SDK calls maps to
     ``[]`` — a real zero the UI must not confuse with "not yet known".
     """
+    from langchain_core.messages import ToolMessage
+
     out: dict[str, list[SdkCall]] = {}
     for msg in messages[start:]:
         if not isinstance(msg, ToolMessage):

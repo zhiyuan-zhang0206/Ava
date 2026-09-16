@@ -361,9 +361,13 @@ def _run(request_path: str, result_path: str) -> None:  # noqa: PLR0915 — one 
     # including interactive `ava.help(ava.self)` (user ruling 2026-08-28).
     # Set for the child's whole lifetime; the token is deliberately held.
     _hidden_surface_members.set(media_gated_members())
-    # Load plugin namespaces (ava.tasks etc.) + wraps + state fields into this
-    # process — the same explicit load a watcher child runs. Idempotent.
-    ava._ensure_plugins_loaded()
+    # Load plugin namespaces (ava.tasks etc.) + wraps into this process — the
+    # same explicit load a watcher child runs. Idempotent. A request carrying a
+    # state snapshot upgrades to the full load (the agent-runtime faces: state
+    # fields are part of the state schema `_build_state_slot` rebuilds);
+    # stateless requests stay on the surface — the child boot must not import
+    # the agent runtime (task #3633).
+    ava._ensure_plugins_loaded(surface=request.state is None)
     _apply_overlay_scope(birth, overlay, scope="plugin")
     from agent._process_boot import _apply_per_agent_eval_isolation
 

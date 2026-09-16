@@ -18,7 +18,12 @@ prepended to `sys.path`) and reports the heavy modules the touch left in
   pull `shared.lm.factory` / `shared.lm.provider_api`;
 - the provider-registration surface (`shared.lm.provider_api` plus the `lm_*`
   provider plugins loaded by `ensure_provider_plugins_loaded`) must stay off
-  the LM chat-model stack (task #3633).
+  the LM chat-model stack (task #3633);
+- the child's plugin autoload surface form (`ava._ensure_plugins_loaded(surface=True)`)
+  must load the plugin surfaces only — no agent-runtime faces, no `agent.state`
+  / `agent.hooks` / `agent.graph.*`, no graph/LM stack — and a later full call
+  must upgrade by loading faces only, never re-executing a surface (task #3633,
+  leg-1 B6).
 
 The lazy re-export stays a working API: `from agent.graph import build_graph`
 and friends resolve through `__getattr__` (the functional probe).
@@ -223,3 +228,89 @@ def test_factory_reexports_the_registry_resolution() -> None:
 
     assert factory.media_types_for_model is registry.media_types_for_model
     assert factory.attach_modalities_for_model is registry.attach_modalities_for_model
+
+
+# ── leg-1 (B6): the child's plugin autoload ────────────────────────────────
+
+_PLUGIN_SURFACE_LOAD = """
+import ava
+
+ava._ensure_plugins_loaded(surface=True)
+
+_PLUGIN_ROOTS = ("ava_builtins.plugins.", "plugins.")
+
+
+def _plugin_modules(suffix):
+    return sorted(
+        name
+        for name in sys.modules
+        if name.endswith(suffix) and name.startswith(_PLUGIN_ROOTS)
+    )
+
+
+agent_side = sorted(
+    name
+    for name in sys.modules
+    if name == "agent.state" or name.startswith(("agent.graph", "agent.hooks"))
+)
+heavy = sorted(
+    name for name in sys.modules if name.startswith(("langchain", "langgraph", "langsmith"))
+)
+print(
+    json.dumps(
+        {
+            "agent_side": agent_side,
+            "heavy": heavy,
+            "faces": _plugin_modules(".agent_runtime"),
+            "surfaces": _plugin_modules(".plugin"),
+        }
+    )
+)
+"""
+
+
+def test_child_surface_load_stays_off_the_agent_runtime() -> None:
+    report = _run_clean_probe(_PLUGIN_SURFACE_LOAD)
+    assert "ava_builtins.plugins.ava_memory.plugin" in report["surfaces"], (
+        f"the surface load did not run — the probe is vacuous: {report['surfaces']}"
+    )
+    assert report["faces"] == [], f"the surface load pulled agent-runtime faces: {report['faces']}"
+    assert report["agent_side"] == [], (
+        f"the surface load pulled the agent runtime: {report['agent_side']}"
+    )
+    assert report["heavy"] == [], f"the surface load pulled the graph/LM stack: {report['heavy']}"
+
+
+_PLUGIN_SURFACE_UPGRADE = """
+import sys
+
+import ava
+
+ava._ensure_plugins_loaded(surface=True)
+surface = sys.modules["ava_builtins.plugins.ava_memory.plugin"]
+
+ava._ensure_plugins_loaded(surface=False)  # the stateful-request upgrade
+faces = sorted(
+    name
+    for name in sys.modules
+    if name.endswith(".agent_runtime")
+    and name.startswith(("ava_builtins.plugins.", "plugins."))
+)
+print(
+    json.dumps(
+        {
+            "same_surface_identity": sys.modules["ava_builtins.plugins.ava_memory.plugin"]
+            is surface,
+            "faces": faces,
+        }
+    )
+)
+"""
+
+
+def test_child_surface_upgrade_loads_faces_without_reexecuting_surfaces() -> None:
+    report = _run_clean_probe(_PLUGIN_SURFACE_UPGRADE)
+    assert report["same_surface_identity"] is True, "the upgrade re-executed the surface module"
+    assert "ava_builtins.plugins.ava_memory.agent_runtime" in report["faces"], (
+        f"the upgrade loaded no faces — the probe is vacuous: {report['faces']}"
+    )

@@ -179,6 +179,13 @@ def load_process_extensions() -> None:
     config = plugins_config.load_for_runtime(known)
     enabled = {name for name, entry in config.plugins.items() if entry.enabled}
     ava._extend.scan_and_load(enabled=enabled)
+    # Each loaded surface's agent-runtime face (state fields / hooks / prompt
+    # sections). Faces of plugins whose surface loads later (the built-in set,
+    # via build_graph's full `load_extensions`) are picked up there — the face
+    # always follows its surface (task #3633).
+    from agent._extensions import load_agent_faces
+
+    load_agent_faces()
 
 
 # Return type is Any on purpose: the chat-model class must stay out of module

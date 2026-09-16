@@ -44,7 +44,7 @@ from ava_builtins.plugins.ava_syntax_fix._punct import (
     _PUNCT_MAP,
     _translate_outside_strings,
 )
-from ava_builtins.plugins.ava_syntax_fix.plugin import (
+from ava_builtins.plugins.ava_syntax_fix.agent_runtime import (
     _detect_missing_imports,
     _extract_text,
     _fix_chinese_punctuation,
@@ -926,7 +926,7 @@ class TestSyntaxFixBeforeExec:
             ]
         )
         with patch(
-            "ava_builtins.plugins.ava_syntax_fix.plugin._llm_repair_syntax",
+            "ava_builtins.plugins.ava_syntax_fix.agent_runtime._llm_repair_syntax",
             new=AsyncMock(return_value=None),
         ):
             result = await syntax_fix_before_exec(state, self._runtime(), self._config())
@@ -954,7 +954,7 @@ class TestSyntaxFixBeforeExec:
         broken = "x = 'unterminated\nprint(x)"
         repaired = "x = 'fixed'\nprint(x)"
         with patch(
-            "ava_builtins.plugins.ava_syntax_fix.plugin._llm_repair_syntax",
+            "ava_builtins.plugins.ava_syntax_fix.agent_runtime._llm_repair_syntax",
             new=AsyncMock(return_value=repaired),
         ):
             result = await syntax_fix_before_exec(
@@ -969,7 +969,7 @@ class TestSyntaxFixBeforeExec:
         """LLM repair unavailable / retries exhausted (returns None) → fall back to ToolMessage fallback path."""
         broken = "if True print('x')"
         with patch(
-            "ava_builtins.plugins.ava_syntax_fix.plugin._llm_repair_syntax",
+            "ava_builtins.plugins.ava_syntax_fix.agent_runtime._llm_repair_syntax",
             new=AsyncMock(return_value=None),
         ):
             result = await syntax_fix_before_exec(
@@ -1076,7 +1076,7 @@ class TestLlmRepairSyntax:
         fake = MagicMock()
         fake.ainvoke = AsyncMock(return_value=MagicMock(content="x = 1"))
         with patch("shared.lm.factory.build_chat_model", return_value=fake):
-            from ava_builtins.plugins.ava_syntax_fix.plugin import _llm_repair_syntax
+            from ava_builtins.plugins.ava_syntax_fix.agent_runtime import _llm_repair_syntax
 
             out = await _llm_repair_syntax("x = 'broken", "SyntaxError: ...")
         assert out == "x = 1"
@@ -1085,7 +1085,7 @@ class TestLlmRepairSyntax:
         from unittest.mock import patch
 
         with patch("shared.lm.factory.build_chat_model", side_effect=RuntimeError("no key")):
-            from ava_builtins.plugins.ava_syntax_fix.plugin import _llm_repair_syntax
+            from ava_builtins.plugins.ava_syntax_fix.agent_runtime import _llm_repair_syntax
 
             out = await _llm_repair_syntax("x = 'broken", "SyntaxError: ...")
         assert out is None
@@ -1096,7 +1096,7 @@ class TestLlmRepairSyntax:
         fake = MagicMock()
         fake.ainvoke = AsyncMock(return_value=MagicMock(content="   "))
         with patch("shared.lm.factory.build_chat_model", return_value=fake):
-            from ava_builtins.plugins.ava_syntax_fix.plugin import _llm_repair_syntax
+            from ava_builtins.plugins.ava_syntax_fix.agent_runtime import _llm_repair_syntax
 
             out = await _llm_repair_syntax("x = 'broken", "SyntaxError: ...")
         assert out is None
@@ -1562,7 +1562,7 @@ class TestSyntaxFixEvents:
         """A deterministic (rough) fix records fix_type=rough with the original
         source as `before` and no `after` — the after state is replayable via
         _apply_fix_pipeline(before)."""
-        from ava_builtins.plugins.ava_syntax_fix import plugin as _plugin
+        from ava_builtins.plugins.ava_syntax_fix import agent_runtime as _plugin
 
         events: list[dict] = []
         monkeypatch.setattr(_plugin, "_emit_syntax_fix_event", lambda **kw: events.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -1596,7 +1596,7 @@ class TestSyntaxFixEvents:
         """The real emit path: a loguru record with event='syntax_fix' whose
         extra carries fix_type / before / fixes — the shape agent_events.payload
         stores."""
-        from ava_builtins.plugins.ava_syntax_fix import plugin as _plugin
+        from ava_builtins.plugins.ava_syntax_fix import agent_runtime as _plugin
 
         captured: dict = {}
         monkeypatch.setattr(_plugin.logger, "info", lambda _msg, **kw: captured.update(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -1616,14 +1616,14 @@ class TestSyntaxFixEvents:
     async def test_lm_fix_emits_before_and_after(self, monkeypatch: pytest.MonkeyPatch):
         """An LLM repair records fix_type=lm with both before (the
         deterministic-fixed source the LLM saw) and after (the repair)."""
-        from ava_builtins.plugins.ava_syntax_fix import plugin as _plugin
+        from ava_builtins.plugins.ava_syntax_fix import agent_runtime as _plugin
 
         events: list[dict] = []
         monkeypatch.setattr(_plugin, "_emit_syntax_fix_event", lambda **kw: events.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         broken = "x = 'unterminated\nprint(x)"
         repaired = "x = 'fixed'\nprint(x)"
         with patch(
-            "ava_builtins.plugins.ava_syntax_fix.plugin._llm_repair_syntax",
+            "ava_builtins.plugins.ava_syntax_fix.agent_runtime._llm_repair_syntax",
             new=AsyncMock(return_value=repaired),
         ):
             result = await syntax_fix_before_exec(
@@ -1652,7 +1652,7 @@ class TestSyntaxFixEvents:
     async def test_no_event_when_nothing_changed(self, monkeypatch: pytest.MonkeyPatch):
         """Clean code that compiles as-is emits no syntax_fix event — the event
         stream records mutations only."""
-        from ava_builtins.plugins.ava_syntax_fix import plugin as _plugin
+        from ava_builtins.plugins.ava_syntax_fix import agent_runtime as _plugin
 
         events: list[dict] = []
         monkeypatch.setattr(_plugin, "_emit_syntax_fix_event", lambda **kw: events.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]

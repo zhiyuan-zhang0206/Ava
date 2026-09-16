@@ -156,6 +156,10 @@ _TYPE_CHECKING_ALLOWED: frozenset[str] = frozenset(
         "shared/lm/stop.py",
         "shared/lm/pricing.py",
         "shared/message_kwargs.py",
+        # Exec-child boot path (`_run_code` -> sdk_telemetry): ToolMessage is
+        # runtime-only (imported at the isinstance call site), BaseMessage
+        # annotation-only (task #3633).
+        "shared/sdk_telemetry.py",
     }
 )
 

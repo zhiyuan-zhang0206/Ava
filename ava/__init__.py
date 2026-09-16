@@ -102,13 +102,18 @@ state: Any = None
 state_update: dict[str, Any] | None = None
 
 
-# Per-process latch: True once this process has loaded plugin namespaces via the
-# subprocess self-load path (`_ensure_plugins_loaded`). Framework-internal — only
-# `_ensure_plugins_loaded` writes it. The agent process does NOT go through that
-# path (it calls `agent.graph._build._load_extensions` directly from build_graph
-# and re-registers built-in hooks after), so the latch stays False there and a
-# genuinely-unknown `ava.X` keeps failing fast in `__getattr__`.
+# Per-process latches: set once this process has loaded plugin namespaces via
+# the subprocess self-load path (`_ensure_plugins_loaded`). Framework-internal —
+# only `_ensure_plugins_loaded` writes them. `_plugins_loaded` = the plugin
+# surfaces; `_plugin_faces_loaded` = the agent-runtime faces (state fields /
+# hooks / prompt sections), loaded only on the full path — a stateful child,
+# via `_ensure_plugins_loaded(surface=False)`. The agent process does NOT go
+# through this path (it calls `agent._extensions.load_extensions` directly from
+# build_graph / host boot and re-registers built-in hooks after), so both
+# latches stay False there and a genuinely-unknown `ava.X` keeps failing fast in
+# `__getattr__`.
 _plugins_loaded = False
+_plugin_faces_loaded = False
 
 # False until this module finishes importing its own submodules (set True at the
 # very bottom). The lazy plugin load in `__getattr__` MUST stay dormant during
@@ -121,15 +126,20 @@ _plugins_loaded = False
 _init_complete = False
 
 
-def _ensure_plugins_loaded() -> None:
+def _ensure_plugins_loaded(*, surface: bool = True) -> None:
     """Idempotently load plugin namespaces (`ava.tasks` etc.) into *this* process.
 
     The entry point for a process an agent launched: a watcher / schedule
     bootstrap calls it explicitly before running agent code, and a persistent-shell
     child reaches it lazily from `__getattr__` on the first unknown `ava.X`.
-    Latched so it runs at most once per process — a call that arrives while the
-    loader module is still initializing (a re-entrant import) defers instead,
-    so a later miss retries once the module is complete.
+    `surface=True` (the default) loads the plugin *surfaces* only — the child
+    contract (task #3633). `surface=False` loads the full agent-runtime faces
+    too (state fields / hooks / prompt sections), for a child whose request
+    carries a state snapshot: the state schema needs the plugins' field
+    registrations. Latched per stage so each runs at most once per process — a
+    call that arrives while the loader module is still initializing (a
+    re-entrant import) defers instead, so a later miss retries once the module
+    is complete.
 
     The loader lives in the agent layer; it is reached via `importlib` (a runtime
     string, not a static `from agent import`) so this ava-layer module keeps NO
@@ -137,7 +147,7 @@ def _ensure_plugins_loaded() -> None:
     launched subprocess still self-loads its plugins.
 
     Containment: the loader's own plugin-import loop is fail-soft (see
-    `agent/graph/_build.py`); anything still escaping it is an inventory/config
+    `agent/_extensions.py`); anything still escaping it is an inventory/config
     failure — a duplicate plugin name, a malformed `plugins_config.json`, a
     plugin-config schema drift. None of those may kill an agent-launched
     process at `import ava` the way the 2026-08-28 ava_ledger crash did (every
@@ -145,20 +155,34 @@ def _ensure_plugins_loaded() -> None:
     without the plugin surface. The agent host surfaces the same failure at its
     own boot. KeyboardInterrupt / SystemExit are not swallowed.
     """
-    global _plugins_loaded  # noqa: PLW0603 — one-shot per-process latch
+    global _plugins_loaded, _plugin_faces_loaded  # noqa: PLW0603 — one-shot latches
+    if _plugin_faces_loaded:
+        return
+    if _plugins_loaded and surface:
+        return
+    import importlib
+
     if _plugins_loaded:
+        # Surfaces are already loaded and this call wants the faces (a child
+        # upgrading for a state snapshot). Faces only — re-running the loader
+        # would re-execute the surfaces; the latch keeps it to once per process.
+        _plugin_faces_loaded = True
+        try:
+            importlib.import_module("agent._extensions").load_agent_faces()
+        except Exception as exc:
+            _contain_plugin_load_failure(exc)
         return
     # Latch BEFORE loading: a plugin's top-level access of a not-yet-registered
     # `ava.X` re-enters `__getattr__` during the load, and the latch makes that
     # re-entry fail fast (as it does in the agent process) instead of recursing.
     _plugins_loaded = True
-    import importlib
-
     try:
-        importlib.import_module("agent.graph._build")._load_extensions()
+        importlib.import_module("agent._extensions").load_extensions(surface=surface)
+        if not surface:
+            _plugin_faces_loaded = True
     except Exception as exc:
         if isinstance(exc, AttributeError) and (
-            "partially initialized module 'agent.graph._build'" in str(exc)
+            "partially initialized module 'agent._extensions'" in str(exc)
         ):
             # Not a failure — too early. A process that imports an `agent.*`
             # module before `ava` reaches this call while the loader module is
@@ -168,24 +192,30 @@ def _ensure_plugins_loaded() -> None:
             # (`_maybe_load_plugins_for_missing` reads the latch).
             _plugins_loaded = False
             return
-        from shared.log import logger
+        _contain_plugin_load_failure(exc)
 
-        logger.error(
-            "[plugins] plugin load failed in this launched child — continuing "
-            "without plugin namespaces (the agent host reports the same "
-            "failure at its own boot)",
-            exc_info=exc,
-        )
-        # stderr besides the logger: a launched child usually has no loguru
-        # sink configured (shared/log.py removes the default handler), and its
-        # stderr is exactly what lands in the watcher / session log — the same
-        # channel the watcher boot's orphan-guard line uses. Containment
-        # without this line would be a silent swallow.
-        _sys.stderr.write(
-            f"[plugins] plugin load failed in this launched child "
-            f"({type(exc).__name__}: {exc}) — continuing without plugin "
-            f"namespaces\n"
-        )
+
+def _contain_plugin_load_failure(exc: Exception) -> None:
+    """Log + surface a plugin-load failure without killing the process.
+
+    Logger AND stderr: a launched child usually has no loguru sink configured
+    (shared/log.py removes the default handler), and its stderr is exactly what
+    lands in the watcher / session log — containment without that line would be
+    a silent swallow.
+    """
+    from shared.log import logger
+
+    logger.error(
+        "[plugins] plugin load failed in this launched child — continuing "
+        "without plugin namespaces (the agent host reports the same "
+        "failure at its own boot)",
+        exc_info=exc,
+    )
+    _sys.stderr.write(
+        f"[plugins] plugin load failed in this launched child "
+        f"({type(exc).__name__}: {exc}) — continuing without plugin "
+        f"namespaces\n"
+    )
 
 
 def _maybe_load_plugins_for_missing(name: str) -> bool:

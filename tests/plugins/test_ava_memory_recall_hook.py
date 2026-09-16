@@ -1,4 +1,4 @@
-"""The passive-recall hook's trigger gate (`plugins/ava_memory/plugin.py`).
+"""The passive-recall hook's trigger gate (`plugins/ava_memory/agent_runtime.py`).
 
 The hook fires on any inbound that is not a machine-originated wake-up: user
 chat, a peer agent's message (`agent:`), a scheduled turn (`schedule:`), and
@@ -39,7 +39,8 @@ def _loaded() -> Any:
             del sys.modules[name]
 
     with PluginContext("ava_memory"):
-        from ava_builtins.plugins.ava_memory import plugin as _plugin
+        # the recall hook lives in the agent_runtime face (the full load imports it after plugin.py — task #3633).
+        from ava_builtins.plugins.ava_memory import agent_runtime as _plugin
 
     bind_from_disk()
     yield _plugin

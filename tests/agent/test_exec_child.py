@@ -489,6 +489,10 @@ def test_child_installs_signal_handlers_before_reading_request(
     def fake_write_result(_path: Path, _payload: ResultPayload) -> None:
         return None
 
+    def fake_ensure_plugins_loaded(*, surface: bool = True) -> None:
+        # Stateless request (fake_read_request: state=None) -> the surface load.
+        assert surface is True
+
     monkeypatch.setattr(exec_child, "_line_buffered_output", lambda: None)
     monkeypatch.setattr(_exec_protocol, "read_request", fake_read_request)
     monkeypatch.setattr(exec_child, "_pop_overlay_env", lambda: (None, None))
@@ -496,7 +500,7 @@ def test_child_installs_signal_handlers_before_reading_request(
     monkeypatch.setattr(exec_child, "_build_state_slot", fake_build_state_slot)
     monkeypatch.setattr(exec_child, "_run_code", fake_run_code)
     monkeypatch.setattr(_exec_protocol, "write_result", fake_write_result)
-    monkeypatch.setattr("ava._ensure_plugins_loaded", lambda: None)
+    monkeypatch.setattr("ava._ensure_plugins_loaded", fake_ensure_plugins_loaded)
     monkeypatch.setattr("ava.security.take_findings", list)
     monkeypatch.setattr("ava._attach.take_attachments", list)
 
@@ -599,7 +603,9 @@ def test_child_overlay_phases_framework_then_plugin(
     def fake_take_findings() -> list[object]:
         return []
 
-    def fake_plugins_loaded() -> None:
+    def fake_plugins_loaded(*, surface: bool = True) -> None:
+        # Stateless request (fake_read_request: state=None) -> the surface load.
+        assert surface is True
         events.append("plugins")
 
     monkeypatch.setattr(_exec_protocol, "read_request", fake_read_request)

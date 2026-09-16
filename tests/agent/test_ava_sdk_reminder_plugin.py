@@ -100,7 +100,8 @@ def _loaded() -> Iterator[Any]:
     register_compact_hooks()
 
     with PluginContext("ava_sdk_reminder"):
-        from ava_builtins.plugins.ava_sdk_reminder import plugin as _plugin
+        # The state field + hooks live in the agent-runtime face (task #3633).
+        from ava_builtins.plugins.ava_sdk_reminder import agent_runtime as _plugin
 
     bind_from_disk()
 
