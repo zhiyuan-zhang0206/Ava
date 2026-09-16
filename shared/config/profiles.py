@@ -72,6 +72,9 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             "data_plane",
             "general",
             "observability",
+            # Display window defaults (task #3696): the agent-published timeline
+            # snapshot reads display.timeline_default_limit via shared/timeline.
+            "display",
             "gateway",
             "services",
             "daemon",

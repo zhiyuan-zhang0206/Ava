@@ -1766,7 +1766,7 @@
     "/api/agents/{agent_id}/timeline": {
       "get": {
         "summary": "Get Timeline",
-        "description": "Timeline = raw view of LangGraph state.messages, one window at a time.\n\nDefault (no `before`) returns the newest `limit` items. Pass\n`before=<oldest item_id you hold>` to fetch the previous window for\nscroll-up history loading. `has_more` reports whether older items exist\nbefore the returned window.\n\nOne checkpoint segment is built at a time; windowing trims the payload +\nthe frontend render. A checkpoint read failure renders an empty view + 200\n(cold-load tolerance, see `shared.checkpoint`).",
+        "description": "Timeline = raw view of LangGraph state.messages, one window at a time.\n\nDefault (no `before`) returns the newest `limit` items; an omitted\n`limit` resolves to the configured `display.timeline_default_limit`\n(50 by default). Pass\n`before=<oldest item_id you hold>` to fetch the previous window for\nscroll-up history loading. `has_more` reports whether older items exist\nbefore the returned window.\n\nOne checkpoint segment is built at a time; windowing trims the payload +\nthe frontend render. A checkpoint read failure renders an empty view + 200\n(cold-load tolerance, see `shared.checkpoint`).",
         "operationId": "get_timeline_api_agents__agent_id__timeline_get",
         "parameters": [
           {
@@ -1783,10 +1783,16 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer",
-              "maximum": 1000,
-              "minimum": 1,
-              "default": 50,
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 1000,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Limit"
             }
           },

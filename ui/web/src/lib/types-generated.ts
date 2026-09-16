@@ -1149,7 +1149,9 @@ export interface paths {
          * Get Timeline
          * @description Timeline = raw view of LangGraph state.messages, one window at a time.
          *
-         *     Default (no `before`) returns the newest `limit` items. Pass
+         *     Default (no `before`) returns the newest `limit` items; an omitted
+         *     `limit` resolves to the configured `display.timeline_default_limit`
+         *     (50 by default). Pass
          *     `before=<oldest item_id you hold>` to fetch the previous window for
          *     scroll-up history loading. `has_more` reports whether older items exist
          *     before the returned window.
@@ -9341,7 +9343,7 @@ export interface operations {
     get_timeline_api_agents__agent_id__timeline_get: {
         parameters: {
             query?: {
-                limit?: number;
+                limit?: number | null;
                 before?: string | null;
             };
             header?: never;

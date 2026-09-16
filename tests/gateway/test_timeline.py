@@ -1720,7 +1720,7 @@ class TestSystemPromptInColdLoad:
         resp = test_client.get(f"/api/agents/{tid}/timeline")
         assert resp.status_code == 200
         data = resp.json()
-        # 60 humans + 1 system prompt = 61 items; tail window = 50 + re-attached 0.0
+        # 60 humans + 1 system prompt = 61 items; tail window = default 50 + re-attached 0.0
         assert data["has_more"] is True
         assert data["items"][0]["item_id"] == "0.0"
         assert data["items"][0]["kind"] == "system_prompt"
@@ -1748,6 +1748,31 @@ class TestSystemPromptInColdLoad:
         assert ids[0] == "0.0"
         assert ids.count("0.0") == 1
         assert data["has_more"] is False
+
+    def test_default_window_comes_from_display_config(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        db_conn: psycopg.Connection,
+        test_client: TestClient,
+    ) -> None:
+        """The implicit window is ``settings.display.timeline_default_limit``
+        (``AVA_TIMELINE_DEFAULT_LIMIT``); 50 is only that field's default."""
+        from langchain_core.messages import HumanMessage
+
+        from shared.config import settings
+
+        monkeypatch.setattr(settings.display, "timeline_default_limit", 5)
+
+        tid = create_agent(db_conn)
+        self._put_checkpoint(  # pyright: ignore[reportUnknownMemberType]
+            tid, [HumanMessage(content=f"m{i}") for i in range(8)]
+        )
+
+        resp = test_client.get(f"/api/agents/{tid}/timeline")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["has_more"] is True
+        assert [it["item_id"] for it in data["items"]] == ["3.0", "4.0", "5.0", "6.0", "7.0"]
 
     def test_long_conversation_rehangs_compact_summary(
         self, db_conn: psycopg.Connection, test_client: TestClient

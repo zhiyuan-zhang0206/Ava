@@ -38,3 +38,20 @@ class DisplaySettings(EnvSettings):
             "scope": "cluster-pinned",
         },
     )
+    timeline_default_limit: int = Field(
+        default=50,
+        alias="AVA_TIMELINE_DEFAULT_LIMIT",
+        description=(
+            "Default timeline tail-window (items) for GET /api/agents/{id}/timeline, the "
+            "agent-published timeline snapshot trim, and the CLI timeline command. The unit "
+            "is timeline items (one turn fans out into reasoning/code/output items), so 50 "
+            "is several screenfuls; both producers share it so a streaming turn always lands "
+            "inside the window the frontend already holds."
+        ),
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )

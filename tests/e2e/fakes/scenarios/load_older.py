@@ -1,5 +1,5 @@
 """Long-history scenario — enough turns to exceed the timeline tail window
-(DEFAULT_TIMELINE_LIMIT=50), so scroll-up history loading has a previous page
+(display.timeline_default_limit, default 50), so scroll-up history loading has a previous page
 to fetch (has_more=true).
 
 35 turns, each thinking + narration + a trivial execute_code tool call → the

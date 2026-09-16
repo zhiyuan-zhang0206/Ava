@@ -31,10 +31,10 @@ from shared.config import settings
 from shared.db import agent_exists, list_inbound_messages
 from shared.impersonation_timeline import hydrate
 from shared.timeline import (
-    DEFAULT_TIMELINE_LIMIT,
     TimelineItem,
     build_timeline_items,
     tail_window,
+    timeline_default_limit,
 )
 
 router = APIRouter()
@@ -251,10 +251,12 @@ def _load_history_segment(
     checkpoint_id: str,
     rank: int,
     *,
-    limit: int = DEFAULT_TIMELINE_LIMIT,
+    limit: int | None = None,
     before: str | None = None,
 ) -> list[TimelineItem] | None:
     """Load and render one persisted segment; damaged data is terminal."""
+    if limit is None:
+        limit = timeline_default_limit()
     try:
         messages = load_checkpoint_messages_segment(agent_id, checkpoint_id)
     except CheckpointReadError as exc:
@@ -418,12 +420,14 @@ def _initial_window(
 def get_timeline(
     agent_id: int,
     request: Request,
-    limit: int = Query(default=DEFAULT_TIMELINE_LIMIT, ge=1, le=1000),
+    limit: int | None = Query(default=None, ge=1, le=1000),
     before: str | None = Query(default=None),
 ) -> TimelineResponse:
     """Timeline = raw view of LangGraph state.messages, one window at a time.
 
-    Default (no `before`) returns the newest `limit` items. Pass
+    Default (no `before`) returns the newest `limit` items; an omitted
+    `limit` resolves to the configured `display.timeline_default_limit`
+    (50 by default). Pass
     `before=<oldest item_id you hold>` to fetch the previous window for
     scroll-up history loading. `has_more` reports whether older items exist
     before the returned window.
@@ -432,6 +436,8 @@ def get_timeline(
     the frontend render. A checkpoint read failure renders an empty view + 200
     (cold-load tolerance, see `shared.checkpoint`).
     """
+    if limit is None:
+        limit = timeline_default_limit()
     cursor = _parse_cursor(before) if before is not None else None
     historical_request = cursor is not None and cursor.checkpoint_id is not None
     with request.app.state.db_pool.connection() as conn:
