@@ -40,6 +40,15 @@ def _stub(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # any host. The off-macOS refusal test overrides it back to False.
     monkeypatch.setattr(os_autostart, "IS_MACOS", True)
 
+    # CI runners ARE systemd hosts, so the real probe would consult their
+    # systemctl through the crontab fakes; pin "no enabled boot unit" here so
+    # the crontab-path tests describe the cron branch on any host. The
+    # boot-unit-branch tests override this with True/False.
+    def no_boot_unit(_home: Path | None = None) -> bool:
+        return False
+
+    monkeypatch.setattr("shared.os_boot_unit.boot_unit_owns_boot_path", no_boot_unit)
+
 
 def test_plist_runs_ava_start_at_load() -> None:
     xml = os_autostart._autostart_plist_content()
