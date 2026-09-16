@@ -7,12 +7,14 @@ The same discipline as ``services.memory_indexer.backends.factory``:
 fails fast — a typo must never silently fall back to the previous
 backend while the operator believes the switch happened.
 
-A backend is a ``PitrStoreGroup``: seven role factories (uploader /
+A backend is a ``PitrStoreGroup``: eight role factories (uploader /
 restartable-streaming writer / viewer stat / generation-pinned reader /
-retention inventory / protected-manifest publisher / retention deletion)
-bound to one backend's credentials. The role contracts stay separate (an
-adapter may serve several roles internally, but no caller gets a
-merged surface). Daemons take the settings-bound group; the restricted
+retention inventory / logical retention inventory / protected-manifest
+publisher / retention deletion) bound to one backend's credentials. The
+two retention-inventory roles share one adapter class per backend, bound
+to the PITR prefix and to the logical dump root respectively. The role
+contracts stay separate (an adapter may serve several roles internally,
+but no caller gets a merged surface). Daemons take the settings-bound group; the restricted
 restore worker builds the group explicitly from its input protocol,
 which keeps its exec boundary free of ``shared.config``.
 """
@@ -25,22 +27,24 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from services.pitr.base_object_store import RestartableStreamingObjectStore
+from services.pitr.logical_dump_names import REMOTE_ROOT
 from services.pitr.object_store import ObjectStore
 from services.pitr.restore_object_store import GenerationPinnedObjectReader
 from services.pitr.restore_proof import ProtectedManifestPublisher
 from services.pitr.retention_delete import RetentionDeleteStore
-from services.pitr.retention_inventory import RetentionInventoryReader
+from services.pitr.retention_inventory import LOGICAL_NAMESPACE, RetentionInventoryReader
 
 
 @dataclass(frozen=True)
 class PitrStoreGroup:
-    """Five role factories bound to one backend and its credentials."""
+    """Role factories bound to one backend and its credentials."""
 
     object_store: Callable[[], ObjectStore]
     restartable_streaming_object_store: Callable[[], RestartableStreamingObjectStore]
     viewer_object_store: Callable[[], ObjectStore]
     generation_pinned_object_reader: Callable[[], GenerationPinnedObjectReader]
     retention_inventory_reader: Callable[[], RetentionInventoryReader]
+    logical_retention_inventory_reader: Callable[[], RetentionInventoryReader]
     protected_manifest_publisher: Callable[[], ProtectedManifestPublisher]
     retention_delete_store: Callable[[], RetentionDeleteStore]
 
@@ -125,6 +129,17 @@ def gcs_pitr_store_group(
             credentials_file=require_viewer(),
         )
 
+    def logical_retention_inventory_reader() -> RetentionInventoryReader:
+        from services.pitr.retention_inventory import GCSRetentionInventoryReader
+
+        return GCSRetentionInventoryReader(
+            project=project,
+            bucket=bucket,
+            prefix=REMOTE_ROOT,
+            credentials_file=require_viewer(),
+            namespace=LOGICAL_NAMESPACE,
+        )
+
     def protected_manifest_publisher() -> ProtectedManifestPublisher:
         from services.pitr.restore_publish_store import GCSProtectedManifestPublisher
 
@@ -145,6 +160,7 @@ def gcs_pitr_store_group(
         viewer_object_store=viewer_object_store,
         generation_pinned_object_reader=generation_pinned_object_reader,
         retention_inventory_reader=retention_inventory_reader,
+        logical_retention_inventory_reader=logical_retention_inventory_reader,
         protected_manifest_publisher=protected_manifest_publisher,
         retention_delete_store=retention_delete_store,
     )
@@ -193,6 +209,13 @@ def baidu_pitr_store_group(
             prefix=prefix,
             token_manager=token_manager(),
             timeout_seconds=timeout_seconds,
+        ),
+        logical_retention_inventory_reader=lambda: BaiduRetentionInventoryReader(
+            app_root=app_root,
+            prefix=REMOTE_ROOT,
+            token_manager=token_manager(),
+            timeout_seconds=timeout_seconds,
+            namespace=LOGICAL_NAMESPACE,
         ),
         protected_manifest_publisher=lambda: BaiduProtectedManifestPublisher(
             app_root=app_root, token_manager=token_manager(), timeout_seconds=timeout_seconds
@@ -279,6 +302,14 @@ def oss_pitr_store_group(
             credentials_file=require_viewer(),
             timeout_seconds=timeout_seconds,
         ),
+        logical_retention_inventory_reader=lambda: OSSRetentionInventoryReader(
+            endpoint=endpoint,
+            bucket=bucket,
+            prefix=REMOTE_ROOT,
+            credentials_file=require_viewer(),
+            timeout_seconds=timeout_seconds,
+            namespace=LOGICAL_NAMESPACE,
+        ),
         protected_manifest_publisher=lambda: OSSProtectedManifestPublisher(
             endpoint=endpoint,
             bucket=bucket,
@@ -327,6 +358,12 @@ def cos_pitr_store_group(
         ),
         retention_inventory_reader=lambda: CosRetentionInventoryReader(
             credentials=credentials(), prefix=prefix, timeout_seconds=timeout_seconds
+        ),
+        logical_retention_inventory_reader=lambda: CosRetentionInventoryReader(
+            credentials=credentials(),
+            prefix=REMOTE_ROOT,
+            timeout_seconds=timeout_seconds,
+            namespace=LOGICAL_NAMESPACE,
         ),
         protected_manifest_publisher=lambda: CosProtectedManifestPublisher(
             credentials=credentials(), timeout_seconds=timeout_seconds

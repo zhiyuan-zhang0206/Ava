@@ -437,8 +437,12 @@ def make_reader(fake: FakeOssBucket) -> OSSGenerationPinnedObjectReader:
     return OSSGenerationPinnedObjectReader.from_store(make_store(fake))
 
 
-def make_inventory(fake: FakeOssBucket, *, prefix: str = PREFIX) -> OSSRetentionInventoryReader:
-    return OSSRetentionInventoryReader.from_store(make_store(fake), prefix=prefix)
+def make_inventory(
+    fake: FakeOssBucket, *, prefix: str = PREFIX, namespace: str = "pitr"
+) -> OSSRetentionInventoryReader:
+    return OSSRetentionInventoryReader.from_store(
+        make_store(fake), prefix=prefix, namespace=namespace
+    )
 
 
 def make_publisher(fake: FakeOssBucket) -> OSSProtectedManifestPublisher:

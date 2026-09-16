@@ -30,6 +30,7 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from zoneinfo import ZoneInfo
 
 from services.pitr.retention_executor import RetentionExecutionSummary, execute_retention_plan
 from services.pitr.retention_journal import RetentionJournal
@@ -38,6 +39,7 @@ from services.pitr.retention_planner import (
     inspect_dry_run_plan,
     write_dry_run_plan,
 )
+from services.pitr.retention_policy import LogicalRetention
 from services.pitr.store_factory import get_store_group
 from shared import telemetry
 from shared.config.physical_backup import PhysicalBackupSettings
@@ -95,6 +97,24 @@ class RetentionDryRunState:
     last_success: float | None = None
     last_error: str | None = None
     delete: RetentionDeleteState = field(default_factory=RetentionDeleteState)
+
+
+def _logical_retention() -> LogicalRetention:
+    """The logical namespace's retention window, mirroring the local pool.
+
+    The depths and the in-flight activation pin come from ``services.backup``
+    itself, so the off-site mirror cannot drift from the local prune.
+    """
+    from services.backup import ACTIVATION_KEEP, BACKUP_KEEP, active_activation_snapshot_name
+    from shared.config import settings
+
+    return LogicalRetention(
+        keep_dailies=BACKUP_KEEP,
+        keep_pre_updates=1,
+        keep_activations=ACTIVATION_KEEP,
+        legacy_tz=ZoneInfo(settings.general.timezone),
+        active_pin_name=active_activation_snapshot_name(),
+    )
 
 
 def _read_carrier(alias: str) -> str | None:
@@ -251,6 +271,8 @@ def _run_delete_pass(
             root,
             retain_chains=config.pitr_retained_weekly_chains,
             inventory_reader=get_store_group().retention_inventory_reader(),
+            logical_reader=get_store_group().logical_retention_inventory_reader(),
+            logical_retention=_logical_retention(),
         )
         if recheck.digest != delete.approved_digest:
             raise RuntimeError(
@@ -313,6 +335,8 @@ def run_operator_once(config: PhysicalBackupSettings) -> RetentionExecutionSumma
         root,
         retain_chains=config.pitr_retained_weekly_chains,
         inventory_reader=get_store_group().retention_inventory_reader(),
+        logical_reader=get_store_group().logical_retention_inventory_reader(),
+        logical_retention=_logical_retention(),
     )
     if recheck.blocked or recheck.digest != digest:
         reason = (
@@ -408,6 +432,16 @@ def health_component(state: RetentionDryRunState) -> dict[str, object]:
     record["eligible_objects"] = plan.eligible_objects if plan is not None and current else 0
     record["retained_bytes"] = plan.retained_bytes if plan is not None and current else 0
     record["eligible_bytes"] = plan.eligible_bytes if plan is not None and current else 0
+    record["logical_object_count"] = (
+        plan.logical_object_count if plan is not None and current else 0
+    )
+    record["logical_bytes"] = plan.logical_bytes if plan is not None and current else 0
+    record["logical_eligible_objects"] = (
+        plan.logical_eligible_objects if plan is not None and current else 0
+    )
+    record["weak_evidence_objects"] = (
+        plan.weak_evidence_objects if plan is not None and current else 0
+    )
     return record
 
 
@@ -419,6 +453,8 @@ def refresh(config: PhysicalBackupSettings) -> DryRunResult:
         ava_home() / "physical-backup",
         retain_chains=config.pitr_retained_weekly_chains,
         inventory_reader=get_store_group().retention_inventory_reader(),
+        logical_reader=get_store_group().logical_retention_inventory_reader(),
+        logical_retention=_logical_retention(),
     )
     telemetry.emit(
         "telemetry",
@@ -427,6 +463,8 @@ def refresh(config: PhysicalBackupSettings) -> DryRunResult:
             "backend": config.pitr_store_backend,
             "object_count": result.remote_object_count,
             "bytes": result.remote_bytes,
+            "logical_object_count": result.logical_object_count,
+            "logical_bytes": result.logical_bytes,
         },
     )
     return result

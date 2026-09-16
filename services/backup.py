@@ -66,7 +66,6 @@ import argparse
 import hashlib
 import logging
 import os
-import re
 import subprocess
 import tempfile
 import threading
@@ -82,6 +81,14 @@ from zoneinfo import ZoneInfo
 import psycopg
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
+from services.pitr.logical_dump_names import (
+    ACTIVATION_MARKER,
+    DUMP_NAME_RE,
+    PRE_UPDATE_MARKER,
+    REMOTE_ROOT,
+    TS_FORMAT,
+    stamp_utc,
+)
 from shared.config import settings
 from shared.db import connect, direct_db_url
 from shared.pg_tools import pg_tool
@@ -93,12 +100,10 @@ _log = logging.getLogger(__name__)
 BACKUP_HOUR = 3  # cluster time; the first tick at/after this hour runs the day's backup
 BACKUP_KEEP = 7  # a week of daily dumps: a bad migration found a day later must not have overwritten the last good copy
 ACTIVATION_KEEP = 2
-_PRE_UPDATE_MARKER = "pre-update"  # filename kind segment for `ava cluster update` snapshots
-_ACTIVATION_MARKER = "pitr-activation"
-# Off-site logical-dump namespace: a sibling of the PITR prefix (the
-# retention inventory scopes its listing to the PITR prefix, so these names
-# never surface as unknown inventory entries).
-_REMOTE_ROOT = "ava-logical"
+# The managed name grammar (markers, formats, regex) lives in
+# `services.pitr.logical_dump_names`: the retention classifier parses the
+# very same grammar, so the writer and the planner cannot drift on what a
+# managed dump name is.
 # Generous ceiling for one dump (the DB is far smaller); see the comment at the
 # run call in `_run_backup` for why an unbounded pg_dump is not acceptable here.
 # 60 min: a full dump with checkpoint history takes about 6.3 min. This is
@@ -114,12 +119,6 @@ _PROGRESS_INTERVAL_S = 60.0
 # Bound the composition-sample connection (a dead DB must stall the backup log
 # line only this long before degrading to "unavailable", never hang it).
 _BREAKDOWN_CONNECT_TIMEOUT_S = 10
-_NAME_RE = re.compile(
-    r"^(?P<db>.+)-(?P<ts>\d{8}T\d{6}Z|\d{8}-\d{6})"
-    r"(?:\.(?P<kind>pre-update|pitr-activation(?:-[0-9a-f-]{36})?))?\.dump(?:\.gz\.enc|\.enc)?$"
-)
-_TS_FORMAT = "%Y%m%dT%H%M%SZ"  # UTC, offset-bearing by construction
-_LEGACY_TS_FORMAT = "%Y%m%d-%H%M%S"  # pre-cutover names: wall clock, no offset
 _TARGET_NAME_ATTEMPTS = 60
 _backup_lock_guard = threading.RLock()
 _backup_lock_state = threading.local()
@@ -139,15 +138,12 @@ def _require_aware(now: datetime) -> datetime:
 
 
 def _parse_stamp(stamp: str) -> datetime:
-    """A managed dump's filename stamp as an aware UTC instant."""
-    if stamp.endswith("Z"):
-        return datetime.strptime(stamp, _TS_FORMAT).replace(tzinfo=UTC)
-    # Legacy name: no offset was ever recorded, so read it in cluster time.
-    # `.replace(tzinfo=...)` (fold=0) keeps the reading deterministic through
-    # the DST fall-back hour, where `.astimezone()` on a naive value used to
-    # pick an offset out of the host's clock.
-    legacy = datetime.strptime(stamp, _LEGACY_TS_FORMAT).replace(tzinfo=_cluster_tz())
-    return legacy.astimezone(UTC)
+    """A managed dump's filename stamp as an aware UTC instant.
+
+    The reading rules (UTC by construction; legacy stamps read in cluster
+    time) live in `services.pitr.logical_dump_names.stamp_utc`.
+    """
+    return stamp_utc(stamp, _cluster_tz())
 
 
 def backup_dir() -> Path:
@@ -190,7 +186,7 @@ def _managed_dumps(directory: Path) -> list[tuple[datetime, Path]]:
     if not directory.exists():
         return dumps
     for path in directory.iterdir():
-        m = _NAME_RE.match(path.name)
+        m = DUMP_NAME_RE.match(path.name)
         if m and path.is_file():
             dumps.append((_parse_stamp(m["ts"]), path))
     return sorted(dumps)
@@ -198,7 +194,7 @@ def _managed_dumps(directory: Path) -> list[tuple[datetime, Path]]:
 
 def activation_snapshot(operation_id: str) -> Path | None:
     """The exact published dump owned by one durable activation operation."""
-    suffix = f".{_ACTIVATION_MARKER}-{operation_id}.dump.enc"
+    suffix = f".{ACTIVATION_MARKER}-{operation_id}.dump.enc"
     matches = [
         path for _timestamp, path in _managed_dumps(backup_dir()) if path.name.endswith(suffix)
     ]
@@ -209,14 +205,14 @@ def activation_snapshot(operation_id: str) -> Path | None:
 
 def _is_pre_update(path: Path) -> bool:
     """Whether a managed dump is an update-kind snapshot rather than a daily dump."""
-    m = _NAME_RE.match(path.name)
-    return bool(m and m.group("kind") == _PRE_UPDATE_MARKER)
+    m = DUMP_NAME_RE.match(path.name)
+    return bool(m and m.group("kind") == PRE_UPDATE_MARKER)
 
 
 def _is_activation(path: Path) -> bool:
     """Whether a dump is pinned by a not-yet-protected PITR operation."""
-    m = _NAME_RE.match(path.name)
-    return bool(m and (m.group("kind") or "").startswith(_ACTIVATION_MARKER))
+    m = DUMP_NAME_RE.match(path.name)
+    return bool(m and (m.group("kind") or "").startswith(ACTIVATION_MARKER))
 
 
 def _active_activation_pin(directory: Path) -> Path | None:
@@ -234,6 +230,17 @@ def _active_activation_pin(directory: Path) -> Path | None:
     if pin.parent.resolve() != directory.resolve():
         raise RuntimeError("active PITR snapshot lies outside the managed backup directory")
     return pin
+
+
+def active_activation_snapshot_name() -> str | None:
+    """The file name of the in-flight activation operation's pinned snapshot.
+
+    The retention planner mirrors the local prune's pin, so the off-site copy
+    of the logical recovery floor survives while the activation is
+    unresolved. None when no operation holds the pin.
+    """
+    pin = _active_activation_pin(backup_dir())
+    return None if pin is None else pin.name
 
 
 def is_due(now: datetime) -> bool:
@@ -406,7 +413,7 @@ class _EncryptedFileSource:
 def _publish_offsite(artifact: Path) -> str | None:
     """Best-effort BlobStore-contract publish; never sacrifice the local artifact.
 
-    Publishes the encrypted dump iff absent as ``{_REMOTE_ROOT}/{name}`` on
+    Publishes the encrypted dump iff absent as ``{REMOTE_ROOT}/{name}`` on
     the configured backup store backend and logs the store-verified ACK. A
     missing or unconfigured store, or a failed publish, warns and retains the
     local artifact — the off-site leg stays optional, exactly as the Drive
@@ -419,7 +426,7 @@ def _publish_offsite(artifact: Path) -> str | None:
     except Exception:
         _log.exception("[backup] off-site store unavailable; local artifact retained")
         return None
-    object_name = f"{_REMOTE_ROOT}/{artifact.name}"
+    object_name = f"{REMOTE_ROOT}/{artifact.name}"
     try:
         ack = store.put_base_if_absent(
             source=_EncryptedFileSource(artifact),
@@ -459,10 +466,10 @@ def _available_target(
         raise ValueError("a backup cannot be both pre-update and PITR activation")
     if pitr_activation is not None and str(UUID(pitr_activation)) != pitr_activation:
         raise ValueError("PITR activation backup requires a canonical operation UUID")
-    marker = f"{_ACTIVATION_MARKER}-{pitr_activation}" if pitr_activation else _PRE_UPDATE_MARKER
+    marker = f"{ACTIVATION_MARKER}-{pitr_activation}" if pitr_activation else PRE_UPDATE_MARKER
     kind = f".{marker}" if pre_update or pitr_activation else ""
     for offset_s in range(_TARGET_NAME_ATTEMPTS):
-        stamp = (now + timedelta(seconds=offset_s)).astimezone(UTC).strftime(_TS_FORMAT)
+        stamp = (now + timedelta(seconds=offset_s)).astimezone(UTC).strftime(TS_FORMAT)
         target = directory / f"{dbname}-{stamp}{kind}.dump.enc"
         if not target.exists():
             return target
@@ -647,7 +654,7 @@ def _run_backup(
     db_url = db_url if db_url is not None else direct_db_url()
     directory = ensure_private_dir(backup_dir())
     # A run interrupted mid-dump (e.g. the process tree killed during a rollout)
-    # leaves `.partial` files behind. The name never matches `_NAME_RE`, so the
+    # leaves `.partial` files behind. The name never matches `DUMP_NAME_RE`, so the
     # due/prune logic ignores them and they pile up. Sweep them before writing a
     # new dump; a fresh partial from THIS run is created after the sweep.
     for stale in directory.glob("*.partial"):

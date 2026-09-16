@@ -88,9 +88,13 @@ remains mandatory and is never pruned by physical-backup retention.
    store or a failed publish warns without discarding the local backup, which
    stays the primary copy. Remote objects are append-only except policy-owned
    retention deletions (off by default): the store contract deliberately has
-   no delete verb, and the physical plane's retention planner is dry-run until
-   an operator arms the deletion role — so remote retention of logical dumps
-   is a shared future concern — see the storage-abstraction effort's retention planner.
+   no delete verb, and the retention planner is dry-run until an operator arms
+   the deletion role. The planner now covers this pool too: the `ava-logical/`
+   objects are decided under the retention window mirroring the local prune
+   (newest seven dailies + one pre-update + two activation snapshots + the
+   in-flight activation pin), with objects that carry no verifiable sidecar
+   binding labeled weak-evidence in the plan — see the storage-abstraction
+   effort's retention planner.
 2. **Restore drill — delivered.** `scripts/restore_drill.py` decrypts the
    latest managed artifact (or a supplied path), restores it into scratch
    Postgres, and validates schema, agent rows, checkpoint rows, a checkpoint
@@ -101,3 +105,11 @@ remains mandatory and is never pruned by physical-backup retention.
 > a typed recovery-drill event and alert; success is recorded privately. The
 > physical-PITR monthly proof and the retention planner remain separately
 > gated, dry-run-safe work owned for deployment by 1818.
+>
+> **Update 2026-09-16 (P2):** the retention planner's logical-surface half
+> landed: the `ava-logical/` pool is inventoried (per-backend, viewer
+> credentials), classified by the shared name grammar, and planned under the
+> same dry-run/arm discipline as the physical chains — sidecar-paired objects
+> carry the full-strength binding on OSS/Baidu, sidecar-less objects are
+> handled strict-naming-plus-stat and marked weak-evidence. Still dry-run
+> until the operator arms the deletion role.

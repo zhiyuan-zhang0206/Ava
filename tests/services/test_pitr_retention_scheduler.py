@@ -40,6 +40,10 @@ def _result(*, digest: str = DIGEST, blocked: bool = False) -> DryRunResult:
         eligible_bytes=20,
         remote_object_count=3,
         remote_bytes=100,
+        logical_object_count=4,
+        logical_bytes=40,
+        logical_eligible_objects=2,
+        weak_evidence_objects=3,
     )
 
 
@@ -71,11 +75,19 @@ class _FakeGroup:
     def retention_inventory_reader(self) -> object:
         return object()
 
+    def logical_retention_inventory_reader(self) -> object:
+        return object()
+
     def viewer_object_store(self) -> _FakeViewer:
         return _FakeViewer()
 
     def retention_delete_store(self) -> object:
         return self.delete_store
+
+
+def _logical_policy_stub() -> object:
+    """Stand-in for the module-level logical retention policy factory."""
+    return object()
 
 
 class _SilentTelemetry:
@@ -91,8 +103,9 @@ def _arm(monkeypatch: pytest.MonkeyPatch, *, armed: bool, digest: str | None = D
 @pytest.fixture
 def wired(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """Replace the module's seams with recording fakes."""
-    calls: dict[str, Any] = {"execute": [], "plans": 0, "group": _FakeGroup()}
+    calls: dict[str, Any] = {"execute": [], "plans": 0, "writes": [], "group": _FakeGroup()}
     monkeypatch.setattr(retention_scheduler, "get_store_group", lambda: calls["group"])
+    monkeypatch.setattr(retention_scheduler, "_logical_retention", _logical_policy_stub)
     monkeypatch.setattr(
         retention_scheduler, "_build_verify_absent", lambda *_args, **_kw: lambda _name: True
     )
@@ -100,9 +113,21 @@ def wired(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setattr(retention_scheduler, "telemetry", _SilentTelemetry())
 
     def fake_write(
-        root: Path, *, retain_chains: int = 2, inventory_reader: object = None
+        root: Path,
+        *,
+        retain_chains: int = 2,
+        inventory_reader: object = None,
+        logical_reader: object = None,
+        logical_retention: object = None,
     ) -> DryRunResult:
         calls["plans"] += 1
+        calls["writes"].append(
+            {
+                "inventory_reader": inventory_reader,
+                "logical_reader": logical_reader,
+                "logical_retention": logical_retention,
+            }
+        )
         return _result(digest=calls.get("write_digest", DIGEST))
 
     def fake_execute(plan: object, **kwargs: object) -> RetentionExecutionSummary:
@@ -187,6 +212,12 @@ def test_stable_digest_arms_and_executes(
     assert kwargs["remote_total_bytes"] == 100
     assert kwargs["delete_store"] is wired["group"].delete_store
     assert "journal" in kwargs
+    # The double-run recheck carries both surfaces: the PITR inventory and
+    # the logical namespace with its retention window.
+    write = wired["writes"][0]
+    assert write["inventory_reader"] is not None
+    assert write["logical_reader"] is not None
+    assert write["logical_retention"] is not None
 
 
 def test_digest_change_resets_stability(
@@ -277,6 +308,11 @@ def test_health_reports_armed_deletion() -> None:
     assert record["delete_state"] == "armed"
     assert record["armed_at"] == 123.0
     assert record["delete_totals"] == {"ticks": 0, "deleted": 0, "absent": 0, "failed": 0}
+    # The logical surface's counters ride the same health record.
+    assert record["logical_object_count"] == 4
+    assert record["logical_bytes"] == 40
+    assert record["logical_eligible_objects"] == 2
+    assert record["weak_evidence_objects"] == 3
 
 
 def test_health_disables_delete_by_default() -> None:

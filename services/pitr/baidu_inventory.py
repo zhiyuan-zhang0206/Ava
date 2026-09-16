@@ -10,6 +10,10 @@ Every live object also captures its sidecar's own delete identity (one
 listing carries both rows), and a sidecar whose host is already gone is
 surfaced as an orphan candidate for the policy's fail-closed range check
 (design section 2.5).
+
+``namespace="logical"`` selects the flat ``ava-logical/`` dump pool,
+classified by the shared name grammar; its sidecar pair carries the same
+full-strength binding as in the PITR namespace.
 """
 
 from __future__ import annotations
@@ -20,8 +24,14 @@ from typing import Any, cast
 from services.pitr.archive_shim import archive_name_is_valid
 from services.pitr.baidu_pcs import PcsError, RemoteFile
 from services.pitr.baidu_store import BaiduObjectStore
+from services.pitr.logical_dump_names import parse_dump_name, relative_name
 from services.pitr.object_store import PermanentObjectStoreError, TransientObjectStoreError
-from services.pitr.retention_inventory import InventorySnapshot
+from services.pitr.retention_inventory import (
+    LOGICAL_NAMESPACE,
+    PITR_NAMESPACE,
+    InventorySnapshot,
+    require_namespace,
+)
 from services.pitr.retention_manifest import (
     SIDECAR_SUFFIX,
     OrphanSidecar,
@@ -42,11 +52,14 @@ class BaiduRetentionInventoryReader:
         prefix: str,
         token_manager: StoreTokenManager,
         timeout_seconds: float = 300.0,
+        namespace: str = PITR_NAMESPACE,
     ) -> None:
+        require_namespace(namespace, prefix)
         self._store = BaiduObjectStore(
             app_root=app_root, token_manager=token_manager, timeout_seconds=timeout_seconds
         )
         self._prefix = prefix.rstrip("/")
+        self._namespace = namespace
 
     def snapshot(self) -> InventorySnapshot:
         present: dict[str, RemoteFile] = {}
@@ -103,6 +116,11 @@ class BaiduRetentionInventoryReader:
 
     def _classify(self, relative: str, metadata: dict[str, str]) -> tuple[str, str | None] | None:
         """Map a managed object name to ``(kind, archive_name)``; None = unknown."""
+        if self._namespace == LOGICAL_NAMESPACE:
+            inner = relative_name(relative, root=self._prefix)
+            if inner is None or parse_dump_name(inner) is None:
+                return None
+            return ("logical", None)
         if relative.startswith(f"{self._prefix}/base/"):
             base_pattern = (
                 rf"{re.escape(self._prefix)}/base/"
@@ -146,7 +164,11 @@ class BaiduRetentionInventoryReader:
             host = name[: -len(SIDECAR_SUFFIX)]
             if host.startswith(f"{self._prefix}/protected/"):
                 continue
-            if not host.startswith((f"{self._prefix}/base/", f"{self._prefix}/wal/")):
+            if self._namespace == LOGICAL_NAMESPACE:
+                inner = relative_name(host, root=self._prefix)
+                if inner is None or parse_dump_name(inner) is None:
+                    continue
+            elif not host.startswith((f"{self._prefix}/base/", f"{self._prefix}/wal/")):
                 continue
             if host in present:
                 continue
