@@ -25,7 +25,7 @@ import threading
 import time
 from collections import Counter
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, LiteralString, cast
@@ -433,7 +433,7 @@ def test_inspect_pre_cutover_agent_uses_indexed_lifecycle_window(
     db_conn.commit()
 
     with TestClient(app) as client:
-        response = client.get(f"/api/agents/{aid}/inspect", params={"hours": 24})
+        response = client.get(f"/api/agents/{aid}/inspect/statistics", params={"hours": 24})
 
     assert response.status_code == 200
     lifecycle_calls = _lifecycle_projected_calls(fake_loki)
@@ -553,7 +553,7 @@ def test_inspect_unknown_agent_404(db_conn: psycopg.Connection) -> None:
     """No agents_meta row → 404 (fail-fast, no empty shell)."""
     db_conn.commit()
     with TestClient(app) as client:
-        resp = client.get("/api/agents/999999/inspect")
+        resp = client.get("/api/agents/999999/inspect/statistics")
     assert resp.status_code == 404
 
 
@@ -713,7 +713,7 @@ def test_inspect_local_loki_budget_rejection_is_503(
 
     monkeypatch.setattr(agent_inspect, "_inspect_rows_cached_async", reject)
     with TestClient(app) as client:
-        response = client.get(f"/api/agents/{aid}/inspect")
+        response = client.get(f"/api/agents/{aid}/inspect/statistics")
     assert response.status_code == 503
     assert response.json()["detail"] == f"Loki query budget unavailable ({reason}); retry"
     assert response.headers["retry-after"] == "1"
@@ -732,7 +732,7 @@ def test_inspect_loki_transport_failure_is_retriable_503(
 
     monkeypatch.setattr(agent_inspect, "_inspect_rows_cached_async", reject)
     with TestClient(app) as client:
-        response = client.get(f"/api/agents/{aid}/inspect")
+        response = client.get(f"/api/agents/{aid}/inspect/statistics")
     assert response.status_code == 503
     assert "loki backend unavailable (RemoteProtocolError)" in response.json()["detail"]
     assert response.headers["retry-after"] == "1"
@@ -764,13 +764,13 @@ def test_inspect_total_deadline_returns_503_then_retry_reloads(
     monkeypatch.setattr(agent_inspect, "_INSPECT_RESPONSE_TIMEOUT_S", 0.01)
     monkeypatch.setattr(agent_inspect, "_inspect_blocking", delayed_loader)
     with TestClient(app) as client:
-        timed_out = client.get(f"/api/agents/{aid}/inspect")
+        timed_out = client.get(f"/api/agents/{aid}/inspect/statistics")
         assert timed_out.status_code == 503
         assert timed_out.json()["detail"] == "inspector history query timed out; retry"
         assert timed_out.headers["retry-after"] == "1"
         assert loader_finished.wait(timeout=1)
         monkeypatch.setattr(agent_inspect, "_INSPECT_RESPONSE_TIMEOUT_S", 15.0)
-        retried = client.get(f"/api/agents/{aid}/inspect")
+        retried = client.get(f"/api/agents/{aid}/inspect/statistics")
 
     assert retried.status_code == 200
     assert retried.json()["stats"]["turn_total"] == 1
@@ -785,7 +785,7 @@ def test_inspect_config_overlay_roundtrips(db_conn: psycopg.Connection) -> None:
     )
     db_conn.commit()
     with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/inspect").json()
+        body = client.get(f"/api/agents/{aid}/inspect/live").json()
     assert body["agent_id"] == aid
     assert body["config_overlay"] == {
         "llm_model": "claude-opus-4-8",
@@ -820,7 +820,7 @@ def test_inspect_config_overlay_clean_of_skill_match_residue(
         cur.execute(sql.SQL(cast(LiteralString, migration.read_text())), prepare=False)
     db_conn.commit()
     with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/inspect").json()
+        body = client.get(f"/api/agents/{aid}/inspect/live").json()
     assert body["config_overlay"] == {"llm_model": "claude-opus-4-8"}
 
 
@@ -831,7 +831,7 @@ def test_inspect_null_config_overlay_is_empty_dict(
     aid = _insert_agent(db_conn, config_overlay=None)
     db_conn.commit()
     with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/inspect").json()
+        body = client.get(f"/api/agents/{aid}/inspect/live").json()
     assert body["config_overlay"] == {}
 
 
@@ -868,7 +868,7 @@ def test_inspect_shells_probed_on_agents_machine(
     monkeypatch.setattr(inspect_mod._cluster_rpc, "dispatch_to_machine", _fake_dispatch)
 
     with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/inspect").json()
+        body = client.get(f"/api/agents/{aid}/inspect/live").json()
     assert seen == {
         "machine": "wsl",
         "kind": "shell_probe",
@@ -943,7 +943,7 @@ def test_inspect_shells_degrade_to_empty_on_unreachable(
     monkeypatch.setattr(inspect_mod._cluster_rpc, "dispatch_to_machine", _unreachable_dispatch)
 
     with TestClient(app) as client:
-        resp = client.get(f"/api/agents/{aid}/inspect")
+        resp = client.get(f"/api/agents/{aid}/inspect/live")
     assert resp.status_code == 200
     assert resp.json()["shells"] == []
 
@@ -969,7 +969,7 @@ def test_inspect_shells_degrade_to_empty_on_failed_op(
     monkeypatch.setattr(inspect_mod._cluster_rpc, "dispatch_to_machine", _failed_dispatch)
 
     with TestClient(app) as client:
-        resp = client.get(f"/api/agents/{aid}/inspect")
+        resp = client.get(f"/api/agents/{aid}/inspect/live")
     assert resp.status_code == 200
     assert resp.json()["shells"] == []
 
@@ -1003,7 +1003,7 @@ def test_inspect_audit_rows_excluded_from_cost_and_stats(
     )
     db_conn.commit()
     with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/inspect").json()
+        body = client.get(f"/api/agents/{aid}/inspect/statistics").json()
     assert body["cost"]["cost_usd"] == 0
     assert body["cost"]["llm_calls"] == 0
     assert body["cost"]["tokens_in"] == 0
@@ -1030,7 +1030,7 @@ def test_inspect_cost_is_cumulative_no_window(
     )
     db_conn.commit()
     with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/inspect").json()
+        body = client.get(f"/api/agents/{aid}/inspect/statistics").json()
     cost = body["cost"]
     assert cost["cost_usd"] == pytest.approx(30.0)  # pyright: ignore[reportUnknownMemberType]
     assert cost["llm_calls"] == 1
@@ -1075,7 +1075,7 @@ def test_inspect_whole_life_tail_bounded_to_retention(
     )
     db_conn.commit()
     with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/inspect").json()
+        body = client.get(f"/api/agents/{aid}/inspect/statistics").json()
     assert body["cost"]["llm_calls"] == 1
     assert body["cost"]["cost_usd"] == pytest.approx(30.0)  # pyright: ignore[reportUnknownMemberType]
 
@@ -1092,7 +1092,7 @@ def test_inspect_cost_unpriced_and_cache_hit(
     )
     db_conn.commit()
     with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/inspect").json()
+        body = client.get(f"/api/agents/{aid}/inspect/statistics").json()
     cost = body["cost"]
     assert cost["cost_usd"] == 0
     assert cost["unpriced_calls"] == 1
@@ -1180,7 +1180,7 @@ def test_inspect_cost_scoped_to_agent(db_conn: psycopg.Connection, fake_loki: _F
     )
     db_conn.commit()
     with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/inspect").json()
+        body = client.get(f"/api/agents/{aid}/inspect/statistics").json()
     assert body["cost"]["cost_usd"] == 0
     assert body["cost"]["llm_calls"] == 0
 
@@ -1211,7 +1211,7 @@ def test_inspect_whole_life_ledger_plus_tail_no_double_count(
     )
     db_conn.commit()
     with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/inspect").json()
+        body = client.get(f"/api/agents/{aid}/inspect/statistics").json()
     cost = body["cost"]
     assert cost["llm_calls"] == 3
     assert cost["tokens_in"] == 2_000_000
@@ -1261,7 +1261,7 @@ def test_inspect_whole_life_gap_day_cost_not_lost_and_not_double_counted(
     )
     db_conn.commit()
     with TestClient(app) as client:
-        cost = client.get(f"/api/agents/{aid}/inspect").json()["cost"]
+        cost = client.get(f"/api/agents/{aid}/inspect/statistics").json()["cost"]
     assert cost["cost_usd"] == pytest.approx(5.0)  # pyright: ignore[reportUnknownMemberType]
     assert cost["llm_calls"] == 2
     assert cost["tokens_in"] == 500_000
@@ -1299,7 +1299,7 @@ def test_inspect_whole_life_gap_day_tokens_reread_the_closed_day(
     db_conn.commit()
 
     with TestClient(app) as client:
-        response = client.get(f"/api/agents/{aid}/inspect")
+        response = client.get(f"/api/agents/{aid}/inspect/statistics")
 
     assert response.status_code == 200
     # lm_stage_tps is output_tokens / turn duration, so the one-second turn
@@ -1347,7 +1347,7 @@ def test_inspect_snapshot_cost_immune_to_registry_changes(
     )
     db_conn.commit()
     with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/inspect").json()
+        body = client.get(f"/api/agents/{aid}/inspect/statistics").json()
     cost = body["cost"]
     assert cost["cost_usd"] == pytest.approx(149.0)  # pyright: ignore[reportUnknownMemberType]
     # tokens still aggregate normally alongside the snapshotted cost
@@ -1388,7 +1388,7 @@ def test_inspect_snapshotless_rows_are_unpriced(
     )
     db_conn.commit()
     with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/inspect").json()
+        body = client.get(f"/api/agents/{aid}/inspect/statistics").json()
     cost = body["cost"]
     assert cost["llm_calls"] == 2
     assert cost["unpriced_calls"] == 1
@@ -1415,7 +1415,7 @@ def test_inspect_no_read_time_pricing_even_for_known_models(
     )
     db_conn.commit()
     with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/inspect").json()
+        body = client.get(f"/api/agents/{aid}/inspect/statistics").json()
     cost = body["cost"]
     assert cost["cost_usd"] == 0
     assert cost["unpriced_calls"] == 1
@@ -1467,11 +1467,11 @@ def test_inspect_hours_window_is_loki_only(
     db_conn.commit()
     floor_before = retention_floor()
     with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/inspect?hours=168").json()
+        body = client.get(f"/api/agents/{aid}/inspect/statistics?hours=168").json()
         floor_after = retention_floor()
-        body72 = client.get(f"/api/agents/{aid}/inspect?hours=72").json()
-        body24 = client.get(f"/api/agents/{aid}/inspect?hours=24").json()
-        whole = client.get(f"/api/agents/{aid}/inspect").json()
+        body72 = client.get(f"/api/agents/{aid}/inspect/statistics?hours=72").json()
+        body24 = client.get(f"/api/agents/{aid}/inspect/statistics?hours=24").json()
+        whole = client.get(f"/api/agents/{aid}/inspect/statistics").json()
     expected_hours = int(EVENT_STREAM_RETENTION.total_seconds() // 3600)
     assert body["window_hours"] == 168
     assert body["applied_window_hours"] == expected_hours
@@ -1514,7 +1514,7 @@ def test_inspect_turn_stats(db_conn: psycopg.Connection, fake_loki: _FakeLoki) -
     )
     db_conn.commit()
     with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/inspect").json()
+        body = client.get(f"/api/agents/{aid}/inspect/statistics").json()
     stats = body["stats"]
     assert stats["turn_total"] == 4
     assert stats["turn_ok"] == 3
@@ -1538,7 +1538,7 @@ def test_inspect_windowed_duration_stats_keep_exact_float_values(
         )
     db_conn.commit()
     with TestClient(app) as client:
-        stats = client.get(f"/api/agents/{aid}/inspect?hours=24").json()["stats"]
+        stats = client.get(f"/api/agents/{aid}/inspect/statistics?hours=24").json()["stats"]
     assert stats["turn_p50_seconds"] == 2.48
     assert stats["turn_p90_seconds"] == 77.33
     assert stats["turn_min_seconds"] == 2.48
@@ -1567,7 +1567,7 @@ def test_inspect_archive_and_live_durations_keep_exact_percentiles(
     db_conn.commit()
 
     with TestClient(app) as client:
-        stats = client.get(f"/api/agents/{aid}/inspect").json()["stats"]
+        stats = client.get(f"/api/agents/{aid}/inspect/statistics").json()["stats"]
 
     assert stats["turn_p50_seconds"] == 1.5
     assert stats["turn_p90_seconds"] == 1.7
@@ -1588,7 +1588,7 @@ def test_whole_life_inspect_uses_archive_rollup(
     db_conn.commit()
 
     with TestClient(app) as client:
-        stats = client.get(f"/api/agents/{aid}/inspect").json()["stats"]
+        stats = client.get(f"/api/agents/{aid}/inspect/statistics").json()["stats"]
 
     assert stats["turn_p50_seconds"] == 73.25
     assert stats["turn_p90_seconds"] == 73.25
@@ -1619,7 +1619,7 @@ def test_whole_life_histogram_replaces_archive_rollup_for_percentiles(
     db_conn.commit()
 
     with TestClient(app) as client:
-        stats = client.get(f"/api/agents/{aid}/inspect").json()["stats"]
+        stats = client.get(f"/api/agents/{aid}/inspect/statistics").json()["stats"]
 
     # Histogram buckets are floored, so their percentile value is 1.0; the
     # exact archive value remains available only for extrema.
@@ -1630,12 +1630,12 @@ def test_whole_life_histogram_replaces_archive_rollup_for_percentiles(
 
 
 def _assert_inspect_live_query_budget(fake_loki: _FakeLoki) -> None:
-    """The cold panel keeps cost/heartbeat and collapses every other live read.
+    """Statistics omit heartbeat and retain the cost plus shared event reads.
     The raw archive fallback (task #1281) adds exactly one archive-stream
     query_events pass for the windowed archive values."""
-    assert sum(fake_loki.wire_calls.values()) <= 13
+    assert sum(fake_loki.wire_calls.values()) <= 12
     assert fake_loki.wire_calls["attribute_aggregate"] == 7
-    assert fake_loki.wire_calls["query_events"] == 2
+    assert fake_loki.wire_calls["query_events"] == 1
     # Requested stats and the retained per-agent lifecycle leg are separate:
     # the latter is cached for thirty minutes across inspector windows.
     assert fake_loki.wire_calls["query_projected_lines"] == 2
@@ -1652,7 +1652,7 @@ def _assert_inspect_live_query_budget(fake_loki: _FakeLoki) -> None:
 def test_inspect_cold_panel_with_ledger_uses_one_shared_live_pass(
     db_conn: psycopg.Connection, fake_loki: _FakeLoki
 ) -> None:
-    """A ledger-backed whole-life panel needs cost, heartbeat, and one live pass."""
+    """Ledger-backed statistics omit current heartbeat and runner work."""
     aid = _insert_agent(db_conn)
     _ledger_row(db_conn, agent_id=aid, days_ago=2, tout=100)
     _metrics_ledger_row(
@@ -1671,7 +1671,7 @@ def test_inspect_cold_panel_with_ledger_uses_one_shared_live_pass(
 
     fake_loki.wire_calls.clear()
     with TestClient(app) as client:
-        assert client.get(f"/api/agents/{aid}/inspect").status_code == 200
+        assert client.get(f"/api/agents/{aid}/inspect/statistics").status_code == 200
 
     _assert_inspect_live_query_budget(fake_loki)
 
@@ -1689,7 +1689,7 @@ def test_inspect_cold_all_live_panel_uses_one_shared_live_pass(
 
     fake_loki.wire_calls.clear()
     with TestClient(app) as client:
-        assert client.get(f"/api/agents/{aid}/inspect").status_code == 200
+        assert client.get(f"/api/agents/{aid}/inspect/statistics").status_code == 200
 
     _assert_inspect_live_query_budget(fake_loki)
 
@@ -1743,7 +1743,7 @@ def test_inspect_whole_life_stats_read_completed_days_from_the_ledger(
     fake_loki.add(event="exec", agent_id=aid, ts=now - timedelta(seconds=30))
     db_conn.commit()
     with TestClient(app) as client:
-        response = client.get(f"/api/agents/{aid}/inspect")
+        response = client.get(f"/api/agents/{aid}/inspect/statistics")
     assert response.status_code == 200
     stats = response.json()["stats"]
     assert stats["turn_total"] == 10
@@ -1783,7 +1783,7 @@ def test_inspect_whole_life_gap_day_events_read_live_and_not_double_counted(
     )
     db_conn.commit()
     with TestClient(app) as client:
-        stats = client.get(f"/api/agents/{aid}/inspect").json()["stats"]
+        stats = client.get(f"/api/agents/{aid}/inspect/statistics").json()["stats"]
     assert stats["turn_total"] == 2
     assert stats["turn_ok"] == 2
     assert stats["turn_p50_seconds"] == 4.5
@@ -1834,7 +1834,7 @@ def test_inspect_clamped_seven_day_percentiles_use_histogram_and_narrow_live_tai
     db_conn.commit()
 
     with TestClient(app) as client:
-        stats = client.get(f"/api/agents/{aid}/inspect?hours=168").json()["stats"]
+        stats = client.get(f"/api/agents/{aid}/inspect/statistics?hours=168").json()["stats"]
 
     assert stats["turn_p50_seconds"] == 4.0
     assert stats["turn_p90_seconds"] == 14.39
@@ -1874,7 +1874,7 @@ def test_inspect_incomplete_histogram_falls_back_to_the_full_raw_window(
     db_conn.commit()
 
     with TestClient(app) as client:
-        stats = client.get(f"/api/agents/{aid}/inspect?hours=168").json()["stats"]
+        stats = client.get(f"/api/agents/{aid}/inspect/statistics?hours=168").json()["stats"]
 
     assert stats["turn_p50_seconds"] == 8.0
     duration_calls = [
@@ -1896,7 +1896,7 @@ def test_inspect_exec_ok_fail_split(db_conn: psycopg.Connection, fake_loki: _Fak
     fake_loki.add(event="code", agent_id=aid)
     db_conn.commit()
     with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/inspect").json()
+        body = client.get(f"/api/agents/{aid}/inspect/statistics").json()
     stats = body["stats"]
     assert stats["exec_ok"] == 2
     assert stats["exec_failed"] == 2
@@ -1919,7 +1919,7 @@ def test_inspect_projected_rows_deduplicate_repeated_boundary_lines(
     monkeypatch.setattr(loki_events, "query_projected_lines", duplicate_boundary_line)
     db_conn.commit()
     with TestClient(app) as client:
-        stats = client.get(f"/api/agents/{aid}/inspect").json()["stats"]
+        stats = client.get(f"/api/agents/{aid}/inspect/statistics").json()["stats"]
 
     assert stats["turn_total"] == 1
     assert stats["turn_ok"] == 1
@@ -1932,7 +1932,7 @@ def test_inspect_empty_agent_zeros(db_conn: psycopg.Connection) -> None:
     aid = _insert_agent(db_conn)
     db_conn.commit()
     with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/inspect").json()
+        body = client.get(f"/api/agents/{aid}/inspect/statistics").json()
     assert body["window_hours"] is None
     assert body["cost"]["cost_usd"] == 0
     assert body["cost"]["cache_hit_pct"] == 0
@@ -2004,8 +2004,8 @@ def test_inspect_hours_windows_cost_and_stats(
     )
     db_conn.commit()
     with TestClient(app) as client:
-        windowed = client.get(f"/api/agents/{aid}/inspect", params={"hours": 24}).json()
-        cumulative = client.get(f"/api/agents/{aid}/inspect").json()
+        windowed = client.get(f"/api/agents/{aid}/inspect/statistics", params={"hours": 24}).json()
+        cumulative = client.get(f"/api/agents/{aid}/inspect/statistics").json()
     # windowed: only the 1h row (its stored snapshot, 2.0)
     assert windowed["window_hours"] == 24
     assert windowed["cost"]["llm_calls"] == 1
@@ -2073,7 +2073,7 @@ def test_inspect_since_compact_windows_cost_and_stats(
     db_conn.commit()
     with TestClient(app) as client:
         body = client.get(
-            f"/api/agents/{aid}/inspect", params={"since_compact": "true", "hours": 1}
+            f"/api/agents/{aid}/inspect/statistics", params={"since_compact": "true", "hours": 1}
         ).json()
     assert body["since_compact"] is True
     assert body["window_hours"] is None
@@ -2092,7 +2092,9 @@ def test_inspect_since_compact_never_compacted_is_cumulative(
     _ledger_row(db_conn, agent_id=aid, days_ago=9, tin=1_000_000, tout=1_000_000, cost=30.0)
     db_conn.commit()
     with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/inspect", params={"since_compact": "true"}).json()
+        body = client.get(
+            f"/api/agents/{aid}/inspect/statistics", params={"since_compact": "true"}
+        ).json()
     assert body["since_compact"] is True
     assert body["cost"]["llm_calls"] == 1
     assert body["cost"]["cost_usd"] == pytest.approx(30.0)  # pyright: ignore[reportUnknownMemberType]
@@ -2104,7 +2106,7 @@ def test_inspect_invalid_hours_422(db_conn: psycopg.Connection, bad: str) -> Non
     aid = _insert_agent(db_conn)
     db_conn.commit()
     with TestClient(app) as client:
-        resp = client.get(f"/api/agents/{aid}/inspect", params={"hours": bad})
+        resp = client.get(f"/api/agents/{aid}/inspect/statistics", params={"hours": bad})
     assert resp.status_code == 422
 
 
@@ -2117,7 +2119,7 @@ def test_inspect_heartbeat_running_agent_dashes(db_conn: psycopg.Connection) -> 
     aid = _insert_agent(db_conn, status="running")
     db_conn.commit()
     with TestClient(app) as client:
-        hb = client.get(f"/api/agents/{aid}/inspect").json()["heartbeat"]
+        hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
     assert hb["interval_s"] == int(settings.daemon.heartbeat_interval_seconds)
     assert hb["next_at"] is None
     assert hb["paused_until"] is None
@@ -2131,7 +2133,7 @@ def test_inspect_heartbeat_idle_projects_next_at(db_conn: psycopg.Connection) ->
     aid = _insert_agent(db_conn, status="idling", status_changed_s_ago=120)
     db_conn.commit()
     with TestClient(app) as client:
-        hb = client.get(f"/api/agents/{aid}/inspect").json()["heartbeat"]
+        hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
     assert hb["paused_until"] is None
     assert hb["next_at"] is not None
     expected = settings.daemon.heartbeat_idle_threshold_seconds - 120 + aid % JITTER_SPAN_S
@@ -2149,7 +2151,7 @@ def test_inspect_heartbeat_zero_jitter_span_disables_jitter(
     aid = _insert_agent(db_conn, status="idling", status_changed_s_ago=120)
     db_conn.commit()
     with TestClient(app) as client:
-        hb = client.get(f"/api/agents/{aid}/inspect").json()["heartbeat"]
+        hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
     assert hb["paused_until"] is None
     assert hb["heartbeat_pending"] is False
     assert hb["next_at"] is not None
@@ -2172,7 +2174,7 @@ def test_inspect_heartbeat_paused_shows_window(db_conn: psycopg.Connection) -> N
     )
     db_conn.commit()
     with TestClient(app) as client:
-        hb = client.get(f"/api/agents/{aid}/inspect").json()["heartbeat"]
+        hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
     assert hb["next_at"] is None
     assert hb["paused_until"] is not None
     assert _seconds_from_now(hb["paused_until"]) == pytest.approx(1800, abs=5)  # pyright: ignore[reportUnknownMemberType]
@@ -2188,7 +2190,7 @@ def test_inspect_heartbeat_expired_pause_is_not_paused(
     )
     db_conn.commit()
     with TestClient(app) as client:
-        hb = client.get(f"/api/agents/{aid}/inspect").json()["heartbeat"]
+        hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
     assert hb["paused_until"] is None
     assert hb["next_at"] is not None
 
@@ -2206,7 +2208,7 @@ def test_inspect_heartbeat_pending_inbound_marks_heartbeat_pending(
     _insert_pending_inbound(db_conn, agent_id=aid)
     db_conn.commit()
     with TestClient(app) as client:
-        hb = client.get(f"/api/agents/{aid}/inspect").json()["heartbeat"]
+        hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
     assert hb["paused_until"] is None
     assert hb["heartbeat_pending"] is True
     assert hb["next_at"] is None
@@ -2230,7 +2232,7 @@ def test_inspect_heartbeat_no_pending_projects_from_last_active(
     )
     db_conn.commit()
     with TestClient(app) as client:
-        hb = client.get(f"/api/agents/{aid}/inspect").json()["heartbeat"]
+        hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
     assert hb["heartbeat_pending"] is False
     assert hb["paused_until"] is None
     assert hb["next_at"] is not None
@@ -2253,7 +2255,7 @@ def test_inspect_heartbeat_consumed_checkin_uses_durable_reminder_floor(
     db_conn.commit()
 
     with TestClient(app) as client:
-        hb = client.get(f"/api/agents/{aid}/inspect").json()["heartbeat"]
+        hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
 
     assert hb["heartbeat_pending"] is False
     assert hb["paused_until"] is None
@@ -2279,7 +2281,7 @@ def test_inspect_heartbeat_stuck_after_expired_pause_no_past_next_at(
     _insert_pending_inbound(db_conn, agent_id=aid)
     db_conn.commit()
     with TestClient(app) as client:
-        hb = client.get(f"/api/agents/{aid}/inspect").json()["heartbeat"]
+        hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
     # expired pause treated as no pause.
     assert hb["paused_until"] is None
     # key assertion: does not project a past next_at (original bug would show "one hour ago").
@@ -2299,7 +2301,7 @@ def test_inspect_heartbeat_idle_family_projects_next_at(
     aid = _insert_agent(db_conn, status=status, status_changed_s_ago=120)
     db_conn.commit()
     with TestClient(app) as client:
-        hb = client.get(f"/api/agents/{aid}/inspect").json()["heartbeat"]
+        hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
     assert hb["paused_until"] is None
     assert hb["heartbeat_pending"] is False
     assert hb["next_at"] is not None
@@ -2319,7 +2321,7 @@ def test_inspect_heartbeat_idle_family_pending_inbound_marks_heartbeat_pending(
     _insert_pending_inbound(db_conn, agent_id=aid)
     db_conn.commit()
     with TestClient(app) as client:
-        hb = client.get(f"/api/agents/{aid}/inspect").json()["heartbeat"]
+        hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
     assert hb["heartbeat_pending"] is True
     assert hb["next_at"] is None
 
@@ -2339,7 +2341,7 @@ def test_inspect_heartbeat_restarting_overdue_still_projects_raw_next_at(
     )
     db_conn.commit()
     with TestClient(app) as client:
-        hb = client.get(f"/api/agents/{aid}/inspect").json()["heartbeat"]
+        hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
     assert hb["heartbeat_pending"] is False
     assert hb["next_at"] is not None
     # Raw projection: 2h ago + idle_threshold + jitter — clearly in the past.
@@ -2360,7 +2362,7 @@ def test_inspect_heartbeat_stale_pending_does_not_suppress(
     _insert_pending_inbound(db_conn, agent_id=aid, created_s_ago=STALE_PENDING_S + 300)
     db_conn.commit()
     with TestClient(app) as client:
-        hb = client.get(f"/api/agents/{aid}/inspect").json()["heartbeat"]
+        hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
     assert hb["heartbeat_pending"] is False
     assert hb["next_at"] is not None
     expected = settings.daemon.heartbeat_idle_threshold_seconds - 120 + aid % JITTER_SPAN_S
@@ -2396,7 +2398,7 @@ def test_inspect_heartbeat_last_pause_newest_wins(
     )
     db_conn.commit()
     with TestClient(app) as client:
-        hb = client.get(f"/api/agents/{aid}/inspect").json()["heartbeat"]
+        hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
     assert hb["last_pause"] is not None
     assert hb["last_pause"]["duration_s"] == 1800
     # at ≈ now - 1h
@@ -2416,7 +2418,7 @@ def test_inspect_heartbeat_last_pause_beyond_lookback_is_none(
     )
     db_conn.commit()
     with TestClient(app) as client:
-        hb = client.get(f"/api/agents/{aid}/inspect").json()["heartbeat"]
+        hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
     assert hb["last_pause"] is None
 
 
@@ -2439,7 +2441,7 @@ def test_inspect_notice_when_agent_has_open_require_response(db_conn: psycopg.Co
     nid, _created_at = row
     db_conn.commit()
     with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/inspect").json()
+        body = client.get(f"/api/agents/{aid}/inspect/live").json()
     notice = body["notice"]
     assert notice is not None
     assert notice["id"] == nid
@@ -2466,7 +2468,7 @@ def test_inspect_notice_when_agent_has_open_fyi(db_conn: psycopg.Connection) -> 
     nid = row[0]
     db_conn.commit()
     with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/inspect").json()
+        body = client.get(f"/api/agents/{aid}/inspect/live").json()
     notice = body["notice"]
     assert notice is not None
     assert notice["id"] == nid
@@ -2480,7 +2482,7 @@ def test_inspect_notice_when_agent_has_none(db_conn: psycopg.Connection) -> None
     aid = _insert_agent(db_conn)
     db_conn.commit()
     with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/inspect").json()
+        body = client.get(f"/api/agents/{aid}/inspect/live").json()
     assert body["notice"] is None
 
 
@@ -2503,7 +2505,7 @@ def test_inspect_notice_resolved_not_returned(db_conn: psycopg.Connection) -> No
         )
     db_conn.commit()
     with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/inspect").json()
+        body = client.get(f"/api/agents/{aid}/inspect/live").json()
     assert body["notice"] is not None
     assert body["notice"]["title"] == "Current"
 
@@ -2521,7 +2523,7 @@ def test_inspect_notice_other_agent_not_visible(db_conn: psycopg.Connection) -> 
         )
     db_conn.commit()
     with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/inspect").json()
+        body = client.get(f"/api/agents/{aid}/inspect/live").json()
     assert body["notice"] is None
 
 
@@ -2530,7 +2532,7 @@ def test_inspect_tps_empty_agent_zeros(db_conn: psycopg.Connection) -> None:
     aid = _insert_agent(db_conn)
     db_conn.commit()
     with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/inspect").json()
+        body = client.get(f"/api/agents/{aid}/inspect/statistics").json()
     tps = body["tps"]
     assert tps["lm_stage_tps"] == 0.0
     assert tps["agent_lifecycle_tps"] == 0.0
@@ -2559,7 +2561,7 @@ def test_inspect_tps_lm_stage(db_conn: psycopg.Connection, fake_loki: _FakeLoki)
         )
     db_conn.commit()
     with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/inspect").json()
+        body = client.get(f"/api/agents/{aid}/inspect/statistics").json()
     tps = body["tps"]
     # 1,000,000 output tokens / 25s = 40,000 tps
     assert tps["lm_stage_tps"] == 40000.0
@@ -2598,7 +2600,7 @@ def test_inspect_tps_lifecycle_from_events(
     )
     db_conn.commit()
     with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/inspect").json()
+        body = client.get(f"/api/agents/{aid}/inspect/statistics").json()
     tps = body["tps"]
     # First life: 1h - 0.5h = 0.5h = 1800s
     # Second life: 0.25h ago → now ≈ 0.25h = 900s
@@ -2645,7 +2647,7 @@ def test_inspect_tps_hours_windows_tps(db_conn: psycopg.Connection, fake_loki: _
     )
     db_conn.commit()
     with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/inspect?hours=1").json()
+        body = client.get(f"/api/agents/{aid}/inspect/statistics?hours=1").json()
     tps = body["tps"]
     # LM-stage: 50 output tokens / 2s = 25 tps (old events excluded)
     assert tps["lm_stage_tps"] == 25.0
@@ -2660,7 +2662,7 @@ def test_inspect_tps_field_present_in_response(
     aid = _insert_agent(db_conn)
     db_conn.commit()
     with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/inspect").json()
+        body = client.get(f"/api/agents/{aid}/inspect/statistics").json()
     assert "tps" in body
     assert "lm_stage_tps" in body["tps"]
     assert "agent_lifecycle_tps" in body["tps"]
@@ -2694,7 +2696,7 @@ def test_inspect_activity_field_present(db_conn: psycopg.Connection) -> None:
     aid = _insert_agent(db_conn)
     db_conn.commit()
     with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/inspect").json()
+        body = client.get(f"/api/agents/{aid}/inspect/statistics").json()
     assert "activity" in body
     act = body["activity"]
     assert set(act) == {
@@ -2713,7 +2715,7 @@ def test_inspect_activity_empty_agent_zeros(db_conn: psycopg.Connection) -> None
     aid = _insert_agent(db_conn)
     db_conn.commit()
     with TestClient(app) as client:
-        act = client.get(f"/api/agents/{aid}/inspect").json()["activity"]
+        act = client.get(f"/api/agents/{aid}/inspect/statistics").json()["activity"]
     assert act["active_seconds"] == 0
     assert act["active_rate"] == 0
 
@@ -2732,7 +2734,7 @@ def test_inspect_activity_sums_non_claim_nodes(
     _node_exit(fake_loki, agent_id=aid, node="before_llm", duration_seconds=5.0)
     db_conn.commit()
     with TestClient(app) as client:
-        act = client.get(f"/api/agents/{aid}/inspect").json()["activity"]
+        act = client.get(f"/api/agents/{aid}/inspect/statistics").json()["activity"]
     assert act["active_seconds"] == pytest.approx(35.0)  # pyright: ignore[reportUnknownMemberType]
     assert act["alive_seconds"] == pytest.approx(3600, abs=30)  # pyright: ignore[reportUnknownMemberType]
     # 35 / 3600 ≈ 0.0097
@@ -2758,7 +2760,7 @@ def test_inspect_activity_sums_aggregated_node_exits(
     db_conn.commit()
 
     with TestClient(app) as client:
-        activity = client.get(f"/api/agents/{aid}/inspect").json()["activity"]
+        activity = client.get(f"/api/agents/{aid}/inspect/statistics").json()["activity"]
 
     assert activity["active_seconds"] == 30.0
     assert activity["exec_seconds"] == 20.0
@@ -2776,7 +2778,7 @@ def test_inspect_activity_excludes_claim_node(
     _node_exit(fake_loki, agent_id=aid, node="llm", duration_seconds=12.0)
     db_conn.commit()
     with TestClient(app) as client:
-        act = client.get(f"/api/agents/{aid}/inspect").json()["activity"]
+        act = client.get(f"/api/agents/{aid}/inspect/statistics").json()["activity"]
     # only the llm node counts — the 3000s claim is excluded
     assert act["active_seconds"] == pytest.approx(12.0)  # pyright: ignore[reportUnknownMemberType]
 
@@ -2795,7 +2797,7 @@ def test_inspect_activity_counts_missing_node_in_any_category(
     db_conn.commit()
 
     with TestClient(app) as client:
-        activity = client.get(f"/api/agents/{aid}/inspect").json()["activity"]
+        activity = client.get(f"/api/agents/{aid}/inspect/statistics").json()["activity"]
 
     assert activity["active_seconds"] == 3.0
     assert activity["exec_seconds"] == 0.0
@@ -2813,7 +2815,7 @@ def test_inspect_activity_rate_capped_at_one(
     _node_exit(fake_loki, agent_id=aid, node="exec", duration_seconds=100.0)
     db_conn.commit()
     with TestClient(app) as client:
-        act = client.get(f"/api/agents/{aid}/inspect").json()["activity"]
+        act = client.get(f"/api/agents/{aid}/inspect/statistics").json()["activity"]
     assert act["active_seconds"] == pytest.approx(100.0)  # pyright: ignore[reportUnknownMemberType]
     assert act["active_rate"] == 1.0
 
@@ -2831,8 +2833,10 @@ def test_inspect_activity_windows_both_active_and_alive(
     _node_exit(fake_loki, agent_id=aid, node="exec", duration_seconds=20.0, ts_offset_hours=0.5)
     db_conn.commit()
     with TestClient(app) as client:
-        windowed = client.get(f"/api/agents/{aid}/inspect", params={"hours": 1}).json()["activity"]
-        cumulative = client.get(f"/api/agents/{aid}/inspect").json()["activity"]
+        windowed = client.get(f"/api/agents/{aid}/inspect/statistics", params={"hours": 1}).json()[
+            "activity"
+        ]
+        cumulative = client.get(f"/api/agents/{aid}/inspect/statistics").json()["activity"]
     # windowed: only the in-window 20s; alive clipped to the last 1h ≈ 3600s.
     assert windowed["active_seconds"] == pytest.approx(20.0)  # pyright: ignore[reportUnknownMemberType]
     assert windowed["alive_seconds"] == pytest.approx(3600, abs=30)  # pyright: ignore[reportUnknownMemberType]
@@ -2851,7 +2855,7 @@ def test_inspect_activity_scoped_to_agent(
     _node_exit(fake_loki, agent_id=other, node="llm", duration_seconds=999.0)
     db_conn.commit()
     with TestClient(app) as client:
-        act = client.get(f"/api/agents/{aid}/inspect").json()["activity"]
+        act = client.get(f"/api/agents/{aid}/inspect/statistics").json()["activity"]
     assert act["active_seconds"] == 0
 
 
@@ -2873,7 +2877,7 @@ def test_inspect_activity_terminate_only_falls_back_to_spawned_at(
     _node_exit(fake_loki, agent_id=aid, node="llm", duration_seconds=60.0)
     db_conn.commit()
     with TestClient(app) as client:
-        act = client.get(f"/api/agents/{aid}/inspect").json()["activity"]
+        act = client.get(f"/api/agents/{aid}/inspect/statistics").json()["activity"]
     # spawned_at → now ≈ 2h = 7200s (no start event to anchor an interval)
     assert act["alive_seconds"] == pytest.approx(7200, abs=30)  # pyright: ignore[reportUnknownMemberType]
     assert act["active_rate"] > 0
@@ -2893,7 +2897,9 @@ def test_inspect_activity_started_but_dead_before_window_is_zero(
     _node_exit(fake_loki, agent_id=aid, node="llm", duration_seconds=10.0, ts_offset_hours=4)
     db_conn.commit()
     with TestClient(app) as client:
-        act = client.get(f"/api/agents/{aid}/inspect", params={"hours": 1}).json()["activity"]
+        act = client.get(f"/api/agents/{aid}/inspect/statistics", params={"hours": 1}).json()[
+            "activity"
+        ]
     assert act["alive_seconds"] == 0
     assert act["active_rate"] == 0
 
@@ -2917,7 +2923,7 @@ def test_inspect_activity_resurrect_without_terminate_keeps_prior_interval(
     _node_exit(fake_loki, agent_id=aid, node="llm", duration_seconds=1800.0, ts_offset_hours=1)
     db_conn.commit()
     with TestClient(app) as client:
-        act = client.get(f"/api/agents/{aid}/inspect").json()["activity"]
+        act = client.get(f"/api/agents/{aid}/inspect/statistics").json()["activity"]
     # spawn→resurrect (3h) + resurrect→now (2h) ≈ 5h = 18000s, not just 2h.
     assert act["alive_seconds"] == pytest.approx(18000, abs=60)  # pyright: ignore[reportUnknownMemberType]
     # 3600s active over 18000s alive — comfortably under the 1.0 cap.
@@ -2939,7 +2945,7 @@ def test_inspect_activity_multiple_resurrects_sum_all_intervals(
     fake_loki.add(event="agent_resurrected", agent_id=aid, ts_offset_hours=2)
     db_conn.commit()
     with TestClient(app) as client:
-        act = client.get(f"/api/agents/{aid}/inspect").json()["activity"]
+        act = client.get(f"/api/agents/{aid}/inspect/statistics").json()["activity"]
     # 4h + 4h + 2h = 10h = 36000s.
     assert act["alive_seconds"] == pytest.approx(36000, abs=60)  # pyright: ignore[reportUnknownMemberType]
 
@@ -2957,7 +2963,9 @@ def test_inspect_activity_resurrect_without_terminate_windows_clip(
     fake_loki.add(event="agent_resurrected", agent_id=aid, ts_offset_hours=0.5)
     db_conn.commit()
     with TestClient(app) as client:
-        act = client.get(f"/api/agents/{aid}/inspect", params={"hours": 1}).json()["activity"]
+        act = client.get(f"/api/agents/{aid}/inspect/statistics", params={"hours": 1}).json()[
+            "activity"
+        ]
     # In the 1h window: [now-1h, resurrect] (0.5h) + [resurrect, now] (0.5h) = 1h.
     assert act["alive_seconds"] == pytest.approx(3600, abs=30)  # pyright: ignore[reportUnknownMemberType]
 
@@ -2976,13 +2984,13 @@ def test_inspect_response_cache_absorbs_repeat_burst(
     fake_loki.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 2.0, "ok": True})
     db_conn.commit()
     with TestClient(app) as client:
-        first = client.get(f"/api/agents/{aid}/inspect").json()
+        first = client.get(f"/api/agents/{aid}/inspect/statistics").json()
         assert first["stats"]["turn_total"] == 1
 
         # More events land AFTER the first call; a cached serve must not see them.
         fake_loki.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 4.0, "ok": True})
         fake_loki.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 6.0, "ok": True})
-        second = client.get(f"/api/agents/{aid}/inspect").json()
+        second = client.get(f"/api/agents/{aid}/inspect/statistics").json()
         assert second["stats"]["turn_total"] == 1  # cached, pre-burst view
 
         # ... but a newly opened notice appears on the very next call.
@@ -2993,7 +3001,7 @@ def test_inspect_response_cache_absorbs_repeat_burst(
             (aid, aid),
         )
         db_conn.commit()
-        third = client.get(f"/api/agents/{aid}/inspect").json()
+        third = client.get(f"/api/agents/{aid}/inspect/live").json()
         assert third["notice"] is not None
         assert third["notice"]["title"] == "q"
 
@@ -3028,13 +3036,14 @@ def test_inspect_cache_keeps_only_aggregates_and_refreshes_live_db_fields(
     db_conn.commit()
 
     with TestClient(app) as client:
-        first = client.get(f"/api/agents/{aid}/inspect").json()
+        first = client.get(f"/api/agents/{aid}/inspect/live").json()
+        first_statistics = client.get(f"/api/agents/{aid}/inspect/statistics").json()
         assert first["machine"] == "runner-a"
         assert first["config_overlay"] == {"llm_model": "model-a"}
         assert first["liveness_state"] == "online"
         assert first["last_probe_at"] is not None
         assert first["heartbeat"]["next_at"] is not None
-        assert first["stats"]["turn_total"] == 1
+        assert first_statistics["stats"]["turn_total"] == 1
 
         fake_loki.add(
             event="turn_end",
@@ -3052,14 +3061,15 @@ def test_inspect_cache_keeps_only_aggregates_and_refreshes_live_db_fields(
 
         # Immediate/manual refresh: no monotonic time passes, but every live
         # field must already be B while the Loki aggregate stays A.
-        manual = client.get(f"/api/agents/{aid}/inspect").json()
+        manual = client.get(f"/api/agents/{aid}/inspect/live").json()
+        manual_statistics = client.get(f"/api/agents/{aid}/inspect/statistics").json()
         assert manual["machine"] == "runner-b"
         assert manual["config_overlay"] == {"llm_model": "model-b"}
         assert manual["liveness_state"] == "offline"
         assert manual["last_probe_at"] is None
         assert manual["heartbeat"]["next_at"] is None
         assert manual["heartbeat"]["paused_until"] is None
-        assert manual["stats"]["turn_total"] == 1
+        assert manual_statistics["stats"]["turn_total"] == 1
 
         with db_conn.cursor() as cur:
             cur.execute(
@@ -3074,7 +3084,8 @@ def test_inspect_cache_keeps_only_aggregates_and_refreshes_live_db_fields(
         # Background poll at t+60 is still an aggregate-cache hit (TTL=75),
         # yet the live projection must advance again to C.
         clock[0] += 60
-        refreshed = client.get(f"/api/agents/{aid}/inspect").json()
+        refreshed = client.get(f"/api/agents/{aid}/inspect/live").json()
+        refreshed_statistics = client.get(f"/api/agents/{aid}/inspect/statistics").json()
 
     assert refreshed["machine"] == "runner-c"
     assert refreshed["config_overlay"] == {"llm_model": "model-c"}
@@ -3084,7 +3095,7 @@ def test_inspect_cache_keeps_only_aggregates_and_refreshes_live_db_fields(
     assert refreshed["heartbeat"]["paused_until"] is not None
     # The historical aggregate is the only cached part; the new Loki row is
     # intentionally invisible until the 75s TTL expires.
-    assert refreshed["stats"]["turn_total"] == 1
+    assert refreshed_statistics["stats"]["turn_total"] == 1
 
 
 def test_inspect_releases_live_db_borrow_before_cached_loki_fanout(
@@ -3095,24 +3106,7 @@ def test_inspect_releases_live_db_borrow_before_cached_loki_fanout(
 
     class TrackingCursor:
         def __init__(self) -> None:
-            self.rows: list[tuple[Any, ...]] = [
-                (
-                    {},
-                    None,
-                    "runner",
-                    "running",
-                    now,
-                    None,
-                    now,
-                    now,
-                    None,
-                    "online",
-                    now,
-                    None,
-                    now,
-                ),
-                (False,),
-            ]
+            self.rows: list[tuple[Any, ...]] = [(now,)]
 
         def __enter__(self) -> TrackingCursor:
             return self
@@ -3164,7 +3158,7 @@ def test_inspect_releases_live_db_borrow_before_cached_loki_fanout(
         app = RequestApp()
 
     with pytest.raises(StopAfterOrderingProofError):
-        asyncio.run(agent_inspect.get_agent_inspect(7, FakeRequest()))  # type: ignore[arg-type]
+        asyncio.run(agent_inspect.get_agent_inspect_statistics(7, FakeRequest()))  # type: ignore[arg-type]
 
 
 def test_inspect_response_cache_keyed_by_window(
@@ -3176,7 +3170,7 @@ def test_inspect_response_cache_keyed_by_window(
     fake_loki.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 1.0, "ok": True})
     db_conn.commit()
     with TestClient(app) as client:
-        windowed = client.get(f"/api/agents/{aid}/inspect", params={"hours": 1}).json()
+        windowed = client.get(f"/api/agents/{aid}/inspect/statistics", params={"hours": 1}).json()
         assert windowed["stats"]["turn_total"] == 1
 
         # An event older than the 1h window lands after the windowed call.
@@ -3187,10 +3181,12 @@ def test_inspect_response_cache_keyed_by_window(
             ts_offset_hours=3,
         )
         # Whole-life is a different cache entry: it must see the old event.
-        whole = client.get(f"/api/agents/{aid}/inspect").json()
+        whole = client.get(f"/api/agents/{aid}/inspect/statistics").json()
         assert whole["stats"]["turn_total"] == 2
         # The windowed entry is still cached from before: no new event seen.
-        windowed_again = client.get(f"/api/agents/{aid}/inspect", params={"hours": 1}).json()
+        windowed_again = client.get(
+            f"/api/agents/{aid}/inspect/statistics", params={"hours": 1}
+        ).json()
         assert windowed_again["stats"]["turn_total"] == 1
 
 
@@ -3206,11 +3202,11 @@ def test_inspect_response_cache_expires(
     fake_loki.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 2.0, "ok": True})
     db_conn.commit()
     with TestClient(app) as client:
-        first = client.get(f"/api/agents/{aid}/inspect").json()
+        first = client.get(f"/api/agents/{aid}/inspect/statistics").json()
         assert first["stats"]["turn_total"] == 1
 
         fake_loki.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 4.0, "ok": True})
-        second = client.get(f"/api/agents/{aid}/inspect").json()
+        second = client.get(f"/api/agents/{aid}/inspect/statistics").json()
         assert second["stats"]["turn_total"] == 2
 
 
@@ -3564,3 +3560,71 @@ def test_inspect_cache_bounds_values_and_distinct_inflight_keys() -> None:
             cache.get_or_load("overflow", lambda: "no", ttl_s=10, now=lambda: 0)
         release.set()
         assert holder.result(timeout=1) == "held"
+
+
+def test_statistics_has_no_current_state_dependencies(
+    db_conn: psycopg.Connection,
+    fake_loki: _FakeLoki,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A runner/notice/live-state outage cannot prevent reading statistics."""
+    aid = _insert_agent(db_conn)
+    fake_loki.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 2.0, "ok": True})
+    db_conn.commit()
+
+    def unexpected_current_read(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("statistics must not read current inspector state")
+
+    for name in (
+        "db_rows_blocking",
+        "notice_blocking",
+        "_probe_agent_shells",
+        "_heartbeat_last_pause",
+    ):
+        monkeypatch.setattr(agent_inspect, name, unexpected_current_read)
+    with TestClient(app) as client:
+        for hours in (1, 24):
+            response = client.get(f"/api/agents/{aid}/inspect/statistics", params={"hours": hours})
+            assert response.status_code == 200
+            body = response.json()
+            assert body["stats"]["turn_total"] == 1
+            assert set(body) == {
+                "agent_id",
+                "window_hours",
+                "applied_window_hours",
+                "since_compact",
+                "cost",
+                "stats",
+                "tps",
+                "activity",
+            }
+        assert client.get(f"/api/agents/{aid}/inspect").status_code == 404
+
+
+def test_statistics_deadline_cancels_pending_sections(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Queued sections cannot survive an expired aggregate leader indefinitely."""
+    futures: list[Future[Any]] = []
+
+    class QueuedExecutor:
+        def submit(self, *args: Any, **kwargs: Any) -> Future[Any]:
+            future: Future[Any] = Future()
+            futures.append(future)
+            return future
+
+    monkeypatch.setattr(agent_inspect, "_inspect_executor", QueuedExecutor())
+
+    def unbounded_window(*_args: Any, **_kwargs: Any) -> tuple[None, None]:
+        return None, None
+
+    monkeypatch.setattr(agent_inspect, "window_bounds", unbounded_window)
+    with pytest.raises(TimeoutError):
+        agent_inspect._inspect_blocking(
+            None,  # type: ignore[arg-type]
+            1,
+            None,
+            since_compact=False,
+            spawned_at=None,
+            deadline=time.monotonic() + 0.01,
+        )
+    assert len(futures) == 2
+    assert all(future.cancelled() for future in futures)

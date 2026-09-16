@@ -11,7 +11,7 @@ import { track } from "./telemetry";
 import type { NoticesFeed,
   UserSettingListResponse,
   UserSettingRow,
-  AgentInspect,
+  AgentInspectStatistics,
   AgentInspectLive,
   AgentMachineRow,
   InspectWidget,
@@ -251,18 +251,18 @@ export const api = {
   // (0 = 5m; 1/6/24/72/168 = hours); omitted = cumulative since spawn. `sinceCompact`
   // windows them to events since the agent's latest compact halt instead
   // (takes precedence over `hours` backend-side).
-  getAgentInspect: (
+  getAgentInspectStatistics: (
     agentId: number,
     hours?: number | null,
     sinceCompact?: boolean,
     signal?: AbortSignal,
-  ): Promise<AgentInspect> => {
+  ): Promise<AgentInspectStatistics> => {
     const params = new URLSearchParams();
     if (hours != null) params.set("hours", String(hours));
     if (sinceCompact) params.set("since_compact", "true");
     const qs = params.toString();
-    return jsonWithTimeout<AgentInspect>(
-      `/api/agents/${agentId}/inspect${qs ? `?${qs}` : ""}`,
+    return jsonWithTimeout<AgentInspectStatistics>(
+      `/api/agents/${agentId}/inspect/statistics${qs ? `?${qs}` : ""}`,
       {},
       INSPECT_REQUEST_TIMEOUT_MS,
       signal,
@@ -270,7 +270,7 @@ export const api = {
     );
   },
 
-  // Cheap, window-independent inspector skeleton. Unlike getAgentInspect this
+  // Cheap, window-independent inspector skeleton. Unlike getAgentInspectStatistics this
   // omits the Loki aggregate fan-out and carries only current shells, liveness,
   // configuration, notice, timestamps, and heartbeat state.
   getAgentInspectLive: (

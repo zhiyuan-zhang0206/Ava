@@ -43,7 +43,7 @@ import { startTransition, useCallback, useEffect, useLayoutEffect, useRef } from
 
 import { api } from "./api";
 import { useDisplayLimit } from "./display-limits";
-import { inspectLiveQueryKey } from "./inspector-prefetch";
+import { inspectLiveQueryKey } from "./inspector-queries";
 import { errMsg } from "./errors";
 import { noteTurnStart } from "./interaction-timing";
 import { useTimelineStore } from "./timeline-store";

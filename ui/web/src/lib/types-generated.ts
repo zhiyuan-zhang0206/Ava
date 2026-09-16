@@ -938,7 +938,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/agents/{agent_id}/inspect": {
+    "/api/agents/{agent_id}/inspect/statistics": {
         parameters: {
             query?: never;
             header?: never;
@@ -946,49 +946,15 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get Agent Inspect
-         * @description Per-agent inspector panel data in one shot — the agent's live persistent
-         *     shells, its frozen config overlay, its LLM cost, turn/exec stats, idle
-         *     heartbeat state. The
-         *     single-agent counterpart to `/api/stats/dashboard` (fleet-wide).
+         * Get Agent Inspect Statistics
+         * @description Read only the selected agent's window-dependent statistics.
          *
-         *     `?hours=` windows `cost` + `stats` to the selected range (0 = last 5m;
-         *     1/6/24/72/168 = hours, anything else 422s), clamped to Loki retention;
-         *     omitted = cumulative since spawn. `applied_window_hours` reports the
-         *     served horizon while `window_hours` continues to echo the request.
-         *     `?since_compact=true` windows them to events since the agent's latest
-         *     compact halt instead — it takes precedence, `hours` is ignored and the
-         *     echoed `window_hours` is None.
-         *     `shells` + `config_overlay` + `heartbeat` are always
-         *     current, independent of the window. 404 if the agent is unknown (no
-         *     agents_meta row). `config_overlay` is the spawn-time override map — `{}` when
-         *     the agent runs on cluster defaults (the column is NULL).
-         *
-         *     Latency discipline: event-history sections use a shared bounded executor,
-         *     and only their aggregates ride a 75s TTL cache keyed by (agent_id, hours,
-         *     since_compact). Concurrent misses share one single-flight Future; no more
-         *     than `_INSPECT_MAX_CONCURRENT_LOADS` distinct leaders run at once, and a
-         *     saturated request gets the queue-full 503. Each leader's 15-second response
-         *     budget is also its load deadline, so expired work stops and releases its
-         *     admission slot rather than continuing under transport timeouts. The
-         *     agents_meta projection (machine, config, heartbeat inputs, liveness and
-         *     timestamps), `notice`, and `shells` are fetched fresh on every call and
-         *     never ride the cache. `shells` is probed on the agent's own machine via the
-         *     `shell_probe` cluster op (the gateway never runs sessions itself; every
-         *     machine — its own included — is dialed at its registered ops URL), so a
-         *     split deployment reflects each agent's runner and an unreachable machine
-         *     sets shells_available=False rather than claiming no shells exist.
-         *     `heartbeat` is the agent's idle check-in state: the
-         *     projected next check-in due time when idle (or the active pause / running
-         *     suppression) plus its most recent pause from history.
-         *
-         *     The retained live lifecycle leg begins at the index-label cutover and never
-         *     scans the legacy slice. It has an 8-second Loki timeout and a per-agent
-         *     thirty-minute single-flight cache, so changing `hours` or `since_compact`
-         *     does not repeat that indexed read. Agents whose lifecycle history is wholly
-         *     pre-cutover use the `spawned_at` fallback described by `_alive_seconds`.
+         *     Current state, notices, runner shells, and heartbeat history are owned by
+         *     ``/inspect/live`` and are never fetched here. Statistics retain their
+         *     bounded, single-flight 75-second aggregate cache and load deadline.
+         *     ``hours`` is retention-clamped; ``since_compact`` takes precedence.
          */
-        get: operations["get_agent_inspect_api_agents__agent_id__inspect_get"];
+        get: operations["get_agent_inspect_statistics_api_agents__agent_id__inspect_statistics_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3812,78 +3778,6 @@ export interface components {
             items: components["schemas"]["AgentEventRow"][];
         };
         /**
-         * AgentInspect
-         * @description GET /api/agents/{id}/inspect response — the per-agent inspector panel.
-         *
-         *     A single-agent view, in contrast to `/api/stats/dashboard` (the whole fleet
-         *     aggregated): the agent's live persistent shells, its frozen per-agent config
-         *     overlay, its current open notice (since #152 at most one), its cumulative
-         *     LLM cost, turn/exec stats, active-rate (working vs blocked-on-a-human),
-         *     idle-heartbeat state, and delivery-obligation state.
-         *     `config_overlay` is the spawn-time field-override map (empty when the agent
-         *     runs on cluster defaults); `preset_name` names the spawn-time preset whose
-         *     config was folded into it (None when no preset was used). `shells` is
-         *     probed on the agent's own machine via
-         *     the `shell_probe` cluster op — the gateway never runs sessions itself, so a
-         *     split deployment sees each agent's shells wherever that agent runs.
-         *
-         *     `window_hours` echoes the `?hours=` request parameter: None = cumulative
-         *     since spawn (the default), else `cost` + `stats` + `tps` + `activity`
-         *     aggregate only over the past N hours. `applied_window_hours` is the
-         *     actually served window in hours, no greater than `window_hours` and
-         *     clamped to the Loki retention horizon; it is None for whole-life and
-         *     since-compact reads. `since_compact` echoes
-         *     `?since_compact=`: True = those cover only events since the agent's latest
-         *     compact halt (`hours` is ignored and `window_hours` is None). `shells`,
-         *     `config_overlay`, `notice`, and `heartbeat` are always current, independent
-         *     of the window.
-         */
-        AgentInspect: {
-            /** Agent Id */
-            agent_id: number;
-            /** Machine */
-            machine: string;
-            /**
-             * Liveness State
-             * @enum {string}
-             */
-            liveness_state: "online" | "offline" | "unknown";
-            /** Last Probe At */
-            last_probe_at?: string | null;
-            observation?: components["schemas"]["AgentObservation"] | null;
-            /** Shells Available */
-            shells_available?: boolean | null;
-            /**
-             * Spawned At
-             * Format: date-time
-             */
-            spawned_at: string;
-            /** Started At */
-            started_at?: string | null;
-            window_hours?: components["schemas"]["StatsWindowHours"] | null;
-            /** Applied Window Hours */
-            applied_window_hours?: number | null;
-            /**
-             * Since Compact
-             * @default false
-             */
-            since_compact: boolean;
-            /** Shells */
-            shells: components["schemas"]["ShellInfo"][];
-            /** Config Overlay */
-            config_overlay: {
-                [key: string]: unknown;
-            };
-            /** Preset Name */
-            preset_name?: string | null;
-            notice?: components["schemas"]["OpenNotice"] | null;
-            cost: components["schemas"]["AgentCost"];
-            stats: components["schemas"]["AgentStats"];
-            tps: components["schemas"]["AgentTps"];
-            activity: components["schemas"]["AgentActivity"];
-            heartbeat: components["schemas"]["HeartbeatInfo"];
-        };
-        /**
          * AgentInspectLive
          * @description GET /api/agents/{id}/inspect/live response — the inspector's cheap,
          *     window-independent skeleton.
@@ -3926,6 +3820,31 @@ export interface components {
             preset_name?: string | null;
             notice?: components["schemas"]["OpenNotice"] | null;
             heartbeat: components["schemas"]["HeartbeatInfo"];
+        };
+        /**
+         * AgentInspectStatistics
+         * @description Window-dependent statistics, with no current control-plane state.
+         *
+         *     ``window_hours`` and ``since_compact`` identify the requested view;
+         *     ``applied_window_hours`` exposes a retention-clamped hour window. The
+         *     aggregate computation and its existing source coverage are unchanged.
+         *     Current state belongs exclusively to ``AgentInspectLive``.
+         */
+        AgentInspectStatistics: {
+            /** Agent Id */
+            agent_id: number;
+            window_hours?: components["schemas"]["StatsWindowHours"] | null;
+            /** Applied Window Hours */
+            applied_window_hours?: number | null;
+            /**
+             * Since Compact
+             * @default false
+             */
+            since_compact: boolean;
+            cost: components["schemas"]["AgentCost"];
+            stats: components["schemas"]["AgentStats"];
+            tps: components["schemas"]["AgentTps"];
+            activity: components["schemas"]["AgentActivity"];
         };
         /**
          * AgentMachineRow
@@ -5234,7 +5153,7 @@ export interface components {
          * HeartbeatLastPause
          * @description The agent's most recent heartbeat pause — when it last opted out of idle
          *     check-ins and the length it asked for. Sourced from the newest
-         *     `heartbeat_paused` events row; None on AgentInspect when the agent has
+         *     `heartbeat_paused` events row; None on AgentInspectLive when the agent has
          *     never paused. `at` is when the pause was requested; `duration_s` is the
          *     requested window in seconds (the agent's `pause_heartbeat(duration)` arg).
          */
@@ -9182,7 +9101,7 @@ export interface operations {
             };
         };
     };
-    get_agent_inspect_api_agents__agent_id__inspect_get: {
+    get_agent_inspect_statistics_api_agents__agent_id__inspect_statistics_get: {
         parameters: {
             query?: {
                 hours?: components["schemas"]["StatsWindowHours"] | null;
@@ -9202,7 +9121,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AgentInspect"];
+                    "application/json": components["schemas"]["AgentInspectStatistics"];
                 };
             };
             /** @description Validation Error */
