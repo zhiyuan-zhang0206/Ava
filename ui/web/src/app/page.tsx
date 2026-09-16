@@ -30,7 +30,7 @@
 import { useQuery } from "@tanstack/react-query";
 import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AgentSidebar } from "@/components/agent-sidebar";
 import { AlertsBadge } from "@/components/alerts-badge";
@@ -53,7 +53,7 @@ import { useStore } from "@/lib/store";
 import { useTimelineStore } from "@/lib/timeline-store";
 import type { AgentRow, ContentBlock } from "@/lib/types";
 import { useAgents } from "@/lib/use-agents";
-import { usePendingMessages } from "@/lib/use-pending-messages";
+import { usePendingMessages, withoutTimelineDuplicates } from "@/lib/use-pending-messages";
 import { useTimeline } from "@/lib/use-timeline";
 import { timelineMaxWidthCss } from "@/lib/timeline-width";
 import { useUserSettings } from "@/lib/use-user-settings";
@@ -301,6 +301,13 @@ function HomeContent({
     showError,
   );
   const pendingMessages = usePendingMessages(activeId, showError);
+  // A message captured by an external takeover is already in the timeline while
+  // its row still reads status='pending' (cleared only at the executor's ACK),
+  // so hide strip entries the conversation already shows (task #3683).
+  const visiblePendingMessages = useMemo(
+    () => withoutTimelineDuplicates(pendingMessages, items),
+    [pendingMessages, items],
+  );
 
   const handleSend = useCallback(
     async (
@@ -425,7 +432,7 @@ function HomeContent({
               up instead of overlapping it. The composer's own top divider
               separates it from the timeline content. */}
           <div className="relative z-20 bg-background">
-            <PendingStrip items={pendingMessages} maxWidthCss={composerMaxWidth} />
+            <PendingStrip items={visiblePendingMessages} maxWidthCss={composerMaxWidth} />
             <Composer
               maxWidthCss={composerMaxWidth}
               mode={composerMode}
