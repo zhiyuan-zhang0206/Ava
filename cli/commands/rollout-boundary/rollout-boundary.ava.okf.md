@@ -34,6 +34,13 @@ tags:
   code on the new revision and reports schema state as unknown.
 
 - Deterministic prepare failures block; duration estimates are telemetry only.
+- The local stop leg refuses to start while this host's backup pipeline is in
+  flight (task #3661): the `pg-backup` scheduler's `/healthz` `progress` field
+  reports a running dump / off-site publish / restore drill, and a live
+  stand-alone `services.backup --publish-offsite` process is scanned for —
+  either one declines the dispatch with `RESTART_DECLINED_EXIT_CODE` before
+  anything is signalled (the 2026-09-16 wave abort was this stop meeting the
+  daily dump's off-site publish). `AVA_UPDATE_BACKUP_PRECHECK=false` overrides.
 
 ## Readiness and Phase B
 

@@ -161,6 +161,23 @@ class GatewaySettings(EnvSettings):
         },
     )
 
+    update_backup_precheck: bool = Field(
+        default=True,
+        alias="AVA_UPDATE_BACKUP_PRECHECK",
+        description=(
+            "Refuse `ava cluster update`'s gateway stop while a logical-backup job "
+            "or off-site publish is in flight on this host (task #3661; the "
+            "2026-09-16 wave abort was the stop meeting the daily dump's off-site "
+            "publish). false (0) dispatches anyway."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     pause_lifecycle_wait_seconds: float = Field(
         default=90.0,
         ge=0,
