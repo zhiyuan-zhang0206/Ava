@@ -50,8 +50,11 @@ the only difference is whether you speak up.
 When you are waiting on an external event, arm a watcher and idle. A few common
 cases:
 
-- **Peer agent reply**: poll `ava.agents.get_last_message(target)` in a custom
-  watcher, message yourself when it changes.
+- **Peer agent reply**: a message addressed to you wakes you — nothing to poll.
+  `ava.agents.get_last_message(target)` is not a reply signal: it returns the
+  peer's last AI *turn text*, `None` when that turn had no text (e.g. the peer
+  answered by `send_message`, task #3656). Poll it only when the signal you
+  await genuinely is turn text; for liveness use `ava.agents.get_status(target)`.
 - **Scheduled time**: `ava.watcher.at(...)`.
 - **File to land**: poll `os.path.exists(...)` in a custom watcher.
 - **Recurring check**: `ava.watcher.cron(...)` for periodic CI/health/deadline checks.
