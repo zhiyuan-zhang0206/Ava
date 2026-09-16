@@ -377,6 +377,11 @@ def test_personal_write_is_immune_to_ava_cwd_drift(memory_plugin: Any, tmp_path:
             del sys.modules[name]
     with PluginContext("ava_code"):
         import_module("ava_builtins.plugins.ava_code.plugin")
+        # The state field + real handle live in the runtime face (task #3633);
+        # the surface alone registers neither — load the face so
+        # build_agent_state() carries ava_code__* and the handle is bound,
+        # as in production.
+        import_module("ava_builtins.plugins.ava_code.agent_runtime")
 
     drifted_cwd = tmp_path / "repository"
     drifted_cwd.mkdir()
