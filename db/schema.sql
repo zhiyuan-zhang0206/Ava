@@ -1728,6 +1728,61 @@ BEGIN
     END IF;
 END $$;
 
+-- ─────────────── understanding_nodes ───────────────
+-- Materialized hierarchical understanding nodes (task #3704): the level tree
+-- behind the run-timeline narrative layers. One row per sealed node, keyed by
+-- the deterministic message span; the node's single text plus the hashes that
+-- make writes idempotent (text_hash) and reruns free (input_hash). Boundaries
+-- are never trimmed (#1125), so the span identity is stable across runs.
+CREATE TABLE understanding_nodes (
+    id BIGSERIAL PRIMARY KEY,
+    agent_id BIGINT NOT NULL,
+    depth INTEGER NOT NULL CHECK (depth >= 1),
+    span_start INTEGER NOT NULL,
+    span_end INTEGER NOT NULL,
+    start_ts TIMESTAMPTZ,
+    end_ts TIMESTAMPTZ,
+    segment_key TEXT NOT NULL,
+    text TEXT NOT NULL,
+    text_hash TEXT NOT NULL,
+    input_hash TEXT NOT NULL,
+    children_count INTEGER NOT NULL,
+    parent_id BIGINT REFERENCES understanding_nodes(id) ON DELETE SET NULL,
+    model TEXT NOT NULL,
+    engine_version TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    schema_version INTEGER NOT NULL,
+    -- Append-only: every written node is final. Kept explicit for a future
+    -- structure-ahead-of-text pass; today every row is TRUE.
+    sealed BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX understanding_nodes_identity
+    ON understanding_nodes (agent_id, depth, span_start, span_end);
+CREATE INDEX understanding_nodes_window
+    ON understanding_nodes (agent_id, start_ts, end_ts);
+CREATE INDEX understanding_nodes_reuse
+    ON understanding_nodes (agent_id, input_hash);
+
+COMMENT ON TABLE understanding_nodes IS
+    'Materialized hierarchical understanding nodes (task #3704): one text per sealed (agent_id, depth, message span); append-only identity, hashes for idempotent writes and zero-cost reruns.';
+
+-- ava_runner surface: the generation pass ships as a gateway-side worker, but
+-- the operational first-run / ad-hoc regeneration path executes from the
+-- agent/runner side (task #3704) — INSERT, UPDATE, SELECT; no DELETE (nothing
+-- deletes nodes). Gated on the role's existence: fresh bootstrap applies this
+-- baseline before install birth creates ava_runner, and
+-- shared/cluster/provision.py's ensure_runner_role grants the same surface at
+-- birth.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
+        GRANT SELECT, INSERT, UPDATE ON understanding_nodes TO ava_runner;
+        GRANT USAGE, SELECT ON SEQUENCE understanding_nodes_id_seq TO ava_runner;
+    END IF;
+END $$;
+
 -- ─────────────── schema_migrations ───────────────
 -- Applied-migration registry — maintained by `shared.migrations`. Keyed by
 -- migration NAME (an applied SET, not a high-water integer). This whole file is
@@ -1869,3 +1924,7 @@ INSERT INTO schema_migrations (name) VALUES ('20260916T054934_permanent-reject-s
 -- while existing DBs without this applied marker still run the migration and fail
 -- loudly if the guard was installed outside migration tracking.
 INSERT INTO schema_migrations (name) VALUES ('20260916T164150_lifecycle-pointer-done-guard');
+
+-- understanding_nodes is represented above. Fresh DBs stamp the migration
+-- instead of replaying the CREATE TABLE / grant delta.
+INSERT INTO schema_migrations (name) VALUES ('20260916T204617_hierarchy-understanding-nodes');

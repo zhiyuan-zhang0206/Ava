@@ -43,6 +43,10 @@ merge are the layers built on top.
   blocks, upper nodes reduce children texts, aliases copy their child) using
   the `known_texts` reuse cache so a rerun over unchanged history costs zero
   calls.
+- `store.py` — persistence on the `understanding_nodes` table (one row per
+  `(agent_id, depth, span)` identity): `write_tree` upserts and links parents
+  from children spans, `load_known_texts` is the reuse cache read side,
+  `load_window_nodes` feeds the run-timeline serving merge.
 
 ## Invariants
 
@@ -54,3 +58,5 @@ merge are the layers built on top.
   bounded compression and a still-over node fails instead of being written.
 - **Reuse by content**: `input_hash` covers the engine and prompt versions, so
   a template bump invalidates every cached text rather than silently reusing.
+- **Stable spans**: compaction boundaries are never trimmed (#1125), so the
+  stitched full history is append-only and the span identity never shifts.

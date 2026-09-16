@@ -76,6 +76,7 @@ class MaterializedNode:
     text_hash: str  # sha256 of the text (idempotent-write key)
     input_hash: str  # the generation cache key this text was produced for
     children: tuple[str, ...]  # child uids, in stream order
+    children_spans: tuple[tuple[int, int], ...]  # child spans, same order
 
 
 @dataclass(frozen=True)
@@ -322,6 +323,7 @@ def _materialized(
         text_hash=text_hash(text),
         input_hash=key if key is not None else input_hash(kind_of_input, text),
         children=tuple(u.uid for u in spec.units),
+        children_spans=tuple(u.span for u in spec.units),
     )
 
 
