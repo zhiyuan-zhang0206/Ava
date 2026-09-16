@@ -15,8 +15,8 @@ never interpreted.
 
 **Registration is declarative; resolution is kernel-side.** The spec carries
 no callables and no queries. Which rows a widget resolves for an agent is the
-gateway's job (a ``taskList`` lists the agent's active tasks, capped
-kernel-side). A widget with no data renders nothing — it shrinks, it does not
+gateway's job (a ``taskList`` lists the agent's active tasks — complete, no
+cap). A widget with no data renders nothing — it shrinks, it does not
 lie.
 
 Registration mirrors the metric registry: call ``register_inspect_widget``
@@ -64,7 +64,7 @@ class InspectWidgetSpec(BaseModel):
     800 notice — see `conventions/plugin-spec-v2.md`), any int slots between
     them, and equal orders stack kernel-first, then by (plugin, id). ``title``
     is an optional section header; without it the widget renders headerless —
-    except kinds the console titles by default (``taskList``: "Today's tasks"),
+    except kinds the console titles by default (``taskList``: "Tasks"),
     which use their own localized copy when ``title`` is unset.
     """
 

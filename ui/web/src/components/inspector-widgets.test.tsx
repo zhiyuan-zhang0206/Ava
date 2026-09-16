@@ -63,6 +63,12 @@ describe("InspectWidgetSection", () => {
     expect(screen.queryByText("Tasks")).toBeNull();
   });
 
+  it("renders every task row — no display cap (user ruling 2026-09-17)", () => {
+    const tasks = Array.from({ length: 11 }, (_, i) => ({ id: 100 + i, title: `task ${i}` }));
+    render(<InspectWidgetSection widget={widget({ tasks })} />);
+    expect(screen.getAllByRole("link")).toHaveLength(11);
+  });
+
   it("renders nothing for an unknown kind", () => {
     const { container } = render(
       <InspectWidgetSection widget={widget({ kind: "kv" as InspectWidget["kind"] })} />,
