@@ -162,7 +162,9 @@ Two more placeholders shape the condition:
 - `MATCH_GLOB = "w5_*.json"` with `REQUIRED_COUNT = K` — count files by glob
   when you cannot name them at the time the checkpoint is armed.
 
-The watcher's single message wakes you.
+The watcher's single message wakes you; delivery retries across a gateway /
+agent restart window, and if every attempt fails the watcher exits 2, so the
+loss surfaces in its exit notice.
 
 ### 4. Reduce — synthesise the final answer
 
