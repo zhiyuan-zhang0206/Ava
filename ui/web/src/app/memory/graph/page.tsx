@@ -732,6 +732,8 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
                     }`}
                     style={{ pointerEvents: "none" }}
                   >
+                    {/* KEEP (task #3696 exception inventory): truncate the label
+                        at node scale — 22 chars + ellipsis past a 24-char title. */}
                     {memNode.title.length > 24
                       ? memNode.title.slice(0, 22) + "…"
                       : memNode.title}

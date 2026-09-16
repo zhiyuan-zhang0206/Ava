@@ -247,6 +247,9 @@ export interface TimelineState {
  *  this, the least-recently-parked thread is evicted; revisiting it cold-fetches
  *  (its React Query snapshot may still hot-restore within gcTime). Bounds the
  *  map so a fleet of chatty background agents can't grow it unbounded. */
+// KEEP (task #3696 exception inventory): 32 is the working set a browsing
+// session realistically cycles through; eviction is safe — a switch-back
+// re-seeds from the React Query cache within gcTime, else one fetch.
 const MAX_PARKED_THREADS = 32;
 
 // Per-thread item count is deliberately UNBOUNDED (user ruling 2026-08-26,

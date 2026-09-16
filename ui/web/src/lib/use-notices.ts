@@ -67,6 +67,9 @@ export interface NoticesFeed {
  *  server resolve lands (task #3272). The deadline bounds how long a drop
  *  can hide a row when no confirmation ever arrives. */
 const dropTombstones = new Map<number, number>(); // id -> deadline (ms epoch)
+// KEEP (task #3696 exception inventory): the deadline gives one confirmation
+// round trip (SSE resolve + refetch) room to land — 15s covers that several
+// times over while keeping an unconfirmed drop from lingering.
 const TOMBSTONE_MS = 15_000;
 
 /** Drop tombstoned ids from one incoming open-queue snapshot. A snapshot
