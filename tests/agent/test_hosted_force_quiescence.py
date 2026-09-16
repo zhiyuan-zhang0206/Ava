@@ -9,6 +9,7 @@ import threading
 import traceback
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
@@ -24,6 +25,7 @@ from ops.ops_exit import _force_terminate_transaction
 from services.agent_host.daemon import _cancel_turn_route
 from services.agent_host.dispatcher import TurnScheduler
 from services.agent_host.host import AgentHost
+from shared import exec_request_evidence
 from shared.config import settings
 from shared.exec_request_evidence import Verdict
 from shared.hosted_force import original_host_force, recover_orphaned_hosted_forces
@@ -392,6 +394,110 @@ async def test_exclusive_host_boot_quarantines_superseded_evidence_and_recovers(
     assert db_conn.execute(
         "SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == (None,)
+
+
+def _unreadable_envelope(exec_dir: Path, agent_id: int, *, age_s: float) -> Path:
+    """One killed parent's unreadable remnant, aged as asked."""
+    agent_dir = exec_dir / str(agent_id)
+    agent_dir.mkdir(parents=True, exist_ok=True)
+    request = agent_dir / f"req-{uuid4().hex}.json"
+    request.write_text("")  # zero-byte remnant: nothing to attribute
+    stamp = request.stat().st_mtime - age_s
+    os.utime(request, (stamp, stamp))
+    return request
+
+
+def _no_process_iteration(*_args: Any, **_kwargs: Any) -> Iterator[Any]:
+    """A `psutil.process_iter` stand-in yielding no processes at all."""
+    return iter(())
+
+
+def _hide_machine_processes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """This box runs other agents' exec children; isolate the test's own legs."""
+    monkeypatch.setattr("shared.exec_request_evidence.psutil.process_iter", _no_process_iteration)
+
+
+async def test_exclusive_host_boot_disposes_aged_unreadable_evidence_and_recovers(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The 6285 shape: a zero-byte remnant no longer defers boot recovery."""
+
+    agent_id = _agent(db_conn)
+    old_host = AgentHost(pool=aops_pool, checkpointer=Mock(), graph=Mock(), machine="claim-test")
+    assert (
+        await admit_hosted_runtime(
+            aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling"
+        )
+        is not None
+    )
+    with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
+        _, _, _, command = await asyncio.to_thread(
+            _force_terminate_transaction, agent_id, pool, source="user"
+        )
+    bound = exec_request_evidence._UNREADABLE_EXPIRY_AGE_S
+    request = _unreadable_envelope(tmp_path, agent_id, age_s=bound + 60)
+    quarantine = tmp_path / "quarantined-exec-requests"
+    monkeypatch.setattr("shared.exec_request_evidence.exec_run_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "shared.exec_request_evidence.quarantined_exec_requests_dir", lambda: quarantine
+    )
+    _hide_machine_processes(monkeypatch)
+
+    recovered, deferred = await recover_orphaned_hosted_forces(aops_pool, "claim-test")
+
+    assert recovered == [agent_id] and deferred == {}
+    assert not request.exists()
+    (moved,) = quarantine.glob(f"*/{agent_id}/{request.name}")
+    assert moved.read_bytes() == b""
+    receipt = json.loads((moved.parent / "receipt.json").read_text())
+    assert receipt["reason"] == "hosted boot recovery"
+    assert receipt["entries"][0]["verdict"] == "disposable"
+    assert db_conn.execute(
+        "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (command,)
+    ).fetchone() == ("done", True)
+    assert db_conn.execute(
+        "SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == (None,)
+
+
+async def test_exclusive_host_boot_still_defers_young_unreadable_evidence(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A fresh remnant may still settle: the bound is not a cleanup timer."""
+
+    agent_id = _agent(db_conn)
+    old_host = AgentHost(pool=aops_pool, checkpointer=Mock(), graph=Mock(), machine="claim-test")
+    assert (
+        await admit_hosted_runtime(
+            aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling"
+        )
+        is not None
+    )
+    with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
+        _, _, _, command = await asyncio.to_thread(
+            _force_terminate_transaction, agent_id, pool, source="user"
+        )
+    request = _unreadable_envelope(tmp_path, agent_id, age_s=0.0)
+    monkeypatch.setattr("shared.exec_request_evidence.exec_run_dir", lambda: tmp_path)
+    _hide_machine_processes(monkeypatch)
+
+    recovered, deferred = await recover_orphaned_hosted_forces(aops_pool, "claim-test")
+
+    assert recovered == [] and set(deferred) == {agent_id}
+    assert request.exists()
+    assert db_conn.execute(
+        "SELECT status,applied_at IS NOT NULL,observed_at FROM inbound_messages WHERE id=%s",
+        (command,),
+    ).fetchone() == ("claimed", True, None)
+    assert db_conn.execute(
+        "SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == (command,)
 
 
 async def test_exclusive_host_boot_defers_while_a_live_child_references_the_request(

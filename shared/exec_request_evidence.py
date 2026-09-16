@@ -21,6 +21,16 @@ it disposable:
   reused PID means the recorded boot ended, never that a replacement is the old
   host (the same identity check exec-owner recovery uses).
 
+An envelope whose own bytes cannot be read at all — the zero-byte or partial
+write a killed parent leaves — carries no attribution to judge, so it is
+bounded by the protocol instead: past twice the exec node timeout (the inner
+exec timeout is validated strictly below it, and the child hard-exits within
+that chain), with no live process reference and no live host process, no
+in-flight request can still own it and it is quarantined too
+(``Verdict.DISPOSABLE``; task #3619 D-2). Every other refusal — over the size
+ceiling, version drift, a wrong agent, a missing or malformed incarnation —
+describes a *readable* envelope whose retention contract is unchanged.
+
 Everything else is retained with diagnostics naming the file, its attribution
 and the disposition commands. Stale evidence is quarantined, never deleted: the
 files move to ``$AVA_HOME/quarantined-exec-requests/<reason>-<stamp>/<agent_id>/``
@@ -56,6 +66,7 @@ from shared.incarnation_resources import (
 from shared.log import logger
 from shared.paths import exec_run_dir, quarantined_exec_requests_dir
 from shared.runtime_incarnation import RuntimeIncarnation
+from shared.timing import EXEC_NODE_TIMEOUT_S
 
 # The envelope protocol's own ceiling (agent/graph/_exec_protocol.py). The
 # typed state snapshot rides as one base64 field, so a legitimate envelope is
@@ -74,13 +85,25 @@ _CHILD_LIFETIME_SLACK_S = 60.0
 _EXEC_CHILD_MODULE = "agent.exec_child"
 _REQUEST_REFERENCE_ENV = "AVA_EXEC_REQUEST_FILE"
 
+# Bounded disposition of an envelope whose own bytes cannot be read (task #3619
+# D-2). A readable envelope declares the timeout that bounds its child's
+# lifetime; an unreadable one does not, so the protocol's ceiling stands in for
+# it: the inner exec timeout is validated strictly below the outer node timeout
+# (shared/config/sandbox.py) and the child hard-exits at
+# timeout + kill grace + watchdog margin, so no in-flight request's child
+# outlives twice the node timeout. An unreadable envelope past this age — with
+# no live process reference and no live host process (see classify_request) —
+# cannot belong to an in-flight request and is disposable.
+_UNREADABLE_EXPIRY_AGE_S = 2.0 * EXEC_NODE_TIMEOUT_S
+
 
 class Verdict(StrEnum):
     """What the evidence proves about one request envelope."""
 
     LIVE = "live"  # a live process cannot be excluded from the request's domain
     STALE = "stale"  # attributed, unreferenced, and its host is provably gone
-    UNKNOWN = "unknown"  # unattributable or unreadable: retained conservatively
+    DISPOSABLE = "disposable"  # unreadable bytes, unreferenced, old, host gone
+    UNKNOWN = "unknown"  # not provably disposable: retained
 
 
 class HostState(StrEnum):
@@ -115,7 +138,7 @@ class RequestEvidence:
     @property
     def retained(self) -> bool:
         """True when the evidence must keep deferring recovery."""
-        return self.verdict is not Verdict.STALE
+        return self.verdict not in {Verdict.STALE, Verdict.DISPOSABLE}
 
     def describe(self) -> str:
         """A one-line diagnostic: file, attribution, proof and refusal."""
@@ -230,7 +253,10 @@ def classify_request(
     ``incumbent`` is the incarnation the row still names — the retired owner in
     both recovery paths; it is reported, not trusted. The callers own the
     premise that this host ended (exclusive boot / absent host), and the stored
-    host identity vetoes the verdict whenever it contradicts that premise.
+    host identity vetoes the verdict whenever it contradicts that premise. An
+    envelope whose own bytes cannot be read has no attribution to judge; when
+    the bounded-disposition switch is on, the legs that need no content decide
+    between ``DISPOSABLE`` and retained (see ``_bounded_unreadable``).
     """
     try:
         mtime = path.stat().st_mtime
@@ -244,24 +270,34 @@ def classify_request(
             (),
             f"request envelope disappeared during classification: {exc}",
         )
-    incarnation, refusal, timeout_s = _read_attribution(path, agent_id)
+    attribution = _read_attribution(path, agent_id)
+    # An envelope that could not declare its timeout still gets a birth window:
+    # the protocol ceiling stands in, so a hidden-environment exec child born
+    # anywhere inside a legitimate request's lifetime is never excluded.
+    declared_timeout_s = (
+        attribution.timeout_s if attribution.timeout_s is not None else EXEC_NODE_TIMEOUT_S
+    )
     live = live_domain_pids(
         path,
         born_from=mtime - _BIRTH_FLOOR_SLACK_S,
-        born_before=mtime + max(timeout_s, 0.0) + _CHILD_LIFETIME_SLACK_S,
+        born_before=mtime + max(declared_timeout_s, 0.0) + _CHILD_LIFETIME_SLACK_S,
     )
     if live:
         return RequestEvidence(
             agent_id,
             path,
             Verdict.LIVE,
-            incarnation,
+            attribution.incarnation,
             mtime,
             live,
             "live process(es) cannot be excluded from this request's exec domain",
         )
+    refusal = attribution.refusal
     if refusal is not None:
+        if attribution.content_unreadable and _bounded_disposition_enabled():
+            return _bounded_unreadable(agent_id, path, mtime, refusal, host)
         return RequestEvidence(agent_id, path, Verdict.UNKNOWN, None, mtime, (), refusal)
+    incarnation = attribution.incarnation
     assert incarnation is not None  # noqa: S101 — refusal covers every unattributed envelope
     if host.state in {HostState.ALIVE, HostState.UNREADABLE}:
         return RequestEvidence(agent_id, path, Verdict.UNKNOWN, incarnation, mtime, (), host.detail)
@@ -274,6 +310,57 @@ def classify_request(
         mtime,
         (),
         f"attributed to {reached} ({incarnation.owner}); {host.detail}; no live process reference",
+    )
+
+
+def _bounded_disposition_enabled() -> bool:
+    """The soft switch for bounded disposition of unreadable envelopes (D-2).
+
+    Default on; off restores unbounded retention (the pre-#3619 behaviour).
+    Read lazily so the module keeps no import-time dependency on the settings
+    aggregate.
+    """
+    from shared.config import settings
+
+    return settings.daemon.exec_request_bounded_quarantine_enabled
+
+
+def _bounded_unreadable(
+    agent_id: int, path: Path, mtime: float, refusal: str, host: HostEvidence
+) -> RequestEvidence:
+    """Judge an unreadable envelope by the legs that need no content.
+
+    Its bytes carry nothing to attribute, so only what needs no content may
+    decide: it must be older than ``_UNREADABLE_EXPIRY_AGE_S`` (past that age
+    no in-flight request can still own it), no live process may reference it
+    (the caller already checked), and the row's stored host process must not
+    be alive. Anything else keeps deferring recovery with the unmet leg named.
+    """
+    age_s = time.time() - mtime
+    if age_s < _UNREADABLE_EXPIRY_AGE_S:
+        return RequestEvidence(
+            agent_id,
+            path,
+            Verdict.UNKNOWN,
+            None,
+            mtime,
+            (),
+            f"{refusal}; not yet past the bounded-disposition bound "
+            f"({age_s:.0f}s of {_UNREADABLE_EXPIRY_AGE_S:.0f}s)",
+        )
+    if host.state in {HostState.ALIVE, HostState.UNREADABLE}:
+        return RequestEvidence(
+            agent_id, path, Verdict.UNKNOWN, None, mtime, (), f"{refusal}; {host.detail}"
+        )
+    return RequestEvidence(
+        agent_id,
+        path,
+        Verdict.DISPOSABLE,
+        None,
+        mtime,
+        (),
+        f"{refusal}; no live process reference; {age_s:.0f}s old, past the "
+        f"{_UNREADABLE_EXPIRY_AGE_S:.0f}s bounded-disposition bound; {host.detail}",
     )
 
 
@@ -298,26 +385,51 @@ def quarantine_stale(
     resources: object,
     reason: str,
 ) -> QuarantineReport:
-    """Move provably stale envelopes aside, preserving them with a receipt.
+    """Move provably disposable envelopes aside, preserving them with a receipt.
 
     Live or unattributable evidence is returned retained; a file that already
     vanished (a settled run, or a racing classifier) is discharged silently,
     while any other move failure keeps that entry retained so the caller still
     refuses. This never deletes evidence, never signals a process and never
     touches the database: the lifecycle transition stays with the caller.
+    An unreadable envelope is disposed without a human review, so that case
+    also raises the counted ``exec_request_bounded_quarantine`` alert.
     """
     host = stored_host(resources)
     entries = tuple(
         classify_request(path, agent_id=agent_id, incumbent=incumbent, host=host)
         for path in request_paths(agent_id)
     )
-    stale = tuple(entry for entry in entries if not entry.retained)
+    disposable = tuple(entry for entry in entries if not entry.retained)
     retained = tuple(entry for entry in entries if entry.retained)
-    if not stale:
+    if not disposable:
         return QuarantineReport(agent_id, None, (), retained)
-    committed = _commit(agent_id, stale, reason=reason)
+    committed = _commit(agent_id, disposable, reason=reason)
+    _alert_bounded_disposition(agent_id, reason, committed)
     return QuarantineReport(
         agent_id, committed.event_dir, committed.quarantined, retained + committed.retained
+    )
+
+
+def _alert_bounded_disposition(agent_id: int, reason: str, committed: QuarantineReport) -> None:
+    """Count and alert when unreadable evidence was quarantined without review."""
+    disposed = tuple(
+        item.entry for item in committed.quarantined if item.entry.verdict is Verdict.DISPOSABLE
+    )
+    if not disposed:
+        return
+    logger.warning(
+        "bounded-disposition quarantine: {preserved} unreadable exec request envelope(s) "
+        "for agent {agent_id} moved aside without review ({reason}) — older than "
+        "{bound_s:.0f}s, no live process reference, host process not alive; preserved "
+        "with a receipt",
+        event="exec_request_bounded_quarantine",
+        agent_id=agent_id,
+        reason=reason,
+        bound_s=round(_UNREADABLE_EXPIRY_AGE_S, 1),
+        preserved=len(disposed),
+        sources=[str(entry.path) for entry in disposed],
+        event_dir=None if committed.event_dir is None else str(committed.event_dir),
     )
 
 
@@ -331,39 +443,74 @@ def disposition_hint(agent_id: int) -> str:
     )
 
 
-def _read_attribution(
-    path: Path, agent_id: int
-) -> tuple[RuntimeIncarnation | None, str | None, float]:
-    """Read (attribution, refusal reason, declared timeout) from one envelope."""
+@dataclass(frozen=True)
+class _Attribution:
+    """What one envelope's bytes could be read to say.
+
+    ``content_unreadable`` marks the bounded-disposition class (task #3619
+    D-2): the file's own bytes could not be read or parsed at all, so no field
+    can be trusted and nothing about it can be attributed. Every other refusal
+    describes a structurally readable envelope and retains unconditionally.
+    ``timeout_s`` is None whenever the bytes that would declare it were not
+    read; the callers substitute the protocol ceiling for it.
+    """
+
+    incarnation: RuntimeIncarnation | None
+    refusal: str | None
+    timeout_s: float | None
+    content_unreadable: bool
+
+
+def _read_attribution(path: Path, agent_id: int) -> _Attribution:
+    """Read one envelope's attribution, refusal reason and declared timeout."""
     try:
         size = path.stat().st_size
         if size > _MAX_ENVELOPE_BYTES:
-            return None, f"envelope is {size} bytes, over the {_MAX_ENVELOPE_BYTES} ceiling", 0.0
+            return _Attribution(
+                None,
+                f"envelope is {size} bytes, over the {_MAX_ENVELOPE_BYTES} ceiling",
+                None,
+                content_unreadable=False,
+            )
         parsed: object = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        return None, f"envelope is unreadable: {exc}", 0.0
+        return _Attribution(None, f"envelope is unreadable: {exc}", None, content_unreadable=True)
     if not isinstance(parsed, dict):
-        return None, "envelope is not a JSON object", 0.0
+        return _Attribution(None, "envelope is not a JSON object", None, content_unreadable=False)
     envelope = cast("dict[str, Any]", parsed)
     version = envelope.get("v")
     if version != _REQUEST_VERSION:
-        return None, f"envelope version {version!r} != {_REQUEST_VERSION}", 0.0
+        return _Attribution(
+            None,
+            f"envelope version {version!r} != {_REQUEST_VERSION}",
+            None,
+            content_unreadable=False,
+        )
     named = envelope.get("agent_id")
     if named != agent_id:
-        return None, f"envelope names agent {named!r}, not {agent_id}", 0.0
+        return _Attribution(
+            None,
+            f"envelope names agent {named!r}, not {agent_id}",
+            None,
+            content_unreadable=False,
+        )
     timeout = envelope.get("timeout_s")
-    timeout_s = float(timeout) if isinstance(timeout, int | float) else 0.0
+    timeout_s = float(timeout) if isinstance(timeout, int | float) else None
     identity = envelope.get("incarnation")
     if not isinstance(identity, dict):
-        return None, "envelope carries no incarnation", timeout_s
+        return _Attribution(
+            None, "envelope carries no incarnation", timeout_s, content_unreadable=False
+        )
     fields = cast("dict[str, Any]", identity)
     try:
         incarnation = RuntimeIncarnation(
             agent_id, UUID(str(fields["generation"])), UUID(str(fields["owner"]))
         )
     except (KeyError, ValueError) as exc:
-        return None, f"envelope incarnation is malformed: {exc}", timeout_s
-    return incarnation, None, timeout_s
+        return _Attribution(
+            None, f"envelope incarnation is malformed: {exc}", timeout_s, content_unreadable=False
+        )
+    return _Attribution(incarnation, None, timeout_s, content_unreadable=False)
 
 
 def _is_exec_child_argv(argv: Sequence[str] | None) -> bool:
@@ -479,7 +626,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="append",
         default=[],
         metavar="FILE",
-        help="quarantine one named request envelope (stale entries only, unless --force)",
+        help="quarantine one named request envelope (disposable entries only, unless --force)",
     )
     parser.add_argument(
         "--force",

@@ -469,6 +469,20 @@ class DaemonSettings(EnvSettings):
         },
     )
 
+    exec_request_bounded_quarantine_enabled: bool = Field(
+        default=True,
+        alias="AVA_EXEC_REQUEST_BOUNDED_QUARANTINE_ENABLED",
+        description="Hosted boot recovery and cold prepare: quarantine an unreadable exec request envelope without human review once it is older than twice the exec node timeout with no live process reference and no live host process (task #3619 D-2). The bytes are preserved with a receipt and the recovery path no longer defers on them; off restores unbounded retention, which needs the manual --force quarantine.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": True,
+        },
+    )
+
     wedged_agent_inbound_age_seconds: float = Field(
         default=2400.0,
         alias="AVA_WEDGED_AGENT_INBOUND_AGE_SECONDS",

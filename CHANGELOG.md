@@ -39,6 +39,19 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
   admission).
 
 ### Fixed
+- Hosted-force recovery no longer defers forever on an unreadable exec request
+  envelope. An envelope whose own bytes cannot be read — the zero-byte or
+  partial remnant a killed parent leaves — carries no attribution, so it is
+  now bounded by the protocol: past twice the exec node timeout, with no live
+  process reference and no live host process, it is quarantined (bytes
+  preserved with a receipt) and counted, raising the
+  `exec_request_bounded_quarantine` anomaly event; the retention switch is
+  `AVA_EXEC_REQUEST_BOUNDED_QUARANTINE_ENABLED`. Exec envelopes are also
+  written atomically (temp file + fsync + rename), so a killed writer cannot
+  produce that remnant in the first place, and a boot recovery that stays
+  deferred across three consecutive boots escalates to the
+  `hosted_boot_recovery_stalled` anomaly event instead of one silent per-boot
+  warning (task #3619).
 - The hosted dispatcher re-asserts a pending cancellation after crossing its
   database scan: a cancel that lands inside psycopg_pool's async connection
   check is absorbed there (the pool returns the connection and retries without

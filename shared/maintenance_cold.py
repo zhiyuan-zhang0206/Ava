@@ -40,10 +40,12 @@ def require_no_consumers(conn: psycopg.Connection[Any], agent_id: int) -> None:
     process or treats a persistent shell, watcher or browser as an exec child.
 
     Exec request envelopes are judged by incarnation attribution and process
-    proof (shared/exec_request_evidence.py). The caller established the retired
-    host is absent, so a provably stale envelope is quarantined — preserved
-    with a receipt, never deleted — while evidence that is still live or
-    unattributable refuses with its file, attribution and disposition commands.
+    proof, and unreadable bytes additionally by the protocol bound
+    (shared/exec_request_evidence.py). The caller established the retired host
+    is absent, so provably disposable evidence is quarantined — preserved with
+    a receipt, never deleted — while evidence that is still live or not
+    provably disposable refuses with its file, attribution and disposition
+    commands.
     """
     backend = get_backend()
     if backend.has_session(f"ava-agent-{agent_id}") or backend.list_sessions(

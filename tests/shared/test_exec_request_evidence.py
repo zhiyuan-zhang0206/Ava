@@ -1,4 +1,5 @@
-"""Incarnation attribution and process proof for leftover exec request envelopes."""
+"""Incarnation attribution and process proof for leftover exec request envelopes —
+and the bounded disposition of the ones whose own bytes cannot be read (D-2)."""
 
 import json
 import os
@@ -7,6 +8,7 @@ import sys
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 from unittest.mock import Mock
 from uuid import uuid4
 
@@ -132,17 +134,225 @@ def test_unattributed_envelope_is_retained_and_never_moved(
     assert request.exists() and not quarantine_dir.exists()
 
 
-def test_unreadable_envelope_is_retained(exec_dir: Path, quarantine_dir: Path) -> None:
-    request = _write_envelope(exec_dir, age_s=3600)
+def _age(path: Path, age_s: float) -> None:
+    """Move `path`'s mtime `age_s` into the past."""
+    stamp = time.time() - age_s
+    os.utime(path, (stamp, stamp))
+
+
+def _unreadable(request: Path, *, age_s: float) -> None:
+    """Turn one written envelope into the killed parent's unreadable remnant."""
     request.write_text("{not json")
-    stamp = time.time() - 3600
-    os.utime(request, (stamp, stamp))
+    _age(request, age_s)
+
+
+def _no_process_iteration(*_args: Any, **_kwargs: Any) -> Iterator[Any]:
+    """A `psutil.process_iter` stand-in yielding no processes at all."""
+    return iter(())
+
+
+def _no_processes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hide machine processes so a classification test isolates its own legs.
+
+    This box runs other agents' exec children; the widened unknown-timeout
+    birth window would otherwise sweep a freshly started one and report LIVE.
+    """
+    monkeypatch.setattr(exec_request_evidence.psutil, "process_iter", _no_process_iteration)
+
+
+def test_unreadable_envelope_past_the_bound_is_disposable_and_moves_with_a_receipt(
+    exec_dir: Path, quarantine_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A 0-byte remnant older than the bound stops fencing recovery (D-2)."""
+    bound = exec_request_evidence._UNREADABLE_EXPIRY_AGE_S
+    request = _write_envelope(exec_dir, age_s=bound + 60)
+    request.write_text("")  # the killed parent's zero-byte remnant
+    _age(request, bound + 60)
+    _no_processes(monkeypatch)
 
     (entry,) = survey(_AGENT, incumbent=None, resources=None)
+    assert entry.verdict is Verdict.DISPOSABLE
+    assert "unreadable" in entry.detail
+    assert "bounded-disposition bound" in entry.detail
 
+    report = quarantine_stale(_AGENT, incumbent=None, resources=None, reason="unit test")
+
+    assert report.retained == ()
+    (moved,) = report.quarantined
+    assert not request.exists()
+    assert moved.destination.read_bytes() == b""  # the bytes are preserved, never deleted
+    receipt = json.loads((moved.destination.parent / "receipt.json").read_text())
+    (record,) = receipt["entries"]
+    assert record["verdict"] == "disposable"
+    assert record["owner"] is None and record["generation"] is None
+    assert record["live_pids"] == []
+
+
+def test_unreadable_envelope_inside_the_bound_is_retained(
+    exec_dir: Path, quarantine_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Young evidence still defers — a deferral that may settle is not a stall."""
+    request = _write_envelope(exec_dir)
+    _unreadable(request, age_s=60.0)
+    _no_processes(monkeypatch)
+
+    report = quarantine_stale(_AGENT, incumbent=None, resources=None, reason="unit test")
+
+    (entry,) = report.retained
+    assert entry.verdict is Verdict.UNKNOWN
+    assert "not yet past the bounded-disposition bound" in entry.detail
+    assert request.exists() and not quarantine_dir.exists()
+
+
+def test_unreadable_envelope_with_a_live_host_is_retained(
+    exec_dir: Path, quarantine_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stored host identity that is not provably ended vetoes disposal."""
+    bound = exec_request_evidence._UNREADABLE_EXPIRY_AGE_S
+    request = _write_envelope(exec_dir, age_s=bound + 60)
+    _unreadable(request, age_s=bound + 60)
+    _no_processes(monkeypatch)
+    native = psutil.Process()
+
+    report = quarantine_stale(
+        _AGENT,
+        incumbent=None,
+        resources=_resources(ResourceProcess(pid=native.pid, birth=native.create_time())),
+        reason="unit test",
+    )
+
+    (entry,) = report.retained
+    assert entry.verdict is Verdict.UNKNOWN
+    assert "not provably ended" in entry.detail
+    assert request.exists()
+
+
+def test_unreadable_envelope_with_a_live_reference_is_deferred(
+    exec_dir: Path, quarantine_dir: Path
+) -> None:
+    """A live process naming the unreadable request keeps it deferred."""
+    bound = exec_request_evidence._UNREADABLE_EXPIRY_AGE_S
+    request = _write_envelope(exec_dir, age_s=bound + 60)
+    _unreadable(request, age_s=bound + 60)
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        env={**os.environ, "AVA_EXEC_REQUEST_FILE": str(request)},
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            shown = psutil.Process(child.pid).environ().get("AVA_EXEC_REQUEST_FILE")
+            if shown == str(request):
+                break
+            time.sleep(0.05)
+        report = quarantine_stale(
+            _AGENT, incumbent=_superseded(), resources=None, reason="unit test"
+        )
+        (entry,) = report.retained
+        assert entry.verdict is Verdict.LIVE
+        assert child.pid in entry.live_pids
+        assert request.exists()
+    finally:
+        # SIGKILL: SIGTERM=SIG_IGN may be inherited from a shell session.
+        child.kill()
+        child.wait(timeout=5)
+
+
+def test_version_drift_envelope_is_still_retained_past_the_bound(
+    exec_dir: Path, quarantine_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D-2 bounds only unreadable bytes; every readable refusal keeps its contract."""
+    bound = exec_request_evidence._UNREADABLE_EXPIRY_AGE_S
+    request = _write_envelope(exec_dir, age_s=bound + 60)
+    envelope = json.loads(request.read_text())
+    envelope["v"] = 99
+    request.write_text(json.dumps(envelope))
+    _age(request, bound + 60)
+    _no_processes(monkeypatch)
+
+    report = quarantine_stale(_AGENT, incumbent=None, resources=None, reason="unit test")
+
+    (entry,) = report.retained
+    assert entry.verdict is Verdict.UNKNOWN
+    assert "version" in entry.detail
+    assert request.exists()
+
+
+def test_unreadable_bounded_disposition_switch_off_retains(
+    exec_dir: Path, quarantine_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AVA_EXEC_REQUEST_BOUNDED_QUARANTINE_ENABLED=false restores retention."""
+    bound = exec_request_evidence._UNREADABLE_EXPIRY_AGE_S
+    request = _write_envelope(exec_dir, age_s=bound + 60)
+    _unreadable(request, age_s=bound + 60)
+    _no_processes(monkeypatch)
+    monkeypatch.setattr(exec_request_evidence, "_bounded_disposition_enabled", lambda: False)
+
+    report = quarantine_stale(_AGENT, incumbent=None, resources=None, reason="unit test")
+
+    (entry,) = report.retained
     assert entry.verdict is Verdict.UNKNOWN
     assert "unreadable" in entry.detail
     assert request.exists()
+
+
+def test_bounded_disposition_raises_the_counted_alert(
+    exec_dir: Path, quarantine_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Disposing unreadable evidence without review is itself the alert."""
+    from loguru import logger
+
+    bound = exec_request_evidence._UNREADABLE_EXPIRY_AGE_S
+    request = _write_envelope(exec_dir, age_s=bound + 60)
+    _unreadable(request, age_s=bound + 60)
+    _no_processes(monkeypatch)
+    records: list[Any] = []
+    sink = logger.add(
+        lambda message: records.append(message.record), level="WARNING", format="{message}"
+    )
+    try:
+        quarantine_stale(_AGENT, incumbent=None, resources=None, reason="unit test")
+    finally:
+        logger.remove(sink)
+
+    alerts = [
+        record
+        for record in records
+        if record["extra"].get("event") == "exec_request_bounded_quarantine"
+    ]
+    (alert,) = alerts
+    extra = alert["extra"]
+    assert extra["agent_id"] == _AGENT
+    assert extra["reason"] == "unit test"
+    assert extra["preserved"] == 1
+    assert extra["sources"] == [str(request)]
+    assert extra["bound_s"] == pytest.approx(exec_request_evidence._UNREADABLE_EXPIRY_AGE_S)
+
+
+def test_routine_stale_quarantine_is_not_the_bounded_alert(
+    exec_dir: Path, quarantine_dir: Path
+) -> None:
+    """Only the unreadable class escalates; attributed staleness stays quiet."""
+    from loguru import logger
+
+    _write_envelope(exec_dir, owner=uuid4(), age_s=3600)
+    records: list[Any] = []
+    sink = logger.add(
+        lambda message: records.append(message.record), level="WARNING", format="{message}"
+    )
+    try:
+        report = quarantine_stale(
+            _AGENT, incumbent=_superseded(), resources=None, reason="unit test"
+        )
+    finally:
+        logger.remove(sink)
+
+    assert len(report.quarantined) == 1
+    assert not [
+        record
+        for record in records
+        if record["extra"].get("event") == "exec_request_bounded_quarantine"
+    ]
 
 
 def test_live_reference_of_any_process_shape_is_never_excluded(
@@ -335,3 +545,37 @@ def test_cli_refuses_an_unreviewed_retained_entry(
     assert main(["--agent", str(_AGENT), "--quarantine", request.name]) == 1
     assert "refusing" in capsys.readouterr().out
     assert request.exists()
+
+
+def test_cli_quarantines_a_bounded_disposable_entry_without_force(
+    exec_dir: Path,
+    quarantine_dir: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The manual path treats bounded-disposition evidence like stale evidence."""
+    bound = exec_request_evidence._UNREADABLE_EXPIRY_AGE_S
+    request = _write_envelope(exec_dir, age_s=bound + 60)
+    _unreadable(request, age_s=bound + 60)
+    _no_processes(monkeypatch)
+
+    assert main(["--agent", str(_AGENT)]) == 0
+    listing = capsys.readouterr().out
+    assert "would quarantine" in listing and "[disposable]" in listing
+
+    assert main(["--agent", str(_AGENT), "--quarantine", request.name]) == 0
+    assert "quarantined" in capsys.readouterr().out
+    assert not request.exists()
+
+
+def test_cli_force_still_quarantines_retained_evidence(
+    exec_dir: Path, quarantine_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--force keeps its review override for everything retention still holds."""
+    request = _write_envelope(
+        exec_dir, payload={"v": 1, "code": "x", "agent_id": _AGENT, "timeout_s": 5.0}, age_s=3600
+    )
+
+    assert main(["--agent", str(_AGENT), "--quarantine", request.name, "--force"]) == 0
+    assert "quarantined" in capsys.readouterr().out
+    assert not request.exists()
