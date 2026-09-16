@@ -256,3 +256,21 @@ class DisplaySettings(EnvSettings):
             "scope": "cluster-pinned",
         },
     )
+
+    fleet_graph_decay_lambda: float = Field(
+        default=0.5,
+        alias="AVA_FLEET_GRAPH_DECAY_LAMBDA",
+        description=(
+            "Default per-day decay constant of the fleet graph's message edge weight "
+            "(GET /api/fleet/graph) when the caller passes none: 0.5 halves a message "
+            "edge's weight roughly every 1.4 days, so the graph shows the live "
+            "conversation pattern while lineage edges stay permanent; the [0, 10] "
+            "range stays a protective constant."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )

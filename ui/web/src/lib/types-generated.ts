@@ -3342,8 +3342,9 @@ export interface paths {
          *     during the merge; pass `?include_terminated=true` for the full graph.
          *
          *     `?hours=` (0 = last 5m; 1/6/24/72/168 = hours; omitted = all-time) windows
-         *     both the node score and the edge events. `?decay_lambda=` (range [0, 10],
-         *     default 0.5) is the per-day decay constant for the message edge weight,
+         *     both the node score and the edge events. `?decay_lambda=` (range [0, 10];
+         *     omitted = the configured default ``display.fleet_graph_decay_lambda`` -
+         *     0.5 out of the box) is the per-day decay constant for the message edge weight,
          *     quantized to 2dp before both computation and cache-key construction. Its
          *     1001 values, two terminated states, and the bounded hour-window choices
          *     cap the cache-key space at approximately 16k entries. Per-caller rate
@@ -12015,7 +12016,7 @@ export interface operations {
                 /** @description Include terminated agents */
                 include_terminated?: boolean;
                 hours?: components["schemas"]["StatsWindowHours"] | null;
-                decay_lambda?: number;
+                decay_lambda?: number | null;
             };
             header?: never;
             path?: never;

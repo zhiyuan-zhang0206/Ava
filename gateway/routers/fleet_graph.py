@@ -48,6 +48,7 @@ from gateway.schemas import (
     window_delta,
 )
 from shared import telemetry
+from shared.config import settings
 from shared.log import logger
 from shared.loki_index_labels import ARCHIVE_FLOOR_AT, ARCHIVE_FREEZE_AT, INDEX_LABEL_CUTOVER_AT
 from shared.observability import cluster_label
@@ -602,7 +603,9 @@ def get_fleet_graph(
         Query(description="Include terminated agents"),
     ] = False,
     hours: Annotated[StatsWindowHours | None, Query()] = None,
-    decay_lambda: Annotated[float, Query(ge=0, le=10)] = 0.5,
+    # `decay_lambda`'s range stays a protective constant (import-time Query
+    # bound); the default *decay* is display.fleet_graph_decay_lambda.
+    decay_lambda: Annotated[float | None, Query(ge=0, le=10)] = None,
 ) -> FleetGraphResponse:
     """Fleet-wide weighted agent graph — nodes (agents) + edges (lineage + messages).
 
@@ -620,8 +623,9 @@ def get_fleet_graph(
     during the merge; pass `?include_terminated=true` for the full graph.
 
     `?hours=` (0 = last 5m; 1/6/24/72/168 = hours; omitted = all-time) windows
-    both the node score and the edge events. `?decay_lambda=` (range [0, 10],
-    default 0.5) is the per-day decay constant for the message edge weight,
+    both the node score and the edge events. `?decay_lambda=` (range [0, 10];
+    omitted = the configured default ``display.fleet_graph_decay_lambda`` -
+    0.5 out of the box) is the per-day decay constant for the message edge weight,
     quantized to 2dp before both computation and cache-key construction. Its
     1001 values, two terminated states, and the bounded hour-window choices
     cap the cache-key space at approximately 16k entries. Per-caller rate
@@ -642,6 +646,8 @@ def get_fleet_graph(
         message (send_message): weight = SUM(EXP(-decay_lambda * days_ago)) * 1.0
             (recency-decayed; dropped below 0.01)
     """
+    if decay_lambda is None:
+        decay_lambda = settings.display.fleet_graph_decay_lambda
     decay_lambda = round(decay_lambda, 2)
 
     now = datetime.now(UTC)
