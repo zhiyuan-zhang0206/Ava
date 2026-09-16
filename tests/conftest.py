@@ -382,6 +382,24 @@ os.environ["AVA_PERMISSIONS_HELPER_SPAWN"] = "false"
 # (tests/test_helperproc.py).
 os.environ.pop("AVA_PERMISSIONS_HELPER_PID", None)
 os.environ.pop("AVA_PERMISSIONS_HELPER_PORT", None)
+# ── PITR backup domain: no ambient AVA_PITR_* config in the suite ──
+#
+# Same shell-leak class as the telegram token above, with a subtler symptom.
+# Candidate validation (shared/config/candidate.py) reconstructs a patched
+# domain from the captured `.env` image and the patch, and for a field the file
+# does not pin it falls back to the BOOT-TIME environment value. A pytest run
+# inside an agent process carries the production AVA_PITR_* set — including
+# AVA_PITR_OSS_VIEWER_CREDENTIALS_FILE — so a fixture `.env` that deliberately
+# omits the viewer credential is completed into a VALID candidate and the
+# expected rejection returns 200 (tests/gateway/test_config_candidate_api.py::
+# test_put_rejects_invalid_oss_candidate_without_writing, 2026-09-16; the
+# services-side sibling tests/services/test_pitr_activation_candidate.py has the
+# same shape). CI is green because it carries no such env; scrubbing here makes
+# a local run resolve exactly as CI does. A test that exercises PITR config sets
+# its own keys (monkeypatch / write_fields).
+for _pitr_key in [key for key in os.environ if key.startswith("AVA_PITR_")]:
+    del os.environ[_pitr_key]
+
 # Repository providers read the process environment while spawn validation reads
 # the cluster `.env` file. Seed every default provider's inert key through both
 # channels before project imports so tests can select any registered model.
