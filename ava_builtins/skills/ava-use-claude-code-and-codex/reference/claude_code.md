@@ -1,0 +1,35 @@
+# Claude Code (`claude`)
+
+For an interactive (persistent) session, use the spawn script instead of
+launching by hand — it pre-trusts the directory and sends the contract message:
+
+```bash
+.venv/bin/python reference/spawn_claude.py <workspace-dir>
+```
+
+Manual launch (for full control):
+
+```bash
+cd /path/to/workspace && unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions   # interactive session (the persistent pattern)
+```
+
+Headless one-shot (`claude -p "<task>"` / `claude -p "<task>" --output-format json`) is
+available for rare, self-contained tasks that need no supervision — avoid by default.
+
+- **Required flags on this machine:** `--dangerously-skip-permissions`.
+  Available models: Fable 5 (`--model fable`), Opus 4.8 (`--model opus`).
+  Other flags (verify with
+  `claude --help`): `--output-format
+  json|stream-json` (only with `-p`), `--continue` / `--resume <session_id>`.
+- In an interactive session, `/compact` (and silent auto-compaction near the
+  limit) manage context; `/context` shows usage but as a grid, not a number.
+- `--output-format json` returns per-turn token usage (input / output / cache)
+  and the model's `contextWindow`; it does **not** report cumulative session
+  usage — sum it yourself if you track headroom in headless mode.
+- **Auth & billing trap:** `ANTHROPIC_API_KEY` must be **unset** before launching
+  `claude`. When the env var is present alongside a paid Claude subscription,
+  Claude Code defaults to API-key billing — incurring per-token charges instead
+  of using the subscription. The spawn script already unsets it in the session.
+  For manual launch, prefix the command with `unset ANTHROPIC_API_KEY &&`.
+  (Agents calling Claude through Ava's model layer are unaffected — the key is
+  picked up from the server config, not the agent's environment.)

@@ -17,7 +17,7 @@ activate rolls the acceptance back loudly: the lease ends `rejected` with the
 reason, the native agent receives a system note and keeps running.
 
 The relay waits natively for preparation and quiescence, then delivers the
-session's start message — the handoff brief recorded during preparation —
+session's start message — the opener recorded on the lease during preparation —
 even if the inbox is empty. Rejection or expiry also wakes the controller;
 waiting for activation never requires a model to poll status.
 The relay authenticates with the lease's scoped `relay_token` — never the

@@ -153,6 +153,18 @@ def _required_str(raw: dict[str, object], field: str) -> str:
     return value
 
 
+def _optional_file(raw: dict[str, object], field: str) -> Path | None:
+    value = raw.get(field)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        _invalid(f"{field} must be a non-empty string or null")
+    path = Path(value)
+    if not path.is_absolute():
+        _invalid(f"{field} must be an absolute path")
+    return path
+
+
 def _optional_positive_int(raw: dict[str, object], field: str) -> int | None:
     value = raw.get(field)
     if value is None:
@@ -213,6 +225,8 @@ def _parse_supervisor_identity(
     raw: dict[str, object],
     status: PersistedStatus,
     owner_agent_id: int,
+    *,
+    supervised: bool,
 ) -> tuple[int | None, str | None]:
     session_id = _optional_positive_int(raw, "supervisor_session_id")
     name_raw = raw.get("supervisor_session_name")
@@ -221,7 +235,9 @@ def _parse_supervisor_identity(
     name = name_raw
     if (session_id is None) != (name is None):
         _invalid("supervisor session id and full name must be published together")
-    if status == "active" and session_id is None:
+    if not supervised and session_id is not None:
+        _invalid("a file-less takeover generation never carries a supervisor handle")
+    if status == "active" and supervised and session_id is None:
         _invalid("active owner must carry its supervisor handle")
     if session_id is not None and name != full_session_name(
         owner_agent_id,
@@ -266,15 +282,16 @@ def _parse(key: CodingSessionKey, value: object) -> CodingSessionOwner:
     expected_state_dir = generation_state_dir(key, generation)
     if raw_state_dir.resolve() != expected_state_dir.resolve():
         _invalid("state_dir is outside this canonical generation")
-    tasks_file = Path(_required_str(raw, "tasks_file"))
-    work_file = Path(_required_str(raw, "work_file"))
-    if not tasks_file.is_absolute() or not work_file.is_absolute():
-        _invalid("task and work file paths must be absolute")
+    tasks_file = _optional_file(raw, "tasks_file")
+    work_file = _optional_file(raw, "work_file")
+    if (tasks_file is None) != (work_file is None):
+        _invalid("task and work file paths must be published together")
+    supervised = tasks_file is not None
     session_id, session_name = _parse_session_identity(
         raw, persisted_status, owner_agent_id, suffix
     )
     supervisor_id, supervisor_name = _parse_supervisor_identity(
-        key, generation, raw, persisted_status, owner_agent_id
+        key, generation, raw, persisted_status, owner_agent_id, supervised=supervised
     )
     terminalized_at, terminal_reason = _parse_terminal_metadata(raw, persisted_status)
     return CodingSessionOwner(
@@ -324,8 +341,8 @@ def _payload(owner: CodingSessionOwner) -> dict[str, object]:
         "supervisor_session_id": owner.supervisor_session_id,
         "supervisor_session_name": owner.supervisor_session_name,
         "state_dir": str(owner.state_dir),
-        "tasks_file": str(owner.tasks_file),
-        "work_file": str(owner.work_file),
+        "tasks_file": str(owner.tasks_file) if owner.tasks_file is not None else None,
+        "work_file": str(owner.work_file) if owner.work_file is not None else None,
         "created_at": owner.created_at.isoformat() if owner.created_at else None,
         "expires_at": owner.expires_at.isoformat() if owner.expires_at else None,
         "terminalized_at": owner.terminalized_at.isoformat() if owner.terminalized_at else None,

@@ -238,6 +238,154 @@ def test_failed_early_publish_kills_codex_session_before_startup(
     assert killed == [7]
 
 
+def test_takeover_launch_inlines_brief_without_files_or_supervisor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    active = _owner(tmp_path)
+    launching = replace(
+        active,
+        status="launching",
+        session_id=None,
+        session_name=None,
+        tasks_file=None,
+        work_file=None,
+        supervisor_session_id=None,
+        supervisor_session_name=None,
+    )
+    events: list[str] = []
+    sent: list[str] = []
+
+    def _claim(
+        _key: coding_session_owner.CodingSessionKey,
+        *,
+        tasks_file: Path | None,
+        work_file: Path | None,
+        ttl_seconds: float,
+    ) -> coding_session_owner.CodingSessionClaim:
+        assert tasks_file is None and work_file is None
+        assert ttl_seconds == 3600
+        events.append("claim")
+        return coding_session_owner.CodingSessionClaim(action="launch", owner=launching)
+
+    def _unexpected(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("a takeover launch must not create files or start a supervisor")
+
+    def _seed(_state_dir: Path, _workspace: Path) -> None:
+        events.append("seed")
+
+    def _new(*, name: str, ttl: float) -> int:
+        assert name == launching.expected_suffix
+        assert ttl == 3600
+        events.append("new")
+        return 7
+
+    def _send(session_id: int, content: str) -> None:
+        assert session_id == 7
+        sent.append(content)
+        events.append("send")
+
+    def _ready(_session_id: int) -> None:
+        events.append("ready")
+
+    def _verified(_session_id: int, _codex_home: Path) -> None:
+        events.append("verified")
+
+    def _publish(
+        _key: coding_session_owner.CodingSessionKey,
+        _generation: str,
+        *,
+        session_id: int,
+        session_name: str,
+    ) -> coding_session_owner.CodingSessionOwner:
+        assert session_id == 7
+        assert session_name.endswith("-codex-workspace-11111111")
+        events.append("publish")
+        return replace(launching, status="active", session_id=7, session_name=session_name)
+
+    monkeypatch.setattr(spawn_codex, "_claim_canonical", _claim)
+    monkeypatch.setattr(spawn_codex, "_init_file", _unexpected)
+    monkeypatch.setattr(spawn_codex, "_launch_supervisor", _unexpected)
+    monkeypatch.setattr(spawn_codex.coding_session_owner, "attach_supervisor", _unexpected)
+    monkeypatch.setattr(spawn_codex, "_seed_codex_home", _seed)
+    monkeypatch.setattr(spawn_codex.ava.shell.sessions, "new", _new)
+    monkeypatch.setattr(spawn_codex.ava.shell.sessions, "send", _send)
+    monkeypatch.setattr(spawn_codex, "_wait_for_ready", _ready)
+    monkeypatch.setattr(spawn_codex, "_verify_submitted", _verified)
+    monkeypatch.setattr(spawn_codex.coding_session_owner, "publish_active", _publish)
+
+    workspace = Path(launching.key.workspace)
+    brief = "Goal: replace the agent. The briefing is inline; read no files."
+    rc = spawn_codex._launch(workspace, None, None, 3600, None, "Fix login", brief)
+
+    assert rc == 0
+    assert events == ["claim", "seed", "new", "publish", "send", "ready", "send", "verified"]
+    assert sent[0].startswith(f"cd {workspace.as_posix()} && ")
+    message = sent[1]
+    assert "take over Ava agent 41" in message
+    assert brief in message
+    assert "tasks.md" not in message and "work.md" not in message
+
+
+def test_takeover_launch_refuses_a_workspace_with_a_live_generation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    record = _owner(tmp_path)
+
+    def _claim(
+        _key: coding_session_owner.CodingSessionKey,
+        *,
+        tasks_file: Path | None,
+        work_file: Path | None,
+        ttl_seconds: float,
+    ) -> coding_session_owner.CodingSessionClaim:
+        assert tasks_file is None and work_file is None
+        return coding_session_owner.CodingSessionClaim(action="adopt", owner=record)
+
+    monkeypatch.setattr(spawn_codex, "_claim_canonical", _claim)
+
+    with pytest.raises(RuntimeError, match="fresh coding workspace"):
+        spawn_codex._launch(
+            Path(record.key.workspace), None, None, 3600, None, "Fix login", "the briefing"
+        )
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        ["--brief", "briefing", "--tasks-file", "tasks.md"],
+        ["--brief", "briefing", "--work-file", "work.md"],
+        [],
+        ["--brief", "   "],
+    ],
+)
+def test_codex_takeover_cli_rejects_files_and_requires_a_brief(
+    extra: list[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("ava._boot.require_agent_id", lambda: 41)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["spawn_codex.py", str(tmp_path), "--impersonate-self", *extra],
+    )
+
+    with pytest.raises(SystemExit):
+        spawn_codex.main()
+
+
+def test_codex_brief_requires_takeover_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "argv", ["spawn_codex.py", str(tmp_path), "--brief", "briefing"])
+
+    with pytest.raises(SystemExit):
+        spawn_codex.main()
+
+
 @pytest.mark.parametrize(
     ("status", "kwargs", "expected"),
     [

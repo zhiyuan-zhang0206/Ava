@@ -1,4 +1,9 @@
-"""Generation-owned lifecycle for supervised external coding-tool sessions.
+"""Generation-owned lifecycle for external coding-tool sessions.
+
+A generation is either *supervised* — a file-driven delegated worker with a
+task file, a work file, and an automatic lifecycle supervisor — or a
+*file-less takeover* that replaces the launching Ava agent: no files, no
+supervisor, and its coding session alone is the liveness signal.
 
 The authoritative key is ``(cluster home, canonical workspace, tool)``. Each
 transition is serialized by a host-local per-key lock and scoped to an opaque
@@ -158,8 +163,8 @@ def claim(
     key: CodingSessionKey,
     *,
     owner_agent_id: int,
-    tasks_file: Path,
-    work_file: Path,
+    tasks_file: Path | None,
+    work_file: Path | None,
     ttl_seconds: float,
     now: dt.datetime | None = None,
     list_sessions: SessionLister = _default_list_sessions,
@@ -172,6 +177,8 @@ def claim(
         raise ValueError("owner_agent_id must be non-negative")
     if not 0 < ttl_seconds <= _MAX_TTL_SECONDS:
         raise ValueError("ttl_seconds must be greater than zero and at most one day")
+    if (tasks_file is None) != (work_file is None):
+        raise ValueError("task and work files are given together, or neither for a takeover")
     timestamp = (now or dt.datetime.now(dt.UTC)).astimezone(dt.UTC)
     with file_lock(lock_path(key), timeout_s=_LOCK_TIMEOUT_S):
         current = read_unlocked(key)
@@ -180,15 +187,20 @@ def claim(
                 f"invalid canonical owner {state_path(key)}: {current.error}"
             )
         current_owner_terminated = current.generation == terminated_generation
+        supervisor_live = current.supervisor_session_name is not None and session_live(
+            current.supervisor_session_name
+        )
         if (
             current.status == "active"
             and current.expires_at is not None
             and timestamp < current.expires_at
             and current.session_name is not None
             and session_live(current.session_name)
-            and current.supervisor_session_name is not None
-            and session_live(current.supervisor_session_name)
             and not current_owner_terminated
+            # A file-less takeover has no supervisor; its coding session alone
+            # is the liveness signal. A supervised generation is adoptable only
+            # while its supervisor is live too.
+            and (current.work_file is None or supervisor_live)
         ):
             return CodingSessionClaim(action="adopt", owner=current)
         if current.status == "launching" and not current_owner_terminated:
@@ -213,8 +225,8 @@ def claim(
             display_label=label,
             expected_suffix=expected_suffix(key, generation),
             state_dir=generation_state_dir(key, generation),
-            tasks_file=tasks_file.expanduser().resolve(),
-            work_file=work_file.expanduser().resolve(),
+            tasks_file=tasks_file.expanduser().resolve() if tasks_file is not None else None,
+            work_file=work_file.expanduser().resolve() if work_file is not None else None,
             created_at=timestamp,
             expires_at=timestamp + dt.timedelta(seconds=ttl_seconds),
         )
@@ -234,6 +246,8 @@ def attach_supervisor(
         current = read_unlocked(key)
         if current.status != "launching" or current.generation != generation:
             raise CodingSessionGenerationChangedError("owner generation changed before supervision")
+        if current.work_file is None:
+            raise RuntimeError("cannot attach a supervisor to a file-less takeover generation")
         if current.owner_agent_id is None:
             raise RuntimeError("launching owner has no agent identity")
         if current.generation is None or session_name != full_session_name(
@@ -263,8 +277,10 @@ def publish_active(
         current = read_unlocked(key)
         if current.status != "launching" or current.generation != generation:
             raise CodingSessionGenerationChangedError("owner generation changed during launch")
-        if current.supervisor_session_id is None or current.supervisor_session_name is None:
-            raise RuntimeError("cannot activate a coding session without its supervisor")
+        if current.work_file is not None and (
+            current.supervisor_session_id is None or current.supervisor_session_name is None
+        ):
+            raise RuntimeError("cannot activate a supervised coding session without its supervisor")
         if current.owner_agent_id is None:
             raise RuntimeError("launching owner has no agent identity")
         if current.expected_suffix is None or session_name != full_session_name(

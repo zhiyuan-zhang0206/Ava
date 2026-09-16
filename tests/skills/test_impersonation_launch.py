@@ -14,16 +14,17 @@ _REFERENCE = (
 
 
 @pytest.mark.parametrize("provider", ["codex", "claude"])
-def test_self_takeover_bootstrap_links_real_guide_and_separate_handles(
+def test_self_takeover_bootstrap_inlines_brief_and_links_real_guide(
     provider: str, tmp_path: Path
 ) -> None:
     guide = _REFERENCE.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
     assert guide.is_file()
-    brief = tmp_path / "tasks with spaces.md"
-    message = bootstrap_message(42, "Fix login", provider, brief, tmp_path / "work.md", guide)
+    brief = "Goal: fix the login flow.\nDecision: keep the session table as-is."
+    message = bootstrap_message(42, "Fix login", provider, brief, guide)
     assert "take over Ava agent 42" in message
     assert "--agent 42" in message and "--name 'Fix login'" in message
-    assert str(guide) in message and str(brief) in message
+    assert str(guide) in message and brief in message
+    assert "work.md" not in message and "tasks.md" not in message and "work file" not in message
     assert "ava impersonate say" in message
     assert "ava.impersonation.say" not in message
     assert "release with your own summary" in message

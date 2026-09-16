@@ -21,8 +21,9 @@ agents serialize the same canonical workspace while distinct workspaces retain
 independent locks.
 
 Each record carries an opaque generation, owner agent, launch phase, full PTY
-handle, expiry, numeric and full supervisor handle, task/work file paths, and
-the private mutable tool-state path. Invalid records fail closed.
+handle, expiry, numeric and full supervisor handle, task/work file paths (both
+absent for a file-less takeover), and the private mutable tool-state path.
+Invalid records fail closed.
 
 ## State machine
 
@@ -32,9 +33,12 @@ the private mutable tool-state path. Invalid records fail closed.
   PTY handle immediately after creation, before slow tool startup and bootstrap.
   A fresh unfinished launch cannot be replaced during its bounded spawn grace;
   after that grace, a live suffix-matching PTY still keeps the generation busy.
-- `active -> adopt`: a live, supervised, unexpired generation is returned
-  unchanged even when another Ava agent asks to launch it. A missing supervisor
-  makes the generation stale rather than silently falling back to TTL.
+- `active -> adopt`: a live, unexpired generation is returned unchanged even
+  when another Ava agent asks to launch it — a supervised one only while its
+  supervisor is live; a file-less takeover on its coding session alone. A
+  missing supervisor on a supervised record makes the generation stale rather
+  than silently falling back to TTL; a launch that wanted a takeover refuses
+  to adopt instead of reclaiming a live takeover in place.
 - `active|stale launching -> launching`: owner termination, expiry, process
   death, or a stale launch with no live candidate PTY permits transfer only
   after the old PTY and private state are reclaimed.
