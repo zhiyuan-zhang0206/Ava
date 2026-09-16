@@ -199,7 +199,7 @@ value is validated as a CSS color literal.
 
 - **Metrics**: `shared/plugin_metrics.py` already defines the two-tier
   core/plugin metric architecture with an `inspector` output surface reserved
-  for per-agent panels under `/api/agents/{id}/inspect`
+  for per-agent panels under `/api/agents/{id}/inspect/metrics`
   (`get_agent_plugin_metrics` exists). Finishing that reserved surface is part
   of this design's scope: a plugin metric declared for `inspector` renders as
   an inspect panel with zero UI declaration.

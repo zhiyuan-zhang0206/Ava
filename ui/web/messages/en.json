@@ -828,6 +828,9 @@
     }
   },
   "inspector": {
+    "sectionWidgets": "Extensions",
+    "widgetsUnavailable": "Inspector extensions unavailable",
+    "retryWidgets": "Retry extensions",
     "title": "Inspector",
     "toggle": "Inspect",
     "closeInspector": "Close inspector",

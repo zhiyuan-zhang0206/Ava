@@ -37,8 +37,8 @@ INSPECT_LIVE = {
     "notice": None,
     "heartbeat": HEARTBEAT,
 }
-INSPECT = {
-    **INSPECT_LIVE,
+INSPECT_STATISTICS = {
+    "agent_id": 1,
     "window_hours": 24,
     "applied_window_hours": 24,
     "since_compact": False,
@@ -165,7 +165,8 @@ FIXTURES: dict[str, object] = {
             }
         ]
     },
-    "/api/agents/1/inspect": INSPECT,
+    "/api/agents/1/inspect/statistics": INSPECT_STATISTICS,
+    "/api/agents/1/inspect/widgets": [],
     "/api/agents/1/inspect/live": INSPECT_LIVE,
 }
 INERT_EVENT_SOURCE = """

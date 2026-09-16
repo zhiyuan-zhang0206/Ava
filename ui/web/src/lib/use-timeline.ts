@@ -42,7 +42,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { startTransition, useCallback, useEffect, useLayoutEffect, useRef } from "react";
 
 import { api } from "./api";
-import { inspectLiveQueryKey } from "./inspector-prefetch";
+import { inspectLiveQueryKey } from "./inspector-queries";
 import { errMsg } from "./errors";
 import { noteTurnStart } from "./interaction-timing";
 import { useTimelineStore } from "./timeline-store";

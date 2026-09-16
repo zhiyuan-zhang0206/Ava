@@ -50,7 +50,6 @@ import { PRIORITY_BG, topNoticePriority } from "@/lib/notices";
 import { formatRelativeTime } from "@/lib/sidebar";
 import { formatShort } from "@/lib/time";
 import type { AgentRow, PublicAgentStatus } from "@/lib/types";
-import { useInspectorPrefetch } from "@/lib/inspector-prefetch";
 import { cn } from "@/lib/utils";
 import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout";
 
@@ -178,7 +177,6 @@ export function AgentRow({
   // the other action mid-fade.
   const [forkOpen, setForkOpen] = useState(false);
   const [resurrectOpen, setResurrectOpen] = useState(false);
-  const inspectPrefetch = useInspectorPrefetch(agent.agent_id);
   // Re-render every minute so the relative-time string refreshes
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -302,12 +300,7 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
           <TreeGuides depth={depth} ancestorsIsLast={ancestorsIsLast} />
           <button
             type="button"
-            onClick={() => {
-              inspectPrefetch.prefetch();
-              onSelect();
-            }}
-            onMouseEnter={inspectPrefetch.schedule}
-            onMouseLeave={inspectPrefetch.cancel}
+            onClick={onSelect}
             className={cn(
               // No transition-colors — active switch must be instant,
               // otherwise the old-focused row's bg fades over 150ms while

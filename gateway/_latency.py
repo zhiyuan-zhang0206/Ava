@@ -66,7 +66,7 @@ R17_R18_EXCLUSION_ROUTE_PATTERNS: dict[str, tuple[str, ...]] = {
     ),
     "slow": (
         r"/api/memory/search",
-        r"/api/agents/.*/inspect",
+        r"/api/agents/.*/inspect/statistics",
         r"/api/stats/dashboard",
         r"/api/metrics/agents",
         r"/api/events",

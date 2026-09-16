@@ -1,4 +1,4 @@
-"""Per-agent inspector panel — GET /api/agents/{id}/inspect."""
+"""Independent current-state, statistics, and extension reads for one agent."""
 
 from __future__ import annotations
 
@@ -23,8 +23,8 @@ from gateway.routers._inspect_cache import InspectCacheFullError, InspectQueryCa
 from gateway.routers._inspect_live import db_rows_blocking, notice_blocking, project_heartbeat
 from gateway.schemas import (
     AgentActivity,
-    AgentInspect,
     AgentInspectLive,
+    AgentInspectStatistics,
     AgentTps,
     HeartbeatLastPause,
     InspectWidgetResult,
@@ -310,19 +310,17 @@ async def _probe_agent_shells(
 class _InspectAggregates(NamedTuple):
     """Only Loki/ledger-derived inspector sections retained by the TTL.
 
-    Machine/config/heartbeat/liveness and all timestamps come from a fresh
-    agents_meta read on every HTTP request. Keeping that boundary explicit
-    prevents a latency cache from becoming a stale control-plane snapshot.
+    Current state and heartbeat history are exclusively owned by the live
+    endpoint. Statistics cannot trigger runner probes or notice reads.
     """
 
     cost: Any
     stats: Any
     tps: Any
     activity: Any
-    heartbeat_last_pause: HeartbeatLastPause | None
 
 
-# Distinct-key inspect loads admit one leader per Loki query slot. Their three
+# Distinct-key inspect loads admit one leader per Loki query slot. Their two
 # independent sections run on one process-lifetime executor, which stays bounded
 # even when a timed-out caller has released its response task.
 _INSPECT_MAX_CONCURRENT_LOADS = 4
@@ -393,20 +391,15 @@ def _inspect_blocking(
         None,
         deadline=deadline,
     )
-    f_heartbeat_last_pause = _inspect_executor.submit(
-        _heartbeat_last_pause,
-        agent_id,
-        deadline=deadline,
-    )
-    futures = (f_cost, f_values, f_heartbeat_last_pause)
+    futures = (f_cost, f_values)
     try:
         cost = f_cost.result(timeout=_remaining_timeout(deadline))
         values = f_values.result(timeout=_remaining_timeout(deadline))
         tps = _agent_tps(values, spawned_at)
         activity = _agent_activity(values, window_start, spawned_at)
-        heartbeat_last_pause = f_heartbeat_last_pause.result(timeout=_remaining_timeout(deadline))
     except FutureTimeoutError as exc:
         for future in futures:
+            future.cancel()
             future.add_done_callback(_discard_future_exception)
         raise TimeoutError from exc
     return _InspectAggregates(
@@ -414,15 +407,13 @@ def _inspect_blocking(
         stats=values.stats,
         tps=tps,
         activity=activity,
-        heartbeat_last_pause=heartbeat_last_pause,
     )
 
 
 # (agent_id, hours, since_compact) -> (monotonic expiry, _InspectAggregates).
 # The event-history aggregates are the panel's expensive half (a whole-life
-# call combines cost, heartbeat, and one shared projected Loki pass), and the frontend
-# refetches them in bursts — on every panel open (refetchOnMount:always), on
-# every notice SSE event for the agent, and on the 60s background interval.
+# call combines cost and one shared projected Loki pass), and the frontend
+# refetches on panel open/selection, manual refresh, compact, and the 60s interval.
 # A 75s TTL spans one 60s open-panel poll tick, so the static retention-window
 # scan is never repeated on every tick. Live DB state, `notice`, and `shells`
 # never ride the cache (see the endpoint). Bound the dict and prune on overflow.
@@ -551,60 +542,23 @@ async def get_agent_inspect_live(agent_id: int, request: Request) -> AgentInspec
     )
 
 
-@router.get("/api/agents/{agent_id}/inspect")
-async def get_agent_inspect(
+@router.get("/api/agents/{agent_id}/inspect/statistics", response_model=AgentInspectStatistics)
+async def get_agent_inspect_statistics(
     agent_id: int,
     request: Request,
     hours: Annotated[StatsWindowHours | None, Query()] = None,
     since_compact: Annotated[bool, Query()] = False,  # noqa: FBT002 — FastAPI query param
-) -> AgentInspect:
-    """Per-agent inspector panel data in one shot — the agent's live persistent
-    shells, its frozen config overlay, its LLM cost, turn/exec stats, idle
-    heartbeat state. The
-    single-agent counterpart to `/api/stats/dashboard` (fleet-wide).
+) -> AgentInspectStatistics:
+    """Read only the selected agent's window-dependent statistics.
 
-    `?hours=` windows `cost` + `stats` to the selected range (0 = last 5m;
-    1/6/24/72/168 = hours, anything else 422s), clamped to Loki retention;
-    omitted = cumulative since spawn. `applied_window_hours` reports the
-    served horizon while `window_hours` continues to echo the request.
-    `?since_compact=true` windows them to events since the agent's latest
-    compact halt instead — it takes precedence, `hours` is ignored and the
-    echoed `window_hours` is None.
-    `shells` + `config_overlay` + `heartbeat` are always
-    current, independent of the window. 404 if the agent is unknown (no
-    agents_meta row). `config_overlay` is the spawn-time override map — `{}` when
-    the agent runs on cluster defaults (the column is NULL).
-
-    Latency discipline: event-history sections use a shared bounded executor,
-    and only their aggregates ride a 75s TTL cache keyed by (agent_id, hours,
-    since_compact). Concurrent misses share one single-flight Future; no more
-    than `_INSPECT_MAX_CONCURRENT_LOADS` distinct leaders run at once, and a
-    saturated request gets the queue-full 503. Each leader's 15-second response
-    budget is also its load deadline, so expired work stops and releases its
-    admission slot rather than continuing under transport timeouts. The
-    agents_meta projection (machine, config, heartbeat inputs, liveness and
-    timestamps), `notice`, and `shells` are fetched fresh on every call and
-    never ride the cache. `shells` is probed on the agent's own machine via the
-    `shell_probe` cluster op (the gateway never runs sessions itself; every
-    machine — its own included — is dialed at its registered ops URL), so a
-    split deployment reflects each agent's runner and an unreachable machine
-    sets shells_available=False rather than claiming no shells exist.
-    `heartbeat` is the agent's idle check-in state: the
-    projected next check-in due time when idle (or the active pause / running
-    suppression) plus its most recent pause from history.
-
-    The retained live lifecycle leg begins at the index-label cutover and never
-    scans the legacy slice. It has an 8-second Loki timeout and a per-agent
-    thirty-minute single-flight cache, so changing `hours` or `since_compact`
-    does not repeat that indexed read. Agents whose lifecycle history is wholly
-    pre-cutover use the `spawned_at` fallback described by `_alive_seconds`.
+    Current state, notices, runner shells, and heartbeat history are owned by
+    ``/inspect/live`` and are never fetched here. Statistics retain their
+    bounded, single-flight 75-second aggregate cache and load deadline.
+    ``hours`` is retention-clamped; ``since_compact`` takes precedence.
     """
     pool = request.app.state.db_pool
+    spawned_at = await asyncio.to_thread(_statistics_spawned_at, pool, agent_id)
     applied_window_hours = None if since_compact or hours is None else applied_window(hours)[0]
-    # Release the agents_meta borrow before entering the potentially queued
-    # Loki fan-out. This fresh read is the live half of the response and must
-    # execute even when the historical aggregate is a TTL hit.
-    db = await asyncio.to_thread(db_rows_blocking, pool, agent_id)
     try:
         aggregates = await asyncio.wait_for(
             _inspect_rows_cached_async(
@@ -612,7 +566,7 @@ async def get_agent_inspect(
                 agent_id,
                 hours,
                 since_compact=since_compact,
-                spawned_at=db.spawned_at,
+                spawned_at=spawned_at,
             ),
             timeout=_INSPECT_RESPONSE_TIMEOUT_S,
         )
@@ -623,45 +577,29 @@ async def get_agent_inspect(
             headers={"Retry-After": "1"},
         ) from exc
     except loki_query_budget.LokiQueryBudgetError:
-        # Preserve the process-wide admission handler's machine-readable reason.
         raise
     except httpx.HTTPError as exc:
         raise_backend_unavailable(exc)
-    # The notice is read fresh on every call (it never rides the cache): the
-    # panel's reply surface must clear the moment a notice resolves, and the
-    # SELECT is cheap. The shell probe is equally cheap and always live.
-    notice = await asyncio.to_thread(notice_blocking, pool, agent_id)
-    shells, shells_available = await _probe_agent_shells(agent_id, db.machine, pool)
-    return AgentInspect(
+    return AgentInspectStatistics(
         agent_id=agent_id,
-        machine=db.machine,
-        spawned_at=db.spawned_at,
-        started_at=db.started_at,
         window_hours=None if since_compact else hours,
         applied_window_hours=applied_window_hours,
         since_compact=since_compact,
-        shells=shells,
-        shells_available=shells_available,
-        observation=db.observation,
-        config_overlay=db.config_overlay,
-        preset_name=db.preset_name,
-        notice=notice,
         cost=aggregates.cost,
         stats=aggregates.stats,
         tps=aggregates.tps,
         activity=aggregates.activity,
-        heartbeat=project_heartbeat(
-            status=db.status,
-            last_active_at=db.last_active_at,
-            last_heartbeat_at=db.last_heartbeat_at,
-            paused_until=db.paused_until,
-            agent_id=agent_id,
-            pending_inbound=db.pending_inbound,
-            last_pause=aggregates.heartbeat_last_pause,
-        ),
-        liveness_state=db.liveness_state,
-        last_probe_at=db.last_probe_at,
     )
+
+
+def _statistics_spawned_at(pool: ConnectionPool[Any], agent_id: int) -> datetime:
+    """Read the immutable lifecycle origin without loading a live snapshot."""
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT spawned_at FROM agents_meta WHERE id = %s", (agent_id,))
+        row = cur.fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
+    return row[0]
 
 
 @router.get("/api/agents/{agent_id}/neighbors")
