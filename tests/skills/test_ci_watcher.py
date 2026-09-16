@@ -56,14 +56,17 @@ class _Result:
 class _FakeAva:
     """Records wakes and file writes instead of doing them.
 
-    `send_failures` makes that many leading `send_message` calls raise — the
-    shape of a gateway refusing connections inside a restart window.
+    `send_failures` / `write_failures` make that many leading calls raise —
+    the shapes of a gateway refusing connections inside a restart window and
+    of an unwritable verdict file.
     """
 
-    def __init__(self, files_root: Path, send_failures: int = 0) -> None:
+    def __init__(self, files_root: Path, send_failures: int = 0, write_failures: int = 0) -> None:
         self.wakes: list[tuple[int, str]] = []
         self.send_calls = 0
         self.send_failures = send_failures
+        self.write_calls = 0
+        self.write_failures = write_failures
         # Whether the verdict file existed at each send attempt — locks the
         # persist-before-send order, not just the end state.
         self.verdict_written_at_send: list[bool] = []
@@ -81,6 +84,9 @@ class _FakeAva:
         class _Files:
             @staticmethod
             def write(path: str, content: str) -> None:
+                fake.write_calls += 1
+                if fake.write_calls <= fake.write_failures:
+                    raise RuntimeError("disk is full")
                 # Stand-in for the SDK's workspace resolution: the watcher's
                 # relative VERDICT_FILE lands under the test's tmp dir.
                 target = files_root / path
@@ -97,17 +103,21 @@ def _run_watcher(
     verdicts: list[Any],
     *,
     fake: _FakeAva | None = None,
+    raise_on_poll: Exception | None = None,
 ) -> tuple[list[tuple[int, str]], list[Any], _FakeAva]:
     """Exec the substituted template; return its wakes, polls, and fake.
 
     `verdicts` is how `check_ci` answers, one entry per poll; the last entry
     repeats if the watcher polls again.  A caller that must assert after the
-    watcher raises (the exhausted-delivery exit) passes its own fake.
+    watcher raises (the exhausted-delivery or probe-error exit) passes its own
+    fake; `raise_on_poll` makes the probe raise instead of answering.
     """
     statuses = _ci_status()
     polled: list[Any] = []
 
     def _check_ci(_pr: str | int) -> _Result:
+        if raise_on_poll is not None:
+            raise raise_on_poll
         verdict = verdicts[min(len(polled), len(verdicts) - 1)]
         polled.append(verdict)
         return _Result(verdict)
@@ -249,3 +259,40 @@ def test_exhausted_delivery_exits_2_and_keeps_the_verdict(
     assert fake.send_calls == 8  # WAKE_ATTEMPTS, exhaustion really tried
     assert "wake delivery failed after 8 attempts" in capsys.readouterr().out
     assert "failed" in (tmp_path / _VERDICT_NAME).read_text(encoding="utf-8")
+
+
+def test_probe_error_is_persisted_then_exits_1(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The probe-error terminal path (2026-09-17 review): persist + echo run
+    before exit 1, across the full retry budget, so the error survives even a
+    wake that cannot land."""
+    fake = _FakeAva(tmp_path, send_failures=100)
+    error = RuntimeError("gh exploded")
+    with pytest.raises(SystemExit) as excinfo:
+        _run_watcher(monkeypatch, tmp_path, [], fake=fake, raise_on_poll=error)
+
+    assert excinfo.value.code == 1
+    assert fake.send_calls == 8  # the retry budget was spent before exiting
+    persisted = (tmp_path / _VERDICT_NAME).read_text(encoding="utf-8")
+    assert "CI watcher error" in persisted
+    assert "gh exploded" in persisted
+    assert "the verdict is at ci-verdict-1234.txt" in capsys.readouterr().out
+
+
+def test_persist_failure_does_not_claim_a_stored_verdict(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A persist failure must not be reported as a stored verdict (2026-09-17
+    review): the message still goes out, and the exhaustion report says the log
+    holds the only copy."""
+    statuses = _ci_status()
+    fake = _FakeAva(tmp_path, send_failures=100, write_failures=100)
+    with pytest.raises(SystemExit) as excinfo:
+        _run_watcher(monkeypatch, tmp_path, [statuses.FAILED], fake=fake)
+
+    assert excinfo.value.code == 2
+    out = capsys.readouterr().out
+    assert "verdict persist failed" in out
+    assert "the verdict was not persisted" in out
+    assert not (tmp_path / _VERDICT_NAME).exists()

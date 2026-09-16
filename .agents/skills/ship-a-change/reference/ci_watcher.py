@@ -79,8 +79,8 @@ def wake(message: str) -> bool:
 
     The SDK already retries 3 times, but a gateway restart window refuses
     connections for minutes: the growing gaps below ride it out.  Returns
-    False when every attempt failed — the caller exits non-zero and the
-    persisted verdict file remains for a later read.
+    False when every attempt failed — `finish` reports the fallback record
+    and the caller exits non-zero.
     """
     delay = WAKE_BACKOFF_S
     for attempt in range(1, WAKE_ATTEMPTS + 1):
@@ -92,10 +92,6 @@ def wake(message: str) -> bool:
             if attempt < WAKE_ATTEMPTS:
                 time.sleep(delay)
                 delay = min(delay * 2, WAKE_BACKOFF_MAX_S)
-    print(
-        f"wake delivery failed after {WAKE_ATTEMPTS} attempts — verdict persisted at {VERDICT_FILE}",
-        flush=True,
-    )
     return False
 
 
@@ -107,12 +103,21 @@ def finish(message: str) -> bool:
     echoed and the message still goes out); the wake is not — the return
     value is its outcome, and callers exit non-zero when it is False.
     """
+    persisted = True
     try:
         ava.files.write(VERDICT_FILE, message + "\n")
     except Exception as exc:  # the wake below is the primary delivery path
+        persisted = False
         print(f"verdict persist failed: {exc!r}", flush=True)
     print(message, flush=True)
-    return wake(message)
+    delivered = wake(message)
+    if not delivered:
+        if persisted:
+            fallback = f"the verdict is at {VERDICT_FILE}"
+        else:
+            fallback = "the verdict was not persisted — the message above is the record"
+        print(f"wake delivery failed after {WAKE_ATTEMPTS} attempts — {fallback}", flush=True)
+    return delivered
 
 
 start = time.time()
