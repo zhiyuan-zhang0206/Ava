@@ -24,8 +24,9 @@ directory. The manifest is the single expression of the built-in policy
 | `hierarchy-worker` | `hierarchy-worker-schedule.py` | product | **enabled** |
 | `trace-ship-tempo` | `trace-ship-tempo-schedule.py` | operator | **disabled** (present, not started) |
 
-- **product** schedules (adversarial evaluation, self-evolution, memory, model tracking) are Ava's
-  own improvement loops — they ship and start by default.
+- **product** schedules (adversarial evaluation, self-evolution, memory, model
+  tracking, the hierarchy worker) are Ava's own improvement loops — they ship
+  and start by default.
 - **operator** schedules (cluster-operator tooling, e.g. shipping OTel traces
   to a local Tempo viewer) ship with the product but start **disabled**: they
   exist so they are discoverable, and start only when the operator enables

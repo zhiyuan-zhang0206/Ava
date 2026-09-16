@@ -9,9 +9,9 @@ budget<deadline cross-check stays on the model in `daemon.py` next to the
 delivery-watchdog validators.
 
 These knobs drive the understanding-tree worker (task #3704 P2b) — a
-gateway-hosted resident schedule (`schedules/hierarchy-worker-schedule.py`)
-that scans for new compact boundaries and runs per-agent builds through
-`services.hierarchy_worker`. The model it generates with is
+gateway-hosted schedule (`schedules/hierarchy-worker-schedule.py`, one cron
+slot a minute) that scans for new compaction boundaries and runs per-agent
+builds through `services.hierarchy_worker`. The model it generates with is
 `settings.lm.hierarchy_model`.
 """
 
@@ -22,26 +22,6 @@ from pydantic import Field
 
 class HierarchyWorkerFields:
     """The hierarchy-worker fields, in their `daemon.py` order."""
-
-    hierarchy_worker_poll_seconds: float = Field(
-        default=60.0,
-        gt=0,
-        alias="AVA_HIERARCHY_WORKER_POLL_SECONDS",
-        description=(
-            "Hierarchy-worker scan cadence (seconds). The scan is one aggregated "
-            "query over the checkpoints table (measured ~0.2s for ~280 "
-            "boundary-bearing threads), so 60s keeps tree updates within a "
-            "minute of a compact while staying invisible in DB load. Read at "
-            "loop iteration; a change needs the schedule restarted."
-        ),
-        json_schema_extra={
-            "capability": "gateway",
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
 
     hierarchy_job_budget_seconds: float = Field(
         default=2400.0,

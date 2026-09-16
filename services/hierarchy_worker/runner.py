@@ -1,17 +1,19 @@
-"""The resident worker loop — scan, claim one job, run it, repeat.
+"""The worker's tick — scan, claim one job, run it; repeat until the queue is dry.
 
 Hosted by the gateway's ScheduleManager through
-`schedules/hierarchy-worker-schedule.py`: a resident schedule the manager
-launches at boot, adopts across gateway restarts, and restarts with backoff +
+`schedules/hierarchy-worker-schedule.py`: a built-in schedule whose per-minute
+cron slot calls `run_tick()`. One tick drains the queue back-to-back (a
+continuation job is due immediately, so a drain never stalls), and the slot
+boundary paces only the idle wait. The manager launches the host at boot,
+keeps it adopted across gateway restarts, and restarts it with backoff +
 breaker if it crashes. Each job runs as a child process, so a big window's
 memory and any crash stay contained; the parent's wait is bounded by the job
 deadline — a wedged child is killed and its row recovered.
 
 Serial by construction — one child at a time, the cost guardrail pinned in
-review (3187). The loop drains pending jobs back-to-back and sleeps only
-when nothing is due. Every DB step is idempotent and race-free (partial
-unique index + atomic claim), so even a second worker process could only
-duplicate work that is hash-idempotent anyway.
+review (3187). Every DB step is idempotent and race-free (partial unique
+index + atomic claim), so even a second worker process could only duplicate
+work that is hash-idempotent anyway.
 """
 
 from __future__ import annotations
@@ -19,7 +21,6 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -45,6 +46,19 @@ class ClaimedJob:
     id: int
     agent_id: int
     include_tail: bool
+
+
+def prepare() -> None:
+    """One-time host start: verify the schema, announce the process.
+
+    Called by the schedule host before its first tick. A drifted schema
+    raises here, so the manager's crash path (backoff + breaker + last_error)
+    exposes it instead of every tick failing on its own.
+    """
+    from shared.migrations import assert_schema_current
+
+    assert_schema_current(settings.data_plane.db_url)
+    logger.info("hierarchy worker started (pid {pid})", pid=os.getpid())
 
 
 def claim_next(conn: Connection) -> ClaimedJob | None:
@@ -102,12 +116,14 @@ def _recover(job_id: int, error: str) -> None:
         )
 
 
-def loop_forever() -> None:
-    """The resident loop. Never returns; a crash is the manager's restart path."""
-    from shared.migrations import assert_schema_current
+def run_tick() -> None:
+    """One schedule tick: scan, then claim and run due jobs back-to-back.
 
-    assert_schema_current(settings.data_plane.db_url)
-    logger.info("hierarchy worker started (pid {pid})", pid=os.getpid())
+    Returns when the queue is dry, or after a transient failure — the next
+    tick retries and nothing is lost (the scan is a stateless reconcile).
+    A code<->DB drift raises so the manager's crash path restarts the worker
+    after a fix; no retry self-heals it.
+    """
     while True:
         try:
             with connect(autocommit=True) as conn:
@@ -133,11 +149,9 @@ def loop_forever() -> None:
             raise
         except Exception:
             logger.exception("hierarchy worker: scan iteration failed")
-            time.sleep(settings.daemon.hierarchy_worker_poll_seconds)
-            continue
+            return
         if job is None:
-            time.sleep(settings.daemon.hierarchy_worker_poll_seconds)
-            continue
+            return
         logger.info(
             "hierarchy job {job} claimed (agent {agent}, include_tail={tail})",
             job=job.id,

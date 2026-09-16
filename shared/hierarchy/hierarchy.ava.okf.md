@@ -72,11 +72,11 @@ merge are the layers built on top.
 ## The worker (task #3704 P2b)
 
 `services/hierarchy_worker/` is the compact-driven builder. It runs as a
-gateway-hosted resident schedule (`schedules/hierarchy-worker-schedule.py`,
-built-in `hierarchy-worker`, product class, enabled by default), scans for
-new compaction boundaries, and runs one build job at a time — each in its own
-child process — tracking work in `hierarchy_jobs` +
-`hierarchy_worker_state`.
+gateway-hosted built-in schedule (`schedules/hierarchy-worker-schedule.py`,
+built-in `hierarchy-worker`, product class, enabled by default): one cron
+slot a minute calls a tick, which scans for new compaction boundaries and
+runs one build job at a time — each in its own child process — tracking work
+in `hierarchy_jobs` + `hierarchy_worker_state`.
 
 - **Triggers**: one aggregated scan reads every thread's newest compact
   boundary; a boundary newer than the agent's covered cursor enqueues a job
@@ -99,8 +99,8 @@ child process — tracking work in `hierarchy_jobs` +
   exponentially (base/cap configurable). A budget-truncated continuation
   drains immediately.
 - **Knobs** (`settings.daemon.hierarchy_*`, each with its written reason):
-  poll cadence, job budget, hard deadline, retry base/cap, generation
-  concurrency, and the child-kill / stale-row graces; the generation model is
+  job budget, hard deadline, retry base/cap, generation concurrency, and the
+  child-kill / stale-row graces; the generation model is
   `settings.lm.hierarchy_model`.
 - **Cost observability**: each job row records the run's scope (stretches,
   nodes generated/reused/failed/skipped) and its token sums; the LLM usage
