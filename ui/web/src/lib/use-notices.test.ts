@@ -193,28 +193,20 @@ describe("useNotices", () => {
   });
 
   it("reconnect (open) refetches both the open queue and the resolved history", async () => {
-    renderHook(() => useNotices(), { wrapper });
-    await waitFor(() => expect(api.getNotices).toHaveBeenCalled());
+    const { result } = renderHook(() => useNotices(), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
     await waitForEventSource();
-    const callsBefore = vi.mocked(api.getNotices).mock.calls.length;
-    const spy = vi.spyOn(queryClient, "invalidateQueries");
+    const before = [...vi.mocked(api.getNotices).mock.calls];
 
-    // The fold owner's central reconnect reconcile invalidates the two notice
-    // families explicitly; unrelated caches are outside this repair fan-out.
     fireOpen();
 
-    expect(spy).toHaveBeenCalledWith({
-      queryKey: NOTICES_QUERY_KEY,
-      exact: false,
+    // Both readers issue their real requests again. The contract concerns
+    // repaired read models, not the scheduler's invalidateQueries arguments.
+    await waitFor(() => {
+      const after = vi.mocked(api.getNotices).mock.calls.slice(before.length);
+      for (const request of before) expect(after).toContainEqual(request);
+      expect(after.length).toBeGreaterThanOrEqual(2);
     });
-    expect(spy).toHaveBeenCalledWith({
-      queryKey: NOTICES_RESOLVED_QUERY_KEY,
-      exact: false,
-    });
-    expect(spy).not.toHaveBeenCalledWith();
-    await waitFor(() =>
-      expect(vi.mocked(api.getNotices).mock.calls.length).toBeGreaterThan(callsBefore + 1),
-    );
   });
 
   // Audit C3: failures must surface (stale-while-error), not silently degrade
