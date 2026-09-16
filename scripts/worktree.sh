@@ -81,6 +81,16 @@ cmd_clean() {
         die "worktree not found: $wt_path"
     fi
 
+    # Two branch conventions clean must cover (task #3710): worktree.sh's own
+    # (ava/<task>) and agent-created worktrees, which name branch == dir
+    # (ava-<id>-<slug>). Prefer the tool's name; fall back to the agent one so
+    # neither convention leaves a branch behind.
+    if [[ "$task" == ava-* ]] \
+        && ! git -C "$REPO_ROOT" rev-parse --verify "$branch" >/dev/null 2>&1 \
+        && git -C "$REPO_ROOT" rev-parse --verify "refs/heads/$task" >/dev/null 2>&1; then
+        branch="$task"
+    fi
+
     # Live-anchor guard (issue #194): a removal kills every session/process
     # whose cwd lies under the worktree, so run the checker shipped with THIS
     # checkout (the tool version decides) and refuse unless it comes back
@@ -147,7 +157,7 @@ cmd_clean() {
         git -C "$REPO_ROOT" branch -D "$branch"
         ok "branch deleted: $branch"
     else
-        echo "→ branch $branch not found (already deleted?)"
+        echo "→ no branch found for $task (already deleted?)"
     fi
 }
 
@@ -184,7 +194,7 @@ Usage: worktree.sh <command> [args]
 
 Commands:
   create <task-name>            Create branch ava/<task> + worktree from main, then run setup
-  clean  <task-name> [--force]  Remove worktree and delete branch ava/<task>
+  clean  <task-name> [--force]  Remove worktree and delete its branch (ava/<task> or ava-<id>-<slug>)
   list                          List all worktrees under .worktrees/
 
 clean is anchor-guarded: it refuses when live sessions or processes are still
