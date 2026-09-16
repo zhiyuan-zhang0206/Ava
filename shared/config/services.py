@@ -124,6 +124,47 @@ class ServiceSettings(_ServiceRuntimeSettings):
             "remote_writable": False,
         },
     )
+    backup_hour: int = Field(
+        default=3,
+        ge=0,
+        le=23,
+        alias="AVA_BACKUP_HOUR",
+        description=(
+            "Cluster-clock hour (0-23) at which the daily logical dump becomes due: "
+            "the scheduler's first wake at/after this hour starts it, so a host that "
+            "was down at that hour catches up on its next tick. 03:00 runs in the "
+            "quiet window, and the newest dump is then only hours old when the "
+            "morning reads it; the hour is read on AVA_TIMEZONE (cluster time), "
+            "never the host clock."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    backup_keep: int = Field(
+        default=7,
+        gt=0,
+        alias="AVA_BACKUP_KEEP",
+        description=(
+            "How many of the newest daily dumps the local pool keeps; the off-site "
+            "PITR retention planner mirrors this count so the remote namespace "
+            "cannot drift from the local prune. 7 is a week of dailies: a bad "
+            "migration found a day later must not have already overwritten the last "
+            "good copy. The pre-update/activation snapshots and the in-flight "
+            "activation pin are kept in their own slots on top of this window."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     pitr_uploader_pidfile: Path = Field(
         default_factory=lambda: _unit_home() / "run" / "pitr_uploader.pid",
         alias="AVA_PITR_UPLOADER_PIDFILE",
