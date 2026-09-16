@@ -9,14 +9,35 @@ import re
 import stat
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Protocol
 from uuid import uuid4
 
 from langchain_core.messages import AIMessage, BaseMessage
 
-from shared.config.sandbox import SandboxSettings
 from shared.lm.content import content_blocks
 from shared.log import logger
 from shared.message_kwargs import message_addl_kwargs, message_content
+
+
+class _CropConfig(Protocol):
+    """The crop knobs `crop_output` reads — declared structurally so this module
+    never imports the eager config chain.
+
+    Naming `SandboxSettings` here would import `shared.config.sandbox` (and
+    with it pydantic_settings) into every exec child's lite boot — this module
+    sits on the `agent.graph` import path (task #3621). The protocol is also
+    the truthful runtime contract: lite mode hands `crop_output` the config
+    view, not a `SandboxSettings`. A caller whose object lacks a member fails
+    statically at the call site.
+    """
+
+    exec_output_crop_after_lines: int
+    exec_output_crop_after_chars: int
+    exec_output_crop_after_bytes: int
+    exec_output_crop_head_lines: int
+    exec_output_crop_tail_lines: int
+    exec_output_crop_archive_max_bytes: int
+
 
 _CROP_NAME = re.compile(r"\bcrop_[0-9a-f]{32}\.txt\b")
 
@@ -108,7 +129,7 @@ def _make_room(directory: Path, size: int, budget: int, referenced: set[str]) ->
 def crop_output(
     output: str,
     directory: Path,
-    config: SandboxSettings,
+    config: _CropConfig,
     *,
     referenced_messages: Sequence[BaseMessage],
     max_chars: int,

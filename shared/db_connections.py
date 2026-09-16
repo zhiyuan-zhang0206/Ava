@@ -7,10 +7,17 @@ import psycopg
 from psycopg_pool import ConnectionPool
 
 from shared.config import settings
-from shared.config.data_plane import gateway_url_host, resolved_pool_size, sslmode_for_url
 from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
 from shared.log import logger
 from shared.url_secret import url_with_port
+
+# `shared.config.data_plane`'s helpers are imported inside the dial functions
+# that call them (`connect` / `pool` / `direct_db_url`), never at module level:
+# this module is on the exec child's boot path (`agent.db` -> `shared.db` ->
+# here) and a module-level import would pull the full eager config chain
+# (pydantic_settings included) back into a lite boot (task #3621). Dialing
+# upgrades the config chain anyway (the first `settings.data_plane` read), so
+# the deferred import is a sys.modules hit at call time.
 
 
 class UnanchoredHomeError(RuntimeError):
@@ -210,6 +217,7 @@ def direct_db_url() -> str:
     `AVA_DB_URL` as-is rather than guessing.
     """
     from shared.cluster import load_registry, record_pgbouncer_port, record_postgres_port
+    from shared.config.data_plane import gateway_url_host
     from shared.machine import reachable_host
     from shared.netutil import is_loopback_host
 
@@ -302,6 +310,8 @@ def connect(
     Raises:
         UnanchoredHomeError: the resolved db_url is the unanchored sentinel.
     """
+    from shared.config.data_plane import sslmode_for_url
+
     dp = settings.data_plane
     url = dp.db_url if not direct else direct_db_url()
     sslmode = sslmode_for_url(url, dp.db_sslmode)
@@ -369,6 +379,8 @@ def pool(
     Raises:
         UnanchoredHomeError: the resolved db_url is the unanchored sentinel.
     """
+    from shared.config.data_plane import resolved_pool_size, sslmode_for_url
+
     dp = settings.data_plane
     url = dp.db_url if not direct else direct_db_url()
     min_size, max_size = resolved_pool_size(

@@ -506,6 +506,16 @@ repos:
         files: ^(shared/events/contract\.py$|shared/events/registry\.py$|shared/events/registry_ops\.py$|shared/events/system\.py$|shared/live_events\.py$|scripts/gen_event_registry\.py$|shared/events/registry\.md$)
         pass_filenames: false
 
+      # shared/config_lite_table.json must stay in sync with the config
+      # registry — the boot-path field index is a generated artifact (#3621):
+      # any config field change without regenerating turns this hook red.
+      - id: config-lite-table-fresh
+        name: "shared/config_lite_table.json in sync with the config registry (drift: run .venv/bin/python scripts/gen_config_lite_table.py)"
+        entry: .venv/bin/python scripts/gen_config_lite_table.py --check
+        language: system
+        files: ^(shared/config_registry\.py$|shared/config/.*\.py$|scripts/gen_config_lite_table\.py$|shared/config_lite_table\.json$)
+        pass_filenames: false
+
   - repo: local
     hooks:
       - id: lint-ava-okf

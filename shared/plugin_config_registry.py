@@ -559,6 +559,13 @@ def validate_config_overlay(overlay: dict[str, object]) -> None:
                     by_domain.setdefault(field_domain(f), {})[f] = v
                 for dom, upd in by_domain.items():
                     sub: BaseModel = getattr(settings, dom)
+                    if not isinstance(sub, BaseModel):
+                        # Boot-lite (#3621): `settings.<domain>` can be a view
+                        # that upgrades in place — re-read the name so the
+                        # class-level validation runs against the built
+                        # sub-model.
+                        sub.model_dump()
+                        sub = getattr(settings, dom)
                     type(sub).model_validate({**sub.model_dump(), **upd})
             else:
                 cls = _PLUGIN_CONFIG_CLASSES[plugin]

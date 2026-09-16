@@ -38,6 +38,7 @@ from contextvars import ContextVar
 from typing import Any
 
 import shared.config_registry as _config_registry
+from shared.config_lite_table import FIELD_DOMAINS
 
 # The current context's pin map: flat field name -> raw pinned value. None =
 # no agent bound (host code outside any turn).
@@ -104,13 +105,13 @@ class _TurnDomain:
 
     def __getattr__(self, name: str) -> Any:
         pins = _AGENT_CONFIG_PINS.get()
-        if pins is not None and name in pins:
-            # Pin only wins for a field this domain actually owns — a flat pin
-            # map cannot leak a same-named attribute into a foreign domain.
-            fields = _config_registry._fields()
-            ref = fields.get(name)
-            if ref is not None and ref.domain == self._domain:
-                return pins[name]
+        # A pin only wins for a field this domain actually owns — a flat pin map
+        # cannot leak a same-named attribute into a foreign domain. The lookup
+        # reads the boot-lite static index, not the live registry: building the
+        # registry here would drag the whole eager config chain into a pinned
+        # read before anything asked for it (task #3621).
+        if pins is not None and name in pins and FIELD_DOMAINS.get(name) == self._domain:
+            return pins[name]
         from shared.config import settings
 
         return getattr(getattr(settings, self._domain), name)

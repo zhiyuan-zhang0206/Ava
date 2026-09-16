@@ -111,3 +111,33 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
 # config-service read paths use this). A string no process-profile name can
 # ever be, so the default also type-checks as the parameter's `str | None`.
 PROFILE_UNSET = "!unset!"
+
+
+def profile_domain_error(profile: str, domain: str) -> AttributeError:
+    """The fail-fast error for touching a config domain the process profile
+    does not construct.
+
+    One constructor, so the eager aggregate (`Settings.__getattr__`), the
+    boot-lite settings view, and `set_field`/`get_field` all raise the same
+    actionable message (fail-fast, Task #856 D2): a cross-profile read used to
+    silently read a default.
+    """
+    return AttributeError(
+        f"'{profile}' process profile does not construct the {domain!r} config "
+        f"domain (per-process config, Task #856) — nothing in this process "
+        f"kind reads settings.{domain}. If this read is legitimate, add the "
+        f"domain to the '{profile}' profile in PROCESS_PROFILES AND to the "
+        f"consumption-matrix guard (tests/shared/test_gateway_consumer_guard.py); "
+        f"otherwise move the read to the process kind that owns the domain. "
+        f"Dynamic code can check settings.has_domain({domain!r}) first."
+    )
+
+
+def profile_unknown_error(profile: str) -> ValueError:
+    """The fail-fast error for an AVA_PROCESS_PROFILE marker outside the known
+    vocabulary — the marker is set by launchers, not by hand."""
+    return ValueError(
+        f"{AVA_PROCESS_PROFILE_ENV}={profile!r} is not a known process profile; "
+        f"must be one of {sorted(PROCESS_PROFILES)} — the marker is set by the "
+        f"process launcher, not by hand"
+    )
