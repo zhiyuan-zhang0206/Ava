@@ -21,7 +21,7 @@
 //   action wrappers, owns the inspector panel open state + preload queries,
 //   threads agents/pendingActions/pendingSpawnCount/forkPending down as props.
 //   Wraps HomeContent in AgentEventStreamProvider — the active-agent
-//   /api/system/all stream (throttled/batched while visible, 7s REST polling
+//   selected-agent detail stream (throttled/batched while visible; suspended
 //   while hidden).
 // - HomeContent: receives activeId + agents from HomeShell; calls
 //   useTimeline + useTokenUsage + usePendingMessages which share that one

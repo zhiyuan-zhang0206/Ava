@@ -15,8 +15,7 @@
 // reopen + heartbeat skip), scoped down to the one alert shape: frames that
 // fail to parse are dropped, a wedged socket reopens, a CLOSED stream
 // with a valid session reconnects with capped backoff, and an expired session
-// stays closed. Hidden tabs close the stream and poll the ["alerts"] caches
-// every 7s (the same hidden-tab policy as the system streams).
+// stays closed. Hidden pages close the stream and reconcile their active reads on return.
 //
 // Cache shape: AlertsResponse (alerts + meta.unresolved_count). Frames upsert
 // by row id and apply unresolved-count deltas.
@@ -44,11 +43,6 @@ const WATCHDOG_MS = 45_000;
 // retries for 401/403; valid sessions reopen with capped exponential backoff.
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
-// Hidden-tab poll cadence — the same 7s the system/all stream polls at
-// (commit 087eb756e): a hidden tab closes its streams and keeps snapshots
-// warm through this interval instead of holding a connection slot.
-const HIDDEN_POLL_MS = 7_000;
-
 /** The default-params cache key (badge / provider warm-up). */
 export const ALERTS_QUERY_KEY = ["alerts"] as const;
 
@@ -125,25 +119,12 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
   const bumpReconnect = useCallback(() => setReconnectNonce((n) => n + 1), []);
   const isVisible = useDocumentVisible();
 
-  // Hidden tab: the stream-owning effect below stays closed, and this poll
-  // keeps the alerts caches near-live instead (the badge always; the section
-  // while its page is mounted) — so returning to the tab lands on fresh data
-  // and the reopen's exact badge invalidate only repairs the last gap.
-  useEffect(() => {
-    if (isVisible || authStatus !== "authenticated") return;
-    const interval = setInterval(() => {
-      void queryClient.invalidateQueries({ queryKey: ALERTS_QUERY_KEY });
-    }, HIDDEN_POLL_MS);
-    return () => clearInterval(interval);
-  }, [isVisible, authStatus, queryClient]);
-
   useEffect(() => {
     if (authStatus !== "authenticated" || !isVisible) {
       // Session not authenticated: keep the stream closed (Task #1635 — an
       // unauthenticated SSE GET 401s and blind retries produced the 43k/24h
       // /api/alerts/stream storm). Login flips the status → effect re-runs → opens.
-      // Hidden tab: same close — the 7s poll above covers freshness until the
-      // tab becomes visible again (reopen runs the exact badge invalidate).
+      // Hidden pages suspend work; reopening reconciles active alert reads.
       return;
     }
 
@@ -192,20 +173,23 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
 
     const es = new EventSource(`${API_BASE}/api/alerts/stream`, { withCredentials: true });
     es.onopen = () => {
+      if (disposed) return;
       failCountRef.current = 0;
       // Alerts have their own stream and staleTime: Infinity, so this provider
       // owns the precise reconnect repair for frames missed while disconnected.
-      // Exact matching avoids refetching the heavier section history.
-      void queryClient.invalidateQueries({ queryKey: ALERTS_QUERY_KEY, exact: true });
+      // Only active readers refetch; inactive history caches are marked stale.
+      void queryClient.invalidateQueries({ queryKey: ALERTS_QUERY_KEY });
       armWatchdog();
     };
     es.onmessage = (e) => {
+      if (disposed) return;
       armWatchdog();
       const raw = typeof e.data === "string" ? e.data : "";
       if (!raw) return;
       foldFrame(raw);
     };
     es.onerror = () => {
+      if (disposed) return;
       switch (es.readyState) {
         case EventSource.CLOSED:
           // CLOSED hides the HTTP status; probe the session instead of blind-retrying

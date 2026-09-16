@@ -27,9 +27,9 @@ vi.mock("./useEventStream", () => ({
   },
 }));
 
-function pushPoll(): void {
+function pushOpen(): void {
   if (connectionHandler === null) throw new Error("hook did not subscribe to connection events");
-  act(() => connectionHandler!({ type: "poll" }));
+  act(() => connectionHandler!({ type: "open" }));
 }
 
 let queryClient: QueryClient;
@@ -57,13 +57,13 @@ beforeEach(() => {
 
 afterEach(() => cleanup());
 
-describe("hidden-tab poll invalidation", () => {
+describe("selected-stream reconnect repair", () => {
   it("invalidates token usage for the active agent", async () => {
     renderHook(() => useTokenUsage(42, vi.fn()), { wrapper });
     await waitFor(() => expect(api.getTokenUsage).toHaveBeenCalledWith(42));
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
 
-    pushPoll();
+    pushOpen();
 
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["token-usage", 42] });
   });
@@ -72,7 +72,7 @@ describe("hidden-tab poll invalidation", () => {
     renderHook(() => useTokenUsage(null, vi.fn()), { wrapper });
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
 
-    pushPoll();
+    pushOpen();
 
     expect(invalidateSpy).not.toHaveBeenCalled();
   });
@@ -82,7 +82,7 @@ describe("hidden-tab poll invalidation", () => {
     await waitFor(() => expect(api.getPendingMessages).toHaveBeenCalledWith(42));
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
 
-    pushPoll();
+    pushOpen();
 
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["pending", 42] });
   });
@@ -91,7 +91,7 @@ describe("hidden-tab poll invalidation", () => {
     renderHook(() => usePendingMessages(null, vi.fn()), { wrapper });
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
 
-    pushPoll();
+    pushOpen();
 
     expect(invalidateSpy).not.toHaveBeenCalled();
   });

@@ -1,12 +1,12 @@
 // timeline-store.ts direct unit tests — the SSE-driven streaming timeline
 // store, split out of store.ts (which now holds only UI + cluster state).
 //
-// Complements the flaky/use-timeline.test.ts integration tests:
+// Complements the use-timeline.test.ts integration tests:
 //   - use-timeline: renderHook actually runs React state, tests hook wiring
 //   - here:          direct act on `useTimelineStore.getState()` actions,
 //                    locking down pure-state-machine behavior — SSE role × flag
 //                    transitions, connection-event writes, switchThread
-//                    defaults + LRU, per-thread background folding, etc.
+//                    defaults, selected-event routing, etc.
 
 import { act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -30,10 +30,7 @@ function item(overrides: Partial<BackendTimelineItem>): BackendTimelineItem {
   };
 }
 
-/** Reset the timeline store to a fresh state — avoids cross-test contamination.
- *  Direct setState (not switchThread): switchThread now parks/unparks per-thread
- *  state, so re-selecting the same id would unpark the prior test's polluted
- *  state instead of clearing it, and its parked buckets must be dropped too. */
+/** Reset timeline state to prevent cross-test contamination. */
 function resetStore(): void {
   useTimelineStore.setState({
     activeThreadId: 42, // 42 so isEventForThread does not block agent_id=42 SSE events
@@ -50,7 +47,6 @@ function resetStore(): void {
     olderFetchCount: 0,
     scrollToBottomRequest: 0,
     liveCompact: null,
-    threads: new Map(),
     compactReplaceSeq: 0,
     compactReplaceAgent: null,
   });
@@ -544,7 +540,6 @@ describe("create() initial defaults (fresh module)", () => {
     expect(s.hasMoreOlder).toBe(false);
     expect(s.loadingOlder).toBe(false);
     expect(s.olderFetchCount).toBe(0);
-    expect(s.threads.size).toBe(0);
   });
 });
 
@@ -847,120 +842,6 @@ describe("compact_done hard reset (incremental design)", () => {
     expect(s.resetPending).toBe(true); // window still open
   });
 
-  it("parked-thread compact_done marks the thread: switch-back seeds cold with the reset window armed", () => {
-    // A compact that completes while the thread is parked must not let a
-    // later switch-back seed the lagging pre-compact snapshot and keep-merge
-    // it back in. The marker makes switchThread seed cold + arm resetPending.
-    act(() => {
-      useTimelineStore.getState().switchThread(
-        1,
-        [item({ item_id: "90.0", kind: "inbound_chat", payload: "pre-compact" })],
-        false,
-      );
-    });
-    // Park thread 1 by switching to thread 2.
-    act(() => {
-      useTimelineStore.getState().switchThread(2, [item({ item_id: "1.0", payload: "other" })], false);
-    });
-    // compact_done arrives for the parked thread 1.
-    act(() => {
-      useTimelineStore.getState().processSseEvent({ role: "compact_done", agent_id: 1 });
-    });
-    expect(useTimelineStore.getState().compactedThreadIds.has(1)).toBe(true);
-    // Switch back: the (possibly lagging) items stay visible — consistent
-    // with the active-thread keep-items behavior — but the reset window is
-    // armed so the first post-compact snapshot replaces wholesale instead of
-    // keep-merging the old history back in.
-    act(() => {
-      useTimelineStore.getState().switchThread(1, [item({ item_id: "90.0", payload: "LAGGING cache" })], false);
-    });
-    const s = useTimelineStore.getState();
-    expect(s.items.map((i) => i.item_id)).toEqual(["90.0"]);
-    expect(s.resetPending).toBe(true);
-    expect(s.compactedThreadIds.has(1)).toBe(false); // marker consumed
-    // The first post-compact snapshot replaces wholesale.
-    act(() => {
-      useTimelineStore.getState().processSseEvent({
-        role: "timeline_snapshot",
-        agent_id: 1,
-        msg_count: 2,
-        items: [item({ item_id: "1.0", payload: "[summary]" })],
-      });
-    });
-    expect(useTimelineStore.getState().items.map((i) => i.item_id)).toEqual(["1.0"]);
-    expect(useTimelineStore.getState().resetPending).toBe(false);
-  });
-
-  it("bucketless compact marker is consumed by the post-compact snapshot (Task #994: stale reset window on switch-back)", () => {
-    // The user scenario: an agent compacts while it has NO parked bucket (the
-    // user is on another thread and never visited it). compact_done sets the
-    // marker; the post-compact FULL snapshot arrives while the thread is still
-    // bucketless and is dropped; a later switch-back then sees the marker and
-    // arms a stale reset window — the GET is dropped inside the window and the
-    // FIRST incremental snapshot (agent still streaming) replaces the fresh
-    // seed wholesale, leaving only the tail ("show only the last detail block,
-    // earlier messages never trigger loading").
-    // Active on thread 2; thread 1 has no bucket.
-    act(() => {
-      useTimelineStore.getState().switchThread(2, [item({ item_id: "2.0", payload: "other" })], false);
-    });
-    // compact_done for the bucketless thread 1 → marker set.
-    act(() => {
-      useTimelineStore.getState().processSseEvent({ role: "compact_done", agent_id: 1 });
-    });
-    expect(useTimelineStore.getState().compactedThreadIds.has(1)).toBe(true);
-    // The post-compact FULL snapshot arrives while thread 1 is still
-    // bucketless. Its job (the reset window's whole purpose) is done: the
-    // marker must be consumed so a later switch-back does NOT arm a stale
-    // window that has no full snapshot to wait for.
-    act(() => {
-      useTimelineStore.getState().processSseEvent({
-        role: "timeline_snapshot",
-        agent_id: 1,
-        msg_count: 2,
-        items: [item({ item_id: "1.0", kind: "system_marker", payload: "[summary]" })],
-      });
-    });
-    expect(useTimelineStore.getState().compactedThreadIds.has(1)).toBe(false);
-    // Switch back with a fresh post-compact cache: no reset window, the GET
-    // applies, and an incremental streaming snapshot keep-merges.
-    act(() => {
-      useTimelineStore.getState().switchThread(
-        1,
-        [item({ item_id: "1.0", kind: "system_marker", payload: "[summary]" })],
-        true,
-      );
-    });
-    let s = useTimelineStore.getState();
-    expect(s.resetPending).toBe(false);
-    // The HTTP snapshot (tail window with history) must apply, not be dropped.
-    act(() => {
-      useTimelineStore.getState().reloadSnapshot(
-        [
-          item({ item_id: "1.0", kind: "system_marker", payload: "[summary]" }),
-          item({ item_id: "2.0", kind: "agent_chat", payload: "earlier message" }),
-        ],
-        3,
-        true,
-      );
-    });
-    s = useTimelineStore.getState();
-    expect(s.items.map((i) => i.item_id)).toEqual(["1.0", "2.0"]);
-    // The next streaming snapshot (incremental tail — "the last detail block")
-    // must keep-merge onto the history, not replace it wholesale.
-    act(() => {
-      useTimelineStore.getState().processSseEvent({
-        role: "timeline_snapshot",
-        agent_id: 1,
-        msg_count: 3,
-        items: [item({ item_id: "3.0", kind: "code_output", payload: "last block" })],
-      });
-    });
-    s = useTimelineStore.getState();
-    expect(s.items.map((i) => i.item_id)).toEqual(["1.0", "2.0", "3.0"]);
-    expect(s.hasMoreOlder).toBe(true);
-  });
-
   it("the first post-compact snapshot replaces items wholesale and clears the reset window", () => {
     act(() => {
       useTimelineStore.getState().switchThread(1, [item({ item_id: "90.0", payload: "old" })], false);
@@ -1163,73 +1044,6 @@ describe("compact crossed unseen (SSE-gap heal)", () => {
     const s = useTimelineStore.getState();
     expect(s.items.map((i) => i.item_id)).toEqual(["0.0", "1.0", "2.0"]);
     expect(s.items.some((i) => i.payload === "post-compact-1 turn")).toBe(false);
-  });
-
-  it("a parked bucket that missed compact_done is replaced wholesale by the post-compact full snapshot", () => {
-    act(() => {
-      useTimelineStore.getState().switchThread(
-        1,
-        [
-          item({ item_id: "1.0", kind: "inbound_chat", payload: "pre-compact" }),
-          item({ item_id: "2.0", kind: "agent_chat", payload: "pre-compact reply" }),
-        ],
-        false,
-      );
-    });
-    act(() => {
-      useTimelineStore.getState().switchThread(2, [item({ item_id: "9.0", payload: "other" })], false);
-    });
-    act(() => {
-      useTimelineStore.getState().processSseEvent({
-        role: "timeline_snapshot",
-        agent_id: 1,
-        msg_count: 3,
-        items: [
-          item({ item_id: "0.0", kind: "system_prompt", payload: "PROMPT" }),
-          envelope(),
-          item({ item_id: "2.0", kind: "agent_chat", payload: "narration" }),
-        ],
-      });
-    });
-    const parked = useTimelineStore.getState().threads.get(1);
-    expect(parked?.items.map((i) => i.item_id)).toEqual(["0.0", "1.0", "2.0"]);
-    expect(parked?.resetPending).toBe(false);
-    // A parked swap is a background heal — the active-thread retention edge
-    // does not move (task #3698).
-    expect(useTimelineStore.getState().compactReplaceSeq).toBe(0);
-    // Switch back: the healed bucket seeds — no resurrection.
-    act(() => {
-      useTimelineStore.getState().switchThread(1, null, false);
-    });
-    expect(useTimelineStore.getState().items.map((i) => i.item_id)).toEqual(["0.0", "1.0", "2.0"]);
-  });
-
-  it("an incremental snapshot carrying the envelope still keep-merges into the parked bucket (no 0.0, no false replace)", () => {
-    act(() => {
-      useTimelineStore.getState().switchThread(
-        1,
-        [
-          item({ item_id: "1.0", kind: "inbound_chat", payload: "pre-compact" }),
-          item({ item_id: "2.0", kind: "agent_chat", payload: "pre-compact reply" }),
-        ],
-        false,
-      );
-    });
-    act(() => {
-      useTimelineStore.getState().switchThread(2, [item({ item_id: "9.0", payload: "other" })], false);
-    });
-    act(() => {
-      useTimelineStore.getState().processSseEvent({
-        role: "timeline_snapshot",
-        agent_id: 1,
-        msg_count: 4,
-        items: [
-          envelope({ item_id: "3.0" }),
-        ],
-      });
-    });
-    const parked = useTimelineStore.getState().threads.get(1);
-    expect(parked?.items.map((i) => i.item_id)).toEqual(["1.0", "2.0", "3.0"]);
   });
 
   it("a full-window post-compact snapshot replaces the ACTIVE thread even when compact_done was lost", () => {
@@ -1478,7 +1292,6 @@ describe("prependOlder / load-older flags", () => {
     expect(s.loadingOlder).toBe(false);
   });
 
-
   it("prepends history beyond the old 6000 cap without dropping items", () => {
     // Task #1734: crossing the former 6000-item ceiling no longer discards
     // the oldest items — every prepended page is retained.
@@ -1558,24 +1371,6 @@ describe("no per-thread item cap across live writers (task #1734)", () => {
     expect(state.hasMoreOlder).toBe(true);
   });
 
-  it("keeps SSE growth in a parked thread bucket past 6000 items", () => {
-    act(() => {
-      useTimelineStore.getState().switchThread(1, fullTimeline(), true);
-      useTimelineStore.getState().switchThread(2, null, false);
-      useTimelineStore.getState().processSseEvent({
-        role: "chat_start",
-        agent_id: 1,
-        item_id: "6001.0",
-      });
-    });
-
-    const parked = useTimelineStore.getState().threads.get(1);
-    expect(parked?.items).toHaveLength(6_001);
-    expect(parked?.items[0].item_id).toBe("1.0");
-    expect(parked?.items.at(-1)?.item_id).toBe("6001.0");
-    expect(parked?.hasMoreOlder).toBe(true);
-  });
-
   it("keeps an oversized switchThread seed in full", () => {
     const oversized = [
       item({ item_id: "0.0", payload: "oldest" }),
@@ -1639,111 +1434,14 @@ describe("no per-thread item cap across live writers (task #1734)", () => {
   });
 });
 
-// -- per-thread routing: background folding + hot switch-back + LRU (PR3) ────
-//
-// The store routes active-agent events into top-level fields. A buffered event
-// for a switched-away (parked) thread folds into its `threads` bucket so
-// switch-back is instant (R2/R3); an unvisited thread is dropped (bounded).
-// Parked buckets are LRU-capped at MAX_PARKED_THREADS(32).
-
-describe("processSseEvent per-thread routing (R2/R3)", () => {
-  it("background SSE for a switched-away thread folds into its parked bucket; switch-back restores it instantly", () => {
-    const ps = useTimelineStore.getState().processSseEvent;
-    // Stream a chat bubble into thread 1 (active path).
-    act(() => {
-      useTimelineStore.getState().switchThread(1, null, false);
-      ps({ role: "chat_start", agent_id: 1, item_id: "3.0" });
-      ps({ role: "chat_delta", agent_id: 1, item_id: "3.0", content: "first" });
-    });
-    expect(useTimelineStore.getState().items.map((i) => i.item_id)).toEqual(["3.0"]);
-
-    // Switch to thread 2 — thread 1 is parked with its bubble.
-    act(() => {
-      useTimelineStore.getState().switchThread(2, null, false);
-    });
-    expect(useTimelineStore.getState().items).toEqual([]); // active view (thread 2) empty
-    expect(useTimelineStore.getState().threads.has(1)).toBe(true);
-
-    // A background delta for the PARKED thread 1 folds into its bucket, not the
-    // active view.
-    act(() => {
-      ps({ role: "chat_delta", agent_id: 1, item_id: "3.0", content: " more" });
-    });
-    expect(useTimelineStore.getState().items).toEqual([]); // active thread 2 untouched
-    expect(useTimelineStore.getState().threads.get(1)?.items[0]?.payload).toBe("first more");
-
-    // Switch back to thread 1 → unpark the live-folded bucket instantly (the
-    // background delta is already there, no refetch needed).
-    act(() => {
-      useTimelineStore.getState().switchThread(1, null, false);
-    });
-    const s = useTimelineStore.getState();
-    expect(s.activeThreadId).toBe(1);
-    expect(s.items[0]?.payload).toBe("first more");
-    expect(s.threads.has(1)).toBe(false); // the active thread is never in the map
-  });
-
-  it("background SSE for an unvisited thread is dropped (no bucket is created)", () => {
-    act(() => {
-      useTimelineStore.getState().switchThread(1, null, false);
-      useTimelineStore.getState().processSseEvent({ role: "chat_start", agent_id: 99, item_id: "1.0" });
-    });
-    const s = useTimelineStore.getState();
-    expect(s.items).toEqual([]); // active thread 1 untouched
-    expect(s.threads.has(99)).toBe(false); // no bucket spun up for a thread never visited
-  });
-
-  it("compact_done for a parked thread marks it and keeps its bucket reset-pending (a history shrink can't be folded; the first snapshot replaces)", () => {
+describe("selected event routing", () => {
+  it("token_usage for an inactive thread is dropped; for the active thread it writes the top-level token fields", () => {
     const ps = useTimelineStore.getState().processSseEvent;
     act(() => {
       useTimelineStore.getState().switchThread(1, null, false);
-      ps({ role: "chat_start", agent_id: 1, item_id: "3.0" }); // thread 1 has a bubble
-      useTimelineStore.getState().switchThread(2, null, false); // park thread 1, active=2
-    });
-    expect(useTimelineStore.getState().threads.get(1)?.items).toHaveLength(1);
-
-    act(() => {
-      ps({ role: "compact_done", agent_id: 1 }); // the parked thread compacts
-    });
-    // The bucket is kept (items still visible on switch-back) with the reset
-    // window armed, and the thread is marked so a bucketless switch-back
-    // seeds cold. The post-compact snapshot then replaces wholesale.
-    const s = useTimelineStore.getState();
-    expect(s.threads.get(1)?.resetPending).toBe(true);
-    expect(s.compactedThreadIds.has(1)).toBe(true);
-    expect(s.items).toEqual([]); // active thread 2 untouched
-
-    act(() => {
-      ps({
-        role: "timeline_snapshot",
-        agent_id: 1,
-        msg_count: 2,
-        items: [item({ item_id: "1.0", payload: "[summary]" })],
-      });
-    });
-    const s2 = useTimelineStore.getState();
-    expect(s2.threads.get(1)?.items.map((i) => i.item_id)).toEqual(["1.0"]);
-    expect(s2.threads.get(1)?.resetPending).toBe(false);
-    expect(s2.compactedThreadIds.has(1)).toBe(false);
-  });
-
-  it("compact_done for a thread with no bucket marks it (no bucket created; switch-back seeds cold)", () => {
-    act(() => {
-      useTimelineStore.getState().switchThread(1, null, false);
-      useTimelineStore.getState().processSseEvent({ role: "compact_done", agent_id: 77 });
-    });
-    const s = useTimelineStore.getState();
-    expect(s.threads.has(77)).toBe(false); // no bucket spun up
-    expect(s.compactedThreadIds.has(77)).toBe(true); // but the marker is set
-  });
-
-  it("token_usage for a parked thread is dropped; for the active thread it writes the top-level token fields", () => {
-    const ps = useTimelineStore.getState().processSseEvent;
-    act(() => {
-      useTimelineStore.getState().switchThread(1, null, false);
-      useTimelineStore.getState().switchThread(2, null, false); // thread 1 parked, active=2
+      useTimelineStore.getState().switchThread(2, null, false); // active=2
       useTimelineStore.setState({ tokenUsage: 0, reasoningTokens: 0 });
-      // token for the parked thread 1 → dropped (tokens are React-Query-cached per thread)
+      // An inactive thread cannot change the selected context bar.
       ps({ role: "token_usage", agent_id: 1, input_tokens: 111, output_tokens: 0 });
     });
     expect(useTimelineStore.getState().tokenUsage).toBe(0);
@@ -1756,57 +1454,7 @@ describe("processSseEvent per-thread routing (R2/R3)", () => {
   });
 });
 
-describe("system-prompt item through park / fold / switch-back", () => {
-  // The system-prompt item (0.0, ~128KB) is a normal timeline item: it arrives
-  // in full-window snapshots (spawn / compact shrink / claim fallback) and the
-  // merge's id-replace keeps one copy per thread; incremental snapshots never
-  // carry it. Parked buckets keep whatever the merge produced — the LRU cap
-  // (MAX_PARKED_THREADS) bounds retained copies.
-
-  it("parking keeps the system-prompt item; switch-back restores the bucket as-is", () => {
-    const sysPrompt = item({ item_id: "0.0", kind: "system_prompt", payload: "X".repeat(10_000) });
-    const chat = item({ item_id: "1.0", kind: "agent_chat", payload: "hi" });
-    act(() => {
-      useTimelineStore.getState().switchThread(1, [sysPrompt, chat], false);
-    });
-    // Park thread 1 (switch to thread 2): the bucket keeps its items untouched.
-    act(() => {
-      useTimelineStore.getState().switchThread(2, null, false);
-    });
-    const bucket = useTimelineStore.getState().threads.get(1);
-    expect(bucket?.items.map((i) => i.item_id)).toEqual(["0.0", "1.0"]);
-    expect(bucket?.items[0]).toBe(sysPrompt); // exact same object — no re-alloc
-
-    // Switch back: the parked bucket wins; the expandable card is there
-    // immediately, no restore dance.
-    act(() => {
-      useTimelineStore.getState().switchThread(1, [sysPrompt, chat], false);
-    });
-    const s = useTimelineStore.getState();
-    expect(s.items.map((i) => i.item_id)).toEqual(["0.0", "1.0"]);
-    expect(s.items[0]).toBe(sysPrompt);
-  });
-
-  it("a timeline_snapshot folded into a parked bucket keeps the system-prompt item", () => {
-    const ps = useTimelineStore.getState().processSseEvent;
-    act(() => {
-      useTimelineStore.getState().switchThread(1, null, false);
-      useTimelineStore.getState().switchThread(2, null, false); // park thread 1
-      ps({
-        role: "timeline_snapshot",
-        agent_id: 1,
-        msg_count: 3,
-        items: [
-          item({ item_id: "0.0", kind: "system_prompt", payload: "BIG" }),
-          item({ item_id: "2.0", kind: "agent_chat", payload: "hello" }),
-        ],
-      });
-    });
-    const bucket = useTimelineStore.getState().threads.get(1);
-    expect(bucket?.items.map((i) => i.item_id)).toEqual(["0.0", "2.0"]);
-    expect(bucket?.items[0]?.payload).toBe("BIG");
-  });
-
+describe("system-prompt snapshot identity", () => {
   it("a snapshot without the system-prompt item keeps the prev 0.0 object verbatim (no 128KB re-alloc)", () => {
     // Incremental snapshots never carry 0.0 (message 0 is below the cursor);
     // the merge's generic keep rule must preserve the existing object — a
@@ -1853,41 +1501,6 @@ describe("system-prompt item through park / fold / switch-back", () => {
     const s = useTimelineStore.getState();
     expect(s.items[0]).toBe(fresh);
     expect(s.items[0]?.payload).toBe("new");
-  });
-});
-
-describe("switchThread LRU eviction (parked-thread cap)", () => {
-  it("parking beyond MAX_PARKED_THREADS evicts the least-recently-parked; the active thread is never evicted", () => {
-    // resetStore leaves active=42. Visiting 1..40 parks 42 then 1..39 (40 parks);
-    // the 32-slot cap keeps the 32 most-recently-parked (8..39), evicting 42 and 1..7.
-    act(() => {
-      for (let id = 1; id <= 40; id++) {
-        useTimelineStore.getState().switchThread(id, null, false);
-      }
-    });
-    const s = useTimelineStore.getState();
-    expect(s.activeThreadId).toBe(40);
-    expect(s.threads.size).toBe(32);
-    expect(s.threads.has(42)).toBe(false); // oldest parked, evicted
-    expect(s.threads.has(1)).toBe(false); // oldest of the new batch, evicted
-    expect(s.threads.has(7)).toBe(false); // last evicted before cap boundary
-    expect(s.threads.has(8)).toBe(true);  // first kept (40 - 32 = 8)
-    expect(s.threads.has(39)).toBe(true); // most recent parked
-    expect(s.threads.has(40)).toBe(false); // active — lives in top-level, not the map
-  });
-
-  it("revisiting an LRU-evicted thread cold-seeds (its live bucket is gone → the hook cold-fetches)", () => {
-    act(() => {
-      for (let id = 1; id <= 40; id++) useTimelineStore.getState().switchThread(id, null, false);
-    });
-    expect(useTimelineStore.getState().threads.has(1)).toBe(false); // evicted above (1..7 evicted, cap=32)
-
-    act(() => {
-      useTimelineStore.getState().switchThread(1, null, false); // no parked bucket → cold
-    });
-    const s = useTimelineStore.getState();
-    expect(s.activeThreadId).toBe(1);
-    expect(s.items).toEqual([]); // cold — nothing restored, a fresh fetch would fill it
   });
 });
 
@@ -1998,7 +1611,7 @@ describe("processSseEventBatch — frame-level folding", () => {
       useTimelineStore.getState().processSseEventBatch([
         { role: "token_usage", agent_id: 42, input_tokens: 100, output_tokens: 1 },
         { role: "token_usage", agent_id: 42, input_tokens: 222, output_tokens: 2 },
-        // A parked agent's token event is dropped (its own React Query cache owns it).
+        // An inactive agent's token event is dropped.
         { role: "token_usage", agent_id: 7, input_tokens: 999, output_tokens: 9 },
       ]);
     });
@@ -2008,7 +1621,7 @@ describe("processSseEventBatch — frame-level folding", () => {
   });
 
   it("a batch matches sequential per-event application (no divergence)", () => {
-    // Park a background thread first.
+    // Visit another thread before selecting the event target.
     act(() => {
       useTimelineStore.getState().switchThread(42, [], false);
       useTimelineStore.getState().switchThread(1, [], false);
@@ -2029,12 +1642,11 @@ describe("processSseEventBatch — frame-level folding", () => {
       items: useTimelineStore.getState().items,
       streamingCode: useTimelineStore.getState().streamingCode,
       turnActive: useTimelineStore.getState().turnActive,
-      threads: new Map(useTimelineStore.getState().threads),
     };
 
     // …vs per-event path on an identical fresh store.
     resetStore();
-    useTimelineStore.setState({ resetPending: false, compactedThreadIds: new Set() });
+    useTimelineStore.setState({ resetPending: false });
     act(() => {
       useTimelineStore.getState().switchThread(42, [], false);
       useTimelineStore.getState().switchThread(1, [], false);
@@ -2043,18 +1655,13 @@ describe("processSseEventBatch — frame-level folding", () => {
       }
     });
     // created_at is stamped per item creation (new Date) — compare the
-    // stable business fields only, both for the active thread and the
-    // parked buckets.
+    // stable business fields only.
     const strip = (list: BackendTimelineItem[]) =>
       list.map((i) => ({ item_id: i.item_id, payload: i.payload }));
-    const stripThreads = (map: Map<number, unknown>) =>
-      [...map.entries()].map(([id, t]) => [id, strip((t as { items: BackendTimelineItem[] }).items)]);
     expect(strip(useTimelineStore.getState().items)).toEqual(strip(afterBatch.items));
     expect(useTimelineStore.getState().streamingCode).toBe(afterBatch.streamingCode);
     expect(useTimelineStore.getState().turnActive).toBe(afterBatch.turnActive);
-    expect(stripThreads(useTimelineStore.getState().threads)).toEqual(
-      stripThreads(afterBatch.threads),
-    );
+
   });
 });
 
@@ -2153,5 +1760,23 @@ describe("liveCompact — compact_started / compact_finished (task #3324)", () =
       useTimelineStore.getState().switchThread(7, [], false);
     });
     expect(useTimelineStore.getState().liveCompact).toBeNull();
+  });
+});
+
+describe("selected-only live state", () => {
+  it("ignores old detail and compact frames without retaining inactive buckets", () => {
+    const store = useTimelineStore.getState();
+    store.switchThread(1, [item({ item_id: "1.0", payload: "A" })], false);
+    store.switchThread(2, [item({ item_id: "1.0", payload: "B" })], false);
+    store.processSseEventBatch([
+      { role: "chat_delta", agent_id: 1, item_id: "1.0", content: "late" },
+      { role: "compact_done", agent_id: 1 },
+    ]);
+    expect(useTimelineStore.getState().items.map((entry) => entry.payload)).toEqual(["B"]);
+    expect(useTimelineStore.getState().resetPending).toBe(false);
+    for (let id = 3; id < 1000; id += 1) store.switchThread(id, [], false);
+    store.switchThread(1, null, false);
+    expect(useTimelineStore.getState().items).toEqual([]);
+    expect(Object.keys(useTimelineStore.getState())).not.toContain("threads");
   });
 });

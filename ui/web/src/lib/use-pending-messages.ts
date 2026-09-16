@@ -82,9 +82,8 @@ export function usePendingMessages(
     queryFn: () => api.getPendingMessages(agentId!),
     enabled: agentId != null,
     staleTime: 0,
-    // gcTime 30min: keep inactive thread cache so returning from another page
-    // hot-hits instead of cold-fetching (matches use-timeline / use-token-usage).
-    gcTime: 30 * 60_000,
+    // Retain no inactive selected-detail snapshots.
+    gcTime: 0,
   });
 
   const onEvent = useCallback(
@@ -124,10 +123,10 @@ export function usePendingMessages(
   const onConnectionEvent = useCallback(
     (ev: ConnectionEvent) => {
       // Banner/closed states are owned by useTimeline on the same shared
-      // connection; poll refreshes the REST snapshot, and parse failures are
+      // connection; reopening refreshes the REST snapshot, and parse failures are
       // surfaced (deduped) so schema drift doesn't fail silently.
       switch (ev.type) {
-        case "poll":
+        case "open":
           if (agentId != null) {
             void queryClient.invalidateQueries({ queryKey: ["pending", agentId] });
           }
@@ -139,7 +138,6 @@ export function usePendingMessages(
           showError(`Pending SSE parse failed: ${key}`);
           return;
         }
-        case "open":
         case "reconnecting":
         case "closed":
           return;

@@ -205,13 +205,13 @@ export const api = {
   // scroll-up history; `has_more` reports whether older items remain.
   getTimeline: (
     agentId: number,
-    opts?: { limit?: number; before?: string },
+    opts?: { limit?: number; before?: string; signal?: AbortSignal },
   ): Promise<TimelineResponse> => {
     const params = new URLSearchParams();
     if (opts?.limit != null) params.set("limit", String(opts.limit));
     if (opts?.before != null) params.set("before", opts.before);
     const qs = params.toString();
-    return f(`/api/agents/${agentId}/timeline${qs ? `?${qs}` : ""}`).then(
+    return f(`/api/agents/${agentId}/timeline${qs ? `?${qs}` : ""}`, { signal: opts?.signal }).then(
       ok<TimelineResponse>,
     );
   },

@@ -201,7 +201,7 @@ describe("AlertsProvider connection auth gating", () => {
     expect(lastInstance).toBeNull();
   });
 
-  it("reconnect invalidates only the default alerts snapshot", async () => {
+  it("reconnect repairs active alert readers and marks inactive caches stale", async () => {
     const { result } = renderHook(() => useAuth().status, { wrapper: alertsWrapper() });
 
     await waitFor(() => expect(result.current).toBe("authenticated"));
@@ -217,7 +217,6 @@ describe("AlertsProvider connection auth gating", () => {
     expect(invalidateSpy).toHaveBeenCalledTimes(1);
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ["alerts"],
-      exact: true,
     });
     expect(invalidateSpy).not.toHaveBeenCalledWith({
       queryKey: ["alerts", "section"],
@@ -378,7 +377,7 @@ describe("AlertsProvider hidden-tab gating", () => {
     vi.unstubAllGlobals();
   });
 
-  it("hidden tab closes the stream and polls the alerts caches every 7s; visible reopens", async () => {
+  it("hidden page closes the stream without polling; visible reopens", async () => {
     const { result } = renderHook(() => useAuth().status, { wrapper: alertsWrapper() });
 
     await waitFor(() => expect(result.current).toBe("authenticated"));
@@ -404,8 +403,8 @@ describe("AlertsProvider hidden-tab gating", () => {
       act(() => {
         vi.advanceTimersByTime(7_000);
       });
-      // The hidden poll refreshes every ["alerts", ...] cache (badge + section).
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["alerts"] });
+      // Hidden views do no periodic reads.
+      expect(invalidateSpy).not.toHaveBeenCalled();
 
       invalidateSpy.mockClear();
       act(() => {
