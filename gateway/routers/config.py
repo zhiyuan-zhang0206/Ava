@@ -28,9 +28,10 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Literal, cast
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from gateway.schemas import (
+    ConfigAuditView,
     ConfigFieldView,
     ConfigFieldWriteResult,
     ConfigView,
@@ -41,7 +42,7 @@ from gateway.schemas import (
 from ops import cluster_rpc as _cluster_rpc
 from ops import ops_config
 from ops.ops_config import SENSITIVE_MASK
-from ops.rpc_schemas import ConfigReadResult, ConfigWriteOpResult
+from ops.rpc_schemas import ConfigAuditReadResult, ConfigReadResult, ConfigWriteOpResult
 from shared import runtime_config
 from shared.config import env_override_values, field_domain, get_config_metadata, settings
 from shared.config.candidate import validate_env_patch_for_write
@@ -158,6 +159,52 @@ async def _dispatch_config_read(target: str) -> ConfigReadResult:
             detail=f"machine {target!r} has no agent-runner ops server — its config cannot be read",
         )
     return ConfigReadResult.model_validate(await asyncio.to_thread(ops_config.config_read_op))
+
+
+async def _dispatch_config_audit_read(target: str, last: int) -> ConfigAuditReadResult:
+    """Run config_audit_read on `target` via its ops server — one uniform path.
+
+    Same structural shape as `_dispatch_config_read`: an agent-runner target is
+    read through its ops server (the gateway's own box included, dialed at its
+    registered localhost URL); only the gateway's OWN box may be read in-process
+    when it has no agent-runner role, and a REMOTE machine without one is
+    unreachable by construction. Caller has already verified the machine is known.
+    """
+    from shared.machines import MachineNotRegistered, lookup_role
+
+    try:
+        role = await asyncio.to_thread(lookup_role, target)
+    except MachineNotRegistered:
+        role = []
+    if "agent-runner" in role:
+        try:
+            wire = await _cluster_rpc.dispatch_to_machine(
+                target_machine=target,
+                kind="config_audit_read",
+                payload={"last": last},
+            )
+        except _cluster_rpc.ClusterOpUnreachable:
+            raise HTTPException(
+                status_code=503,
+                detail=f"machine {target!r} ops server unreachable for config audit read",
+            ) from None
+        except _cluster_rpc.ClusterOpFailed as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=f"machine {target!r} config audit read failed: {exc.result!r}",
+            ) from exc
+        return ConfigAuditReadResult.model_validate(wire)
+    if target != machine_name():
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"machine {target!r} has no agent-runner ops server — "
+                "its config audit cannot be read"
+            ),
+        )
+    return ConfigAuditReadResult.model_validate(
+        await asyncio.to_thread(ops_config.config_audit_read_op, last)
+    )
 
 
 async def _dispatch_config_write(
@@ -331,6 +378,40 @@ async def get_config(machine: str | None = None) -> ConfigView:
         raw_overrides=raw_overrides,
         machine_capabilities=_target_capabilities(target),
     )
+
+
+@router.get("/api/config/audit")
+async def get_config_audit(
+    machine: str | None = None, last: int = Query(20, ge=1, le=200)
+) -> ConfigAuditView:
+    """Return the `.env` write audit trail, newest first.
+
+    `machine` selects the source: omitted = this gateway's own box; `all` = every
+    agent-runner machine plus the gateway's own box, merged (fail-fast — an
+    unreachable machine 503s the whole read); a machine name = that machine.
+    `last` caps the number of returned records (1..200). Records are the raw
+    audit-JSONL entries (`shared/env_audit.py`), each tagged with its `machine`;
+    values were redacted at write time (non-sensitive fields only), and records
+    from before record v2 lack `actor` / `trace_id` / `changed`.
+    """
+    if machine == "all":
+        from shared.machines import list_agent_runners
+
+        runners = await asyncio.to_thread(list_agent_runners)
+        names = [name for name, _url in runners]
+        if machine_name() not in names:
+            names.append(machine_name())
+        results = await asyncio.gather(*(_dispatch_config_audit_read(name, last) for name in names))
+    else:
+        target = machine or machine_name()
+        await asyncio.to_thread(_assert_machine_known, target)
+        results = [await _dispatch_config_audit_read(target, last)]
+
+    records: list[dict[str, object]] = []
+    for result in results:
+        records.extend({**record, "machine": result.machine} for record in result.records)
+    records.sort(key=lambda record: str(record.get("ts", "")), reverse=True)
+    return ConfigAuditView(records=records[:last])
 
 
 @router.get("/api/config/resolved")

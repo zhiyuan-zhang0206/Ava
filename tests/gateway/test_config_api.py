@@ -27,7 +27,7 @@ from fastapi.testclient import TestClient
 from gateway.app import app
 from gateway.routers import config as config_router
 from ops import cluster_rpc as _cluster_rpc
-from ops.rpc_schemas import ConfigWriteOpResult, FieldWriteResult
+from ops.rpc_schemas import ConfigAuditReadResult, ConfigWriteOpResult, FieldWriteResult
 from shared import host_config_validators, runtime_config
 from shared.config import settings
 from shared.machine import machine_name
@@ -883,3 +883,79 @@ def test_put_records_write_audit_with_value_diff(_clean_overrides: Path) -> None
     changed = {str(entry["alias"]): entry for entry in entries}
     assert changed["AVA_MODEL"]["new"] == "audit-model-1"
     assert "actor" in latest
+
+
+def test_get_config_audit_last_is_bounded() -> None:
+    """`last` is a 1..200 query param; out of range is a 422, never a clamped read."""
+    with TestClient(app) as client:
+        assert client.get("/api/config/audit?last=0").status_code == 422
+        assert client.get("/api/config/audit?last=201").status_code == 422
+
+
+def test_get_config_audit_reads_own_records(
+    _clean_overrides: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A self audit read returns this box's newest records, tagged with its machine."""
+    from shared import env_audit, runtime_config
+    from shared.agents import MachineNotRegistered
+
+    def _known(_target: str) -> None:
+        return None
+
+    monkeypatch.setattr(config_router, "_assert_machine_known", _known)
+
+    def _unregistered(_name: str) -> list[str]:
+        raise MachineNotRegistered(_name)
+
+    monkeypatch.setattr("shared.machines.lookup_role", _unregistered)
+    env_path = runtime_config.env_file_path()
+    env_path.write_text("AVA_MODEL=audit-self\n")
+    env_audit.record_env_write(
+        env_path,
+        {"AVA_MODEL"},
+        set(),
+        site="test-self",
+        changes=[{"alias": "AVA_MODEL", "old": "old", "new": "audit-self"}],
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/api/config/audit")
+
+    assert resp.status_code == 200, resp.text
+    records = resp.json()["records"]
+    assert records[-1]["site"] == "test-self"
+    assert records[-1]["machine"] == machine_name()
+    changed = records[-1]["changed"]
+    assert changed[0]["alias"] == "AVA_MODEL"
+    assert changed[0]["new"] == "audit-self"
+
+
+@pytest.mark.asyncio
+async def test_get_config_audit_all_merges_runners_newest_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """machine=all fans out to the runners + this box, merges ts-desc, caps at last."""
+    stamp = {"m1": "01", "m2": "02", machine_name(): "00"}
+    called: list[str] = []
+
+    async def _fake_dispatch(target: str, last: int) -> ConfigAuditReadResult:
+        called.append(target)
+        return ConfigAuditReadResult(
+            machine=target,
+            records=[{"ts": f"2026-09-16T00:0{stamp[target]}:00+00:00", "site": f"s-{target}"}],
+        )
+
+    monkeypatch.setattr(config_router, "_dispatch_config_audit_read", _fake_dispatch)
+
+    def _runners() -> list[tuple[str, str | None]]:
+        return [("m1", None), ("m2", None)]
+
+    monkeypatch.setattr("shared.machines.list_agent_runners", _runners)
+
+    with TestClient(app) as client:
+        resp = client.get("/api/config/audit?machine=all&last=2")
+
+    assert resp.status_code == 200, resp.text
+    records = resp.json()["records"]
+    assert [record["machine"] for record in records] == ["m2", "m1"]
+    assert machine_name() in called

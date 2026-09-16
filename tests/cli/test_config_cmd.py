@@ -20,6 +20,7 @@ import pytest
 from cli.commands import config as cfg
 from shared import runtime_config
 from shared.api_contracts.config import (
+    ConfigAuditView,
     ConfigFieldView,
     ConfigFieldWriteResult,
     ConfigView,
@@ -717,3 +718,88 @@ def test_get_single_key(
     out = capsys.readouterr().out
     assert "AVA_MODEL" in out
     assert "old" in out
+
+
+def test_config_audit_local_reads_newest_first_and_filters(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """No --machine: reads this unit's own JSONL; --key keeps one alias's records."""
+    from shared.env_audit import record_env_write
+
+    monkeypatch.setattr(runtime_config, "_ava_home", lambda: tmp_path)
+    env_path = tmp_path / ".env"
+    env_path.write_text("AVA_MODEL=m\n")
+    record_env_write(
+        env_path,
+        {"AVA_MODEL"},
+        set(),
+        site="first",
+        changes=[{"alias": "AVA_MODEL", "old": "a", "new": "b"}],
+    )
+    record_env_write(env_path, {"AVA_FEISHU_APP_ID"}, set(), site="second")
+
+    assert cfg.cmd_config_audit(last=10, key=None, machine=None) == 0
+    out = capsys.readouterr().out
+    assert "site=first" in out and "site=second" in out
+    assert out.index("site=second") < out.index("site=first")  # newest first
+    assert "AVA_MODEL: a -> b" in out
+
+    assert cfg.cmd_config_audit(last=10, key="AVA_FEISHU_APP_ID", machine=None) == 0
+    out = capsys.readouterr().out
+    assert "site=second" in out
+    assert "site=first" not in out
+
+
+def test_config_audit_machine_fetches_via_gateway(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--machine fetches through the gateway and shows withheld sensitive diffs."""
+    view = ConfigAuditView(
+        records=[
+            {
+                "ts": "2026-09-16T00:00:00+00:00",
+                "machine": "m1",
+                "site": "remote-site",
+                "actor": "user_session:administrator",
+                "keys_written": ["AVA_MODEL", "ANTHROPIC_API_KEY"],
+                "keys_removed": [],
+                "changed": [
+                    {
+                        "alias": "AVA_MODEL",
+                        "scope": "host",
+                        "sensitive": False,
+                        "old": "a",
+                        "new": "b",
+                    },
+                    {
+                        "alias": "ANTHROPIC_API_KEY",
+                        "scope": "cluster",
+                        "sensitive": True,
+                        "old": None,
+                        "new": None,
+                    },
+                ],
+            }
+        ]
+    )
+
+    def _fetch(_machine: str | None, _last: int) -> ConfigAuditView:
+        return view
+
+    monkeypatch.setattr(cfg, "_get_config_audit", _fetch)
+
+    assert cfg.cmd_config_audit(last=5, key=None, machine="m1") == 0
+    out = capsys.readouterr().out
+    assert "[m1]" in out and "remote-site" in out
+    assert "actor=user_session:administrator" in out
+    assert "AVA_MODEL: a -> b" in out
+    assert "ANTHROPIC_API_KEY: (withheld)" in out
+
+
+def test_config_audit_rejects_out_of_range_last(capsys: pytest.CaptureFixture[str]) -> None:
+    """--last outside 1..200 is a clean CLI error on both paths, never a traceback."""
+    assert cfg.cmd_config_audit(last=0, key=None, machine=None) == 1
+    assert "--last must be between 1 and 200" in capsys.readouterr().err
+
+    assert cfg.cmd_config_audit(last=201, key=None, machine="m1") == 1
+    assert "--last must be between 1 and 200" in capsys.readouterr().err

@@ -180,6 +180,7 @@ from gateway.schemas.user_settings import (
 # API contract types downshifted to shared so `cli` decodes them too (re-exported
 # here under their unchanged OpenAPI schema names).
 from shared.api_contracts import (
+    ConfigAuditView,
     ConfigFieldView,
     ConfigFieldWriteResult,
     ConfigView,
@@ -213,6 +214,7 @@ __all__ = [
     "ClusterPanel",
     "CommandItem",
     "CompactEnqueued",
+    "ConfigAuditView",
     "ConfigFieldView",
     "ConfigFieldWriteResult",
     "ConfigView",

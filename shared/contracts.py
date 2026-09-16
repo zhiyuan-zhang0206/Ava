@@ -198,6 +198,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     # ── gateway/routers/config.py ───────────────────────────────────
     ("GET", "/api/config"): RouteContract(),
     ("GET", "/api/config/resolved"): RouteContract(),
+    ("GET", "/api/config/audit"): RouteContract(),
     ("PUT", "/api/config"): RouteContract(note="full config replace — PUT is idempotent"),
     ("GET", "/api/config/default-model"): RouteContract(),
     ("PUT", "/api/config/default-model"): RouteContract(
