@@ -401,3 +401,20 @@ def test_unaddressable_archive_precision_is_retained_and_reported(
     assert db_conn.execute(
         "SELECT turn_distribution FROM agent_archive_stats WHERE agent_id=%s", (aid,)
     ).fetchone() == ([[1.125, 2]],)
+
+
+def test_missing_duration_reason_survives_retained_archive_notice(
+    db_conn: psycopg.Connection,
+) -> None:
+    end = datetime.now(UTC)
+    start = end - timedelta(hours=1)
+    aid = _agent(db_conn, start)
+    db_conn.execute(
+        "INSERT INTO agent_archive_stats(agent_id,turn_distribution) VALUES (%s,'[[1.125,2]]')",
+        (aid,),
+    )
+    write_observations([MetricObservation(1, aid, start, "turn", turn_total=1)], db=db_conn)
+    result = _read(db_conn, aid, start, end, collection=end)
+    assert result.metadata.turns.reason == "missing_turn_durations"
+    assert result.metadata.turns.duration_precision is None
+    assert result.metadata.turns.retained_unapplied_sources == ["historical_archive_distribution"]

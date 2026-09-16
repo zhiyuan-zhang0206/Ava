@@ -18,7 +18,15 @@ class MetricEvidence(BaseModel):
     availability: Literal["observed", "partial", "unavailable"]
     sources: list[str]
     retained_unapplied_sources: list[str] = Field(default_factory=list)
-    reason: str | None = None
+    reason: (
+        Literal[
+            "historical_coverage_unknown",
+            "compact_boundary_unknown",
+            "missing_turn_durations",
+            "archive_precision_unattributed",
+        ]
+        | None
+    ) = None
     duration_precision: Literal["exact", "one_second_buckets", "mixed"] | None = None
 
 
