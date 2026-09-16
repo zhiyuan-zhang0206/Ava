@@ -1,8 +1,18 @@
 """Reference watcher: watch a PR's CI and wake the agent once it settles.
 
-One-shot — sends exactly one message, then exits.  Launch it with
+One-shot — delivers exactly one wake message, then exits.  Launch it with
 `ava.watcher.launch(code, timeout=..., name="ci-watch-<pr>")` right after
-pushing a PR; the single message wakes you with the verdict.
+pushing a PR; the wake message carries the verdict.
+
+Delivery survives a restart window: the settled verdict is persisted first —
+`ci-verdict-<PR>.txt` in the launching agent's workspace — then delivered
+with a bounded retry (gaps doubling from 10s to a 160s cap, ~10.5 min in
+total).  A gateway / agent restart window (an update wave, `ava cluster
+update`) refuses connections for minutes and outlasts the SDK's own 3 quick
+send retries; without persistence + retry a wake landing in that window is
+lost with nothing left behind.  Exit codes: 0 the wake was delivered, 1 the
+CI probe raised, 2 delivery was exhausted — the persisted verdict file is
+then the record to read after the fact.
 
 Uses `scripts/ci_utils.py:check_ci` — the repo-provided, correct CI polling
 logic.  Do NOT write ad-hoc `gh pr checks` + exit-code checks: `gh pr checks`
@@ -31,7 +41,8 @@ Usage:
 1. Read this file with `ava.files.read(...)`
 2. Replace the placeholders (REPO_ROOT / PR_NUMBER / CI_UTILS / WATCHER_ID)
 3. Launch with `ava.watcher.launch(code, timeout="3h", name="ci-watch-<pr>")`
-4. The watcher's single message wakes you
+4. When no wake arrives, read `ci-verdict-<PR>.txt` in your workspace — it
+   was already persisted before the watcher tried to deliver.
 """
 
 import os
@@ -50,14 +61,58 @@ CHECK_EVERY = 60  # seconds between polls
 NO_CHECKS_RETRIES = 3  # consecutive NO_CHECKS verdicts tolerated before waking
 TIMEOUT_S = 7200  # hard stop; reports "timed out" instead of a verdict
 WATCHER_ID = 0  # agent to wake (ava.self.AGENT_ID of the launching agent)
+WAKE_ATTEMPTS = 8  # wake delivery tries (first + 7 retries); the gaps below
+# sum to ~10.5 min — long enough to ride out a gateway / agent restart window
+WAKE_BACKOFF_S = 10.0  # first gap between wake tries; doubles per retry
+WAKE_BACKOFF_MAX_S = 160.0  # cap for one gap
+VERDICT_FILE = f"ci-verdict-{PR_NUMBER}.txt"  # relative — `ava.files` resolves
+# it in the launching agent's workspace: the settled verdict is persisted
+# there before any delivery attempt and stays behind after a failed delivery
 
 os.chdir(REPO_ROOT)
 sys.path.insert(0, CI_UTILS)
 from ci_utils import CIStatus, check_ci  # noqa: E402
 
 
-def wake(message: str) -> None:
-    ava.agents.send_message(WATCHER_ID, message)
+def wake(message: str) -> bool:
+    """Deliver `message` to the agent, retrying across a restart window.
+
+    The SDK already retries 3 times, but a gateway restart window refuses
+    connections for minutes: the growing gaps below ride it out.  Returns
+    False when every attempt failed — the caller exits non-zero and the
+    persisted verdict file remains for a later read.
+    """
+    delay = WAKE_BACKOFF_S
+    for attempt in range(1, WAKE_ATTEMPTS + 1):
+        try:
+            ava.agents.send_message(WATCHER_ID, message)
+            return True
+        except Exception as exc:  # any transport failure retries
+            print(f"wake attempt {attempt}/{WAKE_ATTEMPTS} failed: {exc!r}", flush=True)
+            if attempt < WAKE_ATTEMPTS:
+                time.sleep(delay)
+                delay = min(delay * 2, WAKE_BACKOFF_MAX_S)
+    print(
+        f"wake delivery failed after {WAKE_ATTEMPTS} attempts — verdict persisted at {VERDICT_FILE}",
+        flush=True,
+    )
+    return False
+
+
+def finish(message: str) -> bool:
+    """Persist the terminal message, echo it to the session log, wake the agent.
+
+    Persist-first is the contract: the record must exist even when every
+    delivery attempt fails.  The persist is best-effort (its failure is
+    echoed and the message still goes out); the wake is not — the return
+    value is its outcome, and callers exit non-zero when it is False.
+    """
+    try:
+        ava.files.write(VERDICT_FILE, message + "\n")
+    except Exception as exc:  # the wake below is the primary delivery path
+        print(f"verdict persist failed: {exc!r}", flush=True)
+    print(message, flush=True)
+    return wake(message)
 
 
 start = time.time()
@@ -66,7 +121,10 @@ while time.time() - start < TIMEOUT_S:
     try:
         status = check_ci(PR_NUMBER)
     except Exception as e:  # gh / network / JSON failure — report, do not hang
-        wake(f"PR #{PR_NUMBER} CI watcher error: {type(e).__name__}: {e}")
+        # Exit 1 — the probe itself failed; persist + echo happen first, so
+        # the error survives even when the wake cannot land (exit 2 is for
+        # delivery-only failures).
+        finish(f"PR #{PR_NUMBER} CI watcher error: {type(e).__name__}: {e}")
         raise SystemExit(1) from None
 
     verdict = status.verdict
@@ -103,7 +161,12 @@ while time.time() - start < TIMEOUT_S:
         lines.append(f"passed checks: {', '.join(status.passed)}")
     if status.error_detail:
         lines.append(f"error detail: {status.error_detail}")
-    wake("\n".join(lines))
+    if not finish("\n".join(lines)):
+        raise SystemExit(2)
     break
 else:
-    wake(f"PR #{PR_NUMBER} CI watcher timed out after {TIMEOUT_S}s — still pending, investigate.")
+    message = (
+        f"PR #{PR_NUMBER} CI watcher timed out after {TIMEOUT_S}s — still pending, investigate."
+    )
+    if not finish(message):
+        raise SystemExit(2)
