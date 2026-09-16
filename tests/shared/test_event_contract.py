@@ -160,9 +160,10 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # it to 170; the PR-flow sampler (task #2139's pr_flow_daily + pr_flow_run
     # gauges) raises the current total to 172; host_admission_wait_exceeded
     # (task #3584's fair admission queue — one report per wait episode) raises
-    # the current total to 173.
+    # the current total to 173; host_config_normalized (task #3603's wake-time
+    # normalization of a withdrawn model pin) raises the current total to 174.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 173
+    assert len(_TELEMETRY_KINDS) == 174
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:
