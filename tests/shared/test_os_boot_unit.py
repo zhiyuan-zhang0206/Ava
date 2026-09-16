@@ -101,6 +101,11 @@ def test_render_script_is_one_attempt_and_the_rc_is_the_contract(ctx: BootUnitCo
     assert 'state="$AVA_HOME/logs/boot-converge.state"' in script
     # Proxy readiness is a real round trip through the unit's URL.
     assert "AVA_BOOT_PROXY_WAIT" in script and GENERATE_204_URL in script
+    # Readiness resolves the gateway URL like every client does (env / .env
+    # AVA_GATEWAY_URL > the legacy file), never a bare file read -- the wsl
+    # gateway carries its URL in .env, so the file read alone recorded nothing.
+    assert "from shared.machines import gateway_url" in script
+    assert 'cat "$AVA_HOME/gateway_url"' in script
 
 
 def test_render_script_refuses_metacharacter_paths(tmp_path: Path) -> None:

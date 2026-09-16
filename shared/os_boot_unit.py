@@ -283,7 +283,11 @@ if [ "$rc" != 0 ]; then
 fi
 
 # 3) Record readiness -- measurement only; the exit verdict above is final.
-gw_base=$(cat "$AVA_HOME/gateway_url" 2>/dev/null || true)
+#    The URL is resolved the way every client resolves it -- env
+#    AVA_GATEWAY_URL (the unit's .env) > $AVA_HOME/gateway_url file -- so the
+#    probe dials what the cluster dials; a bare file read missed the .env URL.
+gw_base=$("{repo}/.venv/bin/python" -c 'from shared.machines import gateway_url; print(gateway_url())' 2>/dev/null || true)
+[ -n "$gw_base" ] || gw_base=$(cat "$AVA_HOME/gateway_url" 2>/dev/null || true)
 gw="unknown"
 if [ -n "$gw_base" ]; then
   gw="no"
