@@ -226,12 +226,9 @@ function retireLiveCompact(
  * batch path can never diverge from the per-event path.
  */
 function applySseEvent(state: TimelineState, ev: SystemEvent): Partial<TimelineState> {
-  // token_usage is a thread's own concern but NOT part of ThreadTimelineState
-  // — the token fields are cached per-thread in React Query and mirrored to
-  // the top-level active-thread fields. Write the active thread's token
-  // fields; an inactive thread's token event is dropped (its value is restored
-  // from React Query on switch-back). agent_id=0 is a system reset (passes
-  // isEventForThread), which writes tokenUsage=0 on the active thread as before.
+  // Only selected-agent token events write the context bar. Selection resets
+  // these fields; useTokenUsage supplies the newly selected HTTP snapshot.
+  // agent_id=0 system resets follow the shared event-routing rule.
   if (ev.role === "token_usage") {
     return isEventForThread(ev, state.activeThreadId)
       ? { tokenUsage: ev.input_tokens, reasoningTokens: ev.reasoning_tokens ?? 0 }

@@ -9,8 +9,8 @@
 //                                      — fold (move/upsert, label patch)
 // - pages   (["agent-pages", id] + ["all-pages"]) — fold (opened/closed)
 // - notices (["notices"], ["notices-resolved"])   — invalidate (no full row)
-// - fleet-graph (["fleet-graph"])   — invalidate, debounced 2s (owner)
-// - tasks   (["tasks"])             — invalidate, debounced 2s (owner)
+// - fleet-graph (["fleet-graph"])   — invalidate, coalesced with trailing repair (owner)
+// - tasks   (["tasks"])             — invalidate, coalesced with trailing repair (owner)
 //
 // Reconnect: the owner invalidates only these fold-owned query families once
 // on (re)open. Unrelated settings/config/inspector queries did not miss global
