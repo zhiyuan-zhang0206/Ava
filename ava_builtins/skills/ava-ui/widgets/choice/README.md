@@ -11,6 +11,6 @@ Fill in `choice.html`:
 - `OPTIONS` — `[{ value, label, detail? }]`.
 - the three `AVA_*` placeholders (see [ava_reply](../ava_reply/README.md)).
 
-Zero build: `python -m http.server`, then `ava.ui.show(name, port)`. Whole file
+Zero build: serve the directory with `ava.ui.serve(dir, name, port)` (starts the server + `/health` + registration in one call). Whole file
 as `index.html`, or embed the `<style>` + `<div id="choice">` + both `<script>`
 blocks into your own page.

@@ -206,7 +206,7 @@ don't need any of this.)
 
 | starter | Suits | Files |
 |---|---|---|
-| [single_html/](starters/single_html/README.md) | Zero build, one index.html + `python -m http.server`. Enough for 90% of simple-page cases the agent writes | `index.html` + `README.md` |
+| [single_html/](starters/single_html/README.md) | Zero build, one index.html + `ava.ui.serve()`. Enough for 90% of simple-page cases the agent writes | `index.html` + `README.md` |
 | [react_vite/](starters/react_vite/README.md) | Vite + React, npm run dev hot reload. Use for complex layouts / multiple components / state management | the whole Vite project structure |
 
 ## Usage pattern

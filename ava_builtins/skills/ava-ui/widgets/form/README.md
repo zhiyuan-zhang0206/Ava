@@ -11,4 +11,4 @@ Fill in `form.html`:
 - `SUBMIT_LABEL` — button text.
 - the three `AVA_*` placeholders (see [ava_reply](../ava_reply/README.md)).
 
-Zero build: `python -m http.server` then `ava.ui.show(name, port)`.
+Zero build: serve the directory with `ava.ui.serve(dir, name, port)` (starts the server + `/health` + registration in one call).
