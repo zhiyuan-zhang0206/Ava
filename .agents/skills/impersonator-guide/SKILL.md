@@ -98,7 +98,9 @@ ava impersonate say <session_id> --agent <agent_id> --key progress-1 'Checking t
 Choose a new stable key for each message; retry with the same key and identical
 content after ambiguous delivery. Use `--phase final` for a final reply.
 `--as` is your freely chosen display name; the session has its own `--name`.
-The UI shows both beside your messages. The CLI records observed process facts
+The UI shows no executor or session badge on your messages — they render on the
+normal timeline as the Ava agent's own, with both values recorded in the session
+metadata. The CLI records observed process facts
 separately. For peers, use the borrowed identity through the SDK below.
 
 ## Renewal: only when the Ava side reminds you
