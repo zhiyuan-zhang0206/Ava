@@ -11,6 +11,7 @@ from shared.events.payloads import (
     ComputerSessionEnd,
     ComputerSessionStart,
     DeliveryPoisoned,
+    DeliveryRecoveryDecision,
     DeliveryStalled,
     DeliveryWakeSuppressed,
     EventLogDrop,
@@ -572,6 +573,12 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         "delivery_wake_suppressed",
         "automatic delivery wakes suppressed after repeated resurrection failures",
         payload=DeliveryWakeSuppressed,
+        tier="anomaly",
+    ),
+    "delivery_recovery_decision": _telemetry(
+        "delivery_recovery_decision",
+        "stalled crash-marked recovery decision (harvest / refusal)",
+        payload=DeliveryRecoveryDecision,
         tier="anomaly",
     ),
     "claim_cas_lost": _telemetry(

@@ -79,7 +79,12 @@ from psycopg_pool import ConnectionPool
 
 import shared.db
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from services.delivery_watchdog import dispatch_guard, resurrect_guard, turn_liveness
+from services.delivery_watchdog import (
+    dispatch_guard,
+    resurrect_guard,
+    stall_recovery,
+    turn_liveness,
+)
 from shared import telemetry
 from shared.agents import AgentStatus
 from shared.config import settings
@@ -636,7 +641,8 @@ async def _scan_loop(pool: ConnectionPool, liveness: Liveness) -> None:
     """Main loop: every interval, (1) re-publish lost wakes for stale pending
     rows of idling owners, (2) WARNING each chat inbound stalled past the alert
     threshold, once per row while it stays pending, (3) retry resurrect for
-    terminated owners with pending chats.
+    terminated owners with pending chats, (4) request a harvest decision for
+    stalled chats of crash-marked idling corpses.
 
     The once-per-row alert set lives in `delivery_watchdog_alerted` — the
     table is the single truth (Task #945); each tick reloads it, so memory
@@ -717,6 +723,7 @@ async def _scan_loop(pool: ConnectionPool, liveness: Liveness) -> None:
                 settings.daemon.delivery_watchdog_max_resurrect_per_tick,
                 stale_claimed_threshold,
             )
+            stall_recovery.maybe_request_stall_recovery(pool, alert_threshold)
             await turn_liveness.scan_hosted_turn_liveness(pool, hosted_turn_threshold)
             last_claimed_sweep = _maybe_sweep_stale_inbounds(
                 pool,

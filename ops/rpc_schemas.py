@@ -348,6 +348,27 @@ class ResurrectAgentResponse(BaseModel):
     status: Literal["spawned", "already_alive"]
 
 
+class RecoverCrashMarkedResponse(BaseModel):
+    """`recover-crash-marked-v2` response — the home runner's adjudication of
+    harvesting a crash-marked idling corpse whose chat has stalled pending
+    (the delivery watchdog's stalled-recovery request, task #3618).
+
+    `harvested`: the row matched every settle guard and was flipped to the
+        reaper's terminal shape (terminated, termination_source='reaper';
+        the crash marker is kept, so the relaxed reaper trigger can resume
+        the leftover work on the home machine's next beat).
+    `already_terminated`: the row is already terminated — an idempotent
+        repeat of a completed harvest.
+    `refused`: an adjudication guard failed (fail-closed); `reason` names it
+        ('not_marked', 'not_settled:<status>', 'wrong_machine',
+        'lease_alive', 'wake_suppressed', or the active wake-suppression
+        reason — 'permanent_provider_reject' when the recovery breaker
+        halted the agent)."""
+
+    status: Literal["harvested", "already_terminated", "refused"]
+    reason: str | None = None
+
+
 class ShellInfo(BaseModel):
     """One live persistent-shell session of an agent — a session named
     `…-agent-<id>-shell-<sid>[-<name>]`. `id` is the agent-local session id
