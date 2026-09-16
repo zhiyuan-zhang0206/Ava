@@ -15,7 +15,9 @@ from collections.abc import Callable
 
 # The SDK's convenience batches must not turn one agent action into an
 # account-wide request burst. Callers can opt into a different positive ceiling
-# with `max_concurrent`; this default bounds the omitted-argument path.
+# with `max_concurrent`; this default bounds the omitted-argument path. An
+# SDK-level constant by design, not cluster config (task #3696 exception
+# inventory).
 DEFAULT_BATCH_MAX_CONCURRENT = 12
 
 
