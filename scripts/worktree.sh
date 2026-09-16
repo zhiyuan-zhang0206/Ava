@@ -2,9 +2,9 @@
 # -*- shell-script -*-
 # Worktree management for ~/Ava repo.
 # Usage:
-#   scripts/worktree.sh create <task-name>   # create branch + worktree from main
-#   scripts/worktree.sh clean  <task-name>   # remove worktree + delete branch
-#   scripts/worktree.sh list                 # list all worktrees
+#   scripts/worktree.sh create <task-name>           # create branch + worktree from main
+#   scripts/worktree.sh clean  <task-name> [--force] # remove worktree + delete branch
+#   scripts/worktree.sh list                         # list all worktrees
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -64,18 +64,82 @@ cmd_create() {
 
 cmd_clean() {
     local task="$1"
+    local force="${2:-}"
+
+    if [[ "$task" == -* ]]; then
+        die "missing task name (usage: worktree.sh clean <task-name> [--force])"
+    fi
+    if [[ -n "$force" && "$force" != "--force" ]]; then
+        die "unknown option: $force (usage: worktree.sh clean <task-name> [--force])"
+    fi
+
     local branch="ava/${task}"
     local wt_path="$WORKTREE_ROOT/$task"
+    local guard_script="$REPO_ROOT/scripts/check_worktree_remove.py"
 
     if [[ ! -d "$wt_path" ]]; then
         die "worktree not found: $wt_path"
     fi
 
+    # Live-anchor guard (issue #194): a removal kills every session/process
+    # whose cwd lies under the worktree, so run the checker shipped with THIS
+    # checkout (the tool version decides) and refuse unless it comes back
+    # clean. The checker needs a python that can import psutil — the
+    # worktree's own venv first, then the repo venv. When neither is usable
+    # (or the checker is missing), fail safe: refuse unless --force.
+    local guard_python=""
+    local cand
+    for cand in "$wt_path/.venv/bin/python" "$REPO_ROOT/.venv/bin/python"; do
+        if [[ -x "$cand" ]] && "$cand" -c 'import psutil' >/dev/null 2>&1; then
+            guard_python="$cand"
+            break
+        fi
+    done
+
+    local guard_problem=""
+    if [[ ! -f "$guard_script" ]]; then
+        guard_problem="live-anchor checker missing: $guard_script"
+    elif [[ -z "$guard_python" ]]; then
+        guard_problem="no python with psutil to run the live-anchor checker (tried $wt_path/.venv and $REPO_ROOT/.venv)"
+    fi
+
+    if [[ -n "$guard_problem" ]]; then
+        if [[ "$force" == "--force" ]]; then
+            echo "⚠ $guard_problem — live-anchor check SKIPPED (--force)" >&2
+        else
+            die "$guard_problem — refusing removal (re-run with --force to override)"
+        fi
+    else
+        local guard_rc=0
+        local guard_out=""
+        guard_out="$("$guard_python" "$guard_script" "$wt_path" 2>&1)" || guard_rc=$?
+        if [[ $guard_rc -ne 0 ]]; then
+            if [[ "$force" == "--force" ]]; then
+                echo "⚠ live-anchor check did not pass (rc=$guard_rc) — removing anyway (--force):" >&2
+                echo "$guard_out" >&2
+            elif [[ "$guard_out" == REFUSE* ]]; then
+                echo "$guard_out" >&2
+                die "removal refused: live anchor(s) under $wt_path (re-run with --force to override)"
+            else
+                echo "$guard_out" >&2
+                die "live-anchor check failed — removal refused (re-run with --force to override)"
+            fi
+        else
+            ok "live-anchor check passed"
+        fi
+    fi
+
+    # Never force-discards on its own: a failed removal (dirty tree, lock)
+    # leaves everything in place unless --force asks for the destructive retry.
     echo "→ removing worktree $wt_path …"
-    git -C "$REPO_ROOT" worktree remove "$wt_path" || {
-        echo "→ force-removing worktree …"
-        git -C "$REPO_ROOT" worktree remove --force "$wt_path"
-    }
+    if ! git -C "$REPO_ROOT" worktree remove "$wt_path"; then
+        if [[ "$force" == "--force" ]]; then
+            echo "→ force-removing worktree (--force) …"
+            git -C "$REPO_ROOT" worktree remove --force "$wt_path"
+        else
+            die "removal failed (dirty worktree?) — re-run with --force to discard local changes"
+        fi
+    fi
     ok "worktree removed"
 
     if git -C "$REPO_ROOT" rev-parse --verify "$branch" >/dev/null 2>&1; then
@@ -119,16 +183,29 @@ usage() {
 Usage: worktree.sh <command> [args]
 
 Commands:
-  create <task-name>   Create branch ava/<task> + worktree from main, then run setup
-  clean  <task-name>   Remove worktree and delete branch ava/<task>
-  list                 List all worktrees under .worktrees/
+  create <task-name>            Create branch ava/<task> + worktree from main, then run setup
+  clean  <task-name> [--force]  Remove worktree and delete branch ava/<task>
+  list                          List all worktrees under .worktrees/
+
+clean is anchor-guarded: it refuses when live sessions or processes are still
+anchored under the worktree (scripts/check_worktree_remove.py), when that
+check cannot run (no python with psutil, or the checker missing), or when git
+cannot remove the tree. --force overrides explicitly: the anchor check becomes
+a warning (skipped entirely when it cannot run) and a failed removal is retried
+with git worktree remove --force.
 EOF
     exit 1
 }
 
 case "${1:-}" in
     create) shift; cmd_create "${1:?usage: worktree.sh create <task-name>}" ;;
-    clean)  shift; cmd_clean  "${1:?usage: worktree.sh clean <task-name>}" ;;
+    clean)
+        shift
+        if [[ $# -gt 2 ]]; then
+            die "too many arguments (usage: worktree.sh clean <task-name> [--force])"
+        fi
+        cmd_clean "${1:?usage: worktree.sh clean <task-name> [--force]}" "${2:-}"
+        ;;
     list)   cmd_list ;;
     *)      usage ;;
 esac

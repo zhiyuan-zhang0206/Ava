@@ -8,6 +8,8 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+
 from shared.worktree_guard import find_live_anchors
 
 
@@ -121,6 +123,59 @@ def test_true_anchor_still_refuses_from_inside_invocation(tmp_path: Path) -> Non
         result = _run_guard(target)
         assert result.returncode == 1, result.stdout + result.stderr
         assert "REFUSE" in result.stdout and str(target) in result.stdout
+    finally:
+        sleeper.kill()
+        sleeper.wait()
+
+
+def _case_alias(path: Path) -> Path | None:
+    """A differently-cased spelling of `path` that resolves to it.
+
+    Exists only where the filesystem folds case (macOS APFS, WSL DrvFs);
+    None on a case-sensitive filesystem. Flipping one letter at a time finds
+    a foldable position even when the path crosses a case-sensitive mount
+    boundary (e.g. /mnt/c on WSL).
+    """
+    text = str(path)
+    for i, ch in enumerate(text):
+        if not ch.isalpha():
+            continue
+        candidate = Path(text[:i] + ch.swapcase() + text[i + 1 :])
+        try:
+            if candidate.samefile(path):
+                return candidate
+        except OSError:
+            continue
+    return None
+
+
+def test_case_alias_spelling_finds_anchors(tmp_path: Path) -> None:
+    """#3707 QA (fail-open): on a case-insensitive filesystem a differently
+    spelled target — `.../ava/...` from bash's logical pwd — names the same
+    directory as the physical spelling psutil / the records report
+    (`.../Ava/...`). The containment check must compare identity, not resolved
+    strings: with the old string compare both arms below missed the anchor."""
+    target = tmp_path / "worktrees" / "wt-under-test"
+    target.mkdir(parents=True)
+    alias = _case_alias(target)
+    if alias is None:
+        pytest.skip("requires a case-insensitive filesystem (macOS APFS, WSL DrvFs)")
+
+    pty = tmp_path / "pty"
+    pty.mkdir()
+    (pty / "sess.json").write_text(
+        json.dumps({"pid": 4242, "cwd": str(target), "cmd": "/bin/bash"})
+    )
+    hits = find_live_anchors(alias, records_dir=pty)
+    assert any("pty session" in h for h in hits), hits
+
+    sleeper = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"], cwd=target, start_new_session=True
+    )
+    try:
+        time.sleep(0.5)
+        hits = find_live_anchors(alias, records_dir=tmp_path / "nope")
+        assert any("process" in h for h in hits), hits
     finally:
         sleeper.kill()
         sleeper.wait()
