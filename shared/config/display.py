@@ -9,6 +9,10 @@ Fields land in this module together with their consumers, one batch per pull
 request. A field's ``description`` states the reason for its default value,
 and its ``restart_required`` names the process kind that must be restarted
 after a change.
+
+Defaults obey the same protective ranges as explicit API windows. Validating
+the configuration prevents an omitted query parameter from bypassing those
+limits; invalid boot values and candidate edits fail instead of being clamped.
 """
 
 from __future__ import annotations
@@ -23,6 +27,8 @@ class DisplaySettings(EnvSettings):
 
     messages_default_limit: int = Field(
         default=100,
+        ge=1,
+        le=10000,
         alias="AVA_MESSAGES_DEFAULT_LIMIT",
         description=(
             "Default tail window (items) of GET /api/agents/{id}/messages when the caller "
@@ -40,6 +46,8 @@ class DisplaySettings(EnvSettings):
     )
     timeline_default_limit: int = Field(
         default=50,
+        ge=1,
+        le=1000,
         alias="AVA_TIMELINE_DEFAULT_LIMIT",
         description=(
             "Default timeline tail-window (items) for GET /api/agents/{id}/timeline, the "
@@ -77,6 +85,8 @@ class DisplaySettings(EnvSettings):
 
     notices_open_default_limit: int = Field(
         default=200,
+        ge=1,
+        le=500,
         alias="AVA_NOTICES_OPEN_DEFAULT_LIMIT",
         description=(
             "Default cap on one open-notices read (GET /api/notices/open, /api/notices/live, "
@@ -94,6 +104,8 @@ class DisplaySettings(EnvSettings):
     )
     notices_resolved_default_page: int = Field(
         default=30,
+        ge=1,
+        le=100,
         alias="AVA_NOTICES_RESOLVED_DEFAULT_PAGE",
         description=(
             "One resolved-notices history page (GET /api/notices/resolved and the unified "
@@ -111,6 +123,8 @@ class DisplaySettings(EnvSettings):
 
     shell_capture_default_lines: int = Field(
         default=200,
+        ge=50,
+        le=2000,
         alias="AVA_SHELL_CAPTURE_DEFAULT_LINES",
         description=(
             "Default tail window (lines) of a shell capture when the caller passes none: "
@@ -130,6 +144,8 @@ class DisplaySettings(EnvSettings):
 
     timeline_history_page_base: int = Field(
         default=50,
+        ge=1,
+        le=1000,
         alias="AVA_TIMELINE_HISTORY_PAGE_BASE",
         description=(
             "Base page (items) the web UI fetches per timeline scroll-up; each successive "

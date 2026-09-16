@@ -29,3 +29,13 @@ Directory pages have a fixed maximum. Actual deep lineage remains a legitimate
 cost; unrelated terminated agents and elapsed session time must not enlarge the
 live tree. Search may scan directory labels, but card enrichment and response
 size stay page-bounded. These are growth invariants, not latency guarantees.
+
+During integration with configurable display defaults, an isolated API probe
+showed that an omitted notice limit could return 600 rows when its configured
+default was 600, while the same explicit limit was rejected by the 500-row
+protective ceiling. A zero default also silently hid an existing backlog.
+We applied each consumer's existing lower and upper bounds to the six display
+default fields. Boot input and candidate config writes now reject invalid
+windows before they reach implicit reads. Defaults remain configurable within
+the existing ranges; we rejected clamping invalid configuration or widening
+the protective limits to accommodate it.
