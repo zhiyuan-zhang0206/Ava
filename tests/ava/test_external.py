@@ -59,7 +59,11 @@ def attached_runtime(
     monkeypatch.setattr(_boot, "_owns_loop", True)
     monkeypatch.setattr(ava, "state", None)
     monkeypatch.setattr(ava, "state_update", None)
-    monkeypatch.setattr(ava, "_ensure_plugins_loaded", lambda **_: None)
+
+    def loader_stub(**_kwargs: object) -> None:
+        """Accept the `surface` kwarg attach passes (ignored)."""
+
+    monkeypatch.setattr(ava, "_ensure_plugins_loaded", loader_stub)
     monkeypatch.setattr(state_module, "AgentState", ExampleState)
     monkeypatch.setattr(state_module, "_BASE_FIELD_DECLARED", {"messages"})
     monkeypatch.setattr(external, "machine_name", lambda: "local-runner")
@@ -140,7 +144,11 @@ def test_attach_requests_native_plugin_load(
     exercised in tests/agent/test_lazy_child_imports.py.
     """
     calls: list[dict[str, Any]] = []
-    monkeypatch.setattr(ava, "_ensure_plugins_loaded", lambda **kw: calls.append(kw))
+
+    def spy_loader(**kwargs: Any) -> None:
+        calls.append(kwargs)
+
+    monkeypatch.setattr(ava, "_ensure_plugins_loaded", spy_loader)
     with external.attach("lease", token="credential"):
         pass
     assert calls == [{"surface": False}]
