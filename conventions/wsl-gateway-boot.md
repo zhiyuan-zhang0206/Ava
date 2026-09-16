@@ -22,10 +22,19 @@ install, register, start, stop, or update anything.
    either a failed or a successful client exit. The task has no execution-time
    limit, battery restriction, or idle-only condition. It does not wake a sleeping
    Windows host.
-2. **Linux:** systemd starts the enabled cron daemon. Ava's existing home-scoped
-   `@reboot AVA_HOME=... /absolute/checkout/.venv/bin/ava boot` starts its retrying
-   bring-up. `ava boot` retries failed starts indefinitely; after success, the
-   ordinary Ava watchdogs supervise services. Preserve unrelated crontab entries.
+2. **Linux:** systemd starts the enabled cron daemon, and Ava's home-scoped
+   boot entry starts the installed home. On a host whose service manager is
+   systemd the preferred owner is the distro-level unit
+   `ava-boot.<home-slug>.service` (`ava cluster boot-unit install`,
+   `shared/os_boot_unit.py`): it runs the home's convergence script at boot and
+   systemd itself supplies the retry (`Restart=on-failure`, `RestartSec=60`, no
+   attempt cap, `RuntimeMaxSec=900` bounding one attempt). Without the unit —
+   hosts not running systemd as their service manager — the fallback stays the
+   `@reboot AVA_HOME=... /absolute/checkout/.venv/bin/ava boot` crontab entry,
+   whose retry loop is `ava boot`'s. Enabling the unit removes the crontab
+   entry in the same step, so exactly one owner converges at boot; after a
+   successful convergence the ordinary Ava watchdogs supervise services.
+   Preserve unrelated crontab entries.
 
 The anchor belongs to the distribution, not an Ava home: it may keep other Linux
 workloads alive too. It is deliberately outside `\Ava\<home-slug>\` and is not
@@ -134,8 +143,10 @@ Start-ScheduledTask -TaskName $taskName
 
 Before calling unattended recovery ready, validate a Windows reboot **with no
 user login** in the approved maintenance window. Observe the task's correct user
-and running state, Linux boot ID and systemd/cron, Ava `boot.log`, authenticated
-gateway/data-plane readiness, Linux network access, and runner/agent recovery.
+and running state, Linux boot ID and systemd/cron (with the boot unit installed:
+`systemctl status ava-boot.*` and `$AVA_HOME/logs/boot-converge.state`), Ava
+`boot.log`, authenticated gateway/data-plane readiness, Linux network access, and
+runner/agent recovery.
 Record the Windows native runner's separate interactive-session dependency.
 Test that ending only the anchor makes the repeating trigger recover it, and
 that disabling it prevents resurrection during maintenance. Until these checks

@@ -1,8 +1,10 @@
 """`ava boot` — `ava start`, re-run while the machine is still coming up.
 
 The boot job's entry on the platforms whose scheduler cannot retry a failed job
-for us (Linux `@reboot`, Windows `ONLOGON`); macOS lets launchd do it instead.
-Which, and why, is `shared/boot_policy.py`.
+for us (a Linux host without systemd, Windows `ONLOGON`); macOS lets launchd do
+it instead, and on a Linux host whose service manager is systemd the boot unit's
+`Restart=on-failure` does (`shared/os_boot_unit.py`). Which, and why, is
+`shared/boot_policy.py`.
 
 Retries with no attempt limit, which is what launchd does on the platform that
 has a scheduler-level answer -- the three platforms must agree, or a box whose

@@ -184,8 +184,33 @@ def _h_cluster_watchdog_probe_unregister(args: argparse.Namespace) -> int:
     return cmd_watchdog_probe_unregister(args.role)
 
 
+def _h_cluster_boot_unit_install(args: argparse.Namespace) -> int:
+    from cli.commands import cmd_boot_unit_install
+
+    return cmd_boot_unit_install(
+        enable=not args.no_enable,
+        start=args.start,
+        proxy_wait_url=args.proxy_wait_url,
+    )
+
+
+def _h_cluster_boot_unit_uninstall(_args: argparse.Namespace) -> int:
+    from cli.commands import cmd_boot_unit_uninstall
+
+    return cmd_boot_unit_uninstall()
+
+
+def _h_cluster_boot_unit_status(_args: argparse.Namespace) -> int:
+    from cli.commands import cmd_boot_unit_status
+
+    return cmd_boot_unit_status()
+
+
 def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:  # noqa: PLR0915
     from cli.main import (
+        _h_cluster_boot_unit_install,
+        _h_cluster_boot_unit_status,
+        _h_cluster_boot_unit_uninstall,
         _h_cluster_cancel,
         _h_cluster_destroy,
         _h_cluster_down,
@@ -594,3 +619,47 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         "--role", required=True, choices=["gateway", "agent-runner"]
     )
     cluster_wp_unregister_p.set_defaults(func=_h_cluster_watchdog_probe_unregister)
+
+    # --- `ava cluster boot-unit` — the distro-level boot unit (Linux) ---
+    # The systemd unit that owns the boot convergence path on Linux hosts
+    # (`shared.os_boot_unit`). A staged install rides the crontab fallback
+    # until a later enable swaps the live path.
+    cluster_boot_unit_p = cluster_sub.add_parser(
+        "boot-unit",
+        help="[Linux] manage the systemd unit that converges the stack at boot",
+    )
+    boot_unit_sub = cluster_boot_unit_p.add_subparsers(dest="boot_unit_cmd", required=True)
+
+    boot_unit_install_p = boot_unit_sub.add_parser(
+        "install",
+        help="install the boot unit + convergence script (enabled by default)",
+    )
+    boot_unit_install_p.add_argument(
+        "--no-enable",
+        action="store_true",
+        help="stage files only; the crontab entry stays the live boot path",
+    )
+    boot_unit_install_p.add_argument(
+        "--start",
+        action="store_true",
+        help="start the unit once after installing",
+    )
+    boot_unit_install_p.add_argument(
+        "--proxy-wait-url",
+        default="",
+        help="http(s) URL the convergence script waits on for a real round trip "
+        "before converging (the proxy entrypoint); empty disables the wait",
+    )
+    boot_unit_install_p.set_defaults(func=_h_cluster_boot_unit_install)
+
+    boot_unit_uninstall_p = boot_unit_sub.add_parser(
+        "uninstall",
+        help="stop and remove the boot unit; the crontab path re-arms on the next `ava start`",
+    )
+    boot_unit_uninstall_p.set_defaults(func=_h_cluster_boot_unit_uninstall)
+
+    boot_unit_status_p = boot_unit_sub.add_parser(
+        "status",
+        help="read-only report of the boot unit, convergence script and boot-pass ownership",
+    )
+    boot_unit_status_p.set_defaults(func=_h_cluster_boot_unit_status)

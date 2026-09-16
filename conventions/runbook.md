@@ -1381,8 +1381,9 @@ pitr-uploader healthz whose failure nothing downstream depended on.
 `ava start --no-readiness-gate` keeps the wait and the printed crosses but exits 0
 anyway. Two callers pass it and an operator normally should not:
 
-- **the boot job**, on every platform (`ava boot`'s child argv, and the macOS
-  autostart plist's `ProgramArguments`). Its retry has **no attempt cap** by
+- **the boot job**, on every platform (`ava boot`'s child argv, the macOS
+  autostart plist's `ProgramArguments`, and the Linux boot unit's convergence
+  script `$AVA_HOME/bin/ava-boot-converge.sh`). Its retry has **no attempt cap** by
   design, so a non-zero exit means retry forever — and a box whose headed Chrome
   will never launch would re-run `ava start` every 60 s while otherwise serving
   perfectly. launchd's `SuccessfulExit` is a boolean and cannot tell rc 1 from rc
@@ -1400,7 +1401,12 @@ probe (`shared/os_cron.py`), one watchdog probe per capability
 daily rotate-then-retain log maintenance (`shared/os_logs_job.py`), and the
 per-machine content-refresh pass (`shared/os_packages.py`)
 — as launchd LaunchAgents on macOS, crontab lines on Linux, `\Ava\<home-slug>\`
-tasks on Windows (`shared/os_schtasks.py`). Two properties are load-bearing:
+tasks on Windows (`shared/os_schtasks.py`). A Linux host whose service manager
+is systemd files the boot entry as a **system** unit instead of a crontab line
+(`ava-boot.<home-slug>.service`, `shared/os_boot_unit.py`): installed and
+enabled, the unit owns the boot path and the crontab entry is left out —
+crontab remains the fallback where systemd is not the service manager. Two
+properties are load-bearing:
 
 - **A job spec is anchored to the checkout that wrote it.** `ava_binary_path()`
   resolves this checkout's `.venv` binary (PATH only as a fallback), and the

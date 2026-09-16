@@ -26,6 +26,11 @@ import os
 import subprocess
 import time
 
+from cli.commands._cluster_boot_unit import (
+    cmd_boot_unit_install,
+    cmd_boot_unit_status,
+    cmd_boot_unit_uninstall,
+)
 from cli.commands._cluster_cancel import cmd_cluster_cancel
 from cli.commands._cluster_cron import cmd_cron_register, cmd_cron_unregister
 from cli.commands._cluster_health import cmd_health_probe
@@ -320,6 +325,9 @@ __all__ = [
     "_wait_for_services_ready",
     "apply_pending_migrations",
     "build_services",
+    "cmd_boot_unit_install",
+    "cmd_boot_unit_status",
+    "cmd_boot_unit_uninstall",
     "cmd_cluster_cancel",
     "cmd_cluster_destroy",
     "cmd_cluster_down",

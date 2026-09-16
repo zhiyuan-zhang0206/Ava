@@ -71,7 +71,8 @@ class PlatformBackend(abc.ABC):
         """Register a boot-time job that runs ``ava start`` on reboot.
 
         macOS: launchd RunAtLoad LaunchAgent plist.
-        Linux: ``@reboot`` crontab entry.
+        Linux: a distro-level systemd boot unit when installed and enabled
+        (``shared.os_boot_unit``), else an ``@reboot`` crontab entry.
         Windows: Task Scheduler ``/SC ONLOGON`` job.
 
         Reached only through ``shared.os_autostart.register_autostart``, which
@@ -389,6 +390,8 @@ class LinuxPlatformBackend(PlatformBackend):
     # -- autostart --
 
     def register_autostart(self) -> None:
+        """Systemd boot unit when installed+enabled, else the cron entry --
+        the branch lives in `shared.os_autostart._register_linux`."""
         from shared.os_autostart import _register_linux
 
         rc = _register_linux()

@@ -10,18 +10,24 @@ boot-time dependency (DNS, a not-yet-mounted volume, a gateway still starting)
 has that same shape.
 
 The policy: **re-run `ava start` every ``BOOT_RETRY_INTERVAL_S`` seconds until
-it exits 0, with no attempt limit.** Identical on all three platforms; only the
-mechanism differs, because only one of the three schedulers can retry a job on
-our behalf:
+it exits 0, with no attempt limit.** Identical on every platform; only the
+mechanism differs, because only some schedulers can retry a job on our behalf:
 
 - **macOS** — launchd does the retrying (`KeepAlive` → `SuccessfulExit: false`,
   `ThrottleInterval` = the interval). Preferred where it exists: launchd is a
   supervisor, so it also restarts a start that *died* rather than exited, which
   a loop living inside that process could not.
-- **Linux / Windows** — neither scheduler can repeat a boot trigger: a cron
-  `@reboot` line fires exactly once, and `schtasks /RI` is documented as "not
-  applicable for schedule types: MINUTE, HOURLY, ONSTART, ONLOGON, ONIDLE, and
-  ONEVENT". So the loop is ours — `cli.boot_retry` (`ava boot`).
+- **Linux with systemd** — the distro-level boot unit (`shared.os_boot_unit`,
+  installed with `ava cluster boot-unit install`) states the same policy in
+  restart keys: `Restart=on-failure`, `RestartSec` = the interval,
+  `StartLimitIntervalSec=0` for the no-cap half, and `RuntimeMaxSec` killing a
+  wedged attempt so a hang cannot block retries. systemd is a supervisor like
+  launchd, so it too covers the died-rather-than-exited case.
+- **Linux without the unit / Windows** — these schedulers cannot repeat a boot
+  trigger: a cron `@reboot` line fires exactly once, and `schtasks /RI` is
+  documented as "not applicable for schedule types: MINUTE, HOURLY, ONSTART,
+  ONLOGON, ONIDLE, and ONEVENT". So the loop is ours — `cli.boot_retry`
+  (`ava boot`).
 
 **Why no attempt cap.** An earlier draft capped the owned loop at ~30 attempts,
 on the theory that the 60 s OS watchdog probe was the real long-run net and
