@@ -163,10 +163,8 @@ function HomeShell({ showError }: HomeShellProps) {
   }, [activeId, fork, focusComposer]);
 
   // Preload the open-pages list when an agent is selected (cheap DB read;
-  // useAgentPages folds SSE into this cache). The expensive /inspect endpoint
-  // is deliberately NOT preloaded here — selecting an agent must not fire a
-  // ~25-Loki-aggregation call the user may never look at. InspectorPanel
-  // fetches on open instead — see inspector-panel.tsx.
+  // useAgentPages folds SSE into this cache). InspectorPanel owns its current,
+  // statistics, and widget requests only while open.
   useQuery({
     queryKey: ["agent-pages", activeId] as const,
     queryFn: () => {

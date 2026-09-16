@@ -1,4 +1,4 @@
-"""Tests for GET /api/agents/{id}/inspect HTTP (task #1197: Loki read side).
+"""HTTP contract tests for current-state and statistics Inspector reads.
 
 Locks the per-agent inspector panel's query contract — config overlay
 passthrough, cumulative LLM cost (no time window, accumulated since spawn),
