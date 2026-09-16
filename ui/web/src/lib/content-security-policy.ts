@@ -1,9 +1,4 @@
-const DEFAULT_GATEWAY_PORT = "8000";
-
-interface GatewayOriginOptions {
-  apiBase?: string;
-  gatewayPort?: string;
-}
+export { gatewayOriginForRequest } from "./gateway-origin";
 
 interface ContentSecurityPolicyOptions {
   nonce: string;
@@ -44,23 +39,14 @@ export function browserFacingRequestUrl(request: Request): URL {
   // there). API_BASE uses that browser-facing origin too.
   const browserHost =
     firstHeaderValue(request.headers.get("x-forwarded-host")) ?? request.headers.get("host");
-  if (browserHost) requestUrl.host = browserHost;
+  if (browserHost) {
+    const browserOrigin = new URL(`${requestUrl.protocol}//${browserHost}`);
+    requestUrl.hostname = browserOrigin.hostname;
+    // Assigning .host without a port retains the loopback Next.js port.
+    // Explicitly clear it when the proxy exposes the default HTTPS port.
+    requestUrl.port = browserOrigin.port;
+  }
   return requestUrl;
-}
-
-/** Resolve the same gateway origin the browser API client receives at build time.
- *
- * `NEXT_PUBLIC_API_BASE` is the explicit deployment override. Otherwise
- * converge injects `NEXT_PUBLIC_GATEWAY_PORT` into `next build`, and the browser
- * keeps the frontend request host while switching to that gateway port. Keeping
- * CSP on this path prevents a deployment-specific hostname from entering source.
- */
-export function gatewayOriginForRequest(requestUrl: URL, options: GatewayOriginOptions): string {
-  if (options.apiBase) return httpOrigin(options.apiBase);
-
-  const gatewayUrl = new URL(requestUrl.origin);
-  gatewayUrl.port = options.gatewayPort ?? DEFAULT_GATEWAY_PORT;
-  return gatewayUrl.origin;
 }
 
 /** Build the per-response CSP consumed by Next.js while it renders the request. */

@@ -11,6 +11,17 @@ function directive(policy: string, name: string): string {
 }
 
 describe("gatewayOriginForRequest", () => {
+  it("matches the configured HTTP/2 entry after proxy forwarding", () => {
+    const requestUrl = browserFacingRequestUrl(new Request("http://127.0.0.1:20031/", {
+      headers: { "x-forwarded-host": "console.example", "x-forwarded-proto": "https" },
+    }));
+    const gatewayOrigin = gatewayOriginForRequest(requestUrl, {
+      browserOrigin: "https://console.example", gatewayPort: "20016",
+    });
+    const policy = buildContentSecurityPolicy({ nonce: "test", gatewayOrigin, isDevelopment: false });
+    expect(directive(policy, "connect-src")).toBe("connect-src 'self' https://console.example wss://console.example");
+    expect(policy).not.toContain(":20016");
+  });
   it("uses the configured API base origin without its path", () => {
     expect(
       gatewayOriginForRequest(new URL("https://console.example.test/control"), {

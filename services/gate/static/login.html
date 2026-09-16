@@ -202,7 +202,11 @@ button:disabled {
       submit.textContent = t("signingIn") || "Signing in…";
       var response;
       try {
-        response = await fetch("__GATEWAY_BASE__/api/auth/login", {
+        // A configured HTTPS entry routes auth and SSE directly to the gateway.
+        // Keep the direct HTTP entry working during rollout and rollback.
+        var gatewayBase = window.location.origin === /*__BROWSER_ORIGIN__*/
+          ? "" : "__GATEWAY_BASE__";
+        response = await fetch(gatewayBase + "/api/auth/login", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
