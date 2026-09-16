@@ -62,13 +62,18 @@ __all__ = ["caller_eval_isolation"]
 
 def _resolve_agent_model(request: Request, agent_id: int) -> str:
     """The agent's effective LLM model — its per-agent overlay, else the cluster
-    default (`settings.lm.llm_model`). Same lookup as the token-usage endpoint."""
+    default (`settings.lm.llm_model`), resolved through any withdrawal fallback
+    so callers judge the model that will actually run. Same lookup as the
+    token-usage endpoint; capability gates (image input) must use this resolved
+    id, never the raw configured one."""
+    from shared.lm.registry import resolve_available_model
+
     with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,))
         row = cur.fetchone()
     overlay = row[0] if row and row[0] else None
     model = overlay.get("llm_model") if overlay else None
-    return model or settings.lm.llm_model
+    return resolve_available_model(model or settings.lm.llm_model)
 
 
 def _validate_image_ref(agent_id: int, url: str) -> None:

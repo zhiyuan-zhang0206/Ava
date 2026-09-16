@@ -333,7 +333,7 @@ def test_child_attach_registration_reaches_result_envelope(tmp_path: Path) -> No
         f"import ava\nava.self.attach({str(image)!r}, label='render result')",
         # attach is a media-capable-model feature (user ruling 2026-08-28):
         # the child's default test model is text-only and rejects the call.
-        config_overlay={"llm_model": "deepseek-v4-flash-vision-exp"},
+        config_overlay={"llm_model": "claude-sonnet-5"},
     )
 
     assert proc.returncode == 0, proc.stderr
@@ -681,8 +681,34 @@ def test_child_help_keeps_attach_for_media_capable_model(
         "with contextlib.redirect_stdout(buf):\n"
         "    ava.help(ava.self)\n"
         "print('HAS_ATTACH' if 'def attach(' in buf.getvalue() else 'NO_ATTACH')",
-        config_overlay={"llm_model": "deepseek-v4-flash-vision-exp"},
+        config_overlay={"llm_model": "claude-sonnet-5"},
     )
 
     assert proc.returncode == 0, proc.stderr
     assert "HAS_ATTACH" in proc.stdout
+
+
+def test_child_help_hides_attach_for_withdrawn_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A withdrawn model's child gates media on the fallback that will run: a
+    deepseek-v4-flash-vision-exp pin resolves to the text-only
+    deepseek-v4-flash, so interactive help omits the attach contract and the
+    docs gate matches the attach call (task #3212)."""
+    # help(ava.self) renders MACHINE_SPEC, which needs a machine identity —
+    # the child's bare $AVA_HOME must carry its own machine_name file (env
+    # identity is dropped when the home's .env does not declare it).
+    (tmp_path / "home").mkdir(exist_ok=True)
+    (tmp_path / "home" / "machine_name").write_text("test-host", encoding="utf-8")
+    proc, _request, _result = _spawn(
+        tmp_path,
+        "import ava, io, contextlib\n"
+        "buf = io.StringIO()\n"
+        "with contextlib.redirect_stdout(buf):\n"
+        "    ava.help(ava.self)\n"
+        "print('HAS_ATTACH' if 'def attach(' in buf.getvalue() else 'NO_ATTACH')",
+        config_overlay={"llm_model": "deepseek-v4-flash-vision-exp"},
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert "NO_ATTACH" in proc.stdout

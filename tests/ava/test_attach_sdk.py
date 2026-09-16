@@ -25,7 +25,7 @@ def _media_capable_model(monkeypatch: pytest.MonkeyPatch) -> None:
     so the buffer contract tests run as a media-capable agent."""
     from shared.config import settings
 
-    monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-flash-vision-exp")
+    monkeypatch.setattr(settings.lm, "llm_model", "gpt-5.6-sol")
 
 
 def _exec_child(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -130,6 +130,25 @@ def test_rejects_text_only_model(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     assert take_attachments() == []
 
 
+def test_rejects_model_withdrawn_to_its_text_only_fallback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A configured withdrawn model is gated as the model that will run: a
+    deepseek-v4-flash-vision-exp pin resolves to the text-only
+    deepseek-v4-flash, so attach is rejected (task #3212)."""
+    from shared.config import settings
+
+    _exec_child(monkeypatch, tmp_path)
+    monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-flash-vision-exp")
+    image = tmp_path / "result.png"
+    image.write_bytes(b"png")
+
+    with pytest.raises(RuntimeError, match="text-only"):
+        attach(image)
+
+    assert take_attachments() == []
+
+
 def test_rejects_modality_not_supported_by_model(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -139,8 +158,8 @@ def test_rejects_modality_not_supported_by_model(
     from shared.config import settings
 
     _exec_child(monkeypatch, tmp_path)
-    # deepseek-v4-flash-vision-exp is image-only.
-    monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-flash-vision-exp")
+    # gpt-5.6-sol is image-only.
+    monkeypatch.setattr(settings.lm, "llm_model", "gpt-5.6-sol")
     video = tmp_path / "clip.mp4"
     video.write_bytes(b"mp4")
 

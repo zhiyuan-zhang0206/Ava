@@ -43,6 +43,17 @@ def media_gated_members() -> frozenset[str]:
     return frozenset({"ava.self.attach"})
 
 
+def _current_model() -> str:
+    """The agent's configured model resolved through any withdrawal fallback.
+
+    Capability gates judge the model that will actually run, so a withdrawn id
+    is gated as its fallback (task #3212)."""
+    from shared.config.turn_view import turn_settings
+    from shared.lm.registry import resolve_available_model
+
+    return resolve_available_model(turn_settings.lm.llm_model)
+
+
 def _attach_unavailable_reason() -> str | None:
     """Why ``attach`` is unavailable for the current agent's model, or None.
 
@@ -50,10 +61,9 @@ def _attach_unavailable_reason() -> str | None:
     ``attach_modalities`` declaration) cannot receive any attached media, so
     registering files for its next turn is a contradiction — the SDK docs drop
     the member and the call fails with this reason (user ruling 2026-08-28)."""
-    from shared.config.turn_view import turn_settings
     from shared.lm.factory import attach_modalities_for_model
 
-    model = turn_settings.lm.llm_model
+    model = _current_model()
     if attach_modalities_for_model(model):
         return None
     return f"your model ({model}) is text-only and cannot receive media attachments"
@@ -63,10 +73,9 @@ def _validate_modality(suffix: str) -> None:
     """Reject a file whose modality the current model's attach set does not
     include — a clear error at registration, never a silent pack-time skip
     (user ruling 2026-08-28)."""
-    from shared.config.turn_view import turn_settings
     from shared.lm.factory import attach_modalities_for_model
 
-    model = turn_settings.lm.llm_model
+    model = _current_model()
     mime = ATTACH_MEDIA_MIME[suffix]
     modality = "pdf" if mime == "application/pdf" else mime.split("/", maxsplit=1)[0]
     allowed = attach_modalities_for_model(model)

@@ -4,7 +4,11 @@ tuning defaults) and the `resolve_setting` config layering.
 
 from __future__ import annotations
 
+import subprocess
+import sys
+import textwrap
 from dataclasses import fields as dataclass_fields
+from pathlib import Path
 
 import pytest
 
@@ -602,3 +606,32 @@ def test_attach_modalities_declaration_must_stay_within_media_types() -> None:
     # A strict subset (attach narrower than the endpoint) is legal.
     narrower = replace(MODELS["gemini-2.5-flash"], attach_modalities=frozenset({"image"}))
     reg._validate_spec("gemini-2.5-flash", narrower, anthropic_protocol=False)
+
+
+def test_resolve_is_self_sufficient_in_a_fresh_process() -> None:
+    """File-level isolation (task #3212): a process whose FIRST registry use is
+    the resolve must see plugin-declared withdrawals — the provider loader is
+    triggered by this call, not assumed from an earlier model load. This test
+    process already loaded the providers via the module fixture, which would
+    mask the failure, so the scenario runs in a fresh interpreter (pre-fix it
+    returned the withdrawn id unresolved)."""
+    code = textwrap.dedent(
+        """
+        from shared.lm.registry import MODELS, resolve_available_model
+
+        assert not MODELS, "fresh process must start with an empty registry"
+        resolved = resolve_available_model("deepseek-v4-flash-vision-exp")
+        assert resolved == "deepseek-v4-flash", resolved
+        print("OK")
+        """
+    )
+    result = subprocess.run(  # noqa: S603 — our own venv python + a literal script
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "OK"
