@@ -50,12 +50,11 @@ class RunTimelineLlm(BaseModel):
 
 
 class RunTimelineExec(BaseModel):
-    """One execution event attached to the containing turn."""
+    """Tool and outcome of one execution event; exec events have no duration."""
 
     model_config = ConfigDict(frozen=True)
 
     tool: str
-    dur_s: float
     ok: bool
 
 

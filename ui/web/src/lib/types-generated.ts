@@ -6857,13 +6857,11 @@ export interface components {
         };
         /**
          * RunTimelineExec
-         * @description One execution event attached to the containing turn.
+         * @description Tool and outcome of one execution event; exec events have no duration.
          */
         RunTimelineExec: {
             /** Tool */
             tool: string;
-            /** Dur S */
-            dur_s: number;
             /** Ok */
             ok: boolean;
         };
