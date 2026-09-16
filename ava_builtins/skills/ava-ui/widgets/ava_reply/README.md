@@ -20,7 +20,7 @@ target agent, which wakes and reads it.
 
 ## Flow
 
-1. You build the page (a widget below), `ava.ui.show(name, port)`.
+1. You build the page (a widget below) and serve it with `ava.ui.serve(dir, name, port)`.
 2. The user opens the page (from the chat Pages popover or the `/fleet` per-row
    panel button), interacts, submits.
 3. The page POSTs `avaReply(...)` → the gateway delivers it as an inbound → you
