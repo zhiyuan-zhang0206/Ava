@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 24 | events table |
-| telemetry (category=telemetry) | `events` | 174 | events table |
+| telemetry (category=telemetry) | `events` | 175 | events table |
 | log (category=log) | `events` | 12 | events table |
 | file-only (destination=file) | file log | 1 | file only (not the events table) |
 | SSE live | Redis → frontend (not persisted) | 31 role | live projection |
@@ -91,7 +91,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 174)
+## 3. Telemetry events (category=telemetry, 175)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -206,6 +206,7 @@ consumers: see the comments at each emit point.
 | `page_restore_failed` | page restore failed | anomaly | — | — | events |
 | `page_restore_closed` | page restore closed | noise | — | — | events |
 | `page_restore_notified` | page restore notified | noise | — | — | events |
+| `pause_lifecycle_wait` | preparation bounded-waited an in-flight agent lifecycle command | anomaly | waited_s, outcome, agents | — | events |
 | `db_outage_wait` | db outage wait | anomaly | — | — | events |
 | `db_outage_pause` | db outage pause | anomaly | — | — | events |
 | `db_outage_reconcile_retry` | db outage reconcile retry | anomaly | — | — | events |
