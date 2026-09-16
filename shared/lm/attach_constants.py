@@ -35,6 +35,10 @@ ATTACH_MEDIA_MIME: dict[str, str] = {
     ".pdf": "application/pdf",
 }
 
+# Attachment payload guards (task #3696 exception inventory): per-file ceiling
+# (one file cannot dominate the turn), per-turn count and byte total (a turn's
+# media stays bounded before packing), label cap (rides the merged prompt).
+# Protective bounds, not cluster tuning knobs.
 ATTACH_MAX_FILE_BYTES = 20 * 1024 * 1024
 ATTACH_MAX_FILES_PER_TURN = 8
 ATTACH_MAX_TOTAL_BYTES = 48 * 1024 * 1024

@@ -72,6 +72,8 @@ class LokiBackend(Protocol):
         attribute_filters: dict[str, str] | None = None,
         from_: datetime | None = None,
         to: datetime | None = None,
+        # Mirrors gateway._loki_event_rows.query_events 1:1 (the structural-
+        # protocol contract above) — task #3696 exception inventory.
         limit: int = 100,
         offset: int = 0,
         direction: str = "backward",
@@ -95,6 +97,8 @@ class LokiBackend(Protocol):
         attribute_filters: dict[str, str] | None = None,
         from_: datetime | None = None,
         to: datetime | None = None,
+        # Mirrors gateway._loki_event_rows.query_projected_lines 1:1 — task
+        # #3696 exception inventory.
         limit_per_slice: int = 5000,
     ) -> list[tuple[int, int | None, str]]: ...
 

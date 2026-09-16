@@ -64,6 +64,9 @@ def query_events(
     archive: bool = False,
     from_: datetime | None = None,
     to: datetime | None = None,
+    # Internal read sizing (task #3696 exception inventory): the HTTP-layer
+    # default lives in display.events_default_limit; this bounds an
+    # omitted-argument read for direct callers.
     limit: int = 100,
     offset: int = 0,
     direction: str = "backward",
@@ -370,6 +373,9 @@ def query_projected_lines(
     attribute_filters: dict[str, str] | None = None,
     from_: datetime | None = None,
     to: datetime | None = None,
+    # One slice's read bound (task #3696 exception inventory): a deep query
+    # fans out into slices, each capped here so no slice ships an unbounded
+    # batch.
     limit_per_slice: int = 5000,
     timeout_s: float | None = None,
 ) -> list[tuple[int, int | None, str]]:

@@ -12,6 +12,12 @@ from pydantic import (
     StringConstraints,
 )
 
+# Bounds on the page-registration shape (task #3696 exception inventory):
+# `name` is the page key — a URL-safe slug people copy and paste, capped at 64;
+# `host` is a DNS/IP dial target, capped at the 255-octet hostname ceiling
+# (RFC 1035); `title` rides UI chrome (200 chars); `serve_dir` must fit a real
+# filesystem path (4096, the common PATH_MAX allowance). Structural bounds,
+# not tunable knobs.
 _PageName = Annotated[
     str,
     StringConstraints(
