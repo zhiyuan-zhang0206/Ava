@@ -12,6 +12,7 @@ approve the freshly recomputed plan.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -57,9 +58,21 @@ def _decision(name: str, size: int = 10) -> RetentionDecision:
     return RetentionDecision(object=_object(name, size), reason="beyond retention")
 
 
-def _plan(*, blocked: tuple[str, ...] = ()) -> RetentionPlan:
+def _logical_decision(name: str, size: int = 10) -> RetentionDecision:
+    logical = replace(_object(name, size), kind="logical")
+    return RetentionDecision(
+        object=logical, reason="logical daily dump beyond the retention window"
+    )
+
+
+def _plan(*, blocked: tuple[str, ...] = (), with_logical: bool = False) -> RetentionPlan:
     retained = (_decision("base/1"), _decision("base/2"))
-    eligible = () if blocked else (_decision("old/1"),)
+    eligible: tuple[RetentionDecision, ...] = () if blocked else (_decision("old/1"),)
+    weak: tuple[str, ...] = ()
+    if with_logical:
+        logical = _logical_decision("ava-logical/ava-20260901T030000Z.dump.enc")
+        weak = (logical.object.object_name,)
+        eligible = (*eligible, logical)
     return RetentionPlan(
         schema_version=PLAN_SCHEMA_VERSION,
         retained_chain_count=2,
@@ -74,6 +87,7 @@ def _plan(*, blocked: tuple[str, ...] = ()) -> RetentionPlan:
         retained_bytes=sum(item.object.size for item in retained),
         eligible_bytes=sum(item.object.size for item in eligible),
         orphan_sidecars=(),
+        weak_evidence=weak,
     )
 
 
@@ -192,6 +206,30 @@ def test_status_degrades_without_daemon(
     assert "unreachable" in out
 
 
+def test_status_shows_the_logical_surface(
+    gate_env: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(retention_gate, "read_daemon_record", lambda: None)
+    _write_plan(gate_env, _plan(with_logical=True))
+    assert cmd_pitr_retention_status() == 0
+    out = capsys.readouterr().out
+    assert "1 logical" in out
+    assert "weak-evidence=1" in out
+
+
+def test_inspect_reports_the_logical_counts(
+    gate_env: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from cli.commands import cmd_pitr_retention_inspect
+
+    _write_plan(gate_env, _plan(with_logical=True))
+    assert cmd_pitr_retention_inspect() == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["logical_eligible_objects"] == 1
+    assert payload["logical_retained_objects"] == 0
+    assert payload["weak_evidence_objects"] == 1
+
+
 def test_run_once_requires_armed(gate_env: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert cmd_pitr_retention_run_once(confirm=True) == 1
     assert "not armed" in capsys.readouterr().err
@@ -215,6 +253,11 @@ def _fake_config() -> PhysicalBackupSettings:
     )
 
 
+def _logical_policy_stub() -> object:
+    """Stand-in for the scheduler's logical retention policy factory."""
+    return object()
+
+
 class _FakeViewer:
     def stat(self, object_name: str) -> object:
         return None
@@ -222,6 +265,9 @@ class _FakeViewer:
 
 class _FakeGroup:
     def retention_inventory_reader(self) -> object:
+        return object()
+
+    def logical_retention_inventory_reader(self) -> object:
         return object()
 
     def retention_delete_store(self) -> object:
@@ -257,6 +303,7 @@ def test_run_operator_once_refuses_changed_digest(
     digest = _write_plan(gate_env, _plan())
     assert cmd_pitr_retention_arm(digest=digest, confirm=True) == 0
     monkeypatch.setattr(retention_scheduler, "get_store_group", _FakeGroup)
+    monkeypatch.setattr(retention_scheduler, "_logical_retention", _logical_policy_stub)
     monkeypatch.setattr(
         retention_scheduler,
         "write_dry_run_plan",
@@ -273,6 +320,7 @@ def test_run_operator_once_executes_through_the_executor(
     digest = _write_plan(gate_env, _plan())
     assert cmd_pitr_retention_arm(digest=digest, confirm=True) == 0
     monkeypatch.setattr(retention_scheduler, "get_store_group", _FakeGroup)
+    monkeypatch.setattr(retention_scheduler, "_logical_retention", _logical_policy_stub)
     monkeypatch.setattr(
         retention_scheduler, "write_dry_run_plan", lambda _root, **_kw: _recheck(digest)
     )

@@ -12,6 +12,12 @@ Base objects additionally capture their sidecar's own delete identity, and
 a sidecar whose host is already gone is surfaced as an orphan candidate
 (design section 2.5): silently skipping sidecars would let orphans
 accumulate forever.
+
+``namespace="logical"`` selects the flat ``ava-logical/`` dump pool,
+classified by the shared name grammar. Its objects publish through the
+same multipart path, so the sidecar pair is the full-strength binding;
+a single-PUT straggler without a sidecar resolves through its ETag MD5 and
+is left for the policy to mark weak-evidence.
 """
 
 from __future__ import annotations
@@ -22,13 +28,19 @@ from typing import cast
 
 from services.pitr.archive_shim import archive_name_is_valid
 from services.pitr.checksums import MD5
+from services.pitr.logical_dump_names import parse_dump_name, relative_name
 from services.pitr.object_store import (
     PermanentObjectStoreError,
     RemoteObjectAck,
     TransientObjectStoreError,
 )
 from services.pitr.oss_store import OSSObjectStore
-from services.pitr.retention_inventory import InventorySnapshot
+from services.pitr.retention_inventory import (
+    LOGICAL_NAMESPACE,
+    PITR_NAMESPACE,
+    InventorySnapshot,
+    require_namespace,
+)
 from services.pitr.retention_manifest import (
     SIDECAR_SUFFIX,
     OrphanSidecar,
@@ -49,7 +61,9 @@ class OSSRetentionInventoryReader:
         prefix: str,
         credentials_file: str | Path,
         timeout_seconds: float = 300.0,
+        namespace: str = PITR_NAMESPACE,
     ) -> None:
+        require_namespace(namespace, prefix)
         self._store = OSSObjectStore(
             endpoint=endpoint,
             bucket=bucket,
@@ -57,12 +71,17 @@ class OSSRetentionInventoryReader:
             timeout_seconds=timeout_seconds,
         )
         self._prefix = prefix.rstrip("/")
+        self._namespace = namespace
 
     @classmethod
-    def from_store(cls, store: OSSObjectStore, *, prefix: str) -> OSSRetentionInventoryReader:
+    def from_store(
+        cls, store: OSSObjectStore, *, prefix: str, namespace: str = PITR_NAMESPACE
+    ) -> OSSRetentionInventoryReader:
+        require_namespace(namespace, prefix)
         instance = cls.__new__(cls)
         instance._store = store
         instance._prefix = prefix.rstrip("/")
+        instance._namespace = namespace
         return instance
 
     def snapshot(self) -> InventorySnapshot:
@@ -76,7 +95,13 @@ class OSSRetentionInventoryReader:
                 continue
             if name.startswith(f"{self._prefix}/protected/"):
                 continue
-            if re.fullmatch(_base_pattern(self._prefix), name) is not None:
+            if self._namespace == LOGICAL_NAMESPACE:
+                inner = relative_name(name, root=self._prefix)
+                if inner is None or parse_dump_name(inner) is None:
+                    unknown.append(name)
+                    continue
+                kind = "logical"
+            elif re.fullmatch(_base_pattern(self._prefix), name) is not None:
                 kind = "base"
             elif name.startswith(f"{self._prefix}/wal/"):
                 kind = None  # validated after metadata read
@@ -94,13 +119,15 @@ class OSSRetentionInventoryReader:
             metadata = dict(object_row.metadata)
             if kind == "base":
                 row = self._retention_row_base(name, object_row, metadata)
+            elif kind == "logical":
+                row = self._retention_row_logical(name, object_row)
             else:
                 row = self._retention_row_wal(name, object_row, metadata)
             if row is None:
                 unknown.append(name)
                 continue
             objects.append(row)
-            if row.kind == "base" and f"{name}{SIDECAR_SUFFIX}" in present:
+            if row.kind in {"base", "logical"} and f"{name}{SIDECAR_SUFFIX}" in present:
                 pair = self._sidecar_pair(row)
                 if pair is not None:
                     sidecar_pairs.append(pair)
@@ -152,7 +179,11 @@ class OSSRetentionInventoryReader:
                 continue
             if host in present:
                 continue
-            if re.fullmatch(_base_pattern(self._prefix), host) is None:
+            if self._namespace == LOGICAL_NAMESPACE:
+                inner = relative_name(host, root=self._prefix)
+                if inner is None or parse_dump_name(inner) is None:
+                    continue
+            elif re.fullmatch(_base_pattern(self._prefix), host) is None:
                 continue
             observation = self._orphan_sidecar(host)
             if observation is not None:
@@ -175,7 +206,7 @@ class OSSRetentionInventoryReader:
                 str(content["pin_token"]),
                 int(content["size"]),
                 None,
-                "base",
+                "logical" if self._namespace == LOGICAL_NAMESPACE else "base",
                 str(content["checksum_algo"]),
                 str(content["checksum_value"]),
                 metadata,
@@ -196,6 +227,25 @@ class OSSRetentionInventoryReader:
             object_row.size,
             None,
             "base",
+            object_row.checksum.algo,
+            object_row.checksum.value,
+            tuple(sorted(metadata.items())),
+        )
+
+    def _retention_row_logical(
+        self, name: str, object_row: RemoteObjectAck
+    ) -> RetentionObject | None:
+        """A logical dump resolves its checksum like a base object: single-PUT
+        rows through the ETag MD5, multipart rows through the bound sidecar."""
+        if object_row.checksum.algo != MD5 or not object_row.checksum.value:
+            return None
+        metadata = dict(object_row.metadata)
+        return RetentionObject(
+            name,
+            object_row.pin_token,
+            object_row.size,
+            None,
+            "logical",
             object_row.checksum.algo,
             object_row.checksum.value,
             tuple(sorted(metadata.items())),
