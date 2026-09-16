@@ -1705,7 +1705,7 @@
     "/api/agents/{agent_id}/shell/{session_id}": {
       "get": {
         "summary": "Get Agent Shell",
-        "description": "Capture the most recent terminal output of one of an agent's persistent\nshells — the data the shell monitor page fetches on demand.\n\nDispatches the `shell_capture` op to the machine the agent runs on\n(`agents_meta.machine`, resolved through the `machines` table to that\nhost's ops server URL — one uniform path for every machine, the gateway's\nown box included). The runner resolves `session_id` against its live shell\nsessions for the agent, reconstructs the full session name (carrying\nthe optional `-<name>` suffix), and captures the last\n`lines` lines.\n\n404 if the agent is unknown (no agents_meta row), if the agent has no live\nshell with that id on its machine, or if the capture fails (the session\ndied between the probe and the capture). 503 if the agent's machine's ops\nserver is unreachable — the shell may still exist, but this gateway cannot\nreach it right now.",
+        "description": "Capture the most recent terminal output of one of an agent's persistent\nshells — the data the shell monitor page fetches on demand.\n\nDispatches the `shell_capture` op to the machine the agent runs on\n(`agents_meta.machine`, resolved through the `machines` table to that\nhost's ops server URL — one uniform path for every machine, the gateway's\nown box included). The runner resolves `session_id` against its live shell\nsessions for the agent, reconstructs the full session name (carrying\nthe optional `-<name>` suffix), and captures the last\n`lines` lines. Omit `lines` for the configured default\n(``display.shell_capture_default_lines``, 200 out of the box).\n\n404 if the agent is unknown (no agents_meta row), if the agent has no live\nshell with that id on its machine, or if the capture fails (the session\ndied between the probe and the capture). 503 if the agent's machine's ops\nserver is unreachable — the shell may still exist, but this gateway cannot\nreach it right now.",
         "operationId": "get_agent_shell_api_agents__agent_id__shell__session_id__get",
         "parameters": [
           {
@@ -1731,10 +1731,16 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer",
-              "maximum": 2000,
-              "minimum": 50,
-              "default": 200,
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 2000,
+                  "minimum": 50
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Lines"
             }
           }

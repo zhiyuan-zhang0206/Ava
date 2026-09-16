@@ -644,6 +644,10 @@ def shell_capture_op(agent_id: int, session_id: int, lines: int = 200) -> ShellC
     RuntimeError when the session is absent or died mid-capture, which the ops
     daemon surfaces as a 'failed' op result.
 
+    The `lines` default is a direct-call fallback: the gateway resolves the
+    configured default (display.shell_capture_default_lines) before
+    dispatching, and every programmatic caller passes an explicit window.
+
     Raises:
         ShellNotFoundError: no live shell with `session_id` on this host.
         RuntimeError: the session capture failed.

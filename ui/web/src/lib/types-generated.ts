@@ -1121,7 +1121,8 @@ export interface paths {
          *     own box included). The runner resolves `session_id` against its live shell
          *     sessions for the agent, reconstructs the full session name (carrying
          *     the optional `-<name>` suffix), and captures the last
-         *     `lines` lines.
+         *     `lines` lines. Omit `lines` for the configured default
+         *     (``display.shell_capture_default_lines``, 200 out of the box).
          *
          *     404 if the agent is unknown (no agents_meta row), if the agent has no live
          *     shell with that id on its machine, or if the capture fails (the session
@@ -9316,7 +9317,7 @@ export interface operations {
     get_agent_shell_api_agents__agent_id__shell__session_id__get: {
         parameters: {
             query?: {
-                lines?: number;
+                lines?: number | null;
             };
             header?: never;
             path: {

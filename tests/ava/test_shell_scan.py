@@ -113,3 +113,24 @@ def test_capture_without_scrollback_is_also_scanned(
 
     assert sessions.capture(1, scrollback=False) == _INJECTION
     assert [src for src, _ in findings] == ["shell.sessions.capture"]
+
+
+def test_capture_default_lines_follow_display_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Omitted ``lines`` resolves through settings.display.shell_capture_default_lines
+    (``AVA_SHELL_CAPTURE_DEFAULT_LINES``); the literal 200 is only that field's
+    default, not a hard-coded window."""
+    from shared.config import settings
+
+    monkeypatch.setattr(sessions, "_resolve", lambda _id: "fake-session")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(settings.display, "shell_capture_default_lines", 137)
+    seen: dict[str, int] = {}
+
+    class _FakeBackend:
+        def capture_pane(self, name: str, lines: int = 200, *, scrollback: bool = True) -> str:
+            seen["lines"] = lines
+            return "ok"
+
+    monkeypatch.setattr("shared.session_backend._shell_backend", _FakeBackend())
+
+    assert sessions.capture(1) == "ok"
+    assert seen["lines"] == 137

@@ -89,3 +89,22 @@ class DisplaySettings(EnvSettings):
             "scope": "cluster-pinned",
         },
     )
+
+    shell_capture_default_lines: int = Field(
+        default=200,
+        alias="AVA_SHELL_CAPTURE_DEFAULT_LINES",
+        description=(
+            "Default tail window (lines) of a shell capture when the caller passes none: "
+            "the shell monitor page's poll (GET /api/agents/{id}/shell/{sid}), the SDK's "
+            "ava.shell.sessions.capture(), and the pty CLI's bare `capture` op. 200 lines "
+            "is a few screenfuls and matches the monitor page's own default; the valid "
+            "range (50..2000 at the API, hard clamp 100000 at the pty host) stays fixed "
+            "(protective constants, task #3696 exception inventory)."
+        ),
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )

@@ -1446,3 +1446,22 @@ def test_kill_absent_reports_idle(sessions: Path) -> None:
     nothing was there to interrupt."""
     home = sessions
     assert _kill_verdict(home, "ava-test-verdict-absent-1") == "idle"
+
+
+def test_op_capture_default_lines_follow_display_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A bare `capture` op (no lines argument) resolves through
+    settings.display.shell_capture_default_lines (AVA_SHELL_CAPTURE_DEFAULT_LINES);
+    the literal 200 is only that field's default."""
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.display, "shell_capture_default_lines", 137)
+    seen: dict[str, object] = {}
+
+    def _fake_request(name: str, req: dict[str, object]) -> dict[str, object]:
+        seen.update(req)
+        return {"ok": True, "data": {"text": ""}}
+
+    monkeypatch.setattr(pty_cli, "session_request", _fake_request)
+
+    assert pty_cli._op_capture("ava-test-capture-default", []) == 0
+    assert seen["lines"] == 137

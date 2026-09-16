@@ -102,6 +102,10 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             "lm",  # ops_lifecycle reads llm_model
             "sandbox",
             "observability",
+            # The pty CLI (shared/pty_sessions/cli.py, reachable from the runner
+            # closure) resolves an omitted capture window from
+            # display.shell_capture_default_lines (task #3696).
+            "display",
             # ops/spec.py gates the pitr-uploader roster entry on AVA_PITR_ENABLED.
             "physical_backup",
             # shared.install_registry.resolved_policy() is reachable from the

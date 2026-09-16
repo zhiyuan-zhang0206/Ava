@@ -16,6 +16,7 @@ import ava._boot
 from ava._sdk_validation import coerce_str, coerce_typed
 from ava.security import scan_content
 from shared.cluster import session_name
+from shared.config import settings
 from shared.paths import repo_root, workspace_dir
 from shared.session_backend import get_shell_backend
 from shared.session_env import forward_env_dict
@@ -325,12 +326,16 @@ def send_keys(id: int, *keys: str) -> None:
     get_shell_backend().send_keys(_resolve(id), *keys)
 
 
-def capture(id: int, lines: int = 200, *, scrollback: bool = True) -> str:
+def capture(id: int, lines: int | None = None, *, scrollback: bool = True) -> str:
     """The session's most recent `lines` of output, including history that
-    has scrolled past. Pass `scrollback=False` to get only the current
-    visible screen instead — needed for full-screen programs that redraw in
-    place (`lines` is ignored then)."""
+    has scrolled past. Omit `lines` for the configured default
+    (``display.shell_capture_default_lines``, 200 out of the box). Pass
+    `scrollback=False` to get only the current visible screen instead —
+    needed for full-screen programs that redraw in place (`lines` is
+    ignored then)."""
     id = coerce_typed(id, "id", int)
+    if lines is None:
+        lines = settings.display.shell_capture_default_lines
     lines = coerce_typed(lines, "lines", int)
     scrollback = coerce_typed(scrollback, "scrollback", bool)
     # A session holds whatever ran in it — an interactive fetch, a coding agent

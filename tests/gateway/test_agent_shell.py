@@ -144,6 +144,33 @@ def test_shell_capture_custom_lines_forwarded(
     assert seen["payload"] == {"agent_id": aid, "session_id": 1, "lines": 500}
 
 
+def test_shell_capture_default_lines_follow_display_config(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Omitted ?lines= resolves through settings.display.shell_capture_default_lines
+    (AVA_SHELL_CAPTURE_DEFAULT_LINES); 200 is only that field's default."""
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.display, "shell_capture_default_lines", 137)
+    aid = _insert_agent(db_conn)
+    db_conn.commit()
+
+    seen: dict[str, object] = {}
+
+    async def _capture_dispatch(
+        target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
+    ) -> dict[str, object]:
+        seen["payload"] = payload
+        return await _ok_dispatch(target_machine, kind, payload)
+
+    monkeypatch.setattr(shell_router._cluster_rpc, "dispatch_to_machine", _capture_dispatch)
+
+    with TestClient(app) as client:
+        resp = client.get(f"/api/agents/{aid}/shell/1")
+    assert resp.status_code == 200
+    assert seen["payload"] == {"agent_id": aid, "session_id": 1, "lines": 137}
+
+
 def test_shell_capture_carries_created_at_and_ttl_deadline(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
