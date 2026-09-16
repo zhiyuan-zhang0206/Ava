@@ -56,6 +56,25 @@ class DisplaySettings(EnvSettings):
         },
     )
 
+    run_timeline_layers_max_nodes: int = Field(
+        default=200,
+        alias="AVA_RUN_TIMELINE_LAYERS_MAX_NODES",
+        description=(
+            "Max narrative-layer nodes one depth level may contribute to "
+            "GET /api/agents/{id}/run-timeline's layers. When the finest level's "
+            "intersecting nodes exceed it, the merge drops to the next coarser "
+            "level until the row fits — 200 blocks in one chart row is already "
+            "dense, and nothing is lost: the coarser levels summarize the same "
+            "window."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     notices_open_default_limit: int = Field(
         default=200,
         alias="AVA_NOTICES_OPEN_DEFAULT_LIMIT",
