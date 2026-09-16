@@ -740,6 +740,10 @@ path so the gateway, gate login page and rebuilt frontend agree. If an explicit
 `AVA_GATEWAY_CORS_ALLOWED_ORIGINS` list exists, add the exact new origin there;
 the explicit allowlist remains authoritative.
 
+This setting currently requires a source-built frontend. Retained standalone
+images do not record a browser origin in their build manifest; their launcher
+refuses a nonempty setting instead of silently serving a mismatched bundle.
+
 Only a browser visiting that exact origin uses same-origin API/SSE. Direct IP
 frontend URLs keep their existing gateway-port routing for staged verification
 and rollback. Login through the new HTTPS origin sets a Secure session cookie;

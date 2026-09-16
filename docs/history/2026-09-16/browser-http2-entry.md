@@ -25,3 +25,9 @@ removing an internal port when a forwarded host uses the default HTTPS port.
 Tests cover that boundary and preserve direct HTTP login and explicit CORS
 policy. Production acceptance requires the user's browser to negotiate h2 and
 remain responsive with multiple SSE consumers.
+
+Release-path review: the retained standalone image contract currently records
+only the gateway port and API-base override. Its launcher rejects this new
+setting until the manifest can represent it; source builds carry the setting
+through the canonical build command. Silently accepting an unrepresented
+origin would break HTTPS clients despite successful release verification.

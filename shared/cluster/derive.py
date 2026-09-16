@@ -198,6 +198,8 @@ def frontend_service_cmd(port: int, frontend_dir: str | Path = "ui/web") -> str:
     if WHEEL_RUNTIME:
         if IS_WINDOWS:
             raise RuntimeError("retained frontend launch has no Windows closure proof")
+        if settings.gateway.browser_origin:
+            raise RuntimeError("prepared frontend does not support AVA_BROWSER_ORIGIN")
         retained = runtime_frontend_dir()
         manifest = json.loads((retained / "frontend-manifest.json").read_text(encoding="utf-8"))
         if manifest["publicBuildConfig"] != {
