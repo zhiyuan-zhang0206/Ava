@@ -103,6 +103,12 @@ jobs:
 
       - name: Install the Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+        with:
+          # The action's default `packages` is 'tools platform-tools'; the
+          # deprecated 'tools' package is gone from the SDK repository, so the
+          # step dies with `Failed to find package 'tools'`. Install only what
+          # still exists — the SDK and cmdline-tools ship on the runner image.
+          packages: 'platform-tools'
 
       - name: Install the Android NDK
         run: |
