@@ -14,6 +14,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from shared import plugin_stats
+from shared.config import settings
 from shared.db import pool
 
 
@@ -85,8 +86,24 @@ def test_writer_validation_refuses_what_the_panel_cannot_render(
     with pytest.raises(ValueError, match="exceeds"):
         plugin_stats.upsert(plugin="p", id="c", value="x" * (plugin_stats.MAX_VALUE_CHARS + 1))
     with pytest.raises(ValueError, match="exceeds"):
-        plugin_stats.upsert(plugin="p", id="c", value="ok", detail="y" * 501)
+        plugin_stats.upsert(
+            plugin="p",
+            id="c",
+            value="ok",
+            detail="y" * (settings.display.plugin_stats_max_detail_chars + 1),
+        )
     with pytest.raises(ValueError, match="not one of"):
         plugin_stats.upsert(plugin="p", id="c", value="ok", status="empty")
     with pytest.raises(ValueError, match="non-empty string"):
         plugin_stats.upsert(plugin="", id="c", value="ok")
+
+
+def test_detail_cap_follows_config(
+    monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
+) -> None:
+    """The detail cap is cluster config, resolved per call: a shortened cap
+    rejects what the default would accept (task #3696)."""
+    monkeypatch.setattr(settings.display, "plugin_stats_max_detail_chars", 10)
+    plugin_stats.upsert(plugin="p", id="c", value="ok", detail="y" * 10)
+    with pytest.raises(ValueError, match="exceeds"):
+        plugin_stats.upsert(plugin="p", id="c", value="ok", detail="y" * 11)

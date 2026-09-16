@@ -29,8 +29,9 @@ export interface paths {
          *     nothing to guess, and no-secret requests must never count into the
          *     limiter's failure records.
          *
-         *     Brute-force guard: an IP that fails ``MAX_FAILURES`` times in a row is
-         *     locked for ``LOCKOUT_SECONDS`` (policy + rationale in shared/rate_limit.py).
+         *     Brute-force guard: an IP that fails ``gateway.login_max_failures`` times in
+         *     a row is locked for ``gateway.login_lockout_seconds`` (policy + rationale on
+         *     those config fields; enforcement in shared/rate_limit.py).
          *     While locked, the endpoint returns 429 + ``Retry-After`` instead of 401 —
          *     401 would read as "wrong password" and invite exactly the retry loop the
          *     lockout exists to stop. A successful login resets the IP's counter.

@@ -16,6 +16,7 @@ import pytest
 
 from services.backup_scheduler import daemon
 from shared import daemon_health
+from shared.config import settings
 
 
 @pytest.fixture(autouse=True)
@@ -193,7 +194,8 @@ def test_next_backup_hour_uses_the_cluster_timezone(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(daemon, "_cluster_tz", lambda: UTC)
     monkeypatch.setattr(daemon, "_sleep", fake_sleep)
 
-    asyncio.run(daemon._sleep_until_next_backup_hour(_at(hour=2, minute=30)))
+    backup_hour = settings.services.backup_hour
+    asyncio.run(daemon._sleep_until_next_backup_hour(_at(hour=(backup_hour - 1) % 24, minute=30)))
 
     assert slept == [30 * 60]
 

@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field
 from services.memory_indexer.embeddings.factory import get_provider
 from services.memory_search.store import MemoryStore
 from shared import telemetry
+from shared.config import settings
 
 _log = logging.getLogger("services.memory_search.app")
 
@@ -42,7 +43,10 @@ _log = logging.getLogger("services.memory_search.app")
 # allocates. The store keeps its own exact-dim check as the last gate.
 _EMBED_DIM = get_provider().dim
 _MAX_K = 1000
-_MAX_BATCH_ROWS = 65536
+# Batch-size bound on the wire models — cluster config
+# (services.memory_search_max_batch_rows), resolved at import; a change takes
+# effect when this service restarts.
+_MAX_BATCH_ROWS = settings.services.memory_search_max_batch_rows
 
 # One stats sample per minute — bounded row rate, same cadence as the
 # gateway's gauge flushers (agent_registry / auth401 / latency). A 60s

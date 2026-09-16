@@ -338,6 +338,27 @@ class _ServiceRuntimeSettings(EnvSettings):
         },
     )
 
+    memory_search_max_batch_rows: int = Field(
+        default=65536,
+        gt=0,
+        alias="AVA_MEMORY_SEARCH_MAX_BATCH_ROWS",
+        description=(
+            "Row-count cap on one memory-search batch request body (/upsert_batch, "
+            "/delete_stale_batch), enforced by the wire models. Loopback-only is the "
+            "trust model, not a security boundary, so one request's parse and "
+            "allocation stay bounded; 65536 is far above the indexer's normal batch "
+            "while keeping the worst case bounded. Resolved at import in the "
+            "memory-search app — takes effect on its restart."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     embedding_backend: str = Field(
         default="gemini",
         alias="AVA_EMBEDDING_BACKEND",

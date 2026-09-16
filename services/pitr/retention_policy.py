@@ -56,9 +56,9 @@ class RetentionEvidence:
 class LogicalRetention:
     """The logical namespace's retention window.
 
-    The defaults mirror the local pool (``services.backup.BACKUP_KEEP`` and
-    ``ACTIVATION_KEEP``); production callers pass the writer's live
-    constants so the off-site mirror cannot drift. ``legacy_tz`` is the
+    The defaults mirror the local pool's field defaults (``services.backup_keep``
+    and ``services.backup.ACTIVATION_KEEP``); production callers pass the
+    writer's live values so the off-site mirror cannot drift. ``legacy_tz`` is the
     cluster wall clock legacy (offset-less) stamps are read in;
     ``active_pin_name`` is the in-flight activation operation's pinned
     snapshot, kept regardless of the window.

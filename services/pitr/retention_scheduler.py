@@ -102,14 +102,16 @@ class RetentionDryRunState:
 def _logical_retention() -> LogicalRetention:
     """The logical namespace's retention window, mirroring the local pool.
 
-    The depths and the in-flight activation pin come from ``services.backup``
-    itself, so the off-site mirror cannot drift from the local prune.
+    The depths come from the live ``services`` config (``backup_keep`` /
+    ``ACTIVATION_KEEP``) and the in-flight activation pin from
+    ``services.backup`` itself, so the off-site mirror cannot drift from the
+    local prune.
     """
-    from services.backup import ACTIVATION_KEEP, BACKUP_KEEP, active_activation_snapshot_name
+    from services.backup import ACTIVATION_KEEP, active_activation_snapshot_name
     from shared.config import settings
 
     return LogicalRetention(
-        keep_dailies=BACKUP_KEEP,
+        keep_dailies=settings.services.backup_keep,
         keep_pre_updates=1,
         keep_activations=ACTIVATION_KEEP,
         legacy_tz=ZoneInfo(settings.general.timezone),

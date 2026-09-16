@@ -162,6 +162,10 @@ def _select_unlabeled(cur: psycopg.Cursor, cooling: list[int]) -> list[tuple[int
     inside their failure-backoff window) are excluded in SQL — not after the
     LIMIT — so a cluster of persistently-failing agents neither burns an LLM call
     nor occupies the window ahead of a fresh agent.
+
+    The batch of 10 is an internal scheduling quantity, not a user-facing
+    surface, so it stays a literal rather than joining cluster config (task
+    #3696).
     """
     cur.execute(
         "SELECT t.id, "  # noqa: S608 — _PROMPT_INBOUND_CONDITION is a module constant, never user input

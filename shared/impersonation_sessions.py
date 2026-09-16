@@ -21,7 +21,13 @@ def request(
     codex_remote: str | None = None,
     batch_window_seconds: int = 30,
 ) -> dict[str, Any]:
-    """Request an automatic safe-boundary takeover; return credentials once."""
+    """Request an automatic safe-boundary takeover; return credentials once.
+
+    ``batch_window_seconds`` is the relay's routine-message merge window (see
+    ``control.request``): 30s coalesces routine arrivals into one hint per
+    window while user chat and cancel always hint immediately; 0 disables
+    merging (validated 0..300).
+    """
     result = control.request(
         agent_id,
         caller=CallerIdentity(kind="external_agent", subject=provider),
@@ -44,7 +50,11 @@ def request(
 def list_sessions(
     agent_id: int, *, before: int | None = None, limit: int = 100
 ) -> list[dict[str, Any]]:
-    """Page permanent history newest first; IDs are never reused."""
+    """Page permanent history newest first; IDs are never reused.
+
+    ``limit`` is one page (default 100, validated 1..1000); pass ``before``
+    to read rows older than that session id.
+    """
     from psycopg.rows import dict_row
 
     if not 1 <= limit <= 1000:

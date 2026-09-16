@@ -10,8 +10,14 @@ from shared._impersonation_store import expire, lock_lease
 from shared.db import publish_inbound_wake
 from shared.db_transaction import write_transaction
 
+# One reaper pass handles at most this many leases per list — expired-lease
+# reconciliation and the approaching-expiry reminder scan each take one page.
+# The pass stays a short transaction and the next cycle (default 60s) picks up
+# any remainder, so a backlog drains over cycles rather than one long pass.
+_PASS_BATCH = 200
 
-def reap_impersonations(pool: ConnectionPool, *, limit: int = 200) -> int:
+
+def reap_impersonations(pool: ConnectionPool, *, limit: int = _PASS_BATCH) -> int:
     """Reconcile expired controllers even when their native runner is offline.
 
     Session records, lifecycle events and messages are retained permanently.
@@ -32,6 +38,10 @@ def reap_impersonations(pool: ConnectionPool, *, limit: int = 200) -> int:
     return len(expired_agents)
 
 
+# How long before expiry a lease first gets its renewal reminder: 300s (5
+# minutes) is several 60s reaper cycles, so the reminder lands promptly and
+# still leaves the controller time to renew before the lease lapses; one
+# reminder per expiry deadline (issue #2054).
 REMINDER_WINDOW_SECONDS = 300.0
 
 
@@ -64,7 +74,7 @@ def remind_expiring_impersonations(
             "AND r.payload->>'lease_id'=l.id::text "
             "AND (r.payload->>'expires_at')::timestamptz=l.expires_at) "
             "ORDER BY l.agent_id LIMIT %s",
-            (window_seconds, 200),
+            (window_seconds, _PASS_BATCH),
         ).fetchall()
         prefix = [sys.executable, "-m", "cli", "impersonate"]
         for lease_id, agent_id, expires_at, session_id in candidates:

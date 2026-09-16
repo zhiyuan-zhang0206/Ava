@@ -141,9 +141,15 @@ class GatewayClient:
             raise RuntimeError(f"list commands failed: HTTP {resp.status_code}")
         return resp.json()
 
-    async def get_timeline(self, agent_id: int, limit: int = 5) -> list[dict[str, Any]]:
-        """GET /api/agents/{id}/timeline?limit=N → rendered TimelineItems."""
+    async def get_timeline(self, agent_id: int, limit: int | None = None) -> list[dict[str, Any]]:
+        """GET /api/agents/{id}/timeline?limit=N → rendered TimelineItems.
+
+        Without an explicit limit, N is the configured /switch fetch window
+        (services.im_bridge_timeline_window) — the number the replay trims
+        from."""
         client = await self._http()
+        if limit is None:
+            limit = settings.services.im_bridge_timeline_window
         resp = await client.get(
             f"/api/agents/{agent_id}/timeline",
             headers=self._headers(),

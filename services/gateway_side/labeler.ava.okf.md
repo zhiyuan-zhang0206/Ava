@@ -8,7 +8,7 @@ tags: []
 # Labeler — Agent Auto-Naming
 
 ## What is it
-An independent agent label auto-generation process — polls per second for rows in `agents` where `label IS NULL AND NOT label_user_set`, takes the first chat inbound as prompt, calls LLM to generate a short label name (max 64 characters). Completely decoupled from Gateway.
+An independent agent label auto-generation process — polls per second for rows in `agents` where `label IS NULL AND NOT label_user_set`, takes the first chat inbound as prompt, calls LLM to generate a short label name (max `services.labeler_max_chars` characters, default 64). Completely decoupled from Gateway.
 
 **Role affiliation**: gateway side (pure agent-runner does not run) — `ServiceSpec.capabilities=_GATEWAY` in `ops/spec.py`; roster derived by `services_for_capabilities` intersecting with local `machine_role()`.
 
@@ -30,5 +30,5 @@ An independent agent label auto-generation process — polls per second for rows
 
 ## Notes
 - Label generation logic lives in `shared/labels.py` (labels on agent rows) + `services/labeler/labeler.py` (the generation service) — extracted out of the gateway to eliminate a services → gateway reverse dependency
-- System prompt restricts label to ≤ 64 characters, outputting only the label itself
+- System prompt restricts label to `services.labeler_max_chars` (default 64) characters, outputting only the label itself
 - The prompt being summarized is frequently machine-authored — a long English second-person imperative brief written by one agent to spawn another. That shape steers a summarizer into *executing* the brief; the validity check above is what keeps the result out of the user-facing `agents.label` (issue #178)

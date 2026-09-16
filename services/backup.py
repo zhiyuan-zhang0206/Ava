@@ -1,9 +1,9 @@
 """Daily local Postgres backup, driven by the gateway scheduler daemon.
 
 One `pg_dump --format=custom` per day into `$AVA_HOME/backups/db/`,
-keeping the newest BACKUP_KEEP dumps. `services.backup_scheduler.daemon`
+keeping the newest ``backup_keep`` dumps (``services.backup_keep``, default 7). `services.backup_scheduler.daemon`
 calls `is_due()` and `run_backup()` independently of watchdog rounds. The
-scheduler runs at the first wake after BACKUP_HOUR cluster time with no dump
+scheduler runs at the first wake after ``backup_hour`` cluster time with no dump
 for the current cluster day, so a host that was down at 03:00 catches up.
 The scheduler is the only production caller of `is_due()` and `run_backup()`.
 
@@ -97,9 +97,12 @@ from shared.private_storage import ensure_private_dir, ensure_private_file
 
 _log = logging.getLogger(__name__)
 
-BACKUP_HOUR = 3  # cluster time; the first tick at/after this hour runs the day's backup
-BACKUP_KEEP = 7  # a week of daily dumps: a bad migration found a day later must not have overwritten the last good copy
+# Schedule and daily retention are cluster config (``services.backup_hour`` /
+# ``services.backup_keep``); each field states the reason for its default.
 ACTIVATION_KEEP = 2
+# Newest activation snapshots kept in their own prune slot: two covers the
+# current PITR activation's logical floor plus the one before it; an unresolved
+# activation's snapshot is pinned on top of this window.
 # The managed name grammar (markers, formats, regex) lives in
 # `services.pitr.logical_dump_names`: the retention classifier parses the
 # very same grammar, so the writer and the planner cannot drift on what a
@@ -149,7 +152,7 @@ def _parse_stamp(stamp: str) -> datetime:
 def backup_dir() -> Path:
     # `<home>/backups/db`: the home itself already scopes the cluster (path-only
     # identity), so the dump dir needs no per-cluster token. Pre-cutover dumps
-    # under `backups/<cluster-name>` are left in place (at most BACKUP_KEEP of
+    # under `backups/<cluster-name>` are left in place (at most ``backup_keep`` of
     # them); rotation continues in the new dir.
     return Path(settings.general.ava_home).expanduser() / "backups" / "db"
 
@@ -244,10 +247,10 @@ def active_activation_snapshot_name() -> str | None:
 
 
 def is_due(now: datetime) -> bool:
-    """True once the cluster clock has passed BACKUP_HOUR with no dump for the
+    """True once the cluster clock has passed ``backup_hour`` with no dump for the
     current cluster day. `now` must be TZ-aware."""
     local_now = _require_aware(now).astimezone(_cluster_tz())
-    if local_now.hour < BACKUP_HOUR:
+    if local_now.hour < settings.services.backup_hour:
         return False
     dumps = _managed_dumps(backup_dir())
     tz = _cluster_tz()
@@ -255,7 +258,7 @@ def is_due(now: datetime) -> bool:
 
 
 def _prune(directory: Path) -> list[Path]:
-    """Delete managed dumps beyond retention: the newest BACKUP_KEEP daily dumps
+    """Delete managed dumps beyond retention: the newest ``backup_keep`` daily dumps
     plus the newest pre-update snapshot. Every migration-bearing `ava cluster
     update` writes one snapshot into this same pool, so without a separate slot
     the updates would silently shrink the daily window; the newest snapshot is
@@ -266,7 +269,7 @@ def _prune(directory: Path) -> list[Path]:
     ]
     snapshots = [(ts, path) for ts, path in dumps if _is_pre_update(path)]
     activations = [(ts, path) for ts, path in dumps if _is_activation(path)]
-    keep = set(dailies[-BACKUP_KEEP:]) | set(activations[-ACTIVATION_KEEP:])
+    keep = set(dailies[-settings.services.backup_keep :]) | set(activations[-ACTIVATION_KEEP:])
     active_pin = _active_activation_pin(directory)
     if active_pin is not None:
         keep.update(item for item in activations if item[1] == active_pin)
