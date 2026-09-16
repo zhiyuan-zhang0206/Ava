@@ -417,6 +417,8 @@ class OSSObjectStore:
         items: list[_ListObject] = []
         marker = ""
         while True:
+            # OSS list page ceiling (1000 keys per call); the loop walks the
+            # marker (task #3696 exception inventory).
             page = self._bucket.list_objects(prefix=prefix, marker=marker, max_keys=1000)
             items.extend(page.object_list)
             if not page.is_truncated or not page.next_marker:
