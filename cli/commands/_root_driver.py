@@ -88,15 +88,13 @@ class _RootDriverError(RuntimeError):
 def _root_driven_enabled() -> bool:
     """Whether this host routes start/stop through the root supervisor.
 
-    A configuration failure reads as off (the session path), the same rule
-    `shared.session_backend.helper_spawn_enabled` applies to its own switch.
+    Thin alias of the one shared definition (`shared.root_driver`) — kept under
+    this name because the CLI resolves it (and tests patch it) through the
+    package namespace.
     """
-    try:
-        from shared.config import settings
+    from shared.root_driver import root_drive_enabled
 
-        return bool(settings.services.root_driver_enabled)
-    except Exception:
-        return False
+    return root_drive_enabled()
 
 
 def _root_tree_roster(roles: MachineRoles, launch_skip: set[str]) -> tuple[ServiceSpec, ...]:
