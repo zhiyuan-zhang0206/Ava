@@ -122,6 +122,16 @@ export interface TimelineState {
    * thread switch (per-thread flag). */
   resetPending: boolean;
 
+  /** Bumped every time a compact wholesale-replace lands on the ACTIVE
+   * thread (the reset-window swap below, or a crossed-compact snapshot);
+   * `compactReplaceAgent` names the thread it replaced. Consumers use it
+   * as the edge for post-compact view work that must run ONCE per rewrite
+   * — the compact-history re-attach loads the previous segment(s) after
+   * this fires (task #3698). The parked-thread swap does not bump: its
+   * replacement renders only after a later switch-back. */
+  compactReplaceSeq: number;
+  compactReplaceAgent: number | null;
+
   /** The active thread's in-flight compact run — drives the ticking
    * "Compacting" block. Set by `compact_started` / `compact_finished` for the
    * active thread only (parked threads drop it, like token_usage — the
@@ -416,6 +426,8 @@ function applySseEvent(state: TimelineState, ev: SystemEvent): Partial<TimelineS
           items: snapItems,
           streamingIds: new Set(),
           resetPending: false,
+          compactReplaceSeq: state.compactReplaceSeq + 1,
+          compactReplaceAgent: ev.agent_id,
           hasMoreOlder: state.hasMoreOlder,
           liveCompact: retireLiveCompact(state.liveCompact, snapItems),
         };
@@ -540,6 +552,8 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
   streamingIds: new Set(),
   compactedThreadIds: new Set(),
   resetPending: false,
+  compactReplaceSeq: 0,
+  compactReplaceAgent: null,
   liveCompact: null,
   hasMoreOlder: false,
   loadingOlder: false,

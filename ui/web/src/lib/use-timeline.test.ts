@@ -31,6 +31,7 @@ import { parseItemId } from "./timeline";
 import { useTimelineStore } from "./timeline-store";
 import { useTimeline } from "./use-timeline";
 import type { ConnectionEvent } from "./useEventStream";
+import { SETTINGS_QUERY_KEY } from "./use-user-settings";
 
 // -- mock layer ────────────────────────────────────────────────────────────
 
@@ -54,6 +55,7 @@ vi.mock("react", async (importOriginal) => {
 vi.mock("./api", () => ({
   api: {
     getTimeline: vi.fn(),
+    getSettings: vi.fn(),
   },
 }));
 
@@ -140,6 +142,14 @@ function snapshotItem(overrides: Partial<BackendTimelineItem>): BackendTimelineI
 // same way the old inferMsgCount did (max parseable msg_idx + 1; the ut.N test
 // ids are unparseable → 0), so reloadSnapshot sees identical (items, msg_count)
 // and these tests keep their original semantics.
+function postWindow(): BackendTimelineItem[] {
+  return [
+    snapshotItem({ item_id: "0.0", kind: "system_prompt", payload: "PROMPT" }),
+    snapshotItem({ item_id: "1.0", kind: "inbound_compact_summary", payload: "SUMMARY" }),
+    snapshotItem({ item_id: "2.0", kind: "agent_chat", payload: "post-compact" }),
+  ];
+}
+
 function tlResp(items: BackendTimelineItem[] = [], has_more = false): TimelineResponse {
   let max = -1;
   for (const it of items) {
@@ -156,6 +166,7 @@ beforeEach(() => {
   currentBatchHandler = null;
   // Default getTimeline returns empty; each test resets as needed
   vi.mocked(api.getTimeline).mockResolvedValue(tlResp([]));
+  vi.mocked(api.getSettings).mockResolvedValue({ settings: [] });
   // Restore any store actions a prior test swapped for spies, so switchThread /
   // reloadSnapshot are the real (stable) references again before this test runs.
   useTimelineStore.setState({ switchThread: REAL_SWITCH_THREAD, reloadSnapshot: REAL_RELOAD_SNAPSHOT });
@@ -165,7 +176,7 @@ beforeEach(() => {
   // (switchThread now parks per-thread state) so a prior test's bucket can't be
   // unparked when this test's hook mounts and re-selects that agent id.
   useTimelineStore.getState().switchThread(0, null, false);
-  useTimelineStore.setState({ threads: new Map() });
+  useTimelineStore.setState({ threads: new Map(), compactReplaceSeq: 0, compactReplaceAgent: null });
 });
 
 afterEach(() => {
@@ -817,6 +828,169 @@ describe("useTimeline agentId switch", () => {
     });
     await new Promise((r) => setTimeout(r, 0));
     expect(api.getTimeline).toHaveBeenCalledTimes(2);
+  });
+
+  it("after a compact reset, re-attaches the previous session (default retention = 1)", async () => {
+    // Task #3698 (user ruling 2026-09-17): a compact must not clear the view —
+    // the just-compacted session stays visible above the new summary. The hook
+    // re-attaches it automatically after the wholesale replace, through the
+    // same cross-segment fetch as scroll-up.
+    const showError = vi.fn();
+    let phase: "pre" | "post" = "pre";
+    const pageFor = (opts?: { before?: string; limit?: number }): TimelineResponse => {
+      if (opts?.before === "2.0") {
+        return tlResp(
+          [
+            snapshotItem({
+              item_id: "s1.boundary.0.0",
+              kind: "inbound_compact_summary",
+              payload: "prev summary",
+            }),
+            snapshotItem({
+              item_id: "s1.boundary.7.0",
+              kind: "agent_chat",
+              payload: "previous session",
+            }),
+          ],
+          false,
+        );
+      }
+      if (opts?.before !== undefined) return tlResp([], false);
+      if (phase === "pre") {
+        return tlResp(
+          [snapshotItem({ item_id: "90.0", kind: "inbound_chat", payload: "pre-compact" })],
+          true,
+        );
+      }
+      return tlResp(postWindow(), true);
+    };
+    vi.mocked(api.getTimeline).mockImplementation((_id: number, opts?: { before?: string; limit?: number }) =>
+      Promise.resolve(pageFor(opts)),
+    );
+
+    const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
+    await waitFor(() => expect(result.current.items).toHaveLength(1));
+    expect(result.current.hasMoreOlder).toBe(true);
+
+    phase = "post";
+    pushEvent({ role: "compact_done", agent_id: 42 });
+    pushEvent({
+      role: "timeline_snapshot",
+      agent_id: 42,
+      msg_count: 3,
+      items: postWindow(),
+    });
+
+    await waitFor(() => {
+      expect(api.getTimeline).toHaveBeenCalledWith(42, { before: "2.0", limit: 50 });
+    });
+    await waitFor(() => {
+      expect(result.current.items.map((i) => i.item_id)).toEqual([
+        "s1.boundary.0.0",
+        "s1.boundary.7.0",
+        "0.0",
+        "1.0",
+        "2.0",
+      ]);
+    });
+    expect(showError).not.toHaveBeenCalled();
+  });
+
+  it("head-only post-compact segment crosses from the summary cursor (no real item yet)", async () => {
+    // Right after a compact the current segment can hold only the prompt and
+    // the summary; with no real item, the summary itself is the safe crossing
+    // cursor (every item before it is re-attached context).
+    const showError = vi.fn();
+    let phase: "pre" | "post" = "pre";
+    const pageFor = (opts?: { before?: string; limit?: number }): TimelineResponse => {
+      if (opts?.before === "1.0") {
+        return tlResp(
+          [
+            snapshotItem({
+              item_id: "s1.boundary.7.0",
+              kind: "agent_chat",
+              payload: "previous session",
+            }),
+          ],
+          false,
+        );
+      }
+      if (opts?.before !== undefined) return tlResp([], false);
+      if (phase === "pre") {
+        return tlResp(
+          [snapshotItem({ item_id: "90.0", kind: "inbound_chat", payload: "pre-compact" })],
+          true,
+        );
+      }
+      return tlResp(
+        [
+          snapshotItem({ item_id: "0.0", kind: "system_prompt", payload: "PROMPT" }),
+          snapshotItem({ item_id: "1.0", kind: "inbound_compact_summary", payload: "SUMMARY" }),
+        ],
+        true,
+      );
+    };
+    vi.mocked(api.getTimeline).mockImplementation((_id: number, opts?: { before?: string; limit?: number }) =>
+      Promise.resolve(pageFor(opts)),
+    );
+
+    const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
+    await waitFor(() => expect(result.current.items).toHaveLength(1));
+
+    phase = "post";
+    pushEvent({ role: "compact_done", agent_id: 42 });
+    pushEvent({
+      role: "timeline_snapshot",
+      agent_id: 42,
+      msg_count: 2,
+      items: [
+        snapshotItem({ item_id: "0.0", kind: "system_prompt", payload: "PROMPT" }),
+        snapshotItem({ item_id: "1.0", kind: "inbound_compact_summary", payload: "SUMMARY" }),
+      ],
+    });
+
+    await waitFor(() => {
+      expect(api.getTimeline).toHaveBeenCalledWith(42, { before: "1.0", limit: 50 });
+    });
+    await waitFor(() => {
+      expect(result.current.items.map((i) => i.item_id)).toEqual([
+        "s1.boundary.7.0",
+        "0.0",
+        "1.0",
+      ]);
+    });
+  });
+
+  it("display.compact_history_sessions = 0 keeps the legacy clear-on-compact behavior (no retention fetch)", async () => {
+    const showError = vi.fn();
+    vi.mocked(api.getSettings).mockResolvedValue({
+      settings: [
+        { key: "display.compact_history_sessions", value: 0, updated_at: "2026-09-17T00:00:00Z" },
+      ],
+    });
+    const postItems = [
+      snapshotItem({ item_id: "0.0", kind: "system_prompt", payload: "PROMPT" }),
+      snapshotItem({ item_id: "1.0", kind: "agent_chat", payload: "post-compact" }),
+    ];
+    vi.mocked(api.getTimeline).mockResolvedValue(tlResp(postItems, true));
+    vi.mocked(api.getTimeline).mockResolvedValueOnce(
+      tlResp([snapshotItem({ item_id: "90.0", kind: "inbound_chat", payload: "pre-compact" })], true),
+    );
+
+    const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
+    await waitFor(() => expect(result.current.items).toHaveLength(1));
+    // The settings query must land before the compact so the knob reads 0.
+    await waitFor(() => expect(queryClient.getQueryData(SETTINGS_QUERY_KEY)).toBeTruthy());
+
+    pushEvent({ role: "compact_done", agent_id: 42 });
+    pushEvent({ role: "timeline_snapshot", agent_id: 42, msg_count: 2, items: postItems });
+    await new Promise((r) => setTimeout(r, 20));
+
+    const beforeCalls = vi
+      .mocked(api.getTimeline)
+      .mock.calls.filter((call) => call[1]?.before !== undefined);
+    expect(beforeCalls).toHaveLength(0);
+    expect(result.current.items.map((i) => i.item_id)).toEqual(["0.0", "1.0"]);
   });
 
   it("the post-compact snapshot also invalidates the agent's inspect / pending / token-usage caches (task #1959)", async () => {

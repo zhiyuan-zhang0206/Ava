@@ -19,6 +19,7 @@ import {
   Clock,
   Eye,
   EyeOff,
+  History,
   Languages,
   Monitor,
   MoveHorizontal,
@@ -88,6 +89,14 @@ export default function DisplaySettingsPage() {
   // polarity — a "show" setting reads as "Collapse ... by default" — since that
   // is how the feature reads to the user.
   const expandRunsDefault = settings["display.expand_runs_mode"] === "all";
+
+  // Compact-history retention (task #3698): number of previous compact sessions
+  // kept visible after a compact rewrites the history. Numbers only — anything
+  // else (missing / foreign type) reads as the default 1.
+  const compactHistorySessions =
+    typeof settings["display.compact_history_sessions"] === "number"
+      ? settings["display.compact_history_sessions"]
+      : 1;
 
   const hiddenModels: string[] = (settings["models.hidden"] as string[] | undefined) ?? [];
   const modelGroups = groupedModels(modelsData);
@@ -221,6 +230,19 @@ export default function DisplaySettingsPage() {
           description="Render agent thinking content as formatted markdown; off shows the raw text"
           value={settings["display.render_reasoning_markdown"] as boolean}
           onChange={(v) => setSetting("display.render_reasoning_markdown", v)}
+        />
+        <RadioRow
+          icon={History}
+          label="Compact history"
+          description="How many previous compact sessions stay visible in the timeline when a compact rewrites the history: the just-compacted messages stay above the new summary instead of the list clearing. 0 = clear immediately (legacy), 1 = keep the most recent session."
+          options={[
+            { value: "0", label: "Off" },
+            { value: "1", label: "1" },
+            { value: "2", label: "2" },
+            { value: "3", label: "3" },
+          ]}
+          value={String(compactHistorySessions)}
+          onChange={(v) => setSetting("display.compact_history_sessions", Number(v))}
         />
       </SettingsSection>
 

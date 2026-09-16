@@ -196,11 +196,18 @@ function groupTimelineSegments(items: readonly BackendTimelineItem[]): RenderGro
       result.push({ group, indexOffset: start + summaryIndex, dividerRank: null });
     }
     rawGroups.forEach((group, groupIndex) => {
-      result.push({
-        group,
-        indexOffset: start + rawStart,
-        dividerRank: rank > 0 && groupIndex === 0 ? rank : null,
-      });
+      let divider: number | null = null;
+      if (rank > 0 && groupIndex === 0) {
+        // The scroll-back rule: a historical segment's raw items follow its
+        // compact summary — mark where that summary ends.
+        divider = rank;
+      } else if (rank === 0 && groupIndex === 0 && result.length > 0) {
+        // The current segment's first group follows retained history — mark
+        // the compact boundary between the previous session and the new
+        // post-compact block (task #3698; user ruling 2026-09-17).
+        divider = 0;
+      }
+      result.push({ group, indexOffset: start + rawStart, dividerRank: divider });
     });
     start = end;
   }
@@ -209,6 +216,11 @@ function groupTimelineSegments(items: readonly BackendTimelineItem[]): RenderGro
 
 function CompactHistoryDivider({ rank }: { readonly rank: number }) {
   const t = useTranslations("timeline");
+  // rank 0 = the live boundary between retained history and the current
+  // post-compact segment (task #3698); the historical ranks keep the
+  // scroll-back copy. Dashed rules: this line marks a compact boundary, not
+  // a message divider.
+  const label = rank === 0 ? t("compactBoundaryDivider") : t("compactHistoryDivider");
   return (
     <div
       data-testid="compact-history-divider"
@@ -216,10 +228,10 @@ function CompactHistoryDivider({ rank }: { readonly rank: number }) {
       aria-live="off"
       className={cn("items-center gap-2 py-1 text-[11px] text-muted-foreground/70", FLEX)}
     >
-      <span aria-hidden="true" className={cn("h-px bg-border/60", FLEX_1)} />
+      <span aria-hidden="true" className={cn("border-t border-dashed border-border/60", FLEX_1)} />
       <span aria-hidden="true" className="shrink-0">↑</span>
-      <span className="shrink-0">{t("compactHistoryDivider")}</span>
-      <span aria-hidden="true" className={cn("h-px bg-border/60", FLEX_1)} />
+      <span className="shrink-0">{label}</span>
+      <span aria-hidden="true" className={cn("border-t border-dashed border-border/60", FLEX_1)} />
     </div>
   );
 }
