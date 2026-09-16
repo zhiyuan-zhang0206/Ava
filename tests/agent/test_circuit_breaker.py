@@ -707,3 +707,150 @@ async def test_host_persists_provider_failure_before_releasing_turn(
     assert circuit.reason == ("context_overflow" if overflow else "billing")
     assert circuit.opened_at is not None
     assert calls == 1
+
+
+# ── recovery circuit breaker (task #3617) ────────────────────────────────────
+
+
+def _permanent_rejection() -> FatalProviderError:
+    """A permanent 400 in the 6260 shape; the body is deliberately distinctive
+    so the tests can prove no rejected text reaches the ancestor report."""
+    return FatalProviderError(
+        "Content Exists Risk: do not replay this rejected history",
+        error_class="permanent",
+        provider="deepseek",
+        status=400,
+    )
+
+
+async def _reject_turn(
+    aops_pool: AsyncConnectionPool,
+    agent_id: int,
+    *,
+    publisher: _RecordingPublisher,
+    exc: FatalProviderError | None = None,
+) -> None:
+    await _handle_fatal_llm_error(
+        exc if exc is not None else _permanent_rejection(),
+        AvaContext(
+            ops_pool=aops_pool,
+            llm=MagicMock(),
+            event_publisher=cast(AgentEventPublisher, publisher),
+        ),
+        agent_id=agent_id,
+        occurred_at=datetime(2026, 9, 16, 6, 0, tzinfo=UTC),
+    )
+
+
+async def test_two_permanent_rejections_trip_the_recovery_breaker(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    loguru_records: list[dict[str, Any]],
+) -> None:
+    """Two consecutive permanent rejections with no successful turn between
+    them halt automatic recovery: the durable streak reaches the threshold,
+    the wake suppression names the reason, the metadata-only report reaches
+    the nearest live ancestor, and the frontend gets a blocked Error — while
+    ONE rejection alone changes none of it."""
+    ancestor_id = spawn_agent(spawner="user")
+    child_id = spawn_agent(spawner=f"agent:{ancestor_id}")
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agents_meta SET status = 'idling', "
+            "lease_expires_at = now() + interval '10 minutes' WHERE id = %s",
+            (ancestor_id,),
+        )
+    db_conn.commit()
+    publisher = _RecordingPublisher()
+
+    await _reject_turn(aops_pool, child_id, publisher=publisher)
+    row = db_conn.execute(
+        "SELECT permanent_reject_streak, wake_suppress_reason FROM agents_meta WHERE id = %s",
+        (child_id,),
+    ).fetchone()
+    assert row == (1, None)  # one rejection is not a halt
+
+    await _reject_turn(aops_pool, child_id, publisher=publisher)
+    row = db_conn.execute(
+        "SELECT permanent_reject_streak, wake_suppress_reason, "
+        "EXTRACT(EPOCH FROM (wake_suppressed_until - clock_timestamp())) "
+        "FROM agents_meta WHERE id = %s",
+        (child_id,),
+    ).fetchone()
+    assert row is not None
+    streak, reason, window_s = row
+    assert streak == 2
+    assert reason == "permanent_provider_reject"
+    assert window_s > 300 * 24 * 3600.0  # until-human, far past any timer
+
+    reports = [
+        r[0]
+        for r in db_conn.execute(
+            "SELECT content FROM inbound_messages WHERE agent_id = %s AND kind = 'system_note' "
+            "ORDER BY id",
+            (ancestor_id,),
+        ).fetchall()
+    ]
+    halt_notes = [note for note in reports if "reason=permanent_provider_reject" in note]
+    assert len(halt_notes) == 1
+    assert "do not replay" not in halt_notes[0]  # metadata only, never the text
+
+    halt_logs = [
+        r
+        for r in loguru_records
+        if r["extra"].get("event") == "recovery_breaker_halt"  # pyright: ignore[reportUnknownMemberType]
+    ]
+    assert len(halt_logs) == 1
+
+    errors = [json.loads(payload) for payload in publisher.payloads]
+    halt_errors = [
+        err
+        for err in errors
+        if err.get("blocked") and "Automatic recovery is halted" in err.get("content", "")
+    ]
+    assert len(halt_errors) == 1
+
+
+async def test_transient_rejection_does_not_count_or_trip(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+) -> None:
+    """Only the PERMANENT class counts: a configured-fatal/transient rejection
+    aborts the turn but never arms the recovery breaker."""
+    child_id = spawn_agent(spawner="user")
+    exc = FatalProviderError(
+        "rate limited", error_class="transient", provider="deepseek", status=429
+    )
+    for _ in range(3):
+        await _reject_turn(aops_pool, child_id, publisher=_RecordingPublisher(), exc=exc)
+    row = db_conn.execute(
+        "SELECT permanent_reject_streak, wake_suppress_reason FROM agents_meta WHERE id = %s",
+        (child_id,),
+    ).fetchone()
+    assert row == (0, None)
+
+
+async def test_completed_turn_resets_the_streak_and_clears_the_marker(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+) -> None:
+    """The completed-turn UPDATE is the single reset: it clears the corpse
+    marker and the recovery-breaker streak together (agent/graph/_llm.py)."""
+    from agent.graph._llm import _persist_last_active
+
+    child_id = spawn_agent(spawner="user")
+    db_conn.execute(
+        "UPDATE agents_meta SET permanent_reject_streak = 2, last_turn_fatal_at = now() "
+        "WHERE id = %s",
+        (child_id,),
+    )
+    db_conn.commit()
+
+    await _persist_last_active(
+        AvaContext(ops_pool=aops_pool, llm=MagicMock(), event_publisher=MagicMock()),
+        child_id,
+        "done",
+    )
+    row = db_conn.execute(
+        "SELECT permanent_reject_streak, last_turn_fatal_at FROM agents_meta WHERE id = %s",
+        (child_id,),
+    ).fetchone()
+    assert row == (0, None)

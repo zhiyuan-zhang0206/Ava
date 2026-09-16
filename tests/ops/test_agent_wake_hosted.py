@@ -170,3 +170,182 @@ async def test_resurrection_admits_a_new_incarnation_on_the_same_host(
             "chat",
             "resurrect",
         }
+
+
+# ── relaxed trigger guard: system-reaped crash rows (task #3617) ─────────────
+
+
+def _backdate_before_status(db: psycopg.Connection, aid: int, iid: int) -> None:
+    with db.cursor() as cur:
+        cur.execute(
+            "UPDATE inbound_messages SET created_at = "
+            "(SELECT status_changed_at FROM agents_meta WHERE id = %s) - interval '1 second' "
+            "WHERE id = %s",
+            (aid, iid),
+        )
+    db.commit()
+
+
+def _reaped_crash_park(db: psycopg.Connection) -> tuple[int, int]:
+    """terminated + reaper source + retained crash marker + a leftover chat
+    that predates the termination (the relaxed-trigger shape)."""
+    from shared.db import insert_inbound_message
+
+    aid = _park(db, status="terminated")
+    trigger = insert_inbound_message(db, aid, "leftover work", "user")
+    with db.cursor() as cur:
+        cur.execute(
+            "UPDATE agents_meta SET termination_source = 'reaper', "
+            "last_turn_fatal_at = now() - interval '1 hour' WHERE id = %s",
+            (aid,),
+        )
+    db.commit()
+    _backdate_before_status(db, aid, trigger)
+    return aid, trigger
+
+
+def _guarded_resurrect(aid: int, trigger: int) -> None:
+    agent_wake.resurrect_agent(
+        aid,
+        resurrected_by="system",
+        trigger_inbound_id=trigger,
+        trigger_inbound_kind="chat",
+    )
+
+
+def test_reaped_crash_row_resumes_leftover_work(
+    db_conn: psycopg.Connection, wakes: list[tuple[int, str]]
+) -> None:
+    """A reaper death is not an operator decision, so a chat that predates it
+    still qualifies as the pending-work trigger (task #3617, design section 6)."""
+    aid, trigger = _reaped_crash_park(db_conn)
+
+    assert (
+        agent_wake.resurrect_agent(
+            aid, resurrected_by="system", trigger_inbound_id=trigger, trigger_inbound_kind="chat"
+        )
+        == aid
+    )
+    assert _row(db_conn, aid) == ("idling", None)
+    assert wakes == [(aid, "0")]
+
+
+def test_operator_death_still_refuses_leftover_work(db_conn: psycopg.Connection) -> None:
+    """The crash marker alone never relaxes the fence: a user kill keeps its
+    contract — the leftover chat cannot undo it."""
+    from shared.db import insert_inbound_message
+
+    aid = _park(db_conn, status="terminated")
+    trigger = insert_inbound_message(db_conn, aid, "leftover work", "user")
+    db_conn.execute(
+        "UPDATE agents_meta SET termination_source = 'user', "
+        "last_turn_fatal_at = now() - interval '1 hour' WHERE id = %s",
+        (aid,),
+    )
+    db_conn.commit()
+    _backdate_before_status(db_conn, aid, trigger)
+
+    with pytest.raises(agent_wake.ResurrectTriggerStaleError):
+        _guarded_resurrect(aid, trigger)
+    assert _row(db_conn, aid)[0] == "terminated"
+
+
+def test_suppressed_wakes_refuse_the_reaped_crash_trigger(db_conn: psycopg.Connection) -> None:
+    """The relaxed fence does not bypass an active automatic-wake suppression."""
+    aid, trigger = _reaped_crash_park(db_conn)
+    db_conn.execute(
+        "UPDATE agents_meta SET wake_suppressed_until = now() + interval '1 hour', "
+        "wake_suppress_reason = 'resurrect_failed' WHERE id = %s",
+        (aid,),
+    )
+    db_conn.commit()
+
+    with pytest.raises(agent_wake.ResurrectTriggerStaleError):
+        _guarded_resurrect(aid, trigger)
+    assert _row(db_conn, aid)[0] == "terminated"
+
+
+def test_tripped_recovery_breaker_refuses_the_reaped_crash_trigger(
+    db_conn: psycopg.Connection,
+) -> None:
+    """After consecutive permanent provider rejections the automatic trigger is
+    refused at the final CAS; the durable streak refuses even with no
+    suppression window set (a claim clears the window by design)."""
+    aid, trigger = _reaped_crash_park(db_conn)
+    db_conn.execute("UPDATE agents_meta SET permanent_reject_streak = 2 WHERE id = %s", (aid,))
+    db_conn.commit()
+
+    with pytest.raises(agent_wake.ResurrectTriggerStaleError):
+        _guarded_resurrect(aid, trigger)
+    assert _row(db_conn, aid)[0] == "terminated"
+
+
+def test_reaped_crash_row_keeps_the_failed_restart_fence(
+    db_conn: psycopg.Connection,
+) -> None:
+    """A failed-restart target keeps its hard fence even for a reaped crash
+    row: the relaunch observation must settle first."""
+    aid, trigger = _reaped_crash_park(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agents_meta SET runtime_generation = gen_random_uuid(), "
+            "runtime_owner = gen_random_uuid() WHERE id = %s",
+            (aid,),
+        )
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, status, "
+            "target_generation, target_owner, claimed_at, applied_at, payload) "
+            "SELECT id, '', 'restart', 'system', 'done', runtime_generation, "
+            "runtime_owner, now(), now(), "
+            '\'{"lifecycle_result": {"outcome": "failed", '
+            '"reason": "restart_deadline_expired"}}\'::jsonb '
+            "FROM agents_meta WHERE id = %s",
+            (aid,),
+        )
+    db_conn.commit()
+
+    with pytest.raises(agent_wake.ResurrectTriggerStaleError):
+        _guarded_resurrect(aid, trigger)
+    assert _row(db_conn, aid)[0] == "terminated"
+
+
+def test_reaped_crash_row_keeps_the_auto_resurrect_budget(
+    db_conn: psycopg.Connection,
+) -> None:
+    """The relaxed fence is not a budget bypass: an exhausted auto-resurrect
+    budget refuses even a reaper-marked leftover."""
+    from shared.agents import ResurrectBudgetExhausted
+    from shared.db import insert_inbound_message
+
+    aid, trigger = _reaped_crash_park(db_conn)
+    for _ in range(agent_wake._auto_resurrect_max_attempts()):
+        insert_inbound_message(db_conn, aid, "", "system", kind="resurrect")
+
+    with pytest.raises(ResurrectBudgetExhausted):
+        _guarded_resurrect(aid, trigger)
+    assert _row(db_conn, aid)[0] == "terminated"
+
+
+def test_manual_resurrect_stays_exempt_from_the_gates(
+    db_conn: psycopg.Connection, wakes: list[tuple[int, str]]
+) -> None:
+    """A manual resurrect passes no trigger: the explicit human override
+    bypasses both suppression and the tripped breaker (the breaker record —
+    streak and suppression reason — is retained, auditable)."""
+    aid = _park(db_conn, status="terminated")
+    db_conn.execute(
+        "UPDATE agents_meta SET wake_suppressed_until = now() + interval '300 days', "
+        "wake_suppress_reason = 'permanent_provider_reject', permanent_reject_streak = 2 "
+        "WHERE id = %s",
+        (aid,),
+    )
+    db_conn.commit()
+
+    assert agent_wake.resurrect_agent(aid, resurrected_by="user") == aid
+    assert _row(db_conn, aid) == ("idling", None)
+    assert wakes == [(aid, "0")]
+    row = db_conn.execute(
+        "SELECT permanent_reject_streak, wake_suppress_reason FROM agents_meta WHERE id = %s",
+        (aid,),
+    ).fetchone()
+    assert row == (2, "permanent_provider_reject")

@@ -190,6 +190,12 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
     "llm_turn_aborted": _telemetry(
         "llm_turn_aborted", "turn aborted after retries", family=LLM_ERROR_FAMILY, tier="anomaly"
     ),
+    "recovery_breaker_halt": _telemetry(
+        "recovery_breaker_halt",
+        "recovery circuit breaker tripped — consecutive permanent provider rejections "
+        "halted every automatic recovery path until a turn succeeds (task #3617)",
+        tier="anomaly",
+    ),
     "compact_turn_aborted": _telemetry(
         "compact_turn_aborted", "turn aborted because compaction failed", tier="anomaly"
     ),

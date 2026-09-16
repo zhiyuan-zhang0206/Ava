@@ -169,9 +169,11 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # consecutive-boot recovery escalation) raise the current total to 177;
     # the settled-abort inbound reconcile (task #3615:
     # host_abort_reconcile_skipped + host_abort_reconcile_failed) raises the
-    # current total to 179.
+    # current total to 179; the recovery circuit breaker (task #3617's
+    # recovery_breaker_halt — the halt after consecutive permanent provider
+    # rejections) raises the current total to 180.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 179
+    assert len(_TELEMETRY_KINDS) == 180
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:

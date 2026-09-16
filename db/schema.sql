@@ -160,6 +160,7 @@ CREATE TABLE agents_meta (
     last_probe_at             TIMESTAMPTZ,              -- when the gateway liveness pass last judged this row (Task #1174).
     last_compact_at            TIMESTAMPTZ,              -- R1 (Task #1021): synchronous compact stamp — written by agent/hooks/compact.py at each compact, replacing the events-table OFFSET-1 read-your-own-write hack (the anchor for "last compact" without scanning events). NULL = never compacted.
     last_turn_fatal_at        TIMESTAMPTZ,              -- first fatal turn crash since the last completed LLM turn (the corpse marker: NULL = healthy, set = crash-dead). Stamped with COALESCE (never refreshed while dead) by the hosted runner at crash catch time (agent/hosted_ownership.stamp_turn_fatal); cleared by a completed LLM turn (_persist_last_active) and the resurrect transition. The agent_host beat's reaper terminates marked idling rows past CORPSE_REAP_GRACE_S with termination_source='reaper'; renew_hosted_owner skips marked rows so their lease decays.
+    permanent_reject_streak    INTEGER NOT NULL DEFAULT 0 CHECK (permanent_reject_streak >= 0),  -- consecutive PERMANENT-class provider rejections since the last completed LLM turn (the recovery circuit breaker, task #3617): +1 at each permanent fatal turn settlement (agent/_runloop.py), reset to 0 by the same completed-turn UPDATE that clears last_turn_fatal_at (agent/graph/_llm.py::_persist_last_active). >= 2 halts every automatic recovery path (event-path resurrect / watchdog re-dispatch+retry / the stalled crash-marked harvest op / the relaxed reaper-marked trigger) until a turn succeeds; a manual resurrect stays exempt. See shared/recovery_breaker.py.
     runtime_generation UUID,
     runtime_kind TEXT CHECK (runtime_kind IN ('process', 'hosted')),
     runtime_owner UUID,
@@ -1829,3 +1830,7 @@ INSERT INTO schema_migrations (name) VALUES ('20260827T021440_root-task-ongoing'
 -- 'ongoing' status (drop-task-ongoing-status migration): replaying it would
 -- re-pin the root to 'ongoing' against the baseline's in_progress pin.
 INSERT INTO schema_migrations (name) VALUES ('20260901T181810_allow-non-root-ongoing');
+
+-- The permanent-reject streak column is already represented above. Fresh DBs
+-- stamp the migration instead of replaying the strict ADD COLUMN delta.
+INSERT INTO schema_migrations (name) VALUES ('20260916T054934_permanent-reject-streak');

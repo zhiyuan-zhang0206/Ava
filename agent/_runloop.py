@@ -106,6 +106,115 @@ def _provider_recovery(reason: str) -> str:
     return "Choose a different model overlay or resolve the provider policy rejection, then send a new message."
 
 
+async def _record_permanent_reject_outcome(
+    ctx: AvaContext,
+    agent_id: int,
+    exc: FatalProviderError,
+    reason: str,
+    occurred_at: datetime | None,
+) -> None:
+    """Count one permanent-class rejection; at the halt threshold trip the breaker.
+
+    `shared/recovery_breaker.py` owns the semantics: two consecutive permanent
+    rejections with no successful turn between them halt every automatic
+    recovery path until a turn succeeds (task #3617, design #3610 section 12).
+    Every halted rejection re-runs the escalation — with automatic recovery
+    halted, a further rejected turn was a real claimed inbound (a human or a
+    delivery), and deserves one honest escalation; the state writes are
+    idempotent. All of it is best-effort: none may mask the provider rejection
+    that aborted the turn.
+    """
+    from shared.recovery_breaker import (
+        HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
+        SUPPRESS_REASON_PERMANENT_REJECT,
+        halt_automatic_recovery,
+        record_permanent_reject_turn,
+    )
+
+    assert ctx.ops_pool is not None  # noqa: S101
+    try:
+        streak = await record_permanent_reject_turn(ctx.ops_pool, agent_id)
+    except Exception:
+        logger.warning(
+            "failed to record a permanent-rejection streak for agent {agent_id}; "
+            "the recovery circuit breaker is not updated",
+            agent_id=agent_id,
+            exc_info=True,
+        )
+        return
+    if streak < HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS:
+        return
+    try:
+        freshly_tripped = await halt_automatic_recovery(ctx.ops_pool, agent_id)
+    except Exception:
+        freshly_tripped = False
+        logger.warning(
+            "failed to suppress automatic wakes for halted agent {agent_id}",
+            agent_id=agent_id,
+            exc_info=True,
+        )
+    if freshly_tripped:
+        logger.warning(
+            "recovery circuit breaker tripped for agent {agent_id} — automatic "
+            "recovery halted after {streak} consecutive permanent provider "
+            "rejections (reason={reason})",
+            event="recovery_breaker_halt",
+            agent_id=agent_id,
+            streak=streak,
+            reason=reason,
+        )
+        try:
+            await insert_event_log_async(
+                event_type="circuit_breaker",
+                agent_id=agent_id,
+                source="system",
+                payload={
+                    "action": "halt",
+                    "reason": reason,
+                    "status": exc.status,
+                    "error_class": exc.error_class,
+                    "streak": streak,
+                },
+            )
+        except Exception:
+            logger.warning(
+                "failed to record the recovery-halt circuit_breaker event",
+                agent_id=agent_id,
+            )
+    try:
+        from agent.db import enqueue_fatal_provider_report_to_nearest_alive_ancestor
+
+        await enqueue_fatal_provider_report_to_nearest_alive_ancestor(
+            ctx.ops_pool,
+            agent_id,
+            error_class=exc.error_class or "permanent",
+            provider=exc.provider,
+            status=exc.status,
+            reason=SUPPRESS_REASON_PERMANENT_REJECT,
+            occurred_at=occurred_at if occurred_at is not None else datetime.now(UTC),
+        )
+    except Exception:
+        logger.warning(
+            "failed to enqueue the recovery-halt report to an ancestor",
+            agent_id=agent_id,
+            exc_info=True,
+        )
+    _emit_error_event(
+        ctx,
+        agent_id,
+        f"{type(exc).__name__}: {exc} Automatic recovery is halted after "
+        f"{streak} consecutive permanent provider rejections. Resolve the cause, "
+        "then revive the agent manually — automatic recovery stays off until a "
+        "turn succeeds.",
+        error_class=exc.error_class,
+        provider=exc.provider,
+        status=exc.status,
+        reason=reason,
+        blocked=True,
+        recovery="Resolve the provider rejection, then resurrect the agent manually.",
+    )
+
+
 async def _handle_fatal_llm_error(
     exc: FatalLLMStreamError | FatalProviderError,
     ctx: AvaContext,
@@ -183,6 +292,11 @@ async def _handle_fatal_llm_error(
     input_update: dict[str, object] = {"halted": True}
     if isinstance(exc, FatalProviderError):
         assert reason is not None  # noqa: S101
+        if emit_reports and ctx.ops_pool is not None and exc.error_class == "permanent":
+            # Runs before the already-open dedup below: two consecutive
+            # rejections with the SAME reason are exactly the halt-trip
+            # sequence, and the dedup would otherwise skip the second one.
+            await _record_permanent_reject_outcome(ctx, agent_id, exc, reason, occurred_at)
         already_open = False
         if circuit_reader is not None:
             try:

@@ -157,10 +157,15 @@ def select_terminated_owners_with_pending(
 
     The selected chat is carried to the home runner as the final resurrection
     CAS. A chat already pending when the agent was terminated cannot reverse
-    that explicit lifecycle decision, and a later termination makes this
-    trigger stale before it can launch. Chat only: lifecycle kinds (terminate /
-    restart) must not resurrect a dead agent against the caller's intent. A
-    pile of 250 dead letters for one agent still means one attempt, not 250.
+    that explicit lifecycle decision — EXCEPT when the system itself reaped a
+    crash-marked corpse (`SYSTEM_REAPED_CRASH_ROW`): that death was not an
+    operator's will, so leftover work still resumes its owner. A later
+    termination makes this trigger stale before it can launch, and a tripped
+    recovery breaker (`RECOVERY_BREAKER_CLEAR`) or an active wake suppression
+    keeps automatic recovery halted entirely. Chat only: lifecycle kinds
+    (terminate / restart) must not resurrect a dead agent against the caller's
+    intent. A pile of 250 dead letters for one agent still means one attempt,
+    not 250.
 
     `threshold_s` bounds how long a pending chat keeps its terminated owner a
     resurrect candidate: past it the row is a dead letter (issue #2049) that
@@ -168,7 +173,11 @@ def select_terminated_owners_with_pending(
     unbounded age resurrect-suicides the agent forever, so the same stale
     threshold that closes the row also stops it from being a trigger.
     """
-    from shared.lifecycle_acceptance import FAILED_RESTART_FOR_CURRENT_TARGET
+    from shared.lifecycle_acceptance import (
+        FAILED_RESTART_FOR_CURRENT_TARGET,
+        SYSTEM_REAPED_CRASH_ROW,
+    )
+    from shared.recovery_breaker import RECOVERY_BREAKER_CLEAR
 
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -178,14 +187,19 @@ def select_terminated_owners_with_pending(
                 "JOIN agents_meta ON agents_meta.id = m.agent_id "
                 "WHERE m.status = 'pending' AND m.kind = 'chat' "
                 "  AND agents_meta.status = 'terminated' AND NOT {} "
-                " AND m.created_at > agents_meta.status_changed_at "
+                " AND (m.created_at > agents_meta.status_changed_at OR {}) "
                 "  AND m.created_at > now() - make_interval(secs => %s) "
                 "  AND m.id > COALESCE(agents_meta.last_force_terminate_inbound_id, 0) "
                 "  AND (agents_meta.wake_suppressed_until IS NULL "
                 "       OR agents_meta.wake_suppressed_until < now()) "
+                "  AND {} "
                 "GROUP BY m.agent_id "
                 "ORDER BY m.agent_id"
-            ).format(sql.SQL(FAILED_RESTART_FOR_CURRENT_TARGET)),
+            ).format(
+                sql.SQL(FAILED_RESTART_FOR_CURRENT_TARGET),
+                sql.SQL(SYSTEM_REAPED_CRASH_ROW),
+                sql.SQL(RECOVERY_BREAKER_CLEAR),
+            ),
             (threshold_s,),
         )
         return [(r[0], r[1]) for r in cur.fetchall()]

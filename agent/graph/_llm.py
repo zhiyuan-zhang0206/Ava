@@ -538,6 +538,11 @@ async def _persist_last_active(ctx: AvaContext, agent_id: int, text: str) -> Non
     - last_turn_fatal_at = NULL in the same statement: a completed turn is the
       recovery signal that clears the corpse marker (the heartbeat circuit
       breaker's "first successful LLM call closes the breaker" moment).
+    - permanent_reject_streak = 0 in the same statement: a completed turn is
+      also the recovery signal that closes the recovery circuit breaker
+      (`shared/recovery_breaker.py`) — the only reset, so two consecutive
+      permanent rejections with no success between them keep it >= the halt
+      threshold.
     - last_message_text = the AI text WHEN this turn produced any: it survives
       compact (which replaces the whole checkpoint but not this column), read
       back by get_last_message.
@@ -553,13 +558,14 @@ async def _persist_last_active(ctx: AvaContext, agent_id: int, text: str) -> Non
             if text:
                 await cur.execute(
                     "UPDATE agents_meta SET last_active_at = now(), last_message_text = %s, "
-                    "last_turn_fatal_at = NULL "
+                    "last_turn_fatal_at = NULL, permanent_reject_streak = 0 "
                     "WHERE id = %s",
                     (text, agent_id),
                 )
             else:
                 await cur.execute(
-                    "UPDATE agents_meta SET last_active_at = now(), last_turn_fatal_at = NULL "
+                    "UPDATE agents_meta SET last_active_at = now(), last_turn_fatal_at = NULL, "
+                    "permanent_reject_streak = 0 "
                     "WHERE id = %s",
                     (agent_id,),
                 )
