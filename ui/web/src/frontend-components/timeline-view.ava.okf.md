@@ -12,7 +12,7 @@ tags:
 
 ## Streaming rows
 
-During streaming each line is memoized `TimelineRow` + `React.memo` PythonCode/ChatMarkdown to suppress re-renders at 10-50/s chunk rates. Sticky bottom auto-scroll + last-item fork.
+During streaming each line is memoized `TimelineRow` + `React.memo` PythonCode/ChatMarkdown to suppress unchanged-row renders. Grouping is reused while the items reference is unchanged; nested sticky geometry is measured only inside the selected top-level turn. Sticky bottom auto-scroll + last-item fork.
 
 ## Segments and dividers
 
@@ -20,15 +20,15 @@ Historical ranks group separately; localized presentation-only dividers never en
 
 ## Cross-compact paging
 
-Every active and parked-thread item writer retains the full loaded list (no per-thread item cap, task #1734 — scroll-up paging follows the backend `has_more` until the configured `AVA_TIMELINE_COMPACT_HISTORY` depth is exhausted); at most 32 parked buckets are kept. After a compact the retained-history segments re-attach automatically above the new summary — the store edge and retention hook live in [[ui/web/src/frontend-state/timeline-cache.ava.okf.md|Per-Thread Timeline Cache]].
+The active view retains the full loaded list: scroll-up paging follows backend `has_more` until the configured `AVA_TIMELINE_COMPACT_HISTORY` depth is exhausted. Loaded history and mounted DOM remain proportional to the history opened; CSS containment does not virtualize either. After a compact the retained-history segments re-attach automatically above the new summary — the store edge and retention hook live in [[ui/web/src/frontend-state/timeline-cache.ava.okf.md|Per-Thread Timeline Cache]].
 
 ## Deep collapse
 
-`runs.classifyItem` classifies items as primary (agent replies + human inbound, always visible) / secondary (thinking / code / output, inter-agent messages, system inbound, compact, system_prompt, note marker; collapsed by default via `card.messageCardConfig` `fixedDefault=false`) / bare (ephemeral marker); adjacent secondary items are aggregated by `groupIntoTurns` into a `TurnBlock` (collapsed by default, individually collapsible when expanded). Toggle `display.collapse_agent_runs` (default on).
+`runs.classifyItem` classifies items as primary (agent replies + human inbound, always visible) / secondary (thinking / code / output, inter-agent messages, system inbound, compact, system_prompt, note marker) / bare (ephemeral marker). Adjacent secondary items form a `TurnBlock`; Details All/Last/None controls its default expansion, with Last opening the active final turn.
 
 ## Turn timer
 
-When `turnActive`, the last item (current streaming step) is peeled out and kept visible. The turn header's timer reads ONE basis in both states — `summarizeTurn.workedMs`, the sum of the turn's block durations — with the live "Working for" adding only the in-flight block's elapsed on top, so it does not drop when the turn ends. Wall-clock across a turn is never displayed: a turn is a maximal run of secondary items and can span an idle gap (a restart, a wake-up the agent had not picked up yet).
+The turn header's timer reads ONE basis in both states — `summarizeTurn.workedMs`, the sum of the turn's block durations — with the live "Working for" adding only the in-flight block's elapsed on top, so it does not drop when the turn ends. Wall-clock across a turn is never displayed: a turn is a maximal run of secondary items and can span an idle gap (a restart, a wake-up the agent had not picked up yet).
 
 ## Relationship to Other Nodes
 
