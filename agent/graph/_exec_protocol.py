@@ -42,9 +42,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
-
-from agent.state import checkpoint_msgpack_allowlist
 from shared.exec_process_domain import KILL_GRACE_S as KILL_GRACE_S
 from shared.log import logger
 from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
@@ -74,8 +71,20 @@ STALE_FILE_AGE_S = 3600.0
 _NO_AGENT_DIRNAME = "_no_agent_"
 
 
-def _serde() -> JsonPlusSerializer:
-    """The typed-blob serializer — same allowlist as the LangGraph checkpointer."""
+def _serde() -> Any:
+    """The typed-blob serializer — same allowlist as the LangGraph checkpointer.
+
+    Imports deferred to the first actual (de)serialization: a request without a
+    state snapshot never reaches here, so the child start path must not pay
+    langgraph / `agent.state` at import (startup-path laziness, task #3585).
+    The return type is Any on purpose: `JsonPlusSerializer` must stay out of
+    module scope, and Pyright cannot resolve an annotation the module never
+    imports. `dumps_typed` / `loads_typed` keep the precise public surface.
+    """
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+    from agent.state import checkpoint_msgpack_allowlist
+
     return JsonPlusSerializer(allowed_msgpack_modules=checkpoint_msgpack_allowlist())
 
 

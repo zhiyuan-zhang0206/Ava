@@ -55,6 +55,7 @@ from typing import Any
 from shared.lm._model_registry_types import DEFAULT_TUNING, ModelSpec, ModelTuning
 from shared.lm._model_specs_compatible import COMPATIBLE_MODELS
 from shared.lm._model_specs_primary import PRIMARY_MODELS
+from shared.lm._plugin_providers import ensure_provider_plugins_loaded
 
 MODELS: dict[str, ModelSpec] = {**PRIMARY_MODELS, **COMPATIBLE_MODELS}
 
@@ -121,6 +122,65 @@ def _rebuild_derived_views() -> None:
             if _spec.model_identity is not None
         }
     )
+
+
+# ---------------------------------------------------------------------------
+# Media-capability resolution — data-leaf queries over MODELS / provider
+# bindings. Lives here (not in factory.py) so the boot path (the exec child's
+# media gate, `ava/_attach.py`) resolves without importing the LangChain-heavy
+# factory; factory re-exports the same entry points (startup-path laziness,
+# task #3585).
+# ---------------------------------------------------------------------------
+
+# The legacy core vision-prefix fallback is empty. Registered plugin models are
+# authoritative through `ModelSpec.media_types`; unregistered ids under a
+# plugin prefix use `ProviderBinding.vision`.
+_VISION_MODEL_PREFIXES: tuple[str, ...] = ()
+
+
+def media_types_for_model(model: str) -> frozenset[str]:
+    """Native media capability for `model` across the three provider tiers.
+
+    Registered plugin models use their per-model ``ModelSpec.media_types``. An
+    unregistered id under a plugin prefix gets the binding's v1 image-only
+    ``vision`` capability. No match means text-only.
+    """
+    ensure_provider_plugins_loaded()
+    spec = MODELS.get(model)
+    if spec is not None:
+        return spec.media_types
+    # Function-level: provider_api imports this module, so a module-level
+    # import would be a cycle (and only the unregistered-prefix tier needs it).
+    from shared.lm import provider_api
+
+    for prefix, binding in provider_api.REGISTRY.bindings.items():
+        if model.startswith(prefix):
+            return frozenset({"image"}) if binding.vision else frozenset()
+    if model.startswith(_VISION_MODEL_PREFIXES):
+        return frozenset({"image"})
+    return frozenset()
+
+
+def attach_modalities_for_model(model: str) -> frozenset[str]:
+    """The media types `ava.self.attach` accepts for `model`.
+
+    `ModelSpec.attach_modalities` when the entry declares an attach-specific
+    opinion; otherwise the model's native `media_types` — attach registers
+    files into the same message pipeline, so the native matrix is the default
+    contract (user ruling 2026-08-28). Empty result = text-only for attach:
+    no files can be registered, the SDK docs drop the member, and the call
+    raises. Unregistered ids fall through the same provider tiers as
+    `media_types_for_model`.
+
+    Raw-entry semantics: a withdrawn id answers with its declared set; the
+    registration gates resolve the effective model first (task #3212)."""
+    ensure_provider_plugins_loaded()
+    spec = MODELS.get(model)
+    if spec is not None:
+        if spec.attach_modalities is not None:
+            return spec.attach_modalities
+        return spec.media_types
+    return media_types_for_model(model)
 
 
 def _validate_spec(

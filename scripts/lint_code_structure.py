@@ -129,8 +129,16 @@ def _machine_role_calls(tree: ast.AST) -> list[int]:
 
 
 # Files allowed to use `if TYPE_CHECKING:` — real circular import or heavy
-# optional dependency. Empty today; add an entry with a one-line reason.
-_TYPE_CHECKING_ALLOWED: frozenset[str] = frozenset()
+# optional dependency. Add an entry with a one-line reason.
+_TYPE_CHECKING_ALLOWED: frozenset[str] = frozenset(
+    {
+        # PEP 562 lazy re-export: the node set is a heavy import on paths (the
+        # exec child) that never use the names; TYPE_CHECKING restores the real
+        # signatures for static checkers without putting them back on the import
+        # path (task #3585).
+        "agent/graph/__init__.py",
+    }
+)
 
 
 def _type_checking_violations(tree: ast.Module) -> list[int]:

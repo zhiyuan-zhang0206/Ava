@@ -68,7 +68,7 @@ async def cold_host(
         built.append(name)
         return model
 
-    monkeypatch.setattr("agent._process_boot.build_chat_model", model_for)
+    monkeypatch.setattr("shared.lm.factory.build_chat_model", model_for)
 
     def allow_model(*, model: str | None = None) -> None:
         assert model is not None
