@@ -265,15 +265,19 @@ class AgentSnapshot(BaseModel):
 
 def _row_to_snapshot(row: tuple[Any, ...]) -> AgentSnapshot:
     from shared.lm.factory import model_supports_vision
+    from shared.lm.registry import resolve_available_model
 
     # Pydantic does the per-field type coercion / validation; the tuple
     # positions match the SELECT column order above.
     config_overlay = row[17]
-    effective_model = (
+    configured_model = (
         config_overlay["llm_model"]
         if config_overlay and "llm_model" in config_overlay
         else settings.lm.llm_model
     )
+    # Capability judgments answer for the model that will run: a configured
+    # withdrawn id is served by its fallback (task #3212).
+    effective_model = resolve_available_model(configured_model)
     return AgentSnapshot.model_validate(
         {
             "agent_id": row[0],
@@ -301,8 +305,9 @@ def _row_to_snapshot(row: tuple[Any, ...]) -> AgentSnapshot:
 
 def _row_to_summary(row: tuple[Any, ...]) -> AgentListSummary:
     from shared.lm.factory import model_supports_vision
+    from shared.lm.registry import resolve_available_model
 
-    effective_model = row[15] or settings.lm.llm_model
+    effective_model = resolve_available_model(row[15] or settings.lm.llm_model)
     return AgentListSummary.model_validate(
         {
             "agent_id": row[0],

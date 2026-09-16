@@ -279,7 +279,7 @@ def test_section_keeps_attach_for_media_capable_model(
     """A media-capable model's expanded SDK reference keeps the attach
     contract unchanged (user ruling 2026-08-28)."""
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
-    monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-flash-vision-exp")
+    monkeypatch.setattr(settings.lm, "llm_model", "claude-sonnet-5")
     text = _sdk_expand_section()
     assert "## ava.self" in text
     assert "def attach(" in text

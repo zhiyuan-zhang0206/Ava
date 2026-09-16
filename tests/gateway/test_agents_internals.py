@@ -227,14 +227,18 @@ class TestSpawnAgent:
         monkeypatch.setattr(settings.lm, "llm_model", "claude-sonnet-5")
         default_model_agent = _spawn_agent()
         text_only_agent = _spawn_agent(config={"llm_model": "deepseek-v4-pro"})
+        withdrawn_vision_agent = _spawn_agent(config={"llm_model": "deepseek-v4-flash-vision-exp"})
 
         default_snapshot = select_one(db_conn, default_model_agent)
         text_only_snapshot = select_one(db_conn, text_only_agent)
+        withdrawn_snapshot = select_one(db_conn, withdrawn_vision_agent)
 
         assert default_snapshot is not None
         assert default_snapshot.supports_vision is True
         assert text_only_snapshot is not None
         assert text_only_snapshot.supports_vision is False
+        assert withdrawn_snapshot is not None
+        assert withdrawn_snapshot.supports_vision is False
 
 
 class TestResurrectAgent:

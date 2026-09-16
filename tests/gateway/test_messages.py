@@ -280,12 +280,12 @@ class TestMultimodalMessage:
         assert blocks[1]["type"] == "image_url"
         assert blocks[1]["image_url"]["url"] == url
 
-    def test_image_to_deepseek_vision_model_stores_blocks(
+    def test_image_to_withdrawn_vision_model_resolves_text_only_422(
         self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """deepseek-v4-flash-vision-exp is multimodal on the deepseek branch —
-        the per-model gate must let an image through even though its prefix-mates
-        (v4-pro / v4-flash) are text-only."""
+        """The gate answers for the model that will actually run: a
+        deepseek-v4-flash-vision-exp pin resolves to the text-only
+        deepseek-v4-flash, so an image message is gated 422 up front."""
         from pathlib import Path
 
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
@@ -308,14 +308,9 @@ class TestMultimodalMessage:
                     "source": "user",
                 },
             )
-        assert resp.status_code == 201
-        content, payload = _payload_row(db_conn, tid)
-        assert content == "describe this"
-        assert payload is not None
-        blocks = payload["content_blocks"]
-        assert blocks[0] == {"type": "text", "text": "describe this"}
-        assert blocks[1]["type"] == "image_url"
-        assert blocks[1]["image_url"]["url"] == url
+        assert resp.status_code == 422
+        assert "cannot see images" in resp.text
+        assert _pending_rows(db_conn, tid) == []
 
     def test_image_ref_wrong_agent_422(
         self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
