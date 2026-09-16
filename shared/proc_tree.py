@@ -9,6 +9,7 @@ ops layer reaching through services into cli (issue #2123).
 
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass
 from typing import Any, cast
@@ -134,3 +135,40 @@ def leader_owns_pids(leader: OwnedProcess, pids: set[int]) -> bool:
         return False
     owned = {identity.pid for identity in capture_tree(leader)}
     return bool(owned & pids)
+
+
+def process_metadata() -> dict[str, Any]:
+    """Observed process facts for one caller, standardized for attestation.
+
+    Identity fields use the stable start time (`stable_create_time`) so a
+    later reader compares against the same value the kernel keeps. The parent
+    walk is bounded and records what it could observe instead of failing: a
+    permission gap on an ancestor path must not lose the facts below it.
+    """
+    result: dict[str, Any] = {"pid": os.getpid(), "ancestors": []}
+    # env-ok: inherited provider routing context, never an executor identity assertion
+    codex_home = os.environ.get("CODEX_HOME")
+    if codex_home:
+        result["codex_home"] = codex_home
+    process = psutil.Process()
+    for depth in range(8):
+        try:
+            facts = {
+                "pid": process.pid,
+                "name": process.name(),
+                "executable": process.exe(),
+                "created_at": stable_create_time(process),
+                "parent_pid": process.ppid(),
+            }
+            if depth == 0:
+                result.update(facts)
+            else:
+                result["ancestors"].append(facts)
+            parent = process.parent()
+            if parent is None:
+                break
+            process = parent
+        except (psutil.NoSuchProcess, psutil.AccessDenied) as exc:
+            result["observation_error"] = type(exc).__name__
+            break
+    return result

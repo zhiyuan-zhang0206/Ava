@@ -26,10 +26,13 @@ Preserve `CODEX_HOME` and optionally supply `--codex-remote` so the native relay
 reaches the owning server. Claude starts its Monitor relay immediately after the
 request. See [host setup](agent-impersonation-hosts.md).
 
-The response returns a per-agent integer `id` / `session_id`, starting at zero,
-and credentials once. Keep the controller token in `AVA_IMPERSONATION_TOKEN`;
-Claude's relay uses the separate `AVA_IMPERSONATION_RELAY_TOKEN`. Never put
-credentials in prompts, argv, logs or files. Status/list responses omit them.
+The response returns a per-agent integer `id` / `session_id`, starting at zero.
+There is no controller credential: control commands are authorized by the
+session id plus caller attestation — each command must run from a process that
+descends from the session's recorded controller tree (the executor process that
+made the request). Claude's relay uses the separate scoped
+`AVA_IMPERSONATION_RELAY_TOKEN`; that credential belongs to the relay, never to
+the controller. Status/list responses omit credentials.
 
 ```bash
 ava impersonate status 0 --agent 405
@@ -53,10 +56,9 @@ ava impersonate exec 0 --agent 405 --file operation.py
 The exec form runs local Python in a short attachment. Direct Python uses:
 
 ```python
-import os
 import ava
 
-with ava.external.attach(0, agent_id=405, token=os.environ["AVA_IMPERSONATION_TOKEN"]):
+with ava.external.attach(0, agent_id=405):
     ava.agents.send_message(406, "Please review the login change")
 ```
 

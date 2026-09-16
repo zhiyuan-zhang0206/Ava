@@ -1,6 +1,6 @@
 ---
 name: impersonator-guide
-description: 'Operating an Ava impersonation lease as the external agent: Ava CLI and Python SDK use under a borrowed identity, push-based message handling with prompt ACKs, reminder-driven lease renewal, and summary handoff. Use when an "Ava control active" hint names your lease or AVA_IMPERSONATION_TOKEN is set.'
+description: 'Operating an Ava impersonation lease as the external agent: Ava CLI and Python SDK use under a borrowed identity, push-based message handling with prompt ACKs, reminder-driven lease renewal, and summary handoff. Use when an "Ava control active" hint names your lease or an impersonation session is active for your agent.'
 ---
 
 # Acting as an Ava impersonator
@@ -32,8 +32,10 @@ Three values anchor every command in this skill:
 
 - **Agent id and session id** — appears in the activation push and in the ACK command of
   every delivered batch. The session id is an integer scoped to its Ava agent; keep both handy.
-- **Token** — `AVA_IMPERSONATION_TOKEN` is set in your environment. Never print
-  it, put it in a prompt, a command argument, a log, or a file.
+- **Session authority** — no credential exists to hold or pass. Every control
+  command must run from inside this session's own process tree (the executor and
+  its children); the session id plus that presence is the authority. A command
+  from any other process tree is refused — never move control to a helper.
 - **The cluster executable** — use the `ava` CLI and Python interpreter of the
   cluster that hosts the agent (the checkout path was given to you, typically
   `<checkout>/.venv/bin/ava`). A bare `ava` on `PATH` can belong to a different
@@ -160,13 +162,12 @@ User-visible replies never go through the attachment — send them with the CLI 
 Attach from the cluster's interpreter (the checkout's `.venv/bin/python`):
 
 ```python
-import os
 import ava
 
 session_id = 0                 # from the activation push
 agent_id = 405                 # the Ava agent you are replacing
 
-with ava.external.attach(session_id, agent_id=agent_id, token=os.environ["AVA_IMPERSONATION_TOKEN"]):
+with ava.external.attach(session_id, agent_id=agent_id):
     # Call other ava.* capabilities under the borrowed identity.
 ```
 

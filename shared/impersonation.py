@@ -78,7 +78,10 @@ def request(
     process_metadata: dict[str, Any] | None = None,
     automatic: bool = False,
 ) -> dict[str, Any]:
-    """Prepare a controller lease; return the secret once, never store it raw.
+    """Prepare a controller lease; return the scoped relay credential once (claude only).
+
+    The controller itself holds no deliverable secret: control authority is the
+    session id plus caller-presence attestation (user ruling 2026-09-16).
 
     Every request must name its relay endpoint up front: the accepting runtime
     never guesses one. A claude request also mints the scoped relay credential
@@ -102,7 +105,7 @@ def request(
     ):
         raise ValueError("relay_batch_window_seconds must be an integer from 0 through 300")
     relay_token = secrets.token_urlsafe(32) if relay_provider == "claude" else None
-    lease_id, token = uuid4(), secrets.token_urlsafe(32)
+    lease_id = uuid4()
     with write_transaction() as conn:
         meta = lock_agent(conn, agent_id)
         if meta["machine"] != machine_name():
@@ -127,16 +130,15 @@ def request(
                 raise ImpersonationError("Agent already has a request, lease, or unapplied state")
         set_actor(conn, caller.source())
         conn.execute(
-            "INSERT INTO agent_impersonations(id,agent_id,source,machine,token_hash,reason,"
+            "INSERT INTO agent_impersonations(id,agent_id,source,machine,reason,"
             "status,ttl_seconds,expires_at,relay_provider,relay_thread_id,relay_codex_remote,"
-            "relay_token_hash,relay_batch_window_seconds,name,executor_name,process_metadata,automatic) VALUES(%s,%s,%s,%s,%s,%s,'requested',%s,"
+            "relay_token_hash,relay_batch_window_seconds,name,executor_name,process_metadata,automatic) VALUES(%s,%s,%s,%s,%s,'requested',%s,"
             "clock_timestamp()+%s*interval '1 second',%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 lease_id,
                 agent_id,
                 caller.source(),
                 meta["machine"],
-                token_hash(token),
                 reason,
                 ttl,
                 ttl,
@@ -153,20 +155,19 @@ def request(
         )
         result = public(lock_lease(conn, str(lease_id)))
     _wake(agent_id)
-    result_with_token = result | {"token": token}
     if relay_token is not None:
-        result_with_token["relay_token"] = relay_token
-    return result_with_token
+        return result | {"relay_token": relay_token}
+    return result
 
 
-def get(lease_id: str, token: str) -> dict[str, Any]:
+def get(lease_id: str, caller: object) -> dict[str, Any]:
     with write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
-        authenticate(lease, token)
+        authenticate(lease, caller)
         return public(expire(conn, lease))
 
 
-def require_active(lease_id: str, token: str) -> dict[str, Any]:
+def require_active(lease_id: str, caller: object) -> dict[str, Any]:
     """Check one committed snapshot; SDK work does not hold a database lock."""
     with connect() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
@@ -180,7 +181,7 @@ def require_active(lease_id: str, token: str) -> dict[str, Any]:
         raise ImpersonationError("Impersonation does not exist")
     validate_active(
         lease,
-        token,
+        caller,
         fresh=lease.pop("fresh"),
         machine=lease.pop("current_machine"),
         status=lease.pop("current_status"),
@@ -372,10 +373,10 @@ def native_status(agent_id: int, incarnation: RuntimeIncarnation) -> dict[str, A
         return public(lease)
 
 
-def renew(lease_id: str, token: str, *, ttl_seconds: int | None = None) -> dict[str, Any]:
+def renew(lease_id: str, caller: object, *, ttl_seconds: int | None = None) -> dict[str, Any]:
     with write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
-        require_active_locked(conn, lease, token)
+        require_active_locked(conn, lease, caller)
         set_actor(conn, lease["source"])
         ttl = lease["ttl_seconds"] if ttl_seconds is None else _ttl(ttl_seconds)
         conn.execute(
@@ -388,15 +389,15 @@ def renew(lease_id: str, token: str, *, ttl_seconds: int | None = None) -> dict[
     return result
 
 
-def release(lease_id: str, token: str, summary: str) -> dict[str, Any]:
+def release(lease_id: str, caller: object, summary: str) -> dict[str, Any]:
     if not summary.strip():
         raise ValueError("A nonempty handoff summary is required")
     with write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
-        authenticate(lease, token)
+        authenticate(lease, caller)
         if lease["status"] == "released":
             return public(lease)
-        require_active_locked(conn, lease, token)
+        require_active_locked(conn, lease, caller)
         set_actor(conn, lease["source"])
         inbound_id = (
             None
@@ -418,12 +419,12 @@ def release(lease_id: str, token: str, summary: str) -> dict[str, Any]:
     return result
 
 
-def inbox(lease_id: str, token: str, *, limit: int = 100) -> list[dict[str, Any]]:
+def inbox(lease_id: str, caller: object, *, limit: int = 100) -> list[dict[str, Any]]:
     if not 1 <= limit <= 1000:
         raise ValueError("Inbox limit must be from 1 through 1000")
     with write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
-        require_active_locked(conn, lease, token)
+        require_active_locked(conn, lease, caller)
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "SELECT id,content,kind,source,payload,created_at FROM inbound_messages "
@@ -442,10 +443,10 @@ def inbox(lease_id: str, token: str, *, limit: int = 100) -> list[dict[str, Any]
     return messages
 
 
-def ack(lease_id: str, token: str, message_ids: list[int]) -> None:
+def ack(lease_id: str, caller: object, message_ids: list[int]) -> None:
     with write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
-        require_active_locked(conn, lease, token)
+        require_active_locked(conn, lease, caller)
         rows = conn.execute(
             "SELECT inbound_id FROM agent_impersonation_messages WHERE lease_id=%s "
             "AND inbound_id=ANY(%s)",
@@ -488,11 +489,11 @@ def ack(lease_id: str, token: str, message_ids: list[int]) -> None:
 
 
 def merge_plugin_delta(
-    lease_id: str, token: str, delta: dict[str, Any], *, expected_version: int
+    lease_id: str, caller: object, delta: dict[str, Any], *, expected_version: int
 ) -> None:
     with write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
-        require_active_locked(conn, lease, token)
+        require_active_locked(conn, lease, caller)
         if lease["delta_version"] != expected_version:
             raise ImpersonationError("Concurrent external state update; reload the agent state")
         conn.execute(
@@ -528,7 +529,7 @@ def relay_get(lease_id: str, relay_token: str) -> dict[str, Any]:
 def relay_inbox(lease_id: str, relay_token: str, *, limit: int = 100) -> list[dict[str, Any]]:
     """The relay's read-only inbox page: same durable rows, relay credential only.
 
-    The controller token cannot read here and the relay token cannot release,
+    The controller identity cannot read here and the relay token cannot release,
     renew or ACK anything — the handoff is scoped by construction.
     """
     if not 1 <= limit <= 1000:

@@ -21,6 +21,7 @@ from shared.chat_delivery import insert_chat_inbound_once
 from shared.db import create_agent
 from shared.machine import machine_name
 from shared.runtime_incarnation import RuntimeIncarnation
+from tests.impersonation_support import attested_caller, recorded_tree
 
 
 def test_upgrade_captures_unread_backlog_of_already_active_legacy_session(
@@ -73,12 +74,12 @@ def session(db_conn: psycopg.Connection) -> dict[str, Any]:
         executor_name="Codex reviewer",
         provider="codex",
         thread_id=str(uuid4()),
-        process_metadata={"name": "pytest"},
+        process_metadata=recorded_tree(),
     )
     lease = history.resolve(agent_id, requested["session_id"])
     leases.accept(str(lease["id"]), agent_id, owner, "Check the history contract")
     leases.activate(str(lease["id"]), owner)
-    return history.resolve(agent_id, requested["session_id"]) | {"token": requested["token"]}
+    return history.resolve(agent_id, requested["session_id"])
 
 
 def test_idempotent_inbound_retry_preserves_one_real_message(
@@ -143,7 +144,7 @@ def peer_events(
             client_message_id=str(uuid4()),
         )
     assert len(events) == 3
-    leases.release(str(session["id"]), session["token"], "Sent the peer update")
+    leases.release(str(session["id"]), attested_caller(session), "Sent the peer update")
     return events, recipient
 
 
@@ -207,7 +208,7 @@ def test_gateway_transport_outage_leaves_accounting_pending_and_delivers_handoff
     from agent import impersonation_handoff as handoff
     from ava import _gateway_transport as transport
 
-    leases.release(str(session["id"]), session["token"], "Completed external work")
+    leases.release(str(session["id"]), attested_caller(session), "Completed external work")
     lease = history.resolve(session["agent_id"], session["session_id"])
 
     def unavailable(request: httpx.Request) -> httpx.Response:

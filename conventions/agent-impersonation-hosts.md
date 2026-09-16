@@ -21,8 +21,8 @@ session's start message — the handoff brief recorded during preparation —
 even if the inbox is empty. Rejection or expiry also wakes the controller;
 waiting for activation never requires a model to poll status.
 The relay authenticates with the lease's scoped `relay_token` — never the
-controller's `AVA_IMPERSONATION_TOKEN` — and no relay session, token or
-message files are created.
+controller identity — and no relay session, token or message files are created.
+The controller itself holds no credential: see *Control plane* below.
 
 Verify that the start message actually arrives in the intended conversation
 before relying on automatic delivery. Lease activation, relay process liveness,
@@ -34,55 +34,37 @@ Give the interactive host a live PTY and keep its stdin open through workspace
 trust confirmation. An unattended launch with closed stdin can leave an accepted
 Ava lease active without a usable Codex session.
 
-Use one explicitly addressed app server for both the TUI and the relay. Pass the
-token through that **server's** environment, with an explicit shell policy;
-setting the remote TUI's environment does not configure its server's tools.
-The environment policy was verified with Codex 0.153.4; its
-[environment filtering order](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/protocol/src/shell_environment.rs)
-and [snapshot implementation](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/core/src/shell_snapshot.rs)
-explain the required settings:
+### Control plane — no deliverable credential
+
+Controller authority is the session id plus caller attestation: every control
+command (`say` / `inbox` / `ack` / `renew` / `release` / `exec`) must run from a
+process that descends from the session's recorded controller tree — the
+executor process captured at request time. Nothing travels through the
+environment, argv, or files, so there is no shell environment policy, sentinel
+value, or supervisor-held credential to manage. The old
+`AVA_IMPERSONATION_TOKEN` prescription (with its `shell_environment_policy` /
+`shell_snapshot` settings and presence check) is obsolete: a stale or unrelated
+process gets a classified refusal (no-anchor / anchor-dead / chain-mismatch)
+instead of a credential error. A control-orphaned lease stays parked until the
+native side ends it (restart/stop) or its TTL expires.
+
+### One app server for TUI and relay
+
+Use one explicitly addressed app server for both the TUI and the relay.
+Setting the remote TUI's environment does not configure its server's tools.
 
 ```sh
-codex --disable shell_snapshot \
-  -c 'shell_environment_policy.inherit="all"' \
-  -c 'shell_environment_policy.ignore_default_excludes=true' \
-  -c 'shell_environment_policy.include_only=["PATH","HOME","USER","LOGNAME","SHELL","TERM","LANG","LC_ALL","TMPDIR","AVA_IMPERSONATION_TOKEN","CODEX_THREAD_ID"]' \
-  app-server --listen unix:///path/to/private/run/codex.sock
+codex app-server --listen unix:///path/to/private/run/codex.sock
 ```
 
 Create the socket's parent as a private directory and keep this native server
-running. The socket carries native IPC; it is not a token or message file.
+running. The socket carries native IPC; it is not a message file.
 Configure the server's sandbox and approval policy for the authorized work.
 Connect the interactive TUI to that exact endpoint:
 
 ```sh
 codex --remote unix:///path/to/private/run/codex.sock -C /path/to/agent/workspace
 ```
-
-Use these options together. `inherit="core"` removes the token before
-`include_only` runs, so an allowlist alone cannot restore it. Default secret-name
-exclusions also remove the token; disabling those exclusions requires the strict
-allowlist above. Add other environment names only when the host needs them.
-Keep shell snapshots disabled: a snapshot can persist the inherited credential
-and hide a missing subprocess environment until the working directory changes.
-
-Before requesting a live lease, test the policy with a harmless sentinel value
-for `AVA_IMPERSONATION_TOKEN`. Have Codex run this presence check through its own
-shell tool both in the agent workspace and in the intended Ava checkout; repeat
-it with the real inherited credential before Ava work:
-
-```sh
-python3 -c 'import os; assert os.environ.get("AVA_IMPERSONATION_TOKEN"), "Ava impersonation token missing"'
-```
-
-The check must succeed in both directories without printing the token. Capture
-the request response in the supervisor; keep the credential out of prompts,
-command arguments, logs and token files. Retain that in-memory copy until handoff
-completes, so `finally` cleanup can release an active lease through the Ava CLI
-even if the host never starts, loses stdin or cannot inherit the token.
-Stop external work and close attachments before releasing; verify the terminal
-lease status before discarding the supervisor's credential. TTL remains the
-recovery path if the supervisor dies.
 
 The codex relay needs no manual start: the accepting runtime spawns it at
 activation from the recorded spec, handing the scoped relay credential over a
