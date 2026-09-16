@@ -141,8 +141,14 @@ def main() -> int:
     args = parser.parse_args()
     from ava._boot import require_agent_id
 
-    takeover_agent_id = require_agent_id() if args.impersonate_self else None
-    if args.impersonation_name is not None and not args.impersonate_self:
+    if args.impersonate_self:
+        require_agent_id()
+        raise SystemExit(
+            "claude takeover is not available yet: its launch path does not implement the "
+            "file-less takeover contract (rework tracked as task #3688). "
+            "Use spawn_codex.py for a takeover."
+        )
+    if args.impersonation_name is not None:
         parser.error("--impersonation-name requires --impersonate-self")
     # Validate before creating files or sessions. This assignment belongs only
     # to the external process, not the Ava-owned launcher/supervisor.
@@ -183,24 +189,6 @@ def main() -> int:
         f"Your work file (yours to write, STATUS + log) is {work_file}. "
         "Now read the task file and start working."
     )
-    if takeover_agent_id is not None:
-        from ava._impersonation_launch import bootstrap_message
-
-        guide = (
-            Path(__file__).resolve().parents[4]
-            / ".agents"
-            / "skills"
-            / "impersonator-guide"
-            / "SKILL.md"
-        )
-        msg = bootstrap_message(
-            takeover_agent_id,
-            args.impersonation_name or workspace.name,
-            "claude",
-            tasks_file,
-            work_file,
-            guide,
-        )
     ava.shell.sessions.send(sid, msg)
 
     print(f"ready. name={session_name}  workspace={workspace}")
