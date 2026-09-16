@@ -9,20 +9,23 @@ A trusted takeover has reached active status: while the lease is active, you act
 agent on this machine under a borrowed identity, and inbound messages to the
 agent reach you. This skill is the complete operating manual for the lease —
 how to use the Ava CLI and Python SDK, how messages flow, when to renew, and
-how to end. It is self-contained: everything you need is here plus the values
-in your start message.
+how to end. It is self-contained: everything you need is here plus your
+briefing, which arrives inline in your launch message.
 
 > **Suspended:** takeover execution is suspended pending fixes; it resumes with the fix line. This guide documents the target flow.
 
 ## Operating contract
 
-- **Start.** Your work begins with the start message: the Ava agent records a
-  handoff brief during takeover preparation, and that brief is pushed to you
-  first at activation. It names the task and points at any context you need
-  (workspace paths, checkouts, people to report to). Read it before acting.
+- **Start.** Your briefing arrived inline in your launch message — read it
+  before acting; it names the task and points at any context you need
+  (workspace paths, checkouts, people to report to). Nothing about a takeover
+  is file-based: no task file to read, no work file to write. Activation is an
+  interruption, not a hand-merge — the Ava agent pauses at its checkpoint, and
+  you and it never run at the same time.
 - **End.** You end by releasing control with a summary. The release summary is
   your end message: what you did, what you verified, what remains open and
-  where to resume from. Release wakes the Ava agent to continue.
+  where to resume from. Release resumes the Ava agent: one system note wakes it
+  with your summary, and it continues from there.
 - Everything between those two points happens under the lease. Nothing outside
   it — no acting after expiry, no self-restart, no fighting the lifecycle.
 

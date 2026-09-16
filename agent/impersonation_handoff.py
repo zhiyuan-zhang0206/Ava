@@ -17,9 +17,10 @@ from shared.runtime_incarnation import RuntimeIncarnation
 def start_marker(session: dict[str, Any]) -> HumanMessage:
     """Anchor the session's separately retained messages in checkpoint order."""
     note = system_note_message(
-        content=f"Impersonation session {session['session_id']} ({session['name']}) "
-        f"is preparing. Executor: {session['executor_name']}. Native execution pauses "
-        "after this checkpoint is saved; the controller must wait for active status.",
+        content=f"Impersonation session {session['session_id']} has started. "
+        f'The takeover identifies itself as "{session["name"]}". '
+        "Your execution pauses at the checkpoint saved with this note; "
+        "the session's end delivers a handoff note that resumes your execution.",
         tag=NoteTag.IMPERSONATION,
         created_at=datetime.now(UTC),
     )
@@ -113,12 +114,13 @@ async def deliver_handoff(
     receipt = f"{session['agent_id']}:{session['session_id']}"
     if snapshot.values.get("impersonation_handoff_id") != receipt:
         note = system_note_message(
-            content=f"Impersonation session {session['session_id']} ({session['name']}) ended. "
-            f"Executor: {session['executor_name']}.\n\nExternal summary:\n{summary}\n\n"
+            content=f"Impersonation session {session['session_id']} has ended. "
+            f'The takeover identified itself as "{session["name"]}".\n\nExternal summary:\n{summary}\n\n'
             f"Read the structured handoff: {path}\n"
             "It contains all messages, including ACKed messages, and consumed API/SDK events. "
             "Event accounting may remain pending while upstream delivery catches up. "
-            "Incoming messages marked unacknowledged still need your attention. Native execution resumes now.",
+            "Incoming messages marked unacknowledged still need your attention. "
+            "Your execution resumes with this note.",
             tag=NoteTag.IMPERSONATION,
             created_at=datetime.now(UTC),
         )

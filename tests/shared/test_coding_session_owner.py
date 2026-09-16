@@ -35,6 +35,7 @@ def _claim(
     live: set[str] | None = None,
     terminated_generation: str | None = None,
     stopped: list[str] | None = None,
+    takeover: bool = False,
 ) -> owner.CodingSessionClaim:
     live_names: set[str] = live if live is not None else set()
     stopped_names = stopped if stopped is not None else []
@@ -54,8 +55,8 @@ def _claim(
     return owner.claim(
         key,
         owner_agent_id=agent_id,
-        tasks_file=workspace / "tasks.md",
-        work_file=workspace / "work.md",
+        tasks_file=None if takeover else workspace / "tasks.md",
+        work_file=None if takeover else workspace / "work.md",
         ttl_seconds=3600,
         now=now,
         list_sessions=_list_sessions,
@@ -65,24 +66,30 @@ def _claim(
     )
 
 
-def _publish(claim: owner.CodingSessionClaim, session_id: int) -> owner.CodingSessionOwner:
+def _publish(
+    claim: owner.CodingSessionClaim,
+    session_id: int,
+    *,
+    supervised: bool = True,
+) -> owner.CodingSessionOwner:
     record = claim.owner
     assert record.generation is not None and record.expected_suffix is not None
     assert record.owner_agent_id is not None
     generation = record.generation
     expected_suffix = record.expected_suffix
     owner_agent_id = record.owner_agent_id
-    supervisor_id = session_id + 100
-    record = owner.attach_supervisor(
-        record.key,
-        generation,
-        session_id=supervisor_id,
-        session_name=owner.full_session_name(
-            owner_agent_id,
-            supervisor_id,
-            owner.supervisor_suffix(record.key, generation),
-        ),
-    )
+    if supervised:
+        supervisor_id = session_id + 100
+        record = owner.attach_supervisor(
+            record.key,
+            generation,
+            session_id=supervisor_id,
+            session_name=owner.full_session_name(
+                owner_agent_id,
+                supervisor_id,
+                owner.supervisor_suffix(record.key, generation),
+            ),
+        )
     return owner.publish_active(
         record.key,
         generation,
@@ -196,6 +203,104 @@ def test_live_generation_is_adopted_across_agents(tmp_path: Path) -> None:
     assert adopted.owner.generation == active.generation
     assert adopted.owner.owner_agent_id == 41
     assert adopted.owner.session_id == 3
+
+
+def test_takeover_generation_publishes_without_supervisor(tmp_path: Path) -> None:
+    key = _key(tmp_path)
+    claim = _claim(key, agent_id=41, takeover=True)
+
+    active = _publish(claim, 3, supervised=False)
+
+    assert active.status == "active"
+    assert active.tasks_file is None and active.work_file is None
+    assert active.supervisor_session_id is None and active.supervisor_session_name is None
+    assert owner.read(key) == active
+
+
+def test_live_takeover_generation_is_adopted_not_reclaimed(tmp_path: Path) -> None:
+    key = _key(tmp_path)
+    active = _publish(_claim(key, agent_id=41, takeover=True), 3, supervised=False)
+    assert active.session_name is not None
+    live = {active.session_name}
+    stopped: list[str] = []
+
+    second = _claim(key, agent_id=42, live=live, stopped=stopped, takeover=True)
+
+    assert second.action == "adopt"
+    assert second.owner == active
+    assert stopped == []
+    assert owner.read(key) == active
+
+
+def test_dead_takeover_generation_is_reclaimed_before_rebuild(tmp_path: Path) -> None:
+    key = _key(tmp_path)
+    active = _publish(_claim(key, agent_id=41, takeover=True), 3, supervised=False)
+    assert active.state_dir is not None
+    active.state_dir.mkdir(parents=True)
+    (active.state_dir / "history.jsonl").write_text("stale")
+
+    replacement = _claim(key, agent_id=42, takeover=True)
+
+    assert replacement.action == "launch"
+    assert replacement.owner.generation != active.generation
+    assert replacement.owner.tasks_file is None and replacement.owner.work_file is None
+    assert not active.state_dir.exists()
+
+
+def test_takeover_never_attaches_a_supervisor(tmp_path: Path) -> None:
+    key = _key(tmp_path)
+    claim = _claim(key, agent_id=41, takeover=True)
+    record = claim.owner
+    assert record.generation is not None
+
+    with pytest.raises(RuntimeError, match="takeover"):
+        owner.attach_supervisor(
+            key,
+            record.generation,
+            session_id=99,
+            session_name="ava-agent-41-shell-99-ignored",
+        )
+
+
+def test_supervised_active_record_still_requires_its_supervisor(tmp_path: Path) -> None:
+    key = _key(tmp_path)
+    _publish(_claim(key, agent_id=41), 3)
+    path = owner.state_path(key)
+    payload = cast("dict[str, object]", json.loads(path.read_text()))
+    payload["supervisor_session_id"] = None
+    payload["supervisor_session_name"] = None
+    path.write_text(json.dumps(payload))
+
+    invalid = owner.read(key)
+    assert invalid.status == "invalid"
+    assert "supervisor" in (invalid.error or "")
+
+
+def test_takeover_record_with_a_supervisor_fails_closed(tmp_path: Path) -> None:
+    key = _key(tmp_path)
+    _publish(_claim(key, agent_id=41, takeover=True), 3, supervised=False)
+    path = owner.state_path(key)
+    payload = cast("dict[str, object]", json.loads(path.read_text()))
+    payload["supervisor_session_id"] = 9
+    payload["supervisor_session_name"] = "ava-agent-41-shell-9-ignored"
+    path.write_text(json.dumps(payload))
+
+    invalid = owner.read(key)
+    assert invalid.status == "invalid"
+    assert "takeover" in (invalid.error or "")
+
+
+def test_mixed_file_publication_fails_closed(tmp_path: Path) -> None:
+    key = _key(tmp_path)
+    _publish(_claim(key, agent_id=41), 3)
+    path = owner.state_path(key)
+    payload = cast("dict[str, object]", json.loads(path.read_text()))
+    payload["work_file"] = None
+    path.write_text(json.dumps(payload))
+
+    invalid = owner.read(key)
+    assert invalid.status == "invalid"
+    assert "published together" in (invalid.error or "")
 
 
 def test_terminated_owner_transfers_after_exact_cleanup(tmp_path: Path) -> None:
