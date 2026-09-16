@@ -38,7 +38,7 @@ The Redis ACL repair runs first because services depend on Redis authentication.
 The middle follows `build_services()` registration order, including Milvus
 before the memory indexer that connects to it on cold start. `pg-backup` owns
 its own schedule and the watchdog only probes its last-success health
-([[backup.ava.okf.md|daily backup]]).
+([[services/gateway_side/backup/backup.ava.okf.md|daily backup]]).
 
 ## Agent-runner order
 

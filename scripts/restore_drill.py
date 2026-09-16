@@ -173,7 +173,9 @@ def _scratch_space_requirement(raw_dump: Path) -> int:
     return int(raw_dump.stat().st_size * _SCRATCH_SPACE_FACTOR)
 
 
-def run_drill(artifact: Path | None = None) -> tuple[RestoreReport, float]:
+def run_drill(
+    artifact: Path | None = None, *, foreground: bool = False
+) -> tuple[RestoreReport, float]:
     """Run the complete decrypt, restore, and verification drill."""
     artifact = artifact or _newest_artifact()
     if not artifact.is_file():
@@ -191,7 +193,7 @@ def run_drill(artifact: Path | None = None) -> tuple[RestoreReport, float]:
             f"restore drill: scratch cluster on {base} "
             f"(estimate {format_bytes(required)} for artifact {artifact.name})"
         )
-        with throwaway_postgres(base=base) as scratch_db_url:
+        with throwaway_postgres(base=base, foreground=foreground) as scratch_db_url:
             _ensure_restore_roles(scratch_db_url)
             _restore(raw_dump, scratch_db_url, base=base)
             report = verify_restored_database(scratch_db_url)
