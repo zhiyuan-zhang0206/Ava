@@ -60,6 +60,25 @@ class ServiceSettings(_ServiceRuntimeSettings):
         },
     )
 
+    labeler_max_chars: int = Field(
+        default=64,
+        gt=0,
+        alias="AVA_LABELER_MAX_CHARS",
+        description=(
+            "Character ceiling for an auto-generated agent label: the model is "
+            "asked for a label of at most this many characters, and the output is "
+            "truncated to the same number. 64 is a readable single line in the "
+            "fleet view — long enough to distinguish one task from another, short "
+            "enough that labels scan side by side."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     heartbeat_pidfile: Path = Field(
         default_factory=lambda: _unit_home() / "run" / "heartbeat.pid",
         alias="AVA_HEARTBEAT_PIDFILE",

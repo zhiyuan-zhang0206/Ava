@@ -37,16 +37,16 @@ from langchain_core.messages import AIMessage
 
 import services.labeler.labeler as labeler_module
 from services.labeler.labeler import (
-    _LABEL_SYSTEM_PROMPT,
-    LABEL_MAX_CHARS,
     _rejection_reason,
+    _system_prompt,
     generate_label_async,
 )
+from shared.config import settings
 from shared.db import create_agent
 
 # The nine outputs #178 recorded from real runs: three observed landing in
 # `agents.label` on the preview cluster, six from replaying the stored prompts
-# through `_LABEL_SYSTEM_PROMPT`. All are already 64-char-truncated by
+# through the labeler's system prompt. All are already 64-char-truncated by
 # `_normalize` — that is the exact string that reached the database.
 _ISSUE_178_OUTPUTS = [
     "I'll systematically test the preview cluster's frontend as a ske",
@@ -61,7 +61,7 @@ _ISSUE_178_OUTPUTS = [
 ]
 
 # Real production labels. Deliberately includes the machine-protocol ones that
-# are exactly LABEL_MAX_CHARS long and contain `<yes|no>` placeholders, and the
+# are exactly 64 characters long (the default limit) and contain `<yes|no>` placeholders, and the
 # one that is a verbatim prefix of its own prompt: they are the measured
 # counter-examples to the three rules this change considered and dropped (see
 # `_rejection_reason`'s docstring).
@@ -210,12 +210,19 @@ class TestRejectionReason:
         assert _rejection_reason("I'll validate the timezone configuration") == "assistant_voice"
 
     def test_length_alone_is_not_a_rejection(self) -> None:
-        """#178 suggested treating an exactly-LABEL_MAX_CHARS output as a
+        """#178 suggested treating an output at the exact character limit as a
         failure. 16 of the 287 real production labels are exactly that long —
         the rule was measured and dropped, and this pins that it stays dropped."""
         exactly_max = "DRIVE_PROBE_RESULT mounted=<yes|no> writable=<yes|no> path=<abso"
-        assert len(exactly_max) == LABEL_MAX_CHARS
+        assert len(exactly_max) == settings.services.labeler_max_chars
         assert _rejection_reason(exactly_max) is None
+
+    def test_character_limit_follows_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The ceiling is cluster config, resolved per call: a shortened limit
+        reaches both the truncation and the prompt handed to the model."""
+        monkeypatch.setattr(settings.services, "labeler_max_chars", 10)
+        assert labeler_module._normalize("x" * 50) == "x" * 10
+        assert "at most 10 characters" in _system_prompt()
 
     def test_rejects_a_fenced_code_block_opener(self) -> None:
         """Replaying the three real preview prompts through the old default
@@ -233,7 +240,7 @@ class TestRejectionReason:
         """Observed while measuring model candidates: the model repeated its own
         instruction instead of applying it, and `_normalize` truncated that to
         64 characters like any other output."""
-        echoed = _LABEL_SYSTEM_PROMPT[:LABEL_MAX_CHARS]
+        echoed = _system_prompt()[: settings.services.labeler_max_chars]
         assert _rejection_reason(echoed) == "instruction_echo"
 
     def test_a_short_label_sharing_an_opening_word_survives(self) -> None:
