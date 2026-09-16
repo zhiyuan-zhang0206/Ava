@@ -86,6 +86,9 @@ describe("read-model repair", () => {
   it("does not postpone deadlines under continuous hints or conflate agent keys", async () => {
     vi.useFakeTimers();
     const client = new QueryClient();
+    client.setQueryData(["agent-detail", 1], "cached");
+    client.setQueryData(["agent-detail", 2], "cached");
+    client.setQueryData(["roster"], "cached");
     const invalidate = vi.spyOn(client, "invalidateQueries");
     const repairs = createQueryRepairScheduler(client);
     for (let n = 0; n < 10; n += 1) {
@@ -102,6 +105,9 @@ describe("read-model repair", () => {
   it("disposal removes scheduled repairs", async () => {
     vi.useFakeTimers();
     const client = new QueryClient();
+    client.setQueryData(["agent-detail", 1], "cached");
+    client.setQueryData(["agent-detail", 2], "cached");
+    client.setQueryData(["roster"], "cached");
     const invalidate = vi.spyOn(client, "invalidateQueries");
     const repairs = createQueryRepairScheduler(client);
     repairs.request(["roster"]);
@@ -110,4 +116,17 @@ describe("read-model repair", () => {
     expect(invalidate).not.toHaveBeenCalled();
     client.clear();
   });
+});
+
+
+it("does not allocate timers for uncached agents in a fleet-wide lifecycle burst", async () => {
+  vi.useFakeTimers();
+  const client = new QueryClient();
+  const repairs = createQueryRepairScheduler(client);
+  const before = vi.getTimerCount();
+  for (let id = 0; id < 10_000; id += 1) repairs.request(["agent-detail", id]);
+  expect(vi.getTimerCount()).toBe(before);
+  expect(client.getQueryCache().getAll()).toHaveLength(0);
+  await vi.advanceTimersByTimeAsync(200);
+  repairs.dispose(); client.clear();
 });

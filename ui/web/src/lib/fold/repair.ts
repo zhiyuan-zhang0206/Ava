@@ -48,7 +48,7 @@ export function createQueryRepairScheduler(client: QueryClient) {
 
   return {
     request(key: QueryKey, immediate = false): void {
-      if (disposed) return;
+      if (disposed || client.getQueryCache().findAll({ queryKey: key }).length === 0) return;
       const id = JSON.stringify(key);
       let repair = repairs.get(id);
       if (!repair) {
