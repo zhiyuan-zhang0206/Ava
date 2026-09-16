@@ -24,7 +24,9 @@ from __future__ import annotations
 
 import sys
 import time
+from functools import partial
 
+from cli.commands._pause_resume import StartDelegation
 from cli.commands._start_gui_chain import _rehomeable_domain
 from shared.cluster import session_name
 from shared.deploy_timing import SERVICE_READY_TIMEOUT_S
@@ -80,13 +82,13 @@ def _maybe_handover_start(
     updater_telemetry: bool,
     parent_handoff: bool,
     readiness_gate: bool,
-) -> int | None:
+) -> int | StartDelegation | None:
     """Hand the bring-up to the GUI domain when this start must not run in place.
 
-    Returns the exit code the handed-over run concludes with, or None when this
-    start is not handover-eligible — the caller proceeds with the normal path,
-    which prints the R2a warning. A failed handover (job not ensureable) falls
-    back the same way, loudly.
+    Return a deferred launch for the lifecycle wrapper to run after releasing
+    its lock, an early refusal, or None for an in-place start. A failed GUI
+    launch fails closed: starting here would create the wrong-domain services
+    this handover exists to prevent.
     """
     if parent_handoff or updater_telemetry or not persist_services or disabled_services:
         return None
@@ -103,7 +105,6 @@ def _maybe_handover_start(
     if _rehomeable_domain(roles) is None:
         return None
 
-    t0 = time.time()
     from cli.commands._session_lifecycle import _launch_roster
     from shared.disabled_services import resolve_launch_skip
 
@@ -118,19 +119,31 @@ def _maybe_handover_start(
     if rc != 0:
         return rc
 
+    return StartDelegation(
+        partial(
+            _launch_in_gui_domain, roles, launch_skip=launch_skip, readiness_gate=readiness_gate
+        )
+    )
+
+
+def _launch_in_gui_domain(
+    roles: MachineRoles, *, launch_skip: set[str], readiness_gate: bool
+) -> int:
+    """Kick and observe without owning the child's lifecycle lock or hold."""
     from shared.os_autostart import ensure_via_gui_domain
 
+    t0 = time.time()
     try:
         ok, detail = ensure_via_gui_domain()
     except Exception as exc:  # a start must not crash on its own handover
         ok, detail = False, f"{type(exc).__name__}: {exc}"
     if not ok:
         print(
-            f"  ! GUI-domain handover unavailable ({detail}); bringing services up in this "
-            "chain — they will inherit its launchd domain",
+            f"  ! GUI-domain handover unavailable ({detail}); startup refused. "
+            "Repair the GUI-domain job and retry ava start.",
             file=sys.stderr,
         )
-        return None
+        return 1
     print(
         "\n→ this start chain is outside the macOS GUI login session; handed the bring-up "
         f"to the cluster's GUI-domain job — {detail}"

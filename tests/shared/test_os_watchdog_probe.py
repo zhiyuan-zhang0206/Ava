@@ -27,6 +27,7 @@ def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 @pytest.fixture(autouse=True)
 def _stable_slug(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(probe, "_home_slug", lambda: "ava-deadbeef")
+    monkeypatch.setattr("shared.platform.launchd_job_label", lambda: None)
 
 
 # --- labels ---------------------------------------------------------------
@@ -95,7 +96,9 @@ def test_register_macos_writes_and_bootstraps(
 
     def _run(cmd, **_kw):  # type: ignore[no-untyped-def]
         calls.append(cmd)  # pyright: ignore[reportUnknownArgumentType]
-        return type("R", (), {"returncode": 0, "stderr": "", "stdout": ""})()
+        return type(
+            "R", (), {"returncode": 113 if cmd[1] == "print" else 0, "stderr": "", "stdout": ""}
+        )()
 
     monkeypatch.setattr(probe.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
     assert probe._register_macos("gateway", 60) == 0
@@ -107,8 +110,7 @@ def test_register_macos_writes_and_bootstraps(
         / f"{probe.probe_label('gateway', 'ava-deadbeef')}.plist"
     )
     assert plist.exists()
-    # bootout-then-bootstrap, so a changed interval actually takes effect.
-    assert [c[1] for c in calls] == ["bootout", "bootstrap"]
+    assert [c[1] for c in calls] == ["print", "bootstrap"]
 
 
 def test_register_macos_reports_bootstrap_failure(
@@ -121,7 +123,7 @@ def test_register_macos_reports_bootstrap_failure(
     monkeypatch.setattr(probe, "ava_binary_path", lambda: "/x/ava")
 
     def _run(cmd, **_kw):  # type: ignore[no-untyped-def]
-        rc = 0 if cmd[1] == "bootout" else 1
+        rc = 113 if cmd[1] == "print" else 1
         return type("R", (), {"returncode": rc, "stderr": "boom", "stdout": ""})()
 
     monkeypatch.setattr(probe.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]

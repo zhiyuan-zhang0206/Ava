@@ -14,7 +14,7 @@ import pytest
 from cli.commands import _temporary_stop as command
 from cli.commands import stop as entry
 from cli.commands._maintenance_stop import OwnedProcess
-from cli.commands._pause_resume import resume_after_start
+from cli.commands._pause_resume import StartDelegation, resume_after_start
 from cli.parsers import build_parser
 from ops import agent_pause
 from shared import maintenance, pause_owner, start_serving
@@ -157,6 +157,29 @@ def test_normal_start_releases_hold_only_after_successful_readiness(
     assert maintenance.held()
     assert start(0) == 0
     assert not maintenance.held()
+
+
+def test_delegated_start_leaves_authorization_and_resume_with_child(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    drained()
+    monkeypatch.setattr(start_serving, "is_serving", lambda: True)
+    unpause = MagicMock()
+    monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", unpause)
+
+    def child() -> int:
+        assert not maintenance.start_authorized()
+        assert maintenance.held()
+        return 0
+
+    @resume_after_start
+    def start() -> StartDelegation:
+        assert maintenance.start_authorized()
+        return StartDelegation(child)
+
+    assert start() == 0
+    assert maintenance.held()
+    unpause.assert_not_called()
 
 
 def test_plain_start_and_parser_need_no_manual_operation() -> None:
