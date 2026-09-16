@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from typing import NamedTuple
 from uuid import UUID, uuid4
 
-from ops.agent_pause_probe import host_identity, host_running
+from ops.agent_pause_probe import HostIdentity, host_identity, host_running
 from shared import maintenance, maintenance_cohort, pause_owner
 from shared.db import connect, publish_inbound_wake
 from shared.hold_driver import HoldDriver
@@ -20,6 +20,12 @@ from shared.machine import machine_name, machine_role
 from shared.maintenance_state import MaintenanceHold
 
 PAUSE_TIMEOUT_SECONDS = 300.0
+
+# The retry cadence for the bounded wait on an in-flight agent lifecycle
+# command (task #3591). Every attempt re-runs cohort preparation inside its
+# row-locked transaction, so the interval trades retry cost against how
+# quickly a resolved command is observed.
+_LIFECYCLE_WAIT_POLL_SECONDS = 5.0
 
 
 def _hold(holder: str, at: datetime) -> MaintenanceHold:
@@ -33,12 +39,41 @@ def _wake(hold: MaintenanceHold) -> None:
         publish_inbound_wake(agent, "maintenance")
 
 
+def _lifecycle_wait_seconds() -> float:
+    """The bounded wait when preparation meets an in-flight lifecycle command.
+
+    Task #3591: 0 disables the wait (the pre-#3591 refuse-immediately
+    behavior); maintenance-authored commands never wait regardless.
+    """
+    from shared.config import settings
+
+    return settings.gateway.pause_lifecycle_wait_seconds
+
+
+def _emit_lifecycle_wait(waited: float, outcome: str, agents: tuple[int, ...]) -> None:
+    """One row per wait episode (task #3591): duration, outcome, agents waited on."""
+    from shared import telemetry
+
+    telemetry.emit(
+        "telemetry",
+        "pause_lifecycle_wait",
+        attributes={"waited_s": round(waited, 3), "outcome": outcome, "agents": list(agents)},
+    )
+
+
 def _prepare(holder: str, at: datetime, *, driver: HoldDriver | None = None) -> None:
     """Publish the hold and enqueue restarts.
 
     `driver` is the shepherding identity of an operator-side entry (task
     #3270); daemon-driven pauses pass None and keep the handoff/outcome as
     their ownership evidence.
+
+    An unfinished agent lifecycle command belonging to another actor is
+    bounded-waited (task #3591): preparation retries until it resolves, up to
+    `settings.gateway.pause_lifecycle_wait_seconds` (0 refuses immediately),
+    and only then aborts with the wait result in the message. A
+    maintenance-authored command or claimed ordinary work still refuses
+    immediately.
     """
     roles = machine_role()
     identity = host_identity() if "agent-runner" in roles and host_running() else None
@@ -59,19 +94,62 @@ def _prepare(holder: str, at: datetime, *, driver: HoldDriver | None = None) -> 
                 holder, at, current, MaintenanceHold("draining"), refresh_driver=driver is not None
             )
         return
-    with connect() as conn:
-        hold = maintenance_cohort.prepare(
-            conn,
-            machine=machine_name(),
-            host_owner=identity.owner if identity is not None else None,
-            holder=holder,
-            acquired_at=at,
-            host_absent=identity is None,
-            driver=driver,
-        )
+    hold = _prepare_cohort(holder, at, identity, driver=driver)
     if identity is not None and host_identity().owner != identity.owner:
         raise RuntimeError("agent-host changed boot during preparation; hold retained")
     _wake(hold)
+
+
+def _prepare_cohort(
+    holder: str, at: datetime, identity: HostIdentity | None, *, driver: HoldDriver | None
+) -> MaintenanceHold:
+    """Prepare the cohort, bounded-waiting out in-flight lifecycle commands.
+
+    Every retry re-runs preparation — including the lifecycle-collision check —
+    inside a fresh row-locked transaction under the same `(holder,
+    acquired_at)` CAS, so a command that resolves during the wait cannot
+    double-admit: the admission decision is always made under the locks it
+    will act on (task #3591).
+    """
+    bound = _lifecycle_wait_seconds()
+    deadline = time.monotonic() + bound
+    started: float | None = None
+    waited_on: tuple[int, ...] = ()
+    while True:
+        try:
+            with connect() as conn:
+                hold = maintenance_cohort.prepare(
+                    conn,
+                    machine=machine_name(),
+                    host_owner=identity.owner if identity is not None else None,
+                    holder=holder,
+                    acquired_at=at,
+                    host_absent=identity is None,
+                    driver=driver,
+                )
+        except maintenance_cohort.LifecycleCollisionError as collision:
+            if started is None:
+                started = time.monotonic()
+            waited_on = collision.agent_ids
+            waited = time.monotonic() - started
+            if not collision.waitable:
+                _emit_lifecycle_wait(waited, "refused", waited_on)
+                raise RuntimeError(
+                    f"{collision}; waited {waited:.1f}s — refusing without a wait "
+                    "(maintenance-class or non-lifecycle work)"
+                ) from collision
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                _emit_lifecycle_wait(waited, "exceeded", waited_on)
+                raise RuntimeError(
+                    f"{collision}; waited {waited:.1f}s, still unfinished after the "
+                    f"{bound:g}s bound — aborting (hold retained)"
+                ) from collision
+            time.sleep(min(_LIFECYCLE_WAIT_POLL_SECONDS, remaining))
+            continue
+        if started is not None:
+            _emit_lifecycle_wait(time.monotonic() - started, "resolved", waited_on)
+        return hold
 
 
 def _drain(holder: str, at: datetime, timeout: float) -> None:
