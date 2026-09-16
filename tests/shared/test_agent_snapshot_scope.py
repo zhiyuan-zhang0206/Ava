@@ -147,7 +147,9 @@ def test_roster_attention_skips_resolved_and_unrelated_notices(db_conn: psycopg.
         """)
         cur.execute("ANALYZE agent_notices")
         cur.execute(sql.SQL("EXPLAIN (ANALYZE, FORMAT JSON) ") + _LIVE_SQL)
-        plan = cur.fetchone()[0][0]["Plan"]
+        row = cur.fetchone()
+        assert row is not None
+        plan: dict[str, Any] = row[0][0]["Plan"]
 
     def visited_notices(node: dict[str, Any]) -> float:
         visited = 0
