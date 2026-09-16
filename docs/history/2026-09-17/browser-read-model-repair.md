@@ -8,3 +8,6 @@ events received during a read require another read after it completes.
 This scheduler is deliberately a query-cache owner, not a durable event bus.
 It uses authoritative domain reads and bounded per-active-key scheduling state;
 it does not infer event ordering or persistence from transport arrival time.
+
+Selected-detail ownership follows in
+[selected-agent-stream-ownership.md](selected-agent-stream-ownership.md).

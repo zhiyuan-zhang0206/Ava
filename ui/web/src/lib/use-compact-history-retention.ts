@@ -9,7 +9,7 @@
 // first (`hasMoreOlder` only turns true with it), so a pending request
 // retries as the window state changes; misses are budgeted, then dropped.
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 
 import { useTimelineStore } from "./timeline-store";
 import { useUserSettings } from "./use-user-settings";
@@ -31,6 +31,8 @@ const MAX_RETAINED_SESSIONS = 3;
 export function useCompactHistoryRetention(options: {
   /** Open thread; null when no agent is selected. */
   agentId: number | null;
+  /** Hidden views suspend history reads; visibility resumes the same intent. */
+  isVisible: boolean;
   /** Scroll-up fetch; resolves true when a fetch actually ran. */
   loadOlderSegment: () => Promise<boolean>;
   hasMoreOlder: boolean;
@@ -38,7 +40,7 @@ export function useCompactHistoryRetention(options: {
   /** Current item count — window growth re-invokes a blocked attempt. */
   itemCount: number;
 }): void {
-  const { agentId, loadOlderSegment, hasMoreOlder, loadingOlder, itemCount } = options;
+  const { agentId, isVisible, loadOlderSegment, hasMoreOlder, loadingOlder, itemCount } = options;
   const compactReplaceSeq = useTimelineStore((s) => s.compactReplaceSeq);
   const compactReplaceAgent = useTimelineStore((s) => s.compactReplaceAgent);
 
@@ -55,11 +57,22 @@ export function useCompactHistoryRetention(options: {
   const retentionRef = useRef<{ thread: number; remaining: number; attempts: number } | null>(
     null,
   );
-  const retentionInFlightRef = useRef(false);
+  const retentionInFlightRef = useRef<{ pending: object } | null>(null);
+  const ownerRef = useRef<object | null>(null);
+  // Selection/visibility ownership is separate from the compact edge. A late
+  // completion cannot consume a newer run, including A-to-B-to-A or hide/show.
+  useLayoutEffect(() => {
+    const owner = agentId !== null && isVisible ? {} : null;
+    ownerRef.current = owner;
+    retentionInFlightRef.current = null;
+    if (retentionRef.current?.thread !== agentId) retentionRef.current = null;
+    return () => { ownerRef.current = null; };
+  }, [agentId, isVisible]);
   const lastRetentionSeqRef = useRef(useTimelineStore.getState().compactReplaceSeq);
   const runRetention = useCallback(() => {
     const pending = retentionRef.current;
-    if (pending === null || retentionInFlightRef.current) return;
+    const owner = ownerRef.current;
+    if (!isVisible || pending === null || owner === null || retentionInFlightRef.current?.pending === pending) return;
     if (agentId == null || pending.thread !== agentId) {
       retentionRef.current = null;
       return;
@@ -67,14 +80,15 @@ export function useCompactHistoryRetention(options: {
     const st = useTimelineStore.getState();
     if (st.activeThreadId !== agentId) return;
     if (!st.hasMoreOlder || st.loadingOlder) return; // wait for a loadable window
-    retentionInFlightRef.current = true;
+    const run = { pending };
+    retentionInFlightRef.current = run;
     void (async () => {
       try {
-        while (retentionRef.current !== null && retentionRef.current.thread === agentId) {
+        while (ownerRef.current === owner && retentionRef.current === pending) {
           if (useTimelineStore.getState().activeThreadId !== agentId) return;
           const fired = await loadOlderSegment();
-          const current = retentionRef.current;
-          if (current.thread !== agentId) return;
+          if (ownerRef.current !== owner || retentionRef.current !== pending) return;
+          const current = pending;
           if (!fired) {
             current.attempts += 1;
             if (current.attempts >= RETENTION_MAX_ATTEMPTS) retentionRef.current = null;
@@ -84,10 +98,10 @@ export function useCompactHistoryRetention(options: {
           if (current.remaining <= 0) retentionRef.current = null;
         }
       } finally {
-        retentionInFlightRef.current = false;
+        if (retentionInFlightRef.current === run) retentionInFlightRef.current = null;
       }
     })();
-  }, [agentId, loadOlderSegment]);
+  }, [agentId, isVisible, loadOlderSegment]);
   useEffect(() => {
     if (compactReplaceSeq === lastRetentionSeqRef.current) return;
     lastRetentionSeqRef.current = compactReplaceSeq;

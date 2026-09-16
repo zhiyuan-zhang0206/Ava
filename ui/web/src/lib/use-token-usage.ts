@@ -14,9 +14,8 @@
 // per LLM call.
 //
 // SSE subscription uses the AgentEventStreamProvider shared active-agent
-// connection (/api/system/all?agents=… while visible, the same throttled
-// stream as useTimeline, not two separate connections). Hidden tabs receive
-// a 7s poll signal that invalidates this REST snapshot.
+// connection (the same throttled stream as useTimeline). Reopening after a
+// hidden period repairs the selected snapshot; hidden pages do not poll.
 //
 // Token count has migrated from local useState to Zustand store.tokenUsage.
 
@@ -61,16 +60,14 @@ export function useTokenUsage(
   const seenParseErrors = useRef<Set<string>>(new Set());
 
   // -- React Query: token-usage snapshot, cached by agentId --
-  // staleTime 30s: within 30s, switch-back uses cache directly
-  // gcTime 30min: keep inactive thread cache so returning from another
-  //   page restores instantly, not just a quick sidebar agent-switch
+  // Inactive selections release their cached snapshots.
   const tokenQuery = useQuery({
     queryKey: ["token-usage", agentId] as const,
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- the `enabled` gate below guarantees agentId is set before queryFn runs (standard TanStack idiom the types cannot see)
     queryFn: () => api.getTokenUsage(agentId!),
     enabled: agentId != null,
-    staleTime: 30_000,
-    gcTime: 30 * 60_000,
+    staleTime: 0,
+    gcTime: 0,
     // A transient checkpoint read failure (gateway restart / DB reconnect
     // window) is served as 0/0 by the backend — the SSE token_usage push
     // refreshes the UI only while the agent is actually working, so an idle
@@ -107,15 +104,6 @@ export function useTokenUsage(
         cached.soft_compact_tokens,
         cached.hard_compact_tokens,
       );
-      // Force the background refresh the line above promises: within
-      // staleTime (30s) a key change on an already-mounted observer does NOT
-      // refetch (TanStack gates that path on staleness), and an idle agent
-      // emits no SSE token_usage event to repair the value — so without this
-      // invalidate the context bar would keep the previous visit's snapshot
-      // until the next switch. Mirrors useTimeline's invalidate-on-switch-back;
-      // a cold key is skipped (the enabled observer fetches on its own), and a
-      // fetch already in flight is deduped by the query cache.
-      void queryClient.invalidateQueries({ queryKey: ["token-usage", agentId] });
     } else {
       // Cold cache: reset to 0; React Query is fetching
       applyTokenUsage(0, 0, 0, 0, 0);
@@ -155,7 +143,7 @@ export function useTokenUsage(
   const onConnectionEvent = useCallback(
     (ev: ConnectionEvent) => {
       switch (ev.type) {
-        case "poll":
+        case "open":
           if (agentId != null) {
             void queryClient.invalidateQueries({ queryKey: ["token-usage", agentId] });
           }
@@ -167,7 +155,6 @@ export function useTokenUsage(
           showError(`Token usage SSE parse failed: ${key}`);
           return;
         }
-        case "open":
         case "reconnecting":
         case "closed":
           return;
