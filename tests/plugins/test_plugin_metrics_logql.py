@@ -118,6 +118,26 @@ def test_dashboard_json_matches_registrations() -> None:
         assert all(t["queryType"] == qtype for t in targets)
 
 
+def test_plugin_panels_live_under_their_plugin_rows() -> None:
+    """One row per metric-shipping plugin, row header = plugin name — the
+    generated two-tier layout, restored by task #3689: every plugin's Grafana
+    panels must resolve to the section titled with that plugin, so a panel
+    drifting into another section — or a plugin row being renamed or dropped —
+    fails here."""
+    _load_all()
+    specs = [s for s in registered_metrics() if "grafana" in s.output]
+    path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
+    data = json.loads(path.read_text())
+    rows = sorted((p["gridPos"]["y"], p["title"]) for p in data["panels"] if p.get("type") == "row")
+    by_title = {p.get("title"): p for p in data["panels"]}
+    for spec in specs:
+        y = by_title[spec.title]["gridPos"]["y"]
+        section = max(row for row in rows if row[0] <= y)[1]
+        assert section == spec.plugin, (
+            f"{spec.title!r} sits under {section!r}, not its plugin row {spec.plugin!r}"
+        )
+
+
 def test_dashboard_json_matches_core_registrations() -> None:
     """Every core Grafana spec has one exact dashboard counterpart.
 
