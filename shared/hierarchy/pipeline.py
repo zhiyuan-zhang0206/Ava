@@ -187,7 +187,10 @@ def materialize(
     generated = reused = failed_nonalias = src_tokens = out_tokens = 0
     # One generate_nodes call per chunk; the chunk bounds only how often the
     # deadline is checked (a chunk ≈ max_concurrent * 4 model calls), never
-    # the per-call fan-out itself.
+    # the per-call fan-out itself. The 4 is a granularity choice, not a
+    # tuned value: a chunk runs minutes at most, well inside the
+    # budget-to-deadline margin, and shrinking it further would only trade
+    # that granularity for more per-chunk bookkeeping.
     chunk_size = max(1, max_concurrent * 4)
 
     for level in range(1, sealed.max_level + 1):
