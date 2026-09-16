@@ -875,6 +875,11 @@ _PER_TEST_TRUNCATE_TABLES = (
     "checkpoint_blobs",
     "checkpoint_writes",
     "checkpoints",
+    # The understanding tree (task #3704): derived from checkpoints, and its
+    # agent_id is a plain BIGINT with no FK path into the tables above — a
+    # leaked row would survive into the next test (a stale layer in a
+    # run-timeline read).
+    "understanding_nodes",
     "user_settings",  # no FK, per-test key/value data (audit round-2 cc-docs-tests P2)
     "web_sessions",
     # The cluster extension registry (issue #39 S2). `extensions` FKs to
