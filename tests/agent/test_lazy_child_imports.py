@@ -15,7 +15,10 @@ prepended to `sys.path`) and reports the heavy modules the touch left in
   or `agent.state` (they load only when a state snapshot exists);
 - importing `agent._process_boot` must stay off the LM stack;
 - importing `shared.lm.registry` (the media-capability data leaf) must not
-  pull `shared.lm.factory` / `shared.lm.provider_api`.
+  pull `shared.lm.factory` / `shared.lm.provider_api`;
+- the provider-registration surface (`shared.lm.provider_api` plus the `lm_*`
+  provider plugins loaded by `ensure_provider_plugins_loaded`) must stay off
+  the LM chat-model stack (task #3633).
 
 The lazy re-export stays a working API: `from agent.graph import build_graph`
 and friends resolve through `__getattr__` (the functional probe).
@@ -158,6 +161,39 @@ print(json.dumps({"loaded": loaded}))
 def test_registry_media_resolution_is_a_data_leaf() -> None:
     report = _run_clean_probe(_REGISTRY_LEAF)
     assert report["loaded"] == [], f"data leaf pulled the provider stack: {report['loaded']}"
+
+
+_PROVIDER_REGISTRATION_SURFACE = """
+import shared.lm.provider_api  # noqa: F401
+
+heavy = sorted(
+    name for name in sys.modules if name.startswith(("langchain", "langgraph", "langsmith"))
+)
+print(json.dumps({"heavy": heavy}))
+"""
+
+
+def test_provider_registration_surface_stays_off_the_lm_stack() -> None:
+    report = _run_clean_probe(_PROVIDER_REGISTRATION_SURFACE)
+    assert report["heavy"] == [], f"the registration surface pulled the LM stack: {report['heavy']}"
+
+
+_PROVIDER_PLUGIN_LOAD = """
+from shared.lm import provider_api
+from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+
+ensure_provider_plugins_loaded()
+heavy = sorted(
+    name for name in sys.modules if name.startswith(("langchain", "langgraph", "langsmith"))
+)
+print(json.dumps({"bindings": len(provider_api.REGISTRY.bindings), "heavy": heavy}))
+"""
+
+
+def test_loading_provider_plugins_stays_off_the_lm_stack() -> None:
+    report = _run_clean_probe(_PROVIDER_PLUGIN_LOAD)
+    assert report["bindings"] != 0, "provider registration did not run — the probe is vacuous"
+    assert report["heavy"] == [], f"provider plugins pulled the LM stack: {report['heavy']}"
 
 
 _GRAPH_REEXPORTS = """

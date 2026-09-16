@@ -137,6 +137,25 @@ _TYPE_CHECKING_ALLOWED: frozenset[str] = frozenset(
         # signatures for static checkers without putting them back on the import
         # path (task #3585).
         "agent/graph/__init__.py",
+        # LM provider registration surface: the chat-model stack is a heavy
+        # import on the exec-child boot path, which never uses the type
+        # (annotation-only references; task #3633).
+        "shared/lm/provider_api.py",
+        "shared/lm/factory.py",
+        "ava_builtins/plugins/lm_alibaba/provider.py",
+        "ava_builtins/plugins/lm_anthropic/provider.py",
+        "ava_builtins/plugins/lm_deepseek/provider.py",
+        "ava_builtins/plugins/lm_google/provider.py",
+        "ava_builtins/plugins/lm_moonshot/provider.py",
+        "ava_builtins/plugins/lm_openai/provider.py",
+        "ava_builtins/plugins/lm_xiaomi/provider.py",
+        "ava_builtins/plugins/lm_zhipu/provider.py",
+        # LangChain message-stack trim on the same registration path: message
+        # types appear in annotations only, or (pricing) import at the call
+        # site of a runtime isinstance (task #3633).
+        "shared/lm/stop.py",
+        "shared/lm/pricing.py",
+        "shared/message_kwargs.py",
     }
 )
 

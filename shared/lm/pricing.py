@@ -76,9 +76,14 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
-from langchain_core.messages import AIMessage, AnyMessage
+if TYPE_CHECKING:
+    # Annotation-only at module scope (`tally_tokens`); the runtime
+    # `isinstance(m, AIMessage)` imports AIMessage at the call site. The
+    # provider-registration path must not pull the LangChain message stack
+    # (exec-child boot, task #3633; `_TYPE_CHECKING_ALLOWED`).
+    from langchain_core.messages import AnyMessage
 
 
 @dataclass(frozen=True)
@@ -550,6 +555,8 @@ def tally_tokens(
     — distinguishes "unknown" from "0 tokens"; cost_usd also returns
     None, so JSONL clearly shows data missing rather than a free call.
     """
+    from langchain_core.messages import AIMessage
+
     tok_in = 0
     tok_out = 0
     tok_cached = 0
