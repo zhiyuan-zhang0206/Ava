@@ -24,8 +24,8 @@ Source of truth = services in `build_services()` of `ops/spec.py` whose `Service
 | milvus | Vector database (memory-indexer backend) | [[milvus.ava.okf.md]] |
 | memory-indexer | memory pool vector index | [[memory_indexer.ava.okf.md]] |
 | labeler | agent auto-naming | [[labeler.ava.okf.md]] |
-| pg-backup | Daily local Postgres backup (scheduler daemon, ServiceSpec service) | [[backup.ava.okf.md]] |
-| pitr-uploader | Disabled-by-default encrypted immutable GCS WAL uploader | [[backup.ava.okf.md]] |
+| pg-backup | Daily local Postgres backup (scheduler daemon, ServiceSpec service) | [[services/gateway_side/backup/backup.ava.okf.md]] |
+| pitr-uploader | Disabled-by-default encrypted immutable GCS WAL uploader | [[services/gateway_side/backup/backup.ava.okf.md]] |
 
 ## Also Owned by Gateway Capability, Documented Elsewhere
 The following services also run on the gateway capability (core `_GATEWAY` entries or plugin-folded-in entries), but their concept docs live in their own subtrees and are not repeated here:

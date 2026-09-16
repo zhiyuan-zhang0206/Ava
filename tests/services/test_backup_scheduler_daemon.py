@@ -8,6 +8,7 @@ import os
 import socket
 import subprocess
 import sys
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -15,6 +16,16 @@ import pytest
 
 from services.backup_scheduler import daemon
 from shared import daemon_health
+
+
+@pytest.fixture(autouse=True)
+def inline_jobs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cadence tests replace only the process boundary; shutdown tests spawn it."""
+
+    async def run(job: Callable[[], object]) -> None:
+        job()
+
+    monkeypatch.setattr(daemon, "run_job", run)
 
 
 def _at(hour: int = 3, minute: int = 0) -> datetime:

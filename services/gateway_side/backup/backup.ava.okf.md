@@ -78,3 +78,5 @@ host's: reading a host timezone can make a current dump appear to be future.
   credential or production-enable path; remote execution remains future work.
   The second gate also requires an explicit local least-privilege replication
   URL; the ordinary cluster owner remains `NOSUPERUSER` without `REPLICATION`.
+
+[[shutdown.ava.okf.md|Shutdown ownership]]
