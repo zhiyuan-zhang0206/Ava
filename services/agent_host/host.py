@@ -25,9 +25,11 @@ those resources close. Database outages retain the original task; recovery check
 its ownership before repairing and continuing, without creating a new inbound.
 
 Each completed invocation flushes its checkpoint before linking it to the current
-trace. Expected provider/compaction failures persist halted state; unexpected errors
-remain visible and propagate. Configuration rejection leaves pending work durable
-for a subsequent scan after the configuration is corrected.
+trace. Expected provider/compaction failures persist halted state, and their
+settled abort reconciles the turn's claimed inbounds at once
+(`host_abort_reconcile_enabled`), so no row waits for a next boot; unexpected
+errors remain visible and propagate. Configuration rejection leaves pending work
+durable for a subsequent scan after the configuration is corrected.
 """
 
 from __future__ import annotations
@@ -57,7 +59,6 @@ from agent.hosted_ownership import (
     reap_crash_corpses,
     release_hosted_owner,
     renew_hosted_owner,
-    settle_and_stamp_turn,
     settle_hosted_runtime,
 )
 from agent.impersonation import (
@@ -86,6 +87,7 @@ from services.agent_host.runtime import (
     _StoredConfig,
     admit_stored_model,
 )
+from services.agent_host.settlement import close_hosted_turn
 from services.agent_host.stall_guard import run_invocation_with_stall_guard
 from shared import maintenance
 from shared.config import settings
@@ -334,11 +336,8 @@ class AgentHost:
                 raise
             finally:
                 self._cache_after_turn(agent_id)
-                await settle_and_stamp_turn(
-                    self._control_pool,
-                    incarnation,
-                    exited=outcome.exited,
-                    crashed=outcome.crashed,
+                await close_hosted_turn(
+                    self._pool, self._control_pool, self._checkpointer, incarnation, outcome
                 )
 
     async def _run_held_controls(self, agent_id: int, status: str) -> None:
@@ -696,7 +695,7 @@ class AgentHost:
                                 pending_failure,
                             )
                             await attach_trace_checkpoint_ref(self._graph, ctx, agent_id)
-                        return TurnOutcome(exited=False, crashed=True)
+                        return TurnOutcome(exited=False, crashed=True, aborted=True)
                     try:
                         result: dict[str, object] = await run_invocation_with_stall_guard(
                             self._graph,
@@ -722,7 +721,7 @@ class AgentHost:
                                 pending_failure,
                             )
                             await attach_trace_checkpoint_ref(self._graph, ctx, agent_id)
-                        return TurnOutcome(exited=False, crashed=True)
+                        return TurnOutcome(exited=False, crashed=True, aborted=True)
                     # The trace must remain current until its final checkpoint is
                     # durable; an N-step buffered ID is not yet readable by the UI.
                     async with database_phase():

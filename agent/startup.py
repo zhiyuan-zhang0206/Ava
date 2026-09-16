@@ -6,8 +6,9 @@
 - `_wrap_saver_writes_with_nstep_interval` — throttle checkpoint writes to
   every Nth super-step while keeping aput_writes in lockstep and exposing a
   final-state flush
-- `_reconcile_claimed_inbounds_at_startup` — finalize any 'claimed'
-  inbound rows left behind by the previous runtime of this agent
+- `_reconcile_claimed_inbounds_at_startup` — the inbound reconcile: finalize
+  any 'claimed' inbound rows the agent's last settled runtime step left
+  behind (cold admission, database recovery, or a hosted abort settlement)
 - `_notify_desktop_permissions_at_startup` — surface broken Screen Recording
   or Accessibility permission (detected at converge) to the user, exactly once
 - `reconcile_open_pages` — probe every open page's server and restore it
@@ -374,9 +375,12 @@ async def _reconcile_claimed_inbounds_at_startup(
     `reconcile_claimed_inbounds` so it can finalize any `'claimed'` rows
     left behind by interrupted work.
 
-    The host calls this under the admitted incarnation's single-flight, on
-    cold runtime construction or database recovery. The inbound owner lock
-    fences concurrent control decisions; the caller must retain that identity.
+    The name is historical: this is the inbound reconcile, not a startup-only
+    step. The host calls it under the admitted incarnation's single-flight on
+    cold runtime construction, on database recovery, and at a hosted turn's
+    settled abort — in the last case the flushed checkpoint the abort wrote is
+    exactly what is read back here. The inbound owner lock fences concurrent
+    control decisions; the caller must retain that identity.
 
     No prior checkpoint (brand-new agent) → no commits to confirm; reconcile
     is still called with an empty set so any unlikely stray `'claimed'`

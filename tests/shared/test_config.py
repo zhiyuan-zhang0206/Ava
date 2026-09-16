@@ -520,6 +520,7 @@ _REMOTE_WRITABLE_ALLOWLIST = frozenset(
         "delivery_watchdog_enabled",
         "exec_request_bounded_quarantine_enabled",
         "heartbeat_enabled",
+        "host_abort_reconcile_enabled",
         "machine_description",
         "permissions_helper_enabled",
         "permissions_helper_spawn",
