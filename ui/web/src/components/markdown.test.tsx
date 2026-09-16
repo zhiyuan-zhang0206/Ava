@@ -242,3 +242,56 @@ describe("CJK emphasis (remark-cjk-friendly, task #3314)", () => {
     expect(strongs[1].textContent).toBe("bold");
   });
 });
+
+// Single-tilde safety (task #3653): GFM strikethrough with the default
+// singleTilde paired the `~61G` and `~/work` of one sentence and struck the
+// text between them (user report). A lone `~` must stay literal; only the
+// double form may strike.
+describe("single tilde stays literal (task #3653)", () => {
+  it("renders the reported sentence without strikethrough", () => {
+    const { container } = render(
+      <ChatMarkdown content={"57 \u4e2a worktree \u5171 ~61G\u3002\u7ee7\u7eed\u76d8\u70b9\uff1aworktree \u7684\u5f52\u5c5e repo\u3001~/work \u5176\u4f59\u73af\u5883\u3001\u4ee5\u53ca Group Containers/eagle-local \u7b49\u533a\u57df\u3002"} />,
+    );
+    expect(container.querySelector("del")).toBeNull();
+    expect(container.textContent).toContain("~61G");
+    expect(container.textContent).toContain("~/work");
+  });
+
+  it("keeps a lone ~ pair literal in CJK text", () => {
+    const { container } = render(
+      <ChatMarkdown content={"\u4e2d\u6587 ~x~ \u4e2d\u6587"} />,
+    );
+    expect(container.querySelector("del")).toBeNull();
+    expect(container.textContent).toContain("~x~");
+  });
+
+  it("keeps ~~...~~ strikethrough, including emoji-adjacent", () => {
+    const { container } = render(
+      <ChatMarkdown content={"~~\u5b8c\u6210~~\u2705 \u548c \u2705~~\u5b8c\u6210~~"} />,
+    );
+    const dels = container.querySelectorAll("del");
+    expect(dels).toHaveLength(2);
+    expect(dels[0].textContent).toBe("\u5b8c\u6210");
+  });
+
+  it("only the double form strikes in a mixed line", () => {
+    const { container } = render(
+      <ChatMarkdown content={"~~a~~ \u548c ~b~ \u6df7\u5408"} />,
+    );
+    const dels = container.querySelectorAll("del");
+    expect(dels).toHaveLength(1);
+    expect(dels[0].textContent).toBe("a");
+  });
+
+  it("leaves tildes inside inline code alone", () => {
+    const { container } = render(
+      <ChatMarkdown content={"`~/work` \u548c `~61G` \u548c `~/.ava`"} />,
+    );
+    expect(container.querySelector("del")).toBeNull();
+    const codes = container.querySelectorAll("code");
+    expect(codes).toHaveLength(3);
+    expect(Array.from(codes).map((c) => c.textContent).join("|")).toBe(
+      "~/work|~61G|~/.ava",
+    );
+  });
+});
