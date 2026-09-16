@@ -205,6 +205,31 @@ def test_upsert_batch_saves_once_while_single_upserts_save_each_row(
         assert len(save_calls) == 1 + len(rows)
 
 
+def test_batch_rows_cap_follows_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The wire batch bound is cluster config, resolved at import: reloading
+    the app under a shortened value rebuilds the models with the shorter cap
+    (task #3696)."""
+    import importlib
+
+    from pydantic import ValidationError
+
+    import services.memory_search.app as app_module
+    from shared.config import settings
+
+    try:
+        with monkeypatch.context() as m:
+            m.setattr(settings.services, "memory_search_max_batch_rows", 2)
+            reloaded = importlib.reload(app_module)
+            assert reloaded._MAX_BATCH_ROWS == 2
+            row = reloaded.UpsertBody(
+                path="/a.md", mtime=1.0, content_hash="h", kind="body", chunk_idx=0, vector=[0.0]
+            )
+            with pytest.raises(ValidationError):
+                reloaded.UpsertBatchBody(rows=[row] * 3)
+    finally:
+        importlib.reload(app_module)
+
+
 def test_upsert_batch_rejects_empty_oversized_and_wrong_dim(tmp_path: Path) -> None:
     row = _upsert_body("/a.md", 0)
     bad_dim = {**row, "vector": [0.0] * (_DIM - 1)}
