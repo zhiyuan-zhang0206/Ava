@@ -74,7 +74,13 @@ def config_read_op() -> ConfigReadResult:
     )
 
 
-def config_write_op(overrides: dict[str, Any], *, local: bool = False) -> ConfigWriteOpResult:
+def config_write_op(
+    overrides: dict[str, Any],
+    *,
+    local: bool = False,
+    actor: str | None = None,
+    trace_id: str | None = None,
+) -> ConfigWriteOpResult:
     """Validate and merge this machine's host overrides into its .env (reducer semantics).
 
     `overrides` is a JSON-merge-patch over the host `.env`: a key with a value is
@@ -146,6 +152,8 @@ def config_write_op(overrides: dict[str, Any], *, local: bool = False) -> Config
                         removals,
                         expected_digest=candidate.expected_digest,
                         audit_site="ops_config_write",
+                        actor=actor,
+                        trace_id=trace_id,
                     )
                 except RuntimeError as exc:
                     if str(exc) != ".env changed before owned runtime-config write":

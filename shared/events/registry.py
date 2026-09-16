@@ -154,7 +154,8 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
     ),
     "env_write": _audit(
         "env_write",
-        "official .env config write (actor and keys; values never recorded)",
+        "official .env config write (actor and keys; old/new values for "
+        "non-sensitive fields stay in the local record; sensitive values never recorded)",
     ),
     "env_unauthorized_write": _audit(
         "env_unauthorized_write",

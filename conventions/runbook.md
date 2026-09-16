@@ -264,6 +264,14 @@ in is declared on the field itself — every `Settings` field carries a `scope`
 (`cluster-pinned` / `cluster-default` / `host` / `agent`) in `shared/config/`,
 and `BOOTSTRAP_FIELDS` is derived from it.
 
+Every official `.env` write is audited in `$AVA_HOME/.env.audit.jsonl` (0600): site, actor
+(`user_session:<subject>` / `cluster_bearer:<subject>` / `cli:<os-user>`), `trace_id` when the
+write arrived over HTTP, key names, and old/new values for non-sensitive fields only (record v2,
+task #3588). An out-of-band edit is detected at the next `GET /api/config`: the guard appends a
+self-rate-limited `unauthorized` record and emits an `env_unauthorized_write` anomaly. Rehearsal:
+hand-edit `.env`, read the config once, then confirm the anomaly in the event stream and the
+rebuilt audit line.
+
 Postgres and Redis run as native processes (no Docker — the binaries come from brew's
 `redis@8.2` keg on macOS / apt on Linux, but Ava drives them directly via `pg_ctl` + `redis-server`,
 not `brew services`/launchd/systemd). Every cluster — including `main` — brings up its

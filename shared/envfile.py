@@ -151,7 +151,14 @@ def snapshot_env(path: Path, *, keep: int = ENV_BACKUP_KEEP) -> Path | None:
         return None
 
 
-def upsert_env(path: Path, updates: dict[str, str], *, audit_site: str | None = None) -> None:
+def upsert_env(
+    path: Path,
+    updates: dict[str, str],
+    *,
+    audit_site: str | None = None,
+    actor: str | None = None,
+    trace_id: str | None = None,
+) -> None:
     """Set each key in a unit's `.env`, preserving unrelated lines.
 
     Cross-process exclusive for the whole read-modify-write, like every other door
@@ -164,6 +171,11 @@ def upsert_env(path: Path, updates: dict[str, str], *, audit_site: str | None = 
     with file_lock(env_lock_path(path), timeout_s=ENV_LOCK_TIMEOUT_S):
         snapshot_env(path)
         lines = path.read_text().splitlines() if path.exists() else []
+        before: dict[str, str] = {}
+        if audit_site is not None:
+            from shared.env_audit import env_values_from_text
+
+            before = env_values_from_text("\n".join(lines))
         remaining = dict(updates)
         out: list[str] = []
         for line in lines:
@@ -178,7 +190,20 @@ def upsert_env(path: Path, updates: dict[str, str], *, audit_site: str | None = 
         if audit_site is not None:
             from shared.env_audit import record_env_write
 
-            record_env_write(path, set(updates), set(), site=audit_site)
+            changes = [
+                {"alias": key, "old": before.get(key), "new": value}
+                for key, value in updates.items()
+            ]
+            changes.sort(key=lambda change: str(change["alias"]))
+            record_env_write(
+                path,
+                set(updates),
+                set(),
+                site=audit_site,
+                actor=actor,
+                trace_id=trace_id,
+                changes=changes,
+            )
 
 
 def _chmod_private(path: Path) -> None:
@@ -191,7 +216,14 @@ def _chmod_private(path: Path) -> None:
         _log.warning("could not chmod 0600 %s", path, exc_info=True)
 
 
-def remove_env(path: Path, keys: set[str], *, audit_site: str | None = None) -> None:
+def remove_env(
+    path: Path,
+    keys: set[str],
+    *,
+    audit_site: str | None = None,
+    actor: str | None = None,
+    trace_id: str | None = None,
+) -> None:
     """Remove the named keys from a unit's .env, preserving unrelated lines.
 
     The counterpart of `upsert_env` for keys that must LEAVE the surface (e.g.
@@ -205,12 +237,30 @@ def remove_env(path: Path, keys: set[str], *, audit_site: str | None = None) -> 
         out = [line for line in lines if env_line_key(line) not in keys]
         if len(out) == len(lines):
             return  # nothing to remove — no snapshot churn
+        before: dict[str, str] = {}
+        if audit_site is not None:
+            from shared.env_audit import env_values_from_text
+
+            before = env_values_from_text("\n".join(lines))
         snapshot_env(path)
         write_private_bytes(path, ("\n".join(out) + "\n").encode())
         if audit_site is not None:
             from shared.env_audit import record_env_write
 
-            record_env_write(path, set(), keys, site=audit_site)
+            changes = [
+                {"alias": key, "old": before.get(key), "new": None}
+                for key in sorted(keys)
+                if key in before
+            ]
+            record_env_write(
+                path,
+                set(),
+                keys,
+                site=audit_site,
+                actor=actor,
+                trace_id=trace_id,
+                changes=changes,
+            )
 
 
 def replace_env_bytes_cas(
@@ -248,14 +298,29 @@ def replace_env_bytes_cas(
             finally:
                 os.close(directory_fd)
             if audit_site is not None:
-                from shared.env_audit import record_env_write
+                from shared.env_audit import env_values_from_text, record_env_write
 
+                before_text = current.decode("utf-8", errors="replace")
+                after_text = payload.decode("utf-8", errors="replace")
                 before_keys = {
-                    key for line in current.decode().splitlines() if (key := env_line_key(line))
+                    key for line in before_text.splitlines() if (key := env_line_key(line))
                 }
                 after_keys = {
-                    key for line in payload.decode().splitlines() if (key := env_line_key(line))
+                    key for line in after_text.splitlines() if (key := env_line_key(line))
                 }
-                record_env_write(path, after_keys, before_keys - after_keys, site=audit_site)
+                before_values = env_values_from_text(before_text)
+                after_values = env_values_from_text(after_text)
+                changes = [
+                    {"alias": key, "old": before_values.get(key), "new": after_values.get(key)}
+                    for key in sorted(before_values.keys() | after_values.keys())
+                    if before_values.get(key) != after_values.get(key)
+                ]
+                record_env_write(
+                    path,
+                    after_keys,
+                    before_keys - after_keys,
+                    site=audit_site,
+                    changes=changes,
+                )
         finally:
             staged.unlink(missing_ok=True)

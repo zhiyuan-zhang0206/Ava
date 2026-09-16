@@ -522,10 +522,16 @@ class ClusterTransitionPayload(BaseModel):
 
 class ConfigWritePayload(BaseModel):
     """`config_write` op payload. `overrides` is a JSON-merge-patch over the host
-    `.env` (a null value unsets a field), so its values stay open-typed."""
+    `.env` (a null value unsets a field), so its values stay open-typed.
+
+    `actor` / `trace_id` are stamped by the dispatching gateway from verified
+    request state for the write audit — deliberately not part of the caller's
+    JSON contract (`gateway/request_principal.ava.okf.md`)."""
 
     overrides: dict[str, Any]
     local: bool = False
+    actor: str | None = None
+    trace_id: str | None = None
 
 
 class InventoryWritePayload(BaseModel):
