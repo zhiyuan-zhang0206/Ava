@@ -308,6 +308,41 @@ def test_publish_offsite_standalone_failure_behavior_unchanged(tmp_path: Path) -
     assert artifact.read_bytes() == b"encrypted artifact"
 
 
+def test_publish_offsite_standalone_publish_failure_keeps_exit_and_artifact(
+    tmp_path: Path,
+) -> None:
+    """A standalone publish failing inside the store reports the object it died
+    on, still exits 0 (best-effort), and still retains the local artifact."""
+    artifact = tmp_path / "ava-20260916T030000Z.dump.enc"
+    artifact.write_bytes(b"encrypted artifact")
+    code = textwrap.dedent(f"""
+        import sys
+
+        sys.path.insert(0, {str(_REPO)!r})
+        from services.backup import _main
+        from services.pitr import store_factory
+
+        class _Store:
+            def put_base_if_absent(self, *, source, object_name, metadata, cancelled=None):
+                raise RuntimeError("store write failed")
+
+        class _Group:
+            def restartable_streaming_object_store(self):
+                return _Store()
+
+        store_factory.get_store_group = _Group
+        raise SystemExit(_main(["--publish-offsite", {str(artifact)!r}]))
+    """)
+    proc = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", code], capture_output=True, text=True, check=False
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    msg = f"[backup] off-site publish of {backup._REMOTE_ROOT}/{artifact.name} failed"
+    assert msg in proc.stderr
+    assert artifact.read_bytes() == b"encrypted artifact"
+
+
 def test_db_size_breakdown_real_db(db_conn: Any) -> None:
     """The composition query itself is pinned against a real throwaway DB: a
     fresh DB with no checkpoint tables reads 0 instead of failing (the
