@@ -122,6 +122,9 @@ class PlanSummary:
     blocked_reasons: tuple[str, ...]
     eligible_objects: int
     eligible_bytes: int
+    logical_eligible_objects: int
+    logical_retained_objects: int
+    weak_evidence_objects: int
     retained_objects: int
     retained_bytes: int
     orphan_sidecars: int
@@ -140,6 +143,9 @@ def read_plan() -> PlanSummary | None:
         blocked_reasons=plan.blocked_reasons,
         eligible_objects=len(plan.eligible),
         eligible_bytes=plan.eligible_bytes,
+        logical_eligible_objects=sum(1 for item in plan.eligible if item.object.kind == "logical"),
+        logical_retained_objects=sum(1 for item in plan.retained if item.object.kind == "logical"),
+        weak_evidence_objects=len(plan.weak_evidence),
         retained_objects=len(plan.retained),
         retained_bytes=plan.retained_bytes,
         orphan_sidecars=len(plan.orphan_sidecars),
@@ -165,8 +171,10 @@ def plan_line(plan: PlanSummary) -> str:
     blocked = "no" if not plan.blocked_reasons else f"YES ({'; '.join(plan.blocked_reasons)})"
     return (
         f"digest={plan.digest} blocked={blocked} "
-        f"eligible={plan.eligible_objects} ({human_bytes(plan.eligible_bytes)}) "
-        f"retained={plan.retained_objects} orphans={plan.orphan_sidecars}"
+        f"eligible={plan.eligible_objects} ({human_bytes(plan.eligible_bytes)}, "
+        f"{plan.logical_eligible_objects} logical) "
+        f"retained={plan.retained_objects} orphans={plan.orphan_sidecars} "
+        f"weak-evidence={plan.weak_evidence_objects}"
     )
 
 

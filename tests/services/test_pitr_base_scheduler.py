@@ -746,7 +746,19 @@ def test_retention_refresh_emits_backend_inventory_gauges(
 ) -> None:
     from shared.config import settings
 
-    result = DryRunResult(tmp_path / "plan", "digest", False, 3, 2, 30, 20, 9, 90)
+    result = DryRunResult(
+        tmp_path / "plan",
+        "digest",
+        False,
+        3,
+        2,
+        30,
+        20,
+        9,
+        90,
+        logical_object_count=4,
+        logical_bytes=40,
+    )
     config = settings.physical_backup
     monkeypatch.setattr(config, "pitr_restore_gcs_credentials_file", tmp_path / "viewer.json")
     monkeypatch.setattr(config, "pitr_retained_weekly_chains", 2)
@@ -756,6 +768,10 @@ def test_retention_refresh_emits_backend_inventory_gauges(
     class _StoreGroup:
         @staticmethod
         def retention_inventory_reader() -> object:
+            return object()
+
+        @staticmethod
+        def logical_retention_inventory_reader() -> object:
             return object()
 
     def get_store_group() -> _StoreGroup:
@@ -772,8 +788,12 @@ def test_retention_refresh_emits_backend_inventory_gauges(
     ) -> None:
         calls.append((category, event_name, attributes or {}))
 
+    def logical_retention() -> object:
+        return object()
+
     monkeypatch.setattr(retention_scheduler, "get_store_group", get_store_group)
     monkeypatch.setattr(retention_scheduler, "write_dry_run_plan", write_plan)
+    monkeypatch.setattr(retention_scheduler, "_logical_retention", logical_retention)
     monkeypatch.setattr(retention_scheduler, "ava_home", lambda: tmp_path)
     monkeypatch.setattr("shared.telemetry.emit", record_emit)
 
@@ -782,7 +802,13 @@ def test_retention_refresh_emits_backend_inventory_gauges(
         (
             "telemetry",
             "pitr_remote_inventory",
-            {"backend": "oss", "object_count": 9, "bytes": 90},
+            {
+                "backend": "oss",
+                "object_count": 9,
+                "bytes": 90,
+                "logical_object_count": 4,
+                "logical_bytes": 40,
+            },
         )
     ]
 
