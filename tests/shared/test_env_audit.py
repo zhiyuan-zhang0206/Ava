@@ -324,3 +324,45 @@ def test_record_env_write_withholds_every_value_when_metadata_fails(
     raw = (audit_home / ".env.audit.jsonl").read_text()
     assert "old-value" not in raw
     assert "new-value" not in raw
+
+
+def test_read_env_write_records_returns_newest_first_with_limit(audit_home: Path) -> None:
+    env_path = audit_home / ".env"
+    env_path.write_text("AVA_MODEL=m\n")
+    for i in range(3):
+        record_env_write(env_path, {"AVA_MODEL"}, set(), site=f"test-{i}")
+
+    records = env_audit.read_env_write_records(2)
+    assert [record["site"] for record in records] == ["test-2", "test-1"]
+
+
+def test_read_env_write_records_skips_corrupt_lines_and_missing_history(audit_home: Path) -> None:
+    env_path = audit_home / ".env"
+    env_path.write_text("AVA_MODEL=m\n")
+    record_env_write(env_path, {"AVA_MODEL"}, set(), site="good")
+    with (audit_home / ".env.audit.jsonl").open("a") as fh:
+        fh.write("{not json\n")
+        fh.write("[1, 2]\n")
+
+    records = env_audit.read_env_write_records(10)
+    assert [record["site"] for record in records] == ["good"]
+
+    elsewhere = audit_home / "elsewhere" / ".env"
+    elsewhere.parent.mkdir()
+    assert env_audit.read_env_write_records(5, elsewhere) == []
+
+
+def test_read_env_write_records_reads_beyond_a_full_tail_window(audit_home: Path) -> None:
+    """A history larger than the tail window still serves its newest records."""
+    audit_path = audit_home / ".env.audit.jsonl"
+    with audit_path.open("w") as fh:
+        for i in range(400):
+            fh.write(json.dumps({"site": f"s{i}", "pad": "x" * 200}) + "\n")
+
+    records = env_audit.read_env_write_records(3)
+    assert [record["site"] for record in records] == ["s399", "s398", "s397"]
+
+
+def test_read_env_write_records_rejects_nonpositive_limit(audit_home: Path) -> None:
+    with pytest.raises(ValueError, match="limit"):
+        env_audit.read_env_write_records(0)

@@ -1543,6 +1543,35 @@ async def test_config_write_op_receives_actor_and_trace(monkeypatch: pytest.Monk
     }
 
 
+async def test_config_audit_read_op_receives_last(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The config_audit_read arm forwards `last` into config_audit_read_op."""
+    captured: dict[str, object] = {}
+
+    class _Result:
+        def model_dump(self, **_kw: object) -> dict[str, object]:
+            return {"ok": True}
+
+    def _capture(last: int) -> _Result:
+        captured["last"] = last
+        return _Result()
+
+    monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
+    monkeypatch.setattr(daemon.ops_config, "config_audit_read_op", _capture)
+    status, _ = await daemon._dispatch("config_audit_read", {"last": 7})
+    assert status == "completed"
+    assert captured == {"last": 7}
+
+
+async def test_config_audit_read_rejects_out_of_range_last(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`last` outside 1..200 fails payload validation before any read."""
+    monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
+    status, result = await daemon._dispatch("config_audit_read", {"last": 201})
+    assert status == "failed"
+    assert "last" in str(result["error"])
+
+
 async def test_a_refused_update_says_how_long_the_holder_has_run(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:

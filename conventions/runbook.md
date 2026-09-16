@@ -267,7 +267,10 @@ and `BOOTSTRAP_FIELDS` is derived from it.
 Every official `.env` write is audited in `$AVA_HOME/.env.audit.jsonl` (0600): site, actor
 (`user_session:<subject>` / `cluster_bearer:<subject>` / `cli:<os-user>`), `trace_id` when the
 write arrived over HTTP, key names, and old/new values for non-sensitive fields only (record v2,
-task #3588). An out-of-band edit is detected at the next `GET /api/config`: the guard appends a
+task #3588). Read the trail with `ava config audit [--last N] [--key K] [--machine <name|all>]`
+or `GET /api/config/audit?machine=<name|all>&last=N` (merged newest-first; `all` fans out to
+every agent-runner plus the gateway's own box). An out-of-band edit is detected at the next
+`GET /api/config`: the guard appends a
 self-rate-limited `unauthorized` record and emits an `env_unauthorized_write` anomaly. Rehearsal:
 hand-edit `.env`, read the config once, then confirm the anomaly in the event stream and the
 rebuilt audit line.

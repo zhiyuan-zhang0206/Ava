@@ -78,6 +78,7 @@ from cli.parsers.host import (
 from cli.parsers.impersonation import _h_impersonate, _h_impersonate_relay
 from cli.parsers.logs import _h_logs_retention, _h_logs_rotate
 from cli.parsers.management import (
+    _h_config_audit,
     _h_config_get,
     _h_config_set,
     _h_config_unset,
@@ -180,6 +181,7 @@ __all__ = [
     "_h_cluster_watchdog_probe_register",
     "_h_cluster_watchdog_probe_unregister",
     "_h_computer_release",
+    "_h_config_audit",
     "_h_config_get",
     "_h_config_set",
     "_h_config_unset",

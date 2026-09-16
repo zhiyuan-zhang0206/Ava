@@ -2230,6 +2230,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/config/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Config Audit
+         * @description Return the `.env` write audit trail, newest first.
+         *
+         *     `machine` selects the source: omitted = this gateway's own box; `all` = every
+         *     agent-runner machine plus the gateway's own box, merged (fail-fast — an
+         *     unreachable machine 503s the whole read); a machine name = that machine.
+         *     `last` caps the number of returned records (1..200). Records are the raw
+         *     audit-JSONL entries (`shared/env_audit.py`), each tagged with its `machine`;
+         *     values were redacted at write time (non-sensitive fields only), and records
+         *     from before record v2 lack `actor` / `trace_id` / `changed`.
+         */
+        get: operations["get_config_audit_api_config_audit_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/config/resolved": {
         parameters: {
             query?: never;
@@ -4608,6 +4636,22 @@ export interface components {
              * @constant
              */
             status: "enqueued";
+        };
+        /**
+         * ConfigAuditView
+         * @description GET /api/config/audit response — merged `.env`-write audit records, newest first.
+         *
+         *     Each record is the raw audit-JSONL entry (`shared/env_audit.py`, record v2:
+         *     ts / site / pid / process / cmdline / actor / trace_id / keys_written /
+         *     keys_removed / digest_after / changed), tagged with its `machine`. Values were
+         *     redacted when the record was written (non-sensitive fields only); records from
+         *     before record v2 lack `actor` / `trace_id` / `changed`.
+         */
+        ConfigAuditView: {
+            /** Records */
+            records: {
+                [key: string]: unknown;
+            }[];
         };
         /**
          * ConfigFieldView
@@ -10442,6 +10486,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConfigWriteResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_config_audit_api_config_audit_get: {
+        parameters: {
+            query?: {
+                machine?: string | null;
+                last?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigAuditView"];
                 };
             };
             /** @description Validation Error */

@@ -139,6 +139,19 @@ class ResolvedConfigView(BaseModel):
     fields: list[ResolvedFieldView]
 
 
+class ConfigAuditView(BaseModel):
+    """GET /api/config/audit response — merged `.env`-write audit records, newest first.
+
+    Each record is the raw audit-JSONL entry (`shared/env_audit.py`, record v2:
+    ts / site / pid / process / cmdline / actor / trace_id / keys_written /
+    keys_removed / digest_after / changed), tagged with its `machine`. Values were
+    redacted when the record was written (non-sensitive fields only); records from
+    before record v2 lack `actor` / `trace_id` / `changed`.
+    """
+
+    records: list[dict[str, object]]
+
+
 class ConfigFieldWriteResult(BaseModel):
     """Per-field verdict of a PUT /api/config write — `ok` plus a human-readable
     `reason` when the field was rejected (capability / scope / unknown).

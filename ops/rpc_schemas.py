@@ -419,6 +419,7 @@ OpKind = Literal[
     "status_probe",
     "config_read",
     "config_write",
+    "config_audit_read",
     "inventory_read",
     "inventory_write",
     "cluster_fetch",
@@ -612,6 +613,20 @@ class HostConfigField(BaseModel):
     remote_writable: bool
     can_enable: bool | None = None
     reason: str | None = None
+
+
+class ConfigAuditReadPayload(BaseModel):
+    """`config_audit_read` op payload — how many recent records to read (1..200)."""
+
+    last: int = Field(ge=1, le=200)
+
+
+class ConfigAuditReadResult(BaseModel):
+    """`config_audit_read` op result — this host's recent `.env`-write records,
+    newest first (raw record shape; values were redacted at write time)."""
+
+    machine: str
+    records: list[dict[str, object]]
 
 
 class ConfigReadResult(BaseModel):
