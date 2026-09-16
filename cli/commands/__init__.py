@@ -153,6 +153,8 @@ from cli.commands.packages import (
 )
 from cli.commands.pitr import (
     cmd_pitr_drill,
+    cmd_pitr_multipart_abort,
+    cmd_pitr_multipart_list,
     cmd_pitr_retention_arm,
     cmd_pitr_retention_disable,
     cmd_pitr_retention_inspect,
@@ -369,6 +371,8 @@ __all__ = [
     "cmd_pause",
     "cmd_pitr_activate",
     "cmd_pitr_drill",
+    "cmd_pitr_multipart_abort",
+    "cmd_pitr_multipart_list",
     "cmd_pitr_retention_arm",
     "cmd_pitr_retention_disable",
     "cmd_pitr_retention_inspect",

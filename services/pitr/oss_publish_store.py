@@ -13,11 +13,11 @@ from services.pitr.oss_store import (
     OSSObjectStore,
     _b64_md5,
     _is_file_exists,
-    _map_error,
     _md5_hex,
     _metadata_headers,
     _normalize_etag,
     _user_metadata,
+    map_oss_error,
 )
 
 
@@ -66,7 +66,7 @@ class OSSProtectedManifestPublisher:
             if _is_file_exists(exc):
                 created = False
             else:
-                raise _map_error("OSS protected manifest publish", exc) from exc
+                raise map_oss_error("OSS protected manifest publish", exc) from exc
         body = self._store.get_object(object_name)
         try:
             stored = body.read()

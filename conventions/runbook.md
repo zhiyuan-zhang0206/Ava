@@ -757,6 +757,10 @@ is one env var + a restart; the previously retained copy stays primary until
 the switchover runbook has been executed and observed. The full cut-over
 procedure (restore drills, migration script, rollback): see
 `conventions/pitr-backend-switchover.md`.
+An interrupted publish can leave an incomplete multipart upload (orphan
+shard) behind: the lifecycle rule stays the standing channel (fragments
+aborted after 7 days), and `ava pitr multipart list/abort` is the explicit
+single-upload surface for anything that cannot wait out that window.
 
 Activation is Ava-owned: use `ava cluster pitr status`, then
 `ava cluster pitr activate --origin operator:<name>`. The command validates the

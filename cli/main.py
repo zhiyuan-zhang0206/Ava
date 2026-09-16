@@ -124,6 +124,8 @@ from cli.parsers.packages import (
 )
 from cli.parsers.pitr import (
     _h_pitr_drill,
+    _h_pitr_multipart_abort,
+    _h_pitr_multipart_list,
     _h_pitr_retention_arm,
     _h_pitr_retention_disable,
     _h_pitr_retention_inspect,
@@ -219,6 +221,8 @@ __all__ = [
     "_h_packages_status",
     "_h_pause",
     "_h_pitr_drill",
+    "_h_pitr_multipart_abort",
+    "_h_pitr_multipart_list",
     "_h_pitr_retention_arm",
     "_h_pitr_retention_disable",
     "_h_pitr_retention_inspect",

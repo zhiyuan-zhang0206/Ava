@@ -6,7 +6,9 @@ Not a test module: pytest never collects this file. The fake lives at the
 transport boundary the adapters narrow to (``OSSBucketOps``), so the role
 tests exercise one honest in-memory OSS backend: per-part MD5 verification,
 the forbid-overwrite precondition, the deterministic multipart ETag chain,
-If-Match pinned reads, and the retention-delete role (``OSSDeleteBucketOps``).
+If-Match pinned reads, the retention-delete role (``OSSDeleteBucketOps``),
+and the incomplete-multipart surface (ListMultipartUploads / ListParts /
+AbortMultipartUpload).
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import oss2
-from oss2.models import PartInfo
+from oss2.models import MultipartUploadInfo, PartInfo
 
 from services.pitr.oss_inventory import OSSRetentionInventoryReader
 from services.pitr.oss_publish_store import OSSProtectedManifestPublisher
@@ -136,6 +138,36 @@ class ListPage:
         self.next_marker = marker
 
 
+class UploadsPage:
+    upload_list: Sequence[MultipartUploadInfo]
+    is_truncated: bool
+    next_key_marker: str
+    next_upload_id_marker: str
+
+    def __init__(
+        self,
+        uploads: list[MultipartUploadInfo],
+        truncated: bool,
+        key_marker: str,
+        upload_id_marker: str,
+    ) -> None:
+        self.upload_list = uploads
+        self.is_truncated = truncated
+        self.next_key_marker = key_marker
+        self.next_upload_id_marker = upload_id_marker
+
+
+class PartsPage:
+    parts: Sequence[PartInfo]
+    is_truncated: bool
+    next_marker: str
+
+    def __init__(self, parts: list[PartInfo], truncated: bool, marker: str) -> None:
+        self.parts = parts
+        self.is_truncated = truncated
+        self.next_marker = marker
+
+
 def _meta_headers(metadata: Mapping[str, str]) -> dict[str, str]:
     return {f"x-oss-meta-{key}": value for key, value in metadata.items()}
 
@@ -153,7 +185,12 @@ class FakeOssBucket:
         self.corrupt_complete_etag = False
         self.head_error: tuple[int, str] | None = None
         self.delete_error: tuple[int, str] | None = None
+        self.list_uploads_error: tuple[int, str] | None = None
+        self.parts_error: tuple[int, str] | None = None
+        self.abort_error: tuple[int, str] | None = None
         self.request_error = False
+        #: Initiation clock for multipart uploads; tests advance it to age uploads.
+        self.now = 1_788_652_800
 
     def seed(
         self,
@@ -241,12 +278,77 @@ class FakeOssBucket:
         truncated = len(keys) > max_keys
         return ListPage(entries, truncated, entries[-1].key if entries and truncated else "")
 
+    def list_multipart_uploads(
+        self,
+        prefix: str = "",
+        delimiter: str = "",
+        key_marker: str = "",
+        upload_id_marker: str = "",
+        max_uploads: int = 1000,
+        headers: Mapping[str, str] | None = None,
+    ) -> UploadsPage:
+        if self.request_error:
+            raise oss2.exceptions.RequestError(OSError("injected transport failure"))
+        if self.list_uploads_error is not None:
+            status, code = self.list_uploads_error
+            raise _server_error(status, code, f"injected {code}")
+        entries = sorted(
+            (record["key"], upload_id, int(record["initiated"]))
+            for upload_id, record in self._pending.items()
+            if str(record["key"]).startswith(prefix)
+        )
+        if key_marker:
+            floor = (key_marker, upload_id_marker)
+            entries = [entry for entry in entries if (entry[0], entry[1]) > floor]
+        page = entries[:max_uploads]
+        truncated = len(entries) > max_uploads
+        return UploadsPage(
+            [MultipartUploadInfo(key, upload_id, initiated) for key, upload_id, initiated in page],
+            truncated,
+            page[-1][0] if truncated else "",
+            page[-1][1] if truncated else "",
+        )
+
+    def list_parts(
+        self,
+        key: str,
+        upload_id: str,
+        marker: str = "",
+        max_parts: int = 1000,
+        headers: Mapping[str, str] | None = None,
+    ) -> PartsPage:
+        if self.request_error:
+            raise oss2.exceptions.RequestError(OSError("injected transport failure"))
+        if self.parts_error is not None:
+            status, code = self.parts_error
+            raise _server_error(status, code, f"injected {code}")
+        record = self._pending.get(upload_id)
+        if record is None or record["key"] != key:
+            raise _server_error(404, "NoSuchUpload", "the upload does not exist")
+        floor = int(marker) if marker else 0
+        numbers = sorted(number for number in self._parts.get(upload_id, {}) if number > floor)
+        page = numbers[:max_parts]
+        truncated = len(numbers) > max_parts
+        return PartsPage(
+            [
+                PartInfo(
+                    number,
+                    _uppercase(self._parts[upload_id][number]),
+                    size=len(self._parts[upload_id][number]),
+                    last_modified=self.now,
+                )
+                for number in page
+            ],
+            truncated,
+            str(page[-1]) if truncated else "",
+        )
+
     def init_multipart_upload(
         self, key: str, headers: Mapping[str, str] | None = None
     ) -> InitResult:
         upload_id = f"up{self._next_upload_id}"
         self._next_upload_id += 1
-        self._pending[upload_id] = {"key": key, "metadata": _meta(headers)}
+        self._pending[upload_id] = {"key": key, "metadata": _meta(headers), "initiated": self.now}
         self._parts[upload_id] = {}
         return InitResult(upload_id)
 
@@ -295,6 +397,14 @@ class FakeOssBucket:
         return CompleteResult(etag)
 
     def abort_multipart_upload(self, key: str, upload_id: str) -> None:
+        if self.request_error:
+            raise oss2.exceptions.RequestError(OSError("injected transport failure"))
+        if self.abort_error is not None:
+            status, code = self.abort_error
+            raise _server_error(status, code, f"injected {code}")
+        record = self._pending.get(upload_id)
+        if record is None or record["key"] != key:
+            raise _server_error(404, "NoSuchUpload", "the upload does not exist")
         self._parts.pop(upload_id, None)
         self._pending.pop(upload_id, None)
 

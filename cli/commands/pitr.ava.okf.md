@@ -20,6 +20,16 @@ carriers), and `retention run-once --confirm` (the operator-present first pass
 through the same bounded executor, after recomputing and re-comparing the plan
 digest). Every flip and every pass appends to the retention journal.
 
+`multipart list [--prefix P] [--credentials-file PATH]` renders every
+incomplete multipart upload (orphan shard) with its part count, byte size,
+initiation time and age; `multipart abort --key K --upload-id U` previews one
+upload and aborts exactly it only with `--confirm`. The abort can never touch
+a completed object -- a completed upload's id stops existing the moment the
+upload completes -- and there is no bulk or prefix abort verb. Credentials
+default to the uploader identity (`AVA_PITR_OSS_CREDENTIALS_FILE`); the
+bucket's lifecycle rule (`pitr-expire-90d`: fragments aborted after 7 days,
+whole bucket) remains the standing channel.
+
 `drill --chain <chain> --target-lsn <LSN> --target-wall <TS> --scratch <DIR>`
 restores one protected physical chain to an operator-chosen target LSN in an
 isolated sandbox, reports the acceptance criteria, publishes nothing and keeps
