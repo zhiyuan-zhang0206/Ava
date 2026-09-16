@@ -47,6 +47,8 @@ from shared import session_log
 from shared.log import logger
 from shared.proc_tree import stable_create_time
 from shared.pty_sessions._paths import (
+    CAPTURE_MAX_LINES,
+    RESIZE_MAX,
     err,
     ok,
 )
@@ -387,11 +389,8 @@ def _op_capture(session: PtySession, req: dict[str, Any]) -> dict[str, Any]:
         lines = int(req.get("lines", 200))
     except (TypeError, ValueError):
         lines = 200
-    # Hard clamp kept as a protective constant (task #3696 exception
-    # inventory): the configurable surface is only the *default* window
-    # (display.shell_capture_default_lines); this bounds one capture's
-    # payload for direct socket dialers (the CLI caps at the same value).
-    lines = max(1, min(lines, 100000))
+    # Protective clamp — CAPTURE_MAX_LINES (why it is a constant lives there).
+    lines = max(1, min(lines, CAPTURE_MAX_LINES))
     text = session.screen().render(lines, scrollback=bool(req.get("scrollback", True)))
     return ok({"text": text})
 
@@ -403,7 +402,7 @@ def _op_resize(session: PtySession, req: dict[str, Any]) -> dict[str, Any]:
         cols, rows = int(req.get("cols") or 0), int(req.get("rows") or 0)
     except ValueError:
         return err(2, "resize requires integer cols and rows")
-    if cols < 1 or rows < 1 or cols > 10000 or rows > 10000:
+    if cols < 1 or rows < 1 or cols > RESIZE_MAX or rows > RESIZE_MAX:
         return err(2, f"resize out of range: {cols}x{rows}")
     _set_winsz(session.master_fd, cols, rows)
     session.cols, session.rows = cols, rows
