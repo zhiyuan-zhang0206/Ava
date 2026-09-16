@@ -71,9 +71,14 @@ entering state guards that metadata is not empty.
 from __future__ import annotations
 
 import importlib
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
-from langchain_core.language_models.chat_models import BaseChatModel
+if TYPE_CHECKING:
+    # Annotation-only at module scope (`_LLMFactory`, `build_chat_model`);
+    # the runtime isinstance check in `_resolve_override` imports it at the
+    # call site. Keeps the chat-model stack off the provider-registration path
+    # (exec-child boot, task #3633; `_TYPE_CHECKING_ALLOWED`).
+    from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
 
 from shared.config import field_alias, get_field, settings
@@ -350,6 +355,8 @@ def _resolve_override(override: str, model: str) -> BaseChatModel:
         raise AttributeError(
             f"AVA_LLM_OVERRIDE={override!r}: module {module_path!r} has no attribute {factory_name!r}"
         )
+    from langchain_core.language_models.chat_models import BaseChatModel
+
     result = factory(model)
     if not isinstance(result, BaseChatModel):
         raise TypeError(

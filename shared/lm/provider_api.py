@@ -52,9 +52,14 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
-from langchain_core.language_models.chat_models import BaseChatModel
+if TYPE_CHECKING:
+    # Annotation-only reference (`ProviderBinding.build`): the registration
+    # path must not import the LangChain chat-model stack (exec-child boot,
+    # task #3633; `_TYPE_CHECKING_ALLOWED`: heavy dependency on a path that
+    # does not use the type).
+    from langchain_core.language_models.chat_models import BaseChatModel
 
 from shared.lm._providers import ThinkingConfig
 from shared.lm.pricing import register_plugin_price

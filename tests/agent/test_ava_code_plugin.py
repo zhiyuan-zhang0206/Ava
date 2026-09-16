@@ -42,7 +42,10 @@ def _load_ava_code_plugin():
 
     with PluginContext("ava_code"):
         from ava_builtins.plugins.ava_code import (
-            plugin as plugin,  # import side effects (register hooks)
+            agent_runtime as agent_runtime,  # import side effects (state field, hooks, prompt)
+        )
+        from ava_builtins.plugins.ava_code import (
+            plugin as plugin,  # surface: cwd namespace, wraps
         )
 
     yield
@@ -163,7 +166,7 @@ def test_default_cwd_is_workspace_when_bootstrapped(
 ):
     """In bootstrapped process, cwd default = own workspace dir (and already created)."""
     import ava._boot as boot
-    from ava_builtins.plugins.ava_code.plugin import _default_cwd
+    from ava_builtins.plugins.ava_code.agent_runtime import _default_cwd
 
     monkeypatch.setattr(boot, "_agent_id", boot._agent_id)
     monkeypatch.setattr(boot, "_owns_loop", boot._owns_loop)
@@ -175,7 +178,7 @@ def test_default_cwd_is_workspace_when_bootstrapped(
 def test_default_cwd_home_without_bootstrap(monkeypatch: pytest.MonkeyPatch):
     """No process identity (test/REPL directly construct state) → keep $HOME placeholder behavior."""
     import ava._boot as boot
-    from ava_builtins.plugins.ava_code.plugin import _default_cwd
+    from ava_builtins.plugins.ava_code.agent_runtime import _default_cwd
 
     monkeypatch.setattr(boot, "_agent_id", None)
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
@@ -1006,7 +1009,7 @@ def test_coding_tools_section_skips_framework_expanded_modules(
     is registered via ava.register_sdk_expand at plugin import, so it is
     always expanded and never promoted here."""
     import ava
-    from ava_builtins.plugins.ava_code.plugin import _coding_tools_section
+    from ava_builtins.plugins.ava_code.agent_runtime import _coding_tools_section
     from shared.config import settings
 
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["files", "shell.sessions"])
@@ -1021,7 +1024,7 @@ def test_coding_tools_section_skips_framework_expanded_modules(
 def test_coding_tools_section_all_expanded_keeps_preamble_only(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    from ava_builtins.plugins.ava_code.plugin import _coding_tools_section
+    from ava_builtins.plugins.ava_code.agent_runtime import _coding_tools_section
     from shared.config import settings
 
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["cwd", "files", "shell"])
@@ -1448,17 +1451,22 @@ def test_read_wrap_whitespace_only_agents_md_not_recorded(tmp_path: Path):
 # ── persisted-cwd validation after init ──────────────────────────────────
 
 
-async def test_after_init_hook_falls_back_when_cwd_missing(tmp_path: Path, monkeypatch):
+async def test_after_init_hook_falls_back_when_cwd_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     """When persisted cwd no longer exists (worktree deleted etc.), the
     after_init hook falls back to the agent's workspace and persists the
     new logical cwd without changing the Python process cwd."""
-    from ava_builtins.plugins.ava_code.plugin import _ValidateCwdAfterInitHook
+    from ava_builtins.plugins.ava_code.agent_runtime import _ValidateCwdAfterInitHook
 
     nonexistent = str(tmp_path / "nonexistent-dir")
     fallback_dir = str(tmp_path / "workspaces" / "9999")
 
     # Stub _default_cwd so the test controls the fallback path.
-    monkeypatch.setattr("ava_builtins.plugins.ava_code.plugin._default_cwd", lambda: fallback_dir)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    monkeypatch.setattr(
+        "ava_builtins.plugins.ava_code.agent_runtime._default_cwd",
+        lambda: fallback_dir,
+    )
     Path(fallback_dir).mkdir(parents=True, exist_ok=True)
 
     process_cwd = Path.cwd()
@@ -1476,7 +1484,7 @@ async def test_after_init_hook_falls_back_when_cwd_missing(tmp_path: Path, monke
 async def test_after_init_hook_noop_when_cwd_valid(tmp_path: Path):
     """A valid persisted logical cwd needs no repair and never changes the
     Python process cwd."""
-    from ava_builtins.plugins.ava_code.plugin import _ValidateCwdAfterInitHook
+    from ava_builtins.plugins.ava_code.agent_runtime import _ValidateCwdAfterInitHook
 
     valid_dir = str(tmp_path)
     process_cwd = Path.cwd()
@@ -1494,14 +1502,14 @@ async def test_after_init_hook_falls_back_when_cwd_is_file(
 ):
     """A persisted file path is not a logical directory and is repaired
     without changing the Python process cwd."""
-    from ava_builtins.plugins.ava_code.plugin import _ValidateCwdAfterInitHook
+    from ava_builtins.plugins.ava_code.agent_runtime import _ValidateCwdAfterInitHook
 
     persisted_file = tmp_path / "not-a-directory"
     persisted_file.write_text("file")
     fallback_dir = tmp_path / "workspaces" / "9999"
     fallback_dir.mkdir(parents=True)
     monkeypatch.setattr(
-        "ava_builtins.plugins.ava_code.plugin._default_cwd",
+        "ava_builtins.plugins.ava_code.agent_runtime._default_cwd",
         lambda: fallback_dir,
     )
 

@@ -7,9 +7,13 @@ blocks. The streaming fan-out and timeline both consume that shape.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from langchain_core.language_models.chat_models import BaseChatModel
+if TYPE_CHECKING:
+    # Annotation-only (`build` return): keeps the chat-model stack off the
+    # provider-registration path (exec-child boot, task #3633;
+    # `_TYPE_CHECKING_ALLOWED`).
+    from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
 
 from shared.lm._effort import _clamp_effort

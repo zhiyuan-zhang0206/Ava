@@ -71,7 +71,12 @@ def _load_activity_plugin() -> Iterator[None]:
             del sys.modules[name]
 
     with PluginContext("ava_fleet"):
-        from ava_builtins.plugins.ava_fleet import plugin as plugin
+        from ava_builtins.plugins.ava_fleet import (
+            agent_runtime as agent_runtime,  # import side effects (prompt section)
+        )
+        from ava_builtins.plugins.ava_fleet import (
+            plugin as plugin,  # surface: self/ui members, tasks namespace, spawn wrap
+        )
 
     yield
 
@@ -119,7 +124,7 @@ def test_prompt_section_idle_vs_terminate_rule(_load_activity_plugin: None):
     by). The delegator side says a finished worker ends itself. SDK call
     names stay out of the fleet section — the agent decides the mechanics
     (heartbeat pause etc.) itself."""
-    from ava_builtins.plugins.ava_fleet.plugin import _fleet_self_section
+    from ava_builtins.plugins.ava_fleet.agent_runtime import _fleet_self_section
 
     section = _fleet_self_section()
     # Waiting branch: end the turn idle, the awaited event still wakes you.
@@ -143,7 +148,7 @@ def test_prompt_section_dismiss_notice_after_dialog_reply(
     """When the user has already answered in the dialog, the agent must
     actively dismiss the pending notice instead of leaving it open — and the
     rule is phrased semantically (no dismiss_notice call name)."""
-    from ava_builtins.plugins.ava_fleet.plugin import _fleet_self_section
+    from ava_builtins.plugins.ava_fleet.agent_runtime import _fleet_self_section
 
     section = _fleet_self_section()
     assert "dismiss that notice yourself" in section
@@ -162,7 +167,7 @@ def test_prompt_section_queue_delivery_mandate(
     posting is delivery, no staging for a later moment. Phrased semantically
     and self-contained — no skill names, no call names beyond the channel the
     section already names."""
-    from ava_builtins.plugins.ava_fleet.plugin import _fleet_self_section
+    from ava_builtins.plugins.ava_fleet.agent_runtime import _fleet_self_section
 
     section = _fleet_self_section()
     assert "Queue delivery is mandatory" in section
@@ -176,7 +181,7 @@ def test_prompt_section_queue_delivery_mandate(
 def test_prompt_section_task_conversion_contract(_load_activity_plugin: None):
     """The fleet section turns a future signal into an owned, deduplicated
     task without inventing registry routing behavior."""
-    from ava_builtins.plugins.ava_fleet.plugin import _fleet_self_section
+    from ava_builtins.plugins.ava_fleet.agent_runtime import _fleet_self_section
 
     section = _fleet_self_section()
     assert "## Fleet task interaction" in section
@@ -194,7 +199,7 @@ def test_prompt_section_task_conversion_is_domain_instance_only(
 ):
     """The fleet section names task mechanics without repeating the framework's
     cross-domain future-signal rule or platform-specific policy."""
-    from ava_builtins.plugins.ava_fleet.plugin import _fleet_self_section
+    from ava_builtins.plugins.ava_fleet.agent_runtime import _fleet_self_section
 
     section = _fleet_self_section()
     for phrase in (
@@ -211,7 +216,7 @@ def test_prompt_section_task_conversion_is_domain_instance_only(
 
 def test_prompt_section_numeric_identifier_prefixes(_load_activity_plugin: None):
     """Fleet references identify agents, tasks, and pull requests by kind."""
-    from ava_builtins.plugins.ava_fleet.plugin import _fleet_self_section
+    from ava_builtins.plugins.ava_fleet.agent_runtime import _fleet_self_section
 
     section = _fleet_self_section()
 

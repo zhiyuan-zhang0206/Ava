@@ -20,9 +20,14 @@ deliberately outside this contract.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
-from langchain_core.messages import BaseMessage
+if TYPE_CHECKING:
+    # Annotation-only on the read helpers; callers always pass real LangChain
+    # messages, but this leaf module sits on the provider-registration import
+    # path, which must stay off the message stack (exec-child boot, task
+    # #3633; `_TYPE_CHECKING_ALLOWED`).
+    from langchain_core.messages import BaseMessage
 
 
 class AvaMsgType(StrEnum):

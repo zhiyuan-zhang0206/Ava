@@ -59,7 +59,11 @@ def attached_runtime(
     monkeypatch.setattr(_boot, "_owns_loop", True)
     monkeypatch.setattr(ava, "state", None)
     monkeypatch.setattr(ava, "state_update", None)
-    monkeypatch.setattr(ava, "_ensure_plugins_loaded", lambda: None)
+
+    def loader_stub(**_kwargs: object) -> None:
+        """Accept the `surface` kwarg attach passes (ignored)."""
+
+    monkeypatch.setattr(ava, "_ensure_plugins_loaded", loader_stub)
     monkeypatch.setattr(state_module, "AgentState", ExampleState)
     monkeypatch.setattr(state_module, "_BASE_FIELD_DECLARED", {"messages"})
     monkeypatch.setattr(external, "machine_name", lambda: "local-runner")
@@ -126,6 +130,28 @@ def test_expiry_blocks_identity_and_plugin_state_before_new_effects(
     assert _boot._external_identity is None
     assert _boot._external_agent_id is None
     assert not staged
+
+
+def test_attach_requests_native_plugin_load(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The attach path asks for the faces-included plugin load (#2616 review).
+
+    ``load_snapshot`` rebuilds the checkpoint through ``build_agent_state()``,
+    so a surface-only load silently drops the plugin state fields the lease
+    carries. Locks the wiring; the loader's own surface/full split is
+    exercised in tests/agent/test_lazy_child_imports.py.
+    """
+    calls: list[dict[str, Any]] = []
+
+    def spy_loader(**kwargs: Any) -> None:
+        calls.append(kwargs)
+
+    monkeypatch.setattr(ava, "_ensure_plugins_loaded", spy_loader)
+    with external.attach("lease", token="credential"):
+        pass
+    assert calls == [{"surface": False}]
 
 
 def test_plugin_updates_journal_once_and_next_attachment_sees_them(

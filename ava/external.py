@@ -60,7 +60,11 @@ class Attachment:
             self._version = int(lease["delta_version"])
             _boot._external_identity = self._validate
             _boot._external_agent_id = self.agent_id
-            ava._ensure_plugins_loaded()
+            # Native load: load_snapshot below rebuilds the checkpoint state
+            # (build_agent_state().model_validate), which needs the plugins'
+            # state fields registered — the surface-only default would silently
+            # drop them (review finding, #2616).
+            ava._ensure_plugins_loaded(surface=False)
             state, overlay, birth = load_snapshot(self.agent_id)
             self._stack.enter_context(bind_agent_config(resolve_agent_config_pins(overlay, birth)))
             self._stack.enter_context(bind_agent_plugin_config(resolve_agent_plugin_pins(overlay)))

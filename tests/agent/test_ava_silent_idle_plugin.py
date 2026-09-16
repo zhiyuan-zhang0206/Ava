@@ -41,7 +41,8 @@ def _loaded():
             del sys.modules[name]
 
     with PluginContext("ava_silent_idle"):
-        from ava_builtins.plugins.ava_silent_idle import plugin as _plugin
+        # The hook registrations live in the agent-runtime face (task #3633).
+        from ava_builtins.plugins.ava_silent_idle import agent_runtime as _plugin
 
     yield _plugin
 
