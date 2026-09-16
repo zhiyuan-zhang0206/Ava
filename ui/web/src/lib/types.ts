@@ -791,6 +791,9 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   // Sidebar stats aggregation window (`?hours=`). Must stay within STATS_WINDOWS.
   "display.stats_window_hours": 24,
   "display.run_timeline_window_hours": 0.5,
+  // Show the run timeline summary layer when the data provides one
+  // (hierarchical layer blocks, or a single raw-context summary).
+  "display.run_timeline_summary_visible": true,
   // Fleet view surfaces.
   "display.fleet_left_view": "graph",
   "display.fleet_queue_collapsed": false,

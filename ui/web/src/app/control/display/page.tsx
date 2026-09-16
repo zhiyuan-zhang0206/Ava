@@ -21,6 +21,7 @@ import {
   EyeOff,
   History,
   Languages,
+  Layers,
   Monitor,
   MoveHorizontal,
   Palette,
@@ -243,6 +244,13 @@ export default function DisplaySettingsPage() {
           ]}
           value={String(compactHistorySessions)}
           onChange={(v) => setSetting("display.compact_history_sessions", Number(v))}
+        />
+        <ToggleRow
+          icon={Layers}
+          label="Timeline summaries"
+          description="Show the summary layer above the run timeline when one exists: hierarchical layer blocks between the event rail and the turn track, or a single raw-context summary."
+          value={settings["display.run_timeline_summary_visible"] !== false}
+          onChange={(v) => setSetting("display.run_timeline_summary_visible", v)}
         />
       </SettingsSection>
 

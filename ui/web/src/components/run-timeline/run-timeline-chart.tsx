@@ -14,6 +14,7 @@ import type { RunTimelineResponse } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 import {
+  LayerDetailPanel,
   rowFailed,
   rowLabel,
   tickLabel,
@@ -23,6 +24,7 @@ import {
   type RunTimelineChartLabels,
   type TimelinePopoverTarget,
 } from "./run-timeline-details";
+import { LayerTrackButtons, LayerTrackGeometry, RawSummaryBand } from "./run-timeline-layers";
 import { zoomWindowAround, type TimelineWindowOverride } from "./request-level";
 import { buildTimelineLayout } from "./timeline-layout";
 
@@ -84,11 +86,13 @@ export function RunTimelineChart({
   labels,
   onDrillBucket,
   onZoomWindow,
+  showSummaries = true,
 }: {
   timeline: RunTimelineResponse;
   labels: RunTimelineChartLabels;
   onDrillBucket: (row: RunTimelineResponse["rows"][number]) => void;
   onZoomWindow: (window: TimelineWindowOverride) => void;
+  showSummaries?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const visualizationRef = useRef<HTMLDivElement>(null);
@@ -96,8 +100,11 @@ export function RunTimelineChart({
   const popoverRef = useRef<HTMLDivElement>(null);
   const [canvasWidth, setCanvasWidth] = useState(MIN_CANVAS_WIDTH);
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
+  const [selectedLayerIndex, setSelectedLayerIndex] = useState<number | null>(null);
+  const [summaryOpen, setSummaryOpen] = useState(false);
   const [popoverTarget, setPopoverTarget] = useState<TimelinePopoverTarget | null>(null);
   const rail = useMemo(() => prioritizedRailEvents(timeline.events), [timeline.events]);
+  const layers = showSummaries ? timeline.layers : undefined;
   const layout = useMemo(
     () =>
       buildTimelineLayout({
@@ -105,11 +112,14 @@ export function RunTimelineChart({
         window: timeline.window,
         rows: timeline.rows,
         events: rail.events,
+        layers,
       }),
-    [canvasWidth, rail.events, timeline.rows, timeline.window],
+    [canvasWidth, layers, rail.events, timeline.rows, timeline.window],
   );
   const selectedRow =
     selectedRowIndex === null ? null : (timeline.rows[selectedRowIndex] ?? null);
+  const selectedLayer =
+    selectedLayerIndex === null ? null : (timeline.layers?.[selectedLayerIndex] ?? null);
   const tickSpacingMs =
     (Date.parse(timeline.window.to) - Date.parse(timeline.window.from)) /
     (layout.ticks.length - 1);
@@ -207,8 +217,16 @@ export function RunTimelineChart({
 
   return (
     <section aria-label={labels.chart} className="rounded-[10px] border border-border bg-card p-3">
-      <div className={cn("grid gap-3", selectedRow ? "lg:grid-cols-[minmax(0,1fr)_320px]" : "")}>
+      <div className={cn("grid gap-3", selectedRow || selectedLayer ? "lg:grid-cols-[minmax(0,1fr)_320px]" : "")}>
         <div ref={popoverLayerRef} className={cn(MIN_W_0, "relative space-y-2")}>
+          {showSummaries && timeline.summary ? (
+            <RawSummaryBand
+              summary={timeline.summary}
+              labels={labels}
+              open={summaryOpen}
+              onToggle={() => setSummaryOpen((open) => !open)}
+            />
+          ) : null}
           <div className={cn(FLEX, "items-center justify-between px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground")}>
             <span>{labels.time}</span>
             <span>{labels.eventRail}</span>
@@ -290,6 +308,9 @@ export function RunTimelineChart({
                   fill="var(--muted)"
                   stroke="var(--border)"
                 />
+                {layout.layerRows.length > 0 && timeline.layers ? (
+                  <LayerTrackGeometry rows={layout.layerRows} selectedIndex={selectedLayerIndex} />
+                ) : null}
                 {layout.turns.map((turn, index) => {
                   const row = timeline.rows[turn.rowIndex];
                   const failed = rowFailed(row);
@@ -392,6 +413,8 @@ export function RunTimelineChart({
                         onDrillBucket(row);
                       } else {
                         setSelectedRowIndex(turn.rowIndex);
+                        setSelectedLayerIndex(null);
+                        setSummaryOpen(false);
                       }
                     }}
                     className="absolute rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2"
@@ -414,6 +437,20 @@ export function RunTimelineChart({
                   </button>
                 );
               })}
+
+              {layout.layerRows.length > 0 && timeline.layers ? (
+                <LayerTrackButtons
+                  rows={layout.layerRows}
+                  layers={timeline.layers}
+                  labels={labels}
+                  onSelect={(index) => {
+                    setSelectedLayerIndex(index);
+                    setSelectedRowIndex(null);
+                    setSummaryOpen(false);
+                  }}
+                  onZoom={onZoomWindow}
+                />
+              ) : null}
             </div>
           </div>
           {popoverTarget && (hoveredRow || hoveredEvent) ? (
@@ -434,6 +471,8 @@ export function RunTimelineChart({
         </div>
         {selectedRow ? (
           <TurnDetailPanel row={selectedRow} labels={labels} onClose={() => setSelectedRowIndex(null)} />
+        ) : selectedLayer ? (
+          <LayerDetailPanel node={selectedLayer} labels={labels} onClose={() => setSelectedLayerIndex(null)} />
         ) : null}
       </div>
     </section>

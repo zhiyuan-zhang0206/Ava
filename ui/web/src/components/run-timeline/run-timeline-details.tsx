@@ -33,6 +33,10 @@ export interface RunTimelineChartLabels {
   noExecutions: string;
   closeDetails: string;
   eventDetails: string;
+  layerDetails: string;
+  layerSummary: string;
+  showMore: string;
+  showLess: string;
   kind: string;
   timestamp: string;
   detail: string;
@@ -51,6 +55,13 @@ export function rowLabel(
   labels: RunTimelineChartLabels,
 ): string {
   return row.turn === null ? `${labels.bucket} (${row.n_turns})` : `${labels.turn} ${row.turn}`;
+}
+
+export function layerNodeLabel(
+  node: NonNullable<RunTimelineResponse["layers"]>[number],
+  labels: RunTimelineChartLabels,
+): string {
+  return `${labels.layerDetails} ${node.id}`;
 }
 
 function currency(amount: number): string {
@@ -197,6 +208,48 @@ export function TurnDetailPanel({
             ))}
           </div>
         )}
+      </section>
+    </aside>
+  );
+}
+
+export function LayerDetailPanel({
+  node,
+  labels,
+  onClose,
+}: {
+  node: NonNullable<RunTimelineResponse["layers"]>[number];
+  labels: RunTimelineChartLabels;
+  onClose: () => void;
+}) {
+  return (
+    <aside
+      role="region"
+      aria-label={labels.layerDetails}
+      className="h-fit space-y-4 rounded-[10px] border border-border bg-card p-4 text-foreground"
+    >
+      <header className={cn(FLEX, "items-start justify-between gap-3")}>
+        <div>
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{labels.layerDetails}</p>
+          <h3 className="text-sm font-semibold">
+            L{node.depth} · {node.id}
+          </h3>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label={labels.closeDetails}
+          className="rounded-md px-1.5 py-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          ×
+        </button>
+      </header>
+
+      <DetailMetric label={labels.timeRange} value={timeRange(node.start, node.end)} />
+
+      <section className="space-y-1">
+        <h4 className="text-xs font-semibold">{labels.layerSummary}</h4>
+        <p className="whitespace-pre-wrap text-xs leading-5">{node.summary}</p>
       </section>
     </aside>
   );
