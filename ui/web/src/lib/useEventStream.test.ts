@@ -1108,32 +1108,15 @@ describe("fold subscription lifecycle (Task #1033 regression)", () => {
     expect(result.current).toBe(first);
   });
 
-  it("reconnect reconcile throttles the scoped invalidations to one batch per 30s window", async () => {
-    try {
-      const { qc, wrapper } = withProviderAndClient();
-      const spy = vi.spyOn(qc, "invalidateQueries");
-      renderHook(() => useEventStream(() => undefined, () => undefined), { wrapper });
-      await waitForInstance();
-      vi.useFakeTimers();
-
-      // Initial open → one scoped repair batch fires.
-      act(() => expectInstance().fireOpen());
-      expect(spy).toHaveBeenCalledTimes(RECONNECT_QUERY_KEYS.length);
-
-      // Flaky-network reconnect burst (another open inside the 30s window —
-      // mobile Safari CONNECTING/OPEN jitter, watchdog force-reopen) → no
-      // second refetch storm.
-      spy.mockClear();
-      act(() => { vi.advanceTimersByTime(5_000); });
-      act(() => expectInstance().fireOpen());
-      expect(spy).not.toHaveBeenCalled();
-
-      // Window elapsed → the next open repairs again.
-      act(() => { vi.advanceTimersByTime(26_000); });
-      act(() => expectInstance().fireOpen());
-      expect(spy).toHaveBeenCalledTimes(RECONNECT_QUERY_KEYS.length);
-    } finally {
-      vi.useRealTimers();
-    }
+  it("every reconnect gap repairs scoped queries, including a second gap within 30 seconds", async () => {
+    const { qc, wrapper } = withProviderAndClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    renderHook(() => useEventStream(() => undefined, () => undefined), { wrapper });
+    await waitForInstance();
+    await act(async () => { expectInstance().fireOpen(); await Promise.resolve(); });
+    expect(spy).toHaveBeenCalledTimes(RECONNECT_QUERY_KEYS.length);
+    spy.mockClear();
+    await act(async () => { expectInstance().fireOpen(); await Promise.resolve(); });
+    expect(spy).toHaveBeenCalledTimes(RECONNECT_QUERY_KEYS.length);
   });
 });

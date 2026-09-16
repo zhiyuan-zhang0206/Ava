@@ -27,6 +27,12 @@ hint raises the open-tasks notice (display-only, no state write).
 
 Server data is not mirrored into Zustand — the sidebar reads `useAgents → useQuery`.
 
+The global fold owns read-model repair. Hints coalesce under a fixed deadline;
+reads never cancel an already-running repair, and hints received during that
+read require a trailing repair. Every stream reconnect requests reconciliation,
+including another disconnect inside a previous repair window. Settled query
+keys release their scheduling state.
+
 ## Zustand `store.ts` (Pure UI + Cluster Coordination)
 
 - **UI state**: `activeId`, composer focus token, mobile drawer, mobile inspector overlay (`mobileInspectorOpen`), toast, the terminate open-tasks notice (`openTasksNotice`), search. Spawn selections (`behavior.spawn_*`) and sidebar view mode/sort/stats (`display.sidebar_*`, hooks in `lib/sidebar.ts`) are **not here** — DB settings via `useUserSettings`.
