@@ -48,7 +48,7 @@ def bootstrap_message(
         f"Start the named impersonation with: {command}\n{routing}\n"
         "Keep the returned controller credential private. Wait for status active before acting "
         "as this agent. Its native loop pauses automatically after a durable checkpoint. "
-        "Use ava impersonate say (or ava.impersonation.say inside an attachment) for all "
+        "Use ava impersonate say for all "
         "user-facing progress and questions; process and ACK inbound messages from the relay. "
         f"Keep {work_file} updated with STATUS: WORKING and a work log for process supervision. "
         "When complete, flush attached SDK work, stop your work, then release with your own "

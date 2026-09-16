@@ -30,6 +30,22 @@ text is the authoritative argument reference — this skill does **not** restate
 flags. It carries the things help cannot: the mental model, when to use what,
 and the design intent.
 
+## External takeovers (impersonation)
+
+An external tool (Codex, Claude Code) can take over an Ava agent's identity for a
+session. The executor talks to the human through the CLI only:
+`ava impersonate say <session_id> --agent <id> --key <key> 'text'` (`--phase final`
+for the closing message), watches the lease with `ava impersonate status` / `list`,
+consumes and ACKs inbound messages with `ava impersonate inbox` / `ack`, renews with
+`ava impersonate renew`, and ends with `ava impersonate release --summary`. The
+Python attachment (`ava.external.attach`) remains for the executor's other `ava.*`
+capabilities.
+
+Takeover execution is suspended pending fixes; it resumes with the fix line. The
+executor's field manual is `.agents/skills/impersonator-guide/SKILL.md`; launching a
+takeover from an Ava agent goes through the spawn scripts' `--impersonate-self`
+(see Ava Use Claude Code and Codex).
+
 ## Sub-skills
 
 | If you need to… | Read |
