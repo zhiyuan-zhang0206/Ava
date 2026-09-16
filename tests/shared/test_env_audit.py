@@ -258,6 +258,68 @@ def test_write_fields_records_old_to_new_values(audit_home: Path) -> None:
     ]
 
 
+def test_noop_upsert_leaves_no_record_and_a_real_change_still_records(audit_home: Path) -> None:
+    """A repeated byte-identical upsert must not manufacture an audit record.
+
+    This is the WSL converge noise of task #3637: converge presents the same app
+    port on every `ava start`, and a boot-retry storm re-runs that start per
+    attempt. The change chain stays whole — a real change records its old→new
+    diff, and the integrity guard sees a consistent file after both paths.
+    """
+    from shared.envfile import upsert_env
+
+    env_path = audit_home / ".env"
+    env_path.write_text("AVA_MODEL=first-model\n")
+    audit_path = audit_home / ".env.audit.jsonl"
+
+    upsert_env(env_path, {"AVA_MODEL": "second-model"}, audit_site="test")
+    records_after_change = audit_path.read_text().splitlines()
+    assert len(records_after_change) == 1
+
+    upsert_env(env_path, {"AVA_MODEL": "second-model"}, audit_site="converge_gateway_port")
+
+    assert audit_path.read_text().splitlines() == records_after_change
+    assert env_path.read_text() == "AVA_MODEL=second-model\n"
+    assert check_env_integrity() is None  # the skip left the recorded digest standing
+
+    upsert_env(env_path, {"AVA_MODEL": "first-model"}, audit_site="test")
+
+    record = last_env_write_record()
+    assert record is not None
+    assert record["keys_written"] == ["AVA_MODEL"]
+    assert record["changed"] == [
+        {
+            "alias": "AVA_MODEL",
+            "scope": "cluster-default",
+            "sensitive": False,
+            "old": "second-model",
+            "new": "first-model",
+        }
+    ]
+    assert check_env_integrity() is None
+
+
+def test_noop_upsert_does_not_arm_a_fresh_home(audit_home: Path) -> None:
+    """A no-op is not a write: it neither records nor arms.
+
+    A fresh home arms at its first CHANGING write — the deliberate semantics of
+    the skip (task #3637); the no-op cannot vouch for a file it did not write.
+    """
+    from shared.envfile import upsert_env
+
+    env_path = audit_home / ".env"
+    env_path.write_text("AVA_MODEL=test-model\n")
+
+    upsert_env(env_path, {"AVA_MODEL": "test-model"}, audit_site="converge_gateway_port")
+
+    assert not (audit_home / ".env.audit.jsonl").exists()
+    assert not (audit_home / ".env.audit.armed").exists()
+
+    upsert_env(env_path, {"AVA_MODEL": "other-model"}, audit_site="converge_gateway_port")
+
+    assert (audit_home / ".env.audit.armed").exists()
+
+
 def test_write_fields_withholds_sensitive_values(audit_home: Path) -> None:
     """A secret write lands by name only — its value never reaches the JSONL."""
     runtime_config.write_fields({"deepseek_api_key": "sk-SECRET-VALUE"}, set(), audit_site="test")

@@ -19,7 +19,11 @@ tags: []
   every value (fail closed). Writers capture the pre-write values under the env lock and hand the
   raw diff to `record_env_write`, which owns the redaction: `runtime_config.write_fields`,
   `envfile.upsert_env` / `envfile.remove_env` (actor + diff) and `envfile.replace_env_bytes_cas`
-  (diff only); the rename/migration helpers record the diff-less form. The `env_write` event stream
+  (diff only); the rename/migration helpers record the diff-less form. A write whose rendered
+  bytes equal the file on disk is not a write: `upsert_env` skips it entirely — no snapshot, no
+  rewrite, no record (task #3637: repeated converge runs and boot-retry storms stop manufacturing
+  `old == new` records; a quoted or oddly-spaced line still rewrites and normalizes on its first
+  differing byte). The `env_write` event stream
   entry gains the `actor` and stays value-free — sensitive values enter neither the record nor the
   stream. Motivation: the `AVA_HOST_MAX_CONCURRENT_TURNS=50` write of 2026-09-11 (audit record #18:
   site + key names only) could not be attributed or reconstructed without ssh.
@@ -29,8 +33,9 @@ tags: []
   gateway's own box plus, for `all`, every agent-runner (records tagged with their `machine`;
   an unreachable machine 503s the whole read — fail-fast). Records are the raw JSONL entries, so
   the redaction rules above travel with them.
-- **Integrity guard**: the first official write also creates a sibling owner-only
-  `.env.audit.armed` marker, so deletion, emptiness, corruption, or a missing digest in an armed
+- **Integrity guard**: the first official CHANGING write also creates a sibling owner-only
+  `.env.audit.armed` marker (a no-op upsert neither records nor arms — with the byte-level skip it
+  is not a write), so deletion, emptiness, corruption, or a missing digest in an armed
   history is reported and rebuilt rather than silently returning to the fresh-home state.
   `check_env_integrity()` is the guard: a fresh install/enrollment has neither marker nor history
   and remains unarmed by design; otherwise the guard takes the same `.env` lock as the writers,

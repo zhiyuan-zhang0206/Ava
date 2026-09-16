@@ -1,5 +1,11 @@
 """Idempotent KEY=VALUE upsert into a unit's .env, preserving unrelated lines.
 
+Idempotence is byte-level: an upsert whose rendered result equals the current file
+writes nothing — no snapshot, no rewrite, no audit record (task #3637: a repeated
+converge, e.g. a boot-retry storm, must not manufacture `old == new` records). Any
+differing byte still takes the full write path, so normalization of quoted or
+oddly-spaced lines is preserved.
+
 Lives in `shared` (stdlib-only, no settings import) so both `cli.commands.cluster_lifecycle`
 and the settings-free `cli.enroll` can use one copy. `env_line_key` reads a line's key with the
 same grammar the settings parser uses (`export KEY=v` sets `KEY`; #2981).
@@ -161,6 +167,14 @@ def upsert_env(
 ) -> None:
     """Set each key in a unit's `.env`, preserving unrelated lines.
 
+    A byte-identical result is not a write: when every line this call would render
+    matches the file on disk, the call returns having changed nothing — no snapshot,
+    no rewrite, no audit record. Converge runs this on every `ava start`, and a
+    boot-retry storm re-runs that start per attempt; without the skip, each retry
+    manufactured an `old == new` audit record (task #3637, the WSL converge noise).
+    The skip compares rendered BYTES, not decoded values: a quoted or oddly-spaced
+    line still takes the normal write path and is normalized by that write.
+
     Cross-process exclusive for the whole read-modify-write, like every other door
     onto this file (`env_lock_path`). This one is the busiest: converge runs it on
     **every `ava start`** (the redis URL, the app port, the pooler's DB URL), which
@@ -169,13 +183,7 @@ def upsert_env(
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     with file_lock(env_lock_path(path), timeout_s=ENV_LOCK_TIMEOUT_S):
-        snapshot_env(path)
         lines = path.read_text().splitlines() if path.exists() else []
-        before: dict[str, str] = {}
-        if audit_site is not None:
-            from shared.env_audit import env_values_from_text
-
-            before = env_values_from_text("\n".join(lines))
         remaining = dict(updates)
         out: list[str] = []
         for line in lines:
@@ -186,7 +194,20 @@ def upsert_env(
                 out.append(line)
         for k, v in remaining.items():
             out.append(f"{k}={v}")
-        write_private_bytes(path, ("\n".join(out) + "\n").encode())
+        payload = ("\n".join(out) + "\n").encode()
+        # Skip-when-unchanged (task #3637): the bytes this call would write are the
+        # bytes already on disk, so the correct write is no write — no snapshot, no
+        # rewrite, no audit record. Decided under the same lock that would perform
+        # the write, so no other writer can race the comparison.
+        if path.exists() and path.read_bytes() == payload:
+            return
+        snapshot_env(path)
+        before: dict[str, str] = {}
+        if audit_site is not None:
+            from shared.env_audit import env_values_from_text
+
+            before = env_values_from_text("\n".join(lines))
+        write_private_bytes(path, payload)
         if audit_site is not None:
             from shared.env_audit import record_env_write
 

@@ -189,6 +189,57 @@ def test_upsert_atomically_replaces_the_complete_env(
     assert replaced == [env]
 
 
+# ─── skip-when-unchanged: a no-op upsert is not a write (task #3637) ───
+
+
+def test_upsert_noop_writes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A byte-identical upsert must not rewrite, snapshot, or record.
+
+    The repeated converge (every `ava start`, every boot-retry attempt) presents
+    the same value again and again; before the skip it rewrote the file and
+    appended an `old == new` audit record each time — the WSL noise of #3637.
+    """
+    from shared import envfile
+
+    f = tmp_path / ".env"
+    f.write_text("A=1\nKEEP=2\n")
+    stamp = f.stat().st_mtime_ns
+    writes: list[bytes] = []
+
+    def _record_write(_path: Path, data: bytes) -> None:
+        writes.append(data)
+
+    monkeypatch.setattr(envfile, "write_private_bytes", _record_write)
+
+    envfile.upsert_env(f, {"A": "1"}, audit_site="test_site")
+
+    assert writes == []
+    assert f.read_text() == "A=1\nKEEP=2\n"
+    assert f.stat().st_mtime_ns == stamp
+    assert _backups(f) == []
+    assert not (tmp_path / ".env.audit.jsonl").exists()
+
+
+def test_upsert_noop_still_normalizes_a_quirky_line(tmp_path: Path) -> None:
+    """Skip is byte-level: a quoted or oddly-spaced rendering is still a change.
+
+    The decoded value already matches, but the bytes do not — that write happens
+    (normalizing the line), so the skip can never strand a non-canonical line.
+    """
+    f = tmp_path / ".env"
+    f.write_text('A="1"\nB = 2\n')
+    upsert_env(f, {"A": "1", "B": "2"})
+    assert f.read_text() == "A=1\nB=2\n"
+
+
+def test_upsert_noop_is_decided_on_the_whole_result(tmp_path: Path) -> None:
+    """One changed key among unchanged ones still writes the file."""
+    f = tmp_path / ".env"
+    f.write_text("A=1\nB=2\n")
+    upsert_env(f, {"A": "1", "B": "3"})
+    assert f.read_text() == "A=1\nB=3\n"
+
+
 # ─── env_line_key: the settings parser's key grammar (export prefix, #2981) ───
 
 

@@ -84,6 +84,36 @@ def test_ensure_app_port_keeps_existing_slot_and_env(
     assert "AVA_APP_PORT=18099" in env_path.read_text()
 
 
+def test_ensure_app_port_second_run_is_a_byte_level_noop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Converge runs this on every `ava start` — and a boot-retry storm re-runs
+    that start per attempt. A second run must not rewrite the `.env` or emit
+    another audit record (task #3637: the WSL converge noise)."""
+    home = tmp_path / "ava-dev"
+    rec = ClusterRecord(
+        ports=cast("ClusterPorts", {"gateway": 18032, "frontend": 18033}),
+        gateway_home=str(home),
+        created_at="t",
+    )
+    _write_registry(monkeypatch, tmp_path, rec)
+    env_path = home / ".env"
+    env_path.parent.mkdir(parents=True)
+    env_path.write_text("AVA_GATEWAY_PORT=18032\n")
+
+    assert cg._ensure_app_port(home) == 18032 + 15
+    after_first = env_path.read_bytes()
+    audit_path = home / ".env.audit.jsonl"
+    records = audit_path.read_text().splitlines()
+    assert len(records) == 1
+    assert '"converge_gateway_port"' in records[0]
+
+    assert cg._ensure_app_port(home) == 18032 + 15
+
+    assert env_path.read_bytes() == after_first
+    assert audit_path.read_text().splitlines() == records
+
+
 def test_ensure_app_port_raises_without_record(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
