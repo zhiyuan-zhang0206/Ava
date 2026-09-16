@@ -1437,6 +1437,84 @@ class TestSelectTerminatedOwnersWithPending:
 
         assert select_terminated_owners_with_pending(pool, 86400.0) == []
 
+    def test_system_notice_chat_never_selected(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool
+    ) -> None:
+        """A system-family chat is a platform notification, never a resurrect
+        trigger: plain 'system' and every 'system:<subtype>' variant must not
+        select, while a real chat on the same owner still does (task #3687 —
+        the watcher-reap notice that woke 6260 twice)."""
+        from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
+
+        aid = _make_terminated_agent(db_conn)
+        insert_inbound_message(db_conn, aid, "notice", source="system")
+        insert_inbound_message(db_conn, aid, "variant", source="system:notice-reply")
+
+        assert select_terminated_owners_with_pending(pool, 86400.0) == []
+
+        real = insert_inbound_message(db_conn, aid, "real chat", source="user")
+        assert select_terminated_owners_with_pending(pool, 86400.0) == [(aid, real)]
+
+    def test_machine_wakeup_chats_still_select(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool
+    ) -> None:
+        """Machine wakeups (watcher: / shell: / schedule:) are deliberately NOT
+        notices: a crash-reaped owner's watcher wake is a revival channel, so
+        they must keep selecting (task #3687 boundary review)."""
+        from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
+
+        aid = _make_terminated_agent(db_conn)
+        wid = insert_inbound_message(db_conn, aid, "wake", source="watcher:3")
+
+        assert select_terminated_owners_with_pending(pool, 86400.0) == [(aid, wid)]
+
+
+class TestSystemNoticeSourcePredicateParity:
+    """`SYSTEM_NOTICE_SOURCE` (SQL, consumed by the selector) and
+    `is_system_notice_source` (Python, consumed by the resurrect endpoint)
+    gate the same decision from two languages; they must agree on every
+    input — a one-sided edit would reopen the 6260 gap from the other side
+    (task #3687 review note: pin the pair together)."""
+
+    def test_sql_fragment_and_python_twin_agree(self, db_conn: psycopg.Connection) -> None:
+        from psycopg import sql
+
+        from shared.lifecycle_acceptance import (
+            SYSTEM_NOTICE_SOURCE,
+            is_system_notice_source,
+        )
+
+        samples = [
+            "system",
+            "system:",
+            "system:notice-reply",
+            "system:warn-error-audit",
+            "systemwarn",
+            "system%d",
+            "system_x",
+            "System",
+            " system",
+            "system :x",
+            "",
+            "user",
+            "agent:1",
+            "ui:web",
+            "watcher:3",
+            "shell:0",
+            "schedule:2",
+        ]
+        with db_conn.cursor() as cur:
+            for sample in samples:
+                cur.execute(
+                    sql.SQL("SELECT {} FROM (SELECT %s::text AS source) AS m").format(
+                        sql.SQL(SYSTEM_NOTICE_SOURCE)
+                    ),
+                    (sample,),
+                )
+                row = cur.fetchone()
+                assert row is not None, sample
+                assert row[0] == is_system_notice_source(sample), sample
+
 
 class TestResurrectRetry:
     async def test_repeated_terminated_results_suppress_and_emit_once(

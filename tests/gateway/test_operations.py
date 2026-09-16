@@ -935,6 +935,11 @@ class TestResurrectIfTerminatedPlacement:
         monkeypatch.setattr(ops_lifecycle, "_wake_suppression_active", lambda _aid: False)
         monkeypatch.setattr(ops_lifecycle, "_recovery_halted", lambda _aid: False)
         monkeypatch.setattr(ops_lifecycle, "_clear_wake_suppression", lambda _aid: None)
+        # The notice guard reads the trigger row from the DB; these tests pin
+        # dispatch placement, not the guard — default it to "not a notice".
+        monkeypatch.setattr(
+            ops_lifecycle, "_system_notice_source_of_trigger", lambda _aid, _iid: None
+        )
 
     @pytest.mark.asyncio
     async def test_active_suppression_skips_forward_and_launch(
@@ -1141,6 +1146,115 @@ class TestResurrectIfTerminatedPlacement:
             5, trigger_inbound_id=99, trigger_inbound_kind="chat"
         )
         assert status is AgentStatus.RUNNING
+
+
+class TestResurrectIfTerminatedNotificationGuard:
+    """A system-family chat trigger never resurrects its owner (user ruling
+    2026-08-27; task #3687): the watcher-reap notice that woke 6260 twice is a
+    queued notification, not a wake-up call. The guard reads the trigger row
+    itself; a missing row falls through to the normal path (the home runner's
+    final CAS still adjudicates stale work), and a DB read failure propagates
+    instead of silently becoming a skip."""
+
+    @pytest.fixture(autouse=True)
+    def _default_state(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(ops_lifecycle, "_wake_suppression_active", lambda _aid: False)
+        monkeypatch.setattr(ops_lifecycle, "_recovery_halted", lambda _aid: False)
+        monkeypatch.setattr(ops_lifecycle, "_clear_wake_suppression", lambda _aid: None)
+
+    @pytest.mark.asyncio
+    async def test_system_notice_trigger_skips_forward_and_launch(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from shared.agents import AgentStatus
+
+        monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
+        monkeypatch.setattr(
+            ops_lifecycle, "_system_notice_source_of_trigger", lambda _aid, _iid: "system"
+        )
+
+        def _no_machine_read(_aid: int) -> str:
+            raise AssertionError("a system notice must not read or contact the home")
+
+        monkeypatch.setattr(ops_lifecycle, "get_agent_machine", _no_machine_read)
+        status = await ops_lifecycle.resurrect_if_terminated(
+            5, trigger_inbound_id=207124, trigger_inbound_kind="chat"
+        )
+        assert status is AgentStatus.TERMINATED
+
+    @pytest.mark.asyncio
+    async def test_missing_trigger_row_falls_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """No row -> None -> the normal path runs; stale-work adjudication stays
+        with the home runner's final CAS. This drives the real read (the id
+        does not exist), not a stubbed one."""
+        from shared.agents import AgentStatus
+
+        statuses = iter([AgentStatus.TERMINATED, AgentStatus.IDLING])
+        monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: next(statuses))
+        monkeypatch.setattr(ops_lifecycle, "get_agent_machine", lambda _aid: "home-a")
+        monkeypatch.setattr(ops_lifecycle, "machine_name", lambda: "home-a")
+        calls: list[int] = []
+
+        async def _fake_op(
+            agent_id: int,
+            body: ResurrectAgentRequest,
+            *,
+            trigger_inbound_id: int | None = None,
+            trigger_inbound_kind: str | None = None,
+        ) -> ResurrectAgentResponse:
+            calls.append(agent_id)
+            return ResurrectAgentResponse(status="spawned")
+
+        monkeypatch.setattr(ops_lifecycle, "resurrect_agent_op", _fake_op)
+
+        async def _unreachable(*_a: object, **_kw: object) -> dict:
+            raise ops_lifecycle._cluster_rpc.ClusterOpUnreachable("no ops server")
+
+        monkeypatch.setattr(ops_lifecycle._cluster_rpc, "dispatch_to_machine", _unreachable)
+
+        status = await ops_lifecycle.resurrect_if_terminated(
+            5, trigger_inbound_id=10**12, trigger_inbound_kind="chat"
+        )
+        assert status is AgentStatus.IDLING
+        assert calls == [5]
+
+    @pytest.mark.asyncio
+    async def test_read_failure_propagates(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A failed trigger read must not be swallowed into a skip (review
+        note A): the error surfaces to the caller, mirroring how a failed
+        suppression / breaker read above fails loudly."""
+        from shared.agents import AgentStatus
+
+        monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
+
+        def _boom(_aid: int, _iid: int) -> str | None:
+            raise RuntimeError("trigger read failed")
+
+        monkeypatch.setattr(ops_lifecycle, "_system_notice_source_of_trigger", _boom)
+        with pytest.raises(RuntimeError, match="trigger read failed"):
+            await ops_lifecycle.resurrect_if_terminated(
+                5, trigger_inbound_id=207124, trigger_inbound_kind="chat"
+            )
+
+    def test_trigger_guard_reads_row_kind_and_source(self, db_conn: psycopg.Connection) -> None:
+        """The guard reads the row itself: system-family chats are notices
+        (plain and variant), a user chat and a system_note are not, and a
+        missing row / foreign agent falls through to None."""
+        from shared.db import create_agent, insert_inbound_message
+
+        aid = create_agent(db_conn)
+        db_conn.commit()
+        sys_iid = insert_inbound_message(db_conn, aid, "notice", source="system")
+        var_iid = insert_inbound_message(db_conn, aid, "variant", source="system:notice-reply")
+        user_iid = insert_inbound_message(db_conn, aid, "hi", source="user")
+        note_iid = insert_inbound_message(db_conn, aid, "note", source="system", kind="system_note")
+
+        assert ops_lifecycle._system_notice_source_of_trigger(aid, sys_iid) == "system"
+        assert ops_lifecycle._system_notice_source_of_trigger(aid, var_iid) == "system:notice-reply"
+        assert ops_lifecycle._system_notice_source_of_trigger(aid, user_iid) is None
+        assert ops_lifecycle._system_notice_source_of_trigger(aid, note_iid) is None
+        assert ops_lifecycle._system_notice_source_of_trigger(aid, 10**12) is None
+        assert ops_lifecycle._system_notice_source_of_trigger(aid + 999, sys_iid) is None
 
 
 @pytest.mark.asyncio

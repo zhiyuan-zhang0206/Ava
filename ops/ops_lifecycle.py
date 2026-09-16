@@ -93,6 +93,7 @@ from shared.agents import (
 )
 from shared.audit_events import insert_event_log
 from shared.db import insert_inbound_message
+from shared.lifecycle_acceptance import is_system_notice_source
 from shared.live_announce import publish_agent_updated_sync
 from shared.machine import machine_name
 
@@ -253,6 +254,30 @@ def _recovery_halted(agent_id: int) -> bool:
     return row[0] is True
 
 
+def _system_notice_source_of_trigger(agent_id: int, trigger_inbound_id: int) -> str | None:
+    """The trigger's `source` when it is a system-family chat notice — those
+    never resurrect their owner (user ruling 2026-08-27; task #3687) — else
+    None.
+
+    No row, a non-chat kind, or any other source returns None so the caller
+    proceeds on the normal resurrect path; the home runner's final CAS still
+    adjudicates stale work. A DB read failure propagates: a failed read must
+    not be silently swallowed into a "skip" (the suppression / breaker checks
+    above fail loudly the same way).
+    """
+    with shared.db.connect() as conn:
+        row = conn.execute(
+            "SELECT kind, source FROM inbound_messages WHERE id=%s AND agent_id=%s",
+            (trigger_inbound_id, agent_id),
+        ).fetchone()
+    if row is None:
+        return None
+    kind, source = row
+    if kind == "chat" and is_system_notice_source(source):
+        return str(source)
+    return None
+
+
 def _recovery_halt_reason(agent_id: int) -> str | None:
     """Why automatic recovery is halted for `agent_id`, else None — the
     reason-resolution sibling of `_recovery_halted` for the stalled-harvest
@@ -372,6 +397,13 @@ async def resurrect_if_terminated(
     those signals are no-ops on an already-dead agent (reviving an agent only to
     kill or pause it would reverse the caller's intent), so they short-circuit on
     TERMINATED instead.
+
+    A system-family chat trigger (source `system` / `system:<subtype>`) never
+    starts a resurrect: framework notifications (e.g. watcher reclamation
+    notices) ride the queue for the owner's next resurrect through any other
+    channel — they do not create one (user ruling 2026-08-27; task #3687).
+    User / peer chats, compact requests, and system notes with an explicit
+    resurrect request remain unaffected.
     """
     status = await asyncio.to_thread(get_agent_status, agent_id)
     if status is not AgentStatus.TERMINATED:
@@ -388,6 +420,19 @@ async def resurrect_if_terminated(
             "resurrect_if_terminated: recovery circuit breaker tripped for agent %s "
             "after consecutive permanent provider rejections; skipping auto-resurrect",
             agent_id,
+        )
+        return status
+    notice_source = await asyncio.to_thread(
+        _system_notice_source_of_trigger, agent_id, trigger_inbound_id
+    )
+    if notice_source is not None:
+        _log.debug(
+            "resurrect_if_terminated: trigger %s for agent %s is a system notice "
+            "(source=%s); notifications never resurrect a terminated owner — "
+            "skipping auto-resurrect",
+            trigger_inbound_id,
+            agent_id,
+            notice_source,
         )
         return status
     body = ResurrectAgentRequest(resurrected_by="system")

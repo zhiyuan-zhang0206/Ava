@@ -43,6 +43,32 @@ SYSTEM_REAPED_CRASH_ROW: LiteralString = (
     "(agents_meta.termination_source = 'reaper' AND agents_meta.last_turn_fatal_at IS NOT NULL)"
 )
 
+# A system-family chat is a platform notification, and notifications never
+# resurrect a terminated owner (user ruling 2026-08-27; task #3687). `system`
+# and its `system:<subtype>` variants are the data-plane shape of framework
+# notices (watcher reclamation notices, operator alerts): they stay queued and
+# deliver on the owner's next resurrect through any other channel, or are
+# dead-lettered past the stale threshold. Machine *wakeups* (watcher: / shell:
+# / schedule:) are deliberately NOT in this family — a crash-reaped owner's
+# watcher wake is a revival channel, and the reap pass clears a permanently
+# terminated owner's watchers. The delivery watchdog's selection and the
+# resurrect endpoint share this predicate; they must be updated together (the
+# parity test pins the SQL fragment and the Python twin to each other).
+# Assumes the `inbound_messages` alias `m`, like the fragments above assume
+# `agents_meta`. `starts_with` (not `LIKE 'system:%'`) on purpose: a literal
+# `%` in a parameterized psycopg query would need `%%` escaping and is one
+# edit away from silently matching the wrong rows; `starts_with` mirrors the
+# Python twin's `startswith` exactly.
+SYSTEM_NOTICE_SOURCE: LiteralString = "(m.source = 'system' OR starts_with(m.source, 'system:'))"
+
+
+def is_system_notice_source(source: str) -> bool:
+    """Python twin of `SYSTEM_NOTICE_SOURCE`, kept adjacent on purpose — a
+    drift between the two would reopen the gap from opposite sides; the parity
+    test fails if they disagree."""
+    return source == "system" or source.startswith("system:")
+
+
 # Every unapplied lifecycle command whose intent predates the recorded
 # resurrection is closed by it, visibly (the payload names the resurrect inbound
 # that superseded it), never silently dropped. Applied commands are preserved:
