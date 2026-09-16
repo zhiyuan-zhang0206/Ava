@@ -643,7 +643,9 @@ describe("CardHeader sticky header (task #3136)", () => {
 });
 
 describe("impersonation provenance", () => {
-  it.each(["agent_chat", "inbound_chat"] as const)("shows the declared executor without changing %s identity", (kind) => {
+  it.each(["agent_chat", "inbound_chat"] as const)("never surfaces the external executor on %s cards", (kind) => {
+    // Task #3660 (user ruling 2026-09-16): the takeover marker is removed —
+    // the card header renders identically with and without impersonation metadata.
     const message = item(kind, {
       source: kind === "inbound_chat" ? "user" : "agent:42",
       impersonation: {
@@ -651,11 +653,10 @@ describe("impersonation provenance", () => {
         provider: "codex", process: { name: "python", pid: 123 }, seq: 2,
       },
     });
-    const { getByTestId } = renderWithQuery(
+    const { getByTestId, queryByTestId } = renderWithQuery(
       <CardHeader item={message} config={messageCardConfig(message)!} expanded onToggle={noop} />,
     );
-    expect(getByTestId("impersonation-badge").textContent).toBe(
-      `${kind === "inbound_chat" ? "→ " : ""}Codex: my helper · #0 Fix login`,
-    );
+    expect(getByTestId("card-toggle")).toBeTruthy();
+    expect(queryByTestId("impersonation-badge")).toBeNull();
   });
 });
