@@ -152,6 +152,28 @@ def test_missing_checker_refuses_and_force_overrides(tmp_path: Path) -> None:
     assert not target.exists()
 
 
+def test_crashed_checker_refuses_and_force_overrides(tmp_path: Path) -> None:
+    """A non-zero exit that is not a REFUSE verdict takes the failed-check branch."""
+    repo = _make_repo(tmp_path)
+    target = _add_worktree(repo)
+    _plant_usable_python(repo)
+    (repo / "scripts" / "check_worktree_remove.py").write_text("raise SystemExit(2)\n")
+    home = _fake_home(tmp_path)
+
+    refused = _clean(repo, home, "t1")
+
+    assert refused.returncode == 1
+    assert "live-anchor check failed" in refused.stderr
+    assert target.is_dir()
+    assert _branch_exists(repo, "ava/t1")
+
+    forced = _clean(repo, home, "t1", "--force")
+
+    assert forced.returncode == 0, forced.stderr
+    assert "removing anyway (--force)" in forced.stderr
+    assert not target.exists()
+
+
 def test_dirty_worktree_is_kept_without_force(tmp_path: Path) -> None:
     repo = _make_repo(tmp_path)
     target = _add_worktree(repo)
