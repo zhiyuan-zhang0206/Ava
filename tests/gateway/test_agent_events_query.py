@@ -135,6 +135,19 @@ class TestAgentEventsQuery:
         assert kw["limit"] == 5
         assert kw["offset"] == 10
 
+    def test_default_limit_comes_from_display_config(
+        self, fake_query: dict[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The implicit window is ``settings.display.events_default_limit``
+        (``AVA_EVENTS_DEFAULT_LIMIT``); the literal 100 is only that field's
+        default, not a hard-coded page size."""
+        from shared.config import settings
+
+        monkeypatch.setattr(settings.display, "events_default_limit", 7)
+        with TestClient(app) as client:
+            client.get("/api/agents/7/events")
+        assert fake_query["calls"][0]["limit"] == 7
+
     def test_offset_over_hard_cap_422(self, fake_query: dict[str, list[dict[str, Any]]]) -> None:  # type: ignore[no-untyped-def]
         with TestClient(app) as client:
             response = client.get("/api/agents/7/events", params={"offset": 10_001})

@@ -24,7 +24,7 @@ from shared.agents import InvalidModelConfig as InvalidModelConfig
 from shared.agents import MachineNotRegistered as MachineNotRegistered
 from shared.agents import ResurrectError as ResurrectError
 from shared.agents import SpawnTargetNotAgentRunner as SpawnTargetNotAgentRunner
-from shared.config import cluster_tz
+from shared.config import cluster_tz, settings
 
 from . import presets as presets
 
@@ -198,15 +198,27 @@ class TerminateOutcome(str):
         return f"TerminateOutcome(status={self.status.value!r}, open_tasks={self.open_tasks!r})"
 
 
-def get_neighbors(agent_id: int, depth: int = 1, limit: int = 20) -> list[Neighbor]:
+def get_neighbors(
+    agent_id: int, depth: int | None = None, limit: int | None = None
+) -> list[Neighbor]:
     """Rank the agents most strongly tied to `agent_id`.
 
     Ties form on spawn, fork, resurrect, or send_message and fade with time;
-    `depth` is how many hops out to look.
+    `depth` is how many hops out to look. Omit `depth`/`limit` for the
+    configured defaults (``display.neighbors_default_depth`` /
+    ``display.neighbors_default_limit`` - 1 / 20 out of the box).
     """
     agent_id = coerce_typed(agent_id, "agent_id", int)
-    depth = coerce_typed(depth, "depth", int)
-    limit = coerce_typed(limit, "limit", int)
+    resolved_depth: int
+    if depth is None:
+        resolved_depth = settings.display.neighbors_default_depth
+    else:
+        resolved_depth = coerce_typed(depth, "depth", int)
+    resolved_limit: int
+    if limit is None:
+        resolved_limit = settings.display.neighbors_default_limit
+    else:
+        resolved_limit = coerce_typed(limit, "limit", int)
     return [
         Neighbor(
             agent_id=n["agent_id"],
@@ -215,7 +227,7 @@ def get_neighbors(agent_id: int, depth: int = 1, limit: int = 20) -> list[Neighb
             depth=n["depth"],
             score=n["score"],
         )
-        for n in _client.get_neighbors(agent_id, depth=depth, limit=limit)
+        for n in _client.get_neighbors(agent_id, depth=resolved_depth, limit=resolved_limit)
     ]
 
 

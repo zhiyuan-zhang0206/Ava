@@ -382,18 +382,24 @@ async def get_config(machine: str | None = None) -> ConfigView:
 
 @router.get("/api/config/audit")
 async def get_config_audit(
-    machine: str | None = None, last: int = Query(20, ge=1, le=200)
+    machine: str | None = None,
+    # `last`'s range stays a protective constant (import-time Query bound);
+    # the default *count* is display.config_audit_default_last.
+    last: int | None = Query(default=None, ge=1, le=200),
 ) -> ConfigAuditView:
     """Return the `.env` write audit trail, newest first.
 
     `machine` selects the source: omitted = this gateway's own box; `all` = every
     agent-runner machine plus the gateway's own box, merged (fail-fast — an
     unreachable machine 503s the whole read); a machine name = that machine.
-    `last` caps the number of returned records (1..200). Records are the raw
+    Omitted `last` returns the configured default count
+    (``display.config_audit_default_last`` - 20 out of the box); an explicit
+    `last` stays capped at 200. Records are the raw
     audit-JSONL entries (`shared/env_audit.py`), each tagged with its `machine`;
     values were redacted at write time (non-sensitive fields only), and records
     from before record v2 lack `actor` / `trace_id` / `changed`.
     """
+    effective_last = last if last is not None else settings.display.config_audit_default_last
     if machine == "all":
         from shared.machines import list_agent_runners
 
@@ -401,17 +407,19 @@ async def get_config_audit(
         names = [name for name, _url in runners]
         if machine_name() not in names:
             names.append(machine_name())
-        results = await asyncio.gather(*(_dispatch_config_audit_read(name, last) for name in names))
+        results = await asyncio.gather(
+            *(_dispatch_config_audit_read(name, effective_last) for name in names)
+        )
     else:
         target = machine or machine_name()
         await asyncio.to_thread(_assert_machine_known, target)
-        results = [await _dispatch_config_audit_read(target, last)]
+        results = [await _dispatch_config_audit_read(target, effective_last)]
 
     records: list[dict[str, object]] = []
     for result in results:
         records.extend({**record, "machine": result.machine} for record in result.records)
     records.sort(key=lambda record: str(record.get("ts", "")), reverse=True)
-    return ConfigAuditView(records=records[:last])
+    return ConfigAuditView(records=records[:effective_last])
 
 
 @router.get("/api/config/resolved")

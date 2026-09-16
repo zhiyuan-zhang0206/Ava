@@ -1268,7 +1268,7 @@
     "/api/agents/{agent_id}/events": {
       "get": {
         "summary": "Get Agent Events",
-        "description": "Historical slice of this agent's `events` rows — the REST\ncounterpart to the live `…/events/stream` SSE tail (which only carries\nevents from the moment you subscribe). Backs ops / SDK / eval consumers\nthat need to query the past.\n\nFilters compose (AND):\n  - `from=<ISO-8601>` / `to=<ISO-8601>`: inclusive time window\n    (`ts >= from AND ts <= to`); `from` omitted defaults to the last\n    24h (same lower-bound contract as /api/events). Bad timestamps 422\n    (FastAPI datetime parse).\n  - `event=<name>`: exact event type, e.g. `llm_usage` / `turn_end` /\n    `exec` / `exec_failed`.\n  - `level=<INFO|WARNING|ERROR|…>`: exact level (case-insensitive, any\n    case accepted; the stored/returned values are LOWERCASE since the W9\n    events-table switch — `agent_events`' uppercase `INFO`/`WARNING`/\n    `ERROR` no longer appears on the wire). This is an *exact* match,\n    unlike `/api/cluster/admin/events` where `level`\n    is a minimum threshold — a per-agent history query reads more\n    predictably as \"give me exactly this level\".\n\nReturns newest-first (`ts DESC`; `id` is a stable surrogate derived\nfrom the log line, so `limit`/`offset` paging stays deterministic).\n`limit` defaults to 100, capped at 1000 (over-limit 422s); `offset`\npages further back and is capped at 10,000. Loki has no native offset,\nso the cap bounds the in-memory parse of `limit + offset + 1` rows.\n\nNo agent-existence precondition (same as `…/activity` and `…/pending`):\nan unknown agent or an empty window just returns `[]`.",
+        "description": "Historical slice of this agent's `events` rows — the REST\ncounterpart to the live `…/events/stream` SSE tail (which only carries\nevents from the moment you subscribe). Backs ops / SDK / eval consumers\nthat need to query the past.\n\nFilters compose (AND):\n  - `from=<ISO-8601>` / `to=<ISO-8601>`: inclusive time window\n    (`ts >= from AND ts <= to`); `from` omitted defaults to the last\n    24h (same lower-bound contract as /api/events). Bad timestamps 422\n    (FastAPI datetime parse).\n  - `event=<name>`: exact event type, e.g. `llm_usage` / `turn_end` /\n    `exec` / `exec_failed`.\n  - `level=<INFO|WARNING|ERROR|…>`: exact level (case-insensitive, any\n    case accepted; the stored/returned values are LOWERCASE since the W9\n    events-table switch — `agent_events`' uppercase `INFO`/`WARNING`/\n    `ERROR` no longer appears on the wire). This is an *exact* match,\n    unlike `/api/cluster/admin/events` where `level`\n    is a minimum threshold — a per-agent history query reads more\n    predictably as \"give me exactly this level\".\n\nReturns newest-first (`ts DESC`; `id` is a stable surrogate derived\nfrom the log line, so `limit`/`offset` paging stays deterministic).\n`limit` returns the configured default window (``display.events_default_limit``\n— 100 out of the box), capped at 1000 (over-limit 422s); `offset`\npages further back and is capped at 10,000. Loki has no native offset,\nso the cap bounds the in-memory parse of `limit + offset + 1` rows.\n\nNo agent-existence precondition (same as `…/activity` and `…/pending`):\nan unknown agent or an empty window just returns `[]`.",
         "operationId": "get_agent_events_api_agents__agent_id__events_get",
         "parameters": [
           {
@@ -1351,10 +1351,16 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer",
-              "maximum": 1000,
-              "minimum": 1,
-              "default": 100,
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 1000,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Limit"
             }
           },
@@ -1553,7 +1559,7 @@
     "/api/agents/{agent_id}/neighbors": {
       "get": {
         "summary": "Get Agent Neighbors",
-        "description": "The agents most strongly tied to `agent_id`, ranked by recency-weighted\ninteraction strength (spawn / fork / resurrect / message, all equal weight),\nplus `ancestors` — the immutable birth chain above `agent_id`, nearest ancestor first.\n\n`depth=1` returns direct ties only; a higher `depth` follows ties outward,\ndiscounting each extra hop. `ancestors` ignores `depth`/`limit`: it walks\nthe immutable born_spawner chain to the top (message ties never form\nancestors), each row's `depth` = hops up (1 = the direct birth parent).\nTerminated agents are included (each row carries `status`); `limit` caps\nthe neighbor count, strongest first. The tie graph reads the unified event\nstream (task #180 LGTM cutover): audit edge events stitch the frozen PG\n`events` archive with the Loki live tail and the walks run in Python\n(gateway/neighbors.py) — the retired `agent_neighbors` SQL function died\nwith the frozen table it read.\n\n404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).",
+        "description": "The agents most strongly tied to `agent_id`, ranked by recency-weighted\ninteraction strength (spawn / fork / resurrect / message, all equal weight),\nplus `ancestors` — the immutable birth chain above `agent_id`, nearest ancestor first.\n\nOmitted ``depth``/``limit`` return the configured defaults\n(``display.neighbors_default_depth`` / ``display.neighbors_default_limit``\n- 1 / 20 out of the box). `depth=1` returns direct ties only; a higher\n`depth` follows ties outward,\ndiscounting each extra hop. `ancestors` ignores `depth`/`limit`: it walks\nthe immutable born_spawner chain to the top (message ties never form\nancestors), each row's `depth` = hops up (1 = the direct birth parent).\nTerminated agents are included (each row carries `status`); `limit` caps\nthe neighbor count, strongest first. The tie graph reads the unified event\nstream (task #180 LGTM cutover): audit edge events stitch the frozen PG\n`events` archive with the Loki live tail and the walks run in Python\n(gateway/neighbors.py) — the retired `agent_neighbors` SQL function died\nwith the frozen table it read.\n\n404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).",
         "operationId": "get_agent_neighbors_api_agents__agent_id__neighbors_get",
         "parameters": [
           {
@@ -1570,10 +1576,16 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer",
-              "maximum": 5,
-              "minimum": 1,
-              "default": 1,
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 5,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Depth"
             }
           },
@@ -1582,10 +1594,16 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer",
-              "maximum": 100,
-              "minimum": 1,
-              "default": 20,
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 100,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Limit"
             }
           }
@@ -3113,7 +3131,7 @@
     "/api/cluster/admin/events": {
       "get": {
         "summary": "Get Cluster Admin Events",
-        "description": "Slice the unified event stream from Loki (category=telemetry/log) for\nops debugging without SSH — the LGTM replacement for the PG `events` read\n(task #1197).\n\nFilters compose (AND):\n  - `agent_id=N`: only this agent's events (gateway / daemon rows excluded).\n  - `service_only=true`: only events with no agent_id (gateway / daemons).\n  - `level=ERROR`: minimum level (DEBUG/INFO/WARNING/ERROR/CRITICAL).\n  - `since=2h` / `since=2026-05-25T00:00Z`: relative window or absolute\n    timestamp. Relative format `<int><unit>` with unit `s/m/h/d`.\n  - `event=spawn,terminate`: comma-separated event names.\n  - `grep=<substring>`: substring match on the raw log line (the JSON\n    body includes the `msg` payload).\n  - `limit`: max rows to return, capped at 1000. Default 200.\n\nReturns newest-first; the client paginates by passing\n`since=<oldest_ts_seen>` on the next call.",
+        "description": "Slice the unified event stream from Loki (category=telemetry/log) for\nops debugging without SSH — the LGTM replacement for the PG `events` read\n(task #1197).\n\nFilters compose (AND):\n  - `agent_id=N`: only this agent's events (gateway / daemon rows excluded).\n  - `service_only=true`: only events with no agent_id (gateway / daemons).\n  - `level=ERROR`: minimum level (DEBUG/INFO/WARNING/ERROR/CRITICAL).\n  - `since=2h` / `since=2026-05-25T00:00Z`: relative window or absolute\n    timestamp. Relative format `<int><unit>` with unit `s/m/h/d`.\n  - `event=spawn,terminate`: comma-separated event names.\n  - `grep=<substring>`: substring match on the raw log line (the JSON\n    body includes the `msg` payload).\n  - `limit`: max rows to return, capped at 1000 (protective constant).\n    Omitted returns the configured default\n    (``display.cluster_events_default_limit`` - 200 out of the box).\n\nReturns newest-first; the client paginates by passing\n`since=<oldest_ts_seen>` on the next call.",
         "operationId": "get_cluster_admin_events_api_cluster_admin_events_get",
         "parameters": [
           {
@@ -3211,8 +3229,14 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer",
-              "default": 200,
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Limit"
             }
           }
@@ -3602,7 +3626,7 @@
     "/api/config/audit": {
       "get": {
         "summary": "Get Config Audit",
-        "description": "Return the `.env` write audit trail, newest first.\n\n`machine` selects the source: omitted = this gateway's own box; `all` = every\nagent-runner machine plus the gateway's own box, merged (fail-fast — an\nunreachable machine 503s the whole read); a machine name = that machine.\n`last` caps the number of returned records (1..200). Records are the raw\naudit-JSONL entries (`shared/env_audit.py`), each tagged with its `machine`;\nvalues were redacted at write time (non-sensitive fields only), and records\nfrom before record v2 lack `actor` / `trace_id` / `changed`.",
+        "description": "Return the `.env` write audit trail, newest first.\n\n`machine` selects the source: omitted = this gateway's own box; `all` = every\nagent-runner machine plus the gateway's own box, merged (fail-fast — an\nunreachable machine 503s the whole read); a machine name = that machine.\nOmitted `last` returns the configured default count\n(``display.config_audit_default_last`` - 20 out of the box); an explicit\n`last` stays capped at 200. Records are the raw\naudit-JSONL entries (`shared/env_audit.py`), each tagged with its `machine`;\nvalues were redacted at write time (non-sensitive fields only), and records\nfrom before record v2 lack `actor` / `trace_id` / `changed`.",
         "operationId": "get_config_audit_api_config_audit_get",
         "parameters": [
           {
@@ -3626,10 +3650,16 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer",
-              "maximum": 200,
-              "minimum": 1,
-              "default": 20,
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 200,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Last"
             }
           }
@@ -4193,7 +4223,7 @@
     "/api/schedules/{schedule_id}/runs": {
       "get": {
         "summary": "Get Schedule Runs",
-        "description": "Recent run-history rows (newest first). 404 if the schedule is missing.",
+        "description": "Recent run-history rows (newest first). Omit `limit` for the configured\ndefault window (``display.schedules_runs_default_limit`` - 50 out of the\nbox). 404 if the schedule is missing.",
         "operationId": "get_schedule_runs_api_schedules__schedule_id__runs_get",
         "parameters": [
           {
@@ -4210,8 +4240,14 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer",
-              "default": 50,
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Limit"
             }
           }
@@ -4720,7 +4756,7 @@
     "/api/metrics": {
       "get": {
         "summary": "Get Metrics",
-        "description": "Aggregate report over the last `days` of events (all agents, or a\nsingle one via `agent`). `days` is capped at 30 to bound the scan.\n`since_compact=true` additionally narrows each agent's events to those at\nor after its latest compact halt (echoed in `meta.since_compact`).\n`meta.total_events` counts every telemetry/log event in the window —\nincluding service-level rows (agent_id NULL) from every process, a scope\nwidened by the W9 events-table switch (it was agent-kernel lines only\nbefore); audit events are excluded.",
+        "description": "Aggregate report over the last `days` of events (all agents, or a\nsingle one via `agent`). Omitted `days` returns the configured default\n(``display.metrics_default_window_days`` - 1 out of the box); the 30-day cap\nstays a protective constant (it bounds the scan).\n`since_compact=true` additionally narrows each agent's events to those at\nor after its latest compact halt (echoed in `meta.since_compact`).\n`meta.total_events` counts every telemetry/log event in the window —\nincluding service-level rows (agent_id NULL) from every process, a scope\nwidened by the W9 events-table switch (it was agent-kernel lines only\nbefore); audit events are excluded.",
         "operationId": "get_metrics_api_metrics_get",
         "parameters": [
           {
@@ -4728,10 +4764,16 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer",
-              "maximum": 30,
-              "minimum": 1,
-              "default": 1,
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 30,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Days"
             }
           },
@@ -4797,10 +4839,16 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer",
-              "maximum": 30,
-              "minimum": 1,
-              "default": 1,
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 30,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Days"
             }
           },
@@ -4842,7 +4890,7 @@
     "/api/events": {
       "get": {
         "summary": "Get Events",
-        "description": "Slice of the unified event stream — every event (audit / telemetry /\nlog) through one query surface, the programmatic read side of the\nunified emitter. Newest-first (`ts DESC`, `id DESC` tiebreak).\n\nFilters compose (AND):\n  - `category=<audit|telemetry|log>`: retention/alerting class (unknown\n    value 422s).\n  - `event_name=<name>`: exact event name, e.g. `llm_usage` /\n    `turn_end` / `spawn` / `send_message` (the legacy `kind=` spelling\n    is accepted as an alias; passing both with different values 422s).\n    The `kind=` alias is retired on 2026-09-30 — pre-alignment clients\n    must move to `event_name` before then, after which the alias and its\n    conflict check are removed.\n  - `agent_id=<n>`: events belonging to that agent; service-level events\n    (NULL) are excluded when set.\n  - `trace_id=<hex>`: one turn's whole call chain — every event that\n    shares the id.\n  - `machine=<name>`: the host dimension.\n  - `level=<debug|info|warning|error|critical>`: exact match,\n    case-insensitive (unknown value 422s).\n  - `tier=<business|anomaly|observation|noise>[,...]`: comma-separated\n    display tiers, ORed within the list and ANDed with every other filter.\n    The Loki predicate is derived before pagination so `meta.total` and\n    page boundaries stay exact.\n  - `from=<ISO-8601>` / `to=<ISO-8601>`: inclusive time window\n    (`ts >= from AND ts <= to`); either side may be omitted. Values\n    MUST carry a timezone offset (`Z` or `+hh:mm`) — a naive timestamp\n    is interpreted in the server's local timezone, so it 422s instead\n    of silently shifting the window.\n  - `hours=<n>`: alternative window — the last N hours\n    (`from = now - hours`). Mutually exclusive with `from`.\n  - Default window: when neither `from` nor `hours` is given, the last\n    24 hours are assumed (`from = now - 24h`) — an unbounded query\n    would scan the whole retention history (6M+ rows across every\n    month partition), so the API never runs one. `meta.window_from`\n    always echoes the effective lower bound.\n  - `limit` (default 100, cap 1000) / `offset` (cap 10,000): offset\n    paging with stable ordering across same-`ts` rows. The cap bounds the\n    in-memory Loki JSON parse (`limit + offset + 1` rows).\n  - `with_total=1`: also compute the exact filtered row count\n    (`meta.total`) via the Loki count path — one extra full-window\n    aggregation, so it is opt-in; without it `meta.total` is null.\n\nResponse: `meta` (opt-in exact filtered `total`, effective\n`window_from`/`window_to`, `limit`/`offset`, `has_more` from the list\nfetch's +1 lookahead) + `items` (the unified `EventRow` shape).\n`window_from` is always set — the default 24h lower bound when the\nrequest named none. An empty window returns `items: []`.",
+        "description": "Slice of the unified event stream — every event (audit / telemetry /\nlog) through one query surface, the programmatic read side of the\nunified emitter. Newest-first (`ts DESC`, `id DESC` tiebreak).\n\nFilters compose (AND):\n  - `category=<audit|telemetry|log>`: retention/alerting class (unknown\n    value 422s).\n  - `event_name=<name>`: exact event name, e.g. `llm_usage` /\n    `turn_end` / `spawn` / `send_message` (the legacy `kind=` spelling\n    is accepted as an alias; passing both with different values 422s).\n    The `kind=` alias is retired on 2026-09-30 — pre-alignment clients\n    must move to `event_name` before then, after which the alias and its\n    conflict check are removed.\n  - `agent_id=<n>`: events belonging to that agent; service-level events\n    (NULL) are excluded when set.\n  - `trace_id=<hex>`: one turn's whole call chain — every event that\n    shares the id.\n  - `machine=<name>`: the host dimension.\n  - `level=<debug|info|warning|error|critical>`: exact match,\n    case-insensitive (unknown value 422s).\n  - `tier=<business|anomaly|observation|noise>[,...]`: comma-separated\n    display tiers, ORed within the list and ANDed with every other filter.\n    The Loki predicate is derived before pagination so `meta.total` and\n    page boundaries stay exact.\n  - `from=<ISO-8601>` / `to=<ISO-8601>`: inclusive time window\n    (`ts >= from AND ts <= to`); either side may be omitted. Values\n    MUST carry a timezone offset (`Z` or `+hh:mm`) — a naive timestamp\n    is interpreted in the server's local timezone, so it 422s instead\n    of silently shifting the window.\n  - `hours=<n>`: alternative window — the last N hours\n    (`from = now - hours`). Mutually exclusive with `from`.\n  - Default window: when neither `from` nor `hours` is given, the last\n    24 hours are assumed (`from = now - 24h`) — an unbounded query\n    would scan the whole retention history (6M+ rows across every\n    month partition), so the API never runs one. `meta.window_from`\n    always echoes the effective lower bound.\n  - `limit` (configured default window — ``display.events_default_limit``,\n    100 out of the box — cap 1000) / `offset` (cap 10,000): offset\n    paging with stable ordering across same-`ts` rows. The cap bounds the\n    in-memory Loki JSON parse (`limit + offset + 1` rows).\n  - `with_total=1`: also compute the exact filtered row count\n    (`meta.total`) via the Loki count path — one extra full-window\n    aggregation, so it is opt-in; without it `meta.total` is null.\n\nResponse: `meta` (opt-in exact filtered `total`, effective\n`window_from`/`window_to`, `limit`/`offset`, `has_more` from the list\nfetch's +1 lookahead) + `items` (the unified `EventRow` shape).\n`window_from` is always set — the default 24h lower bound when the\nrequest named none. An empty window returns `items: []`.",
         "operationId": "get_events_api_events_get",
         "parameters": [
           {
@@ -5030,10 +5078,16 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer",
-              "maximum": 1000,
-              "minimum": 1,
-              "default": 100,
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 1000,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Limit"
             }
           },
@@ -5477,10 +5531,16 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer",
-              "maximum": 500,
-              "minimum": 1,
-              "default": 100,
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 500,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Limit"
             }
           }
@@ -5834,7 +5894,7 @@
     "/api/fleet/graph": {
       "get": {
         "summary": "Get Fleet Graph",
-        "description": "Fleet-wide weighted agent graph — nodes (agents) + edges (lineage + messages).\n\nNodes carry status, label, a windowed recent-work `node_score`, and\nrestart-proof `total_tokens` consumed in the retained window (7d). Edges\nsplit into two families: lineage\n(spawn/fork/resurrect) is structural and permanent; messages (send_message)\ndecay with recency. Terminated agents — and edges touching a terminated\nagent — are excluded by default (user ruling 2026-08-09 #1104: terminated\nagents never appear in the graph, mirroring the sidebar's agent tree). The\nfilter ORDER is liveness first: the node set is live-only (`status !=\n'terminated'`, so restarting etc. stay), and edges only ever\nconnect two live endpoints — a live node whose lineage partner has since\nterminated simply renders without that edge. Raw source rows are filtered\nduring the merge; pass `?include_terminated=true` for the full graph.\n\n`?hours=` (0 = last 5m; 1/6/24/72/168 = hours; omitted = all-time) windows\nboth the node score and the edge events. `?decay_lambda=` (range [0, 10],\ndefault 0.5) is the per-day decay constant for the message edge weight,\nquantized to 2dp before both computation and cache-key construction. Its\n1001 values, two terminated states, and the bounded hour-window choices\ncap the cache-key space at approximately 16k entries. Per-caller rate\nlimiting was considered and deferred: this endpoint is auth-gated, and the\nbounded key space leaves no present threat that warrants that infrastructure.\n\nNode score (windowed, drives node size):\n    node_score = SUM(in_total) * 0.1 + SUM(out_total) * 1.0\nover the agent's `llm_usage` counters in the window — read from\nPrometheus (`ava_llm_usage_in_total` / `ava_llm_usage_out_total`,\nwindowed via `increase(...)`). `total_tokens` is the sum of the same two\ncounters over the retained 7d window, also using `increase(...)` so\nexporter process restarts do not reset it.\n\nEdge weight:\n    lineage (spawn/fork/resurrect): weight = event_count * 2.0 (no time decay,\n        always shown — the structural skeleton never fades)\n    message (send_message): weight = SUM(EXP(-decay_lambda * days_ago)) * 1.0\n        (recency-decayed; dropped below 0.01)",
+        "description": "Fleet-wide weighted agent graph — nodes (agents) + edges (lineage + messages).\n\nNodes carry status, label, a windowed recent-work `node_score`, and\nrestart-proof `total_tokens` consumed in the retained window (7d). Edges\nsplit into two families: lineage\n(spawn/fork/resurrect) is structural and permanent; messages (send_message)\ndecay with recency. Terminated agents — and edges touching a terminated\nagent — are excluded by default (user ruling 2026-08-09 #1104: terminated\nagents never appear in the graph, mirroring the sidebar's agent tree). The\nfilter ORDER is liveness first: the node set is live-only (`status !=\n'terminated'`, so restarting etc. stay), and edges only ever\nconnect two live endpoints — a live node whose lineage partner has since\nterminated simply renders without that edge. Raw source rows are filtered\nduring the merge; pass `?include_terminated=true` for the full graph.\n\n`?hours=` (0 = last 5m; 1/6/24/72/168 = hours; omitted = all-time) windows\nboth the node score and the edge events. `?decay_lambda=` (range [0, 10];\nomitted = the configured default ``display.fleet_graph_decay_lambda`` -\n0.5 out of the box) is the per-day decay constant for the message edge weight,\nquantized to 2dp before both computation and cache-key construction. Its\n1001 values, two terminated states, and the bounded hour-window choices\ncap the cache-key space at approximately 16k entries. Per-caller rate\nlimiting was considered and deferred: this endpoint is auth-gated, and the\nbounded key space leaves no present threat that warrants that infrastructure.\n\nNode score (windowed, drives node size):\n    node_score = SUM(in_total) * 0.1 + SUM(out_total) * 1.0\nover the agent's `llm_usage` counters in the window — read from\nPrometheus (`ava_llm_usage_in_total` / `ava_llm_usage_out_total`,\nwindowed via `increase(...)`). `total_tokens` is the sum of the same two\ncounters over the retained 7d window, also using `increase(...)` so\nexporter process restarts do not reset it.\n\nEdge weight:\n    lineage (spawn/fork/resurrect): weight = event_count * 2.0 (no time decay,\n        always shown — the structural skeleton never fades)\n    message (send_message): weight = SUM(EXP(-decay_lambda * days_ago)) * 1.0\n        (recency-decayed; dropped below 0.01)",
         "operationId": "get_fleet_graph_api_fleet_graph_get",
         "parameters": [
           {
@@ -5870,10 +5930,16 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "number",
-              "maximum": 10,
-              "minimum": 0,
-              "default": 0.5,
+              "anyOf": [
+                {
+                  "type": "number",
+                  "maximum": 10,
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Decay Lambda"
             }
           }

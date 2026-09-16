@@ -174,6 +174,25 @@ def test_metrics_days_out_of_range_rejected(db_conn: psycopg.Connection) -> None
         assert client.get("/api/metrics?days=31").status_code == 422
 
 
+def test_metrics_default_window_comes_from_display_config(
+    db_conn: psycopg.Connection, loki_fake: FakeLoki, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Omitted `days` is settings.display.metrics_default_window_days
+    (``AVA_METRICS_DEFAULT_WINDOW_DAYS``); the literal 1 is only that field's
+    default, not a hard-coded window. Both metrics endpoints resolve it."""
+    from shared.config import settings
+
+    db_conn.commit()
+    monkeypatch.setattr(settings.display, "metrics_default_window_days", 3)
+    with TestClient(app) as client:
+        resp = client.get("/api/metrics")
+        agents_resp = client.get("/api/metrics/agents")
+    assert resp.status_code == 200
+    assert resp.json()["meta"]["window_days"] == 3
+    assert agents_resp.status_code == 200
+    assert agents_resp.json()["meta"]["window_days"] == 3
+
+
 def test_metrics_since_compact_param(db_conn: psycopg.Connection, loki_fake: FakeLoki) -> None:
     """`?since_compact=true` drops each agent's pre-compact events (the compact
     halt row itself is kept — `ts >=` cutoff); default counts everything and

@@ -712,6 +712,27 @@ class TestGetNeighbors:
         assert rows[0].score > rows[1].score
         assert f"#{fresh}" in str(rows[0]) and "depth=1" in str(rows[0])
 
+    def test_defaults_come_from_display_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Omitted depth/limit resolve from settings.display.neighbors_default_*
+        (``AVA_NEIGHBORS_DEFAULT_DEPTH`` / ``AVA_NEIGHBORS_DEFAULT_LIMIT``); the
+        literals 1/20 are only the fields' defaults, not hard-coded call
+        parameters."""
+        from shared.config import settings
+
+        seen: dict[str, int] = {}
+
+        def _record(_agent_id: int, *, depth: int, limit: int) -> list[dict[str, object]]:
+            seen["depth"] = depth
+            seen["limit"] = limit
+            return []
+
+        monkeypatch.setattr(ava.agents._client, "get_neighbors", _record)
+        monkeypatch.setattr(settings.display, "neighbors_default_depth", 3)
+        monkeypatch.setattr(settings.display, "neighbors_default_limit", 7)
+
+        assert ava.agents.get_neighbors(11) == []
+        assert seen == {"depth": 3, "limit": 7}
+
     def test_nonexistent_raises(self, db_conn: psycopg.Connection) -> None:
         with pytest.raises(AgentNotFound):
             ava.agents.get_neighbors(9999)

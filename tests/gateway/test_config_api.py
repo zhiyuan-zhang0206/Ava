@@ -892,6 +892,49 @@ def test_get_config_audit_last_is_bounded() -> None:
         assert client.get("/api/config/audit?last=201").status_code == 422
 
 
+def test_get_config_audit_default_last_comes_from_display_config(
+    _clean_overrides: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Omitted `last` is ``settings.display.config_audit_default_last``
+    (``AVA_CONFIG_AUDIT_DEFAULT_LAST``); the literal 20 is only that field's
+    default, not a hard-coded cap."""
+    from shared import env_audit, runtime_config
+    from shared.agents import MachineNotRegistered
+
+    def _known(_target: str) -> None:
+        return None
+
+    monkeypatch.setattr(config_router, "_assert_machine_known", _known)
+
+    def _unregistered(_name: str) -> list[str]:
+        raise MachineNotRegistered(_name)
+
+    monkeypatch.setattr("shared.machines.lookup_role", _unregistered)
+
+    env_path = runtime_config.env_file_path()
+    env_path.write_text("AVA_MODEL=audit-one\n")
+    env_audit.record_env_write(
+        env_path,
+        {"AVA_MODEL"},
+        set(),
+        site="test-one",
+        changes=[{"alias": "AVA_MODEL", "old": "old", "new": "audit-one"}],
+    )
+    env_audit.record_env_write(
+        env_path,
+        {"AVA_MODEL"},
+        set(),
+        site="test-two",
+        changes=[{"alias": "AVA_MODEL", "old": "audit-one", "new": "audit-two"}],
+    )
+
+    monkeypatch.setattr(settings.display, "config_audit_default_last", 1)
+    with TestClient(app) as client:
+        resp = client.get("/api/config/audit")
+    assert resp.status_code == 200, resp.text
+    assert len(resp.json()["records"]) == 1
+
+
 def test_get_config_audit_reads_own_records(
     _clean_overrides: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

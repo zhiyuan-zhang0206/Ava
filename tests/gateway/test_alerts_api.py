@@ -778,6 +778,33 @@ def test_list_unresolved_first_and_filters(db_conn: psycopg.Connection, client: 
     assert resp.json()["meta"]["total"] == 3  # limit does not shrink total
 
 
+def test_list_default_limit_comes_from_display_config(
+    db_conn: psycopg.Connection, client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The implicit window is ``settings.display.alerts_default_limit``
+    (``AVA_ALERTS_DEFAULT_LIMIT``); the literal 100 is only that field's
+    default, not a hard-coded page size."""
+    now = datetime.now(UTC)
+    _seed(
+        db_conn,
+        [
+            {
+                "status": "unresolved",
+                "severity": "error",
+                "alertname": f"r{i}",
+                "starts_at": now - timedelta(minutes=i),
+                "ends_at": None,
+                "fingerprint": f"f{i}",
+            }
+            for i in range(3)
+        ],
+    )
+    monkeypatch.setattr(settings.display, "alerts_default_limit", 2)
+    resp = client.get("/api/alerts")
+    assert resp.status_code == 200
+    assert len(resp.json()["alerts"]) == 2
+
+
 def test_list_unresolved_before_resolved(db_conn: psycopg.Connection, client: TestClient) -> None:
     """A resolved alert must not bury an unresolved one (2026-08-05 ruling)."""
     now = datetime.now(UTC)

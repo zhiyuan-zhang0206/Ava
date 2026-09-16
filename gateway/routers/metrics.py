@@ -21,6 +21,7 @@ from fastapi import APIRouter, Query, Request
 
 from gateway import loki_events
 from gateway.schemas import AgentMetricsItem, AgentMetricsReport, MetricsMeta, MetricsReport
+from shared.config import settings
 from shared.metrics_aggregate import (
     agent_rollups_from_aggregate,
     build_report_from_aggregate,
@@ -32,18 +33,24 @@ router = APIRouter()
 
 @router.get("/api/metrics")
 def get_metrics(
-    days: Annotated[int, Query(ge=1, le=30)] = 1,
+    # `days`'s range stays a protective constant (import-time Query bound); the
+    # default *window* is display.metrics_default_window_days.
+    days: Annotated[int | None, Query(ge=1, le=30)] = None,
     agent: Annotated[int | None, Query()] = None,
     since_compact: Annotated[bool, Query()] = False,  # noqa: FBT002 — FastAPI query param
 ) -> MetricsReport:
     """Aggregate report over the last `days` of events (all agents, or a
-    single one via `agent`). `days` is capped at 30 to bound the scan.
+    single one via `agent`). Omitted `days` returns the configured default
+    (``display.metrics_default_window_days`` - 1 out of the box); the 30-day cap
+    stays a protective constant (it bounds the scan).
     `since_compact=true` additionally narrows each agent's events to those at
     or after its latest compact halt (echoed in `meta.since_compact`).
     `meta.total_events` counts every telemetry/log event in the window —
     including service-level rows (agent_id NULL) from every process, a scope
     widened by the W9 events-table switch (it was agent-kernel lines only
     before); audit events are excluded."""
+    if days is None:
+        days = settings.display.metrics_default_window_days
     agg = fetch_aggregate(days, agent, since_compact=since_compact, loki=loki_events)
     _, data = build_report_from_aggregate(agg, days, agent, since_compact=since_compact)
     return MetricsReport(**data)
@@ -52,7 +59,9 @@ def get_metrics(
 @router.get("/api/metrics/agents")
 def get_metrics_agents(
     request: Request,
-    days: Annotated[int, Query(ge=1, le=30)] = 1,
+    # `days`'s range stays a protective constant (import-time Query bound); the
+    # default *window* is display.metrics_default_window_days.
+    days: Annotated[int | None, Query(ge=1, le=30)] = None,
     since_compact: Annotated[bool, Query()] = False,  # noqa: FBT002 — FastAPI query param
 ) -> AgentMetricsReport:
     """Per-agent breakdown of the last `days` of events — one
@@ -62,6 +71,8 @@ def get_metrics_agents(
     events (no agent_id) count toward `meta.total_events` but produce no row —
     and the count covers every telemetry/log event in the window (all
     processes), the W9-widened scope documented on `get_metrics`."""
+    if days is None:
+        days = settings.display.metrics_default_window_days
     agg = fetch_aggregate(days, None, since_compact=since_compact, loki=loki_events)
     rollups = agent_rollups_from_aggregate(agg)
     labels: dict[int, str | None] = {}
