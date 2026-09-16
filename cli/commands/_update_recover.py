@@ -26,7 +26,7 @@ from cli.commands._update_git import (
 )
 from cli.commands._update_pitr import RECOVERY_SUFFIX
 from cli.commands._update_uv_sync import run_uv_sync
-from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
+from shared.exit_codes import RESTART_DECLINED_EXIT_CODE, SERVICES_NOT_READY_EXIT_CODE
 
 # The `_fan_out` the orchestration injects into `finalize_rollout`: POST a
 # path-addressed op to each (name, ops_url) host, return (name, status, detail).
@@ -265,9 +265,15 @@ def _recover_rc(
 def local_update_failure_detail(rc: int, *, restart_only: bool) -> str:
     """One-line operator summary for a failed gateway local update, keyed on the
     rc `_run_gateway_local_update` returned (1 recovered / 2 DOWN on the pull path;
-    a restart-only bounce has no recovery, so rc is the raw `ava start` code)."""
+    3 refused before stopping; a restart-only bounce has no recovery, so rc is the
+    raw `ava start` code)."""
     from shared.exit_codes import STOP_INCOMPLETE_EXIT_CODE
 
+    if rc == RESTART_DECLINED_EXIT_CODE:
+        return (
+            "refused before stopping anything: this host's backup pipeline (a scheduler job "
+            "or off-site publish) is in flight; the gateway keeps serving — retry once it is idle"
+        )
     if rc == STOP_INCOMPLETE_EXIT_CODE:
         return "pause/stop incomplete; source and schema unchanged; use ava start to restore stopped services"
     if restart_only:

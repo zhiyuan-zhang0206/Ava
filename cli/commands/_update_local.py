@@ -41,6 +41,7 @@ import shlex
 import sys
 from pathlib import Path
 
+from cli.commands import _update_backup_gate as _backup_gate
 from cli.commands import _update_git as _git_mod
 from cli.commands import _update_uv_sync
 from cli.commands._data_plane_admin_secrets import resume_pending_data_plane_admin_secrets
@@ -341,7 +342,7 @@ def _pitr_restart(origin: str) -> bool:
     return origin.startswith(("pitr-activation:", "pitr-rollback:"))
 
 
-def _run_gateway_local_update(
+def _run_gateway_local_update(  # noqa: PLR0915 — composed stop -> checkout -> sync -> start leg; each guard is one statement
     repo: Path,
     *,
     target_sha: str | None = None,
@@ -387,6 +388,16 @@ def _run_gateway_local_update(
             raise ValueError("_run_gateway_local_update(pull=True) requires a target_sha")
         if pull_recover is None:
             raise ValueError("_run_gateway_local_update(pull=True) requires pull_recover")
+
+    # Pre-stop backup gate (task #3661): refuse before signalling anything while
+    # this host's logical-backup pipeline is in flight — the 2026-09-16 wave
+    # abort (rc=5) was this stop meeting the daily dump's off-site publish. A
+    # decline returns its rc unchanged: nothing was stopped, the host keeps
+    # serving, and the orchestration's compensating resume restores the paused
+    # agent-runners.
+    refusal = _backup_gate.refuse_inflight_backup()
+    if refusal is not None:
+        return refusal
 
     # 1) graceful stop gateway daemons (old schema still in place; this ensures the
     # subsequent migrate is not hit by local daemons running old code).
