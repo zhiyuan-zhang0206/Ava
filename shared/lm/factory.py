@@ -147,7 +147,11 @@ def media_types_for_model(model: str) -> frozenset[str]:
 
 
 def model_supports_vision(model: str) -> bool:
-    """Whether `model` accepts images via registry media types, plugin vision, or fallback."""
+    """Whether `model` accepts images via registry media types, plugin vision, or fallback.
+
+    Answers from the model's **raw registry entry**: a withdrawn id keeps its
+    declared facts here, so callers judging an agent's effective model must
+    resolve the withdrawal fallback first (`resolve_available_model`)."""
     return "image" in media_types_for_model(model)
 
 
@@ -160,7 +164,10 @@ def attach_modalities_for_model(model: str) -> frozenset[str]:
     contract (user ruling 2026-08-28). Empty result = text-only for attach:
     no files can be registered, the SDK docs drop the member, and the call
     raises. Unregistered ids fall through the same provider tiers as
-    `media_types_for_model`."""
+    `media_types_for_model`.
+
+    Raw-entry semantics: a withdrawn id answers with its declared set; the
+    registration gates resolve the effective model first (task #3212)."""
     ensure_provider_plugins_loaded()
     spec = MODELS.get(model)
     if spec is not None:

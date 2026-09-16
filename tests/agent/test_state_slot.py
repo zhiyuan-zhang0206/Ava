@@ -838,7 +838,7 @@ async def test_exec_node_checkpoints_child_attachment(fake_cancel_event, tmp_pat
     state = BaseAgentState(messages=[_ai_message_with_code(code)], halted=False)
     runtime, config = _make_runtime_and_config(AsyncMock())
 
-    with bind_agent_config({"llm_model": "deepseek-v4-flash-vision-exp"}):
+    with bind_agent_config({"llm_model": "claude-sonnet-5"}):
         cmd = await _exec_node_impl(state, runtime, config)
 
     update = cast(dict[str, Any], cmd.update)
@@ -891,7 +891,7 @@ async def test_exec_node_compact_path_drops_notes_and_clears_findings(
     )
     runtime, config = _make_runtime_and_config(AsyncMock())
 
-    with bind_agent_config({"llm_model": "deepseek-v4-flash-vision-exp"}):
+    with bind_agent_config({"llm_model": "claude-sonnet-5"}):
         cmd = await _exec_node_impl(state, runtime, config)
 
     update = cast(dict, cmd.update)

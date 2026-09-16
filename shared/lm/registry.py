@@ -311,8 +311,17 @@ def resolve_available_model(model: str) -> str:
 
     Unknown and currently available ids pass through. Registry validation keeps
     a fallback to one available hop, so no dynamic provider-error retry is
-    hidden behind this resolution.
+    hidden behind this resolution. Provider plugins are loaded first, so a
+    plugin-declared withdrawal resolves on the first call of a fresh process
+    too (task #3212).
     """
+    from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+
+    # Registry-consulting call: make it self-sufficient. MODELS starts empty
+    # and is filled by the provider-plugin loader; without this, a process
+    # whose first registry use is this resolve returned a plugin-declared
+    # withdrawal unresolved (task #3212).
+    ensure_provider_plugins_loaded()
     spec = MODELS.get(model)
     return spec.unavailable_fallback if spec and spec.unavailable_fallback else model
 
