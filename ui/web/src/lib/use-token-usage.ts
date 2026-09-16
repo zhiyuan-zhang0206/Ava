@@ -2,12 +2,10 @@
 //
 // Two data sources:
 // 1. React Query ["token-usage", agentId] — GET /api/agents/{id}/token-usage
-//    historical latest value, with per-thread cache + stale-while-revalidate.
-//    When switching back to a previously visited thread, the cache hit
-//    shows the cached value instantly while a background refresh runs.
-// 2. Real-time SSE token_usage event — published by the backend when
-//    an LLM call completes, overwriting the cached value. SSE rate =
-//    one per LLM call.
+//    selected snapshot, read on activation and repaired after stream gaps.
+//    Inactive snapshots are released when selection changes.
+// 2. Real-time SSE token_usage event — published when an LLM call completes,
+//    updating the selected context bar. SSE rate = one per LLM call.
 //
 // Chunk-level can not get accurate input_tokens (Anthropic / OpenAI
 // usage_metadata are both returned at stream end), so SSE rate = one
