@@ -219,7 +219,9 @@ def plan_retention(  # noqa: PLR0915
     if blockers:
         retained.extend(eligible)
         eligible = []
-        retained.extend(logical_eligible)
+        # Fold each surface into its own decision bucket: the sidecar indexes
+        # are per-surface, so a logical decision must not ride the physical list.
+        logical_retained.extend(logical_eligible)
         logical_eligible = []
         orphan_sidecars = []
         logical_orphans = []
