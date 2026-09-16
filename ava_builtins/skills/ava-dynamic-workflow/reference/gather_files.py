@@ -3,8 +3,13 @@
 Workers finish silently — each writes its result file, and none
 of them messages the orchestrator.  A checkpoint is a place the ORCHESTRATOR
 script picked to be woken: this watcher polls `HANDOFF_DIR` until the
-checkpoint condition holds, then sends exactly one message.  One-shot — it
+checkpoint condition holds, then delivers one wake message.  One-shot — it
 exits after messaging.
+
+Delivery survives a restart window: the wake send retries with doubling gaps
+(10s to a 160s cap, ~10.5 min in total) because a gateway / agent restart
+window (an update wave, `ava cluster update`) outlasts the SDK's own 3 quick
+retries; if every attempt fails the watcher exits 2.
 
 The condition comes from the placeholders below:
 
@@ -41,6 +46,10 @@ EXPECTED_FILES: list[str] = []  # e.g. ["flights.json", "hotels.json"]
 MATCH_GLOB = ""  # e.g. "w5_feedback_*.json" — instead of naming the files
 REQUIRED_COUNT = 0  # 0 = all of EXPECTED_FILES; K > 0 = wake at K of them
 ORCHESTRATOR_ID = 0  # the agent to wake at this checkpoint
+WAKE_ATTEMPTS = 8  # wake delivery tries (first + 7 retries); the gaps below
+# sum to ~10.5 min — long enough to ride out a gateway / agent restart window
+WAKE_BACKOFF_S = 10.0  # first gap between wake tries; doubles per retry
+WAKE_BACKOFF_MAX_S = 160.0  # cap for one gap
 
 _dir = Path(HANDOFF_DIR)
 
@@ -63,15 +72,35 @@ def threshold() -> int:
     return len(EXPECTED_FILES)
 
 
+def _wake(message: str) -> None:
+    """Deliver the checkpoint wake, retrying across a restart window.
+
+    Delivery retries with growing gaps; if every attempt fails the watcher
+    exits 2, so a lost wake surfaces as an exit notice instead of nothing.
+    """
+    delay = WAKE_BACKOFF_S
+    for attempt in range(1, WAKE_ATTEMPTS + 1):
+        try:
+            ava.agents.send_message(ORCHESTRATOR_ID, message)
+            return
+        except Exception as exc:  # any transport failure retries
+            print(f"wake attempt {attempt}/{WAKE_ATTEMPTS} failed: {exc!r}", flush=True)
+            if attempt < WAKE_ATTEMPTS:
+                time.sleep(delay)
+                delay = min(delay * 2, WAKE_BACKOFF_MAX_S)
+    print(f"wake delivery failed after {WAKE_ATTEMPTS} attempts", flush=True)
+    raise SystemExit(2)
+
+
 def watch(interval_s: float = 3.0) -> None:
     need = threshold()
     while True:
         ready = landed()
         if len(ready) >= need:
-            ava.agents.send_message(
-                ORCHESTRATOR_ID,
-                f"checkpoint reached in {HANDOFF_DIR} ({len(ready)}/{need}): " + ", ".join(ready),
+            message = f"checkpoint reached in {HANDOFF_DIR} ({len(ready)}/{need}): " + ", ".join(
+                ready
             )
+            _wake(message)
             return
         time.sleep(interval_s)
 
