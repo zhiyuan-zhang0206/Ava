@@ -12,7 +12,8 @@
 //   import 'highlight.js/styles/github.css';
 //
 // Inline `$...$` and display `$$...$$` LaTeX both supported via remark-math
-// + rehype-katex. GFM tables / strikethrough / task lists via remark-gfm.
+// + rehype-katex. GFM tables / strikethrough / task lists via remark-gfm —
+// a lone `~` stays literal (#3653: singleTilde off), only `~~...~~` strikes.
 // Code highlighting via rehype-highlight (highlight.js auto-detect).
 //
 // Relative images (`![](images/1.jpg)`) resolve against the page-server
@@ -33,7 +34,7 @@ export function Markdown({ source, className }: Props) {
   return (
     <div className={className} style={{ maxWidth: 800, margin: '1em auto', padding: '0 1em', lineHeight: 1.6 }}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
+        remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath]}
         rehypePlugins={[rehypeKatex, rehypeHighlight]}
         components={{
           img: ({ node: _node, ...rest }) => (

@@ -11,7 +11,8 @@ containing `--` also made the comment illegal HTML (task #3185).
 
 These tests lock the template invariant and the replacement behavior — exactly
 one token, inside the md-source slot, and a slot-only replacement that injects
-the Markdown once — not the rendering.
+the Markdown once — not the rendering. They also lock the #3653 single-tilde
+guards: a lone ~ must stay literal, in both the html and the react widget.
 """
 
 from __future__ import annotations
@@ -47,3 +48,21 @@ def test_slot_only_replacement_injects_the_markdown_once() -> None:
     html = template.replace(_SLOT, _SLOT.replace(_PLACEHOLDER, safe))
     assert html.count("a -- b") == 1, "the markdown must be injected exactly once"
     assert _PLACEHOLDER not in html, "no placeholder may survive the injection"
+
+
+_TSX = _TEMPLATE.parent / "Markdown.tsx"
+
+
+def test_template_keeps_a_lone_tilde_literal() -> None:
+    """Task #3653: two lone ~ in one sentence must not pair into strikethrough.
+
+    marked's GFM del rule accepts a single tilde per side; the template's
+    renderer guard keeps the double form only.
+    """
+    template = _TEMPLATE.read_text()
+    assert "startsWith('~~')" in template, "the single-tilde guard must stay"
+    assert "marked.use({" in template
+
+
+def test_react_widget_disables_single_tilde() -> None:
+    assert "[remarkGfm, { singleTilde: false }]" in _TSX.read_text()
