@@ -1,4 +1,4 @@
-"""Communicate with the human during an external takeover."""
+"""External takeover consent handshake (legacy import surface)."""
 
 from typing import NoReturn
 
@@ -9,7 +9,8 @@ from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
 
 # Existing in-flight consent requests may still call accept/reject by name.
 # New sessions prepare automatically, so these are absent from normal discovery.
-__all_for_ava__ = ["say"]
+# The reply path (say) is CLI-only (task #3658) — nothing here is discovered.
+__all_for_ava__ = []
 
 
 def _native_incarnation() -> RuntimeIncarnation:
@@ -58,26 +59,4 @@ def reject(request_id: str, reason: str = "") -> None:
         incarnation.agent_id,
         incarnation,
         coerce_str(reason, "reason"),
-    )
-
-
-def say(content: str, *, key: str, phase: str = "commentary") -> int:
-    """Send a user-visible message from the current external attachment.
-
-    Use a stable key when retrying the same message. The UI displays the
-    borrowed agent with the session's declared executor name in metadata.
-    Messages are retained permanently and included in the structured handoff.
-    """
-    from ava.external import _active_attachment
-    from shared.impersonation_history import say as send
-
-    if _active_attachment is None:
-        raise RuntimeError("say requires ava.external.attach")
-    _active_attachment._validate()
-    return send(
-        _active_attachment.lease_id,
-        _active_attachment._token,
-        content,
-        message_key=key,
-        phase=phase,
     )
