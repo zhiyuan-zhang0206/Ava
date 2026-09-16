@@ -15,7 +15,7 @@ from typing import Any, cast
 
 import psutil
 
-from shared.session_record import SessionRecord, pid_starttime_ticks
+from shared.session_record import pid_starttime_ticks
 
 # Identity reads use the stable start timestamp (stable_create_time): on macOS
 # the uncorrected kernel value, elsewhere the public create_time(). The public
@@ -134,14 +134,3 @@ def leader_owns_pids(leader: OwnedProcess, pids: set[int]) -> bool:
         return False
     owned = {identity.pid for identity in capture_tree(leader)}
     return bool(owned & pids)
-
-
-def session_owns_pids(record: SessionRecord, pids: set[int]) -> bool:
-    """Whether any pid in `pids` is `record`'s leader or a birth-validated descendant.
-
-    False when the leader is gone: a descendant whose leader died carries no
-    proof of whose it is (the stop path converges such survivors through the
-    recorded process group, a stronger claim than this probe).
-    """
-    leader = OwnedProcess(record.pid, record.create_time, record.starttime)
-    return leader_owns_pids(leader, pids)
