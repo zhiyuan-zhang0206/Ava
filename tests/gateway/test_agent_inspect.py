@@ -559,7 +559,6 @@ def test_inspect_unknown_agent_404(db_conn: psycopg.Connection) -> None:
 
 def test_inspect_live_returns_only_window_independent_fields(
     db_conn: psycopg.Connection,
-    fake_loki: _FakeLoki,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The live route is the cheap inspector skeleton, not the aggregate payload."""
@@ -570,12 +569,7 @@ def test_inspect_live_returns_only_window_independent_fields(
     )
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET machine = 'wsl' WHERE id = %s", (aid,))
-    fake_loki.add(
-        event="heartbeat_paused",
-        agent_id=aid,
-        payload={"duration_s": 1800},
-        ts_offset_hours=1,
-    )
+    _pause_row(db_conn, agent_id=aid, duration_s=1800, hours_ago=1)
     db_conn.commit()
 
     async def dispatch(
@@ -676,26 +670,24 @@ def test_inspect_live_distinguishes_valid_empty_from_missing_shell_data(
             assert response.json()["shells_available"] is True
 
 
-@pytest.mark.parametrize(
-    "error",
-    [httpx.RemoteProtocolError("Loki closed the response"), ValueError("invalid Loki JSON")],
-)
-def test_inspect_live_loki_failure_degrades_last_pause_to_none(
+def test_inspect_live_reads_committed_pause_when_all_log_reads_fail(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
-    error: Exception,
 ) -> None:
+    """Current state and its pause hint remain complete during a Loki outage."""
     aid = _insert_agent(db_conn, status="idling")
+    _pause_row(db_conn, agent_id=aid, duration_s=900, hours_ago=1)
     db_conn.commit()
 
-    def unavailable(_agent_id: int) -> None:
-        raise error
+    def unavailable(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("live inspector must not query telemetry")
 
-    monkeypatch.setattr(agent_inspect, "_heartbeat_last_pause", unavailable)
+    for name in ("query_events", "query_projected_lines", "attribute_aggregate"):
+        monkeypatch.setattr(loki_events, name, unavailable)
     with TestClient(app) as client:
         response = client.get(f"/api/agents/{aid}/inspect/live")
     assert response.status_code == 200
-    assert response.json()["heartbeat"]["last_pause"] is None
+    assert response.json()["heartbeat"]["last_pause"]["duration_s"] == 900
 
 
 @pytest.mark.parametrize("reason", ["queue_full", "acquire_timeout"])
@@ -2369,33 +2361,16 @@ def test_inspect_heartbeat_stale_pending_does_not_suppress(
     assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)  # pyright: ignore[reportUnknownMemberType]
 
 
-def test_inspect_heartbeat_last_pause_newest_wins(
-    db_conn: psycopg.Connection, fake_loki: _FakeLoki
-) -> None:
-    """last_pause takes the most recent heartbeat_paused event, duration_s from payload;
+def test_inspect_heartbeat_last_pause_newest_wins(db_conn: psycopg.Connection) -> None:
+    """last_pause takes the newest committed pause from this agent's trail;
     another agent's pause does not leak."""
     aid = _insert_agent(db_conn, status="idling", status_changed_s_ago=60)
     other = _insert_agent(db_conn, status="idling", status_changed_s_ago=60)
     # 5h old pause + 1h new pause — new one wins
-    fake_loki.add(
-        event="heartbeat_paused",
-        agent_id=aid,
-        payload={"duration_s": 3600},
-        ts_offset_hours=5,
-    )
-    fake_loki.add(
-        event="heartbeat_paused",
-        agent_id=aid,
-        payload={"duration_s": 1800},
-        ts_offset_hours=1,
-    )
+    _pause_row(db_conn, agent_id=aid, duration_s=3600, hours_ago=5)
+    _pause_row(db_conn, agent_id=aid, duration_s=1800, hours_ago=1)
     # another agent's pause — must not appear in this agent's last_pause
-    fake_loki.add(
-        event="heartbeat_paused",
-        agent_id=other,
-        payload={"duration_s": 999},
-        ts_offset_hours=0,
-    )
+    _pause_row(db_conn, agent_id=other, duration_s=999, hours_ago=0)
     db_conn.commit()
     with TestClient(app) as client:
         hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
@@ -2405,17 +2380,10 @@ def test_inspect_heartbeat_last_pause_newest_wins(
     assert _seconds_from_now(hb["last_pause"]["at"]) == pytest.approx(-3600, abs=60)  # pyright: ignore[reportUnknownMemberType]
 
 
-def test_inspect_heartbeat_last_pause_beyond_lookback_is_none(
-    db_conn: psycopg.Connection, fake_loki: _FakeLoki
-) -> None:
+def test_inspect_heartbeat_last_pause_beyond_lookback_is_none(db_conn: psycopg.Connection) -> None:
     """A pause older than the recent-history lookback is omitted."""
     aid = _insert_agent(db_conn, status="idling", status_changed_s_ago=60)
-    fake_loki.add(
-        event="heartbeat_paused",
-        agent_id=aid,
-        payload={"duration_s": 3600},
-        ts_offset_hours=30,
-    )
+    _pause_row(db_conn, agent_id=aid, duration_s=3600, hours_ago=30)
     db_conn.commit()
     with TestClient(app) as client:
         hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
@@ -3628,3 +3596,25 @@ def test_statistics_deadline_cancels_pending_sections(monkeypatch: pytest.Monkey
         )
     assert len(futures) == 2
     assert all(future.cancelled() for future in futures)
+
+
+def _pause_row(
+    conn: psycopg.Connection, *, agent_id: int, duration_s: float, hours_ago: float
+) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO heartbeat_pause_log (agent_id, duration_s, created_at) "
+            "VALUES (%s, %s, now() - make_interval(secs => %s))",
+            (agent_id, duration_s, hours_ago * 3600),
+        )
+
+
+def test_inspect_last_pause_same_timestamp_uses_newest_id(db_conn: psycopg.Connection) -> None:
+    """Two pauses in one transaction share now(); the later insert wins."""
+    aid = _insert_agent(db_conn)
+    _pause_row(db_conn, agent_id=aid, duration_s=3600, hours_ago=1)
+    _pause_row(db_conn, agent_id=aid, duration_s=600, hours_ago=1)
+    db_conn.commit()
+    with TestClient(app) as client:
+        response = client.get(f"/api/agents/{aid}/inspect/live")
+    assert response.json()["heartbeat"]["last_pause"]["duration_s"] == 600

@@ -25,3 +25,9 @@ This change does not redefine metrics, assert complete historical coverage, or
 replace historical aggregation. Shared server computation retains bounded
 admission/deadlines after an individual browser waiter disconnects; cancellation
 of queued sections prevents expired leaders from retaining unnecessary work.
+
+The remaining current-state dependency on a Loki last-pause lookup was removed
+using the existing heartbeat_pause_log trail. Its writer records each pause in
+the same transaction as the control-plane deadline, and its latest-per-agent
+index already supports the read. The existing 24-hour display horizon remains;
+no duplicate projection or new collection pipeline was introduced.

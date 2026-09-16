@@ -75,9 +75,9 @@ cancel shared work needed by other waiters: admission and query deadlines bound
 that work, and pending section futures are cancelled on deadline expiry.
 
 `GET /api/agents/{id}/inspect/live` exclusively owns the current projection,
-notice, runner shell probe, and bounded recent-pause lookup. An unavailable
-runner sets `shells_available=false`; unavailable pause history drops only that
-optional hint. `/inspect/widgets` owns plugin extensions. The three reads load,
+notice, runner shell probe, and indexed recent-pause lookup from the durable
+Postgres trail. It never queries Loki. An unavailable runner sets
+`shells_available=false`. `/inspect/widgets` owns plugin extensions. The three reads load,
 render, fail, and retry independently. The old mixed `/inspect` route is absent.
 
 ## Key Dependencies
