@@ -385,6 +385,16 @@ HTML_TEMPLATE = """\
 
   // Configure marked (v4 API)
   if (typeof marked !== "undefined") {{
+    // A lone ~ stays literal (#3653): marked's GFM del rule allows a single
+    // tilde per side; only the double form (~~...~~) may strike.
+    marked.use({{
+      walkTokens: function (t) {{
+        if (t.type === "del" && !String(t.raw || "").startsWith("~~")) {{
+          t.type = "text";
+          t.text = t.raw;
+        }}
+      }},
+    }});
     // Use marked v4 highlight option for syntax highlighting
     const renderer = new marked.Renderer();
     // Override code renderer for highlight.js integration

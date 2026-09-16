@@ -13,11 +13,14 @@ import remarkAutolinkDelimiter from "@/lib/remark-autolink-delimiter";
 import remarkCjkLinkBoundary from "@/lib/remark-cjk-link-boundary";
 import { cn } from "@/lib/utils";
 
-// Renders agent chat items and the memory-note side panel body (same
-// markdown surface: GFM tables, fenced code, safe links, CJK-adjacent
-// emphasis via remark-cjk-friendly + its GFM-strikethrough companion —
-// required together while remark-gfm is in the pipeline). user / info /
-// error stay as plain text.
+// Renders every ChatMarkdown consumer — timeline chat items (3 sites),
+// open-notice detail, fleet-inbox detail, and the memory-note body — through
+// one markdown surface: GFM tables, fenced code, safe links, CJK-adjacent
+// emphasis via remark-cjk-friendly + its GFM-strikethrough companion
+// (required together while remark-gfm is in the pipeline). Both strikethrough
+// tokenizers run with singleTilde: false (#3653) so a lone ~ stays literal
+// (paths like ~/.ava, approximations like ~61G); only ~~...~~ strikes.
+// user / info / error stay as plain text.
 //
 // Security:
 // - rehype-raw is disabled → any raw HTML (e.g. <script>) is treated as text
@@ -106,13 +109,18 @@ export const ChatMarkdown = memo(function ChatMarkdown({ content }: Props) {
     <div className={cn("chat-md font-sans", MIN_W_0)}>
       <ReactMarkdown
         remarkPlugins={[
-          remarkGfm,
+          // Single ~ stays literal (#3653): GFM strikethrough defaults to
+          // allowing it, which struck the span between `~61G` and `~/work`
+          // in one sentence (user report). Only the double form may strike.
+          [remarkGfm, { singleTilde: false }],
           // CJK-friendly emphasis (task #3314): the two packages ship as a
           // pair — the companion hooks the GFM strikethrough tokenizer, and
           // without it `~~...~~` next to CJK punctuation stays plain, even
-          // though emphasis itself would already work.
+          // though emphasis itself would already work. Its tokenizer needs
+          // singleTilde: false too: whichever tokenizer sees a tilde first
+          // must reject the single-~ form, so one side alone is not enough.
           remarkCjkFriendly,
-          remarkCjkFriendlyGfmStrikethrough,
+          [remarkCjkFriendlyGfmStrikethrough, { singleTilde: false }],
           remarkCjkLinkBoundary,
           remarkAutolinkDelimiter,
         ]}
