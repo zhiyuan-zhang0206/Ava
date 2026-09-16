@@ -517,6 +517,24 @@ def test_login_cookie_secure_derives_from_gateway_url(
     assert "; Secure" in resp.headers["Set-Cookie"]
 
 
+def test_https_browser_entry_login_preserves_authenticated_cookie(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config.settings.gateway, "browser_origin", "https://console.example")
+    monkeypatch.setattr(config.settings.gateway, "gateway_url", "http://192.0.2.2:20016")
+    monkeypatch.setattr(config.settings.gateway, "session_cookie_secure", None)
+    monkeypatch.setattr(config.settings.gateway, "cors_allowed_origins", [])
+    with _rebuilt_cors_middleware(), TestClient(app, base_url="https://console.example") as client:
+        response = client.post(
+            "/api/auth/login",
+            json={"password": _SECRET},
+            headers={"Origin": "https://console.example"},
+        )
+        assert response.status_code == 200
+        assert "; Secure" in response.headers["Set-Cookie"]
+        assert client.get("/api/auth/check").json()["authenticated"] is True
+
+
 def test_login_cookie_not_secure_for_http_gateway(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

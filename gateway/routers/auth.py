@@ -121,7 +121,7 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
     )
     headers = session_cookie_header(
         session_id,
-        secure=session_cookie_secure(),
+        secure=session_cookie_secure(str(request.url)),
         ttl_seconds=ttl_seconds,
     )
     return JSONResponse(content={"ok": True}, headers=headers)

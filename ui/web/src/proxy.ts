@@ -13,6 +13,7 @@ export function proxy(request: NextRequest) {
     nonce,
     gatewayOrigin: gatewayOriginForRequest(browserFacingRequestUrl(request), {
       apiBase: process.env.NEXT_PUBLIC_API_BASE,
+      browserOrigin: process.env.NEXT_PUBLIC_BROWSER_ORIGIN,
       gatewayPort: process.env.NEXT_PUBLIC_GATEWAY_PORT,
     }),
     isDevelopment: process.env.NODE_ENV === "development",

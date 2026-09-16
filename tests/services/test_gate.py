@@ -27,6 +27,18 @@ from services.gate.daemon import Gate, _Handler
 STATIC = Path(__file__).parent.parent.parent / "services" / "gate" / "static"
 
 
+def test_login_template_carries_explicit_browser_entry() -> None:
+    gate = Gate(
+        gateway_base="http://192.0.2.2:20016",
+        app_base="http://127.0.0.1:20031",
+        static_dir=STATIC,
+        browser_origin="https://console.example",
+    )
+    assert "/*__BROWSER_ORIGIN__*/" not in gate.login_page
+    assert 'window.location.origin === "https://console.example"' in gate.login_page
+    assert "http://192.0.2.2:20016" in gate.login_page
+
+
 class _FakeGateway(BaseHTTPRequestHandler):
     authenticated = False
     down = False

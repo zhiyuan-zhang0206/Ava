@@ -56,6 +56,8 @@ def cors_allowed_origins() -> list[str]:
         f"http://localhost:{frontend_port}",
         f"http://127.0.0.1:{frontend_port}",
     ]
+    if settings.gateway.browser_origin:
+        origins.append(settings.gateway.browser_origin)
     gateway_url = settings.gateway.gateway_url.strip()
     if not gateway_url:
         return origins
@@ -81,8 +83,21 @@ def cors_allowed_origins() -> list[str]:
     return origins
 
 
-def session_cookie_secure() -> bool:
-    """Return the effective Secure flag for gateway session cookies."""
+def session_cookie_secure(request_url: str = "") -> bool:
+    """Secure cookies on the configured HTTPS entry, preserving direct HTTP login.
+
+    Uvicorn accepts forwarded scheme only from its trusted proxy peers. Merely
+    sending an Origin header must not change a direct listener's cookie policy.
+    """
+    if settings.gateway.browser_origin and request_url:
+        request = urlsplit(request_url)
+        browser = urlsplit(settings.gateway.browser_origin)
+        if (
+            request.scheme == browser.scheme
+            and request.hostname == browser.hostname
+            and (request.port or 443) == (browser.port or 443)
+        ):
+            return True
     explicit = settings.gateway.session_cookie_secure
     if explicit is not None:
         return explicit

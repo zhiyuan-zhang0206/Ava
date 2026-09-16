@@ -150,6 +150,7 @@ class Gate:
         app_base: str,
         static_dir: Path,
         state_path: str | None = None,
+        browser_origin: str = "",
     ) -> None:
         self.gateway_base = gateway_base.rstrip("/")
         self.app_base = app_base.rstrip("/")
@@ -172,7 +173,11 @@ class Gate:
 
         # The login form posts to the gateway origin; substitute it at load so
         # the static page needs no build step and works on any gateway port.
-        self.login_page = page("login.html").replace("__GATEWAY_BASE__", self.gateway_base)
+        self.login_page = (
+            page("login.html")
+            .replace("__GATEWAY_BASE__", self.gateway_base)
+            .replace("/*__BROWSER_ORIGIN__*/", json.dumps(browser_origin))
+        )
         self.updating_page = page("updating.html")
         self.down_page = page("down.html")
         # A path is injected by tests. In production the default resolves from
@@ -436,6 +441,7 @@ def main() -> None:
     port = args.port or entry_port()
     gate = Gate(
         gateway_base=_gateway_base(),
+        browser_origin=settings.gateway.browser_origin,
         app_base=_app_base(),
         static_dir=static_dir,
         state_path=None,

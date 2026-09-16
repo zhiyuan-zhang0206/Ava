@@ -22,6 +22,14 @@ The agent stream is connected while authenticated and visible; `activeId` re-key
 
 ## Connection resilience (#648)
 
+`lib/gateway-origin.ts` resolves the same API origin for browser fetch/SSE and
+the server-rendered CSP. `AVA_BROWSER_ORIGIN` is an optional exact HTTPS entry,
+injected by the canonical frontend build: visits there use same-origin gateway
+routes behind an HTTP/2-capable proxy, while existing direct frontend URLs
+retain gateway-port routing. The gate login follows the same entry selection.
+The proxy sends gateway routes directly to the gateway and frontend/navigation
+requests through the gate, preserving its maintenance generation boundary.
+
 - **Half-dead watchdog**: 45s without any frame (even heartbeats) = socket stuck in OPEN (graceful restart / proxy hop) → `bumpReconnect()` forces a clean reopen. Server sends a heartbeat frame roughly every 15s as liveness.
 - **CLOSED auto-reconnect**: unauthenticated streams never open; a CLOSED stream probes `/api/auth/check` — invalid session flips the auth context (AuthGuard → /login) and stays closed until login; valid session or failed probe → capped backoff reopen (`retryTimer` single-flight, `retryNonce` effect lever, 1s doubled to 30s, reset on open; separate from the global `reconnectNonce`). `onerror` dispatches CLOSED/CONNECTING/OPEN (unknown → throw); `ConnectionEvent` = open/poll/reconnecting/closed/parse-failed. AlertsProvider mirrors gate/probe/backoff with independent state.
 - **Cluster update Gate reload + reconnect**: global `cluster_update_started` is a hint emitted only after the persistent UI generation exists; `AppConnectionBanner` asks the current URL to reload through Gate. The root-mounted, auth-independent `GateMaintenanceProvider` polls Gate's same-origin `GET /__ava/deploy-state` as the missed-SSE fallback. Both share a module-level latch, so their race navigates once. Neither renders or times maintenance. The authenticated `/api/cluster/status` poll in `useClusterHealth` still distinguishes stranded pause and reconnects SSE/refetches agents on the real paused true→false gateway-bounce edge.
