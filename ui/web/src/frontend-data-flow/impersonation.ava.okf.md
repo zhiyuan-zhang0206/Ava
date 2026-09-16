@@ -13,4 +13,5 @@ that query while native execution is parked. The same numeric item cursors,
 snapshot merge and compact-history paging handle these extra blocks. There is
 no separate client message store. Each card carries optional `impersonation`
 metadata (agent/session id, name, executor and observed process); user direction
-and the Ava agent identity stay intact.
+and the Ava agent identity stay intact. The card header does not render
+this metadata — no executor/takeover badge (user ruling 2026-09-16, task #3660).
