@@ -9,11 +9,13 @@ failed respawn is reported rather than swallowed.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 
 from cli.commands import _cluster_watchdog_probe as wp
 from ops.service_spec import ServiceSpec
+from shared.os_watchdog_probe import HeldStopState
 
 
 def _spec_for(role: str, pidfile: Path | None) -> ServiceSpec:
@@ -26,6 +28,14 @@ def _spec_for(role: str, pidfile: Path | None) -> ServiceSpec:
         requires_db=True,  # the watchdog's schema controller reads the DB
         pidfile=pidfile,
     )
+
+
+@pytest.fixture(autouse=True)
+def _held_stop_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the held-stop reader to ABSENT: the real one reads this box's
+    $AVA_HOME marker, and these tests must not depend on a maintenance stop
+    that may be running on the machine that runs them."""
+    monkeypatch.setattr("shared.os_watchdog_probe.held_stop_state", lambda: HeldStopState.ABSENT)
 
 
 # --- liveness -------------------------------------------------------------
@@ -141,3 +151,58 @@ def test_failed_respawn_is_reported_not_swallowed(
     monkeypatch.setattr(wp, "_alive", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("shared.service_respawn.respawn_service", lambda *_a, **_k: False)  # pyright: ignore[reportUnknownArgumentType]
     assert wp.cmd_watchdog_probe("gateway") == 1
+
+
+# --- held stop ------------------------------------------------------------
+
+
+def test_fresh_held_stop_leaves_the_watchdog_down_without_a_pidfile_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A maintenance stop kills the watchdog on purpose; a probe tick inside
+    that window must not undo it, and must not even read the pidfile — during
+    a held stop the pidfile says nothing the probe may act on (2026-09-17
+    wave-2: this revival aborted the stop)."""
+    monkeypatch.setattr("shared.os_watchdog_probe.held_stop_state", lambda: HeldStopState.FRESH)
+    monkeypatch.setattr(
+        wp,
+        "_watchdog_spec",
+        lambda _r: _spec_for("gateway", tmp_path / "w.pid"),  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    def _fail_pidfile_read(_spec: object) -> NoReturn:
+        pytest.fail("pidfile read during a held stop")
+
+    monkeypatch.setattr(wp, "_alive", _fail_pidfile_read)
+    respawns: list[str] = []
+    monkeypatch.setattr(
+        "shared.service_respawn.respawn_service",
+        lambda s, _c, _r, **_k: respawns.append(s) or True,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    assert wp.cmd_watchdog_probe("gateway") == 0
+    assert respawns == []
+
+
+@pytest.mark.parametrize(
+    "state", [HeldStopState.STALE, HeldStopState.UNREADABLE], ids=["stale", "unreadable"]
+)
+def test_not_fresh_held_stop_marker_still_revives(
+    state: HeldStopState, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stale / unreadable markers fail OPEN: supervision must not stay disabled
+    over a dead stop's leftover or a torn file — the probe revives, with the
+    reason in its log."""
+    monkeypatch.setattr("shared.os_watchdog_probe.held_stop_state", lambda: state)
+    monkeypatch.setattr(
+        wp,
+        "_watchdog_spec",
+        lambda _r: _spec_for("agent-runner", tmp_path / "w.pid"),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(wp, "_alive", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
+    respawns: list[str] = []
+    monkeypatch.setattr(
+        "shared.service_respawn.respawn_service",
+        lambda s, _c, _r, **_k: respawns.append(s) or True,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    assert wp.cmd_watchdog_probe("agent-runner") == 0
+    assert respawns == ["agent-runner-watchdog"]

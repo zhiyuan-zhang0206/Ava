@@ -26,6 +26,13 @@ probe is dumb on purpose — alive, do nothing; dead, respawn — which matches 
 launchd / cron already behave (each round an independent fork, no shared state,
 a failed round just drops).
 
+ONE exception to the dumb rule (2026-09-17 wave-2 abort): a maintenance stop
+kills the watchdog on purpose, and its services phase refuses to certify while
+anything reappears — so a probe tick landing inside that window would revive
+the watchdog and abort the stop. While a fresh ``held-stop`` marker says a
+stop holds this home, the probe skips revival entirely; see `HeldStopState`
+below.
+
 - macOS: launchd User LaunchAgent, ``StartInterval`` (arbitrary seconds).
 - Linux (incl. WSL): user crontab, ``* * * * *`` (minute granularity — the
   interval is rounded up to whole minutes, see ``_register_linux``).
@@ -42,6 +49,7 @@ import shutil
 import subprocess
 import sys
 import time
+from enum import StrEnum
 from pathlib import Path
 
 from loguru import logger
@@ -369,3 +377,112 @@ def unregister_watchdog_probe(role: MachineRole, home: Path | None = None) -> No
     from shared.platform_backend import get_backend
 
     get_backend().unregister_watchdog_probe(role, slug_for_home(home))
+
+
+# --- held-stop marker (the stop side and the probe side) --------------------
+
+
+# A maintenance stop kills the watchdog on purpose (it is signalled first, see
+# `_maintenance_stop.stop_services`), and the stop's services phase refuses to
+# certify while any service reappears ("services appeared during held stop").
+# The probe above is deliberately gate-blind — dead, respawn — so a probe tick
+# landing inside the stop window revives the watchdog and aborts the stop
+# (2026-09-17 wave-2: a 120.9s services phase crossed a 60s probe tick). The
+# marker below is the one piece of shared state that closes the race:
+# `stop_services` publishes it before the first signal and clears it in a
+# `finally`; the probe reads it and skips revival while it is fresh.
+#
+# Scope: session mode only. A root-driven host (`services.root_driver_enabled`)
+# runs no probe at all — converge retires it and the root supervisor's
+# HealthMonitor absorbs the watchdogs — so there is nothing to suppress there.
+#
+# Marker: ``$AVA_HOME/state/held-stop``, one line ``<unix-ts> <pid> <home>``.
+# The pid and home are operator diagnostics; the reader keys on the timestamp.
+# TTL 30 min — a stop that dies without its `finally` (SIGKILL, OOM) must not
+# suppress revival forever; a healthy stop clears the marker on every path.
+
+HELD_STOP_TTL_S = 30 * 60.0
+
+_HELD_STOP_NAME = "held-stop"
+
+
+class HeldStopState(StrEnum):
+    """Classification of this home's held-stop marker.
+
+    FRESH suppresses probe revival; STALE / ABSENT / UNREADABLE are the probe's
+    normal dumb job — revive a dead watchdog. Unreadable fails OPEN on purpose:
+    a broken marker must not disable supervision, because an unsupervised
+    capability outlives the race the marker guards against.
+    """
+
+    FRESH = "fresh"
+    STALE = "stale"
+    ABSENT = "absent"
+    UNREADABLE = "unreadable"
+
+
+def held_stop_marker_path() -> Path:
+    """This home's held-stop marker path — resolved per call, never cached.
+
+    ``$AVA_HOME/state/held-stop``: the state dir already holds per-home runtime
+    state, and per-home scope keeps a co-located second cluster's stop from
+    touching this one's marker.
+    """
+    return Path(settings.general.ava_home) / "state" / _HELD_STOP_NAME
+
+
+def held_stop_state(*, now: float | None = None) -> HeldStopState:
+    """Classify this home's held-stop marker; never raises.
+
+    ``now`` overrides the clock (tests). A timestamp in the future (clock step)
+    reads FRESH: when the timestamp cannot be trusted, suppression during a
+    possible stop is the safe side. Its horizon is the clock skew plus the TTL
+    (the clock must catch up before the age can pass the TTL) — bounded, not
+    TTL-tight.
+    """
+    try:
+        written = float(held_stop_marker_path().read_text().split()[0])
+    except FileNotFoundError:
+        return HeldStopState.ABSENT
+    except (OSError, IndexError, ValueError):
+        return HeldStopState.UNREADABLE
+    if (time.time() if now is None else now) - written > HELD_STOP_TTL_S:
+        return HeldStopState.STALE
+    return HeldStopState.FRESH
+
+
+def write_held_stop_marker() -> None:
+    """Publish this home's held-stop window (called by `stop_services`).
+
+    Content: ``<unix-ts> <pid> <home>`` — the reader keys on the timestamp; the
+    pid and home are operator diagnostics for "which stop wrote this". Best
+    effort: an unwritable state dir is logged, not raised — the marker is
+    advisory coordination and a failed write must not fail the stop it protects
+    (the stop degrades to pre-marker behavior; only the probe-tick race
+    returns).
+    """
+    try:
+        path = held_stop_marker_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"{time.time():.3f} {os.getpid()} {settings.general.ava_home}\n")
+    except OSError as exc:
+        logger.warning(
+            "cannot publish held-stop marker ({}); a probe tick may revive a watchdog mid-stop",
+            exc,
+        )
+
+
+def clear_held_stop_marker() -> None:
+    """Remove the marker; idempotent, never raises.
+
+    Called from `stop_services`'s ``finally`` on every outcome, so it must not
+    raise over the stop's own error — but a marker that survives (permissions)
+    keeps the probe suppressed until the TTL, which is worth a log line.
+    """
+    try:
+        held_stop_marker_path().unlink(missing_ok=True)
+    except OSError as exc:
+        logger.warning(
+            "cannot clear held-stop marker ({}); probe revival stays suppressed until its TTL",
+            exc,
+        )
