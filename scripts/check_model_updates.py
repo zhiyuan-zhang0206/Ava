@@ -524,6 +524,16 @@ def _state_path(state_dir: Path | None) -> Path:
     return (state_dir if state_dir is not None else ava_home() / "model-tracker") / "state.json"
 
 
+def _valid_status(value: object) -> str:
+    if not isinstance(value, str):
+        raise TypeError("model tracker state status must be a string")
+    if value != "ok" and (
+        not value.startswith("error:") or not value.removeprefix("error:").strip()
+    ):
+        raise ValueError("model tracker state status must be ok or error:<message>")
+    return value
+
+
 def _load_state(path: Path) -> dict[str, dict[str, dict[str, object]]]:
     if not path.exists():
         return {"providers": {}}
@@ -540,14 +550,24 @@ def _load_state(path: Path) -> dict[str, dict[str, dict[str, object]]]:
             isinstance(model_id, str) for model_id in entry["reported"]
         ):
             raise ValueError("model tracker state reported must be a list of strings")
-        if not isinstance(entry["status"], str):
-            raise TypeError("model tracker state status must be a string")
-        status = entry["status"]
-        if status != "ok" and (
-            not status.startswith("error:") or not status.removeprefix("error:").strip()
-        ):
-            raise ValueError("model tracker state status must be ok or error:<message>")
-        providers[provider] = {"reported": entry["reported"], "status": entry["status"]}
+        status = _valid_status(entry["status"])
+        # `announced` postdates the first state files: a file written before
+        # the field existed baselines on the status it was left in, so the
+        # upgrade itself never announces anything.
+        loaded: dict[str, object] = {
+            "reported": entry["reported"],
+            "status": status,
+            "announced": _valid_status(entry.get("announced", status)),
+        }
+        if "pending" in entry:
+            pending = entry["pending"]
+            if not isinstance(pending, dict) or "status" not in pending or "rounds" not in pending:
+                raise ValueError("model tracker state pending must carry status and rounds")
+            rounds = pending["rounds"]
+            if not isinstance(rounds, int) or rounds < 1:
+                raise TypeError("model tracker state pending rounds must be a positive integer")
+            loaded["pending"] = {"status": _valid_status(pending["status"]), "rounds": rounds}
+        providers[provider] = loaded
     return {"providers": providers}
 
 
@@ -562,6 +582,57 @@ def _status_changed(previous: object, current: str) -> bool:
     return isinstance(previous, str) and (previous == "ok") != (current == "ok")
 
 
+def _status_class(status: str) -> str:
+    """The ok/error class the alarm watches; an error message is not part of
+    the identity a status change is compared by."""
+    return "ok" if status == "ok" else "error"
+
+
+# A status change must hold for this many consecutive rounds before it is
+# announced: on the daily cadence a real outage still reaches the P0 lead
+# within a day, while a one-round blip stays silent. 2026-09-14: one SSL EOF
+# towards gemini announced an error, and the next morning's recovery
+# announced again; the fetch retry above absorbs seconds, this absorbs a
+# whole run.
+_STATUS_CONFIRM_ROUNDS = 2
+
+
+def _record_status(entry: dict[str, object], status: str) -> bool:
+    """Record the observed status and return whether it is announced.
+
+    Drift from the announced status accumulates in `pending` and is announced
+    once the same class has held for `_STATUS_CONFIRM_ROUNDS` consecutive
+    rounds. Drift that resolves earlier clears its pending record without
+    announcing, so a suppressed error can never produce a follow-up recovery
+    alarm. An entry seen for the first time baselines on the expected status:
+    a provider counts as working until an error holds long enough to say
+    otherwise.
+    """
+    entry["status"] = status
+    entry.setdefault("announced", "ok")
+    if not _status_changed(entry["announced"], status):
+        entry.pop("pending", None)
+        return False
+    rounds = 1
+    pending = entry.get("pending")
+    if isinstance(pending, dict):
+        pending_status = pending.get("status")
+        prior = pending.get("rounds")
+        if (
+            isinstance(pending_status, str)
+            and _status_class(pending_status) == _status_class(status)
+            and isinstance(prior, int)
+            and prior > 0
+        ):
+            rounds = prior + 1
+    if rounds < _STATUS_CONFIRM_ROUNDS:
+        entry["pending"] = {"status": status, "rounds": rounds}
+        return False
+    entry["announced"] = status
+    entry.pop("pending", None)
+    return True
+
+
 def check_sources(
     file_aliases: Mapping[str, str], state: dict[str, dict[str, dict[str, object]]]
 ) -> dict[str, ProviderReport]:
@@ -574,29 +645,23 @@ def check_sources(
     reports: dict[str, ProviderReport] = {}
     providers = state["providers"]
     for provider, source in SOURCES.items():
-        if provider not in providers:
-            entry: dict[str, object] = {"reported": []}
-            previous_status: object = None
-        else:
-            entry = providers[provider]
-            previous_status = entry["status"]
+        entry: dict[str, object] | None = providers.get(provider)
+        if entry is None:
+            entry = {"reported": []}
+            providers[provider] = entry
         api_key = _api_key(source, file_aliases)
         if api_key is None:
             status = f"error: missing {source.key_alias}"
-            entry["status"] = status
-            providers[provider] = entry
             reports[provider] = ProviderReport(
-                [], [], [], [], {}, status, _status_changed(previous_status, status)
+                [], [], [], [], {}, status, _record_status(entry, status)
             )
             continue
         try:
             comparison = compare_models(source, fetch_provider_models(source, api_key))
         except Exception as exc:
             status = f"error: {str(exc) or type(exc).__name__}"
-            entry["status"] = status
-            providers[provider] = entry
             reports[provider] = ProviderReport(
-                [], [], [], [], {}, status, _status_changed(previous_status, status)
+                [], [], [], [], {}, status, _record_status(entry, status)
             )
             continue
         raw = entry["reported"]
@@ -605,8 +670,6 @@ def check_sources(
         reported = set(raw)
         actionable = [model_id for model_id in comparison.candidates if model_id not in reported]
         entry["reported"] = sorted(reported | set(actionable) | set(comparison.suppressed))
-        entry["status"] = "ok"
-        providers[provider] = entry
         reports[provider] = ProviderReport(
             comparison.candidates,
             actionable,
@@ -614,7 +677,7 @@ def check_sources(
             comparison.other_ids,
             comparison.series_models,
             None,
-            _status_changed(previous_status, "ok"),
+            _record_status(entry, "ok"),
         )
     return reports
 
@@ -698,10 +761,13 @@ def main(argv: list[str] | None = None) -> int:
         _write_report(args.write_report, markdown, payload)
     has_actionable = any(report.actionable_candidates for report in reports.values())
     has_status_change = any(report.status_changed for report in reports.values())
-    has_error = any(report.error is not None for report in reports.values())
+    # Provider errors reach the P0 lead only through the confirmed status
+    # change above: a first-round error reports clean here on purpose, and a
+    # continuing one has already been announced. Exit 1 stays reserved for
+    # the tracker failing to report at all (the handler above this block).
     if has_actionable or has_status_change:
         return 2
-    return 1 if has_error else 0
+    return 0
 
 
 if __name__ == "__main__":
