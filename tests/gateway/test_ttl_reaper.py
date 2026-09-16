@@ -314,6 +314,12 @@ def test_torn_pointer_scan_reports_torn_commands(
     emitted: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
     def _capture_emit(*args: object, **kwargs: object) -> None:
+        # Mirror the production emit() contract: an unregistered name raises
+        # there, so a stub that accepts one would hide exactly that class of
+        # drift (PR #2667 review).
+        from shared.events.contract import EVENTS
+
+        assert len(args) > 1 and args[1] in EVENTS, f"unregistered emit name: {args!r}"
         emitted.append((args, kwargs))
 
     monkeypatch.setattr(ttl_reaper.telemetry, "emit", _capture_emit)
