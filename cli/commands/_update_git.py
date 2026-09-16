@@ -10,19 +10,20 @@ directly. Re-imported by `cli/commands/update.py` (and re-exported through
 
 from __future__ import annotations
 
-import re
 import subprocess
 import sys
-import tempfile
 import time
+from collections.abc import Callable, Generator
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import urlsplit
 
-import shared.pg_tools
+from cli.commands import _update_snapshot as _snapshot_mod
 from cli.commands._repo import _repo_root
 from shared.config import settings
 from shared.gitenv import git_env
+from shared.platform import LockTimeoutError
 from shared.proc import run_bounded
 from shared.runtime_migration import ReleaseMigrationContext
 
@@ -99,8 +100,13 @@ def tracking_target_ref() -> str:
 _GIT_LOCAL_TIMEOUT_S = 60.0
 _GIT_NETWORK_TIMEOUT_S = 180.0
 _PRE_UPDATE_DUMP_TIMEOUT_S = 20 * 60
-_PRE_UPDATE_RESTORE_TIMEOUT_S = 60.0
-_PG_RESTORE_TOC_ENTRY_RE = re.compile(r"^\d+;")
+# Lock-wait narration cadence for the snapshots below (`_narrated_backup_lock`):
+# a scheduled writer holding the lock must not leave the wait silent — the
+# rollout's stall watchdog reclaims 900 s of log silence
+# (`shared.deploy_timing.NO_PROGRESS_TIMEOUT_S`), so each failed chunk of the
+# wait reports one line through the caller's progress sink. Pinned by the
+# cadence guard in tests/cli/test_update_data_snapshot.py.
+_SNAPSHOT_HEARTBEAT_S = 60.0
 
 # Network git commands (fetch / pull) are idempotent and their dominant
 # failure mode is a transient network blip — retry a few times with backoff.
@@ -515,106 +521,47 @@ def current_schema_state() -> set[str]:
         return _mig.applied_migration_names(conn)
 
 
-def _verify_snapshot_artifact(artifact: Path) -> None:
-    """Verify an encrypted snapshot while keeping all error paths redacted."""
-    try:
-        _verify_snapshot_artifact_inner(artifact)
-    except RuntimeError:
-        raise
-    except Exception as exc:
-        raise RuntimeError(
-            f"pre-update data snapshot {artifact} is not restorable: verification failed "
-            f"({type(exc).__name__})"
-        ) from None
+def _activation_progress(line: str) -> None:
+    """Narrate the pre-activation snapshot on stdout — same rationale as
+    `_snapshot_progress`; the activation CLI's log is its visibility surface."""
+    print(f"→ pre-activation data snapshot: {line}", flush=True)
 
 
-def _verify_snapshot_artifact_inner(artifact: Path) -> None:
-    """Decrypt and list a snapshot without exposing its connection URL."""
-    try:
-        artifact_size = artifact.stat().st_size
-    except OSError:
-        raise RuntimeError(
-            f"pre-update data snapshot {artifact} is not restorable: cannot read artifact"
-        ) from None
-    if artifact_size <= 0:
-        raise RuntimeError(
-            f"pre-update data snapshot {artifact} is not restorable: artifact is empty"
-        )
+@contextmanager
+def _narrated_backup_lock(
+    *, timeout_s: float, heartbeat_s: float, progress: Callable[[str], None]
+) -> Generator[None]:
+    """Take the backup lock within `timeout_s`, narrating contested waits.
 
-    from services.backup import decrypt_artifact, gunzip_if_needed
+    A scheduled writer holding the lock would otherwise leave the snapshot
+    silent for up to the whole budget — the 2026-09-14 silent-dump shape. The
+    acquire leg is retried in `heartbeat_s` chunks, reporting each failed chunk
+    through `progress`, because the rollout's stall watchdog reclaims log
+    silence at 900 s. Expiry still raises `LockTimeoutError`, its message
+    naming the total budget rather than the last chunk value.
+    """
+    from services.backup import backup_lock
 
-    with tempfile.TemporaryDirectory(prefix="ava-pre-update-") as temporary_dir:
-        temporary = Path(temporary_dir)
-        dump = temporary / "snapshot.dump"
-        try:
-            decrypt_artifact(artifact, dump)
-        except Exception as exc:
-            raise RuntimeError(
-                f"pre-update data snapshot {artifact} is not restorable: decrypt failed "
-                f"({type(exc).__name__})"
-            ) from None
-        try:
-            dump_size = dump.stat().st_size
-        except OSError:
-            raise RuntimeError(
-                f"pre-update data snapshot {artifact} is not restorable: cannot read decrypted dump"
-            ) from None
-        if dump_size <= 0:
-            raise RuntimeError(
-                f"pre-update data snapshot {artifact} is not restorable: decrypted dump is empty"
-            )
-        try:
-            # Fresh snapshots are raw custom dumps; a legacy artifact (written
-            # before the 2026-08-27 double-gzip removal) still needs its gzip
-            # layer removed before pg_restore can read it.
-            gunzip_if_needed(dump, timeout_s=_PRE_UPDATE_RESTORE_TIMEOUT_S)
-        except subprocess.TimeoutExpired:
-            raise RuntimeError(
-                f"pre-update data snapshot {artifact} is not restorable: gunzip timed out after "
-                f"{_PRE_UPDATE_RESTORE_TIMEOUT_S:.0f}s"
-            ) from None
-        except Exception as exc:
-            raise RuntimeError(
-                f"pre-update data snapshot {artifact} is not restorable: gunzip failed "
-                f"({type(exc).__name__})"
-            ) from None
-        try:
-            dump_size = dump.stat().st_size
-        except OSError:
-            raise RuntimeError(
-                f"pre-update data snapshot {artifact} is not restorable: cannot read decompressed dump"
-            ) from None
-        if dump_size <= 0:
-            raise RuntimeError(
-                f"pre-update data snapshot {artifact} is not restorable: decompressed dump is empty"
-            )
-        try:
-            listing = run_bounded(
-                [str(shared.pg_tools.pg_tool("pg_restore")), "--list", str(dump)],
-                timeout=_PRE_UPDATE_RESTORE_TIMEOUT_S,
-                capture_output=True,
-                text=True,
-            )
-        except subprocess.TimeoutExpired:
-            raise RuntimeError(
-                f"pre-update data snapshot {artifact} is not restorable: pg_restore --list "
-                f"timed out after {_PRE_UPDATE_RESTORE_TIMEOUT_S:.0f}s"
-            ) from None
-        except Exception as exc:
-            raise RuntimeError(
-                f"pre-update data snapshot {artifact} is not restorable: pg_restore --list "
-                f"failed ({type(exc).__name__})"
-            ) from None
-        if listing.returncode != 0:
-            raise RuntimeError(
-                f"pre-update data snapshot {artifact} is not restorable: pg_restore --list "
-                f"exited {listing.returncode}"
-            )
-        if not any(_PG_RESTORE_TOC_ENTRY_RE.match(line) for line in listing.stdout.splitlines()):
-            raise RuntimeError(
-                f"pre-update data snapshot {artifact} is not restorable: pg_restore --list "
-                "returned an empty table of contents"
-            )
+    started = time.monotonic()
+    deadline = started + timeout_s
+    with ExitStack() as stack:
+        while True:
+            remaining_s = deadline - time.monotonic()
+            if remaining_s <= 0:
+                raise LockTimeoutError(
+                    f"could not take the backup lock within {timeout_s:.0f}s — another "
+                    "process has held it for the whole wait; it is released when "
+                    "that process exits"
+                )
+            try:
+                stack.enter_context(backup_lock(timeout_s=min(heartbeat_s, remaining_s)))
+                break
+            except LockTimeoutError:
+                progress(
+                    f"waiting for the backup lock ({time.monotonic() - started:.0f}s "
+                    "elapsed; another backup is writing)"
+                )
+        yield
 
 
 def _snapshot_progress(line: str) -> None:
@@ -632,11 +579,14 @@ def snapshot_pre_update_data(target_sha: str) -> Path | None:
     Code-only updates return None. Recovery reports the returned artifact's
     actual restore method; physical recovery follows PITR's retention window.
 
-    The dump narrates itself on the rollout output — a start line plus per-stage
-    progress lines (see `_snapshot_progress`): the stall watchdog reclaims log
-    silence at 900 s, and while these heartbeats flow an alive-but-stuck dump
-    rides to its own `_PRE_UPDATE_DUMP_TIMEOUT_S` bound instead (enforced by the
-    same loop); a snapshot that stops heartbeating is reclaimed as before.
+    The snapshot narrates itself on the rollout output — a start line,
+    per-stage progress lines, and one heartbeat per `_SNAPSHOT_HEARTBEAT_S` of
+    a wait for the backup lock (`_narrated_backup_lock`): the stall watchdog
+    reclaims log silence at 900 s, and while these heartbeats flow an
+    alive-but-stuck dump rides to its own `_PRE_UPDATE_DUMP_TIMEOUT_S` bound
+    instead (enforced by the same loop); a snapshot that stops heartbeating is
+    reclaimed as before. The lock wait is bounded by that same timeout —
+    expiry raises `LockTimeoutError`.
     """
     from cli.commands._cluster_rollback import _migration_set_at_commit
 
@@ -664,15 +614,20 @@ def snapshot_pre_update_data(target_sha: str) -> Path | None:
         print(f"→ pre-update PITR recovery point: {receipt} (verified; already offsite)")
         return receipt
 
-    from services.backup import backup_lock, run_backup
+    from services.backup import run_backup
 
     _snapshot_progress(f"started (dump bounded at {_PRE_UPDATE_DUMP_TIMEOUT_S / 60:.0f} min)")
 
     # Hold the same lock as the daily writer through the restore listing. A
     # verified dump must remain untouched until this function hands its path to
     # recovery; otherwise a scheduled writer can sweep its partial or replace
-    # the same-second target between creation and verification.
-    with backup_lock(timeout_s=_PRE_UPDATE_DUMP_TIMEOUT_S):
+    # the same-second target between creation and verification. A contended
+    # take is retried in narrated chunks — not one silent 20-minute wait.
+    with _narrated_backup_lock(
+        timeout_s=_PRE_UPDATE_DUMP_TIMEOUT_S,
+        heartbeat_s=_SNAPSHOT_HEARTBEAT_S,
+        progress=_snapshot_progress,
+    ):
         try:
             dump_path = run_backup(
                 timeout_s=_PRE_UPDATE_DUMP_TIMEOUT_S,
@@ -692,7 +647,7 @@ def snapshot_pre_update_data(target_sha: str) -> Path | None:
                 f"could not create pre-update data snapshot: pg_dump failed ({type(exc).__name__})"
             ) from None
 
-        _verify_snapshot_artifact(dump_path)
+        _snapshot_mod._verify_snapshot_artifact(dump_path)
         # The verified path goes to the rollout output: without it, a snapshot
         # is invisible in the log (run_backup writes to its own daemon stream)
         # and an operator can mistake it for an unscheduled backup.
@@ -705,15 +660,25 @@ def snapshot_pre_activation_data(*, operation_id: str, db_url: str) -> Path:
 
     Unlike the rollout helper above this is intentionally unconditional: the
     activation rollout cannot be protected by WAL archiving that is still off.
-    """
-    from services.backup import backup_lock, run_backup
 
-    with backup_lock(timeout_s=_PRE_UPDATE_DUMP_TIMEOUT_S):
+    Narrated like the rollout snapshot (`_activation_progress`) — the CLI's own
+    log carries the lock wait and the dump stages instead of staying silent
+    until the verified path (#2518 residual).
+    """
+    from services.backup import run_backup
+
+    _activation_progress(f"started (dump bounded at {_PRE_UPDATE_DUMP_TIMEOUT_S / 60:.0f} min)")
+    with _narrated_backup_lock(
+        timeout_s=_PRE_UPDATE_DUMP_TIMEOUT_S,
+        heartbeat_s=_SNAPSHOT_HEARTBEAT_S,
+        progress=_activation_progress,
+    ):
         try:
             dump_path = run_backup(
                 timeout_s=_PRE_UPDATE_DUMP_TIMEOUT_S,
                 db_url=db_url,
                 pitr_activation=operation_id,
+                progress=_activation_progress,
             )
         except subprocess.TimeoutExpired:
             raise RuntimeError(
@@ -725,7 +690,7 @@ def snapshot_pre_activation_data(*, operation_id: str, db_url: str) -> Path:
                 "could not create pre-activation data snapshot: "
                 f"pg_dump failed ({type(exc).__name__})"
             ) from None
-        _verify_snapshot_artifact(dump_path)
+        _snapshot_mod._verify_snapshot_artifact(dump_path)
         print(f"→ pre-activation data snapshot: {dump_path} (verified)")
         return dump_path
 

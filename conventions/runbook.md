@@ -631,8 +631,11 @@ run and the cluster is stopped + paused until the lease lapses — `ava cluster 
 is the faster path. A healthy Phase B is not mistaken for this: the poll writes a
 `still polling Phase B (Nm)` heartbeat on the lease-renewal cadence, and the
 pre-update data snapshot writes `→ pre-update data snapshot: pg_dump <Ns>, <N MiB>
-written` progress lines while its dump runs (that stage alone is allowed 20 min).
-During that dump the silence rule is deliberately superseded: the heartbeats are
+written` progress lines while its dump runs (that stage alone is allowed 20 min),
+and one `→ pre-update data snapshot: waiting for the backup lock (<Ns> elapsed;
+another backup is writing)` line per minute of any wait for that lock
+(`_SNAPSHOT_HEARTBEAT_S`). During that dump the silence rule is deliberately
+superseded: the heartbeats are
 unconditional, so an alive-but-stuck dump is no longer reclaimed at 900 s of log
 silence — it rides to its own 20-minute bound (`_PRE_UPDATE_DUMP_TIMEOUT_S`), which the
 same loop that heartbeats enforces (`TimeoutExpired` aborts the rollout before anything
