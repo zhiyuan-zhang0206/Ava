@@ -43,6 +43,7 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "delivery_poisoned",  # services/delivery_watchdog/dispatch_guard.py:_alert_poisoned
         "delivery_wake_suppressed",  # services/delivery_watchdog/resurrect_guard.py:_alert_wake_suppressed
         "delivery_recovery_decision",  # services/delivery_watchdog/stall_recovery.py:_request_harvest
+        "lifecycle_pointer_done_torn",  # gateway/ttl_reaper.py:_scan_torn_lifecycle_pointers_blocking (positional emit)
         "heartbeat_nudged",  # services/heartbeat/daemon.py:_alert_idle
         "heartbeat_backoff_raised",  # services/heartbeat/daemon.py:_raise_backoff_level (positional emit)
         "heartbeat_backoff_reset",  # services/heartbeat/daemon.py:_sweep_backoff_resets (positional emit)

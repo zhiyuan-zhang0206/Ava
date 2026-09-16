@@ -291,6 +291,62 @@ def test_schedule_fire_log_prune_due_throttles(
     assert ttl_reaper._schedule_fire_log_prune_due() is True
 
 
+def test_torn_pointer_scan_due_throttles(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The scan fires on the first pass, then only after the scan interval."""
+    monkeypatch.setattr(ttl_reaper, "_torn_pointer_last_scan", None)
+    assert ttl_reaper._torn_pointer_scan_due() is True
+    assert ttl_reaper._torn_pointer_scan_due() is False
+    monkeypatch.setattr(
+        ttl_reaper,
+        "_torn_pointer_last_scan",
+        time.monotonic() - 2 * ttl_reaper._TORN_POINTER_SCAN_INTERVAL_S,
+    )
+    assert ttl_reaper._torn_pointer_scan_due() is True
+
+
+def test_torn_pointer_scan_reports_torn_commands(
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`done` with a live pointer is counted and alerted; a cleared pointer is quiet."""
+    # (args, kwargs) pairs, so the assertions stay fully typed.
+    emitted: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def _capture_emit(*args: object, **kwargs: object) -> None:
+        # Mirror the production emit() contract: an unregistered name raises
+        # there, so a stub that accepts one would hide exactly that class of
+        # drift (PR #2667 review).
+        from shared.events.contract import EVENTS
+
+        assert len(args) > 1 and args[1] in EVENTS, f"unregistered emit name: {args!r}"
+        emitted.append((args, kwargs))
+
+    monkeypatch.setattr(ttl_reaper.telemetry, "emit", _capture_emit)
+    agent_id = _running_agent(db_conn)
+    row = db_conn.execute(
+        "INSERT INTO inbound_messages "
+        "(agent_id, content, kind, source, status, applied_at, observed_at, "
+        " claimed_at, target_generation, target_owner) "
+        "VALUES (%s, '', 'terminate', 'user', 'done', now(), NULL, now(), "
+        "gen_random_uuid(), gen_random_uuid()) RETURNING id",
+        (agent_id,),
+    ).fetchone()
+    assert row is not None
+    db_conn.execute(
+        "UPDATE agents_meta SET lifecycle_command_id=%s WHERE id=%s", (row[0], agent_id)
+    )
+    db_conn.commit()
+
+    assert ttl_reaper._scan_torn_lifecycle_pointers_blocking(reaper_pool) == 1
+    assert emitted
+    assert emitted[-1][0][1] == "lifecycle_pointer_done_torn"
+
+    db_conn.execute("UPDATE agents_meta SET lifecycle_command_id=NULL WHERE id=%s", (agent_id,))
+    db_conn.commit()
+    assert ttl_reaper._scan_torn_lifecycle_pointers_blocking(reaper_pool) == 0
+
+
 async def test_reaper_reconciles_stale_work_failures_on_its_startup_pass(
     reaper_pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,

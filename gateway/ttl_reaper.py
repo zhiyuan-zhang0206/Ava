@@ -119,6 +119,12 @@ _FIRE_LOG_PASS_BATCH = 50_000
 # would scan the whole table for nothing).
 _schedule_fire_log_last_pruned: float | None = None
 
+# Torn lifecycle-pointer scan cadence: the commit-time guard (task #3678) rejects
+# new pointer->done writes; this scan is the slow safety net for the sides the
+# guard cannot see (a bypass write, a rollback past the migration).
+_TORN_POINTER_SCAN_INTERVAL_S = 3600.0
+_torn_pointer_last_scan: float | None = None
+
 # The only agent states that can act on a reclamation notice. Terminated
 # agents must NOT be resurrected by an expiry notification.
 _NOTIFIABLE_STATUSES = ("running", "idling")
@@ -611,6 +617,66 @@ def _schedule_fire_log_prune_due() -> bool:
     return False
 
 
+def _torn_pointer_scan_due() -> bool:
+    """True once per torn-pointer scan interval (hourly).
+
+    Same throttle shape as the fire-log prune: the scan is hourly, not a
+    per-poll job (a live-pointer join every 30 s would scan agents_meta for
+    nothing).
+    """
+    global _torn_pointer_last_scan  # noqa: PLW0603 — process-local scan cadence
+    now = time.monotonic()
+    if (
+        _torn_pointer_last_scan is None
+        or now - _torn_pointer_last_scan >= _TORN_POINTER_SCAN_INTERVAL_S
+    ):
+        _torn_pointer_last_scan = now
+        return True
+    return False
+
+
+def _scan_torn_lifecycle_pointers_blocking(pool: ConnectionPool) -> int:
+    """Count lifecycle commands sitting at `done` while agents_meta still
+    points at them; alert when any is found.
+
+    That torn shape blinds boot recovery (it needs the command still
+    `claimed`) and live observation (it needs a live process identity) at
+    once, so any resurrect of the affected agent defers forever — 6285/200306
+    and 6089/172352 (task #3678). The commit-time guard rejects the inbound
+    side of the shape; this scan is the slower safety net for the sides it
+    cannot see.
+    """
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT count(*) FROM agents_meta m "
+            "JOIN inbound_messages i ON i.id = m.lifecycle_command_id AND i.agent_id = m.id "
+            "WHERE i.status = 'done'"
+        )
+        row = cur.fetchone()
+        count = 0 if row is None else int(row[0])
+        if not count:
+            return 0
+        cur.execute(
+            "SELECT m.id FROM agents_meta m "
+            "JOIN inbound_messages i ON i.id = m.lifecycle_command_id AND i.agent_id = m.id "
+            "WHERE i.status = 'done' ORDER BY m.id LIMIT 5"
+        )
+        samples = [int(r[0]) for r in cur.fetchall()]
+    _log.warning(
+        "[ttl-reaper] %d lifecycle command(s) sit at done with a live pointer "
+        "(agent(s) %s) — resurrection of the named agent(s) defers until settled",
+        count,
+        ", ".join(str(a) for a in samples),
+    )
+    telemetry.emit(
+        "log",
+        "lifecycle_pointer_done_torn",
+        level="warning",
+        attributes={"count": count, "samples": ", ".join(str(a) for a in samples)},
+    )
+    return count
+
+
 def _prune_schedule_fire_log_blocking(pool: ConnectionPool) -> int:
     """Delete ``schedule_fire_log`` claims older than the retention window.
 
@@ -666,6 +732,11 @@ async def _reaper_loop(pool: ConnectionPool, stop: asyncio.Event) -> None:
             pruned_fire_log = 0
             if _schedule_fire_log_prune_due():
                 pruned_fire_log = await asyncio.to_thread(_prune_schedule_fire_log_blocking, pool)
+            torn_pointers = 0
+            if _torn_pointer_scan_due():
+                torn_pointers = await asyncio.to_thread(
+                    _scan_torn_lifecycle_pointers_blocking, pool
+                )
             if (
                 pages
                 or shells
@@ -676,12 +747,13 @@ async def _reaper_loop(pool: ConnectionPool, stop: asyncio.Event) -> None:
                 or failures
                 or reminded
                 or pruned_fire_log
+                or torn_pointers
             ):
                 _log.info(
                     "[ttl-reaper] reclaimed %d page(s), %d shell(s), %d web session(s), "
                     "%d terminated-owner watcher(s), %d impersonation(s), %d notice(s); "
                     "completed %d stale work failure(s); reminded %d impersonation lease(s); "
-                    "pruned %d schedule fire-log row(s)",
+                    "pruned %d schedule fire-log row(s); found %d torn lifecycle pointer(s)",
                     len(pages),
                     len(shells),
                     sessions,
@@ -691,6 +763,7 @@ async def _reaper_loop(pool: ConnectionPool, stop: asyncio.Event) -> None:
                     failures,
                     reminded,
                     pruned_fire_log,
+                    torn_pointers,
                 )
         except Exception:
             _log.warning("[ttl-reaper] pass failed", exc_info=True)
