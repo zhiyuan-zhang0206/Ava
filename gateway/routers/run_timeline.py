@@ -211,7 +211,6 @@ def _execution_events(events: list[dict[str, object]]) -> list[RunTimelineExec]:
         executions.append(
             RunTimelineExec(
                 tool=tool if isinstance(tool, str) and tool else "execute_code",
-                dur_s=_number(attrs.get("duration_seconds", attrs.get("duration_s"))),
                 ok=name == "exec",
             )
         )
@@ -305,7 +304,7 @@ def _row_for_turn(
 
     llm = _llm_usage(usages)
     execs = _execution_events(associated_events)
-    active_s = min(duration_s, llm.latency_ms / 1000 + sum(exec_.dur_s for exec_ in execs))
+    active_s = min(duration_s, llm.latency_ms / 1000)
     anomalies = [
         _event_name(event) for event in associated_events if _event_name(event) in _ANOMALY_EVENTS
     ]

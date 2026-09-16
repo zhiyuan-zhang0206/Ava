@@ -43,7 +43,7 @@ const timeline: RunTimelineResponse = {
         cost_usd: 0.02,
         model: "deepseek-v4-flash",
       },
-      execs: [{ tool: "execute_code", dur_s: 0, ok: false }],
+      execs: [{ tool: "execute_code", ok: false }],
       anomalies: ["exec_failed"],
       tags: [],
     },
@@ -102,7 +102,6 @@ const labels = {
   latency: "Latency",
   executions: "Executions",
   tool: "Tool",
-  duration: "Duration",
   status: "Status",
   succeeded: "Succeeded",
   failed: "Failed",
@@ -214,7 +213,8 @@ describe("RunTimelineChart", () => {
     expect(within(panel).getByText("deepseek-v4-flash")).toBeTruthy();
     expect(within(panel).getByText("1.50s")).toBeTruthy();
     expect(within(panel).getByText("execute_code")).toBeTruthy();
-    expect(within(panel).getByText("0.00s")).toBeTruthy();
+    expect(within(panel).queryByText("Duration")).toBeNull();
+    expect(within(panel).queryByText("0.00s")).toBeNull();
     expect(within(panel).getAllByText("Failed")).toHaveLength(2);
     expect(within(panel).getByText("exec_failed")).toBeTruthy();
   });

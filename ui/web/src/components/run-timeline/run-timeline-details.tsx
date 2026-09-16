@@ -25,7 +25,6 @@ export interface RunTimelineChartLabels {
   latency: string;
   executions: string;
   tool: string;
-  duration: string;
   status: string;
   succeeded: string;
   failed: string;
@@ -163,18 +162,16 @@ export function TurnDetailPanel({
           <p className="text-xs text-muted-foreground">{labels.noExecutions}</p>
         ) : (
           <div className={cn(OVERFLOW_HIDDEN, "rounded-[10px] border border-border")}>
-            <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-3 bg-muted px-3 py-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 bg-muted px-3 py-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
               <span>{labels.tool}</span>
-              <span>{labels.duration}</span>
               <span>{labels.status}</span>
             </div>
             {row.execs.map((execution, index) => (
               <div
                 key={`${execution.tool}-${index}`}
-                className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-3 border-t border-border px-3 py-2 font-mono text-[11px]"
+                className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-t border-border px-3 py-2 font-mono text-[11px]"
               >
                 <span className="truncate">{execution.tool}</span>
-                <span className="tabular-nums">{execution.dur_s.toFixed(2)}s</span>
                 <span className={execution.ok ? "text-emerald-700 dark:text-emerald-400" : "text-red-700 dark:text-red-400"}>
                   {execution.ok ? labels.succeeded : labels.failed}
                 </span>
