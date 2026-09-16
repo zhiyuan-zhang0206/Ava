@@ -1,16 +1,11 @@
 ---
 type: doc
-title: Delivery Watchdog — wake dispatcher + stale-pending alerter
-description: "Gateway-owned wake dispatcher (re-publishes the Redis wake for stale pending inbounds every 0.5s) + stale-pending alerter + terminated-owner resurrect retry + stale-claimed dead-letter sweep + stalled crash-marked harvest request — the cluster-wide delivery tripwire (Task #689 G4, user ruling 2026-08-03; Task #654; Task #3618)."
+title: Delivery Watchdog Jobs
+description: The six job families of the delivery watchdog on one fast tick — wake dispatch, stall alerting, terminated-owner resurrect retry, stale-inbound dead-letter sweeps, stalled crash-marked recovery request, hosted-turn liveness recovery.
 tags: []
 ---
 
-# Delivery Watchdog — wake dispatcher + stale-pending alerter
-
-## What it is
-A gateway daemon with five jobs on one fast tick (user-confirmed design 2026-08-02, `delivery-dispatcher-design-2026-08-02.md`): it is the cluster-wide tripwire that a `pending` inbound actually reaches its owner. Config-gated by `AVA_DELIVERY_WATCHDOG_ENABLED`.
-
-**Role affiliation**: gateway side — `ServiceSpec.capabilities=_GATEWAY` in `ops/spec.py`, `requires_db=True` (polls `inbound_messages`). Kept alive by `services/healthchecks/delivery_watchdog.py` (gateway watchdog).
+# Delivery Watchdog Jobs
 
 ## Core Responsibilities
 1. **Wake dispatch** — every `AVA_DELIVERY_WATCHDOG_INTERVAL_SECONDS` (default 0.5s), re-publish the Redis wake for every `pending` inbound whose owner is `idling` and whose row is older than `AVA_DELIVERY_WATCHDOG_DISPATCH_THRESHOLD_SECONDS` (default 1s). Per-inbound dispatch counts apply the configured backoff ladder; after the cap, the watchdog poisons the row, emits `delivery_poisoned`, and stops re-publishing it without preventing a recovered agent from claiming it. An owner whose `agents_meta.wake_suppressed_until` has not expired is excluded while new messages continue to queue as `pending`. A lost publish (pub/sub is fire-and-forget) is retried promptly instead of waiting out the claim loop's 30s SELECT recheck, while a permanently failing inbound cannot create an unbounded wake storm. Load is independent of fleet size; the per-agent 30s recheck stays as the double-fault safety net.
@@ -22,6 +17,8 @@ A gateway daemon with five jobs on one fast tick (user-confirmed design 2026-08-
 
 5. **Stalled crash-marked recovery request** (task #3618) — escalate a chat still `pending` past the stall threshold whose owner is a crash-marked idling corpse (`last_turn_fatal_at IS NOT NULL`, not yet terminated) to the owner's home runner over the internal `recover-crash-marked-v2` lifecycle path. The runner adjudicates one row-locked harvest into the corpse reaper's terminal shape (marker kept, so the relaxed reaper trigger then resumes the queued work) or refuses with a reason (`not_marked`, `not_settled:*`, `wrong_machine`, `lease_alive`, the suppression reason — `permanent_provider_reject` when the recovery breaker halted the agent). One request per owner, 60s cooldown, two-way semaphore, gated by `AVA_DELIVERY_STALLED_RECOVERY_ENABLED`; every decision emits `delivery_recovery_decision` (the recovery-decision-rate metric). Owners the recovery breaker halted (durable streak) or with an unexpired suppression window are excluded from the scan — automatic recovery must not start for them.
 
+6. **Hosted-turn liveness recovery** (task #1712) — on the same tick, confirm each hosted `running` agent whose DB activity is older than the 2400 s wedged-agent budget (`wedged_agent_inbound_age_seconds`) against the agent-host's independent 15 s Redis progress heartbeat (`host_turn_progress:<machine>`, 60 s TTL): a missing heartbeat or equally stale per-turn marks is a wedged turn. Recovery force-terminates the incarnation and queues the marked `hosted_turn_recovery` chat — guarded resurrection retries survive restarts, and the marker is the system-notice carve-out (task #3687) that lets the recovery wake its owner — one attempt per agent per 10-minute cooldown, with `host_turn_stall_detected` evidence.
+
 The same resurrection retry owner also resumes an `idling` allocation with no
 PID only when an existing server-prepared resurrect inbound binds this exact
 pending chat, allocation epoch, old incarnation, machine and unexpired deadline.
@@ -30,18 +27,3 @@ allocation without replacing its identity or resetting the durable OS counter;
 ordinary idle agents and historical task-owner records do not qualify.
 
 `running` owners are never dispatched or alerted — a chat queued behind a long in-flight turn is normal; the claim's turn-end SELECT picks it up. `restarting` is left to its own reaper; unclaimed idling rows have no owner.
-
-## Key Dependencies
-- [[db.ava.okf.md]] — polls `inbound_messages` + reads `agents_meta` owner status
-- [[agent/graph/graph.ava.okf.md]] — the claim loop whose lost-wake window this closes
-- [[process-lifecycle.ava.okf.md]] — resurrect semantics the retry re-runs
-
-## Entry Points
-- `services/delivery_watchdog/daemon.py` — `.venv/bin/python -m services.delivery_watchdog.daemon`
-- Watchdog keeps alive via `services/healthchecks/delivery_watchdog.py`
-
-## Notes
-- One instance per cluster (runs on the gateway, owns the data plane)
-- Its degraded-WARNING doubles as a dispatcher-health signal: the per-agent 30s recheck warns when it fires, which only happens if the dispatcher is dead AND a wake was lost
-- After correcting the underlying delivery failure, manually resume watchdog dispatch with `UPDATE inbound_messages SET dispatch_count = 0, last_dispatch_at = NULL, poisoned_at = NULL WHERE id = <inbound_id>;`.
-- Manually clear an agent-level automatic-wake suppression with `UPDATE agents_meta SET wake_suppressed_until = NULL, wake_suppress_reason = NULL WHERE id = <agent_id>;`.

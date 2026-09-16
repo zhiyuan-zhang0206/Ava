@@ -1,6 +1,6 @@
 """Delivery watchdog daemon — gateway-owned wake dispatcher + recovery scanner.
 
-Five jobs on one fast tick (user-confirmed design, 2026-08-02 — see
+Six jobs on one fast tick (user-confirmed design, 2026-08-02 — see
 `delivery-dispatcher-design-2026-08-02.md`):
 
 1. **Wake dispatch** — every `AVA_DELIVERY_WATCHDOG_INTERVAL_SECONDS` (default
@@ -8,22 +8,18 @@ Five jobs on one fast tick (user-confirmed design, 2026-08-02 — see
    `idling` and whose row is older than `AVA_DELIVERY_WATCHDOG_DISPATCH_THRESHOLD_SECONDS`
    (default 1s). Per-row dispatch counts apply a configurable backoff ladder;
    after the cap, the row is poisoned and no longer re-published by the
-   watchdog. Poisoned rows remain pending and claimable. A publish that was
-   lost (pub/sub is fire-and-forget) is thus retried without allowing a
-   permanently failing inbound to create an unbounded wake storm. The
-   per-agent 30s recheck stays as the double-fault safety net (dispatcher dead
-   AND wake lost) and its degraded-WARNING doubles as a dispatcher-health
-   signal.
+   watchdog; poisoned rows stay pending and claimable. A publish that was lost
+   (pub/sub is fire-and-forget) is retried without letting a permanently
+   failing inbound create an unbounded wake storm; the per-agent 30s recheck
+   stays the double-fault safety net, its degraded-WARNING a dispatcher-health signal.
 
 2. **Stall alerting** — WARNING each chat inbound still `pending` past
    `AVA_DELIVERY_WATCHDOG_THRESHOLD_SECONDS` (default 30s) whose owner is in a
-   waiting/terminal state (idling / terminated). Once-per-row
-   while it stays pending: a memory set of already-alerted inbound ids is
-   pruned each scan to the rows still pending, so a row that flips
-   pending -> claimed -> pending (reconcile reset) alerts again. The set is
-   persisted (Task #945): a daemon restart re-seeds it from
-   `delivery_watchdog_alerted` instead of re-reporting every still-stalled
-   inbound (the 5,184-event re-report burst, 2026-08-06 audit).
+   waiting/terminal state (idling / terminated), once per row while it stays
+   pending: the alerted-id set is pruned to pending rows each scan (a row that
+   flips pending -> claimed -> pending alerts again) and persisted (Task #945),
+   so a daemon restart re-seeds from `delivery_watchdog_alerted` instead of
+   re-reporting every still-stalled inbound (the 5,184-event burst, 2026-08-06 audit).
 
 `running` owners are never dispatched or alerted: a chat queued behind a long
 in-flight turn is normal — the claim's turn-end SELECT picks it up. Boot states
@@ -39,9 +35,8 @@ in-flight turn is normal — the claim's turn-end SELECT picks it up. Boot state
    G4, user ruling 2026-08-03): a chat to a dead agent must wake it, and a
    missed auto-resurrect must be retried, not just alerted. Per-agent cooldown
    (60s) + per-tick cap + concurrency semaphore keep a pile of dead letters
-   from spawning an LLM wake storm. Repeated failures suppress automatic wakes
-   for a bounded, exponentially increasing per-agent window; new messages stay
-   pending and normal delivery resumes after expiry.
+   from spawning an LLM wake storm; repeated failures suppress automatic wakes
+   for a bounded exponentially increasing window, and normal delivery resumes after expiry.
 4. **Stale-inbound dead-letter sweep** — every 30s, flip `claimed` chat
    inbounds of TERMINATED owners older than
    `AVA_DELIVERY_WATCHDOG_STALE_CLAIMED_THRESHOLD_SECONDS` (default 24h), or
@@ -49,16 +44,20 @@ in-flight turn is normal — the claim's turn-end SELECT picks it up. Boot state
    `AVA_DELIVERY_WATCHDOG_STALE_CLAIMED_IDLING_THRESHOLD_SECONDS` (default 2h),
    to `done` (age from `claimed_at`, falling back to `created_at`). Hosted
    idling agents may never boot again to reconcile their completed claims;
-   running/restarting owners remain untouched. The same cadence also completes
-   stale pending `terminate`, `system_note`, and `restart_completed` rows of
-   terminated owners, which have no consumer. The reconcile-side cutoff
-   (`agent/db.py::reconcile_claimed_inbounds`) still closes the terminated-owner
-   resurrect race at boot.
+   running/restarting owners remain untouched. The same cadence completes the
+   stale pending `terminate` / `system_note` / `restart_completed` rows of
+   terminated owners (no consumer), and the reconcile-side cutoff
+   (`agent/db.py::reconcile_claimed_inbounds`) still closes the resurrect race at boot.
 5. **Hosted-turn liveness recovery** — on the same watchdog tick, select hosted
    running rows whose DB activity is older than the 2400s wedged-agent budget,
    then confirm them against the agent-host's 15s Redis progress heartbeat
    (60s TTL). Missing host heartbeats or stale per-turn marks trigger a
    terminate-then-resurrect recovery with a 10-minute per-agent cooldown.
+
+6. **Stalled crash-marked harvest request** — escalate a chat still `pending`
+   past the stall threshold whose owner is a crash-marked idling corpse over
+   the internal `recover-crash-marked-v2` path (one request per owner, 60s
+   cooldown, gated by `AVA_DELIVERY_STALLED_RECOVERY_ENABLED`; Task #3618).
 
 Runs on the gateway, one per cluster. Kept alive via
 `services/healthchecks/delivery_watchdog.py` (the gateway watchdog).
@@ -650,7 +649,8 @@ async def _scan_loop(pool: ConnectionPool, liveness: Liveness) -> None:
     rows of idling owners, (2) WARNING each chat inbound stalled past the alert
     threshold, once per row while it stays pending, (3) retry resurrect for
     terminated owners with pending chats, (4) request a harvest decision for
-    stalled chats of crash-marked idling corpses.
+    stalled chats of crash-marked idling corpses, (5) scan hosted-turn liveness
+    and recover wedged hosted turns, (6) sweep stale inbounds into dead letters.
 
     The once-per-row alert set lives in `delivery_watchdog_alerted` — the
     table is the single truth (Task #945); each tick reloads it, so memory
