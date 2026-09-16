@@ -523,18 +523,30 @@ def test_missing_key_is_a_provider_error(monkeypatch: pytest.MonkeyPatch, tmp_pa
     monkeypatch.setattr(tracker, "_environment_value", _missing_environment_value)
     monkeypatch.setattr(tracker, "fetch_provider_models", _stub_fetcher(tracker))
 
-    assert tracker.main(["--env-file", str(env_file), "--state-dir", str(tmp_path / "state")]) == 1
+    assert tracker.main(["--env-file", str(env_file), "--state-dir", str(tmp_path / "state")]) == 0
     state = json.loads((tmp_path / "state" / "state.json").read_text())
     assert state["providers"]["glm"]["status"].startswith("error:")
+    assert state["providers"]["glm"]["pending"]["rounds"] == 1
 
 
-@pytest.mark.parametrize("status", ["unknown", "error:"])
-def test_state_rejects_statuses_outside_the_persisted_contract(tmp_path: Path, status: str) -> None:
+@pytest.mark.parametrize(
+    ("entry", "match"),
+    [
+        ({"reported": [], "status": "unknown"}, "status"),
+        ({"reported": [], "status": "error:"}, "status"),
+        ({"reported": [], "status": "ok", "announced": "unknown"}, "status"),
+        ({"reported": [], "status": "ok", "pending": {"status": "ok"}}, "pending"),
+        ({"reported": [], "status": "ok", "pending": {"status": "ok", "rounds": 0}}, "rounds"),
+    ],
+)
+def test_state_rejects_entries_outside_the_persisted_contract(
+    tmp_path: Path, entry: dict[str, object], match: str
+) -> None:
     tracker = _load_script()
     state_path = tmp_path / "state.json"
-    state_path.write_text(json.dumps({"providers": {"glm": {"reported": [], "status": status}}}))
+    state_path.write_text(json.dumps({"providers": {"glm": entry}}))
 
-    with pytest.raises(ValueError, match="status"):
+    with pytest.raises((TypeError, ValueError), match=match):
         tracker._load_state(state_path)
 
 
@@ -595,7 +607,35 @@ def test_qwen_total_must_match_the_collected_models(monkeypatch: pytest.MonkeyPa
         tracker.fetch_provider_models(tracker.SOURCES["qwen"], "test-key")
 
 
-def test_status_change_notifies_once_before_returning_to_regular_error(
+def test_single_round_transient_error_and_its_recovery_stay_silent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """2026-09-14: one SSL EOF towards gemini announced an error, and the next
+    morning's recovery announced a second time. A one-round blip must stay
+    silent on both sides: its pending record clears without anything having
+    been announced."""
+    tracker = _load_script()
+    env_file = tmp_path / ".env"
+    _write_env_file(tracker, env_file)
+    monkeypatch.setattr(tracker, "_environment_value", _missing_environment_value)
+    monkeypatch.setattr(tracker, "fetch_provider_models", _stub_fetcher(tracker))
+    args = ["--env-file", str(env_file), "--state-dir", str(tmp_path / "state")]
+
+    assert tracker.main(args) == 0
+    _write_env_file(tracker, env_file, missing="GEMINI_API_KEY")
+    assert tracker.main(args) == 0
+    state = json.loads((tmp_path / "state" / "state.json").read_text())
+    assert state["providers"]["gemini"]["pending"]["rounds"] == 1
+    assert state["providers"]["gemini"]["announced"] == "ok"
+
+    _write_env_file(tracker, env_file)
+    assert tracker.main(args) == 0
+    state = json.loads((tmp_path / "state" / "state.json").read_text())
+    assert state["providers"]["gemini"]["status"] == "ok"
+    assert "pending" not in state["providers"]["gemini"]
+
+
+def test_persistent_status_change_announces_once_and_recovery_announces_too(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     tracker = _load_script()
@@ -607,8 +647,44 @@ def test_status_change_notifies_once_before_returning_to_regular_error(
 
     assert tracker.main(args) == 0
     _write_env_file(tracker, env_file, missing="XAI_API_KEY")
-    assert tracker.main(args) == 2
-    assert tracker.main(args) == 1
+    assert tracker.main(args) == 0  # first failing round: pending, not announced
+    assert tracker.main(args) == 2  # second failing round: announced once
+    assert tracker.main(args) == 0  # a continuing error never re-announces
+    _write_env_file(tracker, env_file)
+    assert tracker.main(args) == 0  # the first healthy round is pending too
+    assert tracker.main(args) == 2  # the recovery is announced
+    state = json.loads((tmp_path / "state" / "state.json").read_text())
+    assert state["providers"]["grok"]["status"] == "ok"
+    assert state["providers"]["grok"]["announced"] == "ok"
+    assert "pending" not in state["providers"]["grok"]
+
+
+def test_legacy_state_upgrade_baselines_the_loaded_status(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A state file written before `announced` existed (like the live one on
+    wsl, left in error by the 2026-09-16 proxy outage) baselines on the status
+    it was left in: the upgrade itself announces nothing, and a resolution
+    still walks the two-round window."""
+    tracker = _load_script()
+    env_file = tmp_path / ".env"
+    _write_env_file(tracker, env_file)
+    monkeypatch.setattr(tracker, "_environment_value", _missing_environment_value)
+    monkeypatch.setattr(tracker, "fetch_provider_models", _stub_fetcher(tracker))
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    (state_dir / "state.json").write_text(
+        json.dumps({"providers": {"gemini": {"reported": [], "status": "error: old outage"}}})
+    )
+    args = ["--env-file", str(env_file), "--state-dir", str(state_dir)]
+
+    assert tracker.main(args) == 0  # the first healthy round is pending, silent
+    state = json.loads((state_dir / "state.json").read_text())
+    assert state["providers"]["gemini"]["announced"] == "error: old outage"
+    assert tracker.main(args) == 2  # the second announces the recovery
+    state = json.loads((state_dir / "state.json").read_text())
+    assert state["providers"]["gemini"]["announced"] == "ok"
+    assert "pending" not in state["providers"]["gemini"]
 
 
 def test_empty_fetch_error_still_produces_a_valid_persisted_status(
@@ -627,10 +703,10 @@ def test_empty_fetch_error_still_produces_a_valid_persisted_status(
     monkeypatch.setattr(tracker, "fetch_provider_models", fetch)
     args = ["--env-file", str(env_file), "--state-dir", str(tmp_path / "state")]
 
-    assert tracker.main(args) == 1
+    assert tracker.main(args) == 0
     state = json.loads((tmp_path / "state" / "state.json").read_text())
     assert state["providers"]["glm"]["status"] == "error: ValueError"
-    assert tracker.main(args) == 1
+    assert tracker.main(args) == 2
 
 
 def test_write_report_persists_markdown_and_json(
@@ -770,7 +846,7 @@ def test_transient_ssl_eof_is_retried_without_marking_the_provider_error(
     assert state["providers"]["gemini"]["status"] == "ok"
 
 
-def test_repeated_provider_failure_stays_error_without_repeating_the_status_alarm(
+def test_repeated_provider_failure_announces_once_and_never_repeats(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     tracker = _load_script()
@@ -809,11 +885,15 @@ def test_repeated_provider_failure_stays_error_without_repeating_the_status_alar
 
     monkeypatch.setattr(tracker.requests, "get", failing_get)
     calls.clear()
-    assert tracker.main(args) == 2
+    assert tracker.main(args) == 0  # first failing round: pending, silent
     assert len(calls) == 3
 
     calls.clear()
-    assert tracker.main(args) == 1
+    assert tracker.main(args) == 2  # second failing round: announced once
+    assert len(calls) == 3
+
+    calls.clear()
+    assert tracker.main(args) == 0  # a continuing error never re-announces
     assert len(calls) == 3
     state = json.loads((tmp_path / "state" / "state.json").read_text())
     assert state["providers"]["gemini"]["status"].startswith("error:")
