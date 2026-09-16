@@ -91,6 +91,14 @@ startup, plus alerts when the probe itself fails):
 - **Refresh what you read.** If the probe reads a local clone or copy, fetch
   first (or read the remote ref) — a stale copy reads exactly like "no
   change".
+- **Protect the wake delivery across a restart window.** A gateway / agent
+  restart window (an update wave, `ava cluster update`) refuses connections
+  for minutes; a bare `send_message` exhausts the SDK's own 3 quick retries
+  and the raised exception kills the watcher — the wake is lost silently.
+  When the wake must not be lost, retry delivery with growing gaps and fail
+  loud: this repo's reference watchers retry 10s to a 160s cap (~10.5 min
+  total) and exit 2 when every attempt failed, so the loss surfaces in the
+  exit notice. Keep the retry budget inside the watcher's `timeout`.
 
 ## Report on change, not on every poll
 
@@ -154,6 +162,11 @@ way). If your watcher was reclaimed while you were terminated, the reaper's
 notice tells you — re-register the schedule if you still need it.
 
 ## See also
+
+This skill's own `reference/watch_idle.py` is a ready-made watcher that wakes
+you when a target agent goes idle. Delivery retries across a gateway / agent
+restart window, and if every attempt fails the watcher exits 2, so the loss
+surfaces in its exit notice.
 
 The `ava-goal` skill builds on this: it launches an idle-watcher per target agent to
 supervise a worker toward a goal across many turns.
