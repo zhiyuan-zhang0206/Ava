@@ -80,27 +80,46 @@ ava.register_sdk_expand("cwd")
 
 # ── state handle (surface stand-in) ──────────────────────────────────────
 # The real handle — and the state class it belongs to — lives in the
-# agent-runtime face (`agent_runtime.py`), loaded only in the agent process.
-# This stand-in exists so the surface's call sites (`ava.cwd.get`/`set`, the
-# read wrap's injection path, the project-skill source below) always hold a
-# handle object; its methods raise exactly what the real handle raises outside
-# an exec turn. The surface never legitimately reaches them: the wraps
-# fast-path on `ava.state is None`, and a process with a live state slot has
-# loaded the face, which rebinds `state_handle` on this module.
+# agent-runtime face (`agent_runtime.py`), loaded when a state slot first
+# materializes (task #3633 leg-2: a stateful child's slot is lazy). This
+# stand-in exists so the surface's call sites (`ava.cwd.get`/`set`, the read
+# wrap's injection path, the project-skill source below) always hold a handle
+# object. With a live slot (`ava.state` is not None), the slot exposes
+# `materialize()` — the framework contract on the lazy slot: calling it loads
+# the face (which rebinds `state_handle` on this module) and the call then
+# delegates to the real handle. Without a live slot — outside a turn (test /
+# dev REPL) — its methods raise exactly what the real handle raises outside an
+# exec turn.
 class _UnboundStateHandle:
-    """Stand-in for the ava_code `PluginStateHandle` until the face loads."""
+    """Stand-in for the ava_code `PluginStateHandle` until the slot resolves."""
 
     def read(self) -> Any:
-        raise ava.PluginStateOutsideTurnError(
+        return self._forward(
+            "read",
             "PluginStateHandle[AvaCodeState].read() called outside exec turn—"
-            "ava.state only valid inside execute_code (the exec turn)."
+            "ava.state only valid inside execute_code (the exec turn).",
         )
 
-    def update(self, _delta: dict[str, Any]) -> None:
-        raise ava.PluginStateOutsideTurnError(
+    def update(self, delta: dict[str, Any]) -> None:
+        self._forward(
+            "update",
             "PluginStateHandle[AvaCodeState].update() called outside exec turn—"
-            "ava.state_update only valid inside execute_code (the exec turn)."
+            "ava.state_update only valid inside execute_code (the exec turn).",
+            delta,
         )
+
+    def _forward(self, method: str, outside_turn_message: str, *args: Any) -> Any:
+        """Materialize a live slot, then delegate to the rebound real handle."""
+        state = ava.state
+        if state is not None:
+            materialize = getattr(state, "materialize", None)
+            if materialize is not None:
+                materialize()
+                from .plugin import state_handle as current
+
+                if current is not self:
+                    return getattr(current, method)(*args)
+        raise ava.PluginStateOutsideTurnError(outside_turn_message)
 
 
 state_handle: _UnboundStateHandle = _UnboundStateHandle()

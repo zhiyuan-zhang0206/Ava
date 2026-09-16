@@ -119,7 +119,11 @@ def test_request_envelope_round_trip(tmp_path: Path) -> None:
     assert payload.code == "print('hi')"
     assert payload.agent_id == 7
     assert payload.timeout_s == 300.0
-    assert payload.state == state  # exact, typed (messages back as instances)
+    # The snapshot stays raw until materialized (task #3633 leg-2) — the decode
+    # is exactly what the child defers.
+    assert payload.state is None
+    assert payload.state_raw is not None
+    assert payload.materialize_state() == state  # exact, typed (messages back as instances)
 
 
 def test_request_envelope_transfers_emit_size_and_serialize_time(tmp_path: Path) -> None:

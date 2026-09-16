@@ -134,9 +134,9 @@ def _ensure_plugins_loaded(*, surface: bool = True) -> None:
     child reaches it lazily from `__getattr__` on the first unknown `ava.X`.
     `surface=True` (the default) loads the plugin *surfaces* only — the child
     contract (task #3633). `surface=False` loads the full agent-runtime faces
-    too (state fields / hooks / prompt sections), for a child whose request
-    carries a state snapshot: the state schema needs the plugins' field
-    registrations. Latched per stage so each runs at most once per process — a
+    too (state fields / hooks / prompt sections), called when a stateful
+    child's lazy state slot resolves: the state schema needs the plugins'
+    field registrations. Latched per stage so each runs at most once per process — a
     call that arrives while the loader module is still initializing (a
     re-entrant import) defers instead, so a later miss retries once the module
     is complete.

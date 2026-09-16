@@ -109,8 +109,10 @@ class AvaCodeState(BaseModel):
 
 state_handle = register_plugin_state(AvaCodeState)
 
-# The surface module holds a stand-in handle until this face loads; rebind it
-# so the surface's call sites (`ava.cwd.get`/`set`, the read wrap's injection
+# The surface module holds a stand-in handle until this face loads — on the
+# agent side the face loads at boot; in a stateful child the lazy state slot
+# materializes on first handle use (task #3633 leg-2). Either way the rebind
+# lets the surface's call sites (`ava.cwd.get`/`set`, the read wrap's injection
 # path, the project-skill source) share the real handle.
 _surface.state_handle = state_handle
 

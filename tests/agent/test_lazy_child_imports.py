@@ -23,7 +23,10 @@ prepended to `sys.path`) and reports the heavy modules the touch left in
   must load the plugin surfaces only — no agent-runtime faces, no `agent.state`
   / `agent.hooks` / `agent.graph.*`, no graph/LM stack — and a later full call
   must upgrade by loading faces only, never re-executing a surface (task #3633,
-  leg-1 B6).
+  leg-1 B6);
+- a stateful request reads raw and its child boot arms a lazy state slot —
+  `read_request` + the surface load stay off the serde / `agent.state` / the
+  faces; the first state use (materialize) resolves them (task #3633, leg-2 B3).
 
 The lazy re-export stays a working API: `from agent.graph import build_graph`
 and friends resolve through `__getattr__` (the functional probe).
@@ -36,6 +39,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import cast
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -271,8 +275,9 @@ print(
 
 def test_child_surface_load_stays_off_the_agent_runtime() -> None:
     report = _run_clean_probe(_PLUGIN_SURFACE_LOAD)
-    assert "ava_builtins.plugins.ava_memory.plugin" in report["surfaces"], (
-        f"the surface load did not run — the probe is vacuous: {report['surfaces']}"
+    surfaces = cast("list[object]", report["surfaces"])
+    assert "ava_builtins.plugins.ava_memory.plugin" in surfaces, (
+        f"the surface load did not run — the probe is vacuous: {surfaces}"
     )
     assert report["faces"] == [], f"the surface load pulled agent-runtime faces: {report['faces']}"
     assert report["agent_side"] == [], (
@@ -310,7 +315,123 @@ print(
 
 def test_child_surface_upgrade_loads_faces_without_reexecuting_surfaces() -> None:
     report = _run_clean_probe(_PLUGIN_SURFACE_UPGRADE)
+    faces = cast("list[object]", report["faces"])
     assert report["same_surface_identity"] is True, "the upgrade re-executed the surface module"
-    assert "ava_builtins.plugins.ava_memory.agent_runtime" in report["faces"], (
-        f"the upgrade loaded no faces — the probe is vacuous: {report['faces']}"
+    assert "ava_builtins.plugins.ava_memory.agent_runtime" in faces, (
+        f"the upgrade loaded no faces — the probe is vacuous: {faces}"
     )
+
+
+# ── leg-2 (B3): the stateful child's lazy state slot ───────────────────────
+
+
+def _craft_stateful_envelope(tmp_path: Path) -> Path:
+    """A v1 request envelope carrying a typed state snapshot."""
+    import base64
+
+    from agent.graph._exec_protocol import dumps_typed
+
+    tag, blob = dumps_typed({"ava_code__cwd": str(tmp_path)})
+    req = tmp_path / "req-state.json"
+    req.write_text(
+        json.dumps(
+            {
+                "v": 1,
+                "code": "pass",
+                "agent_id": None,
+                "timeout_s": 1.0,
+                "state_tag": tag,
+                "state_b64": base64.b64encode(blob).decode("ascii"),
+            }
+        ),
+        encoding="utf-8",
+    )
+    return req
+
+
+_STATEFUL_REQUEST_RAW = """
+from pathlib import Path
+
+from agent.graph._exec_protocol import read_request
+
+payload = read_request(Path({req!r}))
+heavy = sorted(
+    name for name in sys.modules if name.startswith(("langchain", "langgraph", "langsmith"))
+)
+print(
+    json.dumps(
+        {{
+            "state": payload.state,
+            "raw": payload.state_raw is not None,
+            "agent_state": "agent.state" in sys.modules,
+            "heavy": heavy,
+        }}
+    )
+)
+"""
+
+
+def test_stateful_request_reads_raw_and_stays_off_the_serde(tmp_path: Path) -> None:
+    report = _run_clean_probe(
+        _STATEFUL_REQUEST_RAW.format(req=str(_craft_stateful_envelope(tmp_path)))
+    )
+    assert report["raw"] is True, "the stateful envelope did not carry a raw blob"
+    assert report["state"] is None, "read_request decoded eagerly — leg-2 wants it raw"
+    assert report["agent_state"] is False, "read_request pulled agent.state"
+    assert report["heavy"] == [], f"read_request pulled the serde/LM stack: {report['heavy']}"
+
+
+_CHILD_STATE_LAZY = """
+from pathlib import Path
+
+import ava
+from agent import exec_child
+from agent.graph._exec_protocol import read_request
+
+exec_child._import_runtime()  # the child boot's step that binds the SDK (mirrors `_run`)
+
+
+def _snap(tag):
+    return {{
+        "tag": tag,
+        "state_is_none": ava.state is None,
+        "agent_state": "agent.state" in sys.modules,
+        "faces": any(
+            name.endswith(".agent_runtime")
+            and name.startswith(("ava_builtins.plugins.", "plugins."))
+            for name in sys.modules
+        ),
+        "heavy": sorted(
+            name
+            for name in sys.modules
+            if name.startswith(("langchain", "langgraph", "langsmith"))
+        ),
+    }}
+
+
+payload = read_request(Path({req!r}))
+ava._ensure_plugins_loaded()
+boot = _snap("boot")
+exec_child._build_state_slot(payload)
+armed = _snap("armed")
+ava.state.materialize()
+touched = _snap("touched")
+print(json.dumps({{"boot": boot, "armed": armed, "touched": touched}}))
+"""
+
+
+def test_stateful_child_arms_lazily_and_materializes_on_first_use(tmp_path: Path) -> None:
+    report = _run_clean_probe(_CHILD_STATE_LAZY.format(req=str(_craft_stateful_envelope(tmp_path))))
+    boot = cast("dict[str, object]", report["boot"])
+    armed = cast("dict[str, object]", report["armed"])
+    touched = cast("dict[str, object]", report["touched"])
+    assert boot["state_is_none"] is True  # the surface boot has not armed a slot yet
+    assert armed["state_is_none"] is False  # the stateful request armed the lazy slot
+    for snap, tag in ((boot, "boot"), (armed, "armed")):
+        assert snap["agent_state"] is False, f"{tag} pulled agent.state"
+        assert snap["faces"] is False, f"{tag} pulled agent-runtime faces"
+        assert snap["heavy"] == [], f"{tag} pulled the serde/LM stack: {snap['heavy']}"
+    assert touched["state_is_none"] is False
+    assert touched["agent_state"] is True, "materialize did not resolve the state"
+    assert touched["faces"] is True, "materialize did not load the faces"
+    assert touched["heavy"] != [], "materialize did not load the serde — probe vacuous"

@@ -36,7 +36,7 @@ only after every import has completed, so a hook firing later always finds
 ## Two faces: `plugin.py` surface, `agent_runtime.py` face
 A plugin loads in up to two faces, and each load form picks which run: the
 child's stateless boot loads surfaces only; the full form (graph build, host
-boot, a stateful child's upgrade) adds the optional `agent_runtime.py` face
+boot, a stateful child's first state use) adds the optional `agent_runtime.py` face
 carrying the agent-side registrations (state fields, hooks, prompt sections).
 Per-face containment, the face's dotted name, and the load forms in full:
 [[okf/plugins/module-loading/two-faces.ava.okf.md]].

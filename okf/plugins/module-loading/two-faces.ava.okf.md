@@ -25,9 +25,10 @@ Which faces load is the caller's choice:
   (`clear_plugin_registrations()`), then each plugin's surface followed by its
   face. The graph build and agent-side tooling take the full form.
 - `load_agent_faces()` — faces alone, for a process whose surfaces are already
-  loaded: host boot after `scan_and_load`, and a child whose request carries a
-  state snapshot upgrading from the surface load (state fields are part of the
-  state schema it rebuilds).
+  loaded: host boot after `scan_and_load`, and a stateful child whose lazy
+  state slot materializes on first use (task #3633 leg-2 — the decode and the
+  faces resolve together; state fields are part of the state schema it
+  rebuilds).
 
 A face loads as `<pkg>.<name>.agent_runtime` through the same by-path
 primitive, with per-face fail-soft containment: a face that raises is reported

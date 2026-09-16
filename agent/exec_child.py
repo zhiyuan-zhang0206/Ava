@@ -66,6 +66,10 @@ from typing import Any, Literal, cast
 import shared.log  # noqa: F401  # pyright: ignore[reportUnusedImport]  # side effect is the point
 
 # isort: split
+# Envelope types the boot path references: a leaf module (stdlib + small shared
+# helpers, no serde — `loads_typed` stays deferred), so importing it here keeps
+# the child's early-import order intact.
+from agent.graph._exec_protocol import RequestPayload
 from shared.log import init_subprocess_logger, logger
 from shared.winjob import EXEC_JOB_GATE_ENV, await_parent_job_gate
 
@@ -219,15 +223,58 @@ def _emit_child_boot_timing() -> None:
     )
 
 
-def _build_state_slot(state: dict[str, Any] | None) -> None:
-    """Rebuild the dynamic AgentState class in this process and inject the
-    snapshot into the plugin state slots (ava.state / ava.state_update)."""
-    if state is None:
-        return
-    from agent.state import build_agent_state
+class _LazyStateSlot:
+    """State slot for a stateful request — materializes on first use.
 
-    state_cls = build_agent_state()
-    ava.state = state_cls.model_validate(state)
+    Holds the request's raw snapshot; `materialize()` loads the plugin faces
+    (state-field registrations), decodes the typed blob, rebuilds and validates
+    the dynamic AgentState, then swaps itself out of `ava.state`. Attribute
+    access before and after goes through (materialize-then-forward), so plugin
+    handles (`PluginStateHandle.read/update`) and `ava.state.<x>` reads work
+    unchanged — to the outside the slot behaves like the state object (task
+    #3633 leg-2: the child start must not pay the serde + `agent.state` +
+    graph/LM stack for a snapshot the turn may never touch).
+    """
+
+    def __init__(self, payload: RequestPayload) -> None:
+        object.__setattr__(self, "_payload", payload)
+        object.__setattr__(self, "_real", None)
+
+    def materialize(self) -> None:
+        """Resolve the slot once: faces, then decode + validate, then swap."""
+        if object.__getattribute__(self, "_real") is not None:
+            return
+        # The faces register the plugins' state fields — in place before the
+        # dynamic class is built.
+        ava._ensure_plugins_loaded(surface=False)
+        payload: RequestPayload = object.__getattribute__(self, "_payload")
+        snapshot = payload.materialize_state()
+        from agent.state import build_agent_state
+
+        real = build_agent_state().model_validate(snapshot)
+        object.__setattr__(self, "_real", real)
+        ava.state = real
+
+    def __getattr__(self, name: str) -> Any:
+        self.materialize()
+        return getattr(object.__getattribute__(self, "_real"), name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        self.materialize()
+        setattr(object.__getattribute__(self, "_real"), name, value)
+
+
+def _build_state_slot(payload: RequestPayload) -> None:
+    """Arm the dynamic AgentState slot from the request snapshot.
+
+    A stateless request leaves `ava.state` None. A stateful request binds a
+    lazy slot (task #3633 leg-2): the decode, the plugin faces, and the
+    dynamic-class build/validation happen on first use — a handle call or an
+    `ava.state.<x>` read (`_LazyStateSlot.materialize`).
+    """
+    if payload.state_raw is None:
+        return
+    ava.state = _LazyStateSlot(payload)
     ava.state_update = {}
 
 
@@ -252,7 +299,9 @@ def _take_result_state_update(payload: Any, *, state_injected: bool) -> None:
             f"plugin tampered with ava.state_update: expected dict, got {type(update).__name__}"
         )
         return
-    payload.state_update = update
+    # `{}` = the slot was armed but never touched: no delta to send, and the
+    # exit path must not pay the serde for it (task #3633 leg-2).
+    payload.state_update = update or None
 
 
 def _run_code(code: str, payload: Any) -> None:
@@ -362,17 +411,16 @@ def _run(request_path: str, result_path: str) -> None:  # noqa: PLR0915 — one 
     # Set for the child's whole lifetime; the token is deliberately held.
     _hidden_surface_members.set(media_gated_members())
     # Load plugin namespaces (ava.tasks etc.) + wraps into this process — the
-    # same explicit load a watcher child runs. Idempotent. A request carrying a
-    # state snapshot upgrades to the full load (the agent-runtime faces: state
-    # fields are part of the state schema `_build_state_slot` rebuilds);
-    # stateless requests stay on the surface — the child boot must not import
-    # the agent runtime (task #3633).
-    ava._ensure_plugins_loaded(surface=request.state is None)
+    # same explicit load a watcher child runs. Idempotent, surface-only: a
+    # request carrying a state snapshot arms a lazy slot whose first use
+    # upgrades to the agent-runtime faces (state fields feed the state schema)
+    # — the child start stays off the agent runtime either way (task #3633).
+    ava._ensure_plugins_loaded()
     _apply_overlay_scope(birth, overlay, scope="plugin")
     from agent._process_boot import _apply_per_agent_eval_isolation
 
     _apply_per_agent_eval_isolation()
-    _build_state_slot(request.state)
+    _build_state_slot(request)
 
     if request.timeout_s > 0:
         _arm_watchdog(request.timeout_s)
@@ -405,7 +453,7 @@ def _run(request_path: str, result_path: str) -> None:  # noqa: PLR0915 — one 
         _write_crashed_result(result_path, exc, code_reached=payload.code_reached)
         return
     finally:
-        _take_result_state_update(payload, state_injected=request.state is not None)
+        _take_result_state_update(payload, state_injected=request.state_raw is not None)
         payload.findings = [f.model_dump() for f in take_findings()]
         payload.attachments = take_attachments()
     # Outside the try: a boot-phase exception (config fetch, request read,
