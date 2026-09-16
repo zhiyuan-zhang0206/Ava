@@ -1966,7 +1966,9 @@ export interface paths {
          *       - `event=spawn,terminate`: comma-separated event names.
          *       - `grep=<substring>`: substring match on the raw log line (the JSON
          *         body includes the `msg` payload).
-         *       - `limit`: max rows to return, capped at 1000. Default 200.
+         *       - `limit`: max rows to return, capped at 1000 (protective constant).
+         *         Omitted returns the configured default
+         *         (``display.cluster_events_default_limit`` - 200 out of the box).
          *
          *     Returns newest-first; the client paginates by passing
          *     `since=<oldest_ts_seen>` on the next call.
@@ -2746,7 +2748,9 @@ export interface paths {
         /**
          * Get Metrics
          * @description Aggregate report over the last `days` of events (all agents, or a
-         *     single one via `agent`). `days` is capped at 30 to bound the scan.
+         *     single one via `agent`). Omitted `days` returns the configured default
+         *     (``display.metrics_default_window_days`` - 1 out of the box); the 30-day cap
+         *     stays a protective constant (it bounds the scan).
          *     `since_compact=true` additionally narrows each agent's events to those at
          *     or after its latest compact halt (echoed in `meta.since_compact`).
          *     `meta.total_events` counts every telemetry/log event in the window —
@@ -10235,7 +10239,7 @@ export interface operations {
                 since?: string | null;
                 event?: string | null;
                 grep?: string | null;
-                limit?: number;
+                limit?: number | null;
             };
             header?: never;
             path?: never;
@@ -11369,7 +11373,7 @@ export interface operations {
     get_metrics_api_metrics_get: {
         parameters: {
             query?: {
-                days?: number;
+                days?: number | null;
                 agent?: number | null;
                 since_compact?: boolean;
             };
@@ -11402,7 +11406,7 @@ export interface operations {
     get_metrics_agents_api_metrics_agents_get: {
         parameters: {
             query?: {
-                days?: number;
+                days?: number | null;
                 since_compact?: boolean;
             };
             header?: never;

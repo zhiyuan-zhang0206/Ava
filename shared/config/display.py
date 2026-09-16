@@ -192,3 +192,34 @@ class DisplaySettings(EnvSettings):
             "scope": "cluster-pinned",
         },
     )
+
+    cluster_events_default_limit: int = Field(
+        default=200,
+        alias="AVA_CLUSTER_EVENTS_DEFAULT_LIMIT",
+        description=(
+            "Default page (rows) of GET /api/cluster/admin/events when the caller "
+            "passes no limit. 200 rows is the ops-debugging glance over the unified "
+            "stream; the handler's [1, 1000] range stays a protective constant."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+    metrics_default_window_days: int = Field(
+        default=1,
+        alias="AVA_METRICS_DEFAULT_WINDOW_DAYS",
+        description=(
+            "Default window (days) of GET /api/metrics and /api/metrics/agents when "
+            "the caller passes none. 1 day is the settings tab's default read; the "
+            "30-day cap stays a protective constant (it bounds the Loki scan)."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
