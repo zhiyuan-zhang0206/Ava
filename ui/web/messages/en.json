@@ -74,7 +74,6 @@
     "latency": "Latency",
     "executions": "Executions",
     "tool": "Tool",
-    "duration": "Duration",
     "status": "Status",
     "succeeded": "Succeeded",
     "failed": "Failed",
