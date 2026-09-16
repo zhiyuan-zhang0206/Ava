@@ -1,9 +1,17 @@
 """Automatic resume for the ordinary start command's existing pause journal."""
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from functools import wraps
 
 from shared import maintenance, start_serving
+
+
+@dataclass(frozen=True)
+class StartDelegation:
+    """A different process owns startup, including readiness and resume."""
+
+    run: Callable[[], int]
 
 
 def exclusive_resources[**P, R](operation: Callable[P, R]) -> Callable[P, R]:
@@ -20,11 +28,11 @@ def exclusive_resources[**P, R](operation: Callable[P, R]) -> Callable[P, R]:
     return wrapped
 
 
-def resume_after_start[**P](start: Callable[P, int]) -> Callable[P, int]:
+def resume_after_start[**P](start: Callable[P, int | StartDelegation]) -> Callable[P, int]:
     """Keep admission closed until a real start passes its serving gate."""
 
-    @wraps(start)
-    def wrapped(*args: P.args, **kwargs: P.kwargs) -> int:
+    @exclusive_resources
+    def start_locked(*args: P.args, **kwargs: P.kwargs) -> int | StartDelegation:
         current = maintenance.snapshot()
         if current is None:
             return start(*args, **kwargs)
@@ -43,4 +51,11 @@ def resume_after_start[**P](start: Callable[P, int]) -> Callable[P, int]:
             unpause_local_cluster()
         return result
 
-    return exclusive_resources(wrapped)
+    @wraps(start)
+    def wrapped(*args: P.args, **kwargs: P.kwargs) -> int:
+        result = start_locked(*args, **kwargs)
+        # The GUI child takes this same lock. The observer must leave both the
+        # lock and its maintenance authorization before kicking/waiting on it.
+        return result.run() if isinstance(result, StartDelegation) else result
+
+    return wrapped

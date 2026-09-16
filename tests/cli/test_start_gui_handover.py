@@ -3,19 +3,22 @@
 A start chain outside the macOS GUI login session must not bring services up in
 place (they would inherit its launchd domain): an operator-shaped start hands
 the bring-up to the cluster's GUI-domain job and waits for readiness with the
-same exit contract. These pin the shape gate, the fail-open paths and the
+same exit contract. These pin the shape gate, failed-launch refusal and the
 observer's verdict — the domain probe, the job ensure and the readiness wait
-are all faked; no test ever kicks a real launchd job.
+are all faked; no test ever kicks a real launchd job. Lock ownership is tested
+with the real filesystem lock used by the startup wrapper.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
 import pytest
 
 from cli.commands import _start_gui_handover as ho
+from cli.commands._pause_resume import StartDelegation, resume_after_start
 from cli.commands._probe import ReadinessWait
 from cli.commands._repo import ServiceSpec
 from shared.config import settings
@@ -169,7 +172,8 @@ def _hand_over(rec: _Recorder, **overrides: object) -> int | None:
         "readiness_gate": True,
     }
     kwargs.update(overrides)
-    return ho._maybe_handover_start(frozenset({"agent-runner"}), **kwargs)  # type: ignore[arg-type]
+    result = ho._maybe_handover_start(frozenset({"agent-runner"}), **kwargs)  # type: ignore[arg-type]
+    return result.run() if isinstance(result, StartDelegation) else result
 
 
 def test_hands_over_and_observes_with_the_start_contract(
@@ -282,8 +286,69 @@ def test_occupied_health_port_refuses_without_kicking(env: _Recorder) -> None:
     assert env.ensure_calls == 0
 
 
-def test_failed_ensure_falls_open(env: _Recorder, capsys: pytest.CaptureFixture[str]) -> None:
+def test_failed_ensure_refuses_wrong_domain_start(
+    env: _Recorder, capsys: pytest.CaptureFixture[str]
+) -> None:
     env.kick_ok = False
     env.kick_detail = "no autostart plist at /x.plist"
-    assert _hand_over(env) is None
+    assert _hand_over(env) == 1
     assert "handover unavailable" in capsys.readouterr().err
+
+
+def test_gui_child_can_take_lifecycle_lock_before_observer_waits(
+    env: _Recorder, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Exercise a real lock, not a mocked assertion that an unlock was called."""
+    from shared import maintenance
+    from shared.platform import file_lock
+
+    lock = tmp_path / "lifecycle.lock"
+    monkeypatch.setattr("shared.ui_update_state.lifecycle_lock_path", lambda: lock)
+    monkeypatch.setattr(maintenance, "snapshot", lambda: None)
+    acquired: list[bool] = []
+
+    def gui_child() -> tuple[bool, str]:
+        with file_lock(lock, timeout_s=0):
+            assert not maintenance.start_authorized()
+            acquired.append(True)
+        return True, _AUTOSTART_DETAIL
+
+    monkeypatch.setattr("shared.os_autostart.ensure_via_gui_domain", gui_child)
+
+    @resume_after_start
+    def start() -> int | StartDelegation:
+        result = ho._maybe_handover_start(
+            frozenset({"agent-runner"}),
+            disabled_services=(),
+            persist_services=True,
+            updater_telemetry=False,
+            parent_handoff=False,
+            readiness_gate=True,
+        )
+        assert result is not None
+        # Preparing a handover must not kick the child under our lock.
+        assert acquired == []
+        return result
+
+    assert start() == 0
+    assert acquired == [True]
+    assert len(env.waits) == 1
+
+
+def test_in_place_start_still_serializes_lifecycle(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from shared import maintenance
+    from shared.platform import LockTimeoutError, file_lock
+
+    lock = tmp_path / "lifecycle.lock"
+    monkeypatch.setattr("shared.ui_update_state.lifecycle_lock_path", lambda: lock)
+    monkeypatch.setattr(maintenance, "snapshot", lambda: None)
+
+    @resume_after_start
+    def start() -> int:
+        with pytest.raises(LockTimeoutError), file_lock(lock, timeout_s=0):
+            pytest.fail("ordinary start lost lifecycle serialization")
+        return 0
+
+    assert start() == 0
