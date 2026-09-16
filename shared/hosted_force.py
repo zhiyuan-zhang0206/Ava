@@ -125,6 +125,13 @@ async def recover_orphaned_hosted_forces(
     The database transition re-locks and revalidates the exact command target;
     it never retargets a force to the new host owner. Returned deferred entries
     are diagnostic evidence for an operator, not cleanup authorization.
+
+    The candidate predicate admits both `claimed` and `done` commands: a
+    command torn into `done` with the pointer still alive (an out-of-band write;
+    task #3678) is blind to boot recovery and live observation alike, and this
+    scan is the one recoverer that can settle it. Everything else stays the
+    strict conjunction — applied set, observation missing, target matching the
+    current incarnation, pointer alive.
     """
     async with pool.connection() as conn:
         candidates = await (
@@ -135,7 +142,7 @@ async def recover_orphaned_hosted_forces(
                 "WHERE m.machine=%s AND m.status='terminated' "
                 "AND m.runtime_kind='hosted' AND m.runtime_generation IS NOT NULL "
                 "AND m.runtime_owner IS NOT NULL AND force.kind='terminate' "
-                "AND force.status='claimed' AND force.applied_at IS NOT NULL "
+                "AND force.status IN ('claimed','done') AND force.applied_at IS NOT NULL "
                 "AND force.observed_at IS NULL "
                 "AND force.target_generation=m.runtime_generation "
                 "AND force.target_owner=m.runtime_owner ORDER BY m.id",
@@ -170,7 +177,7 @@ async def recover_orphaned_hosted_forces(
             command = await (
                 await conn.execute(
                     "SELECT id FROM inbound_messages WHERE id=%s AND agent_id=%s "
-                    "AND kind='terminate' AND status='claimed' "
+                    "AND kind='terminate' AND status IN ('claimed','done') "
                     "AND applied_at IS NOT NULL AND observed_at IS NULL "
                     "AND target_generation=%s AND target_owner=%s FOR UPDATE",
                     (row[2], agent_id, row[0], row[1]),
@@ -180,7 +187,8 @@ async def recover_orphaned_hosted_forces(
                 continue
             observed = await conn.execute(
                 "UPDATE inbound_messages SET observed_at=clock_timestamp(),status='done' "
-                "WHERE id=%s AND agent_id=%s AND kind='terminate' AND status='claimed' "
+                "WHERE id=%s AND agent_id=%s AND kind='terminate' "
+                "AND status IN ('claimed','done') "
                 "AND applied_at IS NOT NULL AND observed_at IS NULL "
                 "AND target_generation=%s AND target_owner=%s",
                 (row[2], agent_id, row[0], row[1]),
