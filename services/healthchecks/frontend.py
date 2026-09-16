@@ -27,6 +27,7 @@ from shared.config import settings
 from shared.daemon_health import DaemonProbe
 from shared.log import init_gateway_process
 from shared.proc_tree import OwnedProcess, leader_owns_pids
+from shared.root_driver import root_drive_enabled
 from shared.service_respawn import respawn_service
 
 _log = logging.getLogger("services.healthchecks.frontend")
@@ -71,20 +72,6 @@ def _listener_pids(port: int) -> set[int]:
             if conn.status == psutil.CONN_LISTEN and conn.laddr.port == port:
                 pids.add(proc.pid)
     return pids
-
-
-def _root_driven_enabled() -> bool:
-    """Whether this host's services run as ava-root tree units (W1.2e-2).
-
-    The same switch `ava start`/`ava stop` fork on; a configuration failure
-    reads as off (the session path), the rule `cli.commands._root_driver`
-    states for its own copy. This is the unit's management mode read from its
-    own definition — never a per-check sniff of "is a root there".
-    """
-    try:
-        return bool(settings.services.root_driver_enabled)
-    except Exception:
-        return False
 
 
 def _root_unit_owner() -> OwnedProcess | None:
@@ -136,8 +123,10 @@ def _expected_owner() -> OwnedProcess | None:
     host records an `ava-frontend` session (identity = the record, birth-
     exact). Everything after — leader liveness, HTTP 2xx, listener lineage —
     is shared by both modes; nothing else in this module branches on the mode.
+    The switch itself is read through the one shared definition
+    (`shared.root_driver.root_drive_enabled`).
     """
-    if _root_driven_enabled():
+    if root_drive_enabled():
         return _root_unit_owner()
     from shared.paths import run_dir
     from shared.session_record import SessionRecord
