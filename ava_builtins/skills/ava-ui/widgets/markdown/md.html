@@ -73,6 +73,25 @@
 <script src="vendor/highlight.min.js"></script>
 
 <script>
+  // Single ~ stays literal (#3653): marked's GFM strikethrough rule accepts a
+  // single tilde per side, so two lone ~ in one sentence struck everything
+  // between them. Only the double form (~~...~~) may strike.
+  function escapeHtmlText(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  marked.use({
+    renderer: {
+      del: function (token) {
+        if (!String(token.raw || '').startsWith('~~')) {
+          return escapeHtmlText(token.raw);
+        }
+        return '<del>' + this.parser.parseInline(token.tokens) + '</del>';
+      },
+    },
+  });
+
   function enhanceContent() {
     const out = document.getElementById('md-output');
     const source = document.getElementById('md-source');
