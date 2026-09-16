@@ -16,6 +16,7 @@ import ava._boot
 from ava._sdk_validation import coerce_str, coerce_typed
 from ava.security import scan_content
 from shared.cluster import session_name
+from shared.config import settings
 from shared.paths import repo_root, workspace_dir
 from shared.session_backend import get_shell_backend
 from shared.session_env import forward_env_dict
@@ -325,19 +326,25 @@ def send_keys(id: int, *keys: str) -> None:
     get_shell_backend().send_keys(_resolve(id), *keys)
 
 
-def capture(id: int, lines: int = 200, *, scrollback: bool = True) -> str:
+def capture(id: int, lines: int | None = None, *, scrollback: bool = True) -> str:
     """The session's most recent `lines` of output, including history that
-    has scrolled past. Pass `scrollback=False` to get only the current
-    visible screen instead — needed for full-screen programs that redraw in
-    place (`lines` is ignored then)."""
+    has scrolled past. Omit `lines` for the configured default
+    (``display.shell_capture_default_lines``, 200 out of the box). Pass
+    `scrollback=False` to get only the current visible screen instead —
+    needed for full-screen programs that redraw in place (`lines` is
+    ignored then)."""
     id = coerce_typed(id, "id", int)
-    lines = coerce_typed(lines, "lines", int)
+    resolved_lines: int
+    if lines is None:
+        resolved_lines = settings.display.shell_capture_default_lines
+    else:
+        resolved_lines = coerce_typed(lines, "lines", int)
     scrollback = coerce_typed(scrollback, "scrollback", bool)
     # A session holds whatever ran in it — an interactive fetch, a coding agent
     # rendering a web page — so reading one ingests exactly as `shell.run` does.
     # Scanned for the same reason; the text comes back byte-for-byte.
     name = _resolve(id)
-    pane = get_shell_backend().capture_pane(name, lines, scrollback=scrollback)
+    pane = get_shell_backend().capture_pane(name, resolved_lines, scrollback=scrollback)
     return scan_content(pane, source="shell.sessions.capture")
 
 

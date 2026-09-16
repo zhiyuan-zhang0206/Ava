@@ -17,6 +17,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api } from "@/lib/api";
+import { useDisplayLimit } from "@/lib/display-limits";
 import { useNow } from "@/lib/use-now";
 import { useUserSettings } from "@/lib/use-user-settings";
 import { formatShort, formatUptime } from "@/lib/time";
@@ -24,6 +25,10 @@ import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
 import { cn } from "@/lib/utils";
 
 const POLL_MS = 3000;
+// Baked fallbacks: the live default comes from
+// display.shell_capture_default_lines via /api/config (useDisplayLimit);
+// MIN/MAX must match the gateway's _MIN_LINES/_MAX_LINES (protective
+// constants, not config — task #3696).
 const DEFAULT_LINES = 200;
 const MIN_LINES = 50;
 const MAX_LINES = 2000;
@@ -84,9 +89,22 @@ export default function ShellMonitorPage({
   const sessionId = resolved ? Number(resolved.sessionId) : Number.NaN;
   const validParams = resolved !== null && Number.isFinite(agentId) && Number.isFinite(sessionId);
 
-  const [lines, setLines] = useState(DEFAULT_LINES);
-  const [inputValue, setInputValue] = useState(String(DEFAULT_LINES));
+  const configuredDefaultLines = useDisplayLimit(
+    "AVA_SHELL_CAPTURE_DEFAULT_LINES",
+    DEFAULT_LINES,
+  );
+  const [lines, setLines] = useState(configuredDefaultLines);
+  const [inputValue, setInputValue] = useState(String(configuredDefaultLines));
   const [theme, toggleTheme] = useTerminalTheme();
+
+  // Adopt the configured default once /api/config resolves, unless the
+  // user has already committed an explicit window.
+  const userSetLines = useRef(false);
+  useEffect(() => {
+    if (userSetLines.current) return;
+    setLines(configuredDefaultLines);
+    setInputValue(String(configuredDefaultLines));
+  }, [configuredDefaultLines]);
   const resolvedTheme = useResolvedTheme(theme);
   const isDark = resolvedTheme === "dark";
 
@@ -115,6 +133,7 @@ export default function ShellMonitorPage({
   const commitLines = useCallback(() => {
     const n = Number(inputValue);
     if (Number.isFinite(n) && n >= MIN_LINES && n <= MAX_LINES) {
+      userSetLines.current = true;
       setLines(n);
     } else {
       // Revert to the current valid value.

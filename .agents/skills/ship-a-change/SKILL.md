@@ -159,12 +159,14 @@ Still on you:
    (instant-fail): change the SHA (rebase) before resubmitting.
 8. Verify it landed (when not using `--merge`): `gh pr view <PR#>` →
    state `MERGED`; the queue may take 10-30 min. Before removing the
-   worktree, run `python scripts/check_worktree_remove.py <path>` from the
-   dev clone and **abort the removal if it reports live sessions or
+   worktree, run `python scripts/check_worktree_remove.py <path>` and
+   **abort the removal if it reports live sessions or
    processes anchored under the path** — a cluster-owned session anchored
    there (a schedule launched by a gateway that ran from the worktree,
    issue #194) dies silently when the worktree's `.venv` disappears, and
-   the schedule's DB row keeps claiming `running`. Then `git worktree
+   the schedule's DB row keeps claiming `running`. The scan skips the
+   invoking process chain, so running the guard from inside the worktree
+   does not self-refuse (issue #3685). Then `git worktree
    remove <path>` and delete the remote branch (`git push origin --delete
    <branch>`) to clean up — Trunk does not always auto-delete branches.
 

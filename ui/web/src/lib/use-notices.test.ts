@@ -226,35 +226,34 @@ describe("useNotices", () => {
   });
 
   it("resolved history pages append via next_cursor", async () => {
-    // The feed query (no resolvedLimit) and the resolved query (resolvedLimit
-    // set) both hit getNotices — distinguish them by the params.
-    const resolvedPages = [
-      feed({
-        resolved_page: [{ id: 5, title: "newest" } as never],
-        next_cursor: { before_at: "2026-06-14T02:00:00Z", before_id: 5 },
-      }),
-      feed({ resolved_page: [{ id: 4, title: "older" } as never], next_cursor: null }),
-    ];
+    // The client pins no page sizes any more (server defaults, task #3696):
+    // every non-cursor call (the feed query and the resolved first page) gets
+    // the first page; the cursor call is the one carrying beforeAt/beforeId.
+    const firstPage = feed({
+      resolved_page: [{ id: 5, title: "newest" } as never],
+      next_cursor: { before_at: "2026-06-14T02:00:00Z", before_id: 5 },
+    });
+    const secondPage = feed({
+      resolved_page: [{ id: 4, title: "older" } as never],
+      next_cursor: null,
+    });
     vi.mocked(api.getNotices).mockImplementation((params) => {
-      if (params?.resolvedLimit != null) {
-        return Promise.resolve(resolvedPages.shift() ?? feed());
-      }
-      return Promise.resolve(feed());
+      if (params?.beforeAt != null) return Promise.resolve(secondPage);
+      return Promise.resolve(firstPage);
     });
     const { result } = renderHook(() => useNotices(), { wrapper });
     await waitFor(() => expect(result.current.resolved.map((n) => n.id)).toEqual([5]));
     act(() => result.current.fetchNextPage());
     await waitFor(() => expect(result.current.resolved.map((n) => n.id)).toEqual([5, 4]));
     // cursor passed back to the api layer for the next page
-    const resolvedCalls = vi
+    const cursorCalls = vi
       .mocked(api.getNotices)
-      .mock.calls.filter((c) => c[0]?.resolvedLimit != null);
-    const secondCall = resolvedCalls[1][0] as {
-      beforeAt?: string;
-      beforeId?: number;
-    };
-    expect(secondCall.beforeAt).toBe("2026-06-14T02:00:00Z");
-    expect(secondCall.beforeId).toBe(5);
+      .mock.calls.filter((c) => c[0]?.beforeAt != null);
+    expect(cursorCalls).toHaveLength(1);
+    expect(cursorCalls[0][0]).toMatchObject({
+      beforeAt: "2026-06-14T02:00:00Z",
+      beforeId: 5,
+    });
   });
 });
 

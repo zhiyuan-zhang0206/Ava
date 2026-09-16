@@ -56,6 +56,9 @@ vi.mock("./api", () => ({
   api: {
     getTimeline: vi.fn(),
     getSettings: vi.fn(),
+    // useDisplayLimit reads the display config domain; an empty field
+    // list keeps every baked fallback (limit assertions below).
+    getConfig: vi.fn().mockResolvedValue({ fields: [] }),
   },
 }));
 

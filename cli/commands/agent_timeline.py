@@ -5,12 +5,17 @@ from __future__ import annotations
 import json
 
 
-def cmd_agents_timeline(agent_id: int, limit: int = 50, before: str | None = None) -> int:
-    """Print the timeline's standing context and history window as JSON."""
+def cmd_agents_timeline(agent_id: int, limit: int | None = None, before: str | None = None) -> int:
+    """Print the timeline's standing context and history window as JSON.
+
+    Without ``limit`` the request omits it and the gateway applies its
+    configured default window (display.timeline_default_limit)."""
     from shared.http_dial import get
     from shared.machine import gateway_api_base, gateway_auth_headers
 
-    params: dict[str, int | str] = {"limit": limit}
+    params: dict[str, int | str] = {}
+    if limit is not None:
+        params["limit"] = limit
     if before is not None:
         params["before"] = before
     response = get(

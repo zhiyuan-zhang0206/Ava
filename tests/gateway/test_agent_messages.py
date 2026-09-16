@@ -136,6 +136,31 @@ def test_default_window_returns_newest_hundred_with_older_page(
     assert [m["content"] for m in body["messages"]] == [f"m{i}" for i in range(5, 105)]
 
 
+def test_default_window_comes_from_display_config(
+    monkeypatch: pytest.MonkeyPatch,
+    db_conn: psycopg.Connection,
+    test_client: TestClient,
+) -> None:
+    """The implicit window is ``settings.display.messages_default_limit``
+    (``AVA_MESSAGES_DEFAULT_LIMIT``); the literal 100 is only that field's
+    default, not a hard-coded page size."""
+    from langchain_core.messages import HumanMessage
+
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.display, "messages_default_limit", 2)
+
+    tid = create_agent(db_conn)
+    _put_checkpoint(tid, [HumanMessage(content=f"m{i}") for i in range(4)])
+
+    resp = test_client.get(f"/api/agents/{tid}/messages")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["start_index"] == 2
+    assert body["has_more"] is True
+    assert [m["content"] for m in body["messages"]] == ["m2", "m3"]
+
+
 def test_limit_returns_newest_tail(db_conn: psycopg.Connection, test_client: TestClient) -> None:
     """limit (no before) -> the newest `limit` messages; start_index points at
     the first returned message's absolute position."""

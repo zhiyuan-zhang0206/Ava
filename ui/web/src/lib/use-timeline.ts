@@ -8,6 +8,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { startTransition, useCallback, useEffect, useLayoutEffect, useRef } from "react";
 
 import { api } from "./api";
+import { useDisplayLimit } from "./display-limits";
 import { useAgentReadRepair } from "./use-agent-read-repair";
 import { inspectLiveQueryKey } from "./inspector-queries";
 import { errMsg } from "./errors";
@@ -16,9 +17,11 @@ import { useTimelineStore } from "./timeline-store";
 import { isReattachedTimelineContext, parseItemIdParts, standingHeadNoteIds } from "./timeline";
 import { useCompactHistoryRetention } from "./use-compact-history-retention";
 
-/** Base number of items fetched per scroll-up. Subsequent scroll-ups
- * fetch BASE * 2^olderFetchCount items (capped at 1000), so the window
- * grows exponentially instead of linearly — fewer scroll-ups needed. */
+/** Baked fallback for the base number of items fetched per scroll-up — the
+ * live value is display.timeline_history_page_base, read at runtime from
+ * GET /api/config (useDisplayLimit; task #3696). Subsequent scroll-ups fetch
+ * BASE * 2^olderFetchCount items (capped at 1000), so the window grows
+ * exponentially instead of linearly — fewer scroll-ups needed. */
 const OLDER_BASE_LIMIT = 50;
 import type { BackendTimelineItem, SystemEvent, TimelineResponse } from "./types";
 import type { ConnectionEvent } from "./useEventStream";
@@ -289,6 +292,10 @@ export function useTimeline(
 
   useAgentEventStream(onSystemEvent, onConnectionEvent, onSystemEventBatch);
 
+  // Scroll-up base window: display.timeline_history_page_base, read at runtime
+  // from /api/config; the baked OLDER_BASE_LIMIT holds until the read lands.
+  const olderBaseLimit = useDisplayLimit("AVA_TIMELINE_HISTORY_PAGE_BASE", OLDER_BASE_LIMIT);
+
   // -- Scroll-up: fetch + prepend the previous window of older items --
   // Reads live store state via getState() (not the subscribed values) so
   // the callback stays stable and never fires on stale closures. The cursor
@@ -335,8 +342,9 @@ export function useTimeline(
         .every((prev) => isReattachedTimelineContext(prev) || headNoteIds.has(prev.item_id));
     });
     if (oldest === undefined) return false;
-    // Exponential growth: first fetch N, second 2N, third 4N, … capped at 1000.
-    const limit = Math.min(OLDER_BASE_LIMIT * Math.pow(2, st.olderFetchCount), 1000);
+    // Exponential growth: first fetch N, second 2N, third 4N, … capped at 1000
+    // (the endpoint's protective le — a constant, not config).
+    const limit = Math.min(olderBaseLimit * Math.pow(2, st.olderFetchCount), 1000);
     const controller = new AbortController();
     olderRequest.current = controller;
     beginLoadOlder();
@@ -355,7 +363,7 @@ export function useTimeline(
       showError(`Failed to load older messages: ${errMsg(e)}`);
       return false;
     }
-  }, [agentId, isVisible, beginLoadOlder, prependOlder, showError]);
+  }, [agentId, isVisible, beginLoadOlder, prependOlder, showError, olderBaseLimit]);
   const loadOlder = useCallback(() => {
     void loadOlderSegment();
   }, [loadOlderSegment]);

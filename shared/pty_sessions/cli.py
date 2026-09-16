@@ -506,7 +506,7 @@ def _op_send_keys(name: str, rest: list[str]) -> int:
 
 
 def _op_capture(name: str, rest: list[str]) -> int:
-    lines = 200
+    lines: int | None = None
     scrollback = True
     for arg in rest:
         if arg == "--scrollback":
@@ -520,6 +520,14 @@ def _op_capture(name: str, rest: list[str]) -> int:
                 f"usage: pty_sessions.cli {name} capture [lines] [--scrollback|--no-scrollback]\n"
             )
             return 2
+    if lines is None:
+        # Lazy import: this CLI is spawned on the capture hot path, so the
+        # config stack must not load unless the omitted argument needs it.
+        # Every programmatic caller passes an explicit window; only a bare
+        # `capture` reaches this branch.
+        from shared.config import settings
+
+        lines = settings.display.shell_capture_default_lines
     if lines < 1 or lines > 100000:
         sys.stderr.write(f"capture lines out of range: {lines}\n")
         return 2
