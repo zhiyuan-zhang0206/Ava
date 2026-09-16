@@ -52,7 +52,7 @@ _LEAF_PROMPT = """You are the summarizer of a cluster understanding layer. \
 The input is one stretch of an agent's work log: a block is one \
 "think -> act -> observe" cycle or one inbound message; i### is the message \
 index; [thinking] marks the model's reasoning; tool calls follow the code that \
-issued them; ...[omitted]... marks an elided passage.
+issued them; …[omitted N chars]… marks an elided passage.
 
 Write the summary of this stretch in Chinese:
 - lead with one sentence: what the stretch was doing and where it ended up;
