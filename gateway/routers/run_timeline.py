@@ -658,7 +658,8 @@ def _narrative_for_window(
     an old cluster, checkpoint read error) degrades to no narrative rather than
     failing the endpoint. Response shapes follow the three coverage states:
     no layers -> summary only; full coverage -> layers only; partial coverage ->
-    both (the summary carries the uncovered stretch).
+    both (the fallback is the agent's latest compact summary -- an agent-level
+    text, not sliced to the window).
     """
     from shared.hierarchy.serve import select_layers
     from shared.hierarchy.store import load_window_nodes

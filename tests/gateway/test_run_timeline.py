@@ -346,3 +346,39 @@ def test_narrative_for_window_degrades_to_none_without_nodes(
     monkeypatch.setattr("shared.hierarchy.store.load_window_nodes", _empty)
     layers, summary = _narrative_for_window(424242, start, start + timedelta(hours=1))
     assert layers is None and summary is None
+
+
+def test_narrative_for_window_keeps_layers_and_adds_the_fallback_on_partial(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Partial coverage: layers stay, and the raw fallback summary rides along."""
+    start = datetime(2026, 9, 12, 4, tzinfo=UTC)
+    end = start + timedelta(hours=2)
+    nodes = [
+        StoredNode(
+            id=9,
+            depth=1,
+            span_start=0,
+            span_end=3,
+            start_ts=start,
+            end_ts=start + timedelta(hours=1),  # half the window
+            text="first half",
+            parent_id=None,
+            engine_version="0.3",
+            prompt_version="0.3",
+        )
+    ]
+
+    def _nodes(*_args: object, **_kwargs: object) -> list[StoredNode]:
+        return nodes
+
+    def _fallback(_agent_id: int) -> str:
+        return "latest compact summary"
+
+    monkeypatch.setattr("shared.hierarchy.store.load_window_nodes", _nodes)
+    monkeypatch.setattr("gateway.routers.run_timeline._latest_compact_summary", _fallback)
+    layers, summary = _narrative_for_window(405, start, end)
+    assert layers is not None
+    (layer,) = layers
+    assert layer.summary == "first half"
+    assert summary is not None and summary.text == "latest compact summary"

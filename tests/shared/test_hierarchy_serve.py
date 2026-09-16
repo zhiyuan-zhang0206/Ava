@@ -98,3 +98,13 @@ def test_partial_coverage() -> None:
     )
     assert selection.coverage == "partial"
     assert selection.layers is not None
+
+
+def test_coverage_reads_the_union_across_levels() -> None:
+    """Mixed-depth segments: a shallower tree's root sits below the selection's
+    top and still covers its stretch -- coverage must read the union, not the
+    top level alone."""
+    deep = node(2, level=3, start=W0, end=W0 + timedelta(hours=2), text="segA")
+    shallow = node(5, level=2, start=W0 + timedelta(hours=2), end=W1, text="segB")
+    selection = select_layers([deep, shallow], window_start=W0, window_end=W1, max_nodes=10)
+    assert selection.coverage == "full"

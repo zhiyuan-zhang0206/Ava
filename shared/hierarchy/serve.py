@@ -10,8 +10,9 @@ The coverage result drives the response's fallback shape (the three states):
 - no usable nodes -> `layers` is None and the raw-context summary carries the
   window;
 - full coverage -> layers only;
-- partial coverage -> layers plus the raw-context summary for the uncovered
-  stretch (the single-summary-field reading of per-segment degradation).
+- partial coverage -> layers plus the raw-context fallback (the agent's
+  latest compact summary -- an agent-level text, not sliced to the window);
+  the single-summary-field reading of per-segment degradation.
 
 `StoredNode.depth` is the ENGINE level (1 = the finest, leaves); the wire
 `depth` is its mirror (`top - level`), so the field name means opposite things
@@ -97,18 +98,19 @@ def select_layers(
 
 
 def _covers(nodes: Sequence[StoredNode], *, window_start: datetime, window_end: datetime) -> bool:
-    """Whether the coarsest selected level's intervals cover the whole window.
+    """Whether the selected nodes' intervals, at any level, cover the window.
 
-    The coarsest level is the selected nodes' ceiling; if its intervals span
-    [window_start, window_end], every finer level is (by construction) inside
-    that span.
+    Coverage is a property of the union, not of the coarsest level alone:
+    across segments whose trees have different depths, a shallower segment's
+    root sits below the selection's global top level, yet its stretch is fully
+    explained -- reading only the top level would report a false `partial`
+    (harmless in effect, but wrong).
     """
     if not nodes:
         return False
-    top_level = max(node.depth for node in nodes)
     intervals: list[tuple[datetime, datetime]] = []
     for node in nodes:
-        if node.depth == top_level and node.start_ts is not None and node.end_ts is not None:
+        if node.start_ts is not None and node.end_ts is not None:
             intervals.append((node.start_ts, node.end_ts))
     intervals.sort()
     cursor = window_start
