@@ -19,9 +19,17 @@ accept different lifecycle states.
   older terminate can never be replayed onto the successor incarnation
   (issue #2158). Then it publishes a host wake.
 - Automatic resurrection requires actual pending work newer than the current
-  death and above the force-terminate inbound fence. The home-machine lock,
-  automatic-wake policy and suppression window guard that transition. A stale
+  death and above the force-terminate inbound fence — except for a row the
+  system itself reaped after a crash (`termination_source='reaper'` with the
+  `last_turn_fatal_at` marker), where work from before the death still resumes
+  its owner. The home-machine lock, automatic-wake policy, suppression window
+  and the recovery breaker's durable streak guard that transition; a stale
   trigger cannot undo a concurrent user termination.
+- A chat stalled `pending` on a crash-marked idling corpse reaches a
+  bounded-time recovery decision: the delivery watchdog escalates to the
+  owner's home runner (`recover-crash-marked-v2`), which harvests the corpse
+  into the reaper's terminal shape (making the relaxed trigger above resume
+  the work) or refuses with a reason (task #3618).
 - Host crash recovery reconciles stale owned rows and durable checkpoints;
   it does not launch individual agent processes.
 

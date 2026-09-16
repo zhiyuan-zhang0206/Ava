@@ -42,6 +42,7 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "loki_write_path_probe_failed",  # services/healthchecks/lgtm.py write-path probe
         "delivery_poisoned",  # services/delivery_watchdog/dispatch_guard.py:_alert_poisoned
         "delivery_wake_suppressed",  # services/delivery_watchdog/resurrect_guard.py:_alert_wake_suppressed
+        "delivery_recovery_decision",  # services/delivery_watchdog/stall_recovery.py:_request_harvest
         "heartbeat_nudged",  # services/heartbeat/daemon.py:_alert_idle
         "heartbeat_backoff_raised",  # services/heartbeat/daemon.py:_raise_backoff_level (positional emit)
         "heartbeat_backoff_reset",  # services/heartbeat/daemon.py:_sweep_backoff_resets (positional emit)

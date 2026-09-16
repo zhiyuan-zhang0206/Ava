@@ -78,6 +78,7 @@ from ops.ops_launch import (
 )
 from ops.rpc_schemas import (
     CancelRequested,
+    RecoverCrashMarkedResponse,
     RestartAgentRequest,
     RestartAgentResponse,
     ResurrectAgentRequest,
@@ -90,6 +91,7 @@ from shared.agents import (
     AgentStatus,
     ResurrectAlreadyAlive,
 )
+from shared.audit_events import insert_event_log
 from shared.db import insert_inbound_message
 from shared.live_announce import publish_agent_updated_sync
 from shared.machine import machine_name
@@ -249,6 +251,39 @@ def _recovery_halted(agent_id: int) -> bool:
     if row is None:
         raise AgentNotFound(f"agent {agent_id} does not exist")
     return row[0] is True
+
+
+def _recovery_halt_reason(agent_id: int) -> str | None:
+    """Why automatic recovery is halted for `agent_id`, else None — the
+    reason-resolution sibling of `_recovery_halted` for the stalled-harvest
+    requester (task #3618).
+
+    The durable gate is the recovery breaker's streak
+    (`RECOVERY_BREAKER_CLEAR` inverts it: consecutive permanent provider
+    rejections with no successful turn between them), which even a claim
+    cannot clear; it always reports `permanent_provider_reject`. An active
+    wake-suppression window without a tripped breaker reports its
+    operator-readable reason (or the `wake_suppressed` fallback)."""
+    from shared.recovery_breaker import (
+        HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
+        SUPPRESS_REASON_PERMANENT_REJECT,
+    )
+
+    with shared.db.connect() as conn:
+        row = conn.execute(
+            "SELECT permanent_reject_streak >= %s, wake_suppress_reason, "
+            "(wake_suppressed_until IS NOT NULL AND wake_suppressed_until >= now()) "
+            "FROM agents_meta WHERE id=%s",
+            (HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS, agent_id),
+        ).fetchone()
+    if row is None:
+        return None
+    halted, suppress_reason, suppress_active = row
+    if halted:
+        return SUPPRESS_REASON_PERMANENT_REJECT
+    if suppress_active:
+        return suppress_reason or "wake_suppressed"
+    return None
 
 
 def _clear_wake_suppression(agent_id: int) -> None:
@@ -460,10 +495,181 @@ async def restart_agent_op(
     return RestartAgentResponse(status="enqueued")
 
 
+def _recover_crash_marked_blocking(agent_id: int) -> RecoverCrashMarkedResponse:
+    """Adjudicate one `recover-crash-marked-v2` harvest (task #3618).
+
+    The requester is the delivery watchdog, escalating a chat inbound still
+    `pending` past the stall threshold whose owner is a crash-marked idling
+    corpse (`last_turn_fatal_at IS NOT NULL`). The harvest mirrors the corpse
+    reaper's terminal shape (`agent/hosted_ownership.py::reap_crash_corpses`):
+    status='terminated', termination_source='reaper', lease dropped, and the
+    crash marker KEPT so the row still matches the relaxed
+    `SYSTEM_REAPED_CRASH_ROW` trigger afterwards. The row lock plus the
+    re-checked guards make the op idempotent and fail-closed:
+
+    - missing row -> AgentNotFound;
+    - the recovery breaker tripped (consecutive permanent provider
+      rejections; `RECOVERY_BREAKER_CLEAR` inverted) -> refused with
+      `permanent_provider_reject` — no automatic recovery may start;
+    - an active wake-suppression window -> refused with its reason;
+    - unmarked / non-idling / non-hosted / foreign machine / live lease ->
+      refused, naming the guard that failed;
+    - already terminated -> `already_terminated` (an idempotent repeat).
+    """
+    from shared.db_transaction import write_transaction
+    from shared.recovery_breaker import (
+        HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
+        SUPPRESS_REASON_PERMANENT_REJECT,
+    )
+
+    with write_transaction() as conn:
+        row = conn.execute(
+            "SELECT status, runtime_kind, machine, last_turn_fatal_at, "
+            "(permanent_reject_streak >= %s), "
+            "wake_suppress_reason, "
+            "(wake_suppressed_until IS NOT NULL AND wake_suppressed_until >= now()), "
+            "(lease_expires_at IS NOT NULL AND lease_expires_at > now()) "
+            "FROM agents_meta WHERE id = %s FOR UPDATE",
+            (HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS, agent_id),
+        ).fetchone()
+        if row is None:
+            raise AgentNotFound(f"agent {agent_id} does not exist")
+        (
+            status,
+            runtime_kind,
+            machine,
+            last_fatal_at,
+            breaker_halted,
+            suppress_reason,
+            suppress_active,
+            lease_alive,
+        ) = row
+        if breaker_halted:
+            return RecoverCrashMarkedResponse(
+                status="refused", reason=SUPPRESS_REASON_PERMANENT_REJECT
+            )
+        if suppress_active:
+            return RecoverCrashMarkedResponse(
+                status="refused", reason=suppress_reason or "wake_suppressed"
+            )
+        if last_fatal_at is None:
+            return RecoverCrashMarkedResponse(status="refused", reason="not_marked")
+        if status == "terminated":
+            return RecoverCrashMarkedResponse(status="already_terminated")
+        if status != "idling":
+            return RecoverCrashMarkedResponse(status="refused", reason=f"not_settled:{status}")
+        if runtime_kind != "hosted":
+            return RecoverCrashMarkedResponse(
+                status="refused", reason=f"not_settled:runtime_kind={runtime_kind}"
+            )
+        if machine != machine_name():
+            return RecoverCrashMarkedResponse(status="refused", reason="wrong_machine")
+        if lease_alive:
+            return RecoverCrashMarkedResponse(status="refused", reason="lease_alive")
+        conn.execute(
+            "UPDATE agents_meta SET status = 'terminated', "
+            "termination_source = 'reaper', lease_expires_at = NULL, "
+            "runtime_protocol_version = 0 "
+            "WHERE id = %s AND status = 'idling' AND last_turn_fatal_at IS NOT NULL",
+            (agent_id,),
+        )
+        insert_event_log(
+            event_type="status_change",
+            agent_id=agent_id,
+            source="system",
+            payload={"from": "idling", "to": "terminated", "reason": "corpse_reaper"},
+        )
+    _log.info(
+        "recover-crash-marked-v2: harvested crash-marked corpse for agent %s "
+        "(termination_source=reaper; the relaxed trigger resumes its queued work)",
+        agent_id,
+    )
+    try:
+        # Best-effort, after the durable flip: refresh mounted frontends.
+        with shared.db.connect() as conn:
+            publish_agent_updated_sync(conn, agent_id)
+    except Exception:
+        _log.exception("recover-crash-marked-v2: snapshot publish failed for agent %s", agent_id)
+    return RecoverCrashMarkedResponse(status="harvested")
+
+
+async def recover_crash_marked_op(agent_id: int) -> RecoverCrashMarkedResponse:
+    """Local-target adjudication of a stalled crash-marked harvest — runs on
+    the agent's home machine (the ops server's 'lifecycle' dispatch target).
+    Off-loop: the transaction waits on the row lock."""
+    return await asyncio.to_thread(_recover_crash_marked_blocking, agent_id)
+
+
+async def recover_crash_marked_if_stalled(
+    agent_id: int, *, stalled_inbound_id: int
+) -> tuple[str, str | None]:
+    """Ask `agent_id`'s home machine to adjudicate harvesting its crash-marked
+    corpse, so the stalled chat `stalled_inbound_id` stops waiting on a dead
+    owner (delivery-watchdog escalation, task #3618).
+
+    Fail-closed and never raising: returns `(decision, reason)` where decision
+    is the home runner's verdict — 'harvested' (the row took the reaper's
+    terminal shape; see `RecoverCrashMarkedResponse`), 'already_terminated',
+    'refused' — or a local transport verdict: 'unreachable' (home machine's
+    ops server did not answer) / 'error' (anything else). An active wake
+    halted recovery state short-circuits before any RPC — the recovery
+    breaker's streak or an active wake-suppression window — and its reason
+    ('permanent_provider_reject' when the breaker tripped) is the refusal
+    reported."""
+    halt_reason = await asyncio.to_thread(_recovery_halt_reason, agent_id)
+    if halt_reason is not None:
+        _log.debug(
+            "recover_crash_marked_if_stalled: automatic recovery is halted for "
+            "agent %s (%s); skipping the harvest request for inbound %s",
+            agent_id,
+            halt_reason,
+            stalled_inbound_id,
+        )
+        return "refused", halt_reason
+    try:
+        home = await asyncio.to_thread(get_agent_machine, agent_id)
+        try:
+            payload: dict[str, object] = {
+                "path": f"/api/agents/{agent_id}/recover-crash-marked-v2",
+                "body": {},
+            }
+            forwarded = await _cluster_rpc.dispatch_to_machine(
+                target_machine=home,
+                kind="lifecycle",
+                payload=payload,
+            )
+            response = RecoverCrashMarkedResponse.model_validate(forwarded)
+            return response.status, response.reason
+        except _cluster_rpc.ClusterOpUnreachable:
+            if home == machine_name():
+                # Local ops server not reachable (test / single-process):
+                # adjudicate in-process, like the other lifecycle ops.
+                response = await recover_crash_marked_op(agent_id)
+                return response.status, response.reason
+            raise
+    except _cluster_rpc.ClusterOpUnreachable as exc:
+        _log.info(
+            "recover_crash_marked_if_stalled: agent %s home machine unreachable "
+            "(%s); stalled inbound %s stays pending",
+            agent_id,
+            exc,
+            stalled_inbound_id,
+        )
+        return "unreachable", str(exc)
+    except Exception:
+        _log.info(
+            "recover_crash_marked_if_stalled: harvest request for agent %s (inbound %s) failed",
+            agent_id,
+            stalled_inbound_id,
+            exc_info=True,
+        )
+        return "error", "harvest request failed"
+
+
 _LIFECYCLE_PATH = re.compile(
     r"^/api/agents/(?P<id>\d+)/"
     r"(?P<action>terminate|resurrect|resurrect-explicit-v2|"
-    r"resurrect-if-pending-work-v2|restart)$"
+    r"resurrect-if-pending-work-v2|recover-crash-marked-v2|restart)$"
 )
 
 
@@ -474,13 +680,19 @@ async def lifecycle_op(
     *,
     trigger_inbound_id: int | None = None,
     trigger_inbound_kind: Literal["chat", "compact_request", "system_note"] | None = None,
-) -> TerminateAgentResponse | ResurrectAgentResponse | RestartAgentResponse:
+) -> (
+    TerminateAgentResponse
+    | ResurrectAgentResponse
+    | RecoverCrashMarkedResponse
+    | RestartAgentResponse
+):
     """Parse the lifecycle path from a 'lifecycle' op payload and dispatch to
     the appropriate per-action op. Returns the per-action response model (the
     ops server serializes it into the /ops response).
 
     Path shapes accepted: terminate/restart plus the versioned internal
-    `resurrect-explicit-v2` and guarded `resurrect-if-pending-work-v2` paths.
+    `resurrect-explicit-v2`, guarded `resurrect-if-pending-work-v2`, and
+    `recover-crash-marked-v2` (the stalled-corpse harvest) paths.
     Legacy `resurrect` is recognized only to reject it. This is the
     version-skew fail-closed boundary: an old runner rejects the v2 paths and a
     new runner rejects every old gateway resurrection instead of guessing its
@@ -519,6 +731,8 @@ async def lifecycle_op(
             trigger_inbound_id=trigger_inbound_id,
             trigger_inbound_kind=trigger_inbound_kind,
         )
+    if action == "recover-crash-marked-v2":
+        return await recover_crash_marked_op(agent_id)
     if action == "restart":
         return await restart_agent_op(agent_id, RestartAgentRequest.model_validate(body), db_pool)
     raise AssertionError(f"unreachable: action={action!r}")

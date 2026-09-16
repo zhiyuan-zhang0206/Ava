@@ -19,7 +19,7 @@ Source of truth = services in `build_services()` of `ops/spec.py` whose `Service
 |---------|----------------|------|
 | heartbeat | Idle agent heartbeat wake-up | [[heartbeat.ava.okf.md]] |
 | im-bridge | **Product frontend** — every IM channel adapter (Telegram / WeChat / Feishu), dialog push + commands | [[im_bridge.ava.okf.md]] |
-| delivery-watchdog | Wake dispatcher + stale-pending alerter + terminated-owner resurrect retry | [[delivery_watchdog.ava.okf.md]] |
+| delivery-watchdog | Wake dispatcher + stale-pending alerter + terminated-owner resurrect retry + stalled crash-marked harvest request | [[delivery_watchdog.ava.okf.md]] |
 | events-maintenance | unified `events` stream maintenance (immutable-Loki class resolution + day-grain rollup) | [[events_maintenance.ava.okf.md]] |
 | milvus | Vector database (memory-indexer backend) | [[milvus.ava.okf.md]] |
 | memory-indexer | memory pool vector index | [[memory_indexer.ava.okf.md]] |
