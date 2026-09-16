@@ -1015,3 +1015,63 @@ def test_real_ensure_pgbouncer_revives_a_shutdown_wait_pooler(
         assert pb.pgbouncer_public_listener_reachable(port, role, secret)
     finally:
         _kill_test_poolers(pid, new_pid)
+
+
+# --- held-stop window -----------------------------------------------------
+
+
+def test_held_stop_marker_brackets_the_stop_window(
+    home: Path, launch: Launcher, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The OS watchdog probe must see the stop from its first signal to its
+    return: the marker is published before the first graceful_signal and
+    cleared once the stop returns — this is what keeps a 60s probe tick from
+    reviving the watchdog mid-stop (2026-09-17 wave-2 abort)."""
+    proc = launch("ava-agent-host", _EXIT)
+    marker = home / "state" / "held-stop"
+    assert not marker.exists()
+    seen: list[bool] = []
+    original = PosixProcSessionBackend.graceful_signal
+
+    def recording(
+        self: PosixProcSessionBackend, name: str, *, expected: SessionRecord | None = None
+    ) -> bool:
+        seen.append(marker.exists())
+        return original(self, name, expected=expected)
+
+    monkeypatch.setattr(PosixProcSessionBackend, "graceful_signal", recording)
+    assert stop.stop_services(3) == ["ava-agent-host"]
+    assert seen == [True]
+    assert not marker.exists()
+    assert proc.wait(timeout=1) == -signal.SIGTERM
+    # A follow-up pass over nothing opens and closes its own window too.
+    assert stop.stop_services(1) == []
+    assert not marker.exists()
+
+
+def test_held_stop_marker_cleared_when_a_survivor_keeps_the_hold(
+    home: Path, launch: Launcher
+) -> None:
+    """A stop that ends in StopIncompleteError still closes its window in the
+    finally — the probe's suppression must end with the stop, not with the
+    TTL."""
+    launch("ava-agent-host", _IGNORE)
+    with pytest.raises(TimeoutError, match="kept its hold"):
+        stop.stop_services(0.15)
+    assert not (home / "state" / "held-stop").exists()
+
+
+def test_held_stop_marker_cleared_on_an_unexpected_error(
+    home: Path, launch: Launcher, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Any crash path clears too — a leaked marker would muzzle the probe until
+    its TTL, and the finally is the only clear point."""
+    launch("ava-agent-host", _EXIT)
+
+    def boom(*_a: object, **_k: object) -> None:
+        raise RuntimeError("wait blew up")
+
+    monkeypatch.setattr(stop, "wait_for_exit", boom)
+    with pytest.raises(RuntimeError, match="wait blew up"):
+        stop.stop_services(3)
+    assert not (home / "state" / "held-stop").exists()

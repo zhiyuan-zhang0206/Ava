@@ -13,6 +13,13 @@ schema / pin), so a probe firing mid-``ava cluster update`` cannot resurrect som
 the rollout intentionally killed. Reviving one session is also the only
 action that stays correct without consulting those gates, which is what lets
 this break the circular dependency (the gates live inside the watchdog process).
+
+One exception, added after the 2026-09-17 wave-2 abort: while a maintenance
+stop holds this home (a fresh marker via
+``shared.os_watchdog_probe.held_stop_state``), a dead watchdog is left dead —
+the stop killed it on purpose, and reviving it mid-stop aborts the stop
+("services appeared during held stop"). It is the probe's only retreat from
+dumb revival.
 """
 
 from __future__ import annotations
@@ -61,18 +68,35 @@ def _alive(spec: ServiceSpec) -> bool:
 def cmd_watchdog_probe(role: MachineRole) -> int:
     """Probe ``role``'s watchdog and respawn it when dead.
 
-    Returns 0 when the watchdog is alive or was successfully respawned, 1 when
-    the respawn failed. The scheduler discards the exit code either way; it is
+    Returns 0 when the watchdog is alive, when a fresh held-stop marker says a
+    maintenance stop holds this home (the respawn is deliberately skipped — see
+    the module docstring), or when the respawn succeeded; 1 when the respawn
+    failed. The scheduler discards the exit code either way; it is
     the log line that an operator reads, and a non-zero code that shows up in
     ``launchctl list``.
     """
+    from shared.os_watchdog_probe import HELD_STOP_TTL_S, HeldStopState, held_stop_state
     from shared.paths import repo_root
     from shared.service_respawn import respawn_service
 
     spec = _watchdog_spec(role)
+    state = held_stop_state()
+    if state is HeldStopState.FRESH:
+        # Deliberately before the pidfile read: during a held stop the pidfile
+        # says nothing the probe may act on. Logged so the silence is visible.
+        logger.info("[watchdog-probe] {}: maintenance stop in progress; standing down", role)
+        return 0
     if _alive(spec):
         return 0
 
+    if state is HeldStopState.STALE:
+        logger.warning(
+            "[watchdog-probe] {}: held-stop marker is older than {}s; reviving",
+            role,
+            int(HELD_STOP_TTL_S),
+        )
+    elif state is HeldStopState.UNREADABLE:
+        logger.warning("[watchdog-probe] {}: held-stop marker is unreadable; reviving", role)
     logger.warning("[watchdog-probe] {} watchdog is down; respawning", role)
     # force=True: the probe is the recursion's dumb-revival leg (see the module
     # docstring) — it must not be held back by the source-switch window, or a

@@ -1472,7 +1472,9 @@ anyway. Two callers pass it and an operator normally should not:
 
 **OS-scheduled jobs.** Five kinds go to the platform scheduler — the health
 probe (`shared/os_cron.py`), one watchdog probe per capability
-(`shared/os_watchdog_probe.py`), the boot autostart (`shared/os_autostart.py`),
+(`shared/os_watchdog_probe.py`; it skips revival while a maintenance stop holds
+this home, per the fresh `$AVA_HOME/state/held-stop` marker), the boot autostart
+(`shared/os_autostart.py`),
 daily rotate-then-retain log maintenance (`shared/os_logs_job.py`), and the
 per-machine content-refresh pass (`shared/os_packages.py`)
 — as launchd LaunchAgents on macOS, crontab lines on Linux, `\Ava\<home-slug>\`
