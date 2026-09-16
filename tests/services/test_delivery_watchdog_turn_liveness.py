@@ -154,7 +154,7 @@ async def test_invalid_host_progress_cannot_authorize_recovery(
     assert wedges == []
 
 
-def test_recovery_queue_creates_durable_pending_system_chat(
+def test_recovery_queue_creates_durable_marked_pending_system_chat(
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
 ) -> None:
@@ -163,7 +163,7 @@ def test_recovery_queue_creates_durable_pending_system_chat(
     trigger_id = watchdog._queue_hosted_turn_recovery(pool, agent_id)
 
     row = db_conn.execute(
-        "SELECT kind, source, status, content FROM inbound_messages WHERE id=%s",
+        "SELECT kind, source, status, content, payload FROM inbound_messages WHERE id=%s",
         (trigger_id,),
     ).fetchone()
     assert row == (
@@ -172,6 +172,10 @@ def test_recovery_queue_creates_durable_pending_system_chat(
         "pending",
         "Your previous hosted turn stopped making progress and was restarted "
         "by the delivery watchdog. Continue from the latest checkpoint.",
+        # The marker is the wire contract that lets this system-source chat
+        # through the notice guard on both resurrection channels (task #3687
+        # review, Ava #3242).
+        {"hosted_turn_recovery": True},
     )
 
 
@@ -221,6 +225,70 @@ async def test_recovery_emits_evidence_then_terminates_queues_and_resurrects(
     await watchdog._recover_hosted_turn(pool, wedge)
 
     assert calls == ["event", "terminate", "queue", "resurrect"]
+
+
+async def test_recovery_chain_reaches_dispatch_through_the_real_notice_guard(
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BLOCK regression (Ava #3242): the queued recovery trigger is
+    source='system', so the plain notice guard used to cut the chain before
+    any resurrect ran. This drives the REAL `resurrect_if_terminated`, the
+    REAL guard read, and the REAL queued marker row; only the terminate and
+    the below-dispatch machinery are stubbed — a guard that wrongly matched
+    would reach no dispatch and fail the assert."""
+    import ops.ops_lifecycle as lifecycle
+
+    agent_id = _make_hosted_running_agent(db_conn)
+    db_conn.execute(
+        "UPDATE agents_meta SET status='terminated', status_changed_at=now() WHERE id=%s",
+        (agent_id,),
+    )
+    db_conn.commit()
+
+    def _silent_emit(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(watchdog.telemetry, "emit", _silent_emit)
+
+    async def fake_terminate(agent_id: int, body: object, db_pool: object) -> object:
+        return object()
+
+    monkeypatch.setattr(lifecycle, "terminate_agent_op", fake_terminate)
+    dispatched: list[dict[str, object]] = []
+
+    async def fake_dispatch(
+        *, target_machine: str, kind: str, payload: dict[str, object]
+    ) -> dict[str, str]:
+        dispatched.append({"target_machine": target_machine, "kind": kind, "payload": payload})
+        return {"status": "spawned"}
+
+    monkeypatch.setattr(lifecycle._cluster_rpc, "dispatch_to_machine", fake_dispatch)
+
+    wedge = watchdog._HostedTurnWedge(agent_id, "runner-a", 2500.0, (), False)
+    await watchdog._recover_hosted_turn(pool, wedge)
+
+    row = db_conn.execute(
+        "SELECT id, payload FROM inbound_messages "
+        "WHERE agent_id=%s AND source='system' ORDER BY id DESC LIMIT 1",
+        (agent_id,),
+    ).fetchone()
+    assert row is not None
+    trigger_id, payload = row
+    assert payload == {"hosted_turn_recovery": True}
+    assert len(dispatched) == 1
+    event = dispatched[0]
+    assert event["target_machine"] == "runner-a"
+    assert event["kind"] == "lifecycle"
+    forwarded = event["payload"]
+    assert isinstance(forwarded, dict)
+    assert forwarded["path"] == f"/api/agents/{agent_id}/resurrect-if-pending-work-v2"
+    assert forwarded["trigger_inbound_id"] == trigger_id
+    assert forwarded["trigger_inbound_kind"] == "chat"
+    body = forwarded["body"]
+    assert isinstance(body, dict)
+    assert body["resurrected_by"] == "system"
 
 
 async def test_hosted_turn_recovery_has_a_ten_minute_per_agent_cooldown(

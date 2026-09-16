@@ -259,6 +259,11 @@ def _system_notice_source_of_trigger(agent_id: int, trigger_inbound_id: int) -> 
     never resurrect their owner (user ruling 2026-08-27; task #3687) — else
     None.
 
+    The delivery watchdog's hosted-turn recovery chat is NOT a notice: its
+    payload carries the `hosted_turn_recovery` marker, and the shared
+    predicate (fail-closed on any non-boolean marker value) returns False, so
+    the recovery reaches dispatch (task #3687 review, Ava #3242).
+
     No row, a non-chat kind, or any other source returns None so the caller
     proceeds on the normal resurrect path; the home runner's final CAS still
     adjudicates stale work. A DB read failure propagates: a failed read must
@@ -267,13 +272,13 @@ def _system_notice_source_of_trigger(agent_id: int, trigger_inbound_id: int) -> 
     """
     with shared.db.connect() as conn:
         row = conn.execute(
-            "SELECT kind, source FROM inbound_messages WHERE id=%s AND agent_id=%s",
+            "SELECT kind, source, payload FROM inbound_messages WHERE id=%s AND agent_id=%s",
             (trigger_inbound_id, agent_id),
         ).fetchone()
     if row is None:
         return None
-    kind, source = row
-    if kind == "chat" and is_system_notice_source(source):
+    kind, source, payload = row
+    if kind == "chat" and is_system_notice_source(source, payload):
         return str(source)
     return None
 
@@ -402,8 +407,10 @@ async def resurrect_if_terminated(
     starts a resurrect: framework notifications (e.g. watcher reclamation
     notices) ride the queue for the owner's next resurrect through any other
     channel — they do not create one (user ruling 2026-08-27; task #3687).
-    User / peer chats, compact requests, and system notes with an explicit
-    resurrect request remain unaffected.
+    The delivery watchdog's hosted-turn recovery chat is the exception — it
+    carries the `hosted_turn_recovery` payload marker and must revive its
+    wedged owner (task #3687 review). User / peer chats, compact requests,
+    and system notes with an explicit resurrect request remain unaffected.
     """
     status = await asyncio.to_thread(get_agent_status, agent_id)
     if status is not AgentStatus.TERMINATED:
