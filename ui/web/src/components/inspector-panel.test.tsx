@@ -51,7 +51,7 @@ const {
     ),
     // useAgentPages fetches the open-pages list; default to none so the Page
     // section stays hidden and these render tests stay focused on the
-    // /inspect sections. The dedicated use-agent-pages.test.ts covers the fetch +
+    // Inspector sections. The dedicated use-agent-pages.test.ts covers the fetch +
     // SSE fold.
     listPages: vi.fn<(agentId: number) => Promise<PageRow[]>>(() => Promise.resolve([])),
     // Presets — the config-overlay diff display compares against them; default
@@ -322,7 +322,7 @@ describe("InspectorPanel", () => {
     expect(screen.queryByText("Persistent shells")).toBeNull();
   });
 
-  it("renders all sections from the /inspect response", async () => {
+  it("renders sections from their current-state and statistics responses", async () => {
     // Freeze Date so the tick-computed runtime values are exact (created_at
     // offsets are relative to Date.now() at fixture build).
     vi.useFakeTimers({ toFake: ["Date"] });
