@@ -1,12 +1,14 @@
-"""`host_running()`: the recorded/root-owned owner recognition (W1.2e-2).
+"""`host_running()` / `ops_quiescent()`: the mode-aware owner recognition (W1.2e-2).
 
-A root-driven host keeps its agent-host as an ava-root tree unit, not a session
-record — the pidfile is the same, so the pidfile-only inconsistency check must
-ask the root before it calls a live pid an unrecorded owner.
+A root-driven host keeps its services as ava-root tree units, not session
+records — the pidfile is the same, so the pidfile-only inconsistency check must
+ask the root before it calls a live pid an unrecorded owner; the same holds for
+`ops_quiescent()`'s "is ops even running" gate (task #3370).
 """
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -48,8 +50,8 @@ def _stub_root_client(
     monkeypatch.setattr("services.ava_root.client.RootClient", _Client)
 
 
-def _root_response(*, state: str, pid: int) -> dict[str, object]:
-    return {"ok": True, "result": {"units": [{"id": "agent-host", "state": state, "pid": pid}]}}
+def _root_response(*, state: str, pid: int, unit_id: str = "agent-host") -> dict[str, object]:
+    return {"ok": True, "result": {"units": [{"id": unit_id, "state": state, "pid": pid}]}}
 
 
 def test_host_running_true_when_session_recorded(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -97,3 +99,118 @@ def test_host_running_rejects_live_pid_when_root_unit_is_down(
     _stub_root_client(monkeypatch, response=_root_response(state="stopped", pid=pid))
     with pytest.raises(RuntimeError, match="without its owned service session"):
         agent_pause_probe.host_running()
+
+
+# ─── ops_quiescent: the mode-aware "is ops running" gate (task #3370) ──────────
+
+
+class _HealthzResponse:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self._payload = payload
+
+    def read(self, _amount: int) -> bytes:
+        return json.dumps(self._payload).encode()
+
+    def __enter__(self) -> _HealthzResponse:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        return None
+
+
+class _HealthzOpener:
+    """Records every opened URL; answers the one shared payload."""
+
+    def __init__(self, calls: list[str], payload: dict[str, object]) -> None:
+        self._calls = calls
+        self._payload = payload
+
+    def open(self, url: str, timeout: float | None = None) -> _HealthzResponse:
+        del timeout
+        self._calls.append(url)
+        return _HealthzResponse(self._payload)
+
+
+def _stub_ops_wait(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, calls: list[str]) -> None:
+    """A quiescent ops healthz answer: this home, this pidfile, no admitted work."""
+    pidfile = tmp_path / "ops.pid"
+    pidfile.write_text(f"{os.getpid()}\n", encoding="utf-8")
+    payload: dict[str, object] = {
+        "home": str(tmp_path),
+        "pid": os.getpid(),
+        "maintenance": {"protocol": 1, "requests": 0, "workers": 0},
+    }
+    monkeypatch.setattr(agent_pause_probe, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(settings.services, "ops_pidfile", pidfile)
+    monkeypatch.setattr(
+        agent_pause_probe,
+        "build_opener",
+        lambda *_args, **_kwargs: _HealthzOpener(calls, payload),  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+
+def test_ops_quiescent_skips_without_session_and_root_unit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Neither management mode claims ops is running: nothing to wait for."""
+    _stub_backend(monkeypatch, has_session=False)
+    _stub_root_client(monkeypatch, response={"ok": True, "result": {"units": []}})
+    calls: list[str] = []
+    _stub_ops_wait(monkeypatch, tmp_path, calls=calls)
+    agent_pause_probe.ops_quiescent(0.5)
+    assert calls == []
+
+
+def test_ops_quiescent_skips_when_root_unit_is_down(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _stub_backend(monkeypatch, has_session=False)
+    _stub_root_client(
+        monkeypatch, response=_root_response(state="stopped", pid=os.getpid(), unit_id="ops")
+    )
+    calls: list[str] = []
+    _stub_ops_wait(monkeypatch, tmp_path, calls=calls)
+    agent_pause_probe.ops_quiescent(0.5)
+    assert calls == []
+
+
+def test_ops_quiescent_skips_when_root_unreachable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _stub_backend(monkeypatch, has_session=False)
+    _stub_root_client(monkeypatch, unreachable=True)
+    calls: list[str] = []
+    _stub_ops_wait(monkeypatch, tmp_path, calls=calls)
+    agent_pause_probe.ops_quiescent(0.5)
+    assert calls == []
+
+
+def test_ops_quiescent_waits_when_the_root_runs_ops(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The W1.2e-2 gap: no session record, but the tree runs ops — the wait must run."""
+    _stub_backend(monkeypatch, has_session=False)
+    _stub_root_client(
+        monkeypatch, response=_root_response(state="running", pid=os.getpid(), unit_id="ops")
+    )
+    calls: list[str] = []
+    _stub_ops_wait(monkeypatch, tmp_path, calls=calls)
+    agent_pause_probe.ops_quiescent(1.0)
+    assert len(calls) == 1
+    assert calls[0].endswith("/healthz")
+
+
+def test_ops_quiescent_session_gate_does_not_consult_the_tree(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Session first: a recorded `ava-ops` opens the wait without a root roundtrip."""
+    _stub_backend(monkeypatch, has_session=True)
+
+    def _explode(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("root consulted although the session records ops")
+
+    monkeypatch.setattr("services.ava_root.client.RootClient", _explode)
+    calls: list[str] = []
+    _stub_ops_wait(monkeypatch, tmp_path, calls=calls)
+    agent_pause_probe.ops_quiescent(1.0)
+    assert len(calls) == 1

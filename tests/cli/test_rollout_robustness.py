@@ -337,7 +337,7 @@ def test_pin_hint_does_not_cry_stray_git_pull_during_a_rollout(
     monkeypatch.setattr(status_mod, "_detect_prod_source_drift", lambda: None)
     monkeypatch.setattr(status_mod, "_print_gateway_cluster_status", lambda: None)
     monkeypatch.setattr(status_mod, "print_data_plane_status", lambda: None)
-    monkeypatch.setattr(status_mod, "_print_service_row", lambda *_a: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(status_mod, "_print_service_row", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
 
     assert status_mod.cmd_status() == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
@@ -360,7 +360,7 @@ def test_pin_hint_still_warns_when_no_update_is_running(
     monkeypatch.setattr(status_mod, "_detect_prod_source_drift", lambda: None)
     monkeypatch.setattr(status_mod, "_print_gateway_cluster_status", lambda: None)
     monkeypatch.setattr(status_mod, "print_data_plane_status", lambda: None)
-    monkeypatch.setattr(status_mod, "_print_service_row", lambda *_a: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(status_mod, "_print_service_row", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
 
     assert status_mod.cmd_status() == 0
     assert "stray" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
