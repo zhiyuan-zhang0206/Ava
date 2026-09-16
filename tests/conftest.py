@@ -193,6 +193,18 @@ os.environ["AVA_COMPACT_HISTORY_DUMP"] = "false"
 # so local runs match CI (2026-08-06, PR #1650 verification).
 os.environ.pop("AVA_PROCESS_PROFILE", None)
 
+# ── Boot mode: the suite exercises the eager config chain ──
+#
+# `import shared.config` boots the boot-lite state by default (lazy v2, task
+# #3621): the boot-path fields resolve from the generated index without
+# constructing Settings, and the eager chain builds on the first touch of
+# anything else. The suite's fixtures and assertions (Settings construction,
+# `model_fields_set` probes, the metadata walks) assume the eager chain from
+# import time, so pin it here; the lite paths are exercised in their own
+# subprocess tests (tests/shared/test_config_boot_lite.py). Read at
+# `shared.config` import, hence inside this block.
+os.environ.setdefault("AVA_CONFIG_BOOT", "eager")
+
 # ── OS-scheduled jobs: the suite never arms one ──
 #
 # launchd reads ONE ~/Library/LaunchAgents per OS user; `crontab` edits ONE table

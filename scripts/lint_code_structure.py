@@ -160,6 +160,11 @@ _TYPE_CHECKING_ALLOWED: frozenset[str] = frozenset(
         # runtime-only (imported at the isinstance call site), BaseMessage
         # annotation-only (task #3633).
         "shared/sdk_telemetry.py",
+        # Boot-lite facade: the names are served at runtime by the lite latch;
+        # TYPE_CHECKING keeps `from shared.config import X` consumers resolving
+        # without an eager import that would rebuild the config chain the lite
+        # facade defers (task #3621).
+        "shared/config/__init__.py",
     }
 )
 

@@ -149,6 +149,9 @@ _ALLOWED_FILES = frozenset(
         "shared/lm/provider_api.py",  # plugin keys are not Settings fields; require_key reads the live process env for the bootstrap plugin-secrets channel on split runners, the same class as child-env handoff entries
         "scripts/migrate_skill_identity.py",  # standalone R2-B migration tool: must target an arbitrary AVA_HOME (--ava-home overrides) and build a psql subprocess env at call time; importing shared.config would freeze the settings singleton to the process's own home at import and drag the whole config stack into a script that must run against foreign / fresh homes
         "scripts/guard_editable_venv.py",  # dependency-free pre-uv preflight must inspect inherited VIRTUAL_ENV before a project environment can be trusted or Settings can import
+        "shared/config/_lite.py",  # the boot-lite resolution layer IS the Settings bootstrap: it reads raw env aliases and plants the placeholder data-plane URLs before any sub-model exists — the same "cannot depend on Settings by construction" class as shared/config/__init__.py
+        "shared/config/_full.py",  # the eager builder reads AVA_PROCESS_PROFILE at construction time, before the singleton exists — the same bootstrap-ordering class as shared/config/data_plane.py
+        "scripts/gen_config_lite_table.py",  # regeneration must run in exactly the states that need it (broken .env, unreachable gateway): it forces AVA_CONFIG_FETCH=skip in the process env BEFORE importing the registry, which Settings cannot mediate by construction
     }
 )
 

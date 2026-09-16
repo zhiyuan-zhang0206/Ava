@@ -789,4 +789,9 @@ app.mount("/mcp", _mcp_endpoint.mcp_gateway(app))
 
 def main() -> None:
     """Run the gateway process through the stable `gateway.app` entry point."""
+    from shared.config import ensure_eager
+
+    # Task #3621: the gateway is on the full-validation whitelist — build the
+    # eager config chain at the entry, before serving.
+    ensure_eager()
     _run_gateway()

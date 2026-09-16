@@ -149,7 +149,18 @@ raise ValueError('boom')
 def test_boot_config_failure_writes_crashed_envelope(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A Settings failure while importing ava must reach the parent's result file."""
+    """An eager Settings failure while importing ava must reach the parent's result file.
+
+    Task #3621: a child boots boot-lite by default, so a broken NON-boot-path
+    field no longer crashes it at import (it would surface on first touch).
+    Pinning the child's boot to eager keeps this exercising the import-time
+    Settings crash; the lite boot's own fail-fast crash (a boot-path field) is
+    covered by test_lite_boot_config_failure_writes_crashed_envelope. The
+    suite process carries AVA_CONFIG_FETCH=skip, which wins over eager, so the
+    pin drops it too.
+    """
+    monkeypatch.delenv("AVA_CONFIG_FETCH", raising=False)
+    monkeypatch.setenv("AVA_CONFIG_BOOT", "eager")
     for name in tuple(os.environ):
         if name.startswith("AVA_PITR_"):
             monkeypatch.delenv(name)
@@ -190,6 +201,36 @@ def test_boot_config_failure_writes_crashed_envelope(
     assert "exec_child" in (payload.full_traceback or "")
     assert result.stat().st_mode & 0o777 == 0o600
     assert payload.code_reached is False  # P0 #2100: boot crash, the code never ran
+
+
+def test_lite_boot_config_failure_writes_crashed_envelope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A boot-path config failure crashes a *lite* child at import (task #3621).
+
+    The child boots boot-lite by default: a bad value for a boot-path field
+    (timezone) makes `prepare()` fail fast while `import ava` runs, and the
+    crash envelope must still reach the parent's result file.
+    """
+    monkeypatch.delenv("AVA_CONFIG_BOOT", raising=False)
+    monkeypatch.delenv("AVA_CONFIG_FETCH", raising=False)
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".env").write_text(
+        "AVA_DB_URL=postgresql://u@127.0.0.1:1/x\n"
+        "AVA_REDIS_URL=redis://127.0.0.1:1/0\n"
+        "AVA_TIMEZONE=Bogus/Zone\n",
+        encoding="utf-8",
+    )
+
+    proc, _request, result = _spawn(tmp_path, "pass", write_request_file=False)
+
+    assert proc.returncode == 0, proc.stderr
+    payload = read_result(result)
+    assert payload.kind == "crashed"
+    assert payload.exc_type == "ValueError"
+    assert "timezone" in (payload.exc_msg or "").lower()
+    assert payload.code_reached is False
 
 
 def test_missing_request_writes_crashed_envelope_after_healthy_boot(tmp_path: Path) -> None:

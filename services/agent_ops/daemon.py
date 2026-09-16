@@ -743,6 +743,11 @@ def _hard_exit(code: int) -> int:
 
 
 def main() -> None:
+    # Task #3621: ops is on the full-validation whitelist — build the eager
+    # config chain at the entry, before serving.
+    from shared.config import ensure_eager
+
+    ensure_eager()
     init_gateway_process(name="ops")
     install_graceful_shutdown("ops")
     code = 0
