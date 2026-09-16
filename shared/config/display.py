@@ -108,3 +108,20 @@ class DisplaySettings(EnvSettings):
             "scope": "cluster-pinned",
         },
     )
+
+    timeline_history_page_base: int = Field(
+        default=50,
+        alias="AVA_TIMELINE_HISTORY_PAGE_BASE",
+        description=(
+            "Base page (items) the web UI fetches per timeline scroll-up; each successive "
+            "scroll-up doubles it (50, 100, 200, ... up to the endpoint's 1000 le). Read at "
+            "runtime from GET /api/config by the frontend; 50 keeps the first backfill "
+            "light while the doubling keeps deep histories a few fetches away."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )

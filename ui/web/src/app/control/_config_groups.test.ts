@@ -9,7 +9,9 @@
 
 import { describe, expect, it } from "vitest";
 
-import { GROUP_ENV_VARS, HIDDEN_ENV_VARS } from "./_config_groups";
+import type { ConfigFieldView } from "@/lib/types";
+
+import { GROUP_ENV_VARS, HIDDEN_ENV_VARS, displayGroupId } from "./_config_groups";
 
 describe("config display grouping tables", () => {
   it("keeps hidden env vars out of every display group", () => {
@@ -20,5 +22,13 @@ describe("config display grouping tables", () => {
 
   it("places compact-history depth with the general timeline controls", () => {
     expect(GROUP_ENV_VARS["config-general"]).toContain("AVA_TIMELINE_COMPACT_HISTORY");
+  });
+
+  it("routes display-domain fields into the Display & general bucket", () => {
+    const field = {
+      env_var: "AVA_TIMELINE_DEFAULT_LIMIT",
+      group: "Display",
+    } as ConfigFieldView;
+    expect(displayGroupId(field)).toBe("config-general");
   });
 });
