@@ -1,7 +1,9 @@
 """Cluster-local client for trusted named impersonation sessions.
 
-Only request prints the newly minted credential. All subsequent commands read
-AVA_IMPERSONATION_TOKEN. Session history is retained by the shared service.
+Only request prints the scoped relay credential (claude). Controller commands
+run under the session id with caller-presence attestation: no controller
+credential is minted, delivered, or stored. Session history is retained by the
+shared service.
 """
 
 from __future__ import annotations
@@ -19,18 +21,9 @@ from typing import Any
 from uuid import UUID
 
 
-def token_from_env() -> str:
-    """Read the explicit external lease credential, without inferring identity."""
-    # env-ok: external controller credential handoff, not cluster configuration
-    token = os.environ.get("AVA_IMPERSONATION_TOKEN")
-    if not token:
-        raise ValueError("set AVA_IMPERSONATION_TOKEN to the request's token")
-    return token
-
-
 def relay_token_from_env() -> str:
     """Read the scoped relay credential the controller received at request time."""
-    # env-ok: external controller credential handoff, not cluster configuration
+    # env-ok: external relay credential handoff, not cluster configuration
     token = os.environ.get("AVA_IMPERSONATION_RELAY_TOKEN")
     if not token:
         raise ValueError(
@@ -64,21 +57,23 @@ def _emit(value: object) -> None:
     print(json.dumps(value, ensure_ascii=False, default=_json_value))
 
 
-async def _wait_inbox(lease_id: str, token: str, limit: int, wait: float) -> list[dict[str, Any]]:
+async def _wait_inbox(
+    lease_id: str, caller: dict[str, Any], limit: int, wait: float
+) -> list[dict[str, Any]]:
     from shared import impersonation as control
     from shared.config import settings
     from shared.redis_listener import RedisInboundListener
 
     if not math.isfinite(wait) or wait < 0:
         raise ValueError("--wait must be finite and nonnegative")
-    lease = await asyncio.to_thread(control.require_active, lease_id, token)
+    lease = await asyncio.to_thread(control.require_active, lease_id, caller)
     listener = RedisInboundListener(settings.data_plane.redis_url, lease["agent_id"])
     try:
         if wait:
             await listener.ensure_listening()
         deadline = time.monotonic() + wait
         while True:
-            messages = await asyncio.to_thread(control.inbox, lease_id, token, limit=limit)
+            messages = await asyncio.to_thread(control.inbox, lease_id, caller, limit=limit)
             remaining = deadline - time.monotonic()
             if messages or remaining <= 0:
                 return messages
@@ -87,7 +82,7 @@ async def _wait_inbox(lease_id: str, token: str, limit: int, wait: float) -> lis
         await listener.close()
 
 
-def _run_local(args: argparse.Namespace, token: str) -> int:
+def _run_local(args: argparse.Namespace) -> int:
     import ava
 
     code = (
@@ -97,7 +92,7 @@ def _run_local(args: argparse.Namespace, token: str) -> int:
     )
     if not code.strip():
         raise ValueError("Python input must be nonempty")
-    with ava.external.attach(args.session_id, agent_id=args.agent_id, token=token):
+    with ava.external.attach(args.session_id, agent_id=args.agent_id):
         exec(
             compile(code, args.file or "<ava-external>", "exec"),
             {"__name__": "__main__", "ava": ava},
@@ -106,10 +101,10 @@ def _run_local(args: argparse.Namespace, token: str) -> int:
 
 
 def _dispatch(args: argparse.Namespace) -> int:
-    from cli.commands.impersonation_process import process_metadata
     from shared import impersonation as control
     from shared import impersonation_sessions as sessions
     from shared.impersonation_history import public_session, say
+    from shared.proc_tree import process_metadata
 
     command = args.impersonation_cmd
     if command == "request":
@@ -145,25 +140,25 @@ def _dispatch(args: argparse.Namespace) -> int:
     if command == "list":
         _emit(sessions.list_sessions(args.agent_id, before=args.before, limit=args.limit))
         return 0
-    token = token_from_env()
+    caller = process_metadata()
     args.lease_id = sessions.private_id(args.agent_id, args.session_id)
     if command == "status":
-        _emit(public_session(control.get(args.lease_id, token)))
+        _emit(public_session(control.get(args.lease_id, caller)))
     elif command == "renew":
-        _emit(public_session(control.renew(args.lease_id, token, ttl_seconds=args.ttl)))
+        _emit(public_session(control.renew(args.lease_id, caller, ttl_seconds=args.ttl)))
     elif command == "release":
         summary = sys.stdin.read() if args.summary == "-" else args.summary
-        _emit(public_session(control.release(args.lease_id, token, summary)))
+        _emit(public_session(control.release(args.lease_id, caller, summary)))
     elif command == "inbox":
-        _emit(asyncio.run(_wait_inbox(args.lease_id, token, args.limit, args.wait)))
+        _emit(asyncio.run(_wait_inbox(args.lease_id, caller, args.limit, args.wait)))
     elif command == "ack":
-        control.ack(args.lease_id, token, args.message_ids)
+        control.ack(args.lease_id, caller, args.message_ids)
         _emit({"acknowledged": args.message_ids})
     elif command == "say":
         content = sys.stdin.read() if args.content == "-" else args.content
-        _emit({"seq": say(args.lease_id, token, content, phase=args.phase, message_key=args.key)})
+        _emit({"seq": say(args.lease_id, caller, content, phase=args.phase, message_key=args.key)})
     elif command == "exec":
-        return _run_local(args, token)
+        return _run_local(args)
     else:
         raise ValueError(f"unknown impersonation command: {command}")
     return 0

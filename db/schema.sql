@@ -1471,7 +1471,7 @@ CREATE TABLE IF NOT EXISTS agent_impersonations (
     PRIMARY KEY (agent_id,session_id),
     source TEXT NOT NULL,
     machine TEXT NOT NULL,
-    token_hash TEXT NOT NULL,
+    token_hash TEXT,
     reason TEXT NOT NULL DEFAULT '',
     rejection_reason TEXT,
     status TEXT NOT NULL CHECK (status IN ('requested', 'accepted', 'active', 'released', 'rejected', 'expired')),

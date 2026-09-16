@@ -9,12 +9,13 @@ tags:
 
 # External SDK Attachment
 
-`ava.external.attach(session_id, agent_id=..., token=...)` binds one active, same-machine controller
+`ava.external.attach(session_id, agent_id=...)` binds one active, same-machine controller
 lease to a Python process. The external model keeps its own tools; SDK calls execute
 in that external process. The attachment is a context manager with explicit `flush`
 and `close` methods, and never starts or renews a lease.
 
-`ava._boot.validate_external_identity` checks the lease and state version on SDK
+`ava._boot.validate_external_identity` checks the lease, the caller's presence in
+the recorded controller tree, and the state version on SDK
 identity paths, including provenance and MCP requests. `PluginStateHandle.read` and
 `update` perform the same check; raw `ava.state` remains a local snapshot rather
 than a lease-aware proxy. Native runtime identity paths remain unchanged

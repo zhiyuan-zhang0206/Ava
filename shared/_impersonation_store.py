@@ -2,15 +2,17 @@
 
 import hashlib
 import hmac
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
+import psutil
 import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from shared.caller_identity import caller_payload
 from shared.machine import machine_name
+from shared.proc_tree import create_time_matches, stable_create_time
 from shared.runtime_incarnation import RuntimeIncarnation
 
 OPEN = ("requested", "accepted", "active")
@@ -63,9 +65,124 @@ def local(lease: dict[str, Any]) -> None:
         raise ImpersonationError("Impersonation is limited to the agent's own machine")
 
 
-def authenticate(lease: dict[str, Any], token: str) -> None:
-    if not hmac.compare_digest(lease["token_hash"], token_hash(token)):
-        raise ImpersonationError("Invalid impersonation token")
+_PROVIDER_ANCHOR_BASENAMES = frozenset({"codex", "claude"})
+
+
+def _basename(value: object) -> str:
+    if not isinstance(value, str) or not value:
+        return ""
+    return value.rstrip("/").rsplit("/", 1)[-1].lower()
+
+
+def _metadata_nodes(metadata: object) -> list[dict[str, Any]]:
+    """One recorded/observed chain as head plus ancestors, skipping junk."""
+    if not isinstance(metadata, dict):
+        return []
+    meta = cast("dict[str, Any]", metadata)
+    nodes: list[dict[str, Any]] = []
+    if meta.get("pid") is not None:
+        nodes.append({key: meta.get(key) for key in ("pid", "name", "executable", "created_at")})
+    ancestors = meta.get("ancestors")
+    if isinstance(ancestors, list):
+        nodes.extend(
+            cast("dict[str, Any]", node)
+            for node in cast("list[object]", ancestors)
+            if isinstance(node, dict)
+        )
+    return nodes
+
+
+def _is_provider_node(node: dict[str, Any]) -> bool:
+    return (
+        _basename(node.get("name")) in _PROVIDER_ANCHOR_BASENAMES
+        or _basename(node.get("executable")) in _PROVIDER_ANCHOR_BASENAMES
+    )
+
+
+def _number(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _same_process(anchor: dict[str, Any], node: dict[str, Any]) -> bool:
+    if node.get("pid") is None or node.get("pid") != anchor.get("pid"):
+        return False
+    live = _number(node.get("created_at"))
+    birth = _number(anchor.get("created_at"))
+    if live is None or birth is None:
+        return False
+    return create_time_matches(live, birth)
+
+
+def _anchor_liveness(anchor: dict[str, Any]) -> str:
+    """Classify one recorded anchor against the live process table.
+
+    "reused" is a dead anchor whose pid now belongs to a different process; it
+    keeps that failure distinguishable from a live anchor the caller simply
+    does not descend from.
+    """
+    pid = anchor.get("pid")
+    if isinstance(pid, bool) or not isinstance(pid, int):
+        return "dead"
+    try:
+        process = psutil.Process(pid)
+        if process.status() in (psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD):
+            return "dead"
+        birth = _number(anchor.get("created_at"))
+        if birth is not None and not create_time_matches(stable_create_time(process), birth):
+            return "reused"
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return "dead"
+    return "alive"
+
+
+def verify_caller(lease: dict[str, Any], caller: object) -> None:
+    """Require the caller to descend from the lease's recorded controller process.
+
+    The session id is the only control credential (user ruling 2026-09-16);
+    this presence check replaces the deliverable token: a recorded provider
+    anchor (codex / claude) must appear among the caller's live ancestors with
+    the same identity (pid + stable start time, with the 2.0s tolerance kept
+    for records written before the stable key). Every failure is fail-closed
+    and classified — no-anchor / anchor-dead / chain-mismatch — so the operator
+    gets a next step instead of a dead end. An orphaned session ends on the
+    native side or by TTL; it is never re-anchored here.
+    """
+    recorded = _metadata_nodes(lease.get("process_metadata"))
+    anchors = [node for node in recorded if _is_provider_node(node)]
+    if not anchors:
+        raise ImpersonationError(
+            "Controller caller check failed (no-anchor): this session records no "
+            "provider controller process to attest against. End it from the native "
+            "side (restart/stop) or let its TTL expire."
+        )
+    live = _metadata_nodes(caller)
+    if any(_same_process(anchor, node) for anchor in anchors for node in live):
+        return
+    states = {_anchor_liveness(anchor) for anchor in anchors}
+    if states & {"alive"}:
+        raise ImpersonationError(
+            "Controller caller check failed (chain-mismatch): the recorded "
+            "controller process is alive but this caller does not descend from it. "
+            "Run impersonation commands from the controller session."
+        )
+    if "reused" in states:
+        raise ImpersonationError(
+            "Controller caller check failed (anchor-dead): the recorded controller "
+            "process is gone (its pid now belongs to a different process). End the "
+            "session from the native side (restart/stop) or let its TTL expire."
+        )
+    raise ImpersonationError(
+        "Controller caller check failed (anchor-dead): the recorded controller "
+        "process is gone. End the session from the native side (restart/stop) or "
+        "let its TTL expire."
+    )
+
+
+def authenticate(lease: dict[str, Any], caller: object) -> None:
+    """Attested controller authority: caller presence plus same-machine placement."""
+    verify_caller(lease, caller)
     local(lease)
 
 
@@ -156,23 +273,26 @@ def expire(conn: psycopg.Connection, lease: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_active(
-    lease: dict[str, Any], token: str, *, fresh: bool, machine: str, status: str
+    lease: dict[str, Any], caller: object, *, fresh: bool, machine: str, status: str
 ) -> None:
     """Validate either a joined read snapshot or rows already locked for mutation."""
-    authenticate(lease, token)
     if lease["status"] != "active" or not fresh:
-        raise ImpersonationError("Impersonation is not active or its TTL has expired")
+        raise ImpersonationError(
+            "Impersonation session is not active (stale-session): it ended or its "
+            "TTL expired; the native agent continues."
+        )
     if machine != lease["machine"] or status not in ("running", "idling"):
         raise ImpersonationError("Agent placement or lifecycle changed")
+    authenticate(lease, caller)
 
 
-def require_active_locked(conn: psycopg.Connection, lease: dict[str, Any], token: str) -> None:
+def require_active_locked(conn: psycopg.Connection, lease: dict[str, Any], caller: object) -> None:
     # Do not persist expiration here and then raise (which would roll it back).
     # The native boundary/get reconciler persists it independently.
     meta = lock_agent(conn, lease["agent_id"])
     fresh = conn.execute("SELECT %s > clock_timestamp()", (lease["expires_at"],)).fetchone()
     validate_active(
-        lease, token, fresh=fresh == (True,), machine=meta["machine"], status=meta["status"]
+        lease, caller, fresh=fresh == (True,), machine=meta["machine"], status=meta["status"]
     )
 
 

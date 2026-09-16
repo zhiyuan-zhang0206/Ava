@@ -18,6 +18,7 @@ from shared.db import create_agent, insert_inbound_message
 from shared.live_events import Cancelled
 from shared.machine import machine_name
 from shared.runtime_incarnation import RuntimeIncarnation
+from tests.impersonation_support import attested_caller, recorded_tree
 
 
 def _agent(conn: psycopg.Connection) -> RuntimeIncarnation:
@@ -50,6 +51,7 @@ def _request(
         caller=CallerIdentity(kind="external_agent", subject="codex", instance="test"),
         ttl_seconds=300,
         reason="Handle the next message",
+        process_metadata=recorded_tree(),
         relay_provider=provider,
         **kwargs,
     )
@@ -98,9 +100,9 @@ def test_external_identity_read_does_not_contend_with_lease_writes(
     lease = _active(owner)
     db_conn.execute("SELECT id FROM agents_meta WHERE id=%s FOR UPDATE", (owner.agent_id,))
     db_conn.execute("SELECT id FROM agent_impersonations WHERE id=%s FOR UPDATE", (lease["id"],))
-    result = leases.require_active(lease["id"], lease["token"])
+    result = leases.require_active(lease["id"], attested_caller(lease))
     assert result["status"] == "active"
-    assert set(result) == set(lease) - {"token"}
+    assert set(result) == set(lease)
 
 
 def test_existing_lease_still_serializes_native_reconciliation(
@@ -158,13 +160,13 @@ def test_request_needs_consent_then_native_checkpoint_ack(db_conn: psycopg.Conne
     db_conn.commit()
     assert _status(owner)["reason"] == "Handle the next message"
     with pytest.raises(leases.ImpersonationError, match="not active"):
-        leases.require_active(lease["id"], lease["token"])
+        leases.require_active(lease["id"], attested_caller(lease))
     leases.accept(lease["id"], owner.agent_id, owner, "Handoff brief")
     assert _status(owner)["status"] == "accepted"
     with pytest.raises(leases.ImpersonationError, match="not active"):
-        leases.inbox(lease["id"], lease["token"])
+        leases.inbox(lease["id"], attested_caller(lease))
     leases.activate(lease["id"], owner)
-    assert leases.require_active(lease["id"], lease["token"])["status"] == "active"
+    assert leases.require_active(lease["id"], attested_caller(lease))["status"] == "active"
 
 
 def test_consent_and_activation_cannot_use_another_incarnation(db_conn: psycopg.Connection) -> None:
@@ -189,11 +191,13 @@ def test_inbox_ack_and_atomic_real_sender_handoff(db_conn: psycopg.Connection) -
     first = insert_inbound_message(db_conn, owner.agent_id, "first", "agent:99")
     second = insert_inbound_message(db_conn, owner.agent_id, "second", "agent:99")
     with pytest.raises(leases.ImpersonationError, match="not read"):
-        leases.ack(lease["id"], lease["token"], [first])
-    assert [m["id"] for m in leases.inbox(lease["id"], lease["token"])] == [first, second]
-    leases.ack(lease["id"], lease["token"], [first])
-    assert [m["id"] for m in leases.inbox(lease["id"], lease["token"])] == [second]
-    result = leases.release(lease["id"], lease["token"], "Finished first; second still needs work.")
+        leases.ack(lease["id"], attested_caller(lease), [first])
+    assert [m["id"] for m in leases.inbox(lease["id"], attested_caller(lease))] == [first, second]
+    leases.ack(lease["id"], attested_caller(lease), [first])
+    assert [m["id"] for m in leases.inbox(lease["id"], attested_caller(lease))] == [second]
+    result = leases.release(
+        lease["id"], attested_caller(lease), "Finished first; second still needs work."
+    )
     assert result["status"] == "released"
     assert leases.native_status(owner.agent_id, owner) is None
     rows = db_conn.execute(
@@ -204,7 +208,7 @@ def test_inbox_ack_and_atomic_real_sender_handoff(db_conn: psycopg.Connection) -
     assert rows[2][1:3] == ("pending", "external_agent:codex:test")
     assert rows[2][3]["caller_identity"]["subject"] == "codex"
     db_conn.commit()
-    assert leases.release(lease["id"], lease["token"], "Retry") == result
+    assert leases.release(lease["id"], attested_caller(lease), "Retry") == result
     assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (3,)
 
 
@@ -216,14 +220,14 @@ def test_external_inbox_preserves_cancel_until_explicit_processing_ack(
     cancel = insert_inbound_message(
         db_conn, owner.agent_id, "Stop current work", "user", kind="cancel"
     )
-    assert [(m["id"], m["kind"]) for m in leases.inbox(lease["id"], lease["token"])] == [
+    assert [(m["id"], m["kind"]) for m in leases.inbox(lease["id"], attested_caller(lease))] == [
         (cancel, "cancel")
     ]
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE id=%s", (cancel,)
     ).fetchone() == ("pending",)
     db_conn.commit()
-    leases.ack(lease["id"], lease["token"], [cancel])
+    leases.ack(lease["id"], attested_caller(lease), [cancel])
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE id=%s", (cancel,)
     ).fetchone() == ("done",)
@@ -236,7 +240,7 @@ def test_cancel_ack_publishes_committed_completion_once(
     lease = _active(owner)
     cancel = insert_inbound_message(db_conn, owner.agent_id, "Stop", "user", kind="cancel")
     peer = insert_inbound_message(db_conn, owner.agent_id, "Peer work", "agent:99")
-    leases.inbox(lease["id"], lease["token"])
+    leases.inbox(lease["id"], attested_caller(lease))
     unread = insert_inbound_message(db_conn, owner.agent_id, "Unread", "user", kind="cancel")
     published: list[Cancelled] = []
     wakes: list[int] = []
@@ -258,16 +262,16 @@ def test_cancel_ack_publishes_committed_completion_once(
     monkeypatch.setattr("shared.redis_client.publish_best_effort_sync", publish)
     monkeypatch.setattr(leases, "_wake", wakes.append)
     with pytest.raises(leases.ImpersonationError, match="not read"):
-        leases.ack(lease["id"], lease["token"], [cancel, unread])
+        leases.ack(lease["id"], attested_caller(lease), [cancel, unread])
     assert published == []
     assert wakes == []
-    leases.ack(lease["id"], lease["token"], [peer])
+    leases.ack(lease["id"], attested_caller(lease), [peer])
     assert published == []
     assert wakes == [owner.agent_id]
-    leases.ack(lease["id"], lease["token"], [cancel])
+    leases.ack(lease["id"], attested_caller(lease), [cancel])
     assert published == [Cancelled(agent_id=owner.agent_id)]
     assert wakes == [owner.agent_id, owner.agent_id]
-    leases.ack(lease["id"], lease["token"], [cancel, peer])
+    leases.ack(lease["id"], attested_caller(lease), [cancel, peer])
     assert len(published) == 1
     assert wakes == [owner.agent_id, owner.agent_id]
 
@@ -278,7 +282,7 @@ def test_ttl_revokes_all_borrower_operations_and_preserves_pending(
     owner = _agent(db_conn)
     lease = _active(owner)
     pending = insert_inbound_message(db_conn, owner.agent_id, "durable", "agent:99")
-    leases.inbox(lease["id"], lease["token"])
+    leases.inbox(lease["id"], attested_caller(lease))
     db_conn.execute(
         "UPDATE agent_impersonations SET expires_at=clock_timestamp()-interval '1 second' "
         "WHERE id=%s",
@@ -286,15 +290,17 @@ def test_ttl_revokes_all_borrower_operations_and_preserves_pending(
     )
     db_conn.commit()
     operations = [
-        lambda: leases.require_active(lease["id"], lease["token"]),
-        lambda: leases.renew(lease["id"], lease["token"]),
-        lambda: leases.inbox(lease["id"], lease["token"]),
-        lambda: leases.ack(lease["id"], lease["token"], [pending]),
-        lambda: leases.release(lease["id"], lease["token"], "Late summary"),
-        lambda: leases.merge_plugin_delta(lease["id"], lease["token"], {}, expected_version=0),
+        lambda: leases.require_active(lease["id"], attested_caller(lease)),
+        lambda: leases.renew(lease["id"], attested_caller(lease)),
+        lambda: leases.inbox(lease["id"], attested_caller(lease)),
+        lambda: leases.ack(lease["id"], attested_caller(lease), [pending]),
+        lambda: leases.release(lease["id"], attested_caller(lease), "Late summary"),
+        lambda: leases.merge_plugin_delta(
+            lease["id"], attested_caller(lease), {}, expected_version=0
+        ),
     ]
     for operation in operations:
-        with pytest.raises(leases.ImpersonationError, match="TTL has expired"):
+        with pytest.raises(leases.ImpersonationError, match="stale-session"):
             operation()
     assert _status(owner)["status"] == "expired"
     assert leases.native_status(owner.agent_id, owner) is None
@@ -308,14 +314,16 @@ def test_plugin_journal_blocks_new_lease_until_checkpoint_receipt(
 ) -> None:
     owner = _agent(db_conn)
     lease = _active(owner)
-    leases.merge_plugin_delta(lease["id"], lease["token"], {"encoded": "first"}, expected_version=0)
+    leases.merge_plugin_delta(
+        lease["id"], attested_caller(lease), {"encoded": "first"}, expected_version=0
+    )
     with pytest.raises(leases.ImpersonationError, match="Concurrent"):
         leases.merge_plugin_delta(
-            lease["id"], lease["token"], {"encoded": "lost"}, expected_version=0
+            lease["id"], attested_caller(lease), {"encoded": "lost"}, expected_version=0
         )
     with pytest.raises(leases.ImpersonationError, match="returned native"):
         leases.mark_plugin_applied(lease["id"], 1, owner)
-    leases.release(lease["id"], lease["token"], "State updated")
+    leases.release(lease["id"], attested_caller(lease), "State updated")
     with pytest.raises(leases.ImpersonationError, match="unapplied state"):
         _request(owner)
     state = _status(owner)
@@ -338,15 +346,15 @@ def test_competing_requests_have_one_winner(db_conn: psycopg.Connection) -> None
     assert sorted(results) == ["conflict", "requested"]
 
 
-def test_token_and_same_machine_checks(db_conn: psycopg.Connection) -> None:
+def test_attestation_and_same_machine_checks(db_conn: psycopg.Connection) -> None:
     owner = _agent(db_conn)
     lease = _active(owner)
-    with pytest.raises(leases.ImpersonationError, match="token"):
+    with pytest.raises(leases.ImpersonationError, match="caller check failed"):
         leases.require_active(lease["id"], "incorrect")
     db_conn.execute("UPDATE agents_meta SET machine='another-host' WHERE id=%s", (owner.agent_id,))
     db_conn.commit()
     with pytest.raises(leases.ImpersonationError, match="placement"):
-        leases.require_active(lease["id"], lease["token"])
+        leases.require_active(lease["id"], attested_caller(lease))
     with pytest.raises(leases.ImpersonationError, match="own machine"):
         _request(owner)
 
@@ -356,14 +364,14 @@ def test_termination_atomically_revokes_but_restart_preserves(db_conn: psycopg.C
     lease = _active(owner)
     db_conn.execute("UPDATE agents_meta SET status='restarting' WHERE id=%s", (owner.agent_id,))
     db_conn.commit()
-    assert leases.get(lease["id"], lease["token"])["status"] == "active"
+    assert leases.get(lease["id"], attested_caller(lease))["status"] == "active"
     db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (owner.agent_id,))
     db_conn.commit()
-    assert leases.get(lease["id"], lease["token"])["status"] == "expired"
+    assert leases.get(lease["id"], attested_caller(lease))["status"] == "expired"
     db_conn.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (owner.agent_id,))
     db_conn.commit()
     with pytest.raises(leases.ImpersonationError, match="not active"):
-        leases.require_active(lease["id"], lease["token"])
+        leases.require_active(lease["id"], attested_caller(lease))
 
 
 def test_replacement_requires_fresh_consent_before_checkpoint_ack(
@@ -410,7 +418,7 @@ def test_renew_replaces_ttl_and_reject_records_reason(db_conn: psycopg.Connectio
     )
     assert result["rejection_reason"] == "Finish the critical operation first"
     lease = _active(owner)
-    renewed = leases.renew(lease["id"], lease["token"], ttl_seconds=600)
+    renewed = leases.renew(lease["id"], attested_caller(lease), ttl_seconds=600)
     assert renewed["ttl_seconds"] == 600
     assert renewed["expires_at"] > lease["expires_at"]
 
@@ -428,7 +436,7 @@ def test_rollback_refuses_active_lease_or_pending_handoff(db_conn: psycopg.Conne
         db_conn.transaction(force_rollback=True),
     ):
         db_conn.execute(migration_sql)
-    leases.release(lease["id"], lease["token"], "Complete")
+    leases.release(lease["id"], attested_caller(lease), "Complete")
     with (
         pytest.raises(psycopg.errors.RaiseException, match="Finish impersonations"),
         db_conn.transaction(force_rollback=True),
@@ -468,7 +476,7 @@ def test_reaper_expires_offline_lease_and_keeps_unconsumed_handoff(
         )
         db_conn.commit()
         assert reap_impersonations(reaper_pool) == 0
-        assert leases.get(lease["id"], lease["token"])["status"] == "expired"
+        assert leases.get(lease["id"], attested_caller(lease))["status"] == "expired"
         db_conn.execute(
             "UPDATE inbound_messages SET status='done' WHERE agent_id=%s", (owner.agent_id,)
         )
@@ -508,8 +516,6 @@ def test_claude_request_mints_a_scoped_relay_credential(db_conn: psycopg.Connect
     assert lease.get("relay_token")
     assert "relay_token_hash" not in lease
     assert leases.relay_get(lease["id"], lease["relay_token"])["status"] == "requested"
-    with pytest.raises(leases.ImpersonationError, match="Invalid relay token"):
-        leases.relay_get(lease["id"], lease["token"])
     with pytest.raises(leases.ImpersonationError, match="Invalid relay token"):
         leases.relay_get(lease["id"], "wrong")
 
@@ -625,10 +631,12 @@ def test_relay_inbox_uses_the_scoped_credential_only(db_conn: psycopg.Connection
     insert_inbound_message(db_conn, owner.agent_id, "hello", "user", kind="chat")
     db_conn.commit()
     with pytest.raises(leases.ImpersonationError, match="Invalid relay token"):
-        leases.relay_inbox(lease["id"], lease["token"])
+        leases.relay_inbox(lease["id"], "wrong")
     rows = leases.relay_inbox(lease["id"], lease["relay_token"])
     assert [row["content"] for row in rows] == ["hello"]
-    with pytest.raises(leases.ImpersonationError):
+    # The relay credential is not a caller attestation: the controller inbox
+    # refuses anything that is not the session's recorded process tree.
+    with pytest.raises(leases.ImpersonationError, match="caller check failed"):
         leases.inbox(lease["id"], lease["relay_token"])
 
 
@@ -643,7 +651,7 @@ def test_relay_heartbeat_beats_while_open_and_stops_at_terminal(
     leases.accept(lease["id"], owner.agent_id, owner, "Handoff brief")
     leases.activate(lease["id"], owner)
     leases.relay_heartbeat(lease["id"], lease["relay_token"])
-    leases.release(lease["id"], lease["token"], "Done")
+    leases.release(lease["id"], attested_caller(lease), "Done")
     with pytest.raises(leases.ImpersonationError, match="ended"):
         leases.relay_heartbeat(lease["id"], lease["relay_token"])
 
@@ -780,7 +788,7 @@ def test_reminder_ack_suppresses_further_reminders(
         (lease["id"], reminder_id),
     )
     db_conn.commit()
-    leases.ack(lease["id"], lease["token"], [reminder_id])
+    leases.ack(lease["id"], attested_caller(lease), [reminder_id])
     db_conn.commit()
     with pool(max_size=2) as reaper_pool:
         assert remind_expiring_impersonations(reaper_pool) == 0
@@ -824,7 +832,7 @@ def test_release_dismisses_its_pending_reminder(db_conn: psycopg.Connection) -> 
     db_conn.commit()
     with pool(max_size=2) as reaper_pool:
         assert remind_expiring_impersonations(reaper_pool) == 1
-    leases.release(lease["id"], lease["token"], "Done before expiry")
+    leases.release(lease["id"], attested_caller(lease), "Done before expiry")
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='reminder'",
         (owner.agent_id,),
@@ -888,8 +896,8 @@ def test_closure_restores_six_native_owners(db_conn: psycopg.Connection, ending:
         )
         db_conn.commit()
         if ending == "released":
-            leases.release(lease["id"], lease["token"], "Complete")
-            leases.release(lease["id"], lease["token"], "Complete again")
+            leases.release(lease["id"], attested_caller(lease), "Complete")
+            leases.release(lease["id"], attested_caller(lease), "Complete again")
         else:
             db_conn.execute(
                 "UPDATE agent_impersonations SET expires_at=clock_timestamp()-interval '1 second' "

@@ -1,0 +1,172 @@
+"""Caller attestation on the controller surface: tiers, pid reuse, generation crossing."""
+
+from types import SimpleNamespace
+from typing import Any
+from uuid import uuid4
+
+import psutil
+import pytest
+
+from shared import _impersonation_store as store
+from shared import impersonation as leases
+from shared.caller_identity import CallerIdentity
+from shared.db import create_agent
+from shared.machine import machine_name
+from shared.runtime_incarnation import RuntimeIncarnation
+from tests.impersonation_support import attested_caller, recorded_tree, unrelated_caller
+
+
+def _stub_birth(monkeypatch: pytest.MonkeyPatch, birth: float) -> None:
+    def stable(_process: object) -> float:
+        return birth
+
+    monkeypatch.setattr(store, "stable_create_time", stable)
+
+
+def _lease(tree: dict[str, Any]) -> dict[str, Any]:
+    return {"process_metadata": tree, "machine": machine_name()}
+
+
+def _stub_liveness(
+    monkeypatch: pytest.MonkeyPatch, *, missing: bool = False, status: str | None = None
+) -> None:
+    """Deterministic process-table answers for the anchor-liveness classification."""
+
+    def process(pid: int) -> SimpleNamespace:
+        if missing:
+            raise psutil.NoSuchProcess(pid)
+        return SimpleNamespace(status=lambda: status or psutil.STATUS_RUNNING)
+
+    monkeypatch.setattr(
+        store,
+        "psutil",
+        SimpleNamespace(
+            Process=process,
+            NoSuchProcess=psutil.NoSuchProcess,
+            AccessDenied=psutil.AccessDenied,
+            STATUS_ZOMBIE=psutil.STATUS_ZOMBIE,
+            STATUS_DEAD=psutil.STATUS_DEAD,
+        ),
+    )
+    _stub_birth(monkeypatch, 998.0)
+
+
+def test_attested_caller_passes() -> None:
+    lease = _lease(recorded_tree())
+    store.verify_caller(lease, attested_caller(lease))
+
+
+def test_chain_mismatch_when_anchor_is_alive(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_liveness(monkeypatch)
+    with pytest.raises(store.ImpersonationError, match="chain-mismatch"):
+        store.verify_caller(_lease(recorded_tree()), unrelated_caller())
+
+
+def test_anchor_dead_when_the_process_is_gone(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_liveness(monkeypatch, missing=True)
+    with pytest.raises(store.ImpersonationError, match="anchor-dead"):
+        store.verify_caller(_lease(recorded_tree()), unrelated_caller())
+
+
+def test_anchor_dead_when_the_pid_was_reused(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_liveness(monkeypatch)
+    _stub_birth(monkeypatch, 5000.0)
+    with pytest.raises(store.ImpersonationError, match="pid now belongs"):
+        store.verify_caller(_lease(recorded_tree()), unrelated_caller())
+
+
+def test_a_zombie_anchor_is_dead(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_liveness(monkeypatch, status=psutil.STATUS_ZOMBIE)
+    with pytest.raises(store.ImpersonationError, match="anchor-dead"):
+        store.verify_caller(_lease(recorded_tree()), unrelated_caller())
+
+
+def test_no_anchor_records_fail_closed() -> None:
+    tree: dict[str, Any] = {
+        "pid": 4242,
+        "name": "python3.12",
+        "executable": "/usr/bin/python3.12",
+        "created_at": 1000.0,
+        "parent_pid": 1,
+        "ancestors": [],
+    }
+    with pytest.raises(store.ImpersonationError, match="no-anchor"):
+        store.verify_caller(_lease(tree), unrelated_caller())
+
+
+def test_same_pid_with_a_drifted_start_time_does_not_attest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_liveness(monkeypatch)
+    lease = _lease(recorded_tree())
+    caller = attested_caller(lease)
+    for node in caller["ancestors"]:
+        if node["pid"] == 4240:
+            node["created_at"] = 998.0 + 60.0
+    with pytest.raises(store.ImpersonationError, match="chain-mismatch"):
+        store.verify_caller(lease, caller)
+
+
+def _agent(db_conn: Any) -> RuntimeIncarnation:
+    agent_id = create_agent(db_conn)
+    owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())
+    db_conn.execute(
+        "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner,"
+        "runtime_kind,lease_expires_at) VALUES(%s,'idling',%s,%s,%s,'process',"
+        "clock_timestamp()+interval '10 minutes')",
+        (agent_id, machine_name(), owner.generation, owner.owner),
+    )
+    db_conn.commit()
+    return owner
+
+
+def _active(owner: RuntimeIncarnation, tree: dict[str, Any]) -> dict[str, Any]:
+    lease = leases.request(
+        owner.agent_id,
+        caller=CallerIdentity(kind="external_agent", subject="codex"),
+        ttl_seconds=300,
+        reason="Attestation coverage",
+        process_metadata=tree,
+        relay_provider="codex",
+        relay_thread_id=str(uuid4()),
+    )
+    leases.accept(lease["id"], owner.agent_id, owner, "Handoff brief")
+    leases.activate(lease["id"], owner)
+    return lease
+
+
+def test_generation_crossing_is_refused(db_conn: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A caller attested for one generation cannot drive another's session id."""
+    first = _active(_agent(db_conn), recorded_tree())
+    second_tree = recorded_tree()
+    second_tree["ancestors"] = [
+        {
+            "pid": 4341,
+            "name": "zsh",
+            "executable": "/bin/zsh",
+            "created_at": 1999.0,
+            "parent_pid": 4340,
+        },
+        {
+            "pid": 4340,
+            "name": "codex",
+            "executable": "/opt/codex",
+            "created_at": 1998.0,
+            "parent_pid": 1,
+        },
+    ]
+    second = _active(_agent(db_conn), second_tree)
+    _stub_liveness(monkeypatch)
+    _stub_birth(monkeypatch, 1998.0)
+    with pytest.raises(store.ImpersonationError, match="chain-mismatch"):
+        leases.require_active(second["id"], attested_caller(first))
+
+
+def test_terminal_sessions_report_stale_without_attestation(db_conn: Any) -> None:
+    """A terminal lease is classified before any anchor work: native/TTL recovery
+    never depends on the dead controller tree (the second, incarnation-held gate)."""
+    owner = _agent(db_conn)
+    lease = _active(owner, recorded_tree())
+    leases.release(lease["id"], attested_caller(lease), "Done")
+    with pytest.raises(leases.ImpersonationError, match="stale-session"):
+        leases.require_active(lease["id"], unrelated_caller())

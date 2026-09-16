@@ -17,6 +17,7 @@ from shared.db import create_agent, insert_inbound_message
 from shared.impersonation_events import consume_events
 from shared.machine import machine_name
 from shared.runtime_incarnation import RuntimeIncarnation
+from tests.impersonation_support import attested_caller, recorded_tree
 
 
 @pytest.fixture
@@ -40,14 +41,13 @@ def start(owner: RuntimeIncarnation, *, active: bool = True) -> dict[str, Any]:
         executor_name="Codex: thoughtful squirrel",
         provider="codex",
         thread_id=str(uuid4()),
-        process_metadata={"name": "python", "pid": 123},
+        process_metadata=recorded_tree(),
     )
     lease = history.resolve(owner.agent_id, result["session_id"])
-    lease["token"] = result["token"]
     if active:
         leases.accept(str(lease["id"]), owner.agent_id, owner, "Continue the login fix")
         leases.activate(str(lease["id"]), owner)
-        lease = history.resolve(owner.agent_id, result["session_id"]) | {"token": result["token"]}
+        lease = history.resolve(owner.agent_id, result["session_id"])
     return lease
 
 
@@ -56,7 +56,7 @@ def test_numbers_are_agent_scoped_and_permanent(
 ) -> None:
     first = start(owner)
     assert first["session_id"] == 0
-    leases.release(str(first["id"]), first["token"], "First result")
+    leases.release(str(first["id"]), attested_caller(first), "First result")
     with pytest.raises(leases.ImpersonationError, match="already has"):
         start(owner)
     # Simulate the native checkpoint receipt, then a second session.
@@ -112,19 +112,23 @@ def test_say_ack_and_file_preserve_all_message_bodies(
     lease = start(owner)
     inbound = insert_inbound_message(db_conn, owner.agent_id, "Please fix login", source="user")
     db_conn.commit()
-    read = leases.inbox(str(lease["id"]), lease["token"])
+    read = leases.inbox(str(lease["id"]), attested_caller(lease))
     assert [row["id"] for row in read] == [inbound]
-    leases.ack(str(lease["id"]), lease["token"], [inbound])
+    leases.ack(str(lease["id"]), attested_caller(lease), [inbound])
     first = history.say(
-        str(lease["id"]), lease["token"], "I found the cause", message_key="progress-1"
+        str(lease["id"]), attested_caller(lease), "I found the cause", message_key="progress-1"
     )
     assert (
-        history.say(str(lease["id"]), lease["token"], "I found the cause", message_key="progress-1")
+        history.say(
+            str(lease["id"]), attested_caller(lease), "I found the cause", message_key="progress-1"
+        )
         == first
     )
     with pytest.raises(ValueError, match="different content"):
-        history.say(str(lease["id"]), lease["token"], "Different reply", message_key="progress-1")
-    leases.release(str(lease["id"]), lease["token"], "Login fixed; tests passed")
+        history.say(
+            str(lease["id"]), attested_caller(lease), "Different reply", message_key="progress-1"
+        )
+    leases.release(str(lease["id"]), attested_caller(lease), "Login fixed; tests passed")
     lease = history.resolve(owner.agent_id, 0)
     document, path = history.export_handoff(lease, db_conn)
     assert Path(path) == tmp_path / "impersonation" / "0.json"
@@ -136,7 +140,7 @@ def test_say_ack_and_file_preserve_all_message_bodies(
     assert document["messages"][0]["acknowledged"] is True
     assert document["statistics"]["outgoing_messages"] == 1
     assert document["session"]["executor_name"] == "Codex: thoughtful squirrel"
-    assert document["session"]["process_metadata"]["name"] == "python"
+    assert document["session"]["process_metadata"]["name"] == "python3.12"
     with (
         db_conn.transaction(force_rollback=True),
         pytest.raises(psycopg.errors.RaiseException, match="permanent"),
@@ -173,7 +177,7 @@ def test_consumer_retains_sdk_facts_without_sampling_or_reinstrumentation(
     assert consume_events(owner.agent_id, 0, events) == 0
     with pytest.raises(ValueError, match="another agent"):
         consume_events(owner.agent_id, 0, [{**events[0], "agent_id": owner.agent_id + 1}])
-    leases.release(str(lease["id"]), lease["token"], "Created task 99")
+    leases.release(str(lease["id"]), attested_caller(lease), "Created task 99")
     result = history.build_document(
         history.resolve(owner.agent_id, 0), history.entries(str(lease["id"]), db_conn)
     )
@@ -194,7 +198,9 @@ def test_timeline_pages_inside_a_session_using_existing_numeric_cursors(
     lease = start(owner)
     marker = start_marker(lease)
     for number in range(15):
-        history.say(str(lease["id"]), lease["token"], f"Message {number}", message_key=str(number))
+        history.say(
+            str(lease["id"]), attested_caller(lease), f"Message {number}", message_key=str(number)
+        )
     items, count = build_timeline_items([marker], [])
     page = hydrate(items, owner.agent_id, limit=5)
     assert count == 1
@@ -238,7 +244,7 @@ def test_late_events_refresh_handoff_after_native_receipt_and_manifest_closes_re
         "category": "telemetry",
         "attributes": {"fn": "ava.files.read", "duration": 0.1},
     }
-    leases.release(str(lease["id"]), lease["token"], "Done")
+    leases.release(str(lease["id"]), attested_caller(lease), "Done")
     lease = history.resolve(owner.agent_id, 0)
     visible: list[dict[str, Any]] = []
     reads: list[dict[str, Any]] = []
@@ -282,9 +288,9 @@ def test_message_retry_does_not_replace_newer_preview(
     db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation
 ) -> None:
     lease = start(owner)
-    history.say(str(lease["id"]), lease["token"], "First", message_key="first")
-    history.say(str(lease["id"]), lease["token"], "Second", message_key="second")
-    history.say(str(lease["id"]), lease["token"], "First", message_key="first")
+    history.say(str(lease["id"]), attested_caller(lease), "First", message_key="first")
+    history.say(str(lease["id"]), attested_caller(lease), "Second", message_key="second")
+    history.say(str(lease["id"]), attested_caller(lease), "First", message_key="first")
     assert db_conn.execute(
         "SELECT last_message_text FROM agents_meta WHERE id=%s", (owner.agent_id,)
     ).fetchone() == ("Second",)
@@ -383,8 +389,8 @@ def test_inbound_attachments_survive_timeline_and_handoff(
     ).fetchone()
     assert inserted is not None
     db_conn.commit()
-    leases.inbox(str(lease["id"]), lease["token"])
-    leases.ack(str(lease["id"]), lease["token"], [inserted[0]])
+    leases.inbox(str(lease["id"]), attested_caller(lease))
+    leases.ack(str(lease["id"]), attested_caller(lease), [inserted[0]])
     items, _ = build_timeline_items([start_marker(lease)], [])
     projected = hydrate(items, owner.agent_id, limit=5)
     image_item = next(item for item in projected if item.inbound_id == inserted[0])
