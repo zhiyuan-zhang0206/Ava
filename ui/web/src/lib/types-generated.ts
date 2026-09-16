@@ -6877,6 +6877,35 @@ export interface components {
             ok: boolean;
         };
         /**
+         * RunTimelineLayerNode
+         * @description One narrative-layer node (depth 0 = overview, 1 = stage, 2 = block).
+         *
+         *     Nodes form a tree via ``parent``; ``summary`` is the node's single text
+         *     (the hierarchy-understanding rule: humans and agents read the same text).
+         *     Present only when hierarchical summaries exist for the window; turn/call
+         *     detail stays on ``rows`` (depth 3/4 of the same naming).
+         */
+        RunTimelineLayerNode: {
+            /** Id */
+            id: string;
+            /** Depth */
+            depth: number;
+            /** Parent */
+            parent: string | null;
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+            /** Summary */
+            summary: string;
+        };
+        /**
          * RunTimelineLlm
          * @description Absolute LLM usage for a turn or an aggregated time bucket.
          */
@@ -6940,6 +6969,9 @@ export interface components {
             /** Events */
             events: components["schemas"]["RunTimelineEvent"][];
             boundaries: components["schemas"]["RunTimelineBoundaries"];
+            /** Layers */
+            layers?: components["schemas"]["RunTimelineLayerNode"][] | null;
+            summary?: components["schemas"]["RunTimelineSummary"] | null;
         };
         /**
          * RunTimelineRow
@@ -6975,6 +7007,14 @@ export interface components {
             anomalies: string[];
             /** Tags */
             tags: string[];
+        };
+        /**
+         * RunTimelineSummary
+         * @description The raw-context summary — shown when a run has no hierarchical layers.
+         */
+        RunTimelineSummary: {
+            /** Text */
+            text: string;
         };
         /**
          * RunTimelineWindow

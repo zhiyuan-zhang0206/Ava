@@ -13013,6 +13013,54 @@
         "title": "RunTimelineExec",
         "description": "Tool and outcome of one execution event; exec events have no duration."
       },
+      "RunTimelineLayerNode": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "depth": {
+            "type": "integer",
+            "title": "Depth"
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "End"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "depth",
+          "parent",
+          "start",
+          "end",
+          "summary"
+        ],
+        "title": "RunTimelineLayerNode",
+        "description": "One narrative-layer node (depth 0 = overview, 1 = stage, 2 = block).\n\nNodes form a tree via ``parent``; ``summary`` is the node's single text\n(the hierarchy-understanding rule: humans and agents read the same text).\nPresent only when hierarchical summaries exist for the window; turn/call\ndetail stays on ``rows`` (depth 3/4 of the same naming)."
+      },
       "RunTimelineLlm": {
         "properties": {
           "calls": {
@@ -13161,6 +13209,30 @@
           },
           "boundaries": {
             "$ref": "#/components/schemas/RunTimelineBoundaries"
+          },
+          "layers": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RunTimelineLayerNode"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Layers"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunTimelineSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -13281,6 +13353,20 @@
         ],
         "title": "RunTimelineRow",
         "description": "A completed turn, or a bucket made from contiguous completed turns."
+      },
+      "RunTimelineSummary": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "title": "RunTimelineSummary",
+        "description": "The raw-context summary — shown when a run has no hierarchical layers."
       },
       "RunTimelineWindow": {
         "properties": {

@@ -67,4 +67,39 @@ describe("buildTimelineLayout", () => {
     expect(layout.connectors[1].source).toEqual(layout.events[1].source);
     expect(layout.connectors[1].destination).toEqual(layout.events[1].destination);
   });
+
+  it("lays narrative-layer rows between the event rail and the turn track when layers exist", () => {
+    const layout = buildTimelineLayout({
+      width: 1000,
+      window: { from: "2026-09-02T08:00:00Z", to: "2026-09-02T09:00:00Z" },
+      rows: [row],
+      events: [],
+      layers: [
+        { id: "L0#0", depth: 0, parent: null, start: "2026-09-02T08:00:00Z", end: "2026-09-02T09:00:00Z", summary: "overview" },
+        { id: "L1#0", depth: 1, parent: "L0#0", start: "2026-09-02T08:00:00Z", end: "2026-09-02T08:30:00Z", summary: "stage a" },
+        { id: "L1#1", depth: 1, parent: "L0#0", start: "2026-09-02T08:30:00Z", end: "2026-09-02T09:00:00Z", summary: "stage b" },
+      ],
+    });
+
+    expect(layout.layerRows).toHaveLength(2);
+    expect(layout.layerRows[0]).toMatchObject({ depth: 0, top: 62, height: 22 });
+    expect(layout.layerRows[0].blocks).toEqual([{ nodeIndex: 0, left: 32, width: 936 }]);
+    expect(layout.layerRows[1].blocks).toEqual([
+      { nodeIndex: 1, left: 32, width: 468 },
+      { nodeIndex: 2, left: 500, width: 468 },
+    ]);
+    expect(layout.track.top).toBe(136);
+  });
+
+  it("keeps the turn track position unchanged when no layers are present", () => {
+    const layout = buildTimelineLayout({
+      width: 1000,
+      window: { from: "2026-09-02T08:00:00Z", to: "2026-09-02T09:00:00Z" },
+      rows: [row],
+      events: [],
+    });
+
+    expect(layout.layerRows).toEqual([]);
+    expect(layout.track.top).toBe(62);
+  });
 });

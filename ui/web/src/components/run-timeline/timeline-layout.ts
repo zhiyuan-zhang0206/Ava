@@ -11,12 +11,15 @@ const EVENT_CHIP_GAP = 8;
 const TRACK_HEIGHT = 36;
 const TRACK_GAP = 24;
 const MIN_TURN_WIDTH = 6;
+const LAYER_ROW_HEIGHT = 22;
+const LAYER_ROW_GAP = 6;
 
 interface TimelineLayoutInput {
   width: number;
   window: RunTimelineResponse["window"];
   rows: RunTimelineResponse["rows"];
   events: RunTimelineResponse["events"];
+  layers?: RunTimelineResponse["layers"];
 }
 
 export interface TimelinePoint {
@@ -30,6 +33,19 @@ export interface TimelineTurnLayout {
   projectedEndX: number;
   left: number;
   width: number;
+}
+
+export interface TimelineLayerBlockLayout {
+  nodeIndex: number;
+  left: number;
+  width: number;
+}
+
+export interface TimelineLayerRowLayout {
+  depth: number;
+  top: number;
+  height: number;
+  blocks: TimelineLayerBlockLayout[];
 }
 
 export interface TimelineTickLayout {
@@ -136,7 +152,29 @@ export function buildTimelineLayout(input: TimelineLayoutInput) {
     laneRightEdges.length === 0
       ? AXIS_Y
       : EVENT_CHIP_TOP + (laneRightEdges.length - 1) * EVENT_LANE_PITCH + EVENT_CHIP_HEIGHT;
-  const trackTop = eventRailBottom + TRACK_GAP;
+  const layerNodes = input.layers ?? [];
+  const layerDepths = [...new Set(layerNodes.map((node) => node.depth))].sort((a, b) => a - b);
+  const layersTop = eventRailBottom + TRACK_GAP;
+  const layerRows: TimelineLayerRowLayout[] = layerDepths.map((depth, rowIndex) => {
+    const nodes = layerNodes
+      .map((node, nodeIndex) => ({ node, nodeIndex }))
+      .filter(({ node }) => node.depth === depth)
+      .sort((a, b) => Date.parse(a.node.start) - Date.parse(b.node.start));
+    const top = layersTop + rowIndex * (LAYER_ROW_HEIGHT + LAYER_ROW_GAP);
+    const blocks = nodes.map(({ node, nodeIndex }) => {
+      const startX = projectedX(node.start, input.window, plot.left, plot.width);
+      const endX = projectedX(node.end, input.window, plot.left, plot.width);
+      const left = Math.min(startX, plot.right - MIN_TURN_WIDTH);
+      const width = Math.min(plot.right - left, Math.max(MIN_TURN_WIDTH, endX - startX));
+      return { nodeIndex, left, width };
+    });
+    return { depth, top, height: LAYER_ROW_HEIGHT, blocks };
+  });
+  const layersBottom =
+    layerDepths.length === 0
+      ? eventRailBottom
+      : layersTop + layerDepths.length * (LAYER_ROW_HEIGHT + LAYER_ROW_GAP) - LAYER_ROW_GAP;
+  const trackTop = layersBottom + TRACK_GAP;
 
   return {
     width,
@@ -145,6 +183,7 @@ export function buildTimelineLayout(input: TimelineLayoutInput) {
     plot,
     ticks,
     track: { top: trackTop, height: TRACK_HEIGHT },
+    layerRows,
     turns,
     events,
     connectors,

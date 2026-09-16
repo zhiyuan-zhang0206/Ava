@@ -25,6 +25,7 @@ import { cn } from "@/lib/utils";
 const ZOOM_WINDOWS = [24, 12, 6, 1, 0.5] as const;
 const RUN_TIMELINE_WINDOW_HOURS_SETTING = "display.run_timeline_window_hours";
 const RUN_TIMELINE_WINDOW_HOURS_DEFAULT = 0.5;
+const RUN_TIMELINE_SUMMARY_VISIBLE_SETTING = "display.run_timeline_summary_visible";
 
 function runTimelineWindowHours(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0
@@ -66,6 +67,10 @@ function chartLabels(t: ReturnType<typeof useTranslations<"runTimeline">>): RunT
     noExecutions: t("noExecutions"),
     closeDetails: t("closeDetails"),
     eventDetails: t("eventDetails"),
+    layerDetails: t("layerDetails"),
+    layerSummary: t("layerSummary"),
+    showMore: t("showMore"),
+    showLess: t("showLess"),
     kind: t("kind"),
     timestamp: t("timestamp"),
     detail: t("detail"),
@@ -86,6 +91,7 @@ export default function RunTimelinePage({
   const configuredWindowHours = runTimelineWindowHours(
     settings[RUN_TIMELINE_WINDOW_HOURS_SETTING],
   );
+  const showTimelineSummaries = settings[RUN_TIMELINE_SUMMARY_VISIBLE_SETTING] !== false;
   const initialWindowOverride = useMemo<TimelineWindowOverride | null>(() => {
     if (settingsLoading || typeof window === "undefined") return null;
     const now = new Date();
@@ -398,6 +404,7 @@ export default function RunTimelinePage({
                 labels={chartLabels(t)}
                 onDrillBucket={drillBucket}
                 onZoomWindow={selectWindow}
+                showSummaries={showTimelineSummaries}
               />
             </>
           ) : timelinePending ? (

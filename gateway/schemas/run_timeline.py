@@ -88,6 +88,33 @@ class RunTimelineEvent(BaseModel):
     label: str | None
 
 
+class RunTimelineSummary(BaseModel):
+    """The raw-context summary — shown when a run has no hierarchical layers."""
+
+    model_config = ConfigDict(frozen=True)
+
+    text: str
+
+
+class RunTimelineLayerNode(BaseModel):
+    """One narrative-layer node (depth 0 = overview, 1 = stage, 2 = block).
+
+    Nodes form a tree via ``parent``; ``summary`` is the node's single text
+    (the hierarchy-understanding rule: humans and agents read the same text).
+    Present only when hierarchical summaries exist for the window; turn/call
+    detail stays on ``rows`` (depth 3/4 of the same naming).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    depth: int
+    parent: str | None
+    start: datetime
+    end: datetime
+    summary: str
+
+
 class RunTimelineBoundaries(BaseModel):
     """Turn rows that anchor the initialized-context-to-compact session."""
 
@@ -110,3 +137,6 @@ class RunTimelineResponse(BaseModel):
     rows: list[RunTimelineRow]
     events: list[RunTimelineEvent]
     boundaries: RunTimelineBoundaries
+    # Optional narrative layer — None when no summaries exist for the window.
+    layers: list[RunTimelineLayerNode] | None = None
+    summary: RunTimelineSummary | None = None
