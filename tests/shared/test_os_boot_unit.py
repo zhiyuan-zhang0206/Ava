@@ -459,12 +459,22 @@ def test_status_does_not_compare_a_foreign_home(
 
     monkeypatch.setattr(os_boot_unit, "_crontab_has_autostart", crontab_absent)
 
+    other_script = os_boot_unit.script_path(other)
+    other_script.parent.mkdir(parents=True)
+    other_script.write_text(render_script(foreign))
+
     rows = dict(status(other))
     assert rows["unit content"] == "not compared (not this process's home)"
+    assert rows["script content"] == "not compared (not this process's home)"
 
-    # The own home still compares (and matches a unit this code rendered).
+    # The own home still compares (and matches the renders this code produces).
     (units / unit_name(ctx.home)).write_text(render_unit(ctx))
-    assert dict(status(ctx.home))["unit content"] == "matches rendered"
+    own_script = os_boot_unit.script_path(ctx.home)
+    own_script.parent.mkdir(parents=True, exist_ok=True)
+    own_script.write_text(render_script(ctx))
+    own_rows = dict(status(ctx.home))
+    assert own_rows["unit content"] == "matches rendered"
+    assert own_rows["script content"] == "matches rendered"
 
 
 def test_paths_and_names_are_home_scoped(tmp_path: Path) -> None:

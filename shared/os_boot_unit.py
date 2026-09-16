@@ -478,9 +478,10 @@ def uninstall(home: Path | None = None) -> list[str]:
 def status(home: Path | None = None) -> list[tuple[str, str]]:
     """Read-only operator report: unit, script, proxy wait, cron entry, last state.
 
-    `unit content` compares only for this process's own home: a foreign home
-    renders from its own checkout/user by construction, so comparing it
-    against this process's context would always read as "differs".
+    `unit content` / `script content` compare only for this process's own home:
+    a foreign home renders from its own checkout/user by construction, so
+    comparing it against this process's context would always read as
+    "differs".
     """
     home = home if home is not None else ava_home()
     ctx = _default_context()
@@ -512,12 +513,15 @@ def status(home: Path | None = None) -> list[tuple[str, str]]:
     script_text = _read_text(script)
     rows.append(("script", f"{script} ({'present' if script_text else 'missing'})"))
     if script_text is not None:
-        rows.append(
-            (
-                "script content",
-                "matches rendered" if script_text == render_script(ctx) else "differs",
+        if home == ctx.home:
+            rows.append(
+                (
+                    "script content",
+                    "matches rendered" if script_text == render_script(ctx) else "differs",
+                )
             )
-        )
+        else:
+            rows.append(("script content", "not compared (not this process's home)"))
 
     rows.append(("proxy wait", proxy_wait or "disabled"))
 
