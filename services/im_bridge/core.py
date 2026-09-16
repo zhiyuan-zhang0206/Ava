@@ -340,9 +340,11 @@ class IMBridgeCore(SpawnMenuMixin):
         self._ensure_subscription(state, prev_agent=prev)
         # Raw timeline mixes dialog items with non-dialog ones (agent_updated,
         # task events...), so fetch a wider window and keep the most recent
-        # 5 dialog messages (user feedback: replay showed only 2).
-        items = await self.gateway.get_timeline(target["agent_id"], limit=20)
-        msgs = [it for it in items if _is_dialog_item(it)][-5:]
+        # `replay` dialog messages (user feedback: replay showed only 2).
+        window = settings.services.im_bridge_timeline_window
+        replay = settings.services.im_bridge_replay_messages
+        items = await self.gateway.get_timeline(target["agent_id"], limit=window)
+        msgs = [it for it in items if _is_dialog_item(it)][-replay:]
         replies: list[Reply] = [
             Reply(
                 copy.SWITCHED_TO.format(
