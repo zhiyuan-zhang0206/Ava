@@ -17,7 +17,7 @@ The session `name` and free `executor_name` are separate from the CLI's observed
 process metadata (PID, name, executable, birth time and ancestors). `relay_provider`
 selects transport; no name or process observation proves a provider's identity.
 The former UUID remains a private compatibility reference for existing leases,
-checkpoint receipts and plugin journals. Public commands, file paths and badges
+checkpoint receipts and plugin journals. Public commands and file paths
 use the scoped integer. Credentials are returned once and stored as hashes.
 
 ## Ownership and return
@@ -68,7 +68,8 @@ The existing timeline endpoint hydrates the checkpoint's session anchor with
 bounded pages of retained message entries. Numeric block cursors preserve ordering
 inside a session and historical compact segments. The frontend uses its existing
 timeline query and merge machinery; the refresh event does not carry another
-message store. It displays the executor and session badge on the normal cards.
+message store. The card header does not display an executor or session badge;
+the impersonation metadata stays on the timeline item.
 
 ## Structured handoff
 
