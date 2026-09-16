@@ -16,7 +16,9 @@ The coverage result drives the response's fallback shape (the three states):
 
 `StoredNode.depth` is the ENGINE level (1 = the finest, leaves); the wire
 `depth` is its mirror (`top - level`), so the field name means opposite things
-in the two layers — hence the local `level` naming below.
+in the two layers — hence the local `level` naming below. Storage guarantees
+at most one cell per same-level region (the write side reconciles re-cuts
+away), so the selection never has to de-duplicate.
 """
 
 from __future__ import annotations

@@ -53,7 +53,11 @@ merge are the layers built on top.
 - **Deterministic**: tree = f(unit stream, trigger positions, params) — the
   same input yields an identical tree (structure, ids, spans); rendering is
   pure, so identical input always produces identical generation requests.
-- **Append-only**: sealed nodes never change; only the pending carry moves.
+- **Append-only**: compact-sealed cells never change across rebuilds — a
+  rebuild reproduces them byte-identically and never deletes them. The
+  provisional tail re-cuts as history grows; its superseded rows are
+  reconciled away (`store.write_tree`) so storage always mirrors the
+  latest partition, while rows a compact-driven pass left pending stay.
 - **Budget**: a node's text must fit its budget; over-budget responses get
   bounded compression and a still-over node fails instead of being written.
 - **Reuse by content**: `input_hash` covers the engine and prompt versions, so

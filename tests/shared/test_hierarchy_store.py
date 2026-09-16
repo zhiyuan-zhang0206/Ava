@@ -21,6 +21,7 @@ AGENT_C = 990_128_903  # reuse-cache test
 AGENT_D = 990_128_904  # window-filter test
 AGENT_E = 990_128_905  # re-cut reconciliation test
 AGENT_F = 990_128_906  # pending stretch across a compact-only pass
+AGENT_G = 990_128_907  # same-version replay identity
 
 # 2026-09-12 12:00-12:05 Beijing == 04:00-04:05 UTC.
 TS0, TS1 = "2026-09-12T12:00:00+08:00", "2026-09-12T12:05:00+08:00"
@@ -144,3 +145,25 @@ def test_unreproduced_rows_outside_the_recut_survive() -> None:
 
     spans = {(r.depth, r.span_start, r.span_end) for r in load_window_nodes(AGENT_F, T0, T1)}
     assert spans == {(1, 0, 30), (1, 31, 40)}
+
+
+def test_same_version_replay_reproduces_sealed_rows_identically() -> None:
+    """The append-only anchor: a rebuild over unchanged history reproduces the
+    sealed rows identically — same ids, same contents (only updated_at ticks)."""
+    nodes = [
+        node("L1#0", span=(0, 30), text="a", input_text="i0"),
+        node("L1#1", span=(31, 40), text="b", input_text="i1"),
+    ]
+    write_tree(AGENT_G, nodes, model="m")
+    first = {
+        (r.id, r.depth, r.span_start, r.span_end, r.text, r.parent_id)
+        for r in load_window_nodes(AGENT_G, T0, T1)
+    }
+
+    write_tree(AGENT_G, nodes, model="m")
+    second = {
+        (r.id, r.depth, r.span_start, r.span_end, r.text, r.parent_id)
+        for r in load_window_nodes(AGENT_G, T0, T1)
+    }
+
+    assert second == first

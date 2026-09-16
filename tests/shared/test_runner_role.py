@@ -536,6 +536,10 @@ def test_runner_grant_matrix(runner_db: str) -> None:  # noqa: PLR0915 -- one gr
             "INSERT INTO agent_tasks (title, description, created_by) VALUES ('t1', 'd', '123')"
         )
         conn.execute("UPDATE agent_tasks SET status = 'done' WHERE title = 't1'")
+        # DELETE stays table-scoped: the understanding-node reconciliation
+        # added one DELETE surface, not a blanket delete on writable tables.
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            conn.execute("DELETE FROM agent_tasks WHERE title = 't1'")
         # ava.watcher (INSERT + UPDATE + DELETE — the full watcher-child
         # lifecycle; see the helper)
         _exercise_watcher_grants(conn, agent_id)

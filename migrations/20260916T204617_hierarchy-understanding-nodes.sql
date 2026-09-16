@@ -35,8 +35,9 @@ CREATE TABLE understanding_nodes (
     engine_version TEXT NOT NULL,
     prompt_version TEXT NOT NULL,
     schema_version INTEGER NOT NULL,
-    -- The tree is append-only: every written node is final (its text is a pure
-    -- function of its input hash). Kept explicit so a future
+    -- Every written node is final (its text is a pure function of its input
+    -- hash); a rebuild reconciles superseded provisional cuts away rather
+    -- than rewriting them (store.write_tree). Kept explicit so a future
     -- structure-ahead-of-text pass can record provisional rows; today every
     -- row is TRUE.
     sealed BOOLEAN NOT NULL DEFAULT TRUE,

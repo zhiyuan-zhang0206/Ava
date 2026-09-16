@@ -1752,7 +1752,9 @@ CREATE TABLE understanding_nodes (
     engine_version TEXT NOT NULL,
     prompt_version TEXT NOT NULL,
     schema_version INTEGER NOT NULL,
-    -- Append-only: every written node is final. Kept explicit for a future
+    -- Every written node is final (its text is a pure function of its input
+    -- hash); a rebuild reconciles superseded provisional cuts away rather
+    -- than rewriting them (store.write_tree). Kept explicit for a future
     -- structure-ahead-of-text pass; today every row is TRUE.
     sealed BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -1772,8 +1774,9 @@ COMMENT ON TABLE understanding_nodes IS
 -- the operational first-run / ad-hoc regeneration path executes from the
 -- agent/runner side (task #3704) — SELECT, INSERT, UPDATE, and DELETE for the
 -- write-side reconciliation that removes rows of a superseded earlier cut
--- when a rebuild re-cuts the same stretch. Gated on the role's existence: fresh bootstrap applies this
--- baseline before install birth creates ava_runner, and
+-- when a rebuild re-cuts the same stretch. Gated on the role's existence:
+-- fresh bootstrap applies this baseline before install birth creates
+-- ava_runner, and
 -- shared/cluster/provision.py's ensure_runner_role grants the same surface at
 -- birth.
 DO $$
