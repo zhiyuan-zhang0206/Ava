@@ -123,6 +123,10 @@ the final exit checkpoint. Only the parked status changes; historical leases,
 identity, messages, checkpoints and lifecycle acknowledgements are preserved.
 An expired lease alone, unfinished lifecycle/graph work or an uncertain
 checkpoint still refuses; queued ordinary messages remain available for resume.
+An unfinished agent lifecycle command (a competing restart/terminate) is
+bounded-waited before refusing — preparation retries under the same row locks
+until it resolves, then proceeds or aborts (task #3591); maintenance-authored
+commands still refuse immediately.
 
 ## Explicit maintenance steps
 
