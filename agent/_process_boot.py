@@ -3,27 +3,25 @@
 The daemon initializes tracing, materializes cluster skills, and loads external
 plugins once per process. Each agent receives its workspace, desktop permission
 notice, and model under its bound configuration. SDK restrictions are applied
-inside the disposable execution child, whose module state is isolated.
+inside the disposable execution child, whose module state is isolated. The
+heavy boot imports (the chat model, `.startup`) stay function-level in
+`boot_agent_scope` so that importing this module — which the exec child does
+for the SDK helpers — does not enter the LM stack (startup-path laziness,
+task #3585).
 """
 
 import asyncio
 import os
 from pathlib import Path
-
-from langchain_core.language_models.chat_models import BaseChatModel
+from typing import Any
 
 import ava
 from ava.shell import sessions
 from shared.config.turn_view import turn_settings
-from shared.lm.factory import build_chat_model
 from shared.log import logger
 from shared.paths import workspace_dir
 from shared.watcher import TEMPLATE_VERSION
 from shared.watcher_registry import watcher_rows
-
-from .startup import (
-    _notify_desktop_permissions_at_startup,
-)
 
 
 def _apply_per_agent_sdk_disable() -> None:
@@ -183,7 +181,10 @@ def load_process_extensions() -> None:
     ava._extend.scan_and_load(enabled=enabled)
 
 
-async def boot_agent_scope(agent_id: int) -> BaseChatModel:
+# Return type is Any on purpose: the chat-model class must stay out of module
+# scope (the exec child imports this module for the SDK helpers), and Pyright
+# cannot resolve an annotation the module never imports.
+async def boot_agent_scope(agent_id: int) -> Any:
     """Agent-scope boot: workspace pre-create, screen-capture notice, chat model.
 
     Everything here is a fact about ONE agent, so the hosted runner runs it per
@@ -213,7 +214,11 @@ async def boot_agent_scope(agent_id: int) -> BaseChatModel:
     # When converge detected an unavailable desktop permission, notify once
     # (idempotent -- clears claimed status files after). Must run after the
     # SDK/plugin load so ava.ui.notify is available.
+    from .startup import _notify_desktop_permissions_at_startup
+
     await _notify_desktop_permissions_at_startup()
+    from shared.lm.factory import build_chat_model
+
     return build_chat_model(turn_settings.lm.llm_model)
 
 
