@@ -73,7 +73,7 @@ def test_timeline_preserves_existing_payload(
     assert json.loads(capsys.readouterr().out) == payload
 
 
-def test_request_uses_external_identity_and_returns_token_once(
+def test_request_uses_external_identity_without_delivering_a_credential(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     seen: dict[str, Any] = {}
@@ -82,7 +82,6 @@ def test_request_uses_external_identity_and_returns_token_once(
         seen.update({"agent_id": agent_id, **kwargs})
         return {
             "id": "lease",
-            "token": "new-credential",
             "expires_at": datetime(2026, 9, 5, tzinfo=UTC),
         }
 
@@ -115,16 +114,15 @@ def test_request_uses_external_identity_and_returns_token_once(
     assert seen["thread_id"] == "thread-1"
     assert seen["codex_remote"] is None
     output = capsys.readouterr()
-    assert json.loads(output.out)["token"] == "new-credential"
+    assert "token" not in json.loads(output.out)
     assert "starts the codex relay automatically" in output.err
-    assert "new-credential" not in output.err
 
 
 def test_claude_request_reports_the_relay_handoff(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     def request(agent_id: int, **kwargs: Any) -> dict[str, Any]:
-        return {"id": "lease", "token": "controller-token", "relay_token": "relay-token"}
+        return {"id": "lease", "relay_token": "relay-token"}
 
     monkeypatch.setattr(sessions, "request", request)
     assert (
@@ -146,7 +144,6 @@ def test_claude_request_reports_the_relay_handoff(
     output = capsys.readouterr()
     assert json.loads(output.out)["relay_token"] == "relay-token"
     assert "AVA_IMPERSONATION_RELAY_TOKEN" in output.err
-    assert "controller-token" not in output.err
     assert "relay-token" not in output.err
 
 
@@ -177,37 +174,44 @@ def test_relay_token_channels(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_ack_uses_explicit_processed_ids_only(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    seen: list[tuple[str, str, list[int]]] = []
+    seen: list[tuple[str, dict[str, Any], list[int]]] = []
 
-    def ack(lease: str, token: str, ids: list[int]) -> None:
-        seen.append((lease, token, ids))
+    def ack(lease: str, attesting: dict[str, Any], ids: list[int]) -> None:
+        seen.append((lease, attesting, ids))
 
     monkeypatch.setattr(
         sessions,
         "private_id",
         _private_id,
     )
-    monkeypatch.setenv("AVA_IMPERSONATION_TOKEN", "credential")
     monkeypatch.setattr(control, "ack", ack)
     assert cli.cmd_impersonate(_args("ack", "0", "11", "13", "--agent", "405")) == 0
-    assert seen == [("lease", "credential", [11, 13])]
+    assert seen[0][0] == "lease"
+    assert seen[0][1]["pid"] > 0
+    assert seen[0][2] == [11, 13]
     assert json.loads(capsys.readouterr().out) == {"acknowledged": [11, 13]}
 
 
-def test_missing_credential_fails_without_network(
+def test_classified_attestation_refusal_fails_without_leaking_state(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.delenv("AVA_IMPERSONATION_TOKEN", raising=False)
+    from shared.impersonation import ImpersonationError
+
+    def deny(_lease: str, _caller: object) -> dict[str, Any]:
+        raise ImpersonationError("Controller caller check failed (chain-mismatch): see docs")
+
+    monkeypatch.setattr(sessions, "private_id", _private_id)
+    monkeypatch.setattr(control, "get", deny)
     assert cli.cmd_impersonate(_args("status", "0", "--agent", "405")) == 1
     output = capsys.readouterr()
     assert output.out == ""
-    assert "AVA_IMPERSONATION_TOKEN" in output.err
+    assert "chain-mismatch" in output.err
 
 
 def test_release_preserves_summary(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[str] = []
 
-    def release(_lease: str, _token: str, summary: str) -> dict[str, Any]:
+    def release(_lease: str, _caller: object, summary: str) -> dict[str, Any]:
         seen.append(summary)
         return {"status": "released"}
 
@@ -216,7 +220,6 @@ def test_release_preserves_summary(monkeypatch: pytest.MonkeyPatch) -> None:
         "private_id",
         _private_id,
     )
-    monkeypatch.setenv("AVA_IMPERSONATION_TOKEN", "credential")
     monkeypatch.setattr(control, "release", release)
     monkeypatch.setattr("shared.impersonation_history.public_session", _public_session)
     assert (

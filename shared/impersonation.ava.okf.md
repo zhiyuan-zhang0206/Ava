@@ -18,7 +18,9 @@ process metadata (PID, name, executable, birth time and ancestors). `relay_provi
 selects transport; no name or process observation proves a provider's identity.
 The former UUID remains a private compatibility reference for existing leases,
 checkpoint receipts and plugin journals. Public commands and file paths
-use the scoped integer. Credentials are returned once and stored as hashes.
+use the scoped integer. The controller holds no credential: its authority is
+the session id plus caller presence, attested against the recorded process
+tree. Relay credentials are returned once and stored as hashes.
 
 ## Ownership and return
 
@@ -36,10 +38,11 @@ Explicit renewal replaces the database deadline; attaching and relay heartbeats
 never renew. The existing TTL reaper expires abandoned sessions even when the
 runner is offline, and sends a reminder once per approaching deadline. This is
 coordination among processes already holding local cluster authority, not a
-security boundary against arbitrary shell execution. Capability, machine and
-incarnation checks still prevent accidental cross-session control.
+security boundary against arbitrary shell execution. Capability, machine,
+incarnation and caller-attestation checks still prevent accidental
+cross-session control.
 
-`ava.external.attach(session_id, agent_id=..., token=...)` loads saved state and
+`ava.external.attach(session_id, agent_id=...)` loads saved state and
 binds SDK identity in the external process. Plugin changes append ordered deltas;
 only the native graph writes checkpoints. On return it applies the journal with
 a durable lease/version receipt. It then writes the handoff file, checkpoints

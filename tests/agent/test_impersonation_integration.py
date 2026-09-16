@@ -32,6 +32,7 @@ from shared.machine import machine_name
 from shared.plugin_context import PluginContext
 from shared.runtime_incarnation import RuntimeIncarnation
 from shared.turn_identity import bind_turn_identity
+from tests.impersonation_support import attested_caller, recorded_tree
 
 
 def _relay_ready(*_args: object) -> bool:
@@ -91,6 +92,7 @@ async def _prepare_graph(
     requested = leases.request(
         agent_id,
         caller=CallerIdentity(kind="external_agent", subject="codex"),
+        process_metadata=recorded_tree(),
         reason="Do the task",
         automatic=automatic,
         name="Integration test",
@@ -179,11 +181,13 @@ async def test_consent_exec_inbox_release_and_resume(
     with bind_turn_identity(agent_id, incarnation=owner):
         first = await graph.ainvoke(reset, config, context=ctx)
         assert first["turn_idle"]
-        assert leases.get(requested["id"], requested["token"])["status"] == "accepted"
+        assert leases.get(requested["id"], attested_caller(requested))["status"] == "accepted"
         # Merely returning from exec/graph has NOT issued the external lease.
         await flush_checkpoint(saver, agent_id)
         assert await settle_checkpoint(graph, agent_id)
-        assert leases.require_active(requested["id"], requested["token"])["status"] == "active"
+        assert (
+            leases.require_active(requested["id"], attested_caller(requested))["status"] == "active"
+        )
         checkpoint = await saver.aget(config)
         assert checkpoint is not None
         assert any(
@@ -197,9 +201,9 @@ async def test_consent_exec_inbox_release_and_resume(
         second_peer = insert_inbound_message(
             db_conn, agent_id, "Peer message still pending", source="agent:99"
         )
-        inbox = leases.inbox(requested["id"], requested["token"])
+        inbox = leases.inbox(requested["id"], attested_caller(requested))
         assert {row["id"] for row in inbox} == {first_peer, second_peer}
-        leases.ack(requested["id"], requested["token"], [first_peer])
+        leases.ack(requested["id"], attested_caller(requested), [first_peer])
         await graph.ainvoke(reset, config, context=ctx)
         await flush_checkpoint(saver, agent_id)
         assert len(model_calls) == 1
@@ -210,12 +214,12 @@ async def test_consent_exec_inbox_release_and_resume(
 
         leases.merge_plugin_delta(
             requested["id"],
-            requested["token"],
+            attested_caller(requested),
             encode_plugin_delta({"handoff__total": 7}),
             expected_version=0,
         )
         if finish == "release":
-            leases.release(requested["id"], requested["token"], "External work complete")
+            leases.release(requested["id"], attested_caller(requested), "External work complete")
         else:
             db_conn.execute(
                 "UPDATE agent_impersonations SET expires_at=clock_timestamp()-interval '1 second' WHERE id=%s",
@@ -223,7 +227,7 @@ async def test_consent_exec_inbox_release_and_resume(
             )
             db_conn.commit()
             with pytest.raises(leases.ImpersonationError, match="expired"):
-                leases.require_active(requested["id"], requested["token"])
+                leases.require_active(requested["id"], attested_caller(requested))
         assert not await settle_checkpoint(graph, agent_id)
         resumed = await graph.ainvoke(reset, config, context=ctx)
         await flush_checkpoint(saver, agent_id)
@@ -260,6 +264,7 @@ async def test_replacement_host_adopts_held_agent_without_model(
     lease = leases.request(
         agent_id,
         caller=CallerIdentity(kind="external_agent", subject="codex"),
+        process_metadata=recorded_tree(),
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
     )
@@ -286,7 +291,7 @@ async def test_replacement_host_adopts_held_agent_without_model(
         (agent_id,),
     ).fetchone() == (host._owner, "idling", True)
     db_conn.commit()
-    assert leases.require_active(lease["id"], lease["token"])["status"] == "active"
+    assert leases.require_active(lease["id"], attested_caller(lease))["status"] == "active"
     assert agent_id not in {wake.agent_id for wake in await host.pending_inbound_wakes(180)}
     # The replacement incarnation inherited the accepting binding (task #2635)
     # — without it the held-controls supervision could not re-provision, and
@@ -310,7 +315,7 @@ async def test_replacement_host_adopts_held_agent_without_model(
     db_conn.commit()
     await host.run_turn(agent_id)
     expected = "expired" if control == "terminate" else "active"
-    assert leases.get(lease["id"], lease["token"])["status"] == expected
+    assert leases.get(lease["id"], attested_caller(lease))["status"] == expected
     if control == "cancel":
         assert db_conn.execute(
             "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='cancel'",
@@ -321,7 +326,7 @@ async def test_replacement_host_adopts_held_agent_without_model(
     if control == "restart":
         # The replacement logical incarnation also adopts without boot hooks.
         await host.run_turn(agent_id)
-        assert leases.require_active(lease["id"], lease["token"])["status"] == "active"
+        assert leases.require_active(lease["id"], attested_caller(lease))["status"] == "active"
     graph.ainvoke.assert_not_called()
     impersonation._relay_children.clear()
 
@@ -353,17 +358,21 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
     with bind_turn_identity(owner.agent_id, incarnation=owner):
         await graph.ainvoke(reset, config, context=ctx)
         assert not model_calls  # No native model acceptance turn.
-        assert leases.get(requested["id"], requested["token"])["status"] == "accepted"
+        assert leases.get(requested["id"], attested_caller(requested))["status"] == "accepted"
         await flush_checkpoint(saver, owner.agent_id)
         assert await settle_checkpoint(graph, owner.agent_id)
         inbound_id = insert_inbound_message(
             db_conn, owner.agent_id, "During takeover", source="user"
         )
         db_conn.commit()
-        leases.inbox(requested["id"], requested["token"])
-        leases.ack(requested["id"], requested["token"], [inbound_id])
-        history.say(requested["id"], requested["token"], "Work completed", message_key="result")
-        leases.release(requested["id"], requested["token"], "Fixed login and verified the result.")
+        leases.inbox(requested["id"], attested_caller(requested))
+        leases.ack(requested["id"], attested_caller(requested), [inbound_id])
+        history.say(
+            requested["id"], attested_caller(requested), "Work completed", message_key="result"
+        )
+        leases.release(
+            requested["id"], attested_caller(requested), "Fixed login and verified the result."
+        )
         later = insert_inbound_message(db_conn, owner.agent_id, "Next task", source="user")
         db_conn.commit()
         await graph.ainvoke(reset, config, context=ctx)
@@ -417,7 +426,7 @@ async def test_accepted_session_repairs_missing_start_checkpoint(
     assert durable is not None
     messages = durable.checkpoint["channel_values"]["messages"]
     assert [m.id for m in messages] == [f"impersonation-start:{owner.agent_id}:0"]
-    assert leases.get(requested["id"], requested["token"])["status"] == "active"
+    assert leases.get(requested["id"], attested_caller(requested))["status"] == "active"
 
 
 async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
@@ -446,7 +455,7 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
         await graph.ainvoke(reset, config, context=ctx)
         await flush_checkpoint(saver, owner.agent_id)
         assert await settle_checkpoint(graph, owner.agent_id)
-        leases.release(requested["id"], requested["token"], "Done; please continue")
+        leases.release(requested["id"], attested_caller(requested), "Done; please continue")
         lease = history.resolve(owner.agent_id, 0)
 
         async def failed_flush(*_: object) -> None:

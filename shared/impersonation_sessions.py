@@ -36,8 +36,9 @@ def request(
         relay_codex_remote=codex_remote,
         relay_batch_window_seconds=batch_window_seconds,
     )
-    credentials = {key: result[key] for key in ("token", "relay_token") if key in result}
-    return public_session(result) | credentials
+    if "relay_token" in result:
+        return public_session(result) | {"relay_token": result["relay_token"]}
+    return public_session(result)
 
 
 def list_sessions(

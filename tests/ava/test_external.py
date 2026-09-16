@@ -1,7 +1,5 @@
 """Borrowed identities and plugin state honor consent, TTL and checkpoint ownership."""
 
-# ruff: noqa: S106 — fixture-only credential
-
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
@@ -73,14 +71,17 @@ def attached_runtime(
 
     monkeypatch.setattr(external, "load_snapshot", load)
 
-    def require(lease_id: str, token: str) -> dict[str, Any]:
-        assert (lease_id, token) == ("lease", "credential")
+    def require(lease_id: str, attesting: dict[str, Any]) -> dict[str, Any]:
+        assert lease_id == "lease"
+        assert attesting == {"pid": 777}
         if lease["status"] != "active":
             raise RuntimeError("lease expired")
         return dict(lease)
 
-    def stage(lease_id: str, token: str, delta: dict[str, Any], *, expected_version: int) -> None:
-        require(lease_id, token)
+    def stage(
+        lease_id: str, attesting: dict[str, Any], delta: dict[str, Any], *, expected_version: int
+    ) -> None:
+        require(lease_id, attesting)
         if expected_version != lease["delta_version"]:
             raise RuntimeError("stale version")
         staged.append(delta)
@@ -89,6 +90,7 @@ def attached_runtime(
 
     monkeypatch.setattr(external.control, "require_active", require)
     monkeypatch.setattr(external.control, "merge_plugin_delta", stage)
+    monkeypatch.setattr(external, "process_metadata", lambda: {"pid": 777})
     return lease, snapshot, staged
 
 
@@ -97,7 +99,7 @@ def test_attach_borrows_identity_even_with_explicit_external_profile(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("AVA_CALLER_IDENTITY", '{"kind":"external_agent","subject":"codex"}')
-    with external.attach("lease", token="credential"):
+    with external.attach("lease"):
         assert _boot._external_agent_id == 405
         assert ava.self.AGENT_ID == 405
         assert _boot.require_agent_id() == 405
@@ -114,7 +116,7 @@ def test_expiry_blocks_identity_and_plugin_state_before_new_effects(
     attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
 ) -> None:
     lease, _, staged = attached_runtime
-    attachment = external.attach("lease", token="credential")
+    attachment = external.attach("lease")
     handle = state_module.PluginStateHandle(ExamplePlugin, "sample")
     lease["status"] = "expired"
     for read in (
@@ -149,7 +151,7 @@ def test_attach_requests_native_plugin_load(
         calls.append(kwargs)
 
     monkeypatch.setattr(ava, "_ensure_plugins_loaded", spy_loader)
-    with external.attach("lease", token="credential"):
+    with external.attach("lease"):
         pass
     assert calls == [{"surface": False}]
 
@@ -159,13 +161,13 @@ def test_plugin_updates_journal_once_and_next_attachment_sees_them(
 ) -> None:
     _, _, staged = attached_runtime
     handle = state_module.PluginStateHandle(ExamplePlugin, "sample")
-    with external.attach("lease", token="credential"):
+    with external.attach("lease"):
         handle.update({"seen": {"one"}})
         handle.update({"seen": {"two"}})
         assert handle.read().seen == {"native", "one", "two"}
     assert len(staged) == 1
     assert decode_plugin_delta(staged[0]) == {"sample__seen": {"one", "two"}}
-    with external.attach("lease", token="credential"):
+    with external.attach("lease"):
         assert handle.read().seen == {"native", "one", "two"}
     assert len(staged) == 1
 
@@ -174,7 +176,7 @@ def test_stale_attachment_refuses_sdk_identity_and_removes_identity_on_close(
     attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
 ) -> None:
     lease, _, _ = attached_runtime
-    attachment = external.attach("lease", token="credential")
+    attachment = external.attach("lease")
     lease["delta_version"] += 1
     with pytest.raises(RuntimeError, match="another attachment"):
         _boot.require_actor()
@@ -201,7 +203,7 @@ def test_failed_context_entry_restores_prior_binding_and_allows_next_attachment(
     ):
         prior_config = current_agent_config_pins()
         prior_plugin_config = current_plugin_config_view()
-        attachment = external.attach("lease", token="credential")
+        attachment = external.attach("lease")
         state_module.PluginStateHandle(ExamplePlugin, "sample").update({"seen": {"unflushed"}})
         if invalidated == "expiry":
             lease["status"] = "expired"
@@ -222,12 +224,13 @@ def test_failed_context_entry_restores_prior_binding_and_allows_next_attachment(
 
         next_lease = {**lease, "id": "next", "status": "active", "delta_version": 0}
 
-        def require_next(lease_id: str, token: str) -> dict[str, Any]:
-            assert (lease_id, token) == ("next", "credential")
+        def require_next(lease_id: str, attesting: dict[str, Any]) -> dict[str, Any]:
+            assert lease_id == "next"
+            assert attesting == {"pid": 777}
             return next_lease
 
         monkeypatch.setattr(external.control, "require_active", require_next)
-        with external.attach("next", token="credential"):
+        with external.attach("next"):
             assert _boot._external_agent_id == 405
             assert ava.self.AGENT_ID == 405
         assert ava.state is prior_state
@@ -245,14 +248,14 @@ def test_concurrent_constructor_fails_before_lease_lookup(
     first_lookup = Event()
     continue_lookup = Event()
 
-    def blocked_require(lease_id: str, token: str) -> dict[str, Any]:
+    def blocked_require(lease_id: str, attesting: dict[str, Any]) -> dict[str, Any]:
         if next(calls) == 0:
             first_lookup.set()
             assert continue_lookup.wait(5), "test did not release the first lease lookup"
-        return require(lease_id, token)
+        return require(lease_id, attesting)
 
     def attach_in_worker() -> None:
-        with external.attach("lease", token="credential"):
+        with external.attach("lease"):
             assert _boot._external_agent_id == 405
             assert ava.self.AGENT_ID == 405
 
@@ -263,7 +266,7 @@ def test_concurrent_constructor_fails_before_lease_lookup(
             assert first_lookup.wait(5), "first constructor did not reach the lease lookup"
             with (
                 pytest.raises(RuntimeError, match="already has an external attachment"),
-                external.attach("lease", token="credential"),
+                external.attach("lease"),
             ):
                 pass
         finally:
@@ -271,7 +274,7 @@ def test_concurrent_constructor_fails_before_lease_lookup(
             first.result(timeout=5)
     assert _boot._external_identity is None
     assert _boot._external_agent_id is None
-    with external.attach("lease", token="credential"):
+    with external.attach("lease"):
         assert _boot._external_agent_id == 405
         assert ava.self.AGENT_ID == 405
 
@@ -303,7 +306,7 @@ def test_constructor_failure_restores_binding_and_allows_next_attachment(
             else:
                 failure_patch.setattr(external, "load_snapshot", fail)
             with pytest.raises(RuntimeError, match="constructor interrupted"):
-                external.attach("lease", token="credential")
+                external.attach("lease")
         assert _boot._external_identity is None
         assert _boot._external_agent_id is None
         assert ava.state is prior_state
@@ -311,7 +314,7 @@ def test_constructor_failure_restores_binding_and_allows_next_attachment(
         assert current_agent_config_pins() is prior_config
         assert current_plugin_config_view() is prior_plugin_config
         assert not staged
-        with external.attach("lease", token="credential"):
+        with external.attach("lease"):
             assert _boot._external_agent_id == 405
             assert ava.self.AGENT_ID == 405
 
@@ -319,14 +322,14 @@ def test_constructor_failure_restores_binding_and_allows_next_attachment(
 def test_repeated_close_cannot_release_another_attachment(
     attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
 ) -> None:
-    first = external.attach("lease", token="credential")
+    first = external.attach("lease")
     first.close()
-    with external.attach("lease", token="credential"):
+    with external.attach("lease"):
         first.close()
         assert _boot._external_agent_id == 405
         assert ava.self.AGENT_ID == 405
         with pytest.raises(RuntimeError, match="already has an external attachment"):
-            external.attach("lease", token="credential")
+            external.attach("lease")
 
 
 def test_expired_lease_cannot_dispatch_through_local_mcp(
@@ -345,7 +348,7 @@ def test_expired_lease_cannot_dispatch_through_local_mcp(
 
     monkeypatch.setattr(mcps, "_get_remote_client", lambda: None)
     monkeypatch.setattr(mcps, "_run_async", local_dispatch)
-    attachment = external.attach("lease", token="credential")
+    attachment = external.attach("lease")
     lease["status"] = "expired"
     try:
         with pytest.raises(RuntimeError, match="expired"):
@@ -370,7 +373,7 @@ def test_mcp_revalidates_lease_before_transport_fallback(
             raise mcps.MCPConnectError("daemon disconnected")
 
     monkeypatch.setattr(mcps, "_get_remote_client", FailedDaemon)
-    attachment = external.attach("lease", token="credential")
+    attachment = external.attach("lease")
     try:
         with pytest.raises(RuntimeError, match="expired"):
             mcps._call_raw("example", "side_effect")
@@ -388,7 +391,7 @@ def test_receipted_journal_entries_are_not_replayed(
     lease["plugin_delta"] = [
         encode_plugin_delta({"messages": [RemoveMessage(id="already-removed")]})
     ]
-    with external.attach("lease", token="credential"):
+    with external.attach("lease"):
         assert ava.state.messages == []
 
 
@@ -398,7 +401,7 @@ def test_attach_rejects_other_machine_without_binding_identity(
     lease, _, _ = attached_runtime
     lease["machine"] = "another-runner"
     with pytest.raises(RuntimeError, match="agent machine"):
-        external.attach("lease", token="credential")
+        external.attach("lease")
     assert _boot._external_identity is None
     assert _boot._external_agent_id is None
 
@@ -466,13 +469,13 @@ def test_external_attachment_appends_messages_without_replacing_native_history(
     appended_message = HumanMessage(content="External progress", id="external")
     snapshot.messages = [native_message]
     handle = state_module.PluginStateHandle(ExampleMessagesPlugin, "sample")
-    with external.attach("lease", token="credential"):
+    with external.attach("lease"):
         handle.update({"messages": [appended_message]})
         assert handle.read().messages == [native_message, appended_message]
     assert len(staged) == 1
     assert decode_plugin_delta(staged[0]) == {"messages": [appended_message]}
     assert snapshot.messages == [native_message]
-    with external.attach("lease", token="credential"):
+    with external.attach("lease"):
         assert handle.read().messages == [native_message, appended_message]
     assert len(staged) == 1
 
@@ -482,7 +485,7 @@ def test_external_attachment_refuses_to_journal_a_full_history_reset(
 ) -> None:
     _, snapshot, staged = attached_runtime
     snapshot.messages = [HumanMessage(content="Native history", id="native")]
-    attachment = external.attach("lease", token="credential")
+    attachment = external.attach("lease")
     ava.state_update = {"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES)]}
     with pytest.raises(ValueError, match=r"REMOVE_ALL.*native compaction"):
         attachment.close()

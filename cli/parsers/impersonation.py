@@ -104,7 +104,7 @@ def _add_impersonation_parser(sub: argparse._SubParsersAction[argparse.ArgumentP
         parser.add_argument(
             "session_id",
             type=partial(_integer_range, minimum=0, maximum=2**63 - 1),
-            help="per-agent session number; credential comes from AVA_IMPERSONATION_TOKEN",
+            help="per-agent session number; run from the session's controller process tree",
         )
         parser.add_argument("--agent", dest="agent_id", required=True, type=int)
         parser.set_defaults(func=_h_impersonate)

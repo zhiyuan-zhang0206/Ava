@@ -163,7 +163,7 @@ def capture_pending(conn: psycopg.Connection, lease: dict[str, Any]) -> None:
 
 def say(
     lease_id: str,
-    token: str,
+    caller: object,
     content: str,
     *,
     phase: str = "commentary",
@@ -179,7 +179,7 @@ def say(
         raise ValueError("A message needs nonempty content/key and commentary or final phase")
     with write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
-        require_active_locked(conn, lease, token)
+        require_active_locked(conn, lease, caller)
         seq = append(
             conn,
             lease_id,

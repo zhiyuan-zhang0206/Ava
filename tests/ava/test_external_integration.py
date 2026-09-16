@@ -23,6 +23,7 @@ from shared.db import create_agent
 from shared.machine import machine_name
 from shared.plugin_context import PluginContext
 from shared.runtime_incarnation import RuntimeIncarnation
+from tests.impersonation_support import attested_caller, recorded_tree
 
 
 def _union(left: set[str], right: set[str]) -> set[str]:
@@ -88,6 +89,7 @@ def native_checkpoint(
 
 def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
     native_checkpoint: tuple[RuntimeIncarnation, state_module.PluginStateHandle[IntegrationPlugin]],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     owner, handle = native_checkpoint
     agent_id = owner.agent_id
@@ -95,25 +97,27 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
     lease = leases.request(
         agent_id,
         caller=CallerIdentity(kind="external_agent", subject="codex"),
+        process_metadata=recorded_tree(),
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
     )
     leases.accept(lease["id"], agent_id, owner, "Handoff brief")
     leases.activate(lease["id"], owner)
-    with external.attach(lease["id"], token=lease["token"]):
+    monkeypatch.setattr(external, "process_metadata", lambda: attested_caller(lease))
+    with external.attach(lease["id"]):
         assert agent_id == ava.self.AGENT_ID
         assert _boot.require_actor() == f"agent:{agent_id}"
         assert ava.state.messages[0].content == "Native task"
         assert handle.read().seen == {"native"}
         handle.update({"seen": {"external"}})
-    updated = leases.get(lease["id"], lease["token"])
+    updated = leases.get(lease["id"], attested_caller(lease))
     assert updated["delta_version"] == 1
     assert decode_plugin_delta(updated["plugin_delta"][0]) == {"integration__seen": {"external"}}
     native_snapshot, _, _ = load_snapshot(agent_id)
     assert native_snapshot.integration__seen == {"native"}
-    with external.attach(lease["id"], token=lease["token"]):
+    with external.attach(lease["id"]):
         assert handle.read().seen == {"native", "external"}
-    assert leases.get(lease["id"], lease["token"])["delta_version"] == 1
+    assert leases.get(lease["id"], attested_caller(lease))["delta_version"] == 1
 
 
 def test_borrowed_sender_reaches_peer_through_gateway_and_returns_real_provenance(
@@ -138,13 +142,15 @@ def test_borrowed_sender_reaches_peer_through_gateway_and_returns_real_provenanc
     lease = leases.request(
         owner.agent_id,
         caller=caller,
+        process_metadata=recorded_tree(),
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
     )
     leases.accept(lease["id"], owner.agent_id, owner, "Handoff brief")
     leases.activate(lease["id"], owner)
+    monkeypatch.setattr(external, "process_metadata", lambda: attested_caller(lease))
 
-    with external.attach(lease["id"], token=lease["token"]):
+    with external.attach(lease["id"]):
         ava.agents.send_message(peer_id, "Implementation ready for review")
 
     outbound = db_conn.execute(
@@ -155,7 +161,7 @@ def test_borrowed_sender_reaches_peer_through_gateway_and_returns_real_provenanc
     ]
     db_conn.commit()
     returned = leases.release(
-        lease["id"], lease["token"], "Delivered the implementation to the peer"
+        lease["id"], attested_caller(lease), "Delivered the implementation to the peer"
     )
     handoff = db_conn.execute(
         "SELECT agent_id,content,source,payload FROM inbound_messages WHERE id=%s",
@@ -195,13 +201,15 @@ def test_external_memory_write_uses_borrowed_identity(
     lease = leases.request(
         owner.agent_id,
         caller=CallerIdentity(kind="external_agent", subject="codex"),
+        process_metadata=recorded_tree(),
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
     )
     leases.accept(lease["id"], owner.agent_id, owner, "Handoff brief")
     leases.activate(lease["id"], owner)
+    monkeypatch.setattr(external, "process_metadata", lambda: attested_caller(lease))
 
-    with external.attach(lease["id"], token=lease["token"]):
+    with external.attach(lease["id"]):
         entry = ava.memory.write("working-rule", "Verify current state.\n", store=store)
 
     root = tmp_path / "shared" if store == "shared" else tmp_path / str(owner.agent_id) / "memory"
@@ -212,7 +220,7 @@ def test_external_memory_write_uses_borrowed_identity(
     if store == "shared":
         assert f"ava_agent: {owner.agent_id}\n" in entry.read_text()
     # Memory files are immediate SDK effects, separate from checkpoint deltas.
-    assert leases.get(lease["id"], lease["token"])["delta_version"] == 0
+    assert leases.get(lease["id"], attested_caller(lease))["delta_version"] == 0
 
 
 @pytest.mark.parametrize("operation", ["write", "note"])
@@ -238,12 +246,14 @@ def test_external_memory_rechecks_lease_before_filesystem_effects(
     lease = leases.request(
         owner.agent_id,
         caller=CallerIdentity(kind="external_agent", subject="codex"),
+        process_metadata=recorded_tree(),
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
     )
     leases.accept(lease["id"], owner.agent_id, owner, "Handoff brief")
     leases.activate(lease["id"], owner)
-    attachment = external.attach(lease["id"], token=lease["token"])
+    monkeypatch.setattr(external, "process_metadata", lambda: attested_caller(lease))
+    attachment = external.attach(lease["id"])
     try:
         db_conn.execute(
             "UPDATE agent_impersonations SET expires_at=clock_timestamp()-interval '1 second' "

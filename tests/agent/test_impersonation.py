@@ -27,6 +27,7 @@ from shared.context import AvaContext
 from shared.lifecycle import AgentImpersonation
 from shared.runtime_incarnation import RuntimeIncarnation
 from shared.turn_identity import bind_turn_identity
+from tests.impersonation_support import attested_caller, recorded_tree
 
 
 @pytest.fixture
@@ -601,6 +602,7 @@ async def test_successor_admission_aligns_active_lease_binding_before_release(
         caller=CallerIdentity(kind="external_agent", subject="codex", instance="test"),
         ttl_seconds=3600,
         reason="Handle the next message",
+        process_metadata=recorded_tree(),
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
     )
@@ -623,7 +625,7 @@ async def test_successor_admission_aligns_active_lease_binding_before_release(
     ).fetchone() == (successor.generation, successor.owner)
     # Release before any native_status: the restore trigger fires, but the
     # binding already matches the live incarnation — agents_meta is untouched.
-    leases.release(lease["id"], lease["token"], "Done before the first held wake")
+    leases.release(lease["id"], attested_caller(lease), "Done before the first held wake")
     db_conn.commit()
     assert db_conn.execute(
         "SELECT runtime_generation,runtime_owner FROM agents_meta WHERE id=%s",
@@ -654,6 +656,7 @@ async def test_successor_admission_resets_a_stale_accepted_binding(
         caller=CallerIdentity(kind="external_agent", subject="codex", instance="test"),
         ttl_seconds=3600,
         reason="Handle the next message",
+        process_metadata=recorded_tree(),
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
     )
