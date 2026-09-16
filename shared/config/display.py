@@ -13,8 +13,28 @@ after a change.
 
 from __future__ import annotations
 
+from pydantic import Field
+
 from shared.config._base import EnvSettings
 
 
 class DisplaySettings(EnvSettings):
     """User-facing listing/window defaults (see the module docstring)."""
+
+    messages_default_limit: int = Field(
+        default=100,
+        alias="AVA_MESSAGES_DEFAULT_LIMIT",
+        description=(
+            "Default tail window (items) of GET /api/agents/{id}/messages when the caller "
+            "passes no limit. 100 covers the recent slice an implicit read usually wants "
+            "(tens of turns once each turn's reasoning/code/output blocks are counted) "
+            "without shipping a whole long conversation; callers that need more pass an "
+            "explicit limit (1..10000)."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )

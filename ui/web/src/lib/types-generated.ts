@@ -525,8 +525,9 @@ export interface paths {
          *     Windowing is an absolute-integer-index analog of the timeline's tail-window
          *     mode (the timeline cursor is an `item_id` string + `has_more`; here the
          *     cursor is an absolute index into `state.messages`). No `limit` returns the
-         *     newest 100 messages; `before=<index>` without a limit returns the newest
-         *     100 messages before that exclusive cursor. An explicit `limit` (1..10000)
+         *     configured default window (``display.messages_default_limit`` — 100 by
+         *     default); `before=<index>` without a limit returns that window immediately
+         *     before the exclusive cursor. An explicit `limit` (1..10000)
          *     preserves the requested page size. `messages[i]` corresponds to
          *     `state.messages[start_index + i]`; `msg_count` is the total length, and
          *     `has_more` tells the caller whether `start_index` can be supplied as the

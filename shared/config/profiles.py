@@ -49,6 +49,9 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             "telegram",
             "feishu",
             "observability",
+            # Display window defaults (task #3696) — served by gateway endpoints
+            # (messages / timeline / notices / shell) for unparameterized reads.
+            "display",
             # The PITR uploader daemon reads the physical-backup plane under
             # the gateway profile (bucket/key/credentials).
             "physical_backup",
