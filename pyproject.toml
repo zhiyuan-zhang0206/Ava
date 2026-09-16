@@ -241,6 +241,11 @@ ignore_imports = [
     # no-op instead of a second turn failure.
     "services.agent_host.settlement -> agent.inbound_ownership",
     "services.agent_host.* -> agent.hosted_ownership",
+    # The corpse reaper is the other half of the hosted ownership machinery
+    # (split out of agent.hosted_ownership at its 800-line budget ceiling):
+    # the host's beat runs the grace reap, and the settlement boundary runs
+    # the prompt reap of a corpse that re-crashed under its own mark.
+    "services.agent_host.* -> agent.corpse_reap",
     # The hosted invocation driver shares the native takeover boundary: it
     # gates active leases and settles external state only after graph flush.
     "services.agent_host.host -> agent.impersonation",

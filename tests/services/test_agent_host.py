@@ -37,6 +37,7 @@ from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, ConfigDict, Field
 
 import ava._boot
+from agent.hosted_ownership import TurnFatalStamp, TurnSettlement
 from services.agent_host import dispatcher, settlement
 from services.agent_host.dispatcher import TurnScheduler
 from services.agent_host.host import AgentHost
@@ -319,11 +320,14 @@ def _stub_host_transitions(
         *,
         exited: bool,
         crashed: bool,
-    ) -> None:
+    ) -> TurnSettlement:
         if crashed:
             stamps.append(incarnation.agent_id)
         if not exited:
             await flip(pool, incarnation.agent_id, "idling", expected_from="running")
+        return TurnSettlement(
+            stamp=TurnFatalStamp(applied=crashed, recrash=False), settled=not exited
+        )
 
     monkeypatch.setattr(host_mod, "admit_hosted_runtime", admit)
     monkeypatch.setattr(settlement, "settle_and_stamp_turn", settle_and_stamp)
@@ -519,9 +523,12 @@ class TestPoolIsolation:
             *,
             exited: bool,
             crashed: bool,
-        ) -> None:
+        ) -> TurnSettlement:
             if not exited:
                 calls.append(("settle", pool))
+            return TurnSettlement(
+                stamp=TurnFatalStamp(applied=crashed, recrash=False), settled=not exited
+            )
 
         async def force(pool: object, *_args: object, **_kwargs: object) -> bool:
             calls.append(("force", pool))
@@ -570,8 +577,11 @@ class TestAbortSettlementReconcile:
 
         async def settle_and_stamp(
             _pool: object, _incarnation: object, *, exited: bool, crashed: bool
-        ) -> None:
+        ) -> TurnSettlement:
             order.append("settle")
+            return TurnSettlement(
+                stamp=TurnFatalStamp(applied=crashed, recrash=False), settled=not exited
+            )
 
         async def reconcile(_pool: object, _checkpointer: object, _incarnation: object) -> None:
             order.append("reconcile")
@@ -855,7 +865,7 @@ class TestTurnLoop:
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Renewal first, reap second: a reap failure must not starve leases.
-        The reap publishes each corpse snapshot itself (hosted_ownership)."""
+        The reap publishes each corpse snapshot itself (agent/corpse_reap)."""
         import services.agent_host.host as host_mod
 
         calls: list[str] = []
