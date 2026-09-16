@@ -52,8 +52,11 @@ from shared.uploads import image_mime_for, parse_upload_url, resolve_upload_path
 router = APIRouter()
 _log = logging.getLogger(__name__)
 
+# Protective cap on one inbound message's content bytes — bounds what one send
+# can park in the pending queue/checkpoint + its Loki volume; a self-imposed
+# guard, not an external protocol limit (KEEP, task #3696 exception inventory;
+# the default *window* is config: settings.display.messages_default_limit).
 _MAX_MESSAGE_CONTENT_BYTES = 1_048_576
-_DEFAULT_MESSAGE_LIMIT = 100
 
 # Compatibility re-export for callers and tests that used this lookup before
 # result-read enforcement was centralized.
@@ -415,8 +418,9 @@ def get_agent_messages(
     Windowing is an absolute-integer-index analog of the timeline's tail-window
     mode (the timeline cursor is an `item_id` string + `has_more`; here the
     cursor is an absolute index into `state.messages`). No `limit` returns the
-    newest 100 messages; `before=<index>` without a limit returns the newest
-    100 messages before that exclusive cursor. An explicit `limit` (1..10000)
+    configured default window (``display.messages_default_limit`` — 100 by
+    default); `before=<index>` without a limit returns that window immediately
+    before the exclusive cursor. An explicit `limit` (1..10000)
     preserves the requested page size. `messages[i]` corresponds to
     `state.messages[start_index + i]`; `msg_count` is the total length, and
     `has_more` tells the caller whether `start_index` can be supplied as the
@@ -441,7 +445,7 @@ def get_agent_messages(
     # `before` is an exclusive upper bound (absolute index); clamp to the
     # available range so an out-of-range cursor still returns a valid window.
     end = msg_count if before is None else min(before, msg_count)
-    effective_limit = limit if limit is not None else _DEFAULT_MESSAGE_LIMIT
+    effective_limit = limit if limit is not None else settings.display.messages_default_limit
     start = max(0, end - effective_limit)
     window = messages[start:end]
     return AgentMessagesResponse(

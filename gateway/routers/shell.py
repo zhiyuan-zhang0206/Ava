@@ -19,15 +19,18 @@ from psycopg_pool import ConnectionPool
 from gateway.schemas import ShellCaptureResponse
 from gateway.shell_ttls import fallback_expiry
 from ops import cluster_rpc as _cluster_rpc
+from shared.config import settings
 
 router = APIRouter()
 
-# Valid range for the ?lines= query parameter.  Lower bound prevents
-# pathological "only capture 1 line" which is never useful; upper bound
-# guards against OOM from an accidental very large number.
+# Valid range for the ?lines= query parameter: protective constants (the
+# default *window* is config - display.shell_capture_default_lines). Lower
+# bound prevents pathological "only capture 1 line" which is never useful;
+# upper bound guards against OOM from an accidental very large number. Both
+# are evaluated at import for the Query annotation, so they cannot be
+# dynamic (task #3696 exception inventory: KEEP).
 _MIN_LINES = 50
 _MAX_LINES = 2000
-_DEFAULT_LINES = 200
 
 # Per-op deadline for the shell capture. The monitor page polls every 3s; a
 # reachable runner answers in milliseconds, and an unreachable one fails the
@@ -41,7 +44,7 @@ async def get_agent_shell(
     agent_id: int,
     session_id: int,
     request: Request,
-    lines: Annotated[int, Query(ge=_MIN_LINES, le=_MAX_LINES)] = _DEFAULT_LINES,
+    lines: Annotated[int | None, Query(ge=_MIN_LINES, le=_MAX_LINES)] = None,
 ) -> ShellCaptureResponse:
     """Capture the most recent terminal output of one of an agent's persistent
     shells — the data the shell monitor page fetches on demand.
@@ -52,7 +55,8 @@ async def get_agent_shell(
     own box included). The runner resolves `session_id` against its live shell
     sessions for the agent, reconstructs the full session name (carrying
     the optional `-<name>` suffix), and captures the last
-    `lines` lines.
+    `lines` lines. Omit `lines` for the configured default
+    (``display.shell_capture_default_lines``, 200 out of the box).
 
     404 if the agent is unknown (no agents_meta row), if the agent has no live
     shell with that id on its machine, or if the capture fails (the session
@@ -60,6 +64,8 @@ async def get_agent_shell(
     server is unreachable — the shell may still exist, but this gateway cannot
     reach it right now.
     """
+    if lines is None:
+        lines = settings.display.shell_capture_default_lines
     machine = await asyncio.to_thread(_agent_machine_blocking, request.app.state.db_pool, agent_id)
 
     try:

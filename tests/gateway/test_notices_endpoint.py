@@ -1003,6 +1003,88 @@ def test_resolved_partial_cursor_422(db_conn: psycopg.Connection) -> None:
     assert only_id.status_code == 422
 
 
+def test_open_default_limit_comes_from_display_config(
+    monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
+) -> None:
+    """The implicit open-feed cap is ``settings.display.notices_open_default_limit``
+    (``AVA_NOTICES_OPEN_DEFAULT_LIMIT``); the literal 200 is only that field's
+    default, not a hard-coded page size."""
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.display, "notices_open_default_limit", 2)
+    a = _seed_agent(db_conn)
+    _insert_notice(db_conn, a, "older")
+    _insert_notice(db_conn, a, "newer")
+    _insert_notice(db_conn, a, "newest")
+
+    with TestClient(app) as client:
+        data = client.get("/api/notices/open").json()
+    assert [r["title"] for r in data] == ["newest", "newer"]
+
+
+def test_resolved_default_page_comes_from_display_config(
+    monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
+) -> None:
+    """The implicit resolved-history page is
+    ``settings.display.notices_resolved_default_page``
+    (``AVA_NOTICES_RESOLVED_DEFAULT_PAGE``); 30 is only that field's default."""
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.display, "notices_resolved_default_page", 2)
+    a = _seed_agent(db_conn)
+    for i in range(3):
+        _insert_notice(
+            db_conn,
+            a,
+            f"n{i}",
+            require_response=True,
+            resolved_at=f"2026-06-14T0{i + 1}:00:00Z",
+            resolution="answered",
+            reply="x",
+        )
+
+    with TestClient(app) as client:
+        data = client.get("/api/notices/resolved").json()
+    assert [r["title"] for r in data] == ["n2", "n1"]
+
+
+def test_feed_defaults_come_from_display_config(
+    monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
+) -> None:
+    """The unified feed's implicit open cap and resolved page follow the same
+    display fields as the standalone endpoints."""
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.display, "notices_open_default_limit", 1)
+    monkeypatch.setattr(settings.display, "notices_resolved_default_page", 1)
+    a = _seed_agent(db_conn)
+    _insert_notice(db_conn, a, "open older")
+    _insert_notice(db_conn, a, "open newer")
+    _insert_notice(
+        db_conn,
+        a,
+        "resolved r0",
+        require_response=True,
+        resolved_at="2026-06-14T01:00:00Z",
+        resolution="answered",
+        reply="x",
+    )
+    _insert_notice(
+        db_conn,
+        a,
+        "resolved r1",
+        require_response=True,
+        resolved_at="2026-06-14T02:00:00Z",
+        resolution="answered",
+        reply="x",
+    )
+
+    with TestClient(app) as client:
+        feed = client.get("/api/notices").json()
+    assert [r["title"] for r in feed["open"]] == ["open newer"]
+    assert [r["title"] for r in feed["resolved_page"]] == ["resolved r1"]
+
+
 # --- table CHECK constraints (the load-bearing invariants) -------------------
 
 

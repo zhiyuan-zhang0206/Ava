@@ -73,6 +73,13 @@ _ESCALATIONS_SELECT = (
 # action -> stored resolution. Explicit map (never inferred from reply presence).
 _ACTION_RESOLUTION = {"answer": "answered", "dismiss": "dismissed", "read": "read"}
 
+# Protective caps on the query parameters - constants, not config (user ruling
+# 2026-09-17, task #3696): the configurable surface is the *default* window
+# ``display.notices_open_default_limit`` / ``display.notices_resolved_default_page``;
+# these ceilings bound one response's payload and stay fixed.
+_OPEN_FEED_MAX_LIMIT = 500
+_RESOLVED_PAGE_MAX_LIMIT = 100
+
 
 def _publish_response_required_snapshot(conn: psycopg.Connection, agent_id: int) -> None:
     """Refresh the inspector's response-required notice projection after commit."""
@@ -181,7 +188,7 @@ def _resolved_notices_blocking(
 @router.get("/api/notices/open")
 async def get_open_notices(
     request: Request,
-    limit: Annotated[int, Query(ge=1, le=500)] = 200,
+    limit: Annotated[int | None, Query(ge=1, le=_OPEN_FEED_MAX_LIMIT)] = None,
     include_awaiting: Annotated[bool, Query()] = False,  # noqa: FBT002 — FastAPI query param
 ) -> list[NoticeItem]:
     """The cross-fleet open notices feed, priority-then-newest.
@@ -190,8 +197,11 @@ async def get_open_notices(
     ones ride the agent snapshot. include_awaiting=True returns both kinds:
     the IM bridge's "/notice list" queue view (Task #941) lists everything
     still open and hands each item its own processing buttons. A notice is
-    open when resolved_at IS NULL. `limit` caps a runaway backlog.
+    open when resolved_at IS NULL. Omit `limit` for the configured default cap
+    (``display.notices_open_default_limit``, 200 out of the box).
     """
+    if limit is None:
+        limit = settings.display.notices_open_default_limit
     rows = await asyncio.to_thread(
         _open_notices_blocking, request.app.state.db_pool, limit, include_awaiting=include_awaiting
     )
@@ -228,7 +238,7 @@ def _notices_after_blocking(pool: ConnectionPool, after: int, limit: int) -> lis
 async def get_notices_live(
     request: Request,
     after: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=500)] = 200,
+    limit: Annotated[int | None, Query(ge=1, le=_OPEN_FEED_MAX_LIMIT)] = None,
 ) -> list[NoticeItem]:
     """New open notices across the fleet, both kinds, oldest-first by id.
 
@@ -236,8 +246,11 @@ async def get_notices_live(
     notices to Telegram (Task #884) — one query, no event dependency, and it
     covers require_response notices (which publish no NoticePosted event) as
     well as FYIs. Idempotent: rows are only ever returned while open, so a
-    poll after a notice was resolved simply stops seeing it.
+    poll after a notice was resolved simply stops seeing it. Omit `limit` for the
+    configured default cap (``display.notices_open_default_limit``).
     """
+    if limit is None:
+        limit = settings.display.notices_open_default_limit
     rows = await asyncio.to_thread(_notices_after_blocking, request.app.state.db_pool, after, limit)
     return [_row_to_item(r) for r in rows]
 
@@ -245,7 +258,7 @@ async def get_notices_live(
 @router.get("/api/notices/resolved")
 async def get_resolved_notices(
     request: Request,
-    limit: Annotated[int, Query(ge=1, le=100)] = 30,
+    limit: Annotated[int | None, Query(ge=1, le=_RESOLVED_PAGE_MAX_LIMIT)] = None,
     require_response: Annotated[bool | None, Query()] = None,
     before_at: Annotated[datetime | None, Query()] = None,
     before_id: Annotated[int | None, Query()] = None,
@@ -256,11 +269,15 @@ async def get_resolved_notices(
     one queue's history (the "needs response" tab passes true, the FYI tab false);
     omit it for both. Keyset-paginated on (resolved_at, id): pass the last row's
     (before_at, before_id) for the next page strictly older. Supply both or neither.
+    Omit `limit` for the configured page size (``display.notices_resolved_default_page``,
+    30 out of the box).
     """
     if (before_at is None) != (before_id is None):
         raise HTTPException(
             status_code=422, detail="before_at and before_id must be supplied together"
         )
+    if limit is None:
+        limit = settings.display.notices_resolved_default_page
     where = "WHERE n.resolved_at IS NOT NULL "
     params: list[object] = []
     if require_response is not None:
@@ -282,8 +299,8 @@ async def get_resolved_notices(
 @router.get("/api/notices")
 async def get_notices_feed(
     request: Request,
-    limit: Annotated[int, Query(ge=1, le=500)] = 200,
-    resolved_limit: Annotated[int, Query(ge=1, le=100)] = 30,
+    limit: Annotated[int | None, Query(ge=1, le=_OPEN_FEED_MAX_LIMIT)] = None,
+    resolved_limit: Annotated[int | None, Query(ge=1, le=_RESOLVED_PAGE_MAX_LIMIT)] = None,
     before_at: Annotated[datetime | None, Query()] = None,
     before_id: Annotated[int | None, Query()] = None,
 ) -> NoticesFeed:
@@ -304,12 +321,19 @@ async def get_notices_feed(
     The standalone endpoints stay for their other consumers (IM bridge,
     CLI). The open sweep (FYI TTL auto-resolve) runs once per call, so the
     open list, the awaiting list and the history agree within one request.
+    The open/awaiting cap and the resolved page default to
+    ``display.notices_open_default_limit`` / ``display.notices_resolved_default_page``
+    when the caller passes none.
     """
     if (before_at is None) != (before_id is None):
         raise HTTPException(
             status_code=422, detail="before_at and before_id must be supplied together"
         )
     pool = request.app.state.db_pool
+    if limit is None:
+        limit = settings.display.notices_open_default_limit
+    if resolved_limit is None:
+        resolved_limit = settings.display.notices_resolved_default_page
     resolved_where = "WHERE n.resolved_at IS NOT NULL "
     resolved_params: list[object] = []
     if before_at is not None:

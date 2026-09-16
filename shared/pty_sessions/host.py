@@ -387,7 +387,11 @@ def _op_capture(session: PtySession, req: dict[str, Any]) -> dict[str, Any]:
         lines = int(req.get("lines", 200))
     except (TypeError, ValueError):
         lines = 200
-    lines = max(1, min(lines, 100000))  # CLI caps at 100000; clamp direct dialers
+    # Hard clamp kept as a protective constant (task #3696 exception
+    # inventory): the configurable surface is only the *default* window
+    # (display.shell_capture_default_lines); this bounds one capture's
+    # payload for direct socket dialers (the CLI caps at the same value).
+    lines = max(1, min(lines, 100000))
     text = session.screen().render(lines, scrollback=bool(req.get("scrollback", True)))
     return ok({"text": text})
 

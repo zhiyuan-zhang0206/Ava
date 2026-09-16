@@ -90,7 +90,9 @@ def _add_timeline_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser
         "timeline", aliases=["context"], help="read standing context and recent conversation"
     )
     parser.add_argument("agent_id", type=int)
-    parser.add_argument("--limit", type=int, default=50, help="recent items, 1..1000 (default 50)")
+    parser.add_argument(
+        "--limit", type=int, default=None, help="recent items, 1..1000 (default: configured window)"
+    )
     parser.add_argument("--before", help="exclusive item_id cursor for older history")
     parser.set_defaults(func=_h_agents_timeline)
 

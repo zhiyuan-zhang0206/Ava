@@ -68,10 +68,10 @@ from shared.event_publisher import AgentEventPublisher
 from shared.live_events import TimelineSnapshot
 from shared.log import logger
 from shared.timeline import (
-    DEFAULT_TIMELINE_LIMIT,
     build_timeline_items,
     needs_chat_anchors,
     tail_window,
+    timeline_default_limit,
 )
 
 
@@ -289,7 +289,7 @@ async def node_lifecycle(
             # (its merge preserves items below the snapshot's msg_idx floor).
             # msg_count stays the full state.messages length so the
             # future-partial boundary is unaffected.
-            window, _ = tail_window(items, DEFAULT_TIMELINE_LIMIT)
+            window, _ = tail_window(items, timeline_default_limit())
         else:
             # Incremental: only the messages past the cursor. msg_count stays
             # the FULL len(messages) — the frontend's future-partial boundary

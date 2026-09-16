@@ -44,6 +44,9 @@ _API_STUBS: dict[str, object] = {
     "/api/agents": [_AGENT],
     "/api/auth/check": {"authenticated": True},
     "/api/settings": {"settings": []},
+    # The home shell reads the display config domain at runtime
+    # (lib/display-limits.ts); an empty field list keeps the baked fallbacks.
+    "/api/config": {"fields": [], "raw_overrides": {}, "machine_capabilities": []},
     "/api/notices": {"open": [], "awaiting": [], "resolved_page": [], "next_cursor": None},
     "/api/tasks": {"tasks": []},
     "/api/agents/1/timeline": {"items": [], "msg_count": 0, "has_more": False},
