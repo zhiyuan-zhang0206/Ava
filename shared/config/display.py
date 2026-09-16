@@ -55,3 +55,37 @@ class DisplaySettings(EnvSettings):
             "scope": "cluster-pinned",
         },
     )
+
+    notices_open_default_limit: int = Field(
+        default=200,
+        alias="AVA_NOTICES_OPEN_DEFAULT_LIMIT",
+        description=(
+            "Default cap on one open-notices read (GET /api/notices/open, /api/notices/live, "
+            "and the unified feed's open/awaiting slices) when the caller passes no limit. "
+            "200 covers a large fleet backlog in one request while bounding the poll payload "
+            "the IM bridge fans out to Telegram and the CLI's fleet-wide listing; the "
+            "protective ceiling (500) stays a constant."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+    notices_resolved_default_page: int = Field(
+        default=30,
+        alias="AVA_NOTICES_RESOLVED_DEFAULT_PAGE",
+        description=(
+            "One resolved-notices history page (GET /api/notices/resolved and the unified "
+            "feed's resolved_limit) when the caller passes none. 30 is a screenful of greyed "
+            "history per keyset page (deepening is a cursor fetch, not a bigger page); the "
+            "protective ceiling (100) stays a constant."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )

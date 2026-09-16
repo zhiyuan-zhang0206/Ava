@@ -72,7 +72,7 @@ def cmd_notices_list(
         f"{base}/notices/open",
         timeout=_TIMEOUT_S,
         headers=headers,
-        params={"include_awaiting": True, "limit": 200},
+        params={"include_awaiting": True},
     )
     resp.raise_for_status()
     notices = resp.json()
@@ -137,7 +137,7 @@ def cmd_notices_clear(*, agent_id: int | None, force: bool, stale: bool = False)
         f"{base}/notices/open",
         timeout=_TIMEOUT_S,
         headers=headers,
-        params={"include_awaiting": True, "limit": 200},
+        params={"include_awaiting": True},
     )
     resp.raise_for_status()
     notices = resp.json()

@@ -2189,7 +2189,7 @@
     "/api/notices/open": {
       "get": {
         "summary": "Get Open Notices",
-        "description": "The cross-fleet open notices feed, priority-then-newest.\n\nBy default only FYI notices (require_response false) — response-required\nones ride the agent snapshot. include_awaiting=True returns both kinds:\nthe IM bridge's \"/notice list\" queue view (Task #941) lists everything\nstill open and hands each item its own processing buttons. A notice is\nopen when resolved_at IS NULL. `limit` caps a runaway backlog.",
+        "description": "The cross-fleet open notices feed, priority-then-newest.\n\nBy default only FYI notices (require_response false) — response-required\nones ride the agent snapshot. include_awaiting=True returns both kinds:\nthe IM bridge's \"/notice list\" queue view (Task #941) lists everything\nstill open and hands each item its own processing buttons. A notice is\nopen when resolved_at IS NULL. Omit `limit` for the configured default cap\n(``display.notices_open_default_limit``, 200 out of the box).",
         "operationId": "get_open_notices_api_notices_open_get",
         "parameters": [
           {
@@ -2197,10 +2197,16 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer",
-              "maximum": 500,
-              "minimum": 1,
-              "default": 200,
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 500,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Limit"
             }
           },
@@ -2269,7 +2275,7 @@
     "/api/notices/live": {
       "get": {
         "summary": "Get Notices Live",
-        "description": "New open notices across the fleet, both kinds, oldest-first by id.\n\nThe IM bridge polls this with the max id it has seen and pushes new\nnotices to Telegram (Task #884) — one query, no event dependency, and it\ncovers require_response notices (which publish no NoticePosted event) as\nwell as FYIs. Idempotent: rows are only ever returned while open, so a\npoll after a notice was resolved simply stops seeing it.",
+        "description": "New open notices across the fleet, both kinds, oldest-first by id.\n\nThe IM bridge polls this with the max id it has seen and pushes new\nnotices to Telegram (Task #884) — one query, no event dependency, and it\ncovers require_response notices (which publish no NoticePosted event) as\nwell as FYIs. Idempotent: rows are only ever returned while open, so a\npoll after a notice was resolved simply stops seeing it. Omit `limit` for the\nconfigured default cap (``display.notices_open_default_limit``).",
         "operationId": "get_notices_live_api_notices_live_get",
         "parameters": [
           {
@@ -2288,10 +2294,16 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer",
-              "maximum": 500,
-              "minimum": 1,
-              "default": 200,
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 500,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Limit"
             }
           }
@@ -2327,7 +2339,7 @@
     "/api/notices/resolved": {
       "get": {
         "summary": "Get Resolved Notices",
-        "description": "One page of resolved notices across the fleet, newest resolution first.\n\nFeeds the greyed history beneath each open queue. `require_response` filters to\none queue's history (the \"needs response\" tab passes true, the FYI tab false);\nomit it for both. Keyset-paginated on (resolved_at, id): pass the last row's\n(before_at, before_id) for the next page strictly older. Supply both or neither.",
+        "description": "One page of resolved notices across the fleet, newest resolution first.\n\nFeeds the greyed history beneath each open queue. `require_response` filters to\none queue's history (the \"needs response\" tab passes true, the FYI tab false);\nomit it for both. Keyset-paginated on (resolved_at, id): pass the last row's\n(before_at, before_id) for the next page strictly older. Supply both or neither.\nOmit `limit` for the configured page size (``display.notices_resolved_default_page``,\n30 out of the box).",
         "operationId": "get_resolved_notices_api_notices_resolved_get",
         "parameters": [
           {
@@ -2335,10 +2347,16 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer",
-              "maximum": 100,
-              "minimum": 1,
-              "default": 30,
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 100,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Limit"
             }
           },
@@ -2423,7 +2441,7 @@
     "/api/notices": {
       "get": {
         "summary": "Get Notices Feed",
-        "description": "The unified inbox feed (Task #1024, R4 layer 2, decision Q1=A): one\nrequest carries the whole Inbox panel.\n\n- `open` — cross-fleet open FYI notices (require_response false),\n  priority then newest. Same content as GET /api/notices/open.\n- `awaiting` — cross-fleet open require_response notices, same sort.\n  Today these ride the agent snapshot (notices_awaiting_response); the\n  merged endpoint makes them a first-class pipe so the frontend's Inbox\n  no longer merges three sources.\n- `resolved_page` + `next_cursor` — one keyset page of the resolved\n  history (both kinds, newest resolution first), same semantics as\n  GET /api/notices/resolved: pass next_cursor back as before_at /\n  before_id for the next strictly-older page; None means the end.\n\nThe standalone endpoints stay for their other consumers (IM bridge,\nCLI). The open sweep (FYI TTL auto-resolve) runs once per call, so the\nopen list, the awaiting list and the history agree within one request.",
+        "description": "The unified inbox feed (Task #1024, R4 layer 2, decision Q1=A): one\nrequest carries the whole Inbox panel.\n\n- `open` — cross-fleet open FYI notices (require_response false),\n  priority then newest. Same content as GET /api/notices/open.\n- `awaiting` — cross-fleet open require_response notices, same sort.\n  Today these ride the agent snapshot (notices_awaiting_response); the\n  merged endpoint makes them a first-class pipe so the frontend's Inbox\n  no longer merges three sources.\n- `resolved_page` + `next_cursor` — one keyset page of the resolved\n  history (both kinds, newest resolution first), same semantics as\n  GET /api/notices/resolved: pass next_cursor back as before_at /\n  before_id for the next strictly-older page; None means the end.\n\nThe standalone endpoints stay for their other consumers (IM bridge,\nCLI). The open sweep (FYI TTL auto-resolve) runs once per call, so the\nopen list, the awaiting list and the history agree within one request.\nThe open/awaiting cap and the resolved page default to\n``display.notices_open_default_limit`` / ``display.notices_resolved_default_page``\nwhen the caller passes none.",
         "operationId": "get_notices_feed_api_notices_get",
         "parameters": [
           {
@@ -2431,10 +2449,16 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer",
-              "maximum": 500,
-              "minimum": 1,
-              "default": 200,
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 500,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Limit"
             }
           },
@@ -2443,10 +2467,16 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer",
-              "maximum": 100,
-              "minimum": 1,
-              "default": 30,
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 100,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Resolved Limit"
             }
           },
