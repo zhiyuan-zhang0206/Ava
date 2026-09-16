@@ -236,6 +236,78 @@ def test_publish_offsite_module_entry_publishes_the_named_artifact(
     assert published == [artifact]
 
 
+def test_publish_offsite_standalone_success_is_visible(tmp_path: Path) -> None:
+    """A standalone success reaches stderr: the entry point configures logging,
+    so the store-verified publish ACK is visible — a fully silent success was
+    once read as a dead upload (misdiagnosed 2026-09-16). A fresh interpreter is
+    deliberate: pytest's own root handler would mask the standalone behavior."""
+    artifact = tmp_path / "ava-20260916T030000Z.dump.enc"
+    artifact.write_bytes(b"encrypted artifact")
+    code = textwrap.dedent(f"""
+        import sys
+        from pathlib import Path
+
+        sys.path.insert(0, {str(_REPO)!r})
+        from services.backup import _main
+        from services.pitr import store_factory
+        from services.pitr.checksums import MD5, ObjectChecksum
+        from services.pitr.object_store import RemoteObjectAck
+
+        class _Store:
+            def put_base_if_absent(self, *, source, object_name, metadata, cancelled=None):
+                return RemoteObjectAck(
+                    object_name=object_name,
+                    pin_token="gen-7",
+                    size=Path({str(artifact)!r}).stat().st_size,
+                    checksum=ObjectChecksum(MD5, "0" * 32),
+                    metadata=dict(metadata),
+                    created=True,
+                )
+
+        class _Group:
+            def restartable_streaming_object_store(self):
+                return _Store()
+
+        store_factory.get_store_group = _Group
+        raise SystemExit(_main(["--publish-offsite", {str(artifact)!r}]))
+    """)
+    proc = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", code], capture_output=True, text=True, check=False
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert "[backup] off-site published" in proc.stderr
+    assert f"{backup._REMOTE_ROOT}/{artifact.name}" in proc.stderr
+
+
+def test_publish_offsite_standalone_failure_behavior_unchanged(tmp_path: Path) -> None:
+    """The standalone failure path is unchanged: an unconfigured store still
+    reports on stderr, still exits 0 (best-effort), still retains the local
+    artifact."""
+    artifact = tmp_path / "ava-20260916T030000Z.dump.enc"
+    artifact.write_bytes(b"encrypted artifact")
+    code = textwrap.dedent(f"""
+        import sys
+
+        sys.path.insert(0, {str(_REPO)!r})
+        from services.backup import _main
+        from services.pitr import store_factory
+
+        def _no_store_group():
+            raise RuntimeError("no backup store configured")
+
+        store_factory.get_store_group = _no_store_group
+        raise SystemExit(_main(["--publish-offsite", {str(artifact)!r}]))
+    """)
+    proc = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", code], capture_output=True, text=True, check=False
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert "[backup] off-site store unavailable; local artifact retained" in proc.stderr
+    assert artifact.read_bytes() == b"encrypted artifact"
+
+
 def test_db_size_breakdown_real_db(db_conn: Any) -> None:
     """The composition query itself is pinned against a real throwaway DB: a
     fresh DB with no checkpoint tables reads 0 instead of failing (the

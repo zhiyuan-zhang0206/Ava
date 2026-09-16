@@ -748,6 +748,13 @@ def _run_backup(
 
 def _main(argv: list[str] | None = None) -> int:
     """Run the detached, best-effort off-site backup publisher."""
+    # Standalone runs leave the module's INFO records to lastResort (WARNING+
+    # only): without this the store-verified publish ACK never appears, so a
+    # successful upload reads as a silent death (2026-09-16 misdiagnosis).
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     parser = argparse.ArgumentParser(prog="python -m services.backup")
     parser.add_argument("--publish-offsite", type=Path, metavar="ARTIFACT")
     args = parser.parse_args(argv)
