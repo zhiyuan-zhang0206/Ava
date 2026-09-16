@@ -13,11 +13,17 @@ on model_provider. Core pre-declares no vocabularies: provider plugins register
 them through their ProviderBinding, and an unknown provider fails fast.
 """
 
+from __future__ import annotations
+
 import enum
 from collections.abc import Mapping
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
-from langchain_core.messages import AIMessage
+if TYPE_CHECKING:
+    # Annotation-only (`classify_stop`). Importing at module scope drags the
+    # LangChain message stack onto the provider-registration path the exec
+    # child boots through (task #3633; `_TYPE_CHECKING_ALLOWED`).
+    from langchain_core.messages import AIMessage
 
 from shared.message_kwargs import message_response_metadata
 

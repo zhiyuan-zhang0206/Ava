@@ -7,14 +7,18 @@ build_graph does not take them; the caller passes them via
 
 At startup, `_load_extensions()` reads `$AVA_HOME/plugins_config.json` and
 imports the `plugin.py` of every enabled plugin, by path — builtin and external
-alike, one loop. The import mechanics and the fail-soft contract live in
-`ava._extend` (`load_plugin_module` / `safe_load_plugin_module`), the same
-primitives `ava._extend.scan_and_load` uses at host boot, so both production
-load paths agree on module name, package context, `sys.modules` identity, and
-containment. A repeat call re-executes the module already in `sys.modules`
-rather than binding a new one, so a plugin module's identity is stable for the
-life of the process. Layer A wrap monkey-patches the process's ava module; the
-exec child re-runs plugin loading at its own boot, so agent code there sees the
+alike, one loop — followed by each plugin's `agent_runtime.py` face (state
+fields, hooks, prompt sections). The loader lives in `agent._extensions` (task
+#3633 moved it off this module so surface-only processes never need the graph
+kernel); it is re-exported here as `_load_extensions` for the graph build. The
+import mechanics and the fail-soft contract live in `ava._extend`
+(`load_plugin_module` / `safe_load_plugin_module`), the same primitives
+`ava._extend.scan_and_load` uses at host boot, so both production load paths
+agree on module name, package context, `sys.modules` identity, and containment.
+A repeat call re-executes the module already in `sys.modules` rather than
+binding a new one, so a plugin module's identity is stable for the life of the
+process. Layer A wrap monkey-patches the process's ava module; the exec child
+re-runs the plugin surface load at its own boot, so agent code there sees the
 wrapped version too. Config decides what is imported; not imported = not
 registered.
 """
@@ -27,11 +31,10 @@ from langgraph.graph import START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import RetryPolicy
 
+from agent._extensions import load_extensions as _load_extensions
 from agent.hooks import make_hook_runner
 from agent.impersonation import protect_native_hooks
 from agent.state import BaseAgentState, build_agent_state
-from shared import paths
-from shared import plugins_config as plugins_cfg
 from shared.config import settings
 from shared.config.turn_view import turn_settings
 
@@ -274,102 +277,6 @@ def _after_exec_default_next(_state: BaseAgentState) -> NodeName:
     - No pending + halted=False + messages non-empty → immediately goto before_llm (no block)
     """
     return CLAIM
-
-
-def _load_extensions() -> plugins_cfg.PluginsConfig:
-    """Read plugins_config.json, trigger import side-effects for enabled plugins (hook
-    registration + Layer A wrap + system prompt contribution).
-
-    Unified plugin model (2026-05 refactor):
-    - Built-in plugins in `<repo>/ava_builtins/plugins/<name>/plugin.py`
-    - External plugins in `~/.ava/plugins/<name>/plugin.py`
-    - Name collision → DuplicatePlugin fail-fast
-    - plugins_config.json `plugins` section controls each plugin's enabled/disabled
-
-    Flow:
-    0. Clear ghost state accumulated from previous reload (state field / hook / contributor)
-    1. plugins_cfg._discover_plugins() → scan built-in + external dirs, returns {name: path}
-    2. plugins_cfg.load(known_plugins) → read config + auto-merge new plugins
-    3. For each enabled=true plugin: import plugin.py to trigger side-effects
-       (reload semantics — a module object already registered for that file is
-       re-executed, never replaced)
-    """
-    # 0. Reset previously registered plugin state / hook / contributor — multiple calls
-    # to _load_extensions (test fixture, dev hot-reload) accumulate module-level
-    # globals; without reset, "plugins disabled by new config" leave residual hooks
-    # in dispatch.
-    from agent.state import clear_plugin_registrations
-
-    clear_plugin_registrations()
-
-    # 1. Discover all plugins
-    discovered = plugins_cfg._discover_plugins()
-    known_plugins = set(discovered.keys())
-
-    # 2. Read config
-    try:
-        config = plugins_cfg.load(known_plugins)
-    except plugins_cfg.DanglingPlugin as exc:
-        # Same fail-soft contract as a broken plugin.py: a config entry whose
-        # plugin directory is gone (an interrupted upgrade, a manual rm) must
-        # not block import ava. Report each dangling name through the one
-        # canonical reporter, then reload with the entries dropped (treated as
-        # disabled).
-        from shared import plugin_load_report
-
-        for name in sorted(exc.names):
-            plugin_load_report.report_plugin_load_failure(name, exc)
-        config = plugins_cfg.load(known_plugins, allow_dangling=True)
-
-    # 3. Import enabled plugin (with PluginContext for state key prefixing).
-    # The import mechanics (dotted name, synthetic parents, sys.modules
-    # registration before exec, reload-in-place) and the fail-soft contract
-    # live in `ava._extend`, shared with the host-boot loader — one contract,
-    # two production call sites.
-    from ava._extend import safe_load_plugin_module
-    from shared.plugin_context import PluginContext
-
-    for name, entry in config.plugins.items():
-        if not entry.enabled:
-            continue
-        # Invariant: load() already validated DanglingPlugin, name must be in discovered;
-        # spec_from_file_location returns non-None for an existing .py. Assert rather
-        # than silent continue — an enabled plugin silently vanishing with 0 log is
-        # the hardest bug to chase.
-        assert name in discovered, f"load() invariant broken: {name} not in discovered"  # noqa: S101
-        plugin_dir = discovered[name]
-        plugin_py = plugin_dir / "plugin.py"
-        # Built-in plugins live under ava_builtins/plugins/; external under ~/.ava/plugins/.
-        is_builtin = str(paths.repo_plugins_dir()) in str(plugin_dir.resolve())
-        pkg = "ava_builtins.plugins" if is_builtin else "plugins"
-        with PluginContext(name):
-            # Fail-soft contract (2026-08-28 ava_ledger incident): a broken
-            # plugin — a missing sibling module, a syntax error, a top-level
-            # exception — is skipped with a loud report, never a blocked
-            # `import ava` / graph build for the whole cluster. The remaining
-            # enabled plugins keep loading below; the half-executed module was
-            # dropped from sys.modules so a later reload retries from a clean
-            # slate. `None` is that skip.
-            if safe_load_plugin_module(plugin_py, name=name, pkg=pkg) is None:
-                continue
-
-    # 4. Bind plugin config from disk — only batch bind after all plugin imports complete,
-    # so that when hook callbacks actually fire, `ava._settings.plugins.<n>` is ready.
-    # Missing disk image auto-writes default; schema drift raises (guides
-    # `ava plugins update`).
-    from shared.plugin_config_registry import bind_from_disk
-
-    bind_from_disk()
-
-    # 5. Install the SDK-usage recorder over the final ava.* surface. Runs last so it
-    # wraps plugin-registered namespaces / members and sits outermost of any plugin
-    # `ava.extend.wrap` layer (one count per agent call). Idempotent; a plugin reload
-    # re-runs it after clear_wraps restores plugin-touched targets.
-    from ava import _sdk_metering as sdk_metering
-
-    sdk_metering.install()
-
-    return config
 
 
 def build_graph(

@@ -100,15 +100,36 @@ def loads_typed(data: tuple[str, bytes]) -> Any:
     return _serde().loads_typed(data)
 
 
-@dataclass(frozen=True)
+@dataclass
 class RequestPayload:
-    """Decoded request envelope — what the parent hands the child."""
+    """Decoded request envelope — what the parent hands the child.
+
+    `state` is the typed-blob-decoded model dump, filled lazily by
+    `materialize_state()`; until then the request's raw `(tag, blob)` rides
+    `state_raw`. Deferring keeps the langgraph serde + `agent.state` off the
+    child start for a snapshot the turn may never touch (task #3633 leg-2).
+    Deliberately not frozen — the lazy memo writes back the one field.
+    """
 
     code: str
     agent_id: int | None
     timeout_s: float
-    state: dict[str, Any] | None  # typed-blob-decoded model dump
+    state: dict[str, Any] | None  # typed-blob-decoded model dump (see materialize_state)
     incarnation: RuntimeIncarnation | None = None
+    state_raw: tuple[str, bytes] | None = None
+
+    def materialize_state(self) -> dict[str, Any] | None:
+        """Decode the raw state blob once; None for a stateless request."""
+        if self.state_raw is None:
+            return self.state
+        if self.state is None:
+            decoded = loads_typed(self.state_raw)
+            if not isinstance(decoded, dict):
+                raise ValueError(
+                    f"exec request state blob decoded to {type(decoded).__name__}, expected dict"
+                )
+            self.state = decoded
+        return self.state
 
 
 @dataclass
@@ -214,7 +235,11 @@ def write_request(
 
 
 def read_request(path: Path) -> RequestPayload:
-    """Read and decode a request envelope; fail-fast on version drift."""
+    """Read a request envelope; fail-fast on version drift.
+
+    The state blob stays raw (`state_raw`) until `materialize_state()` —
+    a stateful child decodes it on first use, not at read (task #3633 leg-2).
+    """
     started_at = time.perf_counter()
     envelope = _read_json(path)
     if envelope.get("v") != REQUEST_VERSION:
@@ -222,13 +247,12 @@ def read_request(path: Path) -> RequestPayload:
             f"exec request envelope version {envelope.get('v')!r} != {REQUEST_VERSION} "
             f"(stale file or version skew between agent and exec child)"
         )
-    state = None
+    state_raw = None
     if envelope.get("state_b64") is not None:
-        state = loads_typed((str(envelope["state_tag"]), base64.b64decode(envelope["state_b64"])))
-        if not isinstance(state, dict):
-            raise ValueError(
-                f"exec request state blob decoded to {type(state).__name__}, expected dict"
-            )
+        # Raw (tag, blob) only — the decode is deferred to `materialize_state()`
+        # so the langgraph serde + `agent.state` stay off the child start
+        # (task #3633 leg-2).
+        state_raw = (str(envelope["state_tag"]), base64.b64decode(envelope["state_b64"]))
     from uuid import UUID
 
     identity = envelope.get("incarnation")
@@ -243,8 +267,9 @@ def read_request(path: Path) -> RequestPayload:
         code=str(envelope["code"]),
         agent_id=envelope.get("agent_id"),
         timeout_s=float(envelope["timeout_s"]),
-        state=cast("dict[str, Any] | None", state),
+        state=None,
         incarnation=incarnation,
+        state_raw=state_raw,
     )
     _log_envelope_transfer("request", "read", path, started_at)
     return payload

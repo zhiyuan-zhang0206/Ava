@@ -24,7 +24,7 @@ def memory_plugin() -> Any:
     registries that `clear_plugin_registrations` truncates, and a second import
     hits the sys.modules cache without re-running plugin.py. Dropping the module
     first is what makes the load — and therefore the registration — actually
-    happen, exactly as `_load_extensions` does it.
+    happen, exactly as the full plugin load (`agent._extensions`) does it.
     """
     from shared.plugin_config_registry import bind_from_disk
     from shared.plugin_context import PluginContext
@@ -35,7 +35,10 @@ def memory_plugin() -> Any:
             del sys.modules[name]
 
     with PluginContext("ava_memory"):
-        from ava_builtins.plugins.ava_memory import plugin as _plugin
+        # The context notes, the memory-discipline prompt section, and the recall
+        # hook are agent-side registrations — they live in the agent_runtime face
+        # (task #3633).
+        from ava_builtins.plugins.ava_memory import agent_runtime as _plugin
 
     bind_from_disk()
     yield _plugin

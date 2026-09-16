@@ -29,52 +29,46 @@ When the wrap is called outside an exec turn (test / dev REPL), it fast-paths
 straight through to the original read — no path rewriting, no injection.
 Behavior is identical to the original SDK function, avoiding a silent fallback
 to the system cwd that would diverge from plugin-enabled behavior.
+
+This module is the plugin's SDK **surface** — the only face an agent-launched
+child loads (task #3633). Its agent-runtime registrations (the `ava_code__cwd`
+state field, the two system-prompt sections, the after_init / after_exec
+hooks) live in `agent_runtime.py`, imported only on the full path (see
+`agent/_extensions.py`); until it loads, `state_handle` below is a stand-in
+that raises the same `PluginStateOutsideTurnError` the real handle raises
+outside an exec turn.
 """
 
 from __future__ import annotations
 
 import hashlib
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Any
 
 __description__ = "Ava Code conventions — maintains cwd and auto-injects project AGENTS.md / CLAUDE.md (walking up from ava.files.read paths)"
 
 import contextlib
-import io
-import stat
 from collections.abc import Callable
 from pathlib import Path
 
-from langchain_core.messages import AnyMessage
-from langgraph.graph.message import add_messages
-from pydantic import BaseModel, Field
-
 import ava
-import ava._boot as _ava_boot
 import ava.files as _ava_files_mod
 import ava.skills as _ava_skills
-from agent.graph._exec_output import truncate_both_ends
-from agent.graph._system_prompt import register_system_prompt_section
-from agent.hooks import Hook, register_after_exec, register_after_init
-from agent.messages import NoteTag, system_note_message
-from agent.state import AgentState, register_plugin_state
 from ava._sdk_validation import coerce_str
-from ava.security import scan_content
 from shared.config import settings
-from shared.config.turn_view import turn_settings
 from shared.log import logger
-from shared.paths import workspace_dir
 
 from . import _code_namespace
 from ._walk import find_context_files_along_path, project_skill_roots
 
 _files_resolve = _ava_files_mod._resolve
 
-# ── ava.cwd SDK namespace registration — must run before register_plugin_state
-# so a plugin double-load (test fixture / dev hot-reload) hits the namespace
-# conflict first (`PluginNamespaceConflictError`, PR #192's first line of
-# defense) rather than the state-field reducer-function-identity-mismatch
-# annotation conflict below (function objects differ after reload).
+# ── ava.cwd SDK namespace registration — runs before the agent-runtime face's
+# register_plugin_state (loaded right after this surface), so a plugin
+# double-load (test fixture / dev hot-reload) hits the namespace conflict first
+# (`PluginNamespaceConflictError`, PR #192's first line of defense) rather than
+# the state-field reducer-function-identity-mismatch annotation conflict
+# (function objects differ after reload).
 # _code_namespace's top level does not depend on state_handle (function
 # bodies lazy-import), so importing here is cycle-free.
 ava.register_namespace("cwd", _code_namespace)
@@ -84,74 +78,51 @@ ava.register_namespace("cwd", _code_namespace)
 ava.register_sdk_expand("cwd")
 
 
-# ── state field declaration ──────────────────────────────────────────────
-def _default_cwd() -> str:
-    """Initial cwd for a fresh agent state: the agent's own workspace.
+# ── state handle (surface stand-in) ──────────────────────────────────────
+# The real handle — and the state class it belongs to — lives in the
+# agent-runtime face (`agent_runtime.py`), loaded when a state slot first
+# materializes (task #3633 leg-2: a stateful child's slot is lazy). This
+# stand-in exists so the surface's call sites (`ava.cwd.get`/`set`, the read
+# wrap's injection path, the project-skill source below) always hold a handle
+# object. With a live slot (`ava.state` is not None), the slot exposes
+# `materialize()` — the framework contract on the lazy slot: calling it loads
+# the face (which rebinds `state_handle` on this module) and the call then
+# delegates to the real handle. Without a live slot — outside a turn (test /
+# dev REPL) — its methods raise exactly what the real handle raises outside an
+# exec turn.
+class _UnboundStateHandle:
+    """Stand-in for the ava_code `PluginStateHandle` until the slot resolves."""
 
-    State is first created inside a bootstrapped agent process, after
-    `ava._boot.establish` has bound the identity — so a real run starts in
-    `$AVA_HOME/workspaces/<agent_id>/` (created here on first touch). Direct
-    state construction without a bootstrap (tests, dev REPL) has no agent and
-    therefore no workspace; $HOME is the documented pre-bootstrap placeholder
-    (see `ava._boot.agent_id`)."""
-    aid = _ava_boot.agent_id()
-    if aid is None:  # pyright: ignore[reportUnnecessaryComparison] — agent_id() returns None pre-bootstrap
-        return str(Path.home())
-    return str(workspace_dir(aid))
+    def read(self) -> Any:
+        return self._forward(
+            "read",
+            "PluginStateHandle[AvaCodeState].read() called outside exec turn—"
+            "ava.state only valid inside execute_code (the exec turn).",
+        )
 
+    def update(self, delta: dict[str, Any]) -> None:
+        self._forward(
+            "update",
+            "PluginStateHandle[AvaCodeState].update() called outside exec turn—"
+            "ava.state_update only valid inside execute_code (the exec turn).",
+            delta,
+        )
 
-class AvaCodeState(BaseModel):
-    """plugins.ava_code persistent state — survives across turns/restarts via LangGraph checkpoint.
+    def _forward(self, method: str, outside_turn_message: str, *args: Any) -> Any:
+        """Materialize a live slot, then delegate to the rebound real handle."""
+        state = ava.state
+        if state is not None:
+            materialize = getattr(state, "materialize", None)
+            if materialize is not None:
+                materialize()
+                from .plugin import state_handle as current
 
-    - cwd: agent-maintained working directory, default `_default_cwd()` (the
-      agent's workspace); the agent switches it via `ava.cwd.set`; the
-      `ava.files.read` wrap uses it to resolve relative paths.
-    - messages: declared base channel (exact BaseAgentState annotation) —
-      the context-file notes this plugin appends during the exec turn; the
-      exec node merges them into its own messages delta (after the exec
-      result). See the field comment below.
-    - injected_paths: set of context-file (AGENTS.md / CLAUDE.md) paths already
-      surfaced to the agent, deduped to prevent the wrap from re-injecting
-      (both auto-inject and direct agent reads mark into here; see module
-      docstring + `_wrapped_read` comment).
-    - last_seen_compact: bookmark compared against the built-in
-      `compact.version`. After compact strips messages, injected_paths is
-      lazily cleared (detected at wrap entry, not actively reset) — the same
-      monotonic version-counter reset `ava_sdk_reminder` uses.
-    - project_skills_note: the project-local skills summary string to inject
-      as a system note when cwd changes. None when cwd has not been set or
-      the cwd is not under a git repo with project skills. Set by
-      `ava.cwd.set()` and injected by the after-exec hook.
-    - project_skills_seen_compact: compact version bookmark for re-injection
-      after compaction. When compact.version advances past this bookmark the
-      note is re-injected (same lazy-reset pattern as injected_paths).
-      Defaults to -1 so the first injection always fires (compact.version
-      starts at 0).
-    - cwd_note: set by ava.cwd.set() to trigger a system note injection in
-      the after-exec hook. The hook reads and clears it, injecting
-      "[system] Working directory set to ..." with optional project-skills
-      listing. Per-turn dedup: subsequent cwd.set() calls overwrite the
-      field; only the final value is injected.
-    """
-
-    cwd: str = Field(default_factory=_default_cwd)
-    # Base-channel declaration: this plugin legitimately appends system notes
-    # (AGENTS.md / CLAUDE.md context injection) to the framework's `messages`
-    # channel during the exec turn. The annotation must match BaseAgentState
-    # exactly (incl. the add_messages reducer) — register_plugin_state
-    # enforces it — and the exec node merges the plugin's messages delta with
-    # its own ToolMessage delta (agent/graph/_exec.py), so the notes ride in
-    # the same in-memory state update instead of a side-channel file.
-    messages: Annotated[list[AnyMessage], add_messages] = Field(default_factory=list)
-    injected_paths: set[str] = Field(default_factory=set)
-    injected_hashes: set[str] = Field(default_factory=set)
-    last_seen_compact: int = 0
-    project_skills_note: str | None = None
-    project_skills_seen_compact: int = -1
-    cwd_note: str | None = None
+                if current is not self:
+                    return getattr(current, method)(*args)
+        raise ava.PluginStateOutsideTurnError(outside_turn_message)
 
 
-state_handle = register_plugin_state(AvaCodeState)
+state_handle: _UnboundStateHandle = _UnboundStateHandle()
 
 
 # ── project-local skill source ───────────────────────────────────────────
@@ -195,6 +166,13 @@ def _process_context_file(
     (file was handled: injected, skipped via dedup, or errored).
     Returns False when the file was not a context file (should not happen).
     """
+    # Agent-runtime half only: reachable when a live state slot exists
+    # (a stateful child / the agent process), so these imports stay off the
+    # surface boot (task #3633).
+    from agent.graph._exec_output import truncate_both_ends
+    from agent.messages import NoteTag, system_note_message
+    from ava.security import scan_content
+
     ctx_file_str = str(ctx_file)
     if ctx_file_str in injected:
         return True
@@ -525,218 +503,3 @@ def _wrapped_serve(
 
 
 ava.extend.wrap("ui.serve", _wrapped_serve)
-
-
-# ── system prompt section: coding tool advertising ──────────────────────────
-# From the plugin's perspective, what "hands" should the agent use for
-# coding? Feed cwd / files / shell as three modules into help() — the
-# renderer is Python-stub-format, each module renders the full docstring +
-# each child function as `def name(sig): """doc"""`; the agent gets the
-# full contract with zero drill-down.
-
-_PROMOTED_MODULES = ("cwd", "files", "shell")
-
-
-@register_system_prompt_section
-def _coding_tools_section() -> str:
-    """Render the cwd / files / shell modules as Python stubs under `## ava.X`.
-
-    A module already expanded by the framework's "Expanded SDK reference"
-    section (the effective list: plugin registrations + AVA_SDK_EXPAND, exact
-    path match) is skipped here — its full contract is in the prompt once
-    already; the preamble conventions below still apply and are always
-    rendered. With the default config every promoted module is expanded, so
-    this section reduces to the preamble."""
-    from agent.graph._system_prompt import effective_sdk_expand
-
-    expanded = set(effective_sdk_expand())
-    pieces: list[str] = []
-    for name in _PROMOTED_MODULES:
-        if name in expanded:
-            continue
-        mod = getattr(ava, name)
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            ava.help(mod)
-        pieces.append(buf.getvalue().rstrip())
-    body = "\n\n".join(pieces)
-    preamble = (
-        "**Prefer the tools below** for file and shell operations. "
-        "When you start a coding task:\n\n"
-        "- Point your working directory at the project root once when you start.\n"
-        "- Read `AGENTS.md` first (via the file tools) before reading other "
-        "code — it sets the project rules you must follow.\n"
-        "- Search with `rg` (ripgrep), not `grep -r`/`find` — recursive grep scans "
-        "every `.worktrees/` checkout and often hits the 30s shell timeout "
-        "(benchmarks in `ava-code:conventions`).\n"
-        "- For any change to a repo, work in an isolated `git worktree` — never edit, "
-        "switch the branch of, or push the shared checkout directly; every change goes "
-        "through a PR. Read the `worktree` skill for naming and how to create one.\n"
-        "- Every commit appends a `Co-authored-by: Ava #<your agent id>` trailer; PR "
-        "titles start with `[Ava-<your agent id>]`.\n"
-        "- Before calling a change done, run the narrowest check that proves it (the "
-        "failing test, the exact command), then widen to nearby cases — don't claim "
-        "success from reading the diff alone.\n"
-        "- `execute_code` has a hard timeout (default 300s); keep it to short, quick "
-        "work. Run anything long-running (e.g. `time.sleep`, large downloads, long "
-        "polling) in an `ava.shell.sessions` persistent shell instead."
-    )
-    if not body:
-        return f"# Coding tools\n\n{preamble}"
-    return f"# Coding tools\n\n{preamble}\n\n{body}"
-
-
-# ── system prompt section: debugging workflow (opt-in) ──────────────────────
-# Coding-specific advice, so it belongs to this plugin rather than the core
-# prompt. Off by default; toggled by adding "ava_code_workflow" to
-# settings.agent.system_prompt_extra (env AVA_SYSTEM_PROMPT_EXTRA).
-# Empty return when disabled = no contribution.
-@register_system_prompt_section
-def _engineering_workflow_section() -> str:
-    """Loose bug-fix-workflow advice, gated by system_prompt_extra=ava_code_workflow."""
-    if "ava_code_workflow" not in turn_settings.agent.system_prompt_extra:
-        return ""
-    return (
-        "## Resolving issues and debugging\n\n"
-        "When you're trying to resolve an issue or chase down a bug, start by "
-        "reproducing the failure. That's the foundation — without a reliable "
-        "repro you're guessing at causes.\n\n"
-        "Once you have it, push further. The failing case in front of you is "
-        "one way the bug shows up; the same underlying defect usually has "
-        "several other manifestations. As you reproduce, keep asking: what "
-        "other inputs hit this code path? What adjacent edge cases would also "
-        "fail? The point is to map the space of failures, not confirm a "
-        "single instance.\n\n"
-        "Reproduction and root-cause analysis feed each other. Each step "
-        "deeper into the cause reveals new failing inputs; each new failing "
-        "input sharpens the cause. Treat them as iteration, not two "
-        "sequential phases.\n\n"
-        "Before believing your fix is done, run it against the variations "
-        "you've discovered, not just the original case. A fix that handles "
-        "one instance but doesn't address the broader pattern is usually the "
-        "wrong fix.\n"
-    )
-
-
-# ── after_exec hook: cwd + project-skills notes ──────────────────────────────
-# AGENTS.md / CLAUDE.md context injection and security-finding delivery moved
-# INTO the exec node's messages delta (in-memory, user ruling 2026-08-11) —
-# this hook no longer touches the messages channel. It keeps the two note
-# types that are summaries of plugin state rather than content discovered
-# during exec: the cwd-change note and the project-skills listing.
-
-
-class _InjectCwdNotesAfterExecHook(Hook):
-    """Inject the cwd-change note and the project-skills note when
-    `ava.cwd.set` left them pending; re-inject the skills note after compact.
-    No-op when there is nothing to inject."""
-
-    async def __call__(
-        self,
-        state: AgentState,
-        _runtime: object,
-        _config: object,
-        /,
-    ) -> dict | None:
-        notes: list = []
-
-        # ── cwd-note injection ───────────────────────────────────────────────
-        # cwd.set() writes a summary into cwd_note (path + optional project
-        # skills listing). Inject it here as a system note on the first turn
-        # after the cwd change. Same-turn dedup: cwd_note carries the *last*
-        # set() value; the hook reads and clears it.
-        #
-        # ── project-skills note injection ───────────────────────────────────
-        # When cwd.set() discovers project-local skills it writes the summary
-        # into project_skills_note. Inject it here as a system note on the
-        # first turn after the cwd change and re-inject after compact (same
-        # lazy-reset pattern as injected_paths: compact.version advancing past
-        # the bookmark clears the "already injected" guard).
-        # project_skills_seen_compact defaults to -1 so the first injection
-        # always fires (compact.version starts at 0).
-        result: dict = {}
-        with contextlib.suppress(ava.PluginStateOutsideTurnError):
-            current = state_handle.read()
-            cwd_note = current.cwd_note
-            if cwd_note is not None:
-                notes.append(
-                    system_note_message(
-                        content=cwd_note,
-                        tag=NoteTag.CONTEXT,
-                        created_at=datetime.now(UTC),
-                    )
-                )
-                result["ava_code__cwd_note"] = None
-            skills_text = current.project_skills_note
-            if skills_text is not None:
-                compact_v = state.compact.version
-                if compact_v > current.project_skills_seen_compact:
-                    notes.append(
-                        system_note_message(
-                            content=skills_text,
-                            tag=NoteTag.PROJECT_SKILLS,
-                            created_at=datetime.now(UTC),
-                        )
-                    )
-                    result["ava_code__project_skills_seen_compact"] = compact_v
-
-        if notes:
-            logger.info("[ava_code] injecting %d finding(s) as system notes", len(notes))
-            result["messages"] = notes
-            return result
-        return None
-
-
-# ── after_init hook: validate persisted logical cwd ─────────────────────
-def _logical_cwd_error(cwd: Path) -> OSError | None:
-    """Return why ``cwd`` cannot serve as a logical directory, or None."""
-    try:
-        mode = cwd.stat().st_mode
-    except OSError as exc:
-        return exc
-    if not stat.S_ISDIR(mode):
-        return NotADirectoryError(f"persisted ava.cwd is not a directory: {cwd}")
-    return None
-
-
-class _ValidateCwdAfterInitHook(Hook):
-    """Repair a persisted logical cwd that cannot be statted or is not a directory.
-
-    The Python process cwd is deliberately outside plugin state: SDK wrappers
-    resolve against ``ava.cwd`` explicitly, while bare Python filesystem and
-    subprocess calls retain the process's stable startup cwd.
-    """
-
-    async def __call__(
-        self,
-        state: AgentState,
-        _runtime: object,
-        _config: object,
-        /,
-    ) -> dict | None:
-        cwd = Path(state.ava_code__cwd)  # pyright: ignore[reportAttributeAccessIssue]
-        exc = _logical_cwd_error(cwd)
-        if exc is not None:
-            # The persisted cwd is no longer usable (worktree deleted after
-            # PR merge / task cleanup, drive unmounted, replaced by a file,
-            # etc.). Fall back
-            # to the agent's workspace and persist the new cwd so future
-            # turns and restarts don't crash on the same stale path.
-            fallback = _default_cwd()
-            logger.warning(
-                "[ava_code] after_init: persisted cwd {cwd!r} failed validation "
-                "({exc!r}), falling back to {fallback!r} — state updated so "
-                "future restarts use the new cwd",
-                cwd=str(cwd),
-                exc=exc,
-                fallback=str(fallback),
-            )
-            return {"ava_code__cwd": str(fallback)}
-        return None
-
-
-validate_cwd_after_init = _ValidateCwdAfterInitHook()
-register_after_init(validate_cwd_after_init)
-
-inject_cwd_notes_after_exec = _InjectCwdNotesAfterExecHook()
-register_after_exec(inject_cwd_notes_after_exec)

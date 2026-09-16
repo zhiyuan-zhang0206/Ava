@@ -53,19 +53,19 @@ def _reset(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
 
 def _spy_loader(monkeypatch: pytest.MonkeyPatch, *, register: str | None) -> list[int]:
-    """Replace agent.graph._build._load_extensions (reached by _ensure_plugins_loaded
+    """Replace agent._extensions.load_extensions (reached by _ensure_plugins_loaded
     via importlib) with a spy that records calls and optionally registers a namespace.
     Avoids the heavy, DB-touching real load in a unit test."""
-    import agent.graph._build as build
+    import agent._extensions as extensions
 
     calls: list[int] = []
 
-    def fake() -> None:
+    def fake(*, surface: bool = False) -> None:
         calls.append(1)
         if register is not None:
             ava.register_namespace(register, SimpleNamespace(ping=lambda: "pong", __doc__="t"))
 
-    monkeypatch.setattr(build, "_load_extensions", fake)
+    monkeypatch.setattr(extensions, "load_extensions", fake)
     return calls
 
 
@@ -166,13 +166,13 @@ def test_ensure_plugins_loaded_contains_a_failing_load_chain(
     is contained, reported loudly, and the process continues without plugin
     namespaces; the stderr line is the always-visible channel because a
     launched child usually has no loguru sink configured."""
-    import agent.graph._build as build
+    import agent._extensions as extensions
     from shared.plugins_config import DuplicatePlugin
 
-    def boom() -> None:
+    def boom(*, surface: bool = False) -> None:
         raise DuplicatePlugin("plugin 'x' exists in both builtin and external roots")
 
-    monkeypatch.setattr(build, "_load_extensions", boom)
+    monkeypatch.setattr(extensions, "load_extensions", boom)
 
     ava._ensure_plugins_loaded()  # must not raise
 
@@ -191,23 +191,23 @@ def test_ensure_plugins_loaded_defers_while_the_loader_module_still_initializes(
     """A re-entrant import is not a failure (task #3234).
 
     A process that imports an `agent.*` module before `ava` reaches the eager
-    load hits the loader while `agent.graph._build` is still its own partial
+    load hits the loader while `agent._extensions` is still its own partial
     `sys.modules` entry: the attribute does not exist YET. That call must defer
     (no latch, no loud report) — and once the module is complete, the next call
     loads normally instead of being blocked by a latch for a load that never
     ran.
     """
-    import agent.graph._build as build
+    import agent._extensions as extensions
 
     calls: list[int] = []
 
-    def fake() -> None:
+    def fake(*, surface: bool = False) -> None:
         calls.append(1)
 
     # Mid-import: the loader attribute is not defined yet and CPython marks
     # the partial-module state (the shape the real circular import hits).
-    monkeypatch.delattr(build, "_load_extensions")
-    monkeypatch.setattr(build.__spec__, "_initializing", True, raising=False)
+    monkeypatch.delattr(extensions, "load_extensions")
+    monkeypatch.setattr(extensions.__spec__, "_initializing", True, raising=False)
 
     ava._ensure_plugins_loaded()  # must not raise
 
@@ -217,8 +217,8 @@ def test_ensure_plugins_loaded_defers_while_the_loader_module_still_initializes(
     assert not any("failed in this launched child" in r["message"] for r in loguru_records)
 
     # The module finishes initializing; the next call retries and loads.
-    monkeypatch.setattr(build, "_load_extensions", fake, raising=False)
-    monkeypatch.setattr(build.__spec__, "_initializing", False)
+    monkeypatch.setattr(extensions, "load_extensions", fake, raising=False)
+    monkeypatch.setattr(extensions.__spec__, "_initializing", False)
 
     ava._ensure_plugins_loaded()
 
@@ -237,16 +237,16 @@ def test_lazy_miss_fails_fast_while_deferred_and_succeeds_after(
     loader module is complete loads the plugin surface.
     """
     _as_launched_child(monkeypatch)
-    import agent.graph._build as build
+    import agent._extensions as extensions
 
     calls: list[int] = []
 
-    def fake() -> None:
+    def fake(*, surface: bool = False) -> None:
         calls.append(1)
         ava.register_namespace("deferrednsp", SimpleNamespace(ping=lambda: "pong", __doc__="t"))
 
-    monkeypatch.delattr(build, "_load_extensions")
-    monkeypatch.setattr(build.__spec__, "_initializing", True, raising=False)
+    monkeypatch.delattr(extensions, "load_extensions")
+    monkeypatch.setattr(extensions.__spec__, "_initializing", True, raising=False)
 
     with pytest.raises(AttributeError):
         _ = ava.deferrednsp  # type: ignore[attr-defined]
@@ -254,8 +254,8 @@ def test_lazy_miss_fails_fast_while_deferred_and_succeeds_after(
     assert ava._plugins_loaded is False
     assert "plugin load failed" not in capsys.readouterr().err
 
-    monkeypatch.setattr(build, "_load_extensions", fake, raising=False)
-    monkeypatch.setattr(build.__spec__, "_initializing", False)
+    monkeypatch.setattr(extensions, "load_extensions", fake, raising=False)
+    monkeypatch.setattr(extensions.__spec__, "_initializing", False)
 
     assert ava.deferrednsp.ping() == "pong"  # type: ignore[attr-defined]
     assert calls == [1]
@@ -267,15 +267,15 @@ def _spy_member_loader(
 ) -> list[int]:
     """Loader spy that registers a plugin MEMBER on an existing framework
     namespace (ava.self / ava.ui) — the shape ava_fleet uses for log/notify."""
-    import agent.graph._build as build
+    import agent._extensions as extensions
 
     calls: list[int] = []
 
-    def fake() -> None:
+    def fake(*, surface: bool = False) -> None:
         calls.append(1)
         ava.register_namespace_member(namespace, member, lambda: "pong")
 
-    monkeypatch.setattr(build, "_load_extensions", fake)
+    monkeypatch.setattr(extensions, "load_extensions", fake)
     return calls
 
 
