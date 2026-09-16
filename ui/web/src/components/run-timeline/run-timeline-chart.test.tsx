@@ -110,6 +110,10 @@ const labels = {
   noExecutions: "No executions",
   closeDetails: "Close details",
   eventDetails: "Event details",
+  layerDetails: "Layer details",
+  layerSummary: "Summary",
+  showMore: "Show more",
+  showLess: "Show less",
   kind: "Kind",
   timestamp: "Timestamp",
   detail: "Detail",
@@ -419,4 +423,50 @@ describe("RunTimelineChart", () => {
 
     expect(screen.getByText("No activity in this window.")).toBeTruthy();
   });
+
+  it("renders narrative-layer blocks and opens the layer panel on click", () => {
+    const layeredTimeline: RunTimelineResponse = {
+      ...timeline,
+      layers: [
+        { id: "L0#0", depth: 0, parent: null, start: "2026-08-29T08:00:00Z", end: "2026-08-29T09:00:00Z", summary: "overview text" },
+        { id: "L1#0", depth: 1, parent: "L0#0", start: "2026-08-29T08:00:00Z", end: "2026-08-29T08:30:00Z", summary: "stage a" },
+        { id: "L1#1", depth: 1, parent: "L0#0", start: "2026-08-29T08:30:00Z", end: "2026-08-29T09:00:00Z", summary: "stage b" },
+      ],
+    };
+    const { container } = render(<RunTimelineChart timeline={layeredTimeline} labels={labels} {...chartActions} />);
+
+    expect(container.querySelectorAll('[data-testid="layer-block"]')).toHaveLength(3);
+    fireEvent.click(screen.getByRole("button", { name: "Layer details L0#0" }));
+    const panel = screen.getByRole("region", { name: "Layer details" });
+    expect(panel).toBeTruthy();
+    expect(within(panel).getByText("overview text")).toBeTruthy();
+    expect(within(panel).getByText("L0 \u00b7 L0#0")).toBeTruthy();
+  });
+
+  it("renders the raw-context summary band when only a summary is provided", () => {
+    const summaryTimeline: RunTimelineResponse = { ...timeline, summary: { text: "raw context summary" } };
+    render(<RunTimelineChart timeline={summaryTimeline} labels={labels} {...chartActions} />);
+
+    expect(screen.getByTestId("raw-summary")).toBeTruthy();
+    expect(screen.getByText("raw context summary")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Show more" }));
+    expect(screen.getByRole("button", { name: "Show less" })).toBeTruthy();
+  });
+
+  it("hides the summary UI when showSummaries is false", () => {
+    const layeredTimeline: RunTimelineResponse = {
+      ...timeline,
+      layers: [
+        { id: "L0#0", depth: 0, parent: null, start: "2026-08-29T08:00:00Z", end: "2026-08-29T09:00:00Z", summary: "overview text" },
+      ],
+      summary: { text: "raw context summary" },
+    };
+    const { container } = render(
+      <RunTimelineChart timeline={layeredTimeline} labels={labels} {...chartActions} showSummaries={false} />,
+    );
+
+    expect(container.querySelectorAll('[data-testid="layer-block"]')).toHaveLength(0);
+    expect(screen.queryByTestId("raw-summary")).toBeNull();
+  });
+
 });
