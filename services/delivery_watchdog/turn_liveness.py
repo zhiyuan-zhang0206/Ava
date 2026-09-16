@@ -16,6 +16,7 @@ import shared.db
 import shared.redis_client
 from shared import telemetry
 from shared.hosted_db_wait import database_wait_matches
+from shared.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
 
 _log = logging.getLogger("services.delivery_watchdog.turn_liveness")
 
@@ -147,7 +148,14 @@ async def _detect_hosted_turn_wedges(
 
 
 def _queue_hosted_turn_recovery(pool: ConnectionPool, agent_id: int) -> int:
-    """Create durable work so guarded resurrection retries survive restarts."""
+    """Create durable work so guarded resurrection retries survive restarts.
+
+    The chat carries the `HOSTED_TURN_RECOVERY_MARKER` payload: it is a
+    system-source message, but it is this recovery's own wake-up call, so the
+    notice predicate must let it through both resurrection channels (the
+    direct call below and the watchdog's terminated-owner retry) — unlike a
+    plain system notification, which never resurrects (task #3687 review,
+    Ava #3242)."""
     with pool.connection() as conn:
         return shared.db.insert_inbound_message(
             conn,
@@ -155,6 +163,7 @@ def _queue_hosted_turn_recovery(pool: ConnectionPool, agent_id: int) -> int:
             "Your previous hosted turn stopped making progress and was restarted "
             "by the delivery watchdog. Continue from the latest checkpoint.",
             source="system",
+            payload={HOSTED_TURN_RECOVERY_MARKER: True},
         )
 
 
