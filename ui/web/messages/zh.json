@@ -74,7 +74,6 @@
     "latency": "延迟",
     "executions": "执行调用",
     "tool": "工具",
-    "duration": "时长",
     "status": "状态",
     "succeeded": "成功",
     "failed": "失败",

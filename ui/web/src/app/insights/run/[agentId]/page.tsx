@@ -58,7 +58,6 @@ function chartLabels(t: ReturnType<typeof useTranslations<"runTimeline">>): RunT
     latency: t("latency"),
     executions: t("executions"),
     tool: t("tool"),
-    duration: t("duration"),
     status: t("status"),
     succeeded: t("succeeded"),
     failed: t("failed"),

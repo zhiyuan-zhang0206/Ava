@@ -87,6 +87,11 @@ def test_aggregate_turn_timeline_joins_usage_and_marks_compact_boundary() -> Non
     assert timeline.rows[0].start == start
     assert timeline.rows[0].llm.in_total == 120
     assert timeline.rows[0].llm.cache_read == 100
+    assert timeline.rows[0].model_dump(mode="json")["execs"] == [
+        {"tool": "execute_code", "ok": False}
+    ]
+    assert timeline.rows[0].active_s == 1.5
+    assert timeline.meta.active_s == 1.5
     assert timeline.rows[0].anomalies == ["exec_failed"]
     assert timeline.rows[1].ok is False
 
@@ -184,6 +189,10 @@ def test_aggregate_turn_timeline_assigns_each_exec_to_its_time_window() -> None:
     )
 
     assert [len(row.execs) for row in timeline.rows] == [1, 0]
+    assert timeline.rows[0].model_dump(mode="json")["execs"] == [
+        {"tool": "execute_code", "ok": True}
+    ]
+    assert timeline.rows[0].active_s == 0
     assert timeline.rows[1].active_s == 0
 
 
