@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 from typing import NamedTuple
 
+from psycopg import sql
 from psycopg_pool import ConnectionPool
 
 import shared.db
@@ -43,22 +44,28 @@ def select_pending_for_dispatch(
     The initial publish is gated by ``age_s``. Later publishes wait for the
     configured step indexed by the row's current dispatch count (1-based),
     repeating the final step when the configured list is shorter than the
-    dispatch cap. Poisoned rows, rows at the cap, and owners under an active
-    automatic-wake suppression window are never selected.
+    dispatch cap. Poisoned rows, rows at the cap, owners under an active
+    automatic-wake suppression window, and owners halted by the recovery
+    circuit breaker (`RECOVERY_BREAKER_CLEAR`) are never selected.
     """
+    from shared.recovery_breaker import RECOVERY_BREAKER_CLEAR
+
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT m.id, m.agent_id "
-            "FROM inbound_messages m "
-            "JOIN agents_meta am ON am.id = m.agent_id "
-            "WHERE m.status = 'pending' AND am.status = 'idling' "
-            "  AND (am.wake_suppressed_until IS NULL OR am.wake_suppressed_until < now()) "
-            "  AND m.created_at < now() - make_interval(secs => %s) "
-            "  AND m.dispatch_count < %s AND m.poisoned_at IS NULL "
-            "  AND (m.last_dispatch_at IS NULL OR m.last_dispatch_at < now() - "
-            "       make_interval(secs => (%s::float8[])[LEAST("
-            "           GREATEST(m.dispatch_count, 1), array_length(%s::float8[], 1))])) "
-            "ORDER BY m.created_at ASC",
+            sql.SQL(
+                "SELECT m.id, m.agent_id "
+                "FROM inbound_messages m "
+                "JOIN agents_meta am ON am.id = m.agent_id "
+                "WHERE m.status = 'pending' AND am.status = 'idling' "
+                "  AND (am.wake_suppressed_until IS NULL OR am.wake_suppressed_until < now()) "
+                "  AND {} "
+                "  AND m.created_at < now() - make_interval(secs => %s) "
+                "  AND m.dispatch_count < %s AND m.poisoned_at IS NULL "
+                "  AND (m.last_dispatch_at IS NULL OR m.last_dispatch_at < now() - "
+                "       make_interval(secs => (%s::float8[])[LEAST("
+                "           GREATEST(m.dispatch_count, 1), array_length(%s::float8[], 1))])) "
+                "ORDER BY m.created_at ASC"
+            ).format(sql.SQL(RECOVERY_BREAKER_CLEAR)),
             (age_s, max_dispatch_count, backoff_steps, backoff_steps),
         )
         return [(row[0], row[1]) for row in cur.fetchall()]

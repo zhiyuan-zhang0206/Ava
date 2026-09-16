@@ -761,6 +761,33 @@ def _make_terminated_agent(db: psycopg.Connection) -> int:
     return aid
 
 
+def _make_reaped_crash_agent(db: psycopg.Connection) -> int:
+    """A `terminated` row the SYSTEM reaped after a crash: reaper source plus
+    the retained crash marker (task #3617's relaxed-trigger population)."""
+    aid = _make_terminated_agent(db)
+    with db.cursor() as cur:
+        cur.execute(
+            "UPDATE agents_meta SET termination_source = 'reaper', "
+            "last_turn_fatal_at = now() - interval '1 hour' WHERE id = %s",
+            (aid,),
+        )
+    db.commit()
+    return aid
+
+
+def _backdate_chat_before_termination(db: psycopg.Connection, aid: int, iid: int) -> None:
+    """Move a chat's created_at just before the row's current status epoch —
+    the "already waiting when the death happened" shape (6260's leftovers)."""
+    with db.cursor() as cur:
+        cur.execute(
+            "UPDATE inbound_messages SET created_at = "
+            "(SELECT status_changed_at FROM agents_meta WHERE id = %s) - interval '1 second' "
+            "WHERE id = %s",
+            (aid, iid),
+        )
+    db.commit()
+
+
 def _insert_claimed_row(
     db: psycopg.Connection,
     agent_id: int,
@@ -1250,6 +1277,165 @@ class TestSelectTerminatedOwnersWithPending:
         iid = insert_inbound_message(db_conn, aid, "fresh peer mail", source="agent:1")
 
         assert select_terminated_owners_with_pending(pool, 86400.0) == [(aid, iid)]
+
+    # ── Task #3617: system-reaped crash rows resume their leftover work ──────
+
+    def test_system_reaped_crash_row_resumes_leftover_chat(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool
+    ) -> None:
+        """A chat already waiting when the SYSTEM reaped a crash-marked corpse
+        is leftover work, not mail an operator's kill cancelled — the relaxed
+        fence lets it trigger resurrection (task #3617, design #3610 section 6)."""
+        from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
+
+        aid = _make_reaped_crash_agent(db_conn)
+        iid = insert_inbound_message(db_conn, aid, "leftover work", source="user")
+        _backdate_chat_before_termination(db_conn, aid, iid)
+
+        assert select_terminated_owners_with_pending(pool, 86400.0) == [(aid, iid)]
+
+    def test_relaxed_guard_still_requires_the_crash_marker(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool
+    ) -> None:
+        """`reaper` alone — marker already cleared by a completed turn of the
+        revived incarnation — is an ordinary system death: the fence holds."""
+        from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
+
+        aid = _make_terminated_agent(db_conn)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET termination_source = 'reaper', "
+                "last_turn_fatal_at = NULL WHERE id = %s",
+                (aid,),
+            )
+        db_conn.commit()
+        iid = insert_inbound_message(db_conn, aid, "leftover work", source="user")
+        _backdate_chat_before_termination(db_conn, aid, iid)
+
+        assert select_terminated_owners_with_pending(pool, 86400.0) == []
+
+    @pytest.mark.parametrize("source", ["user", "exit", "launch-confirm", "integrity"])
+    def test_relaxed_guard_requires_reaper_source(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool, source: str
+    ) -> None:
+        """The crash marker alone never relaxes the fence: only the SYSTEM's
+        own reap is not an operator decision (user/exit) and not a launch or
+        integrity death (which keep their own semantics)."""
+        from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
+
+        aid = _make_terminated_agent(db_conn)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET termination_source = %s, "
+                "last_turn_fatal_at = now() - interval '1 hour' WHERE id = %s",
+                (source, aid),
+            )
+        db_conn.commit()
+        iid = insert_inbound_message(db_conn, aid, "leftover work", source="user")
+        _backdate_chat_before_termination(db_conn, aid, iid)
+
+        assert select_terminated_owners_with_pending(pool, 86400.0) == []
+
+    def test_relaxed_guard_keeps_suppression_and_breaker_gates(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool
+    ) -> None:
+        """The relaxed fence does not bypass the automatic-recovery gates: an
+        active wake suppression refuses, an expired one does not, and a
+        tripped recovery circuit breaker refuses even without a window
+        (task #3617; the streak is the durable gate)."""
+        from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
+
+        aid = _make_reaped_crash_agent(db_conn)
+        iid = insert_inbound_message(db_conn, aid, "leftover work", source="user")
+        _backdate_chat_before_termination(db_conn, aid, iid)
+
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET wake_suppressed_until = now() + interval '1 hour', "
+                "wake_suppress_reason = 'resurrect_failed' WHERE id = %s",
+                (aid,),
+            )
+        db_conn.commit()
+        assert select_terminated_owners_with_pending(pool, 86400.0) == []
+
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET wake_suppressed_until = now() - interval '1 second' "
+                "WHERE id = %s",
+                (aid,),
+            )
+        db_conn.commit()
+        assert select_terminated_owners_with_pending(pool, 86400.0) == [(aid, iid)]
+
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE agents_meta SET permanent_reject_streak = 1 WHERE id = %s", (aid,))
+        db_conn.commit()
+        # One rejection is not a halt: the first fresh-resolve window stays open.
+        assert select_terminated_owners_with_pending(pool, 86400.0) == [(aid, iid)]
+
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE agents_meta SET permanent_reject_streak = 2 WHERE id = %s", (aid,))
+        db_conn.commit()
+        assert select_terminated_owners_with_pending(pool, 86400.0) == []
+
+    def test_relaxed_guard_still_bounds_age_and_keeps_the_force_fence(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool
+    ) -> None:
+        """The remaining conjuncts are untouched: past the dead-letter bound
+        the row is no trigger, and a later explicit force fence still wins."""
+        from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
+
+        aid = _make_reaped_crash_agent(db_conn)
+        iid = insert_inbound_message(db_conn, aid, "leftover work", source="user")
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE inbound_messages SET created_at = now() - interval '2 hours' WHERE id = %s",
+                (iid,),
+            )
+        db_conn.commit()
+
+        assert select_terminated_owners_with_pending(pool, 3600.0) == []
+        assert select_terminated_owners_with_pending(pool, 86400.0) == [(aid, iid)]
+
+        fence = insert_inbound_message(db_conn, aid, "", source="user", kind="terminate")
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET last_force_terminate_inbound_id = %s WHERE id = %s",
+                (fence, aid),
+            )
+        db_conn.commit()
+        assert select_terminated_owners_with_pending(pool, 86400.0) == []
+
+    def test_relaxed_guard_still_refuses_failed_restart(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool
+    ) -> None:
+        """A failed-restart target keeps its own hard fence: the relaunch
+        observation must settle before any resurrection, reaped crash row or
+        not."""
+        from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
+
+        aid = _make_reaped_crash_agent(db_conn)
+        iid = insert_inbound_message(db_conn, aid, "leftover work", source="user")
+        _backdate_chat_before_termination(db_conn, aid, iid)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET runtime_generation = gen_random_uuid(), "
+                "runtime_owner = gen_random_uuid() WHERE id = %s",
+                (aid,),
+            )
+            cur.execute(
+                "INSERT INTO inbound_messages (agent_id, content, kind, source, status, "
+                "target_generation, target_owner, claimed_at, applied_at, payload) "
+                "SELECT id, '', 'restart', 'system', 'done', runtime_generation, "
+                "runtime_owner, now(), now(), "
+                '\'{"lifecycle_result": {"outcome": "failed", '
+                '"reason": "restart_deadline_expired"}}\'::jsonb '
+                "FROM agents_meta WHERE id = %s",
+                (aid,),
+            )
+        db_conn.commit()
+
+        assert select_terminated_owners_with_pending(pool, 86400.0) == []
 
 
 class TestResurrectRetry:

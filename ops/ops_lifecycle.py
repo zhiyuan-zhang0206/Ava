@@ -232,6 +232,25 @@ def _wake_suppression_active(agent_id: int) -> bool:
     return row[0] is True
 
 
+def _recovery_halted(agent_id: int) -> bool:
+    """Whether the recovery circuit breaker is tripped for `agent_id`.
+
+    The durable gate is `permanent_reject_streak` (>= the halt threshold after
+    consecutive permanent provider rejections) — NOT the wake-suppression
+    window, which a claim clears by design; only the streak can carry an
+    until-human halt (task #3617)."""
+    from shared.recovery_breaker import HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
+
+    with shared.db.connect() as conn:
+        row = conn.execute(
+            "SELECT permanent_reject_streak >= %s FROM agents_meta WHERE id=%s",
+            (HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS, agent_id),
+        ).fetchone()
+    if row is None:
+        raise AgentNotFound(f"agent {agent_id} does not exist")
+    return row[0] is True
+
+
 def _clear_wake_suppression(agent_id: int) -> None:
     with shared.db.connect() as conn:
         conn.execute(
@@ -326,6 +345,13 @@ async def resurrect_if_terminated(
         _log.debug(
             "resurrect_if_terminated: automatic wake suppressed for agent %s; "
             "skipping auto-resurrect",
+            agent_id,
+        )
+        return status
+    if await asyncio.to_thread(_recovery_halted, agent_id):
+        _log.debug(
+            "resurrect_if_terminated: recovery circuit breaker tripped for agent %s "
+            "after consecutive permanent provider rejections; skipping auto-resurrect",
             agent_id,
         )
         return status

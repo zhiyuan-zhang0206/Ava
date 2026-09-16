@@ -31,6 +31,18 @@ FAILED_RESTART_FOR_CURRENT_TARGET: LiteralString = (
     "AND failed.payload->'lifecycle_result'->>'reason'='restart_deadline_expired')"
 )
 
+# A row the SYSTEM harvested rather than one an operator ended: the corpse
+# reaper terminated a crash-marked hosted corpse (`termination_source` =
+# 'reaper' AND `last_turn_fatal_at` IS NOT NULL). Both fields survive the whole
+# terminated window — the resurrect transition clears them together — so the
+# pair names exactly "system-reaped crash corpse". The trigger guard waives the
+# created_at>status_changed_at fence for these rows: work that predates a
+# system reap is still work to resume, unlike work predating a user's explicit
+# death (task #3617, design #3610 section 6).
+SYSTEM_REAPED_CRASH_ROW: LiteralString = (
+    "(agents_meta.termination_source = 'reaper' AND agents_meta.last_turn_fatal_at IS NOT NULL)"
+)
+
 # Every unapplied lifecycle command whose intent predates the recorded
 # resurrection is closed by it, visibly (the payload names the resurrect inbound
 # that superseded it), never silently dropped. Applied commands are preserved:

@@ -36,7 +36,11 @@ def _transition_terminated_to_unclaimed_idling(
     """Run the one final resurrection CAS with a fully static SQL shape."""
     base_params = (AgentStatus.IDLING, agent_id, AgentStatus.TERMINATED)
     if trigger_inbound_id is not None:
-        from shared.lifecycle_acceptance import FAILED_RESTART_FOR_CURRENT_TARGET
+        from shared.lifecycle_acceptance import (
+            FAILED_RESTART_FOR_CURRENT_TARGET,
+            SYSTEM_REAPED_CRASH_ROW,
+        )
+        from shared.recovery_breaker import RECOVERY_BREAKER_CLEAR
 
         assert trigger_inbound_kind is not None  # validated at public helper boundary  # noqa: S101
         cur.execute(
@@ -47,14 +51,22 @@ def _transition_terminated_to_unclaimed_idling(
                 "runtime_generation = NULL, runtime_owner = NULL, runtime_kind = NULL, "
                 "runtime_protocol_version = 0 "
                 "WHERE id = %s AND status = %s "
-                "AND NOT {} AND EXISTS ("
+                "AND NOT {} "
+                "AND (agents_meta.wake_suppressed_until IS NULL "
+                "     OR agents_meta.wake_suppressed_until < now()) "
+                "AND {} "
+                "AND EXISTS ("
                 "  SELECT 1 FROM inbound_messages m "
                 "  WHERE m.id = %s AND m.agent_id = agents_meta.id "
                 "    AND m.status = 'pending' AND m.kind = %s "
-                "    AND m.created_at > agents_meta.status_changed_at "
+                "    AND (m.created_at > agents_meta.status_changed_at OR {}) "
                 "    AND m.id > COALESCE(agents_meta.last_force_terminate_inbound_id, 0)"
                 ") RETURNING status_changed_at"
-            ).format(sql.SQL(FAILED_RESTART_FOR_CURRENT_TARGET)),
+            ).format(
+                sql.SQL(FAILED_RESTART_FOR_CURRENT_TARGET),
+                sql.SQL(RECOVERY_BREAKER_CLEAR),
+                sql.SQL(SYSTEM_REAPED_CRASH_ROW),
+            ),
             (*base_params, trigger_inbound_id, trigger_inbound_kind),
         )
     else:
@@ -84,7 +96,8 @@ def _transition_terminated_to_unclaimed_idling(
     if trigger_inbound_id is not None:
         raise ResurrectTriggerStaleError(
             f"agent {agent_id} trigger work no longer qualifies for its current "
-            "termination; UPDATE affected 0 rows"
+            "termination; UPDATE affected 0 rows (stale work, suppressed automatic "
+            "wakes, or a tripped recovery breaker)"
         )
     raise ResurrectAlreadyAlive(
         f"agent {agent_id} was concurrently modified after SELECT; UPDATE affected 0 rows"
@@ -205,8 +218,14 @@ def resurrect_agent(
     """Atomically restore native intent and enqueue lifecycle plus optional chat.
 
     Pending-work callers name the exact post-termination inbound. Its ID and
-    the latest force-termination fence are checked under the metadata row lock.
-    The host resumes the existing checkpoint after the transaction commits.
+    the latest force-termination fence are checked under the metadata row lock,
+    and — for a row the system itself reaped after a crash
+    (`SYSTEM_REAPED_CRASH_ROW`) — work that predates the termination still
+    qualifies: a reaper death is not an operator's decision. The automatic
+    trigger additionally requires clear automatic wakes (no suppression window,
+    `RECOVERY_BREAKER_CLEAR`); explicit manual resurrection passes no trigger
+    and keeps its unconditional contract. The host resumes the existing
+    checkpoint after the transaction commits.
     """
     if (trigger_inbound_id is None) != (trigger_inbound_kind is None):
         raise ValueError("trigger inbound id and kind must be provided together")
