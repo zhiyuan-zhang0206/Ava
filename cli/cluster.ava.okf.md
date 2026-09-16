@@ -33,6 +33,7 @@ A cluster's identity **is** its home path, so every verb that names one takes
 | `recover` | clear a stranded update lock + pause; refuses while the holder pid lives |
 | `health-probe-register` / `health-probe-unregister` | cluster-level cron |
 | `watchdog-probe --role <cap>` | 60s OS job respawning that capability's dead watchdog — ends the who-watches-the-watchdog recursion (`-register` / `-unregister` variants) |
+| `boot-unit install\|uninstall\|status` | [Linux] the distro-level **system** unit that owns the boot path (`ava-boot.<home-slug>.service`, `shared/os_boot_unit.py`): its convergence script runs `ava start --no-readiness-gate` once per attempt, systemd retries (no attempt cap). `install --no-enable` stages the files — the crontab `@reboot` entry stays the live boot path until an enable removes it in the same call. `status` is a read-only report |
 | `pitr status\|activate\|rollback` | durable physical-backup activation lifecycle; the first delivery validates shadow readiness and creates the mandatory logical recovery floor, then stops before PostgreSQL mutation |
 
 ## Notes

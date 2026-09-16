@@ -7,13 +7,15 @@ running `ava start` by hand. Each cluster owns its Postgres+Redis under its
 service), so this one boot job covers the whole cluster — data plane included.
 
 - macOS: a launchd User LaunchAgent (RunAtLoad) in ~/Library/LaunchAgents/
-- Linux: a user crontab `@reboot` entry
+- Linux: a distro-level systemd boot unit when installed and enabled
+  (`shared.os_boot_unit`), else a user crontab `@reboot` entry
 - Windows: a Task Scheduler `/SC ONLOGON` job (see shared/os_schtasks.py)
 
 The job **retries** — one boot-time `ava start` is not enough, because at boot
 its dependencies are not all up yet. See `shared/boot_policy.py` for the policy
-and for why macOS expresses it with launchd keys while the other two run
-`ava boot` (`cli/boot_retry.py`).
+and for how each mechanism states it: launchd keys on macOS, systemd restart
+keys on a host with the distro-level unit, `ava boot` (`cli/boot_retry.py`)
+elsewhere.
 
 Mirrors shared/os_cron.py (the health-probe registrar) -- same launchd / crontab
 / schtasks mechanics -- but fires once at boot (RunAtLoad / @reboot / ONLOGON)
@@ -181,16 +183,34 @@ _CRON_MARKER = "# ava-autostart"
 
 
 def _register_linux() -> int:
-    """Add a `@reboot` crontab entry that runs `ava boot` for this cluster.
+    """Add a `@reboot` crontab entry that runs `ava boot` for this cluster --
+    or defer to this home's distro-level systemd boot unit when one is
+    installed and enabled (`shared.os_boot_unit`).
 
     `ava boot`, not `ava start`: a `@reboot` line fires exactly once and cron
     offers no retry, so the retry loop is ours (`cli/boot_retry.py`).
+
+    The unit, when installed AND enabled, OWNS the boot path: registering both
+    would race two converge runs at every boot, so the crontab entry is not
+    registered here and a stale one is removed. An installed-but-not-enabled
+    unit is a staged install -- the crontab entry stays live until the unit is
+    enabled (and this branch takes over on the first converge after).
 
     A `@reboot` line only fires at boot, so writing it never triggers an
     immediate run (unlike macOS RunAtLoad) -- no recursion guard needed. When
     crontab is absent (a minimal box such as a hermetic bench / CI container),
     warn and skip rather than fail the whole bring-up, matching os_cron.
     """
+    from shared.os_boot_unit import boot_unit_owns_boot_path, unit_name
+
+    if boot_unit_owns_boot_path():
+        from shared.paths import ava_home
+
+        _unregister_linux(_home_slug())  # drop a stale entry from the cron era
+        print(  # noqa: T201
+            f"  . cluster boot autostart: {unit_name(ava_home())} (enabled)"
+        )
+        return 0
     if shutil.which("crontab") is None:
         print(  # noqa: T201
             "  ! autostart: crontab not installed on this host (skipping); "
@@ -313,7 +333,11 @@ def register_autostart() -> None:
 
 
 def unregister_autostart(home: Path | None = None) -> None:
-    """Remove a cluster's boot-time autostart job. Safe when none is registered.
+    """Remove a cluster's boot-time autostart job (crontab / launchd / task).
+
+    The Linux distro-level systemd boot unit, when one exists, is removed by
+    `shared.os_boot_unit.uninstall` -- which `ava cluster destroy` also runs.
+    Safe when none is registered.
 
     `home` selects WHICH cluster's job to remove; it defaults to this process's
     own home. See `shared.os_cron.unregister_os_cron` for why the target travels

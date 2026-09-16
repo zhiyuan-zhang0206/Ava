@@ -720,6 +720,32 @@ def test_destroy_unregisters_every_scheduled_job(
     ]
 
 
+def test_destroy_uninstalls_the_target_homes_boot_unit(
+    isolated_registry: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    recording_backend: _RecordingBackend,
+) -> None:
+    """The systemd boot unit is home-anchored like the other OS jobs: destroy
+    removes the unit for the TARGET home, never this process's own -- a unit
+    left behind would boot a home whose slot is already freed."""
+    import cli.commands.cluster_lifecycle as gw
+    from shared import os_boot_unit
+
+    home = _registered_home(tmp_path, ".ava-bootunit", 18019)
+    monkeypatch.setattr(gw, "cmd_cluster_down", lambda *, path: 0)  # noqa: ARG005  # pyright: ignore[reportUnknownArgumentType]
+    seen: list[Path | None] = []
+
+    def uninstall(target: Path | None = None) -> list[str]:
+        seen.append(target)
+        return []
+
+    monkeypatch.setattr(os_boot_unit, "uninstall", uninstall)
+
+    assert gw.cmd_cluster_destroy(path=str(home)) == 0
+    assert seen == [home]
+
+
 def test_destroy_unregisters_the_target_homes_jobs_not_this_processs(
     isolated_registry: Path,
     tmp_path: Path,
