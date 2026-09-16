@@ -55,17 +55,19 @@ export function PendingStrip({
             <li key={it.id} className={cn("items-center gap-1.5 pl-4", FLEX, MIN_W_0)}>
               <span className="shrink-0 text-muted-foreground/70">· {sourceLabel(it.source)}</span>
               {/* An image-only message stores "[image]" as its text placeholder
-                  (shared/db.py); suppress that literal once real thumbnails
-                  render — the same rule the timeline's EnvelopeContent uses. */}
+                  (gateway/routers/agents_state.py `_normalize_message_content`);
+                  suppress that literal once real thumbnails render — the same
+                  rule the timeline's EnvelopeContent uses. */}
               {it.images?.length && it.content === "[image]" ? null : (
                 <span className="truncate">{it.content}</span>
               )}
               {it.images?.length ? (
                 <span className={cn("shrink-0 gap-1", FLEX)}>
-                  {it.images.map((src) => (
+                  {it.images.map((src, idx) => (
                     // eslint-disable-next-line @next/next/no-img-element -- agent upload reference, not a static asset
                     <img
-                      key={src}
+                      // index-composite: an identical url twice in one message must not collide keys.
+                      key={`${idx}:${src}`}
                       src={assetUrl(src)}
                       alt={t("imageAlt")}
                       crossOrigin="use-credentials"

@@ -10,6 +10,12 @@
 // claimed/committed message simply drops out on the next refetch. This
 // deliberately avoids client-side add/remove/dedup bookkeeping (the class
 // of races that makes optimistic timeline updates fragile).
+//
+// One map gap is presentation-only: during an external takeover an inbound is
+// recorded into the permanent timeline at insert time (capture trigger) while
+// its row stays status='pending' until the executor ACKs — the same message
+// would render in both surfaces (task #3683). `withoutTimelineDuplicates`
+// drops those twins at the render site; the server list stays authoritative.
 
 "use client";
 
@@ -42,6 +48,25 @@ const TURN_START_ROLES: ReadonlySet<SystemEvent["role"]> = new Set([
   "reasoning_start",
   "exec_start",
 ]);
+
+/**
+ * Drop pending inbounds already visible in the timeline (task #3683).
+ *
+ * During an external takeover the capture trigger records an inbound into the
+ * permanent timeline at insert time while its row is still status='pending'
+ * (it clears only at the executor's ACK), so the strip would otherwise show a
+ * message that is already in the conversation. The conversation wins.
+ */
+export function withoutTimelineDuplicates(
+  pending: readonly PendingInbound[],
+  timelineItems: readonly { readonly inbound_id: number | null }[],
+): PendingInbound[] {
+  const inTimeline = new Set<number>();
+  for (const item of timelineItems) {
+    if (item.inbound_id !== null) inTimeline.add(item.inbound_id);
+  }
+  return pending.filter((p) => !inTimeline.has(p.id));
+}
 
 export function usePendingMessages(
   agentId: number | null,
