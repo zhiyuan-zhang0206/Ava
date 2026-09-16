@@ -5,7 +5,12 @@ deterministic span identity `(agent_id, depth, span_start, span_end)`. An
 identical text is a no-op rewrite; a changed text (a regeneration after an
 engine or prompt change) overwrites in place, keeping one row per node.
 Parent links are resolved after the upserts from children spans, so the order
-of nodes in one run never matters.
+of nodes in one run never matters. A rebuild reconciles the table to its own
+partition: rows it did not reproduce are removed when they overlap a
+reproduced span at the same level (an earlier cut of a stretch being re-cut —
+the provisional tail re-splits as history grows), and rows outside every
+reproduced span survive (a compact-driven pass seals no tail, so a pending
+stretch's earlier rows are still its best coverage).
 
 Read paths:
 - `load_known_texts(agent_id)` -> `{input_hash: text}`, the generation reuse
@@ -148,6 +153,32 @@ def write_tree(agent_id: int, nodes: Sequence[MaterializedNode], *, model: str) 
                 f"{sum(len(n.children_spans) for n in nodes if n.level >= 2)} children — "
                 "the tree and the stored rows disagree"
             )
+        # Reconcile: a rebuild after history grew re-cuts only the provisional
+        # tail (compact-sealed stretches reproduce identically). Rows this run
+        # did not reproduce but that overlap a reproduced span at the same
+        # level are an earlier cut of a re-cut stretch — removed, so storage
+        # mirrors the current partition. An unreproduced row with no reproduced
+        # overlap stays: this pass left its stretch pending (a compact-driven
+        # pass seals no tail), and the row is still that region's coverage.
+        spans_by_level: dict[int, list[tuple[int, int]]] = {}
+        for node in nodes:
+            spans_by_level.setdefault(node.level, []).append(node.span)
+        reproduced = {(node.level, node.span[0], node.span[1]) for node in nodes}
+        stale_ids: list[int] = []
+        stored = conn.execute(
+            "SELECT id, depth, span_start, span_end FROM understanding_nodes WHERE agent_id = %s",
+            (agent_id,),
+        ).fetchall()
+        for row_id, depth, span_start, span_end in stored:
+            if (depth, span_start, span_end) in reproduced:
+                continue
+            if any(
+                start <= span_end and end >= span_start
+                for start, end in spans_by_level.get(depth, ())
+            ):
+                stale_ids.append(row_id)
+        if stale_ids:
+            conn.execute("DELETE FROM understanding_nodes WHERE id = ANY(%s)", (stale_ids,))
     return len(nodes)
 
 

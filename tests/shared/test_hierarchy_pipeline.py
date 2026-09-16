@@ -312,3 +312,28 @@ def test_build_agent_tree_same_input_same_tree(monkeypatch: pytest.MonkeyPatch) 
     assert first.max_level >= 2  # the fixture must exercise the cascade
     assert shape(first) == shape(second)
     assert [n.text for n in first.nodes] == [n.text for n in second.nodes]
+
+
+def test_growth_replays_sealed_batches_and_recuts_only_the_tail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The write-side reconciliation's premise: a rebuild after history grew
+    reproduces every compact-sealed cell and re-cuts only the tail span."""
+    msgs: list[BaseMessage] = [inbound(f"step {i}") for i in range(30)]
+    msgs.append(compact())
+    msgs.extend(inbound(f"tail {i}") for i in range(10))
+
+    def fake_loader(agent_id: int) -> list[BaseMessage]:
+        return list(msgs)
+
+    monkeypatch.setattr(pipeline_module, "load_checkpoint_messages_full", fake_loader)
+
+    first = build_agent_tree(7, llm=FakeLLM(_fitting_responder), model=MODEL)
+    msgs.extend(inbound(f"tail {i}") for i in range(10, 17))
+    second = build_agent_tree(7, llm=FakeLLM(_fitting_responder), model=MODEL)
+
+    assert first.errors == () and second.errors == ()
+    spans1 = {node.span for node in first.nodes if node.level == 1}
+    spans2 = {node.span for node in second.nodes if node.level == 1}
+    assert spans1 == {(0, 14), (15, 29), (31, 40)}
+    assert spans2 == {(0, 14), (15, 29), (31, 47)}

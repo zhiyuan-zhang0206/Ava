@@ -626,10 +626,11 @@ def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: s
         )
         # The understanding-tree generation pass ships as a gateway-side worker,
         # but its operational first-run / ad-hoc regeneration path executes from
-        # the agent/runner side (task #3704) — INSERT, UPDATE, SELECT; nothing
-        # deletes nodes, so DELETE stays out.
+        # the agent/runner side (task #3704) — SELECT, INSERT, UPDATE, and
+        # DELETE for the write-side reconciliation that removes rows of a
+        # superseded earlier cut when a rebuild re-cuts the same stretch.
         conn.execute(
-            pgsql.SQL("GRANT SELECT, INSERT, UPDATE ON understanding_nodes TO {}").format(
+            pgsql.SQL("GRANT SELECT, INSERT, UPDATE, DELETE ON understanding_nodes TO {}").format(
                 pgsql.Identifier(RUNNER_ROLE)
             )
         )

@@ -472,7 +472,7 @@ def test_birth_retry_refuses_non_prefix_checkpoint_state(
         )
 
 
-def test_runner_grant_matrix(runner_db: str) -> None:
+def test_runner_grant_matrix(runner_db: str) -> None:  # noqa: PLR0915 -- one grant-matrix litany; each line is one exercised surface
     """The design's grant matrix, exercised as ava_runner over the wire."""
     admin = _admin_url(runner_db)
     ensure_runner_role(_IDENTITY, base_admin_url=admin, runner_password=_RUNNER_PW)
@@ -553,6 +553,10 @@ def test_runner_grant_matrix(runner_db: str) -> None:
         # creation failed with InsufficientPrivilege on
         # agent_impersonation_entries)
         _exercise_impersonation_entry_grants(conn, agent_id)
+        # the understanding-layer build (INSERT + UPDATE + SELECT; the manual
+        # first-run / ad-hoc regeneration path runs from the runner side —
+        # task #3704)
+        _exercise_understanding_node_grants(conn, agent_id)
         # machine_units register_self (INSERT + UPDATE + SELECT)
         conn.execute("INSERT INTO machine_units (machine_name, home) VALUES ('m1', '/h1')")
         conn.execute("UPDATE machine_units SET url = 'http://m1' WHERE machine_name = 'm1'")
@@ -681,6 +685,48 @@ def _exercise_impersonation_entry_grants(conn: psycopg.Connection, agent_id: int
         "SELECT count(*) FROM agent_impersonation_entries WHERE lease_id = %s", (lease[0],)
     ).fetchone()
     assert row == (1,)
+
+
+def _exercise_understanding_node_grants(conn: psycopg.Connection, agent_id: int) -> None:
+    """The understanding-node surface the hierarchy build writes from the
+    runner side (manual first-run / ad-hoc regeneration, task #3704): INSERT a
+    node (the BIGSERIAL id draws from the owning sequence), UPDATE it in
+    place (the write path's upsert rewrites a node when its text
+    regenerates), SELECT it back, and DELETE it — the write-side
+    reconciliation removes rows of a superseded earlier cut when a rebuild
+    re-cuts the same stretch (the provisional tail re-splits as history
+    grows; final compact-sealed cells are never deleted by construction).
+    """
+    conn.execute(
+        "INSERT INTO understanding_nodes (agent_id, depth, span_start, span_end,"
+        " segment_key, text, text_hash, input_hash, children_count, model,"
+        " engine_version, prompt_version, schema_version)"
+        " VALUES (%s, 1, 0, 9, 'compact@i9', 'leaf text', 'th', 'ih', 0,"
+        " 'deepseek-v4-flash', '0.3', '0.3', 1)",
+        (agent_id,),
+    )
+    conn.execute(
+        "UPDATE understanding_nodes SET text = 'rewritten', text_hash = 'th2'"
+        " WHERE agent_id = %s AND depth = 1 AND span_start = 0 AND span_end = 9",
+        (agent_id,),
+    )
+    row = conn.execute(
+        "SELECT text FROM understanding_nodes WHERE agent_id = %s"
+        " AND depth = 1 AND span_start = 0 AND span_end = 9",
+        (agent_id,),
+    ).fetchone()
+    assert row == ("rewritten",)
+    conn.execute(
+        "DELETE FROM understanding_nodes WHERE agent_id = %s"
+        " AND depth = 1 AND span_start = 0 AND span_end = 9",
+        (agent_id,),
+    )
+    assert (
+        conn.execute(
+            "SELECT 1 FROM understanding_nodes WHERE agent_id = %s", (agent_id,)
+        ).fetchone()
+        is None
+    )
 
 
 def _exercise_watcher_grants(conn: psycopg.Connection, agent_id: int) -> None:

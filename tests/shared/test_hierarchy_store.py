@@ -19,6 +19,8 @@ AGENT_A = 990_128_901  # round-trip test
 AGENT_B = 990_128_902  # idempotence test
 AGENT_C = 990_128_903  # reuse-cache test
 AGENT_D = 990_128_904  # window-filter test
+AGENT_E = 990_128_905  # re-cut reconciliation test
+AGENT_F = 990_128_906  # pending stretch across a compact-only pass
 
 # 2026-09-12 12:00-12:05 Beijing == 04:00-04:05 UTC.
 TS0, TS1 = "2026-09-12T12:00:00+08:00", "2026-09-12T12:05:00+08:00"
@@ -115,3 +117,30 @@ def test_window_filter_returns_only_intersecting_nodes() -> None:
     assert [r.text for r in window] == ["early"]
     wide = load_window_nodes(AGENT_D, T0, T1)
     assert {r.text for r in wide} == {"early", "late"}
+
+
+def test_recut_tail_replaces_the_superseded_cut() -> None:
+    """A rebuild after history grew re-cuts the tail: the earlier cut's row is
+    reconciled away instead of standing beside the new one."""
+    stable = node("L1#0", span=(0, 30), text="stable", input_text="blocks 0..30")
+    first_cut = node("L1#1", span=(31, 40), text="tail v1", input_text="stretch 31..40")
+    write_tree(AGENT_E, [stable, first_cut], model="m")
+
+    recut = node("L1#1", span=(31, 47), text="tail v2", input_text="stretch 31..47")
+    write_tree(AGENT_E, [stable, recut], model="m")
+
+    spans = {(r.depth, r.span_start, r.span_end) for r in load_window_nodes(AGENT_E, T0, T1)}
+    assert spans == {(1, 0, 30), (1, 31, 47)}
+
+
+def test_unreproduced_rows_outside_the_recut_survive() -> None:
+    """A compact-driven pass seals no tail: rows of a stretch left pending stay —
+    they are still that region's best coverage."""
+    stable = node("L1#0", span=(0, 30), text="stable", input_text="blocks 0..30")
+    pending = node("L1#1", span=(31, 40), text="tail", input_text="stretch 31..40")
+    write_tree(AGENT_F, [stable, pending], model="m")
+
+    write_tree(AGENT_F, [stable], model="m")
+
+    spans = {(r.depth, r.span_start, r.span_end) for r in load_window_nodes(AGENT_F, T0, T1)}
+    assert spans == {(1, 0, 30), (1, 31, 40)}

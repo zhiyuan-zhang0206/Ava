@@ -11,10 +11,12 @@
 -- The ava_runner write grant: the generation pass ships as a gateway-side
 -- worker, but the operational first-run / ad-hoc regeneration path executes
 -- from the agent/runner side (task #3704), so the runner needs the write
--- surface. Nothing deletes rows (lifecycle follows the checkpoint retention,
--- which never deletes boundaries), so DELETE stays out. Gated on the role's
--- existence so the fresh-bootstrap smoke (migration replay on a schema.sql
--- DB, where the role does not exist yet) stays green.
+-- surface. DELETE serves exactly one path: store.write_tree's reconciliation,
+-- which removes rows of a superseded earlier cut when a rebuild re-cuts the
+-- same stretch (the provisional tail re-splits as history grows;
+-- compact-sealed cells reproduce identically and are never deleted). Gated
+-- on the role's existence so the fresh-bootstrap smoke (migration replay on
+-- a schema.sql DB, where the role does not exist yet) stays green.
 CREATE TABLE understanding_nodes (
     id BIGSERIAL PRIMARY KEY,
     agent_id BIGINT NOT NULL,
@@ -60,7 +62,7 @@ COMMENT ON TABLE understanding_nodes IS
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
-        GRANT SELECT, INSERT, UPDATE ON understanding_nodes TO ava_runner;
+        GRANT SELECT, INSERT, UPDATE, DELETE ON understanding_nodes TO ava_runner;
         GRANT USAGE, SELECT ON SEQUENCE understanding_nodes_id_seq TO ava_runner;
     END IF;
 END $$;

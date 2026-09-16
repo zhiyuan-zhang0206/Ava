@@ -1770,15 +1770,16 @@ COMMENT ON TABLE understanding_nodes IS
 
 -- ava_runner surface: the generation pass ships as a gateway-side worker, but
 -- the operational first-run / ad-hoc regeneration path executes from the
--- agent/runner side (task #3704) — INSERT, UPDATE, SELECT; no DELETE (nothing
--- deletes nodes). Gated on the role's existence: fresh bootstrap applies this
+-- agent/runner side (task #3704) — SELECT, INSERT, UPDATE, and DELETE for the
+-- write-side reconciliation that removes rows of a superseded earlier cut
+-- when a rebuild re-cuts the same stretch. Gated on the role's existence: fresh bootstrap applies this
 -- baseline before install birth creates ava_runner, and
 -- shared/cluster/provision.py's ensure_runner_role grants the same surface at
 -- birth.
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
-        GRANT SELECT, INSERT, UPDATE ON understanding_nodes TO ava_runner;
+        GRANT SELECT, INSERT, UPDATE, DELETE ON understanding_nodes TO ava_runner;
         GRANT USAGE, SELECT ON SEQUENCE understanding_nodes_id_seq TO ava_runner;
     END IF;
 END $$;
