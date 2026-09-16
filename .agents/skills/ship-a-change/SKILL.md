@@ -139,6 +139,12 @@ Still on you:
    ava.watcher.launch(code, timeout="3h", name=f"ci-watch-{pr}")
    ```
 
+   The watcher persists the settled verdict to `ci-verdict-<pr>.txt` in your
+   workspace before it tries to deliver, and retries delivery for ~10 minutes:
+   an update wave or `ava cluster update` refuses connections for minutes —
+   longer than any single send survives. If no wake arrives, read that file;
+   the verdict is there.
+
    Never write an ad-hoc `gh pr checks` + exit-code poll: `gh pr checks`
    exits non-zero when a check FAILS, so a `returncode == 0` condition never
    fires on red and the PR can sit failed until the watcher times out.
