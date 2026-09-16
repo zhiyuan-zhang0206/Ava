@@ -41,8 +41,6 @@ import enum
 from collections.abc import Iterator
 from typing import Any, NamedTuple, cast
 
-import httpx
-
 from shared.log import logger
 
 
@@ -200,6 +198,8 @@ def _is_transport_error(exc: BaseException) -> bool:
     subclass (same name check). httpx and the builtins are isinstance-checked —
     httpx is already part of the process base.
     """
+    import httpx
+
     if isinstance(exc, (httpx.TransportError, ConnectionError, TimeoutError)):
         return True
     if type(exc).__module__.split(".", 1)[0] in ("openai", "anthropic"):

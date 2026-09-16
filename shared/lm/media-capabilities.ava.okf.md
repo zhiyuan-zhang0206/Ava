@@ -15,13 +15,16 @@ tags:
 per-model `vision` bool while leaving the provider-plugin v1 binding contract
 unchanged.
 
-`factory.media_types_for_model()` resolves one answer in order: a registered
+`registry.media_types_for_model()` resolves one answer in order: a registered
 core or plugin model's `ModelSpec.media_types`; an unregistered plugin's
 `ProviderBinding.vision` (image-only); then the core `_VISION_MODEL_PREFIXES`
 fallback (image-only). No match is text-only. `model_supports_vision()` is the
-message-endpoint image gate derived from that result.
+message-endpoint image gate derived from that result. The resolution lives on
+the `shared.lm.registry` data leaf (factory re-exports it), so importing it
+does not pull the LangChain-backed factory — the exec child's boot-path media
+gate relies on that.
 
-`factory.attach_modalities_for_model()` is the attach gate: `ModelSpec.attach_modalities`
+`registry.attach_modalities_for_model()` is the attach gate: `ModelSpec.attach_modalities`
 when the entry declares an attach-specific opinion (must be a subset of `media_types`,
 enforced by the registry), else the native `media_types` — attach registers files into
 the same message pipeline, so the native matrix is the default contract (ruling
