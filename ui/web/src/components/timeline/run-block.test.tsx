@@ -387,4 +387,27 @@ describe("TurnBlock component", () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it("locks the collapse wrapper shrinkable on the inline axis (#3305)", () => {
+    // The clip div is a grid item whose auto column sizes to its min-content:
+    // without min-w-0, a run holding wide content blows the timeline out
+    // sideways (user report, task #3305). Lock the guard class.
+    const { container } = render(
+      <TurnBlock
+        id="turn-1"
+        memberIds={["1.0"]}
+        summary={sampleSummary}
+        expanded={true}
+        isStuck={false}
+        onToggle={vi.fn()}
+      >
+        <div>detail rows</div>
+      </TurnBlock>,
+    );
+    const grid = container.querySelector('[class*="grid-template-rows"]');
+    const clip = grid?.firstElementChild;
+    expect(grid).not.toBeNull();
+    expect(clip?.className).toContain("overflow-clip");
+    expect(clip?.className).toContain("min-w-0");
+  });
 });
