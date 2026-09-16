@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 24 | events table |
-| telemetry (category=telemetry) | `events` | 175 | events table |
+| telemetry (category=telemetry) | `events` | 177 | events table |
 | log (category=log) | `events` | 12 | events table |
 | file-only (destination=file) | file log | 1 | file only (not the events table) |
 | SSE live | Redis → frontend (not persisted) | 31 role | live projection |
@@ -91,7 +91,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 175)
+## 3. Telemetry events (category=telemetry, 177)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -120,6 +120,7 @@ consumers: see the comments at each emit point.
 | `exec_envelope` | exec envelope transfer cost (size + serialize time) — request snapshot / result delta | observation | envelope, op, size_bytes, serialize_ms | — | events |
 | `exec_child_boot` | exec child bootstrap duration before agent-authored code | noise | duration_ms | — | events |
 | `exec_request_quarantine` | stale exec request evidence preserved under the explicit quarantine | observation | reason, event_dir, sources, vanished | — | events |
+| `exec_request_bounded_quarantine` | an unreadable exec request envelope past the bounded-disposition bound (twice the exec node timeout, no live process reference, no live host process) was quarantined without review — the bytes are preserved with a receipt and the recovery path no longer defers on it; off via AVA_EXEC_REQUEST_BOUNDED_QUARANTINE_ENABLED restores unbounded retention | anomaly | — | — | events |
 | `compaction_completed` | applied context compaction size reduction and completed count | noise | compact_kind, compactions, history_chars, summary_chars, summary_history_ratio | — | events |
 | `exec_cancelled` | execute_code cancelled | anomaly | — | — | events |
 | `exec(timeout)` | historical parenthesized name (migration target) | anomaly | — | — | events |
@@ -151,6 +152,7 @@ consumers: see the comments at each emit point.
 | `corpse_reaper_publish_failed` | a reaped corpse's frontend snapshot publish failed — best-effort; the durable terminated flip already committed | noise | — | — | events |
 | `host_turn_stall_aborted` | a hosted turn task ended after its no-progress abort: the invocation unwound and was dropped; the runtime was discarded by run_turn, so the next wake re-runs the startup reconcile before resuming from the checkpoint | anomaly | — | — | events |
 | `host_admission_wait_exceeded` | a hosted turn has queued at the host admission gate (AVA_HOST_MAX_CONCURRENT_TURNS) for at least AVA_HOST_ADMISSION_WAIT_ALERT_SECONDS — carries the agent, its current wait, the limit and the queue depth; reported once per wait episode. Queueing is the configured memory/runtime trade-off working, not an error; a wait this long means the queue is backing up (raise the limit or inspect the turns holding slots). The wait is exempt from stall cancellation — cancelling it would only re-queue it at the tail | anomaly | — | — | events |
+| `hosted_boot_recovery_stalled` | hosted boot recovery was deferred for the same agent on three consecutive boots — retained exec request evidence is not clearing on its own, so the ordinary per-boot warning is escalated to this counted anomaly event; inspect the named evidence and its disposition commands | anomaly | — | — | events |
 | `host_turn_stall_detected` | the hosted dispatcher's durable scan found an in-flight turn whose turn-progress clock (agent/_turn_progress.py: node enters, completed LLM steps, streamed LLM chunks) has been silent past the wedged budget while NO pending inbound exists — the turn-level fake-alive shape (process alive, turn dead) that pending-row and pid-based detectors cannot see. The turn task is cancelled and the agent rescheduled; a turn that refuses to unwind instead escalates to a daemon restart | anomaly | — | — | events |
 | `node_enter` | LangGraph node entered — sink-filtered out of the events table (PR #1758); log files only | noise | — | — | file |
 | `node_exit` | LangGraph node exited | noise | count, nodes | — | events |

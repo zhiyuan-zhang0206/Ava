@@ -163,9 +163,12 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # the current total to 173; host_config_normalized (task #3603's wake-time
     # normalization of a withdrawn model pin) raises the current total to 174;
     # pause_lifecycle_wait (task #3591's bounded wait for an in-flight agent
-    # lifecycle command) raises the current total to 175.
+    # lifecycle command) raises the current total to 175;
+    # exec_request_bounded_quarantine and hosted_boot_recovery_stalled (task
+    # #3619's bounded disposition of unreadable exec evidence and its
+    # consecutive-boot recovery escalation) raise the current total to 177.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 175
+    assert len(_TELEMETRY_KINDS) == 177
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:

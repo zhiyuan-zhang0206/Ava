@@ -36,6 +36,7 @@ import base64
 import contextlib
 import json
 import os
+import tempfile
 import time
 import uuid
 from dataclasses import dataclass
@@ -164,15 +165,19 @@ def _agent_dir(exec_dir: Path, agent_id: int | None) -> Path:
 
 
 def _prune_stale(agent_dir: Path) -> None:
-    """Delete stale result envelopes, never request/resource evidence.
+    """Delete stale result envelopes and orphaned write temp files, never
+    request/resource evidence.
 
     Successful settlement removes each request, result, and Windows job gate
     together. A leftover ``req-*`` file therefore represents uncertain cleanup
     after a killed parent and must survive age-based hygiene so an exclusive
-    hosted boot can fail closed. Bounded best-effort: a single glob per spawn.
+    hosted boot can fail closed. The `.*.tmp` siblings are the atomic-write
+    scratch files (_write_json): a live writer renames its own within
+    milliseconds, so anything a full cutoff old has no writer left — the
+    crash residue of task #3619 D-3. Bounded best-effort: two globs per spawn.
     """
     cutoff = time.time() - STALE_FILE_AGE_S
-    for path in agent_dir.glob("*.json"):
+    for path in (*agent_dir.glob("*.json"), *agent_dir.glob(".*.tmp")):
         if path.name.startswith("req-"):
             continue
         try:
@@ -329,20 +334,30 @@ def _log_envelope_transfer(
 
 
 def _write_json(path: Path, envelope: dict[str, Any]) -> None:
-    """Write `envelope` as JSON, 0600, replacing any existing file at `path`."""
+    """Write `envelope` as JSON, 0600, atomically replacing any file at `path`.
+
+    The bytes land in a same-directory temp file first and become visible at
+    `path` only through the final rename, so a writer killed mid-write can
+    never leave a zero-byte or partial envelope behind (task #3619 D-3: a
+    0-byte request envelope used to defer hosted boot recovery forever — see
+    shared/exec_request_evidence.py). Owner-only from creation — `mkstemp`
+    opens 0600 before any content lands, and the rename keeps that inode's
+    mode, so no byte of message history ever sits at looser perms.
+    """
     data = json.dumps(envelope, ensure_ascii=False).encode("utf-8")
-    # Owner-only create, tightened to exactly 0600 before any content lands:
-    # the create mode passes through the umask, so chmod while the file is
-    # still empty — no byte of message history ever sits at looser perms.
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with contextlib.suppress(OSError):
-        path.chmod(0o600)
+    fd, raw_tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    tmp = Path(raw_tmp)
     try:
+        if os.name != "nt":
+            os.fchmod(fd, 0o600)
         with os.fdopen(fd, "wb") as f:
             f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        tmp.replace(path)  # the rename is the only visible commit point
     except BaseException:
         with contextlib.suppress(OSError):
-            path.unlink()
+            tmp.unlink()
         raise
 
 

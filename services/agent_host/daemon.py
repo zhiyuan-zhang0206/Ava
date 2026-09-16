@@ -60,6 +60,7 @@ import shared.redis_client
 from agent._turn_progress import turn_progress_age_s, turn_progress_snapshot
 from agent.hosted_ownership import settle_stale_running_rows
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
+from services.agent_host import boot_defer
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_host.host import AgentHost
 from services.agent_host.pooled_checkpoint import PooledPostgresSaver
@@ -494,14 +495,30 @@ async def _recover_hosted_forces_at_boot(
     """Recover only resource-free predecessor forces before scheduling starts."""
     recovered, deferred = await recover_orphaned_hosted_forces(control_pool, machine)
     logger.info("hosted boot recovery: observed {n} orphaned force(s)", n=len(recovered))
+    streaks = boot_defer.record_deferrals(deferred)
     for agent_id, evidence in deferred.items():
-        logger.warning(
-            "hosted boot recovery deferred for agent {agent_id}: retained exec request "
-            "evidence [{evidence}]. {hint}",
-            agent_id=agent_id,
-            evidence="; ".join(entry.describe() for entry in evidence),
-            hint=disposition_hint(agent_id),
-        )
+        streak = streaks[agent_id]
+        if streak >= boot_defer.ALERT_AFTER_BOOTS:
+            logger.warning(
+                "hosted boot recovery deferred for agent {agent_id} on {streak} consecutive "
+                "boots: retained exec request evidence [{evidence}] is not clearing on its "
+                "own. {hint}",
+                event="hosted_boot_recovery_stalled",
+                agent_id=agent_id,
+                streak=streak,
+                evidence="; ".join(entry.describe() for entry in evidence),
+                hint=disposition_hint(agent_id),
+            )
+        else:
+            logger.warning(
+                "hosted boot recovery deferred for agent {agent_id} (boot {streak} of "
+                "{limit}): retained exec request evidence [{evidence}]. {hint}",
+                agent_id=agent_id,
+                streak=streak,
+                limit=boot_defer.ALERT_AFTER_BOOTS,
+                evidence="; ".join(entry.describe() for entry in evidence),
+                hint=disposition_hint(agent_id),
+            )
 
 
 async def _schedule_watcher_recovery(host: AgentHost, scheduler: TurnScheduler) -> None:
