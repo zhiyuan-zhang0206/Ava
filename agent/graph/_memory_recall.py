@@ -29,7 +29,6 @@ from collections.abc import Collection
 from datetime import UTC, datetime
 from typing import Any, NamedTuple, cast
 
-import httpx
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 
 from agent.graph._memory_filter import Candidate, filter_candidates
@@ -136,6 +135,8 @@ async def passive_memory_recall(
     if not query:
         return None
     retrieve_k = turn_settings.agent.memory_recall_retrieve_k
+    import httpx  # deferred: stays off the child boot path
+
     search_started = time.monotonic()
     try:
         results = await asyncio.to_thread(_gateway_client.memory_search, query, retrieve_k)

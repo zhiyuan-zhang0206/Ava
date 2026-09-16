@@ -17,8 +17,9 @@ preflight gate refuses an unenrolled `ava start`, not the Settings import. The
 bytes travel the private network; when multi-host is on the gateway requires
 the cluster secret as a bearer token, which this presents from AVA_CLUSTER_SECRET.
 Intentionally imports nothing from shared.config (it runs DURING shared.config
-import) — only stdlib + httpx + shared.cluster_auth + shared.http_dial +
-shared.netutil (all pure stdlib / config-free, so they're safe this early in boot).
+import) — only stdlib + shared.netutil at import; the httpx /
+shared.cluster_auth / shared.http_dial pieces load lazily at fetch time (all
+pure stdlib / config-free, so they're safe this early in boot).
 """
 
 from __future__ import annotations
@@ -30,11 +31,6 @@ import time
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlencode
-
-import httpx
-
-from shared.cluster_auth import bearer_header
-from shared.http_dial import get as dial_get
 
 # An agent boots by fetching this. The timeout must cover a slow-but-healthy
 # fetch under load (the whole boot -- fetch + import + claim -- has to finish
@@ -68,17 +64,24 @@ _SNAPSHOT_VERSION = 2
 # common per-turn child boot fetch-free.
 _SNAPSHOT_FRESH_S = 300.0
 
+
 # Transport-level httpx failures mean "gateway unreachable / mid-restart" —
 # the class that may fall back to a stale snapshot. Auth and status failures
 # (401 wrong secret, 400, 5xx) still fail loud: a runner the gateway rejects
 # must not keep running on old config.
-_TRANSPORT_FAILURES = (
-    httpx.ConnectError,
-    httpx.ConnectTimeout,
-    httpx.ReadTimeout,
-    httpx.RemoteProtocolError,
-    httpx.PoolTimeout,
-)
+def _transport_failures() -> tuple[type[BaseException], ...]:
+    """Transport-level httpx failure classes (lazy import: httpx stays off the
+    settings-import path until an actual fetch is attempted)."""
+    import httpx
+
+    return (
+        httpx.ConnectError,
+        httpx.ConnectTimeout,
+        httpx.ReadTimeout,
+        httpx.RemoteProtocolError,
+        httpx.PoolTimeout,
+    )
+
 
 # The maintenance-verb opt-out (settings-lite). `ava stop` / `ava status` / the
 # watchdog probe / the thin-client verbs must still construct Settings while the
@@ -201,6 +204,14 @@ def _validated_bootstrap_payload(payload: object) -> dict[str, str]:
     return raw
 
 
+def dial_get(*args: Any, **kwargs: Any) -> Any:
+    """Thin seam over `shared.http_dial.get` (lazy: http_dial/httpx stay off the
+    settings-import path; callers and tests patch this module attribute)."""
+    from shared.http_dial import get as _get
+
+    return _get(*args, **kwargs)
+
+
 def fetch_bootstrap_config(
     base_url: str,
     timeout: float = _FETCH_TIMEOUT_S,
@@ -230,6 +241,10 @@ def fetch_bootstrap_config(
             401 when the cluster secret is missing or wrong).
         TypeError: the response body is not a flat ``{str: str}`` map.
     """
+    import httpx
+
+    from shared.cluster_auth import bearer_header
+
     secret = os.environ.get("AVA_CLUSTER_SECRET", "")
     headers = bearer_header(secret) if secret else {}
     params = {"role": role} if role else {}
@@ -398,7 +413,7 @@ def inject_config_from_gateway() -> None:
         # gateway itself never fetches (config_source_is_local), so every
         # fetch this module makes is a runner fetch.
         values = fetch_bootstrap_config(base_url, role="runner")
-    except _TRANSPORT_FAILURES as exc:
+    except _transport_failures() as exc:
         if snapshot is not None:
             # Gateway unreachable: continue on the last-known cluster config
             # (the same values the parent process already holds). A gateway

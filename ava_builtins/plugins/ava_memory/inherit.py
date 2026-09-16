@@ -30,7 +30,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import httpx
 from langchain_core.messages import HumanMessage
 
 from agent.messages import NoteTag, system_note_message
@@ -139,6 +138,8 @@ def _ancestor_chain(agent_id: int) -> list[dict[str, Any]] | None:
     cached = _CHAIN_CACHE.get(agent_id)
     if cached is not None:
         return cached
+    import httpx  # deferred: stays off the boot path
+
     from ava import _gateway_client
     from shared.agents import GatewayUnavailable
 

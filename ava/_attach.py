@@ -29,7 +29,7 @@ def attach_available() -> bool:
     The single gate behind the text-only ruling (2026-08-28): `attach()`
     raises for a model with no attachable modality, and the system-prompt /
     help surfaces hide the member entirely. See
-    `shared.lm.factory.attach_modalities_for_model` for the resolution."""
+    `shared.lm.registry.attach_modalities_for_model` for the resolution."""
     return _attach_unavailable_reason() is None
 
 
@@ -61,7 +61,7 @@ def _attach_unavailable_reason() -> str | None:
     ``attach_modalities`` declaration) cannot receive any attached media, so
     registering files for its next turn is a contradiction — the SDK docs drop
     the member and the call fails with this reason (user ruling 2026-08-28)."""
-    from shared.lm.factory import attach_modalities_for_model
+    from shared.lm.registry import attach_modalities_for_model
 
     model = _current_model()
     if attach_modalities_for_model(model):
@@ -73,7 +73,7 @@ def _validate_modality(suffix: str) -> None:
     """Reject a file whose modality the current model's attach set does not
     include — a clear error at registration, never a silent pack-time skip
     (user ruling 2026-08-28)."""
-    from shared.lm.factory import attach_modalities_for_model
+    from shared.lm.registry import attach_modalities_for_model
 
     model = _current_model()
     mime = ATTACH_MEDIA_MIME[suffix]
