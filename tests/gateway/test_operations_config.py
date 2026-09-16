@@ -528,23 +528,32 @@ async def test_dispatch_config_read_calls_config_read_op(
 async def test_dispatch_config_write_passes_overrides(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """config_write kind -> ops.config_write_op(payload['overrides']), fail-fast on missing key."""
+    """config_write kind -> ops.config_write_op(payload['overrides'] + local/actor/trace_id),
+    fail-fast on missing key."""
     from services.agent_ops import daemon
 
     monkeypatch.setattr(daemon, "_db_pool", object())
     captured: dict[str, Any] = {}
 
     def _fake_config_write(
-        overrides: dict[str, Any], *, local: bool = False
+        overrides: dict[str, Any],
+        *,
+        local: bool = False,
+        actor: str | None = None,
+        trace_id: str | None = None,
     ) -> ConfigWriteOpResult:
         captured["overrides"] = overrides
         captured["local"] = local
+        captured["actor"] = actor
+        captured["trace_id"] = trace_id
         return ConfigWriteOpResult(machine="x", results={}, applied=True, restart_required=[])
 
     monkeypatch.setattr(daemon.ops_config, "config_write_op", _fake_config_write)
     status, _result = await daemon._dispatch("config_write", {"overrides": {"ops_concurrency": 2}})
     assert status == "completed"
     assert captured["overrides"] == {"ops_concurrency": 2}
+    assert captured["actor"] is None  # payload carried no gateway-stamped identity
+    assert captured["trace_id"] is None
 
 
 @pytest.mark.asyncio

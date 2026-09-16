@@ -14,6 +14,7 @@ remote agent-runner's host fields.
 from __future__ import annotations
 
 import argparse
+import getpass
 import os
 import sys
 from dataclasses import dataclass
@@ -467,6 +468,7 @@ def _edit_local_config(
             removals,
             expected_digest=candidate.expected_digest,
             audit_site="cli_config_local",
+            actor=f"cli:{getpass.getuser()}",
         )
     except RuntimeError as e:
         print(f"[ava config {verb}] {e}; retry against the current .env", file=sys.stderr)
