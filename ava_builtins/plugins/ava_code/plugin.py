@@ -87,11 +87,18 @@ ava.register_sdk_expand("cwd")
 # object. With a live slot (`ava.state` is not None), the slot exposes
 # `materialize()` — the framework contract on the lazy slot: calling it loads
 # the face (which rebinds `state_handle` on this module) and the call then
-# delegates to the real handle. Without a live slot — outside a turn (test /
-# dev REPL) — its methods raise exactly what the real handle raises outside an
-# exec turn.
+# delegates to the real handle. The rebind replaces the module attribute only,
+# so a holder that bound the stand-in before it (a call-site local, or the name
+# read once and reused across an update pair) must delegate forward: `_forward`
+# re-reads the module first and hands over once the binding has moved on (task
+# #3665). Without a live slot — outside a turn (test / dev REPL) — its methods
+# raise exactly what the real handle raises outside an exec turn.
 class _UnboundStateHandle:
-    """Stand-in for the ava_code `PluginStateHandle` until the slot resolves."""
+    """Stand-in for the ava_code `PluginStateHandle` until the slot resolves.
+
+    Once the slot materializes the real handle is rebound onto this module;
+    a holder still pointing here delegates forward on its next call — see
+    `_forward`."""
 
     def read(self) -> Any:
         return self._forward(
@@ -109,7 +116,17 @@ class _UnboundStateHandle:
         )
 
     def _forward(self, method: str, outside_turn_message: str, *args: Any) -> Any:
-        """Materialize a live slot, then delegate to the rebound real handle."""
+        """Delegate to the module's current handle; materialize a live slot first."""
+        # A stale holder (bound before the slot materialized — e.g. the name
+        # read once and reused across `ava.cwd.set`'s cwd + cwd_note pair)
+        # must delegate before reading `ava.state`: once materialized that is
+        # the real state, which has no `materialize()` — the stale path would
+        # otherwise fall through to the outside-turn raise after having
+        # already succeeded once (#3665).
+        from .plugin import state_handle as current
+
+        if current is not self:
+            return getattr(current, method)(*args)
         state = ava.state
         if state is not None:
             materialize = getattr(state, "materialize", None)
