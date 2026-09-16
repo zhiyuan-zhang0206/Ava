@@ -1058,6 +1058,49 @@ async def test_reap_terminated_owner_watcher_killed_marks_reaped(
     assert _watcher_status(db_conn, aid, 31) == "reaped"
 
 
+async def test_reap_terminated_owner_watcher_stamps_reaped_at(
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Terminalizing a reclaimed row moves updated_at with it (task #3525).
+
+    The terminated-owner path used to leave updated_at == created_at while
+    both sibling entry points (live-owner reaping, the registry's mark) bump
+    it — so a reaped row's updated_at read as its insert time instead of
+    "reaped at". The stamp is pre-aged to make the refresh observable."""
+    aid = _terminated_agent(db_conn, source="user")
+    _watcher_row(db_conn, aid, 41)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agent_watchers SET updated_at = now() - interval '1 hour' "
+            "WHERE agent_id = %s AND session_id = %s",
+            (aid, 41),
+        )
+    db_conn.commit()
+
+    async def _dispatch(
+        machine: str, kind: str, payload: dict[str, object], **kwargs: object
+    ) -> dict[str, object]:
+        return ShellKillResult(mode="killed", interrupted=False, name="daily").model_dump()
+
+    monkeypatch.setattr(ttl_reaper.cluster_rpc, "dispatch_to_machine", _dispatch)
+    reaped = await _reap_terminated_watchers(reaper_pool)
+
+    assert reaped == [(aid, 41)]
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT status, updated_at > created_at, "
+            "updated_at > now() - interval '5 minutes' "
+            "FROM agent_watchers WHERE agent_id = %s AND session_id = %s",
+            (aid, 41),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    status, after_created, fresh = row
+    assert status == "reaped"
+    assert after_created, "updated_at must move past created_at on reap"
+    assert fresh, "updated_at must be refreshed to the reap time"
+
+
 async def test_reap_terminated_owner_watcher_absent_marks_reaped(
     db_conn: psycopg.Connection, reaper_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:

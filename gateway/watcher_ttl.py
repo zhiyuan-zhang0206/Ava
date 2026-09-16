@@ -165,7 +165,7 @@ def mark_reaped_and_notify_if_owner_still_terminated(
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             """
-            UPDATE agent_watchers SET status = 'reaped'
+            UPDATE agent_watchers SET status = 'reaped', updated_at = now()
             WHERE agent_id = %s AND session_id = %s AND status = 'running'
               AND EXISTS (
                   SELECT 1 FROM agents_meta m
