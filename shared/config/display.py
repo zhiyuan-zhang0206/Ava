@@ -223,3 +223,36 @@ class DisplaySettings(EnvSettings):
             "scope": "cluster-pinned",
         },
     )
+
+    neighbors_default_depth: int = Field(
+        default=1,
+        alias="AVA_NEIGHBORS_DEFAULT_DEPTH",
+        description=(
+            "Default tie-walk depth of GET /api/agents/{id}/neighbors and the SDK's "
+            "ava.agents.get_neighbors when the caller passes none. 1 returns direct "
+            "ties only - the inspector's default view; each extra hop discounts tie "
+            "strength, and the 5-hop ceiling stays a protective constant."
+        ),
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+    neighbors_default_limit: int = Field(
+        default=20,
+        alias="AVA_NEIGHBORS_DEFAULT_LIMIT",
+        description=(
+            "Default cap on the neighbors returned (strongest first) by the same "
+            "reads when the caller passes none. 20 fills the relationship view "
+            "without dragging a whole fleet's tie list into one response; the "
+            "100 ceiling stays a protective constant."
+        ),
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )

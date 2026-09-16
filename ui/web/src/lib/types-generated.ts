@@ -1011,7 +1011,10 @@ export interface paths {
          *     interaction strength (spawn / fork / resurrect / message, all equal weight),
          *     plus `ancestors` — the immutable birth chain above `agent_id`, nearest ancestor first.
          *
-         *     `depth=1` returns direct ties only; a higher `depth` follows ties outward,
+         *     Omitted ``depth``/``limit`` return the configured defaults
+         *     (``display.neighbors_default_depth`` / ``display.neighbors_default_limit``
+         *     - 1 / 20 out of the box). `depth=1` returns direct ties only; a higher
+         *     `depth` follows ties outward,
          *     discounting each extra hop. `ancestors` ignores `depth`/`limit`: it walks
          *     the immutable born_spawner chain to the top (message ties never form
          *     ancestors), each row's `depth` = hops up (1 = the direct birth parent).
@@ -9229,8 +9232,8 @@ export interface operations {
     get_agent_neighbors_api_agents__agent_id__neighbors_get: {
         parameters: {
             query?: {
-                depth?: number;
-                limit?: number;
+                depth?: number | null;
+                limit?: number | null;
             };
             header?: never;
             path: {

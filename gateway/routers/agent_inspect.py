@@ -38,6 +38,7 @@ from gateway.shell_ttls import fallback_expiry
 from ops import cluster_rpc as _cluster_rpc
 from ops.rpc_schemas import ShellInfo
 from shared.agents import AgentNotFound
+from shared.config import settings
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -668,14 +669,19 @@ async def get_agent_inspect(
 def get_agent_neighbors(
     agent_id: int,
     request: Request,
-    depth: Annotated[int, Query(ge=1, le=5)] = 1,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    # `depth`/`limit` ranges stay protective constants (import-time Query
+    # bounds); the default *walk* is display.neighbors_default_depth/limit.
+    depth: Annotated[int | None, Query(ge=1, le=5)] = None,
+    limit: Annotated[int | None, Query(ge=1, le=100)] = None,
 ) -> NeighborsResponse:
     """The agents most strongly tied to `agent_id`, ranked by recency-weighted
     interaction strength (spawn / fork / resurrect / message, all equal weight),
     plus `ancestors` — the immutable birth chain above `agent_id`, nearest ancestor first.
 
-    `depth=1` returns direct ties only; a higher `depth` follows ties outward,
+    Omitted ``depth``/``limit`` return the configured defaults
+    (``display.neighbors_default_depth`` / ``display.neighbors_default_limit``
+    - 1 / 20 out of the box). `depth=1` returns direct ties only; a higher
+    `depth` follows ties outward,
     discounting each extra hop. `ancestors` ignores `depth`/`limit`: it walks
     the immutable born_spawner chain to the top (message ties never form
     ancestors), each row's `depth` = hops up (1 = the direct birth parent).
@@ -692,6 +698,10 @@ def get_agent_neighbors(
         cur.execute("SELECT 1 FROM agents_meta WHERE id = %s", (agent_id,))
         if cur.fetchone() is None:
             raise AgentNotFound(f"agent {agent_id} does not exist")
+    if depth is None:
+        depth = settings.display.neighbors_default_depth
+    if limit is None:
+        limit = settings.display.neighbors_default_limit
     ranked, ancestors_ranked, archive_degraded = neighbors.compute(
         root=agent_id,
         max_depth=depth,

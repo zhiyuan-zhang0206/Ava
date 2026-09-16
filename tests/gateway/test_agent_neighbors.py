@@ -272,6 +272,27 @@ def test_limit_caps_result_count(db_conn: psycopg.Connection, fake_loki: FakeLok
     assert len(rows) == 2  # pyright: ignore[reportUnknownArgumentType]
 
 
+def test_defaults_come_from_display_config(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Omitted depth/limit resolve from settings.display.neighbors_default_*
+    (``AVA_NEIGHBORS_DEFAULT_DEPTH`` / ``AVA_NEIGHBORS_DEFAULT_LIMIT``); the
+    literals 1/20 are only the fields' defaults, not hard-coded query
+    parameters."""
+    from shared.config import settings
+
+    a = _seed_agent(db_conn)
+    for _ in range(3):
+        peer = _seed_agent(db_conn)
+        _event(fake_loki, event_type="send_message", agent_id=peer, target=a)
+
+    monkeypatch.setattr(settings.display, "neighbors_default_limit", 2)
+    with TestClient(app) as client:
+        rows = _neighbors(client, a)
+
+    assert len(rows) == 2  # pyright: ignore[reportUnknownArgumentType]
+
+
 def test_no_ties_returns_empty(db_conn: psycopg.Connection, fake_loki: FakeLoki) -> None:
     a = _seed_agent(db_conn)
     with TestClient(app) as client:
