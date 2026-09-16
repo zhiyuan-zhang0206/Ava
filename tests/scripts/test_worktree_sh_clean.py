@@ -213,6 +213,23 @@ def test_clean_worktree_is_removed_and_branch_deleted(tmp_path: Path) -> None:
     assert not _branch_exists(repo, "ava/t1")
 
 
+def test_agent_style_branch_is_deleted_with_the_worktree(tmp_path: Path) -> None:
+    """Task #3710: agent worktrees name branch == dir (ava-<id>-<slug>), not
+    ava/<task> — clean must not leave that branch behind."""
+    repo = _make_repo(tmp_path)
+    target = repo / ".worktrees" / "ava-9999-demo-task"
+    _git(repo, "worktree", "add", "-q", ".worktrees/ava-9999-demo-task", "-b", "ava-9999-demo-task")
+    _plant_usable_python(repo)
+    home = _fake_home(tmp_path)
+
+    done = _clean(repo, home, "ava-9999-demo-task")
+
+    assert done.returncode == 0, done.stderr
+    assert "branch deleted: ava-9999-demo-task" in done.stdout
+    assert not target.exists()
+    assert not _branch_exists(repo, "ava-9999-demo-task")
+
+
 def test_option_errors_are_rejected(tmp_path: Path) -> None:
     repo = _make_repo(tmp_path)
     home = _fake_home(tmp_path)
