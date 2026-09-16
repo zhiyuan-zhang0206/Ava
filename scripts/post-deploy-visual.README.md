@@ -26,6 +26,10 @@ notifications (P0 -> `send_message` to #3242 and #405, P2 -> `notify` queue).
 - Two frames ~1s apart per crop; only regions diffed in both frames count.
 - Thresholds match CI: 0.1% changed-pixel ratio and channel delta 16,
   applied regionally.
+- Known-ignore regions render as solid magenta (`#FF00FF`) blocks in the
+  captures: each registry entry is applied as a Playwright `mask`, painted
+  in Playwright's default mask color. A magenta block is a mask, not a
+  rendering defect.
 - Attribution: the wave diff is `git log <golden>..<wave> -- ui/web`; a
   drifted crop is expected iff its surface path prefixes intersect that diff,
   otherwise unexpected.

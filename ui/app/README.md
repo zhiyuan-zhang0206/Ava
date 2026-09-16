@@ -93,6 +93,18 @@ recovery state within 30 seconds. Plain HTTP is accepted only when the resolved
 target is private (loopback, link-local, RFC1918, or `100.64.0.0/10`); public
 targets require HTTPS.
 
+## Disk hygiene on shared hosts
+
+Compiling several architectures in one tree grows `src-tauri/target` to
+~10–14 GB — the failure mode behind the 2026-08-22 macmini waterline
+incident (#3138/#1382). When building inside a shared-builder worktree,
+either point `CARGO_TARGET_DIR` at a scratch path you delete afterwards,
+or clean up when done:
+
+```bash
+cargo clean --manifest-path ui/app/src-tauri/Cargo.toml
+```
+
 ## Verification
 
 ```bash
