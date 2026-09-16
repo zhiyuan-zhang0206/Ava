@@ -14,16 +14,27 @@ import time
 from collections.abc import Callable, Sequence
 from typing import Any, cast
 
+import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
+from shared.hierarchy import pipeline as pipeline_module
 from shared.hierarchy.blocks import fold_blocks
 from shared.hierarchy.generate import input_hash, text_hash
 from shared.hierarchy.pipeline import (
+    MaterializedTree,
+    build_agent_tree,
     build_units,
     materialize,
     trigger_batches,
 )
-from shared.hierarchy.seal import NodeSpec, SealResult, Unit, seal_cascade
+from shared.hierarchy.seal import (
+    NodeSpec,
+    SealResult,
+    Unit,
+    narrative_budget_tok,
+    seal_cascade,
+)
+from shared.hierarchy.tokens import count_tokens
 from shared.timeline import build_timeline_items
 
 MODEL = "deepseek-v4-flash"
@@ -262,3 +273,42 @@ def test_input_hash_is_deterministic_and_kind_sensitive() -> None:
     assert input_hash("leaf", "x") == input_hash("leaf", "x")
     assert input_hash("leaf", "x") != input_hash("node", "x")
     assert input_hash("leaf", "x") != input_hash("leaf", "y")
+
+
+# ---- full build (build_agent_tree): end-to-end structure determinism ----
+
+
+def _fitting_responder(call: list[BaseMessage]) -> str:
+    """Deterministic text sized under the call's own budget (structure only)."""
+    budget = narrative_budget_tok(count_tokens(call_material(call)))
+    text = "\u5b57" * max(budget // 2, 1)
+    while text and count_tokens(text) > budget:
+        text = text[:-1]
+    return text
+
+
+def test_build_agent_tree_same_input_same_tree(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The acceptance anchor: one re-run over the same input reproduces the tree.
+
+    The partition (block fold + seal cascade) must be a pure function of the
+    message stream; the fixture is sized so the cascade grows a second level
+    (100 small units -> 5 level-1 groups -> 1 level-2 group), and every node's
+    deterministic fake text fits its budget, so a clean build is expected.
+    """
+    msgs: list[BaseMessage] = [inbound(f"step {i}") for i in range(100)]
+
+    def fake_loader(agent_id: int) -> list[BaseMessage]:
+        return list(msgs)
+
+    monkeypatch.setattr(pipeline_module, "load_checkpoint_messages_full", fake_loader)
+
+    first = build_agent_tree(7, llm=FakeLLM(_fitting_responder), model=MODEL)
+    second = build_agent_tree(7, llm=FakeLLM(_fitting_responder), model=MODEL)
+
+    def shape(tree: MaterializedTree) -> list[tuple[int, tuple[int, int], tuple[str, ...], str]]:
+        return [(n.level, n.span, n.children, n.kind) for n in tree.nodes]
+
+    assert first.errors == ()
+    assert first.max_level >= 2  # the fixture must exercise the cascade
+    assert shape(first) == shape(second)
+    assert [n.text for n in first.nodes] == [n.text for n in second.nodes]
