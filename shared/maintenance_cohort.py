@@ -310,7 +310,7 @@ def _refuse_inflight_lifecycle(
             waitable = waitable and row.kind in ("restart", "terminate") and row.maintenance is None
     if not lines:
         return
-    raise LifecycleCollisionError("; ".join(lines), blocked, waitable=waitable)
+    raise LifecycleCollisionError("; ".join(lines), sorted(set(blocked)), waitable=waitable)
 
 
 def _collision_line(agent_id: int, rows: list[_CommandRow]) -> str:
