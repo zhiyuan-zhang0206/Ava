@@ -37,13 +37,58 @@ import psutil
 from shared.paths import ava_home
 
 
-def _under(path: str | None, target: Path) -> bool:
+def _same_dir(candidate: Path, target: Path) -> bool:
+    """Inode-level sameness; a stat failure on either side reads as not-equal."""
+    try:
+        return candidate.samefile(target)
+    except OSError:
+        return False
+
+
+def _folds_case(target: Path) -> bool:
+    """Whether the filesystem resolves a case-flipped spelling of `target`.
+
+    macOS APFS and WSL DrvFs fold case; ext4 does not. Probed by flipping one
+    letter at a time until a spelling resolves to `target` itself (a path can
+    cross a case-sensitive mount boundary, e.g. /mnt/c on WSL). A target that
+    does not exist reports False — the string fallback then stays exact.
+    """
+    text = str(target)
+    for i, ch in enumerate(text):
+        if not ch.isalpha():
+            continue
+        try:
+            if Path(text[:i] + ch.swapcase() + text[i + 1 :]).samefile(target):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def _under(path: str | None, target: Path, *, fold: bool) -> bool:
+    """Whether `path` lies at or under `target`, spelling-robust.
+
+    A resolved-string prefix alone is spelling-sensitive: `worktree.sh`
+    derives its target from bash's logical `pwd` while psutil / the pty
+    records report the physical spelling, and on a case-insensitive filesystem
+    `.../ava/...` and `.../Ava/...` name the same directory — the miss read as
+    "no anchor" (fail-open, task #3707 QA). Walk the candidate's ancestors and
+    compare inodes instead; a candidate that cannot be stat'ed (deleted, not
+    materialized) falls back to the resolved-string compare — casefolded
+    wholesale when the filesystem folds case (`fold`).
+    """
     if not path:
         return False
     try:
-        return Path(path).resolve().is_relative_to(target)
+        candidate = Path(path).resolve()
     except OSError:
         return False
+    if any(_same_dir(ancestor, target) for ancestor in (candidate, *candidate.parents)):
+        return True
+    left, right = str(candidate), str(target)
+    if fold:
+        left, right = left.casefold(), right.casefold()
+    return left == right or left.startswith(right + os.sep)
 
 
 def _caller_chain() -> set[int]:
@@ -104,6 +149,7 @@ def find_live_anchors(path: Path, *, records_dir: Path | None = None) -> list[st
     hits: list[str] = []
     skip = _caller_chain()
     group = _caller_group()
+    fold = _folds_case(target)
 
     pty_dir = records_dir if records_dir is not None else ava_home() / "run" / "pty"
     if pty_dir.is_dir():
@@ -113,7 +159,7 @@ def find_live_anchors(path: Path, *, records_dir: Path | None = None) -> list[st
             except (json.JSONDecodeError, OSError):
                 continue
             cwd = data.get("cwd")
-            if isinstance(cwd, str) and _under(cwd, target):
+            if isinstance(cwd, str) and _under(cwd, target, fold=fold):
                 hits.append(f"pty session {rec.stem!r} (pid {data.get('pid')}) cwd={cwd!r}")
 
     for proc in psutil.process_iter(["pid", "cwd", "exe", "cmdline"]):
@@ -126,9 +172,9 @@ def find_live_anchors(path: Path, *, records_dir: Path | None = None) -> list[st
         exe = proc.info["exe"]
         cmdline: list[str] = cast("list[str]", proc.info["cmdline"]) or []
         if (
-            _under(cwd, target)
-            or _under(exe, target)
-            or any(tok.startswith(str(target)) for tok in cmdline)
+            _under(cwd, target, fold=fold)
+            or _under(exe, target, fold=fold)
+            or any(tok.startswith("/") and _under(tok, target, fold=fold) for tok in cmdline)
         ):
             hits.append(f"process {pid} cwd={cwd!r} exe={exe!r}")
 
