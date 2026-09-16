@@ -2250,6 +2250,19 @@ class TestAdminEvents:
             client.get("/api/cluster/admin/events")
         assert fake_admin_events["calls"][0]["limit"] == 200
 
+    def test_limit_defaults_come_from_display_config(
+        self, fake_admin_events: dict[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
+    ) -> None:  # type: ignore[no-untyped-def]
+        """The implicit page is ``settings.display.cluster_events_default_limit``
+        (``AVA_CLUSTER_EVENTS_DEFAULT_LIMIT``); the literal 200 is only that
+        field's default, not a hard-coded page size."""
+        from shared.config import settings
+
+        monkeypatch.setattr(settings.display, "cluster_events_default_limit", 7)
+        with TestClient(app) as client:
+            client.get("/api/cluster/admin/events")
+        assert fake_admin_events["calls"][0]["limit"] == 7
+
     def test_limit_caps_at_1000(self, fake_admin_events: dict[str, list[dict[str, Any]]]) -> None:  # type: ignore[no-untyped-def]
         with TestClient(app) as client:
             r = client.get("/api/cluster/admin/events?limit=1001")

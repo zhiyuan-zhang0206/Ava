@@ -445,6 +445,9 @@ async def get_cluster_roster(request: Request) -> list[MachineStatus]:
 # update` window). The gateway is unauthenticated (the private network is the boundary).
 
 
+# Protective ceiling for the admin-events limit (the handler's range check);
+# the default *window* is display.cluster_events_default_limit (task #3696
+# exception inventory: KEEP).
 _EVENTS_MAX_LIMIT = 1000
 
 
@@ -456,7 +459,7 @@ def get_cluster_admin_events(
     since: str | None = None,
     event: str | None = None,
     grep: str | None = None,
-    limit: int = 200,
+    limit: int | None = None,
 ) -> AgentEventsResponse:
     """Slice the unified event stream from Loki (category=telemetry/log) for
     ops debugging without SSH — the LGTM replacement for the PG `events` read
@@ -471,11 +474,15 @@ def get_cluster_admin_events(
       - `event=spawn,terminate`: comma-separated event names.
       - `grep=<substring>`: substring match on the raw log line (the JSON
         body includes the `msg` payload).
-      - `limit`: max rows to return, capped at 1000. Default 200.
+      - `limit`: max rows to return, capped at 1000 (protective constant).
+        Omitted returns the configured default
+        (``display.cluster_events_default_limit`` - 200 out of the box).
 
     Returns newest-first; the client paginates by passing
     `since=<oldest_ts_seen>` on the next call.
     """
+    if limit is None:
+        limit = settings.display.cluster_events_default_limit
     if limit < 1 or limit > _EVENTS_MAX_LIMIT:
         raise HTTPException(
             status_code=400,

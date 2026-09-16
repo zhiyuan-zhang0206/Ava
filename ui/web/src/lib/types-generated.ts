@@ -868,7 +868,8 @@ export interface paths {
          *
          *     Returns newest-first (`ts DESC`; `id` is a stable surrogate derived
          *     from the log line, so `limit`/`offset` paging stays deterministic).
-         *     `limit` defaults to 100, capped at 1000 (over-limit 422s); `offset`
+         *     `limit` returns the configured default window (``display.events_default_limit``
+         *     — 100 out of the box), capped at 1000 (over-limit 422s); `offset`
          *     pages further back and is capped at 10,000. Loki has no native offset,
          *     so the cap bounds the in-memory parse of `limit + offset + 1` rows.
          *
@@ -1010,7 +1011,10 @@ export interface paths {
          *     interaction strength (spawn / fork / resurrect / message, all equal weight),
          *     plus `ancestors` — the immutable birth chain above `agent_id`, nearest ancestor first.
          *
-         *     `depth=1` returns direct ties only; a higher `depth` follows ties outward,
+         *     Omitted ``depth``/``limit`` return the configured defaults
+         *     (``display.neighbors_default_depth`` / ``display.neighbors_default_limit``
+         *     - 1 / 20 out of the box). `depth=1` returns direct ties only; a higher
+         *     `depth` follows ties outward,
          *     discounting each extra hop. `ancestors` ignores `depth`/`limit`: it walks
          *     the immutable born_spawner chain to the top (message ties never form
          *     ancestors), each row's `depth` = hops up (1 = the direct birth parent).
@@ -1965,7 +1969,9 @@ export interface paths {
          *       - `event=spawn,terminate`: comma-separated event names.
          *       - `grep=<substring>`: substring match on the raw log line (the JSON
          *         body includes the `msg` payload).
-         *       - `limit`: max rows to return, capped at 1000. Default 200.
+         *       - `limit`: max rows to return, capped at 1000 (protective constant).
+         *         Omitted returns the configured default
+         *         (``display.cluster_events_default_limit`` - 200 out of the box).
          *
          *     Returns newest-first; the client paginates by passing
          *     `since=<oldest_ts_seen>` on the next call.
@@ -2255,7 +2261,9 @@ export interface paths {
          *     `machine` selects the source: omitted = this gateway's own box; `all` = every
          *     agent-runner machine plus the gateway's own box, merged (fail-fast — an
          *     unreachable machine 503s the whole read); a machine name = that machine.
-         *     `last` caps the number of returned records (1..200). Records are the raw
+         *     Omitted `last` returns the configured default count
+         *     (``display.config_audit_default_last`` - 20 out of the box); an explicit
+         *     `last` stays capped at 200. Records are the raw
          *     audit-JSONL entries (`shared/env_audit.py`), each tagged with its `machine`;
          *     values were redacted at write time (non-sensitive fields only), and records
          *     from before record v2 lack `actor` / `trace_id` / `changed`.
@@ -2524,7 +2532,9 @@ export interface paths {
         };
         /**
          * Get Schedule Runs
-         * @description Recent run-history rows (newest first). 404 if the schedule is missing.
+         * @description Recent run-history rows (newest first). Omit `limit` for the configured
+         *     default window (``display.schedules_runs_default_limit`` - 50 out of the
+         *     box). 404 if the schedule is missing.
          */
         get: operations["get_schedule_runs_api_schedules__schedule_id__runs_get"];
         put?: never;
@@ -2741,7 +2751,9 @@ export interface paths {
         /**
          * Get Metrics
          * @description Aggregate report over the last `days` of events (all agents, or a
-         *     single one via `agent`). `days` is capped at 30 to bound the scan.
+         *     single one via `agent`). Omitted `days` returns the configured default
+         *     (``display.metrics_default_window_days`` - 1 out of the box); the 30-day cap
+         *     stays a protective constant (it bounds the scan).
          *     `since_compact=true` additionally narrows each agent's events to those at
          *     or after its latest compact halt (echoed in `meta.since_compact`).
          *     `meta.total_events` counts every telemetry/log event in the window —
@@ -2829,7 +2841,8 @@ export interface paths {
          *         would scan the whole retention history (6M+ rows across every
          *         month partition), so the API never runs one. `meta.window_from`
          *         always echoes the effective lower bound.
-         *       - `limit` (default 100, cap 1000) / `offset` (cap 10,000): offset
+         *       - `limit` (configured default window — ``display.events_default_limit``,
+         *         100 out of the box — cap 1000) / `offset` (cap 10,000): offset
          *         paging with stable ordering across same-`ts` rows. The cap bounds the
          *         in-memory Loki JSON parse (`limit + offset + 1` rows).
          *       - `with_total=1`: also compute the exact filtered row count
@@ -3329,8 +3342,9 @@ export interface paths {
          *     during the merge; pass `?include_terminated=true` for the full graph.
          *
          *     `?hours=` (0 = last 5m; 1/6/24/72/168 = hours; omitted = all-time) windows
-         *     both the node score and the edge events. `?decay_lambda=` (range [0, 10],
-         *     default 0.5) is the per-day decay constant for the message edge weight,
+         *     both the node score and the edge events. `?decay_lambda=` (range [0, 10];
+         *     omitted = the configured default ``display.fleet_graph_decay_lambda`` -
+         *     0.5 out of the box) is the per-day decay constant for the message edge weight,
          *     quantized to 2dp before both computation and cache-key construction. Its
          *     1001 values, two terminated states, and the bounded hour-window choices
          *     cap the cache-key space at approximately 16k entries. Per-caller rate
@@ -9126,7 +9140,7 @@ export interface operations {
                 to?: string | null;
                 event?: string | null;
                 level?: string | null;
-                limit?: number;
+                limit?: number | null;
                 offset?: number;
             };
             header?: never;
@@ -9259,8 +9273,8 @@ export interface operations {
     get_agent_neighbors_api_agents__agent_id__neighbors_get: {
         parameters: {
             query?: {
-                depth?: number;
-                limit?: number;
+                depth?: number | null;
+                limit?: number | null;
             };
             header?: never;
             path: {
@@ -10269,7 +10283,7 @@ export interface operations {
                 since?: string | null;
                 event?: string | null;
                 grep?: string | null;
-                limit?: number;
+                limit?: number | null;
             };
             header?: never;
             path?: never;
@@ -10552,7 +10566,7 @@ export interface operations {
         parameters: {
             query?: {
                 machine?: string | null;
-                last?: number;
+                last?: number | null;
             };
             header?: never;
             path?: never;
@@ -11000,7 +11014,7 @@ export interface operations {
     get_schedule_runs_api_schedules__schedule_id__runs_get: {
         parameters: {
             query?: {
-                limit?: number;
+                limit?: number | null;
             };
             header?: never;
             path: {
@@ -11403,7 +11417,7 @@ export interface operations {
     get_metrics_api_metrics_get: {
         parameters: {
             query?: {
-                days?: number;
+                days?: number | null;
                 agent?: number | null;
                 since_compact?: boolean;
             };
@@ -11436,7 +11450,7 @@ export interface operations {
     get_metrics_agents_api_metrics_agents_get: {
         parameters: {
             query?: {
-                days?: number;
+                days?: number | null;
                 since_compact?: boolean;
             };
             header?: never;
@@ -11479,7 +11493,7 @@ export interface operations {
                 from?: string | null;
                 to?: string | null;
                 hours?: number | null;
-                limit?: number;
+                limit?: number | null;
                 offset?: number;
                 with_total?: boolean;
             };
@@ -11678,7 +11692,7 @@ export interface operations {
                 window?: string;
                 status?: ("unresolved" | "resolved") | null;
                 severity?: ("critical" | "warning" | "error") | null;
-                limit?: number;
+                limit?: number | null;
             };
             header?: never;
             path?: never;
@@ -12042,7 +12056,7 @@ export interface operations {
                 /** @description Include terminated agents */
                 include_terminated?: boolean;
                 hours?: components["schemas"]["StatsWindowHours"] | null;
-                decay_lambda?: number;
+                decay_lambda?: number | null;
             };
             header?: never;
             path?: never;

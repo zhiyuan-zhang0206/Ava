@@ -267,6 +267,24 @@ class TestLogsRunsDraft:
             sid = _create(client, name="r").json()["id"]
             assert client.get(f"/api/schedules/{sid}/runs").json() == []
 
+    def test_runs_default_limit_comes_from_display_config(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The implicit page is ``settings.display.schedules_runs_default_limit``
+        (``AVA_SCHEDULES_RUNS_DEFAULT_LIMIT``); the literal 50 is only that
+        field's default, not a hard-coded page size."""
+        from shared.config import settings
+
+        monkeypatch.setattr(settings.display, "schedules_runs_default_limit", 1)
+        with TestClient(app) as client:
+            sid = _create(client, name="r").json()["id"]
+            with db_conn.cursor() as cur:
+                cur.execute("INSERT INTO schedule_runs (schedule_id) VALUES (%s)", (sid,))
+                cur.execute("INSERT INTO schedule_runs (schedule_id) VALUES (%s)", (sid,))
+            db_conn.commit()
+            body = client.get(f"/api/schedules/{sid}/runs").json()
+        assert len(body) == 1
+
     def test_runs_missing_schedule_404(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:
             assert client.get("/api/schedules/9999/runs").status_code == 404

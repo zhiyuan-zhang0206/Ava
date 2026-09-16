@@ -217,6 +217,34 @@ def test_loki_edge_tail_keeps_unlabeled_history_and_excludes_other_cluster(
     assert edges[0]["last_seen_at"]
 
 
+def test_decay_lambda_comes_from_display_config(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Omitted `?decay_lambda=` is settings.display.fleet_graph_decay_lambda
+    (``AVA_FLEET_GRAPH_DECAY_LAMBDA``); the literal 0.5 is only that field's
+    default, not a hard-coded decay constant. A zero decay keeps an old message
+    edge above the 0.01 drop threshold."""
+    from shared.config import settings
+
+    source = _seed_agent(db_conn)
+    target = _seed_agent(db_conn)
+    _event_loki(
+        fake_loki,
+        source_agent=source,
+        target_agent=target,
+        event_type="send_message",
+        ts_offset_hours=360,
+    )
+
+    monkeypatch.setattr(settings.display, "fleet_graph_decay_lambda", 0.0)
+    with TestClient(app) as client:
+        resp = client.get("/api/fleet/graph")
+
+    assert resp.status_code == 200, resp.text
+    edges = resp.json()["edges"]
+    assert len(edges) == 1  # exp(0 * 15d) = 1.0 — above the 0.01 drop threshold
+
+
 def _nodes_by_id(client: TestClient, query: str = "") -> dict[int, dict]:
     resp = client.get(f"/api/fleet/graph{query}")
     assert resp.status_code == 200, resp.text
