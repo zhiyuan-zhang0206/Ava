@@ -99,7 +99,7 @@ describe.each<Domain>(["token-usage", "pending"])("%s selected read ownership", 
   });
 
   it("aborts obsolete A-to-B-to-A requests and rejects their late values", async () => {
-    const { result, rerender } = renderHook(({ id }: { id: number | null }) => useRead(domain, id), {
+    const { result, rerender } = renderHook<number, { id: number | null }>(({ id }) => useRead(domain, id), {
       initialProps: { id: 1 }, wrapper,
     });
     await waitFor(() => expect(reads).toHaveLength(1));
@@ -117,7 +117,7 @@ describe.each<Domain>(["token-usage", "pending"])("%s selected read ownership", 
   });
 
   it.each(["hidden", "unmount", "selection"])("%s aborts reads and disposes trailing work", async (cause) => {
-    const view = renderHook(({ id }: { id: number | null }) => useRead(domain, id), {
+    const view = renderHook<number, { id: number | null }>(({ id }) => useRead(domain, id), {
       initialProps: { id: 1 }, wrapper,
     });
     await waitFor(() => expect(reads).toHaveLength(1));
@@ -141,7 +141,7 @@ describe.each<Domain>(["token-usage", "pending"])("%s selected read ownership", 
   });
 
   it("does no read or repair without selection or while initially hidden", () => {
-    const view = renderHook(({ id }: { id: number | null }) => useRead(domain, id), {
+    const view = renderHook<number, { id: number | null }>(({ id }) => useRead(domain, id), {
       initialProps: { id: null }, wrapper,
     });
     pushOpen();
