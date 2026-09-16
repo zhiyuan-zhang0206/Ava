@@ -16,6 +16,7 @@ _SCRIPT = Path(__file__).parents[2] / "scripts" / "generate-ui-page.py"
 
 def _load_module():
     spec = importlib.util.spec_from_file_location("generate_ui_page", _SCRIPT)
+    assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
