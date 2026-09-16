@@ -46,7 +46,12 @@ def test_malformed_record_skipped(tmp_path: Path) -> None:
 def test_live_process_cwd_anchor_reported(tmp_path: Path) -> None:
     target = tmp_path / "worktrees" / "wt-under-test"
     target.mkdir(parents=True)
-    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"], cwd=target)
+    # start_new_session: a process genuinely anchored in the worktree is an
+    # independent session, not a member of the checking invocation's job tree
+    # (whose same-group processes the scan deliberately excludes, #3685).
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"], cwd=target, start_new_session=True
+    )
     try:
         time.sleep(0.5)  # let the child start so psutil sees its cwd
         hits = find_live_anchors(target, records_dir=tmp_path / "nope")
@@ -54,3 +59,68 @@ def test_live_process_cwd_anchor_reported(tmp_path: Path) -> None:
     finally:
         child.kill()
         child.wait()
+
+
+def _run_guard(target: Path) -> subprocess.CompletedProcess[str]:
+    """Invoke the real guard script the way cleanup does — from inside the
+    target, through a transient shell (the #3685 habit)."""
+    script = Path(__file__).resolve().parents[2] / "scripts" / "check_worktree_remove.py"
+    return subprocess.run(  # noqa: S603 — test-owned interpreter, fixture path, no untrusted input
+        ["/bin/sh", "-c", f'cd "{target}" && "{sys.executable}" "{script}" "{target}"'],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_invocation_shell_inside_target_does_not_self_refuse(tmp_path: Path) -> None:
+    """#3685: `cd <worktree> && check` puts the invoking shell's cwd inside the
+    target; that chain is the remover itself, not a live anchor. The false
+    REFUSE it produced pushed callers toward `--force` — how a real anchor gets
+    missed."""
+    target = tmp_path / "worktrees" / "wt-under-test"
+    target.mkdir(parents=True)
+    result = _run_guard(target)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.startswith("OK")
+
+
+def test_pipeline_sibling_consumer_is_not_an_anchor(tmp_path: Path) -> None:
+    """#3685 QA follow-up: cleanup often pipes the guard's output — `cd T &&
+    check T 2>&1 | tail`. The consumer (`tail` / `cat`) is the caller's
+    SIBLING, not an ancestor; it shares the invocation's process group and
+    must not read as an anchor. `rc=` echoes the guard's own status through
+    the pipe."""
+    target = tmp_path / "worktrees" / "wt-under-test"
+    target.mkdir(parents=True)
+    script = Path(__file__).resolve().parents[2] / "scripts" / "check_worktree_remove.py"
+    result = subprocess.run(  # noqa: S603 — test-owned interpreter, fixture path, no untrusted input
+        [
+            "/bin/sh",
+            "-c",
+            f'cd "{target}" && {{ "{sys.executable}" "{script}" "{target}"; echo "rc=$?"; }} 2>&1 | cat',
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert "rc=0" in result.stdout, result.stdout + result.stderr
+    assert f"OK {target}" in result.stdout, result.stdout + result.stderr
+
+
+def test_true_anchor_still_refuses_from_inside_invocation(tmp_path: Path) -> None:
+    """The invoking-chain exclusion must not weaken the guard: an unrelated
+    process genuinely anchored in the target still refuses."""
+    target = tmp_path / "worktrees" / "wt-under-test"
+    target.mkdir(parents=True)
+    sleeper = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"], cwd=target, start_new_session=True
+    )
+    try:
+        time.sleep(0.5)  # let psutil observe the sleeper's cwd
+        result = _run_guard(target)
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "REFUSE" in result.stdout and str(target) in result.stdout
+    finally:
+        sleeper.kill()
+        sleeper.wait()
