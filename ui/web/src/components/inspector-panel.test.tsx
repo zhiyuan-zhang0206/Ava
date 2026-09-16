@@ -164,6 +164,22 @@ function fixture(overrides: Partial<AgentInspectStatistics> = {}): AgentInspectS
     agent_id: 1,
     window_hours: 24,
     since_compact: false,
+    metadata: {
+      collection: "observed",
+      window_start: null,
+      window_end: "2026-09-17T00:00:00Z",
+      sampled_at: "2026-09-17T00:00:00Z",
+      collection_started_at: "2026-09-01T00:00:00Z",
+      last_observed_at: "2026-09-17T00:00:00Z",
+      cost: { availability: "observed", sources: ["observations"] },
+      turns: {
+        availability: "observed",
+        sources: ["observations"],
+        duration_precision: "exact",
+      },
+      activity: { availability: "observed", sources: ["observations"] },
+      lifecycle: { availability: "observed", sources: ["state_transitions"] },
+    },
     cost: {
       cost_usd: 0.4213,
       unpriced_calls: 1,
@@ -1586,7 +1602,7 @@ describe("Inspector read ownership", () => {
     await act(() => vi.advanceTimersByTimeAsync(20));
     expect(screen.getByText("$0.4213")).toBeTruthy();
     const changed = fixture();
-    changed.cost.cost_usd = 9;
+    changed.cost!.cost_usd = 9;
     getAgentInspectStatistics.mockResolvedValue(changed);
     act(() => {
       for (let index = 0; index < 20; index++) streamHandlers.connection?.({ type: "open" });
@@ -1612,5 +1628,56 @@ describe("Inspector read ownership", () => {
     expect(inspectorEntries().every((query) => query.queryKey[1] === 15)).toBe(true);
     view.unmount();
     await waitFor(() => expect(inspectorEntries()).toHaveLength(0));
+  });
+});
+
+describe("persisted metric evidence", () => {
+  it("renders unavailable metrics without manufacturing zero cost or throughput", async () => {
+    const data = fixture({
+      cost: null,
+      stats: null,
+      tps: null,
+      activity: null,
+    });
+    data.metadata.cost = { availability: "unavailable", sources: [] };
+    data.metadata.activity = { availability: "unavailable", sources: [] };
+    data.metadata.lifecycle = { availability: "unavailable", sources: [] };
+    getAgentInspectStatistics.mockResolvedValue(data);
+    render(<InspectorPanel agentId={1} />);
+    await screen.findAllByText("No recorded data is available for this window.");
+    expect(screen.queryByText("$0.0000")).toBeNull();
+    expect(screen.queryByText("0.00 tok/s")).toBeNull();
+  });
+
+  it("shows historical partial coverage beside the recorded amount", async () => {
+    const data = fixture();
+    data.metadata.cost = {
+      availability: "partial",
+      sources: ["historical_daily_costs"],
+    };
+    getAgentInspectStatistics.mockResolvedValue(data);
+    render(<InspectorPanel agentId={1} />);
+    await screen.findByText("$0.4213");
+    expect(screen.getByText("Historical coverage is incomplete")).toBeTruthy();
+    expect(screen.getByText(/Latest recorded observation:/)).toBeTruthy();
+  });
+
+  it("explains an unknown compaction boundary without using the all-time totals", async () => {
+    panelState.hours = -1;
+    const data = fixture({
+      since_compact: true,
+      cost: null,
+      stats: null,
+      tps: null,
+      activity: null,
+    });
+    data.metadata.window_start = null;
+    data.metadata.cost = { availability: "unavailable", sources: [] };
+    getAgentInspectStatistics.mockResolvedValue(data);
+    render(<InspectorPanel agentId={1} />);
+    await screen.findByText(
+      "The last completed compaction boundary is unavailable.",
+    );
+    expect(screen.queryByText("$0.4213")).toBeNull();
   });
 });

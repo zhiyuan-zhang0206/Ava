@@ -950,9 +950,9 @@ export interface paths {
          * @description Read only the selected agent's window-dependent statistics.
          *
          *     Current state, notices, runner shells, and heartbeat history are owned by
-         *     ``/inspect/live`` and are never fetched here. Statistics retain their
-         *     bounded, single-flight 75-second aggregate cache and load deadline.
-         *     ``hours`` is retention-clamped; ``since_compact`` takes precedence.
+         *     ``/inspect/live`` and are never fetched here. Persisted reads share only
+         *     in-flight work and have database and admission deadlines. The requested
+         *     window is preserved; unavailable historical coverage is explicit.
          */
         get: operations["get_agent_inspect_statistics_api_agents__agent_id__inspect_statistics_get"];
         put?: never;
@@ -3706,7 +3706,7 @@ export interface components {
             /** Active Rate */
             active_rate: number;
             /** Llm Seconds */
-            llm_seconds: number;
+            llm_seconds: number | null;
             /** Exec Seconds */
             exec_seconds: number;
         };
@@ -3724,7 +3724,7 @@ export interface components {
         /**
          * AgentCost
          * @description LLM spend + token usage for one agent over the requested window (whole
-         *     life = ledger days + today's live tail; every `llm_usage` event under its
+         *     life = historical daily evidence + persisted observed facts; every `llm_usage` event under its
          *     agent_id — the agent's "session", which spans restarts/resurrects since
          *     agent_id is stable). `cost_usd` sums the rows' usage-time price snapshots
          *     only — never re-priced against the current registry. Calls without a
@@ -3838,8 +3838,9 @@ export interface components {
          * @description Window-dependent statistics, with no current control-plane state.
          *
          *     ``window_hours`` and ``since_compact`` identify the requested view;
-         *     ``applied_window_hours`` exposes a retention-clamped hour window. The
-         *     aggregate computation and its existing source coverage are unchanged.
+         *     ``applied_window_hours`` echoes the served hour window without a Loki
+         *     retention clamp. Metadata distinguishes observed, partial, and unavailable
+         *     source coverage. Unknown sections are null, never invented zero totals.
          *     Current state belongs exclusively to ``AgentInspectLive``.
          */
         AgentInspectStatistics: {
@@ -3853,10 +3854,11 @@ export interface components {
              * @default false
              */
             since_compact: boolean;
-            cost: components["schemas"]["AgentCost"];
-            stats: components["schemas"]["AgentStats"];
-            tps: components["schemas"]["AgentTps"];
-            activity: components["schemas"]["AgentActivity"];
+            cost: components["schemas"]["AgentCost"] | null;
+            stats: components["schemas"]["AgentStats"] | null;
+            tps: components["schemas"]["AgentTps"] | null;
+            activity: components["schemas"]["AgentActivity"] | null;
+            metadata: components["schemas"]["InspectMetricsMetadata"];
         };
         /**
          * AgentMachineRow
@@ -4089,10 +4091,11 @@ export interface components {
         };
         /**
          * AgentStats
-         * @description Cumulative turn + exec counters for one agent (all-time, no window).
+         * @description Observed turn + exec counters within the selected window.
          *
          *     `turn_ok` counts `turn_end` events with ok=true (abnormal/cancelled turns
-         *     excluded); the p50/p90/max are over every turn's `duration_seconds`.
+         *     excluded); duration fields are null when no duration evidence survives.
+         *     The metadata declares retained historical histogram precision.
          *     `exec_ok` is plain `exec` events; `exec_failed` is every other exec outcome
          *     (exec_failed / exec(timeout) / exec_cancelled; the prefix regex also
          *     counts legacy exec_thread_stuck rows for historical continuity).
@@ -4103,13 +4106,13 @@ export interface components {
             /** Turn Ok */
             turn_ok: number;
             /** Turn P50 Seconds */
-            turn_p50_seconds: number;
+            turn_p50_seconds: number | null;
             /** Turn P90 Seconds */
-            turn_p90_seconds: number;
+            turn_p90_seconds: number | null;
             /** Turn Min Seconds */
-            turn_min_seconds: number;
+            turn_min_seconds: number | null;
             /** Turn Max Seconds */
-            turn_max_seconds: number;
+            turn_max_seconds: number | null;
             /** Exec Ok */
             exec_ok: number;
             /** Exec Failed */
@@ -4185,9 +4188,9 @@ export interface components {
          */
         AgentTps: {
             /** Lm Stage Tps */
-            lm_stage_tps: number;
+            lm_stage_tps: number | null;
             /** Agent Lifecycle Tps */
-            agent_lifecycle_tps: number;
+            agent_lifecycle_tps: number | null;
         };
         /**
          * AlertIngestResult
@@ -5229,6 +5232,44 @@ export interface components {
             seq?: number | null;
         };
         /**
+         * InspectMetricsMetadata
+         * @description One pinned query window and the evidence behind each statistics family.
+         *
+         *     ``last_observed_at`` is the newest persisted observation, not a completeness
+         *     watermark. ``sampled_at`` identifies the DB read, including when cached.
+         */
+        InspectMetricsMetadata: {
+            /**
+             * Collection
+             * @default observed
+             * @constant
+             */
+            collection: "observed";
+            /** Window Start */
+            window_start: string | null;
+            /**
+             * Window End
+             * Format: date-time
+             */
+            window_end: string;
+            /**
+             * Sampled At
+             * Format: date-time
+             */
+            sampled_at: string;
+            /**
+             * Collection Started At
+             * Format: date-time
+             */
+            collection_started_at: string;
+            /** Last Observed At */
+            last_observed_at: string | null;
+            cost: components["schemas"]["MetricEvidence"];
+            turns: components["schemas"]["MetricEvidence"];
+            activity: components["schemas"]["MetricEvidence"];
+            lifecycle: components["schemas"]["MetricEvidence"];
+        };
+        /**
          * InspectWidgetResult
          * @description One plugin widget rendered for the inspector panel — an element of
          *     GET /api/agents/{id}/inspect/widgets.
@@ -5907,6 +5948,28 @@ export interface components {
              * @description frontmatter tags, including the note's `type/<x>`, or empty
              */
             tags?: string[];
+        };
+        /**
+         * MetricEvidence
+         * @description Availability of observed data, never a claim that every event was collected.
+         *
+         *     A successful source scan cannot prove that an upstream producer lost nothing.
+         *     Missing historical data and missing exact duration observations remain explicit.
+         */
+        MetricEvidence: {
+            /**
+             * Availability
+             * @enum {string}
+             */
+            availability: "observed" | "partial" | "unavailable";
+            /** Sources */
+            sources: string[];
+            /** Retained Unapplied Sources */
+            retained_unapplied_sources?: string[];
+            /** Reason */
+            reason?: string | null;
+            /** Duration Precision */
+            duration_precision?: ("exact" | "one_second_buckets" | "mixed") | null;
         };
         /**
          * MetricPoint

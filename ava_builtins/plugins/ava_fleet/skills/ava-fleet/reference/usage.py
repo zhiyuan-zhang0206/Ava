@@ -8,7 +8,7 @@ skill-side cost reader: usage introspection is deliberately not a core SDK verb,
 so a budget check is a bash call the watcher makes, not a capability the fleet
 carries.
 
-The read mirrors `gateway/routers/_agent_cost.py` — the same two surfaces the
+This fleet report retains the historical ledger and retained-log sources that the
 fleet dashboard's cost path uses since the LGTM cutover (task #1197: the PG
 `events` table is a frozen archive, task #180, and this script no longer reads
 it):
@@ -88,7 +88,7 @@ _LokiRow = tuple[int, str, int, int, int, int, int, float, int]
 
 def _loki_rows(agent_ids: list[int], from_: datetime, to: datetime | None) -> list[_LokiRow]:
     """Per (agent, model) llm_usage aggregates from pure Loki over
-    [from_, to) — the same subqueries `_agent_cost._loki_aggs_into` runs:
+    [from_, to), grouped independently for the fleet report:
     one sum per token/cost field, one count, one count restricted to rows
     carrying a cost snapshot (unpriced = calls - costed)."""
     out: list[_LokiRow] = []
@@ -205,7 +205,7 @@ def _active_agents(from_: datetime, to: datetime | None) -> list[int]:
 
 
 def _rows(agent_ids: list[int], since: datetime | None, hours: float | None) -> list[_LokiRow]:
-    """The merged row set for one request, mirroring `_agent_cost.agent_cost`:
+    """The merged row set for one request, combining historical days with a retained event tail:
     windowed = pure Loki over the window; whole life = ledger + the per-agent
     Loki tail from the shared gap-day plan (ledger-less agents tail from the
     retention floor — data older than retention is indistinguishable from
@@ -234,7 +234,7 @@ def aggregate(rows: list[_LokiRow]) -> dict[str, Any]:
     (agent, model) the cost is the summed usage-time snapshot; a model with
     no costed call reports `cost_usd: None` in `by_model` (never silently
     $0). Per-agent and total costs round once at the end, matching
-    `_agent_cost`'s `round(cost, 4)`."""
+    the Inspector's four-decimal display precision."""
     per_agent: dict[str, dict[str, Any]] = {}
     for aid, model, r_in, r_out, r_cached, r_reason, r_calls, r_cost, r_unpriced in rows:
         key = str(aid)

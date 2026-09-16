@@ -246,11 +246,10 @@ export const api = {
     );
   },
 
-  // Per-agent windowed inspector aggregates. Single-agent counterpart to
-  // getStatsDashboard (fleet-wide). `hours` windows cost + stats
-  // (0 = 5m; 1/6/24/72/168 = hours); omitted = cumulative since spawn. `sinceCompact`
-  // windows them to events since the agent's latest compact halt instead
-  // (takes precedence over `hours` backend-side).
+  // Persisted observed statistics with explicit window, source precision, and
+  // coverage. `hours` selects the window (0 = 5m); omitted = since spawn.
+  // `sinceCompact` takes precedence and is unavailable when no authoritative
+  // completed durable compact boundary exists.
   getAgentInspectStatistics: (
     agentId: number,
     hours?: number | null,
@@ -270,9 +269,8 @@ export const api = {
     );
   },
 
-  // Cheap, window-independent inspector skeleton. Unlike getAgentInspectStatistics this
-  // omits the Loki aggregate fan-out and carries only current shells, liveness,
-  // configuration, notice, timestamps, and heartbeat state.
+  // Window-independent current state: shells, liveness, configuration, notice,
+  // timestamps, and heartbeat. Independent from persisted statistics.
   getAgentInspectLive: (
     agentId: number,
     signal?: AbortSignal,

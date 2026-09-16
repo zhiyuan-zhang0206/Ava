@@ -72,6 +72,7 @@ from services.events_maintenance.blob_vacuum import (
 )
 from services.events_maintenance.checkpoint_reaper import prune_threads
 from services.events_maintenance.jsonl_replay import replay_gap_days
+from services.events_maintenance.observed_metrics import recover_observations
 from services.events_maintenance.resolution import run_resolution_slice
 from services.events_maintenance.rollup import compute_rollup
 from shared.config import settings
@@ -108,6 +109,16 @@ def _run_maintenance(pool: ConnectionPool, progress: LoopProgress) -> None:
     and the blob VACUUM. One `now` drives the time-based steps.
     Logs what each step did; a no-op pass logs nothing."""
     now = datetime.now(tz=UTC)
+    # Recovery is independent of the old rollup: an unavailable Loki or mirror
+    # must not prevent the remaining maintenance work from making progress.
+    try:
+        with pool.connection() as conn:
+            recovered = recover_observations(conn, now=now)
+        if recovered:
+            _log.info("[events-maintenance] recovered %d metric observations", recovered)
+    except Exception:
+        _log.exception("[events-maintenance] observed metrics recovery incomplete")
+    progress.beat()
     with pool.connection() as conn:
         result = compute_rollup(conn, now_utc=now)
         replay_result = replay_gap_days(conn, now_utc=now)

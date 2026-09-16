@@ -880,7 +880,13 @@
     "windowedUnavailable": "Windowed inspector data unavailable",
     "retryWindowed": "Retry windowed data",
     "openRunTimeline": "Open run timeline",
-    "jumpNotice": "Notification"
+    "jumpNotice": "Notification",
+    "metricsObserved": "Recorded observations",
+    "metricsPartial": "Historical coverage is incomplete",
+    "metricsUnavailable": "No recorded data is available for this window.",
+    "compactBoundaryUnavailable": "The last completed compaction boundary is unavailable.",
+    "metricsLastObserved": "Latest recorded observation: {at}",
+    "metricsNoObservation": "No observation timestamp is available."
   },
   "openTasksNotice": {
     "title": "This agent still has {count, plural, one {# open task} other {# open tasks}}",

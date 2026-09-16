@@ -691,6 +691,17 @@ def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: s
                 pgsql.Identifier(RUNNER_ROLE)
             )
         )
+        conn.execute(
+            pgsql.SQL("GRANT SELECT, INSERT ON agent_metric_observations TO {}").format(
+                pgsql.Identifier(RUNNER_ROLE)
+            )
+        )
+        conn.execute(
+            pgsql.SQL(
+                "GRANT SELECT, INSERT, UPDATE ON agent_metric_days, "
+                "agent_lifecycle_intervals, agent_metric_scans, agent_metric_file_cursors TO {}"
+            ).format(pgsql.Identifier(RUNNER_ROLE))
+        )
         for table in ("checkpoints", "checkpoint_blobs", "checkpoint_writes"):
             conn.execute(
                 pgsql.SQL("GRANT ALL ON {} TO {}").format(

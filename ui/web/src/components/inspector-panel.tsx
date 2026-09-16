@@ -652,18 +652,49 @@ function CostSection({ inspect }: { inspect: AgentInspectStatistics }) {
   // is never silently partial.
   const t = useTranslations("inspector");
   const unpricedSub =
-    cost.unpriced_calls > 0 ? t("unpriced", { count: String(cost.unpriced_calls) }) : undefined;
+    cost && cost.unpriced_calls > 0
+      ? t("unpriced", { count: String(cost.unpriced_calls) })
+      : undefined;
   return (
     <Section icon={<DollarSign className="size-3" />} title={t("sectionCost")}>
-      <div className="grid grid-cols-2 gap-1">
-        <Metric label={t("metricCost")} value={`$${cost.cost_usd.toFixed(4)}`} sub={unpricedSub} />
-        <Metric label={t("metricLlmCalls")} value={String(cost.llm_calls)} />
-        <Metric
-          label={t("metricTokens")}
-          value={`${formatTokens(cost.tokens_in)} / ${formatTokens(cost.tokens_out)}`}
-        />
-        <Metric label={t("metricCacheHit")} value={`${cost.cache_hit_pct.toFixed(2)}%`} />
-      </div>
+      <p className="mb-1 text-[10px] text-muted-foreground">
+        {inspect.metadata.cost.availability === "partial"
+          ? t("metricsPartial")
+          : inspect.metadata.cost.availability === "unavailable"
+            ? t("metricsUnavailable")
+            : t("metricsObserved")}
+      </p>
+      <p className="mb-1 text-[10px] text-muted-foreground">
+        {inspect.metadata.last_observed_at
+          ? t("metricsLastObserved", {
+              at: formatAbsolute(inspect.metadata.last_observed_at),
+            })
+          : t("metricsNoObservation")}
+      </p>
+      {cost ? (
+        <div className="grid grid-cols-2 gap-1">
+          <Metric
+            label={t("metricCost")}
+            value={`$${cost.cost_usd.toFixed(4)}`}
+            sub={unpricedSub}
+          />
+          <Metric label={t("metricLlmCalls")} value={String(cost.llm_calls)} />
+          <Metric
+            label={t("metricTokens")}
+            value={`${formatTokens(cost.tokens_in)} / ${formatTokens(cost.tokens_out)}`}
+          />
+          <Metric
+            label={t("metricCacheHit")}
+            value={`${cost.cache_hit_pct.toFixed(2)}%`}
+          />
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          {inspect.since_compact
+            ? t("compactBoundaryUnavailable")
+            : t("metricsUnavailable")}
+        </p>
+      )}
     </Section>
   );
 }
@@ -675,17 +706,29 @@ function CostSection({ inspect }: { inspect: AgentInspectStatistics }) {
  */
 function ActivitySection({ inspect }: { inspect: AgentInspectStatistics }) {
   const { activity, tps } = inspect;
-  const hasLife = activity.alive_seconds > 0;
-  const idleSeconds = Math.max(0, activity.alive_seconds - activity.active_seconds);
+  const hasLife = activity !== null && activity.alive_seconds > 0;
+  const idleSeconds = activity
+    ? Math.max(0, activity.alive_seconds - activity.active_seconds)
+    : 0;
   const t = useTranslations("inspector");
   return (
     <Section icon={<Timer className="size-3" />} title={t("sectionActivity")}>
+      <p className="mb-1 text-[10px] text-muted-foreground">
+        {inspect.metadata.activity.availability === "unavailable"
+          ? t("metricsUnavailable")
+          : inspect.metadata.activity.availability === "partial" || inspect.metadata.turns.availability === "partial"
+            ? t("metricsPartial")
+            : t("metricsObserved")}
+      </p>
       <div className="grid grid-cols-2 gap-1">
-        <Metric label={t("metricTps")} value={formatTps(tps.lm_stage_tps)} />
+        <Metric
+          label={t("metricTps")}
+          value={tps?.lm_stage_tps != null ? formatTps(tps.lm_stage_tps) : "—"}
+        />
         <Metric
           label={t("metricLlmOutput")}
           value={
-            hasLife
+            hasLife && activity.llm_seconds != null
               ? formatInterval(Math.round(activity.llm_seconds))
               : "—"
           }
@@ -693,9 +736,7 @@ function ActivitySection({ inspect }: { inspect: AgentInspectStatistics }) {
         <Metric
           label={t("metricCodeExecution")}
           value={
-            hasLife
-              ? formatInterval(Math.round(activity.exec_seconds))
-              : "—"
+            hasLife ? formatInterval(Math.round(activity.exec_seconds)) : "—"
           }
         />
         <Metric

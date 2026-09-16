@@ -880,7 +880,13 @@
     "windowedUnavailable": "窗口化检查器数据不可用",
     "retryWindowed": "重试窗口化数据",
     "openRunTimeline": "打开运行时间线",
-    "jumpNotice": "通知"
+    "jumpNotice": "通知",
+    "metricsObserved": "已记录的观测数据",
+    "metricsPartial": "历史数据覆盖不完整",
+    "metricsUnavailable": "此时间范围没有可用的已记录数据。",
+    "compactBoundaryUnavailable": "无法确定上一次已完成的压缩边界。",
+    "metricsLastObserved": "最近记录时间：{at}",
+    "metricsNoObservation": "暂无观测记录时间。"
   },
   "openTasksNotice": {
     "title": "该 agent 仍有 {count} 个未关闭任务",
