@@ -289,3 +289,38 @@ def test_env_write_event_carries_actor_without_values(
     payload = cast("dict[str, object]", captured[0]["payload"])
     assert payload["actor"] == "user_session:administrator"
     assert "m3" not in json.dumps(captured)
+
+
+def test_record_env_write_withholds_every_value_when_metadata_fails(
+    audit_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fail closed: with the config registry unavailable, even a normally-recordable
+    field's values are withheld (names only), and no value text reaches the file.
+
+    The loader is patched (not `get_config_metadata`) because a successful load is
+    cached per process — patching the loader keeps the failure deterministic whatever
+    order the suite runs in.
+    """
+    env_path = audit_home / ".env"
+    env_path.write_text("AVA_MODEL=new-value\n")
+
+    def _boom() -> dict[str, tuple[str, bool]]:
+        raise RuntimeError("registry unavailable")
+
+    monkeypatch.setattr(env_audit, "_load_alias_metadata", _boom)
+    record_env_write(
+        env_path,
+        {"AVA_MODEL"},
+        set(),
+        site="test",
+        changes=[{"alias": "AVA_MODEL", "old": "old-value", "new": "new-value"}],
+    )
+
+    record = last_env_write_record(env_path)
+    assert record is not None
+    assert record["changed"] == [
+        {"alias": "AVA_MODEL", "scope": None, "sensitive": None, "old": None, "new": None}
+    ]
+    raw = (audit_home / ".env.audit.jsonl").read_text()
+    assert "old-value" not in raw
+    assert "new-value" not in raw
