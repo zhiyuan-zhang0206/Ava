@@ -68,20 +68,6 @@ BEGIN
         RAISE EXCEPTION 'termination did not close the lifecycle interval';
     END IF;
 END $$;
-UPDATE agents_meta SET status = 'idling'
-    WHERE id = (SELECT max(id) FROM agents);
-UPDATE agents_meta SET status = 'running'
-    WHERE id = (SELECT max(id) FROM agents);
-DO $$
-BEGIN
-    IF (SELECT count(*) FROM agent_lifecycle_intervals
-        WHERE agent_id = (SELECT max(id) FROM agents)) <> 2
-       OR (SELECT count(*) FROM agent_lifecycle_intervals
-           WHERE agent_id = (SELECT max(id) FROM agents) AND ended_at IS NULL) <> 1 THEN
-        RAISE EXCEPTION 'resurrection or nonterminal transition corrupted lifecycle intervals';
-    END IF;
-END $$;
-
 DO $$
 DECLARE show_closed_count INT;
 DECLARE serve_open_count INT;
@@ -94,6 +80,21 @@ BEGIN
     IF show_closed_count <> 1 OR serve_open_count <> 1 THEN
         RAISE EXCEPTION 'cascade_close_agent_pages wrong result — show_closed_count=%, serve_open_count=%',
             show_closed_count, serve_open_count;
+    END IF;
+END $$;
+
+-- Check resurrection only after termination's page closure; it reopens pages.
+UPDATE agents_meta SET status = 'idling'
+    WHERE id = (SELECT max(id) FROM agents);
+UPDATE agents_meta SET status = 'running'
+    WHERE id = (SELECT max(id) FROM agents);
+DO $$
+BEGIN
+    IF (SELECT count(*) FROM agent_lifecycle_intervals
+        WHERE agent_id = (SELECT max(id) FROM agents)) <> 2
+       OR (SELECT count(*) FROM agent_lifecycle_intervals
+           WHERE agent_id = (SELECT max(id) FROM agents) AND ended_at IS NULL) <> 1 THEN
+        RAISE EXCEPTION 'resurrection or nonterminal transition corrupted lifecycle intervals';
     END IF;
 END $$;
 
