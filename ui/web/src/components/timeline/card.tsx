@@ -495,12 +495,9 @@ export const CardHeader = memo(function CardHeader({
           <span className="truncate">{cardTitle(config, t)}</span>
         </span>
       )}
-      {item.impersonation ? (
-        <span className={cn(MIN_W_0, "truncate rounded border px-1.5 py-0.5 text-[10px] text-muted-foreground")}
-          data-testid="impersonation-badge">
-          {item.kind === "inbound_chat" ? "→ " : ""}{item.impersonation.executor_name} · #{item.impersonation.session_id} {item.impersonation.name}
-        </span>
-      ) : null}
+      {/* No impersonation badge on purpose — the timeline does not surface the
+          external takeover executor (user ruling 2026-09-16, task #3660). The
+          item keeps its impersonation metadata for envelope semantics. */}
       {config.headerTs ? (
         <span className="hidden sm:block shrink-0 pl-2">
           <ItemTimestamp iso={item.created_at ?? ""} showWeekday={showWeekday} />
