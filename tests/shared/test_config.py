@@ -165,6 +165,30 @@ def test_delivery_watchdog_wake_suppression_defaults() -> None:
     assert configured.delivery_watchdog_suppress_max_seconds == 86400.0
 
 
+def test_hierarchy_budget_must_stay_below_deadline() -> None:
+    import pydantic
+
+    from shared.config.daemon import DaemonSettings
+
+    with pytest.raises(pydantic.ValidationError, match="hierarchy_job_budget_seconds"):
+        DaemonSettings.model_validate(
+            {
+                "AVA_HIERARCHY_JOB_BUDGET_SECONDS": 3600,
+                "AVA_HIERARCHY_JOB_DEADLINE_SECONDS": 3600,
+            }
+        )
+    # Strictly below is the designed shape: the budget is the graceful stop
+    # point and must leave the kill margin.
+    configured = DaemonSettings.model_validate(
+        {
+            "AVA_HIERARCHY_JOB_BUDGET_SECONDS": 2400,
+            "AVA_HIERARCHY_JOB_DEADLINE_SECONDS": 3600,
+        }
+    )
+    assert configured.hierarchy_job_budget_seconds == 2400
+    assert configured.hierarchy_job_deadline_seconds == 3600
+
+
 def test_current_field_values_coerces_secretstr(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """A SecretStr field read from .env must come back a SecretStr, not a bare str
     — `.get_secret_value()` consumers crash on a plain str."""

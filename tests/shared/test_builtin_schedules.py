@@ -62,6 +62,7 @@ class TestLoadManifest:
             "memory-arbiter",
             "model-update-tracker",
             "trace-ship-tempo",
+            "hierarchy-worker",
         }
         assert all(
             s.klass == "product" and s.default_enabled

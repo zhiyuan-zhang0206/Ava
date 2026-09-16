@@ -1787,6 +1787,61 @@ BEGIN
     END IF;
 END $$;
 
+-- ─────────────── hierarchy_jobs ───────────────
+-- Understanding-tree build queue (task #3704 P2b): one row per execution
+-- attempt of one agent build, enqueued by the compact-driven worker, claimed
+-- atomically, executed in a child process. Hash-idempotent retries (the
+-- generation reuse cache lives in understanding_nodes), crash-recoverable via
+-- the stale-running sweep, scope+token stats for cost observability.
+CREATE TABLE hierarchy_jobs (
+    id BIGSERIAL PRIMARY KEY,
+    agent_id BIGINT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('compact')),
+    trigger_boundary TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'done', 'failed')),
+    include_tail BOOLEAN NOT NULL,
+    model TEXT,
+    engine_version TEXT,
+    prompt_version TEXT,
+    stretches INTEGER,
+    nodes INTEGER,
+    generated INTEGER,
+    reused INTEGER,
+    failed INTEGER,
+    skipped INTEGER,
+    src_tokens BIGINT,
+    out_tokens BIGINT,
+    error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    started_at TIMESTAMPTZ,
+    finished_at TIMESTAMPTZ
+);
+-- Enqueue de-dup: at most one live job per (agent, kind).
+CREATE UNIQUE INDEX hierarchy_jobs_live
+    ON hierarchy_jobs (agent_id, kind) WHERE status IN ('pending', 'running');
+-- The claim/recovery paths read pending/running rows.
+CREATE INDEX hierarchy_jobs_live_status
+    ON hierarchy_jobs (status) WHERE status IN ('pending', 'running');
+-- Per-agent attempt history (scan reads the last finished attempt).
+CREATE INDEX hierarchy_jobs_agent
+    ON hierarchy_jobs (agent_id, id DESC);
+
+COMMENT ON TABLE hierarchy_jobs IS
+    'Understanding-tree build queue (task #3704 P2b): one row per execution attempt; hash-idempotent retries, crash-recoverable, scope+token stats.';
+
+-- ─────────────── hierarchy_worker_state ───────────────
+-- Per-agent scan cursor of the hierarchy worker: the newest compact boundary
+-- fully covered. First sight records it without building (silent baseline);
+-- a job advances it only when the run skipped nothing.
+CREATE TABLE hierarchy_worker_state (
+    agent_id BIGINT PRIMARY KEY,
+    last_processed_boundary TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE hierarchy_worker_state IS
+    'Per-agent scan cursor of the understanding-tree worker (task #3704 P2b): newest fully covered compact boundary; the row itself is the silent baseline.';
+
 -- ─────────────── schema_migrations ───────────────
 -- Applied-migration registry — maintained by `shared.migrations`. Keyed by
 -- migration NAME (an applied SET, not a high-water integer). This whole file is
@@ -1932,3 +1987,7 @@ INSERT INTO schema_migrations (name) VALUES ('20260916T164150_lifecycle-pointer-
 -- understanding_nodes is represented above. Fresh DBs stamp the migration
 -- instead of replaying the CREATE TABLE / grant delta.
 INSERT INTO schema_migrations (name) VALUES ('20260916T204617_hierarchy-understanding-nodes');
+
+-- hierarchy_jobs + hierarchy_worker_state are represented above. Fresh DBs
+-- stamp the migration instead of replaying the CREATE TABLE delta.
+INSERT INTO schema_migrations (name) VALUES ('20260916T225140_hierarchy-worker');
