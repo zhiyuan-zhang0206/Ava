@@ -218,7 +218,9 @@ def list_alerts(
     window: str = Query(default="24h", pattern="^(1h|6h|24h|7d)$"),
     status: AlertStatus | None = None,
     severity: AlertSeverity | None = None,
-    limit: int = Query(default=100, ge=1, le=500),
+    # `limit`'s range stays a protective constant (import-time Query bound);
+    # the default *window* is display.alerts_default_limit.
+    limit: int | None = Query(default=None, ge=1, le=500),
 ) -> AlertsListResponse:
     """Unresolved-first alert history for the alert section.
 
@@ -228,6 +230,7 @@ def list_alerts(
     the full match count.
     """
 
+    effective_limit = limit if limit is not None else settings.display.alerts_default_limit
     since = datetime.now(UTC) - _WINDOWS[window]
     params: list[Any] = [since]
     where = ["starts_at > %s"]
@@ -266,7 +269,7 @@ def list_alerts(
             f"  FROM alerts WHERE {where_sql}"
             " ORDER BY (status = 'unresolved') DESC, starts_at DESC LIMIT %s"
         )
-        cur.execute(select_sql, (*params, limit))
+        cur.execute(select_sql, (*params, effective_limit))
         rows = [AlertRow(**r) for r in cur.fetchall()]
 
     return AlertsListResponse(

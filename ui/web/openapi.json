@@ -3608,7 +3608,7 @@
     "/api/config/audit": {
       "get": {
         "summary": "Get Config Audit",
-        "description": "Return the `.env` write audit trail, newest first.\n\n`machine` selects the source: omitted = this gateway's own box; `all` = every\nagent-runner machine plus the gateway's own box, merged (fail-fast — an\nunreachable machine 503s the whole read); a machine name = that machine.\n`last` caps the number of returned records (1..200). Records are the raw\naudit-JSONL entries (`shared/env_audit.py`), each tagged with its `machine`;\nvalues were redacted at write time (non-sensitive fields only), and records\nfrom before record v2 lack `actor` / `trace_id` / `changed`.",
+        "description": "Return the `.env` write audit trail, newest first.\n\n`machine` selects the source: omitted = this gateway's own box; `all` = every\nagent-runner machine plus the gateway's own box, merged (fail-fast — an\nunreachable machine 503s the whole read); a machine name = that machine.\nOmitted `last` returns the configured default count\n(``display.config_audit_default_last`` - 20 out of the box); an explicit\n`last` stays capped at 200. Records are the raw\naudit-JSONL entries (`shared/env_audit.py`), each tagged with its `machine`;\nvalues were redacted at write time (non-sensitive fields only), and records\nfrom before record v2 lack `actor` / `trace_id` / `changed`.",
         "operationId": "get_config_audit_api_config_audit_get",
         "parameters": [
           {
@@ -3632,10 +3632,16 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer",
-              "maximum": 200,
-              "minimum": 1,
-              "default": 20,
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 200,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Last"
             }
           }
@@ -4199,7 +4205,7 @@
     "/api/schedules/{schedule_id}/runs": {
       "get": {
         "summary": "Get Schedule Runs",
-        "description": "Recent run-history rows (newest first). 404 if the schedule is missing.",
+        "description": "Recent run-history rows (newest first). Omit `limit` for the configured\ndefault window (``display.schedules_runs_default_limit`` - 50 out of the\nbox). 404 if the schedule is missing.",
         "operationId": "get_schedule_runs_api_schedules__schedule_id__runs_get",
         "parameters": [
           {
@@ -4216,8 +4222,14 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer",
-              "default": 50,
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Limit"
             }
           }
@@ -5489,10 +5501,16 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer",
-              "maximum": 500,
-              "minimum": 1,
-              "default": 100,
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 500,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Limit"
             }
           }

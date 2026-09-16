@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 from gateway.routers.agents import create_and_launch_agent
 from ops.rpc_schemas import SpawnAgentRequest
 from shared.cluster import session_name
+from shared.config import settings
 from shared.db_transaction import write_transaction
 from shared.machine import machine_name
 from shared.paths import ava_home
@@ -380,9 +381,13 @@ def _runs_blocking(
 
 @router.get("/api/schedules/{schedule_id}/runs")
 async def get_schedule_runs(
-    request: Request, schedule_id: int, limit: int = 50
+    request: Request, schedule_id: int, limit: int | None = None
 ) -> list[ScheduleRunView]:
-    """Recent run-history rows (newest first). 404 if the schedule is missing."""
+    """Recent run-history rows (newest first). Omit `limit` for the configured
+    default window (``display.schedules_runs_default_limit`` - 50 out of the
+    box). 404 if the schedule is missing."""
+    if limit is None:
+        limit = settings.display.schedules_runs_default_limit
     pool = request.app.state.db_pool
     await asyncio.to_thread(_fetch_full_blocking, pool, schedule_id)  # 404 guard
     return await asyncio.to_thread(_runs_blocking, pool, schedule_id, limit)

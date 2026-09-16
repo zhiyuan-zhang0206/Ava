@@ -143,3 +143,52 @@ class DisplaySettings(EnvSettings):
             "scope": "cluster-pinned",
         },
     )
+
+    alerts_default_limit: int = Field(
+        default=100,
+        alias="AVA_ALERTS_DEFAULT_LIMIT",
+        description=(
+            "Default page (alerts) of GET /api/alerts when the caller passes no limit. "
+            "100 rows covers the unresolved-first view a dashboard read wants without "
+            "shipping the full resolution history; the 500 ceiling stays a protective "
+            "constant, and the web list's own pinned window is tracked in the task "
+            "#3696 user-flag list (deferred backend alignment)."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+    schedules_runs_default_limit: int = Field(
+        default=50,
+        alias="AVA_SCHEDULES_RUNS_DEFAULT_LIMIT",
+        description=(
+            "Default page (run rows) of GET /api/schedules/{id}/runs when the caller "
+            "passes no limit. 50 rows spans a month of daily runs (a few days of "
+            "frequent ones) - the recent-pattern glance the runs view opens with; the "
+            "CLI passes its own explicit limit and is unaffected."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+    config_audit_default_last: int = Field(
+        default=20,
+        alias="AVA_CONFIG_AUDIT_DEFAULT_LAST",
+        description=(
+            "Default `last` (records) of GET /api/config/audit when omitted. 20 recent "
+            "config writes is the recent-activity glance the audit view opens with; the "
+            "1..200 range and its 200 ceiling stay protective constants."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )

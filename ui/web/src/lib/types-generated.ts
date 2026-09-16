@@ -2256,7 +2256,9 @@ export interface paths {
          *     `machine` selects the source: omitted = this gateway's own box; `all` = every
          *     agent-runner machine plus the gateway's own box, merged (fail-fast — an
          *     unreachable machine 503s the whole read); a machine name = that machine.
-         *     `last` caps the number of returned records (1..200). Records are the raw
+         *     Omitted `last` returns the configured default count
+         *     (``display.config_audit_default_last`` - 20 out of the box); an explicit
+         *     `last` stays capped at 200. Records are the raw
          *     audit-JSONL entries (`shared/env_audit.py`), each tagged with its `machine`;
          *     values were redacted at write time (non-sensitive fields only), and records
          *     from before record v2 lack `actor` / `trace_id` / `changed`.
@@ -2525,7 +2527,9 @@ export interface paths {
         };
         /**
          * Get Schedule Runs
-         * @description Recent run-history rows (newest first). 404 if the schedule is missing.
+         * @description Recent run-history rows (newest first). Omit `limit` for the configured
+         *     default window (``display.schedules_runs_default_limit`` - 50 out of the
+         *     box). 404 if the schedule is missing.
          */
         get: operations["get_schedule_runs_api_schedules__schedule_id__runs_get"];
         put?: never;
@@ -10514,7 +10518,7 @@ export interface operations {
         parameters: {
             query?: {
                 machine?: string | null;
-                last?: number;
+                last?: number | null;
             };
             header?: never;
             path?: never;
@@ -10962,7 +10966,7 @@ export interface operations {
     get_schedule_runs_api_schedules__schedule_id__runs_get: {
         parameters: {
             query?: {
-                limit?: number;
+                limit?: number | null;
             };
             header?: never;
             path: {
@@ -11640,7 +11644,7 @@ export interface operations {
                 window?: string;
                 status?: ("unresolved" | "resolved") | null;
                 severity?: ("critical" | "warning" | "error") | null;
-                limit?: number;
+                limit?: number | null;
             };
             header?: never;
             path?: never;

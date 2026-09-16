@@ -263,6 +263,8 @@ export function useAlerts() {
 export function useAlertsSection() {
   return useQuery({
     queryKey: ALERTS_SECTION_QUERY_KEY,
+    // Pinned at 200 pending the task #3696 user-flag item (backend alerts
+    // default alignment); the server default is display.alerts_default_limit.
     queryFn: () => api.getAlerts({ window: "24h", limit: 200 }),
     staleTime: 30_000,
     refetchOnWindowFocus: false,
