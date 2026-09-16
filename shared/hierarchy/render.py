@@ -177,10 +177,25 @@ def render_message(msg: BaseMessage, params: RenderParams | None = None) -> Rend
     )
 
 
-def render_block_text(
+@dataclass(frozen=True)
+class RenderedBlock:
+    """One block's assembled render: text, true input size, and its end times."""
+
+    text: str
+    tokens: int  # count_tokens(text) — the block's source size as the LLM reads it
+    t0: str
+    t1: str
+
+
+def render_block(
     msgs: Sequence[BaseMessage], block: Block, params: RenderParams | None = None
-) -> str:
-    """One block's source text: a heading plus each rendered message section."""
+) -> RenderedBlock:
+    """Assemble one block's input section: a heading plus message sections.
+
+    The heading's `~N tokens` is the sum of the messages' true sizes (an
+    orientation hint); the returned `tokens` is the assembled text's exact
+    count — the block's source size for the seal/unit accounting.
+    """
     p = params or RenderParams()
     rendered = [
         (idx, r)
@@ -188,7 +203,7 @@ def render_block_text(
         if (r := render_message(msgs[idx], p)) is not None
     ]
     if not rendered:
-        return ""
+        return RenderedBlock(text="", tokens=0, t0="", t1="")
     tok_total = sum(r.tokens for _idx, r in rendered)
     t0 = rendered[0][1].ts
     t1 = rendered[-1][1].ts
@@ -200,11 +215,19 @@ def render_block_text(
         lines.append(f"**[i{idx} | {r.role} | {r.ts} | {r.tokens} tok]**")
         lines.append(r.text)
         lines.append("")
-    return "\n".join(lines).rstrip() + "\n"
+    text = "\n".join(lines).rstrip() + "\n"
+    return RenderedBlock(text=text, tokens=count_tokens(text), t0=t0, t1=t1)
+
+
+def render_block_text(
+    msgs: Sequence[BaseMessage], block: Block, params: RenderParams | None = None
+) -> str:
+    """One block's rendered source text (`render_block().text`)."""
+    return render_block(msgs, block, params).text
 
 
 def block_source_tokens(
     msgs: Sequence[BaseMessage], block: Block, params: RenderParams | None = None
 ) -> int:
     """The block's source size in tokens — what `Unit.tok` carries for blocks."""
-    return count_tokens(render_block_text(msgs, block, params))
+    return render_block(msgs, block, params).tokens

@@ -51,6 +51,7 @@ class NodeSpec:
     src_tok: int = 0
     span: tuple[int, int] = (0, 0)
     at: tuple[str, str] = ("", "")
+    trigger: str = ""  # the trigger batch this node sealed at (storage cursor)
 
     def budget_tok(self) -> int:
         """The node's narrative budget: min(source/10, hard cap), in tokens."""
@@ -167,7 +168,7 @@ def seal_cascade(
         counters[level] = counters.get(level, 0) + 1
         return f"L{level}#{counters[level]}"
 
-    for _tname, batch in triggers:
+    for tname, batch in triggers:
         pending.setdefault(0, [])
         pending[0].extend(batch)
         level = 0
@@ -193,6 +194,7 @@ def seal_cascade(
                             src_tok=u.tok,
                             span=u.span,
                             at=u.at,
+                            trigger=tname,
                         )
                     )
                     new_units.append(Unit(uid=nid, tok=u.tok, span=u.span, at=u.at, kind="alias"))
@@ -210,6 +212,7 @@ def seal_cascade(
                             src_tok=src,
                             span=span,
                             at=at,
+                            trigger=tname,
                         )
                     )
                     # Nominal node tokens = its budget (deterministic; actuals

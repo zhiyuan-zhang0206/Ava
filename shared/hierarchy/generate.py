@@ -24,6 +24,7 @@ Calibration provenance for every constant here: the v0.3 demo's machine check
 
 from __future__ import annotations
 
+import hashlib
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import partial
@@ -31,6 +32,7 @@ from typing import Any
 
 from loguru import logger
 
+from shared.hierarchy import ENGINE_VERSION
 from shared.hierarchy.seal import narrative_budget_tok
 from shared.hierarchy.tokens import count_tokens
 from shared.lm._call import invoke_text
@@ -198,6 +200,24 @@ def clean_text(text: str) -> str:
         if stripped.startswith(prefix):
             stripped = stripped[len(prefix) :].strip()
     return stripped
+
+
+def input_hash(kind: str, input_text: str) -> str:
+    """The generation cache key for one node: identical input, identical key.
+
+    Covers the engine and prompt versions, so bumping either invalidates every
+    cached text — a template change must be re-generated, never silently
+    reused. The storage layer keys its reuse cache on this value.
+    """
+    digest = hashlib.sha256()
+    digest.update(f"{ENGINE_VERSION}|{PROMPT_VERSION}|{kind}|".encode())
+    digest.update(input_text.encode())
+    return digest.hexdigest()
+
+
+def text_hash(text: str) -> str:
+    """The content hash of a generated node text (idempotent-write key)."""
+    return hashlib.sha256(text.encode()).hexdigest()
 
 
 def generate_nodes(
