@@ -436,4 +436,10 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         tier="observation",
         doc="the gateway TTL reaper re-aligned a legacy watcher session's recorded TTL to the watcher's true deadline (rows spawned before the unified write path, task #3411) instead of reclaiming it; attributes carry count and samples",
     ),
+    "lifecycle_pointer_done_torn": EventSpec(
+        name="lifecycle_pointer_done_torn",
+        category="log",
+        tier="anomaly",
+        doc="the gateway TTL reaper's scan found lifecycle command(s) sitting at done while agents_meta.lifecycle_command_id still pointed at them (an out-of-band torn write, task #3678) — every resurrect of the named agent(s) defers until settled; attributes carry count and samples",
+    ),
 }

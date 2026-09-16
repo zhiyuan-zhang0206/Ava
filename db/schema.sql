@@ -479,6 +479,34 @@ COMMENT ON COLUMN inbound_messages.content_hash IS
 COMMENT ON COLUMN inbound_messages.source_assertion_match IS
     'Whether an agent:N source assertion matches a verified agent_token:M credential; NULL when either side is unknown. Informational only.';
 
+-- Lifecycle pointer -> done guard (task #3678): a command must not reach `done`
+-- while agents_meta.lifecycle_command_id still points at it — that torn shape blinds
+-- boot recovery (needs claimed) and live observation (needs a process identity) at
+-- once, deferring any resurrect forever. Deferred to COMMIT, so every legitimate
+-- writer (supersede / force / observe / hosted settle) passes: each clears the
+-- pointer in the same transaction. The TTL reaper's hourly torn-pointer scan
+-- (gateway/ttl_reaper.py, telemetry lifecycle_pointer_done_torn) is the detector
+-- for a bypass (a pointer later set onto an already-done row). Ships to existing
+-- clusters via the paired migration.
+CREATE OR REPLACE FUNCTION reject_inbound_done_with_lifecycle_pointer() RETURNS trigger AS $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM agents_meta m
+        WHERE m.lifecycle_command_id = NEW.id AND m.id = NEW.agent_id
+    ) THEN
+        RAISE EXCEPTION 'inbound % (agent %) cannot reach done while agents_meta.lifecycle_command_id still points at it — settle the command and clear the pointer in the same transaction', NEW.id, NEW.agent_id;
+    END IF;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+CREATE CONSTRAINT TRIGGER inbound_messages_lifecycle_pointer_done_guard
+    AFTER UPDATE ON inbound_messages
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW
+    WHEN (NEW.status = 'done' AND OLD.status IS DISTINCT FROM 'done'
+          AND NEW.kind IN ('restart', 'terminate'))
+    EXECUTE FUNCTION reject_inbound_done_with_lifecycle_pointer();
+
 -- ─────────────── events Since-Birth rollup ───────────────
 -- Day-grain rollups that preserve the `events` "since-birth" aggregates
 -- across retention (events is partitioned by month and old partitions are
@@ -1834,3 +1862,10 @@ INSERT INTO schema_migrations (name) VALUES ('20260901T181810_allow-non-root-ong
 -- The permanent-reject streak column is already represented above. Fresh DBs
 -- stamp the migration instead of replaying the strict ADD COLUMN delta.
 INSERT INTO schema_migrations (name) VALUES ('20260916T054934_permanent-reject-streak');
+
+-- The lifecycle pointer->done guard (function + constraint trigger) is already
+-- represented above, and a fresh DB has no torn rows to repair. Fresh DBs stamp
+-- the migration instead of replaying the strict CREATE CONSTRAINT TRIGGER delta,
+-- while existing DBs without this applied marker still run the migration and fail
+-- loudly if the guard was installed outside migration tracking.
+INSERT INTO schema_migrations (name) VALUES ('20260916T164150_lifecycle-pointer-done-guard');
