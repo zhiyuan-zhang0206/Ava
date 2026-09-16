@@ -518,6 +518,7 @@ _REMOTE_WRITABLE_ALLOWLIST = frozenset(
         "computer_use_queue_timeout_s",
         "computer_use_session_idle_s",
         "delivery_watchdog_enabled",
+        "exec_request_bounded_quarantine_enabled",
         "heartbeat_enabled",
         "machine_description",
         "permissions_helper_enabled",

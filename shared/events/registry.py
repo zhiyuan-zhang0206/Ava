@@ -243,6 +243,15 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         "stale exec request evidence preserved under the explicit quarantine",
         payload=ExecRequestQuarantine,
     ),
+    "exec_request_bounded_quarantine": _telemetry(
+        "exec_request_bounded_quarantine",
+        "an unreadable exec request envelope past the bounded-disposition bound "
+        "(twice the exec node timeout, no live process reference, no live host "
+        "process) was quarantined without review — the bytes are preserved with "
+        "a receipt and the recovery path no longer defers on it; off via "
+        "AVA_EXEC_REQUEST_BOUNDED_QUARANTINE_ENABLED restores unbounded retention",
+        tier="anomaly",
+    ),
     "compaction_completed": _telemetry(
         "compaction_completed",
         "applied context compaction size reduction and completed count",
@@ -433,6 +442,15 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         "error; a wait this long means the queue is backing up (raise the limit "
         "or inspect the turns holding slots). The wait is exempt from stall "
         "cancellation — cancelling it would only re-queue it at the tail",
+        tier="anomaly",
+    ),
+    "hosted_boot_recovery_stalled": _telemetry(
+        "hosted_boot_recovery_stalled",
+        "hosted boot recovery was deferred for the same agent on three "
+        "consecutive boots — retained exec request evidence is not clearing on "
+        "its own, so the ordinary per-boot warning is escalated to this "
+        "counted anomaly event; inspect the named evidence and its disposition "
+        "commands",
         tier="anomaly",
     ),
     "host_turn_stall_detected": _telemetry(

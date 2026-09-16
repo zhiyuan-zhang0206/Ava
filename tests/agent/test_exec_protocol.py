@@ -293,6 +293,91 @@ def test_stale_request_evidence_retained_while_result_is_pruned(tmp_path: Path) 
     assert fresh.parent.is_dir()
 
 
+def test_failed_envelope_write_leaves_nothing_at_the_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A write failing before the rename never materializes at `path` (D-3)."""
+    import agent.graph._exec_protocol as protocol
+
+    path = make_request_path(tmp_path, agent_id=7)
+
+    def refuse_replace(*_args: object, **_kwargs: object) -> None:
+        raise OSError("replace refused")
+
+    monkeypatch.setattr(protocol.os, "replace", refuse_replace)
+
+    with pytest.raises(OSError, match="replace refused"):
+        write_request(path, code="x = 1", agent_id=7, timeout_s=1.0, state=None)
+
+    assert not path.exists()
+    assert list(path.parent.glob(".*.tmp")) == []  # the scratch file is cleaned up
+
+
+@pytest.mark.parametrize("kill_point", ["os.replace", "os.fsync"])
+def test_writer_killed_before_commit_leaves_no_envelope_at_all(
+    tmp_path: Path, kill_point: str
+) -> None:
+    """The rename is the only commit point: a writer killed just before it —
+    or before the fsync that precedes it — never exposes a zero-byte or partial
+    envelope, which is exactly what used to defer hosted boot recovery forever
+    (task #3619 D-3)."""
+    import subprocess
+    import sys
+
+    path = tmp_path / "req-crash.json"
+    script = (
+        "import os, sys\n"
+        "from pathlib import Path\n"
+        "import agent.graph._exec_protocol as protocol\n"
+        "def die(*_args, **_kwargs):\n"
+        "    os._exit(9)\n"
+        f"{kill_point} = die\n"
+        "protocol.write_request(Path(sys.argv[1]), code='x=1', agent_id=7, "
+        "timeout_s=1.0, state=None)\n"
+    )
+    completed = subprocess.run(  # noqa: S603 — our own venv python running a fixed in-test script
+        [sys.executable, "-c", script, str(path)], check=False
+    )
+
+    assert completed.returncode == 9
+    assert not path.exists()
+
+
+def test_envelope_write_commits_the_full_bytes_and_a_second_write_replaces_them(
+    tmp_path: Path,
+) -> None:
+    """The committed file is complete, owner-only, and leaves no scratch behind."""
+    path = make_request_path(tmp_path, agent_id=7)
+    write_request(path, code="x = 1", agent_id=7, timeout_s=1.0, state=None)
+    first = path.read_text(encoding="utf-8")
+
+    write_request(path, code="x = 2", agent_id=7, timeout_s=2.0, state=None)
+
+    assert json.loads(path.read_text(encoding="utf-8"))["code"] == "x = 2"
+    assert json.loads(first)["code"] == "x = 1"
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert list(path.parent.glob(".*.tmp")) == []
+
+
+def test_orphaned_write_temp_files_are_swept(tmp_path: Path) -> None:
+    """A crashed writer's scratch file is swept by a later allocation."""
+    import os
+
+    path = make_request_path(tmp_path, agent_id=7)
+    agent_dir = path.parent
+    orphan = agent_dir / ".req-dead.json.deadbeef.tmp"
+    orphan.write_text("partial")
+    live = agent_dir / ".req-live.json.cafef00d.tmp"
+    live.write_text("partial")
+    old_time = time.time() - STALE_FILE_AGE_S - 10
+    os.utime(orphan, (old_time, old_time))
+
+    make_request_path(tmp_path, agent_id=7)
+
+    assert not orphan.exists()
+    assert live.exists()
+
+
 def test_size_ceiling_enforced(tmp_path: Path) -> None:
     path = make_request_path(tmp_path, agent_id=7)
     write_request(path, code="x = 1", agent_id=7, timeout_s=1.0, state=None)
