@@ -40,6 +40,7 @@ from gateway import (
     prom_metrics,
     telemetry_staleness,
 )
+from gateway._edge_stream import EDGE_EVENT_NAMES, LOKI_EDGE_LIMIT
 from gateway.schemas import (
     FleetGraphEdge,
     FleetGraphNode,
@@ -82,13 +83,6 @@ _ARCHIVE_FETCH_WAIT_S = 3.0
 _NEGATIVE_CACHE_TTL_SECONDS = 60
 _FROZEN_LEGACY_CACHE_KEY = "fleet_graph:frozen:legacy:v1"
 
-# Audit event names that form edges. Lineage (spawn/fork/resurrect) is
-# permanent and all-time; messages (send_message) decay with recency.
-_EDGE_EVENT_NAMES = ("send_message", "spawn", "fork", "resurrect")
-
-# Loki fetch cap for the edge stream. Audit events are low-volume (a few
-# thousand since the cutover); the cap is a guardrail, not an expectation.
-_LOKI_EDGE_LIMIT = 50_000
 _TELEMETRY_READ_TIMEOUT_S = 8.0
 _ROUTE_TIMEOUT_S = 10.0
 
@@ -258,12 +252,12 @@ def _write_legacy_loki_cache(rows: list[dict[str, Any]]) -> None:
 def _query_loki_edge_slice(*, from_: datetime, to: datetime) -> tuple[list[dict[str, Any]], bool]:
     """Query one edge interval with the endpoint's fixed Loki contract."""
     return loki_events.query_events(
-        event_names=list(_EDGE_EVENT_NAMES),
+        event_names=list(EDGE_EVENT_NAMES),
         categories=["audit"],
         cluster=cluster_label(),
         from_=from_,
         to=to,
-        limit=_LOKI_EDGE_LIMIT,
+        limit=LOKI_EDGE_LIMIT,
         direction="forward",
         timeout_s=_TELEMETRY_READ_TIMEOUT_S,
     )
@@ -290,7 +284,7 @@ def _fetch_loki_edges(*, now: datetime) -> tuple[list[dict[str, Any]], bool]:
         else:
             # The versioned payload contains rows only, so a full cached page
             # conservatively preserves the possibility of truncation.
-            legacy_has_more = len(cached_legacy) >= _LOKI_EDGE_LIMIT
+            legacy_has_more = len(cached_legacy) >= LOKI_EDGE_LIMIT
         # Loki range endpoints are inclusive. Keep the legacy interval
         # half-open so the separately queried indexed slice owns cutover.
         legacy_rows = [row for row in cached_legacy if row["ts"] < legacy_end]
@@ -305,7 +299,7 @@ def _fetch_loki_edges(*, now: datetime) -> tuple[list[dict[str, Any]], bool]:
     if has_more:
         logger.warning(
             "fleet_graph Loki edge stream exceeded the {}-row fetch cap — edges truncated",
-            _LOKI_EDGE_LIMIT,
+            LOKI_EDGE_LIMIT,
         )
     return rows, has_more
 
@@ -376,11 +370,11 @@ def _fetch_archive_edges() -> tuple[list[dict[str, Any]], bool]:
     and the caller caches the result, so the multi-second whole-archive scan
     runs at most once a day."""
     rows, has_more = loki_events.query_events(
-        event_names=list(_EDGE_EVENT_NAMES),
+        event_names=list(EDGE_EVENT_NAMES),
         categories=["audit"],
         from_=ARCHIVE_FLOOR_AT,
         to=ARCHIVE_FREEZE_AT,
-        limit=_LOKI_EDGE_LIMIT,
+        limit=LOKI_EDGE_LIMIT,
         direction="forward",
         # The whole-archive scan measured ~5.7s on prod; the result is cached
         # for 24h, so a cold-cache fetch gets a generous budget (the live-tail
@@ -391,7 +385,7 @@ def _fetch_archive_edges() -> tuple[list[dict[str, Any]], bool]:
     if has_more:
         logger.warning(
             "fleet_graph Loki archive edge stream exceeded the %d-row fetch cap — edges truncated",
-            _LOKI_EDGE_LIMIT,
+            LOKI_EDGE_LIMIT,
         )
     return rows, has_more
 

@@ -42,18 +42,11 @@ from datetime import UTC, datetime
 from typing import Any
 
 from gateway import loki_events
+from gateway._edge_stream import EDGE_EVENT_NAMES, LINEAGE_EVENT_NAMES, LOKI_EDGE_LIMIT
 from shared import telemetry
 from shared.log import logger
 from shared.loki_index_labels import ARCHIVE_FLOOR_AT, ARCHIVE_FREEZE_AT
 from shared.redis_client import sync_redis
-
-# Audit event names that form ties (same family as fleet_graph._EDGE_EVENT_NAMES).
-_LINEAGE_EVENT_NAMES = ("spawn", "fork", "resurrect")
-_EDGE_EVENT_NAMES = ("send_message", *_LINEAGE_EVENT_NAMES)
-
-# Loki fetch cap for the edge stream. Audit events are low-volume since the
-# cutover; the cap is a guardrail, not an expectation (mirrors fleet_graph).
-_LOKI_EDGE_LIMIT = 50_000
 
 # Frozen-source cache (mirrors gateway/routers/fleet_graph.py): the archive
 # stream is immutable, so a 24h Redis entry turns its per-request scan into a
@@ -154,10 +147,10 @@ def _read_cached_archive_rows() -> tuple[list[dict[str, Any]], bool] | None:
     rows = _rows_from_cache_payload(cached, cache_name="Loki archive")
     if rows is None:
         return None
-    if cached.get("has_more", len(rows) >= _LOKI_EDGE_LIMIT):
+    if cached.get("has_more", len(rows) >= LOKI_EDGE_LIMIT):
         logger.warning(
             "neighbors Loki archive stream exceeded the %d-row fetch cap — ties truncated",
-            _LOKI_EDGE_LIMIT,
+            LOKI_EDGE_LIMIT,
         )
     return rows, bool(cached.get("degraded", False))
 
@@ -217,11 +210,11 @@ def _fetch_archive_rows() -> tuple[list[dict[str, Any]], bool]:
             return cached
         try:
             rows, has_more = loki_events.query_events(
-                event_names=list(_EDGE_EVENT_NAMES),
+                event_names=list(EDGE_EVENT_NAMES),
                 categories=["audit"],
                 from_=ARCHIVE_FLOOR_AT,
                 to=ARCHIVE_FREEZE_AT,
-                limit=_LOKI_EDGE_LIMIT,
+                limit=LOKI_EDGE_LIMIT,
                 direction="forward",
                 archive=True,
             )
@@ -238,7 +231,7 @@ def _fetch_archive_rows() -> tuple[list[dict[str, Any]], bool]:
         if has_more:
             logger.warning(
                 "neighbors Loki archive stream exceeded the %d-row fetch cap — ties truncated",
-                _LOKI_EDGE_LIMIT,
+                LOKI_EDGE_LIMIT,
             )
         _write_frozen_json(
             _ARCHIVE_CACHE_KEY,
@@ -269,18 +262,18 @@ def _fetch_loki_edges(*, now: datetime) -> list[dict[str, Any]]:
     pinning it for the shared client's 45s default."""
     loki_from = ARCHIVE_FREEZE_AT
     rows, has_more = loki_events.query_events(
-        event_names=list(_EDGE_EVENT_NAMES),
+        event_names=list(EDGE_EVENT_NAMES),
         categories=["audit"],
         from_=loki_from,
         to=now,
-        limit=_LOKI_EDGE_LIMIT,
+        limit=LOKI_EDGE_LIMIT,
         direction="forward",
         timeout_s=_LIVE_READ_TIMEOUT_S,
     )
     if has_more:
         logger.warning(
             "neighbors Loki edge stream exceeded the %d-row fetch cap — ties truncated",
-            _LOKI_EDGE_LIMIT,
+            LOKI_EDGE_LIMIT,
         )
     return rows
 
@@ -320,7 +313,7 @@ def _merge_weights(
 
     weights: dict[tuple[int, int], float] = {}
     for (a, b, name), (cnt, last_seen) in counts.items():
-        if name in _LINEAGE_EVENT_NAMES:
+        if name in LINEAGE_EVENT_NAMES:
             weights[(a, b)] = weights.get((a, b), 0.0) + math.log1p(cnt)
         else:  # send_message
             days = (now - last_seen).total_seconds() / 86400.0
