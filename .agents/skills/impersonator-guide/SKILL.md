@@ -12,6 +12,8 @@ how to use the Ava CLI and Python SDK, how messages flow, when to renew, and
 how to end. It is self-contained: everything you need is here plus the values
 in your start message.
 
+> **Suspended:** takeover execution is suspended pending fixes; it resumes with the fix line. This guide documents the target flow.
+
 ## Operating contract
 
 - **Start.** Your work begins with the start message: the Ava agent records a
@@ -96,7 +98,9 @@ ava impersonate say <session_id> --agent <agent_id> --key progress-1 'Checking t
 Choose a new stable key for each message; retry with the same key and identical
 content after ambiguous delivery. Use `--phase final` for a final reply.
 `--as` is your freely chosen display name; the session has its own `--name`.
-The UI shows both beside your messages. The CLI records observed process facts
+The UI shows no executor or session badge on your messages — they render on the
+normal timeline as the Ava agent's own, with both values recorded in the session
+metadata. The CLI records observed process facts
 separately. For peers, use the borrowed identity through the SDK below.
 
 ## Renewal: only when the Ava side reminds you
@@ -151,6 +155,8 @@ Ava's SDK is a Python namespace (`ava.*`). Under the lease you do not run the
 Ava model — you attach your own Python process to the lease and call the SDK
 directly with the borrowed identity.
 
+User-visible replies never go through the attachment — send them with the CLI (`ava impersonate say <session_id> --agent <agent_id> --key <key> 'text'`; see the message-handling section above).
+
 Attach from the cluster's interpreter (the checkout's `.venv/bin/python`):
 
 ```python
@@ -161,8 +167,7 @@ session_id = 0                 # from the activation push
 agent_id = 405                 # the Ava agent you are replacing
 
 with ava.external.attach(session_id, agent_id=agent_id, token=os.environ["AVA_IMPERSONATION_TOKEN"]):
-    ava.impersonation.say("Implementation done, verifying now", key="verification-started")
-    # Call any other ava.* capability under the borrowed identity.
+    # Call other ava.* capabilities under the borrowed identity.
 ```
 
 Inside the attachment the SDK resolves identity, plugins, and configuration as

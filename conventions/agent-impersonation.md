@@ -1,5 +1,7 @@
 # External agent impersonation
 
+> **Suspended:** takeover execution is suspended pending fixes; it resumes with the fix line. The commands below describe the target flow.
+
 A trusted Codex or Claude Code process on an Ava agent's machine can take over
 its identity. Preparation drains native work and saves its checkpoint before
 activation. It does not ask the native model to approve. TTL is an explicit
@@ -55,9 +57,10 @@ import os
 import ava
 
 with ava.external.attach(0, agent_id=405, token=os.environ["AVA_IMPERSONATION_TOKEN"]):
-    ava.impersonation.say("I found the cause; checking the fix.", key="cause-found")
     ava.agents.send_message(406, "Please review the login change")
 ```
+
+User-visible replies never go through the attachment — send them with the CLI (`ava impersonate say`, see *Talk to the human*).
 
 An attachment binds the borrowed identity and saved configuration. SDK calls,
 plugin state accesses and flush validate the active lease. Plugin changes are
