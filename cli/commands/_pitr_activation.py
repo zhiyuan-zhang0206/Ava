@@ -328,9 +328,9 @@ def _validate_snapshot(record: ActivationRecord) -> None:
     path = Path(record.pre_activation_snapshot)
     if path.is_symlink() or not path.is_file() or _mode(path) != 0o600:
         raise RuntimeError("pre-activation snapshot is missing or unsafe")
-    from cli.commands._update_git import _verify_snapshot_artifact
+    from cli.commands import _update_snapshot
 
-    _verify_snapshot_artifact(path)
+    _update_snapshot._verify_snapshot_artifact(path)
 
 
 def cmd_pitr_status() -> int:
@@ -369,7 +369,7 @@ def _require_same_pre_mutation_state(record: ActivationRecord) -> None:
 
 
 def _prepare_snapshot(home: Path, record: ActivationRecord) -> ActivationRecord:
-    from cli.commands._update_git import _verify_snapshot_artifact, snapshot_pre_activation_data
+    from cli.commands import _update_git, _update_snapshot
     from services.backup import activation_snapshot
 
     pg_settings = record.pre_activation_pg_settings
@@ -380,9 +380,9 @@ def _prepare_snapshot(home: Path, record: ActivationRecord) -> ActivationRecord:
     existing = activation_snapshot(record.operation_id)
     if existing is not None:
         snapshot = existing
-        _verify_snapshot_artifact(snapshot)
+        _update_snapshot._verify_snapshot_artifact(snapshot)
     else:
-        snapshot = snapshot_pre_activation_data(
+        snapshot = _update_git.snapshot_pre_activation_data(
             operation_id=record.operation_id,
             db_url=pg_settings["direct_db_url"],
         )
