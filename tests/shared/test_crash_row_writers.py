@@ -65,7 +65,7 @@ def test_every_reaper_write_preserves_the_crash_marker() -> None:
             )
             checked.append(rel)
     assert checked, "no reaper write sites found — did the literal change?"
-    assert "agent/hosted_ownership.py" in checked  # the corpse reaper itself
+    assert "agent/corpse_reap.py" in checked  # the corpse reaper itself
 
 
 def test_marker_clear_sites_are_enumerated() -> None:

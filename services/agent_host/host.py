@@ -50,13 +50,13 @@ from agent._process_boot import boot_agent_scope, reconcile_agent_watchers
 from agent._runloop import PendingTurnFailure, _emit_error_event, _graph_config, settle_turn_failure
 from agent._trace_checkpoint import attach_trace_checkpoint_ref
 from agent._turn_progress import reset_turn_progress
+from agent.corpse_reap import reap_crash_corpses
 from agent.graph._llm_errors import FatalLLMStreamError, FatalProviderError
 from agent.graph._node_log import flush_node_exit_aggregate
 from agent.hooks.compact import CompactionFailedError
 from agent.hosted_ownership import (
     admit_hosted_runtime,
     apply_hosted_lifecycle,
-    reap_crash_corpses,
     release_hosted_owner,
     renew_hosted_owner,
     settle_hosted_runtime,
