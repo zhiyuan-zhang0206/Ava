@@ -67,10 +67,12 @@ nudge.
 
 ### Set up the workspace
 
-- Give the agent its **own workspace** — a fresh git worktree, or just a
-  dedicated folder — so it doesn't collide with other parallel work. Keep the
-  paths short and easy to type. The workspace can be any project; the scripts
-  assume nothing about its layout.
+- Give the agent its **own workspace** to work in, so it doesn't collide with
+  other parallel work. Which directory that is follows the task: for writing
+  code a fresh git worktree is usually best, for something like ad-hoc data
+  analysis a plain folder is usually best. The directory you pass becomes the
+  tool's working directory. Keep the paths short and easy to type. The workspace
+  can be any project; the scripts assume nothing about its layout.
 - Two files carry the collaboration. **Single writer each**, so there is no lock
   to take and no clobber:
   - the **task file** (default `tasks.md` in the workspace) — **you** append
@@ -254,6 +256,11 @@ A takeover is **file-less and supervisor-less** — nothing from Mode A applies:
 - **The briefing is inline.** `--brief` inlines it verbatim into the launch
   message. There is no task file to read, no work file to write, and nothing
   watches a file.
+- **Run it from your own workspace.** In most takeovers your own workspace is
+  the best working directory: spawn the takeover under it and pass that
+  directory as the spawn workspace argument, so the workspace is directly the
+  impersonator's working directory. Other locations are not forbidden — this is
+  the recommended default, not a requirement.
 - **Start — the process interrupts you.** The launch call returns; when the
   takeover activates, the platform saves your checkpoint and your execution
   pauses. You and the replacement never run at the same time, so there is no
