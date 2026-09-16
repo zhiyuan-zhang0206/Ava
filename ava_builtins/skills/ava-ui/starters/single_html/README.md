@@ -1,7 +1,7 @@
 ```markdown
 # starters/single_html
 
-Zero build, one `index.html` + `python -m http.server`. Agent writes a one-off / simple display page, enough for 90% of scenarios.
+Zero build, one `index.html` served with `ava.ui.serve()`. Agent writes a one-off / simple display page, enough for 90% of scenarios.
 
 ## How to use
 
@@ -12,21 +12,9 @@ shutil.copytree(f"{{os.environ['AVA_HOME']}}/skills/ava-ui/starters/single_html"
 # Edit index.html — paste widget content / change placeholder / etc.
 # (use ava.files.write or bash > overwrite the entire file)
 
-# Start a persistent shell session to run the server (background session, keep running until agent exits)
-sess = ava.shell.sessions.new("my-page", ttl=24 * 3600)
-ava.shell.sessions.send(sess, 'cd /tmp/my-page && python -m http.server 8765')
-
-# poll until port is listening (sessions.send is fire-and-forget, doesn't wait for bind)
-import time, urllib.request
-for _ in range(30):
-    try:
-        urllib.request.urlopen('http://127.0.0.1:8765/', timeout=1).read()
-        break
-    except Exception:
-        time.sleep(0.2)
-
-# Register
-page = ava.ui.show('my-page', 8765, title='My Page')
+# Serve the directory and register the page in one call — `serve` starts the server
+# (answering `/health` for the platform probe), polls until ready, and registers.
+page = ava.ui.serve('/tmp/my-page', 'my-page', 8765, title='My Page')
 print(f'preview: {page.url}')
 ```
 
@@ -36,7 +24,7 @@ Each widget's HTML version is designed to be directly pasted into the `<body>` o
 
 ## Multiple pages
 
-Need `index.html` + `other.html` + subdirectories? `python -m http.server` already serves the entire cwd (root path `/`), just put them there. The URL is `<page.url>other.html` (page.url is `http://<host>:<port>/`).
+Need `index.html` + `other.html` + subdirectories? `serve()` serves the whole directory tree at root `/` — just put them there. The URL is `<page.url>other.html` (page.url is `http://<host>:<port>/`).
 
 ## Unsuitable scenarios
 

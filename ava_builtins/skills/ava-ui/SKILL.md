@@ -50,6 +50,13 @@ a server you already started. The registered URL is the **direct**
 network. The gateway only keeps the registry — there is no reverse proxy, your
 server is served at its own root `/`.
 
+A server registered with `show()` must answer `GET /health` with a 200 —
+the platform probes `<host>:<port>/health` periodically and closes the page
+when the probe fails (the agent receives a "Page recovery" notice). A plain
+`python -m http.server` returns 404 and gets the page closed within minutes;
+a custom server needs its own `/health` route, and `serve()` provides one for
+you.
+
 On top of that, this skill provides:
 - **widget**: a couple that are annoying for the agent to write itself (markdown with
   LaTeX/code blocks/images; transcript synced with audio/video timing).
@@ -131,9 +138,28 @@ ava.files.write('/tmp/hello-ui/index.html', '''
 </body></html>
 ''')
 
-# 2. Start the server in a background session (TTL is mandatory; 24h covers the page's default lifetime)
+# 2. Write a server that answers GET /health with 200 (required — the platform
+#    probe closes the page without it; a bare http.server returns 404), then
+#    start it in a background session (TTL is mandatory; 24h covers the page's
+#    default lifetime)
+ava.files.write('/tmp/hello-ui/server.py', '''
+import http.server
+
+
+class Handler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/health":
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
+            return
+        super().do_GET()
+
+
+http.server.ThreadingHTTPServer(("0.0.0.0", 8765), Handler).serve_forever()
+''')
 session = ava.shell.sessions.new("my-server", ttl=24 * 3600)
-ava.shell.sessions.send(session, 'cd /tmp/hello-ui && python -m http.server 8765')
+ava.shell.sessions.send(session, 'cd /tmp/hello-ui && python server.py')
 
 # 3. Poll until the server is really listening
 for _ in range(30):
@@ -180,7 +206,7 @@ don't need any of this.)
 
 | starter | Suits | Files |
 |---|---|---|
-| [single_html/](starters/single_html/README.md) | Zero build, one index.html + `python -m http.server`. Enough for 90% of simple-page cases the agent writes | `index.html` + `README.md` |
+| [single_html/](starters/single_html/README.md) | Zero build, one index.html + `ava.ui.serve()`. Enough for 90% of simple-page cases the agent writes | `index.html` + `README.md` |
 | [react_vite/](starters/react_vite/README.md) | Vite + React, npm run dev hot reload. Use for complex layouts / multiple components / state management | the whole Vite project structure |
 
 ## Usage pattern
@@ -205,6 +231,10 @@ don't need any of this.)
   the user's browser). Bind `0.0.0.0`. Check the server with `ava.shell.sessions.list()`
   + `capture(id)`; `show()` returns the registered Page (with its URL) on success, and the
   frontend Pages popover lists every open page.
+- **Page closed minutes after `show()`; "Page recovery" notice received**: your server did not
+  answer `GET /health` with a 200 — the platform probes it periodically and closes pages whose
+  probe fails. A plain `python -m http.server` (404 on `/health`) is the most common cause;
+  add a `/health` route returning 200, or switch to `serve()`, which provides the endpoint.
 - **markdown widget LaTeX not rendering**: all dependencies (marked.js, KaTeX, highlight.js,
   DOMPurify) are vendored locally in `widgets/markdown/vendor/` — no CDN needed. If LaTeX does
   not render, check that the vendor files were copied alongside the widget HTML and that the

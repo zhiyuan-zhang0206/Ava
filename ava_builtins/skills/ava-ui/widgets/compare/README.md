@@ -14,8 +14,8 @@ Fill in `compare.html`:
   stripped), so untrusted artifact content is safe by default.
 - the three `AVA_*` placeholders (see [ava_reply](../ava_reply/README.md)).
 
-Sends `picked: <label>`. Zero build: `python -m http.server` then
-`ava.ui.show(name, port)`. The human reaches it from the chat Pages popover or
+Sends `picked: <label>`. Zero build: serve the directory with `ava.ui.serve(dir, name, port)`
+(starts the server + `/health` + registration in one call). The human reaches it from the chat Pages popover or
 the `/fleet` per-row panel button.
 
 

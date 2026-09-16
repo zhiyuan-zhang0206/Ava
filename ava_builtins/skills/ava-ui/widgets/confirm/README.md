@@ -12,8 +12,8 @@ Fill in `confirm.html`:
 - `APPROVE_LABEL` / `REJECT_LABEL` — button text.
 - the three `AVA_*` placeholders (see [ava_reply](../ava_reply/README.md)).
 
-Sends `approved: <note>` or `rejected: <note>`. Zero build: `python -m http.server`
-then `ava.ui.show(name, port)`.
+Sends `approved: <note>` or `rejected: <note>`. Zero build: serve the directory with `ava.ui.serve(dir, name, port)`
+(starts the server + `/health` + registration in one call).
 
 
 ## Dependencies
