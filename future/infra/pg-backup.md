@@ -49,6 +49,9 @@
 > **Update 2026-09-16:** scheduled dumps and restore drills use owned worker
 > processes so stopping the scheduler also stops its synchronous work. Restore
 > Postgres stays in that worker group; only verified completion advances success.
+> **Update 2026-09-16 (2):** the gateway update's stop leg pre-checks the
+> scheduler's progress and any detached off-site publish; a stop refuses
+> (nothing stopped) while either is in flight (task #3661).
 
 > **Update 2026-08-30 (audit P0-2):** the off-site leg no longer uses the
 > Google Drive sync folder — it publishes through the shared BlobStore store

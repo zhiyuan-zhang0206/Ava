@@ -32,8 +32,15 @@ def install_graceful_shutdown(label: str) -> None:
     """
 
     def _handler(signum: int, _frame: types.FrameType | None) -> None:
+        # `service=`, not `label=`: `shared.log._message_to_params` treats an
+        # `extra["label"]` as an event alias, and a daemon name is no registered
+        # event — every stop logged "unregistered event_name='pg-backup'" (and
+        # its siblings) from inside the loguru handler, losing the row
+        # (task #3661 side fix).
         logger.info(
-            "[{label}] received {sig}, shutting down", label=label, sig=signal.Signals(signum).name
+            "[{service}] received {sig}, shutting down",
+            service=label,
+            sig=signal.Signals(signum).name,
         )
         raise KeyboardInterrupt
 

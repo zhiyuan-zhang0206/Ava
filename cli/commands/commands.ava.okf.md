@@ -33,7 +33,7 @@ Most command modules follow these two naming groups:
   `_converge_redis_bridge` (idempotent host wiring) /
   `_converge_legacy_permission_watcher` (one-shot cleanup of the removed
   permission-prompt watcher),
-  `_update_git` /
+  `_update_git` / `_update_backup_gate` (the pre-stop backup gate) /
   `_update_orchestration` / `_update_agent_runner` / `_update_bootstrap` /
   `_update_normal_release` / `_update_uv_sync` /
   `_updater_lease` / `_updater_stage` (the cmd.exe ladder's per-step telemetry marker) / `_update_recover` /

@@ -16,6 +16,42 @@ from shared.session_backend import PosixProcSessionBackend, WinprocSessionBacken
 from tests.shared.poll_until import poll_until
 
 
+def test_shutdown_line_avoids_the_unregistered_event_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`extra["label"]` doubles as an event alias in `shared.log`; the daemon
+    name it carried emitted an unregistered-event error on every stop (task
+    #3661 side fix)."""
+    from shared.events import EVENTS
+
+    calls: list[dict[str, object]] = []
+
+    class _Capture:
+        def info(self, message: str, **kwargs: object) -> None:
+            calls.append({"message": message, **kwargs})
+
+    previous = signal.getsignal(signal.SIGTERM)
+    previous_break: int | None = None
+    if sys.platform == "win32":
+        previous_break = signal.getsignal(signal.SIGBREAK)
+    try:
+        monkeypatch.setattr(daemon_shutdown, "logger", _Capture())
+        daemon_shutdown.install_graceful_shutdown("pg-backup")
+        with pytest.raises(KeyboardInterrupt):
+            signal.raise_signal(signal.SIGTERM)
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+        if sys.platform == "win32" and previous_break is not None:
+            signal.signal(signal.SIGBREAK, previous_break)
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["message"] == "[{service}] received {sig}, shutting down"
+    assert call["service"] == "pg-backup"
+    assert call["sig"] == "SIGTERM"
+    assert "label" not in call
+    assert (call.get("event") or call.get("label") or "log") in EVENTS
+
+
 def test_windows_break_uses_the_shared_interrupt_handler(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
