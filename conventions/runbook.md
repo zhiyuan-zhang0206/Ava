@@ -1122,7 +1122,11 @@ sides derive the CDP port + socket path from `settings.browser_cdp_port`
   session (task #3346), and `ava start` warns loudly when an agent-runner host
   is started from a chain outside the GUI login session — and (task #3348)
   hands such an operator-shaped start's bring-up to the GUI-domain job instead
-  of running it in place, waiting with the normal readiness contract;
+  of running it in place, waiting with the normal readiness contract. The
+  caller releases its local lifecycle lock and maintenance authorization
+  before launching or observing that job; the GUI child owns readiness and
+  resume. A failed GUI launch refuses startup instead of launching services
+  in the wrong domain;
   `AVA_START_GUI_HANDOVER=0` restores the warn-only behavior. If the wait marker cannot be
   written, the probe and healthcheck use the same bounded read-only readiness
   check instead. The gate never

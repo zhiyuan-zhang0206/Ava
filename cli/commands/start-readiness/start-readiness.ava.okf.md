@@ -12,6 +12,13 @@ tags:
 
 ## What it is
 
+An eligible macOS GUI handover returns a `StartDelegation` from the locked
+start body. The lifecycle wrapper leaves its lock and maintenance authorization
+before executing the handover. The GUI child runs the ordinary locked start
+and owns readiness/resume; the observer never releases a maintenance hold.
+Failure to launch the GUI job returns a nonzero exit instead of starting
+services in the observer's non-GUI domain.
+
 `ava start` decides twice whether a service is running: once **before** launching
 (skip what is already up) and once **after** (did the roster come up?). Both used to
 be answered by cheaper questions than the ones they meant, and the pair composed into

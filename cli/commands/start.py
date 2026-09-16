@@ -53,7 +53,7 @@ import sys
 from contextlib import nullcontext
 from pathlib import Path
 
-from cli.commands._pause_resume import resume_after_start
+from cli.commands._pause_resume import StartDelegation, resume_after_start
 from cli.commands._probe import _probe_judges_a_fresh_launch
 from cli.commands._repo import ServiceSpec, _repo_root, session_name
 from cli.commands._setup import _print_missing_setup_error
@@ -328,7 +328,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     readiness_gate: bool = True,
     updater_telemetry: bool = False,
     release_receipt: Path | None = None,
-) -> int:
+) -> int | StartDelegation:
     """Core start logic, shared by cmd_start and cmd_restart.
 
     `persist_services` distinguishes an operator start (True — `--disable-service`

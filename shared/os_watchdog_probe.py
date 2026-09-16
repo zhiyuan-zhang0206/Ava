@@ -41,6 +41,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from loguru import logger
@@ -131,27 +132,66 @@ def _plist_content(role: str, interval_s: int) -> str:
 """
 
 
+_LAUNCHCTL_TIMEOUT_S = 5.0
+_BOOTOUT_SETTLE_S = 10.0
+
+
+def _launchctl(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # noqa: S603
+        ["launchctl", *args],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=_LAUNCHCTL_TIMEOUT_S,
+    )
+
+
+def _job_loaded(service: str) -> bool:
+    result = _launchctl("print", service)
+    if result.returncode == 0:
+        return True
+    if result.returncode in (3, 113):  # ESRCH / launchctl's missing-service verdict
+        return False
+    raise RuntimeError(f"cannot inspect launchd job {service}: {result.stderr.strip()}")
+
+
+def _unload_before_bootstrap(service: str) -> None:
+    result = _launchctl("bootout", service)
+    if result.returncode not in (0, 3, 113):
+        raise RuntimeError(f"cannot unload launchd job {service}: {result.stderr.strip()}")
+    # bootout can return before launchd removes the service. Reusing its label
+    # in that window produces bootstrap EIO even for a valid plist.
+    deadline = time.monotonic() + _BOOTOUT_SETTLE_S
+    while _job_loaded(service):
+        if time.monotonic() >= deadline:
+            raise RuntimeError(f"launchd job {service} did not unload within {_BOOTOUT_SETTLE_S}s")
+        time.sleep(0.1)
+
+
 def _register_macos(role: str, interval_s: int) -> int:
     """Write + load the LaunchAgent for ``role``'s watchdog probe. Idempotent."""
     slug = _home_slug()
     plist_path = _plist_path(role, slug)
     label = probe_label(role, slug)
-    plist_path.parent.mkdir(parents=True, exist_ok=True)
-    plist_path.write_text(_plist_content(role, interval_s))
+    service = f"gui/{os.getuid()}/{label}"
+    content = _plist_content(role, interval_s)
+    from shared.platform import launchd_job_label
 
-    # Bootout any existing instance so the reload picks up a changed interval /
-    # ava path; a not-loaded job makes this a no-op.
-    subprocess.run(  # noqa: S603
-        ["launchctl", "bootout", f"gui/{os.getuid()}/{label}"],
-        capture_output=True,
-        check=False,
-    )
-    result = subprocess.run(  # noqa: S603
-        ["launchctl", "bootstrap", f"gui/{os.getuid()}", str(plist_path)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    if launchd_job_label() == label:
+        # Unloading our ancestor would kill this converge. Keep the old spec
+        # intact so an external converge can still detect the pending change.
+        logger.info("Watchdog probe '{}' is registering itself — deferring reload", label)
+        return 0
+    loaded = _job_loaded(service)
+    if loaded and plist_path.exists() and plist_path.read_text() == content:
+        return 0
+    if loaded:
+        _unload_before_bootstrap(service)
+    plist_path.parent.mkdir(parents=True, exist_ok=True)
+    # Publish the desired file only after removal is confirmed. An unsuccessful
+    # unload must not leave a new file falsely certifying the old loaded job.
+    plist_path.write_text(content)
+    result = _launchctl("bootstrap", f"gui/{os.getuid()}", str(plist_path))
     if result.returncode != 0:
         logger.error("launchctl bootstrap failed for {}: {}", label, result.stderr)
         return 1
