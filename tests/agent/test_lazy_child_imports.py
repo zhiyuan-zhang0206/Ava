@@ -27,6 +27,11 @@ prepended to `sys.path`) and reports the heavy modules the touch left in
 - a stateful request reads raw and its child boot arms a lazy state slot —
   `read_request` + the surface load stay off the serde / `agent.state` / the
   faces; the first state use (materialize) resolves them (task #3633, leg-2 B3).
+- the first state use goes through the plugin surface's own call sites too:
+  `ava.cwd.set` as the child's very first state touch (absolute and relative)
+  lands both of its updates, and a stand-in handle held across materialization
+  forwards to the rebound real handle (task #3665 — the update-first
+  regression).
 
 The lazy re-export stays a working API: `from agent.graph import build_graph`
 and friends resolve through `__getattr__` (the functional probe).
@@ -435,3 +440,102 @@ def test_stateful_child_arms_lazily_and_materializes_on_first_use(tmp_path: Path
     assert touched["agent_state"] is True, "materialize did not resolve the state"
     assert touched["faces"] is True, "materialize did not load the faces"
     assert touched["heavy"] != [], "materialize did not load the serde — probe vacuous"
+
+
+# ── leg-2 regression (#3665): the first state touch is an update ───────────
+
+
+_CHILD_CWD_SET_FIRST_TOUCH = """
+from pathlib import Path
+
+import ava
+from agent import exec_child
+from agent.graph._exec_protocol import read_request
+
+exec_child._import_runtime()  # the child boot's step that binds the SDK (mirrors `_run`)
+payload = read_request(Path({req!r}))
+ava._ensure_plugins_loaded()
+exec_child._build_state_slot(payload)
+
+out = {{}}
+try:
+    ava.cwd.set({arg!r})  # the very first state touch — no warm-up read
+    out["set"] = "ok"
+except Exception as e:  # the report carries the failure (type + message)
+    out["set"] = f"{{type(e).__name__}}: {{e}}"
+out["state_update_keys"] = None if ava.state_update is None else sorted(ava.state_update)
+out["cwd_after"] = str(ava.cwd.get())
+print(json.dumps(out))
+"""
+
+
+def test_fresh_child_cwd_set_absolute_first_touch_lands_both_updates(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    target.mkdir()
+    report = _run_clean_probe(
+        _CHILD_CWD_SET_FIRST_TOUCH.format(
+            req=str(_craft_stateful_envelope(tmp_path)), arg=str(target)
+        )
+    )
+    keys = cast("list[str]", report["state_update_keys"])
+    assert report["set"] == "ok", f"cwd.set as the first state touch failed: {report['set']}"
+    assert "ava_code__cwd" in keys, f"the cwd update never reached state_update: {keys}"
+    assert "ava_code__cwd_note" in keys, f"the cwd_note update never reached state_update: {keys}"
+    assert report["cwd_after"] == str(target.resolve())
+
+
+def test_fresh_child_cwd_set_relative_first_touch_resolves_against_snapshot(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "sub").mkdir()
+    report = _run_clean_probe(
+        _CHILD_CWD_SET_FIRST_TOUCH.format(req=str(_craft_stateful_envelope(tmp_path)), arg="sub")
+    )
+    keys = cast("list[str]", report["state_update_keys"])
+    assert report["set"] == "ok", f"cwd.set as the first state touch failed: {report['set']}"
+    assert "ava_code__cwd" in keys, f"the cwd update never reached state_update: {keys}"
+    assert "ava_code__cwd_note" in keys, f"the cwd_note update never reached state_update: {keys}"
+    assert report["cwd_after"] == str((tmp_path / "sub").resolve())
+
+
+_CHILD_STANDIN_HOLDER_ACROSS_MATERIALIZATION = """
+import sys
+from pathlib import Path
+
+import ava
+from agent import exec_child
+from agent.graph._exec_protocol import read_request
+
+exec_child._import_runtime()
+payload = read_request(Path({req!r}))
+ava._ensure_plugins_loaded()
+exec_child._build_state_slot(payload)
+
+ava_code = sys.modules["ava_builtins.plugins.ava_code.plugin"]
+holder = ava_code.state_handle  # the surface stand-in, bound before any state use
+out = {{}}
+try:
+    holder.update({{"cwd": {cwd!r}}})  # the first use materializes + rebinds the module
+    out["rebound"] = ava_code.state_handle is not holder
+    holder.update({{"cwd_note": "stand-in holder"}})  # the stale object must forward
+    out["updates"] = "ok"
+except Exception as e:  # the report carries the failure (type + message)
+    out["updates"] = f"{{type(e).__name__}}: {{e}}"
+out["state_update_keys"] = None if ava.state_update is None else sorted(ava.state_update)
+print(json.dumps(out))
+"""
+
+
+def test_standin_state_handle_forwards_after_materialize(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    target.mkdir()
+    report = _run_clean_probe(
+        _CHILD_STANDIN_HOLDER_ACROSS_MATERIALIZATION.format(
+            req=str(_craft_stateful_envelope(tmp_path)), cwd=str(target)
+        )
+    )
+    assert report["updates"] == "ok", f"a stand-in holder failed to forward: {report['updates']}"
+    assert report["rebound"] is True, "the probe never crossed the rebind — vacuous"
+    keys = cast("list[str]", report["state_update_keys"])
+    assert "ava_code__cwd" in keys, f"the cwd update never reached state_update: {keys}"
+    assert "ava_code__cwd_note" in keys, f"the cwd_note update never reached state_update: {keys}"
