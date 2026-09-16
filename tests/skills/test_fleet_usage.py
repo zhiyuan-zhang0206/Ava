@@ -2,7 +2,7 @@
 (`ava_builtins/plugins/ava_fleet/skills/ava-fleet/reference/usage.py`).
 
 The live Loki + ledger read is exercised out of band (it mirrors
-`gateway/routers/_agent_cost.py`, which the dashboard tests already cover).
+`gateway/routers/_inspect_metrics.py`, which the dashboard tests already cover).
 These lock the *pure* folding aggregation that a budget watcher reads: that
 every (agent, model) group contributes its summed cost snapshot, that a group
 without costed calls contributes 0 cost but keeps its calls in

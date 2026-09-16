@@ -42,6 +42,22 @@ INSPECT_STATISTICS = {
     "window_hours": 24,
     "applied_window_hours": 24,
     "since_compact": False,
+    "metadata": {
+        "collection": "observed",
+        "window_start": "2026-09-01T00:00:00Z",
+        "window_end": "2026-09-02T00:00:00Z",
+        "sampled_at": "2026-09-02T00:00:00Z",
+        "collection_started_at": "2026-09-01T00:00:00Z",
+        "last_observed_at": "2026-09-01T23:59:00Z",
+        "cost": {"availability": "observed", "sources": ["observations"]},
+        "turns": {
+            "availability": "observed",
+            "sources": ["observations"],
+            "duration_precision": "exact",
+        },
+        "activity": {"availability": "observed", "sources": ["observations"]},
+        "lifecycle": {"availability": "observed", "sources": ["state_transitions"]},
+    },
     "cost": {
         "cost_usd": 0.25,
         "unpriced_calls": 0,

@@ -193,6 +193,7 @@ def _instrument_maintenance_slices(
     fake results are the shapes the pass's logging branches read (empty/zero so
     nothing logs)."""
     rec = {
+        "observed_metrics": _CallRecorder(0),
         "rollup": _CallRecorder(
             SimpleNamespace(start_day=None, end_day=None, metrics_rows=0, tokens_rows=0)
         ),
@@ -202,6 +203,7 @@ def _instrument_maintenance_slices(
         "vacuum": _CallRecorder(SimpleNamespace(ran=False, summary=lambda: "")),
         "emit_sizes": _CallRecorder(None),
     }
+    monkeypatch.setattr(daemon, "recover_observations", rec["observed_metrics"])
     monkeypatch.setattr(daemon, "compute_rollup", rec["rollup"])
     monkeypatch.setattr(daemon, "replay_gap_days", rec["replay"])
     monkeypatch.setattr(daemon, "run_blob_vacuum", rec["vacuum"])
@@ -227,9 +229,9 @@ def test_maintenance_pass_runs_unconditional_slices(monkeypatch: pytest.MonkeyPa
 
     daemon._run_maintenance(cast(ConnectionPool, _FakePool()), progress)  # every slice faked
 
-    for name in ("rollup", "replay", "vacuum", "emit_sizes"):
+    for name in ("observed_metrics", "rollup", "replay", "vacuum", "emit_sizes"):
         assert rec[name].calls == 1, name
-    assert beats == 3
+    assert beats == 4
     assert progress.snapshot()["last_success_at"] is not None
 
 

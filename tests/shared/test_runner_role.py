@@ -13,6 +13,7 @@ tables.
 from __future__ import annotations
 
 from collections.abc import Generator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
@@ -27,6 +28,7 @@ from shared.cluster import (
     provision_database,
 )
 from shared.managed_writer_publication import LegacyProtocolZero, publication_admission
+from shared.observed_metrics import MetricObservation, write_observations
 from shared.pg_tools import throwaway_postgres
 from shared.url_secret import url_with_userinfo
 
@@ -72,6 +74,42 @@ def test_ensure_runner_role_provisions_idempotently(runner_db: str) -> None:
     assert attrs == (True, False, False, False), (
         "ava_runner must be LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE"
     )
+
+
+def test_runner_projects_observations_and_records_actual_lifecycle(runner_db: str) -> None:
+    ensure_runner_role(_IDENTITY, base_admin_url=_admin_url(runner_db), runner_password=_RUNNER_PW)
+    with psycopg.connect(runner_db, autocommit=True) as conn:
+        conn.execute("INSERT INTO agents (id) VALUES (712345)")
+        conn.execute("INSERT INTO agents_meta (id,status) VALUES (712345,'running')")
+    with psycopg.connect(_runner_url(runner_db), autocommit=True) as conn:
+        fact = MetricObservation(
+            event_id=1,
+            agent_id=712345,
+            occurred_at=datetime.now(UTC),
+            kind="usage",
+            usage_calls=1,
+        )
+        assert write_observations([fact], db=conn) == 1
+        assert write_observations([fact], db=conn) == 0
+        conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=712345")
+        conn.execute("UPDATE agents_meta SET status='idling' WHERE id=712345")
+        assert conn.execute(
+            "SELECT count(*), count(*) FILTER (WHERE ended_at IS NULL) "
+            "FROM agent_lifecycle_intervals WHERE agent_id=712345"
+        ).fetchone() == (2, 1)
+        conn.execute(
+            "INSERT INTO agent_metric_file_cursors (source_key, identity, position) "
+            "VALUES ('machine/path', '1:2', 100)"
+        )
+        conn.execute("UPDATE agent_metric_file_cursors SET position=200")
+        conn.execute(
+            "INSERT INTO agent_metric_scans (source,source_key,window_start,window_end) "
+            "VALUES ('full_jsonl','machine/path',now()-interval '1 day',now())"
+        )
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            conn.execute("DELETE FROM agent_metric_observations")
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            conn.execute("UPDATE agent_metric_collection SET started_at=now()")
 
 
 def test_ensure_runner_role_reauths_password_on_rerun(runner_db: str) -> None:

@@ -1,8 +1,4 @@
-"""agent inspect + per-agent cost/stats/neighbors.
-
-Split out of the former monolithic ops/schemas.py; FastAPI registers these
-unchanged, so the OpenAPI codegen is byte-identical to the wire before.
-"""
+"""Independent live state and evidence-bearing persisted agent statistics."""
 
 from datetime import datetime
 from typing import Any, Literal
@@ -14,6 +10,7 @@ from pydantic import (
     NonNegativeInt,
 )
 
+from gateway.schemas.inspect_metrics import InspectMetricsMetadata
 from gateway.schemas.stats import StatsWindowHours
 from ops.rpc_schemas import ShellInfo
 from shared.agent_observation import AgentObservation
@@ -22,7 +19,7 @@ from shared.agent_snapshot import OpenNotice
 
 class AgentCost(BaseModel):
     """LLM spend + token usage for one agent over the requested window (whole
-    life = ledger days + today's live tail; every `llm_usage` event under its
+    life = historical daily evidence + persisted observed facts; every `llm_usage` event under its
     agent_id — the agent's "session", which spans restarts/resurrects since
     agent_id is stable). `cost_usd` sums the rows' usage-time price snapshots
     only — never re-priced against the current registry. Calls without a
@@ -43,10 +40,11 @@ class AgentCost(BaseModel):
 
 
 class AgentStats(BaseModel):
-    """Cumulative turn + exec counters for one agent (all-time, no window).
+    """Observed turn + exec counters within the selected window.
 
     `turn_ok` counts `turn_end` events with ok=true (abnormal/cancelled turns
-    excluded); the p50/p90/max are over every turn's `duration_seconds`.
+    excluded); duration fields are null when no duration evidence survives.
+    The metadata declares retained historical histogram precision.
     `exec_ok` is plain `exec` events; `exec_failed` is every other exec outcome
     (exec_failed / exec(timeout) / exec_cancelled; the prefix regex also
     counts legacy exec_thread_stuck rows for historical continuity)."""
@@ -55,10 +53,10 @@ class AgentStats(BaseModel):
 
     turn_total: NonNegativeInt
     turn_ok: NonNegativeInt
-    turn_p50_seconds: float = Field(ge=0)
-    turn_p90_seconds: float = Field(ge=0)
-    turn_min_seconds: float = Field(ge=0)
-    turn_max_seconds: float = Field(ge=0)
+    turn_p50_seconds: float | None = Field(ge=0)
+    turn_p90_seconds: float | None = Field(ge=0)
+    turn_min_seconds: float | None = Field(ge=0)
+    turn_max_seconds: float | None = Field(ge=0)
     exec_ok: NonNegativeInt
     exec_failed: NonNegativeInt
 
@@ -77,8 +75,8 @@ class AgentTps(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    lm_stage_tps: float = Field(ge=0)
-    agent_lifecycle_tps: float = Field(ge=0)
+    lm_stage_tps: float | None = Field(ge=0)
+    agent_lifecycle_tps: float | None = Field(ge=0)
 
 
 class AgentActivity(BaseModel):
@@ -110,7 +108,7 @@ class AgentActivity(BaseModel):
     active_seconds: float = Field(ge=0)
     alive_seconds: float = Field(ge=0)
     active_rate: float = Field(ge=0, le=1)
-    llm_seconds: float = Field(ge=0)
+    llm_seconds: float | None = Field(ge=0)
     exec_seconds: float = Field(ge=0)
 
 
@@ -198,8 +196,9 @@ class AgentInspectStatistics(BaseModel):
     """Window-dependent statistics, with no current control-plane state.
 
     ``window_hours`` and ``since_compact`` identify the requested view;
-    ``applied_window_hours`` exposes a retention-clamped hour window. The
-    aggregate computation and its existing source coverage are unchanged.
+    ``applied_window_hours`` echoes the served hour window without a Loki
+    retention clamp. Metadata distinguishes observed, partial, and unavailable
+    source coverage. Unknown sections are null, never invented zero totals.
     Current state belongs exclusively to ``AgentInspectLive``.
     """
 
@@ -209,10 +208,11 @@ class AgentInspectStatistics(BaseModel):
     window_hours: StatsWindowHours | None = None
     applied_window_hours: int | None = None
     since_compact: bool = False
-    cost: AgentCost
-    stats: AgentStats
-    tps: AgentTps
-    activity: AgentActivity
+    cost: AgentCost | None
+    stats: AgentStats | None
+    tps: AgentTps | None
+    activity: AgentActivity | None
+    metadata: InspectMetricsMetadata
 
 
 class NeighborRow(BaseModel):

@@ -58,6 +58,30 @@ INSERT INTO agent_pages (agent_id, name, port, serve_dir)
 UPDATE agents_meta SET status = 'terminated'
     WHERE id = (SELECT max(id) FROM agents);
 
+-- Observed lifecycle time follows real row transitions, even without telemetry.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM agent_lifecycle_intervals
+        WHERE agent_id = (SELECT max(id) FROM agents) AND ended_at >= started_at
+    ) THEN
+        RAISE EXCEPTION 'termination did not close the lifecycle interval';
+    END IF;
+END $$;
+UPDATE agents_meta SET status = 'idling'
+    WHERE id = (SELECT max(id) FROM agents);
+UPDATE agents_meta SET status = 'running'
+    WHERE id = (SELECT max(id) FROM agents);
+DO $$
+BEGIN
+    IF (SELECT count(*) FROM agent_lifecycle_intervals
+        WHERE agent_id = (SELECT max(id) FROM agents)) <> 2
+       OR (SELECT count(*) FROM agent_lifecycle_intervals
+           WHERE agent_id = (SELECT max(id) FROM agents) AND ended_at IS NULL) <> 1 THEN
+        RAISE EXCEPTION 'resurrection or nonterminal transition corrupted lifecycle intervals';
+    END IF;
+END $$;
+
 DO $$
 DECLARE show_closed_count INT;
 DECLARE serve_open_count INT;

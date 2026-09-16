@@ -158,7 +158,7 @@ CREATE TABLE agents_meta (
     lease_expires_at           TIMESTAMPTZ,              -- R1 (Task #1021): the agent-process lease — liveness is a lease-expiry judgment (`lease_expires_at > now()`), status stays lifecycle intent. Written by the agent process at claim/start (now()+lease TTL, agent/db.py / agent/_starting.py), cleared on terminate/resurrect by the ops lifecycle; read by the heartbeat daemon and the reaper (shared/db.py ALIVE_SQL). NULL = row has no lease (pre-R1 legacy, or terminated).
     liveness_state             TEXT NOT NULL DEFAULT 'unknown' CHECK (liveness_state IN ('online', 'offline', 'unknown')),  -- gateway-owned derived liveness projection (Task #1174): 'online' = machine reachable AND (process lease alive where one is held); 'offline' = machine unreachable (2 consecutive failed status_probe) or lease expired; 'unknown' = not yet judged (fresh rows / unregistered machine). Written ONLY by the gateway heartbeat daemon's liveness pass — status stays lifecycle intent (R1 invariant #1); the frontend renders offline distinctly. 'terminated' rows are never judged.
     last_probe_at             TIMESTAMPTZ,              -- when the gateway liveness pass last judged this row (Task #1174).
-    last_compact_at            TIMESTAMPTZ,              -- R1 (Task #1021): synchronous compact stamp — written by agent/hooks/compact.py at each compact, replacing the events-table OFFSET-1 read-your-own-write hack (the anchor for "last compact" without scanning events). NULL = never compacted.
+    last_compact_at            TIMESTAMPTZ,              -- Legacy compact marker without a durable completion writer; NULL means unknown, not never compacted.
     last_turn_fatal_at        TIMESTAMPTZ,              -- first fatal turn crash since the last completed LLM turn (the corpse marker: NULL = healthy, set = crash-dead). Stamped with COALESCE (never refreshed while dead) by the hosted runner at crash catch time (agent/hosted_ownership.stamp_turn_fatal); cleared by a completed LLM turn (_persist_last_active) and the resurrect transition. The agent_host beat's reaper terminates marked idling rows past CORPSE_REAP_GRACE_S with termination_source='reaper', and a crash under an already-set mark (a retry dying again) terminates the row at its own settle point via agent/corpse_reap.reap_recrashed_corpse without waiting out the grace; renew_hosted_owner skips marked rows so their lease decays.
     permanent_reject_streak    INTEGER NOT NULL DEFAULT 0 CHECK (permanent_reject_streak >= 0),  -- consecutive PERMANENT-class provider rejections since the last completed LLM turn (the recovery circuit breaker, task #3617): +1 at each permanent fatal turn settlement (agent/_runloop.py), reset to 0 by the same completed-turn UPDATE that clears last_turn_fatal_at (agent/graph/_llm.py::_persist_last_active). >= 2 halts every automatic recovery path (event-path resurrect / watchdog re-dispatch+retry / the stalled crash-marked harvest op / the relaxed reaper-marked trigger) until a turn succeeds; a manual resurrect stays exempt. See shared/recovery_breaker.py.
     runtime_generation UUID,
@@ -211,8 +211,8 @@ CREATE INDEX agent_activity_agent_id_created_at_id_idx
 
 -- ─────────────── heartbeat_pause_log ───────────────
 -- Append-only heartbeat-pause trail: one row per ava.self.pause_heartbeat
--- call. The telemetry `heartbeat_paused` event stays the display surface; this
--- table is the agent-side history source.
+-- call. The latest row supplies Inspector pause duration and the table retains
+-- agent-side history independently of telemetry.
 CREATE TABLE heartbeat_pause_log (
     id          BIGSERIAL PRIMARY KEY,
     agent_id    BIGINT NOT NULL REFERENCES agents(id),
@@ -221,7 +221,7 @@ CREATE TABLE heartbeat_pause_log (
 );
 
 COMMENT ON TABLE heartbeat_pause_log IS
-    'Append-only heartbeat-pause trail: one row per ava.self.pause_heartbeat call. The telemetry `heartbeat_paused` event stays the display surface.';
+    'Append-only heartbeat-pause trail: one row per ava.self.pause_heartbeat call. The latest row supplies Inspector pause duration without telemetry reads.';
 
 -- Latest-first ordering supports pause-trail inspection.
 CREATE INDEX heartbeat_pause_log_agent_created_idx
@@ -539,6 +539,131 @@ CREATE TABLE agent_metrics_daily (
 
 COMMENT ON COLUMN agent_metrics_daily.turn_dur_hist IS
     'Integer-second floor(duration_seconds) bucket-to-count map; mergeable across days and backfilled for archive-era ledger rows.';
+
+-- Compact observed measurements, never a complete billing ledger. The telemetry
+-- queue can shed records before any sink; freshness does not prove completeness.
+CREATE TABLE agent_metric_collection (
+    singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
+    started_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+);
+INSERT INTO agent_metric_collection (singleton) VALUES (TRUE);
+
+CREATE TABLE agent_metric_observations (
+    event_id NUMERIC(20, 0) PRIMARY KEY CHECK (event_id >= 0),
+    agent_id BIGINT NOT NULL REFERENCES agents(id),
+    occurred_at TIMESTAMPTZ NOT NULL,
+    observed_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    kind TEXT NOT NULL CHECK (kind IN ('usage', 'turn', 'exec', 'activity')),
+    model TEXT,
+    usage_calls BIGINT NOT NULL DEFAULT 0 CHECK (usage_calls >= 0),
+    unpriced_calls BIGINT NOT NULL DEFAULT 0 CHECK (unpriced_calls >= 0),
+    tokens_in BIGINT NOT NULL DEFAULT 0 CHECK (tokens_in >= 0),
+    tokens_out BIGINT NOT NULL DEFAULT 0 CHECK (tokens_out >= 0),
+    tokens_cached BIGINT NOT NULL DEFAULT 0 CHECK (tokens_cached >= 0),
+    tokens_reasoning BIGINT NOT NULL DEFAULT 0 CHECK (tokens_reasoning >= 0),
+    turn_total BIGINT NOT NULL DEFAULT 0 CHECK (turn_total >= 0),
+    turn_ok BIGINT NOT NULL DEFAULT 0 CHECK (turn_ok >= 0),
+    exec_ok BIGINT NOT NULL DEFAULT 0 CHECK (exec_ok >= 0),
+    exec_failed BIGINT NOT NULL DEFAULT 0 CHECK (exec_failed >= 0),
+    cost_usd NUMERIC NOT NULL DEFAULT 0 CHECK (cost_usd >= 0 AND cost_usd <> 'NaN'::numeric),
+    turn_duration_seconds DOUBLE PRECISION CHECK (turn_duration_seconds >= 0 AND turn_duration_seconds < 'Infinity'::float8),
+    active_seconds DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (active_seconds >= 0 AND active_seconds < 'Infinity'::float8),
+    exec_seconds DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (exec_seconds >= 0 AND exec_seconds < 'Infinity'::float8)
+);
+CREATE INDEX agent_metric_observations_window_idx
+    ON agent_metric_observations (agent_id, occurred_at);
+
+CREATE TABLE agent_metric_days (
+    agent_id BIGINT NOT NULL REFERENCES agents(id),
+    day DATE NOT NULL,
+    usage_calls BIGINT NOT NULL DEFAULT 0 CHECK (usage_calls >= 0),
+    unpriced_calls BIGINT NOT NULL DEFAULT 0 CHECK (unpriced_calls >= 0),
+    tokens_in BIGINT NOT NULL DEFAULT 0 CHECK (tokens_in >= 0),
+    tokens_out BIGINT NOT NULL DEFAULT 0 CHECK (tokens_out >= 0),
+    tokens_cached BIGINT NOT NULL DEFAULT 0 CHECK (tokens_cached >= 0),
+    tokens_reasoning BIGINT NOT NULL DEFAULT 0 CHECK (tokens_reasoning >= 0),
+    turn_total BIGINT NOT NULL DEFAULT 0 CHECK (turn_total >= 0),
+    turn_ok BIGINT NOT NULL DEFAULT 0 CHECK (turn_ok >= 0),
+    exec_ok BIGINT NOT NULL DEFAULT 0 CHECK (exec_ok >= 0),
+    exec_failed BIGINT NOT NULL DEFAULT 0 CHECK (exec_failed >= 0),
+    cost_usd NUMERIC NOT NULL DEFAULT 0 CHECK (cost_usd >= 0 AND cost_usd <> 'NaN'::numeric),
+    turn_duration_sum DOUBLE PRECISION NOT NULL DEFAULT 0,
+    turn_duration_min DOUBLE PRECISION,
+    turn_duration_max DOUBLE PRECISION,
+    active_seconds DOUBLE PRECISION NOT NULL DEFAULT 0,
+    exec_seconds DOUBLE PRECISION NOT NULL DEFAULT 0,
+    last_observed_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (agent_id, day)
+);
+
+-- A scan proves that this particular source/window was traversed, not that
+-- upstream telemetry was collected without loss. Different runner mirrors are
+-- independent sources, even when their date-stamped filenames are identical.
+CREATE TABLE agent_metric_scans (
+    source TEXT NOT NULL CHECK (source IN ('loki', 'full_jsonl', 'rollup_jsonl', 'archive_loki')),
+    source_key TEXT NOT NULL,
+    window_start TIMESTAMPTZ NOT NULL,
+    window_end TIMESTAMPTZ NOT NULL,
+    scanned_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    PRIMARY KEY (source, source_key, window_start, window_end),
+    CHECK (window_end > window_start)
+);
+
+-- Runner-local source cursors advance in the same transaction as repaired facts.
+CREATE TABLE agent_metric_file_cursors (
+    source_key TEXT PRIMARY KEY,
+    identity TEXT NOT NULL,
+    position BIGINT NOT NULL CHECK (position >= 0),
+    excluded_archive_rows BIGINT NOT NULL DEFAULT 0 CHECK (excluded_archive_rows >= 0)
+);
+
+-- Actual metadata transitions define nonterminated time from this epoch onward.
+-- No reconstruction from lossy lifecycle telemetry, nor invented pre-cutover time.
+CREATE TABLE agent_lifecycle_intervals (
+    agent_id BIGINT NOT NULL REFERENCES agents(id),
+    started_at TIMESTAMPTZ NOT NULL,
+    ended_at TIMESTAMPTZ,
+    PRIMARY KEY (agent_id, started_at),
+    CHECK (ended_at IS NULL OR ended_at >= started_at)
+);
+CREATE UNIQUE INDEX agent_lifecycle_intervals_open_idx
+    ON agent_lifecycle_intervals (agent_id) WHERE ended_at IS NULL;
+INSERT INTO agent_lifecycle_intervals (agent_id, started_at)
+SELECT id, agent_metric_collection.started_at
+FROM agents_meta CROSS JOIN agent_metric_collection
+WHERE status <> 'terminated';
+
+CREATE FUNCTION record_agent_lifecycle_interval() RETURNS TRIGGER
+LANGUAGE plpgsql AS $$
+DECLARE transitioned_at TIMESTAMPTZ := clock_timestamp();
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        IF NEW.status <> 'terminated' THEN
+            INSERT INTO agent_lifecycle_intervals (agent_id, started_at)
+            VALUES (NEW.id, transitioned_at);
+        END IF;
+    ELSIF OLD.status = 'terminated' AND NEW.status <> 'terminated' THEN
+        INSERT INTO agent_lifecycle_intervals (agent_id, started_at)
+        VALUES (NEW.id, transitioned_at);
+    ELSIF OLD.status <> 'terminated' AND NEW.status = 'terminated' THEN
+        UPDATE agent_lifecycle_intervals SET ended_at = transitioned_at
+        WHERE agent_id = NEW.id AND ended_at IS NULL;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER agents_meta_lifecycle_interval
+    AFTER INSERT OR UPDATE OF status ON agents_meta
+    FOR EACH ROW EXECUTE FUNCTION record_agent_lifecycle_interval();
+
+DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
+        GRANT SELECT, INSERT ON agent_metric_observations TO ava_runner;
+        GRANT SELECT, INSERT, UPDATE ON agent_metric_days, agent_lifecycle_intervals TO ava_runner;
+        GRANT SELECT ON agent_metric_collection TO ava_runner;
+        GRANT SELECT, INSERT, UPDATE ON agent_metric_scans, agent_metric_file_cursors TO ava_runner;
+    END IF;
+END $$;
 
 -- ─────────────── api_idempotency ───────────────
 -- Generic AtLeastOnceWithKey dedup (R3 doorplate ①): routes whose contract
@@ -1871,3 +1996,10 @@ INSERT INTO schema_migrations (name) VALUES ('20260916T054934_permanent-reject-s
 INSERT INTO schema_migrations (name) VALUES ('20260916T164150_lifecycle-pointer-done-guard');
 CREATE INDEX agents_meta_live_roster_idx ON agents_meta (id) WHERE status <> 'terminated';
 INSERT INTO schema_migrations (name) VALUES ('20260916T171506_index-live-agent-roster');
+
+-- Compact observed metrics and transactional lifecycle intervals are represented above.
+INSERT INTO schema_migrations (name) VALUES ('20260916T172008_observed-agent-metrics');
+
+-- Earlier pause-table comments are superseded by the current read contract.
+INSERT INTO schema_migrations (name) VALUES ('20260828T191814_heartbeat-pause-log');
+INSERT INTO schema_migrations (name) VALUES ('20260831T185300_heartbeat-pause-comment-update');
