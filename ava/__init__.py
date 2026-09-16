@@ -328,7 +328,6 @@ __all_for_ava__ = [
     "agents",
     "files",
     "help",
-    "impersonation",
     "mcps",
     "self",
     "shell",
