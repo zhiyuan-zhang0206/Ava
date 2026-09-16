@@ -16,6 +16,7 @@ tags:
 | `useFleetGraph` | Fleet relationship graph (GraphView data source); SSE invalidation + 30s reconciliation poll, served from the backend's 60s whole-response cache |
 | `useTasks` | [[ui/web/src/frontend-data-flow/task-list.ava.okf.md|Task list data flow]] |
 | `useTimeline` | timeline items (merged three sources: React Query snapshot + SSE fold + reload merge; switching back to a cached thread triggers fetch-on-enter background reconcile, see [[ui/web/src/frontend-state/frontend-state.ava.okf.md|State management]]) |
+| `useCompactHistoryRetention` | consumes the store's compact-replace edge (`compactReplaceSeq`): re-attaches the newest `display.compact_history_sessions` previous segments above the new compact summary through the scroll-up fetch path (task #3698) |
 | `useTokenUsage` | context window occupancy (React Query historical value + SSE token_usage) |
 | `useAgentPages` | single agent opened pages (InspectorPanel, SSE folds page_opened/closed into cache, replaces deleted PageDock/use-fleet-pages) |
 | `useAllPages` (#655) | fleet-wide opened pages fetched once + SSE incremental fold (Inbox attaches associated page links to notices, avoids N+1 per-agent requests) |

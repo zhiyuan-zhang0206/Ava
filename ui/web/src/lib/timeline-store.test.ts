@@ -51,6 +51,8 @@ function resetStore(): void {
     scrollToBottomRequest: 0,
     liveCompact: null,
     threads: new Map(),
+    compactReplaceSeq: 0,
+    compactReplaceAgent: null,
   });
 }
 
@@ -812,6 +814,9 @@ describe("compact_done hard reset (incremental design)", () => {
     expect(s.items.map((i) => i.item_id)).toEqual(["0.0", "90.0", "91.0"]);
     expect(s.streamingIds.size).toBe(0);
     expect(s.resetPending).toBe(true);
+    // No replace yet, so the retention edge has not moved (task #3698).
+    expect(s.compactReplaceSeq).toBe(0);
+    expect(s.compactReplaceAgent).toBeNull();
   });
 
   it("an EMPTY timeline_snapshot inside the reset window is ignored (does not blank the panel)", () => {
@@ -978,6 +983,10 @@ describe("compact_done hard reset (incremental design)", () => {
     // Wholesale replace: pre-compact 90.0 must NOT survive (keep-all merge would resurrect it).
     expect(s.items.map((i) => i.item_id)).toEqual(["1.0", "2.0"]);
     expect(s.resetPending).toBe(false);
+    // The wholesale replace bumps the retention edge once, naming the thread
+    // it replaced (task #3698).
+    expect(s.compactReplaceSeq).toBe(1);
+    expect(s.compactReplaceAgent).toBe(1);
   });
 
   it("a GET reload inside the reset window is dropped (checkpoint may lag pre-compact); hasMoreOlder still refreshes", () => {
@@ -1185,6 +1194,9 @@ describe("compact crossed unseen (SSE-gap heal)", () => {
     const parked = useTimelineStore.getState().threads.get(1);
     expect(parked?.items.map((i) => i.item_id)).toEqual(["0.0", "1.0", "2.0"]);
     expect(parked?.resetPending).toBe(false);
+    // A parked swap is a background heal — the active-thread retention edge
+    // does not move (task #3698).
+    expect(useTimelineStore.getState().compactReplaceSeq).toBe(0);
     // Switch back: the healed bucket seeds — no resurrection.
     act(() => {
       useTimelineStore.getState().switchThread(1, null, false);
@@ -1246,6 +1258,10 @@ describe("compact crossed unseen (SSE-gap heal)", () => {
     const s = useTimelineStore.getState();
     expect(s.items.map((i) => i.item_id)).toEqual(["0.0", "1.0", "2.0"]);
     expect(s.resetPending).toBe(false);
+    // The SSE-gap heal is still an active-thread replace: the retention edge
+    // moves so the previous segment re-attaches (task #3698).
+    expect(s.compactReplaceSeq).toBe(1);
+    expect(s.compactReplaceAgent).toBe(1);
   });
 });
 
