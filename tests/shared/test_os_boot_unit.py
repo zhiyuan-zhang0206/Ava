@@ -68,6 +68,9 @@ def test_render_unit_states_the_boot_policy(ctx: BootUnitContext) -> None:
     assert "WantedBy=multi-user.target" in unit
     assert f"User={ctx.user}" in unit and f"Group={ctx.group}" in unit
     assert f"WorkingDirectory={ctx.repo}" in unit
+    # Verified on systemd 255: quotes would become part of the path (fatal),
+    # while the literal rest-of-line form keeps spaces working.
+    assert f'WorkingDirectory="{ctx.repo}"' not in unit
     assert f'Environment="AVA_HOME={ctx.home}"' in unit
     assert f'Environment="HOME={ctx.home_dir}"' in unit
     assert f'Environment="PATH={ctx.repo}/.venv/bin:/usr/local/bin:/usr/bin:/bin"' in unit
@@ -99,6 +102,9 @@ def test_render_script_is_one_attempt_and_the_rc_is_the_contract(ctx: BootUnitCo
     assert '>"$log" 2>&1' in script
     assert 'log="$AVA_HOME/logs/boot.log"' in script
     assert 'state="$AVA_HOME/logs/boot-converge.state"' in script
+    # A fresh home must not turn the missing logs/ dir into a failed redirect
+    # (an attempt that never ran ava start but asks the unit to retry forever).
+    assert 'mkdir -p "$AVA_HOME/logs"' in script
     # Proxy readiness is a real round trip through the unit's URL.
     assert "AVA_BOOT_PROXY_WAIT" in script and GENERATE_204_URL in script
     # Readiness resolves the gateway URL like every client does (env / .env

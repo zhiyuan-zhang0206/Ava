@@ -209,7 +209,12 @@ def render_unit(ctx: BootUnitContext, *, proxy_wait_url: str = "") -> str:
         f"User={_path_value(ctx.user, 'user')}\n"
         f"Group={_path_value(ctx.group, 'group')}\n"
         f"{env_lines}\n"
+        # Not quoted on purpose: WorkingDirectory= takes the rest of the line
+        # literally (spaces included), and quotes would become part of the
+        # path -- verified on systemd 255 (quoted = fatal, unquoted = clean).
         f"WorkingDirectory={_path_value(str(ctx.repo), 'checkout path')}\n"
+        # `:` = no $-expansion in the command line (needs systemd >= 245;
+        # Ubuntu >= 22.04, and the drill host runs 255).
         f"ExecStart=:{_quote(str(script_path(ctx.home)), 'script path')}\n"
         "# The retry policy, stated in systemd terms (shared/boot_policy.py).\n"
         "Restart=on-failure\n"
@@ -253,6 +258,11 @@ export PATH="{repo}/.venv/bin:/usr/local/bin:/usr/bin:/bin"
 log="$AVA_HOME/logs/boot.log"
 state="$AVA_HOME/logs/boot-converge.state"
 t0=$SECONDS
+
+# The redirects below and the state write assume logs/ exists; create it so a
+# fresh home cannot turn a missing directory into an attempt that never ran
+# ava start yet still asks the unit to retry forever.
+mkdir -p "$AVA_HOME/logs"
 
 # 1) Proxy readiness -- a real round trip through the configured entrypoint
 #    (the unit's AVA_BOOT_PROXY_WAIT; empty disables the wait). Bounded; on
