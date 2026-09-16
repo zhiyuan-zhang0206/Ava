@@ -39,6 +39,8 @@ def query_loki_shards[T](
 ) -> list[T]:
     """Run bounded Loki spans concurrently; each query acquires Loki's global slot."""
     spans = split_loki_window(from_, to, shard_width=shard_width)
+    if not spans:
+        return []
     if len(spans) == 1:
         start, end = spans[0]
         return [query(start, end)]
