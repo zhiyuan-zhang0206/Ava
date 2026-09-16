@@ -18,6 +18,23 @@ def _h_pitr_drill(args: argparse.Namespace) -> int:
     )
 
 
+def _h_pitr_multipart_list(args: argparse.Namespace) -> int:
+    from cli.commands import cmd_pitr_multipart_list
+
+    return cmd_pitr_multipart_list(prefix=args.prefix, credentials_file=args.credentials_file)
+
+
+def _h_pitr_multipart_abort(args: argparse.Namespace) -> int:
+    from cli.commands import cmd_pitr_multipart_abort
+
+    return cmd_pitr_multipart_abort(
+        key=args.key,
+        upload_id=args.upload_id,
+        credentials_file=args.credentials_file,
+        confirm=args.confirm,
+    )
+
+
 def _h_pitr_retention_inspect(_args: argparse.Namespace) -> int:
     from cli.commands import cmd_pitr_retention_inspect
 
@@ -69,6 +86,8 @@ def _h_pitr_snapshot_retire(args: argparse.Namespace) -> int:
 def _add_pitr_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     from cli.main import (
         _h_pitr_drill,
+        _h_pitr_multipart_abort,
+        _h_pitr_multipart_list,
         _h_pitr_retention_arm,
         _h_pitr_retention_disable,
         _h_pitr_retention_inspect,
@@ -184,3 +203,51 @@ def _add_pitr_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
         action = snapshot_sub.add_parser(name, help=help_text)
         action.add_argument("table", metavar="TABLE", help="rollback snapshot table name")
         action.set_defaults(func=handler)
+    multipart = pitr_sub.add_parser(
+        "multipart", help="inspect and abort incomplete multipart uploads (orphan shards)"
+    )
+    multipart_sub = multipart.add_subparsers(dest="multipart_cmd", required=True)
+    multipart_list = multipart_sub.add_parser(
+        "list", help="list incomplete multipart uploads (read-only)"
+    )
+    multipart_list.add_argument(
+        "--prefix",
+        metavar="PREFIX",
+        default="",
+        help="only list uploads whose key starts with this prefix",
+    )
+    multipart_list.add_argument(
+        "--credentials-file",
+        metavar="PATH",
+        help=(
+            "OSS credential file to use; defaults to AVA_PITR_OSS_CREDENTIALS_FILE "
+            "(the uploader identity)"
+        ),
+    )
+    multipart_list.set_defaults(func=_h_pitr_multipart_list)
+    multipart_abort = multipart_sub.add_parser(
+        "abort", help="abort one incomplete multipart upload (preview without --confirm)"
+    )
+    multipart_abort.add_argument(
+        "--key", metavar="KEY", required=True, help="the upload's object key"
+    )
+    multipart_abort.add_argument(
+        "--upload-id",
+        metavar="UPLOAD_ID",
+        required=True,
+        help="the upload id from `multipart list`",
+    )
+    multipart_abort.add_argument(
+        "--credentials-file",
+        metavar="PATH",
+        help=(
+            "OSS credential file to use; defaults to AVA_PITR_OSS_CREDENTIALS_FILE "
+            "(the uploader identity)"
+        ),
+    )
+    multipart_abort.add_argument(
+        "--confirm",
+        action="store_true",
+        help="perform the abort; without it the command only previews",
+    )
+    multipart_abort.set_defaults(func=_h_pitr_multipart_abort)

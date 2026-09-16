@@ -40,6 +40,10 @@ tags:
   surface.
 - `ava pitr drill`: operator-driven isolated physical restore drill to an
   arbitrary target LSN (sandbox-only; publishes nothing).
+- `ava pitr multipart list/abort`: read-only inventory of incomplete multipart
+  uploads (orphan shards) with part count / bytes / age; `abort --key K
+  --upload-id U --confirm` removes exactly one incomplete upload (preview
+  without `--confirm`; it can never touch a completed object).
 - `ava mcp ...`: isolated environments at `$AVA_HOME/mcps/`. `ava mcp serve`
   runs the other direction and exposes the cluster control plane as an MCP
   server ([[ava/mcps.ava.okf.md|MCP]]).

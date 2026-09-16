@@ -137,7 +137,9 @@ def _is_file_exists(exc: object) -> bool:
     return bool(str(exc.code) == "FileAlreadyExists")
 
 
-def _map_error(operation: str, exc: BaseException) -> ObjectStoreError:
+def map_oss_error(operation: str, exc: BaseException) -> ObjectStoreError:
+    """Map an oss2 transport error onto the store transient/permanent taxonomy."""
+
     if isinstance(exc, oss2.exceptions.RequestError) or (
         isinstance(exc, oss2.exceptions.ServerError) and (exc.status >= 500 or exc.status == 429)
     ):
@@ -297,7 +299,7 @@ class OSSObjectStore:
         except oss2.exceptions.OssError as exc:
             if _is_not_found(exc):
                 return None
-            raise _map_error("OSS sidecar lookup", exc) from exc
+            raise map_oss_error("OSS sidecar lookup", exc) from exc
         try:
             data = obj.read()
         finally:
@@ -339,7 +341,7 @@ class OSSObjectStore:
         except oss2.exceptions.OssError as exc:
             if _is_not_found(exc):
                 return None
-            raise _map_error("OSS sidecar identity", exc) from exc
+            raise map_oss_error("OSS sidecar identity", exc) from exc
         etag = _normalize_etag(head.etag)
         if not etag or head.content_length is None:
             raise TransientObjectStoreError("OSS sidecar omitted verification properties")
@@ -390,7 +392,7 @@ class OSSObjectStore:
                 if existing is None or existing != payload:
                     raise PermanentObjectStoreError("immutable OSS object sidecar differs") from exc
                 return
-            raise _map_error("OSS sidecar publish", exc) from exc
+            raise map_oss_error("OSS sidecar publish", exc) from exc
         # Every publish verb must survive the "verify what we just wrote"
         # step: the sidecar is small, so read it back and compare bytes.
         written = self.read_sidecar(object_name)
@@ -430,7 +432,7 @@ class OSSObjectStore:
         except oss2.exceptions.OssError as exc:
             if _is_not_found(exc):
                 return None
-            raise _map_error("OSS stat", exc) from exc
+            raise map_oss_error("OSS stat", exc) from exc
         etag = _normalize_etag(head.etag)
         if not etag or head.content_length is None:
             raise TransientObjectStoreError("OSS object omitted verification properties")
@@ -472,7 +474,7 @@ class OSSObjectStore:
                 return self._adopt_existing(
                     object_name, size, ObjectChecksum(MD5, digest), metadata
                 )
-            raise _map_error("OSS WAL publish", exc) from exc
+            raise map_oss_error("OSS WAL publish", exc) from exc
         return self._verify_published(
             object_name, size, ObjectChecksum(MD5, digest), metadata, created=True
         )
@@ -569,7 +571,7 @@ class OSSObjectStore:
                 return self._adopt_base(
                     object_name, size, whole.hexdigest(), parts.etags(), metadata
                 )
-            raise _map_error("OSS base upload", exc) from exc
+            raise map_oss_error("OSS base upload", exc) from exc
         finally:
             if upload_id is not None:
                 with suppress(oss2.exceptions.ServerError):
@@ -587,7 +589,7 @@ class OSSObjectStore:
                 headers={"Content-MD5": _b64_md5(_md5_hex(data))},
             )
         except oss2.exceptions.OssError as exc:
-            raise _map_error("OSS shard upload", exc) from exc
+            raise map_oss_error("OSS shard upload", exc) from exc
         etag = _normalize_etag(result.etag)
         if not etag or etag.lower() != _md5_hex(data):
             raise PermanentObjectStoreError("OSS shard ETag does not match its content MD5")
@@ -682,7 +684,7 @@ class OSSObjectStore:
                 raise TransientObjectStoreError(
                     "OSS precondition raced with a missing object"
                 ) from None
-            raise _map_error("OSS base verification", exc) from exc
+            raise map_oss_error("OSS base verification", exc) from exc
 
 
 class OSSRetentionDeleteStore:
@@ -738,7 +740,7 @@ class OSSRetentionDeleteStore:
         except oss2.exceptions.OssError as exc:
             if _is_not_found(exc):
                 return DeleteOutcome.ABSENT
-            raise _map_error("OSS retention head", exc) from exc
+            raise map_oss_error("OSS retention head", exc) from exc
         etag = _normalize_etag(head.etag)
         if not etag:
             raise TransientObjectStoreError("OSS object omitted verification properties")
@@ -749,5 +751,5 @@ class OSSRetentionDeleteStore:
         except oss2.exceptions.OssError as exc:
             # DeleteObject answers 204 even for a missing object, so a raised
             # error is a transport or permission failure, never "absent".
-            raise _map_error("OSS retention delete", exc) from exc
+            raise map_oss_error("OSS retention delete", exc) from exc
         return DeleteOutcome.DELETED
