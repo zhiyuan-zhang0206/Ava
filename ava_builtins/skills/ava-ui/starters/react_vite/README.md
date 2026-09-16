@@ -50,7 +50,7 @@ page directly connects to the server (no gateway reverse proxy), HMR goes throug
 
 ```bash
 npm run build  # → dist/
-# Then you can also serve dist/ using `python -m http.server` (no longer need vite dev server)
+# Then serve dist/ with ava.ui.serve(dir='/tmp/my-app/dist', name='my-react-page', port=5173) (no longer need the vite dev server)
 ```
 
 ## Known pitfalls
