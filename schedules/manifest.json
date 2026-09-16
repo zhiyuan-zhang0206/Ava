@@ -57,6 +57,14 @@
       "description": "Ship the local OTel trace mirror to the local Tempo viewer (LGTM stack) every 5 minutes, incremental by per-file watermark.",
       "script": "trace-ship-tempo-schedule.py",
       "command": "python trace-ship-tempo-schedule.py"
+    },
+    {
+      "name": "hierarchy-worker",
+      "class": "product",
+      "default_enabled": true,
+      "description": "Compact-driven understanding-tree worker — scans for new compaction boundaries, enqueues per-agent builds of the run-timeline narrative layers and runs them serially with a bounded per-job budget (task #3704 P2b).",
+      "script": "hierarchy-worker-schedule.py",
+      "command": "python hierarchy-worker-schedule.py"
     }
   ]
 }
