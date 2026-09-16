@@ -2,10 +2,10 @@
 
 Registers the fleet plugin's per-agent task list (task #2909; reshaped for
 task #3216, user request 2026-09-12): the inspector shows the agent's active
-tasks — "today's tasks" — as a section, each row jumping to the task in the
+tasks as a section, each row jumping to the task in the
 fleet task view.
 
-The kernel resolves the rows (its ownership rule and cap, see
+The kernel resolves the rows (its ownership rule, see
 ``shared/plugin_inspector.py``), so this module carries no ids and no
 callables. ``order=50`` puts the section first in the panel: it is the agent's
 work queue, so it should be visible without scrolling (the order scale and the
