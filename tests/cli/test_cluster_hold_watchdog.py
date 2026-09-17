@@ -9,6 +9,7 @@ reaches both the attempt log and the scheduler-captured stderr.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import UTC, datetime
 
 import pytest
@@ -48,7 +49,7 @@ def _no_hold() -> hw.HoldWatchdogVerdict:
 
 
 @pytest.fixture(autouse=True)
-def _clean_attempt_state() -> None:
+def _clean_attempt_state() -> Iterator[None]:
     paths = (hw.attempt_path(), hw.attempt_lock_path())
     for path in paths:
         path.unlink(missing_ok=True)
@@ -68,9 +69,16 @@ def legs(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     from cli.commands import _hold_recover
 
     calls: list[str] = []
+
+    def _start(_holder: str, _at: datetime) -> None:
+        calls.append("start")
+
+    def _resume(_holder: str, _at: datetime) -> None:
+        calls.append("resume")
+
     monkeypatch.setattr(_hold_recover, "_complete_stop", lambda: calls.append("stop"))
-    monkeypatch.setattr(_hold_recover, "_start_leg", lambda _h, _t: calls.append("start"))
-    monkeypatch.setattr(_hold_recover, "_resume_leg", lambda _h, _t: calls.append("resume"))
+    monkeypatch.setattr(_hold_recover, "_start_leg", _start)
+    monkeypatch.setattr(_hold_recover, "_resume_leg", _resume)
     return calls
 
 
@@ -85,7 +93,7 @@ def db_notes(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
 
 def _verdicts(monkeypatch: pytest.MonkeyPatch, *sequence: hw.HoldWatchdogVerdict) -> None:
-    """Pin evaluate() to a call sequence (pre-reserve verdict, then recheck)."""
+    """Pin evaluate() to a call sequence (pre-reserve, recheck, post-failure reads)."""
     remaining = list(sequence)
 
     def _next(**_kwargs: object) -> hw.HoldWatchdogVerdict:
@@ -172,6 +180,30 @@ def test_a_failed_step_spends_the_attempt_and_reports(
     assert state.note.startswith("failed at start")
     err = capsys.readouterr().err
     assert "failed at start" in err
+
+
+def test_a_mid_ladder_release_records_the_rescued_wording(
+    legs: list[str],
+    db_notes: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A release that sweeps the hold away mid-ladder is a rescue, not a
+    failure: the leg's refusal must record the #6294 abort wording."""
+    from cli.commands import _hold_recover
+
+    def _boom(_h: str, _t: datetime) -> None:
+        raise RuntimeError("this unit is not held by the supplied maintenance generation")
+
+    monkeypatch.setattr(_hold_recover, "_start_leg", _boom)
+    _verdicts(monkeypatch, _eligible(), _eligible(), _no_hold())
+    assert cw.cmd_hold_watchdog() == 1
+    state = hw.read_attempt()
+    assert state is not None and state.note is not None
+    assert state.note.startswith("aborted (rescued within the window)")
+    err = capsys.readouterr().err
+    assert "rescued within the window" in err
+    assert db_notes and "rescued within the window" in db_notes[0]
 
 
 def test_the_attempt_log_carries_the_narrative(

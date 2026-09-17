@@ -30,7 +30,11 @@ def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def _stable_slug(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(hw, "_home_slug", lambda: "ava-deadbeef")
     monkeypatch.setattr("shared.platform.launchd_job_label", lambda: None)
-    monkeypatch.setattr("shared.platform.descends_from_launchd_job", lambda _label: False)
+
+    def _not_descends(_label: str) -> bool:
+        return False
+
+    monkeypatch.setattr("shared.platform.descends_from_launchd_job", _not_descends)
 
 
 def _completed(rc: int = 0, stderr: str = "", stdout: str = "") -> object:
@@ -276,6 +280,10 @@ def test_unregister_addresses_the_requested_home(
             seen.append(slug)
 
     monkeypatch.setattr("shared.platform_backend.get_backend", _Backend)
-    monkeypatch.setattr("shared.cluster.slug_for_home", lambda _home: "slug-of-other-home")
+
+    def _slug(_home: Path) -> str:
+        return "slug-of-other-home"
+
+    monkeypatch.setattr("shared.cluster.slug_for_home", _slug)
     hw.unregister_hold_watchdog(tmp_path / "other-home")
     assert seen == ["slug-of-other-home"]

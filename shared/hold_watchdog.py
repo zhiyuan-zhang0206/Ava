@@ -82,6 +82,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
+from typing import cast
 
 from loguru import logger
 
@@ -341,8 +342,14 @@ def _intended_expiry() -> float | None:
         raw = json.loads(pause_owner.state_path().read_text())
     except (OSError, ValueError):
         return None
-    maintenance = raw.get("maintenance") if isinstance(raw, dict) else None
-    value = maintenance.get(_INTENDED_EXPIRY_KEY) if isinstance(maintenance, dict) else None
+    if not isinstance(raw, dict):
+        return None
+    raw = cast("dict[str, object]", raw)
+    maintenance = raw.get("maintenance")
+    if not isinstance(maintenance, dict):
+        return None
+    payload = cast("dict[str, object]", maintenance)
+    value = payload.get(_INTENDED_EXPIRY_KEY)
     if not isinstance(value, str):
         return None
     try:
@@ -437,7 +444,9 @@ def evaluate(*, now: float | None = None) -> HoldWatchdogVerdict:
         ),
         age_s=age,
         due_in_s=due - clock,
-        **generation,
+        holder=holder,
+        acquired_at=acquired_at,
+        phase=phase,
     )
 
 
@@ -505,6 +514,7 @@ def _read_attempt_unlocked(path: Path) -> AttemptState | None:
         raise AttemptStateUnreadableError(f"attempt CAS is not JSON: {exc}") from exc
     if not isinstance(raw, dict):
         raise AttemptStateUnreadableError("attempt CAS root must be an object")
+    raw = cast("dict[str, object]", raw)
     episode = raw.get("episode")
     attempts = raw.get("attempts", 0)
     attempted_at = raw.get("attempted_at")
@@ -512,7 +522,7 @@ def _read_attempt_unlocked(path: Path) -> AttemptState | None:
     ts = raw.get("ts")
     if episode is not None and not isinstance(episode, str):
         raise AttemptStateUnreadableError("attempt CAS episode must be a string or null")
-    if type(attempts) is not int or attempts < 0:
+    if isinstance(attempts, bool) or not isinstance(attempts, int) or attempts < 0:
         raise AttemptStateUnreadableError("attempt CAS attempts must be a nonnegative integer")
     if attempted_at is not None and (
         isinstance(attempted_at, bool) or not isinstance(attempted_at, (int, float))

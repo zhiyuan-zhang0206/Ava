@@ -10,6 +10,7 @@ stand-in drift.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -40,7 +41,7 @@ def _snapshot(
 
 
 @pytest.fixture(autouse=True)
-def _clean_attempt_state() -> None:
+def _clean_attempt_state() -> Iterator[None]:
     """The root conftest shares one tmp $AVA_HOME across the session; this
     module owns the attempt CAS file inside it.
 
@@ -60,7 +61,11 @@ def _clean_attempt_state() -> None:
 def armed(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every gate passing: a stopped hold, dead dead-driver, nothing executing."""
     monkeypatch.setattr(pause_owner, "read", _snapshot)
-    monkeypatch.setattr("shared.hold_driver.liveness", lambda _driver: "dead")
+
+    def _dead(_driver: object) -> str:
+        return "dead"
+
+    monkeypatch.setattr("shared.hold_driver.liveness", _dead)
     monkeypatch.setattr(hw, "_executing_block", lambda: None)
     monkeypatch.setattr(hw, "_lifecycle_busy", lambda: False)
     monkeypatch.setattr(hw, "_intended_expiry", lambda: None)
@@ -146,7 +151,11 @@ def test_non_dead_driver_identity_never_acts(
 ) -> None:
     """Only a birth-checked DEAD is a license; a live shepherd is work in
     progress and missing evidence is missing evidence (task #3270)."""
-    monkeypatch.setattr("shared.hold_driver.liveness", lambda _driver: reading)
+
+    def _reading(_driver: object) -> str:
+        return reading
+
+    monkeypatch.setattr("shared.hold_driver.liveness", _reading)
     verdict = hw.evaluate()
     assert verdict.kind is hw.VerdictKind.BACK_OFF
     assert verdict.code == f"driver-{reading}"
@@ -168,18 +177,21 @@ def test_handoff_pending_defers(monkeypatch: pytest.MonkeyPatch) -> None:
     snapshot = updater_handoff.UpdaterHandoffSnapshot(
         status="pending", generation="g1", expired=False
     )
-    monkeypatch.setattr(updater_handoff, "read", lambda **_kw: snapshot)
+
+    def _read(**_kw: object) -> updater_handoff.UpdaterHandoffSnapshot:
+        return snapshot
+
+    monkeypatch.setattr(updater_handoff, "read", _read)
     assert hw._executing_block() == ("handoff-pending", "updater handoff g1 is pending")
 
 
 def test_handoff_invalid_defers(monkeypatch: pytest.MonkeyPatch) -> None:
     from shared import updater_handoff
 
-    monkeypatch.setattr(
-        updater_handoff,
-        "read",
-        lambda **_kw: updater_handoff.UpdaterHandoffSnapshot(status="invalid"),
-    )
+    def _invalid_read(**_kw: object) -> updater_handoff.UpdaterHandoffSnapshot:
+        return updater_handoff.UpdaterHandoffSnapshot(status="invalid")
+
+    monkeypatch.setattr(updater_handoff, "read", _invalid_read)
     assert hw._executing_block() == (
         "handoff-unreadable",
         "the updater handoff journal is unreadable",
@@ -192,8 +204,16 @@ def test_handoff_running_with_dead_owner_does_not_defer(monkeypatch: pytest.Monk
     snapshot = updater_handoff.UpdaterHandoffSnapshot(
         status="running", generation="g2", expired=True
     )
-    monkeypatch.setattr(updater_handoff, "read", lambda **_kw: snapshot)
-    monkeypatch.setattr(updater_handoff, "owner_is_live", lambda _snapshot: False)
+
+    def _read(**_kw: object) -> updater_handoff.UpdaterHandoffSnapshot:
+        return snapshot
+
+    monkeypatch.setattr(updater_handoff, "read", _read)
+
+    def _not_live(_snapshot: object) -> bool:
+        return False
+
+    monkeypatch.setattr(updater_handoff, "owner_is_live", _not_live)
     monkeypatch.setattr(hw, "_live_orchestration_session", lambda: None)
     monkeypatch.setattr(hw, "_updater_lock_held", lambda: False)
     assert hw._executing_block() is None
@@ -205,7 +225,11 @@ def test_an_expired_pending_handoff_does_not_defer(monkeypatch: pytest.MonkeyPat
     snapshot = updater_handoff.UpdaterHandoffSnapshot(
         status="pending", generation="g3", expired=True
     )
-    monkeypatch.setattr(updater_handoff, "read", lambda **_kw: snapshot)
+
+    def _read(**_kw: object) -> updater_handoff.UpdaterHandoffSnapshot:
+        return snapshot
+
+    monkeypatch.setattr(updater_handoff, "read", _read)
     monkeypatch.setattr(hw, "_live_orchestration_session", lambda: None)
     monkeypatch.setattr(hw, "_updater_lock_held", lambda: False)
     assert hw._executing_block() is None
@@ -218,11 +242,10 @@ def test_a_live_orchestration_session_defers_including_hold_recover(
     stand down while the sibling completion runs."""
     from shared import updater_handoff
 
-    monkeypatch.setattr(
-        updater_handoff,
-        "read",
-        lambda **_kw: updater_handoff.UpdaterHandoffSnapshot(status="inactive"),
-    )
+    def _inactive_read(**_kw: object) -> updater_handoff.UpdaterHandoffSnapshot:
+        return updater_handoff.UpdaterHandoffSnapshot(status="inactive")
+
+    monkeypatch.setattr(updater_handoff, "read", _inactive_read)
     seen: list[str] = []
 
     class _Backend:
@@ -241,11 +264,10 @@ def test_a_live_orchestration_session_defers_including_hold_recover(
 def test_an_unreadable_session_probe_defers(monkeypatch: pytest.MonkeyPatch) -> None:
     from shared import updater_handoff
 
-    monkeypatch.setattr(
-        updater_handoff,
-        "read",
-        lambda **_kw: updater_handoff.UpdaterHandoffSnapshot(status="inactive"),
-    )
+    def _inactive_read(**_kw: object) -> updater_handoff.UpdaterHandoffSnapshot:
+        return updater_handoff.UpdaterHandoffSnapshot(status="inactive")
+
+    monkeypatch.setattr(updater_handoff, "read", _inactive_read)
 
     def _explode() -> None:
         raise RuntimeError("no backend")

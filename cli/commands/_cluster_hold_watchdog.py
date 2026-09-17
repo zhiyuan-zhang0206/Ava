@@ -104,12 +104,36 @@ def _run_ladder(
             else:
                 _hold_recover._resume_leg(holder, acquired_at)
         except Exception as exc:
-            note = f"failed at {step}: {exc!r}"[:500]
-            _log_line(attempt_log, f"[hold-watchdog] {note}")
-            _report("error", f"[hold-watchdog] {note}")
+            if _released_since(holder, acquired_at):
+                note = f"aborted (rescued within the window): {step} refused: {exc!r}"[:500]
+                _log_line(attempt_log, f"[hold-watchdog] {note}")
+                _report("warning", f"[hold-watchdog] {note}")
+            else:
+                note = f"failed at {step}: {exc!r}"[:500]
+                _log_line(attempt_log, f"[hold-watchdog] {note}")
+                _report("error", f"[hold-watchdog] {note}")
             return note, 1
     note = f"expired-complete: ladder {' -> '.join(steps)} finished; hold released"
     return note, 0
+
+
+def _released_since(holder: str, acquired_at: datetime) -> bool:
+    """True when the exact generation the ladder was completing no longer stands.
+
+    A leg failure takes one of two meanings (task #6294): while our generation
+    stands, the leg FAILED; when a release (or replacement) swept the hold away
+    mid-ladder, the attempt was rescued inside the window and is recorded with
+    the abort wording, never as a completion. The split is decided on a fresh
+    reading - never on the exception's wording - so it tracks state, not strings.
+    """
+    from shared import hold_watchdog
+
+    current = hold_watchdog.evaluate()
+    if current.kind is hold_watchdog.VerdictKind.NO_HOLD:
+        return True
+    if current.holder is None or current.acquired_at is None:
+        return False
+    return current.holder != holder or current.acquired_at != acquired_at
 
 
 def _finish(episode: str, note: str, *, attempt_log: Path | None) -> None:
@@ -189,10 +213,16 @@ def _run_watchdog() -> int:
         _finish(episode, note, attempt_log=attempt_log)
         return 0
 
+    acquired_at = verdict.acquired_at
+    if acquired_at is None:
+        # An eligible verdict always carries a full generation; a None here is
+        # the same class of bug as the missing episode above.
+        _report("error", "[hold-watchdog] eligible verdict without an acquisition instant")
+        return 1
     note, rc = _run_ladder(
         recheck.phase or verdict.phase or "",
         verdict.holder or "",
-        verdict.acquired_at,
+        acquired_at,
         attempt_log=attempt_log,
     )
     _finish(episode, note, attempt_log=attempt_log)
