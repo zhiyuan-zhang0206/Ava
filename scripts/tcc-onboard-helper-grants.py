@@ -36,8 +36,15 @@ Mechanics:
 Usage:
   .venv/bin/python scripts/tcc-onboard-helper-grants.py            # interactive, all items
   .venv/bin/python scripts/tcc-onboard-helper-grants.py --check    # inventory only (no dialogs)
+  .venv/bin/python scripts/tcc-onboard-helper-grants.py --tier L2  # target tier (design v1)
   .venv/bin/python scripts/tcc-onboard-helper-grants.py --items folders
   .venv/bin/python scripts/tcc-onboard-helper-grants.py --timeout 180
+
+Tiers: --tier names the machine's target authorization set (design v1). L0
+refuses to probe or trigger at all (maintenance windows); L1..L3 grow the
+item set. Groups whose trigger method is still pending verification
+(appdata, media, icloud, fda, devtools) are reported as pending and never
+attempted, so an L2/L3 run stays honest about what it can not yet reach.
 
 Exit codes: 0 = every requested item is granted/verified; 1 = unresolved
 items remain (details in the report and at the workdir); 2 = setup failure
@@ -62,7 +69,29 @@ if str(REPO_ROOT) not in sys.path:
 
 DEFAULT_WORKDIR = "/tmp/tcc-onboard-helper-grants"  # noqa: S108 - scratch evidence dir, never secret
 
-ITEM_GROUPS = ("folders", "apple-events", "sr-ax")
+IMPLEMENTED_GROUPS = ("folders", "apple-events", "sr-ax")
+"""Groups this build can inventory and trigger end to end."""
+
+PENDING_GROUPS: dict[str, str] = {
+    # Target-tier groups whose trigger method is still pending verification
+    # (design v1 items #7-#11): named in reports, never attempted.
+    "appdata": "trigger method pending verification (design v1 item #7)",
+    "media": "trigger method pending verification (design v1 item #8)",
+    "icloud": "trigger method pending verification (design v1 item #9)",
+    "fda": "trigger method pending verification (design v1 item #10)",
+    "devtools": "trigger method pending verification (design v1 item #11)",
+}
+
+ITEM_GROUPS = IMPLEMENTED_GROUPS + tuple(PENDING_GROUPS)
+"""Every group name accepted by --items / --tier."""
+
+TIER_GROUPS: dict[str, tuple[str, ...]] = {
+    "L0": (),  # silent posture: no probing, no triggering (maintenance windows)
+    "L1": IMPLEMENTED_GROUPS,
+    "L2": (*IMPLEMENTED_GROUPS, "appdata", "media", "icloud"),
+    "L3": (*IMPLEMENTED_GROUPS, "appdata", "media", "icloud", "fda", "devtools"),
+}
+"""The tier model (design v1): a machine's target authorization set."""
 
 FOLDER_ITEMS: tuple[tuple[str, str, str], ...] = (
     # (item id, TCC service, folder under $HOME)
@@ -154,6 +183,13 @@ with open(result_path, "w") as handle:
 
 class OnboardError(RuntimeError):
     """A user-facing onboarding failure."""
+
+
+def groups_for_tier(tier: str | None) -> tuple[str, ...]:
+    """Item groups implied by ``--tier``; the legacy implemented set when None."""
+    if tier is None:
+        return IMPLEMENTED_GROUPS
+    return TIER_GROUPS[tier]
 
 
 def helper_client() -> Any:
@@ -309,10 +345,22 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
         action="store_true",
         help="inventory only: preflight the folder + system services, never trigger a dialog",
     )
-    parser.add_argument(
+    target = parser.add_mutually_exclusive_group()
+    target.add_argument(
+        "--tier",
+        choices=tuple(TIER_GROUPS),
+        help=(
+            "target tier (design v1): sets the item groups for the run;"
+            " L0 refuses to probe or trigger, L1..L3 grow the set"
+        ),
+    )
+    target.add_argument(
         "--items",
-        default=",".join(ITEM_GROUPS),
-        help="comma-separated subset of: " + ",".join(ITEM_GROUPS),
+        help="comma-separated subset of: "
+        + ",".join(IMPLEMENTED_GROUPS)
+        + " (report-only pending groups: "
+        + ",".join(PENDING_GROUPS)
+        + ")",
     )
     parser.add_argument(
         "--timeout",
@@ -327,7 +375,13 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
         print("FAIL: this onboarding tool is macOS-only (the permissions helper is).")
         return 2
 
-    items = [part.strip() for part in args.items.split(",") if part.strip()]
+    if args.tier == "L0":
+        # Silent posture: nothing is probed and nothing is triggered.
+        print("tier L0 (silent): no inventory probe and no triggers are performed.")
+        return 0
+
+    raw_items = args.items if args.items is not None else ",".join(groups_for_tier(args.tier))
+    items = [part.strip() for part in raw_items.split(",") if part.strip()]
     unknown = [part for part in items if part not in ITEM_GROUPS]
     if unknown:
         print(f"FAIL: unknown --items value(s): {', '.join(unknown)}")
@@ -353,6 +407,14 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
     print("current helper grant state (preflight, zero dialogs):")
     for service in PREFLIGHT_SERVICES:
         print(f"  {service}: {matrix.get(service, 'unknown')}")
+
+    pending = [group for group in items if group in PENDING_GROUPS]
+    if args.tier is not None:
+        print(f"tier {args.tier} -- groups: {', '.join(items)}")
+    if pending:
+        print("pending groups (report-only until their trigger method is verified):")
+        for group in pending:
+            print(f"  {group}: {PENDING_GROUPS[group]}")
 
     statuses: dict[str, str] = {}
     unresolved = False
@@ -433,9 +495,16 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
                 " Privacy & Security > Accessibility."
             )
 
+    for group in pending:
+        statuses[group] = "pending verification (not triggered)"
+        unresolved = True
+
     report = {
         "run_id": run_id,
         "host": os.uname().nodename,
+        "tier": args.tier,
+        "groups": items,
+        "pending_groups": pending,
         "check_only": args.check,
         "matrix": matrix,
         "statuses": statuses,
@@ -448,6 +517,8 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
         print(f"  {item_id}: {value}")
     if args.check:
         print("note: --check never shows AppleEvents rows (see the docstring).")
+    if pending:
+        print("pending groups (not yet triggerable): " + ", ".join(pending))
     if unresolved:
         print(
             "ONBOARD INCOMPLETE -- resolve the items above, then re-run (it skips granted items)."
