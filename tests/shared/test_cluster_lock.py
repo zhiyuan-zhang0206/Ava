@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
+from typing import Any
 
 import psycopg
 import pytest
@@ -89,12 +90,17 @@ def test_release_frees_for_next_holder() -> None:
     assert acquire_update_lock("B") is True  # now free
 
 
-def test_release_is_holder_scoped() -> None:
+def test_release_is_holder_scoped(loguru_records: list[dict[str, Any]]) -> None:
     """A release by a non-holder is a no-op — so a slow release after a TTL reclaim
-    can't clobber the new owner's lock."""
+    can't clobber the new owner's lock; the WARNING names the reclaim, never the
+    pending-publication refusal (task #2683)."""
     assert acquire_update_lock("A") is True
     release_update_lock("B")  # B never held it
     assert update_lock_holder() == "A"  # A still holds
+    assert any(
+        "not held by B at release" in r["message"] and "reclaimed past TTL" in r["message"]
+        for r in loguru_records
+    )
 
 
 def test_expired_lock_is_reclaimable() -> None:
@@ -106,7 +112,7 @@ def test_expired_lock_is_reclaimable() -> None:
 
 
 def test_expired_lock_with_pending_publication_requires_publication_recovery(
-    db_conn: psycopg.Connection,
+    db_conn: psycopg.Connection, loguru_records: list[dict[str, Any]]
 ) -> None:
     """A durable pending publication outlives its lease.
 
@@ -134,6 +140,18 @@ def test_expired_lock_with_pending_publication_requires_publication_recovery(
             "SELECT holder, phase, note FROM deployment_state WHERE id=1"
         ).fetchone()
         assert row == ("gateway:pid123", "updating", None)
+
+        # Both refusals must name the pending publication — the warning must not
+        # assert the reclaim story for this designed refusal (task #2683).
+        refusals = [
+            r["message"]
+            for r in loguru_records
+            if "not held by gateway:pid123 at release" in r["message"]
+            or "settle hold by gateway:pid123 did not land" in r["message"]
+        ]
+        assert len(refusals) == 2
+        assert all("durable pending publication refuses the transition" in m for m in refusals)
+        assert not any("reclaimed past TTL" in m for m in refusals)
 
         with db_conn.cursor() as cur:
             cur.execute(
@@ -300,13 +318,20 @@ def test_settle_hold_leaves_the_holder_string_parseable() -> None:
     assert _lock_holder_is_live(lease.holder) is True
 
 
-def test_settle_hold_by_a_non_holder_is_refused() -> None:
+def test_settle_hold_by_a_non_holder_is_refused(
+    loguru_records: list[dict[str, Any]],
+) -> None:
     """Holder-scoped like release: a straggler must not shorten a lease that has
-    already been reclaimed by a new owner to a settle window."""
+    already been reclaimed by a new owner to a settle window; the WARNING names
+    the reclaim, never the pending-publication refusal (task #2683)."""
     assert acquire_update_lock("A") is True
     assert settle_update_lock("B", hosts=["wsl"]) is False
     lease = read_update_lease()
     assert lease is not None and lease.note is None
+    assert any(
+        "settle hold by B did not land" in r["message"] and "reclaimed past TTL" in r["message"]
+        for r in loguru_records
+    )
 
 
 def test_acquire_clears_a_previous_settle_note() -> None:
