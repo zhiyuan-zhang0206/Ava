@@ -337,6 +337,15 @@ def classify_apple_event(text: str) -> str:
     return f"unresolved ({text})"
 
 
+RESOLVED_STATUSES = frozenset({"granted", "already granted"})
+"""`statuses` spellings that count as resolved; every other value is unresolved."""
+
+
+def count_unresolved(statuses: dict[str, str]) -> int:
+    """How many reported items are unresolved -- the report's one count rule."""
+    return sum(1 for status in statuses.values() if status not in RESOLVED_STATUSES)
+
+
 def state_status(services: tuple[str, ...], matrix: dict[str, str]) -> str:
     """Item status for an untriggerable group: granted only when every service is."""
     states = {service: matrix.get(service, "unknown") for service in services}
@@ -434,7 +443,6 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
             print(f"  {group}: {states}")
 
     statuses: dict[str, str] = {}
-    unresolved = False
 
     if "folders" in items:
         print("\n== file & folders block ==")
@@ -445,7 +453,6 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
                 continue
             if args.check:
                 statuses[item_id] = matrix.get(service, "unknown")
-                unresolved = unresolved or statuses[item_id] != "granted"
                 continue
             child = workdir / f"folder-{item_id}.child.py"
             child.write_text(_FOLDER_ACCESS_CHILD)
@@ -462,7 +469,6 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
             )
             statuses[item_id] = classify_folder(text)
             print(f"  [{item_id}] -> {statuses[item_id]}")
-            unresolved = unresolved or statuses[item_id] != "granted"
 
     if "apple-events" in items and not args.check:
         print("\n== AppleEvents block (Automation dialogs, one per target app) ==")
@@ -483,7 +489,6 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
             )
             statuses[item_id] = classify_apple_event(text)
             print(f"  [{item_id}] -> {statuses[item_id]}")
-            unresolved = unresolved or statuses[item_id] != "granted"
     elif "apple-events" in items and args.check:
         print(
             "\n== AppleEvents block: skipped in --check (no silent way to read Automation rows) =="
@@ -496,7 +501,6 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
             print("  [screen-recording] granted")
         else:
             statuses["screen-recording"] = "missing"
-            unresolved = True
             print(
                 "  [screen-recording] MISSING -- grant AvaPermissionsHelper in System Settings >"
                 " Privacy & Security > Screen Recording, then restart the helper."
@@ -506,7 +510,6 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
             print("  [accessibility] granted")
         else:
             statuses["accessibility"] = "missing"
-            unresolved = True
             print(
                 "  [accessibility] MISSING -- grant AvaPermissionsHelper in System Settings >"
                 " Privacy & Security > Accessibility."
@@ -514,7 +517,9 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
 
     for group in untriggerable:
         statuses[group] = state_status(UNTRIGGERABLE_GROUPS[group], matrix)
-        unresolved = unresolved or statuses[group] != "granted"
+
+    unresolved_count = count_unresolved(statuses)
+    unresolved = unresolved_count > 0
 
     report = {
         "run_id": run_id,
@@ -526,6 +531,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
         "matrix": matrix,
         "statuses": statuses,
         "unresolved": unresolved,
+        "unresolved_count": unresolved_count,
     }
     (workdir / f"report-{run_id}.json").write_text(json.dumps(report, indent=2) + "\n")
 

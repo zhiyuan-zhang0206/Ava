@@ -1542,7 +1542,9 @@ final class PanelDelegate: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         tableView.reloadData()
         let unresolved = (object["unresolved"] as? Bool) ?? true
         if unresolved {
-            setStatus(String(format: panelString("panel.status.unresolved"), rows.count), color: .systemOrange)
+            // One count rule lives in the tool; the panel renders the reported number.
+            let count = (object["unresolved_count"] as? Int) ?? 0
+            setStatus(String(format: panelString("panel.status.unresolved"), count), color: .systemOrange)
         } else {
             setStatus(panelString("panel.status.pass"), color: .systemGreen)
         }
