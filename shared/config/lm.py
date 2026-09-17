@@ -13,10 +13,10 @@ from shared.config._base import EnvSettings
 
 class LmSettings(EnvSettings):
     llm_model: str = Field(
-        default="deepseek-v4-flash",
+        default="deepseek-flash",
         alias="AVA_MODEL",
         description=(
-            "Agent model name, e.g. deepseek-v4-flash or claude-*. Per-agent "
+            "Agent model name, e.g. deepseek-flash or claude-*. Per-agent "
             "overridable; a cross-provider override needs that provider's API key "
             "set on the host, or model build fails fast."
         ),
@@ -47,7 +47,7 @@ class LmSettings(EnvSettings):
         # instead of summarizing them, 15 of 56 attempts) — re-measure if
         # label quality regresses. Staying inside DeepSeek keeps the
         # gateway's required-key surface unchanged.
-        default="deepseek-v4-flash",
+        default="deepseek-flash",
         alias="AVA_LABELER_MODEL",
         description=(
             "Model used only to generate a conversation's short display name "
@@ -68,7 +68,7 @@ class LmSettings(EnvSettings):
     )
 
     hierarchy_model: str = Field(
-        default="deepseek-v4-flash",
+        default="deepseek-flash",
         alias="AVA_HIERARCHY_MODEL",
         description=(
             "Model for the understanding-layer generation pass (hierarchical "
@@ -441,7 +441,7 @@ class LmSettings(EnvSettings):
     )
 
     understand_text_model: str = Field(
-        default="deepseek-v4-flash",
+        default="deepseek-flash",
         alias="AVA_UNDERSTAND_TEXT_MODEL",
         description="Model for `ava.understand`'s text path (strings and text files). Any agent model id works.",
         json_schema_extra={

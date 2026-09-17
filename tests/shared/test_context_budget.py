@@ -43,6 +43,7 @@ def test_deepseek_budget_is_374k_soft_512k_hard() -> None:
     rule with per-model fractions — soft 374k / hard 512k on their 1M
     window."""
     for model in (
+        "deepseek-flash",
         "deepseek-v4-pro",
         "deepseek-v4-flash",
         "deepseek-v4-flash-vision-exp",
@@ -71,6 +72,7 @@ def test_every_non_deepseek_spawnable_model_runs_the_flat_thirty_forty_rule() ->
     for models in SUPPORTED_MODELS.values():
         for model in models:
             if model in (
+                "deepseek-flash",
                 "deepseek-v4-pro",
                 "deepseek-v4-flash",
                 "deepseek-v4-flash-vision-exp",

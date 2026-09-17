@@ -66,6 +66,7 @@ _REPO_MODEL_VENDORS = {
     "claude-opus-5": "anthropic",
     "claude-sonnet-4-6": "anthropic",
     "claude-sonnet-5": "anthropic",
+    "deepseek-flash": "deepseek",
     "deepseek-v4-flash": "deepseek",
     "deepseek-v4-flash-vision-exp": "deepseek",
     "deepseek-v4-pro": "deepseek",
@@ -343,20 +344,20 @@ def test_repo_deepseek_provider_is_enabled_and_registers_complete_contract() -> 
     ensure_provider_plugins_loaded()
 
     deepseek_models = {
+        "deepseek-flash",
         "deepseek-v4-pro",
         "deepseek-v4-flash",
         "deepseek-v4-flash-vision-exp",
     }
     assert deepseek_models <= MODELS.keys()
-    # V4 Pro and the vision experiment stay registered (facts + final price)
-    # but are withdrawn from the spawn picker (user order 2026-09-10); both
-    # resolve to deepseek-v4-flash before provider construction.
-    assert set(SUPPORTED_MODELS["deepseek"]) == deepseek_models - {
-        "deepseek-v4-pro",
-        "deepseek-v4-flash-vision-exp",
-    }
-    assert MODELS["deepseek-v4-pro"].unavailable_fallback == "deepseek-v4-flash"
-    assert MODELS["deepseek-v4-flash-vision-exp"].unavailable_fallback == "deepseek-v4-flash"
+    # V4 Pro, the renamed-away V4 Flash id and the vision experiment stay
+    # registered (facts + final price) but are withdrawn from the spawn picker
+    # (user orders 2026-09-10 / 2026-09-17); all three resolve to
+    # deepseek-flash before provider construction.
+    assert set(SUPPORTED_MODELS["deepseek"]) == {"deepseek-flash"}
+    assert MODELS["deepseek-v4-pro"].unavailable_fallback == "deepseek-flash"
+    assert MODELS["deepseek-v4-flash"].unavailable_fallback == "deepseek-flash"
+    assert MODELS["deepseek-v4-flash-vision-exp"].unavailable_fallback == "deepseek-flash"
     assert pricing.model_vendor("deepseek-v4-pro") == "deepseek"
 
     from shared.lm.factory import _MODEL_KEY_MAP, provider_key_map

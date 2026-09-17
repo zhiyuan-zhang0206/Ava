@@ -42,7 +42,7 @@ def test_plugin_key_env_injection_authorizes_without_env_file(
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-env")
     ensure_provider_plugins_loaded()
 
-    assert validate_model_config(model="deepseek-v4-flash", config={}) == "deepseek-v4-flash"
+    assert validate_model_config(model="deepseek-flash", config={}) == "deepseek-flash"
 
 
 def test_plugin_key_missing_in_both_channels_raises(
@@ -54,7 +54,7 @@ def test_plugin_key_missing_in_both_channels_raises(
     ensure_provider_plugins_loaded()
 
     with pytest.raises(ValueError, match="DEEPSEEK_API_KEY"):
-        validate_model_config(model="deepseek-v4-flash", config={})
+        validate_model_config(model="deepseek-flash", config={})
 
 
 def test_plugin_key_ignores_legacy_settings_field(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -67,7 +67,7 @@ def test_plugin_key_ignores_legacy_settings_field(monkeypatch: pytest.MonkeyPatc
 
     assert provider_key_map()["deepseek-"] == ("DeepSeek", None, "DEEPSEEK_API_KEY")
     with pytest.raises(ValueError, match="DEEPSEEK_API_KEY"):
-        validate_model_config(model="deepseek-v4-flash", config={})
+        validate_model_config(model="deepseek-flash", config={})
 
 
 def test_gemini_plugin_key_ignores_legacy_settings_field(
@@ -178,7 +178,7 @@ def test_mimo_plugin_key_ignores_legacy_settings_field(
 def test_file_fallback_allows_key_after_gateway_pop(env_file: Path) -> None:
     """A plugin key declared in the cluster `.env` authorizes the model."""
     env_file.write_text("DEEPSEEK_API_KEY=sk-file-value\n")
-    assert validate_model_config(model="deepseek-v4-flash", config={}) == "deepseek-v4-flash"
+    assert validate_model_config(model="deepseek-flash", config={}) == "deepseek-flash"
 
 
 def test_missing_key_still_fails(env_file: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -186,22 +186,27 @@ def test_missing_key_still_fails(env_file: Path, monkeypatch: pytest.MonkeyPatch
     env_file.write_text("SOME_OTHER_KEY=x\n")
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     with pytest.raises(ValueError, match="DEEPSEEK_API_KEY"):
-        validate_model_config(model="deepseek-v4-flash", config={})
+        validate_model_config(model="deepseek-flash", config={})
 
 
 def test_withdrawn_model_resolves_to_its_fallback_at_the_spawn_boundary(env_file: Path) -> None:
-    """A spawn that still names a withdrawn deepseek model (v4-pro, vision-exp)
-    degrades to the registered flash fallback instead of failing — both as the
-    cluster default and via a per-agent overlay (user order 2026-09-10)."""
+    """A spawn that still names a withdrawn or retired deepseek model (v4-pro,
+    v4-flash, vision-exp) degrades to the registered flash fallback instead of
+    failing — both as the cluster default and via a per-agent overlay (user
+    orders 2026-09-10 / 2026-09-17)."""
     env_file.write_text("DEEPSEEK_API_KEY=sk-file-value\n")
-    assert validate_model_config(model="deepseek-v4-pro", config={}) == "deepseek-v4-flash"
+    assert validate_model_config(model="deepseek-v4-pro", config={}) == "deepseek-flash"
     assert (
         validate_model_config(model=None, config={"llm_model": "deepseek-v4-pro"})
-        == "deepseek-v4-flash"
+        == "deepseek-flash"
+    )
+    assert validate_model_config(model="deepseek-v4-flash", config={}) == "deepseek-flash"
+    assert (
+        validate_model_config(model=None, config={"llm_model": "deepseek-v4-flash"})
+        == "deepseek-flash"
     )
     assert (
-        validate_model_config(model="deepseek-v4-flash-vision-exp", config={})
-        == "deepseek-v4-flash"
+        validate_model_config(model="deepseek-v4-flash-vision-exp", config={}) == "deepseek-flash"
     )
 
 
@@ -227,8 +232,8 @@ class TestModelSupportsVision:
 
     def test_registered_text_only_deepseek_fails(self) -> None:
         # Same prefix as the vision model — the per-model media types, not the prefix,
-        # decides: an image to a v4-flash agent must still 422 up front.
-        assert model_supports_vision("deepseek-v4-flash") is False
+        # decides: an image to a flash agent must still 422 up front.
+        assert model_supports_vision("deepseek-flash") is False
         assert model_supports_vision("deepseek-v4-pro") is False
 
     def test_unregistered_id_falls_back_to_prefix(self) -> None:

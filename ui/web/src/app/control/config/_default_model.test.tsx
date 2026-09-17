@@ -32,7 +32,7 @@ function wrap() {
 
 const MODELS = {
   providers: {
-    deepseek: ["deepseek-v4-pro", "deepseek-v4-flash"],
+    deepseek: ["deepseek-v4-pro", "deepseek-flash"],
     claude: ["claude-sonnet-5"],
   },
   models: {},
@@ -43,7 +43,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(api.getModels).mockResolvedValue(MODELS);
   vi.mocked(api.getDefaultModel).mockResolvedValue({
-    model: "deepseek-v4-flash",
+    model: "deepseek-flash",
     source: "cluster",
   });
   vi.mocked(api.putDefaultModel).mockResolvedValue({
@@ -69,13 +69,13 @@ describe("DefaultModelPanel", () => {
   it("selects the stored default and groups options by provider", async () => {
     wrap();
     const select = await screen.findByTestId<HTMLSelectElement>("select-default-model");
-    await waitFor(() => expect(select.value).toBe("deepseek-v4-flash"));
+    await waitFor(() => expect(select.value).toBe("deepseek-flash"));
     // optgroup labels are an attribute, not text — read them off the DOM.
     const groups = [...select.querySelectorAll("optgroup")].map((g) => g.label);
     expect(groups).toEqual(["DeepSeek", "Claude"]);
     expect([...select.options].map((o) => o.value)).toEqual([
       "deepseek-v4-pro",
-      "deepseek-v4-flash",
+      "deepseek-flash",
       "claude-sonnet-5",
     ]);
   });
@@ -83,15 +83,15 @@ describe("DefaultModelPanel", () => {
   it("omits superseded roster options while preserving a stored superseded default", async () => {
     vi.mocked(api.getModels).mockResolvedValue({
       providers: {
-        deepseek: ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-legacy"],
+        deepseek: ["deepseek-v4-pro", "deepseek-flash", "deepseek-v4-legacy"],
       },
       models: {
         "deepseek-v4-pro": {
           provider: "deepseek",
           context_window: 128_000,
-          superseded_by: "deepseek-v4-flash",
+          superseded_by: "deepseek-flash",
         },
-        "deepseek-v4-flash": {
+        "deepseek-flash": {
           provider: "deepseek",
           context_window: 128_000,
           superseded_by: null,
@@ -99,10 +99,10 @@ describe("DefaultModelPanel", () => {
         "deepseek-v4-legacy": {
           provider: "deepseek",
           context_window: 128_000,
-          superseded_by: "deepseek-v4-flash",
+          superseded_by: "deepseek-flash",
         },
       },
-      default: "deepseek-v4-flash",
+      default: "deepseek-flash",
     });
     vi.mocked(api.getDefaultModel).mockResolvedValue({
       model: "deepseek-v4-pro",
@@ -115,14 +115,14 @@ describe("DefaultModelPanel", () => {
 
     expect([...select.options].map((option) => option.value)).toEqual([
       "deepseek-v4-pro",
-      "deepseek-v4-flash",
+      "deepseek-flash",
     ]);
   });
 
   it("PUTs the picked model on save", async () => {
     wrap();
     const select = await screen.findByTestId<HTMLSelectElement>("select-default-model");
-    await waitFor(() => expect(select.value).toBe("deepseek-v4-flash"));
+    await waitFor(() => expect(select.value).toBe("deepseek-flash"));
 
     fireEvent.change(select, { target: { value: "claude-sonnet-5" } });
     fireEvent.click(screen.getByTestId("save-default-model"));
@@ -133,11 +133,11 @@ describe("DefaultModelPanel", () => {
   it("keeps save disabled until the pick differs from the stored value", async () => {
     wrap();
     const select = await screen.findByTestId<HTMLSelectElement>("select-default-model");
-    await waitFor(() => expect(select.value).toBe("deepseek-v4-flash"));
+    await waitFor(() => expect(select.value).toBe("deepseek-flash"));
     const save = screen.getByTestId<HTMLButtonElement>("save-default-model");
     expect(save.disabled).toBe(true);
 
-    fireEvent.change(select, { target: { value: "deepseek-v4-flash" } });
+    fireEvent.change(select, { target: { value: "deepseek-flash" } });
     expect(screen.getByTestId<HTMLButtonElement>("save-default-model").disabled).toBe(true);
 
     fireEvent.change(select, { target: { value: "deepseek-v4-pro" } });

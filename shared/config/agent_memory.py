@@ -202,12 +202,12 @@ class AgentMemorySettings(EnvSettings):
     )
 
     memory_recall_filter_model: str = Field(
-        default="deepseek-v4-flash",
+        default="deepseek-flash",
         alias="AVA_MEMORY_RECALL_FILTER_MODEL",
         description=(
             "Model that judges retrieved notes for passive recall. Runs once per "
             "inbound-woken turn on names and one-line descriptions only, with "
-            "reasoning pinned off (~1.5s for a top-100 pass). deepseek-v4-flash "
+            "reasoning pinned off (~1.5s for a top-100 pass). deepseek-flash "
             "per user ruling (task #595): relaxed prompt + top-100 retrieval "
             "make flash match pro on recall, so the cheap model stays."
         ),

@@ -486,6 +486,7 @@ def test_deepseek_plugin_prices_equal_archive_current_base_tier(
 ) -> None:
     ensure_provider_plugins_loaded()
     model_ids = (
+        "deepseek-flash",
         "deepseek-v4-pro",
         "deepseek-v4-flash",
         "deepseek-v4-flash-vision-exp",

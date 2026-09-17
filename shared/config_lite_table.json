@@ -6,7 +6,7 @@
       "AVA_MODEL",
       "str",
       "literal",
-      "deepseek-v4-flash",
+      "deepseek-flash",
       null
     ],
     "db_pool_acquire_timeout_seconds": [

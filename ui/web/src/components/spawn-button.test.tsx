@@ -114,14 +114,14 @@ const modelsDefault = () => ({
 });
 
 const modelsWithSupersession = () => ({
-  providers: { deepseek: ["deepseek-v4-pro", "deepseek-v4-flash"] },
+  providers: { deepseek: ["deepseek-v4-pro", "deepseek-flash"] },
   models: {
     "deepseek-v4-pro": {
       provider: "deepseek",
       context_window: 128_000,
-      superseded_by: "deepseek-v4-flash",
+      superseded_by: "deepseek-flash",
     },
-    "deepseek-v4-flash": {
+    "deepseek-flash": {
       provider: "deepseek",
       context_window: 128_000,
       superseded_by: null,
@@ -590,7 +590,7 @@ describe("SpawnButton model dropdown", () => {
     const list = await screen.findByRole("list");
 
     expect(within(list).queryByText("deepseek-v4-pro")).toBeNull();
-    expect(within(list).getByText("deepseek-v4-flash")).toBeTruthy();
+    expect(within(list).getByText("deepseek-flash")).toBeTruthy();
   });
 
   it("selecting a non-default model passes model to onSpawn", async () => {
@@ -1178,9 +1178,9 @@ describe("SpawnButton model dropdown", () => {
   it("roster-hidden models are counted and excluded, with empty providers dropped", async () => {
     vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
     const roster = modelsDefault();
-    roster.providers.deepseek.push("deepseek-v4-flash");
+    roster.providers.deepseek.push("deepseek-flash");
     vi.mocked(api.getModels).mockResolvedValue(roster);
-    setMockSetting("models.hidden", ["claude-opus-4-8", "deepseek-v4-flash"]);
+    setMockSetting("models.hidden", ["claude-opus-4-8", "deepseek-flash"]);
     wrap(<SpawnButton variant="sm" onSpawn={vi.fn()} />);
 
     await waitFor(() => {
@@ -1190,7 +1190,7 @@ describe("SpawnButton model dropdown", () => {
 
     const list = await screen.findByRole("list");
     expect(within(list).getByText("deepseek-v4-pro")).toBeTruthy();
-    expect(within(list).queryByText("deepseek-v4-flash")).toBeNull();
+    expect(within(list).queryByText("deepseek-flash")).toBeNull();
     expect(within(list).queryByText("claude-opus-4-8")).toBeNull();
     expect(within(list).queryByText("Claude")).toBeNull();
     expect(screen.getByText("2 hidden — manage in Control > Display")).toBeTruthy();

@@ -40,7 +40,7 @@ class TestDeepseekMaxTokens:
 
     def test_flash_max_tokens(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
-        llm = build_chat_model("deepseek-v4-flash")
+        llm = build_chat_model("deepseek-flash")
         assert isinstance(llm, ChatAnthropic)
         assert llm.max_tokens == 384_000
 
@@ -71,14 +71,14 @@ class TestDeepseekMaxTokens:
 
 class TestModelContextWindow:
     """Input-token ceilings reported by the token-usage endpoint. deepseek-v4-pro
-    and deepseek-v4-flash are both 1M context — a frontend gauge computing
+    and deepseek-flash are both 1M context — a frontend gauge computing
     occupancy% off a stale 128K would over-report usage by ~8x."""
 
     def test_deepseek_pro_is_one_million(self) -> None:
         assert MODEL_CONTEXT_WINDOW["deepseek-v4-pro"] == 1_000_000
 
     def test_deepseek_flash_is_one_million(self) -> None:
-        assert MODEL_CONTEXT_WINDOW["deepseek-v4-flash"] == 1_000_000
+        assert MODEL_CONTEXT_WINDOW["deepseek-flash"] == 1_000_000
 
     def test_deepseek_vision_exp_is_one_million(self) -> None:
         assert MODEL_CONTEXT_WINDOW["deepseek-v4-flash-vision-exp"] == 1_000_000

@@ -540,7 +540,7 @@ def test_fetch_reads_page_then_calls_llm_with_web_model(
     monkeypatch: pytest.MonkeyPatch, mock_llm: dict[str, Any]
 ) -> None:
     """Happy path: page body is fetched, framed, and handed to the web-fetch
-    model (default deepseek-v4-flash with reasoning=none); its answer is what
+    model (default deepseek-flash with reasoning=none); its answer is what
     fetch returns."""
     monkeypatch.setattr(settings.web, "jina_api_key", None)  # anonymous
     payload = _make_jina_response(
@@ -554,7 +554,7 @@ def test_fetch_reads_page_then_calls_llm_with_web_model(
         )
     assert results == ["FAKE ANSWER"]
     # Uses the web-fetch model, not the understand text model
-    assert mock_llm["model"] == "deepseek-v4-flash"
+    assert mock_llm["model"] == "deepseek-flash"
     assert mock_llm["reasoning_effort"] == "none"
     # the prompt is passed through; the framed page (title + body) is the material
     assert mock_llm["prompt_text"] == "what does this PEP propose?"
@@ -957,13 +957,13 @@ def test_fetch_uses_configured_model_and_reasoning(
 def test_fetch_default_model_is_flash(
     monkeypatch: pytest.MonkeyPatch, mock_llm: dict[str, Any]
 ) -> None:
-    """Default model is deepseek-v4-flash (cheap) and reasoning is none —
+    """Default model is deepseek-flash (cheap) and reasoning is none —
     independent of the agent's main model."""
     monkeypatch.setattr(settings.web, "jina_api_key", None)
     payload = _make_jina_response(content="ok")
     with patch("ava.web.urllib.request.urlopen", return_value=_FakeResp(payload)):
         ava.web.fetch([("https://example.com", "summarize")])
-    assert mock_llm["model"] == "deepseek-v4-flash"
+    assert mock_llm["model"] == "deepseek-flash"
     assert mock_llm["reasoning_effort"] == "none"
 
 

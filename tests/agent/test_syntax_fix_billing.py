@@ -36,5 +36,5 @@ async def test_successful_syntax_repair_call_emits_chat_billing(
     assert await _repair_once(_LLM(), []) == "fixed = True"
     assert len(emitted) == 1
     assert emitted[0][0] is response
-    assert emitted[0][1]["model"] == "deepseek-v4-flash"
+    assert emitted[0][1]["model"] == "deepseek-flash"
     assert emitted[0][1]["usage_kind"] == "chat"
