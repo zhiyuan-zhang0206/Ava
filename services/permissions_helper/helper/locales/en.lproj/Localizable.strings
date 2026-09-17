@@ -1,0 +1,13 @@
+"panel.title" = "Ava Permissions Helper";
+"panel.tier" = "Target tier:";
+"panel.refresh" = "Check status";
+"panel.fix" = "Fill missing grants";
+"panel.col.item" = "Item";
+"panel.col.status" = "Status";
+"panel.status.checking" = "Checking current grants...";
+"panel.status.running" = "Triggering missing grants - answer any system dialog as it appears...";
+"panel.status.pass" = "Target tier satisfied - every requested grant is in place.";
+"panel.status.unresolved" = "%d unresolved item(s) - see the log below and the report.";
+"panel.error.noRepo" = "Launch with --repo <checkout path> [--helper-socket <path>] to enable runs.";
+"panel.error.launch" = "Could not start the onboarding tool - see the log.";
+"panel.error.report" = "Run finished but no report was found - see the log.";
