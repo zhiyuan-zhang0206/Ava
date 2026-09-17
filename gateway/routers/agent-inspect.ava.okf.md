@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Agent Inspect Router
-description: "GET /api/agents/{id}/inspect + /inspect/live + /neighbors + /inspect/metrics + /inspect/widgets — per-agent LLM cost/token/TPS and neighbor graph, plus the plugin metric and inspector-widget surfaces."
+description: "GET /api/agents/{id}/inspect/statistics + /inspect/live + /neighbors + /inspect/metrics + /inspect/widgets — per-agent LLM cost/token/TPS and neighbor graph, plus the plugin metric and inspector-widget surfaces."
 tags:
 - gateway
 - observability
@@ -9,7 +9,7 @@ tags:
 
 # Agent Inspect Router
 
-`/api/agents/{id}/inspect` + `/inspect/live` + `/neighbors` + `/inspect/metrics`
+`/api/agents/{id}/inspect/statistics` + `/inspect/live` + `/neighbors` + `/inspect/metrics`
 + `/inspect/widgets` — per-agent LLM cost/token/TPS + neighbor graph.
 
 Inspect p50/p90 combine complete daily integer-second duration histograms

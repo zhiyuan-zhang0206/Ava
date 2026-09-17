@@ -117,8 +117,8 @@ class AgentActivity(BaseModel):
 class HeartbeatLastPause(BaseModel):
     """The agent's most recent heartbeat pause — when it last opted out of idle
     check-ins and the length it asked for. Sourced from the newest
-    `heartbeat_paused` events row; None on AgentInspect when the agent has
-    never paused. `at` is when the pause was requested; `duration_s` is the
+    durable heartbeat_pause_log row within the last 24 hours; None when no
+    pause exists in that display window. `at` is when the pause was requested; `duration_s` is the
     requested window in seconds (the agent's `pause_heartbeat(duration)` arg)."""
 
     model_config = ConfigDict(frozen=True)
@@ -171,9 +171,8 @@ class AgentInspectLive(BaseModel):
     """GET /api/agents/{id}/inspect/live response — the inspector's cheap,
     window-independent skeleton.
 
-    Every field reflects current database or runner state except
-    `heartbeat.last_pause`, which is a single bounded recent-history lookup and
-    degrades to None when Loki is unavailable. The response intentionally omits
+    Every field reflects database or runner state. ``heartbeat.last_pause``
+    reads the indexed durable pause trail; no log query is performed. The response omits
     cost, stats, TPS, and activity so switching agents does not wait for the
     expensive event-history aggregate fan-out.
     """
@@ -195,57 +194,25 @@ class AgentInspectLive(BaseModel):
     heartbeat: HeartbeatInfo
 
 
-class AgentInspect(BaseModel):
-    """GET /api/agents/{id}/inspect response — the per-agent inspector panel.
+class AgentInspectStatistics(BaseModel):
+    """Window-dependent statistics, with no current control-plane state.
 
-    A single-agent view, in contrast to `/api/stats/dashboard` (the whole fleet
-    aggregated): the agent's live persistent shells, its frozen per-agent config
-    overlay, its current open notice (since #152 at most one), its cumulative
-    LLM cost, turn/exec stats, active-rate (working vs blocked-on-a-human),
-    idle-heartbeat state, and delivery-obligation state.
-    `config_overlay` is the spawn-time field-override map (empty when the agent
-    runs on cluster defaults); `preset_name` names the spawn-time preset whose
-    config was folded into it (None when no preset was used). `shells` is
-    probed on the agent's own machine via
-    the `shell_probe` cluster op — the gateway never runs sessions itself, so a
-    split deployment sees each agent's shells wherever that agent runs.
-
-    `window_hours` echoes the `?hours=` request parameter: None = cumulative
-    since spawn (the default), else `cost` + `stats` + `tps` + `activity`
-    aggregate only over the past N hours. `applied_window_hours` is the
-    actually served window in hours, no greater than `window_hours` and
-    clamped to the Loki retention horizon; it is None for whole-life and
-    since-compact reads. `since_compact` echoes
-    `?since_compact=`: True = those cover only events since the agent's latest
-    compact halt (`hours` is ignored and `window_hours` is None). `shells`,
-    `config_overlay`, `notice`, and `heartbeat` are always current, independent
-    of the window."""
+    ``window_hours`` and ``since_compact`` identify the requested view;
+    ``applied_window_hours`` exposes a retention-clamped hour window. The
+    aggregate computation and its existing source coverage are unchanged.
+    Current state belongs exclusively to ``AgentInspectLive``.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     agent_id: int
-    machine: str
-    # Gateway-owned liveness projection (Task #1174): 'online' = machine
-    # reachable AND (for running/idling) process lease alive; 'offline' =
-    # machine unreachable or lease expired; 'unknown' = not yet judged.
-    liveness_state: Literal["online", "offline", "unknown"]
-    last_probe_at: datetime | None = None
-    observation: AgentObservation | None = None
-    shells_available: bool | None = None
-    spawned_at: datetime
-    started_at: datetime | None = None
     window_hours: StatsWindowHours | None = None
     applied_window_hours: int | None = None
     since_compact: bool = False
-    shells: list[ShellInfo]
-    config_overlay: dict[str, Any]
-    preset_name: str | None = None
-    notice: OpenNotice | None = None
     cost: AgentCost
     stats: AgentStats
     tps: AgentTps
     activity: AgentActivity
-    heartbeat: HeartbeatInfo
 
 
 class NeighborRow(BaseModel):

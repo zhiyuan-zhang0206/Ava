@@ -1,6 +1,6 @@
 "use client";
 
-import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bell,
   DollarSign,
@@ -15,9 +15,9 @@ import {
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { Fragment, useCallback, type ReactNode, useEffect, useRef } from "react";
+import { Fragment, useCallback, type ReactNode, useEffect } from "react";
 
-import { LiveSectionsSkeleton, SectionSkeleton, WindowedSectionsSkeleton } from "@/components/inspector-panel-skeleton";
+import { LiveSectionsSkeleton, SectionSkeleton } from "@/components/inspector-panel-skeleton";
 import { InspectWidgetSection } from "@/components/inspector-widgets";
 import { Section } from "@/components/inspector-section";
 import { OpenNoticeDetail } from "@/components/open-notice-detail";
@@ -34,10 +34,10 @@ import {
   inspectLiveQueryKey,
   inspectWidgetsQueryKey,
   inspectWindowedQueryKey,
-} from "@/lib/inspector-prefetch";
+} from "@/lib/inspector-queries";
 import { fleetNoticeHref, INSPECT_SECTION_ORDER } from "@/lib/inspector-widgets";
 import type {
-  AgentInspect,
+  AgentInspectStatistics,
   AgentInspectLive,
   HeartbeatInfo,
   OpenNotice,
@@ -69,12 +69,11 @@ const WINDOWS: { labelKey: string; value: number | null }[] = [
  * counterpart to the sidebar's fleet-wide stats card. Sections include
  * persistent shells, the frozen config overlay, and LLM cost.
  *
- * Fetch discipline: the uncached live query supplies shells/liveness/config/
- * notice independently of the slower windowed aggregate query. Both load on
- * open, refresh manually or every 60s, and cancel on close. While the panel is
- * open, sidebar-row intent can prefetch these same keys; closed stays at zero
- * inspect traffic. Notice SSE invalidates both halves. Window transitions use
- * per-section skeletons instead of displaying a previous window's totals.
+ * Current state, statistics, and plugin widgets load and fail independently.
+ * Only the selected agent is queried, only while open. Notice events refresh
+ * current state; task events refresh widgets. Statistics reconcile on selection,
+ * manual refresh, compact, and the 60-second interval, including after reconnect.
+ * Each response is guarded by its agent/window identity before display.
  *
  * Responsive (user ruling 2026-08-23, superseding the 2026-08-05 floating
  * overlay ruling on desktop): at ≥ lg it fills a resizable right-side panel;
@@ -97,10 +96,10 @@ function StaleDot() {
 }
 
 function matchesInspectWindow(
-  data: AgentInspect | undefined,
+  data: AgentInspectStatistics | undefined,
   agentId: number,
   hours: number | null,
-): data is AgentInspect {
+): data is AgentInspectStatistics {
   if (data?.agent_id !== agentId) return false;
   if (hours === COMPACT_INSPECT_WINDOW) return data.since_compact;
   return !data.since_compact && (data.window_hours ?? null) === hours;
@@ -118,6 +117,10 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
     queryFn: ({ signal }) => api.getAgentInspectLive(agentId, signal),
     enabled: open,
     retry: false,
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     refetchInterval: open ? 60_000 : false,
     refetchOnMount: "always",
   });
@@ -126,27 +129,31 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
     queryFn: ({ signal }) => fetchWindowedInspect(agentId, hours, signal),
     enabled: open,
     retry: false,
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     refetchInterval: open ? 60_000 : false,
     refetchOnMount: "always",
-    placeholderData: keepPreviousData,
   });
-  // Plugin widgets (task #2909): cheap and window-independent like the live
-  // half. A failure renders nothing extra — the widget area disappears, the
-  // rest of the panel is unaffected.
+  // Plugin extensions have their own loading and error state.
   const widgetsQuery = useQuery({
     queryKey: inspectWidgetsQueryKey(agentId),
     queryFn: ({ signal }) => api.getAgentInspectWidgets(agentId, signal),
     enabled: open,
     retry: false,
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     refetchInterval: open ? 60_000 : false,
     refetchOnMount: "always",
   });
 
   // Both query keys include the agent id, but keep explicit response identity
   // guards: a malformed/misrouted response must never render under another
-  // agent. The aggregate response also has to echo the selected window; during
-  // keepPreviousData transitions a prior window becomes section skeletons,
-  // never mislabeled numbers.
+  // agent. Statistics must also echo the requested window. Inactive query
+  // entries are discarded, so switching cannot accumulate historical snapshots.
   const liveData =
     liveQuery.data?.agent_id === agentId ? liveQuery.data : undefined;
   const windowedData = matchesInspectWindow(windowedQuery.data, agentId, hours)
@@ -156,7 +163,8 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
     liveQuery.isFetching || windowedQuery.isFetching || widgetsQuery.isFetching;
   const hasStaleError =
     (liveQuery.error !== null && liveData !== undefined) ||
-    (windowedQuery.error !== null && windowedData !== undefined);
+    (windowedQuery.error !== null && windowedData !== undefined) ||
+    (widgetsQuery.error !== null && widgetsQuery.data !== undefined);
 
   const refresh = useCallback(() => {
     void liveQuery.refetch();
@@ -165,9 +173,8 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
   }, [liveQuery, windowedQuery, widgetsQuery]);
 
   // Disabling an observer does not itself guarantee transport cancellation.
-  // Consume React Query's AbortSignal above and explicitly cancel when the
-  // panel closes so a hidden inspector cannot leave its expensive fan-out
-  // running in the gateway.
+  // Abort the browser request on close. Shared gateway aggregate work retains
+  // its bounded admission/deadline independently of a cancelled HTTP waiter.
   useEffect(() => {
     if (!open) {
       void queryClient.cancelQueries({ queryKey: inspectLiveQueryKey(agentId) });
@@ -180,53 +187,29 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
   // poll — see useAgentPages.
   const pages = useAgentPages(agentId);
 
-  const invalidateInspect = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: inspectLiveQueryKey(agentId) });
-    void queryClient.invalidateQueries({ queryKey: ["agent-inspect", agentId] });
-    void queryClient.invalidateQueries({ queryKey: inspectWidgetsQueryKey(agentId) });
-  }, [agentId, queryClient]);
-
-  // Agent switch must show the NEW agent's data immediately (task #1939).
-  // The panel is mounted only while open, so a switch with the panel open
-  // re-keys the inspect queries on an already-mounted observer — and TanStack
-  // only refetches that path when the cache is stale (refetchOnMount: "always"
-  // applies to a true mount only, i.e. opening the panel). With the app's
-  // global 5min staleTime a hot switch-back therefore keeps the previous
-  // visit's cached numbers on screen until the next 60s interval tick.
-  // Invalidate on agentId change while open to force the background refresh
-  // (the first run is skipped — the fresh mount fetches on its own); a cold
-  // key is a no-op and an in-flight fetch is deduped by the query cache.
-  const firstAgentIdRef = useRef(agentId);
-  useEffect(() => {
-    if (firstAgentIdRef.current === agentId) return;
-    firstAgentIdRef.current = agentId;
-    invalidateInspect();
-  }, [agentId, invalidateInspect]);
-
-  // Notice events affect the live notice immediately and may coincide with
-  // aggregate activity, so reconcile both halves of the inspector cache.
+  // The global notices fold exclusively invalidates the live query. This
+  // subscriber owns only widget changes; statistics refresh independently.
   const onSystemEvent = useCallback(
     (ev: SystemEvent) => {
-      if (ev.agent_id !== agentId) return;
-      if (ev.role === "notice_posted" || ev.role === "notice_resolved") {
-        invalidateInspect();
-      }
+      if (!open || ev.agent_id !== agentId) return;
       // Task movement can change the task a widget button points at; the
       // widgets query is the only thing that needs to reconcile.
       if (ev.role === "task_created" || ev.role === "task_updated") {
         void queryClient.invalidateQueries({ queryKey: inspectWidgetsQueryKey(agentId) });
       }
     },
-    [agentId, invalidateInspect, queryClient],
+    [agentId, open, queryClient],
   );
   const onConnectionEvent = useCallback(
-    (_ev: { type: string }) => {
-      // On reconnect, reconcile the notice state (may have changed while disconnected).
-      if (_ev.type === "open") {
-        invalidateInspect();
+    (event: { type: string }) => {
+      if (open && event.type === "open") {
+        void queryClient.invalidateQueries({ queryKey: inspectLiveQueryKey(agentId) });
+        void queryClient.invalidateQueries({ queryKey: inspectWidgetsQueryKey(agentId) });
       }
+      // The next 60-second statistics refresh repairs changes across a gap.
+      // Repeated network reconnects must not restart expensive historical work.
     },
-    [invalidateInspect],
+    [agentId, open, queryClient],
   );
   useEventStream(onSystemEvent, onConnectionEvent);
 
@@ -234,16 +217,6 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
   // and mobile removes the overlay. All hooks run regardless (rules-of-hooks),
   // but the query is disabled so a closed panel cannot produce inspect traffic.
   if (!open) return null;
-
-  // First load = one coordinated reveal (user request 2026-09-12, task #3216):
-  // every query fires together when the panel opens or the agent switches, so
-  // a panel that filled in piecemeal (live half, then windowed, then widgets)
-  // read as broken loading order with mismatched skeletons. While ANY of the
-  // three is still pending, only the unified skeleton set renders; once each
-  // has settled (data or error) the sections below render in one pass. A
-  // window switch is not a first load — its placeholder keeps `isPending`
-  // false and only the windowed sections swap to their own skeletons.
-  const firstLoad = liveQuery.isPending || windowedQuery.isPending || widgetsQuery.isPending;
 
   // The panel's one ordered list (task #2909): built-in sections carry their
   // documented keys (`INSPECT_SECTION_ORDER`), plugin widgets slot in by their
@@ -263,8 +236,15 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
     sections.push({
       order: INSPECT_SECTION_ORDER.shells,
       tie: 0,
-      key: "no-data",
-      node: <p className="font-mono text-[11px] text-muted-foreground">{t("noData")}</p>,
+      key: "live-state",
+      node: !liveQuery.isPending ? (
+        <InspectReadError
+          message={liveQuery.error instanceof Error ? liveQuery.error.message : t("noData")}
+          retryLabel={t("retryInspector")}
+          pending={liveQuery.isFetching}
+          onRetry={() => void liveQuery.refetch()}
+        />
+      ) : <LiveSectionsSkeleton />,
     });
   }
   if (windowedData) {
@@ -272,12 +252,12 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
       { order: INSPECT_SECTION_ORDER.cost, tie: 0, key: "cost", node: <CostSection inspect={windowedData} /> },
       { order: INSPECT_SECTION_ORDER.activity, tie: 0, key: "activity", node: <ActivitySection inspect={windowedData} /> },
     );
-  } else if (windowedQuery.error) {
+  } else if (windowedQuery.error || !windowedQuery.isPending) {
     sections.push({
       order: INSPECT_SECTION_ORDER.cost,
       tie: 0,
       key: "windowed-error",
-      node: <WindowedSectionsError onRetry={() => void windowedQuery.refetch()} />,
+      node: <WindowedSectionsError pending={windowedQuery.isFetching} onRetry={() => void windowedQuery.refetch()} />,
     });
   } else {
     sections.push(
@@ -306,6 +286,21 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
       tie: 0,
       key: "notice",
       node: <NoticeReplySection agentId={agentId} notice={liveData.notice} />,
+    });
+  }
+  if (widgetsQuery.isPending || (widgetsQuery.error && !widgetsQuery.data)) {
+    sections.push({
+      order: INSPECT_SECTION_ORDER.runLink,
+      tie: 1,
+      key: "widgets-state",
+      node: widgetsQuery.error ? (
+        <InspectReadError
+          message={t("widgetsUnavailable")}
+          retryLabel={t("retryWidgets")}
+          pending={widgetsQuery.isFetching}
+          onRetry={() => void widgetsQuery.refetch()}
+        />
+      ) : <SectionSkeleton title={t("sectionWidgets")} rows={1} />,
     });
   }
   for (const widget of widgetsQuery.data ?? []) {
@@ -367,36 +362,11 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
       </header>
 
       <div className={cn("overflow-y-auto px-4 py-3 text-xs", MIN_H_0, FLEX_1)}>
-        {liveQuery.error && !liveData ? (
-          <div className="space-y-2 font-mono text-[11px] text-destructive" role="alert">
-            <p>
-              {liveQuery.error instanceof Error
-                ? liveQuery.error.message
-                : t("loadFailed")}
-            </p>
-            <button
-              type="button"
-              onClick={refresh}
-              disabled={isFetching}
-              aria-label={t("retryInspector")}
-              className="rounded border border-destructive/40 px-2 py-1 hover:bg-destructive/10 disabled:opacity-50"
-            >
-              {isFetching ? t("retrying") : t("retry")}
-            </button>
-          </div>
-        ) : firstLoad ? (
-          <div className="space-y-4">
-            <LiveSectionsSkeleton />
-            <WindowedSectionsSkeleton />
-            {runLinkNode}
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {sections.map((section) => (
-              <Fragment key={section.key}>{section.node}</Fragment>
-            ))}
-          </div>
-        )}
+        <div className="space-y-4">
+          {sections.map((section) => (
+            <Fragment key={section.key}>{section.node}</Fragment>
+          ))}
+        </div>
       </div>
     </>
   );
@@ -429,20 +399,30 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
 // Sections
 // ---------------------------------------------------------------------------
 
-function WindowedSectionsError({ onRetry }: { onRetry: () => void }) {
-  const t = useTranslations("inspector");
+function InspectReadError({ message, retryLabel, pending, onRetry }: {
+  message: string;
+  retryLabel: string;
+  pending: boolean;
+  onRetry: () => void;
+}) {
   return (
     <div className="space-y-2 font-mono text-[11px] text-destructive" role="alert">
-      <p>{t("windowedUnavailable")}</p>
+      <p>{message}</p>
       <button
         type="button"
         onClick={onRetry}
-        className="rounded border border-destructive/40 px-2 py-1 hover:bg-destructive/10"
+        disabled={pending}
+        className="rounded border border-destructive/40 px-2 py-1 hover:bg-destructive/10 disabled:opacity-50"
       >
-        {t("retryWindowed")}
+        {retryLabel}
       </button>
     </div>
   );
+}
+
+function WindowedSectionsError({ pending, onRetry }: { pending: boolean; onRetry: () => void }) {
+  const t = useTranslations("inspector");
+  return <InspectReadError message={t("windowedUnavailable")} retryLabel={t("retryWindowed")} pending={pending} onRetry={onRetry} />;
 }
 
 function PageSection({ pages }: { pages: PageRow[] }) {
@@ -514,7 +494,6 @@ function NoticeReplySection({
         showTimestamp
         onResolved={() => {
           void queryClient.invalidateQueries({ queryKey: inspectLiveQueryKey(agentId) });
-          void queryClient.invalidateQueries({ queryKey: ["agent-inspect", agentId] });
         }}
       />
     </Section>
@@ -666,7 +645,7 @@ function ConfigOverlaySection({ inspect }: { inspect: AgentInspectLive }) {
   );
 }
 
-function CostSection({ inspect }: { inspect: AgentInspect }) {
+function CostSection({ inspect }: { inspect: AgentInspectStatistics }) {
   const { cost } = inspect;
   // Cost is the sum of stored usage-time price snapshots; calls without one
   // (unpriced model) contribute 0 and surface as the sub-line so the figure
@@ -694,7 +673,7 @@ function CostSection({ inspect }: { inspect: AgentInspect }) {
  * code execution, and idle/blocked states. The duration cells follow the
  * header window.
  */
-function ActivitySection({ inspect }: { inspect: AgentInspect }) {
+function ActivitySection({ inspect }: { inspect: AgentInspectStatistics }) {
   const { activity, tps } = inspect;
   const hasLife = activity.alive_seconds > 0;
   const idleSeconds = Math.max(0, activity.alive_seconds - activity.active_seconds);
