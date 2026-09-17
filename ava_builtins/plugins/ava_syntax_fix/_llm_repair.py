@@ -20,7 +20,7 @@ from loguru import logger
 # 5. LLM repair (only on the rare path where deterministic fixes left it broken)
 # ---------------------------------------------------------------------------
 
-_REPAIR_MODEL = "deepseek-v4-flash"
+_REPAIR_MODEL = "deepseek-flash"
 _REPAIR_TIMEOUT = 60.0  # per-attempt; flash model responds much faster
 _REPAIR_MAX_ATTEMPTS = 3  # single-shot is probabilistic; feed the error back and retry
 _REPAIR_SYSTEM = (
@@ -114,7 +114,7 @@ async def _repair_once(llm: Any, messages: list[Any]) -> str | None:
 
 async def _llm_repair_syntax(code: str, rendered_error: str) -> str | None:
     """Fast-model repair for a syntax error the deterministic pipeline could
-    not fix, running deepseek-v4-flash (delimiter repair
+    not fix, running deepseek-flash (delimiter repair
     needs to infer the author's intent). Single-shot output is probabilistic, so
     each attempt's result is compiled and, if still broken, the new error is fed
     back for up to _REPAIR_MAX_ATTEMPTS rounds.

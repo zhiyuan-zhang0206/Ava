@@ -220,9 +220,9 @@ def _payload_row(conn: psycopg.Connection, agent_id: int) -> tuple[str, dict | N
 
 class TestMultimodalMessage:
     def test_image_to_non_vision_model_422(self, db_conn: psycopg.Connection) -> None:
-        """The default model is deepseek-v4-flash (text-only) → an image message
+        """The default model is deepseek-flash (text-only) → an image message
         is gated 422 up front, nothing queued."""
-        tid = _seed_agent(db_conn)  # no overlay → default (deepseek-v4-flash)
+        tid = _seed_agent(db_conn)  # no overlay → default (deepseek-flash)
         with TestClient(app) as client:
             resp = client.post(
                 f"/api/agents/{tid}/messages",
@@ -285,7 +285,7 @@ class TestMultimodalMessage:
     ) -> None:
         """The gate answers for the model that will actually run: a
         deepseek-v4-flash-vision-exp pin resolves to the text-only
-        deepseek-v4-flash, so an image message is gated 422 up front."""
+        deepseek-flash, so an image message is gated 422 up front."""
         from pathlib import Path
 
         monkeypatch.setattr(Path, "home", lambda: tmp_path)

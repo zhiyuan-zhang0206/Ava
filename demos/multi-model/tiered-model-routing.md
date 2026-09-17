@@ -30,7 +30,7 @@ worker_ids = []
 for i, file_spec in enumerate(file_specs):
     wid = ava.agents.spawn(
         prompt=f"Implement this file per the plan:\n{plan}\n\nYour file: {file_spec}",
-        config_overlay={"llm_model": "deepseek-v4-flash"},
+        config_overlay={"llm_model": "deepseek-flash"},
         label=f"worker-{i}"
     )
     worker_ids.append(wid)
@@ -51,7 +51,7 @@ reviewer_id = ava.agents.spawn(
 
 checker_id = ava.agents.spawn(
     prompt=f"Verify this code meets the spec and would run correctly. Flag anything broken:\n{combined_output}",
-    config_overlay={"llm_model": "deepseek-v4-flash"},
+    config_overlay={"llm_model": "deepseek-flash"},
     label="checker"
 )
 ```
@@ -85,8 +85,8 @@ Requirements:
 
 1. Orchestrator picks a small but realistic coding task
 2. **Phase 1**: Spawns a claude-opus-4-8 planner → gets a concrete plan
-3. **Phase 2**: Spawns 2-3 deepseek-v4-flash workers in parallel → each implements one file
-4. **Phase 3**: Spawns claude-sonnet-4-6 reviewer + deepseek-v4-flash checker in parallel
+3. **Phase 2**: Spawns 2-3 deepseek-flash workers in parallel → each implements one file
+4. **Phase 3**: Spawns claude-sonnet-4-6 reviewer + deepseek-flash checker in parallel
 5. **Phase 4**: Spawns claude-opus-4-8 reflector → architecture-level reflection
 6. Renders the full pipeline output to HTML and serves it with `ava.ui.serve`
 
@@ -97,9 +97,9 @@ A Markdown report showing:
 | Phase | Model | Cost tier | Why |
 |-------|-------|-----------|-----|
 | Plan | claude-opus-4-8 | $$$ | Strategic thinking needs strongest reasoning |
-| Execute | deepseek-v4-flash | $ | Straightforward implementation from clear spec |
+| Execute | deepseek-flash | $ | Straightforward implementation from clear spec |
 | Review | claude-sonnet-4-6 | $$ | Quality gate needs strong model, not the strongest |
-| Check | deepseek-v4-flash | $ | Binary pass/fail verification |
+| Check | deepseek-flash | $ | Binary pass/fail verification |
 | Reflect | claude-opus-4-8 | $$$ | Architectural insight needs deep reasoning |
 
 Plus: the plan, the code, the review, and the reflection.

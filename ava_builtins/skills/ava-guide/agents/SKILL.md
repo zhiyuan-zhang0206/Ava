@@ -144,7 +144,7 @@ ava.agents.spawn(prompt="...", preset="coder")
 
 # Via config_overlay (precise override)
 # model id from the registry roster — see the models sub-skill
-ava.agents.spawn(prompt="...", config_overlay={"llm_model": "deepseek-v4-flash"})
+ava.agents.spawn(prompt="...", config_overlay={"llm_model": "deepseek-flash"})
 
 # Both (overlay wins per-key)
 ava.agents.spawn(prompt="...", preset="coder",

@@ -54,10 +54,11 @@ def test_get_models_returns_grouped_supported_models() -> None:
     assert resp.status_code == 200
     body = resp.json()
     flat = [m for group in body["providers"].values() for m in group]
-    assert "deepseek-v4-flash" in flat
-    # V4 Pro and the vision experiment are withdrawn from the picker
-    # (user order 2026-09-10).
+    assert "deepseek-flash" in flat
+    # V4 Pro, the renamed-away V4 Flash id and the vision experiment are
+    # withdrawn from the picker (user orders 2026-09-10 / 2026-09-17).
     assert "deepseek-v4-pro" not in flat
+    assert "deepseek-v4-flash" not in flat
     assert "deepseek-v4-flash-vision-exp" not in flat
     assert "gpt-5.6-sol" in flat
     # additional verified-live models
@@ -87,7 +88,7 @@ def test_get_models_surfaces_superseded_by(monkeypatch: pytest.MonkeyPatch) -> N
         resp = client.get("/api/models")
     body = resp.json()
     assert body["models"]["glm-5.2"]["superseded_by"] == "kimi-k3"
-    assert body["models"]["deepseek-v4-flash"]["superseded_by"] is None
+    assert body["models"]["deepseek-flash"]["superseded_by"] is None
 
 
 def test_get_models_every_model_has_reasoning_effort_control() -> None:
@@ -193,7 +194,7 @@ def test_get_models_reasoning_effort_default_is_the_per_model_tuning_value(
     # Spot-check the documented vendor defaults (decision doc
     # 2026-07-25-per-model-tuning-values.md Decision 4): deepseek max,
     # claude adaptive family high, gpt medium, kimi/glm max.
-    assert models["deepseek-v4-flash"]["reasoning_effort_default"] == "max"
+    assert models["deepseek-flash"]["reasoning_effort_default"] == "max"
     assert models["claude-sonnet-5"]["reasoning_effort_default"] == "high"
     assert models["claude-haiku-4-5-20251001"]["reasoning_effort_default"] == "none"
     assert models["gpt-5.6-sol"]["reasoning_effort_default"] == "medium"
@@ -214,7 +215,7 @@ def test_get_models_reasoning_effort_default_is_the_per_model_tuning_value(
     with TestClient(app) as client:
         resp = client.get("/api/models")
     models = resp.json()["models"]
-    assert models["deepseek-v4-flash"]["reasoning_effort_default"] == "max"
+    assert models["deepseek-flash"]["reasoning_effort_default"] == "max"
 
 
 class TestSpawn:

@@ -41,7 +41,7 @@ const timeline: RunTimelineResponse = {
         reasoning: 4,
         latency_ms: 1500,
         cost_usd: 0.02,
-        model: "deepseek-v4-flash",
+        model: "deepseek-flash",
       },
       execs: [{ tool: "execute_code", ok: false }],
       anomalies: ["exec_failed"],
@@ -64,7 +64,7 @@ const timeline: RunTimelineResponse = {
         reasoning: 8,
         latency_ms: 2500,
         cost_usd: 0,
-        model: "deepseek-v4-flash",
+        model: "deepseek-flash",
       },
       execs: [],
       anomalies: [],
@@ -214,7 +214,7 @@ describe("RunTimelineChart", () => {
     expect(within(panel).getByText("120")).toBeTruthy();
     expect(within(panel).getByText("12")).toBeTruthy();
     expect(within(panel).getByText("$0.02")).toBeTruthy();
-    expect(within(panel).getByText("deepseek-v4-flash")).toBeTruthy();
+    expect(within(panel).getByText("deepseek-flash")).toBeTruthy();
     expect(within(panel).getByText("1.50s")).toBeTruthy();
     expect(within(panel).getByText("execute_code")).toBeTruthy();
     expect(within(panel).queryByText("Duration")).toBeNull();

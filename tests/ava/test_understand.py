@@ -98,7 +98,7 @@ def test_text_mode_uses_deepseek(mock_deepseek: dict[str, Any]) -> None:
     routed to DeepSeek V4 Flash (default downgraded from pro, task #918)."""
     [out] = understand_mod.understand([{"prompt": "summarize", "text": "the quick brown fox"}])
     assert out == "fake answer"
-    assert mock_deepseek["model"] == "deepseek-v4-flash"
+    assert mock_deepseek["model"] == "deepseek-flash"
     assert _content(mock_deepseek) == [
         {"type": "text", "text": "the quick brown fox"},
         {"type": "text", "text": "summarize"},
@@ -180,7 +180,7 @@ def test_existing_text_file_uses_deepseek(mock_deepseek: dict[str, Any], tmp_pat
     f = tmp_path / "notes.md"
     f.write_text("# Heading\nbody text", encoding="utf-8")
     understand_mod.understand([{"prompt": "what is the heading", "paths": [str(f)]}])
-    assert mock_deepseek["model"] == "deepseek-v4-flash"
+    assert mock_deepseek["model"] == "deepseek-flash"
     content = _content(mock_deepseek)
     assert content[0] == {"type": "text", "text": "# Heading\nbody text"}
     assert content[1] == {"type": "text", "text": "what is the heading"}
@@ -459,7 +459,7 @@ def test_paths_all_text_uses_text_model(mock_deepseek: dict[str, Any], tmp_path:
     b.write_text("material B", encoding="utf-8")
     [out] = understand_mod.understand([{"prompt": "diff", "paths": [str(a), str(b)]}])
     assert out == "fake answer"
-    assert mock_deepseek["model"] == "deepseek-v4-flash"
+    assert mock_deepseek["model"] == "deepseek-flash"
     assert mock_deepseek["llm"].invoke.call_count == 1
     assert _content(mock_deepseek) == [
         {"type": "text", "text": "material A"},

@@ -8,7 +8,7 @@ description: Chooses the LLM model and config overlay for spawned Ava workers un
 You pick a worker's model at spawn time:
 
 ```python
-ava.agents.spawn(prompt="...", config_overlay={"llm_model": "deepseek-v4-flash"})
+ava.agents.spawn(prompt="...", config_overlay={"llm_model": "deepseek-flash"})
 ```
 
 Omitting the overlay is a valid choice — the child inherits the cluster default.
@@ -71,28 +71,34 @@ policy bug, not a preference, so the frontier is actively maintained:
 - A dominance pair is worth stating explicitly, so a later reader does not
   resurrect the dominated name out of habit.
 
-Current frontier state (user ruling 2026-09-10):
+Current frontier state (user ruling 2026-09-10; id updated 2026-09-17):
 
-- `deepseek-v4-flash` **dominates** `deepseek-v4-flash-vision-exp` — same
+- `deepseek-flash` **dominates** `deepseek-v4-flash-vision-exp` — same
   price (the catalog carries the same rates), same 1M context, and its
   backend is DeepSeek V4.1 Flash. Wherever a doc, script or spawn choice
-  named the vision experimental sibling, use the plain `deepseek-v4-flash`
+  named the vision experimental sibling, use the plain `deepseek-flash`
   id: the policy is flash everywhere, vision work included.
-- `deepseek-v4-pro` is **withdrawn from selection** (same ruling). It stays
-  registered with `spawnable=False` so old configs keep working — it resolves
-  to `deepseek-v4-flash` — but no new choice may name it.
+- `deepseek-v4-flash` is **retired from selection** (user order 2026-09-17,
+  task #3750): the provider renamed the id to `deepseek-flash`, so the old
+  name stays registered with `spawnable=False` and resolves to
+  `deepseek-flash` before provider construction — old configs keep working,
+  but no new choice may name `deepseek-v4-flash`.
+- `deepseek-v4-pro` is **withdrawn from selection** (2026-09-10 ruling). It
+  stays registered with `spawnable=False` so old configs keep working — it
+  resolves to `deepseek-flash` — but no new choice may name it.
 
 ## Current cost policy
 
-**One model: `deepseek-v4-flash`** (user ruling 2026-09-10, superseding the
-2026-09-03 two-tier table). Main agent and workers alike — orchestration,
+**One model: `deepseek-flash`** (user ruling 2026-09-10; id renamed from
+`deepseek-v4-flash` on 2026-09-17 — user report, task #3750 — either spelling
+resolves to the same id). Main agent and workers alike — orchestration,
 planning, synthesis, review, extraction, format transforms, scanning — run the
 same id on its V4.1 Flash backend.
 
 - Complexity is absorbed by **decomposition and verification waves**, not by
   upgrading the model (next section).
-- `deepseek-v4-pro` and `deepseek-v4-flash-vision-exp` are withdrawn by
-  policy; vision work uses plain `deepseek-v4-flash`.
+- `deepseek-v4-pro`, `deepseek-v4-flash` and `deepseek-v4-flash-vision-exp`
+  are retired or withdrawn by policy; vision work uses plain `deepseek-flash`.
 - Other registered models (`gemini-*`, Claude, GLM, Qwen, …) sit outside the
   default policy: select one only when the user explicitly asks for that
   model, and confirm it is on the roster first (section above).
@@ -103,7 +109,7 @@ same id on its V4.1 Flash backend.
   "Corrupted thought signature"; only a fresh spawn ever ran clean — relevant
   only if a cross-model switch onto it is ever explicitly ordered.
 - An already-running agent still on a non-flash model is moved with
-  `ava.self.restart(config_overlay={"llm_model": "deepseek-v4-flash"})`.
+  `ava.self.restart(config_overlay={"llm_model": "deepseek-flash"})`.
 - Ruling record: shared-pool note `dev/ava-agent-model-flash-ruling-20260910.md`.
 
 ## How to run sub-tasks (flash-only)
@@ -122,19 +128,19 @@ structure a sub-task gets:
 The typical dynamic-workflow shape that falls out:
 
 ```
-deepseek-v4-flash orchestrator
-  → deepseek-v4-flash worker fleet
-  → deepseek-v4-flash cross-checkers
+deepseek-flash orchestrator
+  → deepseek-flash worker fleet
+  → deepseek-flash cross-checkers
 ```
 
 ## Don't
 
-- Don't select anything outside `deepseek-v4-flash` for Ava-line agents
+- Don't select anything outside `deepseek-flash` for Ava-line agents
   (workers, orchestrators, reviewers, synthesizers alike) — `deepseek-v4-pro`,
-  `deepseek-v4-flash-vision-exp` and `gemini-*` are all withdrawn from the
-  policy (user ruling 2026-09-10 14:16), vision work included. An exception
-  happens only when the user explicitly asks for a specific model (and it
-  must be on the roster).
+  `deepseek-v4-flash`, `deepseek-v4-flash-vision-exp` and `gemini-*` are all
+  retired or withdrawn from the policy (user rulings 2026-09-10 14:16 and
+  2026-09-17), vision work included. An exception happens only when the user
+  explicitly asks for a specific model (and it must be on the roster).
 - Don't hand flash an open-ended judgment task and trust the output
   unverified — pair flash breadth with a flash cross-checking wave.
 - Don't scatter hardcoded model names where the cluster default would do —

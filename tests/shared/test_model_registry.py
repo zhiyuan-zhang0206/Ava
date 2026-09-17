@@ -120,13 +120,45 @@ def test_gemini_3_8_flash_is_spawnable_again() -> None:
 def test_deepseek_v4_pro_is_withdrawn_to_the_flash_fallback() -> None:
     """User order 2026-09-10: DeepSeek serves only the flash tier, so V4 Pro
     leaves the spawn picker; a config that still names it resolves to
-    deepseek-v4-flash before provider construction — the withdrawal shape of
+    deepseek-flash before provider construction — the withdrawal shape of
     PR #1582 (gemini-3.8-flash), not a removal."""
     spec = MODELS["deepseek-v4-pro"]
     assert not spec.spawnable
-    assert spec.unavailable_fallback == "deepseek-v4-flash"
+    assert spec.unavailable_fallback == "deepseek-flash"
     assert "deepseek-v4-pro" not in SUPPORTED_MODELS["deepseek"]
-    assert resolve_available_model("deepseek-v4-pro") == "deepseek-v4-flash"
+    assert resolve_available_model("deepseek-v4-pro") == "deepseek-flash"
+
+
+def test_deepseek_flash_registry_facts() -> None:
+    """The canonical flash-tier id (user report 2026-09-17, task #3750): the
+    provider renamed DeepSeek's V4 Flash; the new id carries the flash facts,
+    tuning and price the retired entry kept."""
+    spec = MODELS["deepseek-flash"]
+    assert spec.provider == "deepseek"
+    assert spec.spawnable
+    assert spec.context_window == 1_000_000
+    assert spec.max_output_tokens == 384_000
+    assert spec.knowledge_cutoff == "2026-04"
+    assert spec.model_identity == "You are running on DeepSeek Flash."
+    assert spec.effort_levels == ("high", "max")
+    assert "deepseek-flash" in SUPPORTED_MODELS["deepseek"]
+    assert resolve_setting("reasoning_effort", model="deepseek-flash") == "max"
+    assert resolve_setting("auto_compact_fraction", model="deepseek-flash") == 0.512
+    assert resolve_setting("compact_reminder_fraction", model="deepseek-flash") == 0.374
+
+
+def test_deepseek_v4_flash_is_withdrawn_to_the_deepseek_flash_fallback() -> None:
+    """User order 2026-09-17 (task #3750): the provider renamed the flash
+    tier, so the old `deepseek-v4-flash` id leaves the spawn picker; a config
+    that still names it resolves to `deepseek-flash` before provider
+    construction — the withdrawal shape of #1582/#2140, not a removal."""
+    spec = MODELS["deepseek-v4-flash"]
+    assert not spec.spawnable
+    assert spec.unavailable_fallback == "deepseek-flash"
+    assert "deepseek-v4-flash" not in SUPPORTED_MODELS["deepseek"]
+    assert resolve_available_model("deepseek-v4-flash") == "deepseek-flash"
+    assert spec.context_window == 1_000_000
+    assert spec.max_output_tokens == 384_000
 
 
 def test_gemini_flash_lite_latest_registry_facts() -> None:
@@ -227,14 +259,14 @@ def test_deepseek_vision_exp_registry_facts() -> None:
     media support — it is the same text model with still-image input added,
     not a new family. Withdrawn from new selections 2026-09-10 (user order):
     the vision experiment is stopped, so it leaves the picker and resolves to
-    deepseek-v4-flash before provider construction — the facts stay for
+    deepseek-flash before provider construction — the facts stay for
     registry answers (the PR #1582/#2140 withdrawal shape)."""
     spec = MODELS["deepseek-v4-flash-vision-exp"]
     assert spec.provider == "deepseek"
     assert not spec.spawnable
-    assert spec.unavailable_fallback == "deepseek-v4-flash"
+    assert spec.unavailable_fallback == "deepseek-flash"
     assert "deepseek-v4-flash-vision-exp" not in SUPPORTED_MODELS["deepseek"]
-    assert resolve_available_model("deepseek-v4-flash-vision-exp") == "deepseek-v4-flash"
+    assert resolve_available_model("deepseek-v4-flash-vision-exp") == "deepseek-flash"
     assert spec.context_window == 1_000_000
     assert spec.max_output_tokens == 384_000
     assert spec.knowledge_cutoff == "2026-04"
@@ -373,6 +405,7 @@ def test_deepseek_carries_per_model_compact_thresholds() -> None:
     """User decision (2026-08-29): the deepseek entries compact at soft
     374k / hard 512k on their 1M window — 0.374 / 0.512 of the window."""
     for model in (
+        "deepseek-flash",
         "deepseek-v4-pro",
         "deepseek-v4-flash",
         "deepseek-v4-flash-vision-exp",
@@ -621,7 +654,7 @@ def test_resolve_is_self_sufficient_in_a_fresh_process() -> None:
 
         assert not MODELS, "fresh process must start with an empty registry"
         resolved = resolve_available_model("deepseek-v4-flash-vision-exp")
-        assert resolved == "deepseek-v4-flash", resolved
+        assert resolved == "deepseek-flash", resolved
         print("OK")
         """
     )

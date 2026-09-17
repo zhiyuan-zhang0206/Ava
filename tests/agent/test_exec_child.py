@@ -740,7 +740,7 @@ def test_child_help_hides_attach_for_withdrawn_model(
 ) -> None:
     """A withdrawn model's child gates media on the fallback that will run: a
     deepseek-v4-flash-vision-exp pin resolves to the text-only
-    deepseek-v4-flash, so interactive help omits the attach contract and the
+    deepseek-flash, so interactive help omits the attach contract and the
     docs gate matches the attach call (task #3212)."""
     # help(ava.self) renders MACHINE_SPEC, which needs a machine identity —
     # the child's bare $AVA_HOME must carry its own machine_name file (env

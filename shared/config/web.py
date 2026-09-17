@@ -86,7 +86,7 @@ class WebSettings(EnvSettings):
     )
 
     web_fetch_model: str = Field(
-        default="deepseek-v4-flash",
+        default="deepseek-flash",
         alias="AVA_WEB_FETCH_MODEL",
         description="Model for `ava.web.fetch` page-content summarization. Separate from `understand_text_model` so the cheap fetch path does not use the agent's main model.",
         json_schema_extra={

@@ -122,7 +122,7 @@ class TestBuildChatModel:
         on that list, so we must explicitly request it. Changing this default will break this
         test, signaling the need to sync docs / runbook."""
         assert resolve_setting("reasoning_effort", model="deepseek-v4-pro") == "max"
-        assert resolve_setting("reasoning_effort", model="deepseek-v4-flash") == "max"
+        assert resolve_setting("reasoning_effort", model="deepseek-flash") == "max"
 
     def test_deepseek_max_effort_injects_output_config(
         self, monkeypatch: pytest.MonkeyPatch
@@ -156,7 +156,7 @@ class TestBuildChatModel:
         endpoint's thinking switch, which is also what the setting promises."""
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "none")
-        llm = build_chat_model("deepseek-v4-flash")
+        llm = build_chat_model("deepseek-flash")
         assert isinstance(llm, ChatAnthropic)
         assert "extra_body" not in llm.model_kwargs
         assert llm.thinking == {"type": "disabled"}
@@ -170,7 +170,7 @@ class TestBuildChatModel:
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "none")
         llm = build_chat_model(
-            "deepseek-v4-flash", thinking={"type": "enabled", "budget_tokens": 8000}
+            "deepseek-flash", thinking={"type": "enabled", "budget_tokens": 8000}
         )
         assert isinstance(llm, ChatAnthropic)
         assert "extra_body" not in llm.model_kwargs
@@ -192,7 +192,7 @@ class TestBuildChatModel:
     def test_shipped_web_fetch_config_builds_an_accepted_request(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The pair `ava.web.fetch` ships with (AVA_WEB_FETCH_MODEL=deepseek-v4-flash,
+        """The pair `ava.web.fetch` ships with (AVA_WEB_FETCH_MODEL=deepseek-flash,
         AVA_WEB_FETCH_REASONING=none) has to build a request the endpoint accepts —
         that exact pair is what 400'd on every fetch in production."""
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
@@ -1373,9 +1373,9 @@ class TestValidateModelConfig:
         self._set_plugin_keys(monkeypatch)
         result = validate_model_config(
             model="claude-sonnet-5",
-            config={"llm_model": "deepseek-v4-flash"},
+            config={"llm_model": "deepseek-flash"},
         )
-        assert result == "deepseek-v4-flash"
+        assert result == "deepseek-flash"
 
     def test_fallback_to_cluster_default_when_config_omits_model(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1384,10 +1384,10 @@ class TestValidateModelConfig:
         self._clear_all_keys(monkeypatch)
         self._set_plugin_keys(monkeypatch)
         result = validate_model_config(
-            model="deepseek-v4-flash",
+            model="deepseek-flash",
             config={"some_other_key": "value"},
         )
-        assert result == "deepseek-v4-flash"
+        assert result == "deepseek-flash"
 
     def test_fallback_to_cluster_default_when_config_is_none(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1395,8 +1395,8 @@ class TestValidateModelConfig:
         """When config=None, use the cluster default."""
         self._clear_all_keys(monkeypatch)
         self._set_plugin_keys(monkeypatch)
-        result = validate_model_config(model="deepseek-v4-flash", config=None)
-        assert result == "deepseek-v4-flash"
+        result = validate_model_config(model="deepseek-flash", config=None)
+        assert result == "deepseek-flash"
 
     def test_no_model_configured_raises(self) -> None:
         """Neither cluster default nor config has a model → ValueError."""
@@ -1419,8 +1419,8 @@ class TestValidateModelConfig:
         """Registered model → returns model name."""
         self._clear_all_keys(monkeypatch)
         self._set_plugin_keys(monkeypatch)
-        result = validate_model_config(model="deepseek-v4-flash")
-        assert result == "deepseek-v4-flash"
+        result = validate_model_config(model="deepseek-flash")
+        assert result == "deepseek-flash"
 
     def test_all_supported_models_pass_name_check(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Every model in SUPPORTED_MODELS passes the name check."""
@@ -1557,10 +1557,10 @@ class TestValidateModelConfig:
         self._clear_all_keys(monkeypatch)
         self._set_plugin_keys(monkeypatch)
         result = validate_model_config(
-            model="deepseek-v4-flash",
+            model="deepseek-flash",
             config={"llm_model": 42},  # not a string
         )
-        assert result == "deepseek-v4-flash"
+        assert result == "deepseek-flash"
 
     def test_override_skips_api_key_check(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """AVA_LLM_OVERRIDE is set → skip API key check. e2e tests depend on this behavior."""
