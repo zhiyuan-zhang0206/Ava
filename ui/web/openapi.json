@@ -13333,6 +13333,31 @@
         "title": "RunTimelineExec",
         "description": "Tool and outcome of one execution event; exec events have no duration."
       },
+      "RunTimelineInbound": {
+        "properties": {
+          "ts": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ts"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "inbound_id": {
+            "type": "integer",
+            "title": "Inbound Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ts",
+          "source",
+          "inbound_id"
+        ],
+        "title": "RunTimelineInbound",
+        "description": "One chat delivery fact (inbound_messages row) inside the window.\n\nThe arrow source for multi-agent compare views: ``source`` carries the\nenvelope contract (``agent:<id>`` / ``user`` / ...); ``inbound_id`` is\nava_inbound_id, the identity the console item stream already exposes."
+      },
       "RunTimelineLayerNode": {
         "properties": {
           "id": {
@@ -13553,6 +13578,20 @@
                 "type": "null"
               }
             ]
+          },
+          "inbounds": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RunTimelineInbound"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inbounds"
           }
         },
         "type": "object",

@@ -95,7 +95,19 @@
     "loading": "Loading run timeline…",
     "loadFailed": "Could not load the run timeline.",
     "retry": "Retry",
-    "invalidAgent": "The agent id in this URL is invalid."
+    "invalidAgent": "The agent id in this URL is invalid.",
+    "compareTitle": "Run timeline — compare",
+    "compareOpen": "Compare agents",
+    "compareSelectorDescription": "Compare 2–3 agents' run timelines side by side on one shared window.",
+    "compareAgentsLabel": "Agents",
+    "compareAgentsHint": "Enter 2–3 agent ids, comma separated.",
+    "compareSelectorInvalid": "Choose 2 to 3 agents to compare.",
+    "laneOpenSingle": "Open single view",
+    "fitOverlap": "Fit to overlap",
+    "arrowsToggle": "Message arrows",
+    "arrowsOverlayLabel": "Agent-to-agent message arrows",
+    "arrowReadout": "#{source} → #{target} · {time}",
+    "arrowReadoutHint": "Hover a message arrow for details."
   },
   "nav": {
     "openSidebar": "Open sidebar",

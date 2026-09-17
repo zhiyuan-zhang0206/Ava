@@ -145,3 +145,15 @@ describe("RunTimelinePage initial window", () => {
     expect(getRunTimeline).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("compare entry", () => {
+  it("preselects this agent for the compare view", async () => {
+    const { getByRole } = render();
+
+    await waitFor(() =>
+      expect(getByRole("link", { name: "Compare agents" }).getAttribute("href")).toBe(
+        "/insights/compare?agents=42",
+      ),
+    );
+  });
+});

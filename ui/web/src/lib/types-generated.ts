@@ -6902,6 +6902,25 @@ export interface components {
             ok: boolean;
         };
         /**
+         * RunTimelineInbound
+         * @description One chat delivery fact (inbound_messages row) inside the window.
+         *
+         *     The arrow source for multi-agent compare views: ``source`` carries the
+         *     envelope contract (``agent:<id>`` / ``user`` / ...); ``inbound_id`` is
+         *     ava_inbound_id, the identity the console item stream already exposes.
+         */
+        RunTimelineInbound: {
+            /**
+             * Ts
+             * Format: date-time
+             */
+            ts: string;
+            /** Source */
+            source: string;
+            /** Inbound Id */
+            inbound_id: number;
+        };
+        /**
          * RunTimelineLayerNode
          * @description One narrative-layer node (depth 0 = overview, 1 = stage, 2 = block).
          *
@@ -6997,6 +7016,8 @@ export interface components {
             /** Layers */
             layers?: components["schemas"]["RunTimelineLayerNode"][] | null;
             summary?: components["schemas"]["RunTimelineSummary"] | null;
+            /** Inbounds */
+            inbounds?: components["schemas"]["RunTimelineInbound"][] | null;
         };
         /**
          * RunTimelineRow

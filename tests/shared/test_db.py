@@ -252,3 +252,42 @@ def test_write_transaction_direct_refuses_a_pool() -> None:
         write_transaction(object(), direct=True),  # pyright: ignore[reportArgumentType]
     ):
         pass
+
+
+def test_list_chat_inbound_facts_windows_and_filters_kind(
+    db_conn: psycopg.Connection,
+) -> None:
+    """The arrow read: chat inbounds only, inside the closed [from_, to], oldest first."""
+    from datetime import UTC, datetime, timedelta
+
+    agent_id = _seed_agent(db_conn, "running")
+    base = datetime(2026, 9, 12, 4, tzinfo=UTC)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, created_at) VALUES "
+            "(%s, 'before', 'chat', 'agent:1', %s),"
+            "(%s, 'inside-a', 'chat', 'agent:2', %s),"
+            "(%s, 'inside-b', 'chat', 'user', %s),"
+            "(%s, 'note', 'system_note', 'system', %s),"
+            "(%s, 'after', 'chat', 'agent:1', %s)",
+            (
+                agent_id,
+                base - timedelta(minutes=1),
+                agent_id,
+                base + timedelta(minutes=1),
+                agent_id,
+                base + timedelta(minutes=2),
+                agent_id,
+                base + timedelta(minutes=3),
+                agent_id,
+                base + timedelta(minutes=10),
+            ),
+        )
+    db_conn.commit()
+
+    facts = db.list_chat_inbound_facts(agent_id, base, base + timedelta(minutes=5))
+
+    assert [(fact.source, fact.created_at) for fact in facts] == [
+        ("agent:2", base + timedelta(minutes=1)),
+        ("user", base + timedelta(minutes=2)),
+    ]

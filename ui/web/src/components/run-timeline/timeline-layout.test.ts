@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { RunTimelineResponse } from "@/lib/types";
 
-import { buildTimelineLayout } from "./timeline-layout";
+import { buildTimelineLayout, plotGeometry } from "./timeline-layout";
 
 const row: RunTimelineResponse["rows"][number] = {
   turn: 1,
@@ -101,5 +101,12 @@ describe("buildTimelineLayout", () => {
 
     expect(layout.layerRows).toEqual([]);
     expect(layout.track.top).toBe(62);
+  });
+});
+
+describe("plotGeometry", () => {
+  it("exposes the plot insets and the time-axis y for outside consumers", () => {
+    expect(plotGeometry(1000)).toEqual({ left: 32, width: 936, axisY: 38 });
+    expect(plotGeometry(0)).toEqual({ left: 32, width: 256, axisY: 38 });
   });
 });

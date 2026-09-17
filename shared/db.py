@@ -65,6 +65,44 @@ class InboundRow(NamedTuple):
     payload: dict[str, Any] | None = None
 
 
+class ChatInboundFact(NamedTuple):
+    """One chat delivery fact for run-timeline arrows — no content read."""
+
+    id: int
+    source: str
+    created_at: datetime
+
+
+def list_chat_inbound_facts(
+    agent_id: int,
+    from_: datetime,
+    to: datetime,
+) -> list[ChatInboundFact]:
+    """Chat delivery facts in [from_, to], oldest first.
+
+    Windowed read on the (agent_id, created_at) index — the arrow source for
+    multi-agent compare views. Content is deliberately not selected: an arrow
+    needs identity, source and time only. Callers state the window (no default;
+    task #3696 posture).
+    """
+    db_pool = pool(autocommit=True)
+    try:
+        with db_pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, source, created_at FROM inbound_messages"
+                " WHERE agent_id = %s AND kind = 'chat'"
+                " AND created_at BETWEEN %s AND %s"
+                " ORDER BY created_at",
+                (agent_id, from_, to),
+            )
+            return [
+                ChatInboundFact(id=int(row[0]), source=str(row[1]), created_at=row[2])
+                for row in cur.fetchall()
+            ]
+    finally:
+        db_pool.close()
+
+
 def fetch_one(cur: psycopg.Cursor, context: str) -> tuple[Any, ...]:
     """After `fetchone()`, assert there was a row — for
     `INSERT ... RETURNING` / aggregate queries where SQL contractually

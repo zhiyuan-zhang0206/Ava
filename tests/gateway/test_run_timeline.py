@@ -6,7 +6,12 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from gateway.routers.run_timeline import _narrative_for_window, aggregate_turn_timeline
+from gateway.routers.run_timeline import (
+    _inbounds_for_window,
+    _narrative_for_window,
+    aggregate_turn_timeline,
+)
+from shared.db import ChatInboundFact
 from shared.hierarchy.store import StoredNode
 
 
@@ -382,3 +387,34 @@ def test_narrative_for_window_keeps_layers_and_adds_the_fallback_on_partial(
     (layer,) = layers
     assert layer.summary == "first half"
     assert summary is not None and summary.text == "latest compact summary"
+
+
+def test_inbounds_for_window_maps_delivery_facts_to_wire_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Wiring lock: chat delivery facts -> ts/source/inbound_id rows."""
+    start = datetime(2026, 9, 12, 4, tzinfo=UTC)
+    end = start + timedelta(hours=2)
+    facts = [ChatInboundFact(id=31, source="agent:405", created_at=start + timedelta(minutes=5))]
+
+    def _facts(*_args: object, **_kwargs: object) -> list[ChatInboundFact]:
+        return facts
+
+    monkeypatch.setattr("shared.db.list_chat_inbound_facts", _facts)
+    rows = _inbounds_for_window(406, start, end)
+    assert rows is not None
+    (row,) = rows
+    assert (row.inbound_id, row.source, row.ts) == (31, "agent:405", start + timedelta(minutes=5))
+
+
+def test_inbounds_for_window_degrades_to_none_on_read_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failing delivery-fact read must not fail the endpoint."""
+    start = datetime(2026, 9, 12, 4, tzinfo=UTC)
+
+    def _boom(*_args: object, **_kwargs: object) -> list[ChatInboundFact]:
+        raise RuntimeError("store gone")
+
+    monkeypatch.setattr("shared.db.list_chat_inbound_facts", _boom)
+    assert _inbounds_for_window(406, start, start + timedelta(hours=1)) is None
