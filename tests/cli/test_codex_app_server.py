@@ -11,9 +11,11 @@ back on. The relay-level live-first/queue-fallback wiring lives in
 from __future__ import annotations
 
 import json
+import shutil
+import tempfile
 import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -28,6 +30,23 @@ THREAD_ID = UUID("b9d32d0d-bd27-40fc-83e8-692769b21523")
 
 def _endpoint(path: Path) -> str:
     return f"unix://{path}"
+
+
+@pytest.fixture
+def short_socket() -> Iterator[Path]:
+    """A bind path short enough for macOS's 104-char AF_UNIX limit.
+
+    pytest's ``tmp_path`` is too deep on macOS (test__mcps_daemon precedent:
+    the limit bites during bind, not connect); a short /tmp directory keeps
+    every bind path legal on both platforms. Self-managed and removed on
+    teardown.
+    """
+    # Short bind path: macOS AF_UNIX limit is 104 chars, CI Linux 107.
+    base = Path(tempfile.mkdtemp(prefix="cxas-", dir="/tmp"))
+    try:
+        yield base / "codex.sock"
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
 
 
 class FakeAppServer:
@@ -104,13 +123,12 @@ class FakeAppServer:
                     )
 
 
-def test_live_submit_delivers_over_the_control_socket(tmp_path: Path) -> None:
+def test_live_submit_delivers_over_the_control_socket(short_socket: Path) -> None:
     server = FakeAppServer()
-    sock = tmp_path / "codex.sock"
-    server.start(sock)
+    server.start(short_socket)
     try:
         reason = codex_app_server.live_submit(
-            str(THREAD_ID), "hello host", endpoint=_endpoint(sock), timeout=3.0
+            str(THREAD_ID), "hello host", endpoint=_endpoint(short_socket), timeout=3.0
         )
     finally:
         server.stop()
@@ -127,13 +145,12 @@ def test_live_submit_delivers_over_the_control_socket(tmp_path: Path) -> None:
     }
 
 
-def test_live_submit_reports_a_refused_turn(tmp_path: Path) -> None:
+def test_live_submit_reports_a_refused_turn(short_socket: Path) -> None:
     server = FakeAppServer(refuse_turn=True)
-    sock = tmp_path / "codex.sock"
-    server.start(sock)
+    server.start(short_socket)
     try:
         reason = codex_app_server.live_submit(
-            str(THREAD_ID), "parked", endpoint=_endpoint(sock), timeout=3.0
+            str(THREAD_ID), "parked", endpoint=_endpoint(short_socket), timeout=3.0
         )
     finally:
         server.stop()
@@ -142,7 +159,7 @@ def test_live_submit_reports_a_refused_turn(tmp_path: Path) -> None:
     assert "ActiveTurnNotSteerable" in reason
 
 
-def test_live_submit_skips_interleaved_server_traffic(tmp_path: Path) -> None:
+def test_live_submit_skips_interleaved_server_traffic(short_socket: Path) -> None:
     spoof = {"id": codex_app_server._TURN_REQUEST_ID, "method": "item/requestApproval"}
     server = FakeAppServer(
         interleave=[
@@ -150,27 +167,27 @@ def test_live_submit_skips_interleaved_server_traffic(tmp_path: Path) -> None:
             spoof,
         ]
     )
-    sock = tmp_path / "codex.sock"
-    server.start(sock)
+    server.start(short_socket)
     try:
         reason = codex_app_server.live_submit(
-            str(THREAD_ID), "delivered anyway", endpoint=_endpoint(sock), timeout=3.0
+            str(THREAD_ID), "delivered anyway", endpoint=_endpoint(short_socket), timeout=3.0
         )
     finally:
         server.stop()
     assert reason is None
 
 
-def test_live_submit_does_not_mistake_a_server_request_for_its_reply(tmp_path: Path) -> None:
+def test_live_submit_does_not_mistake_a_server_request_for_its_reply(
+    short_socket: Path,
+) -> None:
     """An id collision without result/error is not a reply: the client times out."""
     spoof = {"id": codex_app_server._TURN_REQUEST_ID, "method": "item/requestApproval"}
     server = FakeAppServer(interleave=[spoof], hold_reply=True)
-    sock = tmp_path / "codex.sock"
-    server.start(sock)
+    server.start(short_socket)
     started = time.monotonic()
     try:
         reason = codex_app_server.live_submit(
-            str(THREAD_ID), "unanswered", endpoint=_endpoint(sock), timeout=0.3
+            str(THREAD_ID), "unanswered", endpoint=_endpoint(short_socket), timeout=0.3
         )
     finally:
         server.stop()
@@ -178,14 +195,13 @@ def test_live_submit_does_not_mistake_a_server_request_for_its_reply(tmp_path: P
     assert time.monotonic() - started < 5.0
 
 
-def test_live_submit_bounds_a_silent_server(tmp_path: Path) -> None:
+def test_live_submit_bounds_a_silent_server(short_socket: Path) -> None:
     server = FakeAppServer(silent=True)
-    sock = tmp_path / "codex.sock"
-    server.start(sock)
+    server.start(short_socket)
     started = time.monotonic()
     try:
         reason = codex_app_server.live_submit(
-            str(THREAD_ID), "unheard", endpoint=_endpoint(sock), timeout=0.3
+            str(THREAD_ID), "unheard", endpoint=_endpoint(short_socket), timeout=0.3
         )
     finally:
         server.stop()
@@ -220,25 +236,21 @@ def test_default_control_endpoint_follows_codex_home(
 
 
 def test_live_submit_treats_a_bare_unix_endpoint_as_the_default_socket(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    short_socket: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A bare ``unix://`` resolves through ``default_control_socket()``.
 
-    The bind lives at ``tmp_path`` directly: the production suffix
-    ``app-server-control/app-server-control.sock`` (42 bytes) pushes a CI
-    runner's deep pytest tmp root over the 107-byte sun_path limit — the first
-    CI run failed exactly there with ``AF_UNIX path too long``. The resolver is
-    pinned to a short path; its CODEX_HOME mapping stays covered by
-    ``test_default_control_endpoint_follows_codex_home``.
+    Its CODEX_HOME mapping stays covered by
+    ``test_default_control_endpoint_follows_codex_home``; the bind goes through
+    the short-socket fixture like every other test that starts a fake server.
     """
-    sock = tmp_path / "codex.sock"
 
     def short_default_socket() -> Path:
-        return sock
+        return short_socket
 
     monkeypatch.setattr(codex_app_server, "default_control_socket", short_default_socket)
     server = FakeAppServer()
-    server.start(sock)
+    server.start(short_socket)
     try:
         reason = codex_app_server.live_submit(str(THREAD_ID), "hi", endpoint="unix://", timeout=3.0)
     finally:
