@@ -8,6 +8,7 @@ with the record kept — what its budget or a permanent failure refuses.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -399,6 +400,25 @@ def test_flush_disabled_keeps_expired_records(
     assert report.expired == 0 and path.exists()
 
 
+def test_flush_retention_boundary_is_inclusive(
+    journal: Path, db_conn: psycopg.Connection, pool: ConnectionPool
+) -> None:
+    """The window closes exactly at the threshold (>=): one second short the
+    records stay, the exact 30 days expire them."""
+    agent_id = _agent(db_conn)
+    first = _record(agent_id=agent_id, content="first", key="k-1", now=_NOW)
+    second = _record(agent_id=agent_id, content="second", key="k-2", now=_NOW)
+    assert first is not None and second is not None
+    for path in (first, second):
+        entry = outbox._read(path)
+        assert entry is not None
+        outbox._abandon(path, entry, "budget", _NOW)
+    report = outbox.flush(pool, now=_NOW + timedelta(days=30) - timedelta(seconds=1))
+    assert report.expired == 0 and first.exists() and second.exists()
+    report = outbox.flush(pool, now=_NOW + timedelta(days=30))
+    assert report.expired == 2 and not first.exists() and not second.exists()
+
+
 def test_flush_abandons_missing_agent(
     journal: Path, db_conn: psycopg.Connection, pool: ConnectionPool
 ) -> None:
@@ -444,3 +464,45 @@ def test_flush_keeps_unreadable_record(journal: Path, pool: ConnectionPool) -> N
     report = outbox.flush(pool)
     assert report.unreadable == 1
     assert bad.exists()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("created_at", "garbage"),
+        ("created_at", "2026-09-17T09:30:00"),  # naive — no tzinfo
+        ("abandoned_at", "garbage"),
+    ],
+)
+def test_read_treats_corrupt_timestamps_as_unreadable(
+    journal: Path, field: str, value: str
+) -> None:
+    """A corrupt or naive timestamp makes the whole record unreadable at the
+    parse boundary — never a raise inside a pass (task #3797)."""
+    path = _record(agent_id=7, now=_NOW)
+    assert path is not None
+    raw = json.loads(path.read_text())
+    raw[field] = value
+    path.write_text(json.dumps(raw))
+    assert outbox._read(path) is None
+
+
+def test_flush_continues_past_a_corrupt_timestamp_record(
+    journal: Path, db_conn: psycopg.Connection, pool: ConnectionPool
+) -> None:
+    """One corrupt record must never wedge the pass — the N1 vector was the
+    abandoned_at read in the retention predicate: the healthy record still
+    delivers, the corrupt one is kept and counted unreadable (task #3797)."""
+    agent_id = _agent(db_conn)
+    good = _record(agent_id=agent_id, content="deliver me", key="key-good", now=_NOW)
+    corrupt = _record(agent_id=agent_id, content="corrupt", key="key-bad", now=_NOW)
+    assert good is not None and corrupt is not None
+    entry = outbox._read(corrupt)
+    assert entry is not None
+    outbox._abandon(corrupt, entry, "budget", _NOW)
+    raw = json.loads(corrupt.read_text())
+    raw["abandoned_at"] = "garbage"
+    corrupt.write_text(json.dumps(raw))
+    report = outbox.flush(pool, now=_NOW + timedelta(seconds=31))
+    assert report.delivered == 1 and report.unreadable == 1
+    assert not good.exists() and corrupt.exists()
