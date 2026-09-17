@@ -20,6 +20,7 @@ import { InspectorToggle } from "./inspector-toggle";
 import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS } from "@/lib/layout";
 import { formatAbsolute, formatRelative } from "@/lib/time";
 import { foldNotices } from "@/lib/fold/notices";
+import { BACK_VISIT_REVALIDATE_MAX } from "@/lib/switch-budget";
 import type { AgentInspectStatistics, AgentInspectLive, InspectWidget, PageRow, SystemEvent } from "@/lib/types";
 
 // vi.hoisted so the mock fn is initialized before the hoisted vi.mock factory
@@ -1614,20 +1615,63 @@ describe("Inspector read ownership", () => {
     expect(screen.getByText("$9.0000")).toBeTruthy();
   });
 
-  it("switching agents releases inactive inspector cache entries", async () => {
-    getAgentInspectLive.mockImplementation((id) => Promise.resolve(liveFixture({ agent_id: id })));
+  it("retains each visited agent's inspector entries for the window (back-switch cache, task #3894)", async () => {
+    getAgentInspectLive.mockImplementation((id) =>
+      Promise.resolve(liveFixture(id === 1 ? { agent_id: id } : { agent_id: id, shells: [] })),
+    );
     getAgentInspectStatistics.mockImplementation((id) => Promise.resolve(fixture({ agent_id: id })));
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const view = rtlRender(<QueryClientProvider client={client}><InspectorPanel agentId={1} /></QueryClientProvider>);
-    for (let id = 2; id <= 15; id++) {
-      view.rerender(<QueryClientProvider client={client}><InspectorPanel agentId={id} /></QueryClientProvider>);
-      await waitFor(() => expect(getAgentInspectLive).toHaveBeenCalledWith(id, expect.any(AbortSignal)));
-    }
+    await screen.findByText("dev-server");
+    view.rerender(<QueryClientProvider client={client}><InspectorPanel agentId={2} /></QueryClientProvider>);
+    await waitFor(() => expect(getAgentInspectLive).toHaveBeenCalledWith(2, expect.any(AbortSignal)));
+
     const inspectorEntries = () => client.getQueryCache().getAll().filter((query) => String(query.queryKey[0]).startsWith("agent-inspect"));
-    await waitFor(() => expect(inspectorEntries()).toHaveLength(3));
-    expect(inspectorEntries().every((query) => query.queryKey[1] === 15)).toBe(true);
+    // Both agents' entries coexist — retention (switch-budget.ts), not discard.
+    await waitFor(() => expect(inspectorEntries()).toHaveLength(6));
+    expect(new Set(inspectorEntries().map((query) => query.queryKey[1]))).toEqual(new Set([1, 2]));
+
+    // A back-switch inside the window renders the retained cache synchronously.
+    view.rerender(<QueryClientProvider client={client}><InspectorPanel agentId={1} /></QueryClientProvider>);
+    expect(screen.getByText("dev-server")).toBeTruthy();
+
+    // Unmount keeps entries for the retention window instead of dropping them.
     view.unmount();
-    await waitFor(() => expect(inspectorEntries()).toHaveLength(0));
+    expect(inspectorEntries()).toHaveLength(6);
+  });
+
+  it("a back-switch revalidates at most the two live reads and never shows a cold skeleton", async () => {
+    getAgentInspectLive.mockImplementation((id) =>
+      Promise.resolve(liveFixture(id === 1 ? { agent_id: id } : { agent_id: id, shells: [] })),
+    );
+    getAgentInspectStatistics.mockImplementation((id) => Promise.resolve(fixture({ agent_id: id })));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = rtlRender(<QueryClientProvider client={client}><InspectorPanel agentId={1} /></QueryClientProvider>);
+    await screen.findByText("dev-server");
+    view.rerender(<QueryClientProvider client={client}><InspectorPanel agentId={2} /></QueryClientProvider>);
+    await waitFor(() => expect(getAgentInspectLive).toHaveBeenCalledWith(2, expect.any(AbortSignal)));
+
+    const liveCalls = (id: number) =>
+      getAgentInspectLive.mock.calls.filter(([calledId]) => calledId === id).length;
+    const statsCalls = (id: number) =>
+      getAgentInspectStatistics.mock.calls.filter(([calledId]) => calledId === id).length;
+    const widgetCalls = (id: number) =>
+      getAgentInspectWidgets.mock.calls.filter(([calledId]) => calledId === id).length;
+    expect(widgetCalls(1)).toBe(1);
+    const liveBefore = liveCalls(1);
+    const statsBefore = statsCalls(1);
+
+    view.rerender(<QueryClientProvider client={client}><InspectorPanel agentId={1} /></QueryClientProvider>);
+    // Cached snapshot renders synchronously — a back-visit never cold-skeletons.
+    expect(screen.getByText("dev-server")).toBeTruthy();
+    expect(screen.queryByLabelText("Persistent shells loading")).toBeNull();
+
+    // The background revalidations are the two live reads, within budget.
+    await waitFor(() => expect(liveCalls(1)).toBe(liveBefore + 1));
+    const revalidated = liveCalls(1) - liveBefore + (statsCalls(1) - statsBefore);
+    expect(revalidated).toBeLessThanOrEqual(BACK_VISIT_REVALIDATE_MAX);
+    // The widget set is selection-invariant: no third read.
+    expect(widgetCalls(1)).toBe(1);
   });
 });
 

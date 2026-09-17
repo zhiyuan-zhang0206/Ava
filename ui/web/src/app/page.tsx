@@ -205,9 +205,12 @@ function HomeShell({ showError }: HomeShellProps) {
       />
     </AgentEventStreamProvider>
   );
+  // resetKey, not key=: a switch resets the boundary of a crashed panel but
+  // leaves a healthy one mounted, so the inspector's per-agent cache survives
+  // the switch (task #3894).
   const inspector =
     inspectorOpen && activeId != null ? (
-      <ErrorBoundary key={activeId}>
+      <ErrorBoundary resetKey={activeId}>
         <LazyInspectorPanel agentId={activeId} />
       </ErrorBoundary>
     ) : null;

@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { Fragment, useCallback, type ReactNode, useEffect } from "react";
+import { Fragment, useCallback, useRef, type ReactNode, useEffect } from "react";
 
 import { LiveSectionsSkeleton, SectionSkeleton } from "@/components/inspector-panel-skeleton";
 import { InspectWidgetSection } from "@/components/inspector-widgets";
@@ -35,6 +35,7 @@ import {
   inspectWidgetsQueryKey,
   inspectWindowedQueryKey,
 } from "@/lib/inspector-queries";
+import { INSPECTOR_RETENTION_MS } from "@/lib/switch-budget";
 import { fleetNoticeHref, INSPECT_SECTION_ORDER } from "@/lib/inspector-widgets";
 import type {
   AgentInspectStatistics,
@@ -74,6 +75,13 @@ const WINDOWS: { labelKey: string; value: number | null }[] = [
  * current state; task events refresh widgets. Statistics reconcile on selection,
  * manual refresh, compact, and the 60-second interval, including after reconnect.
  * Each response is guarded by its agent/window identity before display.
+ *
+ * Switch caching (task #3894): the panel stays mounted across agent switches
+ * (page.tsx resets its error boundary via `resetKey`, not `key=`) and each
+ * agent's snapshot is retained for INSPECTOR_RETENTION_MS — a switch back
+ * inside the window renders the cached sections immediately (no skeleton)
+ * while the two live reads revalidate in the background. The widget set is
+ * selection-invariant and never refetches from a switch alone.
  *
  * Responsive (user ruling 2026-08-23, superseding the 2026-08-05 floating
  * overlay ruling on desktop): at ≥ lg it fills a resizable right-side panel;
@@ -118,7 +126,7 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
     enabled: open,
     retry: false,
     staleTime: 0,
-    gcTime: 0,
+    gcTime: INSPECTOR_RETENTION_MS,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     refetchInterval: open ? 60_000 : false,
@@ -130,30 +138,35 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
     enabled: open,
     retry: false,
     staleTime: 0,
-    gcTime: 0,
+    gcTime: INSPECTOR_RETENTION_MS,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     refetchInterval: open ? 60_000 : false,
     refetchOnMount: "always",
   });
-  // Plugin extensions have their own loading and error state.
+  // Plugin extensions have their own loading and error state. The widget set
+  // is selection-invariant for an agent (see switch-budget.ts): task events
+  // refresh it while open, the interval repairs across gaps, and a reconnect
+  // invalidates it — so no `refetchOnMount: "always"` here; staleTime at the
+  // retention window keeps a back-switch from firing a third read.
   const widgetsQuery = useQuery({
     queryKey: inspectWidgetsQueryKey(agentId),
     queryFn: ({ signal }) => api.getAgentInspectWidgets(agentId, signal),
     enabled: open,
     retry: false,
-    staleTime: 0,
-    gcTime: 0,
+    staleTime: INSPECTOR_RETENTION_MS,
+    gcTime: INSPECTOR_RETENTION_MS,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     refetchInterval: open ? 60_000 : false,
-    refetchOnMount: "always",
   });
 
   // Both query keys include the agent id, but keep explicit response identity
   // guards: a malformed/misrouted response must never render under another
-  // agent. Statistics must also echo the requested window. Inactive query
-  // entries are discarded, so switching cannot accumulate historical snapshots.
+  // agent. Statistics must also echo the requested window. Inactive entries
+  // are retained per agent for INSPECTOR_RETENTION_MS (switch-budget.ts) — a
+  // back-switch renders this cache immediately — and only the selected
+  // agent's keys are ever rendered, so retention cannot leak across agents.
   const liveData =
     liveQuery.data?.agent_id === agentId ? liveQuery.data : undefined;
   const windowedData = matchesInspectWindow(windowedQuery.data, agentId, hours)
@@ -182,6 +195,13 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
       void queryClient.cancelQueries({ queryKey: inspectWidgetsQueryKey(agentId) });
     }
   }, [agentId, open, queryClient]);
+
+  // The panel no longer remounts per agent switch (the batch-1 cache fix), so
+  // restore the scroll-to-top reset the remount used to give a new selection.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+  }, [agentId]);
 
   // Open pages: SSE-driven cache (page_opened/page_closed fold in live), not a
   // poll — see useAgentPages.
@@ -361,7 +381,7 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
         />
       </header>
 
-      <div className={cn("overflow-y-auto px-4 py-3 text-xs", MIN_H_0, FLEX_1)}>
+      <div ref={scrollRef} className={cn("overflow-y-auto px-4 py-3 text-xs", MIN_H_0, FLEX_1)}>
         <div className="space-y-4">
           {sections.map((section) => (
             <Fragment key={section.key}>{section.node}</Fragment>
