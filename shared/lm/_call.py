@@ -71,8 +71,8 @@ def invoke_text(
 ) -> str:
     """Invoke `llm` on a single HumanMessage of `content`, return flattened text.
 
-    `desc` labels failure messages (e.g. `deepseek-v4-flash, text`, or
-    `deepseek-v4-flash for <url>` on the fetch path). A failed invoke or an
+    `desc` labels failure messages (e.g. `deepseek-flash, text`, or
+    `deepseek-flash for <url>` on the fetch path). A failed invoke or an
     empty (safety-blocked) response raises `error_type` with the reason.
 
     `retry_attempts` bounds retries of TRANSIENT/UNKNOWN provider failures

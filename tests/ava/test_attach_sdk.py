@@ -135,7 +135,7 @@ def test_rejects_model_withdrawn_to_its_text_only_fallback(
 ) -> None:
     """A configured withdrawn model is gated as the model that will run: a
     deepseek-v4-flash-vision-exp pin resolves to the text-only
-    deepseek-v4-flash, so attach is rejected (task #3212)."""
+    deepseek-flash, so attach is rejected (task #3212)."""
     from shared.config import settings
 
     _exec_child(monkeypatch, tmp_path)

@@ -21,7 +21,7 @@ const row: RunTimelineResponse["rows"][number] = {
     reasoning: 4,
     latency_ms: 1500,
     cost_usd: 0.02,
-    model: "deepseek-v4-flash",
+    model: "deepseek-flash",
   },
   execs: [],
   anomalies: [],

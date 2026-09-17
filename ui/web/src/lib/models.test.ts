@@ -49,19 +49,19 @@ describe("groupedModels", () => {
     const data = modelsResponse(
       {
         claude: ["claude-haiku-4-5-20251001", "claude-sonnet-5", "claude-opus-5"],
-        deepseek: ["deepseek-v4-flash", "deepseek-v4-pro"],
+        deepseek: ["deepseek-flash", "deepseek-v4-pro"],
       },
       {
         "claude-haiku-4-5-20251001": 0.2,
         "claude-sonnet-5": 2.0,
         "claude-opus-5": 5.0,
-        "deepseek-v4-flash": 0.1,
+        "deepseek-flash": 0.1,
         "deepseek-v4-pro": 0.5,
       },
     );
     expect(groupedModels(data)).toEqual([
       ["claude", ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001"]],
-      ["deepseek", ["deepseek-v4-pro", "deepseek-v4-flash"]],
+      ["deepseek", ["deepseek-v4-pro", "deepseek-flash"]],
     ]);
   });
 
@@ -120,14 +120,14 @@ describe("groupedModels", () => {
 
 describe("isSuperseded", () => {
   const response: ModelsResponse = {
-    providers: { deepseek: ["deepseek-v4-pro", "deepseek-v4-flash"] },
+    providers: { deepseek: ["deepseek-v4-pro", "deepseek-flash"] },
     models: {
       "deepseek-v4-pro": {
         provider: "deepseek",
         context_window: 128_000,
-        superseded_by: "deepseek-v4-flash",
+        superseded_by: "deepseek-flash",
       },
-      "deepseek-v4-flash": {
+      "deepseek-flash": {
         provider: "deepseek",
         context_window: 128_000,
         superseded_by: null,
@@ -137,7 +137,7 @@ describe("isSuperseded", () => {
         context_window: 128_000,
       },
     },
-    default: "deepseek-v4-flash",
+    default: "deepseek-flash",
   };
 
   it("returns true when the registry supplies a replacement", () => {
@@ -145,7 +145,7 @@ describe("isSuperseded", () => {
   });
 
   it("returns false for null or omitted replacements", () => {
-    expect(isSuperseded(response, "deepseek-v4-flash")).toBe(false);
+    expect(isSuperseded(response, "deepseek-flash")).toBe(false);
     expect(isSuperseded(response, "deepseek-v4-legacy")).toBe(false);
   });
 

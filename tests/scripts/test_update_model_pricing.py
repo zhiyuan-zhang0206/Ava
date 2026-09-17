@@ -318,8 +318,8 @@ def test_reconcile_appends_a_new_effective_period_without_rewriting_history() ->
     )
 
     assert updated is not None
-    # One flash column prices both legacy names (footnote (1)).
-    for model in ("deepseek-v4-flash", "deepseek-v4-flash-vision-exp"):
+    # One flash column prices the canonical id and both legacy names (footnote (1)).
+    for model in ("deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"):
         periods = updated["models"][model]["periods"]
         assert periods[-2]["effective_until"] == "2026-09-15T12:34:56Z"
         assert periods[-1]["effective_from"] == "2026-09-15T12:34:56Z"

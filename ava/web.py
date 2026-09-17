@@ -394,7 +394,7 @@ def _answer(
     """Have a model answer `prompt` against the fetched page content.
 
     Builds the LLM directly via `build_chat_model` using the web-fetch-specific
-    model (`settings.web.web_fetch_model`, default deepseek-v4-flash) and
+    model (`settings.web.web_fetch_model`, default deepseek-flash) and
     reasoning effort — an explicit per-call `effort` wins, else
     `settings.web.web_fetch_reasoning` (default none) — independent of the
     agent's main model and `ava.understand`'s text model.

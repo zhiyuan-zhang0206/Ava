@@ -14,7 +14,7 @@ Your task: Use config_overlay to demonstrate Ava's multi-model switching capabil
 2. Use `ava.agents.spawn()` to create 3 agents, each specifying a different `llm_model`:
    - `claude-sonnet-4-6`
    - `gpt-5.4-mini`
-   - `deepseek-v4-flash`
+   - `deepseek-flash`
 
    Example:
    ```python
@@ -63,6 +63,6 @@ A Markdown report containing:
 `config_overlay` allows each agent to choose a different model without modifying the global configuration. This is especially useful in the following scenarios:
 
 - **Comparative evaluation**: See how different models perform on the same task and choose the most suitable one
-- **Cost optimization**: Use cheaper models for simple tasks (e.g., deepseek-v4-flash) and powerful models for complex reasoning (e.g., claude-opus-4-8)
+- **Cost optimization**: Use cheaper models for simple tasks (e.g., deepseek-flash) and powerful models for complex reasoning (e.g., claude-opus-4-8)
 - **Complementary strengths**: Some models excel at coding, others at creative writing, assign based on needs
 - **Gradual migration**: When a new model goes live, try it on some agents first, then fully switch after validation
