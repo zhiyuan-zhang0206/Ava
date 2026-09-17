@@ -105,4 +105,7 @@ in `hierarchy_jobs` + `hierarchy_worker_state`.
 - **Cost observability**: each job row records the run's scope (stretches,
   nodes generated/reused/failed/skipped) and its token sums; the LLM usage
   ledger (`usage_source='hierarchy.generate'`) is the authoritative per-call
-  record.
+  record. Both worker processes boot the logging/telemetry seam — `job.main`
+  as `hierarchy-worker`, the host's `prepare()` as
+  `schedule-hierarchy-worker` — so the ledger rows and the worker's own
+  records actually reach the event stream (task #3868).
