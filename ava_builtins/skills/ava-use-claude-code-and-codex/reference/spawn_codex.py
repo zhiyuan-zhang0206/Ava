@@ -248,6 +248,12 @@ def _app_server_command(
     TUI) and ends the server when it dies, then removes the socket. The
     hands-off policy is configured on the server itself: the remote TUI's flags
     do not reach the server's tools.
+
+    The janitor's cadence bounds are reference-script defaults, not config —
+    the script is copied and run standalone, so a knob travels in the file
+    (task #3696 exception inventory): a 2s dead-check interval reaps within a
+    few seconds of session death at one cheap sleep, and a 1s grace lets the
+    server exit on SIGTERM (and unlink its socket) before the SIGKILL.
     """
     from shared.external_caller import launch_caller_assignment
 
@@ -277,6 +283,12 @@ def _wait_for_app_server(endpoint: str, timeout: float = 20.0) -> None:
     Socket acceptance is the readiness fact (the app server writes no startup
     line); a launch whose endpoint never answers fails loudly instead of
     starting a TUI that queues nothing.
+
+    The 20s timeout and 0.5s probe cadence are reference-script defaults, not
+    config — the script is copied and run standalone (task #3696 exception
+    inventory): app-server startup measured ~1-2s on codex 0.153.4, so 20s
+    bounds one wait and an absent or older app server fails the launch loudly
+    instead of hanging it.
     """
     path = endpoint.removeprefix("unix://")
     print(f"waiting for the shared codex app server at {endpoint}...")
@@ -285,6 +297,9 @@ def _wait_for_app_server(endpoint: str, timeout: float = 20.0) -> None:
         if Path(path).exists():
             with contextlib.suppress(OSError):
                 probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                # Local connect-probe bound; the house 2s for same-machine
+                # sockets (shared/pty_sessions/launch.py). Reference-script
+                # default, not config (task #3696 exception inventory).
                 probe.settimeout(2.0)
                 try:
                     probe.connect(path)
