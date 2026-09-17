@@ -573,7 +573,11 @@ def test_codex_queues_exact_thread_and_literal_message(
         outputs.append(result)
         return result
 
+    def no_default_endpoint() -> str | None:
+        return None
+
     monkeypatch.setattr(relay.shared.proc, "run_bounded", record)
+    monkeypatch.setattr(relay, "default_control_endpoint", no_default_endpoint)
     message = "Ava push with literal $(no-shell) and `no-shell`"
     relay.host_emitter("codex", str(THREAD_ID))(message)
     assert len(outputs) == 1
@@ -603,10 +607,85 @@ def test_codex_queue_honours_the_remote_endpoint(
         outputs.append(result)
         return result
 
+    attempts: list[str] = []
+
+    def refused_live(
+        _thread_id: str, _message: str, *, endpoint: str, timeout: float = 5.0
+    ) -> str | None:
+        attempts.append(endpoint)
+        return "endpoint offline in this test"
+
     monkeypatch.setattr(relay.shared.proc, "run_bounded", record)
+    monkeypatch.setattr(relay, "live_submit", refused_live)
     remote = "unix:///private/tmp/ava-codex.sock"
     relay.host_emitter("codex", str(THREAD_ID), codex_remote=remote)("push")
+    assert attempts == [remote]
     assert json.loads(outputs[0].stdout)[-2:] == ["--remote", remote]
+
+
+def test_codex_emitter_prefers_live_delivery_over_the_queue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts: list[tuple[str, str, str]] = []
+
+    def delivered_live(
+        thread_id: str, message: str, *, endpoint: str, timeout: float = 5.0
+    ) -> str | None:
+        attempts.append((thread_id, message, endpoint))
+        return None
+
+    def unexpected_queue(_thread_id: UUID, _message: str, *, remote: str | None = None) -> None:
+        raise AssertionError("the durable queue must not run when the live path delivered")
+
+    monkeypatch.setattr(relay, "live_submit", delivered_live)
+    monkeypatch.setattr(relay, "queue_codex", unexpected_queue)
+    remote = "unix:///private/tmp/ava-codex.sock"
+    relay.host_emitter("codex", str(THREAD_ID), codex_remote=remote)("push")
+    assert attempts == [(str(THREAD_ID), "push", remote)]
+
+
+def test_codex_emitter_falls_back_to_the_queue_when_live_refuses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def refused_live(
+        _thread_id: str, _message: str, *, endpoint: str, timeout: float = 5.0
+    ) -> str | None:
+        return "turn/start refused (code -32603: ActiveTurnNotSteerable)"
+
+    queued: list[tuple[UUID, str | None]] = []
+
+    def record_queue(thread_id: UUID, _message: str, *, remote: str | None = None) -> None:
+        queued.append((thread_id, remote))
+
+    monkeypatch.setattr(relay, "live_submit", refused_live)
+    monkeypatch.setattr(relay, "queue_codex", record_queue)
+    remote = "unix:///private/tmp/ava-codex.sock"
+    relay.host_emitter("codex", str(THREAD_ID), codex_remote=remote)("push")
+    assert queued == [(THREAD_ID, remote)]
+
+
+def test_codex_emitter_uses_the_default_control_endpoint_without_a_remote(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts: list[str] = []
+
+    def daemon_endpoint() -> str | None:
+        return "unix:///tmp/ava-daemon.sock"
+
+    def delivered_live(
+        _thread_id: str, _message: str, *, endpoint: str, timeout: float = 5.0
+    ) -> str | None:
+        attempts.append(endpoint)
+        return None
+
+    def unexpected_queue(_thread_id: UUID, _message: str, *, remote: str | None = None) -> None:
+        raise AssertionError("the queue must not run when the default daemon delivered")
+
+    monkeypatch.setattr(relay, "default_control_endpoint", daemon_endpoint)
+    monkeypatch.setattr(relay, "live_submit", delivered_live)
+    monkeypatch.setattr(relay, "queue_codex", unexpected_queue)
+    relay.host_emitter("codex", str(THREAD_ID))("push")
+    assert attempts == ["unix:///tmp/ava-daemon.sock"]
 
 
 def test_claude_rejects_codex_remote() -> None:
@@ -747,6 +826,12 @@ def test_command_passes_remote_to_queue(monkeypatch: pytest.MonkeyPatch) -> None
     def queue(thread_id: UUID, _message: str, *, remote: str | None = None) -> None:
         queued.append((thread_id, remote))
 
+    def refused_live(
+        _thread_id: str, _message: str, *, endpoint: str, timeout: float = 5.0
+    ) -> str | None:
+        return "endpoint offline in this test"
+
+    monkeypatch.setattr(relay, "live_submit", refused_live)
     monkeypatch.setattr(relay, "queue_codex", queue)
     assert args.func(args) == 0
     assert queued == [(THREAD_ID, remote)]
@@ -821,7 +906,11 @@ def test_codex_relay_caps_pushed_content_before_queue(
         _ = remote
         queued.append(message)
 
+    def no_default_endpoint() -> str | None:
+        return None
+
     monkeypatch.setattr(relay, "queue_codex", queue)
+    monkeypatch.setattr(relay, "default_control_endpoint", no_default_endpoint)
     assert args.func(args) == 0
     push = queued[-1]
     assert "truncated" in push
