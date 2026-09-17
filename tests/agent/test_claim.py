@@ -2989,3 +2989,38 @@ async def test_claim_node_idle_enter_publishes_full_window_snapshot(
     assert snaps[0]["msg_count"] == 1
     assert [it["item_id"] for it in snaps[0]["items"]] == ["0.0"]
     assert snaps[0]["items"][0]["kind"] == "system_prompt"
+
+
+def test_claim_will_idle_shares_the_impl_and_wrapper_contract() -> None:
+    """One idle predicate for the impl branch and the wrapper's snapshot path:
+    a trailing end-of-session note waives the fresh-window term (resume), and
+    an open breaker parks idle (the wrapper previously omitted that arm)."""
+    from datetime import UTC, datetime
+
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    from agent.graph._claim import claim_will_idle
+    from agent.messages import system_note_message
+    from agent.state_channels import CIRCUIT_REASON_BILLING, CircuitState
+    from shared.message_kwargs import NoteTag
+
+    fresh = AgentState()
+    fresh.messages = [SystemMessage(content="prompt")]
+    assert claim_will_idle(fresh)  # no conversation yet: idle
+
+    resume = AgentState()
+    resume.impersonation_handoff_id = "7:0"
+    note = system_note_message(
+        content="session ended", tag=NoteTag.IMPERSONATION, created_at=datetime.now(UTC)
+    )
+    note.id = "impersonation-handoff:7:0"
+    resume.messages = [SystemMessage(content="prompt"), note]
+    assert not claim_will_idle(resume)  # the note must get its first turn
+
+    resume.halted = True
+    assert claim_will_idle(resume)  # an ended turn still wins
+
+    parked = AgentState()
+    parked.messages = [HumanMessage(content="hello")]
+    parked.circuit = CircuitState(open=True, reason=CIRCUIT_REASON_BILLING)
+    assert claim_will_idle(parked)

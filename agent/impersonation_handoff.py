@@ -88,7 +88,8 @@ def _receipt(session: dict[str, Any], incarnation: RuntimeIncarnation) -> None:
     with write_transaction() as conn:
         require_native(conn, incarnation)
         lease = lock_lease(conn, session["id"])
-        # These messages have now been delivered in the durable handoff note/file.
+        # These messages have now been delivered in the durable end-of-session note
+        # and record file.
         # Their immutable bodies survive independently of processing status.
         conn.execute(
             "UPDATE inbound_messages SET status='done' WHERE agent_id=%s AND status='pending' "
