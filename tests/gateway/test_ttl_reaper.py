@@ -15,6 +15,7 @@ import asyncio
 import time
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 
 import psycopg
 import pytest
@@ -1349,3 +1350,67 @@ async def test_terminal_watcher_rows_are_not_reaped(
     assert reaped == []
     assert dispatched == []
     assert _watcher_status(db_conn, aid, 37) == "rebuilt"
+
+
+async def test_shutdown_stop_defers_the_rest_of_the_shell_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stop waits out only the in-flight dispatch, never the rest of the batch.
+
+    Each unreachable-machine ``shell_kill`` dispatch burns its full retry
+    budget (tens of seconds) and the batch is serial, so a stop landing during
+    one dispatch used to make ``stop_ttl_reaper`` — and with it the gateway
+    lifespan — wait out every remaining row. With ``stop`` set, the pass must
+    finish the in-flight dispatch and leave the rest to the next pass.
+    """
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls: list[int] = []
+
+    async def _dispatch(
+        _machine: str, _kind: str, payload: dict[str, Any], **kwargs: object
+    ) -> dict[str, object]:
+        calls.append(int(payload["session_id"]))
+        started.set()
+        await release.wait()
+        raise ttl_reaper.cluster_rpc.ClusterOpUnreachable("machine unreachable")
+
+    def _rows(_pool: object) -> list[dict[str, object]]:
+        return [
+            {"agent_id": 1, "session_id": session_id, "watcher_status": None}
+            for session_id in (101, 102, 103)
+        ]
+
+    def _claim(_pool: object, _agent_id: int, _session_id: int) -> bool:
+        return True
+
+    def _machine_of(_pool: object, _agent_id: int) -> str:
+        return "machine-x"
+
+    def _deadline(_row: dict[str, object]) -> None:
+        return None
+
+    monkeypatch.setattr(ttl_reaper, "_expired_shell_rows_blocking", _rows)
+    monkeypatch.setattr(ttl_reaper, "_claim_shell_row_still_expired", _claim)
+    monkeypatch.setattr(ttl_reaper, "_agent_machine", _machine_of)
+    monkeypatch.setattr(ttl_reaper, "watcher_deadline_of", _deadline)
+    monkeypatch.setattr(ttl_reaper.cluster_rpc, "dispatch_to_machine", _dispatch)
+
+    pool = cast(ConnectionPool, None)  # every pool consumer above is faked
+    stop = asyncio.Event()
+
+    async def _drive() -> None:
+        await ttl_reaper._reap_expired_shells(pool, stop)
+
+    reap_task = asyncio.create_task(_drive())
+    await asyncio.wait_for(started.wait(), timeout=5)
+
+    reaper = ttl_reaper.TtlReaper(task=reap_task, stop=stop)
+    stopper = asyncio.create_task(ttl_reaper.stop_ttl_reaper(reaper))
+    while not stop.is_set():
+        await asyncio.sleep(0.01)
+    assert not stopper.done()  # the in-flight dispatch still holds the pass open
+
+    release.set()
+    await asyncio.wait_for(stopper, timeout=5)
+    assert calls == [101]  # rows 102/103 deferred to the next pass

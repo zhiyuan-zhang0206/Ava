@@ -36,3 +36,17 @@ def test_gateway_pins_uvicorn_to_one_worker_for_process_local_rate_limits(
 
     assert captured["workers"] == 1
     assert "rate limit" in caplog.text
+
+
+def test_gateway_launch_bounds_the_connection_drain(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The launch assembly must hand uvicorn a finite graceful-shutdown budget.
+
+    The 2026-09-17 gateway stall: uvicorn's connection-drain phase has no
+    default timeout, so an unfinished streaming response held it forever. The
+    real child-process regression lives in
+    tests/gateway/test_server_shutdown.py; this pins the value the assembly
+    resolves for uvicorn.
+    """
+    monkeypatch.setattr(settings.gateway, "gateway_graceful_shutdown_timeout_seconds", 7.5)
+    kwargs = _server.serve_kwargs(host="127.0.0.1")
+    assert kwargs["timeout_graceful_shutdown"] == 7.5

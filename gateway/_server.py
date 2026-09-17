@@ -8,6 +8,7 @@ import logging
 import os
 import signal
 from contextlib import suppress
+from typing import Any
 
 import uvicorn
 
@@ -87,28 +88,50 @@ def main() -> None:
     host = "" if is_gateway() and settings.data_plane.cluster_secret else "127.0.0.1"
     if host != "127.0.0.1":
         verify_transport_encryption(settings.data_plane.cluster_secret, host)
-    reload = settings.gateway.gateway_reload
     if _GATEWAY_UVICORN_WORKERS != 1:
         raise RuntimeError(
             "gateway must run one uvicorn worker because rate limiters are process-local"
         )
     _log.warning("gateway starts with one uvicorn worker because rate limiters are process-local")
-    # log_config=None: uvicorn's default LOGGING_CONFIG dictConfig would
-    # clobber the root-handler install (`_StdlibInterceptHandler`) that
-    # init_gateway_process set up above, sending uvicorn's own records
-    # (ASGI tracebacks, startup/shutdown) to a bare stderr handler instead
-    # of through loguru → gateway.log + the events pipeline. With None,
-    # uvicorn leaves the logging system alone; uvicorn.error propagates to
-    # the root intercept handler, and uvicorn.access is gated to WARNING in
-    # `_install_stdlib_intercept` (per-request INFO is noise). #970: an
-    # unhandled ASGI exception used to land only in the session log and die
-    # with the session — now it reaches gateway.log and the events table.
-    uvicorn.run(
-        "gateway.app:app",
-        host=host,
-        port=settings.gateway.gateway_port,
-        reload=reload,
-        reload_dirs=["gateway", "shared", "ava", "agent"] if reload else None,
-        log_config=None,
-        workers=_GATEWAY_UVICORN_WORKERS,
-    )
+    uvicorn.run(**serve_kwargs(host=host))
+
+
+def serve_kwargs(*, host: str, app: str = "gateway.app:app") -> dict[str, Any]:
+    """Assemble the uvicorn launch parameters for the gateway ASGI server.
+
+    The single assembly point of the launch contract: ``main()`` hands the dict
+    straight to ``uvicorn.run``, and the shutdown regression
+    (``tests/gateway/test_server_shutdown.py``) starts a real child-process
+    server from the same dict — only the bind address, the app path and the
+    port are swapped — so a field dropped here (in particular
+    ``timeout_graceful_shutdown``) fails a real server, not just a mock.
+
+    ``timeout_graceful_shutdown`` bounds uvicorn's connection-drain phase.
+    Uvicorn's default is ``None``, and an unfinished streaming response then
+    holds the drain in "Waiting for connections to close" forever — the
+    2026-09-17 gateway stall, ended only by a forced kill. Once the budget
+    elapses uvicorn cancels the remaining request/stream tasks and runs the
+    lifespan shutdown, so a stuck stream costs at most the configured budget,
+    never the maintenance-stop deadline.
+    """
+    reload = settings.gateway.gateway_reload
+    return {
+        "app": app,
+        "host": host,
+        "port": settings.gateway.gateway_port,
+        "reload": reload,
+        "reload_dirs": ["gateway", "shared", "ava", "agent"] if reload else None,
+        # log_config=None: uvicorn's default LOGGING_CONFIG dictConfig would
+        # clobber the root-handler install (`_StdlibInterceptHandler`) that
+        # init_gateway_process set up above, sending uvicorn's own records
+        # (ASGI tracebacks, startup/shutdown) to a bare stderr handler instead
+        # of through loguru → gateway.log + the events pipeline. With None,
+        # uvicorn leaves the logging system alone; uvicorn.error propagates to
+        # the root intercept handler, and uvicorn.access is gated to WARNING in
+        # `_install_stdlib_intercept` (per-request INFO is noise). #970: an
+        # unhandled ASGI exception used to land only in the session log and die
+        # with the session — now it reaches gateway.log and the events table.
+        "log_config": None,
+        "workers": _GATEWAY_UVICORN_WORKERS,
+        "timeout_graceful_shutdown": settings.gateway.gateway_graceful_shutdown_timeout_seconds,
+    }

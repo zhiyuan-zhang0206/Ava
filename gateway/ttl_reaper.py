@@ -435,7 +435,9 @@ def _delete_shell_row_blocking(
             )
 
 
-async def _reap_expired_shells(pool: ConnectionPool) -> list[tuple[int, int]]:
+async def _reap_expired_shells(
+    pool: ConnectionPool, stop: asyncio.Event | None = None
+) -> list[tuple[int, int]]:
     """Kill TTL-expired shell sessions on their home machines.
 
     One lifecycle for every session, watcher sessions included (user ruling
@@ -451,7 +453,8 @@ async def _reap_expired_shells(pool: ConnectionPool) -> list[tuple[int, int]]:
     The row is deleted only on a definitive verdict (killed / absent); an
     unreachable machine or a version-skewed runner leaves it for the next
     pass — deleting the row would orphan the live session. All DB work runs
-    via to_thread: the gateway event loop never blocks on psycopg.
+    via to_thread: the gateway event loop never blocks on psycopg. A set
+    ``stop`` defers the not-yet-started rows to the next pass.
     """
     rows = await asyncio.to_thread(_expired_shell_rows_blocking, pool)
     reaped: list[tuple[int, int]] = []
@@ -459,6 +462,8 @@ async def _reap_expired_shells(pool: ConnectionPool) -> list[tuple[int, int]]:
     heal_samples: list[str] = []
     now = datetime.now(UTC)
     for row in rows:
+        if stop is not None and stop.is_set():
+            break
         agent_id = row["agent_id"]
         session_id = row["session_id"]
         deadline = watcher_deadline_of(row)
@@ -719,10 +724,10 @@ async def _reaper_loop(pool: ConnectionPool, stop: asyncio.Event) -> None:
             reminded = await asyncio.to_thread(remind_expiring_impersonations, pool)
             impersonations = await asyncio.to_thread(reap_impersonations, pool)
             pages = await asyncio.to_thread(_reap_expired_pages_blocking, pool)
-            shells = await _reap_expired_shells(pool)
+            shells = await _reap_expired_shells(pool, stop)
             sessions = await asyncio.to_thread(_reap_expired_web_sessions_blocking, pool)
             terminated_watchers = await reap_terminated_owner_watchers(
-                pool, timeout_s=_SHELL_KILL_TIMEOUT_S, batch=_PASS_BATCH
+                pool, timeout_s=_SHELL_KILL_TIMEOUT_S, batch=_PASS_BATCH, stop=stop
             )
             notices = await asyncio.to_thread(_reap_expired_notices_blocking, pool)
             for agent_id, nid in notices:
@@ -783,7 +788,11 @@ def start_ttl_reaper(db_pool: ConnectionPool) -> TtlReaper:
 
 
 async def stop_ttl_reaper(reaper: TtlReaper) -> None:
-    """Drain a bounded in-flight pass before the gateway closes its pool."""
+    """Drain the pass's in-flight remote dispatch before the gateway closes its pool.
+
+    Batch loops defer not-yet-started rows once ``stop`` is set: deferred rows
+    stay expired, and the next boot's pass re-selects them.
+    """
     reaper.stop.set()
     with suppress(asyncio.CancelledError):
         await reaper.task
