@@ -472,7 +472,7 @@ describe("GraphView", () => {
     expect(screen.getByText("2 nodes · 1 edges")).toBeTruthy();
   });
 
-  it("shows the stale snapshot age for a non-empty fallback graph", () => {
+  it("renders no stale copy for a stale fallback graph (task #3893)", () => {
     const snapshotAt = new Date(Date.now() - 12 * 60 * 1000).toISOString();
     useFleetGraph.mockReturnValue(
       ok({
@@ -485,7 +485,9 @@ describe("GraphView", () => {
 
     renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
 
-    expect(screen.getByRole("status").textContent).toBe("Stale — snapshot from 12m ago");
+    // Degradation markers are internal: no chip, no age, no "stale" wording.
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByText(/stale/i)).toBeNull();
   });
 
   it("does not flag a fresh graph as stale", () => {
@@ -502,7 +504,7 @@ describe("GraphView", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
-  it("shows a telemetry warning without labeling a fresh graph stale", () => {
+  it("renders no telemetry-degraded copy (task #3893)", () => {
     useFleetGraph.mockReturnValue(
       ok({
         nodes: [node(1), node(2)],
@@ -513,12 +515,11 @@ describe("GraphView", () => {
 
     renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
 
-    expect(screen.getByRole("status").textContent).toBe(
-      "Telemetry degraded — updates may lag",
-    );
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByText(/telemetry/i)).toBeNull();
   });
 
-  it("marks a fresh graph whose Loki edge response was truncated", () => {
+  it("renders no truncation copy (task #3893)", () => {
     useFleetGraph.mockReturnValue(
       ok({
         nodes: [node(1), node(2)],
@@ -529,7 +530,8 @@ describe("GraphView", () => {
 
     renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
 
-    expect(screen.getByText("Truncated — edge limit reached")).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByText(/truncat/i)).toBeNull();
   });
 
   it("merges multiple lineage kinds per pair into one edge (no duplicate React keys)", async () => {
