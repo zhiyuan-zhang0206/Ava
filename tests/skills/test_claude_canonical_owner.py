@@ -168,6 +168,66 @@ def test_takeover_launch_inlines_brief_without_files_or_supervisor(
     assert "tasks.md" not in message and "work.md" not in message
 
 
+def test_start_receipt_survives_a_dead_session_at_the_enter_retry(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A dead pane's send_keys refusal stays loud-not-fatal: warn, do not raise.
+
+    send_keys is the first call a mid-window death reaches (it precedes the
+    capture read), so this is the throw point the contract must cover first.
+    """
+
+    def no_receipt(_started: float) -> bool:
+        return False
+
+    def no_sleep(_seconds: float) -> None:
+        return None
+
+    def dead_keys(_sid: int, *_keys: str) -> None:
+        raise ValueError("session 7 is not this agent's (no match for 'shell-7')")
+
+    def unexpected_capture(_sid: int, **_kwargs: object) -> str:
+        raise AssertionError("capture must not run once the Enter retry refused")
+
+    monkeypatch.setattr(spawn_claude, "_bootstrap_submitted", no_receipt)
+    monkeypatch.setattr(spawn_claude.time, "sleep", no_sleep)
+    monkeypatch.setattr(spawn_claude.ava.shell.sessions, "send_keys", dead_keys)
+    monkeypatch.setattr(spawn_claude.ava.shell.sessions, "capture", unexpected_capture)
+
+    spawn_claude._verify_start_receipt(7, timeout=0.01)
+    out = capsys.readouterr().out
+    assert "start-receipt=not-submitted" in out
+    assert "Enter retry failed" in out
+
+
+def test_start_receipt_survives_a_dead_session_at_capture(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A dead pane's capture refusal stays loud-not-fatal: warn, do not raise."""
+
+    def no_receipt(_started: float) -> bool:
+        return False
+
+    def no_sleep(_seconds: float) -> None:
+        return None
+
+    def no_keys(_sid: int, *_keys: str) -> None:
+        return None
+
+    def dead_capture(_sid: int, **_kwargs: object) -> str:
+        raise ValueError("session 7 is not this agent's (no match for 'shell-7')")
+
+    monkeypatch.setattr(spawn_claude, "_bootstrap_submitted", no_receipt)
+    monkeypatch.setattr(spawn_claude.time, "sleep", no_sleep)
+    monkeypatch.setattr(spawn_claude.ava.shell.sessions, "send_keys", no_keys)
+    monkeypatch.setattr(spawn_claude.ava.shell.sessions, "capture", dead_capture)
+
+    spawn_claude._verify_start_receipt(7, timeout=0.01)
+    out = capsys.readouterr().out
+    assert "start-receipt=not-submitted" in out
+    assert "capture failed" in out
+
+
 def test_takeover_launch_refuses_a_workspace_with_a_live_generation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

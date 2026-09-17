@@ -2,6 +2,7 @@
 
 import hashlib
 import hmac
+import re
 from typing import Any, cast
 from uuid import UUID
 
@@ -67,6 +68,11 @@ def local(lease: dict[str, Any]) -> None:
 
 _PROVIDER_ANCHOR_BASENAMES = frozenset({"codex", "claude"})
 
+# claude's native installer runs a version-stamped binary from
+# ``<install>/claude/versions/<version>`` (the process carries the version as
+# its name), so its controller node never matches the basename allowlist.
+_CLAUDE_NATIVE_VERSION = re.compile(r"\d+(?:\.\d+)+")
+
 
 def _basename(value: object) -> str:
     if not isinstance(value, str) or not value:
@@ -92,10 +98,29 @@ def _metadata_nodes(metadata: object) -> list[dict[str, Any]]:
     return nodes
 
 
+def _is_claude_native_executable(executable: object) -> bool:
+    """Whether a recorded executable is a claude native-install artifact.
+
+    Recognition is the install shape — a ``claude`` directory holding a
+    ``versions`` directory whose entry is version-stamped (e.g.
+    ``~/.local/share/claude/versions/2.1.274``). Exactly like the basename
+    allowlist, this is a shape gate on what gets recorded; the attestation
+    itself stays pid + stable start time equality with the recorded process.
+    """
+    if not isinstance(executable, str) or not executable:
+        return False
+    parts = executable.rstrip("/").split("/")
+    if len(parts) < 3 or parts[-2].lower() != "versions" or parts[-3].lower() != "claude":
+        return False
+    return _CLAUDE_NATIVE_VERSION.fullmatch(parts[-1]) is not None
+
+
 def _is_provider_node(node: dict[str, Any]) -> bool:
+    executable = node.get("executable")
     return (
         _basename(node.get("name")) in _PROVIDER_ANCHOR_BASENAMES
-        or _basename(node.get("executable")) in _PROVIDER_ANCHOR_BASENAMES
+        or _basename(executable) in _PROVIDER_ANCHOR_BASENAMES
+        or _is_claude_native_executable(executable)
     )
 
 
@@ -142,7 +167,8 @@ def verify_caller(lease: dict[str, Any], caller: object) -> None:
 
     The session id is the only control credential (user ruling 2026-09-16);
     this presence check replaces the deliverable token: a recorded provider
-    anchor (codex / claude) must appear among the caller's live ancestors with
+    anchor (codex / claude — claude's native ``claude/versions/<version>``
+    layout included) must appear among the caller's live ancestors with
     the same identity (pid + stable start time, with the 2.0s tolerance kept
     for records written before the stable key). Every failure is fail-closed
     and classified — no-anchor / anchor-dead / chain-mismatch — so the operator

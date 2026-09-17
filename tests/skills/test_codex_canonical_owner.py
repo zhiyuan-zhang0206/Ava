@@ -525,3 +525,74 @@ def test_canonical_notifications_never_resurrect_owner(
     watch_work._notify(41, "terminal", canonical=True)
 
     assert notes == [(41, "terminal", "task", False)]
+
+
+# ── Receipt checkpoints: a dead session must warn, not roll the launch back ──
+
+
+def test_submission_check_survives_a_dead_session_at_enter(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The Enter retry on a dead pane warns; it must not raise (rollback class)."""
+
+    def no_sleep(_seconds: float) -> None:
+        return None
+
+    def idle_capture(_sid: int, **_kwargs: object) -> str:
+        return "composer idle"
+
+    def dead_keys(_sid: int, *_keys: str) -> None:
+        raise ValueError("session 7 is not this agent's (no match for 'shell-7')")
+
+    monkeypatch.setattr(spawn_codex.time, "sleep", no_sleep)
+    monkeypatch.setattr(spawn_codex.ava.shell.sessions, "capture", idle_capture)
+    monkeypatch.setattr(spawn_codex.ava.shell.sessions, "send_keys", dead_keys)
+
+    spawn_codex._verify_submitted(7, Path("/nonexistent"), timeout=0.01)
+    out = capsys.readouterr().out
+    assert "WARNING" in out
+    assert "Enter retry failed" in out
+
+
+def test_submission_check_survives_a_dead_session_at_capture(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The polling capture read of a dead pane warns instead of raising."""
+
+    def dead_capture(_sid: int, **_kwargs: object) -> str:
+        raise ValueError("session 7 is not this agent's (no match for 'shell-7')")
+
+    monkeypatch.setattr(spawn_codex.ava.shell.sessions, "capture", dead_capture)
+
+    spawn_codex._verify_submitted(7, Path("/nonexistent"), timeout=5.0)
+    assert "capture failed" in capsys.readouterr().out
+
+
+def test_submission_check_survives_a_dead_session_after_the_enter_retry(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The post-Enter capture read of a dead pane warns instead of raising.
+
+    The pane looks alive (idle composer) until the Enter retry lands, so the
+    refusal surfaces only at the re-check — the second capture site.
+    """
+
+    def no_sleep(_seconds: float) -> None:
+        return None
+
+    entered = {"sent": False}
+
+    def capture(_sid: int, **_kwargs: object) -> str:
+        if entered["sent"]:
+            raise ValueError("session 7 is not this agent's (no match for 'shell-7')")
+        return "composer idle"
+
+    def keys(_sid: int, *_keys: str) -> None:
+        entered["sent"] = True
+
+    monkeypatch.setattr(spawn_codex.time, "sleep", no_sleep)
+    monkeypatch.setattr(spawn_codex.ava.shell.sessions, "capture", capture)
+    monkeypatch.setattr(spawn_codex.ava.shell.sessions, "send_keys", keys)
+
+    spawn_codex._verify_submitted(7, Path("/nonexistent"), timeout=0.01)
+    assert "capture failed" in capsys.readouterr().out

@@ -94,6 +94,85 @@ def test_no_anchor_records_fail_closed() -> None:
         store.verify_caller(_lease(tree), unrelated_caller())
 
 
+def _native_claude_tree() -> dict[str, Any]:
+    """The observed claude native layout: name=version, versions/<version> exe."""
+    return {
+        "pid": 4242,
+        "name": "python3.12",
+        "executable": "/usr/bin/python3.12",
+        "created_at": 1000.0,
+        "parent_pid": 4241,
+        "ancestors": [
+            {
+                "pid": 4241,
+                "name": "zsh",
+                "executable": "/bin/zsh",
+                "created_at": 999.0,
+                "parent_pid": 4240,
+            },
+            {
+                "pid": 4240,
+                "name": "2.1.274",
+                "executable": "/Users/dev/.local/share/claude/versions/2.1.274",
+                "created_at": 998.0,
+                "parent_pid": 1,
+            },
+        ],
+    }
+
+
+def test_claude_native_layout_attests() -> None:
+    """A native claude controller (name=version) is a recorded anchor."""
+    lease = _lease(_native_claude_tree())
+    store.verify_caller(lease, attested_caller(lease))
+
+
+def _anchor_recognized(node: dict[str, Any]) -> bool:
+    """Behavioral probe: a lone node is an anchor iff a descending caller attests."""
+    tree: dict[str, Any] = {
+        "pid": 4242,
+        "name": "python3.12",
+        "executable": "/usr/bin/python3.12",
+        "created_at": 1000.0,
+        "parent_pid": int(node["pid"]),
+        "ancestors": [node],
+    }
+    lease = _lease(tree)
+    try:
+        store.verify_caller(lease, attested_caller(lease))
+    except store.ImpersonationError:
+        return False
+    return True
+
+
+@pytest.mark.parametrize(
+    ("name", "executable", "recognized"),
+    [
+        ("codex", "/opt/codex", True),
+        ("codex", "/usr/local/bin/codex", True),
+        ("claude", "/usr/local/bin/claude", True),
+        ("2.1.269", "/home/u/.local/share/claude/versions/2.1.269", True),
+        ("2.1.274", "/Users/u/.local/share/claude/versions/2.1.274", True),
+        ("3.2.1", "/opt/claude/versions/3.2.1", True),
+        ("python3.12", "/usr/bin/python3.12", False),
+        ("2.1.274", "/opt/2.1.274", False),
+        ("2.1.274", "/opt/other/versions/2.1.274", False),
+        ("2.1.274", "/opt/other/claude/2.1.274", False),
+        ("2.1.274", "/opt/other/claude/versions/nightly", False),
+        ("2.1.274", "/opt/other/claude/versions/2.1.274/extra", False),
+    ],
+)
+def test_provider_anchor_recognition(name: str, executable: str, recognized: bool) -> None:
+    node = {
+        "pid": 4240,
+        "name": name,
+        "executable": executable,
+        "created_at": 998.0,
+        "parent_pid": 1,
+    }
+    assert _anchor_recognized(node) is recognized
+
+
 def test_same_pid_with_a_drifted_start_time_does_not_attest(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
