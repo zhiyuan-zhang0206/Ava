@@ -90,7 +90,7 @@ describe("QueryClient defaults", () => {
     expect(queryFn).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the default three retries for network errors", async () => {
+  it("caps transient-failure retries at two (three attempts, task #3895)", async () => {
     vi.useFakeTimers();
     const queryFn = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
 
@@ -103,7 +103,27 @@ describe("QueryClient defaults", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_000);
     });
-    expect(queryFn).toHaveBeenCalledTimes(4);
+    expect(queryFn).toHaveBeenCalledTimes(3);
+  });
+
+  it("retries only transient statuses and caps the retry delay (task #3895)", () => {
+    const client = createQueryClient();
+    const retry = client.getDefaultOptions().queries?.retry as (
+      failureCount: number,
+      error: unknown,
+    ) => boolean;
+    expect(retry(0, new ApiError(401, "auth"))).toBe(false);
+    expect(retry(0, new ApiError(404, "not found"))).toBe(false);
+    expect(retry(0, new ApiError(422, "unprocessable"))).toBe(false);
+    expect(retry(0, new ApiError(408, "timeout"))).toBe(true);
+    expect(retry(0, new ApiError(429, "rate limited"))).toBe(true);
+    expect(retry(0, new ApiError(503, "unavailable"))).toBe(true);
+    expect(retry(1, new TypeError("Failed to fetch"))).toBe(true);
+    expect(retry(2, new TypeError("Failed to fetch"))).toBe(false);
+    const retryDelay = client.getDefaultOptions().queries?.retryDelay as (n: number) => number;
+    expect(retryDelay(0)).toBe(1_000);
+    expect(retryDelay(1)).toBe(2_000);
+    expect(retryDelay(6)).toBe(8_000);
   });
 });
 

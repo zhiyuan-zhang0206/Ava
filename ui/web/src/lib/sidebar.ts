@@ -143,11 +143,22 @@ export function useStatsWindow(): {
 // renders them differently). `windowHours` is part of the query key, so
 // switching the window refetches immediately instead of waiting out the
 // poll interval.
+//
+// Failure backoff (task #3895): consecutive failed polls geometrically back
+// the cadence off up to STATS_POLL_MAX_MS — during a degraded-backend window
+// a fixed 30s cadence keeps re-running 4 heavy aggregations per open window
+// and feeds the "Loki slow -> more retries" loop the user reported. The
+// first success snaps the cadence back to 30s.
 const STATS_POLL_MS = 30_000;
+const STATS_POLL_MAX_MS = 240_000; // cap: a recovered backend is re-probed within ~4 minutes
 
 interface StatsPollEntry {
   subscribers: number;
-  timer: ReturnType<typeof setInterval>;
+  timer: ReturnType<typeof setTimeout> | undefined;
+  /** Current tick spacing — STATS_POLL_MS, doubled per failed poll (capped). */
+  delayMs: number;
+  /** Consecutive failed polls; reset by the first success. */
+  failureCount: number;
 }
 
 // One coordinator per browser QueryClient (therefore per page). React Query
@@ -165,7 +176,22 @@ function subscribeStatsPoll(queryClient: QueryClient, windowHours: StatsWindowHo
   }
   let entry = byWindow.get(windowHours);
   if (entry === undefined) {
-    const timer = setInterval(() => {
+    const created: StatsPollEntry = {
+      subscribers: 0,
+      timer: undefined,
+      delayMs: STATS_POLL_MS,
+      failureCount: 0,
+    };
+    // Self-chaining polls (not setInterval): the next tick is scheduled only
+    // after the current one settles, so a poll can never overlap its
+    // predecessor no matter how long a degraded gateway holds the request,
+    // and the delay applied is the one the last outcome earned.
+    const schedule = () => {
+      if (byWindow.get(windowHours) !== created) return; // unsubscribed mid-settle
+      created.timer = setTimeout(run, created.delayMs);
+    };
+    const run = () => {
+      created.timer = undefined;
       void queryClient
         .query({
           queryKey: ["stats", "dashboard", windowHours],
@@ -173,11 +199,25 @@ function subscribeStatsPoll(queryClient: QueryClient, windowHours: StatsWindowHo
           retry: 1,
           staleTime: 0,
         })
+        .then(
+          () => {
+            created.failureCount = 0;
+            created.delayMs = STATS_POLL_MS;
+          },
+          () => {
+            created.failureCount += 1;
+            created.delayMs = Math.min(created.delayMs * 2, STATS_POLL_MAX_MS);
+          },
+        )
         // React Query records the error for every observer to render; consume
         // the timer-owned Promise so a failed poll is not an unhandled rejection.
-        .catch(() => undefined);
-    }, STATS_POLL_MS);
-    entry = { subscribers: 0, timer };
+        .catch(() => undefined)
+        .finally(schedule);
+    };
+    // Preserve the original cadence: first coordinator tick one interval out
+    // (the observer's own mount fetch covers t=0).
+    created.timer = setTimeout(run, created.delayMs);
+    entry = created;
     byWindow.set(windowHours, entry);
   }
   entry.subscribers += 1;
@@ -186,7 +226,7 @@ function subscribeStatsPoll(queryClient: QueryClient, windowHours: StatsWindowHo
     if (current === undefined) return;
     current.subscribers -= 1;
     if (current.subscribers === 0) {
-      clearInterval(current.timer);
+      if (current.timer !== undefined) clearTimeout(current.timer);
       byWindow.delete(windowHours);
     }
   };
