@@ -269,14 +269,15 @@ recovery was a single official `ava start`.
    handover (who, when) in the operation record.
 
 5. **Bound every hold and name its rescuer.** This section extends the pre-stop
-   abandoned path of the table above: a started stop is never auto-released; for
+   abandoned path described above: a started stop is never auto-released; for
    that class the named rescuer and the stated maximum intended lifetime are the
    insurance. A drill hold carries both, written alongside the hold, together
    with the window end and a reference to the staged commands. A hold with a
    dead shepherd, empty failures, nothing executing under it, and an age past
    its bound is an orphan: escalate through the concrete available mechanisms —
-   the pause watchdog, the stranded-hold controller, the machine-local alarm
-   path — always out-of-band, then recover via the official path. A release
+   the pause watchdog, the stranded-hold controller, the gateway alarm
+   (`update failed: host left held`) — always out-of-band, then recover via
+   the official path. A release
    before the declared lifetime, or without the rescue actor's handover record,
    is an anomaly to surface to the operation owner. During a stop-class window,
    an external party may judge locks stale and clear them (user-side Codex does
@@ -293,3 +294,35 @@ recovery was a single official `ava start`.
    backed by the surviving-machine record described above — never as an
    unlogged one-shot — so a successor continues from the record plus the staged
    commands instead of restarting.
+
+### Stop-class checklist
+
+Run this list for every stop-class drill or operation: pre-flight items before
+the first stop leg, closing items once recovery is declared.
+
+**Pre-flight**
+
+- [ ] Rescue actor and backup named and confirmed in writing: outside the
+  blast radius, an independent link, never executing stop legs.
+- [ ] Phase-by-phase rescue commands staged and dry-checked read-only — ssh
+  access, `sudo -n`, and the `--force` pre-authorization recorded.
+- [ ] Progress record location set (a non-target machine), task-log sync
+  convention declared, heartbeat cadence declared (every step, and at least
+  every 5 minutes).
+- [ ] Abort bound declared: no progress for 10 minutes → the rescue actor runs
+  the staged recovery, announces it, and records the handover.
+- [ ] Hold fields written alongside the hold: rescuer, maximum intended
+  lifetime, window end, staged-command reference. Intentional-keep strategy
+  chosen — a live shepherd session kept alive, or
+  `AVA_ABANDONED_HOLD_AUTO_RELEASE=0` pinned.
+- [ ] Window-start announcement prepared: `drill-*` locks must not be cleared
+  while the window is open, and external releases watched (an in-window
+  release is treated as stolen).
+- [ ] Out-of-band signal armed and both paths exercised (alert, recovery); the
+  expected triage line confirmed (#3722-A).
+
+**Post-recovery**
+
+- [ ] Recovery verified: services ready, maintenance resumed, scheduled probe
+  jobs present, pinned settings and schema at target, no unintended restarts.
+- [ ] All lines notified; evidence archived on the non-target machine.
