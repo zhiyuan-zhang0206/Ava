@@ -534,3 +534,27 @@ def test_start_pg_waits_for_reachable_bind_before_starting(
     assert _ci._start_pg(5433, "s3cr3t") == 0
     assert waited == [True]
     assert calls != []
+
+
+def test_start_pg_hands_the_built_start_env_to_pg_ctl(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    """Task #3754: pg_ctl start gets pg_start_env() — the postmaster env is
+    built explicitly (the macOS locale fallback for launchd / non-interactive
+    ssh starts) instead of inheriting whatever process brought the cluster up."""
+    monkeypatch.setattr(_ci, "_bind_addrs", lambda _secret: ["127.0.0.1"])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_ci, "_ensure_pg_data", lambda: tmp_path)
+    monkeypatch.setattr(_ci, "_pg_running", lambda _port, _host: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_ci, "_pg_socket_dir", lambda: tmp_path)
+    sentinel = {"LC_ALL": "en_US.UTF-8", "PATH": "/usr/bin:/bin"}
+    monkeypatch.setattr(_ci, "pg_start_env", lambda: sentinel)
+    envs: list[object] = []
+
+    def _run(cmd: list[str], **kwargs: object) -> object:
+        envs.append(kwargs.get("env"))
+        return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(_ci.subprocess, "run", _run)
+
+    assert _ci._start_pg(5433, "") == 0
+    assert envs == [sentinel]
