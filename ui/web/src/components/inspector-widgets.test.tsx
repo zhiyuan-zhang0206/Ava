@@ -25,7 +25,7 @@ function widget(over: Partial<InspectWidget> = {}): InspectWidget {
     plugin: "ava_fleet",
     id: "today-tasks",
     kind: "taskList",
-    order: 50,
+    order: 150,
     title: null,
     tasks: [
       { id: 42, title: "Ship the inspector fix", priority: "P0" },
