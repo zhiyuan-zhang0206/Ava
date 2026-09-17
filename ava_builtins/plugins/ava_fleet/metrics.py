@@ -1,7 +1,8 @@
 """ava_fleet Grafana + inspector metrics — registered at import time.
 
-``scripts/gen_plugin_dashboard.py`` imports this module (inside a
-PluginContext) to collect the registrations. Two metrics:
+``shared/grafana_dashboard_supply`` imports this module (inside a
+PluginContext) to collect the registrations for the rendered Ava Ops
+dashboard (``ava lgtm render``, task #3697). Two metrics:
 
 - ``ava_fleet_task_done_rate`` — dual-surface (grafana + inspector): a
   cluster-wide task-completion rate panel, and the same query the inspector

@@ -50,6 +50,20 @@ core_metrics.register_core_metric(
             "max by (day) (last_over_time(ava_pr_flow_daily_ready_to_merge_p90_seconds[26h]))"
         ],
         target_names=["median", "p90"],
+        thresholds=[],
+        panel_id=2401,
+        section="PR flow",
+        order=0,
+        transformations=[
+            {"id": "joinByField", "options": {"byField": "day", "mode": "outer"}},
+            {
+                "id": "organize",
+                "options": {
+                    "excludeByName": {"Time 1": True, "Time 2": True},
+                    "renameByName": {"Value #A": "median", "Value #B": "p90"},
+                },
+            },
+        ],
     )
 )
 
@@ -70,6 +84,9 @@ core_metrics.register_core_metric(
         query="ava_pr_flow_run_queue_depth_ratio",
         query_type="promql",
         target_names=["queue depth"],
+        panel_id=2402,
+        section="PR flow",
+        order=1,
     )
 )
 
@@ -92,6 +109,20 @@ core_metrics.register_core_metric(
         query_type="promql",
         targets=["max by (day) (last_over_time(ava_pr_flow_daily_qa_rereview_share_ratio[26h]))"],
         target_names=["mean rounds", "re-review share"],
+        thresholds=[],
+        panel_id=2403,
+        section="PR flow",
+        order=2,
+        transformations=[
+            {"id": "joinByField", "options": {"byField": "day", "mode": "outer"}},
+            {
+                "id": "organize",
+                "options": {
+                    "excludeByName": {"Time 1": True, "Time 2": True},
+                    "renameByName": {"Value #A": "mean rounds", "Value #B": "re-review share"},
+                },
+            },
+        ],
     )
 )
 
@@ -112,5 +143,19 @@ core_metrics.register_core_metric(
         query="max by (day) (last_over_time(ava_pr_flow_daily_flake_new_quarantines_ratio[26h]))",
         query_type="promql",
         target_names=["new quarantines"],
+        thresholds=[],
+        panel_id=2404,
+        section="PR flow",
+        order=3,
+        transformations=[
+            {"id": "joinByField", "options": {"byField": "day", "mode": "outer"}},
+            {
+                "id": "organize",
+                "options": {
+                    "excludeByName": {"Time": True},
+                    "renameByName": {"Value": "new quarantines"},
+                },
+            },
+        ],
     )
 )

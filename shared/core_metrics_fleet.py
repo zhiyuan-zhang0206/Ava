@@ -17,6 +17,11 @@ core_metrics.register_core_metric(
     MetricSpec(
         name="core_agent_max_id",
         title="Max Agent ID",
+        description=(
+            "Agents-table high-water mark (max id), sampled by the gateway every "
+            "60s into the ava_agent_registry_max_id_ratio gauge (task #2010); a "
+            "vertical step marks a batch spawn."
+        ),
         event_name="agent_registry",
         category="telemetry",
         unit="short",
@@ -31,6 +36,9 @@ core_metrics.register_core_metric(
         query="max(ava_agent_registry_max_id_ratio)",
         query_type="promql",
         target_names=["max_id"],
+        panel_id=2301,
+        section="Fleet",
+        order=5,
     )
 )
 
@@ -38,6 +46,11 @@ core_metrics.register_core_metric(
     MetricSpec(
         name="core_agent_max_id_growth_rate",
         title="Max Agent ID growth rate",
+        description=(
+            "Slope of the ava_agent_registry_max_id_ratio gauge over the last hour, "
+            "expressed in agents per day (deriv() * 86400, task #2010); a spike marks "
+            "a batch spawn."
+        ),
         event_name="agent_registry",
         category="telemetry",
         unit="short",
@@ -50,5 +63,9 @@ core_metrics.register_core_metric(
         query="deriv(max(ava_agent_registry_max_id_ratio)[1h:]) * 86400",
         query_type="promql",
         target_names=["agents/day"],
+        panel_id=2302,
+        section="Fleet",
+        order=6,
+        field_defaults={"color": {"mode": "fixed", "fixedColor": "purple"}},
     )
 )

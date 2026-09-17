@@ -1,8 +1,9 @@
 """ava_code Grafana metrics — registered at import time.
 
-``scripts/gen_plugin_dashboard.py`` imports this module (inside a
-PluginContext) to collect the registrations below; the plugin name comes from
-the context. Query templates target the unified event stream in Loki
+``shared/grafana_dashboard_supply`` imports this module (inside a
+PluginContext) to collect the registrations below for the rendered Ava Ops
+dashboard (``ava lgtm render``, task #3697); the plugin name comes from the
+context. Query templates target the unified event stream in Loki
 (task #180: the PG ``events`` table is a frozen archive since the LGTM
 cutover — every metric reads the event stream through LogQL, the same read
 the core panels use, task #1280).
