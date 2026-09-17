@@ -7,6 +7,7 @@ a Thursday mid-week follow-up trigger.
 Resumable: recomputes on every iteration, acts only when the window is open.
 """
 
+import json
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -16,6 +17,7 @@ from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
 from schedules.catchup import catch_up, fire_slot_once
 from shared.config import settings
+from shared.observability import observability_refusal_detail
 from shared.watcher import next_fire
 
 ensure_agent_status_members(
@@ -55,7 +57,13 @@ def count_events(since: datetime) -> int:
     """Count events since `since` (UTC) via the Loki-backed /api/events count
     path. PG `events` is a frozen archive since 2026-08-12 (Task #1197 LGTM
     cutover) — the weekly trigger must count the live stream or it silently
-    skips every week (2026-08-14 missed-consumer audit)."""
+    skips every week (2026-08-14 missed-consumer audit).
+
+    When the gateway refuses the read with the no-observability code (a
+    cluster without an observability stack — a policy state, not an outage),
+    the window is counted from the local event mirror instead, the same
+    fallback the daily scan takes: the weekly trigger must not crash-loop
+    forever on such clusters."""
     import os
 
     import httpx
@@ -81,6 +89,18 @@ def count_events(since: datetime) -> int:
         "with_total": 1,
     }
     resp = httpx.get(f"{base}/api/events", params=params, headers=headers, timeout=120.0)
+    refusal = observability_refusal_detail(resp)
+    if refusal is not None:
+        # No observability on this cluster (policy, not outage): the gateway
+        # reads are refused permanently, so count the window from the local
+        # mirror rather than letting the check raise every week.
+        total = _count_mirror_events(since)
+        print(
+            f"[{datetime.now(UTC).isoformat()}] self-evolution count: gateway "
+            f"observability reads unavailable ({refusal}); counted {total} "
+            f"events from the local mirror"
+        )
+        return total
     resp.raise_for_status()
     payload = resp.json()
     total = payload.get("meta", {}).get("total")
@@ -89,6 +109,40 @@ def count_events(since: datetime) -> int:
             f"/api/events returned no total despite with_total=1: {str(payload)[:300]}"
         )
     return int(total)
+
+
+def _count_mirror_events(since: datetime) -> int:
+    """Count events in [since, now] from the local JSONL mirror.
+
+    The fallback when the gateway refuses observability reads (no
+    observability stack on this cluster). The mirror (logs/events-<UTC
+    day>.jsonl — shared/telemetry's local copy of every event this box
+    emitted, 7-day retention) partitions rows by append day, not by ts, so a
+    boundary day's file needs the timestamp filter. The emitter can duplicate
+    a row (see mirror_backfill's Task #1408 note), so the count is an upper
+    bound — accurate enough for this trigger's coarse volume bands, not an
+    accounting figure.
+    """
+    from shared.paths import logs_dir
+
+    now = datetime.now(UTC)
+    since_utc = since.astimezone(UTC)
+    total = 0
+    day = since_utc.date()
+    while day <= now.date():
+        path = logs_dir() / f"events-{day:%Y%m%d}.jsonl"
+        if path.exists():
+            with path.open(encoding="utf-8") as fh:
+                for line in fh:
+                    if not line.strip():
+                        continue
+                    ts = datetime.fromisoformat(json.loads(line)["ts"])
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=UTC)  # the writer always emits UTC
+                    if since_utc <= ts <= now:
+                        total += 1
+        day += timedelta(days=1)
+    return total
 
 
 def ensure_agent(label: str, prompt: str) -> int:

@@ -10,6 +10,13 @@ skill's reference dir), so the fallback runs the exact pipeline the daily
 schedule runs. Output mirrors daily_scan.py: daily/<week>.jsonl with the
 UTC-date week label.
 
+2026-09-17 (no-observability clusters): collect_from_mirror() is the shared
+core — backfill() writes the dataset for the CLI/manual fallback, and
+daily_scan.py imports it as the AUTOMATIC fallback when the gateway refuses
+observability reads (503 ``observability_read_unavailable``: the cluster has
+no observability stack by configuration). Transient Loki failures still fail
+the scan loudly; only the policy refusal falls back.
+
 2026-08-26 (Task #1408): the consumer dedupes mirror rows by the surrogate
 event id (PR #356, shared/telemetry.event_id) — the emitter can append the
 same event twice, and on 08-24/25 ~7% of mirror rows were byte-identical
@@ -60,7 +67,7 @@ from collections import Counter
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TextIO
+from typing import Any, TextIO
 
 # PYTHONSAFEPATH=1 keeps the script's own directory off sys.path — restore
 # it for the sibling import (the reference dir is a script dir, not a package).
@@ -165,14 +172,24 @@ def _mirror_fetch_factory_from_dir(tmpdir: Path, index: SortIndex) -> Callable[.
     return mirror_fetch
 
 
-def backfill(days: int, week: str | None = None) -> tuple[Path, list[str]]:
-    """Collect [now - days, now) from the local mirror, write daily/<week>.jsonl.
+def collect_from_mirror(
+    days: int, week: str | None = None, *, include_test: bool = False
+) -> tuple[list[dict[str, Any]], dict[str, int], list[str]]:
+    """Collect [now - days, now) from the local mirror — no file written.
 
-    Returns (path, missing_days); missing_days names the window days whose
-    mirror file does not exist. A missing day is never silent: it is listed
-    in the warning and the caller must treat the dataset as partial (the CLI
-    exits non-zero). Per-day in-window row counts are always printed so a
-    thin or absent day is visible in the log.
+    The shared core of `backfill()` and of the daily scan's automatic
+    fallback: when the gateway refuses observability reads (this cluster has
+    no observability stack), daily_scan.py imports this function and feeds
+    the records through its normal report/alert path.
+
+    Returns (records, counts, missing_days): `counts` is
+    `collect.collect_with_counts`' pre-filter counts (seen / excluded_test /
+    skipped_meta — the daily sentinel needs them to tell a TEST-only window
+    from a broken source); `missing_days` names the window days whose mirror
+    file does not exist. A missing day is never silent: it is listed in the
+    warning and the caller must treat the dataset as partial. Per-day
+    in-window row counts are always printed so a thin or absent day is
+    visible in the log.
     """
     week = week or datetime.now(UTC).date().isoformat()
     window_to = datetime.now(UTC)
@@ -259,30 +276,49 @@ def backfill(days: int, week: str | None = None) -> tuple[Path, list[str]]:
                 + " — dataset is partial"
             )
         # Phase 2 — the consumer streams the staged rows in ts order while
-        # collect() groups and builds records; the temp dir lives until the
-        # output is written. The replacement is restored afterwards: a
+        # collect() groups and builds records; the temp dir lives until
+        # collect returns. The replacement is restored afterwards: a
         # same-process caller that collects again must go back to the Loki
         # path, not silently read a consumed temp dir (QA #1010 nit).
         original_fetch = collect._fetch_events_window
         collect._fetch_events_window = _mirror_fetch_factory_from_dir(tmpdir, index)
         try:
-            records = collect.collect(days, week, from_=window_from, to=window_to)
+            records, record_counts = collect.collect_with_counts(
+                days, week, from_=window_from, to=window_to, include_test=include_test
+            )
         finally:
             collect._fetch_events_window = original_fetch
-        out_dir = ava_home() / "self_evolution" / "daily"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        path = out_dir / f"{week}.jsonl"
-        with path.open("w", encoding="utf-8") as f:
-            for rec in records:
-                f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
-        counts_label = Counter(r["label"] for r in records)
-        print(f"[mirror] wrote {path}: {len(records)} runs ({dict(counts_label)})")
-        return path, missing_days
+        return records, record_counts, missing_days
     finally:
         tmp.cleanup()  # temp rows are consumed — release the disk space
         if gc_was_enabled:
             gc.enable()
             gc.collect()  # one sweep for the run's churn, then the storm stops
+
+
+def backfill(
+    days: int, week: str | None = None, *, include_test: bool = False
+) -> tuple[Path, list[str], dict[str, int]]:
+    """Collect [now - days, now) from the local mirror, write daily/<week>.jsonl.
+
+    The CLI/ops entry point on top of `collect_from_mirror` — the manual
+    fallback for a failed Loki collect (the daily scan's automatic
+    no-observability fallback runs through `collect_from_mirror` directly).
+    Returns (path, missing_days, counts); a missing day must not read as
+    success — the CLI exits non-zero (a partial window must not silently
+    become a partial dataset).
+    """
+    week = week or datetime.now(UTC).date().isoformat()
+    records, counts, missing_days = collect_from_mirror(days, week, include_test=include_test)
+    out_dir = ava_home() / "self_evolution" / "daily"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"{week}.jsonl"
+    with path.open("w", encoding="utf-8") as f:
+        for rec in records:
+            f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
+    counts_label = Counter(r["label"] for r in records)
+    print(f"[mirror] wrote {path}: {len(records)} runs ({dict(counts_label)})")
+    return path, missing_days, counts
 
 
 def main() -> None:
@@ -291,7 +327,7 @@ def main() -> None:
         raise SystemExit(2)
     days = int(sys.argv[1])
     week = sys.argv[2] if len(sys.argv) > 2 else None
-    _path, missing_days = backfill(days, week)
+    _path, missing_days, _counts = backfill(days, week)
     # Partial window is not success: a caller that watches the exit code
     # (schedule, handoff script) must see the gap.
     raise SystemExit(1 if missing_days else 0)
