@@ -218,6 +218,52 @@ class TestFinalTerminationClosureMarker:
             (running_agent_id,),
         ).fetchone() == ("terminated", True)
 
+    @pytest.mark.asyncio
+    async def test_force_final_records_closed_in_the_terminate_event(
+        self,
+        db_conn: psycopg.Connection,
+        db_pool: ConnectionPool,
+        running_agent_id: int,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The force path's audit event names the closure — parity with the
+        graceful path (`_enqueue_termination_inbounds` passes `closed=final`).
+        `terminate --final` / `kill --final` are force-first use cases, so the
+        `terminate` event must carry `closed: true` next to the command it
+        accompanied (`test_force_final_stamps_the_marker` pins the marker)."""
+        from ops import ops_lifecycle
+
+        events: list[dict[str, object]] = []
+
+        def _record(**kwargs: object) -> None:
+            events.append(kwargs)
+
+        monkeypatch.setattr(ops_exit, "insert_event_log", _record)
+
+        async def _noop_cancel(_aid: int, _command_id: int) -> None:
+            return None
+
+        monkeypatch.setattr(ops_lifecycle, "_cancel_hosted_turn_best_effort", _noop_cancel)
+
+        resp = await ops_lifecycle.terminate_agent_op(
+            running_agent_id, TerminateAgentRequest(force=True, final=True), db_pool
+        )
+        assert resp.status == "enqueued"
+        row = db_conn.execute(
+            "SELECT last_force_terminate_inbound_id FROM agents_meta WHERE id=%s",
+            (running_agent_id,),
+        ).fetchone()
+        assert row is not None
+        (inbound_id,) = row
+        assert events == [
+            {
+                "event_type": "terminate",
+                "agent_id": running_agent_id,
+                "source": "user",
+                "payload": {"inbound_id": inbound_id, "closed": True},
+            }
+        ]
+
     def test_repeat_close_keeps_the_first_time(
         self, db_conn: psycopg.Connection, db_pool: ConnectionPool, running_agent_id: int
     ) -> None:

@@ -246,7 +246,7 @@ def _terminate_force_blocking(
         message=body.message,
         final=body.final,
     )
-    _publish_force_terminate_inbound(agent_id, inbound_id, body.source)
+    _publish_force_terminate_inbound(agent_id, inbound_id, body.source, closed=body.final)
     publish_agent_updated_sync(agent_id)
     return old_status, pid, killed_page_names, inbound_id
 
