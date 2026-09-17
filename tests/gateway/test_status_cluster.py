@@ -8,6 +8,7 @@ that async fan-out path and only validate the SystemStatus.cluster data pipeline
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -16,7 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
-from gateway.routers import _roster_rows
+from gateway.routers import _roster_probe, _roster_rows
 from gateway.routers import status as status_router
 
 _OPS_URL = "http://wsl:18121"
@@ -46,10 +47,11 @@ def _truncate_machines(db_conn: psycopg.Connection) -> None:
 
 @pytest.fixture(autouse=True)
 def _reset_probe_backoff() -> None:
-    """The per-machine probe backoff is module-level mutable state; clear it before
-    each test so a failure recorded by one test cannot defer a probe in the next
-    (e.g. the offline/online cases both use name 'wsl')."""
-    status_router._probe_failures.clear()
+    """The per-machine probe backoff (`gateway.routers._roster_probe`) is
+    module-level mutable state; clear it before each test so a failure recorded
+    by one test cannot defer a probe in the next (e.g. the offline/online cases
+    both use name 'wsl')."""
+    _roster_probe._probe_failures.clear()
 
 
 @pytest.fixture
@@ -420,7 +422,7 @@ class TestProbeAgentRunner:
 
         assert row.online is False
         assert called is False
-        assert status_router._probe_failures["wsl"][0] == 1
+        assert _roster_probe._probe_failures["wsl"][0] == 1
 
     @pytest.mark.asyncio
     async def test_blackhole_stays_inside_single_total_budget(
@@ -459,7 +461,7 @@ class TestProbeAgentRunner:
 
         assert row.online is False
         assert cancelled.is_set()
-        assert status_router._probe_failures["wsl"][0] == 1
+        assert _roster_probe._probe_failures["wsl"][0] == 1
 
     @pytest.mark.asyncio
     async def test_timeout_returns_offline(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -499,7 +501,7 @@ class TestProbeAgentRunner:
                 "paused": True,
             }
 
-        status_router._probe_failures["wsl"] = (2, 0.0)
+        _roster_probe._probe_failures["wsl"] = (2, 0.0)
         monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", fake_enqueue)
         r = await status_router._probe_agent_runner(
             "wsl",
@@ -512,7 +514,7 @@ class TestProbeAgentRunner:
         assert r.online is True
         assert r.paused is True
         assert r.description == "voice IO + browser"
-        assert "wsl" not in status_router._probe_failures
+        assert "wsl" not in _roster_probe._probe_failures
 
     @pytest.mark.asyncio
     async def test_success_threads_head_sha(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -559,45 +561,71 @@ class TestProbeAgentRunner:
 
 class TestProbeBackoff:
     """P1 per-machine probe backoff: a down host is re-probed on an exponential
-    schedule (min(5 * 2**failures, 300)s) instead of on every ~5s panel poll."""
+    schedule (min(base * 2**failures, cap)s — both bounds config since task
+    #3507) instead of on every ~5s panel poll."""
 
     def test_no_record_not_in_backoff(self) -> None:
-        assert status_router._probe_in_backoff("wsl") is False
+        assert _roster_probe._probe_in_backoff("wsl") is False
 
     def test_note_unreachable_increments_failures(self) -> None:
-        status_router._note_probe_unreachable("wsl")
-        assert status_router._probe_failures["wsl"][0] == 1
-        status_router._note_probe_unreachable("wsl")
-        assert status_router._probe_failures["wsl"][0] == 2
+        _roster_probe._note_probe_unreachable("wsl")
+        assert _roster_probe._probe_failures["wsl"][0] == 1
+        _roster_probe._note_probe_unreachable("wsl")
+        assert _roster_probe._probe_failures["wsl"][0] == 2
 
     def test_reachable_clears_backoff(self) -> None:
-        status_router._probe_failures["wsl"] = (3, 0.0)
-        status_router._note_probe_reachable("wsl")
-        assert "wsl" not in status_router._probe_failures
+        _roster_probe._probe_failures["wsl"] = (3, 0.0)
+        _roster_probe._note_probe_reachable("wsl")
+        assert "wsl" not in _roster_probe._probe_failures
 
     def test_within_window_defers_past_window_reprobes(self) -> None:
-        now = status_router.time.monotonic()
+        now = _roster_probe.time.monotonic()
         # 1 failure -> 10s window
-        status_router._probe_failures["wsl"] = (1, now - 5.0)
-        assert status_router._probe_in_backoff("wsl") is True
-        status_router._probe_failures["wsl"] = (1, now - 11.0)
-        assert status_router._probe_in_backoff("wsl") is False
+        _roster_probe._probe_failures["wsl"] = (1, now - 5.0)
+        assert _roster_probe._probe_in_backoff("wsl") is True
+        _roster_probe._probe_failures["wsl"] = (1, now - 11.0)
+        assert _roster_probe._probe_in_backoff("wsl") is False
 
     def test_window_escalates_with_consecutive_failures(self) -> None:
-        now = status_router.time.monotonic()
+        now = _roster_probe.time.monotonic()
         # 2 failures -> 20s window (was 10s at 1 failure)
-        status_router._probe_failures["wsl"] = (2, now - 19.0)
-        assert status_router._probe_in_backoff("wsl") is True
-        status_router._probe_failures["wsl"] = (2, now - 21.0)
-        assert status_router._probe_in_backoff("wsl") is False
+        _roster_probe._probe_failures["wsl"] = (2, now - 19.0)
+        assert _roster_probe._probe_in_backoff("wsl") is True
+        _roster_probe._probe_failures["wsl"] = (2, now - 21.0)
+        assert _roster_probe._probe_in_backoff("wsl") is False
 
     def test_window_capped_at_300(self) -> None:
-        now = status_router.time.monotonic()
+        now = _roster_probe.time.monotonic()
         # A large failure count would compute a huge window; it is clamped to 300s.
-        status_router._probe_failures["wsl"] = (100, now - 299.0)
-        assert status_router._probe_in_backoff("wsl") is True
-        status_router._probe_failures["wsl"] = (100, now - 301.0)
-        assert status_router._probe_in_backoff("wsl") is False
+        _roster_probe._probe_failures["wsl"] = (100, now - 299.0)
+        assert _roster_probe._probe_in_backoff("wsl") is True
+        _roster_probe._probe_failures["wsl"] = (100, now - 301.0)
+        assert _roster_probe._probe_in_backoff("wsl") is False
+
+    def test_window_base_is_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The first re-probe gap follows the configured base (task #3507 lifted
+        the schedule literals into config)."""
+        from shared.config import settings
+
+        monkeypatch.setattr(settings.gateway, "status_probe_backoff_base_seconds", 2.0)
+        now = _roster_probe.time.monotonic()
+        # 1 failure -> 2 * 2**1 = 4s window
+        _roster_probe._probe_failures["wsl"] = (1, now - 3.9)
+        assert _roster_probe._probe_in_backoff("wsl") is True
+        _roster_probe._probe_failures["wsl"] = (1, now - 4.1)
+        assert _roster_probe._probe_in_backoff("wsl") is False
+
+    def test_window_cap_is_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The window ceiling follows the configured cap (task #3507 lifted the
+        schedule literals into config)."""
+        from shared.config import settings
+
+        monkeypatch.setattr(settings.gateway, "status_probe_backoff_cap_seconds", 10.0)
+        now = _roster_probe.time.monotonic()
+        _roster_probe._probe_failures["wsl"] = (100, now - 9.0)
+        assert _roster_probe._probe_in_backoff("wsl") is True
+        _roster_probe._probe_failures["wsl"] = (100, now - 11.0)
+        assert _roster_probe._probe_in_backoff("wsl") is False
 
     @pytest.mark.asyncio
     async def test_probe_skips_dispatch_while_in_backoff(
@@ -649,13 +677,199 @@ class TestProbeBackoff:
         )
         assert first.online is True
         assert first.paused is None
-        assert "wsl" not in status_router._probe_failures
+        assert "wsl" not in _roster_probe._probe_failures
         second = await status_router._probe_agent_runner(
             "wsl", ["agent-runner"], _OPS_URL, last, None, None
         )
         assert second.online is True
         assert second.paused is None
         assert len(calls) == 2  # reachable -> dialed again, not skipped
+
+
+class TestFastFailBudget:
+    """Task #3507: a machine that already carries reachability failures re-probes
+    under the fast-fail budget, so a blackholed re-dial cannot drag the whole-table
+    read past the CLI/UI budget; first contact keeps the full anti-false-offline
+    budget."""
+
+    def test_budget_selection_is_state_driven(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from shared.config import settings
+
+        monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 11.0)
+        monkeypatch.setattr(settings.gateway, "status_probe_fastfail_timeout_seconds", 2.0)
+        assert _roster_probe._probe_budget_s("wsl") == 11.0
+        _roster_probe._probe_failures["wsl"] = (1, 0.0)
+        assert _roster_probe._probe_budget_s("wsl") == 2.0
+        _roster_probe._note_probe_reachable("wsl")
+        assert _roster_probe._probe_budget_s("wsl") == 11.0
+
+    @pytest.mark.asyncio
+    async def test_first_contact_uses_full_budget(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """No failure record yet -> the dial goes out under the full budget (the
+        anti-jitter margin, task #1200)."""
+        from datetime import UTC, datetime
+
+        from shared.config import settings
+
+        monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 11.0)
+        monkeypatch.setattr(settings.gateway, "status_probe_fastfail_timeout_seconds", 2.0)
+        seen: dict[str, object] = {}
+
+        async def fake_enqueue(*_a: object, **_kw: object) -> dict[str, object]:
+            seen["timeout_s"] = _kw.get("timeout_s")
+            return {
+                "machine_name": "wsl",
+                "serve_gateway": False,
+                "serve_agent_runner": True,
+                "paused": False,
+            }
+
+        monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", fake_enqueue)
+        r = await status_router._probe_agent_runner(
+            "wsl", ["agent-runner"], _OPS_URL, datetime(2026, 5, 24, tzinfo=UTC), None, None
+        )
+        assert seen["timeout_s"] == 11.0
+        assert r.online is True
+
+    @pytest.mark.asyncio
+    async def test_failed_machine_reprobe_uses_fastfail_budget(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A machine with a recorded failure (backoff window elapsed) re-dials
+        under the fast-fail budget; the success clears it back to normal."""
+        from datetime import UTC, datetime
+
+        from shared.config import settings
+
+        monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 11.0)
+        monkeypatch.setattr(settings.gateway, "status_probe_fastfail_timeout_seconds", 2.0)
+        seen: dict[str, object] = {}
+
+        async def fake_enqueue(*_a: object, **_kw: object) -> dict[str, object]:
+            seen["timeout_s"] = _kw.get("timeout_s")
+            return {
+                "machine_name": "wsl",
+                "serve_gateway": False,
+                "serve_agent_runner": True,
+                "paused": False,
+            }
+
+        monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", fake_enqueue)
+        # The failure is old enough that the backoff window has elapsed -> re-dial.
+        _roster_probe._probe_failures["wsl"] = (1, 0.0)
+        r = await status_router._probe_agent_runner(
+            "wsl", ["agent-runner"], _OPS_URL, datetime(2026, 5, 24, tzinfo=UTC), None, None
+        )
+        assert seen["timeout_s"] == 2.0
+        assert r.online is True
+        assert "wsl" not in _roster_probe._probe_failures
+
+    @pytest.mark.asyncio
+    async def test_first_contact_blackhole_keeps_full_budget(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A first-contact blackhole is cancelled at the full budget, not the
+        fast-fail one — the anti-false-offline margin survives the change."""
+        from datetime import UTC, datetime
+
+        from shared.config import settings
+
+        monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 0.05)
+        monkeypatch.setattr(settings.gateway, "status_probe_fastfail_timeout_seconds", 0.005)
+
+        async def blackhole(**_kw: object) -> dict[str, object]:
+            await asyncio.Event().wait()
+            raise AssertionError("unreachable")
+
+        monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", blackhole)
+        started = time.monotonic()
+        r = await asyncio.wait_for(
+            status_router._probe_agent_runner(
+                "wsl", ["agent-runner"], _OPS_URL, datetime(2026, 5, 24, tzinfo=UTC), None, None
+            ),
+            timeout=0.5,
+        )
+        assert r.online is False
+        assert time.monotonic() - started >= 0.03  # the full budget, not the fast-fail one
+        assert _roster_probe._probe_failures["wsl"][0] == 1
+
+    @pytest.mark.asyncio
+    async def test_blackholed_reprobe_stays_inside_fastfail_budget(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A known-failed machine's blackholed re-dial is cancelled at the
+        fast-fail budget — before the fix it held the dial for the full budget
+        and the roster read with it."""
+        from datetime import UTC, datetime
+
+        from shared.config import settings
+
+        monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 5.0)
+        monkeypatch.setattr(settings.gateway, "status_probe_fastfail_timeout_seconds", 0.01)
+        cancelled = asyncio.Event()
+
+        async def blackhole(**_kw: object) -> dict[str, object]:
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+            raise AssertionError("unreachable")
+
+        monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", blackhole)
+        _roster_probe._probe_failures["wsl"] = (1, 0.0)
+        row = await asyncio.wait_for(
+            status_router._probe_agent_runner(
+                "wsl", ["agent-runner"], _OPS_URL, datetime(2026, 5, 24, tzinfo=UTC), None, None
+            ),
+            timeout=0.2,
+        )
+        assert row.online is False
+        assert cancelled.is_set()
+        assert _roster_probe._probe_failures["wsl"][0] == 2
+
+    @pytest.mark.asyncio
+    async def test_transition_read_stays_bounded_by_fastfail_budget(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Simulation of the 2026-09-15 mba transition (task #3507): one machine
+        blackholed, one healthy peer. With the failure recorded, the whole-table
+        read returns inside the fast-fail budget; under the old code the re-dial
+        held the read for the FULL 5s budget (and the CLI/UI read timed out)."""
+        from datetime import UTC, datetime
+
+        from shared.config import settings
+
+        monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 5.0)
+        monkeypatch.setattr(settings.gateway, "status_probe_fastfail_timeout_seconds", 0.05)
+
+        async def dispatch(*, target_machine: str, **_kw: object) -> dict[str, object]:
+            if target_machine == "mba":
+                await asyncio.Event().wait()  # blackholed: hangs until cancelled
+            return {
+                "machine_name": target_machine,
+                "serve_gateway": False,
+                "serve_agent_runner": True,
+                "paused": False,
+            }
+
+        monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", dispatch)
+        _roster_probe._probe_failures["mba"] = (1, 0.0)  # already failed; window elapsed
+        last = datetime(2026, 5, 24, tzinfo=UTC)
+        rows: list[
+            tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]
+        ] = [
+            ("mba", _OPS_URL, ["agent-runner"], last, None, None, False),
+            ("wsl", _OPS_URL, ["agent-runner"], last, None, None, False),
+        ]
+        started = time.monotonic()
+        machines = await status_router.gather_cluster_status(rows, "cloud-test")
+        elapsed = time.monotonic() - started
+        assert elapsed < 1.0  # far below the 5s full budget the old code burned on the re-dial
+        by_name = {m.name: m for m in machines}
+        assert by_name["mba"].online is False
+        assert by_name["wsl"].online is True
+        assert _roster_probe._probe_failures["mba"][0] == 2
 
 
 class TestPinVerdict:
