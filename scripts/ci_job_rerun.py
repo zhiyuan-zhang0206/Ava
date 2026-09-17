@@ -1,20 +1,31 @@
-"""Job-level re-run of failed GitHub Actions jobs (issue #102).
+"""Re-run of failed GitHub Actions jobs on a PR's current workflow runs (issue #102).
 
-`gh run rerun --failed` is refused while any job of the run is still going
-("This workflow is already running"), so run-level recovery waits on the
-slowest surviving shard — the more shards, the more likely one is slow, and
-the more likely you need the re-run exactly then. A failed job can be
-re-run at job level (POST /actions/jobs/{id}/rerun) while its siblings keep
-running, so recovery stops depending on unrelated jobs finishing.
+GitHub refuses both re-run flavors while the containing run is still going, so
+there is no early window to recover a flaky job in:
 
-Used by scripts/ci_utils.py (--rerun-failed-jobs); the polling helper there
-already knows which checks are red, this module knows how to re-run them.
+- job level, `POST /repos/{repo}/actions/jobs/{id}/rerun` -> 403 "The workflow
+  run containing this job is already running";
+- run level, `POST /repos/{repo}/actions/runs/{id}/rerun-failed-jobs` (and
+  `.../rerun`) -> 403 "This workflow is already running".
 
-The job objects come from the REST API, whose shape differs from the GraphQL
-check runs ci_utils reads: the numeric job identifier is `.id` (not
-`.databaseId`) and conclusions are lowercase (`"failure"`, `"timed_out"`).
-A GitHub query that fails raises `CiJobRerunError` instead of reading as
-"no failed jobs" (issue #1945).
+Probed live 2026-09-17 (task #3764): the Actions re-run how-to states the
+30-day window and no docs page states this precondition; the API refuses
+until the run reads `completed`. The recovery for a still-running run is
+"wait for the run to finish, then re-run", which `rerun_failed_jobs` reports
+as `waiting` instead of forwarding the 403.
+
+Once a run is completed, `rerun_failed_jobs` re-runs its failed jobs: one
+job-level rerun when a single job failed (the narrowest intervention), and one
+run-level `rerun-failed-jobs` call when several did — a second job-level rerun
+of the same run is refused while the first rerun's new attempt runs (probed
+2026-09-17), so multi-job recovery is atomic at run level, the same policy
+.github/workflows/ci-rerun.yml applies.
+
+Used by scripts/ci_utils.py (--rerun-failed-jobs). The job objects come from
+the REST API, whose shape differs from the GraphQL check runs ci_utils reads:
+the numeric job identifier is `.id` (not `.databaseId`) and conclusions are
+lowercase (`"failure"`, `"timed_out"`). A GitHub query that fails raises
+`CiJobRerunError` instead of reading as "no failed jobs" (issue #1945).
 """
 
 from __future__ import annotations
@@ -80,30 +91,40 @@ def _head_sha_of(pr: str | int, repo: str) -> str:
     return sha
 
 
-def _current_run_ids(head_sha: str, repo: str) -> list[int]:
-    """Run ids for the PR head — the newest run per workflow only.
+def _current_runs(head_sha: str, repo: str) -> list[dict]:
+    """The newest run per workflow name for the PR head, with its REST status.
 
     One head commit hosts several workflow runs (CI, QA reviews, re-runs). A
     failed job in a superseded run is stale: re-running it would surface a
     check whose newer run already settled it, so only the newest run per
-    workflow name is consulted (issue #1945, "stale QA checks").
+    workflow name is consulted (issue #1945, "stale QA checks"). The run's
+    `status` rides along — a re-run is refused until it reads `completed`
+    (task #3764).
     """
     data = _gh_api_json(
         [f"repos/{repo}/actions/runs?head_sha={head_sha}&per_page=100"],
         "runs",
     )
-    newest: dict[str, tuple[str, int]] = {}
+    newest: dict[str, tuple[str, int, str]] = {}
     for run in data.get("workflow_runs") or []:
         if not isinstance(run, dict):
             continue
         run_id = run.get("id")
         name = run.get("name")
         created_at = run.get("created_at")
-        if run_id is None or not isinstance(name, str) or created_at is None:
+        status = run.get("status")
+        if (
+            run_id is None
+            or not isinstance(name, str)
+            or created_at is None
+            or not isinstance(status, str)
+        ):
             continue
         if name not in newest or created_at > newest[name][0]:
-            newest[name] = (created_at, run_id)
-    return sorted(run_id for _, run_id in newest.values())
+            newest[name] = (created_at, run_id, status)
+    runs = [{"run_id": run_id, "status": status} for _, run_id, status in newest.values()]
+    runs.sort(key=lambda run: run["run_id"])
+    return runs
 
 
 def _all_jobs(head_sha: str, repo: str) -> list[dict]:
@@ -111,13 +132,14 @@ def _all_jobs(head_sha: str, repo: str) -> list[dict]:
 
     The projection keeps the REST job id (`.id`, the numeric identifier used by
     `/actions/jobs/{id}/rerun`) — never GraphQL's `.databaseId`, which REST job
-    objects do not carry (issue #1945).
+    objects do not carry (issue #1945) — and the containing run's `status` and
+    `run_id`, on which re-run eligibility turns (task #3764).
     """
     jobs: list[dict] = []
-    for run_id in _current_run_ids(head_sha, repo):
+    for run in _current_runs(head_sha, repo):
         data = _gh_api_json(
-            [f"repos/{repo}/actions/runs/{run_id}/jobs?per_page=100"],
-            f"run {run_id} jobs",
+            [f"repos/{repo}/actions/runs/{run['run_id']}/jobs?per_page=100"],
+            f"run {run['run_id']} jobs",
         )
         for job in data.get("jobs") or []:
             if not isinstance(job, dict):
@@ -126,8 +148,9 @@ def _all_jobs(head_sha: str, repo: str) -> list[dict]:
                 {
                     "name": job.get("name"),
                     "job_id": job.get("id"),
-                    "run_id": job.get("run_id", run_id),
+                    "run_id": job.get("run_id", run["run_id"]),
                     "conclusion": job.get("conclusion"),
+                    "run_status": run["status"],
                 }
             )
     return jobs
@@ -136,13 +159,11 @@ def _all_jobs(head_sha: str, repo: str) -> list[dict]:
 def list_failed_jobs(pr: str | int, repo: str) -> list[dict]:
     """Completed-failed jobs across every current workflow run of the PR's head.
 
-    A failed job can be re-run while sibling jobs of the same run are still
-    going — the window where run-level recovery is blocked. REST conclusions
-    are lowercase and null while running: normalize on read, so only completed
-    failures (`failure`, `timed_out`, `cancelled`, ...) are listed, never
-    successful siblings and never superseded QA checks. A failed GitHub query
-    raises `CiJobRerunError`; an empty list means the query succeeded and found
-    nothing to re-run.
+    Each entry carries the job's REST id and conclusion plus the containing
+    run's `run_id` and `run_status`; only completed failures (`failure`,
+    `timed_out`, `cancelled`, ...) are listed, never successful siblings and
+    never superseded QA checks. A failed GitHub query raises `CiJobRerunError`;
+    an empty list means the query succeeded and found nothing to re-run.
     """
     sha = _head_sha_of(pr, repo)
     return [
@@ -152,19 +173,62 @@ def list_failed_jobs(pr: str | int, repo: str) -> list[dict]:
     ]
 
 
-def rerun_failed_jobs(pr: str | int, repo: str) -> tuple[list[dict], list[str]]:
-    """Re-run every failed job at job level; return (re-ran, errors)."""
+def rerun_failed_jobs(pr: str | int, repo: str) -> tuple[list[dict], list[dict], list[str]]:
+    """Re-run the failed jobs of the PR head's current runs.
+
+    Returns `(reran, waiting, errors)`: jobs whose re-run was accepted; jobs
+    that cannot be re-run yet because their run is still going — GitHub refuses
+    both flavors until the run reads `completed` (probed 2026-09-17, task
+    #3764), so the caller reports the recovery action instead of the 403 — and
+    re-run requests GitHub rejected. A completed run with a single failed job
+    re-runs at job level; several failed jobs re-run with one run-level
+    `rerun-failed-jobs` call, because a second job-level rerun of the same run
+    is refused while the first's new attempt runs.
+    """
     reran: list[dict] = []
+    waiting: list[dict] = []
     errors: list[str] = []
+    by_run: dict[int, list[dict]] = {}
     for job in list_failed_jobs(pr, repo):
+        by_run.setdefault(job["run_id"], []).append(job)
+    for run_id, jobs in by_run.items():
+        if jobs[0]["run_status"] != "completed":
+            waiting.extend(jobs)
+            continue
+        if len(jobs) == 1:
+            r = subprocess.run(  # noqa: S603
+                [
+                    "gh",
+                    "api",
+                    "--method",
+                    "POST",
+                    f"repos/{repo}/actions/jobs/{jobs[0]['job_id']}/rerun",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if r.returncode == 0:
+                reran.append(jobs[0])
+            else:
+                errors.append(f"{jobs[0]['name']}: {(r.stderr or r.stdout).strip()}")
+            continue
         r = subprocess.run(  # noqa: S603
-            ["gh", "api", "--method", "POST", f"repos/{repo}/actions/jobs/{job['job_id']}/rerun"],
+            [
+                "gh",
+                "api",
+                "--method",
+                "POST",
+                f"repos/{repo}/actions/runs/{run_id}/rerun-failed-jobs",
+            ],
             capture_output=True,
             text=True,
             check=False,
         )
         if r.returncode == 0:
-            reran.append(job)
+            reran.extend(jobs)
         else:
-            errors.append(f"{job['name']}: {(r.stderr or r.stdout).strip()}")
-    return reran, errors
+            errors.append(
+                f"run {run_id} ({len(jobs)} failed jobs): {(r.stderr or r.stdout).strip()}"
+            )
+    return reran, waiting, errors

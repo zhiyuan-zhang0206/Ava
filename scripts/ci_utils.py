@@ -1022,18 +1022,27 @@ def _rerun_command(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
                 print("No failed jobs to re-run")
                 return 0
             for j in jobs:
-                print(f"{j['name']} (job {j['job_id']}, run {j['run_id']}, {j['conclusion']})")
+                print(
+                    f"{j['name']} (job {j['job_id']}, run {j['run_id']}, "
+                    f"{j['conclusion']}) [run {j['run_status']}]"
+                )
             return 0
-        reran, errors = rerun_failed_jobs(args.pr, args.repo)
+        reran, waiting, errors = rerun_failed_jobs(args.pr, args.repo)
     except CiJobRerunError as error:
         # A failed GitHub query must not read as "no failed jobs" (issue #1945).
         print(f"Failed to list failed jobs: {error}", file=sys.stderr, flush=True)
         return 1
     for j in reran:
         print(f"Re-ran {j['name']} (job {j['job_id']})")
+    for w in waiting:
+        print(
+            f"Waiting: {w['name']} (job {w['job_id']}, run {w['run_id']}): the run "
+            f"is still {w['run_status']}; GitHub refuses re-runs until it completes. "
+            "Re-run this command once the run finishes."
+        )
     for e in errors:
         print(f"Re-run failed: {e}")
-    return 3 if errors else 0
+    return 3 if errors else 5 if waiting else 0
 
 
 def _validate_common_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
@@ -1843,11 +1852,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--rerun-failed-jobs",
         action="store_true",
-        help="re-run every failed job of the PR's workflow runs at JOB level "
-        "(issue #102): run-level rerun is refused while any job is still "
-        "going, so recovery must not wait on the slowest surviving shard. "
-        "Exit 0 when all failed jobs were re-run (or none were), 3 on errors. "
-        "Exclusive with --wait/--merge/--json.",
+        help="re-run the failed jobs of the PR's workflow runs once their run "
+        "is completed (issue #102): GitHub refuses job-level and run-level "
+        "reruns alike while a run is still going (probed 2026-09-17; the docs "
+        "state no such precondition), so a still-running run is reported "
+        "as waiting with the recovery action. Exit 0 when all failed "
+        "jobs were re-run (or none were), 5 when failures remain whose run is "
+        "still going, 3 on errors. Exclusive with --wait/--merge/--json.",
     )
     p.add_argument(
         "--dry-run",
