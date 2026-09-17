@@ -351,6 +351,84 @@ class LmSettings(EnvSettings):
         },
     )
 
+    llm_stall_retry_initial_interval_seconds: float = Field(
+        default=300.0,
+        gt=0,
+        alias="AVA_LLM_STALL_RETRY_INITIAL_INTERVAL_SECONDS",
+        description=(
+            "First wait (seconds) before retrying an LLM call that ended in two "
+            "adjacent stalls (stream segment + non-streaming fallback). Starts at "
+            "5 minutes on purpose: a stalled provider is degraded, so an immediate "
+            "retry re-stalls — the wait rides out the short queue depressions. "
+            "Doubles per consecutive pair up to llm_stall_retry_max_interval_seconds."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    llm_stall_retry_max_interval_seconds: float = Field(
+        default=1800.0,
+        gt=0,
+        alias="AVA_LLM_STALL_RETRY_MAX_INTERVAL_SECONDS",
+        description=(
+            "Cap (seconds) on the stalled-call retry wait. 30 minutes: beyond it "
+            "the longer wait stops improving recovery odds while pushing the next "
+            "attempt further out, and — with the ±jitter below — one wait plus one "
+            "bounded attempt must stay under the hosted no-progress stall guard "
+            "(AVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS, default 2400s)."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    llm_stall_retry_max_consecutive: int = Field(
+        default=4,
+        ge=0,
+        alias="AVA_LLM_STALL_RETRY_MAX_CONSECUTIVE",
+        description=(
+            "Consecutive two-adjacent-stall terminations retried on the delayed "
+            "schedule before the turn gives up and falls back to the regular wake "
+            "path. 4 pairs cover ~5+10+20+30 = 65 minutes while the observed stall "
+            "waves ran ~2.5-3h — past this coverage an in-turn hold is worse than "
+            "settling to idle and letting the next wake retry. 0 disables the "
+            "delayed schedule (pair errors then retry like any transient)."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    llm_stall_retry_jitter_fraction: float = Field(
+        default=0.25,
+        ge=0.0,
+        lt=1.0,
+        alias="AVA_LLM_STALL_RETRY_JITTER_FRACTION",
+        description=(
+            "Multiplicative jitter (± this fraction) on each stalled-call retry "
+            "wait. The 2026-09-14/15 wave hit 36 agents on 3 machines within 10s — "
+            "without jitter the fleet's delayed retries re-synchronize into a fresh "
+            "burst; ±25% spreads them (band chosen in the incident review). 0 keeps "
+            "the schedule deterministic (not recommended for a shared provider)."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     llm_fatal_provider_error_types: str = Field(
         default="engine_overloaded_error",
         alias="AVA_LLM_FATAL_PROVIDER_ERROR_TYPES",

@@ -170,7 +170,16 @@ register(
             effort_levels=("high", "max"),
             tuning=ModelTuning(
                 reasoning_effort="max",  # same as the retired v4 entries: Ava is not an auto-promoted harness
-                llm_stream_ttft_timeout_seconds=600.0,  # same documented 10-minute queue
+                # Stall-wave tightening (2026-09-18, task #3884): the 600 that
+                # matched DeepSeek's documented up-to-10-minute queue was
+                # exactly the failure — in the 09-14/15 waves a request not
+                # served within minutes was not served inside 600s either (the
+                # queue served ONLY keep-alive comments), and each stall
+                # burned 600s (stream) + 600s (non-streaming fallback) per
+                # turn before crashing. 150 keeps generous queue headroom
+                # while cutting stall detection ~4x; the non-streaming
+                # fallback segment runs under this same bound.
+                llm_stream_ttft_timeout_seconds=150.0,
                 # Same decision as every deepseek entry (2026-08-29): soft 374k /
                 # hard 512k on the 1M window — 0.512 / 0.374 exactly.
                 auto_compact_fraction=0.512,
@@ -200,12 +209,14 @@ register(
                 # not on that list, so the promotion has to be explicit. Their own
                 # V4 report has max beating high on EVERY agentic metric.
                 reasoning_effort="max",
-                # DeepSeek documents queueing a request for up to 10 minutes while
-                # emitting only SSE COMMENT frames (`: keep-alive`), which no SDK
-                # surfaces as a chunk — so a healthy queued request is indistinguish-
-                # able from a dead one until data starts. 600 matches the server's
-                # own connection-close cutoff.
-                llm_stream_ttft_timeout_seconds=600.0,
+                # Stall-wave tightening (task #3884): 600 -> 150. The queue's
+                # keep-alive-comment window made a healthy queued request
+                # indistinguishable from a dead one, but waiting the full
+                # documented window only converted a provider incident into a
+                # ~20-minute silent outage per agent (600s stream stall + 600s
+                # fallback). 150 cuts detection ~4x; the fallback segment runs
+                # under the same bound. See deepseek-flash for the full note.
+                llm_stream_ttft_timeout_seconds=150.0,
                 # Compact thresholds pinned 2026-08-29 (user decision, reverting
                 # the 2026-08-27 600k/700k pin): soft 374k / hard 512k — the task
                 # #581 values. 0.512 / 0.374 of the 1M window is exactly
@@ -233,7 +244,7 @@ register(
             effort_levels=("high", "max"),
             tuning=ModelTuning(
                 reasoning_effort="max",  # same as pro: Ava is not an auto-promoted harness
-                llm_stream_ttft_timeout_seconds=600.0,  # same documented 10-minute queue
+                llm_stream_ttft_timeout_seconds=150.0,  # stall-wave tightening (task #3884); see deepseek-flash
                 # Same decision as deepseek-v4-pro (2026-08-29): soft 374k /
                 # hard 512k on the 1M window — 0.512 / 0.374 exactly.
                 auto_compact_fraction=0.512,
@@ -262,7 +273,7 @@ register(
             media_types=frozenset({"image"}),
             tuning=ModelTuning(
                 reasoning_effort="max",  # same as pro/flash: Ava is not an auto-promoted harness
-                llm_stream_ttft_timeout_seconds=600.0,  # same documented 10-minute queue
+                llm_stream_ttft_timeout_seconds=150.0,  # stall-wave tightening (task #3884); see deepseek-flash
                 # Same decision as deepseek-v4-pro (2026-08-29): soft 374k /
                 # hard 512k on the 1M window — 0.512 / 0.374 exactly.
                 auto_compact_fraction=0.512,

@@ -98,7 +98,45 @@ from ._nodes import (
 # at these scales — which is why the per-agent offset exists.
 _RETRY_JITTER_SPAN_S = 10.0
 _RETRY_REMAINING_ATTR = "_ava_retry_budget_remaining_seconds"
+# The backoff factor the transient schedule was tuned with (all incidents
+# validated base 2) — the `backoff_factor` property below returns this unless
+# the delayed stall mode computes its sleep whole in `_should_retry`.
+_LLM_RETRY_BACKOFF_FACTOR = 2.0
 _retry_budget_state = threading.local()
+
+
+def _retry_thread_id() -> str:
+    """The per-thread stall-pair streak key (bound turn identity, else `?`).
+
+    `agent.graph._llm_errors` keys its streaks by the llm node's
+    ``str(agent_id_from_config(config))``; the retry machinery runs in the same
+    turn, so the bound identity resolves to the same string. `?` keeps tests
+    and non-agent entry points from crashing on an unbound identity.
+    """
+    from shared.turn_identity import effective_agent_id
+
+    ident = effective_agent_id()
+    return str(ident) if ident is not None else "?"
+
+
+def _delayed_stall_sleep(streak: int) -> float:
+    """The jittered wait before the retry after stall pair number `streak`.
+
+    Exponential with a cap: ``initial x 2**(streak-1)``, capped at
+    ``llm_stall_retry_max_interval_seconds``. Then multiplicative
+    ±``llm_stall_retry_jitter_fraction`` jitter — the 2026-09-14/15 wave hit 36
+    agents on 3 machines within 10s, so an unjittered schedule would
+    re-synchronize the fleet into a fresh burst. Random per grant (not the
+    deterministic per-agent phase used elsewhere): with only up to 4 grants,
+    each one must land in a fresh spot, not offset a fixed schedule.
+    """
+    base = min(
+        settings.lm.llm_stall_retry_initial_interval_seconds * (2 ** (streak - 1)),
+        settings.lm.llm_stall_retry_max_interval_seconds,
+    )
+    from shared.resilience import jittered
+
+    return jittered(base, span=base * settings.lm.llm_stall_retry_jitter_fraction, mode="random")
 
 
 def _retry_wait_ceiling() -> float | None:
@@ -110,6 +148,23 @@ def _retry_wait_ceiling() -> float | None:
     """
     remaining = getattr(_retry_budget_state, "remaining_seconds", None)
     return remaining if isinstance(remaining, float) else None
+
+
+def _delayed_stall_sleep_pending_value() -> float | None:
+    """The delayed stall wait `_should_retry` stashed for this attempt, if any.
+
+    Same synchronous handoff shape as `_retry_wait_ceiling`: LangGraph reads
+    the policy fields one after another before its sleep, so a thread-local
+    carries the computed wait from the predicate to the property reads. It is
+    consumed (cleared) by the `jitter` read, the last field LangGraph touches.
+    """
+    value = getattr(_retry_budget_state, "stall_pair_sleep", None)
+    return value if isinstance(value, float) else None
+
+
+def _delayed_stall_sleep_pending() -> bool:
+    """True while this attempt's reads are serving a delayed stall wait."""
+    return _delayed_stall_sleep_pending_value() is not None
 
 
 def _retry_phase_jitter() -> float:
@@ -171,6 +226,15 @@ class _TurnScopedRetryPolicy(RetryPolicy):
     fills the underlying tuple slots with the build-time values, so even an
     unnoticed snapshot degrades to today's behaviour rather than to LangGraph's
     defaults.
+
+    A third dynamic behaviour rides the same handoff: the delayed stall
+    schedule. `_should_retry`'s pair branch computes the whole wait for this
+    attempt (streak-based, jittered — `_delayed_stall_sleep`) and stashes it in
+    the thread-local; `initial_interval` / `max_interval` then serve it,
+    `backoff_factor` collapses to 1.0 (the wait is not compounded again),
+    `jitter` turns off (the wait already carries its multiplicative jitter) and
+    `max_attempts` adds the streak cap as headroom. The stash is consumed by
+    the `jitter` read, exactly like the transient budget above.
     """
 
     __slots__ = ()
@@ -179,14 +243,35 @@ class _TurnScopedRetryPolicy(RetryPolicy):
     def max_attempts(self) -> int:  # pyright: ignore[reportIncompatibleVariableOverride]
         from shared.lm.registry import resolve_setting
 
-        return resolve_setting("llm_retry_max_attempts", model=turn_settings.lm.llm_model)
+        base = resolve_setting("llm_retry_max_attempts", model=turn_settings.lm.llm_model)
+        if _delayed_stall_sleep_pending():
+            # Non-binding headroom while a delayed stall sequence runs: its
+            # real bounds are the streak cap (in retry_on) and the node-entry
+            # fatal, but the shared attempts gate must not pre-empt them when
+            # transient failures earlier in the same sequence consumed part of
+            # the transient count.
+            return base + settings.lm.llm_stall_retry_max_consecutive
+        return base
 
     @property
     def initial_interval(self) -> float:  # pyright: ignore[reportIncompatibleVariableOverride]
+        delayed = _delayed_stall_sleep_pending_value()
+        if delayed is not None:
+            return delayed
         return settings.lm.llm_retry_initial_interval_seconds + _retry_phase_jitter()
 
     @property
+    def backoff_factor(self) -> float:  # pyright: ignore[reportIncompatibleVariableOverride]
+        # The delayed stall wait is computed whole in `_should_retry`
+        # (streak-based, jittered); compounding it again by the transient
+        # schedule's factor of 2 would square the growth.
+        return _LLM_RETRY_BACKOFF_FACTOR if not _delayed_stall_sleep_pending() else 1.0
+
+    @property
     def max_interval(self) -> float:  # pyright: ignore[reportIncompatibleVariableOverride]
+        delayed = _delayed_stall_sleep_pending_value()
+        if delayed is not None:
+            return delayed
         remaining = _retry_wait_ceiling()
         if remaining is None:
             return settings.lm.llm_retry_max_interval_seconds
@@ -198,10 +283,17 @@ class _TurnScopedRetryPolicy(RetryPolicy):
     @property
     def jitter(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
         remaining = _retry_wait_ceiling()
+        delayed = _delayed_stall_sleep_pending_value()
         # LangGraph reads max_interval before jitter. Consume the synchronous
-        # handoff here so a later unrelated policy inspection cannot reuse an
-        # earlier attempt's budget.
+        # handoffs here so a later unrelated policy inspection cannot reuse an
+        # earlier attempt's budget or delayed wait.
         _retry_budget_state.remaining_seconds = None
+        _retry_budget_state.stall_pair_sleep = None
+        if delayed is not None:
+            # The delayed wait was already jittered multiplicatively in
+            # `_should_retry`; LangGraph's additive +0..1s would only blur the
+            # configured ±fraction band.
+            return False
         return remaining is None or remaining > 1.0
 
 
@@ -213,12 +305,31 @@ def _build_llm_retry() -> RetryPolicy:
     reaches zero, this predicate rejects the next retry before LangGraph sleeps
     or invokes the provider again.
 
+    Stall pairs (`LLMStreamStallPairError` — the streaming segment stalled and
+    the non-streaming fallback then timed out) run on a SEPARATE delayed
+    schedule instead of the transient one: a manager/provider that was just
+    unable to serve two consecutive segments needs minutes, not the 30s
+    transient backoff, so the waits start at
+    `llm_stall_retry_initial_interval_seconds` (5min), double, cap at
+    `llm_stall_retry_max_interval_seconds` (30min), and run for at most
+    `llm_stall_retry_max_consecutive` (4) consecutive pairs before the node's
+    entry check fails the turn into the fatal settlement (agent alive, idles;
+    the regular wake path retries). Each wait is jittered ±
+    `llm_stall_retry_jitter_fraction` so the fleet's delayed retries do not
+    re-synchronize (the 2026-09-14/15 wave hit 36 agents within 10s).
+
     Returns a `_TurnScopedRetryPolicy`: the two per-agent fields resolve per read
     so one shared graph still retries each hosted agent on its own schedule.
     """
     from agent.graph._llm import (
         FatalLLMStreamError,
         FatalProviderError,
+    )
+    from agent.graph._llm_errors import (
+        LLMStreamStallPairError,
+        _record_stall_pair_streak,
+        _reset_stall_pair_streak,
+        _stall_pair_streak,
     )
 
     def _should_retry(exc: Exception) -> bool:
@@ -228,15 +339,38 @@ def _build_llm_retry() -> RetryPolicy:
             exc, (FatalLLMStreamError, FatalProviderError, KeyboardInterrupt, SystemExit)
         ):
             _retry_budget_state.remaining_seconds = None
+            _retry_budget_state.stall_pair_sleep = None
             return False
+        max_pairs = settings.lm.llm_stall_retry_max_consecutive
+        if isinstance(exc, LLMStreamStallPairError) and max_pairs > 0:
+            # Delayed stall schedule: minutes-scale waits between attempts, at
+            # most `max_pairs` consecutive pairs (a pair = stream segment
+            # stall + non-streaming fallback stall in the same call). This is
+            # a regime of its own on top of the transient budget's
+            # seconds-scale backoff; a spent streak ends the sequence at the
+            # node-entry check, so the refusal here is only the defensive
+            # backstop.
+            thread = _retry_thread_id()
+            streak = _stall_pair_streak(thread) + 1
+            if streak > max_pairs:
+                _reset_stall_pair_streak(thread)
+                _retry_budget_state.remaining_seconds = None
+                _retry_budget_state.stall_pair_sleep = None
+                return False
+            _record_stall_pair_streak(thread, streak)
+            _retry_budget_state.remaining_seconds = None
+            _retry_budget_state.stall_pair_sleep = _delayed_stall_sleep(streak)
+            return True
         remaining = getattr(exc, _RETRY_REMAINING_ATTR, None)
         if isinstance(remaining, float):
             if remaining <= 0.0:
                 _retry_budget_state.remaining_seconds = None
+                _retry_budget_state.stall_pair_sleep = None
                 return False
             _retry_budget_state.remaining_seconds = remaining
         else:
             _retry_budget_state.remaining_seconds = None
+        _retry_budget_state.stall_pair_sleep = None
         return True
 
     from shared.lm.registry import resolve_setting
@@ -251,7 +385,7 @@ def _build_llm_retry() -> RetryPolicy:
         max_attempts=resolve_setting("llm_retry_max_attempts", model=turn_settings.lm.llm_model),
         # + _retry_phase_jitter(): per-agent schedule offset (see module note).
         initial_interval=settings.lm.llm_retry_initial_interval_seconds + _retry_phase_jitter(),
-        backoff_factor=2,
+        backoff_factor=_LLM_RETRY_BACKOFF_FACTOR,
         max_interval=settings.lm.llm_retry_max_interval_seconds,
         # Explicit: lock LangGraph's per-attempt jitter on (default True, but
         # the intent is load-bearing — see the de-phasing note above).

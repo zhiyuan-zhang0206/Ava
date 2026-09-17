@@ -129,6 +129,27 @@ class LlmRetry(TypedDict):
     duration_seconds: float
 
 
+class StreamStalledRetry(TypedDict):
+    """`stream_stalled_retry` payload — agent/graph/_llm_stream.py.
+
+    The stalled stream's provider identity and shape, so stalls are countable
+    per vendor/model — the provider-health dimension the LLM telemetry
+    previously lacked (2026-09-14/15 wave: 100% of stalled requests were
+    api.deepseek.com, but nothing in the event stream said so).
+
+    ``elapsed_s`` is the stalled segment's wall-clock (the bound that expired);
+    it also maps onto the OTLP metric surface as a histogram with
+    ``vendor``/``model``/``stage`` as datapoint attributes. ``stage`` is
+    ``ttft`` (no first chunk), ``mid-stream`` (gap after chunks arrived) or
+    ``total`` (the per-attempt duration ceiling).
+    """
+
+    vendor: str | None
+    model: str
+    stage: str
+    elapsed_s: float
+
+
 class LlmProviderError(TypedDict):
     """`llm_provider_error` payload — shared/lm/errors.py.
 

@@ -66,6 +66,19 @@ def test_stream_total_timeout_resolves_shared_floor_and_explicit_override(
     assert resolve_setting("llm_stream_total_timeout_seconds", model="deepseek-v4-pro") == 7200.0
 
 
+def test_deepseek_stall_wave_ttft_default_is_150(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Task #3884: the DeepSeek family's resolved TTFT default dropped 600 -> 150
+    (the 600 matched the provider's documented up-to-10-minute queue, which the
+    09-14/15 waves turned into 600s stream + 600s fallback burns per turn). The
+    sentinel + per-model layer must agree, and an explicit override still wins."""
+    monkeypatch.setattr(settings.lm, "llm_stream_ttft_timeout_seconds", None)
+    for model in ("deepseek-flash", "deepseek-v4-pro", "deepseek-v4-flash"):
+        assert resolve_setting("llm_stream_ttft_timeout_seconds", model=model) == 150.0
+
+    monkeypatch.setattr(settings.lm, "llm_stream_ttft_timeout_seconds", 90.0)
+    assert resolve_setting("llm_stream_ttft_timeout_seconds", model="deepseek-flash") == 90.0
+
+
 def test_sentinelized_config_fields_default_to_none() -> None:
     """Each per-model-defaultable settings field carries the None sentinel as
     its pydantic default — a real default there would read as an explicit user

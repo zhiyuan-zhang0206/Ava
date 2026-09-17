@@ -6,14 +6,20 @@ cap is useless -- the agent would keep retrying after the cap fires.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import pytest
 
 from agent.graph._build import _build_llm_retry
 from agent.graph._llm import (
     FatalLLMStreamError,
     FatalProviderError,
+    LLMStreamStallPairError,
+    LLMStreamStallPairExhaustedError,
     LLMStreamStallTimeoutError,
 )
+from shared.config import settings
+from shared.turn_identity import bind_turn_identity
 
 
 def test_retry_policy_excludes_fatal_llm_stream_error() -> None:
@@ -129,3 +135,155 @@ def test_retry_policy_phase_jitter_deterministic_per_agent(monkeypatch: pytest.M
     monkeypatch.setenv("AVA_AGENT_ID", "5678")
     j2 = _retry_phase_jitter()
     assert j2 != j1  # different agents retry on different phases
+
+
+# --- Delayed stall schedule (task #3884) ---
+#
+# A stall pair (stream segment + non-streaming fallback both stalled in one
+# call) runs on its own schedule: initial `llm_stall_retry_initial_interval`
+# (5min), doubling, capped, jittered, at most `llm_stall_retry_max_consecutive`
+# consecutive pairs — minutes-scale waits so a degraded provider is not
+# hot-looped, spread by jitter so the fleet does not re-synchronize.
+
+
+@pytest.fixture
+def bound_thread() -> Iterator[str]:
+    """Bind a turn identity so the streak keys on it, and clean it up after."""
+    from agent.graph._llm_errors import _reset_stall_pair_streak
+
+    with bind_turn_identity(6363):
+        yield "6363"
+    _reset_stall_pair_streak("6363")
+
+
+def _read_policy_fields_in_langgraph_order(policy: object) -> tuple[int, float, float, float, bool]:
+    """Read the policy fields the way LangGraph's retry loop does.
+
+    The synchronous handoff (thread-local) is consumed by the `jitter` read,
+    the last one in the sequence — reading in a different order sees different
+    state.
+    """
+    from langgraph.types import RetryPolicy
+
+    assert isinstance(policy, RetryPolicy)
+    return (
+        policy.max_attempts,
+        policy.initial_interval,
+        policy.max_interval,
+        policy.backoff_factor,
+        policy.jitter,
+    )
+
+
+def test_stall_pair_grants_the_delayed_schedule(bound_thread: str) -> None:
+    """A pair error is retried under the delayed schedule: minutes-scale
+    jittered wait, no compounding backoff, its own attempts headroom."""
+    from agent.graph._llm_errors import _stall_pair_streak
+    from shared.config.turn_view import turn_settings
+    from shared.lm.registry import resolve_setting
+
+    policy = _build_llm_retry()
+    exc = LLMStreamStallPairError("pair", stage="ttft")
+
+    assert policy.retry_on(exc)  # type: ignore[arg-type]
+    max_attempts, sleep, max_interval, backoff, jitter = _read_policy_fields_in_langgraph_order(
+        policy
+    )
+
+    base_attempts = resolve_setting("llm_retry_max_attempts", model=turn_settings.lm.llm_model)
+    assert max_attempts == base_attempts + settings.lm.llm_stall_retry_max_consecutive
+    assert 300.0 * 0.75 <= sleep <= 300.0 * 1.25  # initial 5min, jittered +-25%
+    assert max_interval == sleep  # the computed wait, not the transient cap
+    assert backoff == 1.0  # never compounded again
+    assert jitter is False  # the wait already carries its multiplicative jitter
+    assert _stall_pair_streak(bound_thread) == 1
+    # Handoff consumed: later reads fall back to the transient values.
+    assert policy.backoff_factor == 2.0
+
+
+def test_stall_pair_wait_doubles_and_caps(bound_thread: str) -> None:
+    """Waits follow initial x 2**(streak-1) capped at the max interval —
+    5, 10, 20, 30 minutes — each in the configured jitter band."""
+    policy = _build_llm_retry()
+    bands = {1: 300.0, 2: 600.0, 3: 1200.0, 4: 1800.0}
+    for streak, base in bands.items():
+        exc = LLMStreamStallPairError("pair")
+        assert policy.retry_on(exc)  # type: ignore[arg-type]
+        sleep = policy.initial_interval
+        assert base * 0.75 <= sleep <= base * 1.25, f"streak {streak}"
+        assert policy.max_attempts > 0  # read in LangGraph order, consumes alongside
+        assert policy.backoff_factor == 1.0
+        assert policy.jitter is False
+
+
+def test_stall_pair_refuses_past_the_cap_and_resets(bound_thread: str) -> None:
+    """Past `llm_stall_retry_max_consecutive` the retry is refused and the
+    streak resets (the next turn starts with a fresh budget)."""
+    from agent.graph._llm_errors import (
+        _record_stall_pair_streak,
+        _stall_pair_streak,
+    )
+
+    policy = _build_llm_retry()
+    _record_stall_pair_streak(bound_thread, settings.lm.llm_stall_retry_max_consecutive)
+    assert not policy.retry_on(LLMStreamStallPairError("pair"))  # type: ignore[arg-type]
+    assert _stall_pair_streak(bound_thread) == 0
+
+
+def test_stall_pair_entry_cap_raises_fatal_and_resets(bound_thread: str) -> None:
+    """A spent streak fails the turn at node entry as a FatalLLMStreamError
+    (the established alive-and-idle settlement), and resets."""
+    from agent.graph._llm_errors import (
+        _check_stall_pair_cap,
+        _record_stall_pair_streak,
+        _stall_pair_streak,
+    )
+
+    _record_stall_pair_streak(bound_thread, settings.lm.llm_stall_retry_max_consecutive)
+    with pytest.raises(LLMStreamStallPairExhaustedError):
+        _check_stall_pair_cap(bound_thread)
+    assert _stall_pair_streak(bound_thread) == 0
+    assert isinstance(LLMStreamStallPairExhaustedError("x"), FatalLLMStreamError)
+    assert isinstance(LLMStreamStallPairError("x"), LLMStreamStallTimeoutError)
+
+
+def test_stall_pair_errors_skip_the_consecutive_tracker(bound_thread: str) -> None:
+    """The tracker's cap (3) must not pre-empt the delayed schedule's 4th
+    grant, so pair errors never enter it; plain stalls still do."""
+    from agent.graph._llm_errors import (
+        _clear_consecutive_errors,
+        _consecutive_errors,
+        _record_consecutive_error,
+    )
+
+    _clear_consecutive_errors(bound_thread)
+    _record_consecutive_error(bound_thread, LLMStreamStallPairError("pair"))
+    assert bound_thread not in _consecutive_errors
+    _record_consecutive_error(bound_thread, LLMStreamStallTimeoutError("stall"))
+    assert _consecutive_errors[bound_thread] == ("LLMStreamStallTimeoutError", 1)
+    _clear_consecutive_errors(bound_thread)
+
+
+def test_delayed_schedule_disabled_falls_back_to_transient(
+    bound_thread: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`llm_stall_retry_max_consecutive=0` disables the delayed regime: pair
+    errors retry (or stop) exactly like any transient error, with no streak."""
+    from agent.graph._build import _RETRY_JITTER_SPAN_S, _RETRY_REMAINING_ATTR
+    from agent.graph._llm_errors import _stall_pair_streak
+
+    monkeypatch.setattr(settings.lm, "llm_stall_retry_max_consecutive", 0)
+    policy = _build_llm_retry()
+    exc = LLMStreamStallPairError("pair")
+
+    assert policy.retry_on(exc)  # type: ignore[arg-type]
+    assert (
+        settings.lm.llm_retry_initial_interval_seconds
+        <= policy.initial_interval
+        < settings.lm.llm_retry_initial_interval_seconds + _RETRY_JITTER_SPAN_S
+    )
+    assert policy.jitter is True
+    assert _stall_pair_streak(bound_thread) == 0
+
+    setattr(exc, _RETRY_REMAINING_ATTR, 0.0)
+    assert not policy.retry_on(exc)  # type: ignore[arg-type]

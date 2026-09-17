@@ -44,6 +44,7 @@ from shared.events.payloads import (
     Spawn,
     SseDrop,
     StatusChange,
+    StreamStalledRetry,
     SyntaxFix,
     TaskEscalation,
     TaskReminderDigest,
@@ -210,7 +211,18 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         tier="anomaly",
     ),
     "stream_stalled_retry": _telemetry(
-        "stream_stalled_retry", "stream stalled, retried", family=LLM_ERROR_FAMILY, tier="anomaly"
+        "stream_stalled_retry",
+        "stream stalled, retried (vendor/model/stage/elapsed_s carry the provider-health "
+        "dimension; elapsed_s also maps to an OTLP histogram)",
+        payload=StreamStalledRetry,
+        family=LLM_ERROR_FAMILY,
+        tier="anomaly",
+    ),
+    "stream_stall_pair_terminated": _telemetry(
+        "stream_stall_pair_terminated",
+        "two adjacent stream stalls (stream segment + non-streaming fallback) terminated "
+        "the call early; retried on the delayed stall schedule",
+        tier="anomaly",
     ),
     "stream_overloaded_retry": _telemetry(
         "stream_overloaded_retry",
