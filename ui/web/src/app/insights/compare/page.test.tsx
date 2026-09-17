@@ -160,6 +160,8 @@ describe("parseCompareAgents", () => {
     expect(parseCompareAgents("41, x").invalid).toBe(true);
     expect(parseCompareAgents("-1").invalid).toBe(true);
     expect(parseCompareAgents("2.5").invalid).toBe(true);
+    expect(parseCompareAgents("1e3").invalid).toBe(true);
+    expect(parseCompareAgents("0x1f").invalid).toBe(true);
   });
 
   it("ignores empty segments", () => {

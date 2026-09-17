@@ -44,11 +44,13 @@ export function parseCompareAgents(raw: string): CompareSelection {
   for (const token of raw.split(",")) {
     const trimmed = token.trim();
     if (trimmed === "") continue;
-    const value = Number(trimmed);
-    if (!Number.isInteger(value) || value < 0) {
+    // Plain decimal ids only: Number() would silently accept "1e3" / "0x1f" /
+    // "1.0" and pick a different agent than the URL reads.
+    if (!/^\d+$/.test(trimmed)) {
       invalid = true;
       continue;
     }
+    const value = Number(trimmed);
     if (!ids.includes(value)) ids.push(value);
   }
   return { ids, invalid, raw };

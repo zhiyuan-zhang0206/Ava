@@ -257,7 +257,7 @@ def test_write_transaction_direct_refuses_a_pool() -> None:
 def test_list_chat_inbound_facts_windows_and_filters_kind(
     db_conn: psycopg.Connection,
 ) -> None:
-    """The arrow read: chat inbounds only, inside [from_, to), oldest first."""
+    """The arrow read: chat inbounds only, inside the closed [from_, to], oldest first."""
     from datetime import UTC, datetime, timedelta
 
     agent_id = _seed_agent(db_conn, "running")

@@ -149,6 +149,11 @@ export function CompareView({
   });
 
   const selectWindow = (next: TimelineWindowOverride) => setWindowOverride(next);
+  // "Reset" here returns to the configured fresh slice (the window the page
+  // opens on). The single view's reset means the whole session instead — a
+  // compare view has no single "whole session", and alignment needs one
+  // explicit shared window, so the two pages keep their own defensible
+  // meaning (P3b may unify the control).
   const resetWindow = () => setWindowOverride(undefined);
 
   const setZoomWindow = (hours: number) => {
