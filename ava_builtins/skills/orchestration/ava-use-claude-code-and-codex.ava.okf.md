@@ -40,7 +40,7 @@ owns an explicit shared app server, and the launcher wires it: `codex app-server
 --listen` on a private per-generation socket (`codex_app_server_socket`), a
 janitor that ends the server when the coding session dies, the TUI connected
 with `--remote`, and the endpoint in the launch message so the request records
-it (`--codex-remote`) and the relay queues into the same server. Notifications
+it (`--codex-remote`) and the relay delivers into the same server. Notifications
 use non-resurrecting system notes.
 
 ## Key dependencies

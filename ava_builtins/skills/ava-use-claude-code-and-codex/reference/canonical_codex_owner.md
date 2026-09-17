@@ -48,7 +48,7 @@ contract, and Git tree; a takeover process has none of those files and
 rebuilds from the briefing inlined in its launch message instead.
 
 Every takeover generation also owns the explicit shared app server the relay
-queues into: queue acceptance on a different server never reaches the
+delivers into: queue acceptance on a different server never reaches the
 conversation. The launcher starts `codex app-server --listen unix://<socket>`
 on a private per-generation socket under the cluster's `run/` directory (with
 `approval_policy="never"` and `sandbox_mode="danger-full-access"` configured on
