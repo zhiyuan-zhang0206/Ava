@@ -68,7 +68,7 @@ def test_launch_command_unsets_api_key_and_skips_permission_prompts(tmp_path: Pa
 
     assert command.startswith(f"cd {record.key.workspace} && ")
     assert "unset ANTHROPIC_API_KEY && " in command
-    assert command.endswith("claude --dangerously-skip-permissions")
+    assert command.endswith("exec claude --dangerously-skip-permissions")
     assert "AVA_CALLER_IDENTITY" not in command
 
 
@@ -230,3 +230,119 @@ def test_claude_brief_requires_takeover_mode(
 def test_supervised_launch_needs_its_files(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="supervised launch needs its task and work files"):
         spawn_claude._launch(tmp_path, None, None, 3600)
+
+
+def test_claim_reclaims_a_terminated_owners_generation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    record = _owner(tmp_path)
+    seen: list[str | None] = []
+
+    def _claim(
+        _key: coding_session_owner.CodingSessionKey,
+        *,
+        owner_agent_id: int,
+        tasks_file: Path | None,
+        work_file: Path | None,
+        ttl_seconds: float,
+        terminated_generation: str | None,
+    ) -> coding_session_owner.CodingSessionClaim:
+        seen.append(terminated_generation)
+        return coding_session_owner.CodingSessionClaim(action="launch", owner=record)
+
+    def _read(
+        _key: coding_session_owner.CodingSessionKey,
+    ) -> coding_session_owner.CodingSessionOwner:
+        return record
+
+    def _terminated(_agent_id: int) -> bool:
+        return True
+
+    monkeypatch.setattr(spawn_claude.coding_session_owner, "read", _read)
+    monkeypatch.setattr(spawn_claude, "_owner_terminated", _terminated)
+    monkeypatch.setattr(spawn_claude.coding_session_owner, "claim", _claim)
+
+    spawn_claude._claim_canonical(record.key, tasks_file=None, work_file=None, ttl_seconds=3600)
+
+    assert seen == [record.generation]
+
+
+def test_failed_early_publish_kills_claude_session_before_startup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    active = _owner(tmp_path)
+    launching = replace(
+        active,
+        status="launching",
+        session_id=None,
+        session_name=None,
+        tasks_file=None,
+        work_file=None,
+    )
+    events: list[str] = []
+    killed: list[int] = []
+    terminated: list[tuple[str, str]] = []
+
+    def _claim(
+        _key: coding_session_owner.CodingSessionKey,
+        *,
+        tasks_file: Path | None,
+        work_file: Path | None,
+        ttl_seconds: float,
+    ) -> coding_session_owner.CodingSessionClaim:
+        events.append("claim")
+        return coding_session_owner.CodingSessionClaim(action="launch", owner=launching)
+
+    def _pretrust(_workspace: Path) -> None:
+        events.append("pretrust")
+
+    def _new(*, name: str, ttl: float) -> int:
+        events.append("new")
+        return 7
+
+    def _send(_session_id: int, _content: str) -> None:
+        events.append("send")
+
+    def _ready(_session_id: int) -> None:
+        events.append("ready")
+
+    def _publish(
+        _key: coding_session_owner.CodingSessionKey,
+        _generation: str,
+        *,
+        session_id: int,
+        session_name: str,
+    ) -> coding_session_owner.CodingSessionOwner:
+        events.append("publish")
+        raise coding_session_owner.CodingSessionGenerationChangedError("replacement won")
+
+    def _kill(session_id: int) -> None:
+        killed.append(session_id)
+
+    def _terminate(
+        _key: coding_session_owner.CodingSessionKey,
+        _generation: str,
+        *,
+        reason: str,
+    ) -> bool:
+        terminated.append((_generation, reason))
+        return False
+
+    monkeypatch.setattr(spawn_claude, "_claim_canonical", _claim)
+    monkeypatch.setattr(spawn_claude, "_pretrust", _pretrust)
+    monkeypatch.setattr(spawn_claude.ava.shell.sessions, "new", _new)
+    monkeypatch.setattr(spawn_claude.ava.shell.sessions, "send", _send)
+    monkeypatch.setattr(spawn_claude, "_wait_for_ready", _ready)
+    monkeypatch.setattr(spawn_claude.coding_session_owner, "publish_active", _publish)
+    monkeypatch.setattr(spawn_claude.ava.shell.sessions, "kill", _kill)
+    monkeypatch.setattr(spawn_claude.coding_session_owner, "terminate_generation", _terminate)
+
+    workspace = Path(launching.key.workspace)
+    with pytest.raises(coding_session_owner.CodingSessionGenerationChangedError):
+        spawn_claude._launch(workspace, None, None, 3600, None, "Fix login", "the briefing")
+
+    assert events == ["claim", "pretrust", "new", "publish"]
+    assert killed == [7]
+    assert terminated == [(launching.generation, "launch-failed")]

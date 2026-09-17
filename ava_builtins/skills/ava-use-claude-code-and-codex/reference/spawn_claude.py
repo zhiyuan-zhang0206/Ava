@@ -28,8 +28,10 @@ coding agent is told where they are rather than assuming a layout.
 
 A takeover instead publishes a generation-owned record under the canonical key,
 opens the session under the record's name, and sends the inline briefing; it
-reads and writes no files and starts no supervisor. ``--status`` /
-``--cancel-generation`` inspect or stop the record.
+reads no task or work file, writes nothing in the workspace beyond the trust
+flag, and starts no supervisor. ``--status`` / ``--cancel-generation`` inspect
+or stop the record (supervised launches stay outside the record plane by
+design, so those two report none for them).
 
 The workspace is any directory: a git worktree, a scratch folder, a checkout of
 an unrelated project. Supervised mode imposes no structure on it beyond the two
@@ -129,32 +131,59 @@ def _wait_for_ready(sid: int, timeout: float = 30.0) -> None:
     print(f"  -> timeout after {timeout:.0f} s, sending anyway")
 
 
-def _verify_start_receipt(sid: int, timeout: float = 30.0) -> None:
-    """The takeover bootstrap must visibly land, not vanish into the composer.
+def _bootstrap_submitted(started: float) -> bool:
+    """Did a Claude session transcript freshly record the takeover bootstrap?
+
+    Claude Code appends session transcripts under ``~/.claude/projects/<slug>/``
+    as the executor works; the bootstrap line appearing in a transcript written
+    after the send is submission evidence. Visibility alone is not: a message
+    parked in the composer shows the same text (F1 class).
+    """
+    projects = Path.home() / ".claude" / "projects"
+    if not projects.is_dir():
+        return False
+    cutoff = started - 10.0
+    for path in projects.rglob("*.jsonl"):
+        try:
+            if path.stat().st_mtime < cutoff:
+                continue
+            if "take over Ava agent" in path.read_text(encoding="utf-8", errors="ignore"):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def _verify_start_receipt(sid: int, timeout: float = 45.0) -> None:
+    """The takeover bootstrap must actually submit, not vanish into the composer.
 
     A live session is not receipt: a message parked in the composer leaves an
     executor that never learned it replaced the agent (F1 class — do not infer
-    receipt from a zero exit code). Receipt = the capture shows the bootstrap's
-    opening line. If it does not appear within ``timeout``, press Enter once (a
-    stale composer entry submits there) and re-check. Kept loud but not fatal:
-    the session may still be rendering; the operator sees the warning.
+    receipt from a zero exit code). Submission evidence = the workspace's
+    Claude transcript freshly records the bootstrap. When it stays absent,
+    press Enter once (a stale composer entry submits there) and re-check. Kept
+    loud but not fatal: the session may still be rendering; the operator sees
+    the warning.
     """
-    print("verifying the takeover bootstrap reached the session...")
-    deadline = time.time() + timeout
+    print("verifying the takeover bootstrap was submitted...")
+    started = time.time()
+    deadline = started + timeout
     while time.time() < deadline:
-        if "take over Ava agent" in ava.shell.sessions.capture(sid):
-            print("  -> start-receipt=visible")
+        if _bootstrap_submitted(started):
+            print("  -> start-receipt=submitted (transcript)")
             return
         time.sleep(2)
-    print("  -> not visible within window; sending Enter once")
+    print("  -> no submission evidence yet; sending Enter once")
     ava.shell.sessions.send_keys(sid, "Enter")
     time.sleep(5)
-    if "take over Ava agent" in ava.shell.sessions.capture(sid):
-        print("  -> start-receipt=visible after Enter retry")
+    if _bootstrap_submitted(started):
+        print("  -> start-receipt=submitted after Enter retry")
         return
+    visible = "take over Ava agent" in ava.shell.sessions.capture(sid)
     print(
-        "  -> WARNING: start-receipt=not-visible; the takeover bootstrap may not have "
-        "reached the executor. Check the session before relying on it."
+        "  -> WARNING: start-receipt=not-submitted "
+        f"(visible={visible}); the takeover bootstrap may be parked or missing. "
+        "Check the session before relying on it."
     )
 
 
@@ -176,7 +205,7 @@ def _claude_command(workspace: Path, caller_instance: str | None = None) -> str:
         f"cd {shlex.quote(workspace.as_posix())} && "
         "unset ANTHROPIC_API_KEY && "
         f"{launch_caller_assignment('claude_code', caller_instance)}"
-        "claude --dangerously-skip-permissions"
+        "exec claude --dangerously-skip-permissions"
     )
 
 
@@ -338,9 +367,9 @@ def _run_takeover_launch(
     generation = owner.generation
     expected_suffix = owner.expected_suffix
     owner_agent_id = owner.owner_agent_id
-    _pretrust(workspace)
     sid: int | None = None
     try:
+        _pretrust(workspace)
         sid = ava.shell.sessions.new(name=expected_suffix, ttl=ttl_seconds)
         full_name = coding_session_owner.full_session_name(owner_agent_id, sid, expected_suffix)
         active = coding_session_owner.publish_active(
@@ -441,11 +470,17 @@ def main() -> int:
         help="opt in to v1 external provenance (bounded instance ID); requires target protocol support",
     )
     action = parser.add_mutually_exclusive_group()
-    action.add_argument("--status", action="store_true", help="Print the canonical owner record.")
+    action.add_argument(
+        "--status",
+        action="store_true",
+        help="Print the canonical owner record (takeover generations; supervised "
+        "launches are not registered).",
+    )
     action.add_argument(
         "--cancel-generation",
         metavar="GENERATION",
-        help="Stop and terminalize exactly this canonical generation.",
+        help="Stop and terminalize exactly this canonical generation "
+        "(takeover generations; supervised launches are not registered).",
     )
     parser.add_argument(
         "--impersonate-self", action="store_true", help="replace the launching Ava agent"
