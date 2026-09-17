@@ -11,7 +11,12 @@ top-level tasks). Kept here so the two surfaces cannot drift apart.
 
 from __future__ import annotations
 
-import psycopg
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # Annotation-only; keeping the import out of the module graph lets the fleet
+    # plugin autoload stay off psycopg (task #3816).
+    import psycopg
 
 
 def system_root_id(cur: psycopg.Cursor) -> int | None:

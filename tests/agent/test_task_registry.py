@@ -23,6 +23,7 @@ import pytest
 import ava
 import ava._boot
 from ava_builtins.plugins.ava_fleet import task_registry
+from shared import live_announce
 
 
 def _seed_agent(db: psycopg.Connection, *, status: str = "running", spawner: str = "test") -> int:
@@ -1171,7 +1172,7 @@ def test_create_publishes_task_created(
 ) -> None:
     agent_id = _seed_agent(db_conn)
     calls: list[tuple] = []
-    monkeypatch.setattr(task_registry, "publish_task_created_sync", lambda *a: calls.append(a))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    monkeypatch.setattr(live_announce, "publish_task_created_sync", lambda *a: calls.append(a))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     original = ava._boot._agent_id
     ava._boot._agent_id = agent_id
     try:
@@ -1190,7 +1191,7 @@ def test_update_publishes_task_updated(
     try:
         task = task_registry.create("title", "detail", parent=root_task_id)
         calls: list[tuple] = []
-        monkeypatch.setattr(task_registry, "publish_task_updated_sync", lambda *a: calls.append(a))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        monkeypatch.setattr(live_announce, "publish_task_updated_sync", lambda *a: calls.append(a))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         task_registry.update(task.id, status="in_progress")
     finally:
         ava._boot._agent_id = original
