@@ -1973,6 +1973,36 @@ describe("selected opening-gap reconcile", () => {
     expect(api.getConversationSnapshot).toHaveBeenCalledTimes(1);
     expect(api.getTimeline).toHaveBeenCalledTimes(1);
   });
+
+  it("compact_done aborts an in-flight reconcile: the pre-compact snapshot never lands", async () => {
+    vi.mocked(api.getTimeline).mockResolvedValue(
+      tlResp([snapshotItem({ item_id: "1.0", payload: "stable" })]),
+    );
+    let finishSnapshot!: (value: ConversationSnapshotResponse) => void;
+    vi.mocked(api.getConversationSnapshot).mockReset().mockImplementation(
+      () => new Promise((resolve) => { finishSnapshot = resolve; }),
+    );
+    const { result } = renderHook(() => useTimeline(42, vi.fn()), { wrapper });
+    await waitFor(() => expect(result.current.items[0]?.payload).toBe("stable"));
+
+    pushConnectionEvent({ type: "open" });
+    await waitFor(() => expect(api.getConversationSnapshot).toHaveBeenCalledTimes(1));
+
+    // A compact lands while the composed read is in flight. The read must be
+    // aborted — a pre-compact snapshot must not overwrite the post-compact
+    // window (the timeline query's own fetch is cancelled for the same reason).
+    pushEvent({ role: "compact_done", agent_id: 42 });
+
+    await act(async () => {
+      finishSnapshot(composedSnapshot(
+        tlResp([snapshotItem({ item_id: "1.0", payload: "pre-compact ghost" })]),
+      ));
+      await Promise.resolve();
+    });
+    expect(result.current.items.map((item) => item.payload)).toEqual(["stable"]);
+    expect(queryClient.getQueryData<TimelineResponse>(["timeline", 42]))
+      .toMatchObject({ items: [{ payload: "stable" }] });
+  });
 });
 
 
