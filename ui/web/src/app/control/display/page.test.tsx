@@ -101,6 +101,48 @@ describe("DisplaySettingsPage", () => {
     });
   });
 
+  // display.expand_runs_mode default "none" (user ruling 2026-09-17): an
+  // unset user collapses details by default. The row inverts the stored
+  // setting's polarity, so the switch reads ON — and turning it off must
+  // write "all" (the pre-existing write inverted polarity vs the row,
+  // leaving this switch a dead no-op; regression-locked here).
+  it("collapses details by default when the setting is unset, and turning the switch off writes 'all'", async () => {
+    renderPage();
+
+    const label = await screen.findByText("Collapse details by default");
+    const row = label.parentElement?.parentElement?.parentElement;
+    const toggle = row?.querySelector<HTMLButtonElement>('[role="switch"]');
+    expect(toggle?.getAttribute("aria-checked")).toBe("true");
+
+    fireEvent.click(toggle!);
+    await waitFor(() => {
+      expect(api.putSetting).toHaveBeenCalledWith("display.expand_runs_mode", "all");
+    });
+  });
+
+  it("stored 'all' reads the row as off; turning the switch on writes 'none'", async () => {
+    vi.mocked(api.getSettings).mockResolvedValue({
+      settings: [
+        {
+          key: "display.expand_runs_mode",
+          value: "all",
+          updated_at: "2026-09-01T00:00:00Z",
+        },
+      ],
+    });
+    renderPage();
+
+    const label = await screen.findByText("Collapse details by default");
+    const row = label.parentElement?.parentElement?.parentElement;
+    const toggle = row?.querySelector<HTMLButtonElement>('[role="switch"]');
+    expect(toggle?.getAttribute("aria-checked")).toBe("false");
+
+    fireEvent.click(toggle!);
+    await waitFor(() => {
+      expect(api.putSetting).toHaveBeenCalledWith("display.expand_runs_mode", "none");
+    });
+  });
+
   it("renders the thinking markdown toggle", async () => {
     renderPage();
 

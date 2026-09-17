@@ -223,7 +223,7 @@ export default function DisplaySettingsPage() {
           label="Collapse details by default"
           description="A newly-toggled work block starts collapsed instead of open. Flipping this (or the header's Details chip) expands/collapses every work block at once"
           value={!expandRunsDefault}
-          onChange={(v) => setSetting("display.expand_runs_mode", !v ? "none" : "all")}
+          onChange={(v) => setSetting("display.expand_runs_mode", v ? "none" : "all")}
         />
         <ToggleRow
           icon={Sparkles}
