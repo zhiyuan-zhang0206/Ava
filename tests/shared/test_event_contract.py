@@ -174,9 +174,11 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # rejections) raises the current total to 180; the recrash prompt reap
     # (task #3616: host_recrash_reap_skipped) raises the current total to 181;
     # the stalled crash-marked recovery decision (task #3618's
-    # delivery_recovery_decision) raises the current total to 182.
+    # delivery_recovery_decision) raises the current total to 182; the
+    # deferred-delivery outbox (task #3757's delivery_outbox_flushed +
+    # delivery_outbox_abandoned) raises it to 184.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 182
+    assert len(_TELEMETRY_KINDS) == 184
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:
@@ -190,6 +192,23 @@ def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:
 
 def test_delivery_recovery_decision_payload_names_the_verdict() -> None:
     assert payload_keys("delivery_recovery_decision") == ("inbound_id", "decision", "reason")
+
+
+def test_delivery_outbox_payloads_name_the_evidence() -> None:
+    assert payload_keys("delivery_outbox_flushed") == (
+        "inbound_id",
+        "attempts",
+        "flush_attempts",
+        "age_s",
+        "origin_agent_id",
+    )
+    assert payload_keys("delivery_outbox_abandoned") == (
+        "reason",
+        "attempts",
+        "flush_attempts",
+        "age_s",
+        "origin_agent_id",
+    )
 
 
 def test_gateway_observability_payloads_and_gauge_dispositions() -> None:

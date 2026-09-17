@@ -11,11 +11,14 @@ import json
 from pydantic import Field, field_validator, model_validator
 
 from shared.config._base import EnvSettings
+from shared.config.delivery_outbox_fields import DeliveryOutboxFields
 from shared.config.delivery_watchdog_fields import DeliveryWatchdogFields
 from shared.config.hierarchy_worker_fields import HierarchyWorkerFields
 
 
-class DaemonSettings(DeliveryWatchdogFields, HierarchyWorkerFields, EnvSettings):
+class DaemonSettings(
+    DeliveryOutboxFields, DeliveryWatchdogFields, HierarchyWorkerFields, EnvSettings
+):
     host_max_concurrent_turns: int = Field(
         default=0,
         ge=0,
@@ -653,4 +656,24 @@ class DaemonSettings(DeliveryWatchdogFields, HierarchyWorkerFields, EnvSettings)
             raise ValueError("delivery watchdog dispatch backoff steps must not be empty")
         if any(step <= 0 for step in value):
             raise ValueError("delivery watchdog dispatch backoff steps must all be positive")
+        return value
+
+    @field_validator("delivery_outbox_retry_backoff_steps_s", mode="before")
+    @classmethod
+    def _parse_delivery_outbox_retry_backoff_steps(cls, value: object) -> object:
+        """Accept either a JSON array or a comma-separated environment value."""
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return [float(step.strip()) for step in value.split(",") if step.strip()]
+        return value
+
+    @field_validator("delivery_outbox_retry_backoff_steps_s")
+    @classmethod
+    def _validate_delivery_outbox_retry_backoff_steps(cls, value: list[float]) -> list[float]:
+        if not value:
+            raise ValueError("delivery outbox retry backoff steps must not be empty")
+        if any(step <= 0 for step in value):
+            raise ValueError("delivery outbox retry backoff steps must all be positive")
         return value
