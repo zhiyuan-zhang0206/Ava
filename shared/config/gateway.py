@@ -131,6 +131,71 @@ class GatewaySettings(EnvSettings):
         },
     )
 
+    status_probe_fastfail_timeout_seconds: float = Field(
+        default=5.0,
+        alias="AVA_STATUS_PROBE_FASTFAIL_TIMEOUT_SECONDS",
+        description=(
+            "Fast-fail deadline (seconds) for the roster's status_probe of a "
+            "machine that already carries consecutive reachability failures "
+            "(task #3507). A known-failed host's re-dial exists only to notice "
+            "recovery; allowed the full status_probe_timeout_seconds it would "
+            "hang there and drag the whole-table read past the CLI/UI read "
+            "budget - the 2026-09-15 mba transition had `ava cluster status` "
+            "timing out every time a re-dial hung. 5s: >1.5x the slowest "
+            "healthy status_snapshot measured (3.07-3.27s, task #1200), so a "
+            "recovered machine still clears its failures on the first "
+            "re-probe, while staying well under the 8s read budget. First "
+            "contact with a not-yet-failed machine keeps the full budget - "
+            "the anti-false-offline margin."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    status_probe_backoff_base_seconds: float = Field(
+        default=5.0,
+        alias="AVA_STATUS_PROBE_BACKOFF_BASE_SECONDS",
+        description=(
+            "Base (seconds) of the per-machine status_probe re-probe backoff "
+            "(task #3507 lifted the min(5*2**n, 300) schedule literals into "
+            "config under the numeric-limits convention). The window after n "
+            "consecutive failures is base * 2**n seconds - the first re-dial "
+            "waits 10s at this default - capped at "
+            "status_probe_backoff_cap_seconds. 5s ties the base to the panel "
+            "poll cadence, so an unreachable host is not dialed more than once "
+            "per poll interval at the low end."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    status_probe_backoff_cap_seconds: float = Field(
+        default=300.0,
+        alias="AVA_STATUS_PROBE_BACKOFF_CAP_SECONDS",
+        description=(
+            "Ceiling (seconds) for the per-machine status_probe re-probe "
+            "backoff (task #3507 lifted the min(5*2**n, 300) schedule literals "
+            "into config under the numeric-limits convention): a persistently "
+            "down host is still re-probed at least this often, so recovery is "
+            "noticed within five minutes while steady-state dialing stays "
+            "sparse."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     cluster_rpc_max_retries: int = Field(
         default=3,
         alias="AVA_CLUSTER_RPC_MAX_RETRIES",

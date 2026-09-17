@@ -267,49 +267,18 @@ def _get_services_status() -> ServicesStatus:
 # runner's status_snapshot measured 3.07-3.27s on 2026-08-12, and a budget
 # shorter than the handler's own wall time flipped it offline (probe timeout ->
 # 2 consecutive failures -> machine_probe offline) while /healthz answered in
-# ~15ms. A genuinely offline host still refuses fast (connect refused /
-# blackhole), so the wider budget costs only the anti-jitter margin. The
-# heartbeat liveness pass reads the same setting
-# (services/heartbeat/liveness.py) so the two probes stay aligned by
-# construction.
+# ~15ms. This is the budget of FIRST contact — the anti-jitter margin a
+# slow-but-healthy host needs. A machine that already carries reachability
+# failures re-probes under the fast-fail budget instead
+# (`_roster_probe._probe_budget_s`, task #3507): a blackholed re-dial otherwise
+# hangs until this full budget and drags the whole-table read past the CLI/UI
+# read budget. The heartbeat liveness pass reads this setting
+# (services/heartbeat/liveness.py), so its probes stay aligned with the
+# roster's first-contact ones.
 
-# Per-machine probe backoff. A machine that keeps failing its status_probe (a
-# down host — e.g. a flaky WSL peer) would otherwise be dialed on every panel
-# poll (~5s), one wasted round-trip + one log line each. Instead a recently-failed
-# host is re-probed on an exponential schedule: min(5 * 2**failures, 300) seconds.
-# Only reachability failures (ClusterOpUnreachable) widen the window; any
-# reachable answer (a probe success, or an op-level ClusterOpFailed — the host
-# responded) clears it back to the normal cadence. State is process-local monotonic
-# time; a gateway restart drops it, which just re-probes everyone once and rebuilds
-# the schedule. Concurrent panel polls (sync handler, threadpool) may race on this
-# dict, but the ops are GIL-atomic and the worst case is one redundant probe or an
-# off-by-one failure count — acceptable for a diagnostic throttle.
-_PROBE_BACKOFF_BASE_S = 5.0
-_PROBE_BACKOFF_CAP_S = 300.0
-_probe_failures: dict[str, tuple[int, float]] = {}  # name -> (consecutive_failures, last_attempt)
-
-
-def _probe_in_backoff(name: str) -> bool:
-    """True when `name` failed recently enough that its next probe is still
-    deferred. A name with no failure record is never deferred (normal cadence)."""
-    state = _probe_failures.get(name)
-    if state is None:
-        return False
-    failures, last_attempt = state
-    backoff = min(_PROBE_BACKOFF_BASE_S * (2**failures), _PROBE_BACKOFF_CAP_S)
-    return (time.monotonic() - last_attempt) < backoff
-
-
-def _note_probe_unreachable(name: str) -> None:
-    """Record an unreachable probe: bump the consecutive-failure count and stamp
-    the attempt, widening the next backoff window."""
-    failures = _probe_failures.get(name, (0, 0.0))[0]
-    _probe_failures[name] = (failures + 1, time.monotonic())
-
-
-def _note_probe_reachable(name: str) -> None:
-    """Clear any backoff for `name` — it answered, so resume the normal cadence."""
-    _probe_failures.pop(name, None)
+# The per-machine probe backoff (failure state, window schedule) and the
+# per-machine probe budget both live in `_roster_probe`, beside the dispatch
+# they bound — split out under the file-line budget (task #3507).
 
 
 async def _probe_agent_runner(
@@ -333,7 +302,7 @@ async def _probe_agent_runner(
     Online == the ops server responded within the timeout. Paused comes from
     the host's local `cluster_is_paused()` snapshot.
     """
-    if _probe_in_backoff(name):
+    if _roster_probe._probe_in_backoff(name):
         # Recently-failed host still inside its backoff window: skip the dial and
         # report the same offline row a live probe would. One success re-probe
         # (once the window elapses) clears the backoff.
@@ -343,16 +312,21 @@ async def _probe_agent_runner(
     if gateway_url is None:
         # The roster row is the address authority for this fan-out. Do not let
         # cluster_rpc synchronously re-read Postgres outside the async timeout.
-        _note_probe_unreachable(name)
+        _roster_probe._note_probe_unreachable(name)
         return _roster_rows.offline_status(
             name, role, gateway_url, up_since_at, description, stopped_at, is_staging=is_staging
         )
+    # Known-failed host -> fast-fail budget; first contact -> the full one. A
+    # blackholed re-dial under the full budget is what dragged the whole-table
+    # read past the CLI/UI budget (task #3507).
     try:
-        result = await _roster_probe.dispatch_status_probe(name, gateway_url)
+        result = await _roster_probe.dispatch_status_probe(
+            name, gateway_url, timeout_s=_roster_probe._probe_budget_s(name)
+        )
     except _cluster_rpc.ClusterOpUnreachable:
         # Expected when a host is genuinely offline / mid-restart — quiet. Widen
         # this host's backoff so a persistently-down peer stops being dialed every poll.
-        _note_probe_unreachable(name)
+        _roster_probe._note_probe_unreachable(name)
         return _roster_rows.offline_status(
             name, role, gateway_url, up_since_at, description, stopped_at, is_staging=is_staging
         )
@@ -362,11 +336,11 @@ async def _probe_agent_runner(
         # real error is not invisible behind a misleading offline marker. The host
         # is reachable, so clear backoff (this is not the down-host case).
         _log.warning("status_probe op failed on reachable host %s: %s", name, exc.result)
-        _note_probe_reachable(name)
+        _roster_probe._note_probe_reachable(name)
         return _roster_rows.reachable_unknown_status(
             name, role, gateway_url, up_since_at, description, stopped_at, is_staging=is_staging
         )
-    _note_probe_reachable(name)
+    _roster_probe._note_probe_reachable(name)
     # The ops server responded 200; validate its body as the status_probe result
     # contract (ClusterStatus) — same posture as cluster.py:get_cluster_status.
     # A body that does not validate (a version-skewed / wrong server) must NOT be
@@ -597,8 +571,10 @@ async def gather_cluster_status(
 ) -> list[MachineStatus]:
     """Async fan-out: every machine probed in parallel via a status_probe op
     to its ops server (the local machine included — its ops server is dialed
-    at its registered localhost URL). Total wall ≈
-    `settings.gateway.status_probe_timeout_seconds`.
+    at its registered localhost URL). Total wall ≈ the largest per-probe budget
+    in play: `settings.gateway.status_probe_timeout_seconds` on first contact,
+    the faster `status_probe_fastfail_timeout_seconds` for a machine already in
+    the failure backoff (task #3507).
 
     The one exception is a local machine without the agent-runner capability
     (a pure gateway in a split deployment): it runs no ops server, so its row
@@ -678,8 +654,9 @@ def _get_cluster_status(cur: Cursor) -> ClusterPanel:
     SELECT machines table (paused rows excluded — the cluster panel shows
     only active members; `ava cluster resume` brings a row back) + dispatch
     parallel probes (agent-runner via a `status_probe` op; the host responds
-    with its local paused state). Total wall ≈
-    `settings.gateway.status_probe_timeout_seconds` regardless of N machines.
+    with its local paused state). Total wall ≈ the largest per-probe budget in
+    play (a known-failed machine re-probes under the fast-fail budget)
+    regardless of N machines.
 
     Wrapped sync via asyncio.run because `/api/status` is a sync FastAPI
     handler (runs in threadpool); creating a fresh event loop here is safe.
