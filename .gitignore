@@ -107,3 +107,6 @@ okf-d3.html
 /.commit_msg.txt
 /commit_msg.txt
 /.precommit-all.log
+
+# Local vitest artifact (task #3758)
+ui/web/junit.xml

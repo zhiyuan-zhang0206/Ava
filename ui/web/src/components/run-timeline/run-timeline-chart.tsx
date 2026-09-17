@@ -31,7 +31,7 @@ import { buildTimelineLayout } from "./timeline-layout";
 export type { RunTimelineChartLabels } from "./run-timeline-details";
 
 const MIN_CANVAS_WIDTH = 1000;
-const MIN_DETAIL_CANVAS_WIDTH = 320;
+export const MIN_DETAIL_CANVAS_WIDTH = 320;
 // KEEP (task #3696 exception inventory): rail density cap — priority kinds
 // first, then the rest, capped at 120 chips; the skipped remainder is
 // summarized (`skippedByKind`), not drawn.
@@ -90,18 +90,33 @@ export function RunTimelineChart({
   onDrillBucket,
   onZoomWindow,
   showSummaries = true,
+  widthOverride,
+  onDetailOpenChange,
 }: {
   timeline: RunTimelineResponse;
   labels: RunTimelineChartLabels;
   onDrillBucket: (row: RunTimelineResponse["rows"][number]) => void;
   onZoomWindow: (window: TimelineWindowOverride) => void;
   showSummaries?: boolean;
+  /** Compare view only: one shared canvas width across every lane (task
+   *  #3802), so the stacked time axes stay locked together. When set, the
+   *  chart stops self-measuring and drops its own min-width floor. */
+  widthOverride?: number;
+  /** Reports detail-panel visibility; the compare view sizes every lane from
+   *  whether ANY lane's panel is open. */
+  onDetailOpenChange?: (open: boolean) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const visualizationRef = useRef<HTMLDivElement>(null);
   const popoverLayerRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
-  const [canvasWidth, setCanvasWidth] = useState(MIN_CANVAS_WIDTH);
+  const [measuredWidth, setMeasuredWidth] = useState(MIN_CANVAS_WIDTH);
+  // The compare view passes one width for every lane (task #3802) so the time
+  // axes stay locked together; the single view keeps self-measuring.
+  const canvasWidth =
+    widthOverride === undefined
+      ? measuredWidth
+      : Math.max(MIN_DETAIL_CANVAS_WIDTH, Math.round(widthOverride));
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
   const [selectedLayerIndex, setSelectedLayerIndex] = useState<number | null>(null);
   const [summaryOpen, setSummaryOpen] = useState(false);
@@ -177,16 +192,24 @@ export function RunTimelineChart({
     popoverTarget?.kind === "event" ? (rail.events[popoverTarget.index] ?? null) : null;
 
   useEffect(() => {
+    if (widthOverride !== undefined) return;
     const container = scrollRef.current;
     if (!container) return;
     const minimumWidth = selectedRow ? MIN_DETAIL_CANVAS_WIDTH : MIN_CANVAS_WIDTH;
     const updateWidth = () => {
-      setCanvasWidth(Math.max(minimumWidth, Math.floor(container.getBoundingClientRect().width)));
+      setMeasuredWidth(Math.max(minimumWidth, Math.floor(container.getBoundingClientRect().width)));
     };
     updateWidth();
     window.addEventListener("resize", updateWidth);
     return () => window.removeEventListener("resize", updateWidth);
-  }, [selectedRow]);
+  }, [selectedRow, widthOverride]);
+
+  // Detail-panel visibility is a shared concern in the compare view: it sizes
+  // every lane from whether ANY lane's panel is open.
+  useEffect(() => {
+    onDetailOpenChange?.(selectedRow !== null || selectedLayer !== null);
+    return () => onDetailOpenChange?.(false);
+  }, [onDetailOpenChange, selectedRow, selectedLayer]);
 
   useEffect(() => {
     const visualization = visualizationRef.current;
@@ -240,7 +263,11 @@ export function RunTimelineChart({
               data-testid="run-timeline-visualization"
               role="group"
               aria-label={labels.visualization}
-              className={cn("relative", selectedRow ? "min-w-[320px]" : "min-w-[1000px]")}
+              className={cn(
+                "relative",
+                widthOverride === undefined &&
+                  (selectedRow ? "min-w-[320px]" : "min-w-[1000px]"),
+              )}
               style={{ width: `${layout.width}px`, height: `${layout.height}px` }}
             >
               <svg
@@ -420,6 +447,10 @@ export function RunTimelineChart({
                         setSelectedLayerIndex(null);
                         setSummaryOpen(false);
                       }
+                      // The panel supersedes the hover card: clicking a block
+                      // must not leave the popover covering the track (the
+                      // pointer never left the block).
+                      setPopoverTarget(null);
                     }}
                     className="absolute rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2"
                     style={{

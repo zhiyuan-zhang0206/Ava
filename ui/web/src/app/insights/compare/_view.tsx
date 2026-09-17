@@ -8,7 +8,7 @@
 import { keepPreviousData, useQueries } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { createRef, useMemo, useRef, useState } from "react";
+import { createRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   COMPARE_LANE_HUES,
@@ -23,12 +23,17 @@ import {
   usesTimelineBuckets,
   type TimelineWindowOverride,
 } from "@/components/run-timeline/request-level";
-import { RunTimelineChart } from "@/components/run-timeline/run-timeline-chart";
+import {
+  MIN_DETAIL_CANVAS_WIDTH,
+  RunTimelineChart,
+} from "@/components/run-timeline/run-timeline-chart";
 import { tickLabel } from "@/components/run-timeline/run-timeline-details";
 import { buttonVariants } from "@/components/ui/button";
 import { api } from "@/lib/api";
+import { BREAKPOINT_LG_PX } from "@/lib/breakpoint";
 import { FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout";
 import type { RunTimelineResponse } from "@/lib/types";
+import { useMediaQuery } from "@/lib/use-media-query";
 import { useUserSettings } from "@/lib/use-user-settings";
 import { cn } from "@/lib/utils";
 
@@ -66,6 +71,38 @@ export function overlapWindow(
   return { from: new Date(from).toISOString(), to: new Date(to).toISOString() };
 }
 
+/** Metrics of one compare lane's chart column (the lane row minus its label). */
+const LANE_LABEL_COLUMN_PX = 112; // w-28
+const LANE_GAP_PX = 12; // gap-3
+const PANEL_COLUMN_PX = 320; // the chart's detail column
+const PANEL_GRID_GAP_PX = 12; // grid gap-3
+const SECTION_PADDING_PX = 12; // the chart section's p-3, each side
+const SECTION_BORDER_PX = 1; // the chart section's hairline border, each side
+
+export function laneColumnWidth(stackWidth: number): number {
+  return Math.max(0, Math.floor(stackWidth) - LANE_LABEL_COLUMN_PX - LANE_GAP_PX);
+}
+
+/** The one canvas width every compare lane renders (task #3802): any lane's
+ *  open detail panel narrows every lane together (side-by-side layout only),
+ *  so a delivery timestamp keeps a single x across the stacked axes. The
+ *  width is the chart's real container (padding and border removed, plus the
+ *  detail column when open) — a canvas wider than its container would hide
+ *  its edge ticks behind the overflow, and per-lane horizontal scrolling has
+ *  no value once every lane opens on the same slot. Floor: the same 320 used
+ *  when the chart squeezes beside a detail panel. */
+export function sharedCanvasWidth(
+  columnWidth: number,
+  anyDetailOpen: boolean,
+  wideLayout: boolean,
+): number {
+  const panel = anyDetailOpen && wideLayout ? PANEL_COLUMN_PX + PANEL_GRID_GAP_PX : 0;
+  return Math.max(
+    MIN_DETAIL_CANVAS_WIDTH,
+    columnWidth - SECTION_PADDING_PX * 2 - SECTION_BORDER_PX * 2 - panel,
+  );
+}
+
 export function CompareView({
   agents,
   names,
@@ -83,6 +120,42 @@ export function CompareView({
   const [hoveredArrow, setHoveredArrow] = useState<CompareArrowHover | null>(null);
   const stackRef = useRef<HTMLDivElement>(null);
   const laneRefs = useMemo(() => agents.map(() => createRef<HTMLDivElement>()), [agents]);
+  const [stackWidth, setStackWidth] = useState(0);
+  const [detailOpenLanes, setDetailOpenLanes] = useState<ReadonlySet<number>>(new Set());
+  const wideLayout = useMediaQuery(`(min-width: ${BREAKPOINT_LG_PX}px)`);
+  const handleDetailOpen = useCallback((agentId: number, open: boolean) => {
+    setDetailOpenLanes((current) => {
+      if (current.has(agentId) === open) return current;
+      const next = new Set(current);
+      if (open) next.add(agentId);
+      else next.delete(agentId);
+      return next;
+    });
+  }, []);
+  const detailOpenCallbacks = useMemo(
+    () => agents.map((agentId) => (open: boolean) => handleDetailOpen(agentId, open)),
+    [agents, handleDetailOpen],
+  );
+  useEffect(() => {
+    const stack = stackRef.current;
+    if (!stack) return;
+    const update = () => setStackWidth(stack.getBoundingClientRect().width);
+    update();
+    window.addEventListener("resize", update);
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver(update);
+      observer.observe(stack);
+    }
+    return () => {
+      window.removeEventListener("resize", update);
+      observer?.disconnect();
+    };
+  }, []);
+  const sharedWidth =
+    stackWidth > 0
+      ? sharedCanvasWidth(laneColumnWidth(stackWidth), detailOpenLanes.size > 0, wideLayout)
+      : undefined;
 
   // The initial window is the configured fresh slice, the same one the single
   // view opens on; `undefined` means settings have not supplied it yet.
@@ -197,11 +270,18 @@ export function CompareView({
 
   const fitTarget = overlapWindow(lanes.map((lane) => lane.timeline));
   const readout = hoveredArrow
-    ? t("arrowReadout", {
-        source: hoveredArrow.sourceAgentId,
-        target: hoveredArrow.targetAgentId,
-        time: tickLabel(hoveredArrow.ts, false),
-      })
+    ? hoveredArrow.count > 1
+      ? t("arrowClusterReadout", {
+          source: hoveredArrow.sourceAgentId,
+          target: hoveredArrow.targetAgentId,
+          time: tickLabel(hoveredArrow.ts, false),
+          count: hoveredArrow.count,
+        })
+      : t("arrowReadout", {
+          source: hoveredArrow.sourceAgentId,
+          target: hoveredArrow.targetAgentId,
+          time: tickLabel(hoveredArrow.ts, false),
+        })
     : t("arrowReadoutHint");
 
   return (
@@ -350,6 +430,8 @@ export function CompareView({
                     onDrillBucket={drillBucket}
                     onZoomWindow={selectWindow}
                     showSummaries={showSummaries}
+                    widthOverride={sharedWidth}
+                    onDetailOpenChange={detailOpenCallbacks[index]}
                   />
                 ) : lane.query.isPending ? (
                   <p className="font-mono text-sm text-muted-foreground">{t("loading")}</p>

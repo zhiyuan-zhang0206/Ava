@@ -140,6 +140,22 @@ describe("RunTimelineChart", () => {
     expect(screen.queryByLabelText("Tokens panel")).toBeNull();
   });
 
+  it("pins one canvas width when the compare view overrides it", () => {
+    render(
+      <RunTimelineChart timeline={timeline} labels={labels} {...chartActions} widthOverride={777} />,
+    );
+    const visualization = screen.getByTestId("run-timeline-visualization");
+    expect(visualization.getAttribute("style")).toContain("width: 777px");
+
+    fireEvent.click(screen.getByRole("button", { name: "Turn 1" }));
+    // Opening the detail panel must not re-scale this lane: the compare view
+    // owns one width for every lane.
+    expect(screen.getByTestId("run-timeline-visualization").getAttribute("style")).toContain(
+      "width: 777px",
+    );
+    expect(screen.getByText("Turn details")).toBeTruthy();
+  });
+
   it("keeps every glyph in a fixed sibling overlay outside transformable geometry", () => {
     const { container } = render(<RunTimelineChart timeline={timeline} labels={labels} {...chartActions} />);
     const geometry = screen.getByTestId("run-timeline-geometry");
@@ -239,6 +255,9 @@ describe("RunTimelineChart", () => {
 
     fireEvent.click(turn);
     expect(screen.getByRole("region", { name: "Turn details" })).toBeTruthy();
+    // The panel supersedes the hover card: the click dismisses the popover it
+    // opened with (the pointer never left the block).
+    expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
   it("shows bucket facts and drills into the bucket instead of selecting it", () => {
