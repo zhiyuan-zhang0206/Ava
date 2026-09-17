@@ -165,6 +165,47 @@ class ObservabilitySettings(EnvSettings):
         },
     )
 
+    telemetry_otlp_child_defer: bool = Field(
+        default=True,
+        alias="AVA_TELEMETRY_OTLP_CHILD_DEFER",
+        description=(
+            "Exec children (agent-exec) hold their OTLP export instead of bringing "
+            "the exporter stack up on the first record (task #3816 M4b): records "
+            "ship at clean exit, on hold saturation, or at the max-age bound. On "
+            "(default) keeps child live memory flat; the JSONL mirror and the local "
+            "file sink stay live, so the delay (bounded by min(saturation, max-age, "
+            "exit)) touches only the Loki/Prometheus arrival of a child's records. "
+            "Off restores the eager first-record bring-up. Read from the environment "
+            "directly by the child arm path — it cannot pull the settings singleton, "
+            "which would import the config chain the deferral exists to avoid — so "
+            "cluster-level overrides go through the env surface. Applies to new exec "
+            "children."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+    telemetry_otlp_child_defer_max_age_s: float = Field(
+        default=60.0,
+        alias="AVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S",
+        description=(
+            "Upper bound, in seconds, on how long a deferred exec child's oldest "
+            "unexported record may wait before the OTLP stack is brought up "
+            "mid-life and the backlog shipped (task #3816 M4b). This is the "
+            "child-record observability-delay bound: Loki sees a long child's "
+            "records at this age at the latest; children that exit earlier never "
+            "fire it. Read from the environment directly by the child arm path."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
     telemetry_otlp_endpoint: str = Field(
         default=f"http://127.0.0.1:{_OTLP_INGRESS_PORT_DEFAULT}",
         alias="AVA_TELEMETRY_OTLP_ENDPOINT",

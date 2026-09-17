@@ -37,8 +37,9 @@ X is in Settings's **model_fields alias set**, error — `Settings` is a
 BaseSettings module-load singleton, env is read once at import time, so
 later setenv/delenv cannot reach `settings.x`, and the test silently no-ops.
 Must switch to `monkeypatch.setattr(settings, "<field_name>", value)` —
-except provider API-key env vars declared in `_PROVIDER_KEY_ENV_VARS` (see
-below): those are read from the environment live by the plugin builders.
+except provider API-key env vars declared in `_PROVIDER_KEY_ENV_VARS` and the
+live-read knobs in `_LIVE_READ_ENV_VARS` (see below): those are read from the
+environment live by design, so setenv is the real seam.
 
 The alias set is dynamically read from `the config field registry` — adding a
 new field to Settings auto-syncs the ban list; no manual maintenance.
@@ -84,6 +85,20 @@ _PROVIDER_KEY_ENV_VARS = frozenset(
         "GLM_API_KEY",  # ava_builtins/plugins/lm_zhipu
         "MIMO_API_KEY",  # ava_builtins/plugins/lm_xiaomi
         "MOONSHOT_API_KEY",  # ava_builtins/plugins/lm_moonshot
+    }
+)
+
+# Vars read from the live environment BY DESIGN (not via the Settings singleton,
+# which is constructed once at module load). The exec-child OTLP deferral knobs
+# are read on the child arm path in shared/telemetry_otlp_defer.py, where
+# constructing Settings would import the config chain the deferral exists to
+# avoid (task #3816 M4b) — so in tests, monkeypatch.setenv on them is a REAL
+# seam, the same class as the provider keys above. Every entry must have its
+# reader file in _ALLOWED_FILES.
+_LIVE_READ_ENV_VARS = frozenset(
+    {
+        "AVA_TELEMETRY_OTLP_CHILD_DEFER",  # shared/telemetry_otlp_defer.py
+        "AVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S",  # shared/telemetry_otlp_defer.py
     }
 )
 
@@ -140,6 +155,7 @@ _ALLOWED_FILES = frozenset(
         "shared/proc_tree.py",  # process_metadata records CODEX_HOME, the provider routing context the impersonation relay spec needs — a child-env handoff read, not persisted cluster config
         "ava/_attach.py",  # attach() reads the one-shot AVA_EXEC_REQUEST_FILE child-protocol marker at call time; it is not Settings config and only an exec child receives it
         "shared/observability.py",  # endpoint_override_is_explicit must distinguish operator-set observability URLs from Settings' identical loopback defaults; Settings preserves the value but not whether it was explicit
+        "shared/telemetry_otlp_defer.py",  # the exec-child OTLP deferral knobs (AVA_TELEMETRY_OTLP_CHILD_DEFER[_MAX_AGE_S]) are read from the raw env on the child arm path — reading them through Settings would import the settings singleton + full config chain the deferral exists to keep out of the child's life (task #3816 M4b); same presence-style class as shared/observability.py
         "shared/turn_identity.py",  # effective_agent_id() reads the ambient AVA_AGENT_ID as the outermost identity fallback (the same per-process identity channel as ava/_boot.py / ava/_mcp_remote.py); the turn contextvar layers above it and Settings models neither  # _current_agent_id() reads the ambient AVA_AGENT_ID to stamp MCP daemon envelopes; the key is the process identity channel, not Settings-managed, and importing ava.self here is circular (moved from ava/mcps.py, 2026-08-13 #1229)
         "services/computer/mcp_wrapper.py",  # _agent_id() reads the ambient AVA_AGENT_ID to stamp computer-mcp requests; same identity channel, not Settings-managed
         "agent/_process_boot.py",  # boot sets os.environ["AVA_AGENT_ID"] so child processes inherit the agent identity; the env forward must run before child spawn and cannot route through Settings (the same forward agent/loop.py previously owned)
@@ -238,7 +254,11 @@ def _scan_file(
             # Rule 2: monkeypatch.setenv/delenv in tests changing a Settings-managed env (silent no-op).
             for m in _TEST_SETENV_PATTERN.finditer(code):
                 env_name = m.group(1)
-                if env_name in managed_envs and env_name not in _PROVIDER_KEY_ENV_VARS:
+                if (
+                    env_name in managed_envs
+                    and env_name not in _PROVIDER_KEY_ENV_VARS
+                    and env_name not in _LIVE_READ_ENV_VARS
+                ):
                     violations.append((lineno, line.strip(), f"setenv-managed:{env_name}"))
         elif _OS_ENV_PATTERN.search(code):
             # Rule 1: bare os.environ in non-test code.
