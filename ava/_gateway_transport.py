@@ -12,6 +12,7 @@ from shared.agents import EXCEPTION_BY_REASON, ErrorReason, GatewayUnavailable
 from shared.cluster_auth import bearer_header
 from shared.config import settings
 from shared.contracts import Idempotency
+from shared.delivery_outbox import TRANSIENT_HTTP_STATUSES as _TRANSIENT_HTTP_STATUSES
 
 # Singleton: process-wide shared connection pool. Connect/read timeout is a
 # guard against a stuck gateway line. Most gateway ops are near-instant,
@@ -67,14 +68,10 @@ _MAX_RETRIES = settings.gateway.gateway_client_max_retries
 _RETRY_DELAY_S = settings.gateway.gateway_client_retry_delay_seconds
 
 # ── Transient-failure retry policy ──
-# HTTP statuses that mean "the gateway or one of its backends hiccuped" —
-# worth re-sending an idempotent request. 500 = unhandled server error (may be
-# a transient blip — the 2026-08-07 memory-indexer 500 class that crashed an
-# agent's graph before this policy), 502/503 = a backend (indexer / cross-
-# machine runner) is down, 504 = gateway-side timeout, 429 = rate-limited.
-# 4xx are NOT here: the wire `reason` is authoritative application semantics
-# (AgentNotFound etc.); retrying cannot change the result.
-_TRANSIENT_HTTP_STATUSES = frozenset({429, 500, 502, 503, 504})
+# The status set (429/500/502/503/504) lives with the deferred-delivery outbox
+# — `shared.delivery_outbox.TRANSIENT_HTTP_STATUSES` — so this transport's
+# retry policy and the outbox interception on both send paths (SDK
+# `send_message` + the `ava agents send` CLI) classify failures identically.
 
 # Bounded exponential backoff: attempt i sleeps the base delay multiplied by
 # the backoff factor raised to i, capped at `_RETRY_MAX_DELAY_S`, plus a
