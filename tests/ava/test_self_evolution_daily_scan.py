@@ -137,12 +137,14 @@ def test_scan_passes_include_test_flag_through(
     monkeypatch.setattr(daily_scan, "collect", _CollectStub)
     monkeypatch.setattr(daily_scan, "ava_home", lambda: tmp_path)
 
-    _records1, _path1, counts1 = daily_scan.scan(1, week="w1")
-    _records2, _path2, counts2 = daily_scan.scan(2, week="w2", include_test=True)
+    result1 = daily_scan.scan(1, week="w1")
+    result2 = daily_scan.scan(2, week="w2", include_test=True)
 
     assert calls == [(1, "w1", False), (2, "w2", True)]
-    assert counts1 == {"seen": 0, "excluded_test": 0, "skipped_meta": 0}
-    assert counts2 == {"seen": 0, "excluded_test": 0, "skipped_meta": 0}
+    assert result1.counts == {"seen": 0, "excluded_test": 0, "skipped_meta": 0}
+    assert result2.counts == {"seen": 0, "excluded_test": 0, "skipped_meta": 0}
+    # the normal path carries no fallback provenance
+    assert result1.source_note is None and result1.missing_days == ()
     # the default run wrote the dataset file, the measurement run too
     assert (tmp_path / "self_evolution" / "daily").is_dir()
 
@@ -278,10 +280,10 @@ def test_main_persists_report_and_prints_pointer(
     ]
     dataset = tmp_path / "daily.jsonl"
 
-    def _fake_scan(days: int, include_test: bool = False) -> tuple[list[Any], Path, None]:
+    def _fake_scan(days: int, include_test: bool = False) -> Any:
         assert days == 1
         assert include_test is False
-        return records, dataset, None
+        return ds.ScanResult(records, dataset, None)
 
     monkeypatch.setattr(ds, "scan", _fake_scan)
     monkeypatch.setattr(sys, "argv", ["daily_scan.py"])
@@ -318,10 +320,10 @@ def test_main_degrades_to_rich_output_when_report_unwritable(
     dataset = tmp_path / "daily.jsonl"
     (tmp_path / "daily.report.txt").mkdir()  # the final replace() onto a directory raises OSError
 
-    def _fake_scan(days: int, include_test: bool = False) -> tuple[list[Any], Path, None]:
+    def _fake_scan(days: int, include_test: bool = False) -> Any:
         assert days == 1
         assert include_test is False
-        return records, dataset, None
+        return ds.ScanResult(records, dataset, None)
 
     monkeypatch.setattr(ds, "scan", _fake_scan)
     monkeypatch.setattr(sys, "argv", ["daily_scan.py"])
@@ -355,3 +357,144 @@ def test_compact_bad_line_pins_every_signal_token(daily_scan: Any) -> None:
     )
     assert ds._compact_bad_line(all_signals) == "  #7 fumbled rep2 c1 pf1 ef2 last cp3 br term"
     assert ds._compact_bad_line(_record("failed", agent_id=8)) == "  #8 failed -"
+
+
+# ── no-observability fallback (2026-09-17) ──────────────────────────────────
+
+
+def test_scan_falls_back_to_mirror_on_no_observability_refusal(
+    daily_scan: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A cluster without observability refuses /api/events reads (503
+    observability_read_unavailable) — a policy state, not an outage. The scan
+    must collect the window from the local mirror instead of failing rc=1
+    every night, and carry the provenance on the result so the report and the
+    schedule wake message cannot present mirror data as the live read."""
+    ds = daily_scan
+    records = [_record("ok", agent_id=1)]
+    counts = {"seen": 1, "excluded_test": 0, "skipped_meta": 0}
+
+    def _refuse(*_args: Any, **_kwargs: Any) -> Any:
+        raise ds.collect.ObservabilityReadUnavailable(
+            "observability reads unavailable for this cluster"
+        )
+
+    calls: list[dict[str, Any]] = []
+
+    def _from_mirror(days: int, week: str, *, include_test: bool = False) -> Any:
+        calls.append({"days": days, "week": week, "include_test": include_test})
+        return records, counts, ["20260916"]
+
+    monkeypatch.setattr(ds.collect, "collect_with_counts", _refuse)
+    monkeypatch.setattr(ds.mirror_backfill, "collect_from_mirror", _from_mirror)
+    monkeypatch.setattr(ds, "ava_home", lambda: tmp_path)
+
+    result = ds.scan(1, week="w1")
+
+    assert result.records == records
+    assert result.counts == counts
+    assert calls == [{"days": 1, "week": "w1", "include_test": False}]
+    assert result.missing_days == ("20260916",)
+    assert result.source_note == (
+        "local event mirror (no observability on this cluster); "
+        "mirror file missing for 20260916 — window may be partial"
+    )
+    assert result.path == tmp_path / "self_evolution" / "daily" / "w1.jsonl"
+    assert result.path.exists()  # the scan still owns the dataset write
+    assert "collecting from the local event mirror" in capsys.readouterr().out
+
+
+def test_scan_does_not_fall_back_on_a_transient_failure(
+    daily_scan: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The fallback keys on the no-observability type only: a transient
+    /api/events failure stays loud (a silent switch to mirror rows could mask
+    an outage), exactly as before."""
+    ds = daily_scan
+    called: list[str] = []
+
+    def _boom(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("/api/events read failed after 5 attempts: HTTP 502")
+
+    def _from_mirror(*_args: Any, **_kwargs: Any) -> Any:
+        called.append("mirror")
+        return [], {}, []
+
+    monkeypatch.setattr(ds.collect, "collect_with_counts", _boom)
+    monkeypatch.setattr(ds.mirror_backfill, "collect_from_mirror", _from_mirror)
+    monkeypatch.setattr(ds, "ava_home", lambda: tmp_path)
+
+    with pytest.raises(RuntimeError, match="after 5 attempts"):
+        ds.scan(1, week="w1")
+
+    assert called == []
+
+
+def test_alert_exit_alerts_on_a_partial_fallback_window(daily_scan: Any) -> None:
+    """A fallback window missing a mirror day is partial: it alerts even when
+    every collected run is ok — the gap itself could hide bad runs
+    (mirror_backfill's iron rule: never a silent partial dataset)."""
+    ds = daily_scan
+    ok = [_record("ok", agent_id=1)]
+    counts = {"seen": 1, "excluded_test": 0, "skipped_meta": 0}
+
+    assert ds.alert_exit(ok, counts, missing_days=("20260916",)) == 2
+    assert ds.alert_exit(ok, counts, missing_days=()) == 0
+
+
+def test_render_reports_the_fallback_source_before_the_closing_block(
+    daily_scan: Any,
+) -> None:
+    """The source line lands in the stable tail (before summary/pointer), so
+    the runner's tail crop keeps the provenance; the normal path has none."""
+    ds = daily_scan
+    records = [_record("ok", agent_id=1)]
+    note = "local event mirror (no observability on this cluster)"
+
+    out = ds.render(records, Path("d.jsonl"), 1, report_path=Path("d.report.txt"), source_note=note)
+    lines = out.splitlines()
+    assert f"source: {note}" in lines
+    assert lines.index(f"source: {note}") < lines.index(
+        "summary: 1 runs (ok 1 / fumbled 0 / failed 0) | corrections 0 | peer 0 "
+        "| breached 0 | exec-fail runs 0"
+    )
+
+    plain = ds.render(records, Path("d.jsonl"), 1, report_path=Path("d.report.txt"))
+    assert not any(line.startswith("source: ") for line in plain.splitlines())
+
+
+def test_main_alerts_and_prints_the_source_line_on_a_partial_fallback(
+    daily_scan: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """main() must thread the scan's provenance and missing days through:
+    rc=2 on the partial window, and the source line in the printed tail."""
+    ds = daily_scan
+    records = [_record("ok", agent_id=1)]
+    dataset = tmp_path / "daily.jsonl"
+    note = "local event mirror (no observability on this cluster)"
+
+    def _fake_scan(days: int, include_test: bool = False) -> Any:
+        return ds.ScanResult(
+            records,
+            dataset,
+            {"seen": 1, "excluded_test": 0, "skipped_meta": 0},
+            note,
+            ("20260916",),
+        )
+
+    monkeypatch.setattr(ds, "scan", _fake_scan)
+    monkeypatch.setattr(sys, "argv", ["daily_scan.py"])
+
+    with pytest.raises(SystemExit) as excinfo:
+        ds.main()
+
+    assert excinfo.value.code == 2  # partial window alerts even though runs are ok
+    out = capsys.readouterr().out
+    assert f"source: {note}" in out
+    assert "full report:" in out

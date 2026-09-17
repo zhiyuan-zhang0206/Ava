@@ -47,6 +47,7 @@ from record import LeakPaths, _plugins_activated, _transcript, build_record  # n
 
 from shared.config import settings
 from shared.db import connect
+from shared.observability import ObservabilityReadUnavailable, observability_refusal_detail
 from shared.paths import ava_home
 from shared.resilience import ExponentialBackoff, Policy, http_classifier, retry
 
@@ -93,6 +94,9 @@ def _events_page(
     Runs on `_EVENTS_RETRY_POLICY`: a transient failure (502/503/504 or a
     transport error) is retried inside the wait budget; a spent budget
     raises the diagnostics-carrying error, any other status fails fast.
+    The cluster-without-observability refusal is neither: it raises
+    `ObservabilityReadUnavailable` on the first reply (no retry), because
+    the state is configuration and callers hold a local fallback.
     """
     params: dict[str, Any] = {
         "category": category,
@@ -111,6 +115,14 @@ def _events_page(
             headers=_gateway_headers(),
             timeout=_HTTP_TIMEOUT_S,
         )
+        refusal = observability_refusal_detail(resp)
+        if refusal is not None:
+            # The cluster has no observability (policy, not outage) — fail fast
+            # rather than spend the retry budget on a state retrying cannot
+            # clear; callers may fall back to the local mirror. Raised
+            # response-less on purpose: the retry classifier sees no HTTP
+            # status on this exception and never retries it.
+            raise ObservabilityReadUnavailable(refusal)
         resp.raise_for_status()
         payload = resp.json()
         return payload.get("items", []), payload.get("meta", {})

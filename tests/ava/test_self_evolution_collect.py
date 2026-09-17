@@ -10,6 +10,7 @@ predate the window for long-running agents).
 """
 
 import importlib.util
+import json
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -628,6 +629,55 @@ def test_fetch_permanent_status_fails_fast(
 
     assert client.calls == 1
     assert sleeps == []
+
+
+def test_fetch_no_observability_refusal_fails_fast_with_typed_error(
+    collect_mod: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cluster without observability refuses reads with 503 +
+    code=observability_read_unavailable (gateway/_loki_transport._read_gate).
+    That is a policy state, not a transient blip: it must raise the typed
+    ObservabilityReadUnavailable on the FIRST reply — no retry budget spent —
+    so callers can fall back to the local event mirror."""
+    body = json.dumps(
+        {
+            "type": "about:blank",
+            "code": "observability_read_unavailable",
+            "status": 503,
+            "detail": "observability reads unavailable for this cluster; set AVA_TELEMETRY_LOKI_URL",
+            "retryable": True,
+        }
+    )
+    reply = _Status(503, headers={"content-type": "application/problem+json"}, body=body)
+    client = _ScriptedClient([reply] * 5)
+    _patch_client(collect_mod, monkeypatch, client)
+    sleeps = _capture_sleeps(monkeypatch)
+
+    with pytest.raises(collect_mod.ObservabilityReadUnavailable) as err:
+        collect_mod._fetch_events_window("telemetry", _ts_after(0), _ts_after(3600))
+
+    assert "observability reads unavailable" in str(err.value)  # the gateway detail rides along
+    assert client.calls == 1
+    assert sleeps == []
+
+
+def test_fetch_503_with_another_problem_code_keeps_the_retry_path(
+    collect_mod: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The refusal check is narrow: any other problem+json 503 (admission
+    shedding, proxy) keeps its normal retry path — a transient outage must
+    never be conflated with the no-observability policy state."""
+    body = json.dumps({"code": "loki_query_budget_unavailable", "detail": "retry"})
+    reply = _Status(503, headers={"content-type": "application/problem+json"}, body=body)
+    client = _ScriptedClient([reply] * 5)
+    _patch_client(collect_mod, monkeypatch, client)
+    sleeps = _capture_sleeps(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="after 5 attempts"):
+        collect_mod._fetch_events_window("telemetry", _ts_after(0), _ts_after(3600))
+
+    assert client.calls == 5
+    assert sleeps == [5.0, 10.0, 20.0, 40.0]
 
 
 # ── plugin attribution (issue #40) ──────────────────────────────────────────
