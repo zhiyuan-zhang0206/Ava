@@ -26,6 +26,7 @@ import pytest
 from playwright.sync_api import Page
 
 from tests.e2e._env import E2EEnv
+from tests.e2e._settings import pin_expand_runs_all
 
 # Records (scrollTop, scrollHeight, item count, first real item + its viewport
 # top) on every frame + scroll event, into window.__tl.samples.
@@ -263,6 +264,12 @@ def test_load_older_preserves_reading_position(e2e_env: E2EEnv) -> None:
             route.continue_(),
         ),
     )
+
+    # The paging precondition below counts mounted [data-item-id] nodes; the
+    # default details level "none" (user ruling 2026-09-17) collapses runs,
+    # unmounting their members. Pin the expanded rendering the scenario
+    # expects.
+    pin_expand_runs_all(e2e_env.gateway_url)
 
     page.goto(e2e_env.agent_url)
     page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)

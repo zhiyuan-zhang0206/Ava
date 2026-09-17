@@ -50,6 +50,7 @@ from shared.agents import AgentStatus
 from shared.config import settings
 from tests.e2e._db import wait_for_status
 from tests.e2e._env import E2EEnv
+from tests.e2e._settings import pin_expand_runs_all
 from tests.e2e.fakes.scenarios.parked_compact import (
     POST_COMPACT_NARRATION,
     REPLY_1,
@@ -126,6 +127,11 @@ def test_switch_back_after_parked_compact_shows_post_compact_state(e2e_env: E2EE
     agent_b = int(resp.json()["id"])
     try:
         _wait_idle_intent(agent_b)
+
+        # This test asserts on the compact envelope card — a secondary
+        # timeline item, folded out of the DOM by the default details level
+        # "none" (user ruling 2026-09-17). Pin the expanded rendering.
+        pin_expand_runs_all(gateway_url)
 
         page.goto(e2e_env.agent_url)
         page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)
