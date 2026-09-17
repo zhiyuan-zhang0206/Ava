@@ -7,8 +7,8 @@ exists, and the failure is visible only in the caller's log (the 2026-09-17
 black-window evidence, task #3757: "fire != delivered"). This module closes
 that window on the sending machine:
 
-- **Record (dead-hand coverage).** When a delivery POST finally fails, the SDK calls
-  `record_failed_send`. The message is written durably to
+- **Record (dead-hand coverage).** When a delivery POST finally fails, the SDK
+  (or the `ava agents send` CLI) calls `record_failed_send`. The message is written durably to
   ``$AVA_HOME/state/delivery-outbox/`` — one JSON file per logical message —
   BEFORE the send raises, so the record does not depend on the caller's process
   surviving or retrying.
@@ -72,6 +72,17 @@ _ENTRY_SUFFIX = ".json"
 
 # Content type the SDK accepts: a plain string or OpenAI-shaped blocks.
 Content = str | list[dict[str, object]]
+
+# HTTP statuses that mean "the gateway or one of its backends hiccuped" — a
+# delivery attempt worth replaying once the backend returns. 500 = unhandled
+# server error (the 2026-08-07 memory-indexer 500 class), 502/503 = a backend
+# (indexer / cross-machine runner) is down, 504 = gateway-side timeout,
+# 429 = rate-limited. 4xx are NOT here: the wire `reason` is authoritative
+# application semantics (AgentNotFound etc.); replaying cannot change the
+# result. One definition, shared by the SDK transport's retry policy
+# (`ava/_gateway_transport.py`) and the outbox interception on both send paths
+# (SDK `send_message` and the `ava agents send` CLI).
+TRANSIENT_HTTP_STATUSES = frozenset({429, 500, 502, 503, 504})
 
 
 @dataclass(frozen=True)

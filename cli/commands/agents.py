@@ -15,7 +15,10 @@ fast (`raise_for_status()`) on any HTTP error. Ordered by escalating force:
 `send` is the shell-level message primitive: the completion notices of
 `ava.shell.run_background` and watcher exit notices are generated command lines
 ending in `ava agents send ... --source shell:N|watcher:N`, and a host operator
-can message any agent directly. Richer capabilities (spawn an agent, inspect its
+can message any agent directly. A `send` that cannot reach the gateway is not
+lost: the deferred-delivery outbox (`shared/delivery_outbox`) records it on this
+machine and the ops daemon redelivers it once the gateway returns — the same
+coverage the SDK send path has. Richer capabilities (spawn an agent, inspect its
 events) stay in the `ava.*` SDK and the web UI.
 """
 
@@ -100,17 +103,28 @@ def cmd_agents_send(
     the background-run / watcher completion notices use it to carry the end of
     the command's output (result line or traceback) so the agent usually does
     not need a follow-up read. Delivery auto-resurrects a terminated target
-    (gateway behavior, same as the SDK path)."""
+    (gateway behavior, same as the SDK path).
+
+    A failed send is not lost: the deferred-delivery outbox
+    (`shared/delivery_outbox`) records a transport failure or a transient HTTP
+    response (429/5xx) on this machine under the message's idempotency key, and
+    the machine's ops daemon redelivers it once the gateway returns. 4xx stay
+    loud and unrecorded — the wire reason is application semantics, replay
+    cannot change it."""
     import os
     import sys
     from pathlib import Path
 
+    import httpx
+
+    from shared import delivery_outbox
     from shared.http_dial import post as dial_post
     from shared.machine import gateway_api_base, gateway_auth_headers
 
     caller = _caller_body(source)
     if "source" not in caller:
         raise ValueError("send requires --source or an explicit AVA_CALLER_IDENTITY profile")
+    resolved_source = caller["source"]
     if tail_file is not None:
         # Delivering the notice is the primary contract; the tail is a rider.
         # An unreadable tail file must not abort the POST — the failure is
@@ -126,13 +140,53 @@ def cmd_agents_send(
         else:
             if tail.strip():
                 content += f"\n\nLast output ({tail_file}):\n{tail.strip()}"
+    # All attempts of one logical message share one key; minting it here also
+    # arms the server's client_message_id receipt for the flush replay.
+    key: str | None = None
+    try:
+        key = delivery_outbox.logical_key(
+            agent_id=agent_id, source=resolved_source, content=content
+        )
+    except Exception:
+        # The outbox is a safety net for a failing send, never a reason for
+        # one: an unusable outbox degrades to the unkeyed behavior with a
+        # loud note, instead of changing the call's outcome.
+        print(
+            "warning: delivery outbox unavailable; sending an unkeyed message",
+            file=sys.stderr,
+        )
+    headers = gateway_auth_headers()
+    if key is not None:
+        headers = {**headers, "Idempotency-Key": key}
     url = f"{gateway_api_base()}/api/agents/{agent_id}/messages"
-    resp = dial_post(
-        url,
-        json={"content": content, **caller},
-        timeout=_TIMEOUT_S,
-        headers=gateway_auth_headers(),
-    )
+    try:
+        resp = dial_post(
+            url,
+            json={"content": content, **caller},
+            timeout=_TIMEOUT_S,
+            headers=headers,
+        )
+    except httpx.TransportError:
+        if key is not None:
+            delivery_outbox.record_failed_send(
+                agent_id=agent_id,
+                source=resolved_source,
+                content=content,
+                client_message_id=key,
+            )
+        raise
+    if key is not None:
+        if resp.status_code in delivery_outbox.TRANSIENT_HTTP_STATUSES:
+            delivery_outbox.record_failed_send(
+                agent_id=agent_id,
+                source=resolved_source,
+                content=content,
+                client_message_id=key,
+            )
+        elif resp.is_success:
+            delivery_outbox.note_send_succeeded(
+                agent_id=agent_id, source=resolved_source, content=content, key=key
+            )
     if resp.status_code >= 400:
         # Surface the response body before raising: the 422 detail carries the
         # legal source set / validation reason, which is the actionable part.
