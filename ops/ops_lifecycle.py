@@ -12,7 +12,9 @@ these directly; the ops server runs them in-process. Cross-machine routing stays
 in the FastAPI handler wrappers — forwarding never recurses inside an op. The
 one forwarding call site in this module is `resurrect_if_terminated`, which is
 NOT an op (only the gateway routers call it, never the ops server dispatch), so
-its home-machine forward cannot loop either.
+its home-machine forward cannot loop either. The durable automatic-resurrection
+gates it consults live in `ops/resurrect_gates.py` (split out at the line
+budget; re-exported here).
 """
 
 from __future__ import annotations
@@ -25,7 +27,6 @@ from typing import Any, Literal
 
 from psycopg_pool import ConnectionPool
 
-import shared.db
 from ops import cluster_rpc as _cluster_rpc
 from ops import ops_exit
 from ops.agent_wake import ResurrectTriggerStaleError
@@ -76,6 +77,28 @@ from ops.ops_launch import (
 from ops.ops_launch import (
     launch_agent_op as launch_agent_op,
 )
+
+# Re-exported (explicit-alias form) so the module-qualified callers — tests —
+# keep their call sites unchanged after the line-budget split: the automatic-
+# resurrection gates now live in `ops/resurrect_gates.py`.
+from ops.resurrect_gates import (
+    clear_wake_suppression as _clear_wake_suppression,
+)
+from ops.resurrect_gates import (
+    closed_agent as _closed_agent,
+)
+from ops.resurrect_gates import (
+    recovery_halt_reason as _recovery_halt_reason,
+)
+from ops.resurrect_gates import (
+    recovery_halted as _recovery_halted,
+)
+from ops.resurrect_gates import (
+    system_notice_source_of_trigger as _system_notice_source_of_trigger,
+)
+from ops.resurrect_gates import (
+    wake_suppression_active as _wake_suppression_active,
+)
 from ops.rpc_schemas import (
     CancelRequested,
     RecoverCrashMarkedResponse,
@@ -93,7 +116,6 @@ from shared.agents import (
 )
 from shared.audit_events import insert_event_log
 from shared.db import insert_inbound_message
-from shared.lifecycle_acceptance import is_system_notice_source
 from shared.live_announce import publish_agent_updated_sync
 from shared.machine import machine_name
 
@@ -131,7 +153,15 @@ async def cancel_agent_op(agent_id: int, db_pool: ConnectionPool) -> CancelReque
 async def terminate_agent_op(
     agent_id: int, body: TerminateAgentRequest, db_pool: ConnectionPool
 ) -> TerminateAgentResponse:
-    """Local-target graceful or force terminate. Caller handles cross-machine."""
+    """Local-target graceful or force terminate. Caller handles cross-machine.
+
+    `body.final` additionally closes the agent — the closure marker (never
+    auto-resurrect) is stamped in the same transaction as the termination
+    intent. A graceful terminate that lands on an already-dead row has no
+    termination left to apply, so `final` there is the metadata-only mark
+    (`ops_exit.mark_agent_closed`), which doubles as the backfill route for
+    agents closed before the marker existed.
+    """
     if body.force:
         _old_status, pid, killed_page_names, command_id = await asyncio.to_thread(
             _terminate_force_blocking, agent_id, body, db_pool
@@ -150,6 +180,16 @@ async def terminate_agent_op(
 
     s = await asyncio.to_thread(get_agent_status, agent_id)
     if s is AgentStatus.TERMINATED:
+        if body.final:
+            marked = await asyncio.to_thread(
+                ops_exit.mark_agent_closed, agent_id, source=body.source, db_pool=db_pool
+            )
+            if marked:
+                _log.info(
+                    "[gateway] agent %s already terminated; closed by %s (never auto-resurrect)",
+                    agent_id,
+                    body.source,
+                )
         return TerminateAgentResponse(status="already_terminated")
 
     status, iid, zombie_closed_page_names = await asyncio.to_thread(
@@ -204,8 +244,9 @@ def _terminate_force_blocking(
         db_pool,
         source=body.source,
         message=body.message,
+        final=body.final,
     )
-    _publish_force_terminate_inbound(agent_id, inbound_id, body.source)
+    _publish_force_terminate_inbound(agent_id, inbound_id, body.source, closed=body.final)
     publish_agent_updated_sync(agent_id)
     return old_status, pid, killed_page_names, inbound_id
 
@@ -219,109 +260,9 @@ def _terminate_graceful_blocking(
         db_pool,
         source=body.source,
         message=body.message,
+        final=body.final,
     )
     return "enqueued", iid, []
-
-
-def _wake_suppression_active(agent_id: int) -> bool:
-    with shared.db.connect() as conn:
-        row = conn.execute(
-            "SELECT wake_suppressed_until >= now() FROM agents_meta WHERE id=%s",
-            (agent_id,),
-        ).fetchone()
-    if row is None:
-        raise AgentNotFound(f"agent {agent_id} does not exist")
-    return row[0] is True
-
-
-def _recovery_halted(agent_id: int) -> bool:
-    """Whether the recovery circuit breaker is tripped for `agent_id`.
-
-    The durable gate is `permanent_reject_streak` (>= the halt threshold after
-    consecutive permanent provider rejections) — NOT the wake-suppression
-    window, which a claim clears by design; only the streak can carry an
-    until-human halt (task #3617)."""
-    from shared.recovery_breaker import HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
-
-    with shared.db.connect() as conn:
-        row = conn.execute(
-            "SELECT permanent_reject_streak >= %s FROM agents_meta WHERE id=%s",
-            (HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS, agent_id),
-        ).fetchone()
-    if row is None:
-        raise AgentNotFound(f"agent {agent_id} does not exist")
-    return row[0] is True
-
-
-def _system_notice_source_of_trigger(agent_id: int, trigger_inbound_id: int) -> str | None:
-    """The trigger's `source` when it is a system-family chat notice — those
-    never resurrect their owner (user ruling 2026-08-27; task #3687) — else
-    None.
-
-    The delivery watchdog's hosted-turn recovery chat is NOT a notice: its
-    payload carries the `hosted_turn_recovery` marker, and the shared
-    predicate (fail-closed on any non-boolean marker value) returns False, so
-    the recovery reaches dispatch (task #3687 review, Ava #3242).
-
-    No row, a non-chat kind, or any other source returns None so the caller
-    proceeds on the normal resurrect path; the home runner's final CAS still
-    adjudicates stale work. A DB read failure propagates: a failed read must
-    not be silently swallowed into a "skip" (the suppression / breaker checks
-    above fail loudly the same way).
-    """
-    with shared.db.connect() as conn:
-        row = conn.execute(
-            "SELECT kind, source, payload FROM inbound_messages WHERE id=%s AND agent_id=%s",
-            (trigger_inbound_id, agent_id),
-        ).fetchone()
-    if row is None:
-        return None
-    kind, source, payload = row
-    if kind == "chat" and is_system_notice_source(source, payload):
-        return str(source)
-    return None
-
-
-def _recovery_halt_reason(agent_id: int) -> str | None:
-    """Why automatic recovery is halted for `agent_id`, else None — the
-    reason-resolution sibling of `_recovery_halted` for the stalled-harvest
-    requester (task #3618).
-
-    The durable gate is the recovery breaker's streak
-    (`RECOVERY_BREAKER_CLEAR` inverts it: consecutive permanent provider
-    rejections with no successful turn between them), which even a claim
-    cannot clear; it always reports `permanent_provider_reject`. An active
-    wake-suppression window without a tripped breaker reports its
-    operator-readable reason (or the `wake_suppressed` fallback)."""
-    from shared.recovery_breaker import (
-        HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
-        SUPPRESS_REASON_PERMANENT_REJECT,
-    )
-
-    with shared.db.connect() as conn:
-        row = conn.execute(
-            "SELECT permanent_reject_streak >= %s, wake_suppress_reason, "
-            "(wake_suppressed_until IS NOT NULL AND wake_suppressed_until >= now()) "
-            "FROM agents_meta WHERE id=%s",
-            (HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS, agent_id),
-        ).fetchone()
-    if row is None:
-        return None
-    halted, suppress_reason, suppress_active = row
-    if halted:
-        return SUPPRESS_REASON_PERMANENT_REJECT
-    if suppress_active:
-        return suppress_reason or "wake_suppressed"
-    return None
-
-
-def _clear_wake_suppression(agent_id: int) -> None:
-    with shared.db.connect() as conn:
-        conn.execute(
-            "UPDATE agents_meta SET wake_suppressed_until=NULL, wake_suppress_reason=NULL "
-            "WHERE id=%s AND wake_suppressed_until IS NOT NULL",
-            (agent_id,),
-        )
 
 
 async def resurrect_agent_op(
@@ -410,6 +351,12 @@ async def resurrect_if_terminated(
     carries the `hosted_turn_recovery` payload marker and must revive its
     wedged owner (task #3687 review). User / peer chats, compact requests,
     and system notes with an explicit resurrect request remain unaffected.
+
+    A closed agent (`terminate --final`, `closed_at` set) is never
+    auto-resurrected: the closure marker outranks every automatic channel,
+    system-notice carve-out included, and only an explicit manual resurrect
+    reopens it. The home runner's final CAS re-checks the same predicate, so a
+    close landing while this call is in flight still refuses the wake.
     """
     status = await asyncio.to_thread(get_agent_status, agent_id)
     if status is not AgentStatus.TERMINATED:
@@ -425,6 +372,13 @@ async def resurrect_if_terminated(
         _log.debug(
             "resurrect_if_terminated: recovery circuit breaker tripped for agent %s "
             "after consecutive permanent provider rejections; skipping auto-resurrect",
+            agent_id,
+        )
+        return status
+    if await asyncio.to_thread(_closed_agent, agent_id):
+        _log.debug(
+            "resurrect_if_terminated: agent %s is closed (never auto-resurrect); "
+            "skipping auto-resurrect — queued work waits for an explicit manual resurrect",
             agent_id,
         )
         return status

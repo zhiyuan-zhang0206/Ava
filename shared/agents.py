@@ -50,6 +50,9 @@ class TerminationSource(StrEnum):
 
     Resurrect policy — INVOLUNTARY deaths come back, intentional ones stay dead:
     `ops/controllers/resurrect.py` allowlists exactly `RESURRECTABLE`.
+    Orthogonal to source: `agents_meta.closed_at` (set by `terminate --final`)
+    marks a closed agent that no automatic path may resurrect regardless of
+    source; only an explicit manual resurrect reopens it.
     """
 
     # Intentional — the user's will (force-kill, or a terminate that found the pid

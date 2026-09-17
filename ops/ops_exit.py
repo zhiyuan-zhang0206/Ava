@@ -12,6 +12,7 @@ from shared.audit_events import insert_event_log
 from shared.db import publish_inbound_wake
 from shared.db_transaction import write_transaction
 from shared.envelope import validate_writable_source
+from shared.live_announce import publish_agent_updated_sync
 from shared.log import logger
 
 
@@ -113,14 +114,35 @@ def _insert_termination_inbounds(
     return message_id, terminate_id
 
 
+def _stamp_closed(conn: psycopg.Connection, agent_id: int) -> None:
+    """Stamp the closure marker inside the caller's transaction (first close wins).
+
+    Every terminate path carrying `final=true` runs this in the SAME
+    transaction as its termination intent: closing is never separable from the
+    end-of-life it accompanies, so a crash between acceptance and death cannot
+    leave a death whose auto-resurrect guard is missing. The WHERE keeps the
+    first closure time across repeated close requests.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agents_meta SET closed_at = now() WHERE id = %s AND closed_at IS NULL",
+            (agent_id,),
+        )
+
+
 def _enqueue_termination_inbounds(
     agent_id: int,
     db_pool: ConnectionPool,
     *,
     source: str,
     message: str | None,
+    final: bool = False,
 ) -> int:
-    """Persist graceful termination and publish its audit/wake effects."""
+    """Persist graceful termination and publish its audit/wake effects.
+
+    `final` stamps the closure marker (never auto-resurrect) in the same
+    transaction as the terminate command.
+    """
     with write_transaction(db_pool) as conn:
         _, terminate_id = _insert_termination_inbounds(
             conn,
@@ -128,7 +150,9 @@ def _enqueue_termination_inbounds(
             source=source,
             message=message,
         )
-    _publish_force_terminate_inbound(agent_id, terminate_id, source)
+        if final:
+            _stamp_closed(conn, agent_id)
+    _publish_force_terminate_inbound(agent_id, terminate_id, source, closed=final)
     return terminate_id
 
 
@@ -138,8 +162,9 @@ def _force_terminate_transaction(
     *,
     source: str,
     message: str | None = None,
+    final: bool = False,
 ) -> tuple[AgentStatus, int | None, list[str], int]:
-    """Lock the agent, insert termination intent and install its host resource fence. A newer inbound cannot bypass this accepted force command."""
+    """Lock the agent, insert termination intent and install its host resource fence. A newer inbound cannot bypass this accepted force command. `final` additionally stamps the closure marker in this same transaction."""
     with db_pool.connection() as conn, conn.cursor() as cur:
         conn.execute("SET TRANSACTION READ WRITE")
         cur.execute(
@@ -173,17 +198,24 @@ def _force_terminate_transaction(
         from shared.hosted_force import install_hosted_force
 
         install_hosted_force(conn, agent_id, terminate_inbound_id)
+        if final:
+            _stamp_closed(conn, agent_id)
     return old_status, pid, page_names, terminate_inbound_id
 
 
-def _publish_force_terminate_inbound(agent_id: int, inbound_id: int, source: str) -> None:
-    """Emit the non-transactional audit/wake side effects after fence commit."""
-    insert_event_log(
-        event_type="terminate",
-        agent_id=agent_id,
-        source=source,
-        payload={"inbound_id": inbound_id},
-    )
+def _publish_force_terminate_inbound(
+    agent_id: int, inbound_id: int, source: str, *, closed: bool = False
+) -> None:
+    """Emit the non-transactional audit/wake side effects after fence commit.
+
+    `closed` records a `final=true` termination in the same audit trail — the
+    marker itself is written transactionally with the termination intent; this
+    only names it next to the command it accompanied.
+    """
+    payload: dict[str, object] = {"inbound_id": inbound_id}
+    if closed:
+        payload["closed"] = True
+    insert_event_log(event_type="terminate", agent_id=agent_id, source=source, payload=payload)
     publish_inbound_wake(agent_id, str(inbound_id))
 
 
@@ -203,3 +235,30 @@ def _force_mark_terminated(
     )
     _publish_force_terminate_inbound(agent_id, inbound_id, source)
     return page_names
+
+
+def mark_agent_closed(agent_id: int, *, source: str, db_pool: ConnectionPool) -> bool:
+    """Close an already-terminated agent — the metadata-only `terminate --final`.
+
+    On a dead agent there is no termination left to apply; the closure is the
+    whole action — and the backfill route for agents closed before the marker
+    existed. Writes the marker, records the `terminate` audit event with
+    `{"closed": true}`, refreshes mounted frontends, and returns whether THIS
+    call is what closed the agent (False = already closed: no duplicate event).
+
+    Callers must have observed `terminated` first: this marks, it never ends a
+    live agent.
+    """
+    with write_transaction(db_pool) as conn:
+        row = conn.execute(
+            "UPDATE agents_meta SET closed_at = now() WHERE id = %s AND closed_at IS NULL "
+            "RETURNING id",
+            (agent_id,),
+        ).fetchone()
+    if row is None:
+        return False
+    insert_event_log(
+        event_type="terminate", agent_id=agent_id, source=source, payload={"closed": True}
+    )
+    publish_agent_updated_sync(agent_id)
+    return True

@@ -33,10 +33,18 @@ def _transition_terminated_to_unclaimed_idling(
     trigger_inbound_id: int | None,
     trigger_inbound_kind: Literal["chat", "compact_request", "system_note"] | None,
 ) -> datetime:
-    """Run the one final resurrection CAS with a fully static SQL shape."""
+    """Run the one final resurrection CAS with a fully static SQL shape.
+
+    The automatic (trigger) branch refuses a closed agent — the closure marker
+    re-checked under the row lock, so a close landing while a wake was in
+    flight still wins. The explicit branch clears the closure marker: reopening
+    a closed agent is exactly the manual resurrect's contract, and the caller
+    reports it on the resurrect event.
+    """
     base_params = (AgentStatus.IDLING, agent_id, AgentStatus.TERMINATED)
     if trigger_inbound_id is not None:
         from shared.lifecycle_acceptance import (
+            CLOSED_AGENT,
             FAILED_RESTART_FOR_CURRENT_TARGET,
             SYSTEM_REAPED_CRASH_ROW,
         )
@@ -55,6 +63,7 @@ def _transition_terminated_to_unclaimed_idling(
                 "AND (agents_meta.wake_suppressed_until IS NULL "
                 "     OR agents_meta.wake_suppressed_until < now()) "
                 "AND {} "
+                "AND NOT {} "
                 "AND EXISTS ("
                 "  SELECT 1 FROM inbound_messages m "
                 "  WHERE m.id = %s AND m.agent_id = agents_meta.id "
@@ -65,6 +74,7 @@ def _transition_terminated_to_unclaimed_idling(
             ).format(
                 sql.SQL(FAILED_RESTART_FOR_CURRENT_TARGET),
                 sql.SQL(RECOVERY_BREAKER_CLEAR),
+                sql.SQL(CLOSED_AGENT),
                 sql.SQL(SYSTEM_REAPED_CRASH_ROW),
             ),
             (*base_params, trigger_inbound_id, trigger_inbound_kind),
@@ -72,7 +82,7 @@ def _transition_terminated_to_unclaimed_idling(
     else:
         cur.execute(
             "UPDATE agents_meta SET status = %s, pid = NULL, started_at = NULL, "
-            "termination_source = NULL, lease_expires_at = NULL, "
+            "termination_source = NULL, closed_at = NULL, lease_expires_at = NULL, "
             "last_turn_fatal_at = NULL, "
             "runtime_generation = NULL, runtime_owner = NULL, runtime_kind = NULL, "
             "runtime_protocol_version = 0 "
@@ -97,7 +107,7 @@ def _transition_terminated_to_unclaimed_idling(
         raise ResurrectTriggerStaleError(
             f"agent {agent_id} trigger work no longer qualifies for its current "
             "termination; UPDATE affected 0 rows (stale work, suppressed automatic "
-            "wakes, or a tripped recovery breaker)"
+            "wakes, a tripped recovery breaker, or a closed agent)"
         )
     raise ResurrectAlreadyAlive(
         f"agent {agent_id} was concurrently modified after SELECT; UPDATE affected 0 rows"
@@ -140,8 +150,12 @@ def _prepare_resurrect_attempt(
     prompt: str | None,
     trigger_inbound_id: int | None,
     trigger_inbound_kind: Literal["chat", "compact_request", "system_note"] | None,
-) -> None:
-    """Commit resurrection and its optional prompt before waking the host."""
+) -> bool:
+    """Commit resurrection and its optional prompt before waking the host.
+
+    Returns whether this call reopened a closed agent (the explicit branch
+    cleared `closed_at`), so the caller can record it on the resurrect event.
+    """
     from shared.envelope import reject_unnegotiated_caller
     from shared.exec_owner_recovery import recover_local_resources
     from shared.lifecycle_acceptance import supersede_lifecycle_for_resurrect
@@ -150,13 +164,16 @@ def _prepare_resurrect_attempt(
     recover_local_resources(agent_id, machine_name())
     with write_transaction() as conn, conn.cursor() as cur:
         latched_machine = _lock_active_home_machine(cur, agent_id)
-        cur.execute("SELECT status,machine FROM agents_meta WHERE id = %s FOR UPDATE", (agent_id,))
+        cur.execute(
+            "SELECT status,machine,closed_at FROM agents_meta WHERE id = %s FOR UPDATE", (agent_id,)
+        )
         row = cur.fetchone()
         if row is None:
             raise AgentNotFound(f"agent {agent_id} does not exist")
         if row[1] != latched_machine:
             raise ResurrectTriggerStaleError("resurrection placement changed after pause latch")
         current = AgentStatus(row[0])
+        reopened = trigger_inbound_id is None and row[2] is not None
         if current is not AgentStatus.TERMINATED:
             raise ResurrectAlreadyAlive(
                 f"agent {agent_id} is in {current.value!r} state, not 'terminated'"
@@ -205,6 +222,7 @@ def _prepare_resurrect_attempt(
         conn.commit()
         publish_agent_updated_sync(agent_id)
     publish_inbound_wake(agent_id, "0")
+    return reopened
 
 
 def resurrect_agent(
@@ -223,25 +241,30 @@ def resurrect_agent(
     (`SYSTEM_REAPED_CRASH_ROW`) — work that predates the termination still
     qualifies: a reaper death is not an operator's decision. The automatic
     trigger additionally requires clear automatic wakes (no suppression window,
-    `RECOVERY_BREAKER_CLEAR`); explicit manual resurrection passes no trigger
-    and keeps its unconditional contract. The host resumes the existing
-    checkpoint after the transaction commits.
+    `RECOVERY_BREAKER_CLEAR`) and an open agent (no closure marker); explicit
+    manual resurrection passes no trigger and keeps its unconditional
+    contract — it reopens a closed agent (clearing `closed_at`) and the audit
+    event carries `"reopened": true`. The host resumes the existing checkpoint
+    after the transaction commits.
     """
     if (trigger_inbound_id is None) != (trigger_inbound_kind is None):
         raise ValueError("trigger inbound id and kind must be provided together")
-    _prepare_resurrect_attempt(
+    reopened = _prepare_resurrect_attempt(
         agent_id,
         resurrected_by=resurrected_by,
         prompt=prompt,
         trigger_inbound_id=trigger_inbound_id,
         trigger_inbound_kind=trigger_inbound_kind,
     )
+    payload: dict[str, object] = {"prompt": prompt} if prompt else {}
+    if reopened:
+        payload["reopened"] = True
     insert_event_log(
         event_type="resurrect",
         agent_id=agent_id,
         source=resurrected_by,
         target_agent_id=_resurrect_event_target(resurrected_by),
-        payload={"prompt": prompt} if prompt else {},
+        payload=payload,
     )
     logger.info(
         "agent {agent_id} resurrected by {resurrected_by}",

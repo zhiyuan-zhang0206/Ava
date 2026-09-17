@@ -32,13 +32,15 @@ Overview of the Agent subsystem.
   "whether the new process needs to be told what it went through":
   - **spawn** — create new agent, **no inbound message delivered** (from nothing, no "why was I called" issue).
   - **resurrect** — bring a `terminated` agent back (history preserved), deliver a `kind='resurrect'` marker
-    telling the model "you are resurrected" rather than continuing the previous context.
+    telling the model "you are resurrected" rather than continuing the previous context. The explicit path also
+    reopens a closed agent (`terminate --final`), which no automatic channel may wake.
   - **respawn** — the durable restarter replaces the process and `respawn_agent` delivers
     `kind='restart_completed'`; when restarted from idle, only commit the marker, no need to wake the model.
   - **fork** — new agent + inherit state of a checkpoint (including history), deliver `kind='fork'` identity marker
     correcting "who I am".
   - **terminate / force-kill** — graceful exit (deliver `kind='terminate'`, graph goes to END, process exits naturally)
-    or a four-step kill ladder when stuck (`force=true`, not available on `ava.self.terminate()`).
+    or a four-step kill ladder when stuck (`force=true`, not available on `ava.self.terminate()`). With `final` the
+    termination also closes the agent for good: never auto-resurrected. Only an explicit resurrect reopens it.
   - **heartbeat** — check-in for an idle agent; claim appends a system note unless a permanent-provider circuit breaker is open, in which case the heartbeat is consumed without growing the LLM context.
 
 ## Sub-concepts

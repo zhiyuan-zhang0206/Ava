@@ -180,3 +180,162 @@ def test_force_termination_retries_command_before_message(
         "SELECT status,last_force_terminate_inbound_id FROM agents_meta WHERE id=%s",
         (running_agent_id,),
     ).fetchone() == ("terminated", terminate_id)
+
+
+class TestFinalTerminationClosureMarker:
+    """`terminate --final` stamps `agents_meta.closed_at` in the same
+    transaction as the termination intent (graceful acceptance / force fence),
+    and the metadata-only mark covers an already-dead row (the backfill
+    route). Without `final` the marker stays NULL — ordinary termination is
+    unchanged."""
+
+    def test_graceful_final_stamps_the_marker(
+        self, db_conn: psycopg.Connection, db_pool: ConnectionPool, running_agent_id: int
+    ) -> None:
+        ops_exit._enqueue_termination_inbounds(
+            running_agent_id, db_pool, source="user", message=None, final=True
+        )
+        assert db_conn.execute(
+            "SELECT closed_at IS NOT NULL FROM agents_meta WHERE id=%s", (running_agent_id,)
+        ).fetchone() == (True,)
+
+    def test_graceful_default_leaves_the_marker_open(
+        self, db_conn: psycopg.Connection, db_pool: ConnectionPool, running_agent_id: int
+    ) -> None:
+        ops_exit._enqueue_termination_inbounds(
+            running_agent_id, db_pool, source="user", message=None
+        )
+        assert db_conn.execute(
+            "SELECT closed_at FROM agents_meta WHERE id=%s", (running_agent_id,)
+        ).fetchone() == (None,)
+
+    def test_force_final_stamps_the_marker(
+        self, db_conn: psycopg.Connection, db_pool: ConnectionPool, running_agent_id: int
+    ) -> None:
+        ops_exit._force_terminate_transaction(running_agent_id, db_pool, source="user", final=True)
+        assert db_conn.execute(
+            "SELECT status, closed_at IS NOT NULL FROM agents_meta WHERE id=%s",
+            (running_agent_id,),
+        ).fetchone() == ("terminated", True)
+
+    @pytest.mark.asyncio
+    async def test_force_final_records_closed_in_the_terminate_event(
+        self,
+        db_conn: psycopg.Connection,
+        db_pool: ConnectionPool,
+        running_agent_id: int,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The force path's audit event names the closure — parity with the
+        graceful path (`_enqueue_termination_inbounds` passes `closed=final`).
+        `terminate --final` / `kill --final` are force-first use cases, so the
+        `terminate` event must carry `closed: true` next to the command it
+        accompanied (`test_force_final_stamps_the_marker` pins the marker)."""
+        from ops import ops_lifecycle
+
+        events: list[dict[str, object]] = []
+
+        def _record(**kwargs: object) -> None:
+            events.append(kwargs)
+
+        monkeypatch.setattr(ops_exit, "insert_event_log", _record)
+
+        async def _noop_cancel(_aid: int, _command_id: int) -> None:
+            return None
+
+        monkeypatch.setattr(ops_lifecycle, "_cancel_hosted_turn_best_effort", _noop_cancel)
+
+        resp = await ops_lifecycle.terminate_agent_op(
+            running_agent_id, TerminateAgentRequest(force=True, final=True), db_pool
+        )
+        assert resp.status == "enqueued"
+        row = db_conn.execute(
+            "SELECT last_force_terminate_inbound_id FROM agents_meta WHERE id=%s",
+            (running_agent_id,),
+        ).fetchone()
+        assert row is not None
+        (inbound_id,) = row
+        assert events == [
+            {
+                "event_type": "terminate",
+                "agent_id": running_agent_id,
+                "source": "user",
+                "payload": {"inbound_id": inbound_id, "closed": True},
+            }
+        ]
+
+    def test_repeat_close_keeps_the_first_time(
+        self, db_conn: psycopg.Connection, db_pool: ConnectionPool, running_agent_id: int
+    ) -> None:
+        """A second close (e.g. a `--final` kill after a graceful `--final`)
+        never churns the closure timestamp, and the metadata-only mark reports
+        it was already closed."""
+        ops_exit._enqueue_termination_inbounds(
+            running_agent_id, db_pool, source="user", message=None, final=True
+        )
+        first = db_conn.execute(
+            "SELECT closed_at FROM agents_meta WHERE id=%s", (running_agent_id,)
+        ).fetchone()
+        assert first is not None and first[0] is not None
+
+        assert ops_exit.mark_agent_closed(running_agent_id, source="user", db_pool=db_pool) is False
+        assert (
+            db_conn.execute(
+                "SELECT closed_at FROM agents_meta WHERE id=%s", (running_agent_id,)
+            ).fetchone()
+            == first
+        )
+
+    def test_mark_agent_closed_audits_once(
+        self,
+        db_conn: psycopg.Connection,
+        db_pool: ConnectionPool,
+        running_agent_id: int,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        db_conn.execute(
+            "UPDATE agents_meta SET status='terminated', termination_source='exit' WHERE id=%s",
+            (running_agent_id,),
+        )
+        db_conn.commit()
+        events: list[dict[str, object]] = []
+
+        def _record(**kwargs: object) -> None:
+            events.append(kwargs)
+
+        monkeypatch.setattr(ops_exit, "insert_event_log", _record)
+
+        assert ops_exit.mark_agent_closed(running_agent_id, source="user", db_pool=db_pool) is True
+        assert ops_exit.mark_agent_closed(running_agent_id, source="user", db_pool=db_pool) is False
+        assert events == [
+            {
+                "event_type": "terminate",
+                "agent_id": running_agent_id,
+                "source": "user",
+                "payload": {"closed": True},
+            }
+        ]
+
+    @pytest.mark.asyncio
+    async def test_terminate_op_marks_closed_on_an_already_dead_row(
+        self, db_conn: psycopg.Connection, db_pool: ConnectionPool
+    ) -> None:
+        """The graceful short-circuit still honors `final`: an already-dead
+        agent is marked metadata-only — the backfill route."""
+        from ops import ops_lifecycle
+
+        agent_id = create_agent(db_conn)
+        db_conn.execute(
+            "INSERT INTO agents_meta (id,status,machine,termination_source) "
+            "VALUES (%s,'terminated','test-machine','exit')",
+            (agent_id,),
+        )
+        db_conn.commit()
+
+        resp = await ops_lifecycle.terminate_agent_op(
+            agent_id, TerminateAgentRequest(final=True), db_pool
+        )
+        assert resp.status == "already_terminated"
+        assert db_conn.execute(
+            "SELECT closed_at IS NOT NULL FROM agents_meta WHERE id=%s", (agent_id,)
+        ).fetchone() == (True,)

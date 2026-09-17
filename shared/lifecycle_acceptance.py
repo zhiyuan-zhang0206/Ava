@@ -99,6 +99,26 @@ def is_system_notice_source(source: str, payload: Mapping[str, object] | None) -
     return payload.get(HOSTED_TURN_RECOVERY_MARKER) is not True
 
 
+# A closed agent (`agents_meta.closed_at` set) never auto-resurrects: every
+# automatic resurrection path — delivery chat, compact, the delivery
+# watchdog's terminated-owner retry, hosted-turn recovery — skips it, so its
+# queued work stays pending and dead-letters on the existing thresholds. The
+# user closes an agent with `terminate --final`; only an explicit manual
+# resurrect reopens it (clearing the column). This is the closure analogue
+# of the notice gate above: the delivery watchdog's selection and the
+# resurrect endpoint (plus the home runner's final CAS) gate the same
+# decision and must be updated together (the parity test pins the SQL
+# fragment and the Python twin to each other).
+CLOSED_AGENT: LiteralString = "agents_meta.closed_at IS NOT NULL"
+
+
+def is_closed_agent(closed_at: datetime | None) -> bool:
+    """Python twin of `CLOSED_AGENT`, kept adjacent on purpose — a drift
+    between the two would reopen the closure gap from opposite sides; the
+    parity test fails if they disagree on any `closed_at` input."""
+    return closed_at is not None
+
+
 # Every unapplied lifecycle command whose intent predates the recorded
 # resurrection is closed by it, visibly (the payload names the resurrect inbound
 # that superseded it), never silently dropped. Applied commands are preserved:
