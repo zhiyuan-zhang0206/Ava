@@ -65,14 +65,16 @@ and an unmarked gateway without an explicit Loki URL receives the shared clean
 503 instead of reading another home's loopback stack.
 
 `GET /api/agents/{id}/inspect/statistics` owns window-dependent cost, stats,
-TPS and activity. Its 75s single-flight TTL retains only historical aggregates;
-completed UTC days read the Postgres ledger and retained detail comes from
-Loki. Each request reads only the immutable birth timestamp before joining the
-bounded aggregate loader. It performs no runner probe, current-state projection,
-notice read, or heartbeat-pause lookup. The aggregate deadline is 30s; async
-followers do not occupy worker threads. Cancelling an HTTP waiter does not
-cancel shared work needed by other waiters: admission and query deadlines bound
-that work, and pending section futures are cancelled on deadline expiry.
+TPS and activity. It reads one repeatable-read Postgres snapshot over persisted
+observations, day summaries and disjoint historical ledger days. Exact percentile
+work scales with selected duration observations; additive work uses day summaries
+and at most two raw boundary days. Up to four in-flight leaders are admitted and
+identical callers share their read; completed results have no TTL. Each SQL query
+has a two-second statement limit and the HTTP wait has a 15-second limit. Collection
+is explicitly observed, never certified lossless. Missing historical sections and
+unknown compact boundaries are unavailable, with declared coverage/precision and
+observation timestamps. No runner probe, current-state projection, heartbeat query,
+or synchronous Loki scan occurs here.
 
 `GET /api/agents/{id}/inspect/live` exclusively owns the current projection,
 notice, runner shell probe, and indexed recent-pause lookup from the durable
