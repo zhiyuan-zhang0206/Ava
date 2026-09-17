@@ -191,11 +191,15 @@ class GatewayClient:
         ) as resp:
             if resp.status_code != 200:
                 raise RuntimeError(f"sse {agent_id} failed: HTTP {resp.status_code}")
-            buf = ""
+            buf = b""
             async for chunk in resp.aiter_bytes():
-                buf += chunk.decode("utf-8", errors="replace")
-                while "\n\n" in buf:
-                    frame, buf = buf.split("\n\n", 1)
+                buf += chunk
+                while b"\n\n" in buf:
+                    frame_bytes, buf = buf.split(b"\n\n", 1)
+                    # Decode whole frames by byte accumulation: a per-chunk
+                    # decode turns a multi-byte character split across
+                    # transport chunks into U+FFFD replacements.
+                    frame = frame_bytes.decode("utf-8", errors="replace")
                     data = None
                     # Split on "\n" only - str.splitlines() also breaks on
                     # U+0085 / U+2028 / U+2029, which are legal unescaped
