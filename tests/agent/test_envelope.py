@@ -5,7 +5,8 @@ the format changes, SYSTEM_PROMPT must change in sync. Pin the format for each
 source type:
 - `system` / `system:<subtype>` → raw text, no wrap (no timestamp)
 - `agent:N` → "Agent N [timestamp]:" prefix
-- `user` → "User [timestamp]:" prefix
+- `user` → bare "[timestamp]" header (no label)
+- `ui:page:<name>` → same bare "[timestamp]" header as `user`
 - `watcher:N` → "Watcher (id N) [ts]:" prefix
 - unrecognized → ValueError (fail-fast)
 
@@ -32,22 +33,22 @@ def _freeze_timestamp(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class TestUserSource:
-    """`source='user'` —— the human user (the UI). Wraps as "User [ts]:"."""
+    """`source='user'` —— the human user (the UI). Wraps as a bare "[ts]" header."""
 
     def test_user(self) -> None:
-        assert wrap_inbound("hi", "user") == f"User {_TS}:\n\nhi"
+        assert wrap_inbound("hi", "user") == f"{_TS}\n\nhi"
 
     def test_user_preserves_multiline(self) -> None:
         content = "line 1\nline 2\n\nline 4"
-        assert wrap_inbound(content, "user") == f"User {_TS}:\n\n{content}"
+        assert wrap_inbound(content, "user") == f"{_TS}\n\n{content}"
 
     def test_user_empty_content(self) -> None:
-        assert wrap_inbound("", "user") == f"User {_TS}:\n\n"
+        assert wrap_inbound("", "user") == f"{_TS}\n\n"
 
     def test_legacy_ui_prefix_now_rejected(self) -> None:
         """The old `ui:X` channel namespace is gone — `user` is the only plain
         human source now. Old forms fail-fast rather than silently wrap as
-        "User". The one surviving `ui:` form is `ui:page:<name>` (page callback)."""
+        a user message. The one surviving `ui:` form is `ui:page:<name>` (page callback)."""
         for bad in ("ui:web", "ui:telegram", "ui:cli", "ui:slack"):
             with pytest.raises(ValueError, match="Unrecognized inbound source"):
                 wrap_inbound("hi", bad)
@@ -55,10 +56,11 @@ class TestUserSource:
 
 class TestPageCallback:
     """`source='ui:page:<name>'` — an HTML page the agent started posts back. It
-    reads as "User"; the agent recovers which page from <name>."""
+    wraps as the same bare "[ts]" header as `user`; the agent recovers which
+    page from <name>."""
 
-    def test_page_callback_wraps_as_user(self) -> None:
-        assert wrap_inbound("chose B", "ui:page:compare") == f"User {_TS}:\n\nchose B"
+    def test_page_callback_wraps_same_as_user(self) -> None:
+        assert wrap_inbound("chose B", "ui:page:compare") == f"{_TS}\n\nchose B"
 
     def test_page_callback_validates(self) -> None:
         validate_source("ui:page:compare")  # no raise
@@ -101,9 +103,9 @@ class TestAgentPrefix:
         assert wrap_inbound(content, "agent:7") == f"Agent 7 {_TS}:\n\n{content}"
 
     def test_agent_prefix_not_user_format(self) -> None:
-        """agent source must not produce a "User" prefix."""
+        """agent source must not produce the user envelope's bare "[ts]" header."""
         out = wrap_inbound("x", "agent:1")
-        assert "User messaged" not in out
+        assert not out.startswith("[")
         assert out.startswith(f"Agent 1 {_TS}:")
 
 
@@ -190,8 +192,9 @@ class TestUnknownSource:
 
 
 class TestMessageTimestampsOff:
-    """`settings.general.message_timestamps=False` — strips timestamps from all source
-    prefixes, with no trailing space before the colon."""
+    """`settings.general.message_timestamps=False` — strips timestamps from all
+    source prefixes, with no trailing space before the colon; the user envelope
+    has no label behind the timestamp, so its header disappears entirely."""
 
     @pytest.fixture(autouse=True)
     def _disable(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -200,7 +203,10 @@ class TestMessageTimestampsOff:
         monkeypatch.setattr(settings.general, "message_timestamps", False)
 
     def test_user_no_timestamp(self) -> None:
-        assert wrap_inbound("hi", "user") == "User:\n\nhi"
+        assert wrap_inbound("hi", "user") == "hi"
+
+    def test_page_no_timestamp(self) -> None:
+        assert wrap_inbound("hi", "ui:page:compare") == "hi"
 
     def test_agent_no_timestamp(self) -> None:
         assert wrap_inbound("hi", "agent:5") == "Agent 5:\n\nhi"
@@ -241,7 +247,7 @@ class TestCreatedAtParameter:
         out = wrap_inbound("hi", "user", created_at=created)
         expected = f"[{_local_ts(created)}]"
         assert expected in out
-        assert out == f"User {expected}:\n\nhi"
+        assert out == f"{expected}\n\nhi"
 
     def test_agent_with_created_at(self) -> None:
         from datetime import datetime
@@ -286,7 +292,7 @@ class TestCreatedAtWithTimestampsOff:
         from datetime import datetime
 
         created = datetime(2026, 6, 21, 10, 0, 0, tzinfo=UTC)
-        assert wrap_inbound("hi", "user", created_at=created) == "User:\n\nhi"
+        assert wrap_inbound("hi", "user", created_at=created) == "hi"
 
     def test_agent_no_ts_even_with_created_at(self) -> None:
         from datetime import datetime
@@ -323,15 +329,14 @@ class TestWeekdayFlag:
 
         created = datetime(2026, 6, 21, 10, 30, 0, tzinfo=UTC)
         assert (
-            self._wrap(monkeypatch, weekday=True)
-            == f"User [{_local_ts(created, weekday=True)}]:\n\nhi"
+            self._wrap(monkeypatch, weekday=True) == f"[{_local_ts(created, weekday=True)}]\n\nhi"
         )
 
     def test_weekday_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from datetime import datetime
 
         created = datetime(2026, 6, 21, 10, 30, 0, tzinfo=UTC)
-        assert self._wrap(monkeypatch, weekday=False) == f"User [{_local_ts(created)}]:\n\nhi"
+        assert self._wrap(monkeypatch, weekday=False) == f"[{_local_ts(created)}]\n\nhi"
 
     def test_no_timezone_suffix_either_way(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """No `%Z` in either shape — the timezone is declared once, in the
@@ -342,7 +347,7 @@ class TestWeekdayFlag:
         for weekday in (True, False):
             out = self._wrap(monkeypatch, weekday=weekday)
             assert "PDT" not in out and "PST" not in out
-            assert out.endswith(":00]:\n\nhi")
+            assert out.endswith(":00]\n\nhi")
 
     def test_created_at_and_now_agree(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Both producers render one shape — the docstring claim, enforced.
@@ -359,7 +364,7 @@ class TestWeekdayFlag:
         for weekday in (True, False):
             monkeypatch.setattr(settings.general, "message_timestamp_weekday", weekday)
             day = r"[A-Z][a-z]{2} " if weekday else ""
-            shape = rf"^User \[\d{{4}}-\d{{2}}-\d{{2}} {day}\d{{2}}:\d{{2}}:\d{{2}}\]:$"
+            shape = rf"^\[\d{{4}}-\d{{2}}-\d{{2}} {day}\d{{2}}:\d{{2}}:\d{{2}}\]$"
             for out in (
                 wrap_inbound("hi", "user"),
                 wrap_inbound("hi", "user", created_at=datetime.now(UTC)),

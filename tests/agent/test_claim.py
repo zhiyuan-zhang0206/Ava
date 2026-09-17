@@ -394,7 +394,8 @@ async def test_claim_chat_kind_appends_humanmessage_with_envelope(
     # plus the context notes) is laid down by `init_context` before claim runs.
     assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert isinstance(msgs[0], HumanMessage)
-    assert msgs[0].content.startswith("User ")  # pyright: ignore[reportUnknownMemberType]
+    # User envelope: a bare "[ts]" header (shared/envelope.py).
+    assert msgs[0].content.startswith("[")  # pyright: ignore[reportUnknownMemberType]
     assert "hello" in msgs[0].content  # pyright: ignore[reportUnknownMemberType]
     assert cmd.update["halted"] is False  # type: ignore[index]
     assert cmd.update["active_task_id"] is None  # type: ignore[index]
@@ -417,8 +418,8 @@ async def test_claim_chat_expands_slash_command(
     )
 
     content = cmd.update["messages"][-1].content  # type: ignore[index]
-    # Envelope attributes the sender; the expansion body is source-neutral.
-    assert content.startswith("User ")  # pyright: ignore[reportUnknownMemberType]
+    # The user envelope frames the expansion; the body is source-neutral.
+    assert content.startswith("[")  # pyright: ignore[reportUnknownMemberType]
     assert "Command /recap:" in content
     assert "Additional message: just the PRs" in content
 
