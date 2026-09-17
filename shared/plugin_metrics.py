@@ -109,6 +109,9 @@ class MetricSpec(BaseModel):
         category: the event category (audit | telemetry | log).
         unit: Grafana unit id (``short``, ``percent``, ``ops``, ``s``, ...).
         panel: Grafana panel type — ``timeseries`` / ``stat`` / ``barchart`` / ``table`` / ``logs``.
+            A ``logs`` panel is a raw stream view whose LogQL skips the
+            ``{event_name}``/``{category}`` placeholder rule (the ``raw_view``
+            waiver; only the stream-selector and ``| json`` checks apply).
         query: Grafana query template. LogQL templates select the live event
             stream and use ``{event_name}`` / ``{category}`` placeholders;
             ``{{agent_id}}`` is inspector-only and rendered as a label filter.
