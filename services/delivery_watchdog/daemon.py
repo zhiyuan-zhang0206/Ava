@@ -37,6 +37,8 @@ in-flight turn is normal — the claim's turn-end SELECT picks it up. Boot state
    (60s) + per-tick cap + concurrency semaphore keep a pile of dead letters
    from spawning an LLM wake storm; repeated failures suppress automatic wakes
    for a bounded exponentially increasing window, and normal delivery resumes after expiry.
+   Closed agents (`closed_at` set via `terminate --final`) are never selected:
+   closure outranks every automatic channel.
 4. **Stale-inbound dead-letter sweep** — every 30s, flip `claimed` chat
    inbounds of TERMINATED owners older than
    `AVA_DELIVERY_WATCHDOG_STALE_CLAIMED_THRESHOLD_SECONDS` (default 24h), or
@@ -83,6 +85,18 @@ from services.delivery_watchdog import (
     resurrect_guard,
     stall_recovery,
     turn_liveness,
+)
+from services.delivery_watchdog.dead_letter import (
+    dead_letter_stale_claimed as dead_letter_stale_claimed,
+)
+from services.delivery_watchdog.dead_letter import (
+    dead_letter_stale_pending_chats as dead_letter_stale_pending_chats,
+)
+from services.delivery_watchdog.dead_letter import (
+    dead_letter_stale_pending_resurrects as dead_letter_stale_pending_resurrects,
+)
+from services.delivery_watchdog.dead_letter import (
+    dead_letter_stale_pending_terminated as dead_letter_stale_pending_terminated,
 )
 from shared import telemetry
 from shared.agents import AgentStatus
@@ -177,12 +191,18 @@ def select_terminated_owners_with_pending(
     closes it. Machine *wakeups* still wake; exempt is the watchdog's own
     recovery chat (`hosted_turn_recovery` marker): it revives its wedged owner.
 
+    A closed agent (user marked it `terminate --final`; `closed_at` set) is
+    never a resurrect candidate — the closure outranks every automatic
+    channel, the recovery-marker exemption included. Its pending chats stay
+    queued and dead-letter on the age gate above.
+
     `threshold_s` bounds how long a pending chat keeps its terminated owner a
     resurrect candidate: past it the row is a dead letter (issue #2049) that
     `dead_letter_stale_pending_chats` closes — and with it the trigger, so no
     unbounded retry can resurrect-suicide the agent forever.
     """
     from shared.lifecycle_acceptance import (
+        CLOSED_AGENT,
         FAILED_RESTART_FOR_CURRENT_TARGET,
         SYSTEM_NOTICE_SOURCE,
         SYSTEM_REAPED_CRASH_ROW,
@@ -204,6 +224,7 @@ def select_terminated_owners_with_pending(
                 "       OR agents_meta.wake_suppressed_until < now()) "
                 "  AND {} "
                 "  AND NOT {} "
+                "  AND NOT {} "
                 "GROUP BY m.agent_id "
                 "ORDER BY m.agent_id"
             ).format(
@@ -211,115 +232,11 @@ def select_terminated_owners_with_pending(
                 sql.SQL(SYSTEM_REAPED_CRASH_ROW),
                 sql.SQL(RECOVERY_BREAKER_CLEAR),
                 sql.SQL(SYSTEM_NOTICE_SOURCE),
+                sql.SQL(CLOSED_AGENT),
             ),
             (threshold_s,),
         )
         return [(r[0], r[1]) for r in cur.fetchall()]
-
-
-def dead_letter_stale_pending_chats(pool: ConnectionPool, threshold_s: float) -> int:
-    """Dead-letter stale pending chats whose terminated owner never claimed them.
-
-    A pending chat newer than the latest termination makes its terminated
-    owner a G4 resurrect candidate on every tick. That retry must not run
-    forever: a chat that stays pending past `threshold_s` is a dead letter, so
-    the reaper closes it here (issue #2049) — marked done, never deleted — and
-    the resurrect-suicide loop can no longer accumulate an ever-growing
-    pending queue. `select_terminated_owners_with_pending` applies the same
-    age gate, so the two stay in lockstep: a closed row is never a trigger and
-    a trigger row is never closed. Live owners are untouched; their pending
-    chats still wake through the normal dispatch path.
-    """
-    with write_transaction(pool) as conn, conn.cursor() as cur:
-        cur.execute(
-            "UPDATE inbound_messages m SET status = 'done', claimed_at = now() "
-            "FROM agents_meta am "
-            "WHERE m.agent_id = am.id "
-            "  AND am.status = 'terminated' "
-            "  AND m.status = 'pending' AND m.kind = 'chat' "
-            "  AND m.created_at < now() - make_interval(secs => %s)",
-            (threshold_s,),
-        )
-        return cur.rowcount
-
-
-def dead_letter_stale_claimed(
-    pool: ConnectionPool,
-    threshold_s: float,
-    idling_threshold_s: float = 7200.0,
-) -> int:
-    """Dead-letter stale claimed chats of terminated or idling owners.
-
-    Terminated agents leave 'claimed' rows behind: reconcile runs only at
-    process boot, so a cleanly terminated (or long-dead) process never
-    finalizes its claims. The rows sit forever — and worse, if the agent is
-    ever resurrected (delivery auto-resurrect, Task #689 G4, or manually),
-    boot reconcile sees no commit evidence (checkpoint pruned) and resets
-    them all to 'pending', re-delivering ancient messages as fresh ones
-    (Task #654). Dead-lettering rows older than the threshold keeps the
-    two-phase crash-recovery guarantee (rows younger than the threshold still
-    reset to 'pending' on boot) while making a resurrected agent start from
-    its real conversation, not a flood of stale mail.
-
-    Age is measured from `claimed_at`, falling back to `created_at` for rows
-    that predate the claimed_at column (2026-08-02): a NULL claimed_at means
-    'claimed before the column existed', so created_at is the only age
-    evidence left. Running owners are never touched; idling owners are swept
-    past the idling threshold because hosted agents may never boot again to
-    finalize their claims.
-    """
-    with write_transaction(pool) as conn, conn.cursor() as cur:
-        cur.execute(
-            "UPDATE inbound_messages m SET status = 'done' "
-            "FROM agents_meta am "
-            "WHERE m.agent_id = am.id "
-            "  AND m.status = 'claimed' AND m.kind = 'chat' "
-            "  AND ((am.status = 'terminated' "
-            "        AND COALESCE(m.claimed_at, m.created_at) "
-            "            < now() - make_interval(secs => %s)) "
-            "       OR (am.status = 'idling' "
-            "           AND COALESCE(m.claimed_at, m.created_at) "
-            "               < now() - make_interval(secs => %s)))",
-            (threshold_s, idling_threshold_s),
-        )
-        return cur.rowcount
-
-
-def dead_letter_stale_pending_resurrects(pool: ConnectionPool, threshold_s: float) -> int:
-    """Dead-letter pending resurrect rows whose consumer never reached claim.
-
-    A stale lifecycle row records an abandoned wake. Retaining it cannot
-    recover the turn and later floods the agent with redundant markers, so age
-    alone decides cleanup regardless of the current agent lifecycle state.
-    """
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            "UPDATE inbound_messages m SET status = 'done', claimed_at = now() "
-            "WHERE m.status = 'pending' AND m.kind = 'resurrect' "
-            "  AND m.created_at < now() - make_interval(secs => %s)",
-            (threshold_s,),
-        )
-        return cur.rowcount
-
-
-def dead_letter_stale_pending_terminated(pool: ConnectionPool, threshold_s: float) -> int:
-    """Complete stale lifecycle notices whose terminated owner cannot claim them.
-
-    Post-termination chats remain pending for the G4 resurrect-retry path; only
-    one-shot lifecycle notices with no remaining consumer are dead-lettered.
-    """
-    with write_transaction(pool) as conn, conn.cursor() as cur:
-        cur.execute(
-            "UPDATE inbound_messages m SET status = 'done', claimed_at = now() "
-            "FROM agents_meta am "
-            "WHERE m.agent_id = am.id "
-            "  AND am.status = 'terminated' "
-            "  AND m.status = 'pending' "
-            "  AND m.kind IN ('terminate', 'system_note', 'restart_completed') "
-            "  AND m.created_at < now() - make_interval(secs => %s)",
-            (threshold_s,),
-        )
-        return cur.rowcount
 
 
 def select_pending_ids(pool: ConnectionPool) -> set[int]:

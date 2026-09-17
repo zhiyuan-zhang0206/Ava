@@ -51,13 +51,13 @@ def _h_agents_resurrect(args: argparse.Namespace) -> int:
 def _h_agents_terminate(args: argparse.Namespace) -> int:
     from cli.commands.agents import cmd_agents_terminate
 
-    return cmd_agents_terminate(args.agent_id, source=args.source)
+    return cmd_agents_terminate(args.agent_id, source=args.source, final=args.final)
 
 
 def _h_agents_kill(args: argparse.Namespace) -> int:
     from cli.commands.agents import cmd_agents_kill
 
-    return cmd_agents_kill(args.agent_id, source=args.source)
+    return cmd_agents_kill(args.agent_id, source=args.source, final=args.final)
 
 
 def _h_notices_list(args: argparse.Namespace) -> int:
@@ -183,12 +183,22 @@ def _add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
         "terminate", help="stop the agent gracefully (it exits after its current turn)"
     )
     agents_terminate_p.add_argument("agent_id", type=int, help="agent id to terminate")
+    agents_terminate_p.add_argument(
+        "--final",
+        action="store_true",
+        help="also close the agent: never auto-resurrect (resurrect reopens it)",
+    )
     agents_terminate_p.set_defaults(func=_h_agents_terminate)
 
     agents_kill_p = agents_sub.add_parser(
         "kill", help="hard-stop a stuck agent (kill the process + mark terminated)"
     )
     agents_kill_p.add_argument("agent_id", type=int, help="agent id to kill")
+    agents_kill_p.add_argument(
+        "--final",
+        action="store_true",
+        help="also close the agent: never auto-resurrect (resurrect reopens it)",
+    )
     agents_kill_p.set_defaults(func=_h_agents_kill)
 
     for lifecycle_parser in (

@@ -935,6 +935,9 @@ class TestResurrectIfTerminatedPlacement:
         monkeypatch.setattr(ops_lifecycle, "_wake_suppression_active", lambda _aid: False)
         monkeypatch.setattr(ops_lifecycle, "_recovery_halted", lambda _aid: False)
         monkeypatch.setattr(ops_lifecycle, "_clear_wake_suppression", lambda _aid: None)
+        # The closure guard reads agents_meta; these tests pin dispatch
+        # placement, not the gate — default it to "open".
+        monkeypatch.setattr(ops_lifecycle, "_closed_agent", lambda _aid: False)
         # The notice guard reads the trigger row from the DB; these tests pin
         # dispatch placement, not the guard — default it to "not a notice".
         monkeypatch.setattr(
@@ -973,6 +976,28 @@ class TestResurrectIfTerminatedPlacement:
 
         def _no_machine_read(_aid: int) -> str:
             raise AssertionError("halted auto-resurrect must not read or contact the home")
+
+        monkeypatch.setattr(ops_lifecycle, "get_agent_machine", _no_machine_read)
+        status = await ops_lifecycle.resurrect_if_terminated(
+            5, trigger_inbound_id=88, trigger_inbound_kind="chat"
+        )
+        assert status is AgentStatus.TERMINATED
+
+    @pytest.mark.asyncio
+    async def test_closed_agent_skips_forward_and_launch(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A closed agent (`terminate --final`) is never auto-resurrected: the
+        closure marker outranks every automatic channel, so the delivery,
+        compact, and watchdog triggers all stop here — no home contact, no
+        launch. Its queued work waits for an explicit manual resurrect."""
+        from shared.agents import AgentStatus
+
+        monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
+        monkeypatch.setattr(ops_lifecycle, "_closed_agent", lambda _aid: True)
+
+        def _no_machine_read(_aid: int) -> str:
+            raise AssertionError("closed auto-resurrect must not read or contact the home")
 
         monkeypatch.setattr(ops_lifecycle, "get_agent_machine", _no_machine_read)
         status = await ops_lifecycle.resurrect_if_terminated(
@@ -1161,6 +1186,9 @@ class TestResurrectIfTerminatedNotificationGuard:
         monkeypatch.setattr(ops_lifecycle, "_wake_suppression_active", lambda _aid: False)
         monkeypatch.setattr(ops_lifecycle, "_recovery_halted", lambda _aid: False)
         monkeypatch.setattr(ops_lifecycle, "_clear_wake_suppression", lambda _aid: None)
+        # The closure guard reads agents_meta; these tests pin the notice
+        # guard, not the closure — default it to "open".
+        monkeypatch.setattr(ops_lifecycle, "_closed_agent", lambda _aid: False)
 
     @pytest.mark.asyncio
     async def test_system_notice_trigger_skips_forward_and_launch(

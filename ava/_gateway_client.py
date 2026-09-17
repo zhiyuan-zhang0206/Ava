@@ -372,6 +372,7 @@ def terminate(
     source: str | None = None,
     message: str | None = None,
     force: bool = False,
+    final: bool = False,
 ) -> dict:
     """POST /api/agents/{id}/terminate → response dict.
 
@@ -387,6 +388,11 @@ def terminate(
 
     message, when present, is retained for the agent's next resurrection while
     termination proceeds without waiting for another response.
+
+    final=True closes the agent — never auto-resurrected (its queued work
+    dead-letters on the existing thresholds); an explicit resurrect reopens it.
+    Sent only when set, so an older gateway never receives a flag it cannot
+    honor.
     """
     body: dict = {}
     if source is not None:
@@ -397,6 +403,8 @@ def terminate(
         body["message"] = message
     if force:
         body["force"] = True
+    if final:
+        body["final"] = True
     resp = _post(f"/api/agents/{agent_id}/terminate", body)
     _raise_from_response(resp)
     return resp.json()

@@ -15342,6 +15342,11 @@
             "title": "Force",
             "default": false
           },
+          "final": {
+            "type": "boolean",
+            "title": "Final",
+            "default": false
+          },
           "source": {
             "type": "string",
             "maxLength": 64,
@@ -15365,7 +15370,7 @@
         },
         "type": "object",
         "title": "TerminateAgentRequest",
-        "description": "POST /api/agents/{id}/terminate request body — fully optional.\n\n`force` defaults to False for graceful termination. True directly kills the\ndetached process and force-updates status when the agent cannot reach claim.\n\n`source` defaults to \"user\"; SDK paths pass f\"agent:{my_id}\". Claim\nincludes this source in the lifecycle marker shown to the agent.\n\n`message`, when present, is queued as chat immediately before the terminate\ninbound. Lifecycle acceptance claims only the terminate row, so the chat\nremains pending for the next resurrection without another LLM turn."
+        "description": "POST /api/agents/{id}/terminate request body — fully optional.\n\n`force` defaults to False for graceful termination. True directly kills the\ndetached process and force-updates status when the agent cannot reach claim.\n\n`final` closes the agent — the closure marker (`agents_meta.closed_at`)\nmeans \"never auto-resurrect\": every automatic resurrection path skips it\nand its queued work dead-letters on the existing thresholds; only an\nexplicit manual resurrect reopens it. Stamped even when the terminate lands\non an already-terminated agent (metadata-only mark; the backfill route).\n\n`source` defaults to \"user\"; SDK paths pass f\"agent:{my_id}\". Claim\nincludes this source in the lifecycle marker shown to the agent.\n\n`message`, when present, is queued as chat immediately before the terminate\ninbound. Lifecycle acceptance claims only the terminate row, so the chat\nremains pending for the next resurrection without another LLM turn."
       },
       "TerminateAgentResponse": {
         "properties": {

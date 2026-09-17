@@ -260,6 +260,25 @@ def test_agents_terminate_is_graceful(
     assert "terminate" in capsys.readouterr().out
 
 
+def test_agents_terminate_final_sends_the_closure_flag(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen = _patch_post(monkeypatch, {"status": "enqueued"})
+    assert _agents.cmd_agents_terminate(7, final=True) == 0
+    assert seen["url"] == "http://gw:8000/api/agents/7/terminate"
+    assert seen["json"] == {"force": False, "final": True}
+    assert "terminate" in capsys.readouterr().out
+
+
+def test_agents_kill_final_sends_the_closure_flag(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen = _patch_post(monkeypatch, {"status": "enqueued"})
+    assert _agents.cmd_agents_kill(7, final=True) == 0
+    assert seen["url"] == "http://gw:8000/api/agents/7/terminate"
+    assert seen["json"] == {"force": True, "final": True}
+
+
 def test_agents_kill_forces(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
