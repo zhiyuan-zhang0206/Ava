@@ -108,6 +108,8 @@ _TRUNK_REQUEST_TIMEOUT_S = 30.0
 _MAX_LIST_PAGES = 80
 _MAX_TIMELINE_PAGES = 3
 _MAX_FLAKY_PAGES = 20
+# GitHub's per_page ceiling (100); every walk pages in batches of this size
+# (task #3696 exception inventory).
 _PAGE_SIZE = 100
 
 _STATE_DIR_RELATIVE = Path("state") / "pr-flow"

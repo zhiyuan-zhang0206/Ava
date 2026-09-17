@@ -73,7 +73,8 @@ def get_agent_events(
     event: Annotated[str | None, Query()] = None,
     level: Annotated[str | None, Query()] = None,
     # `limit`'s range and `offset`'s ceiling stay protective constants (import-
-    # time Query bounds); the default *window* is display.events_default_limit.
+    # time Query bounds; task #3696 exception inventory); the default *window*
+    # is display.events_default_limit.
     limit: Annotated[int | None, Query(ge=1, le=1000)] = None,
     offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
 ) -> list[AgentEventRow]:

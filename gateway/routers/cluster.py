@@ -446,8 +446,8 @@ async def get_cluster_roster(request: Request) -> list[MachineStatus]:
 
 
 # Protective ceiling for the admin-events limit (the handler's range check);
-# the default *window* is display.cluster_events_default_limit (task #3696
-# exception inventory: KEEP).
+# the default *window* is display.cluster_events_default_limit
+# (task #3696 exception inventory: KEEP).
 _EVENTS_MAX_LIMIT = 1000
 
 

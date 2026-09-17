@@ -24,6 +24,9 @@ import { cn } from "@/lib/utils";
 
 const ZOOM_WINDOWS = [24, 12, 6, 1, 0.5] as const;
 const RUN_TIMELINE_WINDOW_HOURS_SETTING = "display.run_timeline_window_hours";
+// KEEP (task #3696 exception inventory): fallback when the per-user setting is
+// unset — the smallest window the zoom control offers (ZOOM_WINDOWS bottoms
+// out at 0.5h), so the page opens focused on the freshest slice.
 const RUN_TIMELINE_WINDOW_HOURS_DEFAULT = 0.5;
 const RUN_TIMELINE_SUMMARY_VISIBLE_SETTING = "display.run_timeline_summary_visible";
 

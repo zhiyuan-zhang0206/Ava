@@ -29,7 +29,7 @@ anything CI catches.** Report only what CI is blind to.
 
 ## Review dimensions
 
-Walk all six. For each, decide: pass (`[x]`), or partial / concern (`[~]`).
+Walk all seven. For each, decide: pass (`[x]`), or partial / concern (`[~]`).
 
 ### 1. AGENTS.md compliance
 The highest-value check — `AGENTS.md` is natural language, unmechanizable.
@@ -87,6 +87,12 @@ Not the coverage percentage (CI gates that already) — the judgment:
 - Per-file line budget (600 soft / 800 hard) — flag only what the structure lint
   does not already block.
 
+### 7. Numeric limits
+Per `conventions/numeric-limits.md`: a new or changed limit/cap is either cluster
+config with its reason in the field's `description`, or a literal marked as an
+exception with the source that fixes it. A naked limit — no config, no marker, no
+stated source — is a must-fix.
+
 ## Review comment template
 
 Post exactly this structure. Omit a severity section if it has no items (don't
@@ -116,6 +122,7 @@ leave empty headers). The comment is repository-facing — it carries no agent i
 - [x/~] Security Patterns
 - [x/~] Test Coverage
 - [x/~] Architecture Consistency
+- [x/~] Numeric Limits
 
 ---
 *Reviewed by automated review*

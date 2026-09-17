@@ -25,7 +25,8 @@ const RETENTION_MAX_ATTEMPTS = 5;
 /** The Display settings row offers 0..3 retained sessions; clamping to that
  * range keeps a hand-set value inside what the user-facing row can express —
  * a negative number is meaningless, and each extra session costs one more
- * sequential segment fetch. */
+ * sequential segment fetch. The row's options and this clamp are the same
+ * range: widen both together (ui/web/src/app/control/display/page.tsx). */
 const MAX_RETAINED_SESSIONS = 3;
 
 export function useCompactHistoryRetention(options: {

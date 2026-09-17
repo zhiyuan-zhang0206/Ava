@@ -26,7 +26,7 @@ def request(
     ``batch_window_seconds`` is the relay's routine-message merge window (see
     ``control.request``): 30s coalesces routine arrivals into one hint per
     window while user chat and cancel always hint immediately; 0 disables
-    merging (validated 0..300).
+    merging (validated 0..300; task #3696 exception inventory).
     """
     result = control.request(
         agent_id,

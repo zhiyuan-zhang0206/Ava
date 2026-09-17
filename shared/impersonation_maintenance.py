@@ -13,7 +13,8 @@ from shared.db_transaction import write_transaction
 # One reaper pass handles at most this many leases per list — expired-lease
 # reconciliation and the approaching-expiry reminder scan each take one page.
 # The pass stays a short transaction and the next cycle (default 60s) picks up
-# any remainder, so a backlog drains over cycles rather than one long pass.
+# any remainder, so a backlog drains over cycles rather than one long pass —
+# an internal batch quantity, not a tuning knob (task #3696 exception inventory).
 _PASS_BATCH = 200
 
 
@@ -41,7 +42,7 @@ def reap_impersonations(pool: ConnectionPool, *, limit: int = _PASS_BATCH) -> in
 # How long before expiry a lease first gets its renewal reminder: 300s (5
 # minutes) is several 60s reaper cycles, so the reminder lands promptly and
 # still leaves the controller time to renew before the lease lapses; one
-# reminder per expiry deadline (issue #2054).
+# reminder per expiry deadline (issue #2054; task #3696 exception inventory).
 REMINDER_WINDOW_SECONDS = 300.0
 
 

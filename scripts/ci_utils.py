@@ -1183,6 +1183,8 @@ def _quarantined_tests(repo: str, *, token: str | None) -> list[dict[str, object
     payload: dict[str, object] = {
         "repo": {"host": "github.com", "owner": owner, "name": name},
         "org_url_slug": _TRUNK_ORG_SLUG,
+        # Trunk's page ceiling: 100 per page; one page is the whole lookup
+        # (task #3696 exception inventory).
         "page_query": {"page_size": 100},
     }
     data, error = _trunk_post("flaky-tests/list-quarantined-tests", payload, token)

@@ -575,6 +575,8 @@ def _write_evidence(scratch: Path, evidence: DrillEvidence) -> None:
         handle.write(evidence.to_json())
 
 
+# Drill-log tails (task #3696 exception inventory): 4000 chars for the report
+# excerpt; the stop-marker scan reads wider (see `_stop_lines`).
 def _log_tail(path: Path, limit: int = 4000) -> str:
     try:
         return path.read_text(errors="replace")[-limit:]
@@ -583,6 +585,8 @@ def _log_tail(path: Path, limit: int = 4000) -> str:
 
 
 def _stop_lines(sandbox_log: Path) -> list[str]:
+    # Wide tail for the stop-marker scan: the markers can sit above a long
+    # crawl-out (task #3696 exception inventory).
     text = _log_tail(sandbox_log, limit=200_000)
     return [
         line for line in text.splitlines() if any(marker in line for marker in _STOP_LINE_MARKERS)

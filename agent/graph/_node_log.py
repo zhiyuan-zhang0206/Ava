@@ -191,6 +191,9 @@ _SNAPSHOT_CURSOR: dict[int, int] = {}
 # isolates concurrent turns sharing the host. Exceptions bypass this buffer because their traceback is
 # load-bearing diagnostic data.
 _NODE_EXIT_AGGREGATE: dict[int, list[dict[str, Any]]] = {}
+# Flush threshold + memory bound (task #3696 exception inventory): a normal
+# turn's exits are a handful; this only trips when a flush path was skipped,
+# keeping the per-agent buffer from growing unbounded.
 _NODE_EXIT_AGGREGATE_CAP = 32
 
 

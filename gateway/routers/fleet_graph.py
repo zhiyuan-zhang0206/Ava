@@ -598,7 +598,8 @@ def get_fleet_graph(
     ] = False,
     hours: Annotated[StatsWindowHours | None, Query()] = None,
     # `decay_lambda`'s range stays a protective constant (import-time Query
-    # bound); the default *decay* is display.fleet_graph_decay_lambda.
+    # bound; task #3696 exception inventory); the default *decay* is
+    # display.fleet_graph_decay_lambda.
     decay_lambda: Annotated[float | None, Query(ge=0, le=10)] = None,
 ) -> FleetGraphResponse:
     """Fleet-wide weighted agent graph — nodes (agents) + edges (lineage + messages).

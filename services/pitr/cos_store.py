@@ -45,7 +45,8 @@ from services.pitr.object_store import (
 from services.pitr.retention_delete import DeleteOutcome
 
 _HASH_CHUNK_BYTES = 8 * 1024 * 1024
-"""Read/write granularity; the base packer and WAL staging use 8 MiB."""
+"""Read/write granularity; the base packer and WAL staging use 8 MiB
+(task #3696 exception inventory)."""
 
 
 class CosObjectStore:

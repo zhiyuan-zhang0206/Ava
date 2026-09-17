@@ -154,7 +154,10 @@ def list_compact_boundary_checkpoint_ids(agent_id: int, *, limit: int | None = N
 
 
 def _msgpack_array_length(header: bytes) -> int:
-    """Read a MessagePack array length from its at-most-five-byte header."""
+    """Read a MessagePack array length from its at-most-five-byte header.
+
+    Markers and widths are the MessagePack spec (task #3696 exception inventory).
+    """
     if not header:
         raise ValueError("empty MessagePack header")
     marker = header[0]

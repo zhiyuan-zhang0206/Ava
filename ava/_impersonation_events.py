@@ -55,6 +55,8 @@ def consume_recorded_events(session: dict[str, Any], *, page_budget: int = 4) ->
                 **filters,
                 "from": window["start"],
                 "to": window["end"],
+                # 1000 = the events API's page ceiling (le); the durable
+                # cursor resumes across steps (task #3696 exception inventory).
                 "limit": 1000,
                 "offset": window["offset"],
             },
@@ -73,6 +75,8 @@ def consume_recorded_events(session: dict[str, Any], *, page_budget: int = 4) ->
         if not page["meta"]["has_more"]:
             cursor.pop(0)
         elif window["offset"] < 10_000:
+            # Walk to the API's offset ceiling (le=10_000); past it the window
+            # is bisected below.
             window["offset"] += 1000
         else:
             start, end = (

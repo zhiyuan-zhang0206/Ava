@@ -151,6 +151,8 @@ def _query_chat_db(
     return results
 
 
+# 20-row default page for both lenses (task #3696 exception inventory);
+# --limit overrides, and the codes path over-scans internally to fill it.
 def query_codes(
     phone_suffix: str | None = None,
     lookback_hours: float = DEFAULT_LOOKBACK_HOURS,

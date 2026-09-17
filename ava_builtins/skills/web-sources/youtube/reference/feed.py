@@ -462,7 +462,7 @@ def sync(
     ones already mirrored. Otherwise it is a follow: a steady-state run stops at
     the mirror and takes everything above it; a first follow (or a gap larger than
     the window — enum never reached the mirror) is capped to `initial_limit` so it
-    does not backfill the whole window.
+    does not backfill the whole window (task #3696 exception inventory).
 
     `do_fetch=False` is a non-mutating preview (enumerate only)."""
     source = resolve_source(spec)

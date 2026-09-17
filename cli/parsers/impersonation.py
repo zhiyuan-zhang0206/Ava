@@ -97,6 +97,8 @@ def _add_impersonation_parser(sub: argparse._SubParsersAction[argparse.ArgumentP
     listing = commands.add_parser("list", help="page permanent session history")
     listing.add_argument("--agent", dest="agent_id", required=True, type=int)
     listing.add_argument("--before", type=int)
+    # Page matches the controller-read default; 1000 = the service's validated
+    # ceiling (task #3696 exception inventory).
     listing.add_argument("--limit", type=partial(_integer_range, maximum=1000), default=100)
     listing.set_defaults(func=_h_impersonate)
     for name in ("status", "renew", "release", "inbox", "ack", "exec", "say"):
@@ -121,6 +123,7 @@ def _add_impersonation_parser(sub: argparse._SubParsersAction[argparse.ArgumentP
     parsers["release"].add_argument(
         "--summary", required=True, help="handoff summary; '-' reads stdin"
     )
+    # Same page bounds as the controller read (task #3696 exception inventory).
     parsers["inbox"].add_argument(
         "--limit",
         type=partial(_integer_range, maximum=1000),

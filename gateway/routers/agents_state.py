@@ -402,6 +402,7 @@ async def reconcile_agent_message(
 def get_agent_messages(
     agent_id: int,
     request: Request,
+    # le=10000 is a protective range bound (task #3696 exception inventory).
     limit: int | None = Query(default=None, ge=1, le=10000),
     before: int | None = Query(default=None, ge=0),
 ) -> AgentMessagesResponse:

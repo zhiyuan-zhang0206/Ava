@@ -639,6 +639,8 @@ class HostConfigField(BaseModel):
 class ConfigAuditReadPayload(BaseModel):
     """`config_audit_read` op payload — how many recent records to read (1..200)."""
 
+    # Read ceiling (200) mirrors the config-audit endpoint's le; callers pass
+    # their own window (task #3696 exception inventory).
     last: int = Field(ge=1, le=200)
 
 

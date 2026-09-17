@@ -99,6 +99,9 @@ function sanitizeValue(value: unknown): string | undefined {
     return String(value);
   }
   if (typeof value === "string") {
+    // KEEP (task #3696 exception inventory): one string rides the event
+    // payload; 64 chars identify the value (label, selector, url) without
+    // letting one field dominate it.
     return value.length > 64 ? value.slice(0, 64) : value;
   }
   // Objects / arrays / undefined — never serialized (a setting value is

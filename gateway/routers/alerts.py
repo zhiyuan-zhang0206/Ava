@@ -218,8 +218,9 @@ def list_alerts(
     window: str = Query(default="24h", pattern="^(1h|6h|24h|7d)$"),
     status: AlertStatus | None = None,
     severity: AlertSeverity | None = None,
-    # `limit`'s range stays a protective constant (import-time Query bound);
-    # the default *window* is display.alerts_default_limit.
+    # `limit`'s range stays a protective constant (import-time Query bound;
+    # task #3696 exception inventory); the default *window* is
+    # display.alerts_default_limit.
     limit: int | None = Query(default=None, ge=1, le=500),
 ) -> AlertsListResponse:
     """Unresolved-first alert history for the alert section.

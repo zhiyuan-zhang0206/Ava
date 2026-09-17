@@ -12,6 +12,6 @@ EDGE_EVENT_NAMES = ("send_message", *LINEAGE_EVENT_NAMES)
 
 # Loki fetch cap for the edge stream. Audit events are low-volume (a few
 # thousand since the cutover); the cap is a guardrail, not an expectation - a
-# truncated read degrades to a partial graph. Protective constant (task #3696
-# exception inventory: KEEP).
+# truncated read degrades to a partial graph.
+# Protective constant (task #3696 exception inventory: KEEP).
 LOKI_EDGE_LIMIT = 50_000

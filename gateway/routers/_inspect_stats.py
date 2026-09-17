@@ -314,6 +314,9 @@ def _projected_live_values(
         from_=min(start for start, _ in spans),
         to=max(end for _, end in spans),
         timeout_s=_query_timeout(deadline),
+        # Stats scan sizing (task #3696 exception inventory): the aggregation
+        # reduces client-side, so a wider per-slice bound keeps the slice
+        # count (and Loki round trips) low.
         limit_per_slice=20000,
     )
 
