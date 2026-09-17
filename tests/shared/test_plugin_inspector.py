@@ -33,7 +33,7 @@ def _widget(**over: Any) -> InspectWidgetSpec:
     data: dict[str, Any] = {
         "id": "today-tasks",
         "kind": "taskList",
-        "order": 50,
+        "order": 150,
     }
     data.update(over)
     return InspectWidgetSpec(**data)
