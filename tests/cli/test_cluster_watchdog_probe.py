@@ -100,7 +100,7 @@ def test_live_watchdog_is_left_alone(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
 
 def test_dead_watchdog_is_respawned_with_its_own_spec(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     spec = _spec_for("agent-runner", tmp_path / "w.pid")
     monkeypatch.setattr(wp, "_watchdog_spec", lambda _r: spec)  # pyright: ignore[reportUnknownArgumentType]
@@ -115,6 +115,7 @@ def test_dead_watchdog_is_respawned_with_its_own_spec(
     assert wp.cmd_watchdog_probe("agent-runner") == 0
     assert seen["session"] == "agent-runner-watchdog"
     assert "--role agent-runner" in str(seen["cmd"])
+    assert "watchdog respawned" in capsys.readouterr().err
 
 
 def test_respawn_is_forced_through_the_source_switch_window(
@@ -142,7 +143,7 @@ def test_respawn_is_forced_through_the_source_switch_window(
 
 
 def test_failed_respawn_is_reported_not_swallowed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A silent 0 here would tell the operator the watchdog is fine while its
     capability's services stay down — the failure mode this whole feature exists
@@ -151,6 +152,8 @@ def test_failed_respawn_is_reported_not_swallowed(
     monkeypatch.setattr(wp, "_alive", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("shared.service_respawn.respawn_service", lambda *_a, **_k: False)  # pyright: ignore[reportUnknownArgumentType]
     assert wp.cmd_watchdog_probe("gateway") == 1
+    err = capsys.readouterr().err
+    assert "respawning" in err and "failed to respawn" in err
 
 
 # --- held stop ------------------------------------------------------------
@@ -206,3 +209,23 @@ def test_not_fresh_held_stop_marker_still_revives(
     )
     assert wp.cmd_watchdog_probe("agent-runner") == 0
     assert respawns == ["agent-runner-watchdog"]
+
+
+# --- scheduler-visible output ---------------------------------------------
+
+
+def test_stand_down_line_reaches_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The scheduler runs this command headless (no AVA_CLI_LOG_NAME, no TTY),
+    so loguru has no sink — without a stderr copy the held-stop observation has
+    nothing to read. stderr is what launchd's StandardErrorPath and the
+    crontab line's redirect both capture (task #3867)."""
+    monkeypatch.setattr("shared.os_watchdog_probe.held_stop_state", lambda: HeldStopState.FRESH)
+    monkeypatch.setattr(
+        wp,
+        "_watchdog_spec",
+        lambda _r: _spec_for("gateway", tmp_path / "w.pid"),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    assert wp.cmd_watchdog_probe("gateway") == 0
+    assert "standing down" in capsys.readouterr().err
