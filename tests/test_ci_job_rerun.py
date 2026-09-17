@@ -325,3 +325,25 @@ def test_rerun_failed_jobs_uses_run_level_for_multiple_failed_jobs(
     posts = [c for c in calls if "POST" in c]
     assert len(posts) == 1
     assert "actions/runs/11/rerun-failed-jobs" in posts[0][-1]
+
+
+def test_rerun_failed_jobs_reports_rejected_run_level_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A rejected run-level rerun request (the multi-failed-job path) lands in
+    `errors` with the run and its job count — never in `reran` (task #3764)."""
+    fake, _calls = _fake_gh(
+        [
+            _sha_response(),
+            _runs_response(_CI_RUN),
+            _jobs_response(
+                _job("backend (1/8)", 101, 11, "failure"),
+                _job("e2e shard (3/4)", 102, 11, "failure"),
+            ),
+            _R(returncode=1, stderr="gh: rate limited"),
+        ]
+    )
+    monkeypatch.setattr(rerun.subprocess, "run", fake)
+    reran, waiting, errors = rerun.rerun_failed_jobs(42, "owner/repo")
+    assert reran == [] and waiting == []
+    assert any("run 11" in e and "2 failed jobs" in e and "rate limited" in e for e in errors)

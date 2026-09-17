@@ -1854,8 +1854,8 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="re-run the failed jobs of the PR's workflow runs once their run "
         "is completed (issue #102): GitHub refuses job-level and run-level "
-        "reruns alike while a run is still going (probed 2026-09-17; the REST "
-        "docs state no such precondition), so a still-running run is reported "
+        "reruns alike while a run is still going (probed 2026-09-17; the docs "
+        "state no such precondition), so a still-running run is reported "
         "as waiting with the recovery action. Exit 0 when all failed "
         "jobs were re-run (or none were), 5 when failures remain whose run is "
         "still going, 3 on errors. Exclusive with --wait/--merge/--json.",

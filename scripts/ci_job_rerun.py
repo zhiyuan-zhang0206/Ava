@@ -8,11 +8,11 @@ there is no early window to recover a flaky job in:
 - run level, `POST /repos/{repo}/actions/runs/{id}/rerun-failed-jobs` (and
   `.../rerun`) -> 403 "This workflow is already running".
 
-Probed live 2026-09-17 (task #3764): the REST docs state the 30-day re-run
-window but no run-status precondition; the API refuses until the run reads
-`completed`. The recovery for a still-running run is "wait for the run to
-finish, then re-run", which `rerun_failed_jobs` reports as `waiting` instead
-of forwarding the 403.
+Probed live 2026-09-17 (task #3764): the Actions re-run how-to states the
+30-day window and no docs page states this precondition; the API refuses
+until the run reads `completed`. The recovery for a still-running run is
+"wait for the run to finish, then re-run", which `rerun_failed_jobs` reports
+as `waiting` instead of forwarding the 403.
 
 Once a run is completed, `rerun_failed_jobs` re-runs its failed jobs: one
 job-level rerun when a single job failed (the narrowest intervention), and one

@@ -943,7 +943,7 @@ def test_rerun_failed_jobs_forwards_and_reports_errors(
         lambda _pr, _repo: ([], [], ["lint: gh: rate limited"]),
     )
     assert ci_utils.main(["42", "--rerun-failed-jobs"]) == 3
-    assert "rate limited" in capsys.readouterr().out
+    assert "Re-run failed: lint: gh: rate limited" in capsys.readouterr().out
 
 
 def test_rerun_failed_jobs_success_exits_zero(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
@@ -987,6 +987,32 @@ def test_rerun_failed_jobs_waits_for_still_running_run(
     assert "Waiting: backend shard (8/16)" in out
     assert "in_progress" in out
     assert "Re-run this command once the run finishes." in out
+
+
+def test_rerun_failed_jobs_reports_mixed_outcomes(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    """A rerun that partly lands and partly waits prints both lines and exits
+    5: the waiting remainder governs the exit (task #3764)."""
+    monkeypatch.setattr(
+        ci_utils,
+        "rerun_failed_jobs",
+        lambda _pr, _repo: (
+            [{"name": "lint", "job_id": 104, "run_id": 11, "conclusion": "FAILURE"}],
+            [
+                {
+                    "name": "backend shard (8/16)",
+                    "job_id": 105093815208,
+                    "run_id": 35187743815,
+                    "conclusion": "failure",
+                    "run_status": "in_progress",
+                }
+            ],
+            [],
+        ),
+    )
+    assert ci_utils.main(["42", "--rerun-failed-jobs"]) == 5
+    out = capsys.readouterr().out
+    assert "Re-ran lint" in out
+    assert "Waiting: backend shard (8/16)" in out
 
 
 def test_rerun_failed_jobs_query_failure_is_an_error(
