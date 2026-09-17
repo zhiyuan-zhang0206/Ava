@@ -9,8 +9,6 @@ from ava._sdk_validation import coerce_str, coerce_typed
 from shared.config import settings
 from shared.config.turn_view import turn_settings
 from shared.lifecycle import AgentRestart, AgentTermination, _SystemHalt
-from shared.live_events import CompactRequest
-from shared.redis_client import publish_best_effort_sync
 
 # Deliberately NOT in __all_for_ava__ (importable, but out of the rendered SDK
 # docs): AgentRestart / AgentTermination are framework control-flow exceptions
@@ -303,6 +301,11 @@ def compact(summary: str) -> NoReturn:
     # The durable compact_summary inbound is already committed; if this live-UI
     # event is lost the frontend recovers on its next fetch. Routed through the
     # never-raise primitive so redis can never interrupt this lifecycle exit.
+    # Imported here, not at module scope: `import ava` must not pull the redis /
+    # live-events stacks into every exec child (startup-path laziness, task #3816).
+    from shared.live_events import CompactRequest
+    from shared.redis_client import publish_best_effort_sync
+
     publish_best_effort_sync(
         settings.data_plane.events_channel,
         CompactRequest(
