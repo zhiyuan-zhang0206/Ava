@@ -91,7 +91,10 @@ Delivery is live-first, preserving the existing conversation either way.
 Primary: the relay opens a websocket to the session's app server endpoint and
 calls `turn/start` with the message — on an idle thread that starts a new turn,
 and on an active regular turn it steers that turn, so an active host receives
-the message within seconds. Fallback: whenever the live attempt does not land —
+the message within seconds. When the session recorded no endpoint, the relay
+probes the local daemon's control socket
+(`$CODEX_HOME/app-server-control/app-server-control.sock`) and uses it when it
+exists. Fallback: whenever the live attempt does not land —
 the endpoint is unreachable, times out, or the host refuses (an active turn
 that cannot be steered, a review or a manual compaction; an unknown thread) —
 the relay invokes `codex queue --thread UUID --message TEXT --remote ENDPOINT`,

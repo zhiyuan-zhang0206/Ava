@@ -38,10 +38,11 @@ def bootstrap_message(
     codex_routing = (
         "Add --thread-id with this Codex session's CODEX_THREAD_ID and --codex-remote "
         f"{codex_remote} when issuing the request; preserve CODEX_HOME so the native relay "
-        "queues into that same server — the TUI and the relay must share one endpoint."
+        "delivers into that same server (live turn/start; queue fallback) — the TUI and the "
+        "relay must share one endpoint."
         if codex_remote is not None
         else "Add --thread-id with this Codex session's CODEX_THREAD_ID; preserve CODEX_HOME "
-        "when issuing the request so the native relay uses this session's owner. When your host "
+        "when issuing the request so the native relay finds this session's server. When your host "
         "runs an explicit app server, pass --codex-remote with its endpoint — the TUI and the "
         "relay must share one endpoint."
     )
