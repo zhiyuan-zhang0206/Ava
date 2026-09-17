@@ -562,6 +562,26 @@ class DeliveryRecoveryDecision(TypedDict):
     reason: str | None
 
 
+class DeliveryOutboxFlushed(TypedDict):
+    """`delivery_outbox_flushed` payload — shared/delivery_outbox.py flusher."""
+
+    inbound_id: int
+    attempts: int
+    flush_attempts: int
+    age_s: float
+    origin_agent_id: int | None
+
+
+class DeliveryOutboxAbandoned(TypedDict):
+    """`delivery_outbox_abandoned` payload — shared/delivery_outbox.py flusher."""
+
+    reason: str
+    attempts: int
+    flush_attempts: int
+    age_s: float
+    origin_agent_id: int | None
+
+
 class FrontendInteraction(TypedDict):
     """`frontend_interaction` payload — gateway/routers/frontend_telemetry.py.
 

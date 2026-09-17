@@ -62,6 +62,7 @@ import ava
 import ava._boot
 from ava._gateway_transport import (
     _MEMORY_SEARCH_MAX_RETRIES,
+    _TRANSIENT_HTTP_STATUSES,
     _delete,
     _get,
     _memory_search_timeout,
@@ -75,6 +76,7 @@ from ava._gateway_transport import (
     _patch as _patch,
 )
 from shared.agents import GatewayUnavailable as GatewayUnavailable
+from shared.log import logger
 
 
 class MemorySearchResult(NamedTuple):
@@ -197,15 +199,60 @@ def send_message(
     inbound row under a unique constraint. Every retry uses the same generated
     `Idempotency-Key`, so it returns that row's stable id instead of duplicating
     the message even if the first HTTP response was lost.
+
+    Deferred delivery (`shared.delivery_outbox`, task #3757): all attempts of
+    one logical message — this call's own retries and a caller's later re-sends
+    of the same (target, source, content) within the dedup window — share one
+    key while the message is undelivered, and a final failure is recorded
+    durably on this machine for bounded redelivery once the gateway returns.
+    A raised `GatewayUnavailable` still means "not delivered now"; it no longer
+    means the message evaporated. Callers keep their own retry semantics
+    unchanged — a re-send is deduplicated by the shared key, and a caller that
+    gives up leaves the durable record behind.
     """
     import httpx
 
+    from shared import delivery_outbox
+
     body = {"content": content, "source": source}
-    resp = _post(
-        f"/api/agents/{agent_id}/messages",
-        body,
-        timeout=httpx.Timeout(120.0),
-    )
+    key: str | None = None
+    try:
+        key = delivery_outbox.logical_key(agent_id=agent_id, source=source, content=content)
+    except Exception:
+        # The outbox is a safety net for a failing send, never a reason for one:
+        # an unusable outbox degrades to the pre-outbox behavior (no shared key,
+        # no record) with a loud log, instead of changing the call's outcome.
+        logger.opt(exception=True).warning(
+            "delivery outbox unavailable; sending agent {} an unkeyed message", agent_id
+        )
+    try:
+        resp = _post(
+            f"/api/agents/{agent_id}/messages",
+            body,
+            timeout=httpx.Timeout(120.0),
+            idempotency_key=key,
+        )
+    except GatewayUnavailable:
+        if key is not None:
+            delivery_outbox.record_failed_send(
+                agent_id=agent_id,
+                source=source,
+                content=content,
+                client_message_id=key,
+            )
+        raise
+    if key is not None:
+        if resp.status_code in _TRANSIENT_HTTP_STATUSES:
+            delivery_outbox.record_failed_send(
+                agent_id=agent_id,
+                source=source,
+                content=content,
+                client_message_id=key,
+            )
+        elif resp.is_success:
+            delivery_outbox.note_send_succeeded(
+                agent_id=agent_id, source=source, content=content, key=key
+            )
     _raise_from_response(resp)
 
 
