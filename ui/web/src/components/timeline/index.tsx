@@ -904,13 +904,15 @@ export function TimelineView({
   // Single Details mode — governs default expanded state for every block
   // across all message kinds (All / Last / None).
   // The mode is DB-backed; until the settings query lands, useUserSettings
-  // falls back to USER_SETTING_DEFAULTS whose expand_runs_mode default is
-  // "all" — rendering with that would flash every detail block open on every
-  // cold load (refresh / app start / desktop rollout reload) before the real
-  // value arrives and collapses them again ("details=none but blocks
-  // auto-expand" report). While loading, render the safe collapsed state and
-  // switch to the real mode when it lands; a reveal (collapsed → expanded
-  // for "all" users) is far less jarring than a flash of everything open.
+  // falls back to USER_SETTING_DEFAULTS (expand_runs_mode default "none",
+  // user ruling 2026-09-17) and the loading state must render the safe
+  // collapsed state regardless of what it reports — a stale "all" read would
+  // flash every detail block open on every cold load (refresh / app start /
+  // desktop rollout reload) before the real value arrives and collapses them
+  // again ("details=none but blocks auto-expand" report). While loading,
+  // render the collapsed state and switch to the real mode when it lands; a
+  // reveal (collapsed → expanded for "all" users) is far less jarring than a
+  // flash of everything open.
   const { detailsMode, isLoading: detailsModeLoading } = useContentToggle();
   const effectiveDetailsMode = detailsModeLoading ? "none" : detailsMode;
 

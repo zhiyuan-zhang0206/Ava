@@ -771,8 +771,9 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   // Default-expanded state of "N steps" run blocks. The Details control in the
   // header (ContentToggle) and the "Collapse details by default" row in the
   // Display settings both control this flag — acting as expand-all /
-  // collapse-all across every run. Default true: steps start expanded.
-  "display.expand_runs_mode": "all",
+  // collapse-all across every run. Default "none": steps start collapsed
+  // (user ruling 2026-09-17).
+  "display.expand_runs_mode": "none",
   // Inspector side-panel open/closed — a workspace preference shared by the
   // composer's toggle and the timeline layout. Default CLOSED (user ruling
   // 2026-08-23, superseding the 2026-08-05 floating desktop panel); the

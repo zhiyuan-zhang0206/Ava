@@ -1,6 +1,6 @@
 // useContentToggle — a thin, DB-backed wrapper over useUserSettings
 // (display.expand_runs_mode). These tests drive it against the reactive
-// user-settings mock and assert it reads the stored value, defaults to "all",
+// user-settings mock and assert it reads the stored value, defaults to "none",
 // and writes the right key on setDetailsMode.
 
 import { act, cleanup, renderHook } from "@testing-library/react";
@@ -16,9 +16,9 @@ beforeEach(() => resetMockSettings());
 afterEach(cleanup);
 
 describe("useContentToggle", () => {
-  it('no stored value → detailsMode defaults to "all"', () => {
+  it('no stored value → detailsMode defaults to "none"', () => {
     const { result } = renderHook(() => useContentToggle());
-    expect(result.current.detailsMode).toBe("all");
+    expect(result.current.detailsMode).toBe("none");
   });
 
   it("surfaces isLoading from the settings query (consumers gate expansion on it)", () => {
@@ -48,6 +48,12 @@ describe("useContentToggle", () => {
 
   it("legacy false → none", () => {
     setMockSetting("display.expand_runs_mode", false);
+    const { result } = renderHook(() => useContentToggle());
+    expect(result.current.detailsMode).toBe("none");
+  });
+
+  it('unrecognized stored value → falls back to "none"', () => {
+    setMockSetting("display.expand_runs_mode", "expanded");
     const { result } = renderHook(() => useContentToggle());
     expect(result.current.detailsMode).toBe("none");
   });

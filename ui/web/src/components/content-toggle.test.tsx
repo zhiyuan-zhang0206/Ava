@@ -18,17 +18,17 @@ describe("ContentToggle", () => {
     expect(screen.getByText("Details")).toBeTruthy();
     const select = screen.getByRole("combobox", { name: "Details level" });
     expect(select).toBeTruthy();
-    expect((select as HTMLSelectElement).value).toBe("all");
+    expect((select as HTMLSelectElement).value).toBe("none");
     // All three options exist
     expect(screen.getByText("All")).toBeTruthy();
     expect(screen.getByText("Last")).toBeTruthy();
     expect(screen.getByText("None")).toBeTruthy();
   });
 
-  it("defaults to 'all' selected", () => {
+  it("defaults to 'none' selected", () => {
     render(<ContentToggle />);
     const select = screen.getByRole("combobox", { name: "Details level" });
-    expect((select as HTMLSelectElement).value).toBe("all");
+    expect((select as HTMLSelectElement).value).toBe("none");
   });
 
   it("selecting Last writes the setting", () => {
