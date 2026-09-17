@@ -2,8 +2,8 @@
 
 The tier table is the machine-facing contract from design v1 (user decisions
 2026-09-17): L2 is macmini's target, L3 gained Full Disk Access, and groups
-whose trigger method is still pending verification must be named as pending
-rather than silently skipped or attempted.
+whose trigger method is still pending verification must have their state read
+and reported rather than silently skipped or attempted.
 """
 
 from __future__ import annotations
@@ -38,10 +38,27 @@ def test_full_tier_carries_fda_and_the_extended_tier_does_not() -> None:
     assert "fda" not in _mod.TIER_GROUPS["L2"]
 
 
-def test_pending_groups_are_declared_with_a_reason() -> None:
+def test_untriggerable_groups_declare_their_preflight_services() -> None:
     for group in ("appdata", "media", "icloud", "fda", "devtools"):
-        assert group in _mod.PENDING_GROUPS
-        assert _mod.PENDING_GROUPS[group]
+        services = _mod.UNTRIGGERABLE_GROUPS[group]
+        assert services
+        assert all(service.startswith("kTCCService") for service in services)
+
+
+def test_preflight_matrix_covers_every_untriggerable_service() -> None:
+    covered = set(_mod.PREFLIGHT_SERVICES)
+    for services in _mod.UNTRIGGERABLE_GROUPS.values():
+        assert set(services) <= covered
+
+
+def test_state_status_is_granted_only_when_every_service_is() -> None:
+    services = _mod.UNTRIGGERABLE_GROUPS["media"]
+    matrix = dict.fromkeys(services, "granted")
+    assert _mod.state_status(services, matrix) == "granted"
+    matrix[services[-1]] = "denied"
+    text = _mod.state_status(services, matrix)
+    assert "denied" in text
+    assert "trigger method pending verification" in text
 
 
 def test_groups_for_tier_defaults_to_the_implemented_set() -> None:
