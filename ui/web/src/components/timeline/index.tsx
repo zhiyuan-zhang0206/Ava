@@ -214,12 +214,20 @@ function groupTimelineSegments(items: readonly BackendTimelineItem[]): RenderGro
   return result;
 }
 
+// The divider's dashed rule: longer dashes and gaps than the browser's
+// `border-dashed` (~2-3px) at a 1:1 ratio, and a deeper color than
+// `border-border` so the line is legible in the dark theme (user feedback
+// 2026-09-17, task #3870). currentColor lets `text-*` carry the tone.
+const DIVIDER_RULE_CLASS =
+  "h-px bg-[repeating-linear-gradient(to_right,currentColor_0_6px,transparent_6px_12px)] text-muted-foreground/60";
+
 function CompactHistoryDivider({ rank }: { readonly rank: number }) {
   const t = useTranslations("timeline");
   // rank 0 = the live boundary between retained history and the current
   // post-compact segment (task #3698); the historical ranks keep the
-  // scroll-back copy. Dashed rules: this line marks a compact boundary, not
-  // a message divider.
+  // scroll-back copy. The rule + label alone mark a compact boundary, not a
+  // message divider — no arrow glyph (removed per the same 2026-09-17
+  // report, task #3870).
   const label = rank === 0 ? t("compactBoundaryDivider") : t("compactHistoryDivider");
   return (
     <div
@@ -228,10 +236,9 @@ function CompactHistoryDivider({ rank }: { readonly rank: number }) {
       aria-live="off"
       className={cn("items-center gap-2 py-1 text-[11px] text-muted-foreground/70", FLEX)}
     >
-      <span aria-hidden="true" className={cn("border-t border-dashed border-border/60", FLEX_1)} />
-      <span aria-hidden="true" className="shrink-0">↑</span>
+      <span aria-hidden="true" className={cn(DIVIDER_RULE_CLASS, FLEX_1)} />
       <span className="shrink-0">{label}</span>
-      <span aria-hidden="true" className={cn("border-t border-dashed border-border/60", FLEX_1)} />
+      <span aria-hidden="true" className={cn(DIVIDER_RULE_CLASS, FLEX_1)} />
     </div>
   );
 }

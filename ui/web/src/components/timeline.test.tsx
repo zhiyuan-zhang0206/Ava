@@ -255,6 +255,8 @@ describe("compact history segment dividers", () => {
     expect(screen.getAllByText("Original history before compact")).toHaveLength(2);
     // The rank-0 divider marks the live boundary into the current segment (task #3698).
     expect(screen.getAllByText("Context compacted")).toHaveLength(1);
+    // No arrow glyph on any divider (user feedback 2026-09-17, task #3870).
+    expect(container.textContent).not.toContain("↑");
 
     const timelineColumn = container.querySelector("[data-slot='scroll-area-viewport'] > div");
     expect(timelineColumn).not.toBeNull();
