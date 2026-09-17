@@ -37,8 +37,9 @@ spawn_codex = _load("spawn_codex_under_test", _REFERENCE / "spawn_codex.py")
 watch_work = _load("watch_work_under_test", _REFERENCE / "watch_work.py")
 
 
-def _record_app_server(events: list[str], _endpoint: str) -> None:
-    """The takeover's readiness wait records as an event in launch-order tests."""
+def _record_app_server(events: list[str], _endpoint: str, *, log_path: Path | None = None) -> None:
+    """The takeover's readiness wait records as an event; the launch hands it the server log."""
+    assert log_path is not None and log_path.name == "app-server.log"
     events.append("app-server")
 
 

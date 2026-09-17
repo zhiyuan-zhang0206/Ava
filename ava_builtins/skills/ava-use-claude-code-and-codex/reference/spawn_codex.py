@@ -259,15 +259,20 @@ def _app_server_command(
 
     if owner.state_dir is None:
         raise RuntimeError("launching owner has no isolated state directory")
-    log_path = owner.state_dir / "app-server.log"
+    log_path = _app_server_log_path(owner)
     socket_path = endpoint.removeprefix("unix://")
     janitor = (
         "{ while kill -0 $$ 2>/dev/null && kill -0 $AP 2>/dev/null; do sleep 2; done; "
-        f"kill $AP 2>/dev/null; sleep 1; kill -9 $AP 2>/dev/null; rm -f {shlex.quote(socket_path)}; }}"
+        "if ! kill -0 $$ 2>/dev/null; then "
+        "if ps -p $AP -o command= 2>/dev/null | grep -q 'app-server'; then "
+        "kill $AP 2>/dev/null; sleep 1; kill -9 $AP 2>/dev/null; fi; fi; "
+        f"rm -f {shlex.quote(socket_path)}; }}"
         " &"
     )
-    # The server pid travels as ${!} (the POSIX spelling): interactive panes
-    # with history expansion can abort the whole line on a bare $! (review C1).
+    # The server pid travels as ${!}: interactive panes run with history
+    # expansion, where a bare $! can abort the whole line (review C1); ${!} is
+    # accepted by bash, dash and zsh alike, so the swap carries no behavior
+    # risk (review N8).
     return (
         f"(cd {shlex.quote(workspace.as_posix())} && "
         f"CODEX_HOME={shlex.quote(str(owner.state_dir))} "
@@ -279,12 +284,22 @@ def _app_server_command(
     )
 
 
-def _wait_for_app_server(endpoint: str, timeout: float = 20.0) -> None:
+def _app_server_log_path(owner: coding_session_owner.CodingSessionOwner) -> Path:
+    """The shared app server's stdout/stderr log inside the owner's state dir."""
+    assert owner.state_dir is not None  # noqa: S101 — callers run after the launch-field check
+    return owner.state_dir / "app-server.log"
+
+
+def _wait_for_app_server(
+    endpoint: str, timeout: float = 20.0, *, log_path: Path | None = None
+) -> None:
     """Block until the shared app server accepts a connection on its socket.
 
     Socket acceptance is the readiness fact (the app server writes no startup
     line); a launch whose endpoint never answers fails loudly instead of
-    starting a TUI that queues nothing.
+    starting a TUI that queues nothing. ``log_path``, when given, names the
+    server's own log in the timeout error so a failing launch points at the
+    evidence (review N3).
 
     The 20s timeout and 0.5s probe cadence are reference-script defaults, not
     config — the script is copied and run standalone (task #3696 exception
@@ -310,8 +325,9 @@ def _wait_for_app_server(endpoint: str, timeout: float = 20.0) -> None:
                 print("  -> app server ready")
                 return
         time.sleep(0.5)
+    detail = f" (app-server log: {log_path})" if log_path is not None else ""
     raise RuntimeError(
-        f"the shared codex app server did not become ready at {endpoint}; "
+        f"the shared codex app server did not become ready at {endpoint}{detail}; "
         "check that the installed codex supports `app-server --listen` and `--remote` "
         "(see canonical_codex_owner.md) — the takeover launch is refused without it"
     )
@@ -525,7 +541,7 @@ def _launch(
             ava.shell.sessions.send(
                 sid, _app_server_command(owner, workspace, remote, caller_instance)
             )
-            _wait_for_app_server(remote)
+            _wait_for_app_server(remote, log_path=_app_server_log_path(owner))
         ava.shell.sessions.send(
             sid, _codex_command(owner, workspace, caller_instance, remote=remote)
         )

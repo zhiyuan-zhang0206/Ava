@@ -507,6 +507,14 @@ def test_request_requires_a_relay_binding(db_conn: psycopg.Connection) -> None:
             relay_provider="claude",
             relay_thread_id=str(uuid4()),
         )
+    with pytest.raises(ValueError, match="unix:// or ws://"):
+        leases.request(
+            owner.agent_id,
+            caller=CallerIdentity(kind="external_agent", subject="codex"),
+            relay_provider="codex",
+            relay_thread_id=str(uuid4()),
+            relay_codex_remote="http://not-a-codex-endpoint",
+        )
 
 
 def test_claude_request_mints_a_scoped_relay_credential(db_conn: psycopg.Connection) -> None:
