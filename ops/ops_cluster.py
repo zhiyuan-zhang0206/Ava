@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
-from ops import cluster_session
+from ops import cluster_session, fetch_topology
 from ops.cluster import (
     ClusterStatus,
     ClusterUpdateInProgress,
@@ -671,6 +671,14 @@ def cluster_fetch_op() -> dict[str, object]:
     fans this out to every agent-runner *before* Phase A so a fetch failure
     aborts the rollout with nothing paused.
 
+    **Central fetch (`settings.general.fetch_via_gateway`, default off).** In the
+    central-fetch topology the gateway is the cluster's only wall-crossing
+    fetcher, so a host that does not carry the gateway capability refuses here —
+    before any fetch — when its `origin` still addresses a wall host
+    (github.com): fetching GitHub from a runner would silently fall back out of
+    the topology. A gateway-capable host is exempt — crossing the wall is its job.
+    The predicate lives in `ops.fetch_topology`.
+
     **Per-attempt observability (2026-08-27 performance forensics):** the
     gateway retries a transport timeout at its own level, so one Phase 0 can
     drive several sequential invocations of this op on the host (observed on
@@ -682,8 +690,10 @@ def cluster_fetch_op() -> dict[str, object]:
     transfer) — instead of a bare "timed out".
 
     Returns:
-        ``{"ok": True, "fetched": "<sha or empty>", "elapsed_s": <float>}``
-        on success; ``{"ok": False, "error": "<message>"}`` on failure.
+        ``{"ok": True, "fetched": "<sha or empty>", "origin_url": <str>, "elapsed_s": <float>}``
+        on success; ``{"ok": False, "error": "<message>", "origin_url": <str>}`` on
+        failure. `origin_url` is the URL the fetch actually used — the evidence the
+        central-fetch refusal and the ops log are read against.
     """
     import subprocess
     import time
@@ -697,7 +707,16 @@ def cluster_fetch_op() -> dict[str, object]:
         pid=os.getpid(),
         timeout=_FETCH_TIMEOUT_S,
     )
+    origin_url = ""
     try:
+        origin_url = fetch_topology.git_origin_url(repo_root())
+        if (refusal := fetch_topology.fetch_wall_refusal(origin_url)) is not None:
+            logger.warning(
+                "[cluster_fetch] refusing: fetch_via_gateway is on but origin still "
+                "addresses a wall host ({url})",
+                url=origin_url,
+            )
+            return {"ok": False, "error": refusal, "origin_url": origin_url}
         result = run_bounded(
             ["git", "fetch", "--progress", "origin"],
             cwd=repo_root(),
@@ -727,7 +746,12 @@ def cluster_fetch_op() -> dict[str, object]:
                 sha=fetched[:7] if fetched else "?",
                 elapsed=elapsed,
             )
-            return {"ok": True, "fetched": fetched, "elapsed_s": round(elapsed, 2)}
+            return {
+                "ok": True,
+                "fetched": fetched,
+                "origin_url": origin_url,
+                "elapsed_s": round(elapsed, 2),
+            }
         logger.warning(
             "[cluster_fetch] git fetch failed rc={rc} stderr={err!r} elapsed={elapsed:.1f}s",
             rc=result.returncode,
@@ -737,6 +761,7 @@ def cluster_fetch_op() -> dict[str, object]:
         return {
             "ok": False,
             "error": f"git fetch origin failed (rc={result.returncode}): {result.stderr[:300]}",
+            "origin_url": origin_url,
             "elapsed_s": round(elapsed, 2),
         }
     except subprocess.TimeoutExpired as exc:
@@ -759,9 +784,10 @@ def cluster_fetch_op() -> dict[str, object]:
                 f"git fetch origin timed out after {elapsed:.0f}s"
                 + (f"; last stderr: {tail[:200]}" if tail else "")
             ),
+            "origin_url": origin_url,
             "elapsed_s": round(elapsed, 2),
         }
     except Exception as exc:
         elapsed = time.monotonic() - t0
         logger.warning("[cluster_fetch] unexpected error: {exc!r}", exc=exc)
-        return {"ok": False, "error": str(exc)}
+        return {"ok": False, "error": str(exc), "origin_url": origin_url}
