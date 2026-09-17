@@ -136,7 +136,9 @@ dashboard panels, including the Statistics-coverage tiles) and
 `shared/core_metrics_observability.py` (the former `ava_observability`
 plugin pack, promoted to core the same day — the repo's own observability
 is not a plugin, per user ruling), and the smaller registration modules
-beside them (`core_metrics_dismissed`, `core_metrics_fleet`,
+beside them (`core_metrics_cost` and `core_metrics_frontend` — the line
+budget splits of the two above, task #3697 S1 — plus
+`core_metrics_dismissed`, `core_metrics_fleet`,
 `core_metrics_pr_flow`). All register through `register_core_metric()` in
 `shared/core_metrics.py`, which runs the **same
 SQL-template safety validation as plugin metrics** (`validate_spec_sql`) and
