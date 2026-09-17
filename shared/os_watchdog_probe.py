@@ -260,12 +260,16 @@ def _register_linux(role: str, interval_s: int) -> int:
 
     minutes = max(1, interval_s // 60)
     marker = _cron_marker(role, _home_slug())
-    # mkdir -p because a redirect into a missing directory would fail the whole
-    # command — killing the job, not just losing its output.
+    # mkdir first, then the pinned command: /bin/sh scopes a leading
+    # `VAR=v cmd` assignment to that one command, so the env prefix must sit
+    # immediately before the ava binary — with a command in between, the
+    # probe ran without its home pin (task #3867). mkdir needs no
+    # environment, and running it first keeps a missing log directory from
+    # failing the redirect, which would kill the whole job.
     log_file = _probe_log_file()
     entry = (
-        f"*/{minutes} * * * * {cron_env_prefix()}mkdir -p {log_file.parent} && "
-        f"{ava_binary_path()} cluster watchdog-probe --role {role} "
+        f"*/{minutes} * * * * mkdir -p {log_file.parent} && "
+        f"{cron_env_prefix()}{ava_binary_path()} cluster watchdog-probe --role {role} "
         f">> {log_file} 2>&1  {marker}"
     )
 
