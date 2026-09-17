@@ -295,7 +295,7 @@ def test_zero_provider_plugins_fail_loud_and_remain_retryable(
 def test_repo_model_vendor_vocabulary_is_complete() -> None:
     ensure_provider_plugins_loaded()
 
-    assert len(_REPO_MODEL_VENDORS) == 35
+    assert len(_REPO_MODEL_VENDORS) == 36
     assert set(MODELS) == _REPO_MODEL_VENDORS.keys()
     # Catalog-only entries: a registered chat model pops its archive entry, so
     # what remains is the catalog-only services plus models the registry no
