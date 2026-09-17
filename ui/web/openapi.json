@@ -9982,15 +9982,19 @@
           "title": {
             "type": "string",
             "title": "Title"
+          },
+          "priority": {
+            "$ref": "#/components/schemas/Priority"
           }
         },
         "type": "object",
         "required": [
           "id",
-          "title"
+          "title",
+          "priority"
         ],
         "title": "InspectWidgetTask",
-        "description": "One task row of a resolved ``taskList`` widget — an element of\n`InspectWidgetResult.tasks` (GET /api/agents/{id}/inspect/widgets).\n\nKernel-resolved data, not policy: the row carries only what the console\nrenders (id for the `/fleet?task=` link, title for the text). The list is\nalready filtered (the agent's active tasks) and complete — every active row renders (user ruling 2026-09-17)."
+        "description": "One task row of a resolved ``taskList`` widget — an element of\n`InspectWidgetResult.tasks` (GET /api/agents/{id}/inspect/widgets).\n\nKernel-resolved data, not policy: the row carries only what the console\nrenders (id for the `/fleet?task=` link, title for the text, priority\nfor the stakes badge — task #3819, user request 2026-09-17). The list is\nalready filtered (the agent's active tasks) and complete — every active row renders (user ruling 2026-09-17)."
       },
       "InventoryAggregate": {
         "properties": {

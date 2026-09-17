@@ -5327,7 +5327,8 @@ export interface components {
          *     `InspectWidgetResult.tasks` (GET /api/agents/{id}/inspect/widgets).
          *
          *     Kernel-resolved data, not policy: the row carries only what the console
-         *     renders (id for the `/fleet?task=` link, title for the text). The list is
+         *     renders (id for the `/fleet?task=` link, title for the text, priority
+         *     for the stakes badge — task #3819, user request 2026-09-17). The list is
          *     already filtered (the agent's active tasks) and complete — every active row renders (user ruling 2026-09-17).
          */
         InspectWidgetTask: {
@@ -5335,6 +5336,7 @@ export interface components {
             id: number;
             /** Title */
             title: string;
+            priority: components["schemas"]["Priority"];
         };
         /**
          * InventoryAggregate

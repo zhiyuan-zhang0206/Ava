@@ -46,6 +46,7 @@ from shared.plugin_inspector import (
     drop_plugin_inspect_widgets,
     registered_inspect_widgets,
 )
+from shared.priority import Priority
 
 # The shipped-plugin inspector directory — every builtin plugin dir with an
 # inspector.py is part of the in-process registry (the metric loader's
@@ -110,14 +111,18 @@ def _resolve_tasks(cur: Cursor[Any], agent_id: int) -> list[InspectWidgetTask]:
 
     "Active" = ``in_progress``; the system root is excluded by its NULL
     owner. The list is complete — every active task renders; there is no
-    display cap (user ruling 2026-09-17)."""
+    display cap (user ruling 2026-09-17). Each row carries its own
+    ``priority`` (the P0..P3 stakes rung the console badges — task #3819)."""
     cur.execute(
-        "SELECT id, title FROM agent_tasks "
+        "SELECT id, title, priority FROM agent_tasks "
         "WHERE owner = %s AND status = 'in_progress' "
         "ORDER BY updated_at DESC, id DESC",
         (agent_id,),
     )
-    return [InspectWidgetTask(id=int(row[0]), title=str(row[1])) for row in cur.fetchall()]
+    return [
+        InspectWidgetTask(id=int(row[0]), title=str(row[1]), priority=Priority(str(row[2])))
+        for row in cur.fetchall()
+    ]
 
 
 def widgets_for_agent(pool: ConnectionPool[Any], agent_id: int) -> list[InspectWidgetResult]:
