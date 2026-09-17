@@ -35,6 +35,12 @@ def _darwin_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_lgtm_native.platform, "machine", lambda: "arm64")
 
 
+# The fixed document the S3 dashboard render is stubbed to: the assertions
+# below pin strict stderr checks on the config renderer, and the real render
+# reads the plugin registry (DB) — offline isolation, not behavior under test.
+_STUB_RENDER = '{"title": "Ava Ops", "panels": []}\n'
+
+
 @pytest.fixture(autouse=True)
 def _default_provisioning_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
     """Default-render assertions use an explicit default deployment configuration."""
@@ -43,6 +49,13 @@ def _default_provisioning_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr("shared.config.settings.gateway.gateway_url", "")
     monkeypatch.setattr("shared.config.settings.gateway.gateway_port", 8000)
+
+    def render_dashboard_json(_repo_only: bool = False) -> tuple[str, tuple[str, ...]]:
+        return _STUB_RENDER, ()
+
+    monkeypatch.setattr(
+        "shared.grafana_dashboard_supply.render_dashboard_json", render_dashboard_json
+    )
 
 
 def _fail_on_docker_query(_name: str) -> None:

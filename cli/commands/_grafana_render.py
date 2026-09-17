@@ -18,8 +18,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from shared.grafana_dashboard import render_dashboard, render_to_json
-
 __all__ = ["cmd_grafana_render"]
 
 _DASHBOARD_FILE = "ava-ops-main.json"
@@ -85,7 +83,6 @@ def cmd_grafana_render(*, force: bool, repo_only: bool) -> int:
     (or was written), 1 when it differs (diff preview) or the render cannot
     run on this host.
     """
-    from shared import core_metrics
     from shared.paths import ava_home
 
     target = _provisioning_dashboard(ava_home())
@@ -97,24 +94,14 @@ def cmd_grafana_render(*, force: bool, repo_only: bool) -> int:
         )
         return 1
 
-    from shared.grafana_dashboard_supply import collect_plugin_specs
+    from shared.grafana_dashboard_supply import render_dashboard_json
 
-    core_specs = core_metrics.collect_core_metrics()
-    if repo_only:
-        plugins = collect_plugin_specs()
-    else:
-        from shared.db import connect
-
-        with connect() as conn:
-            plugins = collect_plugin_specs(conn)
-    if plugins.failed:
+    rendered, failed = render_dashboard_json(repo_only=repo_only)
+    if failed:
         print(
-            f"plugin load failures (skipped, panels missing from this render): "
-            f"{', '.join(sorted(plugins.failed))}",
+            f"plugin load failures (skipped, panels missing from this render): {', '.join(failed)}",
             file=sys.stderr,
         )
-
-    rendered = render_to_json(render_dashboard(core_specs, plugins.specs))
     current = target.read_text(encoding="utf-8") if target.is_file() else None
 
     if current == rendered:
