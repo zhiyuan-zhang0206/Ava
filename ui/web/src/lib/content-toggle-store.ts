@@ -25,7 +25,8 @@ function normalizeMode(raw: unknown): DetailsMode {
   // Migrate legacy boolean: true → "all", false → "none"
   if (raw === true) return "all";
   if (raw === false) return "none";
-  return "all";
+  // Unknown value → the default mode.
+  return "none";
 }
 
 interface ContentToggleState {
@@ -33,11 +34,12 @@ interface ContentToggleState {
   setDetailsMode: (mode: DetailsMode) => void;
   /** True until the DB-backed setting has arrived from the server. While
    *  loading, settings falls back to USER_SETTING_DEFAULTS, whose
-   *  expand_runs_mode default is "all" — a consumer that renders expansion
-   *  from detailsMode alone would flash every detail block open until the
-   *  real value lands (the "details=none but blocks auto-expand" report).
-   *  Consumers that render blocks (TimelineView) must treat isLoading as
-   *  "mode unknown" and render the safe collapsed state. */
+   *  expand_runs_mode default is "none" (user ruling 2026-09-17) — but a
+   *  consumer must not read that fallback as the user's real choice: a stale
+   *  "all" read would flash every detail block open until the real value
+   *  lands (the "details=none but blocks auto-expand" report). Consumers that
+   *  render blocks (TimelineView) must treat isLoading as "mode unknown" and
+   *  render the safe collapsed state. */
   isLoading: boolean;
 }
 

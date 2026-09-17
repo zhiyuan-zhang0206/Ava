@@ -54,11 +54,16 @@ vi.mock("./ui/scroll-area", () => ({
   ),
 }));
 
-// Details mode can be overridden per-test — defaults to "all".
+// Details mode can be overridden per-test. The fixture baseline is "all" —
+// most tests here render inner content that is only visible expanded, so they
+// run with blocks expanded unless a test sets the mode explicitly. The
+// production default for an unset user is "none" (USER_SETTING_DEFAULTS, user
+// ruling 2026-09-17); default-behavior coverage lives in the content-toggle
+// tests.
 // `setToggleState({ detailsMode: "last" })` changes the mode inside a describe block.
 // `isLoading` models the DB-backed settings query still in flight: while true,
-// the hook's detailsMode is the USER_SETTING_DEFAULTS fallback ("all") but the
-// timeline must render the safe collapsed state (the flash regression).
+// the timeline must render the safe collapsed state regardless of the reported
+// detailsMode (the flash regression).
 const toggleState = {
   detailsMode: "all" as "all" | "last" | "none",
   isLoading: false,
@@ -2224,13 +2229,13 @@ describe("Details mode — collapse/expand", () => {
     expect(screen.getByText(/1 turn/i)).toBeTruthy();
   });
 
-  it('settings still loading (isLoading) → detail blocks collapsed, no "all"-default flash', () => {
-    // While the DB-backed setting is in flight, useContentToggle's detailsMode
-    // is the USER_SETTING_DEFAULTS fallback ("all") — the timeline must NOT
-    // render every block expanded from that, or every cold load (refresh /
-    // app start / desktop rollout reload) flashes all detail blocks open and
-    // then collapses them when the real value lands. Regression for the
-    // "details level is none but blocks auto-expand" report.
+  it('settings still loading (isLoading) → detail blocks collapsed even when the in-flight detailsMode reads "all"', () => {
+    // While the DB-backed setting is in flight, the timeline must NOT render
+    // expansion from whatever value detailsMode reports — a stale "all" read
+    // would flash every block open on every cold load (refresh / app start /
+    // desktop rollout reload) and then collapse them when the real value
+    // lands. Regression for the "details level is none but blocks
+    // auto-expand" report.
     setToggleState({ detailsMode: "all", isLoading: true });
     render(
       <TimelineView
@@ -3484,7 +3489,7 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
     expect(screen.getByTestId("python-code").textContent).toBe("thread B code");
   });
 
-  it("folds a run of ≥2 secondary items into an expanded turn block by default", () => {
+  it("folds a run of ≥2 secondary items into an expanded turn block (detailsMode='all')", () => {
     render(
       <TimelineView
         items={[
@@ -3514,7 +3519,7 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
     expect(screen.getByTestId("python-code").textContent).toBe("x=1");
   });
 
-  it("clicking the run header toggles inner rows (expanded by default, click collapses)", () => {
+  it("clicking the run header toggles inner rows (expanded in 'all' mode, click collapses)", () => {
     render(
       <TimelineView
         items={[
