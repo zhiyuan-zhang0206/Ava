@@ -2,7 +2,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { compareArrowSpecs } from "@/components/run-timeline/compare-arrows";
+import {
+  clusterArrows,
+  compareArrowSpecs,
+  type CompareArrowSpec,
+} from "@/components/run-timeline/compare-arrows";
 import type {
   AgentRoster,
   AgentRow,
@@ -32,7 +36,7 @@ vi.mock("@/lib/api", () => ({ api: { getRunTimeline, getSettings, getAgentRoster
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: pushSpy }) }));
 
 import ComparePage, { isComparableView, parseCompareAgents } from "./page";
-import { overlapWindow } from "./_view";
+import { laneColumnWidth, overlapWindow, sharedCanvasWidth } from "./_view";
 
 const NOW = new Date("2026-09-17T04:30:00.000Z");
 const DEFAULT_FROM = "2026-09-17T04:00:00.000Z";
@@ -170,11 +174,12 @@ describe("parseCompareAgents", () => {
     expect(selection.invalid).toBe(false);
   });
 
-  it("views exactly 2–3 valid agents", () => {
+  it("views exactly 2–8 valid agents", () => {
     expect(isComparableView(parseCompareAgents("41"))).toBe(false);
     expect(isComparableView(parseCompareAgents("41,42"))).toBe(true);
     expect(isComparableView(parseCompareAgents("41,42,43"))).toBe(true);
-    expect(isComparableView(parseCompareAgents("41,42,43,44"))).toBe(false);
+    expect(isComparableView(parseCompareAgents("41,42,43,44,45,46,47,48"))).toBe(true);
+    expect(isComparableView(parseCompareAgents("41,42,43,44,45,46,47,48,49"))).toBe(false);
     expect(isComparableView(parseCompareAgents("41,42,x"))).toBe(false);
   });
 });
@@ -226,6 +231,46 @@ describe("compareArrowSpecs", () => {
   });
 });
 
+describe("clusterArrows", () => {
+  const spec = (id: number, sourceAgentId: number, targetAgentId: number, ts: string): CompareArrowSpec => ({
+    id,
+    sourceAgentId,
+    targetAgentId,
+    ts,
+  });
+
+  it("merges same-pair arrows within the pixel tolerance", () => {
+    const clusters = clusterArrows(
+      [
+        { spec: spec(1, 42, 43, "2026-09-17T04:10:00Z"), x: 100 },
+        { spec: spec(2, 42, 43, "2026-09-17T04:10:05Z"), x: 105 },
+        { spec: spec(3, 42, 43, "2026-09-17T04:12:00Z"), x: 130 },
+      ],
+      8,
+    );
+
+    expect(clusters).toHaveLength(2);
+    expect(clusters[0].members.map((member) => member.id)).toEqual([1, 2]);
+    expect(clusters[0].x).toBe(100);
+    expect(clusters[1].members.map((member) => member.id)).toEqual([3]);
+  });
+
+  it("keeps different pairs apart and re-merges the pair's later members", () => {
+    const clusters = clusterArrows(
+      [
+        { spec: spec(1, 42, 43, "2026-09-17T04:10:00Z"), x: 100 },
+        { spec: spec(2, 43, 42, "2026-09-17T04:10:01Z"), x: 102 },
+        { spec: spec(3, 42, 43, "2026-09-17T04:10:02Z"), x: 103 },
+      ],
+      8,
+    );
+
+    expect(clusters).toHaveLength(2);
+    expect(clusters[0].members.map((member) => member.id)).toEqual([1, 3]);
+    expect(clusters[1].members.map((member) => member.id)).toEqual([2]);
+  });
+});
+
 describe("overlapWindow", () => {
   it("intersects the row extents of every lane", () => {
     const first = {
@@ -250,6 +295,28 @@ describe("overlapWindow", () => {
       rows: [{ ...row, start: "2026-09-17T05:00:00Z", end: "2026-09-17T05:10:00Z" }],
     };
     expect(overlapWindow([timeline(), late])).toBeNull();
+  });
+});
+
+describe("sharedCanvasWidth", () => {
+  it("fits the chart's container with no panel open", () => {
+    // 26 = the section's p-3 padding (24) + 1px border, each side.
+    expect(sharedCanvasWidth(1060, false, true)).toBe(1034);
+    expect(sharedCanvasWidth(700, false, true)).toBe(674);
+  });
+
+  it("narrows every lane together once a panel claims its column", () => {
+    expect(sharedCanvasWidth(1060, true, true)).toBe(1060 - 26 - 332);
+    expect(sharedCanvasWidth(400, true, true)).toBe(320);
+  });
+
+  it("skips the panel column below lg, where the panel stacks under the chart", () => {
+    expect(sharedCanvasWidth(1060, true, false)).toBe(1034);
+  });
+
+  it("derives the lane column from the stack width", () => {
+    expect(laneColumnWidth(1200)).toBe(1200 - 124);
+    expect(laneColumnWidth(80)).toBe(0);
   });
 });
 
@@ -282,7 +349,7 @@ describe("ComparePage", () => {
     const { getByRole } = renderPage("42,x");
 
     await waitFor(() =>
-      expect(getByRole("alert").textContent).toContain("Choose 2 to 3 agents to compare."),
+      expect(getByRole("alert").textContent).toContain("Choose 2 to 8 agents to compare."),
     );
   });
 
@@ -373,5 +440,53 @@ describe("ComparePage", () => {
 
     fireEvent.click(getByRole("button", { name: "Message arrows" }));
     expect(screen.getAllByTestId("compare-arrow")).toHaveLength(1);
+  });
+
+  it("merges a burst between two agents into one arrow with a count badge", async () => {
+    getRunTimeline.mockImplementation((agentId: number) =>
+      Promise.resolve(
+        agentId === 43
+          ? timeline({
+              inbounds: [
+                { ts: "2026-09-17T04:10:00Z", source: "agent:42", inbound_id: 7 },
+                { ts: "2026-09-17T04:10:05Z", source: "agent:42", inbound_id: 8 },
+              ],
+            })
+          : timeline(),
+      ),
+    );
+    renderPage("42,43");
+
+    await waitFor(() => expect(screen.getAllByTestId("compare-arrow")).toHaveLength(1));
+    expect(screen.getByTestId("compare-arrow").getAttribute("data-count")).toBe("2");
+    expect(screen.getByTestId("compare-arrow-count").textContent).toBe("×2");
+
+    fireEvent.pointerEnter(screen.getByTestId("compare-arrow-hit"));
+    await waitFor(() => expect(screen.getByText("#42 → #43 · 04:10 ×2")).toBeTruthy());
+  });
+
+  it("picks agents from the roster list and rewrites the id value", async () => {
+    const { getByLabelText, getByRole } = renderPage();
+
+    const cto = await waitFor(() => getByRole("button", { name: /CTO/ }));
+    fireEvent.click(cto);
+    expect(getByLabelText("Agents")).toHaveProperty("value", "43");
+
+    fireEvent.click(getByRole("button", { name: /CEO/ }));
+    expect(getByLabelText("Agents")).toHaveProperty("value", "43, 42");
+
+    fireEvent.click(getByRole("button", { name: /CTO/ }));
+    expect(getByLabelText("Agents")).toHaveProperty("value", "42");
+  });
+
+  it("filters the roster list by name or id", async () => {
+    renderPage();
+
+    const filter = await waitFor(() => screen.getByLabelText("Filter agents"));
+    await waitFor(() => expect(screen.getAllByText(/CEO/).length).toBeGreaterThan(0));
+
+    fireEvent.change(filter, { target: { value: "43" } });
+    await waitFor(() => expect(screen.queryByText(/CEO/)).toBeNull());
+    expect(screen.getAllByText(/CTO/).length).toBeGreaterThan(0);
   });
 });

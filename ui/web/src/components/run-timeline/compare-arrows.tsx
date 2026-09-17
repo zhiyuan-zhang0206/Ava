@@ -11,8 +11,10 @@
 //
 // Geometry is measured from the lane DOM — each lane's
 // [data-testid=run-timeline-visualization] box plus plotGeometry/timeCoordinate
-// — because the lanes scroll and re-flow independently; horizontal scrolling is
-// mirrored to every lane so one scroll offset keeps all time axes aligned.
+// — because the lanes scroll. The compare view pins ONE shared canvas width
+// across all lanes (task #3802), so a delivery timestamp maps to a single x;
+// horizontal scrolling is mirrored to every lane so one scroll offset keeps
+// all time axes aligned.
 
 import {
   type RefObject,
@@ -33,6 +35,14 @@ export const COMPARE_LANE_HUES = [
   "var(--series-1)",
   "var(--series-3)",
   "var(--series-2)",
+  "var(--series-4)",
+  "var(--series-5)",
+  // Beyond the five themed series vars (task #3802, full-fleet compare):
+  // fixed mid-tone hues that stay distinguishable from the series set in
+  // both color schemes.
+  "#8b5cf6",
+  "#0d9488",
+  "#db2777",
 ] as const;
 
 const AGENT_SOURCE_PREFIX = "agent:";
@@ -44,6 +54,14 @@ const ARROW_BOW_PX = 16;
 const ARROW_HIT_WIDTH_PX = 12;
 const ARROW_STROKE_WIDTH_PX = 1.5;
 const ARROW_EMPHASIZED_WIDTH_PX = 2.5;
+// Same-pair deliveries within this distance on the shared axis merge into one
+// curve with a count badge (task #3802): a burst between two agents reads as
+// one arrow, not a stack of identical bows.
+export const ARROW_CLUSTER_TOLERANCE_PX = 8;
+// Bow-width multipliers, rotated by source→target pair in first-seen order, so
+// concurrent deliveries between different pairs fan apart instead of nesting
+// exactly on top of each other.
+const PAIR_BOW_FACTORS = [1, 0.7, 1.3] as const;
 
 const SCROLL_CONTAINER_SELECTOR = '[data-testid="run-timeline-scroll"]';
 const VISUALIZATION_SELECTOR = '[data-testid="run-timeline-visualization"]';
@@ -62,10 +80,13 @@ export interface CompareArrowSpec {
 }
 
 export interface CompareArrowHover {
+  /** The cluster's first member — stable across re-renders. */
   id: number;
   sourceAgentId: number;
   targetAgentId: number;
   ts: string;
+  /** 1 for a single delivery; >1 for a merged burst (task #3802). */
+  count: number;
 }
 
 /** The arrows the lanes imply: chat inbounds sent by another visible lane.
@@ -89,6 +110,46 @@ export function compareArrowSpecs(lanes: CompareArrowLane[]): CompareArrowSpec[]
     }
   }
   return specs.sort((left, right) => Date.parse(left.ts) - Date.parse(right.ts));
+}
+
+export interface PlottedArrow {
+  spec: CompareArrowSpec;
+  /** The delivery timestamp's x on the shared axis, in stack coordinates. */
+  x: number;
+}
+
+export interface ArrowCluster {
+  sourceAgentId: number;
+  targetAgentId: number;
+  /** The first member's x — the anchor keeps its true delivery position. */
+  x: number;
+  members: CompareArrowSpec[];
+}
+
+/** Merge same-pair arrows within `tolerancePx` on the shared axis (task
+ *  #3802): input must be in delivery order; a later member merges into its
+ *  pair's most recent cluster while it stays within tolerance of that
+ *  cluster's anchor. */
+export function clusterArrows(plotted: PlottedArrow[], tolerancePx: number): ArrowCluster[] {
+  const clusters: ArrowCluster[] = [];
+  const lastByPair = new Map<string, ArrowCluster>();
+  for (const item of plotted) {
+    const key = `${item.spec.sourceAgentId}:${item.spec.targetAgentId}`;
+    const last = lastByPair.get(key);
+    if (last && Math.abs(item.x - last.x) <= tolerancePx) {
+      last.members.push(item.spec);
+      continue;
+    }
+    const cluster: ArrowCluster = {
+      sourceAgentId: item.spec.sourceAgentId,
+      targetAgentId: item.spec.targetAgentId,
+      x: item.x,
+      members: [item.spec],
+    };
+    clusters.push(cluster);
+    lastByPair.set(key, cluster);
+  }
+  return clusters;
 }
 
 interface LaneBox {
@@ -206,33 +267,62 @@ export function CompareArrows({
     };
   }, [containerRef, laneRefs, lanesKey, measure]);
 
-  const arrows = useMemo(
-    () =>
-      specs.flatMap((spec) => {
-        const sourceIndex = laneIndexByAgent.get(spec.sourceAgentId);
-        const targetIndex = laneIndexByAgent.get(spec.targetAgentId);
-        if (sourceIndex === undefined || targetIndex === undefined) return [];
-        const sourceBox = laneBoxes[sourceIndex];
-        const targetBox = laneBoxes[targetIndex];
-        if (!sourceBox || !targetBox) return [];
-        const plot = plotGeometry(targetBox.width);
-        const x =
-          targetBox.left +
-          plot.left +
-          timeCoordinate(spec.ts, timeWindow.from, timeWindow.to, plot.width);
-        const yFrom = sourceBox.top + plot.axisY;
-        const yTo = targetBox.top + plot.axisY;
-        const midY = (yFrom + yTo) / 2;
-        return [
-          {
-            ...spec,
-            hue: COMPARE_LANE_HUES[sourceIndex % COMPARE_LANE_HUES.length],
-            path: `M ${x.toFixed(1)} ${yFrom.toFixed(1)} Q ${(x - ARROW_BOW_PX).toFixed(1)} ${midY.toFixed(1)} ${x.toFixed(1)} ${yTo.toFixed(1)}`,
-          },
-        ];
-      }),
-    [laneBoxes, laneIndexByAgent, specs, timeWindow.from, timeWindow.to],
-  );
+  const arrows = useMemo(() => {
+    // Measured x per delivery, then clustered — the axis conversion happens
+    // before merging, so the pixel tolerance stays in screen space.
+    const plotted: PlottedArrow[] = [];
+    for (const spec of specs) {
+      const sourceIndex = laneIndexByAgent.get(spec.sourceAgentId);
+      const targetIndex = laneIndexByAgent.get(spec.targetAgentId);
+      if (sourceIndex === undefined || targetIndex === undefined) continue;
+      const sourceBox = laneBoxes[sourceIndex];
+      const targetBox = laneBoxes[targetIndex];
+      if (!sourceBox || !targetBox) continue;
+      const plot = plotGeometry(targetBox.width);
+      // Anchored to the target lane (where the delivery lands); with the
+      // shared canvas width the source lane's axis agrees, so one x serves
+      // both endpoints — a divergence would surface as a visible bend.
+      const x =
+        targetBox.left +
+        plot.left +
+        timeCoordinate(spec.ts, timeWindow.from, timeWindow.to, plot.width);
+      plotted.push({ spec, x });
+    }
+    const clusters = clusterArrows(plotted, ARROW_CLUSTER_TOLERANCE_PX);
+    const pairOrder = new Map<string, number>();
+    return clusters.flatMap((cluster) => {
+      const sourceIndex = laneIndexByAgent.get(cluster.sourceAgentId);
+      const targetIndex = laneIndexByAgent.get(cluster.targetAgentId);
+      if (sourceIndex === undefined || targetIndex === undefined) return [];
+      const sourceBox = laneBoxes[sourceIndex];
+      const targetBox = laneBoxes[targetIndex];
+      if (!sourceBox || !targetBox) return [];
+      const plot = plotGeometry(targetBox.width);
+      const yFrom = sourceBox.top + plot.axisY;
+      const yTo = targetBox.top + plot.axisY;
+      const midY = (yFrom + yTo) / 2;
+      const pairKey = `${cluster.sourceAgentId}:${cluster.targetAgentId}`;
+      if (!pairOrder.has(pairKey)) pairOrder.set(pairKey, pairOrder.size);
+      const bow =
+        ARROW_BOW_PX *
+        PAIR_BOW_FACTORS[(pairOrder.get(pairKey) ?? 0) % PAIR_BOW_FACTORS.length];
+      const x = cluster.x;
+      return [
+        {
+          id: cluster.members[0].id,
+          count: cluster.members.length,
+          sourceAgentId: cluster.sourceAgentId,
+          targetAgentId: cluster.targetAgentId,
+          ts: cluster.members[0].ts,
+          x,
+          hue: COMPARE_LANE_HUES[sourceIndex % COMPARE_LANE_HUES.length],
+          path: `M ${x.toFixed(1)} ${yFrom.toFixed(1)} Q ${(x - bow).toFixed(1)} ${midY.toFixed(1)} ${x.toFixed(1)} ${yTo.toFixed(1)}`,
+          badgeX: x + 6,
+          badgeY: midY + 3,
+        },
+      ];
+    });
+  }, [laneBoxes, laneIndexByAgent, specs, timeWindow.from, timeWindow.to]);
 
   return (
     <svg
@@ -263,6 +353,11 @@ export function CompareArrows({
           <g key={arrow.id}>
             <path
               data-testid="compare-arrow"
+              data-ts={arrow.ts}
+              data-count={arrow.count}
+              data-x={arrow.x.toFixed(1)}
+              data-source={arrow.sourceAgentId}
+              data-target={arrow.targetAgentId}
               d={arrow.path}
               fill="none"
               stroke={arrow.hue}
@@ -270,6 +365,17 @@ export function CompareArrows({
               strokeOpacity={dimmed ? 0.15 : 0.9}
               markerEnd={`url(#compare-arrow-head-${laneIndexByAgent.get(arrow.sourceAgentId)})`}
             />
+            {arrow.count > 1 ? (
+              <text
+                data-testid="compare-arrow-count"
+                x={arrow.badgeX}
+                y={arrow.badgeY}
+                fontSize={9}
+                fill="var(--muted-foreground)"
+              >
+                ×{arrow.count}
+              </text>
+            ) : null}
             <path
               data-testid="compare-arrow-hit"
               d={arrow.path}
@@ -283,6 +389,7 @@ export function CompareArrows({
                   sourceAgentId: arrow.sourceAgentId,
                   targetAgentId: arrow.targetAgentId,
                   ts: arrow.ts,
+                  count: arrow.count,
                 })
               }
               onPointerLeave={() => onHoverChange(null)}
