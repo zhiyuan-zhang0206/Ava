@@ -43,6 +43,10 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "delivery_poisoned",  # services/delivery_watchdog/dispatch_guard.py:_alert_poisoned
         "delivery_wake_suppressed",  # services/delivery_watchdog/resurrect_guard.py:_alert_wake_suppressed
         "delivery_recovery_decision",  # services/delivery_watchdog/stall_recovery.py:_request_harvest
+        # Outbox emissions go through the module helper (shared/delivery_outbox.py:_emit),
+        # which passes the name positionally — no `event=` literal to scan.
+        "delivery_outbox_flushed",  # shared/delivery_outbox.py:flush
+        "delivery_outbox_abandoned",  # shared/delivery_outbox.py:_abandon
         "lifecycle_pointer_done_torn",  # gateway/ttl_reaper.py:_scan_torn_lifecycle_pointers_blocking (positional emit)
         "heartbeat_nudged",  # services/heartbeat/daemon.py:_alert_idle
         "heartbeat_backoff_raised",  # services/heartbeat/daemon.py:_raise_backoff_level (positional emit)

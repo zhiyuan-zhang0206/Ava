@@ -165,6 +165,38 @@ def test_delivery_watchdog_wake_suppression_defaults() -> None:
     assert configured.delivery_watchdog_suppress_max_seconds == 86400.0
 
 
+def test_delivery_outbox_defaults() -> None:
+    """Task #3757: on by default; 30s/1m/5m/15m ladder, 12h budget, 15m merge
+    window, 30s flush tick, 128-entry cap (each reason lives on the field)."""
+    from shared.config.daemon import DaemonSettings
+
+    configured = DaemonSettings()
+    assert configured.delivery_outbox_enabled is True
+    assert configured.delivery_outbox_retry_backoff_steps_s == [30.0, 60.0, 300.0, 900.0]
+    assert configured.delivery_outbox_budget_seconds == 43200.0
+    assert configured.delivery_outbox_dedup_window_seconds == 900.0
+    assert configured.delivery_outbox_flush_interval_seconds == 30.0
+    assert configured.delivery_outbox_max_entries == 128
+
+
+@pytest.mark.parametrize("raw", ["[1, 2.5]", "1,2.5"])
+def test_delivery_outbox_backoff_accepts_json_or_comma_list(raw: str) -> None:
+    from shared.config.daemon import DaemonSettings
+
+    configured = DaemonSettings.model_validate({"AVA_DELIVERY_OUTBOX_RETRY_BACKOFF_STEPS_S": raw})
+    assert configured.delivery_outbox_retry_backoff_steps_s == [1.0, 2.5]
+
+
+@pytest.mark.parametrize("raw", ["", "[0]", "[-1, 2]"])
+def test_delivery_outbox_backoff_rejects_empty_or_nonpositive_steps(raw: str) -> None:
+    import pydantic
+
+    from shared.config.daemon import DaemonSettings
+
+    with pytest.raises(pydantic.ValidationError):
+        DaemonSettings.model_validate({"AVA_DELIVERY_OUTBOX_RETRY_BACKOFF_STEPS_S": raw})
+
+
 def test_hierarchy_budget_must_stay_below_deadline() -> None:
     import pydantic
 
@@ -541,6 +573,7 @@ _REMOTE_WRITABLE_ALLOWLIST = frozenset(
         "computer_use_lease_s",
         "computer_use_queue_timeout_s",
         "computer_use_session_idle_s",
+        "delivery_outbox_enabled",
         "delivery_watchdog_enabled",
         "exec_request_bounded_quarantine_enabled",
         "heartbeat_enabled",

@@ -10,6 +10,8 @@ from shared.events.payloads import (
     ComputerAction,
     ComputerSessionEnd,
     ComputerSessionStart,
+    DeliveryOutboxAbandoned,
+    DeliveryOutboxFlushed,
     DeliveryPoisoned,
     DeliveryRecoveryDecision,
     DeliveryStalled,
@@ -588,6 +590,18 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         "delivery_recovery_decision",
         "stalled crash-marked recovery decision (harvest / refusal)",
         payload=DeliveryRecoveryDecision,
+        tier="anomaly",
+    ),
+    "delivery_outbox_flushed": _telemetry(
+        "delivery_outbox_flushed",
+        "delivery backlog — a deferred-send record was redelivered (task #3757)",
+        payload=DeliveryOutboxFlushed,
+    ),
+    "delivery_outbox_abandoned": _telemetry(
+        "delivery_outbox_abandoned",
+        "delivery backlog — a deferred-send record abandoned at its budget or on a "
+        "permanent failure (task #3757)",
+        payload=DeliveryOutboxAbandoned,
         tier="anomaly",
     ),
     "claim_cas_lost": _telemetry(

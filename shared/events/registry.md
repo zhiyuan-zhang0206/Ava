@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 24 | events table |
-| telemetry (category=telemetry) | `events` | 182 | events table |
+| telemetry (category=telemetry) | `events` | 184 | events table |
 | log (category=log) | `events` | 13 | events table |
 | file-only (destination=file) | file log | 1 | file only (not the events table) |
 | SSE live | Redis → frontend (not persisted) | 31 role | live projection |
@@ -91,7 +91,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 182)
+## 3. Telemetry events (category=telemetry, 184)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -178,6 +178,8 @@ consumers: see the comments at each emit point.
 | `delivery_poisoned` | delivery backlog — permanently-failing inbound poisoned (dispatch cap reached) | anomaly | inbound_id, dispatch_count, age_s | — | events |
 | `delivery_wake_suppressed` | automatic delivery wakes suppressed after repeated resurrection failures | anomaly | consecutive_failures, suppress_seconds, suppress_count, reason | — | events |
 | `delivery_recovery_decision` | stalled crash-marked recovery decision (harvest / refusal) | anomaly | inbound_id, decision, reason | — | events |
+| `delivery_outbox_flushed` | delivery backlog — a deferred-send record was redelivered (task #3757) | observation | inbound_id, attempts, flush_attempts, age_s, origin_agent_id | — | events |
+| `delivery_outbox_abandoned` | delivery backlog — a deferred-send record abandoned at its budget or on a permanent failure (task #3757) | anomaly | reason, attempts, flush_attempts, age_s, origin_agent_id | — | events |
 | `claim_cas_lost` | claim CAS race lost — another lifecycle op owns the row | anomaly | — | — | events |
 | `claim_cas_lost_exit` | claim wait aborted by a lost CAS — process exiting cleanly | anomaly | — | — | events |
 | `idle_cas_lost` | idle-flip CAS race lost — degraded, not fatal | anomaly | — | — | events |
