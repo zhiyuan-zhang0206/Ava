@@ -7,20 +7,23 @@ stubbed API. Two contracts:
   (the compare view pins ONE shared canvas width across lanes), so the message
   arrows cannot drift between lanes;
 - layout: every canvas fits its container, a lane's detail panel narrows all
-  lanes together, and the narrowed lane keeps its edge ticks clear of the
-  panel. No screenshot golden is committed: this repo mints visual references
-  only through the Visual baselines workflow's fixed reference set, and this
-  page is still under active iteration, so the numeric contracts are the gate.
+  lanes together, and the narrowed lane keeps its edge ticks clear of the panel;
+- stacking: the panel card paints above the cross-lane arrow overlay (below
+  `lg` the panel stacks under its lane, where arrows cross its band). No
+  screenshot golden is committed: this repo mints visual references only
+  through the Visual baselines workflow's fixed reference set, and this page is
+  still under active iteration, so the numeric contracts are the gate.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
+from typing import TypedDict, cast
 
 import pytest
-from playwright.sync_api import Browser, Page, Route
+from playwright.sync_api import Browser, BrowserContext, Page, Route
 
 from tests.e2e._ports import FRONTEND_URL
 
@@ -187,28 +190,36 @@ def _stubs() -> dict[str, object]:
     return stubs
 
 
-@pytest.fixture
-def compare_page(frontend_proc: None, playwright_browser: Browser) -> Iterator[Page]:
-    context = playwright_browser.new_context(
-        viewport={"width": 1280, "height": 900},
-        color_scheme="light",
-        locale="en-US",
-        timezone_id="UTC",
-    )
-    page = context.new_page()
-    page.add_init_script(_INERT_EVENT_SOURCE)
-    # A frozen Date makes the page's initial window deterministic: the default
-    # half-hour slice always lands on [17:30, 18:00) of the fixture timeline.
-    page.clock.set_fixed_time(_FROZEN_NOW)
-    stubs = _stubs()
-
+def _stub_route(stubs: dict[str, object]) -> Callable[[Route], None]:
     def _stub(route: Route) -> None:
         endpoint = "/api/" + route.request.url.split("/api/", 1)[1].split("?", 1)[0]
         route.fulfill(
             status=200, content_type="application/json", body=json.dumps(stubs.get(endpoint, {}))
         )
 
-    page.route("**/api/**", _stub)
+    return _stub
+
+
+def _new_compare_page(browser: Browser, *, width: int, height: int) -> tuple[BrowserContext, Page]:
+    """A compare page on the fixture stubs. A frozen Date makes the page's
+    initial window deterministic: the default half-hour slice always lands on
+    [17:30, 18:00) of the fixture timeline."""
+    context = browser.new_context(
+        viewport={"width": width, "height": height},
+        color_scheme="light",
+        locale="en-US",
+        timezone_id="UTC",
+    )
+    page = context.new_page()
+    page.add_init_script(_INERT_EVENT_SOURCE)
+    page.clock.set_fixed_time(_FROZEN_NOW)
+    page.route("**/api/**", _stub_route(_stubs()))
+    return context, page
+
+
+@pytest.fixture
+def compare_page(frontend_proc: None, playwright_browser: Browser) -> Iterator[Page]:
+    context, page = _new_compare_page(playwright_browser, width=1280, height=900)
     try:
         yield page
     finally:
@@ -346,3 +357,83 @@ def test_compare_panel_keeps_shared_canvas_width(compare_page: Page) -> None:
         assert tick_box is not None
         assert tick_box["x"] + tick_box["width"] <= lane_box["x"] + lane_box["width"] + 0.5
         assert tick_box["x"] + tick_box["width"] <= panel_box["x"] + 0.5
+
+
+class _LayeringReport(TypedDict):
+    """The narrow-layout probe: how many arrow-curve sample points fall inside
+    the open panel's box, and which element paints on top at each one."""
+
+    samples: int
+    coveredByOverlay: int
+    onPanel: int
+    offenders: list[dict[str, int | str]]
+
+
+_NARROW_LAYERING_SCRIPT = """
+() => {
+  const panel = document.querySelector('[role="region"][aria-label="Turn details"]');
+  const panelRect = panel.getBoundingClientRect();
+  const overlay = document.querySelector('[data-testid="compare-arrows"]');
+  const overlayRect = overlay.getBoundingClientRect();
+  const report = { samples: 0, coveredByOverlay: 0, onPanel: 0, offenders: [] };
+  for (const path of document.querySelectorAll('[data-testid="compare-arrow"]')) {
+    const length = path.getTotalLength();
+    for (let at = 0; at <= length; at += 4) {
+      const point = path.getPointAtLength(at);
+      const x = overlayRect.left + point.x;
+      const y = overlayRect.top + point.y;
+      if (x < panelRect.left || x > panelRect.right || y < panelRect.top || y > panelRect.bottom) {
+        continue;
+      }
+      report.samples += 1;
+      const top = document.elementFromPoint(x, y);
+      if (top && top.closest('[data-testid="compare-arrows"]')) {
+        report.coveredByOverlay += 1;
+        if (report.offenders.length < 3) {
+          report.offenders.push({
+            ts: path.getAttribute('data-ts'),
+            x: Math.round(x),
+            y: Math.round(y),
+          });
+        }
+      } else if (top && top.closest('[role="region"][aria-label="Turn details"]')) {
+        report.onPanel += 1;
+      }
+    }
+  }
+  return report;
+}
+"""
+
+
+def _settle_narrow_layering(page: Page) -> _LayeringReport:
+    """Poll until the overlay has re-measured against the opened panel (the
+    panel's height shifts every lane below it). Bounded: the samples assertion
+    fails loudly if no crossing arrow ever reaches the panel."""
+    report = cast(_LayeringReport, page.evaluate(_NARROW_LAYERING_SCRIPT))
+    for _ in range(20):
+        if report["samples"] >= 4:
+            break
+        page.wait_for_timeout(100)
+        report = cast(_LayeringReport, page.evaluate(_NARROW_LAYERING_SCRIPT))
+    return report
+
+
+def test_compare_narrow_panel_paints_above_arrows(
+    frontend_proc: None, playwright_browser: Browser
+) -> None:
+    """Below lg the panel stacks under its lane (task #3825): the cross-lane
+    arrow overlay must stay behind the panel card."""
+    context, page = _new_compare_page(playwright_browser, width=900, height=1600)
+    try:
+        _open_compare(page)
+        page.locator('button[aria-label^="Turn "]').nth(3).click()
+        panel = page.locator('[role="region"][aria-label="Turn details"]')
+        panel.wait_for()
+        panel.scroll_into_view_if_needed()
+        report = _settle_narrow_layering(page)
+        assert report["samples"] >= 4, report
+        assert report["coveredByOverlay"] == 0, report
+        assert report["onPanel"] == report["samples"], report
+    finally:
+        context.close()
