@@ -60,6 +60,12 @@ carries the endpoint into the launch message so the request records it
 loudly without it, and a takeover additionally prints
 `codex_app_server=<endpoint>`.
 
+Cleanup boundary: the janitor is the only cleanup owner — if it never starts,
+or is itself killed (for example with the whole session tree), an orphan app
+server and socket can remain; reap them by hand via the printed
+`codex_app_server=<endpoint>`. The normal stop paths (session death, expiry)
+leave no residue.
+
 The default TTL is four hours and can be adapted with `--ttl-seconds` up to the
 Persistent Shell one-day maximum. TTL is a crash backstop. The automatically
 started supervisor closes and terminalizes the exact generation on current
