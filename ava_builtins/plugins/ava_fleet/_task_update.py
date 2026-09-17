@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import builtins
 import math
+from typing import TYPE_CHECKING
 
-import psycopg
-
-from shared.audit_events import insert_event_log
 from shared.priority import DEFAULT_REMIND_INTERVAL_SECONDS, Priority, validate_priority
 from shared.task_notes import task_note_line
+
+if TYPE_CHECKING:
+    # Annotation-only here; the runtime import sits at the raise site so plugin
+    # autoload stays off the psycopg stack (task #3816).
+    import psycopg
 from shared.task_status import TaskStatus
 
 # The statuses update() may assign to a task. shared/task_status.TaskStatus is
@@ -290,6 +293,8 @@ def _write_task_update(
     sql = f"UPDATE agent_tasks SET {', '.join(sets)}, updated_at = now() WHERE id = %s"  # noqa: S608
     # type: ignore[arg-type] — the SET clause is assembled at runtime from
     # user-passed field names; psycopg accepts any str query.
+    import psycopg  # per-call: keeps the psycopg stack off plugin autoload (task #3816)
+
     try:
         cur.execute(sql, (*params, task_id))  # type: ignore[arg-type]
     except psycopg.errors.UniqueViolation as exc:
@@ -335,6 +340,8 @@ def _log_task_update(
     new_owner: int | None,
 ) -> None:
     """Record a task_update audit event (category=audit, kind=task_update)."""
+    from shared.audit_events import insert_event_log  # deferred (task #3816)
+
     insert_event_log(
         event_type="task_update",
         agent_id=actor,

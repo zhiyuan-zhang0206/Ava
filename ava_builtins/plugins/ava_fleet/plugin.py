@@ -45,7 +45,6 @@ import ava
 import ava._boot
 import ava.agents
 from ava._sdk_validation import coerce_str, coerce_typed
-from shared.live_announce import publish_agent_updated_sync
 from shared.priority import validate_priority
 
 from . import task_registry
@@ -66,6 +65,9 @@ def set_label(text: str) -> None:
             source="self",
             payload={"new_label": text or None},
         )
+    # Per-call import: plugin autoload stays off the redis/live-events stack (task #3816).
+    from shared.live_announce import publish_agent_updated_sync
+
     publish_agent_updated_sync(ava._boot.agent_id())
 
 
