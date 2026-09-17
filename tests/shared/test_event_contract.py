@@ -176,9 +176,11 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # the stalled crash-marked recovery decision (task #3618's
     # delivery_recovery_decision) raises the current total to 182; the
     # deferred-delivery outbox (task #3757's delivery_outbox_flushed +
-    # delivery_outbox_abandoned) raises it to 184.
+    # delivery_outbox_abandoned) raises it to 184; the converge-side
+    # ava-ops dashboard render-failure guard (task #3697 S3's
+    # lgtm_dashboard_render_failed) raises the current total to 185.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 184
+    assert len(_TELEMETRY_KINDS) == 185
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:

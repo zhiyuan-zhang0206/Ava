@@ -85,6 +85,11 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         "prod source checkout reset to the installed commit / cleaned of untracked files",
         tier="anomaly",
     ),
+    "lgtm_dashboard_render_failed": _telemetry(
+        "lgtm_dashboard_render_failed",
+        "ava-ops dashboard render failed during converge; the previous provisioning file was kept",
+        tier="anomaly",
+    ),
     # labeler / trace housekeeping
     "label_generated": _telemetry("label_generated", "label auto-generated", tier="noise"),
     "label_generate_failed": _telemetry(

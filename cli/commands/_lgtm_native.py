@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
-import json
 import os
 import platform
 import plistlib
@@ -33,12 +32,11 @@ from dotenv import dotenv_values
 from cli.commands._converge_spec import ConvergeCtx
 from cli.commands._lgtm import is_station_ctx, roles_declare_station
 from cli.commands._lgtm_assets import _NATIVE_CONSTANTS, load_versions
+from cli.commands._lgtm_provisioning import _render_provisioning
 from cli.commands._observatory_urls import (
     _alerts_webhook_url,
-    _atomic_write,
     _observability_datasource_urls,
 )
-from cli.commands._rendered_file import write_rendered_guarded
 from shared.log import logger
 from shared.loki_index_labels import validate_loki_deploy_config
 
@@ -487,61 +485,6 @@ def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
     _write_if_changed(rendered_run_script, run_script)
     rendered_run_script.chmod(0o755)
     _render_provisioning(repo, native_dir)
-
-
-def _render_provisioning(repo: Path, native_dir: Path) -> None:
-    """Copy the Grafana provisioning tree into the native config dir.
-
-    Every provisioning file (datasources, alert rules, dashboards, READMEs) is
-    copied VERBATIM — the datasource and webhook URLs are Grafana-native
-    $__env{} references resolved from the process env (runtime.env), so the
-    checkout file is always a valid configuration and the rendered copy never
-    rewrites URLs. Each file is written atomically through the content-hash
-    user-modification guard (web-sources precedent): a file the user
-    hand-edited since the last converge write is warned about and preserved,
-    never overwritten. Grafana reads this rendered tree via
-    {{AVA_PROVISIONING_PATH}} — the deployment state is decoupled from the
-    source checkout, so a rollout that swaps the checkout cannot feed the
-    running instance a half-rendered tree.
-    """
-    source_dir = repo / "deploy/lgtm/config/grafana/provisioning"
-    if not source_dir.is_dir():
-        return
-    dest_dir = native_dir / "config" / "provisioning"
-    hashes_path = native_dir / "config" / "provisioning-hashes.json"
-    rendered_relative: set[str] = set()
-    for source in sorted(source_dir.rglob("*")):
-        if not source.is_file():
-            continue
-        rel = source.relative_to(source_dir)
-        rendered_relative.add(rel.as_posix())
-        content = source.read_text(encoding="utf-8")
-        warning = write_rendered_guarded(
-            dest_dir / rel, content, hashes_path, rel.as_posix(), writer=_atomic_write
-        )
-        if warning is not None:
-            print(f"  ! lgtm native: {warning}", file=sys.stderr)
-    # Remove rendered files whose source template vanished (web-sources
-    # _cleanup_gone_sources): untouched copies are pure derived state; a copy
-    # the user edited is kept, loudly.
-    for dest in sorted(dest_dir.rglob("*")):
-        if not dest.is_file():
-            continue
-        rel = dest.relative_to(dest_dir).as_posix()
-        if rel in rendered_relative:
-            continue
-        hashes: dict[str, str] = {}
-        if hashes_path.exists():
-            hashes = json.loads(hashes_path.read_text(encoding="utf-8"))
-        recorded = hashes.get(rel)
-        if recorded is not None and hashlib.sha256(dest.read_bytes()).hexdigest() == recorded:
-            dest.unlink()
-            continue
-        print(
-            f"  ! lgtm native: rendered provisioning file {dest} has no source "
-            "template anymore but was modified locally; kept",
-            file=sys.stderr,
-        )
 
 
 def _render_grafana_admin_password(native_dir: Path) -> None:

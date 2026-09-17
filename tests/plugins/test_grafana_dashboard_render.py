@@ -396,7 +396,11 @@ def test_repo_supplier_loads_the_shipped_plugins() -> None:
     its plugin context and reports the grafana spec set."""
     clear_registry()
     for name in _PLUGINS:
-        sys.modules.pop(f"ava_builtins.plugins.{name}.metrics", None)
+        # The loader caches its file-location imports under these synthetic
+        # names; without dropping them a re-load returns the cached module and
+        # leaves the just-cleared registry empty (order-dependent with any
+        # earlier render-path test in the same session).
+        sys.modules.pop(f"ava_repo_plugins.{name}.metrics", None)
     result = load_repo_plugin_specs()
     assert result.loaded == list(_PLUGINS)
     assert result.failed == []
