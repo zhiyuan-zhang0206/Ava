@@ -778,6 +778,21 @@ COMMENT ON COLUMN alerts.source IS
 
 CREATE INDEX alerts_status_starts_idx ON alerts (status, starts_at DESC);
 
+-- ava_runner surface for the start-readiness alerts (task #3747): `ava start`'s
+-- non-critical tier upserts its firing instance and resolves it again on
+-- recovery from the runner process (cli/commands/_probe.py). The resolve edge
+-- is an in-place status UPDATE and no runner path deletes rows, so the write
+-- surface is SELECT / INSERT / UPDATE, no DELETE. Gated on the role's
+-- existence: fresh bootstrap applies this baseline before install birth
+-- creates ava_runner, and shared/cluster/provision.py's ensure_runner_role
+-- grants the audited surface at birth.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
+        GRANT SELECT, INSERT, UPDATE ON alerts TO ava_runner;
+    END IF;
+END $$;
+
 -- ─────────────── event_dismissals (Loki event-class resolution, task #1468) ───────────────
 -- Loki log lines are immutable, so a resolution is state about an event class,
 -- never a write-back onto an historical event. NULL agent_id means every agent;

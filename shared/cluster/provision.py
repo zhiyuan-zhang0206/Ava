@@ -464,6 +464,11 @@ def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: s
         stay out — task #1932: the table shipped without this entry and
         the fleet-wide pause_heartbeat INSERT failed with
         InsufficientPrivilege)
+      - SELECT, INSERT, UPDATE on alerts (the start-readiness alert surface:
+        a non-critical service that misses its readiness window is upserted
+        from the runner process and resolved in place when it recovers —
+        task #3747: the surface shipped without this entry and every pure
+        agent-runner's start failed the resolve with InsufficientPrivilege)
       - ALL on the LangGraph checkpoint tables (agent state: checkpoints,
         checkpoint_blobs, checkpoint_writes)
 
@@ -701,6 +706,21 @@ def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: s
                 "GRANT SELECT, INSERT, UPDATE ON agent_metric_days, "
                 "agent_lifecycle_intervals, agent_metric_scans, agent_metric_file_cursors TO {}"
             ).format(pgsql.Identifier(RUNNER_ROLE))
+        )
+        # The start-readiness alert surface (task #3747): `ava start`'s
+        # non-critical tier upserts its firing instance and resolves it again
+        # on recovery, all from the runner process (cli/commands/_probe.py
+        # dials shared.db.connect, which on an agent-runner host carries the
+        # runner projection): SELECT the open instance by labels, INSERT /
+        # UPDATE through the shared upsert and the notified stamp. No runner
+        # path deletes alert rows -- resolution is a status write -- so
+        # DELETE stays out. Regression: the surface shipped without this
+        # entry, and every pure agent-runner's start logged "non-critical
+        # service alert resolve failed (InsufficientPrivilege)".
+        conn.execute(
+            pgsql.SQL("GRANT SELECT, INSERT, UPDATE ON alerts TO {}").format(
+                pgsql.Identifier(RUNNER_ROLE)
+            )
         )
         for table in ("checkpoints", "checkpoint_blobs", "checkpoint_writes"):
             conn.execute(
