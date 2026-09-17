@@ -1,4 +1,4 @@
-"""Durable native checkpoint receipts for automatic session handoffs."""
+"""Durable native checkpoint receipts for automatic session endings."""
 
 import asyncio
 from datetime import UTC, datetime
@@ -8,6 +8,7 @@ from langchain_core.messages import HumanMessage
 
 from agent.messages import system_note_message
 from shared.agents import GatewayUnavailable
+from shared.db import publish_inbound_wake
 from shared.db_transaction import write_transaction
 from shared.impersonation_history import export_handoff, metadata
 from shared.message_kwargs import NoteTag
@@ -20,7 +21,7 @@ def start_marker(session: dict[str, Any]) -> HumanMessage:
         content=f"Impersonation session {session['session_id']} has started. "
         f'The takeover identifies itself as "{session["name"]}". '
         "Your execution pauses at the checkpoint saved with this note; "
-        "the session's end delivers a handoff note that resumes your execution.",
+        "the session's end delivers a closing note that resumes your execution.",
         tag=NoteTag.IMPERSONATION,
         created_at=datetime.now(UTC),
     )
@@ -39,6 +40,22 @@ async def ensure_start_marker(graph: Any, session: dict[str, Any]) -> None:
     if not any(message.id == marker.id for message in snapshot.values.get("messages", [])):
         await graph.aupdate_state(config, {"messages": [marker]})
     await flush_checkpoint(graph.checkpointer, session["agent_id"])
+
+
+def resume_note_pending(state: Any) -> bool:
+    """Whether the newest message is an end-of-session note awaiting its first turn.
+
+    `deliver_handoff` appends the note as the first resumed input. It is a system
+    note, so a window that never carried a real exchange still reads as "no
+    conversation" and the claim would idle out with the note unprocessed. Until
+    the agent takes its first turn after delivery (which appends newer messages),
+    the trailing note itself marks the pending resume.
+    """
+    receipt = state.impersonation_handoff_id
+    messages = state.messages
+    if receipt is None or not messages:
+        return False
+    return getattr(messages[-1], "id", None) == f"impersonation-handoff:{receipt}"
 
 
 def _save_document(session: dict[str, Any], incarnation: RuntimeIncarnation) -> tuple[str, str]:
@@ -71,7 +88,8 @@ def _receipt(session: dict[str, Any], incarnation: RuntimeIncarnation) -> None:
     with write_transaction() as conn:
         require_native(conn, incarnation)
         lease = lock_lease(conn, session["id"])
-        # These messages have now been delivered in the durable handoff note/file.
+        # These messages have now been delivered in the durable end-of-session note
+        # and record file.
         # Their immutable bodies survive independently of processing status.
         conn.execute(
             "UPDATE inbound_messages SET status='done' WHERE agent_id=%s AND status='pending' "
@@ -94,6 +112,9 @@ async def deliver_handoff(
     The native gate remains closed throughout. A crash before the checkpoint
     repeats the same message id; a crash after it only repeats the DB receipt.
     Ordinary queued input cannot be claimed until the receipt releases the gate.
+    The receipt is followed by a best-effort wake: the note's first turn must run
+    even when nothing else is queued (claim also resumes on the trailing note, so
+    an empty queue is not an idle verdict).
     """
     import httpx
 
@@ -116,8 +137,9 @@ async def deliver_handoff(
         note = system_note_message(
             content=f"Impersonation session {session['session_id']} has ended. "
             f'The takeover identified itself as "{session["name"]}".\n\nExternal summary:\n{summary}\n\n'
-            f"Read the structured handoff: {path}\n"
-            "It contains all messages, including ACKed messages, and consumed API/SDK events. "
+            f"If you need more detail than the summary, the complete structured "
+            f"record of this session is available at: {path}\n"
+            "It retains all messages, including ACKed messages, and the consumed API/SDK events. "
             "Event accounting may remain pending while upstream delivery catches up. "
             "Incoming messages marked unacknowledged still need your attention. "
             "Your execution resumes with this note.",
@@ -137,3 +159,7 @@ async def deliver_handoff(
         )
     await flush_checkpoint(graph.checkpointer, incarnation.agent_id)
     await asyncio.to_thread(_receipt, session, incarnation)
+    # The receipt opens the claim gate; this wake drives the note's first turn when
+    # nothing else is queued (and re-drives it if this turn ends before that
+    # invocation). Best-effort: the host latches wakes per agent.
+    publish_inbound_wake(session["agent_id"], "impersonation")

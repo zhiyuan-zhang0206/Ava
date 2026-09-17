@@ -74,16 +74,18 @@ timeline query and merge machinery; the refresh event does not carry another
 message store. The card header does not display an executor or session badge;
 the impersonation metadata stays on the timeline item.
 
-## Structured handoff
+## Session record
 
 One session produces `<workspace>/impersonation/<session_id>.json` containing
 session/process metadata, all input/output bodies and inbound ACK state,
 lifecycle facts, original consumed SDK/API events and statistics. Normal release
 requires the impersonator's own summary. Expiry/rejection states their reason and
 absence of an external summary. The first new system note contains that summary
-and the JSON path, before ordinary queued input. Captured pending inputs become
-processed only after the note is durable; unacknowledged incoming content remains
-in the file for the resumed agent to handle.
+and the JSON path, before ordinary queued input; it is the resumed input — while
+it is the newest message, the agent's claim runs its first turn even with an
+otherwise empty queue, and delivery ends by publishing a wake. Captured pending
+inputs become processed only after the note is durable; unacknowledged incoming
+content remains in the file for the resumed agent to handle.
 
 SDK collection, sampling and instrumentation belong to the upstream collector.
 The consumption boundary is `shared/impersonation_events.py`: explicit scoped
@@ -93,7 +95,7 @@ one due local session and consumes at most four pages per pass; a saved cursor
 continues large sweeps, and completed sweeps restart to recover late indexing.
 `complete_delivery` accepts an upstream manifest of exact event IDs, validates
 the durable set and certifies completion. Until then, accounting remains pending
-even after the native handoff receipt. Statistics count recorded events without
+even after the native receipt. Statistics count recorded events without
 extrapolating samples. See the consumer module for delivery-completion semantics.
 
 See [[../ava/external.ava.okf.md]],

@@ -676,3 +676,18 @@ async def test_successor_admission_resets_a_stale_accepted_binding(
         "FROM agent_impersonations WHERE id=%s",
         (lease["id"],),
     ).fetchone() == ("requested", None, None, 2)
+
+
+def test_resume_note_pending_tracks_the_trailing_end_note() -> None:
+    """The claim's fresh-window waiver keys on the newest message being the
+    delivered end-of-session note; any newer message ends the pending resume."""
+    from agent.impersonation_handoff import resume_note_pending
+
+    note = HumanMessage(content="session ended", id="impersonation-handoff:7:0")
+    state = SimpleNamespace(impersonation_handoff_id="7:0", messages=[note])
+    assert resume_note_pending(state)
+    state.messages.append(HumanMessage(content="next task", id="m-next"))
+    assert not resume_note_pending(state)
+    state.impersonation_handoff_id = None
+    assert not resume_note_pending(state)
+    assert not resume_note_pending(SimpleNamespace(impersonation_handoff_id="9:0", messages=[]))

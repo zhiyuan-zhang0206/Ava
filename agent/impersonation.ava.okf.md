@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Cooperative external impersonation
-description: Automatic safe-boundary takeover, durable native handoff notes, and external plugin state restoration.
+description: Automatic safe-boundary takeover, durable native session-end notes, and external plugin state restoration.
 tags: [agent-lifecycle, concurrency]
 ---
 
@@ -66,7 +66,10 @@ The stable note id and `impersonation_handoff_id` channel survive retries.
 Checkpoint flush is unconditional before setting `handoff_applied_at`; only
 that receipt consumes captured pending input and opens the normal claim gate.
 The file retains incoming ACK state and every recorded body. Input arriving
-after release remains queued behind the note. File or checkpoint errors retain
-the native gate. An unavailable event backend leaves accounting explicitly
+after release remains queued behind the note. The note is the resumed input:
+while it is the newest message, claim runs its first turn even with an
+otherwise empty queue and no conversation yet, and delivery ends by publishing
+a wake so a turn ending first still resumes the agent. File or checkpoint
+errors retain the native gate. An unavailable event backend leaves accounting explicitly
 pending without blocking the control handoff; the registered agent-host event
 reconciler supplements the same file after late events become readable.
