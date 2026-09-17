@@ -48,20 +48,22 @@ describe("InspectWidgetSection", () => {
     expect(links[0].textContent).toContain("#42");
   });
 
-  it("leads each row with the #id column, left-aligned like the shell rows (task #3563)", () => {
+  it("leads each row with #id, then its priority badge, then the title (tasks #3563/#3866)", () => {
     render(<InspectWidgetSection widget={widget()} />);
     const link = screen.getAllByRole("link")[0];
     const spans = [...link.querySelectorAll("span")].map((s) => s.textContent);
-    // The id column renders first (left edge); the title takes the rest.
-    expect(spans[0]).toBe("#42");
-    expect(spans[1]).toBe("Ship the inspector fix");
+    // The id column renders first (left edge, #3563); the priority rung sits
+    // immediately right of it (#3866 — not the row's right edge); the title
+    // takes the remaining width.
+    expect(spans).toEqual(["#42", "P0", "Ship the inspector fix"]);
   });
 
   it("shows each row's priority badge (P0..P3, the board's own colors)", () => {
     render(<InspectWidgetSection widget={widget()} />);
     const rows = screen.getAllByRole("link");
-    const badges = rows.map((row) => [...row.querySelectorAll("span")].at(-1));
-    expect(badges.map((b) => b?.textContent)).toEqual(["P0", "P3"]);
+    // The badge is the span right of the #id column (index 1).
+    const badges = rows.map((row) => [...row.querySelectorAll("span")][1]);
+    expect(badges.map((b) => b.textContent)).toEqual(["P0", "P3"]);
     // Same PRIORITY_BG mapping as the task board / graph (P0 destructive).
     expect(badges[0]?.className).toContain("bg-destructive");
     expect(badges[1]?.className).toContain("bg-slate-500");

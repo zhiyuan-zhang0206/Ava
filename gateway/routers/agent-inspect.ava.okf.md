@@ -36,8 +36,9 @@ see `shared/plugin_metrics.py` + the `deploy/lgtm` dashboards README.
 Builds the widget registry in process — ENABLED builtin plugins' `inspector.py`
 modules under their `PluginContext` — and resolves each widget's payload
 server-side: a `taskList` lists the agent's active tasks (owner-scoped,
-newest first, complete; each row carries the task's id, title, and its P0..P3
-priority — task #3819). A widget with nothing to show leaves the payload
+priority-ordered (P0 first, ties by id), complete; each row carries the
+task's id, title, and its P0..P3 priority — tasks #3819/#3866). A widget with
+nothing to show leaves the payload
 entirely — see `shared/plugin_inspector.py`. An `inspector.py` that
 fails to import is skipped with a loud report (loguru ERROR + the
 `plugin_load_failed` event) and the remaining widgets still serve — fail-soft
