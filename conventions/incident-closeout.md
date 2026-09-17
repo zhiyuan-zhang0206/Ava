@@ -18,8 +18,10 @@ Every behavior-changing closeout carries exactly one `closing-gate:` line
 - `closing-gate: doc_only=<reason>`
 - `closing-gate: upline_hook=#<task-id> repro=<...>` — unshipped code: repro now, guard before it ships
 
-**Incidents accept only `guard`.** An *incident* here = a closeout that ships a
-user-facing closeout report; when in doubt, treat it as an incident. An incident
+**Incidents accept only `guard`.** An *incident* here = an incident/defect
+closeout that ships a user-facing closeout report — the term stays scoped to
+incident/defect work (a feature task that merely produces a report is not one);
+when in doubt about the class, treat it as an incident. An incident
 already proved human rules do not hold; a repro is an intermediate artifact, not
 a terminal state there. A missing or wrong-form line on an incident = BLOCK (no
 QA PASS; the incident is not closed and no closeout report ships).
@@ -102,9 +104,12 @@ A minimal **runnable** case that failed before the fix:
 
 1. **PR surface**: behavior-changing PR descriptions carry a "Recurrence
    evidence" section reachable from the `closing-gate:` line; QA adds the
-   `closing-gate:` verdict line to the review comment (QA validates the red
-   battery / red-green pair). An incident PR without a valid guard line does not
-   get a QA PASS. The receipt JSON is untouched — trust stays in
+   `closing-gate:` verdict line to its **narrative review comment** — or inside
+   the receipt JSON's `note` field if it rides with the receipt — and never as
+   extra text in the receipt comment, which stays a single fenced JSON block
+   (`conventions/qa-approval-receipt.md`). QA validates the red battery /
+   red-green pair. An incident PR without a valid guard line does not get a QA
+   PASS. The receipt schema is untouched — trust stays in
    `conventions/qa-approval-receipt.md`.
 2. **Task surface**: the closeout note's owner writes the same line; incidents —
    405 verifies it before closing (guard only); non-incidents — spot-checked by
