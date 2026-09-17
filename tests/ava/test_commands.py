@@ -390,8 +390,8 @@ def test_command_record_carries_no_chaining_policy():
 
 
 def test_expand_is_source_neutral(monkeypatch: pytest.MonkeyPatch):
-    # Expansion must not name an actor — the envelope (wrap_inbound) attributes
-    # the sender, so a /command sent by a peer agent reads correctly.
+    # Expansion must not name an actor — the envelope (wrap_inbound) frames the
+    # message, so a /command sent by a peer agent reads correctly.
     monkeypatch.setattr(
         _commands, "discover_commands", lambda: [_file_command("recap", "Recap it.")]
     )

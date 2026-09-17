@@ -7,7 +7,7 @@
     | ``system``              | framework internal INSERT      | original text (no wrap)                             |
     | ``system:<subtype>``    | framework internal INSERT      | original text (no wrap)                             |
     | ``agent:N``             | peer agent N                   | "Agent N [ts]:\n\n..."                            |
-    | ``user``                | the human user (the UI)        | "User [ts]:\n\n..."                               |
+    | ``user``                | the human user (the UI)        | "[ts]\n\n..."                                     |
     | ``ui:page:<name>``      | an HTML page the agent started | "User [ts]:\n\n..."                               |
     | ``watcher:N``           | a watcher session's wake-up    | "Watcher (id N) [ts]:\n\n..."                       |
     | ``shell:N``             | a background shell command's completion notice | "Shell session (id N) [ts]:\n\n..."  |
@@ -16,7 +16,7 @@
 ``user`` covers every human-originated inbound — chat from the composer,
 question / report replies, and the lifecycle triggers (restart / terminate /
 resurrect) the user fires. ``ui:page:<name>`` is a callback POSTed by an HTML
-page the agent itself started (a page registered via ``ava.ui.show``); it also
+page the agent itself started (a page registered via ``ava.ui.show``); it
 reads as "User", and the agent recovers which page posted from ``<name>``.
 ``watcher:N`` is a wake-up delivered from inside a watcher session (a scheduled
 fire, or the exit notice sent when the watcher stops); N is the watcher's
@@ -131,8 +131,13 @@ def wrap_inbound(content: str, source: str, *, created_at: datetime | None = Non
         formatted = format_timestamp(created_at) if created_at is not None else now_timestamp()
         ts = f" {formatted}"
     else:
+        formatted = ""
         ts = ""
-    if source == "user" or source.startswith(_PAGE_PREFIX):
+    if source == "user":
+        # Bare "[ts]" header (user ruling 2026-09-18): no "User" label, no
+        # colon; with timestamps off there is no header at all.
+        return f"{formatted}\n\n{content}" if formatted else content
+    if source.startswith(_PAGE_PREFIX):
         return f"User{ts}:\n\n{content}"
     if source.startswith(_AGENT_PREFIX):
         sender_id = source.removeprefix(_AGENT_PREFIX)

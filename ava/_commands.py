@@ -38,8 +38,8 @@ Commands are also sendable **agent-to-agent**: any chat inbound runs through
 addressable prompt function, not just a human UI macro. Peers discover the
 catalog via the read-only `ava.agents.commands()` (name + description +
 instruction-hint, no body). Because of this dual audience, `expand_command` is
-**source-neutral**: it never names the actor — `wrap_inbound` already attributes
-the sender ("Agent 5:" / "User:").
+**source-neutral**: it never names the actor — `wrap_inbound` already frames the
+message ("Agent 5:" for peers; the bare "[ts]" header for the user).
 
 Namespace: the composer identifier mirrors the skill namespace tree
 (`ava/skills.py`) — bare for built-ins, `plugin:name` for a plugin's, `a:b:name`
@@ -275,10 +275,10 @@ def split_commands(content: str) -> list[Invocation] | None:
 def _expand_one(inv: Invocation) -> str:
     """Expand a single invocation into its prompt text.
 
-    Source-neutral: the envelope (shared.envelope.wrap_inbound) already
-    attributes the sender ("Agent 5:" / "User:"), so the expansion must not
-    re-name an actor — a `/command` sent by a peer agent reads correctly
-    without the old "User invoked …" phrasing.
+    Source-neutral: the envelope (shared.envelope.wrap_inbound) already frames
+    the message ("Agent 5:" for peers; the bare "[ts]" header for the user), so
+    the expansion must not re-name an actor — a `/command` sent by a peer agent
+    reads correctly without the old "User invoked …" phrasing.
     """
     name = inv.typed_name
     if inv.command["skill_target"]:
