@@ -784,6 +784,24 @@ def test_accessibility_probe_treats_the_windows_wire_shape_as_granted(fake_helpe
     assert status.available is True
 
 
+# --- Bundle content -------------------------------------------------------
+
+
+def test_info_plist_allows_ui_for_panel_mode() -> None:
+    """No LSBackgroundOnly: a socket-less launch shows the panel (design v1 Phase A)."""
+    plist_path = (
+        Path(__file__).resolve().parents[2]
+        / "services"
+        / "permissions_helper"
+        / "helper"
+        / "Info.plist"
+    )
+    with plist_path.open("rb") as handle:
+        plist = plistlib.load(handle)
+    assert plist.get("LSBackgroundOnly") is not True
+    assert plist.get("LSUIElement") is True
+
+
 # --- Signing --------------------------------------------------------------
 # TCC keys the helper's grants on the stable certificate, so an ad-hoc identity
 # is never an acceptable substitute -- and a current bundle is never re-signed.

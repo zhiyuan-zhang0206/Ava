@@ -1258,13 +1258,76 @@ func dispatch(_ req: [String: Any], listeningFD: Int32) -> [String: Any] {
     }
 }
 
+// MARK: - Panel mode
+
+/// Minimal Phase A skeleton for the user-facing panel: shown only when the
+/// process was launched without a socket path (see `socketPath()`). The status
+/// matrix and one-click onboarding arrive in Phase B; this stage proves the
+/// mode split, the window, and the signing/rebuild path stay intact.
+final class PanelDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 240),
+            styleMask: [.titled, .closable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Ava Permissions Helper"
+        window.isReleasedWhenClosed = false
+
+        let label = NSTextField(labelWithString:
+            "Panel mode (Phase A skeleton) - the grant matrix and one-click onboarding arrive in Phase B.")
+        label.alignment = .center
+        label.maximumNumberOfLines = 0
+        label.lineBreakMode = .byWordWrapping
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        if let content = window.contentView {
+            content.addSubview(label)
+            NSLayoutConstraint.activate([
+                label.centerXAnchor.constraint(equalTo: content.centerXAnchor),
+                label.centerYAnchor.constraint(equalTo: content.centerYAnchor),
+                label.leadingAnchor.constraint(
+                    greaterThanOrEqualTo: content.leadingAnchor, constant: 24),
+                label.trailingAnchor.constraint(
+                    lessThanOrEqualTo: content.trailingAnchor, constant: -24),
+            ])
+        }
+
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        if #available(macOS 14.0, *) {
+            NSApp.activate()
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        return true
+    }
+}
+
+/// Run as the user-facing panel; never returns. Reached only without a socket.
+func runPanelMode() -> Never {
+    let app = NSApplication.shared
+    _ = app.setActivationPolicy(.accessory)
+    let delegate = PanelDelegate()
+    app.delegate = delegate
+    app.run()
+    exit(0)
+}
+
 // MARK: - Socket server
 
 func socketPath() -> String {
     if let p = ProcessInfo.processInfo.environment["AVA_PERMISSIONS_HELPER_SOCKET"] { return p }
     if CommandLine.arguments.count > 1 { return CommandLine.arguments[1] }
-    FileHandle.standardError.write(Data("AvaPermissionsHelper: no socket path (env AVA_PERMISSIONS_HELPER_SOCKET or argv[1])\n".utf8))
-    exit(2)
+    // No socket path: this process is not the launchd daemon -- it is a
+    // user-facing launch (Finder double-click / `open -n -a`), so it becomes
+    // the panel instance instead of exiting.
+    FileHandle.standardError.write(Data("AvaPermissionsHelper: no socket path -- starting panel mode\n".utf8))
+    runPanelMode()
 }
 
 /// Register the helper into the Screen Recording and Accessibility lists (and
