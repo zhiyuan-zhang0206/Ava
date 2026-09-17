@@ -91,6 +91,10 @@ Rules that keep delivery honest:
 - **Never poll, never write inbox code.** `ava impersonate inbox <session_id> --agent <agent_id>`
   remains only as a fallback read — for a missed or truncated push, or for a
   message's payload. The pushes are the delivery.
+- **Confirm the start message.** Activation, relay liveness, and queue
+  acceptance are not host receipt: confirm the start message actually arrived
+  in your conversation before relying on pushes. If it did not, use the
+  fallback read and note the miss in your release summary.
 - **`cancel`**: stop the current work and ACK the cancel once stopped. To
   interrupt an in-flight tool immediately, use your own session's stop control;
   the ACK comes after the stop, not instead of it. An unacknowledged cancel

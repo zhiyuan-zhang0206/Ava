@@ -29,6 +29,7 @@ from shared.coding_session_owner_record import (
     expected_suffix,
     full_session_name,
     generation_state_dir,
+    key_digest,
     lock_path,
     read_unlocked,
     state_path,
@@ -47,6 +48,7 @@ __all__ = [
     "attach_supervisor",
     "canonical_key",
     "claim",
+    "codex_app_server_socket",
     "full_session_name",
     "generation_state_dir",
     "launch_is_stale",
@@ -92,6 +94,23 @@ def launch_is_stale(
         return False
     timestamp = (now or dt.datetime.now(dt.UTC)).astimezone(dt.UTC)
     return timestamp - owner.created_at >= _UNPUBLISHED_CLAIM_WINDOW
+
+
+def codex_app_server_socket(key: CodingSessionKey, generation: str) -> Path:
+    """Private host-local unix socket for a generation's shared Codex app server.
+
+    Kept under the cluster home's ``run/`` directory and shortened (12 hex
+    digest + 8 generation chars) because a socket path inside the generation
+    state dir can exceed the kernel's unix-socket path limit (104 bytes on
+    macOS). The name is scoped to one generation, so a dying predecessor can
+    never unlink a successor's socket; a crashed generation's stale file is
+    inert.
+    """
+    return (
+        Path(key.cluster)
+        / "run"
+        / f"codex-app-server.{key_digest(key)[:12]}-{generation.replace('-', '')[:8]}.sock"
+    )
 
 
 def read(key: CodingSessionKey) -> CodingSessionOwner:

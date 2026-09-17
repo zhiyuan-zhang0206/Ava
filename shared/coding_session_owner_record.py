@@ -82,7 +82,8 @@ def canonical_key(
     )
 
 
-def _key_digest(key: CodingSessionKey) -> str:
+def key_digest(key: CodingSessionKey) -> str:
+    """Stable SHA-256 identity digest used in host-local file names."""
     identity = json.dumps(
         {"cluster": key.cluster, "tool": key.tool, "workspace": key.workspace},
         separators=(",", ":"),
@@ -121,16 +122,16 @@ def _host_owner_dir() -> Path:
 
 
 def state_path(key: CodingSessionKey) -> Path:
-    return _host_owner_dir() / f"{_key_digest(key)}.json"
+    return _host_owner_dir() / f"{key_digest(key)}.json"
 
 
 def lock_path(key: CodingSessionKey) -> Path:
-    return _host_owner_dir() / f"{_key_digest(key)}.lock"
+    return _host_owner_dir() / f"{key_digest(key)}.lock"
 
 
 def generation_state_dir(key: CodingSessionKey, generation: str) -> Path:
     """Private mutable tool state for exactly one owner generation."""
-    return Path(key.cluster) / "run" / "coding-tools" / key.tool / _key_digest(key) / generation
+    return Path(key.cluster) / "run" / "coding-tools" / key.tool / key_digest(key) / generation
 
 
 def _timestamp(value: object, field: str) -> dt.datetime:

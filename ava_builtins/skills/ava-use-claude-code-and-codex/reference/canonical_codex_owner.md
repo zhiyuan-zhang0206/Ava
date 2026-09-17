@@ -47,6 +47,19 @@ fresh supervised worker rebuilds from the task file, work log, collaboration
 contract, and Git tree; a takeover process has none of those files and
 rebuilds from the briefing inlined in its launch message instead.
 
+Every takeover generation also owns the explicit shared app server the relay
+queues into: queue acceptance on a different server never reaches the
+conversation. The launcher starts `codex app-server --listen unix://<socket>`
+on a private per-generation socket under the cluster's `run/` directory (with
+`approval_policy="never"` and `sandbox_mode="danger-full-access"` configured on
+the server itself), starts a janitor that ends the server when the coding
+session dies, connects the TUI with `--remote` to that exact endpoint, and
+carries the endpoint into the launch message so the request records it
+(`--codex-remote`). This needs a codex release with `app-server --listen`, TUI
+`--remote`, and `queue --remote` (verified on 0.153.4); the launch is refused
+loudly without it, and a takeover additionally prints
+`codex_app_server=<endpoint>`.
+
 The default TTL is four hours and can be adapted with `--ttl-seconds` up to the
 Persistent Shell one-day maximum. TTL is a crash backstop. The automatically
 started supervisor closes and terminalizes the exact generation on current

@@ -7,6 +7,10 @@ publishes one generation-owned record and gives that generation a private
 supervisor; a takeover (``--impersonate-self``) runs file- and supervisor-less
 with its briefing inlined in the launch message. A concurrent or cross-agent
 caller adopts the live record instead of stacking another Codex process.
+A takeover also wires the explicit shared app-server topology: a private
+``codex app-server --listen`` socket, the TUI connected to it with ``--remote``,
+and the endpoint carried into the launch message so the request records it
+(``--codex-remote``) and the relay queues into the same server.
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ import contextlib
 import json
 import shlex
 import shutil
+import socket
 import sys
 import time
 from pathlib import Path
@@ -218,20 +223,106 @@ def _launch_supervisor(
     )
 
 
-def _codex_command(
+def _app_server_endpoint(key: coding_session_owner.CodingSessionKey, generation: str) -> str:
+    """The single endpoint both the TUI and the codex relay connect to.
+
+    Prepares the socket's private run directory; the app server binds the
+    socket itself.
+    """
+    socket_path = coding_session_owner.codex_app_server_socket(key, generation)
+    socket_path.parent.mkdir(parents=True, exist_ok=True)
+    return f"unix://{socket_path}"
+
+
+def _app_server_command(
     owner: coding_session_owner.CodingSessionOwner,
     workspace: Path,
+    endpoint: str,
     caller_instance: str | None = None,
 ) -> str:
+    """Start the shared app server plus the janitor that outlives the kill rounds.
+
+    The kill path signals the shell's and the foreground process group only, so
+    a background child in its own group survives it; the janitor is that child's
+    cleanup owner — it watches the session child (this shell, then the exec'd
+    TUI) and ends the server when it dies, then removes the socket. The
+    hands-off policy is configured on the server itself: the remote TUI's flags
+    do not reach the server's tools.
+    """
     from shared.external_caller import launch_caller_assignment
 
     if owner.state_dir is None:
         raise RuntimeError("launching owner has no isolated state directory")
+    log_path = owner.state_dir / "app-server.log"
+    socket_path = endpoint.removeprefix("unix://")
+    janitor = (
+        "{ while kill -0 $$ 2>/dev/null && kill -0 $AP 2>/dev/null; do sleep 2; done; "
+        f"kill $AP 2>/dev/null; sleep 1; kill -9 $AP 2>/dev/null; rm -f {shlex.quote(socket_path)}; }}"
+        " &"
+    )
     return (
-        f"cd {shlex.quote(workspace.as_posix())} && "
+        f"(cd {shlex.quote(workspace.as_posix())} && "
         f"CODEX_HOME={shlex.quote(str(owner.state_dir))} "
         f"{launch_caller_assignment('codex', caller_instance)}"
-        "exec codex --dangerously-bypass-approvals-and-sandbox"
+        f"exec codex app-server --listen {shlex.quote(endpoint)}"
+        ' -c approval_policy="never" -c sandbox_mode="danger-full-access"'
+        f" > {shlex.quote(str(log_path))} 2>&1) & AP=$!; "
+        f"{janitor}"
+    )
+
+
+def _wait_for_app_server(endpoint: str, timeout: float = 20.0) -> None:
+    """Block until the shared app server accepts a connection on its socket.
+
+    Socket acceptance is the readiness fact (the app server writes no startup
+    line); a launch whose endpoint never answers fails loudly instead of
+    starting a TUI that queues nothing.
+    """
+    path = endpoint.removeprefix("unix://")
+    print(f"waiting for the shared codex app server at {endpoint}...")
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if Path(path).exists():
+            with contextlib.suppress(OSError):
+                probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                probe.settimeout(2.0)
+                try:
+                    probe.connect(path)
+                finally:
+                    probe.close()
+                print("  -> app server ready")
+                return
+        time.sleep(0.5)
+    raise RuntimeError(
+        f"the shared codex app server did not become ready at {endpoint}; "
+        "check that the installed codex supports `app-server --listen` and `--remote` "
+        "(see canonical_codex_owner.md) — the takeover launch is refused without it"
+    )
+
+
+def _codex_command(
+    owner: coding_session_owner.CodingSessionOwner,
+    workspace: Path,
+    caller_instance: str | None = None,
+    remote: str | None = None,
+) -> str:
+    """Build the interactive TUI command; a takeover clears the screen first.
+
+    The shared app server line has already filled the screen with its echo,
+    which would otherwise pass for a rendered TUI frame and let the launch
+    message park in the composer (the codex-tui-first-message trap).
+    """
+    from shared.external_caller import launch_caller_assignment
+
+    if owner.state_dir is None:
+        raise RuntimeError("launching owner has no isolated state directory")
+    prefix = "clear && " if remote is not None else ""
+    remote_flag = f"--remote {shlex.quote(remote)} " if remote is not None else ""
+    return (
+        f"{prefix}cd {shlex.quote(workspace.as_posix())} && "
+        f"CODEX_HOME={shlex.quote(str(owner.state_dir))} "
+        f"{launch_caller_assignment('codex', caller_instance)}"
+        f"exec codex {remote_flag}--dangerously-bypass-approvals-and-sandbox"
     )
 
 
@@ -250,8 +341,8 @@ def _bootstrap_message(
     )
 
 
-def _takeover_bootstrap_message(agent_id: int, name: str, brief: str) -> str:
-    """Inline the briefing; a takeover reads no task or work file."""
+def _takeover_bootstrap_message(agent_id: int, name: str, brief: str, codex_remote: str) -> str:
+    """Inline the briefing and the shared app-server endpoint; no task/work file."""
     from ava._impersonation_launch import bootstrap_message
 
     guide = (
@@ -261,7 +352,7 @@ def _takeover_bootstrap_message(agent_id: int, name: str, brief: str) -> str:
         / "impersonator-guide"
         / "SKILL.md"
     )
-    return bootstrap_message(agent_id, name, "codex", brief, guide)
+    return bootstrap_message(agent_id, name, "codex", brief, guide, codex_remote=codex_remote)
 
 
 def _print_owner(owner: coding_session_owner.CodingSessionOwner, *, adopted: bool) -> None:
@@ -393,6 +484,7 @@ def _launch(
     expected_suffix = owner.expected_suffix
     owner_agent_id = owner.owner_agent_id
     sid: int | None = None
+    remote: str | None = None
     try:
         _seed_codex_home(owner.state_dir, workspace)
         if takeover_name is None:
@@ -411,10 +503,21 @@ def _launch(
             session_id=sid,
             session_name=full_name,
         )
-        ava.shell.sessions.send(sid, _codex_command(owner, workspace, caller_instance))
+        if takeover_name is not None:
+            remote = _app_server_endpoint(key, generation)
+            ava.shell.sessions.send(
+                sid, _app_server_command(owner, workspace, remote, caller_instance)
+            )
+            _wait_for_app_server(remote)
+        ava.shell.sessions.send(
+            sid, _codex_command(owner, workspace, caller_instance, remote=remote)
+        )
         _wait_for_ready(sid)
         if takeover_name is not None:
-            message = _takeover_bootstrap_message(owner_agent_id, takeover_name, takeover_brief)
+            assert remote is not None  # noqa: S101 — set above for takeovers
+            message = _takeover_bootstrap_message(
+                owner_agent_id, takeover_name, takeover_brief, remote
+            )
         else:
             assert tasks_file is not None and work_file is not None  # noqa: S101 — checked above
             message = _bootstrap_message(workspace, tasks_file, work_file)
@@ -436,6 +539,8 @@ def _launch(
         raise
 
     print(f"ready. name={active.expected_suffix} workspace={workspace}")
+    if remote is not None:
+        print(f"codex_app_server={remote}")
     _print_owner(active, adopted=False)
     return 0
 

@@ -11,6 +11,7 @@ def bootstrap_message(
     provider: str,
     brief: str,
     guide: Path,
+    codex_remote: str | None = None,
 ) -> str:
     """Name both identities explicitly and inline the briefing in the launch message."""
     if provider not in ("codex", "claude") or not name.strip():
@@ -34,9 +35,18 @@ def bootstrap_message(
             "Take over the launching Ava agent. The briefing is in the launch message.",
         ]
     )
+    codex_routing = (
+        "Add --thread-id with this Codex session's CODEX_THREAD_ID and --codex-remote "
+        f"{codex_remote} when issuing the request; preserve CODEX_HOME so the native relay "
+        "queues into that same server — the TUI and the relay must share one endpoint."
+        if codex_remote is not None
+        else "Add --thread-id with this Codex session's CODEX_THREAD_ID; preserve CODEX_HOME "
+        "when issuing the request so the native relay uses this session's owner. When your host "
+        "runs an explicit app server, pass --codex-remote with its endpoint — the TUI and the "
+        "relay must share one endpoint."
+    )
     routing = (
-        "Add --thread-id with this Codex session's CODEX_THREAD_ID; preserve CODEX_HOME "
-        "when issuing the request so the native relay uses this session's owner."
+        codex_routing
         if provider == "codex"
         else "Immediately start the Claude Monitor relay with --session <returned id> and the "
         "returned relay credential, as the request output instructs."
@@ -49,6 +59,8 @@ def bootstrap_message(
         "No controller credential is issued: control commands (say/inbox/ack/renew/release) run "
         "under this session's id and are pinned to this process tree. Wait for status active "
         "before acting as this agent. Its execution pauses automatically when the session starts. "
+        "Once active, verify the start message actually arrives in this conversation before "
+        "relying on automatic delivery — queue acceptance is not host receipt. "
         "Use ava impersonate say for all "
         "user-facing progress and questions; process and ACK inbound messages from the relay. "
         "When complete, flush attached SDK work, stop your work, then release with your own "
