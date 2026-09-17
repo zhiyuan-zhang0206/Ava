@@ -26,6 +26,7 @@ from services.pitr.restore_proof import (
     _is_zombie,
     update_restore_owner,
 )
+from shared.pg_tools import pg_start_env
 from shared.proc_tree import create_time_matches, stable_create_time
 
 
@@ -241,6 +242,11 @@ def _spawn_sandbox_postgres(
     in OUR group: exec postgres directly with its output in the run-root log
     (activation #10 first surfaced the group-escape tripwire; #8/#9 hung
     earlier on pg_ctl's capture pipe for the same daemonization reason).
+
+    The child environment comes from `pg_start_env()` (Task #3829): a caller
+    that is itself locale-less (launchd, a non-interactive drill start) must
+    not hand a locale-less environment to the postmaster — on macOS that is
+    the "postmaster became multithreaded during startup" abort (Task #3754).
     """
     with log_path.open("ab", buffering=0) as log:
         return cast(
@@ -256,6 +262,7 @@ def _spawn_sandbox_postgres(
                 stdin=subprocess.DEVNULL,
                 stdout=log.fileno(),
                 stderr=log.fileno(),
+                env=pg_start_env(),
             ),
         )
 
