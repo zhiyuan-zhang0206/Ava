@@ -913,12 +913,18 @@ def test_rerun_failed_jobs_dry_run_lists_jobs(monkeypatch: pytest.MonkeyPatch, c
         ci_utils,
         "list_failed_jobs",
         lambda _pr, _repo: [
-            {"name": "e2e shard (3/4)", "job_id": 102, "run_id": 11, "conclusion": "FAILURE"}
+            {
+                "name": "e2e shard (3/4)",
+                "job_id": 102,
+                "run_id": 11,
+                "conclusion": "FAILURE",
+                "run_status": "completed",
+            }
         ],
     )
     assert ci_utils.main(["42", "--rerun-failed-jobs", "--dry-run"]) == 0
     out = capsys.readouterr().out
-    assert "e2e shard (3/4)" in out and "102" in out
+    assert "e2e shard (3/4)" in out and "102" in out and "[run completed]" in out
 
 
 def test_rerun_failed_jobs_nothing_to_do(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
@@ -934,10 +940,10 @@ def test_rerun_failed_jobs_forwards_and_reports_errors(
     monkeypatch.setattr(
         ci_utils,
         "rerun_failed_jobs",
-        lambda _pr, _repo: ([], ["lint: gh: rate limited"]),
+        lambda _pr, _repo: ([], [], ["lint: gh: rate limited"]),
     )
     assert ci_utils.main(["42", "--rerun-failed-jobs"]) == 3
-    assert "rate limited" in capsys.readouterr().out
+    assert "Re-run failed: lint: gh: rate limited" in capsys.readouterr().out
 
 
 def test_rerun_failed_jobs_success_exits_zero(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
@@ -947,10 +953,66 @@ def test_rerun_failed_jobs_success_exits_zero(monkeypatch: pytest.MonkeyPatch, c
         lambda _pr, _repo: (
             [{"name": "lint", "job_id": 104, "run_id": 11, "conclusion": "FAILURE"}],
             [],
+            [],
         ),
     )
     assert ci_utils.main(["42", "--rerun-failed-jobs"]) == 0
     assert "Re-ran lint" in capsys.readouterr().out
+
+
+def test_rerun_failed_jobs_waits_for_still_running_run(
+    monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """Failures waiting on a still-running run are reported with the recovery
+    action and exit 5, never forwarded as a 403 (task #3764)."""
+    monkeypatch.setattr(
+        ci_utils,
+        "rerun_failed_jobs",
+        lambda _pr, _repo: (
+            [],
+            [
+                {
+                    "name": "backend shard (8/16)",
+                    "job_id": 105093815208,
+                    "run_id": 35187743815,
+                    "conclusion": "failure",
+                    "run_status": "in_progress",
+                }
+            ],
+            [],
+        ),
+    )
+    assert ci_utils.main(["42", "--rerun-failed-jobs"]) == 5
+    out = capsys.readouterr().out
+    assert "Waiting: backend shard (8/16)" in out
+    assert "in_progress" in out
+    assert "Re-run this command once the run finishes." in out
+
+
+def test_rerun_failed_jobs_reports_mixed_outcomes(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    """A rerun that partly lands and partly waits prints both lines and exits
+    5: the waiting remainder governs the exit (task #3764)."""
+    monkeypatch.setattr(
+        ci_utils,
+        "rerun_failed_jobs",
+        lambda _pr, _repo: (
+            [{"name": "lint", "job_id": 104, "run_id": 11, "conclusion": "FAILURE"}],
+            [
+                {
+                    "name": "backend shard (8/16)",
+                    "job_id": 105093815208,
+                    "run_id": 35187743815,
+                    "conclusion": "failure",
+                    "run_status": "in_progress",
+                }
+            ],
+            [],
+        ),
+    )
+    assert ci_utils.main(["42", "--rerun-failed-jobs"]) == 5
+    out = capsys.readouterr().out
+    assert "Re-ran lint" in out
+    assert "Waiting: backend shard (8/16)" in out
 
 
 def test_rerun_failed_jobs_query_failure_is_an_error(
@@ -1187,11 +1249,21 @@ def _diag_job(name: str, job_id: int = 9, conclusion: str = "FAILURE") -> dict:
 
 
 def _diag_runs(run_id: int = 10) -> str:
-    """Real-shaped REST runs payload with one CI run (issue #1945)."""
+    """Real-shaped REST runs payload with one CI run (issue #1945).
+
+    The run carries `status: completed` — the field `ci_job_rerun` reads to
+    decide whether a re-run is admissible (task #3764)."""
     return json.dumps(
         {
             "total_count": 1,
-            "workflow_runs": [{"id": run_id, "name": "CI", "created_at": "2026-09-09T10:00:00Z"}],
+            "workflow_runs": [
+                {
+                    "id": run_id,
+                    "name": "CI",
+                    "created_at": "2026-09-09T10:00:00Z",
+                    "status": "completed",
+                }
+            ],
         }
     )
 
