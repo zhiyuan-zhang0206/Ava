@@ -487,3 +487,17 @@ def test_misdirected_full_handle_fails_closed(tmp_path: Path) -> None:
     assert "session_name does not match" in (invalid.error or "")
     with pytest.raises(owner.InvalidCodingSessionOwnerError):
         _claim(key, agent_id=99, live={active.session_name})
+
+
+def test_codex_app_server_socket_is_short_and_generation_scoped(tmp_path: Path) -> None:
+    key = _key(tmp_path)
+    generation = "be6a5e0a-f271-4301-ad6b-521673bf262f"
+    first = owner.codex_app_server_socket(key, generation)
+    assert first.parent == Path(key.cluster) / "run"
+    assert first.name.startswith("codex-app-server.")
+    assert first.name.endswith("-be6a5e0a.sock")
+    assert len(first.name) == len("codex-app-server.") + 12 + 1 + 8 + len(".sock")
+    assert owner.codex_app_server_socket(key, generation) == first
+    assert owner.codex_app_server_socket(key, "ffffffff-1111-2222-3333-444444444444") != first
+    other = owner.codex_app_server_socket(_key(tmp_path, "workspace2"), generation)
+    assert other != first

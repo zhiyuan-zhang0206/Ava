@@ -66,6 +66,14 @@ Connect the interactive TUI to that exact endpoint:
 codex --remote unix:///path/to/private/run/codex.sock -C /path/to/agent/workspace
 ```
 
+The Ava takeover launcher wires this topology itself for a file-less takeover:
+it starts the app server on a private per-generation socket under the cluster's
+`run/` directory with the hands-off approval and sandbox policy, starts a
+janitor that ends the server when the coding session dies, connects the TUI
+with `--remote`, and passes the endpoint into the launch message so the request
+records it (`--codex-remote`) and the runtime's relay queues into the same
+server.
+
 The codex relay needs no manual start: the accepting runtime spawns it at
 activation from the recorded spec, handing the scoped relay credential over a
 private stdin pipe (`--token-stdin` — the credential never appears in argv,

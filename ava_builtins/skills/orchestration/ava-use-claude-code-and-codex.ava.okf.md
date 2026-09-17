@@ -35,8 +35,13 @@ supervised mode; it terminalizes the exact generation and reclaims its
 PTY/private state on current-generation `DONE` or `HANDOFF`, explicit cancel,
 owner termination, Codex death, or absolute expiry. A takeover starts no
 supervisor — explicit cancel and expiry are its stop paths, and the next
-launch reclaims a dead takeover record. Notifications use non-resurrecting
-system notes.
+launch reclaims a dead takeover record. A takeover generation additionally
+owns an explicit shared app server, and the launcher wires it: `codex app-server
+--listen` on a private per-generation socket (`codex_app_server_socket`), a
+janitor that ends the server when the coding session dies, the TUI connected
+with `--remote`, and the endpoint in the launch message so the request records
+it (`--codex-remote`) and the relay queues into the same server. Notifications
+use non-resurrecting system notes.
 
 ## Key dependencies
 - [[ava_builtins/skills/orchestration/orchestration.ava.okf.md|Workflow orchestration skill]] — belongs to functional group

@@ -54,6 +54,13 @@ The generation state directory is
 `$AVA_HOME/run/coding-tools/<tool>/<canonical-key-digest>/<generation>/`.
 Cleanup validates that exact derived path before removal.
 
+The shared Codex app-server socket for a takeover is
+`codex_app_server_socket(key, generation)` →
+`<cluster home>/run/codex-app-server.<key-digest12>-<generation8>.sock`: host-local
+and short by construction because the generation state dir can exceed the
+kernel's unix-socket path limit, and scoped to one generation so a dying
+predecessor can never unlink a successor's socket.
+
 ## Key dependencies
 
 - [[shared/pty_sessions/pty_sessions.ava.okf.md]] — full-name PTY liveness and

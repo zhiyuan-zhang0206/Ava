@@ -16,9 +16,13 @@ nothing back into it. Run the spawn script in your Ava execution context:
 The briefing is inlined verbatim into the launch message the new process wakes
 up with: include the current goal, decisions, constraints and paths. The
 script's startup checks — readiness, message submission, the generation's owner
-record — run before it returns. On the next safe boundary Ava saves your
-checkpoint, verifies the inbound relay and activates the replacement; the
-executor may freely choose its display name. Run it from your own workspace —
+record — run before it returns; for Codex it also starts the shared app server
+the takeover and the relay both use, with the endpoint carried in the launch
+message. On the next safe boundary Ava saves your checkpoint, verifies the
+inbound relay and activates the replacement; the executor may freely choose its
+display name. Activation and relay liveness are not host receipt: once active,
+the takeover verifies the start message actually arrived in its conversation
+before relying on push delivery. Run it from your own workspace —
 usually the best choice for a takeover: spawn the takeover under your
 workspace and pass that directory as the spawn workspace argument, so the
 workspace is directly the impersonator's working directory (other locations
