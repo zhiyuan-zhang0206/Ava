@@ -383,7 +383,9 @@ async def test_reaper_reconciles_stale_work_failures_on_its_startup_pass(
     assert calls == [reaper_pool]
 
 
-async def _empty_shell_reap(_pool: ConnectionPool) -> list[tuple[int, int]]:
+async def _empty_shell_reap(
+    _pool: ConnectionPool, _stop: asyncio.Event | None = None
+) -> list[tuple[int, int]]:
     return []
 
 
