@@ -17,8 +17,9 @@ that window on the sending machine:
   `insert_chat_inbound_once` path — the same durable INSERT + wake the HTTP
   route uses — so every downstream mechanism (delivery watchdog dispatch,
   claim recheck, terminated-owner resurrect retry) completes the delivery.
-  Retries follow a configurable backoff ladder and stop at a configurable
-  budget.
+  Retries follow a configurable backoff ladder; the first failed attempt at
+  or after the configurable budget abandons the entry, so an attempt is never
+  skipped on time alone.
 - **Escalate (keep it loud).** A delivery that cannot land within the budget,
   or that fails permanently (missing agent, key conflict), is abandoned with a
   WARNING, a `delivery_outbox_abandoned` telemetry event, and the record kept
@@ -171,12 +172,20 @@ def split_content(content: Content) -> tuple[str, dict[str, object] | None]:
     """Map wire content to its durable `(content, payload)` form.
 
     The semantic twin of `gateway/routers/agents_state.py::_normalize_message_content`
-    (kept here because `services` may not import `gateway`): a string passes
-    through; a block list stores the joined text part (or `"[image]"`) plus the
+    (kept here because `services` may not import `gateway`): a string is
+    stripped; a block list stores the joined text part (or `"[image]"`) plus the
     `{"content_blocks": [...]}` payload the claim node inlines natively.
+
+    The strip mirrors the wire model: `ops/rpc_schemas._MessageContent` parses
+    string content with `strip_whitespace=True, min_length=1`, so the route's
+    stored row carries the stripped form. A flushed insert bypasses that model,
+    and `shared/chat_delivery._matching_receipt` compares stored vs incoming
+    content exactly — an unstripped replay of a whitespace-edged string would
+    read as a different message (a false `key_conflict` / 409) although it is
+    the same one.
     """
     if isinstance(content, str):
-        return content, None
+        return content.strip(), None
     texts: list[str] = []
     for block in content:
         raw = block.get("text")
@@ -568,7 +577,8 @@ def _due_at(entry: OutboxEntry, steps: tuple[float, ...]) -> datetime:
     return base + timedelta(seconds=step)
 
 
-def _record_failed_flush(path: Path, entry: OutboxEntry, moment: datetime) -> None:
+def _record_failed_flush(path: Path, entry: OutboxEntry, moment: datetime) -> OutboxEntry:
+    """Persist one failed flush attempt; returns the updated entry."""
     updated = replace(
         entry,
         flush_attempts=entry.flush_attempts + 1,
@@ -576,6 +586,7 @@ def _record_failed_flush(path: Path, entry: OutboxEntry, moment: datetime) -> No
     )
     with suppress(OSError):
         _write_atomic(path, updated)
+    return updated
 
 
 def flush(pool: FlushPool, *, now: datetime | None = None) -> FlushReport:
@@ -583,9 +594,13 @@ def flush(pool: FlushPool, *, now: datetime | None = None) -> FlushReport:
 
     A record is delivered through `insert_chat_inbound_once` (idempotent by its
     stored key), retired on success, retried per the backoff ladder while
-    transiently failing, and abandoned — loudly — once its budget is spent or
-    the failure is permanent. While the outbox is disabled, nothing is touched
-    and records stay for a re-enable or the operator.
+    transiently failing, and abandoned — loudly — on a permanent failure or on
+    the first failed attempt at or after its budget. The budget decision sits
+    after the attempt, never before it: an entry owed a retry at budget time
+    still gets it (a flusher stalled across the budget gives the message its
+    chance once services return), and a successful attempt delivers at any age.
+    While the outbox is disabled, nothing is touched and records stay for a
+    re-enable or the operator.
     """
     snapshot = limits()
     moment = now or datetime.now(UTC)
@@ -607,10 +622,6 @@ def flush(pool: FlushPool, *, now: datetime | None = None) -> FlushReport:
             deferred += 1
             continue
         age_s = (moment - _parse_iso(entry.created_at)).total_seconds()
-        if age_s >= snapshot.budget_seconds:
-            _abandon(path, entry, "budget", moment)
-            abandoned += 1
-            continue
         if moment < _due_at(entry, snapshot.retry_backoff_steps):
             deferred += 1
             continue
@@ -625,8 +636,15 @@ def flush(pool: FlushPool, *, now: datetime | None = None) -> FlushReport:
                 entry.agent_id,
                 path,
             )
-            _record_failed_flush(path, entry, moment)
-            deferred += 1
+            updated = _record_failed_flush(path, entry, moment)
+            if age_s >= snapshot.budget_seconds:
+                # The failed attempt at/after the budget is the terminal one —
+                # abandon it with the attempt already on the record. The
+                # decision falls after the attempt, never before it.
+                _abandon(path, updated, "budget", moment)
+                abandoned += 1
+            else:
+                deferred += 1
         else:
             with suppress(OSError):
                 path.unlink()

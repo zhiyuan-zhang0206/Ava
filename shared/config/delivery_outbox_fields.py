@@ -58,7 +58,7 @@ class DeliveryOutboxFields:
         default=43200.0,
         gt=0,
         alias="AVA_DELIVERY_OUTBOX_BUDGET_SECONDS",
-        description="Deferred-delivery budget (seconds): how long an outbox entry keeps being redelivered before it is abandoned with an observable escalation instead. 12h is 6.5x the 2026-09-17 110-minute black window (task #3719/#3757 evidence), so an overnight outage still backfills, while a wake for a fire older than half a day has lost its actionability window and escalates rather than delivering stale work.",
+        description="Deferred-delivery budget (seconds): how long an outbox entry keeps being retried before a failed attempt abandons it with an observable escalation instead. The abandonment decision falls after the attempt, never before it, so an entry owed a retry at budget time still gets it (a flusher stalled across the budget gives the message its chance once services return) and a successful attempt delivers at any age. 12h is 6.5x the 2026-09-17 110-minute black window (task #3719/#3757 evidence), so an overnight outage still backfills; a message that still cannot land half a day on escalates (event + warning + kept record) instead of retrying forever.",
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "",

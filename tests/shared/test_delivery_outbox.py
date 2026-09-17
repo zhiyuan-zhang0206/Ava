@@ -175,6 +175,11 @@ def test_note_send_succeeded_retires_only_the_matching_record(
 
 def test_split_content_matches_the_route_normalization() -> None:
     assert outbox.split_content("plain") == ("plain", None)
+    # Wire strings are stripped by `_MessageContent` before the row is written
+    # (strip_whitespace=True); the twin must match, or a whitespace-edged
+    # replay of an already-committed key looks like a different message
+    # (a false key_conflict/409).
+    assert outbox.split_content("  padded\n") == ("padded", None)
     blocks: list[dict[str, object]] = [
         {"type": "text", "text": "look ma"},
         {"type": "image_url", "image_url": {"url": "https://x/i.png"}},
@@ -275,20 +280,75 @@ def test_flush_failed_attempt_backs_off(
     assert len(attempts) == 2
 
 
-def test_flush_abandons_at_budget(
-    journal: Path, db_conn: psycopg.Connection, pool: ConnectionPool
+def test_flush_abandons_at_budget_after_the_failed_attempt(
+    journal: Path,
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Past the budget the entry still gets its attempt; it is the FAILED
+    attempt that abandons — with the attempt recorded on the record."""
     agent_id = _agent(db_conn)
     path = _record(agent_id=agent_id, now=_NOW)
     assert path is not None
+
+    def _boom(_pool: object, entry: outbox.OutboxEntry, _timeout: float) -> int:
+        raise RuntimeError("data plane down")
+
+    monkeypatch.setattr(outbox, "_deliver", _boom)
     report = outbox.flush(pool, now=_NOW + timedelta(seconds=43201))
     assert report.abandoned == 1 and report.delivered == 0
     entry = outbox._read(path)
     assert entry is not None
     assert entry.state == "abandoned" and entry.abandon_reason == "budget"
+    assert entry.flush_attempts == 1
     assert _inbounds(db_conn, agent_id) == []
     # An abandoned record is terminal — later passes leave it alone.
     assert outbox.flush(pool, now=_NOW + timedelta(seconds=50000)).touched == 0
+
+
+def test_flush_delivers_stale_entry_when_the_final_attempt_succeeds(
+    journal: Path, db_conn: psycopg.Connection, pool: ConnectionPool
+) -> None:
+    """A flusher stalled across the budget still gives the message its chance
+    once services return: the attempt runs before the budget decision, and a
+    success at any age delivers."""
+    agent_id = _agent(db_conn)
+    _record(agent_id=agent_id, now=_NOW)
+    report = outbox.flush(pool, now=_NOW + timedelta(seconds=43201))
+    assert report.delivered == 1 and report.abandoned == 0
+    assert len(_inbounds(db_conn, agent_id)) == 1
+
+
+def test_flush_past_budget_not_due_defers_until_the_attempt(
+    journal: Path,
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Past the budget, an entry not yet due waits for its next due attempt
+    instead of being abandoned — the decision needs the attempt's outcome."""
+    agent_id = _agent(db_conn)
+    path = _record(agent_id=agent_id, now=_NOW)
+    assert path is not None
+    _patch_limits(monkeypatch, budget_seconds=100.0)
+
+    def _boom(_pool: object, entry: outbox.OutboxEntry, _timeout: float) -> int:
+        raise RuntimeError("data plane down")
+
+    monkeypatch.setattr(outbox, "_deliver", _boom)
+    # Attempt 1 at +31 (next due +91), attempt 2 at +95 (next due +395).
+    assert outbox.flush(pool, now=_NOW + timedelta(seconds=31)).deferred == 1
+    assert outbox.flush(pool, now=_NOW + timedelta(seconds=95)).deferred == 1
+    # +150 is past the 100 s budget but not due: deferred, still pending.
+    assert outbox.flush(pool, now=_NOW + timedelta(seconds=150)).deferred == 1
+    entry = outbox._read(path)
+    assert entry is not None and entry.state == "pending" and entry.flush_attempts == 2
+    # The attempt owed at +395 runs and, failing past the budget, abandons.
+    assert outbox.flush(pool, now=_NOW + timedelta(seconds=396)).abandoned == 1
+    entry = outbox._read(path)
+    assert entry is not None
+    assert entry.abandon_reason == "budget" and entry.flush_attempts == 3
 
 
 def test_flush_abandons_missing_agent(
