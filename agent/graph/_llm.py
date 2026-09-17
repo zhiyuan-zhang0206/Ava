@@ -108,6 +108,12 @@ from ._llm_errors import (
     LLMStreamSilentIdleError as LLMStreamSilentIdleError,
 )
 from ._llm_errors import (
+    LLMStreamStallPairError as LLMStreamStallPairError,
+)
+from ._llm_errors import (
+    LLMStreamStallPairExhaustedError as LLMStreamStallPairExhaustedError,
+)
+from ._llm_errors import (
     LLMStreamStallTimeoutError as LLMStreamStallTimeoutError,
 )
 from ._llm_errors import (
@@ -118,7 +124,10 @@ from ._llm_errors import (
 )
 from ._llm_errors import (
     _check_consecutive_error_cap,
+    _check_stall_pair_cap,
     _clear_consecutive_errors,
+    _reset_stall_pair_streak,
+    _stall_pair_streak_active,
 )
 from ._llm_errors import (
     _classify_and_log_provider_error as _classify_and_log_provider_error,
@@ -363,6 +372,7 @@ async def llm_node(
     into the record.
     """
     turn_start = time.monotonic()
+    agent_id = agent_id_from_config(config)
     event_publisher = runtime.context.event_publisher
     assert event_publisher is not None, "llm_node requires ctx.event_publisher"  # noqa: S101
     async with node_lifecycle(
@@ -370,17 +380,36 @@ async def llm_node(
         messages=state.messages,
         ops_pool=runtime.context.ops_pool,
         event_publisher=event_publisher,
-        agent_id=agent_id_from_config(config),
+        agent_id=agent_id,
     ):
         try:
             timing = _retry_elapsed_seconds(runtime)
-            if timing is not None and timing[1] >= settings.lm.llm_retry_max_total_seconds:
+            if (
+                timing is not None
+                and timing[1] >= settings.lm.llm_retry_max_total_seconds
+                # The transient-retry budget is sized for seconds-scale
+                # backoffs; while a delayed stall sequence is active its own
+                # schedule (streak cap) owns the bound — see _build.
+                and not _stall_pair_streak_active(str(agent_id))
+            ):
                 _log_llm_retry_duration(runtime, outcome="budget_exhausted")
                 _raise_retry_budget_exhausted(timing[0])
             result = await _llm_node_impl(state, runtime, config)
         except BaseException as exc:
+            # A settled (failed) attempt is real activity: mark the turn clock
+            # now so the following retry sleep is the ONLY silence the hosted
+            # no-progress stall guard sees. The delayed stall schedule may
+            # sleep for up to `llm_stall_retry_max_interval_seconds` (default
+            # 1800s, jittered, under the guard's 2400s) — without this mark
+            # the silence would include the whole stalled attempt on top of
+            # the sleep and could cross the guard's bound.
+            mark_turn_progress(agent_id)
             timing = _retry_elapsed_seconds(runtime)
-            if timing is not None and isinstance(exc, Exception):
+            if (
+                timing is not None
+                and isinstance(exc, Exception)
+                and not isinstance(exc, LLMStreamStallPairError)
+            ):
                 attempt, duration_seconds = timing
                 remaining_seconds = settings.lm.llm_retry_max_total_seconds - duration_seconds
                 if remaining_seconds <= 0.0 and not isinstance(exc, LLMRetryBudgetExceededError):
@@ -597,6 +626,10 @@ async def _llm_node_impl(
     # N times across retries, fail fast with FatalLLMStreamError instead of
     # wasting another 30-480s retry cycle on a deterministic error.
     _check_consecutive_error_cap(str(agent_id))
+    # Stall-pair cap: a spent delayed stall-retry streak (default 4 pairs) ends
+    # the turn here as a fatal abort — the next attempt would only burn another
+    # stalled pair while the provider is still degraded.
+    _check_stall_pair_cap(str(agent_id))
 
     # Streaming forwarding (chat / reasoning / code) is isolated in
     # RedisStreamHandler — process_chunk is called in the chunk loop; after
@@ -636,8 +669,11 @@ async def _llm_node_impl(
         return cancelled_cmd
 
     # Stream succeeded -- reset the consecutive-error tracker so a future
-    # transient error (different type) starts from 1, not accumulated.
+    # transient error (different type) starts from 1, not accumulated. The
+    # stall-pair streak resets with it: a served request proves the provider
+    # recovered, so a later stall pair starts a fresh delayed schedule.
     _clear_consecutive_errors(str(agent_id))
+    _reset_stall_pair_streak(str(agent_id))
 
     if not chunks:
         # LLM returned empty — extremely rare; return empty code per historical

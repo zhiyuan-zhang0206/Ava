@@ -48,7 +48,7 @@ core_metrics.register_core_metric(
             "|llm_cancelled|llm_provider_error|llm_turn_aborted|loki_query_failed"
             "|page_restore_failed|page_restore_query_failed|page_serve_dir_missing"
             "|pgbouncer_repaired|screen_capture_notify_failed|sse_drop|stream_overloaded_retry"
-            '|stream_stalled_retry|warning_resolved")))'
+            '|stream_stall_pair_terminated|stream_stalled_retry|warning_resolved")))'
         ),
         target_names=["events"],
         width=24,

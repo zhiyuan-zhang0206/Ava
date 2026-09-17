@@ -178,9 +178,11 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # deferred-delivery outbox (task #3757's delivery_outbox_flushed +
     # delivery_outbox_abandoned) raises it to 184; the converge-side
     # ava-ops dashboard render-failure guard (task #3697 S3's
-    # lgtm_dashboard_render_failed) raises the current total to 185.
+    # lgtm_dashboard_render_failed) raises the current total to 185; the
+    # deepseek stall-wave mitigation (task #3884's stream_stall_pair_terminated
+    # — two adjacent stalls ended a call early) raises the current total to 186.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 185
+    assert len(_TELEMETRY_KINDS) == 186
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:
@@ -361,6 +363,14 @@ def test_pitr_remote_inventory_payload_and_metric_disposition() -> None:
     assert payload_keys("pitr_remote_inventory") == ("backend", "object_count", "bytes")
     assert _METRIC_DISPOSITION[("pitr_remote_inventory", "object_count")] == "gauge"
     assert _METRIC_DISPOSITION[("pitr_remote_inventory", "bytes")] == "gauge"
+
+
+def test_stall_wave_mitigation_event_contract() -> None:
+    """Task #3884: the stall-retry event carries the provider-health payload
+    (vendor/model/stage/elapsed_s) and pair terminations register as an
+    anomaly-tier telemetry event of their own."""
+    assert payload_keys("stream_stalled_retry") == ("vendor", "model", "stage", "elapsed_s")
+    assert tier_for("stream_stall_pair_terminated", "telemetry", "warning") == "anomaly"
 
 
 def test_recovery_drill_failed_payload() -> None:

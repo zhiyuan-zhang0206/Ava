@@ -3,7 +3,10 @@
 ``_consume_llm`` is the single entry: stream via ``bound_llm.astream(...)``
 under per-stage stall timeouts plus a total-attempt ceiling, falling back once
 to a non-stream ``ainvoke`` on a stalled stream or a configured-fatal provider
-error type.
+error type. A stalled stream's fallback runs under the SAME bound as its
+stream segment; when that fallback also times out (two adjacent stalls), the
+call is terminated as ``LLMStreamStallPairError`` for the delayed retry
+schedule instead of burning the provider's stalled segments.
 ``_stream_with_cache_retry`` wraps the whole exchange (stale Gemini cache
 invalidation + one plain-path retry, concurrency-limiter slot, latency/decode
 stamps).
@@ -30,6 +33,7 @@ from shared.log import logger
 
 from ._callbacks import RedisStreamHandler
 from ._llm_errors import (
+    LLMStreamStallPairError,
     LLMStreamStallTimeoutError,
     _is_fatal_provider_error_type,
     _parse_provider_error_type,
@@ -60,9 +64,21 @@ async def _consume_llm(
 
     Note the two paths run under different clocks: the streaming attempt is
     bounded by the per-model TTFT / inter-chunk gap timeouts and total-duration
-    ceiling, the fallback by ``llm_non_streaming_fallback_timeout_seconds``
-    (600s). Any apparent "streaming fails, non-streaming succeeds" asymmetry
-    has to be read against that gap before it is attributed to the provider.
+    ceiling; the stall-triggered fallback runs under the SAME
+    ``llm_stream_ttft_timeout_seconds`` resolution as its stream segment (one
+    key, one value — a stalled call costs ~2x the bound, never the stream
+    bound plus a separate 600s ceiling), while the fatal-error-type fallback
+    keeps ``llm_non_streaming_fallback_timeout_seconds`` (that trigger is not
+    a stall; the fallback may bypass the SSE layer and complete a full slow
+    generation). Any apparent "streaming fails, non-streaming succeeds"
+    asymmetry has to be read against these bounds before it is attributed to
+    the provider.
+
+    A stall whose fallback ALSO times out is a *stall pair* — the fallback's
+    ``TimeoutError`` is re-raised as ``LLMStreamStallPairError`` here, so the
+    retry policy's delayed stall schedule (not the generic transient fast
+    retry) owns the next attempt, and a bare transport TimeoutError never
+    reads as one more blip to re-burn.
 
     Fallback runs only once per call — if non-stream also hits the same error,
     propagate naturally. Cost: that turn loses UI progressive streaming display;
@@ -74,19 +90,23 @@ async def _consume_llm(
     assembly — a signature-only block filled with `thinking=""` round-trips
     the endpoint, so no doubled re-request is needed.
     """
+    from shared.lm.factory import provider_key_of_model
     from shared.lm.registry import resolve_setting
 
+    model = turn_settings.lm.llm_model
+    # One resolution feeds BOTH segments of a stalled call: the stream
+    # segment's first-chunk bound and the post-stall non-streaming fallback.
+    # Per-model defaults with shared fallback; explicit env values / the
+    # per-agent overlay win (a slow provider gets a longer bound without
+    # loosening every model's stall detection).
+    stall_segment_timeout = resolve_setting("llm_stream_ttft_timeout_seconds", model=model)
+    stream_started = time.monotonic()
     try:
         return await _consume_stream_with_stall_timeout(
             bound_llm.astream(messages).__aiter__(),  # type: ignore[attr-defined]
             chunks=chunks,
             handler=handler,
-            # Per-model defaults with shared fallback; explicit env values /
-            # the per-agent overlay win (a slow provider gets a longer TTFT
-            # without loosening every model's stall detection).
-            ttft_timeout=resolve_setting(
-                "llm_stream_ttft_timeout_seconds", model=turn_settings.lm.llm_model
-            ),
+            ttft_timeout=stall_segment_timeout,
             total_timeout=resolve_setting(
                 "llm_stream_total_timeout_seconds", model=turn_settings.lm.llm_model
             ),
@@ -97,27 +117,60 @@ async def _consume_llm(
     except LLMStreamStallTimeoutError as e:
         # Streaming stalled (e.g. Kimi K3 engine overload: first request 429,
         # retry 200 but server doesn't stream → TTFT timeout). Non-streaming
-        # bypasses the SSE event layer entirely — fallback once.
+        # bypasses the SSE event layer entirely — fallback once, under the SAME
+        # bound (`stall_segment_timeout`): a stalled provider then costs ~2x the
+        # bound for the whole call instead of the stream bound plus the 600s
+        # fallback ceiling, and the second timeout terminates the pair instead
+        # of burning further (see below).
         logger.warning(
             "[{error_type}] retry non-streaming once: {error}",
             event="stream_stalled_retry",
             error_type=type(e).__name__,
             error=str(e)[:200],
+            vendor=provider_key_of_model(model),
+            model=model,
+            stage=e.stage,
+            elapsed_s=round(time.monotonic() - stream_started, 1),
         )
         chunks.clear()
-        return await _ainvoke_single_chunk(
-            bound_llm,
-            messages,
-            chunks=chunks,
-            handler=handler,
-            timeout=settings.lm.llm_non_streaming_fallback_timeout_seconds,
-        )
+        try:
+            return await _ainvoke_single_chunk(
+                bound_llm,
+                messages,
+                chunks=chunks,
+                handler=handler,
+                timeout=stall_segment_timeout,
+            )
+        except TimeoutError as fallback_timeout:
+            # Second adjacent stall: the non-streaming retry was not served
+            # either, inside the same bound. Terminate the call here as a
+            # first-class LLMStreamError so the delayed stall schedule (not the
+            # generic transient retry) owns the next attempt; a bare
+            # TimeoutError would read as one more transport blip and burn the
+            # provider's stalled segments until the turn died.
+            logger.warning(
+                "two adjacent stalls — non-streaming fallback timed out after "
+                "{timeout_s:.1f}s; terminating the call for a delayed retry",
+                event="stream_stall_pair_terminated",
+                vendor=provider_key_of_model(model),
+                model=model,
+                stage=e.stage,
+                timeout_s=stall_segment_timeout,
+            )
+            raise LLMStreamStallPairError(
+                f"LLM stream stalled ({e.stage}) and the non-streaming fallback also "
+                f"timed out after {stall_segment_timeout:.1f}s — two adjacent stalls; "
+                f"aborting the call for a delayed retry.",
+                stage=e.stage,
+            ) from fallback_timeout
     except Exception as e:
         # Provider returned a fatal error type (e.g. engine_overloaded_error)
         # on the streaming path. Non-streaming may still succeed (it bypasses
         # the SSE event layer and runs under a far longer timeout). Fallback
         # once before letting the error propagate to _llm_node_impl →
-        # FatalProviderError.
+        # FatalProviderError. This trigger is NOT a stall, so the pair bound
+        # above does not apply — the fallback keeps
+        # `llm_non_streaming_fallback_timeout_seconds` as its ceiling.
         if _is_fatal_provider_error_type(e):
             error_type = _parse_provider_error_type(e) or "unknown"
             logger.warning(
@@ -232,7 +285,8 @@ async def _consume_stream_with_stall_timeout(
             if remaining_total <= 0:
                 raise LLMStreamStallTimeoutError(
                     f"LLM stream exceeded {total_timeout:.1f}s total duration "
-                    f"after {chunk_idx} chunks; abort streaming attempt."
+                    f"after {chunk_idx} chunks; abort streaming attempt.",
+                    stage="total",
                 )
             if remaining_total <= stage_timeout:
                 timeout = remaining_total
@@ -243,19 +297,22 @@ async def _consume_stream_with_stall_timeout(
             if total_timeout is not None and time.monotonic() - started_at >= total_timeout:
                 raise LLMStreamStallTimeoutError(
                     f"LLM stream exceeded {total_timeout:.1f}s total duration "
-                    f"after {chunk_idx} chunks; abort streaming attempt."
+                    f"after {chunk_idx} chunks; abort streaming attempt.",
+                    stage="total",
                 ) from None
             return (first_ts, last_ts)
         except TimeoutError as e:
             if total_is_next_deadline:
                 raise LLMStreamStallTimeoutError(
                     f"LLM stream exceeded {total_timeout:.1f}s total duration "
-                    f"after {chunk_idx} chunks; abort streaming attempt."
+                    f"after {chunk_idx} chunks; abort streaming attempt.",
+                    stage="total",
                 ) from e
-            stage = "TTFT" if chunk_idx == 0 else f"mid-stream after {chunk_idx} chunks"
+            stage_label = "TTFT" if chunk_idx == 0 else f"mid-stream after {chunk_idx} chunks"
             raise LLMStreamStallTimeoutError(
-                f"LLM stream stalled — no chunk for {stage_timeout:.1f}s ({stage}); "
-                f"abort turn. Provider hang / network drop suspected."
+                f"LLM stream stalled — no chunk for {stage_timeout:.1f}s ({stage_label}); "
+                f"abort turn. Provider hang / network drop suspected.",
+                stage="ttft" if chunk_idx == 0 else "mid-stream",
             ) from e
         assert isinstance(chunk, AIMessageChunk)  # noqa: S101
         # Arrival timestamps before fan-out: decode_ms measures the provider's
@@ -265,7 +322,8 @@ async def _consume_stream_with_stall_timeout(
         if total_timeout is not None and now - started_at >= total_timeout:
             raise LLMStreamStallTimeoutError(
                 f"LLM stream exceeded {total_timeout:.1f}s total duration "
-                f"after {chunk_idx} chunks; abort streaming attempt."
+                f"after {chunk_idx} chunks; abort streaming attempt.",
+                stage="total",
             )
         if first_ts is None:
             first_ts = now
