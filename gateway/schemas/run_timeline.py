@@ -115,6 +115,21 @@ class RunTimelineLayerNode(BaseModel):
     summary: str
 
 
+class RunTimelineInbound(BaseModel):
+    """One chat delivery fact (inbound_messages row) inside the window.
+
+    The arrow source for multi-agent compare views: ``source`` carries the
+    envelope contract (``agent:<id>`` / ``user`` / ...); ``inbound_id`` is
+    ava_inbound_id, the identity the console item stream already exposes.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    ts: datetime
+    source: str
+    inbound_id: int
+
+
 class RunTimelineBoundaries(BaseModel):
     """Turn rows that anchor the initialized-context-to-compact session."""
 
@@ -140,3 +155,5 @@ class RunTimelineResponse(BaseModel):
     # Optional narrative layer — None when no summaries exist for the window.
     layers: list[RunTimelineLayerNode] | None = None
     summary: RunTimelineSummary | None = None
+    # Chat delivery facts — None when the read degrades.
+    inbounds: list[RunTimelineInbound] | None = None
