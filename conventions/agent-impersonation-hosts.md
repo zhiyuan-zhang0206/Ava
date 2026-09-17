@@ -71,8 +71,8 @@ it starts the app server on a private per-generation socket under the cluster's
 `run/` directory with the hands-off approval and sandbox policy, starts a
 janitor that ends the server when the coding session dies, connects the TUI
 with `--remote`, and passes the endpoint into the launch message so the request
-records it (`--codex-remote`) and the runtime's relay queues into the same
-server.
+records it (`--codex-remote`) and the runtime's relay delivers into the same
+server (live `turn/start`, with `codex queue` as the fallback).
 
 The codex relay needs no manual start: the accepting runtime spawns it at
 activation from the recorded spec, handing the scoped relay credential over a
@@ -87,8 +87,19 @@ active. The manual form below remains for diagnostics:
   --codex-remote unix:///path/to/private/run/codex.sock
 ```
 
-The adapter invokes `codex queue --thread UUID --message TEXT --remote ENDPOINT`, preserving the
-existing conversation. It never starts `codex exec` or resumes a conversation
+Delivery is live-first, preserving the existing conversation either way.
+Primary: the relay opens a websocket to the session's app server endpoint and
+calls `turn/start` with the message — on an idle thread that starts a new turn,
+and on an active regular turn it steers that turn, so an active host receives
+the message within seconds. Fallback: whenever the live attempt does not land —
+the endpoint is unreachable, times out, or the host refuses (an active turn
+that cannot be steered, a review or a manual compaction; an unknown thread) —
+the relay invokes `codex queue --thread UUID --message TEXT --remote ENDPOINT`,
+the durable queue, which delivers at the next turn boundary and never loses the
+message. The envelope's message ids ride in the text either way: a
+re-delivery repeat is marked, a host that already processed a batch skips it,
+and the two paths together stay at-least-once with idempotent repeats.
+It never starts `codex exec` or resumes a conversation
 per message. Select the session UUID explicitly; `/status` in that CLI session
 shows it. The `codex` executable on PATH must support `queue` and reach the same
 app server as that session. Run `codex queue --help` to check the
@@ -111,10 +122,14 @@ the Ava message. `--codex-remote` is rejected for Claude Monitor.
 Desktop and ChatGPT embedded sessions may use a different app-server instance
 or event consumer; a thread UUID alone does not establish delivery. Idle wake-up
 has also been verified in a ChatGPT embedded host through the shared CLI queue:
-a queued push started a new turn after the active turn ended. Busy-turn delivery
-is not implied. Test receipt both while the host is busy and after it becomes
-idle; queued items during an active turn alone do not establish a delivery
-failure. Do not infer receipt from a shared database or a zero queue exit code.
+a queued push started a new turn after the active turn ended. Busy-turn
+delivery is not implied through the queue — a queued item's turn is dispatched
+when the thread is idle, so it waits out an active turn; only the live
+`turn/start` path steers an active *steerable* turn, and review or compaction
+turns are not steerable (they fall back to the queue). Test receipt on the host
+you are wiring, both while it is busy and after it becomes idle; queued items
+during an active turn alone do not establish a delivery failure.
+Do not infer receipt from a shared database or a zero queue exit code.
 Verify the existing conversation's behavior before changing hosts; moving work
 into a CLI session is a separate host handoff.
 

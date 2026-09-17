@@ -126,8 +126,9 @@ def _dispatch(args: argparse.Namespace) -> int:
             print(
                 "The runtime starts the codex relay automatically at activation; "
                 "no relay process starts here. When your session runs an explicit app "
-                "server, pass --codex-remote with its endpoint so the relay queues into "
-                "the same server the session uses (see the host conventions). A relay "
+                "server, pass --codex-remote with its endpoint so the relay reaches the "
+                "same server the session uses (live turn/start, codex queue fallback; "
+                "see the host conventions). A relay "
                 "that cannot start rolls the takeover back loudly (status becomes "
                 "rejected with the reason).",
                 file=sys.stderr,

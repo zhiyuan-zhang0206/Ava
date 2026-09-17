@@ -34,6 +34,7 @@ from pydantic import BaseModel
 
 import shared.proc
 import shared.redis_listener
+from cli.commands.codex_app_server import default_control_endpoint, live_submit
 from shared.config import settings
 from shared.impersonation import RELAY_HEARTBEAT_SECONDS
 
@@ -221,12 +222,32 @@ def monitor_claude(message: str) -> None:
 def host_emitter(
     provider: str, thread_id: str | None, *, codex_remote: str | None = None
 ) -> Callable[[str], None]:
-    """Resolve an explicit host destination before opening the inbox relay."""
+    """Resolve an explicit host destination before opening the inbox relay.
+
+    Codex delivery is live-first: each emission tries ``turn/start`` on the
+    session's app server (a fresh turn on an idle thread, a steer into an
+    active steerable one) and falls back to the durable ``codex queue`` on any
+    refusal or transport failure. The queue delivers at the next turn
+    boundary; the envelope ids keep the two paths idempotent together.
+    """
     if provider == "codex":
         if thread_id is None:
             raise ValueError("codex relay requires --thread-id for an existing session")
         target = UUID(thread_id)
-        return lambda message: queue_codex(target, message, remote=codex_remote)
+
+        def emit_codex(message: str) -> None:
+            endpoint = codex_remote or default_control_endpoint()
+            if endpoint is not None:
+                reason = live_submit(str(target), message, endpoint=endpoint)
+                if reason is None:
+                    return
+                print(
+                    f"codex live delivery fell back to the queue ({reason})",
+                    file=sys.stderr,
+                )
+            queue_codex(target, message, remote=codex_remote)
+
+        return emit_codex
     if provider == "claude":
         if codex_remote is not None:
             raise ValueError("Claude Monitor does not use --codex-remote")
