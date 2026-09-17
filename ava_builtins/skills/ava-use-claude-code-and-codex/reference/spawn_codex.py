@@ -10,7 +10,7 @@ caller adopts the live record instead of stacking another Codex process.
 A takeover also wires the explicit shared app-server topology: a private
 ``codex app-server --listen`` socket, the TUI connected to it with ``--remote``,
 and the endpoint carried into the launch message so the request records it
-(``--codex-remote``) and the relay queues into the same server.
+(``--codex-remote``) and the relay delivers into the same server.
 """
 
 from __future__ import annotations

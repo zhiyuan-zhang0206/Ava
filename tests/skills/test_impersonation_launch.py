@@ -62,7 +62,7 @@ def test_codex_bootstrap_carries_the_shared_app_server_endpoint() -> None:
     guide = _REFERENCE.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
     message = bootstrap_message(42, "Fix login", "codex", "brief", guide, codex_remote=_ENDPOINT)
     assert f"--codex-remote {_ENDPOINT}" in message
-    assert "queues into that same server" in message
+    assert "delivers into that same server" in message
     assert "CODEX_THREAD_ID" in message and "CODEX_HOME" in message
 
 
