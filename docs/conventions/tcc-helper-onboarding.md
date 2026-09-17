@@ -66,9 +66,12 @@ Access, and macmini's target is L2.
 | L2 extended | L1 + other-app data + media library + iCloud surface. |
 | L3 full | L2 + Full Disk Access (the heavy item) + DeveloperTool + future items. |
 
-Groups whose trigger method is still pending verification (`appdata`, `media`,
-`icloud`, `fda`, `devtools`) are named in the report and never attempted; an
-L2/L3 run reports them as pending until their verification round lands.
+Groups beyond the triggerable set (`appdata`, `media`, `icloud`, `fda`,
+`devtools`) have their grant state read by the same preflight probe and are
+never attempted: a non-granted state is reported as unresolved with the
+observed values (their trigger method is still pending verification), so an
+L2/L3 run stays honest instead of guessing at a request the tool can not yet
+reproduce.
 
 ## Trigger mechanics worth knowing
 
@@ -91,6 +94,14 @@ L2/L3 run reports them as pending until their verification round lands.
   evidence it was needed, but the user placed it in the full tier (2026-09-17).
   Its trigger method is pending verification; it is never attempted before
   that.
+- **Extended-group states are preflight-readable.** The five beyond-set
+  services (SystemPolicyAppData, MediaLibrary + Photos, FileProviderDomain +
+  Ubiquity, SystemPolicyAllFiles, DeveloperTool) answer `TCCAccessPreflight`
+  silently; the 2026-09-17 validation also showed the readings discriminate
+  (bogus service name -> denied; Microphone -> not-determined; FDA -> denied),
+  so a granted reading is meaningful. Only the trigger method for a machine
+  that still lacks the grant remains pending -- the tool reads the state and
+  never attempts these groups.
 - **Multiple helper instances on one host share the same TCC identity.** A
   second cluster instance (its own build, launchd service and socket -- e.g. a
   dev/test instance) needs no separate onboarding when its helper is built
@@ -104,7 +115,7 @@ L2/L3 run reports them as pending until their verification round lands.
 
 | Machine | Helper | Folder rows | SR / AX | Notes |
 |---|---|---|---|---|
-| macmini | running, spawn wire OK (rebuilt 2026-09-13, same signing identity) | Desktop/Documents/Downloads granted | granted | Onboarded 2026-09-12; spawn backend enabled + verified. Rebuild 2026-09-13 kept every grant (stable identity); re-verified 2026-09-14: spawn-chain PASS, preflight matrix green. Target tier: L2 (user 2026-09-17). |
+| macmini | running, spawn wire OK (rebuilt 2026-09-13, same signing identity) | Desktop/Documents/Downloads granted | granted | Onboarded 2026-09-12; spawn backend enabled + verified. Rebuild 2026-09-13 kept every grant (stable identity); re-verified 2026-09-14: spawn-chain PASS, preflight matrix green. Target tier: L2 (user 2026-09-17). Extended states (appdata/media/icloud) read granted 2026-09-17 (preflight, controls-validated). |
 | company-mini | running, build predates `spawn` | to onboard after rebuild | granted | Rebuild first, same signing identity (an identity change silently drops the Accessibility grant) |
 | macbook-air | running, build predates `spawn` | to onboard after rebuild | granted | Same as company-mini |
 | company-air | not installed | all first-time | first-time | Fresh install + sign + first grants in one user-present session |
