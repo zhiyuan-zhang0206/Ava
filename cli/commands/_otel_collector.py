@@ -48,17 +48,17 @@ from shared.observability import collector_allowed_for_home
 
 # Pinned contrib version — re-validate against the deploy/lgtm backends
 # (Tempo/Loki/Prometheus OTLP intake) when bumping.
-OTELCOL_CONTRIB_VERSION = "0.155.0"
+OTELCOL_CONTRIB_VERSION = "0.157.0"
 
 # SHA256 of each supported platform's release tarball
-# (opentelemetry-collector-releases v0.155.0 checksums). Keyed by the platform
+# (opentelemetry-collector-releases v0.157.0 checksums). Keyed by the platform
 # tag used in the asset name.
 _OTELCOL_CONTRIB_SHA256: dict[str, str] = {
-    "darwin_arm64": "dc9ecd5243bc632a2901d028bfc7a705fb6317b269c9514b5f8187b80caf8c56",
-    "darwin_amd64": "7a792b03c6c7d8cfa1b67c08fd9d0c5c021a1387f926ecba92b9cfbec2d0f80e",
-    "linux_amd64": "229cfddeb0621d2a011bfd1c8894335479e46349b93a0cfbccbe653443a3ec95",
-    "linux_arm64": "f2fac079d5b761a729e49ba5db319cab92affc558406dc42e3c1c08e0827e14f",
-    "windows_amd64": "c34e1e064641956f16f2089d1384657ecef43dd64407da0516948f786fd045a8",
+    "darwin_arm64": "6c03308935573712a795b4229f756bc4288bbbb13850604f3c7287868af84d4b",
+    "darwin_amd64": "e11e7482144c3ac1eb1f612d3d175589435cad968a791d6ef5c73be43e1b8c34",
+    "linux_amd64": "d33177515a244a2393f03ffd66ab3e68a8fc11a56bc145ec4d0ca2644ee95504",
+    "linux_arm64": "34eb82390c462c877dd60ec5ec84de899088916facd07306ec988e4c34bd05b3",
+    "windows_amd64": "7b3938e1522ff04261a694a58e7111c5f7cdd19be617c3a77118cffad7abb815",
 }
 
 _DOWNLOAD_URL = (
