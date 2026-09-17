@@ -9,7 +9,9 @@ Modules:
   it as a child process under a hard deadline, repeat (serial by
   construction; drains back-to-back, sleeping only when nothing is due).
 - `execute` / `job`: the child side of one build — `job` is the
-  `python -m services.hierarchy_worker.job --job-id N` entry point, and
+  `python -m services.hierarchy_worker.job --job-id N` entry point (it boots
+  the child's process sinks, name `hierarchy-worker`, so the generation's
+  `llm_usage` ledger rows reach the event stream — task #3868), and
   `execute.execute_job` owns the job row's outcome (scope + token stats, the
   scan-cursor advance) and the build itself.
 
