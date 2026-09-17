@@ -18,6 +18,7 @@ from psycopg import Connection
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
+from gateway.inspect_metrics_health import note_inspect_metrics_coverage
 from gateway.schemas import AgentActivity, AgentCost, AgentStats, AgentTps, StatsWindowHours
 from gateway.schemas.inspect_metrics import InspectMetricsMetadata, MetricEvidence
 from gateway.schemas.stats import window_delta
@@ -228,7 +229,7 @@ def inspect_snapshot(
                 sources=[],
                 reason="compact_boundary_unknown",
             )
-            return MetricsSnapshot(
+            snapshot = MetricsSnapshot(
                 None,
                 None,
                 None,
@@ -245,7 +246,13 @@ def inspect_snapshot(
                     lifecycle=absent,
                 ),
             )
-        return _read_snapshot(conn, agent_id, start, sampled_at, spawned_at, collection)
+        else:
+            snapshot = _read_snapshot(conn, agent_id, start, sampled_at, spawned_at, collection)
+    # Outside the read transaction: the coverage note is a diagnostic side
+    # channel (background log + alert episodes; task #3869) and never joins
+    # the snapshot itself.
+    note_inspect_metrics_coverage(pool, agent_id, snapshot.metadata, spawned_at=spawned_at)
+    return snapshot
 
 
 def _sum_days(

@@ -1631,8 +1631,8 @@ describe("Inspector read ownership", () => {
   });
 });
 
-describe("persisted metric evidence", () => {
-  it("renders unavailable metrics without manufacturing zero cost or throughput", async () => {
+describe("persisted metric evidence is internal (task #3869)", () => {
+  it("renders unavailable metrics without manufacturing zero cost, throughput, or a verdict", async () => {
     const data = fixture({
       cost: null,
       stats: null,
@@ -1644,12 +1644,17 @@ describe("persisted metric evidence", () => {
     data.metadata.lifecycle = { availability: "unavailable", sources: [] };
     getAgentInspectStatistics.mockResolvedValue(data);
     render(<InspectorPanel agentId={1} />);
-    await screen.findAllByText("No recorded data is available for this window.");
+    await screen.findByText("Activity");
+    await waitFor(() => expect(getAgentInspectStatistics).toHaveBeenCalled());
+    // No fabricated zeros, and no internal coverage copy on screen (user
+    // ruling 2026-09-17: the panel stays silent; the backend logs/alerts).
     expect(screen.queryByText("$0.0000")).toBeNull();
     expect(screen.queryByText("0.00 tok/s")).toBeNull();
+    expect(screen.queryByText("No recorded data is available for this window.")).toBeNull();
+    expect(screen.queryByText("Historical coverage is incomplete")).toBeNull();
   });
 
-  it("shows historical partial coverage beside the recorded amount", async () => {
+  it("keeps the recorded amount while never rendering the historical-coverage verdict", async () => {
     const data = fixture();
     data.metadata.cost = {
       availability: "partial",
@@ -1658,11 +1663,11 @@ describe("persisted metric evidence", () => {
     getAgentInspectStatistics.mockResolvedValue(data);
     render(<InspectorPanel agentId={1} />);
     await screen.findByText("$0.4213");
-    expect(screen.getByText("Historical coverage is incomplete")).toBeTruthy();
-    expect(screen.getByText(/Latest recorded observation:/)).toBeTruthy();
+    expect(screen.queryByText("Historical coverage is incomplete")).toBeNull();
+    expect(screen.queryByText(/Latest recorded observation:/)).toBeNull();
   });
 
-  it("explains an unknown compaction boundary without using the all-time totals", async () => {
+  it("keeps the compact window empty without exposing the boundary verdict or all-time totals", async () => {
     panelState.hours = -1;
     const data = fixture({
       since_compact: true,
@@ -1675,41 +1680,51 @@ describe("persisted metric evidence", () => {
     data.metadata.cost = { availability: "unavailable", sources: [] };
     getAgentInspectStatistics.mockResolvedValue(data);
     render(<InspectorPanel agentId={1} />);
-    await screen.findByText(
-      "The last completed compaction boundary is unavailable.",
-    );
+    await screen.findByText("Activity");
+    await waitFor(() => expect(getAgentInspectStatistics).toHaveBeenCalled());
+    expect(
+      screen.queryByText("The last completed compaction boundary is unavailable."),
+    ).toBeNull();
     expect(screen.queryByText("$0.4213")).toBeNull();
   });
 });
 
-describe("visible duration evidence", () => {
+describe("internal duration evidence never renders (task #3869)", () => {
   it.each([
     ["one_second_buckets", "Historical durations use one-second buckets."],
     ["mixed", "Durations combine exact values and historical one-second buckets."],
-  ] as const)("labels %s precision beside activity", async (precision, label) => {
+  ] as const)("hides the %s precision note while activity stays visible", async (precision, label) => {
     const data = fixture();
     data.metadata.turns.duration_precision = precision;
     getAgentInspectStatistics.mockResolvedValue(data);
     render(<InspectorPanel agentId={1} />);
-    expect(await screen.findByText(label)).toBeTruthy();
+    await screen.findByText("42.5");
+    expect(screen.queryByText(label)).toBeNull();
   });
 
-  it("explains retained durations without pretending they belong to the window", async () => {
+  it("hides the retained-durations note", async () => {
     const data = fixture();
     data.metadata.turns.retained_unapplied_sources = ["historical_archive_distribution"];
     data.metadata.turns.reason = "archive_precision_unattributed";
     getAgentInspectStatistics.mockResolvedValue(data);
     render(<InspectorPanel agentId={1} />);
-    expect(await screen.findByText("Older exact durations are retained, but cannot be assigned to this window.")).toBeTruthy();
+    await screen.findByText("42.5");
+    expect(
+      screen.queryByText("Older exact durations are retained, but cannot be assigned to this window."),
+    ).toBeNull();
     expect(screen.queryByText("historical_archive_distribution")).toBeNull();
   });
 
-  it("explains missing duration denominators while keeping throughput unknown", async () => {
+  it("hides the missing-durations note while throughput stays unknown", async () => {
     const data = fixture({ tps: { lm_stage_tps: null, agent_lifecycle_tps: null } });
     data.metadata.turns.reason = "missing_turn_durations";
     getAgentInspectStatistics.mockResolvedValue(data);
     render(<InspectorPanel agentId={1} />);
-    expect(await screen.findByText("Some recorded turns have no duration; throughput is unavailable.")).toBeTruthy();
+    await screen.findByText("Activity");
+    await waitFor(() => expect(getAgentInspectStatistics).toHaveBeenCalled());
+    expect(
+      screen.queryByText("Some recorded turns have no duration; throughput is unavailable."),
+    ).toBeNull();
     expect(screen.queryByText("42.5")).toBeNull();
   });
 });

@@ -657,20 +657,10 @@ function CostSection({ inspect }: { inspect: AgentInspectStatistics }) {
       : undefined;
   return (
     <Section icon={<DollarSign className="size-3" />} title={t("sectionCost")}>
-      <p className="mb-1 text-[10px] text-muted-foreground">
-        {inspect.metadata.cost.availability === "partial"
-          ? t("metricsPartial")
-          : inspect.metadata.cost.availability === "unavailable"
-            ? t("metricsUnavailable")
-            : t("metricsObserved")}
-      </p>
-      <p className="mb-1 text-[10px] text-muted-foreground">
-        {inspect.metadata.last_observed_at
-          ? t("metricsLastObserved", {
-              at: formatAbsolute(inspect.metadata.last_observed_at),
-            })
-          : t("metricsNoObservation")}
-      </p>
+      {/* The read model's coverage verdicts (availability, last-observed,
+          boundary) are NOT rendered — they are machinery, and they go to the
+          background log + alert episodes instead (user ruling 2026-09-17,
+          task #3869). The section renders the metrics, or nothing. */}
       {cost ? (
         <div className="grid grid-cols-2 gap-1">
           <Metric
@@ -688,13 +678,7 @@ function CostSection({ inspect }: { inspect: AgentInspectStatistics }) {
             value={`${cost.cache_hit_pct.toFixed(2)}%`}
           />
         </div>
-      ) : (
-        <p className="text-xs text-muted-foreground">
-          {inspect.since_compact
-            ? t("compactBoundaryUnavailable")
-            : t("metricsUnavailable")}
-        </p>
-      )}
+      ) : null}
     </Section>
   );
 }
@@ -706,18 +690,6 @@ function CostSection({ inspect }: { inspect: AgentInspectStatistics }) {
  */
 function ActivitySection({ inspect }: { inspect: AgentInspectStatistics }) {
   const { activity, tps } = inspect;
-  const turnEvidence = inspect.metadata.turns;
-  const precisionLabels = {
-    exact: "metricsDurationExact",
-    one_second_buckets: "metricsDurationBuckets",
-    mixed: "metricsDurationMixed",
-  } as const;
-  const reasonLabels = {
-    historical_coverage_unknown: "metricsPartial",
-    compact_boundary_unknown: "compactBoundaryUnavailable",
-    missing_turn_durations: "metricsMissingDurations",
-    archive_precision_unattributed: "metricsRetainedDurations",
-  } as const;
   const hasLife = activity !== null && activity.alive_seconds > 0;
   const idleSeconds = activity
     ? Math.max(0, activity.alive_seconds - activity.active_seconds)
@@ -725,26 +697,9 @@ function ActivitySection({ inspect }: { inspect: AgentInspectStatistics }) {
   const t = useTranslations("inspector");
   return (
     <Section icon={<Timer className="size-3" />} title={t("sectionActivity")}>
-      <p className="mb-1 text-[10px] text-muted-foreground">
-        {inspect.metadata.activity.availability === "unavailable"
-          ? t("metricsUnavailable")
-          : inspect.metadata.activity.availability === "partial" || inspect.metadata.turns.availability === "partial"
-            ? t("metricsPartial")
-            : t("metricsObserved")}
-      </p>
-      {turnEvidence.availability !== "unavailable" && turnEvidence.duration_precision && (
-        <p className="mb-1 text-[10px] text-muted-foreground">
-          {t(precisionLabels[turnEvidence.duration_precision])}
-        </p>
-      )}
-      {turnEvidence.reason && (turnEvidence.reason !== "historical_coverage_unknown" || inspect.metadata.activity.availability === "unavailable") && (
-        <p className="mb-1 text-[10px] text-muted-foreground">
-          {t(reasonLabels[turnEvidence.reason])}
-        </p>
-      )}
-      {!!turnEvidence.retained_unapplied_sources?.length && turnEvidence.reason !== "archive_precision_unattributed" && (
-        <p className="mb-1 text-[10px] text-muted-foreground">{t("metricsRetainedDurations")}</p>
-      )}
+      {/* Coverage verdicts, duration precision, and retained-source notes are
+          NOT rendered — machinery goes to the background log + alert episodes
+          (user ruling 2026-09-17, task #3869). */}
       <div className="grid grid-cols-2 gap-1">
         <Metric
           label={t("metricTps")}
