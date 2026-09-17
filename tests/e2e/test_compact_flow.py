@@ -31,6 +31,7 @@ from shared.agents import AgentStatus
 from shared.config import settings
 from tests.e2e._db import wait_for_status
 from tests.e2e._env import E2EEnv
+from tests.e2e._settings import pin_expand_runs_all
 from tests.e2e.fakes.scenarios.compact_flow import (
     FIRST_REPLY,
     POST_COMPACT_NARRATION,
@@ -90,6 +91,11 @@ def test_force_compact_renders_envelope_without_unrecognized_marker(e2e_env: E2E
             else None
         ),
     )
+
+    # The compact envelope card is a secondary timeline item; the default
+    # details level "none" (user ruling 2026-09-17) folds secondary items out
+    # of the DOM. Pin the expanded rendering this test asserts on.
+    pin_expand_runs_all(e2e_env.gateway_url)
 
     page.goto(e2e_env.agent_url)
     page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)
