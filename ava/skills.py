@@ -6,15 +6,17 @@ import sys
 import types
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from ava import _skill_sources
-from shared.audit_events import SkillInvokedPayload
-from shared.install_registry import loadable_skill_names
 from shared.log import logger
 from shared.paths import ava_home
-from shared.skill_index import SkillFile, SkillIndex
 from shared.skill_names import SkillIdentity, display_name, match_key
+
+if TYPE_CHECKING:
+    # Annotation-only on the mount signatures; imported at the call site so the
+    # stack stays off every exec child (task #3816; _TYPE_CHECKING_ALLOWED).
+    from shared.skill_index import SkillFile
 
 _recorded_skill_invocations: set[tuple[int, str]] = set()
 # Per-agent-run dedup set: (agent_id, skill_identifier) tuples — one row per
@@ -295,6 +297,8 @@ class SkillIndexBuilder:
         # (sorted folders) — the arrival order the tree converges under — and
         # include the mount point itself, so a SKILL.md at the root (empty
         # rel) still loads as a bare root skill.
+        from shared.skill_index import SkillIndex  # heavy stack, deferred per-call (task #3816)
+
         index = SkillIndex.cached([root])
         for entry in index.entries:
             self._mount_folder_skill(root, entry, gate_keys)
@@ -432,6 +436,8 @@ def _scan_tree() -> dict:
     `.agents/skills/` and `.ava/skills/` in the same repo, where two of the
     three are usually links back to the third).
     """
+    from shared.install_registry import loadable_skill_names
+
     builder = SkillIndexBuilder()
     builder.mount(_skills_dir(), loadable_skill_names())
     for root in _provider_roots():
@@ -702,7 +708,7 @@ def _insert_skill_events(agent: int, skills: list[Skill]) -> bool:
     if not skills:
         return True
     try:
-        from shared.audit_events import insert_event_log_many
+        from shared.audit_events import SkillInvokedPayload, insert_event_log_many
 
         insert_event_log_many(
             event_type="skill_invoked",

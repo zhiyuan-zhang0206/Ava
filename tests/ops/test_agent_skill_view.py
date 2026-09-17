@@ -44,7 +44,7 @@ def load_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     root.mkdir()
     _write_skill(root, "load-skill", "converged skill")
     monkeypatch.setattr(skills, "_skills_dir", lambda: root)
-    monkeypatch.setattr(skills, "loadable_skill_names", lambda: {"load-skill"})
+    monkeypatch.setattr("shared.install_registry.loadable_skill_names", lambda: {"load-skill"})
     monkeypatch.setattr(_commands, "_command_dirs", list)
     return root
 
@@ -197,7 +197,9 @@ def test_agent_skill_view_honors_per_agent_skill_narrowing(
 ) -> None:
     """A named prompt capability keeps only its corresponding skill command."""
     _write_skill(load_dir, "other-skill", "other converged skill")
-    monkeypatch.setattr(skills, "loadable_skill_names", lambda: {"load-skill", "other-skill"})
+    monkeypatch.setattr(
+        "shared.install_registry.loadable_skill_names", lambda: {"load-skill", "other-skill"}
+    )
     monkeypatch.setattr(
         ops_cluster,
         "_agent_skill_view_inputs",

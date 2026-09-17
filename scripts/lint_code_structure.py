@@ -165,6 +165,10 @@ _TYPE_CHECKING_ALLOWED: frozenset[str] = frozenset(
         # without an eager import that would rebuild the config chain the lite
         # facade defers (task #3621).
         "shared/config/__init__.py",
+        # Boot-path trim: the skill-index stack is a heavy import every exec
+        # child pays; `SkillFile` is annotation-only on the mount helpers
+        # (script/module-level imports removed for task #3816).
+        "ava/skills.py",
     }
 )
 
