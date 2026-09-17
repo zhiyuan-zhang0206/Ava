@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Frontend State Management
-description: TanStack Query for server state, two Zustand stores for volatile UI/SSE, and localStorage for 8 per-device values; per-thread timeline caching.
+description: TanStack Query for server state, two Zustand stores for volatile UI/SSE, and localStorage for 8 per-device values; selected conversation state.
 tags:
 - frontend
 ---
@@ -20,23 +20,28 @@ hint raises the open-tasks notice (display-only, no state write).
 |---|---|---|
 | TanStack Query | All **server data** (agent list, status, timeline snapshots, token, agent pages, inspect) **+ persistent UI preferences** (`display.*`/`behavior.*` in `user_settings`, via `useUserSettings`/`useDebouncedSetting`); SSE merges into cache, no polling | `lib/use-*.ts` |
 | Zustand `store.ts` | **Volatile UI state** (activeId, composer focus token, mobile drawer, toast, open-tasks notice, search) + cluster coordination (`reconnectNonce`/`clusterStranded`); **not persisted** (`persist` middleware removed) | `lib/store.ts` |
-| Zustand `timeline-store.ts` | **SSE-driven timeline state** (items/turnActive/streamingCode/streamingIds/hasMoreOlder/parked threads); split from `store.ts` so high-frequency code_delta/chat_delta folding only notifies timeline subscribers, not sidebar/spawn/banner | `lib/timeline-store.ts` |
+| Zustand `timeline-store.ts` | **SSE-driven timeline state** (items/turnActive/streamingCode/streamingIds/hasMoreOlder); split from `store.ts` so high-frequency code_delta/chat_delta folding only notifies timeline subscribers, not sidebar/spawn/banner | `lib/timeline-store.ts` |
 | localStorage | 8 **per-device values** (not synced): active agent (`ava.active.agent_id`), Fleet mobile tab (`ava.fleet.mobileTab`), and library-managed splits (`ava.fleet.split`, `ava.fleet.queue-split`, `ava.memory.graph.split`, `ava.home.columns.desktop`, `ava.home.columns.mobile`, `ava.home.inspector.desktop`) | `use-agents.ts`, `fleet-view.tsx`/`inbox-queue/`, `memory/graph/page.tsx`, `home-layout.tsx` |
 
 `display.*`/`behavior.*` covers: Thinking/Code/Output expand defaults, inspector toggles, sidebar collapse/view mode/sort/stats/show terminated, fleet queue collapse + left panel tab, task graph mode + done/canceled filters, force params (graph + task graph), shell terminal theme, spawn model/preset/reasoning_effort, notification and confirmation toggles, UI language (`display.language`, i18n locale via `i18n/language-provider.tsx`; framework copy only, data plane never translated — `decisions/2026-08-05-frontend-i18n-next-intl.md`) — defaults in `lib/types.ts:USER_SETTING_DEFAULTS`. `content-toggle-store.ts` stays a thin `useUserSettings` wrapper. `inspector-panel-store.ts` is breakpoint-aware (task #793): on desktop (≥ lg) the inspector is a side panel, so `display.inspector_open` stays a DB-backed workspace preference (default closed); on mobile (< lg) it is a full-screen overlay that hides the timeline, so its open state is **per-session volatile state** (`mobileInspectorOpen` in `store.ts`, default closed) and mobile toggles never write the shared setting — opening/closing the overlay on a phone must not yank the desktop panel. `lib/settings-migration.ts` (`<SettingsMigration/>`, once after auth) moves leftover localStorage keys into the DB one by one then deletes them (failure retains the key for retry); the 8 per-device keys are excluded; the old zustand-persist blob (`ava-spawn-prefs`) follows a separate blob-to-field path.
 
 Server data is not mirrored into Zustand — the sidebar reads `useAgents → useQuery`.
 
+The global fold owns read-model repair. Hints coalesce under a fixed deadline;
+reads never cancel an already-running repair, and hints received during that
+read require a trailing repair. Every stream reconnect requests reconciliation,
+including another disconnect inside a previous repair window. Settled query
+keys release their scheduling state.
+
 ## Zustand `store.ts` (Pure UI + Cluster Coordination)
 
 - **UI state**: `activeId`, composer focus token, mobile drawer, mobile inspector overlay (`mobileInspectorOpen`), toast, the terminate open-tasks notice (`openTasksNotice`), search. Spawn selections (`behavior.spawn_*`) and sidebar view mode/sort/stats (`display.sidebar_*`, hooks in `lib/sidebar.ts`) are **not here** — DB settings via `useUserSettings`.
 - **Cluster coordination**: `reconnectNonce` (sole SSE-reconnect lever) and `clusterStranded` (drives `AppConnectionBanner`). Maintenance ownership is never mirrored into Zustand: Gate's persisted snapshot is the fact, while SSE/poll only trigger a latched Gate reload.
 
-## `timeline-store.ts` + Per-Thread Timeline Cache (R1/R2/R3)
+## Selected Timeline State
 
-The SSE-driven timeline store — parked-thread buckets, `switchThread` as the sole mover,
-its memory bounds, and the fetch-on-enter reconcile — has its own node:
-[[ui/web/src/frontend-state/timeline-cache.ava.okf.md|Per-Thread Timeline Cache]].
+The selected conversation store and its abortable reads have their own node:
+[[ui/web/src/frontend-state/timeline-cache.ava.okf.md|Selected Timeline State]].
 
 ## Sticky Bottom Controller (`lib/sticky.ts`)
 

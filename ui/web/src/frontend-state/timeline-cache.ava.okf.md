@@ -1,25 +1,43 @@
 ---
 type: doc
-title: Per-Thread Timeline Cache
-description: The `timeline-store.ts` store — parked-thread buckets (R1/R2/R3), `switchThread` as the sole mover, its memory bounds, and the fetch-on-enter reconcile.
+title: Selected Timeline State
+description: One selected conversation owns the live store and abortable tail/history reads; inactive conversations retain no live buckets.
 tags:
 - frontend
 ---
 
-# Per-Thread Timeline Cache
+# Selected Timeline State
 
-`/api/system/all?agents=<active>,<parked…>` carries the active agent's events plus system-level `agent_id=0` signals. Active thread state lives in top-level fields; each **parked** inactive thread goes into `threads: Map<agentId, ThreadTimelineState>`.
+`/api/system/all?agents=<active>` carries only the selected agent's detailed
+events plus system signals. The timeline store holds one selected view.
+`switchThread` atomically replaces its identity, items, streaming flags, compact
+state, pagination state, and token fields; inactive agents have no live buckets
+or compact-marker subscriptions.
 
-- `switchThread` is the **sole mover**: one `set()` parks the outgoing thread, restores the incoming one, flips `activeThreadId`, bumps scroll signals — SSE gate and items never desync.
-- In-flight events for a just-parked thread fold into its bucket (R3); parked threads stay in the stream selection (task #1959: parked compacts must still reach the store) — switch-back restores parked state (R2), then fetch-on-enter reconciles the gap.
-- **Compact replace edge** (task #3698; user ruling 2026-09-17): a wholesale replace on the ACTIVE thread (reset-window snapshot or SSE-gap heal) bumps `compactReplaceSeq` and records `compactReplaceAgent`; the parked-thread swap does not bump (its replacement renders only after a later switch-back, where fetch-on-enter reconciles). `useCompactHistoryRetention` consumes the edge and re-attaches the newest `display.compact_history_sessions` (default 1; 0 = legacy clear) previous compact segments through the same scroll-up path, so a compact appends the new summary below the retained session instead of clearing the view.
-- Memory bound: the `system_prompt` item (item 0.0, ~128KB) is dropped from parked buckets (park + snapshot fold) — it is re-sent in every `timeline_snapshot` and was the largest retained object in the page heap (~40MB of copies with the fleet active); `switchThread` restores the full item from the React Query snapshot on switch-back, and the active thread keeps its own copy for the expandable card.
-- Load priority: parked bucket > React Query snapshot (hot restore, no flash) > cold (empty until fetch lands).
-- Aw-Snap memory bound: there is NO fleet-wide timeline prefetch — it retained one full timeline per fleet agent (the ~128KB `system_prompt` plus history) in the React Query cache for gcTime=30min, the dominant renderer-heap source (~445 agents × 2-3 prompt copies ≈ 88MB). The `["timeline", agentId]` query fires only for agents actually opened, so live prompt copies ≈ visited + active threads, never fleet size. Snapshots carry no system-prompt special-casing: incremental snapshots never include 0.0 (message 0 is below the publish cursor); full-window snapshots (spawn / compact / claim fallback) include it when the tail window holds it. The merge keeps one copy per thread (id-replace); parked buckets keep theirs under the LRU cap (MAX_PARKED_THREADS=32).
-- LRU cap `MAX_PARKED_THREADS = 32` (`timeline-store.ts:206`); token fields stay out of buckets (cached under `["token-usage", agentId]`). `token-usage` carries per-model soft/hard compact thresholds (`context-meter.tsx` gauge ticks); the composer button opens `context-breakdown.tsx` — anchored in-place panel (not a modal), lazy-loading `["context-breakdown", agentId]` on open (`GET /api/agents/{id}/context-breakdown`).
-- **fetch-on-enter**: switching back to a cached thread triggers a background reconcile refetch even with a live parked bucket — buckets are not freshness guarantees (events missed during disconnection silently expire them); `mergeSnapshotWithStreaming` returns the same reference when unchanged, so the refetch costs zero renders. **stale-while-error**: during reconcile in-flight/failed, loaded content stays shown (same as `useTasks`/`TaskGraph`: on poll failure retain last data, `StaleBadge` marks "stale"; failure shown only on cold start with no data).
-- `foldEvent` pure-folds one thread's events; `processSseEvent` folds high-frequency SSE in a single `set()` (code_delta one chunk per event), avoiding cascading re-renders.
+The selected timeline query reads one bounded tail on activation. Inactive
+queries have zero garbage-collection time. Query cancellation reaches `fetch`
+through its AbortSignal. The selected pending-message and token-usage reads
+share this selection/visibility ownership. A stream open during an existing
+read leaves a trailing read, including the initial no-cache request; leaving
+the view disposes that repair before cancelling the HTTP request. Older-page requests have selection-scoped controllers:
+a late response after A-to-B-to-A cannot append to the new A view, and cancellation
+does not produce an error toast or clear the new view's loading state.
+
+A compact replacement preserves the upstream retention edge: `compactReplaceSeq`
+and `compactReplaceAgent` trigger reattachment of the configured previous compact
+sessions through the same cancellable history-page read.
+
+History remains fully accessible through explicit paging. Switching releases
+loaded inactive history, not durable records. The active view still retains all
+pages the user loads; this change does not claim a bound on deep-history memory
+or DOM size. Those rendering concerns are independent of subscription ownership.
+
+Timeline snapshots merge with provisional streaming items. The current
+wire format does not provide a shared checkpoint revision between REST and live
+snapshots; request cancellation alone does not establish commit ordering. An
+explicit cross-layer identity contract is required before claiming arbitrary
+same-agent snapshot race safety.
 
 ## Relationship to Other Nodes
 
-- [[ui/web/src/frontend-state/frontend-state.ava.okf.md|Frontend State Management]] — the three-mechanism split this store belongs to; the sticky bottom controller and the volatile store slots live there.
+- [[ui/web/src/frontend-state/frontend-state.ava.okf.md|Frontend State Management]]

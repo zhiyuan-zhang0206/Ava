@@ -205,19 +205,19 @@ export const api = {
   // scroll-up history; `has_more` reports whether older items remain.
   getTimeline: (
     agentId: number,
-    opts?: { limit?: number; before?: string },
+    opts?: { limit?: number; before?: string; signal?: AbortSignal },
   ): Promise<TimelineResponse> => {
     const params = new URLSearchParams();
     if (opts?.limit != null) params.set("limit", String(opts.limit));
     if (opts?.before != null) params.set("before", opts.before);
     const qs = params.toString();
-    return f(`/api/agents/${agentId}/timeline${qs ? `?${qs}` : ""}`).then(
+    return f(`/api/agents/${agentId}/timeline${qs ? `?${qs}` : ""}`, { signal: opts?.signal }).then(
       ok<TimelineResponse>,
     );
   },
 
-  getTokenUsage: (agentId: number): Promise<TokenUsageResponse> => {
-    return f(`/api/agents/${agentId}/token-usage`).then(ok<TokenUsageResponse>);
+  getTokenUsage: (agentId: number, signal?: AbortSignal): Promise<TokenUsageResponse> => {
+    return f(`/api/agents/${agentId}/token-usage`, { signal }).then(ok<TokenUsageResponse>);
   },
 
   getContextBreakdown: (agentId: number): Promise<ContextBreakdownResponse> => {
@@ -309,8 +309,8 @@ export const api = {
     return f(`/api/agents/${agentId}/shell/${sessionId}${qs}`).then(ok<ShellCapture>);
   },
 
-  getPendingMessages: (agentId: number): Promise<PendingInbound[]> => {
-    return f(`/api/agents/${agentId}/pending`).then(ok<PendingInbound[]>);
+  getPendingMessages: (agentId: number, signal?: AbortSignal): Promise<PendingInbound[]> => {
+    return f(`/api/agents/${agentId}/pending`, { signal }).then(ok<PendingInbound[]>);
   },
 
   getCommands: (agentId?: number | null): Promise<CommandItem[]> => {

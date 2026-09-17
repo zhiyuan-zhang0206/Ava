@@ -1,46 +1,11 @@
 "use client";
 
-// Three SSE connections, unified under two Providers:
-//
-// - EventStreamProvider / useEventStream: the GLOBAL broadcast
-//   (`/api/system`). The server forwards only GLOBAL_ROLES — the
-//   cross-agent, low-frequency lifecycle (agent spawned/updated/label,
-//   page open/close, notice_posted/notice_resolved, cluster update start) for
-//   *every* agent. The
-//   sidebar agent list (useAgentsCacheSync, the single root cache writer), the
-//   inspector's open-pages list (useAgentPages, folding page_opened/page_closed
-//   into its ["agent-pages", agentId] cache), and the inbox feed
-//   (useInboxFeed, invalidate-refetch on notice_posted/notice_resolved)
-//   subscribe here.
-//
-// - AgentEventStreamProvider / useAgentEventStream: the throttled
-//   all-events stream (`/api/system/all?agents=<active>,<parked…>`). The
-//   server pushes the selected agents' events plus agent_id=0 system signals
-//   in a batched stream (max 10 pushes/sec, each push a JSON array of events).
-//   The selection is the active agent + the timeline store's parked threads
-//   (LRU-capped at 32) so parked buckets keep live-folding (R2/R3) AND a
-//   compact that happens while a thread is parked still reaches the store —
-//   without compact_done the reset window can never arm and a switch-back
-//   resurrects the compacted-away history (task #1959). The frontend still
-//   filters internally via isEventForThread / role checks. The timeline
-//   (useTimeline), token usage (useTokenUsage), and pending strip
-//   (usePendingMessages) subscribe here. Hidden tabs close SSE and receive a
-//   synthetic poll signal every 7s so their REST snapshots stay current.
-//
-// The batched format (`data: [{...}, {...}]`) is handled transparently:
-// the onmessage handler detects arrays and fans out each element as an
-// individual SystemEvent to subscribers.
-//
-// Each Provider holds its connection and fans frames out to its own
-// subscriber Set; `useEventStream` / `useAgentEventStream` register a
-// callback pair. Using multiple hooks against one Provider shares the one
-// EventSource (vs. the old `useEventStream(agentId, ...)` that opened a new
-// EventSource per hook call — N parallel connections with independent state
-// lifecycles producing strange intermediate banners). The shared machinery
-// (`useSseConnection`) is identical for both; only the URL differs.
-//
-// Why connect directly to FastAPI instead of going through Next
-// rewrites: the Turbopack dev proxy buffers SSE.
+// One page-wide basic-event stream and one selected-agent detail stream.
+// Providers share their connections with all consumers. Selection changes
+// replace the detail connection; inactive agents never remain subscribed.
+// Hidden pages suspend both streams and reconcile authoritative reads on open.
+// Alerts have a separate domain provider. Frames may contain a single event or
+// a batch; batch consumers fold one frame in one state update.
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 
@@ -49,7 +14,6 @@ import { notifySessionInvalid, useAuth } from "./auth-context";
 import { useFoldOwner } from "./fold/owner";
 import { useDocumentVisible } from "./use-document-visible";
 import { useStore } from "./store";
-import { useTimelineStore } from "./timeline-store";
 import type { SystemEvent } from "./types";
 
 // Half-dead-connection watchdog window. The server emits a heartbeat data
@@ -77,7 +41,6 @@ const RECONNECT_MAX_MS = 30_000;
  *  reconnect banner / report schema drift / show a refresh hint, etc. */
 export type ConnectionEvent =
   | { type: "open" }
-  | { type: "poll" }
   | { type: "reconnecting" } // readyState=CONNECTING — UA reconnecting per spec
   | { type: "closed" } // server closed (404/500 etc), EventSource no longer retries
   | { type: "parse-failed"; raw: string; error: unknown };
@@ -188,12 +151,14 @@ function useSseConnection(
     };
 
     es.onopen = () => {
+      if (disposed) return;
       failCountRef.current = 0;
       onOpenChange(true);
       armWatchdog();
       for (const sub of subscribersRef.current) sub.conn({ type: "open" });
     };
     es.onmessage = (e) => {
+      if (disposed) return;
       // Any frame = the connection is alive — reset the watchdog before
       // anything else (heartbeat counts too).
       armWatchdog();
@@ -280,6 +245,7 @@ function useSseConnection(
       }
     };
     es.onerror = () => {
+      if (disposed) return;
       // Explicit tri-state dispatch (CONNECTING/OPEN/CLOSED), no
       // case _: catch-all. Treating a transient OPEN-state error
       // (common on Safari mobile under flaky network) as reconnecting
@@ -396,8 +362,7 @@ export function EventStreamProvider({
   // Mutable Set of subscribers — useRef avoids re-renders on every subscribe.
   const subscribersRef = useRef<Set<Subscriber>>(new Set());
   const [sseOpen, setSseOpen] = useState(false);
-  // Hidden tabs close the global stream too; the fold owner's throttled
-  // reconnect reconcile (30s window) repairs whatever was missed on return.
+  // Reopening reconciles any events missed while the page was hidden.
   const isVisible = useDocumentVisible();
 
   useSseConnection(
@@ -465,59 +430,15 @@ const AgentEventStreamContext = createContext<EventStreamContextValue | null>(nu
 // The all-events connection has no e2e-ready marker (the global Provider's
 // sse-ready already gates page interactivity); its OPEN state drives no UI.
 const NOOP_OPEN_CHANGE = (_open: boolean): void => undefined;
-const HIDDEN_POLL_MS = 7_000;
-
-/**
- * Provider for the active agent's throttled stream (`/api/system/all?agents=…`).
- * Agent switches re-key the EventSource. Hidden tabs close it and fan out a
- * synthetic poll event every 7s; becoming visible reopens the stream. The
- * frontend's per-consumer guards remain as a defensive routing layer.
- */
-export function AgentEventStreamProvider({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+/** The detailed feed belongs exclusively to the selected, visible agent. */
+export function AgentEventStreamProvider({ children }: { children: React.ReactNode }) {
   const subscribersRef = useRef<Set<Subscriber>>(new Set());
   const activeId = useStore((s) => s.activeId);
-  // Parked thread ids + compact-marker ids, as stable joined strings — the
-  // provider re-renders (and the EventSource re-keys) only when the ID SET
-  // changes, not on every parked fold (a new Map/Set reference per event).
-  // Including parked threads in the filter keeps their buckets live-folded
-  // (R2/R3) AND — the task #1959 fix — delivers compact_done + the
-  // post-compact timeline_snapshot for a thread that compacts while parked:
-  // without those events the store can never arm its reset window, and a
-  // switch-back keep-merges the stale pre-compact cache into the post-compact
-  // snapshot, resurrecting the compacted-away history (task #1959).
-  // compactedThreadIds keeps an evicted-but-compacted thread in the filter
-  // until its post-compact snapshot consumes the marker.
-  const parkedIds = useTimelineStore(
-    (s) => [...s.threads.keys()].sort((a, b) => a - b).join(","),
-  );
-  const compactedIds = useTimelineStore(
-    (s) => [...s.compactedThreadIds].sort((a, b) => a - b).join(","),
-  );
   const isVisible = useDocumentVisible();
-
-  useEffect(() => {
-    if (isVisible) return;
-    const interval = setInterval(() => {
-      for (const sub of subscribersRef.current) {
-        sub.conn({ type: "poll" });
-      }
-    }, HIDDEN_POLL_MS);
-    return () => clearInterval(interval);
-  }, [isVisible]);
-
-  const filteredIds = [
-    activeId,
-    ...parkedIds.split(",").filter(Boolean).map(Number),
-    ...compactedIds.split(",").filter(Boolean).map(Number),
-  ].filter((id): id is number => id != null && Number.isFinite(id));
-  const agentFilter = [...new Set(filteredIds)].sort((a, b) => a - b).join(",");
-  const allEventsUrl =
-    `${API_BASE}/api/system/all` + (agentFilter !== "" ? `?agents=${agentFilter}` : "");
-  useSseConnection(isVisible ? allEventsUrl : null, subscribersRef, NOOP_OPEN_CHANGE);
+  const url = isVisible && activeId !== null
+    ? `${API_BASE}/api/system/all?agents=${activeId}`
+    : null;
+  useSseConnection(url, subscribersRef, NOOP_OPEN_CHANGE);
   const subscribe = useSubscribe(subscribersRef);
 
   return (
