@@ -273,16 +273,25 @@ vi.mock("@/components/content-toggle", () => ({
 
 const inspectorMockState = vi.hoisted(() => ({
   shouldThrow: false,
+  mounts: 0,
 }));
 
-vi.mock("@/components/inspector-panel", () => ({
-  InspectorPanel: () => {
-    if (inspectorMockState.shouldThrow) {
-      throw new Error("Simulated inspector render crash");
-    }
-    return <div data-testid="inspector-panel" />;
-  },
-}));
+vi.mock("@/components/inspector-panel", async () => {
+  const React = await import("react");
+  return {
+    InspectorPanel: () => {
+      // Counts committed mounts — the batch-1 switch fix keeps this at 1
+      // across healthy agent switches (task #3894).
+      React.useEffect(() => {
+        inspectorMockState.mounts += 1;
+      }, []);
+      if (inspectorMockState.shouldThrow) {
+        throw new Error("Simulated inspector render crash");
+      }
+      return <div data-testid="inspector-panel" />;
+    },
+  };
+});
 
 vi.mock("@/components/inspector-toggle", () => ({
   InspectorToggle: () => <button data-testid="inspector-toggle">toggle</button>,
@@ -323,6 +332,7 @@ function wrap(ui: React.ReactElement) {
 beforeEach(() => {
   vi.clearAllMocks();
   inspectorMockState.shouldThrow = false;
+  inspectorMockState.mounts = 0;
   hooksState.agents = [];
   hooksState.activeId = null;
   hooksState.forkPending = false;
@@ -514,6 +524,31 @@ describe("HomePage top-level render", () => {
     expect(screen.getByTestId("composer").contains(toggle)).toBe(false);
   });
 
+  it("keeps a healthy inspector mounted across an agent switch (no remount, task #3894)", async () => {
+    hooksState.activeId = 5;
+    hooksState.agents = [makeAgent({ agent_id: 5 }), makeAgent({ agent_id: 6 })];
+    hooksState.settings = {
+      "display.timeline_width_ratio": 0.4,
+      "display.inspector_open": true,
+    };
+    const { rerender } = wrap(<HomePage />);
+    await screen.findByTestId("inspector-panel");
+    expect(inspectorMockState.mounts).toBe(1);
+
+    hooksState.activeId = 6;
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    rerender(
+      <QueryClientProvider client={qc}>
+        <HomePage />
+      </QueryClientProvider>,
+    );
+    await screen.findByTestId("inspector-panel");
+    // Same mounted instance — no `key=` remount on the agent switch.
+    expect(inspectorMockState.mounts).toBe(1);
+  });
+
   it("renders ErrorBoundary fallback when inspector panel throws a render error", async () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5 })];
@@ -533,7 +568,7 @@ describe("HomePage top-level render", () => {
     consoleSpy.mockRestore();
   });
 
-  it("resets ErrorBoundary when activeId changes via key", async () => {
+  it("resets the inspector ErrorBoundary when activeId changes via resetKey", async () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5 }), makeAgent({ agent_id: 6 })];
     hooksState.settings = {
@@ -561,6 +596,9 @@ describe("HomePage top-level render", () => {
 
     expect(await screen.findByTestId("inspector-panel")).toBeTruthy();
     expect(screen.queryByText("Something went wrong")).toBeNull();
+    // Recovery rendered a fresh panel (its first successful mount); the
+    // boundary reset did not tear down a healthy tree.
+    expect(inspectorMockState.mounts).toBe(1);
     consoleSpy.mockRestore();
   });
 });

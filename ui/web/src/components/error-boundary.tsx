@@ -12,7 +12,9 @@ import { cn } from "@/lib/utils";
  * section (sidebar, chat area, fleet view).
  *
  * Errors are logged to console with their component stack for debugging.
- * A "Retry" button resets the error state and re-renders children.
+ * A "Retry" button resets the error state and re-renders children, and an
+ * optional `resetKey` clears the error state when the subtree's selection
+ * changes underneath (see the prop doc).
  */
 
 interface Props {
@@ -20,6 +22,14 @@ interface Props {
   fallback?: (error: Error, reset: () => void) => ReactNode;
   /** Called when an error is caught, after logging. */
   onError?: (error: Error, errorInfo: React.ErrorInfo) => void;
+  /**
+   * Reset sentinel (mirrors ItemErrorBoundary's `resetKey`): when this value
+   * changes while the boundary is showing an error, the error state clears so
+   * the incoming subtree (e.g. a newly selected agent) gets a fresh render
+   * attempt. Unlike a React `key=`, changing it does not remount healthy
+   * children — a mounted section keeps its caches and internal state.
+   */
+  resetKey?: unknown;
   children: ReactNode;
 }
 
@@ -32,6 +42,12 @@ export class ErrorBoundary extends Component<Props, State> {
 
   static getDerivedStateFromError(error: Error): State {
     return { error };
+  }
+
+  componentDidUpdate(prevProps: Props): void {
+    if (this.state.error && prevProps.resetKey !== this.props.resetKey) {
+      this.setState({ error: null });
+    }
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
