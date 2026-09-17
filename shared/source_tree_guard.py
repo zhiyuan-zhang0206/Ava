@@ -169,6 +169,8 @@ def source_tree_violations(repo: Path | None = None) -> tuple[str, ...]:
         installed = get_installed_sha()
         head_sha = head.stdout.strip()
         if installed is not None and head_sha != installed:
+            # Short-SHA display width (7): a diagnostic token, not a
+            # tunable (task #3696 exception inventory).
             violations.append(f"HEAD {head_sha[:7]} moved off installed commit {installed[:7]}")
     if blind:
         violations.append(f"{GUARD_SKIPPED_PREFIX}git unavailable")

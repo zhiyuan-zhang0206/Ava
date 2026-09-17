@@ -35,7 +35,7 @@ import httpx
 
 # Telegram's hard cap for documents sent through the Bot API.
 MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
-# Telegram's caption cap for sendDocument.
+# Telegram's caption cap for sendDocument (task #3696 exception inventory).
 MAX_CAPTION_CHARS = 1024
 # Uploads up to 50 MB over a private link need more headroom than a text
 # message; a slow link should fail loudly rather than hang the caller.

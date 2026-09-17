@@ -34,6 +34,7 @@ HEARTBEAT_SECONDS = 480
 HARD_LIMIT_SECONDS = 7200
 WAKE_ATTEMPTS = 8  # wake delivery tries (first + 7 retries); the gaps below
 # sum to ~10.5 min — long enough to ride out a gateway / agent restart window
+# (wake-delivery retry contract; task #3696 exception inventory)
 WAKE_BACKOFF_S = 10.0  # first gap between wake tries; doubles per retry
 WAKE_BACKOFF_MAX_S = 160.0  # cap for one gap
 
