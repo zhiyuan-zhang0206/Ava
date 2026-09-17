@@ -8,8 +8,8 @@ the Postgres and Redis exporters) and the two memory-search export stats
 All PromQL against fixed scrape targets; the multi-series panels (per
 machine, per mountpoint, multi-direction) carry the series palette
 (``palette-classic``), the memory-search pair the fixed blue/purple of their
-hand-written originals, and the per-type gauges keep their as-is units,
-min/max bounds and threshold steps.
+hand-written originals, and the per-type gauges keep their as-is sizes
+(12x8), units, min/max bounds and threshold steps.
 
 """
 
@@ -34,6 +34,7 @@ core_metrics.register_core_metric(
         query='1 - avg by (machine_name) (system_cpu_utilization_ratio{state="idle"})',
         target_names=["{{machine_name}}"],
         field_defaults={"color": {"mode": "palette-classic"}, "max": 1, "min": 0},
+        height=8,
         panel_id=2101,
         section="Host & data plane",
         order=0,
@@ -57,6 +58,7 @@ core_metrics.register_core_metric(
         query='avg by (machine_name) (system_memory_utilization_ratio{state="used"})',
         target_names=["{{machine_name}}"],
         field_defaults={"color": {"mode": "palette-classic"}, "max": 1, "min": 0},
+        height=8,
         panel_id=2102,
         section="Host & data plane",
         order=1,
@@ -83,6 +85,7 @@ core_metrics.register_core_metric(
         ],
         target_names=["{{machine_name}} 1m", "{{machine_name}} 5m", "{{machine_name}} 15m"],
         field_defaults={"color": {"mode": "palette-classic"}},
+        height=8,
         panel_id=2103,
         section="Host & data plane",
         order=2,
@@ -107,6 +110,7 @@ core_metrics.register_core_metric(
         query="max by (machine_name, mountpoint) (system_filesystem_utilization_ratio)",
         target_names=["{{machine_name}} {{mountpoint}}"],
         field_defaults={"color": {"mode": "palette-classic"}, "max": 1, "min": 0},
+        height=8,
         panel_id=2104,
         section="Host & data plane",
         order=3,
@@ -127,6 +131,7 @@ core_metrics.register_core_metric(
         query="sum by (machine_name, direction) (rate(system_disk_io_bytes_total[5m]))",
         target_names=["{{machine_name}} {{direction}}"],
         field_defaults={"color": {"mode": "palette-classic"}},
+        height=8,
         panel_id=2105,
         section="Host & data plane",
         order=4,
@@ -150,6 +155,7 @@ core_metrics.register_core_metric(
         query="sum by (machine_name, direction) (rate(system_network_io_bytes_total[5m]))",
         target_names=["{{machine_name}} {{direction}}"],
         field_defaults={"color": {"mode": "palette-classic"}},
+        height=8,
         panel_id=2106,
         section="Host & data plane",
         order=5,
@@ -176,6 +182,7 @@ core_metrics.register_core_metric(
         ],
         target_names=["{{machine_name}} backends", "{{machine_name}} max_connections"],
         field_defaults={"color": {"mode": "palette-classic"}, "min": 0},
+        height=8,
         panel_id=2107,
         section="Host & data plane",
         order=6,
@@ -202,6 +209,7 @@ core_metrics.register_core_metric(
         ],
         target_names=["{{machine_name}} commits/s", "{{machine_name}} rollbacks/s"],
         field_defaults={"color": {"mode": "palette-classic"}},
+        height=8,
         panel_id=2108,
         section="Host & data plane",
         order=7,
@@ -225,6 +233,7 @@ core_metrics.register_core_metric(
         query="max by (machine_name) (postgresql_db_size_bytes)",
         target_names=["{{machine_name}}"],
         field_defaults={"color": {"mode": "palette-classic"}},
+        height=8,
         panel_id=2109,
         section="Host & data plane",
         order=8,
@@ -251,6 +260,7 @@ core_metrics.register_core_metric(
         ],
         target_names=["{{machine_name}} used", "{{machine_name}} rss"],
         field_defaults={"color": {"mode": "palette-classic"}},
+        height=8,
         panel_id=2110,
         section="Host & data plane",
         order=9,
@@ -276,6 +286,7 @@ core_metrics.register_core_metric(
         ],
         target_names=["{{machine_name}} clients", "{{machine_name}} evictions/s"],
         field_defaults={"color": {"mode": "palette-classic"}, "min": 0},
+        height=8,
         panel_id=2111,
         section="Host & data plane",
         order=10,
@@ -296,6 +307,7 @@ core_metrics.register_core_metric(
         query="max by (machine_name) (redis_commands_per_second)",
         target_names=["{{machine_name}}"],
         field_defaults={"color": {"mode": "palette-classic"}},
+        height=8,
         panel_id=2112,
         section="Host & data plane",
         order=11,
