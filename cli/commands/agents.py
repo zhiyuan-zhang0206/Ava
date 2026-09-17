@@ -12,6 +12,9 @@ fast (`raise_for_status()`) on any HTTP error. Ordered by escalating force:
   terminate <id>  POST /api/agents/{id}/terminate        graceful stop + exit
   kill <id>       POST /api/agents/{id}/terminate(force) hard-stop a stuck agent
 
+Both terminate and kill accept `--final`: close the agent — never
+auto-resurrected; `resurrect` reopens it.
+
 `send` is the shell-level message primitive: the completion notices of
 `ava.shell.run_background` and watcher exit notices are generated command lines
 ending in `ava agents send ... --source shell:N|watcher:N`, and a host operator
@@ -283,11 +286,15 @@ def cmd_agents_resurrect(agent_id: int, *, source: str | None = None) -> int:
     return 0
 
 
-def _terminate(agent_id: int, *, force: bool, source: str | None = None) -> int:
+def _terminate(
+    agent_id: int, *, force: bool, source: str | None = None, final: bool = False
+) -> int:
     """Shared POST for `terminate` (graceful) and `kill` (force) — both hit
     POST /api/agents/{id}/terminate, differing only in the `force` flag. The
     An explicit source/profile is forwarded unchanged. Non-opted-in legacy
-    callers retain the old server default until the negotiated transition."""
+    callers retain the old server default until the negotiated transition.
+    `final` closes the agent (never auto-resurrect); it is sent only when set,
+    so an older gateway never receives a flag it cannot honor."""
     from shared.http_dial import post as dial_post
     from shared.machine import gateway_api_base, gateway_auth_headers
 
@@ -295,7 +302,7 @@ def _terminate(agent_id: int, *, force: bool, source: str | None = None) -> int:
     url = f"{gateway_api_base()}/api/agents/{agent_id}/terminate"
     resp = dial_post(
         url,
-        json={"force": force, **_caller_body(source)},
+        json={"force": force, **({"final": True} if final else {}), **_caller_body(source)},
         timeout=_TIMEOUT_S,
         headers=gateway_auth_headers(),
     )
@@ -304,15 +311,20 @@ def _terminate(agent_id: int, *, force: bool, source: str | None = None) -> int:
     return 0
 
 
-def cmd_agents_terminate(agent_id: int, *, source: str | None = None) -> int:
+def cmd_agents_terminate(agent_id: int, *, source: str | None = None, final: bool = False) -> int:
     """`ava agents terminate <id>` — graceful stop: the agent exits after
     processing its current turn. For an agent wedged mid-turn (a hung step) that
-    cannot reach the graceful exit, use `kill`."""
-    return _terminate(agent_id, force=False, source=source)
+    cannot reach the graceful exit, use `kill`. With `--final` the agent is also
+    closed: never auto-resurrected (its queued work dead-letters on the existing
+    thresholds); `ava agents resurrect <id>` reopens it. On an
+    already-terminated agent `--final` is the metadata-only mark (the backfill
+    route for agents closed before the marker existed)."""
+    return _terminate(agent_id, force=False, source=source, final=final)
 
 
-def cmd_agents_kill(agent_id: int, *, source: str | None = None) -> int:
+def cmd_agents_kill(agent_id: int, *, source: str | None = None, final: bool = False) -> int:
     """`ava agents kill <id>` — request forceful interruption. Hosted work may
     return enqueued while it drains; this is acceptance, not observed exit.
-    The response acknowledges the host lifecycle request; completion is asynchronous."""
-    return _terminate(agent_id, force=True, source=source)
+    The response acknowledges the host lifecycle request; completion is asynchronous.
+    `--final` also closes the agent (see `terminate --final`)."""
+    return _terminate(agent_id, force=True, source=source, final=final)

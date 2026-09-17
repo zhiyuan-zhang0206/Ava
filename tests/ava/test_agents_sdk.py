@@ -332,6 +332,19 @@ class TestTerminate:
             ("", "terminate", f"agent:{ava.self.AGENT_ID}"),
         ]
 
+    def test_final_terminate_closes_the_peer_for_good(self, db_conn: psycopg.Connection) -> None:
+        """`final=True` rides the SDK body end to end: the termination is
+        accepted and the agent is closed (never auto-resurrected)."""
+        ava._boot._agent_id = _spawn_agent()
+        peer_id = ava.agents.spawn()
+
+        result = ava.agents.terminate(peer_id, final=True)
+
+        assert result == "enqueued"
+        assert db_conn.execute(
+            "SELECT closed_at IS NOT NULL FROM agents_meta WHERE id = %s", (peer_id,)
+        ).fetchone() == (True,)
+
     def test_terminate_reports_open_tasks_hint_with_truncation(
         self, db_conn: psycopg.Connection
     ) -> None:

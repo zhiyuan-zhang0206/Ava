@@ -19,6 +19,7 @@ A gateway daemon with six jobs on one fast tick (user-confirmed design 2026-08-0
 
 ## Entry Points
 - `services/delivery_watchdog/daemon.py` — `.venv/bin/python -m services.delivery_watchdog.daemon`
+- `services/delivery_watchdog/dead_letter.py` — job 4's stale-inbound dead-letter sweeps (split out at the line budget; re-exported by `daemon.py`)
 - Watchdog keeps alive via `services/healthchecks/delivery_watchdog.py`
 
 ## Notes

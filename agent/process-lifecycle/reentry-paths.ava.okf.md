@@ -17,14 +17,18 @@ accept different lifecycle states.
   its notification, optional message and an epoch fence: every earlier
   unapplied restart/terminate command is settled as superseded, so a delayed
   older terminate can never be replayed onto the successor incarnation
-  (issue #2158). Then it publishes a host wake.
+  (issue #2158). It also reopens a closed agent, clearing the closure marker
+  (the audit event carries `reopened`). Then it publishes a host wake.
 - Automatic resurrection requires actual pending work newer than the current
   death and above the force-terminate inbound fence — except for a row the
   system itself reaped after a crash (`termination_source='reaper'` with the
   `last_turn_fatal_at` marker), where work from before the death still resumes
   its owner. The home-machine lock, automatic-wake policy, suppression window
   and the recovery breaker's durable streak guard that transition; a stale
-  trigger cannot undo a concurrent user termination.
+  trigger cannot undo a concurrent user termination. A closed agent
+  (`terminate --final`; `agents_meta.closed_at` set) is exempt from every
+  automatic path — its queued work waits and dead-letters on the existing
+  thresholds.
 - A chat stalled `pending` on a crash-marked idling corpse reaches a
   bounded-time recovery decision: the delivery watchdog escalates to the
   owner's home runner (`recover-crash-marked-v2`), which harvests the corpse

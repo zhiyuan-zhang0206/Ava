@@ -1084,6 +1084,22 @@ class TestDeadLetterStalePendingChats:
             cur.execute("SELECT status FROM inbound_messages WHERE id = %s", (row,))
             assert cur.fetchone() == ("pending",)
 
+    def test_closed_owner_still_dead_letters(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool
+    ) -> None:
+        """Closure stops auto-resurrect, not cleanup: a stale pending chat of a
+        closed owner is dead-lettered by the same age gate as any other
+        terminated owner — the queue drains exactly as the ruling says."""
+        from services.delivery_watchdog.daemon import dead_letter_stale_pending_chats
+
+        aid = _make_terminated_agent(db_conn)
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE agents_meta SET closed_at = now() WHERE id = %s", (aid,))
+        db_conn.commit()
+        _insert_pending_resurrect_row(db_conn, aid, age_s=2 * 86400, kind="chat")
+
+        assert dead_letter_stale_pending_chats(pool, 86400.0) == 1
+
 
 class TestSelectTerminatedOwnersWithPending:
     def test_force_fence_excludes_older_chat_but_accepts_newer_chat(
@@ -1172,6 +1188,26 @@ class TestSelectTerminatedOwnersWithPending:
         iid = insert_inbound_message(db_conn, aid, "hello?", source="user")
 
         assert select_terminated_owners_with_pending(pool, 86400.0) == [(aid, iid)]
+
+    def test_closed_owner_is_never_a_resurrect_candidate(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool
+    ) -> None:
+        """`terminate --final` closes the agent: even a fresh pending chat must
+        not select it for the G4 retry — closure outranks every automatic
+        channel. An open terminated twin is still selected, so the guard is a
+        policy, not a blanket."""
+        from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
+
+        closed = _make_terminated_agent(db_conn)
+        insert_inbound_message(db_conn, closed, "hello?", source="user")
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE agents_meta SET closed_at = now() WHERE id = %s", (closed,))
+        db_conn.commit()
+
+        open_twin = _make_terminated_agent(db_conn)
+        twin_chat = insert_inbound_message(db_conn, open_twin, "hello?", source="user")
+
+        assert select_terminated_owners_with_pending(pool, 86400.0) == [(open_twin, twin_chat)]
 
     def test_deduplicates_per_agent(
         self, db_conn: psycopg.Connection, pool: ConnectionPool
@@ -1572,6 +1608,43 @@ class TestSystemNoticeSourcePredicateParity:
                 assert is_system_notice_source(source, payload) is expected, (source, label)
         # The marker only ever applies inside the system family.
         assert is_system_notice_source("watcher:3", {"hosted_turn_recovery": True}) is False
+
+
+class TestClosedAgentPredicateParity:
+    """`CLOSED_AGENT` (SQL, consumed by the delivery watchdog's selector and
+    the home runner's final CAS) and `is_closed_agent` (Python, consumed by
+    the resurrect endpoint) gate the same decision from two languages; they
+    must agree on every `closed_at` input — a one-sided edit would reopen the
+    closure gap from the other side (task #3911 review note: pin the pair
+    together, mirroring the SYSTEM_NOTICE_SOURCE parity above)."""
+
+    def test_sql_fragment_and_python_twin_agree(self, db_conn: psycopg.Connection) -> None:
+        from datetime import UTC, datetime
+
+        from psycopg import sql
+
+        from shared.lifecycle_acceptance import CLOSED_AGENT, is_closed_agent
+
+        samples: tuple[tuple[str, datetime | None], ...] = (
+            ("open", None),
+            ("closed-now", datetime.now(UTC)),
+            ("closed-backdated", datetime(2001, 9, 11, tzinfo=UTC)),
+        )
+        with db_conn.cursor() as cur:
+            for label, closed_at in samples:
+                cur.execute(
+                    sql.SQL(
+                        "SELECT {} FROM (SELECT %s::timestamptz AS closed_at) AS agents_meta"
+                    ).format(sql.SQL(CLOSED_AGENT)),
+                    (closed_at,),
+                )
+                row = cur.fetchone()
+                assert row is not None, label
+                assert row[0] == is_closed_agent(closed_at), (label, closed_at)
+        # The verdict is purely about the marker, never about recency: a
+        # decades-old closure time is still closed; only NULL is open.
+        assert is_closed_agent(datetime(2001, 9, 11, tzinfo=UTC)) is True
+        assert is_closed_agent(None) is False
 
 
 class TestResurrectRetry:

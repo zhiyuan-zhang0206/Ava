@@ -449,10 +449,13 @@ def terminate(
     *,
     message: str | None = None,
     force: bool = False,
+    final: bool = False,
 ) -> TerminateOutcome:
     """End an agent after its current step. `message` is saved without another
     response and is available if the agent is later revived. `force=True`
     interrupts work; an `enqueued` result confirms acceptance, not exit.
+    `final=True` closes the agent — never auto-resurrected (its queued work
+    dead-letters on the existing thresholds); an explicit `resurrect` reopens it.
 
     The result compares as the status string (`== "enqueued"` works as before)
     and carries `open_tasks`: the tasks the agent still owns as it goes down
@@ -460,7 +463,8 @@ def terminate(
     agent_id = coerce_typed(agent_id, "agent_id", int)
     message = coerce_str(message, "message", allow_none=True)
     force = coerce_typed(force, "force", bool)
-    data = _client.terminate(agent_id, message=message, force=force)
+    final = coerce_typed(final, "final", bool)
+    data = _client.terminate(agent_id, message=message, force=force, final=final)
     return TerminateOutcome(
         TerminateResult(data["status"]),
         _open_tasks_from_dict(data["open_tasks"]),

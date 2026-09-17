@@ -7769,6 +7769,12 @@ export interface components {
          *     `force` defaults to False for graceful termination. True directly kills the
          *     detached process and force-updates status when the agent cannot reach claim.
          *
+         *     `final` closes the agent — the closure marker (`agents_meta.closed_at`)
+         *     means "never auto-resurrect": every automatic resurrection path skips it
+         *     and its queued work dead-letters on the existing thresholds; only an
+         *     explicit manual resurrect reopens it. Stamped even when the terminate lands
+         *     on an already-terminated agent (metadata-only mark; the backfill route).
+         *
          *     `source` defaults to "user"; SDK paths pass f"agent:{my_id}". Claim
          *     includes this source in the lifecycle marker shown to the agent.
          *
@@ -7782,6 +7788,11 @@ export interface components {
              * @default false
              */
             force: boolean;
+            /**
+             * Final
+             * @default false
+             */
+            final: boolean;
             /**
              * Source
              * @default user
