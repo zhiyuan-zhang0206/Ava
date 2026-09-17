@@ -258,6 +258,11 @@ def _free_port() -> int:
 
 # Owner lock, one per instance dir, beside that instance's `data/` and `pg.log`.
 _OWNER_LOCK_NAME = "owner.lock"
+# The claim's private name. The claim file is created, flocked, and written under
+# it, then renamed onto `_OWNER_LOCK_NAME` (same inode, lock intact): no glob
+# matches it, so a sweep can only ever see the final name already-locked (skip) or
+# absent (not yet claimed) — never a claim it would judge stale mid-flight (#3629).
+_CLAIM_LOCK_NAME = "owner.lock.claim"
 
 
 def _throwaway_locks() -> list[Path]:
@@ -283,15 +288,23 @@ class _Registration(NamedTuple):
 def _register_throwaway(instance_dir: Path, port: int) -> _Registration | None:
     """Claim `instance_dir` as this process's throwaway cluster by taking the
     lifetime flock on its own `owner.lock`. None on Windows (no flock, and the sweep
-    is a no-op there too). The body carries owner diagnostics only — never a path."""
+    is a no-op there too). The body carries owner diagnostics only — never a path.
+
+    The claim is published already-locked — claim file, flock, body, rename — so
+    `owner.lock` comes into existence only as the rename target of the file whose
+    flock this process already holds. That is the invariant the sweep's whole
+    judgment rests on (`flock acquirable => owner dead`): it can never open a
+    created-but-unlocked `owner.lock` and reap a claim in flight (#3629)."""
     if IS_WINDOWS:
         return None
     import fcntl
 
     lock = instance_dir / _OWNER_LOCK_NAME
-    fd = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_TRUNC, 0o600)
+    claim = instance_dir / _CLAIM_LOCK_NAME
+    fd = os.open(claim, os.O_RDWR | os.O_CREAT | os.O_TRUNC, 0o600)
     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     os.write(fd, json.dumps({"owner_pid": os.getpid(), "port": port}).encode())
+    claim.rename(lock)  # same inode: the published lock is the one already held
     return _Registration(fd, lock)
 
 
@@ -388,9 +401,10 @@ def sweep_orphaned_throwaway_clusters() -> int:
     run that starts one first bounds the leak from every previous killed run.
 
     Concurrency-safe (xdist workers all call it): the flock that proves deadness is
-    the reap lock too, so one instance is reaped once. On a shared tmpfs another
-    user's instance dirs are `0700`, so the glob simply does not see them. No-op on
-    Windows."""
+    the reap lock too, so one instance is reaped once, and a claim mid-flight is not
+    observable — `owner.lock` is published only already-locked (see
+    `_register_throwaway`). On a shared tmpfs another user's instance dirs are
+    `0700`, so the glob simply does not see them. No-op on Windows."""
     if IS_WINDOWS:
         return 0
     import fcntl
