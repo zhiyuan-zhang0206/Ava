@@ -27,3 +27,11 @@ cross-network calls. -->
 
 ## NOT tested
 <!-- Explicit boundaries. "happy path works" is not "everything works". -->
+
+
+## Recurrence evidence
+<!-- Behavior-changing PRs only: one `closing-gate:` line — `guard=<path-or-gate-name>
+red-battery=<evidence>` or `repro=<command> red/green=<reference> why-not-guard=<one line>`;
+`doc_only=<reason>` for no-executable-behavior changes; `upline_hook=#<task>` for unshipped code.
+See conventions/incident-closeout.md. Delete this section when nothing applies (non-behavior
+surfaces). -->
