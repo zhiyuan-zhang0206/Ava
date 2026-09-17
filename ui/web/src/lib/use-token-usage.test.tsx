@@ -34,7 +34,7 @@ afterEach(() => {
 });
 
 describe("useTokenUsage agent switch", () => {
-  it("serves a returned-to agent from cache; the reattach reconcile refreshes it", async () => {
+  it("serves a returned-to agent from cache and fires no read of its own", async () => {
     getTokenUsage.mockImplementation((id) => Promise.resolve(tokenFixture(id)));
     // Cold keys fetch regardless of a global staleTime default.
     const qc = new QueryClient({

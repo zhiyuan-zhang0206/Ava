@@ -205,6 +205,10 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("PUT", "/api/config/default-model"): RouteContract(
         note="set default model — PUT is idempotent"
     ),
+    # ── gateway/routers/conversation.py ─────────────────────────────
+    ("GET", "/api/agents/{agent_id}/conversation-snapshot"): RouteContract(
+        note="composed switch refresh — timeline head window + token usage + pending in one read"
+    ),
     # ── gateway/routers/events.py ───────────────────────────────────
     ("GET", "/api/agents/{agent_id}/events/stream"): RouteContract(note="SSE live stream"),
     ("GET", "/api/agents/{agent_id}/events"): RouteContract(),
