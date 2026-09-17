@@ -18,7 +18,8 @@ process registry.
 
 Resolution happens server-side because the payloads are *data*, not routes:
 a ``taskList`` widget lists the agent's active tasks (owned by the agent, not
-done/cancelled, newest first, complete). A widget with an empty payload drops
+done/cancelled, priority-ordered — P0 first, ties by task id — complete).
+A widget with an empty payload drops
 out of the response entirely (the panel's empty-section rule). Import errors are fail-soft (the plugin-load contract —
 2026-08-28 ava_ledger incident, restated for plugins 2026-09-11): a plugin
 whose ``inspector.py`` fails to import, or whose registration raises, is
@@ -107,16 +108,18 @@ def _load_inspect_widgets() -> list[InspectWidgetSpec]:
 
 
 def _resolve_tasks(cur: Cursor[Any], agent_id: int) -> list[InspectWidgetTask]:
-    """The agent's active tasks, newest first — the ``taskList`` payload.
+    """The agent's active tasks, priority-first — the ``taskList`` payload.
 
     "Active" = ``in_progress``; the system root is excluded by its NULL
-    owner. The list is complete — every active task renders; there is no
+    owner. Rows come rung-first: P0..P3 ascending, ties by id ascending
+    (task #3866, user request 2026-09-17 — the panel's order must be
+    legible). The list is complete — every active task renders; there is no
     display cap (user ruling 2026-09-17). Each row carries its own
     ``priority`` (the P0..P3 stakes rung the console badges — task #3819)."""
     cur.execute(
         "SELECT id, title, priority FROM agent_tasks "
         "WHERE owner = %s AND status = 'in_progress' "
-        "ORDER BY updated_at DESC, id DESC",
+        "ORDER BY priority ASC, id ASC",
         (agent_id,),
     )
     return [

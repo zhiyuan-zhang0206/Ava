@@ -8,8 +8,9 @@ gateway builds the widget registry in process (mocked here by patching
 widgets with nothing to show.
 
 Locks: empty registry -> [], unknown agent -> 404, the taskList resolution
-rules (owner filter, active statuses only, newest-first order, each row's own
-priority carried through, no cap, empty payload -> widget dropped), widget
+rules (owner filter, active statuses only, priority-first order — P0..P3,
+ties by id — each row's own priority carried through, no cap, empty payload
+-> widget dropped), widget
 ordering/attribution passthrough, the loader's enabled-set filtering, and its
 fail-soft skip of a broken inspector.py.
 """
@@ -155,7 +156,7 @@ def test_unknown_agent_404(db_conn: psycopg.Connection, monkeypatch: pytest.Monk
 # ── taskList resolution ───────────────────────────────────────────────────────
 
 
-def test_lists_only_the_agents_active_tasks_newest_first(
+def test_lists_only_the_agents_active_tasks(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     aid = _insert_agent(db_conn)
@@ -190,8 +191,9 @@ def test_lists_only_the_agents_active_tasks_newest_first(
         "taskList",
         50,
     )
-    assert [t["id"] for t in widget["tasks"]] == [newer, mid, older]
-    assert widget["tasks"][0] == {"id": newer, "title": "newer", "priority": "P2"}
+    # One rung (the default P2): id ascending — recency is no order key.
+    assert [t["id"] for t in widget["tasks"]] == [older, newer, mid]
+    assert widget["tasks"][0] == {"id": older, "title": "older", "priority": "P2"}
 
 
 def test_task_list_shows_every_active_task(
@@ -210,32 +212,42 @@ def test_task_list_shows_every_active_task(
 
     tasks = _get(aid).json()[0]["tasks"]
     assert len(tasks) == 11
-    # Newest-first, complete: the first N ids by ascending age.
+    # One rung (the default P2): id ascending — the complete list, no cap.
     assert [t["id"] for t in tasks] == ids
 
 
 def test_task_rows_carry_their_own_priority(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Each taskList row carries its own P0..P3 rung (task #3819, user
-    request 2026-09-17: the Inspector Tasks section shows each task's
-    priority) — a mixed-priority queue keeps its rows' rungs."""
+    """Each taskList row carries its own P0..P3 rung (task #3819) and the rows
+    come rung-first, not newest-first (task #3866, user request 2026-09-17:
+    the panel's order must be legible) — a mixed-priority queue sorts by rung,
+    ties by id, regardless of recency."""
     aid = _insert_agent(db_conn)
     root = _root_task_id(db_conn)
-    p0 = _insert_task(db_conn, owner=aid, parent_id=root, title="urgent", priority="P0")
+    # Inserted recency-first on purpose: the newest row is the LOWEST rung, so
+    # an updated_at-driven order would fail this test.
+    p3 = _insert_task(db_conn, owner=aid, parent_id=root, title="later", priority="P3")
     p1 = _insert_task(
         db_conn, owner=aid, parent_id=root, title="next", priority="P1", updated_seconds_ago=60
     )
-    p3 = _insert_task(
-        db_conn, owner=aid, parent_id=root, title="later", priority="P3", updated_seconds_ago=120
+    p1b = _insert_task(
+        db_conn, owner=aid, parent_id=root, title="next-b", priority="P1", updated_seconds_ago=30
+    )
+    p0 = _insert_task(
+        db_conn, owner=aid, parent_id=root, title="urgent", priority="P0", updated_seconds_ago=120
     )
     _patch_loader(monkeypatch, _widget())
     db_conn.commit()
 
     tasks = _get(aid).json()[0]["tasks"]
+    # P0 first, then the P1 pair in id order — p1b ("next-b") is the more
+    # RECENT update but carries the later id, so a recency tie-break would
+    # flip them; then the newest-row P3.
     assert [(row["id"], row["priority"]) for row in tasks] == [
         (p0, "P0"),
         (p1, "P1"),
+        (p1b, "P1"),
         (p3, "P3"),
     ]
 

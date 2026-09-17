@@ -46,7 +46,8 @@ export function InspectWidgetSection({ widget }: { widget: InspectWidget }) {
           <li key={task.id}>
             {/* The #id leads the row so the ids line up on the left edge,
                 mirroring the shell rows (task #3563 — user: the tasks id should
-                sit left "like shell"); the title takes the remaining width. */}
+                sit left "like shell"); its priority rung follows the id, and
+                the title takes the remaining width (task #3866). */}
             <Link
               href={fleetTaskHref(task.id)}
               className={cn(
@@ -58,10 +59,10 @@ export function InspectWidgetSection({ widget }: { widget: InspectWidget }) {
               <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
                 #{task.id}
               </span>
-              <span className={cn("truncate text-foreground", MIN_W_0, FLEX_1)}>{task.title}</span>
-              {/* The task's stakes rung (P0..P3) — the same badge colors as the
-                  board/tree (lib/notices PRIORITY_BG), pinned right so it never
-                  truncates with the title (task #3819, user request 2026-09-17). */}
+              {/* The task's stakes rung (P0..P3) sits immediately right of the
+                  id (task #3866, user request 2026-09-17 — it anchored the
+                  row's right edge before); the same badge colors as the
+                  board/tree (lib/notices PRIORITY_BG, task #3819). */}
               <span
                 className={cn(
                   "shrink-0 rounded px-1 text-[9px] font-bold leading-tight text-white",
@@ -70,6 +71,7 @@ export function InspectWidgetSection({ widget }: { widget: InspectWidget }) {
               >
                 {task.priority}
               </span>
+              <span className={cn("truncate text-foreground", MIN_W_0, FLEX_1)}>{task.title}</span>
             </Link>
           </li>
         ))}
