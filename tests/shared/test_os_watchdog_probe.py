@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,7 @@ import pytest
 
 from shared import os_cron
 from shared import os_watchdog_probe as probe
+from shared.config import settings
 
 
 @pytest.fixture()
@@ -231,6 +233,80 @@ def test_register_linux_rounds_sub_minute_interval_up(monkeypatch: pytest.Monkey
     monkeypatch.setattr(probe.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
     assert probe._register_linux("gateway", 5) == 0
     assert written["body"].startswith("*/1 * * * *")
+
+
+def test_register_linux_captures_output_to_the_shared_log(monkeypatch: pytest.MonkeyPatch) -> None:
+    """cron has no StandardErrorPath: without the redirect the probe's stderr —
+    its only channel under the scheduler — is mailed / dropped, and the
+    held-stop observation cannot see the probe stand down (task #3867). The
+    redirect targets the same file the launchd plist names."""
+    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(probe, "ava_binary_path", lambda: "/x/ava")
+    written: dict[str, str] = {}
+
+    def _run(cmd, **kw):  # type: ignore[no-untyped-def]
+        if cmd == ["crontab", "-"]:
+            written["body"] = kw["input"]
+            return type("R", (), {"returncode": 0, "stderr": "", "stdout": ""})()
+        return type("R", (), {"returncode": 1, "stderr": "no crontab for u", "stdout": ""})()
+
+    monkeypatch.setattr(probe.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
+    assert probe._register_linux("gateway", 60) == 0
+
+    log_file = Path(settings.general.ava_home) / "logs" / "watchdog-probe.log"
+    body = written["body"]
+    assert f"mkdir -p {log_file.parent}" in body
+    assert f">> {log_file} 2>&1" in body
+    # The env prefix must sit immediately before the ava binary: /bin/sh
+    # scopes `VAR=v cmd1 && cmd2` to cmd1 alone, so anything in between (a
+    # mkdir, once) silently strips AVA_HOME from the probe (task #3867).
+    assert f"{probe.cron_env_prefix()}/x/ava cluster watchdog-probe" in body
+
+
+@pytest.mark.skipif(os.name == "nt", reason="cron lines are POSIX shell")
+def test_cron_line_scopes_the_home_pin_to_the_probe_command(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Execute the registered line the way cron does — /bin/sh -c in a clean
+    environment — with a wrapper standing in for the ava binary. /bin/sh scopes
+    a leading `VAR=v cmd` assignment to that one command, so a command moved
+    between the prefix and the binary silently strips AVA_HOME from the probe;
+    the wrapper records what the probe process would actually see (task #3867,
+    QA battery: the old shape showed AVA_HOME empty here)."""
+    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType]
+    log_file = tmp_path / "logs" / "watchdog-probe.log"
+    monkeypatch.setattr(probe, "_probe_log_file", lambda: log_file)
+    record = tmp_path / "probe-home.txt"
+    wrapper = tmp_path / "ava-wrapper.sh"
+    wrapper.write_text(f'#!/bin/sh\necho "AVA_HOME=${{AVA_HOME-}}" > {record}\nexit 0\n')
+    wrapper.chmod(0o755)
+    monkeypatch.setattr(probe, "ava_binary_path", lambda: str(wrapper))
+    written: dict[str, str] = {}
+
+    def _run(cmd, **kw):  # type: ignore[no-untyped-def]
+        if cmd == ["crontab", "-"]:
+            written["body"] = kw["input"]
+            return type("R", (), {"returncode": 0, "stderr": "", "stdout": ""})()
+        return type("R", (), {"returncode": 1, "stderr": "no crontab for u", "stdout": ""})()
+
+    # the patch below replaces subprocess.run on the shared module — keep the
+    # real callable for the verbatim execution further down
+    real_run = subprocess.run
+    monkeypatch.setattr(probe.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
+    assert probe._register_linux("gateway", 60) == 0
+
+    # cron hands the command part of the line to /bin/sh; run it verbatim with
+    # AVA_HOME removed from the environment, so only the line's own prefix can
+    # supply the probe's home.
+    command = written["body"].strip().split(None, 5)[5]
+    result = real_run(
+        ["env", "-u", "AVA_HOME", "/bin/sh", "-c", command],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert record.read_text().strip() == probe.cron_env_prefix().strip()
 
 
 def test_unregister_linux_is_a_noop_without_our_line(monkeypatch: pytest.MonkeyPatch) -> None:
