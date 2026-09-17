@@ -110,7 +110,8 @@ async def test_profile_through_auth_gate_and_real_hosted_claim(
     assert isinstance(content, str)
     assert "External agent" in content and "codex" in content
     assert "asserted" in content
-    assert "User [" not in content and "[system]" not in content
+    # Caller envelopes read as neither a system message nor a human "[ts]" header.
+    assert "[system]" not in content and not content.startswith("[")
 
 
 @pytest.mark.parametrize(
