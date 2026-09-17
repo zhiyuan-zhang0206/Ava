@@ -55,7 +55,7 @@ The Autonomy axis of the Two Dials (who consumes evidence to make decisions) con
 
 - `reference/orchestrator.md` / `reference/worker.md` — per-role deep-dive manuals: delegator semantics of the first prompt, delivery path (results = write a file + send the path, siblings only consume published artifacts), reporting discipline.
 - `reference/watch_idle.py` — reference script for a goal-mode watcher (wake and judge when the goal is idle).
-- `reference/usage.py` — budget table: aggregates `llm_usage` by `--agent-id`/`--since`/`--hours`, priced via `shared.lm.pricing.cost_usd`, outputs JSON (caliber mirrors `agent_inspect._agent_cost`).
+- `reference/usage.py` — budget table: aggregates `llm_usage` by `--agent-id`/`--since`/`--hours`, priced via `shared.lm.pricing.cost_usd`, outputs JSON (the fleet report retains its own ledger/log read path).
 
 ## Key Dependencies
 

@@ -138,6 +138,8 @@ def _cascade_closure(seed: set[str], edges: list[tuple[str, str]]) -> set[str]:
 _EXEMPT: dict[str, str] = {
     "schema_migrations": "migration bookkeeping — never test data",
     "checkpoint_migrations": "LangGraph migration bookkeeping — never test data",
+    "agent_metric_collection": "migration-seeded collection cutover singleton — "
+    "read-only after installation, never test data",
     "cluster_pin": "cluster singleton state — infra, not test data",
     "cluster_last_update": "cluster singleton outcome row — infra (mirrored into "
     "deployment_state by the R1 migration)",

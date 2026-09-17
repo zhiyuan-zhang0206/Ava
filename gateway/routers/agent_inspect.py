@@ -5,34 +5,27 @@ from __future__ import annotations
 import asyncio
 import logging
 import time as time_mod
-from concurrent.futures import Future, ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FutureTimeoutError
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any, NamedTuple
+from typing import Annotated, Any
 
-import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
 from opentelemetry import metrics
-from psycopg_pool import ConnectionPool
+from psycopg import Error as DatabaseError
+from psycopg_pool import ConnectionPool, PoolTimeout
 
-from gateway import loki_query_budget, neighbors
-from gateway.routers import _agent_cost, _inspect_stats, _plugin_inspector, _plugin_metrics
-from gateway.routers._agent_cost import window_bounds
-from gateway.routers._backend_failure import raise_backend_unavailable
+from gateway import neighbors
+from gateway.routers import _inspect_metrics, _plugin_inspector, _plugin_metrics
 from gateway.routers._inspect_cache import InspectCacheFullError, InspectQueryCache
 from gateway.routers._inspect_live import db_rows_blocking, notice_blocking, project_heartbeat
 from gateway.schemas import (
-    AgentActivity,
     AgentInspectLive,
     AgentInspectStatistics,
-    AgentTps,
     HeartbeatLastPause,
     InspectWidgetResult,
     NeighborRow,
     NeighborsResponse,
     PluginMetricResult,
     StatsWindowHours,
-    applied_window,
 )
 from gateway.shell_ttls import fallback_expiry
 from ops import cluster_rpc as _cluster_rpc
@@ -45,152 +38,6 @@ _log = logging.getLogger(__name__)
 _shell_probe_failures = metrics.get_meter(__name__).create_counter(
     "ava.inspect.shell_probe.failures", unit="{failure}"
 )
-
-# The compact-halt event name (payload key `body` mentions "compact") —
-# mirrors `HALT_KEYS` in shared/events/contract.py.
-HALT_EVENT = "halt"
-
-
-def _alive_seconds(
-    lifecycle_events: list[tuple[datetime, str]],
-    window_start: datetime | None,
-    spawned_at: datetime | None,
-) -> float:
-    """The agent's alive wall-clock, optionally clipped to a window lower bound.
-
-    Sum of every spawn/resurrect → terminate interval (excluding gaps spent
-    terminated); the open tail (currently alive) runs to now. Computed from the
-    `agent_spawned` / `agent_resurrected` / `agent_terminated` lifecycle events.
-    With `window_start` set, each interval is
-    clipped to `[window_start, now]` before summing, so an interval that ended
-    before the window contributes 0 — this is what makes the active-rate
-    denominator follow the request window. `window_start=None` = whole life (no
-    clip), the basis for `AgentTps.agent_lifecycle_tps`.
-
-    Fallback: an agent from which no life START was recovered — no lifecycle
-    events at all, OR a partial stream that predates `agent_spawned` emission
-    and carries only a later `agent_terminated` — uses
-    `agents_meta.spawned_at → now` instead, clipped the same way. The trigger
-    is "no start seen", NOT "alive is 0": an agent WITH a start whose only life
-    ended before `window_start` correctly reports 0 (it was not alive in the
-    window) and must not fall back. A best-effort approximation that may
-    overcount for resurrected/terminated agents (includes terminated gaps);
-    real lifecycle events are more accurate. This is also the intentional
-    bridge when inspect excludes pre-index-cutover lifecycle events: the open
-    alive tail remains exact for the default 24-hour view, while whole-life
-    and wide-window views can include pre-cutover gaps until legacy retention
-    ends.
-
-    Consecutive starts without an intervening terminate (the crash/reaper
-    shape — SIGKILL/OOM leaves no `agent_terminated`, then the crash-resurrect
-    controller wakes the row) close the previous interval at the new start
-    instead of dropping it, so a resurrected agent keeps its pre-crash life.
-
-    KNOWN GAP (crash/reaper): a process that died by SIGKILL/OOM emits no
-    `agent_terminated` event, so an open lifecycle tail of an agent that is
-    NEVER resurrected is counted to `now` and keeps growing — inflating alive
-    and thus depressing active-rate for an abandoned-crashed agent. `not
-    saw_start` fallback does NOT cover this (a crash HAS a start). Closing the
-    tail at `agents_meta.status_changed_at` when the row is already
-    `terminated`, and emitting a reaper-side terminate event, are the
-    follow-ups (see PR)."""
-    now = datetime.now(tz=UTC)
-
-    def clip(start: datetime, end: datetime) -> float:
-        """Seconds of `[start, end]` that fall inside `[window_start, now]`."""
-        lo = start if window_start is None else max(start, window_start)
-        hi = min(end, now)
-        return max(0.0, (hi - lo).total_seconds())
-
-    alive_seconds = 0.0
-    saw_start = False
-    current_life_start: datetime | None = None
-    for ts, event in sorted(lifecycle_events):
-        if event in ("agent_spawned", "agent_resurrected"):
-            if current_life_start is not None:
-                # A second start with no intervening terminate: the previous
-                # life ended without an `agent_terminated` event — the normal
-                # crash/reaper shape (SIGKILL/OOM leaves no finally, then the
-                # crash-resurrect controller wakes the row). Closing the open
-                # interval at the new start keeps that real life in the sum;
-                # the resurrect timestamp is the best available bound for a
-                # death whose true time is unknown (it can only overcount the
-                # crash→resurrect gap, never drop a real interval).
-                alive_seconds += clip(current_life_start, ts)
-            saw_start = True
-            current_life_start = ts
-        elif event == "agent_terminated" and current_life_start is not None:
-            alive_seconds += clip(current_life_start, ts)
-            current_life_start = None
-    # If the agent is currently alive (no terminating event after last start),
-    # add time from the last start to now.
-    if current_life_start is not None:
-        alive_seconds += clip(current_life_start, now)
-
-    if not saw_start and spawned_at is not None:
-        alive_seconds = clip(spawned_at, now)
-    return alive_seconds
-
-
-def _agent_tps(
-    values: _inspect_stats.InspectValues,
-    spawned_at: datetime | None,
-) -> AgentTps:
-    """LM-stage and agent-lifecycle TPS for one agent.
-
-    LM-stage TPS = output tokens / cumulative LLM call wall-clock (sum of
-    `turn_end.duration_seconds` within the window). Isolates model generation
-    speed excluding execute_code and framework overhead. Numerator and
-    denominator come from the same shared ledger-plus-edge view.
-
-    Agent-lifecycle TPS = output tokens / cumulative agent alive time (whole
-    life, `_alive_seconds(window_start=None)` — the request window narrows only the
-    numerator, so this stays a since-birth throughput)."""
-    lm_stage_tps = (
-        values.output_tokens / values.turn_duration_seconds
-        if values.turn_duration_seconds > 0
-        else 0.0
-    )
-    alive_seconds = _alive_seconds(
-        values.lifecycle_events, window_start=None, spawned_at=spawned_at
-    )
-    agent_lifecycle_tps = values.output_tokens / alive_seconds if alive_seconds > 0 else 0.0
-
-    return AgentTps(
-        lm_stage_tps=round(lm_stage_tps, 2),
-        agent_lifecycle_tps=round(agent_lifecycle_tps, 2),
-    )
-
-
-def _agent_activity(
-    values: _inspect_stats.InspectValues,
-    window_start: datetime | None,
-    spawned_at: datetime | None,
-) -> AgentActivity:
-    """Active-rate for one agent: fraction of alive time spent actively working
-    versus idle-waiting for input (see `AgentActivity` for the full contract).
-
-    `active_seconds` = Σ `node_exit.duration_seconds` over every graph node
-    EXCEPT `claim` within the window (llm + exec + hooks = all real processing).
-    `llm_seconds` = Σ `turn_end.duration_seconds` within the window — the
-    model's generation wall-clock (reasoning + output). `exec_seconds` = Σ
-    `node_exit.duration_seconds` where node = 'exec'. `alive_seconds` =
-    `_alive_seconds(window_start)`. `active_rate` = active/alive capped at 1.0;
-    0.0 when alive is 0. Its inputs are prepared by the shared live pass."""
-    active_rate = (
-        values.active_seconds / alive_seconds
-        if (alive_seconds := _alive_seconds(values.lifecycle_events, window_start, spawned_at)) > 0
-        else 0.0
-    )
-    active_rate = min(1.0, active_rate)
-    return AgentActivity(
-        active_seconds=round(values.active_seconds, 2),
-        alive_seconds=round(alive_seconds, 2),
-        active_rate=round(active_rate, 4),
-        llm_seconds=round(values.turn_duration_seconds, 2),
-        exec_seconds=round(values.exec_seconds, 2),
-    )
-
 
 _HEARTBEAT_PAUSE_LOOKBACK = timedelta(hours=24)
 
@@ -284,161 +131,15 @@ async def _probe_agent_shells(
     return shells, True
 
 
-class _InspectAggregates(NamedTuple):
-    """Only Loki/ledger-derived inspector sections retained by the TTL.
-
-    Current state and heartbeat history are exclusively owned by the live
-    endpoint. Statistics cannot trigger runner probes or notice reads.
-    """
-
-    cost: Any
-    stats: Any
-    tps: Any
-    activity: Any
-
-
-# Distinct-key inspect loads admit one leader per Loki query slot. Their two
-# independent sections run on one process-lifetime executor, which stays bounded
-# even when a timed-out caller has released its response task.
-_INSPECT_MAX_CONCURRENT_LOADS = 4
-_INSPECT_EXECUTOR_WORKERS = 4
-_INSPECT_SINGLEFLIGHT_MAX = 32
-_inspect_executor = ThreadPoolExecutor(
-    max_workers=_INSPECT_EXECUTOR_WORKERS,
-    thread_name_prefix="inspect",
-)
-
-
-def _remaining_timeout(deadline: float | None) -> float | None:
-    """Return the remaining load budget or abort once its deadline elapsed."""
-    if deadline is None:
-        return None
-    remaining = deadline - time_mod.monotonic()
-    if remaining <= 0:
-        raise TimeoutError
-    return remaining
-
-
-def _discard_future_exception(future: Future[Any]) -> None:
-    """Consume a late section exception after the load deadline has elapsed."""
-    if not future.cancelled():
-        future.exception()
-
-
-def _inspect_blocking(
-    pool: ConnectionPool[Any],
-    agent_id: int,
-    hours: StatsWindowHours | None,
-    *,
-    since_compact: bool,
-    spawned_at: datetime | None,
-    deadline: float | None = None,
-) -> _InspectAggregates:
-    """Sync twin of the inspect endpoint's event-history section — runs via
-    asyncio.to_thread so the event loop stays free. Its sections run on the
-    shared bounded executor and stop waiting when the load deadline expires."""
-    _remaining_timeout(deadline)
-    # `window_start` is the concrete lower-bound instant of the request
-    # window — the active-rate denominator clips alive-time to it (alive
-    # is replayed in Python). since_compact → the compact halt ts (or
-    # None when never compacted); hours → now - N h; neither → None
-    # (whole life).
-    from_, window_start = window_bounds(
-        agent_id,
-        hours,
-        since_compact=since_compact,
-        deadline=deadline,
-    )
-    # Keep the leader in asyncio.to_thread's default executor. Submitting a
-    # leader that waits on section futures here would deadlock this pool when
-    # every shared worker is occupied by leaders.
-    f_cost = _inspect_executor.submit(
-        _agent_cost.agent_cost,
-        pool,
-        agent_id,
-        hours,
-        since_compact=since_compact,
-        deadline=deadline,
-    )
-    f_values = _inspect_executor.submit(
-        _inspect_stats.inspect_values,
-        pool,
-        agent_id,
-        from_,
-        None,
-        deadline=deadline,
-    )
-    futures = (f_cost, f_values)
-    try:
-        cost = f_cost.result(timeout=_remaining_timeout(deadline))
-        values = f_values.result(timeout=_remaining_timeout(deadline))
-        tps = _agent_tps(values, spawned_at)
-        activity = _agent_activity(values, window_start, spawned_at)
-    except FutureTimeoutError as exc:
-        for future in futures:
-            future.cancel()
-            future.add_done_callback(_discard_future_exception)
-        raise TimeoutError from exc
-    return _InspectAggregates(
-        cost=cost,
-        stats=values.stats,
-        tps=tps,
-        activity=activity,
-    )
-
-
-# (agent_id, hours, since_compact) -> (monotonic expiry, _InspectAggregates).
-# The event-history aggregates are the panel's expensive half (a whole-life
-# call combines cost and one shared projected Loki pass), and the frontend
-# refetches on panel open/selection, manual refresh, compact, and the 60s interval.
-# A 75s TTL spans one 60s open-panel poll tick, so the static retention-window
-# scan is never repeated on every tick. Live DB state, `notice`, and `shells`
-# never ride the cache (see the endpoint). Bound the dict and prune on overflow.
-_INSPECT_CACHE_TTL_S = 75.0
-_INSPECT_CACHE_MAX = 1024
-# A panel request is an interactive read, not a batch job. Until the unlabeled
-# pre-cutover Loki slice expires on 2026-08-30 11:10Z, a cold wide-window or whole-life
-# load can legitimately take about 15 seconds; 30 seconds prevents those reads
-# from returning 503. Every Loki query remains individually bounded at 8 seconds,
-# so a down backend fails in about 16 seconds rather than waiting for this bound.
-# The response budget is also the leader deadline: a timed-out request releases
-# admission once its fan-out stops rather than later populating this cache.
-_INSPECT_RESPONSE_TIMEOUT_S = 30.0
+# SQL work is bounded by database timeouts and at most four leaders. Identical
+# in-flight requests share a read; completed values are not kept behind a TTL.
+_INSPECT_RESPONSE_TIMEOUT_S = 15.0
 _InspectKey = tuple[int, int | None, bool]
-_inspect_query_cache = InspectQueryCache[_InspectKey, _InspectAggregates](
-    max_entries=_INSPECT_CACHE_MAX,
-    max_inflight=_INSPECT_SINGLEFLIGHT_MAX,
-    max_concurrent_loads=_INSPECT_MAX_CONCURRENT_LOADS,
+_inspect_query_cache = InspectQueryCache[_InspectKey, _inspect_metrics.MetricsSnapshot](
+    max_entries=32,
+    max_inflight=32,
+    max_concurrent_loads=4,
 )
-
-
-def _inspect_rows_cached(
-    pool: ConnectionPool[Any],
-    agent_id: int,
-    hours: StatsWindowHours | None,
-    *,
-    since_compact: bool,
-    spawned_at: datetime | None = None,
-) -> _InspectAggregates:
-    """Return cached rows or share one in-flight fan-out for this exact key."""
-    key: _InspectKey = (agent_id, None if hours is None else int(hours), since_compact)
-    deadline = time_mod.monotonic() + _INSPECT_RESPONSE_TIMEOUT_S
-    try:
-        return _inspect_query_cache.get_or_load(
-            key,
-            lambda: _inspect_blocking(
-                pool,
-                agent_id,
-                hours,
-                since_compact=since_compact,
-                spawned_at=spawned_at,
-                deadline=deadline,
-            ),
-            ttl_s=_INSPECT_CACHE_TTL_S,
-            now=time_mod.monotonic,
-        )
-    except InspectCacheFullError as exc:
-        raise HTTPException(status_code=503, detail="inspect query queue is full") from exc
 
 
 async def _inspect_rows_cached_async(
@@ -447,23 +148,16 @@ async def _inspect_rows_cached_async(
     hours: StatsWindowHours | None,
     *,
     since_compact: bool,
-    spawned_at: datetime | None = None,
-) -> _InspectAggregates:
-    """Async request twin: followers await single-flight without a worker."""
-    key: _InspectKey = (agent_id, None if hours is None else int(hours), since_compact)
-    deadline = time_mod.monotonic() + _INSPECT_RESPONSE_TIMEOUT_S
+    spawned_at: datetime,
+) -> _inspect_metrics.MetricsSnapshot:
+    key = (agent_id, None if hours is None else int(hours), since_compact)
     try:
         return await _inspect_query_cache.get_or_load_async(
             key,
-            lambda: _inspect_blocking(
-                pool,
-                agent_id,
-                hours,
-                since_compact=since_compact,
-                spawned_at=spawned_at,
-                deadline=deadline,
+            lambda: _inspect_metrics.inspect_snapshot(
+                pool, agent_id, hours, since_compact=since_compact, spawned_at=spawned_at
             ),
-            ttl_s=_INSPECT_CACHE_TTL_S,
+            ttl_s=0,
             now=time_mod.monotonic,
         )
     except InspectCacheFullError as exc:
@@ -471,9 +165,8 @@ async def _inspect_rows_cached_async(
 
 
 def cache_clear() -> None:
-    """Test seam: drop the inspect response cache."""
+    """Reset request admission between isolated tests."""
     _inspect_query_cache.clear()
-    _inspect_stats.reset_for_tests()
 
 
 @router.get("/api/agents/{agent_id}/inspect/live", response_model=AgentInspectLive)
@@ -527,14 +220,14 @@ async def get_agent_inspect_statistics(
     """Read only the selected agent's window-dependent statistics.
 
     Current state, notices, runner shells, and heartbeat history are owned by
-    ``/inspect/live`` and are never fetched here. Statistics retain their
-    bounded, single-flight 75-second aggregate cache and load deadline.
-    ``hours`` is retention-clamped; ``since_compact`` takes precedence.
+    ``/inspect/live`` and are never fetched here. Persisted reads share only
+    in-flight work and have database and admission deadlines. The requested
+    window is preserved; unavailable historical coverage is explicit.
     """
     pool = request.app.state.db_pool
-    spawned_at = await asyncio.to_thread(_statistics_spawned_at, pool, agent_id)
-    applied_window_hours = None if since_compact or hours is None else applied_window(hours)[0]
+    applied_window_hours = None if since_compact or hours is None else int(hours)
     try:
+        spawned_at = await asyncio.to_thread(_statistics_spawned_at, pool, agent_id)
         aggregates = await asyncio.wait_for(
             _inspect_rows_cached_async(
                 pool,
@@ -551,10 +244,12 @@ async def get_agent_inspect_statistics(
             detail="inspector history query timed out; retry",
             headers={"Retry-After": "1"},
         ) from exc
-    except loki_query_budget.LokiQueryBudgetError:
-        raise
-    except httpx.HTTPError as exc:
-        raise_backend_unavailable(exc)
+    except (DatabaseError, PoolTimeout) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="inspector metrics database unavailable; retry",
+            headers={"Retry-After": "1"},
+        ) from exc
     return AgentInspectStatistics(
         agent_id=agent_id,
         window_hours=None if since_compact else hours,
@@ -564,12 +259,14 @@ async def get_agent_inspect_statistics(
         stats=aggregates.stats,
         tps=aggregates.tps,
         activity=aggregates.activity,
+        metadata=aggregates.metadata,
     )
 
 
 def _statistics_spawned_at(pool: ConnectionPool[Any], agent_id: int) -> datetime:
     """Read the immutable lifecycle origin without loading a live snapshot."""
-    with pool.connection() as conn, conn.cursor() as cur:
+    with pool.connection(timeout=1.0) as conn, conn.cursor() as cur:
+        cur.execute("SET LOCAL statement_timeout = '2s'")
         cur.execute("SELECT spawned_at FROM agents_meta WHERE id = %s", (agent_id,))
         row = cur.fetchone()
     if row is None:

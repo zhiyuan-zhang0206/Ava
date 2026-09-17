@@ -12,10 +12,16 @@ tags:
 `/api/agents/{id}/inspect/statistics` + `/inspect/live` + `/neighbors` + `/inspect/metrics`
 + `/inspect/widgets` — per-agent LLM cost/token/TPS + neighbor graph.
 
-Inspect p50/p90 combine complete daily integer-second duration histograms
-(backfilled archive-era days bucketed) with an exact live tail; frozen-archive
-exact values only as a raw full-window fallback while daily histogram coverage
-is incomplete; min/max always exact. The `/inspect/live` half is uncached and
+Statistics read persisted compact metric observations and day summaries from
+Postgres. Pre-cutover full days preserve the existing cost/turn ledgers without
+adding the same observed day twice. Exact duration observations feed quantiles;
+older ledger-only histograms retain their declared integer-second precision.
+The panel names exact/bucketed/mixed precision and explains missing duration
+denominators or retained historical durations that cannot fit the selected window.
+Missing evidence is null/partial with window and observation timestamps, not a
+zero or a claim of complete collection. No synchronous log scan or completed
+result TTL is part of the statistics path. Since-compact is unavailable without
+an authoritative completed compact boundary. The `/inspect/live` half remains
 window-independent — see [[gateway/routers/ops-surfaces.ava.okf.md]].
 
 ## Plugin metric surface (`/inspect/metrics`, W13b)

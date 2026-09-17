@@ -24,7 +24,7 @@ from psycopg import Cursor
 from pydantic import ValidationError
 
 from gateway import loki_events, loki_query_budget
-from gateway.routers import _inspect_pg, _roster_probe, _roster_rows, _stats_dashboard
+from gateway.routers import _loki_shards, _roster_probe, _roster_rows, _stats_dashboard
 from gateway.routers._backend_failure import raise_backend_unavailable
 from gateway.routers._health import get_health
 from gateway.routers._roster_rows import read_stranded_holds, stamp_cluster_globals
@@ -135,7 +135,7 @@ def get_stats_dashboard(
 
         # Twelve-hour shards halve fan-out; every interactive query has an 8-second timeout.
         turn_end_sum = sum(
-            _inspect_pg.query_loki_shards(
+            _loki_shards.query_loki_shards(
                 window_start,
                 now,
                 lambda shard_start, shard_end: loki_events.attribute_aggregate(
@@ -152,7 +152,7 @@ def get_stats_dashboard(
             )
         )
         turn_end_count = sum(
-            _inspect_pg.query_loki_shards(
+            _loki_shards.query_loki_shards(
                 window_start,
                 now,
                 lambda shard_start, shard_end: loki_events.count_events(
@@ -173,7 +173,7 @@ def get_stats_dashboard(
         from services.events_maintenance import resolution as _resolution
 
         class_counts: dict[Any, int] = {}
-        for shard_counts in _inspect_pg.query_loki_shards(
+        for shard_counts in _loki_shards.query_loki_shards(
             window_start,
             now,
             lambda shard_start, shard_end: loki_events.count_event_classes(

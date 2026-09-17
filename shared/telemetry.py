@@ -7,27 +7,25 @@ sharing one schema (`events` table) and one correlation key (`trace_id`). This
 module is the only writer of the stream.
 
 Pipeline (Layer 1): a bounded queue + drain thread per process. Every `emit()`
-enqueues one event; the drain thread batch-writes (default 100/batch, 0.5 s
-interval) in one transaction:
+enqueues one event; the drain thread writes batches (default 100/batch, 0.5 s
+interval) to independent sinks:
 
 1. append the batch to the local JSONL mirrors under `logs_dir()` — the full
    event stream for 7 days, a filtered ledger-rollup source for 90 days by
    default, and a filtered lineage copy for 365 days (the permanently retained
    class's second, independent failure domain) — then
-2. export the batch to the OTLP backend (`shared.telemetry_otlp`) — events ->
+2. project compact typed measurements to Postgres (`shared.observed_metrics`),
+   best-effort and idempotent; no event or checkpoint bodies are stored — then
+3. export the batch to the OTLP backend (`shared.telemetry_otlp`) — events ->
    OTLP logs (Loki), telemetry numeric payloads -> OTLP metrics (Prometheus) —
    when `AVA_TELEMETRY_OTLP_ENABLED` is on (default). Fully failure-isolated:
    the OTLP side sheds instead of blocking; see telemetry_otlp's docstring
    for the contract.
 
-The Postgres `events` copy was retired with the LGTM cutover (task #1197,
-user ruling 2026-08-12): the PG table is now a read-only archive — nothing
-writes it, the read side is Loki/Prometheus, and `events_maintenance`'s
-events-archive slices are disabled (the daemon still always runs its checkpoint
-reaper + blob vacuum, which are independent of the events pipeline). The full
-JSONL mirror remains the local debugging backfill; its filtered rollup-source
-mirror is the automated ledger-gap recovery source, and its filtered lineage
-mirror is the local copy of the permanently retained lineage class.
+The Postgres `events` archive has been retired; this pipeline never restores
+event bodies there. Live event reads use Loki/Prometheus. JSONL holds local
+debugging and replay sources; the filtered lineage mirror retains its longer
+history independently of metric projection.
 
 Backpressure: bounded queues shed on overload, producing immediate local error
 logs and loss metrics, plus structured summaries bypassing the saturated queue.
@@ -181,6 +179,28 @@ class Event:
     attributes: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
+def event_row(event: Event) -> dict[str, Any]:
+    """Canonical mirror row and stable identity shared by metric projection."""
+    body = {
+        "ts": event.ts.isoformat(),
+        "trace_id": event.trace_id,
+        "span_id": event.span_id,
+        "agent_id": event.agent_id,
+        "machine": event.machine,
+        "cluster": event.cluster,
+        "process": event.process,
+        "category": event.category,
+        "event_name": event.event_name,
+        "level": event.level,
+        "source": event.source,
+        "target_agent_id": event.target_agent_id,
+        "attributes": event.attributes,
+    }
+    body_str = json.dumps(body, default=str, separators=(",", ":"), ensure_ascii=False)
+    ts_ns = int(event.ts.timestamp() * 1_000_000_000)
+    return {**body, "id": event_id(body_str, ts_ns)}
+
+
 class _SyncMarker:
     """Sentinel for _EventPipeline.sync(): the drain thread flushes its
     held batch and signals completion when it dequeues one."""
@@ -316,28 +336,8 @@ def _append_jsonl(events: list[Event]) -> None:
         rollup_lines: list[str] = []
         lineage_lines: list[str] = []
         for e in events:
-            body = {
-                "ts": e.ts.isoformat(),
-                "trace_id": e.trace_id,
-                "span_id": e.span_id,
-                "agent_id": e.agent_id,
-                "machine": e.machine,
-                "cluster": e.cluster,
-                "process": e.process,
-                "category": e.category,
-                "event_name": e.event_name,
-                "level": e.level,
-                "source": e.source,
-                "target_agent_id": e.target_agent_id,
-                "attributes": e.attributes,
-            }
-            body_str = json.dumps(body, default=str, separators=(",", ":"), ensure_ascii=False)
-            ts_ns = int(e.ts.timestamp() * 1_000_000_000)
-            eid = event_id(body_str, ts_ns)
             line = (
-                json.dumps(
-                    {**body, "id": eid}, default=str, separators=(",", ":"), ensure_ascii=False
-                )
+                json.dumps(event_row(e), default=str, separators=(",", ":"), ensure_ascii=False)
                 + "\n"
             )
             lines.append(line)
@@ -413,16 +413,20 @@ def _report_no_pipeline(message: str, **extra: Any) -> None:
 
 
 def _write_batch(events: list[Event]) -> None:
-    """Write one batch: JSONL mirror first (durable), then the OTLP export
-    (Loki logs + Prometheus metrics). The Postgres `events` copy was retired
-    with the LGTM cutover (task #1197) — nothing writes it anymore.
+    """Mirror first, then compact metric projection and OTLP export.
 
-    Both sinks are best-effort and failure-isolated: the mirror is a local
-    append (never raises into the drain thread), the OTLP side sheds instead
-    of blocking (see telemetry_otlp's docstring)."""
+    Every sink is failure-isolated. The projection never restores the retired
+    Postgres event archive and cannot turn an observation into a billing proof.
+    """
     if not events:
         return
     _append_jsonl(events)
+    try:
+        from shared.observed_metrics import project_events
+
+        project_events(events)
+    except Exception as exc:
+        _report_no_pipeline("[observed-metrics] sink unavailable: {err}", err=repr(exc))
     _export_otlp(events)
 
 
@@ -780,6 +784,10 @@ def _drain_on_exit() -> None:
         return
     pipeline.flush()
     pipeline.stop()
+    with contextlib.suppress(Exception):
+        from shared.observed_metrics import close_projection
+
+        close_projection()
     with contextlib.suppress(Exception):
         from shared import telemetry_otlp  # deferred — heavy OTel imports
 
