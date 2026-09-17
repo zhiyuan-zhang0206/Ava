@@ -183,9 +183,12 @@ def _register_macos(role: str, interval_s: int) -> int:
     label = probe_label(role, slug)
     service = f"gui/{os.getuid()}/{label}"
     content = _plist_content(role, interval_s)
-    from shared.platform import launchd_job_label
+    from shared.platform import descends_from_launchd_job, launchd_job_label
 
-    if launchd_job_label() == label:
+    # Env first (cheap; matches the job's direct child), then the live process
+    # tree — descendants read "0" from the environment, so ownership must be
+    # proven against the scheduler's view of the job (postmortems/0008).
+    if launchd_job_label() == label or descends_from_launchd_job(label):
         # Unloading our ancestor would kill this converge. Keep the old spec
         # intact so an external converge can still detect the pending change.
         logger.info("Watchdog probe '{}' is registering itself — deferring reload", label)

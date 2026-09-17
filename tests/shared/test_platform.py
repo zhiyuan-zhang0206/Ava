@@ -18,7 +18,9 @@ import pytest
 import shared.platform as plat
 from shared.platform import (
     _detect_wsl,
+    descends_from_launchd_job,
     ensure_line_buffered_stdio,
+    launchd_job_loaded,
     primary_disk_path,
     pty_max,
 )
@@ -127,3 +129,63 @@ class TestEnsureLineBufferedStdio:
         monkeypatch.setattr(sys, "stdout", io.StringIO())
         ensure_line_buffered_stdio()
         ensure_line_buffered_stdio()
+
+
+class TestLaunchdOwnership:
+    """`launchd_job_loaded` / `descends_from_launchd_job` — the ownership checks
+    behind the self-reload guards (`shared/os_cron`, `shared/os_watchdog_probe`).
+
+    The inherited `XPC_SERVICE_NAME` is not trustworthy: only the job's direct
+    child reads the label, every exec'd descendant reads "0" (2026-09-17,
+    postmortems/0008). So the tree check asks launchd for the job's pid and
+    walks this process's ancestry with ps.
+    """
+
+    def _fake(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        print_rc: int,
+        print_out: str,
+        ps: dict[int, str],
+    ) -> None:
+        def run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+            if cmd[1] == "print":
+                return subprocess.CompletedProcess(cmd, print_rc, print_out, "")
+            value = ps.get(int(cmd[-1]), "")
+            return subprocess.CompletedProcess(cmd, 0 if value else 1, value, "")
+
+        monkeypatch.setattr(plat.subprocess, "run", run)
+        monkeypatch.setattr(plat, "IS_MACOS", True)
+        monkeypatch.setattr(plat.os, "getpid", lambda: 500)
+
+    def test_off_macos_is_never_owned(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(plat, "IS_MACOS", False)
+        assert descends_from_launchd_job("com.x") is False
+        assert launchd_job_loaded("com.x") is False
+
+    def test_loaded_follows_launchctl_verdict(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._fake(monkeypatch, print_rc=0, print_out="", ps={})
+        assert launchd_job_loaded("com.x") is True
+        self._fake(monkeypatch, print_rc=113, print_out="", ps={})
+        assert launchd_job_loaded("com.x") is False
+
+    def test_unloaded_job_owns_no_process(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._fake(monkeypatch, print_rc=113, print_out="Could not find service", ps={})
+        assert descends_from_launchd_job("com.x") is False
+
+    def test_loaded_but_not_running_owns_no_process(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._fake(monkeypatch, print_rc=0, print_out="state = not running\n", ps={})
+        assert descends_from_launchd_job("com.x") is False
+
+    def test_ancestor_chain_proves_ownership(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._fake(monkeypatch, print_rc=0, print_out="\tpid = 200\n", ps={500: "300", 300: "200"})
+        assert descends_from_launchd_job("com.x") is True
+
+    def test_chain_reaching_launchd_is_external(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._fake(monkeypatch, print_rc=0, print_out="pid = 999\n", ps={500: "300", 300: "1"})
+        assert descends_from_launchd_job("com.x") is False
+
+    def test_unreadable_ancestor_is_not_proof(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._fake(monkeypatch, print_rc=0, print_out="pid = 200\n", ps={500: "300"})
+        assert descends_from_launchd_job("com.x") is False

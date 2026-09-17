@@ -46,6 +46,10 @@ def _desired_plist(_interval_s: int, _threshold: int) -> str:
     return "<desired-plist/>"
 
 
+def _never_descendant(_label: str) -> bool:
+    return False
+
+
 def test_legacy_tokens_cover_convention_and_retired_cluster_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -161,6 +165,7 @@ def test_register_macos_still_reloads_from_another_launchd_job(
     monkeypatch.setenv("XPC_SERVICE_NAME", f"com.ava.{slug}.autostart")
     monkeypatch.setattr(os_cron, "_home_slug", lambda: slug)
     monkeypatch.setattr(os_cron, "_launchd_plist_content", _desired_plist)
+    monkeypatch.setattr(os_cron, "descends_from_launchd_job", _never_descendant)
     calls = _record_launchctl(monkeypatch)
 
     assert os_cron._register_macos(300, 3) == 0
@@ -442,3 +447,48 @@ def test_register_allowed_for_non_prod_home(
     os_cron.register_os_cron()
 
     assert calls == ["300/3"]
+
+
+def test_register_macos_defers_when_ancestry_proves_the_job(
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On current macOS an exec'd descendant reads XPC_SERVICE_NAME="0", not the
+    label (2026-09-17 recurrence), so the live process-tree check must defer
+    even when the environment value is "0"."""
+    slug = "ava-t-cafe0123"
+    label = f"com.ava.{slug}.health-probe"
+    plist = _plant_plist(fake_home, label)
+    plist.write_text("<old-plist/>")
+    monkeypatch.setenv("XPC_SERVICE_NAME", "0")
+    monkeypatch.setattr(os_cron, "_home_slug", lambda: slug)
+    monkeypatch.setattr(os_cron, "_launchd_plist_content", _desired_plist)
+
+    def _is_current(candidate: str) -> bool:
+        return candidate == label
+
+    monkeypatch.setattr(os_cron, "descends_from_launchd_job", _is_current)
+    calls = _record_launchctl(monkeypatch)
+
+    assert os_cron._register_macos(300, 3) == 0
+    assert plist.read_text() == "<old-plist/>"
+    assert calls == []
+
+
+def test_register_macos_reloads_when_env_reads_zero_but_tree_is_external(
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The "0" descendant reading must not block a legitimate external converge
+    from applying a pending spec change."""
+    slug = "ava-t-cafe0123"
+    label = f"com.ava.{slug}.health-probe"
+    plist = _plant_plist(fake_home, label)
+    plist.write_text("<old-plist/>")
+    monkeypatch.setenv("XPC_SERVICE_NAME", "0")
+    monkeypatch.setattr(os_cron, "_home_slug", lambda: slug)
+    monkeypatch.setattr(os_cron, "_launchd_plist_content", _desired_plist)
+    monkeypatch.setattr(os_cron, "descends_from_launchd_job", _never_descendant)
+    calls = _record_launchctl(monkeypatch)
+
+    assert os_cron._register_macos(300, 3) == 0
+    assert plist.read_text() == "<desired-plist/>"
+    assert [call[1] for call in calls] == ["bootout", "bootstrap"]

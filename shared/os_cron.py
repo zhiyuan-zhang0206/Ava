@@ -30,7 +30,7 @@ from pathlib import Path
 from loguru import logger
 
 from shared.config import settings
-from shared.platform import crontab_lock, launchd_job_label
+from shared.platform import crontab_lock, descends_from_launchd_job, launchd_job_label
 
 DEFAULT_INTERVAL_SECONDS = 300  # 5 minutes
 DEFAULT_CONSECUTIVE_THRESHOLD = 3
@@ -316,6 +316,22 @@ def _launchd_plist_content(interval_s: int, threshold: int) -> str:
 """
 
 
+def _own_probe_job_of(own_labels: set[str]) -> str | None:
+    """The health-probe label this process runs under, or None when external.
+
+    ``XPC_SERVICE_NAME`` matches only for the job's direct child — exec'd
+    descendants read "0" (see `shared.platform.descends_from_launchd_job`) —
+    so the environment is a fast path and the live process tree is the proof.
+    Labels are probed in sorted order for deterministic logging/reporting."""
+    current = launchd_job_label()
+    if current is not None and current in own_labels:
+        return current
+    for candidate in sorted(own_labels):
+        if descends_from_launchd_job(candidate):
+            return candidate
+    return None
+
+
 def _register_macos(interval_s: int, threshold: int) -> int:
     """Register the health probe as a launchd User LaunchAgent.
 
@@ -331,12 +347,15 @@ def _register_macos(interval_s: int, threshold: int) -> int:
     # the rollback before its finally block can resume the cluster and release
     # the update lease. Leave the old plist in place so a later external start
     # still sees any desired-content change and performs the deferred reload.
-    current_job = launchd_job_label()
-    if current_job is not None:
-        own_labels = {label, *(_health_probe_label(token) for token in _legacy_label_tokens())}
-        if current_job in own_labels:
-            logger.info("Health probe '{}' is registering itself — deferring reload", current_job)
-            return 0
+    # Ownership is two-pronged: the inherited `XPC_SERVICE_NAME` is a cheap
+    # fast path that only the job's direct child matches, while descendants —
+    # where converges actually run — read "0", so the live process tree check
+    # is the proof (postmortems/0008).
+    own_labels = {label, *(_health_probe_label(token) for token in _legacy_label_tokens())}
+    own_job = _own_probe_job_of(own_labels)
+    if own_job is not None:
+        logger.info("Health probe '{}' is registering itself — deferring reload", own_job)
+        return 0
 
     # Ensure the LaunchAgents directory exists.
     plist_path.parent.mkdir(parents=True, exist_ok=True)

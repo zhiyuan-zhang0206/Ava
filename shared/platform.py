@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextlib
 import os
 import platform as _osplat
+import re
 import signal
 import subprocess
 import sys
@@ -34,12 +35,93 @@ IS_LINUX = sys.platform.startswith("linux")
 
 
 def launchd_job_label() -> str | None:
-    """The launchd label that owns this process, or None outside a LaunchAgent.
+    """The launchd label naming this process, or None outside a LaunchAgent.
 
-    launchd injects ``XPC_SERVICE_NAME`` into the job and its descendants. This
-    is per-process scheduler identity, not operator-configurable Ava settings.
+    launchd sets ``XPC_SERVICE_NAME`` only for the job's DIRECT child — the job
+    process itself. Every exec'd descendant reads ``"0"`` on current macOS
+    (2026-09-17, three LaunchAgent shapes incl. the bash -> python chain a
+    converge runs under), so this is a hint, not proof of ownership:
+    destructive converges must confirm against the live process tree with
+    :func:`descends_from_launchd_job`. Per-process scheduler identity, not
+    operator-configurable Ava settings.
     """
     return os.environ.get("XPC_SERVICE_NAME")
+
+
+def launchd_job_loaded(label: str) -> bool:
+    """Whether launchd currently holds a job under ``label`` (macOS; False elsewhere).
+
+    ``launchctl print`` exits non-zero for a label the domain does not know —
+    the only question asked here; the large dump it writes on success is
+    ignored. Mirrors the gate layer's ``_job_loaded`` so both agree on what
+    "loaded" means.
+    """
+    if not IS_MACOS:
+        return False
+    result = subprocess.run(  # noqa: S603
+        ["launchctl", "print", f"gui/{os.getuid()}/{label}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def descends_from_launchd_job(label: str) -> bool:
+    """True when this process runs inside the live process tree of launchd job ``label``.
+
+    The ownership boundary behind the self-reload guards (``shared/os_cron``,
+    ``shared/os_watchdog_probe``): ``launchctl bootout`` terminates the job's
+    whole process tree, so a converge running beneath the job it is about to
+    replace would kill its own recovery. The inherited ``XPC_SERVICE_NAME``
+    cannot prove ownership — only the job's direct child reads the label
+    while descendants read ``"0"`` (postmortems/0008) — so ask the scheduler
+    for the job's current pid and walk this process's ancestry instead.
+
+    False off macOS, when the job is not loaded/not running (it owns no live
+    process then), and whenever an ancestor cannot be read: callers proceed
+    with a replacement unless ownership is PROVEN.
+    """
+    if not IS_MACOS:
+        return False
+    result = subprocess.run(  # noqa: S603
+        ["launchctl", "print", f"gui/{os.getuid()}/{label}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return False
+    match = re.search(r"(?m)^\s*pid = (\d+)\s*$", result.stdout)
+    if match is None:
+        return False  # loaded but not running — it owns no live process
+    job_pid = int(match.group(1))
+    pid = os.getpid()
+    while pid > 1:  # bounded by reaching launchd (pid 1)
+        if pid == job_pid:
+            return True
+        parent = _parent_pid(pid)
+        if parent is None or parent == pid:
+            return False
+        pid = parent
+    return False
+
+
+def _parent_pid(pid: int) -> int | None:
+    """The parent pid of ``pid``, or None when ps cannot answer."""
+    result = subprocess.run(  # noqa: S603
+        ["ps", "-o", "ppid=", "-p", str(pid)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    value = result.stdout.strip()
+    if result.returncode != 0 or not value:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
 
 
 # WSL is a Linux kernel whose uname release string carries "microsoft" / "WSL".
