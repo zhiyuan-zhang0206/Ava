@@ -477,3 +477,61 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
         ]
         assert len(notes) == 1
         assert history.resolve(owner.agent_id, 0)["handoff_applied_at"] is not None
+
+
+async def test_end_note_resumes_an_empty_queue(
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A release with nothing queued must still run the end note's first turn.
+
+    Regression: the end-of-session note is a system note, so a window that never
+    carried a real exchange reports has_conversation() == False and the claim
+    idled out with the note unprocessed. The note is the resumed input: the claim
+    runs before_llm with an empty queue, and delivery publishes a wake.
+    """
+    from shared import impersonation_history as history
+
+    graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
+        db_conn, aops_pool, monkeypatch, automatic=True
+    )
+    monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
+
+    def workspace_for_agent(_agent_id: int) -> Path:
+        return tmp_path
+
+    monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
+    monkeypatch.setattr("ava._impersonation_events.consume_recorded_events", _no_events)
+    wakes: list[tuple[int, str]] = []
+
+    def record_wake(agent_id: int, payload: str) -> bool:
+        wakes.append((agent_id, payload))
+        return True
+
+    monkeypatch.setattr("agent.impersonation_handoff.publish_inbound_wake", record_wake)
+    with bind_turn_identity(owner.agent_id, incarnation=owner):
+        await graph.ainvoke(reset, config, context=ctx)
+        assert not model_calls  # No native model acceptance turn.
+        await flush_checkpoint(saver, owner.agent_id)
+        assert await settle_checkpoint(graph, owner.agent_id)
+        leases.release(requested["id"], attested_caller(requested), "External work complete")
+        assert not await settle_checkpoint(graph, owner.agent_id)
+        assert not model_calls
+        assert wakes == [(owner.agent_id, "impersonation")]
+
+        resumed = await graph.ainvoke(reset, config, context=ctx)
+        await flush_checkpoint(saver, owner.agent_id)
+        assert len(model_calls) == 1
+        note = model_calls[0].messages[-1]
+        assert note.id == f"impersonation-handoff:{owner.agent_id}:0"
+        assert note.additional_kwargs["ava_note_tag"] == "impersonation"
+        assert "External work complete" in note.content
+        assert "structured handoff" not in note.content
+        assert "the complete structured record of this session is available at:" in note.content
+        assert "impersonation/0.json" in note.content
+        # The note is consumed once: another pass finds an idle agent, not a resume.
+        await graph.ainvoke(reset, config, context=ctx)
+        assert len(model_calls) == 1
+        assert resumed["impersonation_handoff_id"] == f"{owner.agent_id}:0"

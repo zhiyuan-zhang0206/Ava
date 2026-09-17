@@ -64,6 +64,7 @@ from agent.graph._context import AvaContext, agent_id_from_config
 from agent.graph._node_log import flush_node_exit_aggregate, node_lifecycle
 from agent.graph._nodes import BEFORE_LLM, CLAIM, END
 from agent.impersonation import claim_gate
+from agent.impersonation_handoff import resume_note_pending
 from agent.inbound_ownership import RuntimeOwnershipLostError
 from agent.messages import has_conversation
 
@@ -73,6 +74,24 @@ from agent.messages import has_conversation
 from ._claim_dispatch import _by_who as _by_who
 from ._claim_dispatch import _handle_heartbeat as _handle_heartbeat
 from ._claim_dispatch import _render_restart_completed_marker as _render_restart_completed_marker
+
+
+def claim_will_idle(state: _state.AgentState) -> bool:
+    """The claim's single idle predicate — impl branch and wrapper snapshot share it.
+
+    Idle when the turn already ended (`halted`), when the window carries no
+    conversation yet AND no unprocessed end-of-session note is trailing (a
+    resume note is the resumed input: `deliver_handoff` appends it and the
+    claim must run its first turn even on a notes-only window), or when an
+    open breaker parks the agent (`parks_idle`). The wrapper's turn-end
+    full-window snapshot calls this same function, so the two decisions
+    cannot drift.
+    """
+    return (
+        state.halted
+        or (not has_conversation(state.messages) and not resume_note_pending(state))
+        or state.circuit.parks_idle
+    )
 
 
 async def _claim_node_impl(
@@ -112,7 +131,7 @@ async def _claim_node_impl(
         # success (llm_node). The overflow reason is deliberately NOT parked:
         # it must keep flowing to decide()'s forced-compact arm, which runs on
         # dispatched wakes only.
-        if state.halted or not has_conversation(state.messages) or state.circuit.parks_idle:
+        if claim_will_idle(state):
             drain = build_attach_drain(state, ctx)
             if drain is not None:
                 return Command[ClaimGoto](update=drain, goto=CLAIM)
@@ -199,11 +218,12 @@ async def claim_node(
     # This is what heals a frontend that missed events (SSE gap / dropped
     # deltas): the incremental snapshots in this design cover commits only, so
     # without it a reconnect GET could read a lagging checkpoint and the tail
-    # of the turn would never appear. The predicate mirrors _claim_node_impl's
-    # idle decision exactly (same expression, same state). If a batch wakes the
+    # of the turn would never appear. The shared `claim_will_idle` predicate is
+    # the same call _claim_node_impl's idle branch makes, so the two cannot drift.
+    # If a batch wakes the
     # claim right after, the snapshot is still a legal view of the committed
     # state — the next node's incremental snapshot covers the new messages.
-    will_idle = state.halted or not has_conversation(state.messages)
+    will_idle = claim_will_idle(state)
     async with node_lifecycle(
         CLAIM,
         messages=state.messages,
