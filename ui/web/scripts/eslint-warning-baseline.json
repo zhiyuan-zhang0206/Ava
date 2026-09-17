@@ -56,6 +56,11 @@
       "line": 1
     },
     {
+      "file": "src/components/run-timeline/run-timeline-chart.tsx",
+      "rule": "local/source-lines",
+      "line": 1
+    },
+    {
       "file": "src/components/spawn-button.tsx",
       "rule": "local/source-lines",
       "line": 1

@@ -16,16 +16,18 @@ import { COMPARE_LANE_HUES } from "@/components/run-timeline/compare-arrows";
 import { buttonVariants } from "@/components/ui/button";
 import { compareHref } from "@/lib/compare-links";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout";
+import type { AgentRow } from "@/lib/types";
 import { useFleetAgents } from "@/lib/use-fleet-agents";
 import { cn } from "@/lib/utils";
 
 import { CompareView } from "./_view";
 
-// KEEP (task #3696 exception inventory): the 2–3 lane bound is the v1 compare
-// scope (user ruling B, notice #2682) — >3 lanes wait for the P3b full-fleet
-// selector and its layout/performance work.
+// KEEP (task #3696 exception inventory): the 8-lane bound (task #3802, P3b):
+// 8 stacked lanes stay glanceable in about one scroll, and the bound caps the
+// window-change fan-out at 16 reads (8 lanes × turn + bucket). Beyond that,
+// open several compare windows instead of one mega-stack.
 const MIN_COMPARE_AGENTS = 2;
-const MAX_COMPARE_AGENTS = 3;
+const MAX_COMPARE_AGENTS = 8;
 
 export interface CompareSelection {
   ids: number[];
@@ -97,7 +99,7 @@ export default function ComparePage({
   if (!isComparableView(selection)) {
     return (
       <CompareShell>
-        <CompareSelector initialValue={selection.raw} names={names} />
+        <CompareSelector initialValue={selection.raw} names={names} roster={roster} />
       </CompareShell>
     );
   }
@@ -167,15 +169,49 @@ function CompareChips({
 function CompareSelector({
   initialValue,
   names,
+  roster,
 }: {
   initialValue: string;
   names: Map<number, string | null>;
+  roster: AgentRow[];
 }) {
   const t = useTranslations("runTimeline");
   const router = useRouter();
   const [value, setValue] = useState(initialValue);
+  const [filter, setFilter] = useState("");
   const selection = parseCompareAgents(value);
   const complete = isComparableView(selection);
+
+  // The roster picker edits the same comma-separated value the text input
+  // holds — one source of truth, so both entry paths converge on one ordered
+  // id list (order = lane order). Adding appends; removing drops the token.
+  const toggleRosterAgent = (agentId: number) => {
+    setValue((current) => {
+      const parsed = parseCompareAgents(current);
+      const ids = parsed.ids.includes(agentId)
+        ? parsed.ids.filter((id) => id !== agentId)
+        : [...parsed.ids, agentId];
+      return ids.join(", ");
+    });
+  };
+
+  const needle = filter.trim().toLowerCase();
+  const visibleRoster = useMemo(
+    () =>
+      roster
+        .filter(
+          (agent) =>
+            needle === "" ||
+            String(agent.agent_id).includes(needle) ||
+            (agent.label ?? "").toLowerCase().includes(needle),
+        )
+        .sort(
+          (left, right) =>
+            (left.label ?? "").localeCompare(right.label ?? "") ||
+            left.agent_id - right.agent_id,
+        ),
+    [needle, roster],
+  );
   return (
     <form
       className="space-y-3 rounded border border-border bg-card p-4"
@@ -195,6 +231,43 @@ function CompareSelector({
           className="rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground"
         />
       </label>
+      <div className="max-w-md space-y-2 rounded border border-border p-3">
+        <p className="text-xs text-muted-foreground">{t("compareRosterLabel")}</p>
+        <input
+          aria-label={t("compareRosterFilter")}
+          placeholder={t("compareRosterFilter")}
+          value={filter}
+          onChange={(event) => setFilter(event.target.value)}
+          className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground"
+        />
+        <div className={cn(FLEX, "max-h-44 flex-wrap gap-1 overflow-y-auto")}>
+          {visibleRoster.map((agent) => {
+            const selected = selection.ids.includes(agent.agent_id);
+            return (
+              <button
+                key={agent.agent_id}
+                type="button"
+                aria-pressed={selected}
+                onClick={() => toggleRosterAgent(agent.agent_id)}
+                className={cn(
+                  "rounded border px-2 py-0.5 font-mono text-xs",
+                  selected
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border hover:bg-muted",
+                )}
+              >
+                {agent.label ?? `#${agent.agent_id}`}
+                <span className="ml-1 text-[10px] text-muted-foreground">
+                  #{agent.agent_id}
+                </span>
+              </button>
+            );
+          })}
+          {visibleRoster.length === 0 ? (
+            <p className="text-xs text-muted-foreground">{t("compareRosterEmpty")}</p>
+          ) : null}
+        </div>
+      </div>
       {selection.ids.length > 0 ? (
         <div className={cn(FLEX, "flex-wrap items-center gap-1")}>
           {selection.ids.map((agentId) => (
