@@ -8,10 +8,10 @@ gateway builds the widget registry in process (mocked here by patching
 widgets with nothing to show.
 
 Locks: empty registry -> [], unknown agent -> 404, the taskList resolution
-rules (owner filter, active statuses only, newest-first order, no
-cap, empty payload -> widget dropped), widget ordering/attribution
-passthrough, the loader's enabled-set filtering, and its fail-soft skip of a
-broken inspector.py.
+rules (owner filter, active statuses only, newest-first order, each row's own
+priority carried through, no cap, empty payload -> widget dropped), widget
+ordering/attribution passthrough, the loader's enabled-set filtering, and its
+fail-soft skip of a broken inspector.py.
 """
 
 from __future__ import annotations
@@ -104,12 +104,13 @@ def _insert_task(
     title: str,
     status: str = "in_progress",
     updated_seconds_ago: float = 0,
+    priority: str = "P2",
 ) -> int:
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO agent_tasks "
-            "(parent_id, title, description, status, owner, created_by, updated_at) "
-            "VALUES (%s, %s, 'd', %s, %s, %s, now() - make_interval(secs => %s)) RETURNING id",
+            "(parent_id, title, description, status, owner, created_by, updated_at, priority) "
+            "VALUES (%s, %s, 'd', %s, %s, %s, now() - make_interval(secs => %s), %s) RETURNING id",
             (
                 parent_id,
                 title,
@@ -117,6 +118,7 @@ def _insert_task(
                 owner,
                 str(owner) if owner is not None else "user",
                 updated_seconds_ago,
+                priority,
             ),
         )
         row = cur.fetchone()
@@ -189,7 +191,7 @@ def test_lists_only_the_agents_active_tasks_newest_first(
         50,
     )
     assert [t["id"] for t in widget["tasks"]] == [newer, mid, older]
-    assert widget["tasks"][0] == {"id": newer, "title": "newer"}
+    assert widget["tasks"][0] == {"id": newer, "title": "newer", "priority": "P2"}
 
 
 def test_task_list_shows_every_active_task(
@@ -210,6 +212,32 @@ def test_task_list_shows_every_active_task(
     assert len(tasks) == 11
     # Newest-first, complete: the first N ids by ascending age.
     assert [t["id"] for t in tasks] == ids
+
+
+def test_task_rows_carry_their_own_priority(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each taskList row carries its own P0..P3 rung (task #3819, user
+    request 2026-09-17: the Inspector Tasks section shows each task's
+    priority) — a mixed-priority queue keeps its rows' rungs."""
+    aid = _insert_agent(db_conn)
+    root = _root_task_id(db_conn)
+    p0 = _insert_task(db_conn, owner=aid, parent_id=root, title="urgent", priority="P0")
+    p1 = _insert_task(
+        db_conn, owner=aid, parent_id=root, title="next", priority="P1", updated_seconds_ago=60
+    )
+    p3 = _insert_task(
+        db_conn, owner=aid, parent_id=root, title="later", priority="P3", updated_seconds_ago=120
+    )
+    _patch_loader(monkeypatch, _widget())
+    db_conn.commit()
+
+    tasks = _get(aid).json()[0]["tasks"]
+    assert [(row["id"], row["priority"]) for row in tasks] == [
+        (p0, "P0"),
+        (p1, "P1"),
+        (p3, "P3"),
+    ]
 
 
 def test_widget_without_tasks_is_dropped(

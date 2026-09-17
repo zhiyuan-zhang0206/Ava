@@ -1519,8 +1519,8 @@ function widgetFixture(over: Partial<InspectWidget> = {}): InspectWidget {
     order: 50,
     title: null,
     tasks: [
-      { id: 42, title: "Ship the inspector fix" },
-      { id: 43, title: "Reply to QA" },
+      { id: 42, title: "Ship the inspector fix", priority: "P1" },
+      { id: 43, title: "Reply to QA", priority: "P2" },
     ],
     ...over,
   };

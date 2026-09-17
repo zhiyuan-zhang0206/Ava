@@ -28,8 +28,8 @@ function widget(over: Partial<InspectWidget> = {}): InspectWidget {
     order: 50,
     title: null,
     tasks: [
-      { id: 42, title: "Ship the inspector fix" },
-      { id: 43, title: "Reply to QA" },
+      { id: 42, title: "Ship the inspector fix", priority: "P0" },
+      { id: 43, title: "Reply to QA", priority: "P3" },
     ],
     ...over,
   };
@@ -57,6 +57,16 @@ describe("InspectWidgetSection", () => {
     expect(spans[1]).toBe("Ship the inspector fix");
   });
 
+  it("shows each row's priority badge (P0..P3, the board's own colors)", () => {
+    render(<InspectWidgetSection widget={widget()} />);
+    const rows = screen.getAllByRole("link");
+    const badges = rows.map((row) => [...row.querySelectorAll("span")].at(-1));
+    expect(badges.map((b) => b?.textContent)).toEqual(["P0", "P3"]);
+    // Same PRIORITY_BG mapping as the task board / graph (P0 destructive).
+    expect(badges[0]?.className).toContain("bg-destructive");
+    expect(badges[1]?.className).toContain("bg-slate-500");
+  });
+
   it("uses a plugin-declared title when given", () => {
     render(<InspectWidgetSection widget={widget({ title: "Agent tasks" })} />);
     expect(screen.getByText("Agent tasks")).toBeTruthy();
@@ -64,7 +74,11 @@ describe("InspectWidgetSection", () => {
   });
 
   it("renders every task row — no display cap (user ruling 2026-09-17)", () => {
-    const tasks = Array.from({ length: 11 }, (_, i) => ({ id: 100 + i, title: `task ${i}` }));
+    const tasks = Array.from({ length: 11 }, (_, i) => ({
+      id: 100 + i,
+      title: `task ${i}`,
+      priority: "P2" as const,
+    }));
     render(<InspectWidgetSection widget={widget({ tasks })} />);
     expect(screen.getAllByRole("link")).toHaveLength(11);
   });

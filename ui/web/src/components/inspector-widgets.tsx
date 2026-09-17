@@ -16,6 +16,7 @@ import { useTranslations } from "next-intl";
 
 import { Section } from "@/components/inspector-section";
 import { fleetTaskHref } from "@/lib/inspector-widgets";
+import { PRIORITY_BG } from "@/lib/notices";
 import type { InspectWidget } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout";
@@ -58,6 +59,17 @@ export function InspectWidgetSection({ widget }: { widget: InspectWidget }) {
                 #{task.id}
               </span>
               <span className={cn("truncate text-foreground", MIN_W_0, FLEX_1)}>{task.title}</span>
+              {/* The task's stakes rung (P0..P3) — the same badge colors as the
+                  board/tree (lib/notices PRIORITY_BG), pinned right so it never
+                  truncates with the title (task #3819, user request 2026-09-17). */}
+              <span
+                className={cn(
+                  "shrink-0 rounded px-1 text-[9px] font-bold leading-tight text-white",
+                  PRIORITY_BG[task.priority],
+                )}
+              >
+                {task.priority}
+              </span>
             </Link>
           </li>
         ))}

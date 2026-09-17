@@ -15,6 +15,7 @@ from gateway.schemas.stats import StatsWindowHours
 from ops.rpc_schemas import ShellInfo
 from shared.agent_observation import AgentObservation
 from shared.agent_snapshot import OpenNotice
+from shared.priority import Priority
 
 
 class AgentCost(BaseModel):
@@ -316,13 +317,15 @@ class InspectWidgetTask(BaseModel):
     `InspectWidgetResult.tasks` (GET /api/agents/{id}/inspect/widgets).
 
     Kernel-resolved data, not policy: the row carries only what the console
-    renders (id for the `/fleet?task=` link, title for the text). The list is
+    renders (id for the `/fleet?task=` link, title for the text, priority
+    for the stakes badge — task #3819, user request 2026-09-17). The list is
     already filtered (the agent's active tasks) and complete — every active row renders (user ruling 2026-09-17)."""
 
     model_config = ConfigDict(frozen=True)
 
     id: int
     title: str
+    priority: Priority
 
 
 class InspectWidgetResult(BaseModel):
