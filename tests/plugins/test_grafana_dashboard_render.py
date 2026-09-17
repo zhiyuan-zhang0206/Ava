@@ -1,4 +1,4 @@
-"""The registry-rendered Ava Ops dashboard — renderer + suppliers (task #3697 S1).
+"""The registry-rendered Ava Ops dashboard — renderer + suppliers (task #3697).
 
 The provisioning file ``deploy/lgtm/config/grafana/provisioning/dashboards/
 ava-ops-main.json`` is on its way to becoming a render of the metric
@@ -36,11 +36,10 @@ The four normalizations (each applied to both sides before comparison):
   spec sets no custom (the compaction pair and the cost barchart lacked it;
   the render gives every chart the one standard look).
 
-What this file does NOT lock yet: full-set geometric equality — the fixture
-also contains 18 panels that are still hand-written (the S2 registration
-worklist, pinned as ``_S2_PENDING`` below); until they render, sections have
-different y offsets. When S2 lands, the fidelity test grows to all 84 panels
-and ``_S2_PENDING`` empties.
+All 84 panels are covered since S2 (task #3697) registered the last 18; the
+fixture-only worklist (``_S2_PENDING``) is empty. The fidelity lock compares
+panel content (not gridPos) — the full board geometry is locked by the layout
+replay against the fixture's 94 entries.
 """
 
 from __future__ import annotations
@@ -77,28 +76,11 @@ _DASHBOARD_FILE = (
 )
 _PLUGINS = ("ava_code", "ava_fleet", "ava_memory")
 
-# The fixture panels still hand-written (the S2 migration worklist, task
-# #3697): they have no specs yet, so the render cannot cover them.
-_S2_PENDING = {
-    "Events — What happened (T0+T1)",
-    "Events — types",
-    "Events — raw stream (all, incl. noise)",
-    "Gateway latency sample count by route",
-    "CPU utilization",
-    "Memory used",
-    "Load average",
-    "Filesystem used",
-    "Disk throughput",
-    "Network throughput",
-    "Postgres connections",
-    "Postgres transactions",
-    "Database size",
-    "Redis memory",
-    "Redis clients and evictions",
-    "Redis throughput",
-    "Memory search rows",
-    "Memory search npz save duration",
-}
+# Empty since S2 (task #3697) registered the last 18 panels — the Events
+# trio, the gateway sample count, and the host + memory-search gauges. Kept as
+# the assertion anchor: any fixture panel that stops being covered (a spec
+# silently dropping off the board) fails the worklist test below.
+_S2_PENDING: set[str] = set()
 
 
 def _load_world() -> tuple[list[MetricSpec], list[MetricSpec], dict[str, Any]]:
@@ -221,12 +203,19 @@ def test_rendered_panels_match_the_provisioning_file(
         actual = _canonical_panel(rendered, from_fixture=False)
         if spec.custom is None:
             # The standard look profile: a fixture panel without a custom block
-            # adopts the rendered default (normalization #4).
-            expected_defaults = expected.setdefault("fieldConfig", {}).setdefault("defaults", {})
-            if expected_defaults.get("custom") is None:
-                actual_defaults = actual.get("fieldConfig", {}).get("defaults", {})
-                if actual_defaults.get("custom") is not None:
-                    expected_defaults["custom"] = actual_defaults["custom"]
+            # adopts the rendered default (normalization #4). Only a real
+            # rendered custom is adopted — a logs panel renders no fieldConfig
+            # at all, so no stub is materialized on either side.
+            actual_defaults = actual.get("fieldConfig", {}).get("defaults")
+            fixture_defaults = expected.get("fieldConfig", {}).get("defaults")
+            if (
+                actual_defaults is not None
+                and actual_defaults.get("custom") is not None
+                and (fixture_defaults is None or fixture_defaults.get("custom") is None)
+            ):
+                expected.setdefault("fieldConfig", {}).setdefault("defaults", {})["custom"] = (
+                    actual_defaults["custom"]
+                )
         for key in ("gridPos",):
             expected.pop(key, None)
             actual.pop(key, None)
@@ -348,12 +337,10 @@ def test_render_invariants(
     assert dashboard["refresh"] == "10m"
     assert dashboard["time"] == {"from": "now-24h", "to": "now"}
     rows = [panel["title"] for panel in panels if panel["type"] == "row"]
-    # A section renders its row iff it has panels: every fixture row that
-    # renders keeps its fixture order, and the Host & data plane row is absent
-    # until its S2-pending specs register.
+    # Every fixture section now has registered specs (S2, task #3697), so the
+    # rendered row list is the fixture's row list, in fixture order.
     fixture_rows = [entry["title"] for entry in _fixture()["panels"] if entry["type"] == "row"]
-    assert rows == [title for title in fixture_rows if title in set(rows)]
-    assert "Host & data plane" not in rows  # all its panels are S2-pending (_S2_PENDING)
+    assert rows == fixture_rows
 
 
 def test_render_rejects_unplaced_core_specs() -> None:
