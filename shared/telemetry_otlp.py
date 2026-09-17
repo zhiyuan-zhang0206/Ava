@@ -65,6 +65,12 @@ and the isolation above makes the flag a rare emergency kill switch, not the
 primary defense. Off means JSONL mirror only: Loki and Prometheus stop advancing.
 Flipping it + restarting is the documented apply path.
 
+Child deferral (task #3816 M4b): an exec child arms `defer_until_exit()` before
+its first record; batches are held in the bounded queue — OTel stack, settings
+chain, and metric plumbing unimported — and complete at `finalize()` (clean
+exit), on hold saturation, or at the max-age bound. The policy and its
+semantics live in `shared.telemetry_otlp_defer`.
+
 Backend initialization is retried every five minutes after a failed collector
 probe or SDK setup. Each disabled/recovered attempt is emitted as a real event,
 not only through the ``_NO_EMITTER`` diagnostic path, so the surviving JSONL
@@ -74,7 +80,6 @@ mirror records the outage even while OTLP itself cannot carry the event.
 from __future__ import annotations
 
 import contextlib
-import json
 import queue
 import threading
 import time
@@ -89,7 +94,9 @@ from shared.observability import (
     production_identity,
 )
 from shared.telemetry import Event
+from shared.telemetry_otlp_defer import ChildDeferral
 from shared.telemetry_otlp_gauges import GaugeValues, observable_gauge_callback, record_gauge
+from shared.telemetry_otlp_logs import _emit_log_record
 from shared.telemetry_otlp_metrics import (
     _EVENT_LOOP_LAG_BUCKETS_MS as _EVENT_LOOP_LAG_BUCKETS_MS,
 )
@@ -110,8 +117,11 @@ from shared.telemetry_otlp_metrics import (
 
 __all__ = [
     "COLLECTOR_RETRY_INTERVAL_S",
+    "defer_until_exit",
+    "deferred_state",
     "endpoint_reachable",
     "export_batch",
+    "finalize",
     "flush",
     "shutdown",
     "warmup",
@@ -130,17 +140,6 @@ _QUEUE_MAXSIZE = 2048
 # every five minutes, not on every batch, so a missing sidecar cannot turn event
 # volume into connection-probe volume.
 COLLECTOR_RETRY_INTERVAL_S = 300
-
-# Log-record severity mapping — OTel SeverityNumber values (plain ints; the
-# enum is constructed at the record site, see _emit_log).
-_SEVERITY_NUMBERS: dict[str, int] = {
-    "debug": 5,
-    "info": 9,
-    "warning": 13,
-    "error": 17,
-    "critical": 21,
-}
-
 # Metric-attribute guard rails: payload keys that never become metric
 # attributes, and the max length of a string attribute. The `body` key is
 # exec/code payload content — as a Prometheus label it would leak code into
@@ -346,15 +345,41 @@ class _OtlpBackend:
         self._init_failed_at: float | None = None
         self._init_lock = threading.Lock()
         self._thread: threading.Thread | None = None
+        # Child deferral (task #3816 M4b) — policy in shared.telemetry_otlp_defer;
+        # the lambdas look the backend methods up per call so test seams stay live.
+        self._deferral = ChildDeferral(
+            queue=self._queue,
+            bring_up=lambda: self._enabled() and self._ensure(),
+            record_metrics=lambda event: self._record_metrics(event),  # noqa: PLW0108 — per-call lookup keeps owner seams live
+            export_live=lambda events: self._export_live(events),  # noqa: PLW0108 — per-call lookup keeps owner seams live
+        )
 
     # ── public surface (called by shared.telemetry) ─────────────────────────
 
     def export_batch(self, events: list[Event]) -> None:
         """Export one emitter batch to the OTLP backend. Never raises, never
         blocks the caller: logs enqueue to the bounded queue (shed when full),
-        metrics record in memory (lock-free atomics)."""
-        if not events or not self._enabled() or not self._ensure():
+        metrics record in memory (lock-free atomics).
+
+        While deferred (exec-child arm, task #3816 M4b) the batch is held in
+        that same bounded queue with no worker behind it — no settings read, no
+        OTel import — until the hold saturates, the max-age timer fires, or
+        finalize()/shutdown() completes the deferral."""
+        if not events:
             return
+        if self._deferral.is_active() and self._logs is None:
+            self._deferral.hold_batch(events)
+            return
+        if not self._enabled() or not self._ensure():
+            return
+        self._export_live(events)
+
+    def _export_live(self, events: list[Event]) -> None:
+        """Enqueue one batch on the live path + record its metrics.
+
+        Split out of export_batch so the deferred hand-off (saturation,
+        finalize) reuses the exact live semantics — including the counted shed
+        when the queue stays full."""
         lost = 0
         example = None
         for event in events:
@@ -389,7 +414,15 @@ class _OtlpBackend:
         After draining, the SDK batch processors are force-flushed (bounded
         by their own timeout): a short-lived process (the exec child) exits
         before the 5s batch window would fire on its own, so without this the
-        queued OTLP records — SDK calls — never reach the collector."""
+        queued OTLP records — SDK calls — never reach the collector.
+
+        While deferred the queue holds the unexported backlog and there is no
+        worker: draining it here would drop every held event (`_emit_log`
+        cannot emit without providers), so flushing a deferred backend is a
+        no-op — the hold is completed by finalize() (see
+        `shared.telemetry_otlp_defer`) (task #3816 M4b)."""
+        if self._deferral.is_active():
+            return
         del timeout  # signature kept for callers; the drain is best-effort
         while True:
             try:
@@ -409,6 +442,11 @@ class _OtlpBackend:
 
     def shutdown(self) -> None:
         """Stop the worker thread and flush the SDK providers (process exit)."""
+        # Complete a deferred hold first (task #3816 M4b): the atexit path for
+        # abnormal exits reaches here too, and held records must face the same
+        # best-effort completion a clean exit gets through finalize().
+        with contextlib.suppress(Exception):
+            self.finalize()
         with contextlib.suppress(Exception):
             self._queue.put_nowait(None)
         with contextlib.suppress(Exception):
@@ -417,6 +455,34 @@ class _OtlpBackend:
         with contextlib.suppress(Exception):
             if self._metric_provider is not None:
                 self._metric_provider.force_flush(timeout_millis=2000)
+
+    # ── child deferral (task #3816 M4b) ─────────────────────────────────────
+
+    def defer_until_exit(self) -> None:
+        """Arm deferred export for this process (the exec-child arm path).
+
+        Called before any record can reach export_batch: batches are held in
+        the bounded queue while the OTel stack, the settings chain, and the
+        metric plumbing stay unimported. No-op once the backend is up, and when
+        AVA_TELEMETRY_OTLP_CHILD_DEFER is off (the documented revert switch).
+        """
+        if self._logs is not None:
+            return
+        self._deferral.arm()
+
+    def finalize(self) -> None:
+        """Complete a deferred hold (clean exit / shutdown), then flush.
+
+        A deferred backend is completed here: the hold is brought up and
+        drained synchronously — or degrades to JSONL-only when the bring-up
+        fails (the standard failed path; its five-minute retry gate is the only
+        retry). A deferred backend with an empty hold skips the bring-up
+        entirely (zero-record children keep M3's zero-import exit); a backend
+        that was never deferred takes the plain flush path.
+        """
+        if self._deferral.is_active():
+            self._deferral.complete("finalize")
+        self.flush()
 
     # ── flag + backend bring-up ──────────────────────────────────────────────
 
@@ -532,79 +598,10 @@ class _OtlpBackend:
     def _emit_log(self, event: Event) -> None:
         """Map one Event to an OTLP LogRecord and emit it.
 
-        Body = the full event as JSON (the id-free mirror shape; the mirror row
-        itself also carries the surrogate `id`, which the body deliberately does
-        not). Attributes = the indexed
-        dimensions; trace_id/span_id ride the LogRecord fields so Loki rows
-        correlate with Tempo spans. Runs on the worker thread (or flush()).
+        The mapping body lives in `shared.telemetry_otlp_logs` (split for the
+        800-line ceiling); runs on the worker thread (or flush()).
         """
-        from opentelemetry._logs import LogRecord
-        from opentelemetry._logs.severity import SeverityNumber
-        from opentelemetry.trace import (
-            NonRecordingSpan,
-            SpanContext,
-            TraceFlags,
-            set_span_in_context,
-        )
-
-        attributes: dict[str, Any] = {
-            "event_name": event.event_name,
-            "category": event.category,
-            "level": event.level,
-            "machine": event.machine,
-            "cluster": event.cluster,
-            "process": event.process,
-            "source": event.source,
-        }
-        if event.agent_id is not None:
-            attributes["agent_id"] = event.agent_id
-        if event.target_agent_id is not None:
-            attributes["target_agent_id"] = event.target_agent_id
-        body = json.dumps(
-            {
-                "ts": event.ts.isoformat(),
-                "trace_id": event.trace_id,
-                "span_id": event.span_id,
-                "agent_id": event.agent_id,
-                "machine": event.machine,
-                "cluster": event.cluster,
-                "process": event.process,
-                "category": event.category,
-                "event_name": event.event_name,
-                "level": event.level,
-                "source": event.source,
-                "target_agent_id": event.target_agent_id,
-                "attributes": event.attributes,
-            },
-            default=str,
-            separators=(",", ":"),
-            ensure_ascii=False,
-        )
-        # Trace correlation via `context` (the non-deprecated LogRecord
-        # constructor): a NonRecordingSpan carries the captured trace/span ids
-        # into the OTLP LogRecord fields. No ids -> no context -> trace_id 0
-        # (OTLP's "no trace").
-        context: Any = None
-        if event.trace_id and event.span_id:
-            span_context = SpanContext(
-                trace_id=int(event.trace_id, 16),
-                span_id=int(event.span_id, 16),
-                is_remote=False,
-                trace_flags=TraceFlags(TraceFlags.SAMPLED),
-            )
-            context = set_span_in_context(NonRecordingSpan(span_context))
-        record = LogRecord(
-            timestamp=int(event.ts.timestamp() * 1_000_000_000),
-            observed_timestamp=time.time_ns(),
-            context=context,
-            severity_text=event.level,
-            # The event.name semantic field is not in the stub overloads yet;
-            # event_name rides as an attribute (Loki label) either way.
-            severity_number=SeverityNumber(_SEVERITY_NUMBERS[event.level]),
-            body=body,
-            attributes=attributes,
-        )
-        self._logs.get_logger("ava.telemetry").emit(record)
+        _emit_log_record(self._logs, event)
 
     def _record_metrics(self, event: Event) -> None:
         """Map a telemetry event's numeric payload fields to OTLP instruments.
@@ -763,6 +760,24 @@ def warmup() -> None:
     with contextlib.suppress(Exception):
         if backend._enabled():
             backend._ensure()
+
+
+def defer_until_exit() -> None:
+    """Arm deferred export on the process backend (task #3816 M4b).
+
+    The exec-child arm path; see `_OtlpBackend.defer_until_exit`.
+    """
+    backend.defer_until_exit()
+
+
+def finalize() -> None:
+    """Complete a deferred hold and flush (clean exit / shutdown, task #3816)."""
+    backend.finalize()
+
+
+def deferred_state() -> bool:
+    """Whether the process backend currently holds a deferred backlog."""
+    return backend._deferral.is_active()
 
 
 def flush() -> None:
