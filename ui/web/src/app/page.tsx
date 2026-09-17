@@ -370,7 +370,7 @@ function HomeContent({
   }, [activeId, showError]);
 
   const activeLabel = activeAgent
-    ? `Agent #${activeAgent.agent_id}${activeAgent.label ? ` · ${activeAgent.label}` : ""} · ${activeAgent.status.charAt(0).toUpperCase() + activeAgent.status.slice(1)}`
+    ? `Agent #${activeAgent.agent_id}${activeAgent.label ? ` · ${activeAgent.label}` : ""}`
     : "…";
   // "busy" = the agent is mid-turn. turnActive (the SSE turn-in-progress
   // signal) alone is flappy: it flips false at every llm_done — including the

@@ -735,18 +735,34 @@ function ActivitySection({ inspect }: { inspect: AgentInspectStatistics }) {
  * the timeline header already displays agent status. The "every N" badge and
  * old "Last judged" cell remain omitted.
  */
+/** Lifecycle status → its agentRow label. The conversation header used to
+ *  capitalize the raw value; the status renders in Liveness now (task #3904). */
+const STATUS_LABEL_KEY: Record<string, string> = {
+  running: "statusRunning",
+  idling: "statusIdling",
+  restarting: "statusRestarting",
+  terminated: "statusTerminated",
+};
+
 function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
   const { liveness_state: state, heartbeat, spawned_at } = inspect;
   const offline = state === "offline";
   const t = useTranslations("inspector");
+  const tStatus = useTranslations("agentRow");
   const next = nextHeartbeatCell(heartbeat, {
     pending: t("pending"),
     due: t("due"),
   });
   const lastPause = heartbeat.last_pause;
+  const statusKey = STATUS_LABEL_KEY[inspect.status];
   return (
     <Section icon={<HeartPulse className={cn("size-3", offline && "text-destructive")} />} title={t("sectionLiveness")}>
       <div className="grid grid-cols-2 gap-1">
+        <Metric label={t("metricMachine")} value={inspect.machine} />
+        <Metric
+          label={t("metricStatus")}
+          value={statusKey ? tStatus(statusKey as Parameters<typeof tStatus>[0]) : inspect.status}
+        />
         <Metric
           className="col-span-2"
           label={t("metricBirth")}

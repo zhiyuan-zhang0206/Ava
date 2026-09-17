@@ -3857,6 +3857,8 @@ export interface components {
             agent_id: number;
             /** Machine */
             machine: string;
+            /** Status */
+            status: string;
             /**
              * Liveness State
              * @enum {string}

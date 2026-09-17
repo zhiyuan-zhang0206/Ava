@@ -145,16 +145,16 @@ describe("dedupe", () => {
   it("suppresses the same (page, element, key) within 2 s", () => {
     stubBeacon();
     setTelemetryPage("control/config");
-    track("setting-change", { key: "display.show_machine_name", value: false });
-    track("setting-change", { key: "display.show_machine_name", value: true });
-    track("setting-change", { key: "display.show_machine_name", value: false });
+    track("setting-change", { key: "display.show_timestamp_weekday", value: false });
+    track("setting-change", { key: "display.show_timestamp_weekday", value: true });
+    track("setting-change", { key: "display.show_timestamp_weekday", value: false });
     expect(__telemetryBufferSize()).toBe(1);
   });
 
   it("does not dedupe different keys or elements", () => {
     stubBeacon();
     setTelemetryPage("control/config");
-    track("setting-change", { key: "display.show_machine_name", value: false });
+    track("setting-change", { key: "display.show_timestamp_weekday", value: false });
     track("setting-change", { key: "display.language", value: "zh" });
     track("spawn");
     expect(__telemetryBufferSize()).toBe(3);
@@ -235,7 +235,7 @@ describe("value sanitization", () => {
   it("serializes booleans and numbers", async () => {
     const sendBeacon = stubBeacon();
     setTelemetryPage("control/config");
-    track("setting-change", { key: "display.show_machine_name", value: false });
+    track("setting-change", { key: "display.show_timestamp_weekday", value: false });
     track("setting-change", { key: "display.timeline_width_ratio", value: 0.4 });
     expect(__telemetryFlushForTest()).toBe(2);
     const body = await beaconBody(sendBeacon);
@@ -244,7 +244,7 @@ describe("value sanitization", () => {
         .filter((e): e is BeaconEvent & { key: string; value: string } => e.key !== undefined)
         .map((e) => [e.key, e.value]),
     );
-    expect(byKey["display.show_machine_name"]).toBe("false");
+    expect(byKey["display.show_timestamp_weekday"]).toBe("false");
     expect(byKey["display.timeline_width_ratio"]).toBe("0.4");
   });
 

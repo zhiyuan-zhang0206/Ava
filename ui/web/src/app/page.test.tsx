@@ -345,7 +345,7 @@ describe("HomePage top-level render", () => {
     expect(screen.getByTestId("header-bar").getAttribute("data-label")).toBe("…");
   });
 
-  it("activeId not null + agent in list → label contains #N + status", () => {
+  it("activeId not null + agent in list → label contains #N + label (status moved to the inspector, task #3904)", () => {
     hooksState.activeId = 5;
     hooksState.agents = [
       makeAgent({ agent_id: 5, label: "research", status: "idling" }),
@@ -354,7 +354,7 @@ describe("HomePage top-level render", () => {
     const label = screen.getByTestId("header-bar").getAttribute("data-label");
     expect(label).toContain("Agent #5");
     expect(label).toContain("research");
-    expect(label).toContain("Idling");
+    expect(label).not.toContain("Idling");
   });
 
   it("toast is NOT rendered by the page (the renderer moved to the root ToastHost in Providers, Task #1051)", () => {

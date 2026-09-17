@@ -294,73 +294,13 @@ describe("AgentRow inspector reads", () => {
   });
 });
 
-describe("AgentRow machine badge", () => {
-  // Single machine (<=1 online) → no badge; the badge only carries
-  // information on multi-machine setups. Printing the same machine name
-  // on 100 rows of a single-machine setup is just noise.
-  it("status not loaded yet → not shown (degrades to single-machine behavior)", () => {
-    const { queryByText } = render(
-      <AgentRow {...baseProps} agent={ag(1)} depth={0} ancestorsIsLast={[]} />,
-    );
-    expect(queryByText("test-machine")).toBeNull();
-  });
-
-  // Multi-machine setup (>=2 machines): the badge shows when the user setting
-  // is enabled; hides when disabled. Seed the React Query cache directly so the
-  // component reads the desired state without live fetches.
-  it("multi-machine + show_machine_name enabled → badge shown", () => {
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    // Seed two machines into the status cache
-    qc.setQueryData(["status"], {
-      cluster: { machines: [{ name: "m1" }, { name: "m2" }] },
-    });
-    // Seed user setting enabled
-    qc.setQueryData(["user-settings"], { "display.show_machine_name": true });
-    const { queryByText } = rtlRender(
-      <QueryClientProvider client={qc}>
-        <AgentRow {...baseProps} agent={ag(1)} depth={0} ancestorsIsLast={[]} />
-      </QueryClientProvider>,
-    );
-    expect(queryByText("test-machine")).toBeTruthy();
-  });
-
-  it("multi-machine + show_machine_name disabled → badge hidden", () => {
+describe("AgentRow machine badge (removed, task #3904)", () => {
+  // The machine name left the tree — it renders in the Inspector's Liveness
+  // block now. Multi-machine data plus the legacy setting must not print it.
+  it("never renders the machine name", () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     qc.setQueryData(["status"], {
       cluster: { machines: [{ name: "m1" }, { name: "m2" }] },
-    });
-    qc.setQueryData(["user-settings"], { "display.show_machine_name": false });
-    const { queryByText } = rtlRender(
-      <QueryClientProvider client={qc}>
-        <AgentRow {...baseProps} agent={ag(1)} depth={0} ancestorsIsLast={[]} />
-      </QueryClientProvider>,
-    );
-    expect(queryByText("test-machine")).toBeNull();
-  });
-
-  it("multi-machine but agent.machine is 'unknown' → badge hidden", () => {
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    qc.setQueryData(["status"], {
-      cluster: { machines: [{ name: "m1" }, { name: "m2" }] },
-    });
-    qc.setQueryData(["user-settings"], { "display.show_machine_name": true });
-    const { queryByText } = rtlRender(
-      <QueryClientProvider client={qc}>
-        <AgentRow
-          {...baseProps}
-          agent={ag(1, { machine: "unknown" })}
-          depth={0}
-          ancestorsIsLast={[]}
-        />
-      </QueryClientProvider>,
-    );
-    expect(queryByText("unknown")).toBeNull();
-  });
-
-  it("single machine + show_machine_name enabled → badge hidden (noise guard)", () => {
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    qc.setQueryData(["status"], {
-      cluster: { machines: [{ name: "m1" }] },
     });
     qc.setQueryData(["user-settings"], { "display.show_machine_name": true });
     const { queryByText } = rtlRender(

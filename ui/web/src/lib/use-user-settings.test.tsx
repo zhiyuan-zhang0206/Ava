@@ -35,14 +35,14 @@ describe("useUserSettings", () => {
 
     await waitFor(() => !result.current.isLoading);
 
-    expect(result.current.settings["display.show_machine_name"]).toBe(true);
+    expect(result.current.settings["display.show_timestamp_weekday"]).toBe(true);
     expect(result.current.settings["display.time_mode"]).toBe("last_active");
   });
 
   it("merges server values over defaults", async () => {
     vi.spyOn(api, "getSettings").mockResolvedValue({
       settings: [
-        { key: "display.show_machine_name", value: false, updated_at: "2026-01-01T00:00:00Z" },
+        { key: "display.show_timestamp_weekday", value: false, updated_at: "2026-01-01T00:00:00Z" },
       ],
     });
 
@@ -52,7 +52,7 @@ describe("useUserSettings", () => {
       expect(result.current.isLoading).toBe(false);
     });
 
-    expect(result.current.settings["display.show_machine_name"]).toBe(false);
+    expect(result.current.settings["display.show_timestamp_weekday"]).toBe(false);
     expect(result.current.settings["display.time_mode"]).toBe("last_active");
   });
 
@@ -66,14 +66,14 @@ describe("useUserSettings", () => {
     await waitFor(() => !result.current.isLoading);
 
     // Initial value from defaults
-    expect(result.current.settings["display.show_machine_name"]).toBe(true);
+    expect(result.current.settings["display.show_timestamp_weekday"]).toBe(true);
 
     // Attempt to update — should fail and roll back
-    result.current.setSetting("display.show_machine_name", false);
+    result.current.setSetting("display.show_timestamp_weekday", false);
 
     // After error, value should still be the default (rolled back)
     await waitFor(() => {
-      expect(result.current.settings["display.show_machine_name"]).toBe(true);
+      expect(result.current.settings["display.show_timestamp_weekday"]).toBe(true);
     });
   });
 
@@ -126,7 +126,7 @@ describe("useUserSettings", () => {
   it("setSetting optimistically updates and calls PUT", async () => {
     vi.spyOn(api, "getSettings").mockResolvedValue({ settings: [] });
     vi.spyOn(api, "putSetting").mockResolvedValue({
-      key: "display.show_machine_name",
+      key: "display.show_timestamp_weekday",
       value: false,
       updated_at: "2026-01-01T00:00:00Z",
     });
@@ -135,10 +135,10 @@ describe("useUserSettings", () => {
 
     await waitFor(() => !result.current.isLoading);
 
-    result.current.setSetting("display.show_machine_name", false);
+    result.current.setSetting("display.show_timestamp_weekday", false);
 
     await waitFor(() => {
-      expect(api.putSetting).toHaveBeenCalledWith("display.show_machine_name", false);
+      expect(api.putSetting).toHaveBeenCalledWith("display.show_timestamp_weekday", false);
     });
   });
 });

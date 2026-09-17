@@ -22,7 +22,6 @@ import {
   History,
   Languages,
   Layers,
-  Monitor,
   MoveHorizontal,
   Palette,
   Rows3,
@@ -145,13 +144,6 @@ export default function DisplaySettingsPage() {
       )}
 
       <SettingsSection id="display-agent-list" title={t("agentListDisplay")}>
-        <ToggleRow
-          icon={Monitor}
-          label="Show machine name"
-          description="On multi-machine deployments, show the host machine's name next to each agent row"
-          value={settings["display.show_machine_name"] as boolean}
-          onChange={(v) => setSetting("display.show_machine_name", v)}
-        />
         <ToggleRow
           icon={CircleDot}
           label="Show agent status dot"
