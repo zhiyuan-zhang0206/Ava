@@ -139,6 +139,18 @@ class GeneralSettings(EnvSettings):
         },
     )
 
+    fetch_via_gateway: bool = Field(
+        default=False,
+        alias="AVA_FETCH_VIA_GATEWAY",
+        description="Central-fetch topology for the cluster source: when on, the gateway is the cluster's single wall-crossing fetcher and every agent-runner's rollout fetch must come from the gateway (its `origin` points there); a runner whose `origin` still addresses a wall host (github.com) refuses the Phase-0 fetch instead of silently fetching GitHub. Off (default): every node fetches its own `origin`. Enable/rollback: conventions/fetch-via-gateway-runbook.md.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     os_jobs_enabled: bool = Field(
         default=True,
         alias="AVA_OS_JOBS_ENABLED",
