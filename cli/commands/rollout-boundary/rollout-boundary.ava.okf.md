@@ -48,6 +48,14 @@ tags:
   must fetch the target and acknowledge native drain in Phase A before the
   gateway advances to migration. An unreachable or failed participant aborts
   this rollout; it is not removed from the barrier while still serving.
+- **Central fetch** (`settings.general.fetch_via_gateway`, cluster-pinned,
+  default off): the gateway is the cluster's only wall-crossing fetcher. The
+  gateway's own GitHub fetch runs in preflight, before Phase 0; every
+  non-gateway participant must then fetch the source from the gateway — a
+  runner whose `origin` still addresses a wall host refuses in
+  `ops.ops_cluster.cluster_fetch_op` (abort before any pause; no silent wall
+  fallback). Enable/rollback:
+  [fetch-via-gateway runbook](../../../conventions/fetch-via-gateway-runbook.md).
 - [[cli/commands/rollout-boundary/phase-b.ava.okf.md]] specifies the runner
   convergence evidence, stall judgments, retry ownership and deadlines.
 - `_gateway_ready` is a **precondition**, not a phase: the rollout's Phase B
