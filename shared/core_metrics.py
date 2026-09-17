@@ -17,12 +17,18 @@ ava-ops-main.json``) carry the **core section first** — row header ``core``,
 then one row per plugin. The inspector surface (``gateway/routers/
 _plugin_metrics.py``) builds both registries in process — task #180 PR D
 replaced the generator's state snapshot ($AVA_HOME/state/plugin_metrics.json),
-which froze when the generator did not survive the archive->public port.
+which froze when the generator did not survive the archive->public port. The
+dashboard render is being rebuilt (task #3697): ``shared.grafana_dashboard``
+renders the registries into the dashboard JSON, previewed by ``ava lgtm
+render`` and wired into converge by slice S3.
 
 Core definitions live in ``shared/core_metrics_panels.py`` (the migrated
-ops-dashboard panels) and ``shared/core_metrics_observability.py`` (the
-migrated ava_observability pack). The ``plugin`` field of every core metric
-is ``core`` — the dashboard row header and the display name are "core".
+ops-dashboard panels), ``shared/core_metrics_observability.py`` (the migrated
+ava_observability pack), and the smaller modules beside them
+(``core_metrics_cost`` / ``core_metrics_frontend`` / ``core_metrics_dismissed``
+/ ``core_metrics_fleet`` / ``core_metrics_pr_flow``). The ``plugin`` field of
+every core metric is ``core`` — the dashboard row header and the display name
+are "core".
 """
 
 from __future__ import annotations
@@ -36,16 +42,19 @@ from shared.plugin_metrics import (
     validate_spec_sql,
 )
 
-# Definition modules the generator imports (in registration order across
-# modules: panels first, then observability — the dashboard's core section
-# follows that order). A missing module is tolerated (a partial checkout /
-# test env without the definitions) and renders an empty core section.
+# Definition modules collected (in registration order across modules). The
+# renderer orders the dashboard by each spec's ``section`` + ``order`` pins,
+# not this sequence — it only breaks ties for un-pinned specs and shapes the
+# inspector listing. A missing module is tolerated (a partial checkout / test
+# env without the definitions) and renders an empty core section.
 _CORE_DEFINITION_MODULES = (
     "shared.core_metrics_panels",
+    "shared.core_metrics_cost",
     "shared.core_metrics_dismissed",
     "shared.core_metrics_fleet",
     "shared.core_metrics_pr_flow",
     "shared.core_metrics_observability",
+    "shared.core_metrics_frontend",
 )
 
 _CORE_REGISTRY: dict[str, MetricSpec] = {}

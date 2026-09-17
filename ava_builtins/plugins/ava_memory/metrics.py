@@ -85,6 +85,7 @@ register_metric(
         query_type="logql",
         target_names=["runs"],
         output=["grafana"],
+        order=0,
     )
 )
 
@@ -116,8 +117,8 @@ register_metric(
         query=_passive_recall_average_ms("search_ms"),
         query_type="logql",
         target_names=["avg search ms"],
-        custom={"axisLabel": "ms"},
         output=["grafana", "inspector"],
+        order=4,
     )
 )
 
@@ -136,8 +137,8 @@ register_metric(
         query=_passive_recall_average_ms("filter_ms"),
         query_type="logql",
         target_names=["avg filter ms"],
-        custom={"axisLabel": "ms"},
         output=["grafana", "inspector"],
+        order=5,
     )
 )
 
@@ -168,6 +169,7 @@ register_metric(
         query_type="logql",
         target_names=["empty %"],
         output=["grafana", "inspector"],
+        order=1,
     )
 )
 
@@ -196,6 +198,7 @@ register_metric(
         query_type="logql",
         target_names=["anomaly %"],
         output=["grafana"],
+        order=2,
     )
 )
 
@@ -216,6 +219,7 @@ register_metric(
         query_type="logql",
         target_names=["failures"],
         output=["grafana"],
+        order=3,
     )
 )
 

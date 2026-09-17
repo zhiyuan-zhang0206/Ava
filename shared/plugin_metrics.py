@@ -2,12 +2,14 @@
 
 Two output surfaces (user-approved design, 2026-08-04, event-system W13):
 
-- ``grafana``: the ops dashboards
-  (``deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-*.json``) are
-  hand-maintained since the generator did not survive the archive->public
-  port — a MetricSpec change must be mirrored in the JSONs by hand
-  (``tests/plugins/test_plugin_metrics_logql.py`` locks JSON against the
-  registered specs).
+- ``grafana``: the ops dashboard
+  (``deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json``)
+  is becoming a render of the registry — ``shared.grafana_dashboard`` turns
+  the specs into the dashboard JSON and ``ava lgtm render`` previews / writes
+  it (task #3697; slice S3 flips converge onto the render). Until then the
+  JSON stays the deployment source, and
+  ``tests/plugins/test_grafana_dashboard_render.py`` locks the render against
+  it.
 - ``inspector`` (W13b): the gateway builds the registry in process (imports
   every plugin's ``metrics.py`` under its PluginContext + the core definition
   modules — task #180 PR D) and serves per-agent panels under
@@ -59,7 +61,7 @@ from shared.plugin_metrics_sql import (
 )
 
 Category = Literal["audit", "telemetry", "log"]
-PanelType = Literal["timeseries", "stat", "barchart", "table"]
+PanelType = Literal["timeseries", "stat", "barchart", "table", "logs"]
 OutputSurface = Literal["grafana", "inspector"]
 
 # ── errors ────────────────────────────────────────────────────────────────────
@@ -106,7 +108,7 @@ class MetricSpec(BaseModel):
             e.g. ``recall-filter``).
         category: the event category (audit | telemetry | log).
         unit: Grafana unit id (``short``, ``percent``, ``ops``, ``s``, ...).
-        panel: Grafana panel type — ``timeseries`` / ``stat`` / ``barchart`` / ``table``.
+        panel: Grafana panel type — ``timeseries`` / ``stat`` / ``barchart`` / ``table`` / ``logs``.
         query: Grafana query template. LogQL templates select the live event
             stream and use ``{event_name}`` / ``{category}`` placeholders;
             ``{{agent_id}}`` is inspector-only and rendered as a label filter.
@@ -121,6 +123,16 @@ class MetricSpec(BaseModel):
             step entirely (panels without any thresholds).
         thresholds: optional absolute-threshold steps (green base + red at the
             given value by default when a bare number list would suffice).
+        panel_id / section / order / position: dashboard placement pins
+            (2026-09-17, task #3697) — the as-is panel id, the section row it
+            belongs to, the panel's render rank within that section, and an
+            explicit grid position for the rare panel whose placement
+            deviates from the flow layout. Core panels carry the as-is
+            values; plugin panels leave them None (the renderer allocates
+            ids per plugin block and uses the plugin name as the section).
+        transformations: optional Grafana transformations copied verbatim
+            into the panel (e.g. the PR-flow day tables' joinByField +
+            organize), for the panels whose rendered shape needs them.
         output: which surfaces consume this metric — ``grafana`` (dashboard
             JSON, this wave), ``inspector`` (per-agent panels, reserved).
             A query carrying ``{{agent_id}}`` must NOT include ``grafana``.
@@ -163,6 +175,19 @@ class MetricSpec(BaseModel):
     # Explicit grid size (override the 6x4 stat / 12x7 chart default).
     width: int | None = Field(default=None, ge=1, le=24)
     height: int | None = Field(default=None, ge=1, le=40)
+    # Dashboard placement pins (task #3697): the as-is panel id, its section
+    # row, the render rank within that section, and an explicit grid position
+    # for the rare panel whose placement deviates from the flow layout. Core
+    # panels carry the as-is values; plugin panels leave them None (the
+    # renderer allocates ids per plugin block and uses the plugin name as the
+    # section).
+    panel_id: int | None = Field(default=None, ge=1)
+    section: str | None = None
+    order: int | None = Field(default=None, ge=0)
+    position: tuple[int, int] | None = None
+    # Grafana transformations copied verbatim into the rendered panel (the
+    # PR-flow day tables' joinByField + organize).
+    transformations: list[dict[str, Any]] | None = None
     thresholds: list[ThresholdStep] | None = None
     output: list[OutputSurface] = ["grafana"]
     plugin: str = ""  # auto-filled at register time

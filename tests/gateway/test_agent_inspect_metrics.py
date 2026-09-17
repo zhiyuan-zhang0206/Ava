@@ -612,12 +612,12 @@ def test_in_process_loader_imports_shipped_metrics() -> None:
                 importlib.import_module(mod_name)
             else:
                 importlib.reload(mod)
-    for mod_name in ("shared.core_metrics_panels", "shared.core_metrics_observability"):
-        mod = sys.modules.get(mod_name)
-        if mod is None:
-            importlib.import_module(mod_name)
-        else:
-            importlib.reload(mod)
+    # Drop every core definition module so the loader's collect_core_metrics()
+    # re-imports and re-registers the whole fresh set — the canonical module
+    # list, so a definition split (e.g. cost / frontend out of panels /
+    # observability, task #3697 S1) cannot silently shrink the registration.
+    for module_name in core_metrics._CORE_DEFINITION_MODULES:
+        sys.modules.pop(module_name, None)
 
     specs = _plugin_metrics._load_plugin_metrics()
 

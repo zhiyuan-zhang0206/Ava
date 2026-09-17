@@ -50,6 +50,7 @@ from cli.commands._gateway_ready import (
 from cli.commands._gateway_ready import (
     await_gateway_serving as _await_gateway_serving,
 )
+from cli.commands._grafana_render import cmd_grafana_render
 from cli.commands._lgtm import cmd_lgtm_off, cmd_lgtm_on, cmd_lgtm_status
 from cli.commands._pitr_activation import cmd_pitr_activate, cmd_pitr_rollback, cmd_pitr_status
 from cli.commands._probe import (
@@ -349,6 +350,7 @@ __all__ = [
     "cmd_ensure_db_role",
     "cmd_firewall_status",
     "cmd_firewall_sync",
+    "cmd_grafana_render",
     "cmd_health_probe",
     "cmd_lgtm_off",
     "cmd_lgtm_on",
