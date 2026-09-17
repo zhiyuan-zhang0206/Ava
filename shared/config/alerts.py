@@ -93,6 +93,25 @@ class AlertsSettings(EnvSettings):
         },
     )
 
+    inspect_metrics_degraded_cooldown_seconds: float = Field(
+        default=3600.0,
+        alias="AVA_ALERTS_INSPECT_METRICS_DEGRADED_COOLDOWN_SECONDS",
+        description=(
+            "Per-(agent, family, condition) cooldown for the inspector-metrics "
+            "coverage warnings the gateway logs, and for re-emission of an open "
+            "degradation alert (task #3869). The condition is read-path evaluated: "
+            "without a cooldown every statistics request would re-log and re-send "
+            "the same chronic limit; an hour keeps the record visible while "
+            "holding the volume to one line per condition."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     im_notify_enabled: bool = Field(
         default=True,
         validation_alias=AliasChoices(

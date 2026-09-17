@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
+from typing import Any
 
 import psycopg
 import pytest
@@ -283,6 +284,29 @@ def test_statistics_http_does_not_read_logs_or_current_state(
         response = client.get(f"/api/agents/{aid}/inspect/statistics")
     assert response.status_code == 200, response.text
     assert response.json()["metadata"]["collection"] == "observed"
+
+
+def test_statistics_read_invokes_the_coverage_note(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The coverage note is wired into the statistics read (#3869 review): a
+    change that drops the call must fail here, not just in review."""
+    now = datetime.now(UTC)
+    aid = _agent(db_conn, now)
+    db_conn.commit()
+    seen: list[int] = []
+
+    def _record(pool: Any, agent_id: int, metadata: Any, *, spawned_at: Any) -> None:
+        assert metadata.collection == "observed"
+        assert spawned_at is not None
+        seen.append(agent_id)
+
+    monkeypatch.setattr(_inspect_metrics, "note_inspect_metrics_coverage", _record)
+    with TestClient(app) as client:
+        response = client.get(f"/api/agents/{aid}/inspect/statistics")
+    assert response.status_code == 200, response.text
+    assert response.json()["metadata"]["collection"] == "observed"
+    assert seen == [aid]
 
 
 def test_since_compact_without_authoritative_boundary_is_unavailable(
