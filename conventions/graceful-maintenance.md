@@ -221,3 +221,75 @@ The repair moves the failed receipts to `repaired` (both sides stay visible in
 `maintenance status`), records operator identity in the journal, and releases
 the hold in the same command; if that release is interrupted (a partial
 release), `resume --cancel` completes it.
+
+## Stop-class drills and operations: executor-cancellation insurance and hold handover
+
+A stop-class drill or operation — any leg that takes the message plane down with
+it — must survive its executor's cancellation. The 2026-09-17 S3 incident is the
+proof case: the executor's turn was cancelled after the stop leg, the start leg
+never ran, and the retained non-expiring hold left the whole platform dark for
+~110 minutes (#3719). At the cancellation-plus-10-minute mark the entire
+recovery was a single official `ava start`.
+
+1. **Name a rescue actor outside the blast radius.** Before the first stop leg,
+   designate one rescue actor plus a backup on a machine that stays up, and one
+   out-of-band signal (the OOB probe). The rescue actor observes directly —
+   read-only over an independent link (ssh plus state files), never through the
+   message plane, which is itself the surface under test — and never executes
+   stop legs.
+
+2. **Keep the progress record off the stopped surface.** The authoritative
+   record is a progress file written on a non-target machine (or pulled there
+   every step); the task registry is a sync target only. On 2026-09-17 both the
+   operation log and the message plane died with the stack (log frozen 08:34:55;
+   the executor's send failed 08:50:39). Any monitoring or automation for the
+   operation lives on a surviving OS surface (launchd / cron / scheduled task),
+   never inside an agent turn.
+
+3. **Stage the exact rescue ladder for every phase, with a force tier.** Use the
+   phase table above; the staged set is (a) an incomplete stop → a bounded re-run
+   of the stop, then the documented `stop --force` escalation when a graceful
+   leg provably cannot complete (2026-09-17: two normal attempts timed out;
+   force finished in 12s), then `maintenance start` / `maintenance resume`;
+   (b) stopped → `ava start` end-to-end (or `maintenance start` plus
+   `maintenance resume` per the table); (c) starting → re-run
+   `maintenance start`, then `resume`. Verify the read-only parts in advance,
+   ssh access and `sudo -n` included. The rescue actor is pre-authorized to use
+   `--force` once the abort bound has been declared — a fresh approval round
+   would burn the window — but never against a competing rollout.
+
+4. **Heartbeat and the abort bound.** The executor records a progress line
+   every step and at least every 5 minutes. No progress for 10 minutes is the
+   abort bound for the operation — judged on observable evidence (return code
+   not delivered, state-file timestamps not advancing, surviving process
+   inventory unchanged). It shares its numeral with the abandoned-hold notice
+   bound but is a different instrument: that bound judges an idle hold for
+   release, while this one bounds executor silence during a live operation. The
+   rescue actor then executes the staged recovery, announces it, and records the
+   handover (who, when) in the operation record.
+
+5. **Bound every hold and name its rescuer.** This section extends the pre-stop
+   abandoned path of the table above: a started stop is never auto-released; for
+   that class the named rescuer and the stated maximum intended lifetime are the
+   insurance. A drill hold carries both, written alongside the hold, together
+   with the window end and a reference to the staged commands. A hold with a
+   dead shepherd, empty failures, nothing executing under it, and an age past
+   its bound is an orphan: escalate through the concrete available mechanisms —
+   the pause watchdog, the stranded-hold controller, the machine-local alarm
+   path — always out-of-band, then recover via the official path. A release
+   before the declared lifetime, or without the rescue actor's handover record,
+   is an anomaly to surface to the operation owner. During a stop-class window,
+   an external party may judge locks stale and clear them (user-side Codex does
+   this legitimately): announce at window start that `drill-*` locks must not be
+   cleared while the window is open, watch for releases, and treat an in-window
+   external release as stolen — abort that step's reading, carry the completion
+   chain through, and take evidence after the window. To intentionally keep a
+   host down, keep the ladder's session alive — the live shepherd is the intent
+   marker — or, until the orphan-completion design names a dedicated marker,
+   pin the existing `AVA_ABANDONED_HOLD_AUTO_RELEASE=0` (gateway/cluster
+   setting).
+
+6. **Carry the operation across turns.** Run stop-class operations as a task
+   backed by the surviving-machine record described above — never as an
+   unlogged one-shot — so a successor continues from the record plus the staged
+   commands instead of restarting.
