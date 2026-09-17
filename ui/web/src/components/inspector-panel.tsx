@@ -730,10 +730,11 @@ function ActivitySection({ inspect }: { inspect: AgentInspectStatistics }) {
 
 /**
  * Liveness — one merged section (Task #1195, user ruling 2026-08-12) with
- * three cells: agent birth, next heartbeat, and last pause. The gateway-owned
- * derived liveness state only colors the HeartPulse icon when offline because
- * the timeline header already displays agent status. The "every N" badge and
- * old "Last judged" cell remain omitted.
+ * five cells: machine and lifecycle status (moved here from the tree row and
+ * the conversation header by task #3904), agent birth, next heartbeat, and
+ * last pause. The gateway-owned derived liveness state colors the HeartPulse
+ * icon when offline. The "every N" badge and old "Last judged" cell remain
+ * omitted.
  */
 /** Lifecycle status → its agentRow label. The conversation header used to
  *  capitalize the raw value; the status renders in Liveness now (task #3904). */
