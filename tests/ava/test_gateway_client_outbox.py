@@ -25,6 +25,7 @@ def _limits(**overrides: object) -> outbox.DeliveryOutboxLimits:
         "enabled": True,
         "retry_backoff_steps": (30.0, 60.0, 300.0, 900.0),
         "budget_seconds": 43200.0,
+        "abandoned_retention_days": 30,
         "dedup_window_seconds": 900.0,
         "flush_interval_seconds": 30.0,
         "max_entries": 128,
