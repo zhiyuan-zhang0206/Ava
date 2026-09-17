@@ -36,6 +36,10 @@ def _stable_slug(monkeypatch: pytest.MonkeyPatch) -> None:
 # --- labels ---------------------------------------------------------------
 
 
+def _never_descendant(_label: str) -> bool:
+    return False
+
+
 def test_label_is_distinct_per_capability() -> None:
     """A single box runs BOTH watchdogs; one shared label would mean one job
     supervising one capability and the other left unwatched — the exact
@@ -95,6 +99,7 @@ def test_register_macos_writes_and_bootstraps(
 ) -> None:
     monkeypatch.setattr(os_cron, "launchd_path_env", lambda: "/usr/bin")
     monkeypatch.setattr(probe, "ava_binary_path", lambda: "/x/ava")
+    monkeypatch.setattr("shared.platform.descends_from_launchd_job", _never_descendant)
     calls: list[list[str]] = []
 
     def _run(cmd, **_kw):  # type: ignore[no-untyped-def]

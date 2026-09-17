@@ -23,7 +23,12 @@ def plist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(probe, "_plist_path", plist_path)
     monkeypatch.setattr(probe, "_plist_content", plist_content)
     monkeypatch.setattr("shared.platform.launchd_job_label", lambda: None)
+    monkeypatch.setattr("shared.platform.descends_from_launchd_job", _never_descendant)
     return path
+
+
+def _never_descendant(_label: str) -> bool:
+    return False
 
 
 def test_unchanged_loaded_job_is_not_unloaded(plist: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -106,6 +111,30 @@ def test_probe_does_not_unload_its_own_ancestor(
     plist.write_text("old spec")
     monkeypatch.setattr(
         "shared.platform.launchd_job_label", lambda: probe.probe_label("agent-runner", "test")
+    )
+
+    def run(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("must not unload the job that owns this process tree")
+
+    monkeypatch.setattr(probe.subprocess, "run", run)
+    assert probe._register_macos("agent-runner", 90) == 0
+    assert plist.read_text() == "old spec"
+
+
+def test_probe_defers_when_ancestry_proves_the_job(
+    plist: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """XPC_SERVICE_NAME reads "0" for exec'd descendants on current macOS; the
+    live process-tree check must still defer the self-reload."""
+    plist.write_text("old spec")
+    monkeypatch.setattr("shared.platform.launchd_job_label", lambda: "0")
+
+    def _runs_this_job(label: str) -> bool:
+        return label == probe.probe_label("agent-runner", "test")
+
+    monkeypatch.setattr(
+        "shared.platform.descends_from_launchd_job",
+        _runs_this_job,
     )
 
     def run(*_args: object, **_kwargs: object) -> None:
