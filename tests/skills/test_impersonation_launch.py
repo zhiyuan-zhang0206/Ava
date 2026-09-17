@@ -196,8 +196,11 @@ def test_app_server_command_executes_in_an_interactive_bash(tmp_path: Path) -> N
     ``$!`` itself is expanded is a bash-version fact — 3.2 (macOS) aborts the
     whole line, 5.x (this host, CI) exempts it — so this is a discriminating
     guard on biting shells and an execution-level smoke everywhere: the line
-    must reach the server command and leave the pane usable. The other tests
-    here monkeypatch ``sessions.send`` and assert the command's shape only;
+    must reach the server command and leave the pane usable. A login shell
+    rebuilds PATH (macOS path_helper prepends /etc/paths), so the shim is
+    exported inside the pane rather than inherited (macmini red, 2026-09-17).
+    The other tests here monkeypatch ``sessions.send`` and assert the command's
+    shape only;
     this one covers the real execution face (task #3778).
     """
     import contextlib
@@ -230,6 +233,12 @@ def test_app_server_command_executes_in_an_interactive_bash(tmp_path: Path) -> N
     output = bytearray()
     try:
         _pump_pane(master, 1.0, output)
+        # A login pane rebuilds PATH once /etc/profile runs — macOS path_helper
+        # prepends /etc/paths (homebrew) and masks an inherited shim, pointing
+        # the launch at the real codex (macmini red, 2026-09-17). Export the
+        # shim first, inside the pane, so the launcher line runs the shim.
+        os.write(master, f'export PATH="{shim_dir}:$PATH"\n'.encode())
+        _pump_pane(master, 0.5, output)
         os.write(master, (command + "\n").encode())
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline and not argv_file.exists():
