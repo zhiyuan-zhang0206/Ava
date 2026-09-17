@@ -57,9 +57,11 @@ machine running against the production ``~/.ava`` cluster. Other processes,
 including disposable exec children in test or ad-hoc homes, stay off unless an
 operator explicitly sets ``AVA_TELEMETRY_OTLP_ENDPOINT``. Every allowed process
 reads ``AVA_TELEMETRY_OTLP_ENABLED`` from the startup-frozen settings singleton
-(``restart_required`` on the config fields). Exec children call ``warmup()``
-before agent code runs so constructing the OTel SDK cannot first happen during
-interpreter shutdown. This is **startup-applied**, matching every other config
+(``restart_required`` on the config fields). Exec children never first-construct
+the OTel SDK during interpreter shutdown: the child deferral completes its
+bring-up during life (``shared.telemetry_otlp_defer``), and ``_ensure()`` refuses
+to construct while ``sys.is_finalizing()`` is true — the invariant the old eager
+``warmup()`` call served. This is **startup-applied**, matching every other config
 field in the system — there is no live-reload mechanism in ``shared/config``,
 and the isolation above makes the flag a rare emergency kill switch, not the
 primary defense. Off means JSONL mirror only: Loki and Prometheus stop advancing.
@@ -81,6 +83,7 @@ from __future__ import annotations
 
 import contextlib
 import queue
+import sys
 import threading
 import time
 from functools import cache
@@ -361,10 +364,9 @@ class _OtlpBackend:
         blocks the caller: logs enqueue to the bounded queue (shed when full),
         metrics record in memory (lock-free atomics).
 
-        While deferred (exec-child arm, task #3816 M4b) the batch is held in
-        that same bounded queue with no worker behind it — no settings read, no
-        OTel import — until the hold saturates, the max-age timer fires, or
-        finalize()/shutdown() completes the deferral."""
+        While deferred (exec-child arm, task #3816 M4b) the batch is held in the
+        same bounded queue with no worker — no settings read, no OTel import —
+        until saturation, the max-age timer, or finalize()/shutdown()."""
         if not events:
             return
         if self._deferral.is_active() and self._logs is None:
@@ -509,7 +511,14 @@ class _OtlpBackend:
 
         The interval gate prevents per-batch probes. Initialization remains
         best-effort and never raises into the event drain.
+
+        Never constructs during interpreter shutdown (the hazard the old eager
+        ``warmup()`` call existed to prevent — exec children now complete their
+        bring-up during life): a finalization-time attempt degrades to the
+        unsent path; the JSONL mirror retains the records.
         """
+        if sys.is_finalizing():
+            return False
         if self._logs is not None:
             return True
         now = time.monotonic()

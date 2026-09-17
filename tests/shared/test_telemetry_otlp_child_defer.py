@@ -259,3 +259,42 @@ def test_env_defaults_locked_to_settings_fields() -> None:
         fields["telemetry_otlp_child_defer_max_age_s"].alias
         == "AVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S"
     )
+
+
+def test_ensure_refuses_during_finalization(
+    otlp_backend: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A first SDK construction during interpreter shutdown is refused.
+
+    The old eager warmup() existed to keep construction off the shutdown path;
+    exec children now defer instead, and `_ensure()` enforces the invariant at
+    the single construction point — the record path degrades to unsent (the
+    JSONL mirror retains it)."""
+    import sys
+
+    backend, log_exporter, _ = otlp_backend
+    monkeypatch.setattr(sys, "is_finalizing", lambda: True)
+
+    assert backend._ensure() is False
+    backend.export_batch([_event()])
+    assert backend._logs is None  # pyright: ignore[reportUnknownMemberType]
+    assert backend._thread is None  # pyright: ignore[reportUnknownMemberType]
+    assert not log_exporter.get_finished_logs()
+
+
+def test_deferred_completion_during_finalization_keeps_hold(
+    deferred_backend: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The deferral's shutdown fallback must not construct during finalization:
+    the hold stays intact instead (JSONL-only), never a shutdown-time bring-up."""
+    import sys
+
+    backend, log_exporter, _ = deferred_backend
+    monkeypatch.setattr(sys, "is_finalizing", lambda: True)
+    backend.export_batch([_event()])
+
+    backend.finalize()
+
+    assert backend._deferral.is_active()  # pyright: ignore[reportUnknownMemberType]
+    assert backend._logs is None  # pyright: ignore[reportUnknownMemberType]
+    assert not log_exporter.get_finished_logs()
