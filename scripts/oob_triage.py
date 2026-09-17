@@ -83,10 +83,13 @@ _STATES = ("paused", "resumed", "legacy-resumed")
 _LIVENESS = ("alive", "dead", "missing", "unreadable")
 
 # The desensitization whitelist (spec part 2 v1.1.1 B5): only strings matching
-# these shapes may leave the process; a value that fails renders as `?`.
-_OPERATION_PATTERN = re.compile(r"[A-Za-z0-9:._-]{1,120}")
-_TIMESTAMP_PATTERN = re.compile(r"[0-9T:.+Z-]{1,40}")
-_HOST_PATTERN = re.compile(r"[A-Za-z0-9._@-]{1,253}")
+# these shapes may leave the process; a value that fails renders as `?`. First
+# characters exclude `-` throughout: a value reaching an argv tail
+# (`--operation <OP>`, `--acquired-at <TS>`, `ssh <host>`) must never read as
+# an option.
+_OPERATION_PATTERN = re.compile(r"[A-Za-z0-9:._][A-Za-z0-9:._-]{0,119}")
+_TIMESTAMP_PATTERN = re.compile(r"[0-9][0-9T:.+Z-]{0,39}")
+_HOST_PATTERN = re.compile(r"[A-Za-z0-9._@][A-Za-z0-9._@-]{0,252}")
 
 Classification = Literal["no-hold", "orphaned", "owned", "stranded", "undetermined"]
 HoldReading = Literal["present", "absent", "invalid", "unknown"]
@@ -116,7 +119,9 @@ class Triage:
 
 
 def _mapping(value: object, where: str) -> Payload:
-    if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
+    if not isinstance(value, dict):
+        raise TypeError(f"{where} must be a string-keyed object")
+    if not all(isinstance(key, str) for key in cast("dict[object, object]", value)):
         raise TypeError(f"{where} must be a string-keyed object")
     return cast("Payload", value)
 
@@ -158,6 +163,13 @@ def _whitelisted(value: object, pattern: re.Pattern[str]) -> str | None:
     return None
 
 
+def _validated_host(host: str) -> str:
+    """The ssh target unchanged, or ValueError (a leading `-` reads as an ssh option)."""
+    if not _HOST_PATTERN.fullmatch(host):
+        raise ValueError(f"invalid ssh host: {host!r}")
+    return host
+
+
 def _age_seconds(acquired_at: str | None, now: float) -> int | None:
     if acquired_at is None:
         return None
@@ -178,8 +190,11 @@ def render_command(
     Two rows only: a pre-stop hold resumes ``--cancel``; a stop-class hold is
     restarted end-to-end. An uncovered or unknown phase renders none. A value
     that failed the whitelist renders as ``?`` -- visibly incomplete, never
-    remote free text.
+    remote free text. An invalid host renders none too (defense in depth;
+    `triage` validates earlier).
     """
+    if not _HOST_PATTERN.fullmatch(host):
+        return None
     if phase in _RESUME_PHASES:
         return (
             f"ssh {host} 'cd ~/.ava/source && .venv/bin/ava maintenance resume"
@@ -280,6 +295,12 @@ def classify_status(payload: Payload, *, host: str, now: float | None = None) ->
     )
     operation = _whitelisted(payload["operation"], _OPERATION_PATTERN)
     acquired_at = _whitelisted(payload["acquired_at"], _TIMESTAMP_PATTERN)
+    # The judgments mirror the controller's stranded-hold verdict
+    # (ops/controllers/stranded_pause.py, `stranded_hold_verdict`): failed
+    # receipts read `stranded` (never releasable), a dead shepherd with none
+    # reads `orphaned`, and a missing/unreadable shepherd is never a release
+    # license (shared/hold_driver.py: `missing` is definitional, only `dead`
+    # is the unambiguous birth-checked absence) -- so both stay `undetermined`.
     if failures > 0:
         classification: Classification = "stranded"
     elif driver == "dead":
@@ -409,8 +430,10 @@ def triage(
 
     Primary read is `ava maintenance status`; when it fails or surprises, the
     raw journal is read; when that fails too, the degraded line. A failed read
-    never blocks producing a triage.
+    never blocks producing a triage; an invalid host raises ValueError before
+    any read.
     """
+    host = _validated_host(host)
     reader = _make_reader(connect_timeout_s, command_timeout_s) if read is None else read
     status_payload = reader(host, _STATUS_COMMAND)
     if status_payload is not None:
@@ -476,9 +499,10 @@ def main(argv: list[str] | None = None) -> int:
         help="hard bound per read (default: %(default)s)",
     )
     args = parser.parse_args(argv)
-    host = cast(str, args.host)
-    if not _HOST_PATTERN.fullmatch(host):
-        parser.error(f"invalid --host: {host!r}")
+    try:
+        host = _validated_host(cast(str, args.host))
+    except ValueError as error:
+        parser.error(str(error))
     result = triage(
         host,
         connect_timeout_s=cast(float, args.connect_timeout),

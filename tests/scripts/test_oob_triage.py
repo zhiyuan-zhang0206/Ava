@@ -18,6 +18,7 @@ import json
 import sys
 from pathlib import Path
 from types import ModuleType
+from typing import cast
 
 import pytest
 
@@ -80,8 +81,7 @@ def _status_payload(
     if phase is None:
         payload["maintenance"] = None
     else:
-        maintenance = copy.deepcopy(_STATUS_SAMPLE["maintenance"])
-        assert isinstance(maintenance, dict)
+        maintenance = cast("dict[str, object]", copy.deepcopy(_STATUS_SAMPLE["maintenance"]))
         maintenance["phase"] = phase
         maintenance["failures"] = {} if failures is None else failures
         payload["maintenance"] = maintenance
@@ -94,7 +94,7 @@ def _journal_payload(
     phase: str | None = "stopping",
     failures: dict[str, str] | None = None,
 ) -> dict[str, object]:
-    maintenance = (
+    maintenance: dict[str, object] | None = (
         None
         if phase is None
         else {
@@ -302,5 +302,128 @@ def test_host_pattern_accepts_aliases_and_rejects_free_text() -> None:
     module = _triage_module()
     assert module._HOST_PATTERN.fullmatch("wsl")
     assert module._HOST_PATTERN.fullmatch("user@host.example")
+    assert module._HOST_PATTERN.fullmatch("a" * 253)
+    assert module._HOST_PATTERN.fullmatch("a" * 254) is None
     assert module._HOST_PATTERN.fullmatch("bad host") is None
     assert module._HOST_PATTERN.fullmatch("evil;rm") is None
+    # A leading dash would read as an ssh option in the rendered command.
+    assert module._HOST_PATTERN.fullmatch("-oProxyCommand=x") is None
+    assert module._HOST_PATTERN.fullmatch("-N") is None
+
+
+def test_triage_and_render_command_defend_the_host_boundary() -> None:
+    module = _triage_module()
+
+    def never_read(host: str, command: str) -> dict[str, object] | None:
+        raise AssertionError("a read must not start for an invalid host")
+
+    with pytest.raises(ValueError):
+        module.triage("-OProxyCommand=sh", read=never_read)
+    assert module.render_command("-N", "stopping", None, None) is None
+
+
+class _Proc:
+    def __init__(self, returncode: int, stdout: str) -> None:
+        self.returncode = returncode
+        self.stdout = stdout
+
+
+def test_read_source_success_builds_the_bounded_argv(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _triage_module()
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def fake_run(argv: list[str], **kwargs: object) -> _Proc:
+        calls.append((argv, kwargs))
+        return _Proc(0, '{"status": "paused"}')
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    payload = module._read_source(
+        "wsl", module._STATUS_COMMAND, connect_timeout_s=5.0, command_timeout_s=10.0
+    )
+    assert payload == {"status": "paused"}
+    argv, kwargs = calls[0]
+    assert argv == [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "wsl",
+        module._STATUS_COMMAND,
+    ]
+    assert kwargs["timeout"] == 10.0
+    assert kwargs["check"] is False
+    assert kwargs["capture_output"] is True
+    assert kwargs["text"] is True
+
+
+def test_read_source_degrades_on_every_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _triage_module()
+
+    def run_returning(returncode: int, stdout: str):
+        def fake_run(argv: list[str], **kwargs: object) -> _Proc:
+            return _Proc(returncode, stdout)
+
+        return fake_run
+
+    def run_raising(error: BaseException):
+        def fake_run(argv: list[str], **kwargs: object) -> _Proc:
+            raise error
+
+        return fake_run
+
+    failure_runs = [
+        run_returning(255, ""),  # ssh / remote command failed
+        run_returning(0, "not json"),  # non-JSON stdout
+        run_returning(0, "[1, 2]"),  # JSON, but not an object
+        run_raising(module.subprocess.TimeoutExpired("ssh", 10.0)),
+        run_raising(OSError("boom")),
+    ]
+    for fake_run in failure_runs:
+        monkeypatch.setattr(module.subprocess, "run", fake_run)
+        assert (
+            module._read_source(
+                "wsl", module._STATUS_COMMAND, connect_timeout_s=5.0, command_timeout_s=10.0
+            )
+            is None
+        )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "bad op",
+        "bad'quote",
+        'bad"quote',
+        "back`tick",
+        "dollar$var",
+        "line\nbreak",
+        "-leading-dash",
+        "semi;colon",
+        "slash/here",
+        "hash#note",
+    ],
+)
+def test_operation_whitelist_rejects_non_pattern_characters(value: str) -> None:
+    module = _triage_module()
+    assert module._whitelisted(value, module._OPERATION_PATTERN) is None
+
+
+def test_operation_whitelist_bounds_and_accepts_the_real_shape() -> None:
+    module = _triage_module()
+    real = "local-pause:wsl:1137224:aaa93de5-0a30-4536-bdb6-b185ff515605"
+    assert module._whitelisted(real, module._OPERATION_PATTERN) == real
+    assert module._whitelisted("a" * 120, module._OPERATION_PATTERN) == "a" * 120
+    assert module._whitelisted("a" * 121, module._OPERATION_PATTERN) is None
+
+
+@pytest.mark.parametrize("value", ["x", "-2026-09-17", " 2026-09-17T00:00:00Z", "2026/09/17"])
+def test_timestamp_whitelist_rejects(value: str) -> None:
+    module = _triage_module()
+    assert module._whitelisted(value, module._TIMESTAMP_PATTERN) is None
+
+
+def test_timestamp_whitelist_accepts_the_real_shape() -> None:
+    module = _triage_module()
+    real = "2026-09-17T00:42:14.184784+00:00"
+    assert module._whitelisted(real, module._TIMESTAMP_PATTERN) == real
