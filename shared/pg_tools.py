@@ -39,6 +39,7 @@ from shared.pg_foreground import (
 )
 from shared.pg_stall_watchdog import fixture_log_artifact_dir, stall_guard
 from shared.platform import IS_MACOS, IS_WINDOWS
+from shared.process_env import inherited_process_env
 
 PG_BIN_LINUX = Path("/usr/lib/postgresql/17/bin")
 PG_BIN_WINDOWS = Path("C:\\Program Files\\PostgreSQL\\17\\bin")  # EDB installer default
@@ -101,6 +102,37 @@ def pg_tz_args() -> str:
     See `_PG_TZ_ARGS` above for why. Unlike `pg_shm_args`, this one has no
     platform exception — every PG startup path in this codebase sets it."""
     return _PG_TZ_ARGS
+
+
+# macOS postmaster locale fallback (Task #3754). With no LC_ALL/LANG in the
+# environment, locale init goes through CoreFoundation, which spawns a thread,
+# and the postmaster refuses to run multithreaded: it aborts with "postmaster
+# became multithreaded during startup" (HINT: set LC_ALL to a valid locale).
+# A launchd job and a non-interactive ssh session both start `ava` with no
+# locale at all — so PG is handed one instead of inheriting the caller's
+# emptiness. Verified 2026-09-17 on macOS against Homebrew postgresql@17
+# (17.11): nothing at all fails, an empty LC_ALL fails, LC_CTYPE alone fails
+# (a locale-less Python start fills exactly that one variable via its own
+# C-locale coercion — not enough), any non-empty LC_ALL/LANG starts; initdb
+# needs none of this. The environment
+# stays the override (a caller that sets LC_ALL/LANG keeps it verbatim), and
+# Linux gets nothing — its absent locale resolves to C without threads, and a
+# minimal image may not even have en_US.UTF-8 generated.
+_MACOS_PG_LOCALE = "en_US.UTF-8"
+
+
+def pg_start_env() -> dict[str, str]:
+    """The child environment for starting a Postgres server.
+
+    The caller's live environment, with `LC_ALL` supplied when it carries
+    neither `LC_ALL` nor `LANG` (macOS only — see `_MACOS_PG_LOCALE`). Pass
+    this as `env=` to the `pg_ctl start` invocation (or a direct `postgres`
+    spawn): pg_ctl hands its environment to the postmaster, and the macOS
+    postmaster aborts at startup when that environment has no locale."""
+    env = inherited_process_env()
+    if is_macos() and not env.get("LC_ALL") and not env.get("LANG"):
+        env["LC_ALL"] = _MACOS_PG_LOCALE
+    return env
 
 
 # Prefix of every throwaway instance directory this module creates. Load-bearing:
@@ -664,6 +696,7 @@ def throwaway_postgres(
                             *shlex.split(f"{pg_tz_args()} {pg_shm_args()}"),
                         ],
                         log=log,
+                        env=pg_start_env(),
                     )
                     wait_foreground_postgres(process, log=log, port=port, data=data)
                 else:
@@ -692,6 +725,7 @@ def throwaway_postgres(
                         ],
                         check=True,
                         capture_output=True,
+                        env=pg_start_env(),
                     )
             except subprocess.CalledProcessError as exc:
                 if _is_port_bind_failure(exc, log) and attempt < _PG_START_ATTEMPTS:

@@ -58,7 +58,15 @@ from shared.machine import reachable_host
 from shared.paths import ava_home
 from shared.pg_admin import live_pg_socket_dir, pg_socket_dir
 from shared.pg_admin import pg_admin_url as _shared_pg_admin_url
-from shared.pg_tools import PG_BIN_LINUX, brew_prefix, is_macos, pg_shm_args, pg_tool, pg_tz_args
+from shared.pg_tools import (
+    PG_BIN_LINUX,
+    brew_prefix,
+    is_macos,
+    pg_shm_args,
+    pg_start_env,
+    pg_tool,
+    pg_tz_args,
+)
 from shared.platform_backend import get_backend
 from shared.private_storage import write_private_bytes
 from shared.process_env import inherited_process_env
@@ -362,6 +370,7 @@ def _start_pg(pg_port: int, cluster_secret: str) -> int:
         check=False,
         capture_output=True,
         text=True,
+        env=pg_start_env(),
     )
     if result.returncode != 0:
         print(
