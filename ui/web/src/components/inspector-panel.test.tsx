@@ -211,6 +211,7 @@ function liveFixture(overrides: Partial<AgentInspectLive> = {}): AgentInspectLiv
   return {
     agent_id: 1,
     machine: "test-host",
+    status: "running",
     liveness_state: "online",
     last_probe_at: null,
     shells_available: true,
@@ -1465,6 +1466,16 @@ describe("InspectorPanel liveness (merged section, Task #1195)", () => {
     expect(screen.queryByText("offline")).toBeNull();
     expect(container.querySelector(".text-destructive")).not.toBeNull();
     expect(screen.queryByText("never")).toBeNull();
+  });
+
+  it("shows the machine and lifecycle status (task #3904)", async () => {
+    getAgentInspectLive.mockResolvedValue(liveFixture({ liveness_state: "online" }));
+    render(<InspectorPanel agentId={1} />);
+    await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
+    expect(screen.getByText("Machine")).toBeTruthy();
+    expect(screen.getByText("test-host")).toBeTruthy();
+    expect(screen.getByText("Status")).toBeTruthy();
+    expect(screen.getByText("Running")).toBeTruthy();
   });
 });
 

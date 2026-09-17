@@ -30,7 +30,6 @@
 // plain items fire immediately with no prompt. The destructive Kill
 // (SIGKILL) sits behind a confirm so it can't be hit by accident.
 
-import { useQuery } from "@tanstack/react-query";
 import { GitFork, Loader2, PowerOff, RotateCw, Shrink, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
@@ -43,7 +42,6 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import { api } from "@/lib/api";
 import { useUserSettings } from "@/lib/use-user-settings";
 import type { TimeMode, DateFormat } from "@/lib/types";
 import { PRIORITY_BG } from "@/lib/notices";
@@ -184,27 +182,7 @@ export function AgentRow({
     return () => clearInterval(id);
   }, []);
 
-  // Single-machine deployments: machine badge is noise; only show on
-  // multi-machine setups so the user can see where each agent runs. Use
-  // cluster.machines.length (registered count) rather than filter(online):
-  // the latter hides every badge when one of two cluster machines is
-  // briefly offline — exactly when the user most needs to see placement.
-  // queryKey ["status"] shares cache with the Control page / SpawnButton;
-  // TanStack Query dedupes, so no extra fetch.
-  // machine='unknown' is the db default (manual INSERT / old row not
-  // backfilled); skip rendering to avoid printing the literal "unknown"
-  // into the sidebar.
-  const { data: status } = useQuery({
-    queryKey: ["status"],
-    queryFn: api.getSystemStatus,
-  });
-  const machineCount = status?.cluster.machines.length ?? 0;
-  const multiMachine = machineCount >= 2 && agent.machine !== "unknown";
-  // User setting can override: if explicitly disabled, hide; if enabled and
-  // multi-machine, show.
   const { settings: userSettings } = useUserSettings();
-  const showMachineSetting = userSettings["display.show_machine_name"] !== false;
-  const showMachine = showMachineSetting ? multiMachine : false;
   const rawTimeMode = userSettings["display.time_mode"];
   const timeMode: TimeMode =
     rawTimeMode === "last_active" || rawTimeMode === "spawned" || rawTimeMode === "hidden"
@@ -392,13 +370,6 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
                 </span>
               )}
             </span>
-            {showMachine ? (
-              <span
-                className="text-[10px] opacity-60 shrink-0 px-1 rounded border border-border/50"
-              >
-                {agent.machine}
-              </span>
-            ) : null}
             {showTime ? (
               <span className="text-[10px] opacity-60 shrink-0 tabular-nums">
                 {absTime}

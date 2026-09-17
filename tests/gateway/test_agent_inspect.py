@@ -140,6 +140,7 @@ def test_inspect_live_returns_only_window_independent_fields(
     assert set(body) == {
         "agent_id",
         "machine",
+        "status",
         "liveness_state",
         "last_probe_at",
         "observation",
@@ -154,6 +155,7 @@ def test_inspect_live_returns_only_window_independent_fields(
     }
     assert body["agent_id"] == aid
     assert body["machine"] == "wsl"
+    assert body["status"] == "idling"
     assert body["shells_available"] is True
     assert body["observation"]["runtime_owner"] == "unknown"
     assert body["config_overlay"] == {"llm_model": "claude-opus-4-8"}
