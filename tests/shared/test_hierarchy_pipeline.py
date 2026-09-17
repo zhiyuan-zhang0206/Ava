@@ -9,6 +9,7 @@ child's text. Model calls go through a deterministic fake — no network.
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from collections.abc import Callable, Sequence
@@ -337,3 +338,113 @@ def test_growth_replays_sealed_batches_and_recuts_only_the_tail(
     spans2 = {node.span for node in second.nodes if node.level == 1}
     assert spans1 == {(0, 14), (15, 29), (31, 40)}
     assert spans2 == {(0, 14), (15, 29), (31, 47)}
+
+
+# ---- generation budget + ordering (task #3704 P2b) ----
+
+
+def _leaf_group(nid: str, units: Sequence[Unit], span: tuple[int, int]) -> NodeSpec:
+    """A hand-built level-1 group over `units` (the budget tests' fixture)."""
+    return NodeSpec(
+        nid=nid,
+        level=1,
+        units=tuple(units),
+        kind="group",
+        src_tok=sum(u.tok for u in units),
+        span=span,
+        at=(T0, T0),
+        trigger="t1",
+    )
+
+
+def _group_fixture(count: int) -> tuple[list[BaseMessage], SealResult, dict[str, Any]]:
+    """`count` level-1 groups of 4 units each, over fresh inbound messages."""
+    msgs: list[BaseMessage] = [inbound(f"m{i}") for i in range(count * 4)]
+    _items, _blocks, (units, table) = render_all(msgs)
+    groups = [
+        _leaf_group(f"L1#{i + 1}", units[i * 4 : (i + 1) * 4], (i * 4, i * 4 + 3))
+        for i in range(count)
+    ]
+    return msgs, SealResult(nodes=tuple(groups), pending={}, max_level=1), table
+
+
+def test_deadline_already_passed_skips_everything_without_a_call() -> None:
+    """A budget that is already spent stops before the first chunk: nothing is
+    attempted, everything is `skipped`, and no model call happens."""
+    msgs, sealed, table = _group_fixture(3)
+    fake = FakeLLM(lambda _m: "text")
+    tree = materialize(
+        msgs,
+        sealed,
+        table,
+        llm=fake,
+        model=MODEL,
+        retry_attempts=0,
+        deadline=time.monotonic() - 1,
+    )
+    assert tree.nodes == ()
+    assert tree.errors == ()
+    assert tree.skipped == 3
+    assert tree.generated == 0 and tree.reused == 0
+    assert fake.calls == []
+
+
+def test_deadline_stops_between_chunks_and_continuation_completes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The slicing contract: a deadline stops generation between chunks only,
+    the stopped nodes stay `skipped`, and a continuation run — same tree, the
+    produced texts offered as known — generates exactly the remainder."""
+    msgs, sealed, table = _group_fixture(5)
+    # max_concurrent=1 -> a chunk is 4 calls; the deadline read after the first
+    # chunk (second read) is past it, so exactly one node stays unattempted.
+    ticks = iter([0.0, 100.0])
+    monkeypatch.setattr(pipeline_module.time, "monotonic", lambda: next(ticks, 100.0))
+    fake = FakeLLM(lambda _m: "first pass")
+    first = materialize(
+        msgs,
+        sealed,
+        table,
+        llm=fake,
+        model=MODEL,
+        retry_attempts=0,
+        max_concurrent=1,
+        deadline=50.0,
+    )
+    assert len(fake.calls) == 4
+    assert first.skipped == 1
+    assert first.generated == 4
+
+    known = {node.input_hash: node.text for node in first.nodes}
+    fake2 = FakeLLM(lambda _m: "continuation")
+    second = materialize(
+        msgs,
+        sealed,
+        table,
+        llm=fake2,
+        model=MODEL,
+        retry_attempts=0,
+        max_concurrent=1,
+        known_texts=known,
+    )
+    assert second.skipped == 0
+    assert len(fake2.calls) == 1  # exactly the skipped node — nothing redone
+    assert len(second.nodes) == 5
+
+
+def test_generation_is_newest_first_within_a_level() -> None:
+    """Within a level nodes are independent, so they generate newest-span
+    first — the priority a budget-truncated run leaves its coverage on."""
+    msgs, sealed, table = _group_fixture(5)
+    fake = FakeLLM(lambda _m: "text")
+    tree = materialize(
+        msgs, sealed, table, llm=fake, model=MODEL, retry_attempts=0, max_concurrent=1
+    )
+    assert tree.skipped == 0 and len(tree.nodes) == 5
+    spans: list[tuple[int, int]] = []
+    for call in fake.calls:
+        head = call_material(call).splitlines()[0]
+        match = re.search(r"i(\d+)-i(\d+)", head)
+        assert match is not None
+        spans.append((int(match.group(1)), int(match.group(2))))
+    assert spans == [(16, 19), (12, 15), (8, 11), (4, 7), (0, 3)]
