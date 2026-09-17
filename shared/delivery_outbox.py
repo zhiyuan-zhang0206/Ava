@@ -277,7 +277,14 @@ def _write_atomic(path: Path, entry: OutboxEntry) -> None:
 
 
 def _read(path: Path) -> OutboxEntry | None:
-    """Parse one record; None for unreadable/drifted files (kept for inspection)."""
+    """Parse one record; None for unreadable/drifted files (kept for inspection).
+
+    A record whose timestamps do not parse — or that lack a timezone — is
+    unreadable too, and is rejected HERE: every consumer (the flush loop, the
+    retry ladder, the retention predicate, the fingerprint-merge scan) subtracts
+    these fields inside its own per-record handling, so a raise from there would
+    abort the whole pass — one corrupt record would wedge every later one.
+    """
     try:
         raw = json.loads(path.read_text())
         if not isinstance(raw, dict):
@@ -308,16 +315,24 @@ def _read(path: Path) -> OutboxEntry | None:
             abandon_reason=cast("str | None", raw.get("abandon_reason")),
             abandoned_at=cast("str | None", raw.get("abandoned_at")),
         )
+        # Timestamps must parse (and carry a timezone) before anything consumes
+        # them — see the docstring.
+        created = _parse_iso(entry.created_at)
+        _parse_iso(entry.last_attempt_at)
+        if entry.last_flush_at is not None:
+            _parse_iso(entry.last_flush_at)
+        if entry.abandoned_at is not None:
+            _parse_iso(entry.abandoned_at)
+        # The filename carries the fingerprint — a record whose content no longer
+        # matches its name was corrupted or hand-edited; never trust it.
+        expected = _entry_path_name(
+            entry.agent_id,
+            fingerprint(entry.agent_id, entry.source, entry.content),
+            created,
+        )
+        if path.name != expected:
+            return None
     except (ValueError, KeyError, TypeError, OSError):
-        return None
-    # The filename carries the fingerprint — a record whose content no longer
-    # matches its name was corrupted or hand-edited; never trust it.
-    expected = _entry_path_name(
-        entry.agent_id,
-        fingerprint(entry.agent_id, entry.source, entry.content),
-        _parse_iso(entry.created_at),
-    )
-    if path.name != expected:
         return None
     return entry
 
@@ -624,8 +639,10 @@ def flush(pool: FlushPool, *, now: datetime | None = None) -> FlushReport:
     chance once services return), and a successful attempt delivers at any age.
     An abandoned record is also expired — this pass prunes it — once
     `delivery_outbox_abandoned_retention_days` have elapsed since abandonment.
-    While the outbox is disabled, nothing is touched and records stay for a
-    re-enable or the operator.
+    A file that fails to parse (bad JSON, drifted schema, unparseable
+    timestamps) is counted unreadable and kept for inspection; it never stops
+    the pass. While the outbox is disabled, nothing is touched and records
+    stay for a re-enable or the operator.
     """
     snapshot = limits()
     moment = now or datetime.now(UTC)
