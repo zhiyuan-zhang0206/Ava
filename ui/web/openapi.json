@@ -3766,6 +3766,46 @@
         }
       }
     },
+    "/api/agents/{agent_id}/conversation-snapshot": {
+      "get": {
+        "summary": "Get Conversation Snapshot",
+        "description": "Compose the three conversation reads in one round trip.\n\nCalls the standalone routes' own functions — no duplicated logic. A\nnonexistent agent 404s through the timeline read, matching\n`GET .../timeline` (token usage and pending tolerate absence, but are not\nreached then).",
+        "operationId": "get_conversation_snapshot_api_agents__agent_id__conversation_snapshot_get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationSnapshotResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/config/default-model": {
       "get": {
         "summary": "Get Default Model",
@@ -8963,6 +9003,31 @@
         ],
         "title": "ContextSection",
         "description": "One node of the system prompt's recursive section breakdown: a heading — or\nthe `(preamble)` / `(intro)` prose before the first sub-heading — with its\n(normalized) token estimate. A section over ~1000 tokens is drilled into its\nnext-level sub-headings as `children` (recursively); a smaller section, or one\nwith no deeper heading, is a leaf (`children == []`). When `children` is\nnon-empty their tokens sum to this node's `tokens`."
+      },
+      "ConversationSnapshotResponse": {
+        "properties": {
+          "timeline": {
+            "$ref": "#/components/schemas/TimelineResponse"
+          },
+          "token_usage": {
+            "$ref": "#/components/schemas/TokenUsageResponse"
+          },
+          "pending": {
+            "items": {
+              "$ref": "#/components/schemas/PendingInbound"
+            },
+            "type": "array",
+            "title": "Pending"
+          }
+        },
+        "type": "object",
+        "required": [
+          "timeline",
+          "token_usage",
+          "pending"
+        ],
+        "title": "ConversationSnapshotResponse",
+        "description": "The selected agent's three conversation read models, one point in time.\n\n`timeline` carries the same head window `GET .../timeline` serves (no\ncursor); `token_usage` and `pending` mirror their standalone endpoints\nsection-for-section (drift is caught by the side-by-side contract test)."
       },
       "DefaultModelView": {
         "properties": {

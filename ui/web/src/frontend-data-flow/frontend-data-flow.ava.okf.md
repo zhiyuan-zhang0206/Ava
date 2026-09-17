@@ -21,8 +21,10 @@ Server data enters UI via React Query cache, kept live by SSE while visible; hid
 The detail stream exists only while an authenticated, visible page has a selected
 agent. Clearing selection closes it; selection changes replace it. No inactive
 or previously visited agent remains subscribed. Hidden pages do not replace SSE
-with polling. Reopening repairs the selected timeline, token usage, pending
-messages, and the global read models. Alerts retain a separate domain stream.
+with polling. Reopening refreshes the selected timeline, token usage, and
+pending messages with one composed reconcile read (`/conversation-snapshot`,
+agent-reconcile.ts) and repairs the global read models. Alerts retain a
+separate domain stream.
 Multiple hooks share one EventSource, and disposed connections discard late
 callbacks. `withCredentials` carries the session cookie through gateway auth.
 

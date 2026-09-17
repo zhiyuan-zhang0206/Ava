@@ -22,6 +22,7 @@ import type { NoticesFeed,
   WireAgentDirectoryPage,
   AgentRoster,
   AgentDirectoryPage,
+  ConversationSnapshotResponse,
   ContextBreakdownResponse,
   DefaultModelView,
   AlertsResponse,
@@ -222,6 +223,20 @@ export const api = {
 
   getTokenUsage: (agentId: number, signal?: AbortSignal): Promise<TokenUsageResponse> => {
     return f(`/api/agents/${agentId}/token-usage`, { signal }).then(ok<TokenUsageResponse>);
+  },
+
+  // One switch-refresh read of the selected agent's three conversation
+  // models (task #3900 batch 2): head timeline window + token usage +
+  // pending inbounds in a single round trip. The three sections are written
+  // into the same query keys the standalone readers use (agent-reconcile.ts);
+  // those endpoints stay authoritative for first paint and their own readers.
+  getConversationSnapshot: (
+    agentId: number,
+    signal?: AbortSignal,
+  ): Promise<ConversationSnapshotResponse> => {
+    return f(`/api/agents/${agentId}/conversation-snapshot`, { signal }).then(
+      ok<ConversationSnapshotResponse>,
+    );
   },
 
   getContextBreakdown: (agentId: number): Promise<ContextBreakdownResponse> => {

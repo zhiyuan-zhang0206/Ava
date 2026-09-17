@@ -15,12 +15,13 @@ tags:
 | `useFleetAgents` | `/fleet` read-only agents (pure-read shares `AGENTS_QUERY_KEY` cache) |
 | `useFleetGraph` | Fleet relationship graph (GraphView data source); SSE invalidation + 30s reconciliation poll, served from the backend's 60s whole-response cache |
 | `useTasks` | [[ui/web/src/frontend-data-flow/task-list.ava.okf.md|Task list data flow]] |
-| `useTimeline` | selected timeline tail + live SSE fold, with abortable older-history paging and opening-gap repair; see [[ui/web/src/frontend-state/frontend-state.ava.okf.md|State management]] |
-| `useTokenUsage` | selected context occupancy (abortable activation read + SSE token_usage + opening-gap repair) |
+| `useTimeline` | selected timeline tail + live SSE fold, with abortable older-history paging; the retained window (30min) seeds a switch back and the shared composed reconcile refreshes it; see [[ui/web/src/frontend-state/frontend-state.ava.okf.md|State management]] |
+| `useTokenUsage` | selected context occupancy (abortable cold read + SSE token_usage; a retained snapshot seeds a switch back and the shared composed reconcile refreshes it) |
 | `useCompactHistoryRetention` | consumes the store's compact-replace edge (`compactReplaceSeq`): re-attaches the newest `display.compact_history_sessions` previous segments above the new compact summary through the scroll-up fetch path (task #3698) |
 | `useAgentPages` | single agent opened pages (InspectorPanel, SSE folds page_opened/closed into cache, replaces deleted PageDock/use-fleet-pages) |
 | `useAllPages` (#655) | fleet-wide opened pages fetched once + SSE incremental fold (Inbox attaches associated page links to notices, avoids N+1 per-agent requests) |
-| `usePendingMessages` | selected pending inbound queue with abortable reads and bounded hint repair; the page hides items already visible in the timeline (takeover capture, #3683) |
+| `usePendingMessages` | selected pending inbound queue with abortable reads and bounded queue-event hint repair (the open gap belongs to the shared composed reconcile); the page hides items already visible in the timeline (takeover capture, #3683) |
+| `useAgentReconcile` (`lib/agent-reconcile.ts`) | the conversation trio's one composed re-attach read (`GET /api/agents/{id}/conversation-snapshot`), shared by `useTimeline`/`useTokenUsage`/`usePendingMessages`: joins reads in flight (write last), trails a hint that arrives during a read, drops a snapshot superseded by a newer write, aborts with the last reader, and falls back to three per-domain invalidations on failure (task #3900) |
 | Run timeline page | one on-demand React Query read of `GET /api/agents/{id}/run-timeline` per agent/window/session/level; it does not subscribe or poll, requests turns first for a server-selected session, requests one-hour buckets up front for an explicit window of at least six hours, and falls back to buckets before rendering a turn response above 400 rows |
 
 Message POSTs are bounded across both headers and body consumption. A timeout,
