@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
-import { RunTimelineChart, type RunTimelineChartLabels } from "@/components/run-timeline/run-timeline-chart";
+import { RunTimelineChart } from "@/components/run-timeline/run-timeline-chart";
 import {
   bucketLabel,
   centerZoomWindow,
@@ -16,69 +16,23 @@ import {
 } from "@/components/run-timeline/request-level";
 import { buttonVariants } from "@/components/ui/button";
 import { api } from "@/lib/api";
+import { compareHref } from "@/lib/compare-links";
 import { formatTokensCompact } from "@/lib/format-number";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
 import type { RunTimelineResponse } from "@/lib/types";
 import { useUserSettings } from "@/lib/use-user-settings";
 import { cn } from "@/lib/utils";
 
-const ZOOM_WINDOWS = [24, 12, 6, 1, 0.5] as const;
-const RUN_TIMELINE_WINDOW_HOURS_SETTING = "display.run_timeline_window_hours";
-// KEEP (task #3696 exception inventory): fallback when the per-user setting is
-// unset — the smallest window the zoom control offers (ZOOM_WINDOWS bottoms
-// out at 0.5h), so the page opens focused on the freshest slice.
-const RUN_TIMELINE_WINDOW_HOURS_DEFAULT = 0.5;
-const RUN_TIMELINE_SUMMARY_VISIBLE_SETTING = "display.run_timeline_summary_visible";
-
-function runTimelineWindowHours(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) && value > 0
-    ? value
-    : RUN_TIMELINE_WINDOW_HOURS_DEFAULT;
-}
-
-function dateTimeInputValue(iso: string): string {
-  const date = new Date(iso);
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-function chartLabels(t: ReturnType<typeof useTranslations<"runTimeline">>): RunTimelineChartLabels {
-  return {
-    chart: t("chartAriaLabel"),
-    visualization: t("visualizationAriaLabel"),
-    time: t("time"),
-    eventRail: t("eventRail"),
-    input: t("input"),
-    output: t("output"),
-    turn: t("turn"),
-    bucket: t("bucket"),
-    cost: t("cost"),
-    model: t("model"),
-    empty: t("empty"),
-    moreEvents: (count, summary) => t("moreEvents", { count, summary }),
-    turnDetails: t("turnDetails"),
-    timeRange: t("timeRange"),
-    activeSeconds: t("activeSeconds"),
-    latency: t("latency"),
-    executions: t("executions"),
-    tool: t("tool"),
-    status: t("status"),
-    succeeded: t("succeeded"),
-    failed: t("failed"),
-    anomalies: t("anomalies"),
-    none: t("none"),
-    noExecutions: t("noExecutions"),
-    closeDetails: t("closeDetails"),
-    eventDetails: t("eventDetails"),
-    layerDetails: t("layerDetails"),
-    layerSummary: t("layerSummary"),
-    showMore: t("showMore"),
-    showLess: t("showLess"),
-    kind: t("kind"),
-    timestamp: t("timestamp"),
-    detail: t("detail"),
-  };
-}
+import {
+  RUN_TIMELINE_SUMMARY_VISIBLE_SETTING,
+  RUN_TIMELINE_WINDOW_HOURS_SETTING,
+  RUN_TIMELINE_ZOOM_HOURS,
+  chartLabels,
+  dateTimeInputValue,
+  initialTimelineWindow,
+  runTimelineWindowHours,
+  zoomPresetLabel,
+} from "../../_run-timeline-shared";
 
 /** Run-level tracing page. The backend selects the initialized-context session on first load. */
 export default function RunTimelinePage({
@@ -97,11 +51,7 @@ export default function RunTimelinePage({
   const showTimelineSummaries = settings[RUN_TIMELINE_SUMMARY_VISIBLE_SETTING] !== false;
   const initialWindowOverride = useMemo<TimelineWindowOverride | null>(() => {
     if (settingsLoading || typeof window === "undefined") return null;
-    const now = new Date();
-    return {
-      from: new Date(now.getTime() - configuredWindowHours * 60 * 60 * 1000).toISOString(),
-      to: now.toISOString(),
-    };
+    return initialTimelineWindow(configuredWindowHours, new Date());
   }, [configuredWindowHours, settingsLoading]);
   // `undefined` means settings have not supplied the one-time initial window;
   // `null` remains the user's explicit reset to the full session.
@@ -189,10 +139,7 @@ export default function RunTimelinePage({
           presetSpanMs / (Date.parse(timeline.window.to) - Date.parse(timeline.window.from)),
           now,
         )
-      : {
-          from: new Date(now.getTime() - presetSpanMs).toISOString(),
-          to: now.toISOString(),
-        };
+      : initialTimelineWindow(hours, now);
     selectWindow(next);
   };
 
@@ -248,6 +195,14 @@ export default function RunTimelinePage({
         <div className={cn(FLEX_1, MIN_W_0)}>
           <h1 className="truncate text-sm font-semibold">{t("title", { agentId: agentId ?? "—" })}</h1>
         </div>
+        {agentId !== null ? (
+          <Link
+            href={compareHref([agentId])}
+            className={buttonVariants({ size: "sm", variant: "ghost" })}
+          >
+            {t("compareOpen")}
+          </Link>
+        ) : null}
       </header>
 
       <div className="overflow-y-auto">
@@ -265,14 +220,14 @@ export default function RunTimelinePage({
                   })}
                 </span>
               ) : null}
-              {ZOOM_WINDOWS.map((hours) => (
+              {RUN_TIMELINE_ZOOM_HOURS.map((hours) => (
                 <button
                   key={hours}
                   type="button"
                   onClick={() => setZoomWindow(hours)}
                   className="rounded border border-border px-2 py-1 font-mono text-xs hover:bg-muted"
                 >
-                  {hours >= 1 ? `${hours}h` : "30m"}
+                  {zoomPresetLabel(hours)}
                 </button>
               ))}
               <button

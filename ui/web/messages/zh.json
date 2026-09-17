@@ -95,7 +95,19 @@
     "loading": "正在加载运行时间线…",
     "loadFailed": "无法加载运行时间线。",
     "retry": "重试",
-    "invalidAgent": "此 URL 中的 agent id 无效。"
+    "invalidAgent": "此 URL 中的 agent id 无效。",
+    "compareTitle": "运行时间线 — 对比",
+    "compareOpen": "对比",
+    "compareSelectorDescription": "在同一时间窗内并排对比 2–3 个 agent 的运行时间线。",
+    "compareAgentsLabel": "Agent 列表",
+    "compareAgentsHint": "输入 2–3 个 agent id，用逗号分隔。",
+    "compareSelectorInvalid": "请选择 2–3 个 agent 进行对比。",
+    "laneOpenSingle": "打开单视图",
+    "fitOverlap": "拟合到重叠区间",
+    "arrowsToggle": "消息箭头",
+    "arrowsOverlayLabel": "agent 间消息箭头",
+    "arrowReadout": "#{source} → #{target} · {time}",
+    "arrowReadoutHint": "悬停消息箭头查看详情。"
   },
   "nav": {
     "openSidebar": "打开侧边栏",

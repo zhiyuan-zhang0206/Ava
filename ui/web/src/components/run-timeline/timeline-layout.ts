@@ -70,11 +70,12 @@ export interface TimelineConnectorLayout {
   path: string;
 }
 
-/** The plot area insets for one canvas width — one source of truth for
- *  geometry consumers outside the chart (the compare-view arrow overlay). */
-export function plotGeometry(width: number): { left: number; width: number } {
+/** The plot geometry for one canvas width — one source of truth for
+ *  geometry consumers outside the chart (the compare-view arrow overlay):
+ *  the plot insets, and the time-axis y the event rail hangs off. */
+export function plotGeometry(width: number): { left: number; width: number; axisY: number } {
   const clamped = Math.max(320, Math.round(width));
-  return { left: CANVAS_PADDING, width: clamped - CANVAS_PADDING * 2 };
+  return { left: CANVAS_PADDING, width: clamped - CANVAS_PADDING * 2, axisY: AXIS_Y };
 }
 
 function projectedX(
