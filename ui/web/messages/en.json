@@ -772,17 +772,9 @@
       "legend": "Agent graph legend",
       "ariaLabel": "Fleet relationship graph",
       "window": "Graph window",
-      "staleSnapshot": "Stale — snapshot from {age}",
-      "staleLastKnown": "Stale — last known graph",
-      "telemetryDegraded": "Telemetry degraded — updates may lag",
-      "truncated": "Truncated — edge limit reached",
       "loading": "Loading...",
       "unavailable": "Graph unavailable.",
-      "empty": "No agents to graph.",
-      "snapshotNow": "less than a minute ago",
-      "snapshotMinutes": "{count}m ago",
-      "snapshotHours": "{count}h ago",
-      "snapshotDays": "{count}d ago"
+      "empty": "No agents to graph."
     },
     "task": {
       "status": {
