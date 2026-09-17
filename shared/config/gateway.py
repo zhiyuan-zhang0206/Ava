@@ -298,6 +298,31 @@ class GatewaySettings(EnvSettings):
         },
     )
 
+    gateway_graceful_shutdown_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        allow_inf_nan=False,
+        alias="AVA_GATEWAY_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS",
+        description=(
+            "Seconds uvicorn may drain in-flight connections after SIGTERM before it "
+            "cancels the remaining request/stream tasks and enters lifespan shutdown. "
+            "Bounds the connection-drain phase that stalled production on 2026-09-17: "
+            "with uvicorn's default (None) an unfinished SSE response held the drain in "
+            "'Waiting for connections to close' until a forced kill. Derivation: the "
+            "default maintenance stop deadline is 300s, and both this drain and the "
+            "lifespan cleanup that follows it must fit inside that deadline, so the "
+            "budget sits near a tenth of it; it also exceeds ordinary slow-request "
+            "durations, so a planned restart still lets normal work finish. A stuck "
+            "stream costs at most this budget, never the stop."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     gateway_port: int = Field(
         default=8000,
         alias="AVA_GATEWAY_PORT",
