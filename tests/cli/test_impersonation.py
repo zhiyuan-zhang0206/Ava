@@ -118,6 +118,42 @@ def test_request_uses_external_identity_without_delivering_a_credential(
     assert "starts the codex relay automatically" in output.err
 
 
+def test_request_records_the_shared_app_server_endpoint(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen: dict[str, Any] = {}
+
+    def request(agent_id: int, **kwargs: Any) -> dict[str, Any]:
+        seen.update({"agent_id": agent_id, **kwargs})
+        return {"id": "lease", "expires_at": datetime(2026, 9, 5, tzinfo=UTC)}
+
+    monkeypatch.setattr(sessions, "request", request)
+    endpoint = "unix:///home/u/.ava-lc/run/codex-app-server.0123456789ab-01234567.sock"
+    assert (
+        cli.cmd_impersonate(
+            _args(
+                "request",
+                "--name",
+                "Fix login",
+                "--agent",
+                "405",
+                "--as",
+                "Codex: task1",
+                "--provider",
+                "codex",
+                "--thread-id",
+                "thread-1",
+                "--codex-remote",
+                endpoint,
+            )
+        )
+        == 0
+    )
+    assert seen["codex_remote"] == endpoint
+    assert seen["thread_id"] == "thread-1"
+    assert "pass --codex-remote" in capsys.readouterr().err
+
+
 def test_claude_request_reports_the_relay_handoff(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

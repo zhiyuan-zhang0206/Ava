@@ -6,6 +6,7 @@ import datetime as dt
 import importlib.util
 import sys
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -34,6 +35,11 @@ def _load(name: str, path: Path) -> ModuleType:
 
 spawn_codex = _load("spawn_codex_under_test", _REFERENCE / "spawn_codex.py")
 watch_work = _load("watch_work_under_test", _REFERENCE / "watch_work.py")
+
+
+def _record_app_server(events: list[str], _endpoint: str) -> None:
+    """The takeover's readiness wait records as an event in launch-order tests."""
+    events.append("app-server")
 
 
 def _owner(tmp_path: Path) -> coding_session_owner.CodingSessionOwner:
@@ -308,6 +314,7 @@ def test_takeover_launch_inlines_brief_without_files_or_supervisor(
     monkeypatch.setattr(spawn_codex, "_launch_supervisor", _unexpected)
     monkeypatch.setattr(spawn_codex.coding_session_owner, "attach_supervisor", _unexpected)
     monkeypatch.setattr(spawn_codex, "_seed_codex_home", _seed)
+    monkeypatch.setattr(spawn_codex, "_wait_for_app_server", partial(_record_app_server, events))
     monkeypatch.setattr(spawn_codex.ava.shell.sessions, "new", _new)
     monkeypatch.setattr(spawn_codex.ava.shell.sessions, "send", _send)
     monkeypatch.setattr(spawn_codex, "_wait_for_ready", _ready)
@@ -319,12 +326,23 @@ def test_takeover_launch_inlines_brief_without_files_or_supervisor(
     rc = spawn_codex._launch(workspace, None, None, 3600, None, "Fix login", brief)
 
     assert rc == 0
-    assert events == ["claim", "seed", "new", "publish", "send", "ready", "send", "verified"]
-    assert sent[0].startswith(f"cd {workspace.as_posix()} && ")
-    message = sent[1]
-    assert "take over Ava agent 41" in message
-    assert brief in message
-    assert "tasks.md" not in message and "work.md" not in message
+    assert events == [
+        "claim",
+        "seed",
+        "new",
+        "publish",
+        "send",
+        "app-server",
+        "send",
+        "ready",
+        "send",
+        "verified",
+    ]
+    assert "codex app-server --listen" in sent[0]
+    assert sent[1].startswith("clear && ") and "exec codex --remote unix://" in sent[1]
+    assert "take over Ava agent 41" in sent[2]
+    assert brief in sent[2]
+    assert "tasks.md" not in sent[2] and "work.md" not in sent[2]
 
 
 def test_takeover_launch_refuses_a_workspace_with_a_live_generation(
