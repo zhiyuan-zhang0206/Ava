@@ -1,6 +1,7 @@
 """Self-takeover bootstrap names the launching agent, validates before launch, and pins the shared app-server topology."""
 
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 
@@ -77,6 +78,8 @@ def test_takeover_launcher_wires_one_explicit_shared_app_server(tmp_path: Path) 
     tui = module._codex_command(owner, workspace, None, remote=endpoint)
     assert f"codex app-server --listen {endpoint}" in server
     assert "AP=${!}" in server and "kill $AP" in server
+    assert "if ! kill -0 $$ 2>/dev/null; then" in server
+    assert "ps -p $AP -o command= 2>/dev/null | grep -q 'app-server'" in server
     assert f"rm -f {endpoint.removeprefix('unix://')}" in server
     assert 'approval_policy="never"' in server
     assert 'sandbox_mode="danger-full-access"' in server
@@ -137,8 +140,128 @@ def test_app_server_wait_accepts_a_bound_socket() -> None:
 
 def test_app_server_wait_fails_loudly_when_absent(tmp_path: Path) -> None:
     module = _load_spawn("takeover_spawn_codex_wait_missing")
-    with pytest.raises(RuntimeError, match="did not become ready"):
-        module._wait_for_app_server(f"unix://{tmp_path}/missing.sock", timeout=0.4)
+    log_path = tmp_path / "app-server.log"
+    with pytest.raises(RuntimeError, match="did not become ready") as excinfo:
+        module._wait_for_app_server(
+            f"unix://{tmp_path}/missing.sock", timeout=0.4, log_path=log_path
+        )
+    assert str(log_path) in str(excinfo.value)
+
+
+def _pump_pane(master: int, seconds: float, buf: bytearray) -> None:
+    import os
+    import select
+    import time
+
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        ready, _, _ = select.select([master], [], [], 0.05)
+        if ready:
+            try:
+                buf.extend(os.read(master, 65536))
+            except OSError:
+                return
+
+
+def _write_codex_shim(shim_dir: Path, argv_file: Path) -> None:
+    shim_dir.mkdir()
+    shim = shim_dir / "codex"
+    shim.write_text(f'#!/bin/sh\necho "$@" > {argv_file}\necho FAKE_CODEX_STARTED\nsleep 60\n')
+    shim.chmod(0o755)
+
+
+def _start_pane(env: dict[str, str], cwd: Path) -> tuple[int, subprocess.Popen[bytes]]:
+    import os
+    import pty
+
+    master, slave = pty.openpty()
+    pane = subprocess.Popen(
+        ["bash", "-l", "-i"],
+        stdin=slave,
+        stdout=slave,
+        stderr=slave,
+        env=env,
+        cwd=cwd,
+        start_new_session=True,
+    )
+    os.close(slave)
+    return master, pane
+
+
+def test_app_server_command_executes_in_an_interactive_bash(tmp_path: Path) -> None:
+    """Feed the real launcher line through the production pane shape.
+
+    The pane is a pty running ``bash -l -i`` (PtySessionBackend), whose history
+    expansion can abort a whole line containing ``!`` (review C1). Whether
+    ``$!`` itself is expanded is a bash-version fact — 3.2 (macOS) aborts the
+    whole line, 5.x (this host, CI) exempts it — so this is a discriminating
+    guard on biting shells and an execution-level smoke everywhere: the line
+    must reach the server command and leave the pane usable. A login shell
+    rebuilds PATH (macOS path_helper prepends /etc/paths), so the shim is
+    exported inside the pane rather than inherited (macmini red, 2026-09-17).
+    The other tests here monkeypatch ``sessions.send`` and assert the command's
+    shape only;
+    this one covers the real execution face (task #3778).
+    """
+    import contextlib
+    import os
+    import signal
+    import time
+
+    module = _load_spawn("takeover_spawn_codex_pane_exec")
+    state = tmp_path / "home"
+    state.mkdir()
+    owner = _owner(state)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    run = tmp_path / "run"
+    run.mkdir()
+    endpoint = f"unix://{run}/codex-app-server.0123456789ab-01234567.sock"
+    command = module._app_server_command(owner, workspace, endpoint)
+
+    shim_dir = tmp_path / "bin"
+    argv_file = tmp_path / "codex-argv.txt"
+    _write_codex_shim(shim_dir, argv_file)
+
+    env = dict(os.environ)
+    env["PATH"] = f"{shim_dir}:{env['PATH']}"
+    env["HOME"] = str(tmp_path / "fakehome")
+    env["PS1"] = "P> "
+    (tmp_path / "fakehome").mkdir()
+
+    master, pane = _start_pane(env, workspace)
+    output = bytearray()
+    try:
+        _pump_pane(master, 1.0, output)
+        # A login pane rebuilds PATH once /etc/profile runs — macOS path_helper
+        # prepends /etc/paths (homebrew) and masks an inherited shim, pointing
+        # the launch at the real codex (macmini red, 2026-09-17). Export the
+        # shim first, inside the pane, so the launcher line runs the shim.
+        os.write(master, f'export PATH="{shim_dir}:$PATH"\n'.encode())
+        _pump_pane(master, 0.5, output)
+        os.write(master, (command + "\n").encode())
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline and not argv_file.exists():
+            _pump_pane(master, 0.5, output)
+        _pump_pane(master, 1.0, output)
+        os.write(master, b"echo SENTINEL_$((2+2))\n")
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and b"SENTINEL_4" not in output:
+            _pump_pane(master, 0.5, output)
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(pane.pid, signal.SIGKILL)
+        # Job control gives the shim its own process group; target it by its
+        # unique tmp path (no other process carries it), and the janitor
+        # self-exits once the pane shell is gone.
+        subprocess.run(["pkill", "-f", str(tmp_path)], check=False)  # noqa: S603
+        os.close(master)
+
+    text = output.decode(errors="replace")
+    assert "event not found" not in text, text[-2000:]
+    assert argv_file.exists(), text[-2000:]
+    assert f"app-server --listen {endpoint}" in argv_file.read_text()
+    assert "SENTINEL_4" in text, text[-2000:]
 
 
 @pytest.mark.parametrize("provider", ["codex", "claude"])

@@ -303,12 +303,16 @@ def validate_relay_spec(
     provider: str | None, thread_id: str | None, codex_remote: str | None
 ) -> None:
     """The request must name its relay endpoint up front; the native side
-    never guesses one."""
+    never guesses one. A codex remote must be a unix:// or ws:// address,
+    rejected here so a malformed endpoint fails the request instead of the
+    relay (review N4)."""
     if provider not in RELAY_PROVIDERS:
         raise ValueError("Relay provider must be 'codex' or 'claude'")
     if provider == "codex":
         if not thread_id:
             raise ValueError("Codex relay requires the existing session's thread id")
+        if codex_remote is not None and not codex_remote.startswith(("unix://", "ws://")):
+            raise ValueError("Codex remote must be a unix:// or ws:// endpoint")
     elif thread_id is not None or codex_remote is not None:
         raise ValueError("Claude relay routes to its owner; thread id and remote are rejected")
 
