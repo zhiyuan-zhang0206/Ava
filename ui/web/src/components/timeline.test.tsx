@@ -173,6 +173,50 @@ describe("TimelineView accessibility", () => {
   });
 });
 
+describe("timeline document work", () => {
+  it("reuses turn summaries for view changes and refreshes them when items change", () => {
+    const code = makeItem({
+      item_id: "1.0",
+      kind: "agent_code",
+      payload: "ava.files.read('first')",
+      sdk_calls: [{ method: "files.read", count: 1 }],
+    });
+    // Reading committed SDK calls is part of deriving the turn summary.
+    // A collapse and a parent-only update must not re-read historical data.
+    const calls = vi.fn(() => [{ method: "files.read", count: 1 }]);
+    Object.defineProperty(code, "sdk_calls", { get: calls });
+    const items = [code];
+    const { rerender } = render(<TimelineView items={items} threadKey="first" />);
+    expect(calls).toHaveBeenCalled();
+    calls.mockClear();
+
+    fireEvent.click(screen.getByTestId("turn-toggle"));
+    expect(screen.getByTestId("turn-toggle").getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByTestId("python-code")).toBeNull();
+    rerender(<TimelineView items={items} threadKey="first" forkPending />);
+    expect(calls).not.toHaveBeenCalled();
+
+    const next = makeItem({
+      ...code,
+      payload: "ava.files.read('updated')",
+      sdk_calls: [{ method: "files.read", count: 2 }],
+    });
+    rerender(<TimelineView items={[next]} threadKey="first" />);
+    expect(screen.getByTestId("turn-toggle").textContent).toContain("files.read × 2");
+    fireEvent.click(screen.getByTestId("turn-toggle"));
+    expect(screen.getByTestId("python-code").textContent).toBe("ava.files.read('updated')");
+
+    rerender(
+      <TimelineView
+        items={[makeItem({ kind: "agent_chat", payload: "another conversation" })]}
+        threadKey="second"
+      />,
+    );
+    expect(screen.queryByTestId("turn-toggle")).toBeNull();
+    expect(screen.getByTestId("chat-markdown").textContent).toBe("another conversation");
+  });
+});
+
 describe("compact history segment dividers", () => {
   it("renders one localized divider between each compact summary and its raw history", () => {
     const items = [

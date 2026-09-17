@@ -81,6 +81,7 @@ export function findClosestStuckHeaderId(
 
   let topId: string | null = null;
   let topTop = -Infinity;
+  let topOwner: HTMLElement | null = null;
   // Child rows are excluded here: their block's header is the level-1 marker,
   // and they surface on the level-2 pass below.
   for (const el of viewport.querySelectorAll<HTMLElement>(
@@ -92,22 +93,29 @@ export function findClosestStuckHeaderId(
     if (crossed(r, stickyLine) && r.top >= topTop) {
       topTop = r.top;
       topId = id;
+      topOwner = el;
     }
   }
 
+  // A nested header belongs only to the selected top-level turn. Measuring
+  // every historical child's geometry defeats offscreen layout containment;
+  // an unpinned turn or a top-level message card has no nested sticky owner.
+  const header = topOwner?.matches('[data-turn-expanded="true"]')
+    ? topOwner.querySelector<HTMLElement>('[data-testid="turn-toggle"]')
+    : null;
+  if (!topOwner || !header) return { topId, childId: null };
+  const childLine = header.getBoundingClientRect().bottom;
+
   let childId: string | null = null;
   let childTop = -Infinity;
-  for (const el of viewport.querySelectorAll<HTMLElement>(
+  for (const el of topOwner.querySelectorAll<HTMLElement>(
     '[data-turn-child="true"][data-card-sticky="true"]',
   )) {
     const id = el.getAttribute("data-item-id");
-    const header = el
-      .closest<HTMLElement>("[data-turn-id]")
-      ?.querySelector<HTMLElement>('[data-testid="turn-toggle"]');
-    if (!id || !header) continue;
+    if (!id) continue;
     // The child line sits under the block's header — see the doc comment.
     const r = el.getBoundingClientRect();
-    if (crossed(r, header.getBoundingClientRect().bottom) && r.top >= childTop) {
+    if (crossed(r, childLine) && r.top >= childTop) {
       childTop = r.top;
       childId = id;
     }

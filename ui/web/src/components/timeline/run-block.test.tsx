@@ -39,6 +39,55 @@ function mockRect(top: number, bottom: number, height: number): DOMRect {
 }
 
 describe("findClosestStuckHeaderId", () => {
+  it("measures children only inside the owning turn regardless of historical turn count", () => {
+    const container = document.createElement("div");
+    vi.spyOn(container, "getBoundingClientRect").mockReturnValue(mockRect(0, 800, 800));
+    const historicalGeometry = vi.fn(() => mockRect(-1000, -100, 900));
+    for (let i = 0; i < 1000; i += 1) {
+      const turn = document.createElement("div");
+      turn.dataset.turnId = `old-${i}`;
+      turn.dataset.turnExpanded = "true";
+      vi.spyOn(turn, "getBoundingClientRect").mockReturnValue(mockRect(-1000, -100, 900));
+      const header = document.createElement("button");
+      header.dataset.testid = "turn-toggle";
+      header.getBoundingClientRect = historicalGeometry;
+      const child = document.createElement("div");
+      child.dataset.itemId = `old-child-${i}`;
+      child.dataset.turnChild = "true";
+      child.dataset.cardSticky = "true";
+      child.getBoundingClientRect = historicalGeometry;
+      turn.append(header, child);
+      container.append(turn);
+    }
+    const turn = document.createElement("div");
+    turn.dataset.turnId = "active";
+    turn.dataset.turnExpanded = "true";
+    vi.spyOn(turn, "getBoundingClientRect").mockReturnValue(mockRect(10, 700, 690));
+    const header = document.createElement("button");
+    header.dataset.testid = "turn-toggle";
+    const headerGeometry = vi.spyOn(header, "getBoundingClientRect")
+      .mockReturnValue(mockRect(44, 72, 28));
+    turn.append(header);
+    for (const [id, top] of [["earlier", 10], ["closest", 50]] as const) {
+      const child = document.createElement("div");
+      child.dataset.itemId = id;
+      child.dataset.turnChild = "true";
+      child.dataset.cardSticky = "true";
+      vi.spyOn(child, "getBoundingClientRect").mockReturnValue(mockRect(top, 400, 400 - top));
+      turn.append(child);
+    }
+    container.append(turn);
+
+    expect(findClosestStuckHeaderId(container, 44)).toEqual({ topId: "active", childId: "closest" });
+    expect(historicalGeometry).not.toHaveBeenCalled();
+    expect(headerGeometry).toHaveBeenCalledTimes(1);
+
+    turn.dataset.turnExpanded = "false";
+    expect(findClosestStuckHeaderId(container, 44)).toEqual({ topId: null, childId: null });
+    expect(historicalGeometry).not.toHaveBeenCalled();
+    expect(headerGeometry).toHaveBeenCalledTimes(1);
+  });
+
   it("returns null when no expanded turn block is in the container", () => {
     const container = document.createElement("div");
     container.innerHTML = `
