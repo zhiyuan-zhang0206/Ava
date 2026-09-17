@@ -73,13 +73,13 @@ IMPLEMENTED_GROUPS = ("folders", "apple-events", "sr-ax")
 """Groups this build can inventory and trigger end to end."""
 
 PENDING_GROUPS: dict[str, str] = {
-    # Target-tier groups whose trigger method is still pending verification
-    # (design v1 items #7-#11): named in reports, never attempted.
-    "appdata": "trigger method pending verification (design v1 item #7)",
-    "media": "trigger method pending verification (design v1 item #8)",
-    "icloud": "trigger method pending verification (design v1 item #9)",
-    "fda": "trigger method pending verification (design v1 item #10)",
-    "devtools": "trigger method pending verification (design v1 item #11)",
+    # Target-tier groups whose trigger method is still pending verification:
+    # named in reports, never attempted.
+    "appdata": "trigger method pending verification",
+    "media": "trigger method pending verification",
+    "icloud": "trigger method pending verification",
+    "fda": "trigger method pending verification",
+    "devtools": "trigger method pending verification",
 }
 
 ITEM_GROUPS = IMPLEMENTED_GROUPS + tuple(PENDING_GROUPS)
