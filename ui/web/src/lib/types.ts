@@ -168,9 +168,9 @@ export type ContextSection = Schemas["ContextSection"];
 
 export type RunTimelineResponse = Schemas["RunTimelineResponse"];
 
-// --- Per-agent inspector panel (GET /api/agents/{id}/inspect) ---
+// --- Per-agent inspector panel (GET /api/agents/{id}/inspect/statistics) ---
 
-export type AgentInspect = Schemas["AgentInspect"];
+export type AgentInspectStatistics = Schemas["AgentInspectStatistics"];
 export type AgentInspectLive = Schemas["AgentInspectLive"];
 export type ShellInfo = Schemas["ShellInfo"];
 export type ShellCapture = Schemas["ShellCaptureResponse"];

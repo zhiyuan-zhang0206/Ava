@@ -831,6 +831,9 @@
     }
   },
   "inspector": {
+    "sectionWidgets": "扩展",
+    "widgetsUnavailable": "检查器扩展暂不可用",
+    "retryWidgets": "重试扩展",
     "title": "检查器",
     "toggle": "检查",
     "closeInspector": "关闭检查器",

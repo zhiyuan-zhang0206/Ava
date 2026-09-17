@@ -153,9 +153,9 @@ def project_heartbeat(
     earlier check-in was already consumed, `last_heartbeat_at` remains the
     durable cadence floor even when its turn did not produce any LLM work.
 
-    `last_pause` is the cached event-history aggregate. Every other input is
-    from the request's fresh agents_meta read, so a status/heartbeat change is
-    visible immediately even while the historical Loki fan-out rides its TTL.
+    `last_pause` is the latest recent committed row from heartbeat_pause_log.
+    Every other input comes from the request's fresh agents_meta projection;
+    current heartbeat state does not depend on historical statistics or logs.
     """
     # The daemon's due predicate takes the later of `last_active_at` plus the
     # idle threshold/jitter and `last_heartbeat_at` plus the configured interval.

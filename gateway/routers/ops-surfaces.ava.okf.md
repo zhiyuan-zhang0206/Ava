@@ -64,26 +64,21 @@ cluster label. The fleet graph's Loki event tail applies the same dimension,
 and an unmarked gateway without an explicit Loki URL receives the shared clean
 503 instead of reading another home's loopback stack.
 
-`GET /api/agents/{id}/inspect` draws the same boundary per agent: its 75s
-single-flight TTL retains only history aggregates. Completed UTC days read the
-durable Postgres ledger; duration percentiles and lifecycle/node details stitch
-the frozen archive to the retained Loki tail. Live spans are split into <=3h
-queries under the shared Loki budget, rather than rescanning one long window.
-Every request freshly reads machine, config overlay, status/heartbeat inputs,
-liveness and probe timestamp, releases that DB borrow, then joins/loads the
-aggregate. Thus both manual refresh and the 60s panel poll see control-plane
-changes immediately without re-running the historical fan-out. The interactive
-response has a 15s aggregate deadline: budget refusal, deadline expiry, and
-Loki transport/status failure are retriable HTTP 503 responses with
-`Retry-After`; a synchronous leader already in progress remains the sole
-single-flight load and may populate the TTL after its original caller has
-received the bounded failure. Async followers await that shared claim without
-occupying the gateway's worker pool.
+`GET /api/agents/{id}/inspect/statistics` owns window-dependent cost, stats,
+TPS and activity. Its 75s single-flight TTL retains only historical aggregates;
+completed UTC days read the Postgres ledger and retained detail comes from
+Loki. Each request reads only the immutable birth timestamp before joining the
+bounded aggregate loader. It performs no runner probe, current-state projection,
+notice read, or heartbeat-pause lookup. The aggregate deadline is 30s; async
+followers do not occupy worker threads. Cancelling an HTTP waiter does not
+cancel shared work needed by other waiters: admission and query deadlines bound
+that work, and pending section futures are cancelled on deadline expiry.
 
-`GET /api/agents/{id}/inspect/live` is the uncached, window-independent half:
-fresh DB projection + notice, runner shell probe, and one bounded recent-pause
-lookup. Shell failure becomes `[]`; Loki failure drops only the optional pause
-hint. Cost, stats, TPS, and activity remain exclusive to `/inspect`.
+`GET /api/agents/{id}/inspect/live` exclusively owns the current projection,
+notice, runner shell probe, and indexed recent-pause lookup from the durable
+Postgres trail. It never queries Loki. An unavailable runner sets
+`shells_available=false`. `/inspect/widgets` owns plugin extensions. The three reads load,
+render, fail, and retry independently. The old mixed `/inspect` route is absent.
 
 ## Key Dependencies
 
