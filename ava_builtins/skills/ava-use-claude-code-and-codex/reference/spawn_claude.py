@@ -163,7 +163,7 @@ def _verify_start_receipt(sid: int, timeout: float = 45.0) -> None:
     Claude transcript freshly records the bootstrap. When it stays absent,
     press Enter once (a stale composer entry submits there) and re-check. Kept
     loud but not fatal: the session may still be rendering; the operator sees
-    the warning.
+    the warning. A dead session's capture() refusal is reported the same way.
     """
     print("verifying the takeover bootstrap was submitted...")
     started = time.time()
@@ -179,7 +179,18 @@ def _verify_start_receipt(sid: int, timeout: float = 45.0) -> None:
     if _bootstrap_submitted(started):
         print("  -> start-receipt=submitted after Enter retry")
         return
-    visible = "take over Ava agent" in ava.shell.sessions.capture(sid)
+    try:
+        visible = "take over Ava agent" in ava.shell.sessions.capture(sid)
+    except ValueError as exc:
+        # capture() refuses a dead session with ValueError; that refusal must
+        # not bypass this checkpoint's loud-not-fatal contract (the caller kills
+        # the session and rolls the launch back on exceptions).
+        print(
+            "  -> WARNING: start-receipt=not-submitted "
+            f"(capture failed: {exc}); the takeover bootstrap may be parked, or "
+            "the session may have ended. Check the session before relying on it."
+        )
+        return
     print(
         "  -> WARNING: start-receipt=not-submitted "
         f"(visible={visible}); the takeover bootstrap may be parked or missing. "
