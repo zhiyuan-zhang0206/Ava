@@ -237,6 +237,7 @@ export function RunTimelineChart({
           <div ref={scrollRef} data-testid="run-timeline-scroll" className="overflow-x-auto">
             <div
               ref={visualizationRef}
+              data-testid="run-timeline-visualization"
               role="group"
               aria-label={labels.visualization}
               className={cn("relative", selectedRow ? "min-w-[320px]" : "min-w-[1000px]")}

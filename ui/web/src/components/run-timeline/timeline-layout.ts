@@ -70,6 +70,14 @@ export interface TimelineConnectorLayout {
   path: string;
 }
 
+/** The plot geometry for one canvas width — one source of truth for
+ *  geometry consumers outside the chart (the compare-view arrow overlay):
+ *  the plot insets, and the time-axis y the event rail hangs off. */
+export function plotGeometry(width: number): { left: number; width: number; axisY: number } {
+  const clamped = Math.max(320, Math.round(width));
+  return { left: CANVAS_PADDING, width: clamped - CANVAS_PADDING * 2, axisY: AXIS_Y };
+}
+
 function projectedX(
   timestamp: string,
   window: RunTimelineResponse["window"],
@@ -91,10 +99,11 @@ function connectorPath(source: TimelinePoint, destination: TimelinePoint): strin
 /** One rounded pixel projection shared by SVG geometry and fixed HTML text. */
 export function buildTimelineLayout(input: TimelineLayoutInput) {
   const width = Math.max(320, Math.round(input.width));
+  const geometry = plotGeometry(width);
   const plot = {
-    left: CANVAS_PADDING,
+    left: geometry.left,
     right: width - CANVAS_PADDING,
-    width: width - CANVAS_PADDING * 2,
+    width: geometry.width,
   };
   const windowStart = Date.parse(input.window.from);
   const windowSpan = Date.parse(input.window.to) - windowStart;

@@ -25,6 +25,7 @@ from gateway.schemas.run_timeline import (
     RunTimelineBoundaries,
     RunTimelineEvent,
     RunTimelineExec,
+    RunTimelineInbound,
     RunTimelineLayerNode,
     RunTimelineLlm,
     RunTimelineMeta,
@@ -632,6 +633,7 @@ def get_run_timeline(
         for event in post_window_events
     )
     layers, summary = _narrative_for_window(agent_id, window_start, window_end)
+    inbounds = _inbounds_for_window(agent_id, window_start, window_end)
     return RunTimelineResponse(
         agent_id=agent_id,
         window=RunTimelineWindow(from_=window_start, to=window_end),
@@ -646,6 +648,7 @@ def get_run_timeline(
         ),
         layers=layers,
         summary=summary,
+        inbounds=inbounds,
     )
 
 
@@ -696,6 +699,29 @@ def _narrative_for_window(
         if text:
             summary = RunTimelineSummary(text=text)
     return layers, summary
+
+
+def _inbounds_for_window(
+    agent_id: int, window_start: datetime, window_end: datetime
+) -> list[RunTimelineInbound] | None:
+    """Chat delivery facts in the window — the compare-view arrow source.
+
+    Delivery facts only (``inbound_messages``), never the checkpoint copy:
+    compaction rewrites context, but who was woken by whom and when is a fact
+    of delivery. One windowed index read; a read failure degrades to None
+    rather than failing the endpoint (the narrative-read posture).
+    """
+    from shared.db import list_chat_inbound_facts
+
+    try:
+        facts = list_chat_inbound_facts(agent_id, window_start, window_end)
+    except Exception:
+        logger.exception("run-timeline inbound read failed for agent {}", agent_id)
+        return None
+    return [
+        RunTimelineInbound(ts=fact.created_at, source=fact.source, inbound_id=fact.id)
+        for fact in facts
+    ]
 
 
 def _latest_compact_summary(agent_id: int) -> str | None:
