@@ -1358,7 +1358,13 @@
     {
      "expr": "{service_name=\"unknown_service\"} | json | __error__=\"\" | ((level!~\"warning|error|critical\" and category=\"audit\") or (level=~\"warning|error|critical\" or (level!~\"warning|error|critical\" and category!=\"audit\" and event_name=~\"checkpoint_write_failed|claim_cas_lost|claim_cas_lost_exit|compact_turn_aborted|dangling_tool_pairing_repaired|db_outage_pause|db_outage_reconcile_retry|db_outage_wait|db_pool_acquire_slow|db_pool_acquire_timeout|db_recovered|delivery_stalled|editable_pth_repaired|error_resolved|event_log_drop|exec\\\\(cancelled\\\\)|exec\\\\(failed\\\\)|exec\\\\(thread\\\\-stuck\\\\)|exec\\\\(timeout\\\\)|exec_cancelled|exec_failed|exec_node_timeout|exec_subprocess_killed|exec_timeout|host_dispatcher_bad_channel|host_turn_crashed|host_turn_uncancellable|idle_cas_lost|label_generate_failed|launch_confirm_failed|launch_confirm_task_crashed|launch_force_terminated|llm_cancelled|llm_provider_error|llm_turn_aborted|loki_query_failed|page_restore_failed|page_restore_query_failed|page_serve_dir_missing|pgbouncer_repaired|screen_capture_notify_failed|sse_drop|stream_overloaded_retry|stream_stalled_retry|warning_resolved\")))",
      "refId": "A",
-     "legendFormat": "events"
+     "legendFormat": "events",
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "queryType": "range"
     }
    ],
    "options": {
@@ -1390,7 +1396,8 @@
      "expr": "sum by (event_name, level, category) (count_over_time({service_name=\"unknown_service\"} | json | __error__=\"\" [$__range]))",
      "refId": "A",
      "queryType": "instant",
-     "legendFormat": "events"
+     "legendFormat": "events",
+     "editorMode": "code"
     }
    ],
    "options": {
@@ -1428,8 +1435,7 @@
       "filterable": false,
       "inspect": false
      }
-    },
-    "overrides": []
+    }
    }
   },
   {
@@ -1454,7 +1460,9 @@
      },
      "expr": "{service_name=\"unknown_service\"} | json | __error__=\"\"",
      "refId": "A",
-     "legendFormat": "events"
+     "legendFormat": "events",
+     "editorMode": "code",
+     "queryType": "range"
     }
    ],
    "options": {
@@ -4380,11 +4388,20 @@
     {
      "refId": "A",
      "expr": "1 - avg by (machine_name) (system_cpu_utilization_ratio{state=\"idle\"})",
-     "legendFormat": "{{machine_name}}"
+     "legendFormat": "{{machine_name}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "queryType": "range"
     }
    ],
    "fieldConfig": {
     "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
      "unit": "percentunit",
      "custom": {
       "drawStyle": "line",
@@ -4427,11 +4444,20 @@
     {
      "refId": "A",
      "expr": "avg by (machine_name) (system_memory_utilization_ratio{state=\"used\"})",
-     "legendFormat": "{{machine_name}}"
+     "legendFormat": "{{machine_name}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "queryType": "range"
     }
    ],
    "fieldConfig": {
     "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
      "unit": "percentunit",
      "custom": {
       "drawStyle": "line",
@@ -4474,21 +4500,42 @@
     {
      "refId": "A",
      "expr": "system_cpu_load_average_1m",
-     "legendFormat": "{{machine_name}} 1m"
+     "legendFormat": "{{machine_name}} 1m",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "queryType": "range"
     },
     {
      "refId": "B",
      "expr": "system_cpu_load_average_5m",
-     "legendFormat": "{{machine_name}} 5m"
+     "legendFormat": "{{machine_name}} 5m",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "queryType": "range"
     },
     {
      "refId": "C",
      "expr": "system_cpu_load_average_15m",
-     "legendFormat": "{{machine_name}} 15m"
+     "legendFormat": "{{machine_name}} 15m",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "queryType": "range"
     }
    ],
    "fieldConfig": {
     "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
      "unit": "short",
      "custom": {
       "drawStyle": "line",
@@ -4529,11 +4576,20 @@
     {
      "refId": "A",
      "expr": "max by (machine_name, mountpoint) (system_filesystem_utilization_ratio)",
-     "legendFormat": "{{machine_name}} {{mountpoint}}"
+     "legendFormat": "{{machine_name}} {{mountpoint}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "queryType": "range"
     }
    ],
    "fieldConfig": {
     "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
      "unit": "percentunit",
      "custom": {
       "drawStyle": "line",
@@ -4576,11 +4632,20 @@
     {
      "refId": "A",
      "expr": "sum by (machine_name, direction) (rate(system_disk_io_bytes_total[5m]))",
-     "legendFormat": "{{machine_name}} {{direction}}"
+     "legendFormat": "{{machine_name}} {{direction}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "queryType": "range"
     }
    ],
    "fieldConfig": {
     "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
      "unit": "Bps",
      "custom": {
       "drawStyle": "line",
@@ -4621,11 +4686,20 @@
     {
      "refId": "A",
      "expr": "sum by (machine_name, direction) (rate(system_network_io_bytes_total[5m]))",
-     "legendFormat": "{{machine_name}} {{direction}}"
+     "legendFormat": "{{machine_name}} {{direction}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "queryType": "range"
     }
    ],
    "fieldConfig": {
     "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
      "unit": "Bps",
      "custom": {
       "drawStyle": "line",
@@ -4666,16 +4740,31 @@
     {
      "refId": "A",
      "expr": "max by (machine_name) (postgresql_backends)",
-     "legendFormat": "{{machine_name}} backends"
+     "legendFormat": "{{machine_name}} backends",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "queryType": "range"
     },
     {
      "refId": "B",
      "expr": "max by (machine_name) (postgresql_connection_max)",
-     "legendFormat": "{{machine_name}} max_connections"
+     "legendFormat": "{{machine_name}} max_connections",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "queryType": "range"
     }
    ],
    "fieldConfig": {
     "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
      "unit": "short",
      "custom": {
       "drawStyle": "line",
@@ -4717,16 +4806,31 @@
     {
      "refId": "A",
      "expr": "sum by (machine_name) (rate(postgresql_commits_total[5m]))",
-     "legendFormat": "{{machine_name}} commits/s"
+     "legendFormat": "{{machine_name}} commits/s",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "queryType": "range"
     },
     {
      "refId": "B",
      "expr": "sum by (machine_name) (rate(postgresql_rollbacks_total[5m]))",
-     "legendFormat": "{{machine_name}} rollbacks/s"
+     "legendFormat": "{{machine_name}} rollbacks/s",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "queryType": "range"
     }
    ],
    "fieldConfig": {
     "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
      "unit": "ops",
      "custom": {
       "drawStyle": "line",
@@ -4767,11 +4871,20 @@
     {
      "refId": "A",
      "expr": "max by (machine_name) (postgresql_db_size_bytes)",
-     "legendFormat": "{{machine_name}}"
+     "legendFormat": "{{machine_name}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "queryType": "range"
     }
    ],
    "fieldConfig": {
     "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
      "unit": "bytes",
      "custom": {
       "drawStyle": "line",
@@ -4812,16 +4925,31 @@
     {
      "refId": "A",
      "expr": "max by (machine_name) (redis_memory_used_bytes)",
-     "legendFormat": "{{machine_name}} used"
+     "legendFormat": "{{machine_name}} used",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "queryType": "range"
     },
     {
      "refId": "B",
      "expr": "max by (machine_name) (redis_memory_rss_bytes)",
-     "legendFormat": "{{machine_name}} rss"
+     "legendFormat": "{{machine_name}} rss",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "queryType": "range"
     }
    ],
    "fieldConfig": {
     "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
      "unit": "bytes",
      "custom": {
       "drawStyle": "line",
@@ -4862,16 +4990,31 @@
     {
      "refId": "A",
      "expr": "max by (machine_name) (redis_clients_connected)",
-     "legendFormat": "{{machine_name}} clients"
+     "legendFormat": "{{machine_name}} clients",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "queryType": "range"
     },
     {
      "refId": "B",
      "expr": "sum by (machine_name) (rate(redis_keys_evicted_total[5m]))",
-     "legendFormat": "{{machine_name}} evictions/s"
+     "legendFormat": "{{machine_name}} evictions/s",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "queryType": "range"
     }
    ],
    "fieldConfig": {
     "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
      "unit": "short",
      "custom": {
       "drawStyle": "line",
@@ -4913,11 +5056,20 @@
     {
      "refId": "A",
      "expr": "max by (machine_name) (redis_commands_per_second)",
-     "legendFormat": "{{machine_name}}"
+     "legendFormat": "{{machine_name}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "queryType": "range"
     }
    ],
    "fieldConfig": {
     "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
      "unit": "ops",
      "custom": {
       "drawStyle": "line",

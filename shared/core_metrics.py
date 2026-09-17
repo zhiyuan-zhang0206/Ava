@@ -24,9 +24,12 @@ render`` and wired into converge by slice S3.
 
 Core definitions live in ``shared/core_metrics_panels.py`` (the migrated
 ops-dashboard panels), ``shared/core_metrics_observability.py`` (the migrated
-ava_observability pack), and the smaller modules beside them
-(``core_metrics_cost`` / ``core_metrics_frontend`` / ``core_metrics_dismissed``
-/ ``core_metrics_fleet`` / ``core_metrics_pr_flow``). The ``plugin`` field of
+ava_observability pack), ``shared/core_metrics_events.py`` (the event-stream
+panels: the Events trio and the gateway sample count) and
+``shared/core_metrics_host.py`` (the "Host & data plane" section), plus the
+smaller modules beside them (``core_metrics_cost`` / ``core_metrics_frontend``
+/ ``core_metrics_dismissed`` / ``core_metrics_fleet`` / ``core_metrics_pr_flow``).
+The ``plugin`` field of
 every core metric is ``core`` — the dashboard row header and the display name
 are "core".
 """
@@ -53,6 +56,8 @@ _CORE_DEFINITION_MODULES = (
     "shared.core_metrics_dismissed",
     "shared.core_metrics_fleet",
     "shared.core_metrics_pr_flow",
+    "shared.core_metrics_events",
+    "shared.core_metrics_host",
     "shared.core_metrics_observability",
     "shared.core_metrics_frontend",
 )

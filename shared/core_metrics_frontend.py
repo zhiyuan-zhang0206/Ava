@@ -51,7 +51,7 @@ core_metrics.register_core_metric(
         output=["grafana"],
         panel_id=34,
         section="Gateway & execution",
-        order=7,
+        order=8,
     )
 )
 
@@ -78,7 +78,7 @@ core_metrics.register_core_metric(
         output=["grafana"],
         panel_id=35,
         section="Gateway & execution",
-        order=8,
+        order=9,
     )
 )
 
@@ -105,7 +105,7 @@ core_metrics.register_core_metric(
         output=["grafana"],
         panel_id=36,
         section="Gateway & execution",
-        order=9,
+        order=10,
     )
 )
 
@@ -133,6 +133,6 @@ core_metrics.register_core_metric(
         output=["grafana"],
         panel_id=37,
         section="Gateway & execution",
-        order=10,
+        order=11,
     )
 )
