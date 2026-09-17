@@ -300,6 +300,10 @@ def _image_dimensions(path: Path) -> tuple[tuple[int, int] | None, str | None]:
 
 
 def _image_dimension_limit(model: str, image_count: int) -> int:
+    # Sentinel high (the int32 ceiling) until a model policy tier applies:
+    # nothing constrains the dimension, and the value stays representable
+    # everywhere it flows (task #3696 exception inventory; tiers below
+    # override).
     dimension_limit = 2**31 - 1
     policy = _attach_policy(model)
     if policy is None:

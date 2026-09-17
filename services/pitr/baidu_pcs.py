@@ -43,7 +43,8 @@ SVIP_SHARD_BYTES = 32 * 1024 * 1024
 """SVIP shard size — the CTO-pinned spec for this deployment (32 MiB)."""
 
 SVIP_SINGLE_FILE_LIMIT_BYTES = 20 * 1024**3
-"""SVIP single-file ceiling (20 GB). Base backups must assert below this."""
+"""SVIP single-file ceiling (20 GB). Base backups must assert below this.
+External platform limit (task #3696 exception inventory)."""
 
 DOWNLOAD_UA = "pan.baidu.com"
 """The only User-Agent the download data plane accepts."""
@@ -257,6 +258,8 @@ class PcsClient:
             return None
         return _parse_file(rows[0])
 
+    # limit=1000: the PCS list page size the walks page in
+    # (task #3696 exception inventory).
     def list_dir(
         self, dir_path: str, *, start: int = 0, limit: int = 1000, recursion: int = 0
     ) -> list[RemoteFile]:
@@ -276,6 +279,7 @@ class PcsClient:
         rows = cast(list[dict[str, Any]], payload.get("list") or [])
         return [_parse_file(row) for row in rows]
 
+    # Same page size as list_dir (task #3696 exception inventory).
     def list_all(
         self, dir_path: str, *, start: int = 0, limit: int = 1000
     ) -> tuple[list[RemoteFile], bool]:

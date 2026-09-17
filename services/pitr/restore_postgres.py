@@ -53,6 +53,8 @@ def _smoke_samples(cur: psycopg.Cursor[tuple[object, ...]]) -> list[str]:
         if found is None or found[0] is None:
             evidence.append(f"absent:{table}")
             continue
+        # Sample probe for the evidence row: 16 rows prove the table readable
+        # without shipping it (task #3696 exception inventory).
         query = sql.SQL(
             "SELECT to_jsonb(sample)::text FROM {} AS sample ORDER BY {} LIMIT 16"
         ).format(
@@ -196,6 +198,7 @@ def _run(command: list[str], *, timeout: float) -> None:
         # stderr and the CLI refusal truncates to the first 300 chars of the
         # worker traceback — the cause must ride with the exception itself.
         detail = (result.stderr or result.stdout or "").strip()
+        # Excerpt cap for the carried cause (task #3696 exception inventory).
         if len(detail) > 4000:
             detail = f"\u2026{detail[-4000:]}"
         raise RestoreProofError(
@@ -213,7 +216,8 @@ class SandboxPostgresIdentity:
 
 
 def _log_tail(path: Path, limit: int = 4000) -> str:
-    """Bounded tail of a postmaster log, to ride with an error before cleanup."""
+    """Bounded tail of a postmaster log, to ride with an error before cleanup
+    (4000 chars; task #3696 exception inventory)."""
     try:
         tail = path.read_text(errors="replace").strip()
     except OSError:

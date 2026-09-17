@@ -42,8 +42,8 @@ SUN_PATH_MAX = 100
 DEFAULT_COLS = 120
 DEFAULT_ROWS = 40
 
-# Wire-protocol payload bounds for one capture/resize request (task #3696
-# exception inventory): protective limits, not user-facing tuning knobs — the
+# Wire-protocol payload bounds for one capture/resize request
+# (task #3696 exception inventory): protective limits, not user-facing tuning knobs — the
 # configurable surface is only the capture *default* window
 # (display.shell_capture_default_lines). The host clamps to them, and the CLI
 # validates against CAPTURE_MAX_LINES before dialing, so one request can never

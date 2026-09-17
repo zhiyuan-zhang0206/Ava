@@ -28,9 +28,13 @@ WORK_FILE = "/path/to/work.md"
 POLL_SECONDS = 60
 STALL_SECONDS = 600
 HEARTBEAT_SECONDS = 480
+# 2h: a supervision run is bounded — after this the launching agent is woken
+# with the limit notice and may relaunch; without it a forgotten runner polls
+# forever (task #3696 exception inventory).
 HARD_LIMIT_SECONDS = 7200
 WAKE_ATTEMPTS = 8  # wake delivery tries (first + 7 retries); the gaps below
 # sum to ~10.5 min — long enough to ride out a gateway / agent restart window
+# (wake-delivery retry contract; task #3696 exception inventory)
 WAKE_BACKOFF_S = 10.0  # first gap between wake tries; doubles per retry
 WAKE_BACKOFF_MAX_S = 160.0  # cap for one gap
 

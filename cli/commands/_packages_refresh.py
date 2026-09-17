@@ -737,6 +737,8 @@ class _Pass:
                     setattr(row, field_name, value)
 
 
+# Operator-facing error tails: the last line of a stream, capped — the full
+# output stays in the run log (task #3696 exception inventory).
 def _tail(text: str, limit: int = 200) -> str:
     lines = (text or "").strip().splitlines()
     tail = lines[-1] if lines else ""

@@ -1,6 +1,9 @@
 const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
 const MIN_BAR_PX = 12;
 const CANVAS_BUDGET = 1000;
+// KEEP (task #3696 exception inventory): zoom floor — 60s is the finest bucket
+// the overview aggregates into (BUCKETS starts at 1m); a narrower window would
+// draw one bucket.
 const MIN_WINDOW_MS = 60_000;
 const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_BUCKETS = 96;

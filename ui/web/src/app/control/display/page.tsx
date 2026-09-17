@@ -232,6 +232,8 @@ export default function DisplaySettingsPage() {
           value={settings["display.render_reasoning_markdown"] as boolean}
           onChange={(v) => setSetting("display.render_reasoning_markdown", v)}
         />
+        {/* The 0..3 range is clamped again in use-compact-history-retention
+            (MAX_RETAINED_SESSIONS) — widen both together. */}
         <RadioRow
           icon={History}
           label="Compact history"

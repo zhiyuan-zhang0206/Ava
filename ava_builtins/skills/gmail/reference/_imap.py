@@ -276,6 +276,8 @@ def _canonical_url(text: str) -> str | None:
 # --------------------------------------------------------------------------- #
 
 
+# Lens defaults (task #3696 exception inventory): 50 headers keep an
+# interactive search page light; read pulls fewer full messages (5).
 def search(query: str, *, limit: int | None = 50) -> list[dict[str, Any]]:
     """Run a Gmail search (full `X-GM-RAW` syntax), newest-first, return metadata.
 

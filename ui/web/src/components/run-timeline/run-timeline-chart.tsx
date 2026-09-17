@@ -32,6 +32,9 @@ export type { RunTimelineChartLabels } from "./run-timeline-details";
 
 const MIN_CANVAS_WIDTH = 1000;
 const MIN_DETAIL_CANVAS_WIDTH = 320;
+// KEEP (task #3696 exception inventory): rail density cap — priority kinds
+// first, then the rest, capped at 120 chips; the skipped remainder is
+// summarized (`skippedByKind`), not drawn.
 const EVENT_RAIL_LIMIT = 120;
 const TIMELINE_POPOVER_WIDTH = 288;
 // Rail kinds the backend still emits after the task #2591 narrowing: execution

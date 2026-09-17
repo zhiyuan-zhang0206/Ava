@@ -52,6 +52,9 @@ def main() -> None:
         Path(os.environ["AVA_EXEC_REQUEST_FILE"]) != context.request_path
         or Path(os.environ["AVA_EXEC_RESULT_FILE"]) != context.result_path
         or hashlib.sha256(
+            # Defensive ceiling for hashing the launcher-written request
+            # envelope: far above any legitimate request, still a bounded read
+            # (task #3696 exception inventory).
             read_owner_bytes(context.request_path, limit=64 * 1024 * 1024)
         ).hexdigest()
         != context.allocation.request_digest

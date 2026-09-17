@@ -35,6 +35,8 @@ import oss2
 
 from services.pitr.oss_store import map_oss_error
 
+# OSS multipart list pages (uploads / parts), 1000 per call — the API's page
+# size (task #3696 exception inventory).
 _UPLOAD_PAGE_SIZE = 1000
 _PARTS_PAGE_SIZE = 1000
 

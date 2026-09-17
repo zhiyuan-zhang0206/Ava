@@ -317,6 +317,8 @@ def _all_meta(client: MilvusClient) -> dict[str, tuple[float, str, str]]:
         collection_name=_COLLECTION,
         filter="",
         output_fields=["path", "mtime", "content_hash", "embedder"],
+        # Reconcile scan page (task #3696 exception inventory): comfortably
+        # above the index sizes this reads (a few thousand files).
         limit=16384,
     )
     meta: dict[str, tuple[float, str, str]] = {}

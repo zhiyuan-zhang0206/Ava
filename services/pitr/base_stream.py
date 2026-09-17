@@ -24,6 +24,8 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 BASE_MAGIC = b"AVAPITRB1"
 PACKER_VERSION = 1
+# Streaming chunk: one 8 MiB block per read/write pass — the packer's memory
+# bound (task #3696 exception inventory).
 CHUNK_BYTES = 8 * 1024 * 1024
 
 

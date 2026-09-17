@@ -46,7 +46,7 @@ from shared.config import settings
 _MAX_ENTRIES = 10_000
 """Soft cap on tracked IPs: when exceeded, expired entries are swept on the
 next failure record. Bounds memory for a subnet scan without a background
-timer."""
+timer. Protective constant (task #3696 exception inventory)."""
 
 
 class _Entry:
