@@ -61,10 +61,12 @@ describe("DisplaySettingsPage", () => {
     renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText("Show machine name")).toBeTruthy();
+      expect(screen.getByText("Show agent status dot")).toBeTruthy();
     });
 
-    expect(screen.getByText("Show agent status dot")).toBeTruthy();
+    // The machine-name row is gone — the name renders in the Inspector's
+    // Liveness block now (task #3904).
+    expect(screen.queryByText("Show machine name")).toBeNull();
     expect(screen.getByText("Show activity line")).toBeTruthy();
     expect(screen.getByText("Show terminated agents")).toBeTruthy();
     expect(screen.getByText("Time display mode")).toBeTruthy();
@@ -275,7 +277,7 @@ describe("DisplaySettingsPage", () => {
     renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText("Show machine name")).toBeTruthy();
+      expect(screen.getByText("Show agent status dot")).toBeTruthy();
     });
     expect(screen.queryByText("Skin")).toBeNull();
   });

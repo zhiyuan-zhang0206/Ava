@@ -180,6 +180,7 @@ class AgentInspectLive(BaseModel):
 
     agent_id: int
     machine: str
+    status: str
     liveness_state: Literal["online", "offline", "unknown"]
     last_probe_at: datetime | None = None
     observation: AgentObservation | None = None

@@ -94,7 +94,7 @@ class TestFrontendTelemetryIngest:
                         _one(
                             element="setting-change",
                             page="control/display",
-                            key="display.show_machine_name",
+                            key="display.show_timestamp_weekday",
                             value="false",
                         ),
                     ],
@@ -120,7 +120,7 @@ class TestFrontendTelemetryIngest:
             "page": "control/display",
             "element": "setting-change",
             "session_id": session,
-            "key": "display.show_machine_name",
+            "key": "display.show_timestamp_weekday",
             "value": "false",
         }
 

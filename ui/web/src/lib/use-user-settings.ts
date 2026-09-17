@@ -6,7 +6,7 @@
 //
 // Usage:
 //   const { settings, setSetting, isLoading } = useUserSettings();
-//   const showMachine = settings["display.show_machine_name"] as boolean;
+//   const showStatusDot = settings["display.show_agent_status"] as boolean;
 //
 // The hook returns the merged settings map (defaults + server values) and
 // a setSetting(key, value) that optimistically updates the cache while

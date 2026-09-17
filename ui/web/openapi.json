@@ -7004,6 +7004,10 @@
             "type": "string",
             "title": "Machine"
           },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
           "liveness_state": {
             "type": "string",
             "enum": [
@@ -7104,6 +7108,7 @@
         "required": [
           "agent_id",
           "machine",
+          "status",
           "liveness_state",
           "spawned_at",
           "shells",
