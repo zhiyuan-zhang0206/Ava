@@ -637,7 +637,9 @@ class TestTasksEntries:
         with db_conn.cursor() as cur:
             cur.execute("INSERT INTO agents (id) VALUES (900001) ON CONFLICT (id) DO NOTHING")
         db_conn.commit()
-        monkeypatch.setattr(task_registry, "publish_task_created_sync", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
+        from shared import live_announce  # origin: deferred import at the call site (task #3816)
+
+        monkeypatch.setattr(live_announce, "publish_task_created_sync", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
 
         task = task_registry.create(title=("My Task",), description="d", parent=root_id)  # pyright: ignore[reportArgumentType, reportUnknownArgumentType]
         assert task.title == "My Task"

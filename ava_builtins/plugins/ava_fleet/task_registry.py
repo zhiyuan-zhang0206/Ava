@@ -7,19 +7,20 @@ from __future__ import annotations
 import builtins
 import math
 from dataclasses import dataclass
-from typing import TypeGuard
-
-import psycopg
+from typing import TYPE_CHECKING, TypeGuard
 
 import ava
 import ava._boot
 import ava.agents
 from ava._sdk_validation import coerce_str, coerce_typed
-from shared.audit_events import insert_event_log
-from shared.live_announce import publish_task_created_sync, publish_task_updated_sync
 from shared.task_owner_notifications import owner_change_notifications
 from shared.task_reparent import resolve_reparent
 from shared.task_timestamps import render_task_timestamps
+
+if TYPE_CHECKING:
+    # Annotation-only here (cursor params); the runtime import sits at the raise
+    # site so plugin autoload stays off the psycopg stack (task #3816).
+    import psycopg
 
 from ._task_update import (
     _DEFAULT_PRIORITY,
@@ -179,6 +180,8 @@ def _insert_task(
 
     Rejects duplicate in_progress titles -- prevents agents from creating
     the same task twice (#60, #253)."""
+    import psycopg  # per-call: keeps the psycopg stack off plugin autoload (task #3816)
+
     cur.execute(
         "SELECT id, status FROM agent_tasks WHERE title = %s AND status = 'in_progress' LIMIT 1",
         (title,),
@@ -219,6 +222,8 @@ def _insert_task(
     if row is None:
         raise RuntimeError("expected exactly one row: task insert")
     task = _row_to_task(row)
+    from shared.audit_events import insert_event_log  # deferred (task #3816)
+
     insert_event_log(
         event_type="task_create",
         agent_id=actor,
@@ -314,6 +319,8 @@ def create(
         _notify_owner_change(task.id, title, None, owner, actor, description=description)
 
     # Live-refresh every open task board (fleet-wide invalidate + refetch).
+    from shared.live_announce import publish_task_created_sync  # deferred (task #3816)
+
     publish_task_created_sync(actor, task.id)
     return task
 
@@ -495,6 +502,8 @@ def update(
             changes,
             parent_only,
         )
+        from shared.live_announce import publish_task_updated_sync  # deferred (task #3816)
+
         publish_task_updated_sync(actor, task_id)
 
 
