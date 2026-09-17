@@ -7,6 +7,11 @@ launching by hand — it pre-trusts the directory and sends the contract message
 .venv/bin/python reference/spawn_claude.py <workspace-dir>
 ```
 
+For a takeover (`--impersonate-self --impersonation-name '…' --brief '<text>'`)
+the script is file-less: no task/work files, nothing to watch, and the briefing
+tells the executor to start its own Claude Monitor relay. The full procedure is
+[Let the coding agent take over your identity](impersonate_self.md).
+
 Manual launch (for full control):
 
 ```bash

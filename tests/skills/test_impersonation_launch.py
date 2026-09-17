@@ -32,6 +32,7 @@ def test_self_takeover_bootstrap_inlines_brief_and_links_real_guide(
         assert "CODEX_THREAD_ID" in message and "CODEX_HOME" in message
     else:
         assert "Monitor relay with --session" in message
+        assert "as the request output instructs" in message
 
 
 @pytest.mark.parametrize("provider", ["codex", "claude"])
