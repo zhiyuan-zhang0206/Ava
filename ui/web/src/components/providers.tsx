@@ -70,10 +70,23 @@ export function createQueryClient(): QueryClient {
         // actually want polling (e.g. status).
         refetchOnWindowFocus: false,
         retry: (failureCount, error) => {
-          // Task #1326: a 401 is not transient; retrying amplifies it into a poll storm.
-          if (error instanceof ApiError && error.status === 401) return false;
-          return failureCount < 3;
+          if (error instanceof ApiError) {
+            // Task #1326: a 401 is not transient; retrying amplifies it into a poll storm.
+            if (error.status === 401) return false;
+            // Other 4xx answers are deterministic too — a retry re-hits the
+            // same answer once per poll cadence. Only 408/429 ask for one.
+            if (error.status < 500 && error.status !== 408 && error.status !== 429) {
+              return false;
+            }
+          }
+          // Task #3895: transient failures get at most two retries. Read paths
+          // recover through their own polls / SSE invalidations, so a longer
+          // burst against a struggling backend only multiplies load.
+          return failureCount < 2;
         },
+        // Capped exponential backoff (1s, 2s), so a failing request's retries
+        // cannot spread past its poll interval into the next cycle.
+        retryDelay: (attempt) => Math.min(1_000 * 2 ** attempt, 8_000),
       },
     },
   });

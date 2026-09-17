@@ -139,6 +139,54 @@ describe("useStatsDashboard shared polling", () => {
     expect(getStatsDashboard).toHaveBeenCalledTimes(3);
   });
 
+  it("backs consecutive failed polls off and snaps back on success (task #3895)", async () => {
+    vi.useFakeTimers();
+    getStatsDashboard.mockRejectedValue(new Error("stats endpoint 503"));
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, retryDelay: 0 } },
+    });
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client: queryClient }, children);
+
+    const hook = renderHook(() => useStatsDashboard(24), { wrapper });
+    const tick = (ms: number) =>
+      act(async () => {
+        await vi.advanceTimersByTimeAsync(ms);
+        await vi.advanceTimersByTimeAsync(1_500); // let a scheduled retry land
+      });
+
+    await tick(0);
+    expect(getStatsDashboard).toHaveBeenCalledTimes(2); // mount fetch + its retry
+
+    // Four minutes of persistent failure. A fixed 30s cadence would run ~8
+    // coordinator ticks (two attempts each); the 30→60→120→240 backoff must
+    // hold the total far below that.
+    await tick(240_000);
+    const failedPhaseCalls = getStatsDashboard.mock.calls.length;
+    expect(failedPhaseCalls).toBeGreaterThanOrEqual(4);
+    expect(failedPhaseCalls).toBeLessThanOrEqual(10);
+
+    // Recovery: the first succeeding poll resets the cadence to 30s, so the
+    // ticks after it resume at the plain interval.
+    getStatsDashboard.mockResolvedValue({
+      live_count: 1,
+      window_hours: 24,
+      tokens: { input: 0, output: 0, cache_read: 0, cache_hit_pct: 0 },
+      cost_usd: 0,
+      avg_turn_seconds: null,
+      warnings: 0,
+      errors: 0,
+      total_events: 0,
+      plugin_stats: [],
+    });
+    await tick(240_000);
+    const afterSuccess = getStatsDashboard.mock.calls.length;
+    expect(afterSuccess).toBeGreaterThanOrEqual(failedPhaseCalls + 1);
+    await tick(60_000);
+    expect(getStatsDashboard.mock.calls.length).toBeGreaterThanOrEqual(afterSuccess + 1);
+    hook.unmount();
+  });
+
   it("retries one failed request and exposes the error", async () => {
     const failure = new Error("stats endpoint 500");
     getStatsDashboard.mockRejectedValue(failure);
