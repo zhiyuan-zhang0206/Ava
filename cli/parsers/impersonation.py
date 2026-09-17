@@ -77,7 +77,7 @@ def _add_impersonation_parser(sub: argparse._SubParsersAction[argparse.ArgumentP
     request.add_argument(
         "--thread-id",
         dest="relay_thread_id",
-        help="existing Codex session UUID the relay queues into (codex only)",
+        help="existing Codex session UUID the relay delivers into (codex only)",
     )
     request.add_argument(
         "--codex-remote",
