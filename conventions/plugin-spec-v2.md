@@ -160,7 +160,7 @@ sections carry fixed keys, so a value slots a widget anywhere between them:
 
 Equal orders stack built-in sections first, then widgets by `(plugin, id)` —
 deterministic, independent of registration order. (The fleet plugin's task
-list uses 50: the agent's work queue sits first, visible without scrolling.)
+list uses 150: the work queue sits directly below the built-in `page` section.)
 
 ### Version ranges
 

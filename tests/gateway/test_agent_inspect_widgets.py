@@ -48,7 +48,7 @@ def _widget(**over: Any) -> InspectWidgetSpec:
     data: dict[str, Any] = {
         "id": "today-tasks",
         "kind": "taskList",
-        "order": 50,
+        "order": 150,
     }
     data.update(over)
     with PluginContext("ava_fleet"):
@@ -189,7 +189,7 @@ def test_lists_only_the_agents_active_tasks(
         "ava_fleet",
         "today-tasks",
         "taskList",
-        50,
+        150,
     )
     # One rung (the default P2): id ascending — recency is no order key.
     assert [t["id"] for t in widget["tasks"]] == [older, newer, mid]
@@ -308,7 +308,7 @@ def test_loader_imports_shipped_fleet_widget(monkeypatch: pytest.MonkeyPatch) ->
 
     specs = _plugin_inspector._load_inspect_widgets()
     assert [(s.plugin, s.id, s.kind, s.order) for s in specs] == [
-        ("ava_fleet", "today-tasks", "taskList", 50)
+        ("ava_fleet", "today-tasks", "taskList", 150)
     ]
     assert specs[0].title is None
 
