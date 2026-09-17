@@ -1,14 +1,16 @@
 # Grafana dashboards — Ava Ops (as code)
 
 This directory is the provisioning source. At converge,
-`cli/commands/_lgtm_native.py` copies the whole provisioning tree VERBATIM
-into `$AVA_HOME/lgtm/native/config/provisioning/` (content-hash user-edit
+`cli/commands/_lgtm_native.py` renders the whole provisioning tree into
+`$AVA_HOME/lgtm/native/config/provisioning/` (content-hash user-edit
 protected; datasource/webhook URLs are Grafana-native `$__env{}` references,
-so the checkout files are always valid); native Grafana receives that
-rendered directory's absolute file-provider path through
-`GRAFANA_PROVISIONING_PATH` in the rendered `runtime.env` and hot-reloads
-changed dashboards within ~30s — a git checkout plus the converge copy is the
-whole deployment step, with no separate render pipeline.
+so the checkout files are always valid). Every file is copied VERBATIM
+except `ava-ops-main.json`, which is generated from the metric registries
+(task #3697 S3) — the checked-in copy here is the render's reference output,
+not the provisioning source. Native Grafana receives the rendered
+directory's absolute file-provider path through `GRAFANA_PROVISIONING_PATH`
+in the rendered `runtime.env` and hot-reloads changed dashboards within
+~30s — a git checkout plus converge is the whole deployment step.
 
 ## One dashboard (2026-08-23 merge, task #1399)
 
@@ -97,13 +99,14 @@ summaries cover the same information.
 
 ## Files
 
-- `ava-ops-main.json` — the only dashboard. Still hand-maintained for now
-  (the generator did not survive the archive→public port), but the render
-  path is being rebuilt (task #3697): `shared/grafana_dashboard.py` renders
-  the metric registries into this file's shape — every panel is
-  registry-covered since slice S2 — `ava lgtm render` previews (diff) or
-  force-writes it, and slice S3 flips converge onto the render — from then
-  on a MetricSpec change no longer needs a hand mirror here.
+- `ava-ops-main.json` — the only dashboard, rendered from the metric
+  registries since task #3697: `shared/grafana_dashboard.py` renders the
+  registries into this file's shape (every panel registry-covered, slice
+  S2), `ava lgtm render` previews (diff) or force-writes the host
+  provisioning copy, and converge generates its provisioning copy from the
+  same render (slice S3) — plugin installs/uninstalls and MetricSpec
+  changes move the panels with no hand mirror here; the checked-in copy is
+  the render's reference output.
 - Deleted 2026-08-23 (a dashboard file removed from this directory is
   dropped from Grafana on the next provisioning reload — `dashboards.yml`
   has `disableDeletion: false`, verified live on the merge day):
@@ -219,9 +222,10 @@ of mass-editing targets.
    that matches the panel's information density; stats and tables remain
    instant over `[$__range]`; every count wraps in `sum(...)`.
 4. `output` selects the surfaces: `["grafana"]`, `["inspector"]`, or both.
-5. **Then update `ava-ops-main.json` by hand**: add the rendered panel
-   under the row named after the plugin (`ava_code` / `ava_fleet` /
-   `ava_memory` — every metric-shipping plugin owns a row; keep ids >= 1000).
+5. **No hand edit**: converge generates `ava-ops-main.json` from the metric
+   registries (task #3697 S3) and `ava lgtm render` previews the result —
+   the panel lands under the row named after the plugin (every
+   metric-shipping plugin owns a row; ids >= 1000 are renderer-allocated).
    `tests/plugins/test_plugin_metrics_logql.py` also locks every registered
    grafana spec against the JSON.
 
@@ -249,10 +253,12 @@ watch Loki panel latency and shrink the window again if it degrades).
 
 ## Syncing to the live Grafana
 
-There is no sync: native Grafana (host port 3003) reads this directory through
-the absolute `GRAFANA_PROVISIONING_PATH` set in `runtime.env`, and its file
-provider reloads a changed file within ~30s. Editing here and checking out on
-the LGTM host is the deployment. The `uid` must stay `ava-ops-main`, and
+There is no sync: native Grafana (host port 3003) reads the rendered
+directory through the absolute `GRAFANA_PROVISIONING_PATH` set in
+`runtime.env`, and its file provider reloads a changed file within ~30s.
+Editing a file here and checking out on the LGTM host is the deployment —
+except `ava-ops-main.json`, which converge generates from the metric
+registries (edit the specs, not the JSON). The `uid` must stay `ava-ops-main`, and
 datasource uids must match `datasources.yml`. Loki and Prometheus datasource
 URLs use host loopback; Tempo is the remote WSL trace backend.
 
@@ -260,10 +266,11 @@ URLs use host loopback; Tempo is the remote WSL trace backend.
 
 Provisioning is wired by `dashboards.yml` in this directory (file
 provider, `disableDeletion: false`, path expanded from
-`$__env{GRAFANA_PROVISIONING_PATH}`). Update flow: edit the dashboard JSON
-here (keeping the uid `ava-ops-main`) → land the change → the LGTM host's
-checkout advances and the provisioner reloads within ~30s. Restart native
-Grafana to force a new provisioning cycle when needed.
+`$__env{GRAFANA_PROVISIONING_PATH}`). Update flow: land the change in the
+metric registries (or edit a verbatim provisioning file here) → the LGTM
+host's checkout advances, converge regenerates the rendered tree, and the
+provisioner reloads within ~30s. Restart native Grafana to force a new
+provisioning cycle when needed.
 
 ## Access requirements
 

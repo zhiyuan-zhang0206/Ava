@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import plistlib
 import subprocess
 from pathlib import Path
@@ -49,6 +50,21 @@ def _redirect_plists(monkeypatch: pytest.MonkeyPatch, root: Path) -> None:
         _lgtm_native,
         "_plist_path",
         fake_plist_path,
+    )
+
+
+# The fixed document the S3 dashboard render is stubbed to: these converge
+# tests stay offline (no plugin imports, no registry database).
+_STUB_RENDER = '{"title": "Ava Ops", "panels": []}\n'
+
+
+@pytest.fixture(autouse=True)
+def _stub_dashboard_render(monkeypatch: pytest.MonkeyPatch) -> None:
+    def render_dashboard_json(_repo_only: bool = False) -> tuple[str, tuple[str, ...]]:
+        return _STUB_RENDER, ()
+
+    monkeypatch.setattr(
+        "shared.grafana_dashboard_supply.render_dashboard_json", render_dashboard_json
     )
 
 
@@ -261,6 +277,10 @@ def test_ensure_renders_configs_with_native_paths_and_loopback(
     assert (config_dir / "provisioning/datasources/datasources.yml").is_file()
     assert (config_dir / "provisioning/alerting/contact.yml").is_file()
     assert (config_dir / "provisioning/alerting/rules.yml").is_file()
+    # The dashboard is generated from the render path, not copied (S3).
+    assert (config_dir / "provisioning/dashboards/ava-ops-main.json").read_text(
+        encoding="utf-8"
+    ) == _STUB_RENDER
     assert loki_config["common"]["path_prefix"] == f"{home}/lgtm/native/data/loki"
     assert loki_config["frontend"]["address"] == "127.0.0.1"
     assert (
@@ -392,3 +412,96 @@ def test_native_step_does_not_touch_an_unmarked_home(
     _lgtm_native.ensure_lgtm_native_step(ctx)
 
     assert not ctx.ava_home.exists()
+
+
+def test_render_provisioning_generates_the_dashboard_from_the_render_path(tmp_path: Path) -> None:
+    """Task #3697 S3: ava-ops-main.json in the rendered tree comes from the
+    metric-registry render, not from the checkout copy — and its hash is
+    recorded in the protection sidecar."""
+    repo = tmp_path / "repo"
+    source = repo / "deploy/lgtm/config/grafana/provisioning"
+    (source / "dashboards").mkdir(parents=True)
+    (source / "dashboards/ava-ops-main.json").write_text('{"checkout": true}\n', encoding="utf-8")
+    (source / "dashboards/dashboards.yml").write_text("yaml\n", encoding="utf-8")
+    (source / "datasources").mkdir()
+    (source / "datasources/datasources.yml").write_text("datasource\n", encoding="utf-8")
+    native = tmp_path / "native"
+
+    _lgtm_native._render_provisioning(repo, native)
+
+    dest_dir = native / "config/provisioning"
+    assert (dest_dir / "dashboards/ava-ops-main.json").read_text(encoding="utf-8") == _STUB_RENDER
+    assert (dest_dir / "dashboards/dashboards.yml").read_text(encoding="utf-8") == "yaml\n"
+    hashes = json.loads((native / "config/provisioning-hashes.json").read_text(encoding="utf-8"))
+    assert "dashboards/ava-ops-main.json" in hashes
+
+
+def test_render_provisioning_keeps_the_generated_dashboard_without_its_source(
+    tmp_path: Path,
+) -> None:
+    """Deleting the checkout copy must not delete the generated artifact: the
+    disappearance cleanup only covers verbatim copies."""
+    repo = tmp_path / "repo"
+    source = repo / "deploy/lgtm/config/grafana/provisioning"
+    (source / "dashboards").mkdir(parents=True)
+    checkout_copy = source / "dashboards/ava-ops-main.json"
+    checkout_copy.write_text('{"checkout": true}\n', encoding="utf-8")
+    native = tmp_path / "native"
+
+    _lgtm_native._render_provisioning(repo, native)
+    dest = native / "config/provisioning/dashboards/ava-ops-main.json"
+    assert dest.is_file()
+
+    checkout_copy.unlink()
+    _lgtm_native._render_provisioning(repo, native)
+
+    assert dest.read_text(encoding="utf-8") == _STUB_RENDER
+
+
+def test_render_provisioning_rewrites_the_dashboard_only_on_change(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    (repo / "deploy/lgtm/config/grafana/provisioning").mkdir(parents=True)
+    native = tmp_path / "native"
+
+    _lgtm_native._render_provisioning(repo, native)
+    dest = native / "config/provisioning/dashboards/ava-ops-main.json"
+    before = dest.stat().st_mtime_ns
+
+    _lgtm_native._render_provisioning(repo, native)
+
+    assert dest.stat().st_mtime_ns == before
+
+
+def test_render_provisioning_dashboard_failure_keeps_the_previous_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo = tmp_path / "repo"
+    (repo / "deploy/lgtm/config/grafana/provisioning").mkdir(parents=True)
+    native = tmp_path / "native"
+    _lgtm_native._render_provisioning(repo, native)
+    dest = native / "config/provisioning/dashboards/ava-ops-main.json"
+    before = dest.read_text(encoding="utf-8")
+
+    def broken_render(_repo_only: bool = False) -> tuple[str, tuple[str, ...]]:
+        raise RuntimeError("render exploded")
+
+    monkeypatch.setattr("shared.grafana_dashboard_supply.render_dashboard_json", broken_render)
+    emitted: list[tuple[object, ...]] = []
+
+    def record_emit(*args: object, **kwargs: object) -> None:
+        emitted.append((*args, kwargs))
+
+    monkeypatch.setattr("shared.telemetry.emit", record_emit)
+
+    _lgtm_native._render_provisioning(repo, native)
+
+    assert dest.read_text(encoding="utf-8") == before
+    assert emitted == [
+        (
+            "telemetry",
+            "lgtm_dashboard_render_failed",
+            {"level": "warning", "source": "converge", "attributes": {"error": "render exploded"}},
+        )
+    ]
+    err = capsys.readouterr().err
+    assert "keeping the previous file" in err

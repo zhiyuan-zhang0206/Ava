@@ -188,3 +188,31 @@ def collect_plugin_specs(conn: psycopg.Connection | None = None) -> PluginSpecs:
         failed.extend(installed.failed)
         specs.extend(installed.specs)
     return PluginSpecs(specs=specs, loaded=loaded, failed=failed)
+
+
+def render_dashboard_json(*, repo_only: bool = False) -> tuple[str, tuple[str, ...]]:
+    """Render the complete ava-ops dashboard JSON from the live spec suppliers.
+
+    The one render path shared by the operator command (``ava lgtm render``)
+    and the converge provisioning step (task #3697 S3). ``repo_only`` skips
+    the installed-plugin registry read; otherwise the enabled installed
+    plugins load from the cluster database. A plugin that fails to load is
+    skipped and reported by its supplier — never a half-written render.
+
+    Returns:
+        ``(dashboard_json, failed_plugins)`` — the deterministic serialization
+        plus the sorted names of plugins whose metrics module failed to load.
+    """
+    from shared import core_metrics
+    from shared.grafana_dashboard import render_dashboard, render_to_json
+
+    core_specs = core_metrics.collect_core_metrics()
+    if repo_only:
+        plugins = collect_plugin_specs()
+    else:
+        from shared.db import connect
+
+        with connect() as conn:
+            plugins = collect_plugin_specs(conn)
+    rendered = render_to_json(render_dashboard(core_specs, plugins.specs))
+    return rendered, tuple(sorted(plugins.failed))
