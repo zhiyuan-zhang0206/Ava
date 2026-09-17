@@ -20,8 +20,6 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useStore } from "./store";
-import { useTimelineStore } from "./timeline-store";
-import type { ThreadTimelineState } from "./fold/timeline";
 import { AuthProvider, useAuth } from "./auth-context";
 import { RECONNECT_QUERY_KEYS } from "./fold";
 import { useFoldOwner } from "./fold/owner";
@@ -55,6 +53,7 @@ class MockEventSource {
     this.init = init;
     // eslint-disable-next-line @typescript-eslint/no-this-alias -- mock must track the latest constructed instance
     lastInstance = this;
+    instances.push(this);
   }
 
   close(): void {
@@ -76,6 +75,7 @@ class MockEventSource {
 }
 
 let lastInstance: MockEventSource | null = null;
+let instances: MockEventSource[] = [];
 
 function deferredAuthResult() {
   let resolve!: (result: { authenticated: boolean }) => void;
@@ -87,6 +87,7 @@ function deferredAuthResult() {
 
 beforeEach(() => {
   lastInstance = null;
+  instances = [];
   mocks.checkAuth.mockReset();
   mocks.checkAuth.mockResolvedValue({ authenticated: true });
   vi.stubGlobal("EventSource", MockEventSource);
@@ -97,10 +98,7 @@ beforeEach(() => {
   // The Providers read reconnectNonce + activeId from the store and list them
   // in effect deps — reset both so each test starts from a known baseline.
   useStore.setState({ reconnectNonce: 0, activeId: null });
-  // AgentEventStreamProvider also selects parked/compacted thread ids from the
-  // timeline store — reset them so a prior test's buckets don't leak into the
-  // URL filter assertions.
-  useTimelineStore.setState({ threads: new Map(), compactedThreadIds: new Set() });
+
 });
 
 afterEach(() => {
@@ -428,6 +426,7 @@ describe("EventStreamProvider auth-gated connection", () => {
     firstMount.unmount();
 
     lastInstance = null;
+  instances = [];
     const replacement = renderHook(
       () => {
         useEventStream(() => undefined, () => undefined);
@@ -694,7 +693,8 @@ describe("EventStreamProvider half-dead watchdog", () => {
 // (useSseConnection) with the global broadcast — tested above. These tests
 // cover what differs: the URL follows activeId, agent switches re-key the
 // connection, and hidden tabs close SSE in favor of a slow poll signal.
-describe("AgentEventStreamProvider all-events broadcast URL", () => {
+describe("AgentEventStreamProvider selected detail stream", () => {
+  beforeEach(() => { useStore.setState({ activeId: 42 }); });
   function withAgentProvider() {
     const qc = new QueryClient({
       defaultOptions: { queries: { retry: false } },
@@ -721,75 +721,37 @@ describe("AgentEventStreamProvider all-events broadcast URL", () => {
     expect(expectInstance().url).toBe("/api/system/all?agents=7");
   });
 
-  it("activeId null → opens the unfiltered all-events connection", async () => {
+  it("no selected agent means no detail connection", async () => {
+    useStore.setState({ activeId: null });
+    const { result } = renderHook(() => {
+      useAgentEventStream(vi.fn(), vi.fn());
+      return useAuth().status;
+    }, { wrapper: withAgentProvider() });
+    await waitFor(() => expect(result.current).toBe("authenticated"));
+    expect(lastInstance).toBeNull();
+  });
+
+  it("clearing selection closes the detail connection and discards late frames", async () => {
+    useStore.setState({ activeId: 1 });
+    const onSystem = vi.fn();
+    renderHook(() => useAgentEventStream(onSystem, vi.fn()), { wrapper: withAgentProvider() });
+    await waitForInstance();
+    const old = expectInstance();
     act(() => useStore.setState({ activeId: null }));
-    void renderHook(() => useAgentEventStream(vi.fn(), vi.fn()), {
-      wrapper: withAgentProvider(),
-    });
-    await waitForInstance();
-    expect(lastInstance).not.toBeNull();
-    expect(expectInstance().url).toBe("/api/system/all");
+    expect(old.readyState).toBe(MockEventSource.CLOSED);
+    act(() => old.fireMessage(JSON.stringify({ role: "chat_delta", agent_id: 1, item_id: "1.0", content: "late" })));
+    expect(onSystem).not.toHaveBeenCalled();
   });
 
-  function parkedThread(): ThreadTimelineState {
-    return {
-      items: [],
-      streamingIds: new Set(),
-      streamingCode: false,
-      turnActive: false,
-      hasMoreOlder: false,
-      olderFetchCount: 0,
-      resetPending: false,
-    };
-  }
-
-  it("parked threads join the agents filter (task #1959 — parked compacts must reach the store)", async () => {
-    act(() => useStore.setState({ activeId: 1 }));
-    act(() =>
-      useTimelineStore.setState({
-        threads: new Map([
-          [7, parkedThread()],
-          [3, parkedThread()],
-        ]),
-      }),
-    );
-    void renderHook(() => useAgentEventStream(vi.fn(), vi.fn()), {
-      wrapper: withAgentProvider(),
-    });
+  it("visiting more agents never increases live detail connection count", async () => {
+    useStore.setState({ activeId: 1 });
+    const { unmount } = renderHook(() => useAgentEventStream(vi.fn(), vi.fn()), { wrapper: withAgentProvider() });
     await waitForInstance();
-    // Active + parked ids, numerically sorted (the URL is re-keyed per set).
-    expect(expectInstance().url).toBe("/api/system/all?agents=1,3,7");
-  });
-
-  it("a compact-marker id joins the filter even without a parked bucket", async () => {
-    act(() => useStore.setState({ activeId: 4 }));
-    act(() => useTimelineStore.setState({ compactedThreadIds: new Set([9]) }));
-    void renderHook(() => useAgentEventStream(vi.fn(), vi.fn()), {
-      wrapper: withAgentProvider(),
-    });
-    await waitForInstance();
-    expect(expectInstance().url).toBe("/api/system/all?agents=4,9");
-  });
-
-  it("parking a thread re-keys the connection so parked events keep flowing", async () => {
-    act(() => useStore.setState({ activeId: 1 }));
-    void renderHook(() => useAgentEventStream(vi.fn(), vi.fn()), {
-      wrapper: withAgentProvider(),
-    });
-    await waitForInstance();
-    const first = expectInstance();
-    expect(first.url).toBe("/api/system/all?agents=1");
-
-    // The user switches away from 1 → 1 parks; the stream must now carry it.
-    act(() => useStore.setState({ activeId: 2 }));
-    act(() =>
-      useTimelineStore.setState({
-        threads: new Map([[1, parkedThread()]]),
-      }),
-    );
-    await waitFor(() => expect(expectInstance()).not.toBe(first));
-    expect(first.readyState).toBe(MockEventSource.CLOSED);
-    expect(expectInstance().url).toBe("/api/system/all?agents=1,2");
+    for (let id = 2; id <= 100; id += 1) act(() => useStore.setState({ activeId: id }));
+    expect(instances.filter((stream) => stream.readyState !== MockEventSource.CLOSED)).toHaveLength(1);
+    expect(expectInstance().url).toBe("/api/system/all?agents=100");
+    unmount();
+    expect(instances.every((stream) => stream.readyState === MockEventSource.CLOSED)).toBe(true);
   });
 
   it("agent switch → closes and reopens with the new filter", async () => {
@@ -807,7 +769,7 @@ describe("AgentEventStreamProvider all-events broadcast URL", () => {
     expect(expectInstance().url).toBe("/api/system/all?agents=2");
   });
 
-  it("hidden tab closes SSE, polls subscribers every 7s, then reopens when visible", async () => {
+  it("hidden page closes SSE without polling, then reopens when visible", async () => {
     act(() => useStore.setState({ activeId: 7 }));
     const onConn = vi.fn<(ev: ConnectionEvent) => void>();
     void renderHook(() => useAgentEventStream(vi.fn(), onConn), {
@@ -831,7 +793,7 @@ describe("AgentEventStreamProvider all-events broadcast URL", () => {
       act(() => {
         vi.advanceTimersByTime(7_000);
       });
-      expect(onConn).toHaveBeenCalledWith({ type: "poll" });
+      expect(onConn).not.toHaveBeenCalled();
 
       onConn.mockClear();
       act(() => {
@@ -847,7 +809,7 @@ describe("AgentEventStreamProvider all-events broadcast URL", () => {
       act(() => {
         vi.advanceTimersByTime(7_000);
       });
-      expect(onConn).not.toHaveBeenCalledWith({ type: "poll" });
+      expect(onConn).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
@@ -1108,32 +1070,16 @@ describe("fold subscription lifecycle (Task #1033 regression)", () => {
     expect(result.current).toBe(first);
   });
 
-  it("reconnect reconcile throttles the scoped invalidations to one batch per 30s window", async () => {
-    try {
-      const { qc, wrapper } = withProviderAndClient();
-      const spy = vi.spyOn(qc, "invalidateQueries");
-      renderHook(() => useEventStream(() => undefined, () => undefined), { wrapper });
-      await waitForInstance();
-      vi.useFakeTimers();
-
-      // Initial open → one scoped repair batch fires.
-      act(() => expectInstance().fireOpen());
-      expect(spy).toHaveBeenCalledTimes(RECONNECT_QUERY_KEYS.length);
-
-      // Flaky-network reconnect burst (another open inside the 30s window —
-      // mobile Safari CONNECTING/OPEN jitter, watchdog force-reopen) → no
-      // second refetch storm.
-      spy.mockClear();
-      act(() => { vi.advanceTimersByTime(5_000); });
-      act(() => expectInstance().fireOpen());
-      expect(spy).not.toHaveBeenCalled();
-
-      // Window elapsed → the next open repairs again.
-      act(() => { vi.advanceTimersByTime(26_000); });
-      act(() => expectInstance().fireOpen());
-      expect(spy).toHaveBeenCalledTimes(RECONNECT_QUERY_KEYS.length);
-    } finally {
-      vi.useRealTimers();
-    }
+  it("every reconnect gap repairs scoped queries, including a second gap within 30 seconds", async () => {
+    const { qc, wrapper } = withProviderAndClient();
+    for (const key of RECONNECT_QUERY_KEYS) qc.setQueryData(key, []);
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    renderHook(() => useEventStream(() => undefined, () => undefined), { wrapper });
+    await waitForInstance();
+    await act(async () => { expectInstance().fireOpen(); await Promise.resolve(); });
+    expect(spy).toHaveBeenCalledTimes(RECONNECT_QUERY_KEYS.length);
+    spy.mockClear();
+    await act(async () => { expectInstance().fireOpen(); await Promise.resolve(); });
+    expect(spy).toHaveBeenCalledTimes(RECONNECT_QUERY_KEYS.length);
   });
 });

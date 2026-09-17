@@ -2,21 +2,18 @@
 //
 // Two data sources:
 // 1. React Query ["token-usage", agentId] — GET /api/agents/{id}/token-usage
-//    historical latest value, with per-thread cache + stale-while-revalidate.
-//    When switching back to a previously visited thread, the cache hit
-//    shows the cached value instantly while a background refresh runs.
-// 2. Real-time SSE token_usage event — published by the backend when
-//    an LLM call completes, overwriting the cached value. SSE rate =
-//    one per LLM call.
+//    selected snapshot, read on activation and repaired after stream gaps.
+//    Inactive snapshots are released when selection changes.
+// 2. Real-time SSE token_usage event — published when an LLM call completes,
+//    updating the selected context bar. SSE rate = one per LLM call.
 //
 // Chunk-level can not get accurate input_tokens (Anthropic / OpenAI
 // usage_metadata are both returned at stream end), so SSE rate = one
 // per LLM call.
 //
 // SSE subscription uses the AgentEventStreamProvider shared active-agent
-// connection (/api/system/all?agents=… while visible, the same throttled
-// stream as useTimeline, not two separate connections). Hidden tabs receive
-// a 7s poll signal that invalidates this REST snapshot.
+// connection (the same throttled stream as useTimeline). Reopening after a
+// hidden period repairs the selected snapshot; hidden pages do not poll.
 //
 // Token count has migrated from local useState to Zustand store.tokenUsage.
 
@@ -26,6 +23,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useLayoutEffect, useRef } from "react";
 
 import { api } from "./api";
+import { useAgentReadRepair } from "./use-agent-read-repair";
 import { useTimelineStore } from "./timeline-store";
 import type { SystemEvent, TokenUsageResponse } from "./types";
 import type { ConnectionEvent } from "./useEventStream";
@@ -49,6 +47,7 @@ export function useTokenUsage(
   showError: (msg: string) => void,
 ): TokenUsageState {
   const queryClient = useQueryClient();
+  const { isVisible, requestRepair } = useAgentReadRepair("token-usage", agentId);
   const tokenUsage = useTimelineStore((s) => s.tokenUsage);
   const maxContextTokens = useTimelineStore((s) => s.maxContextTokens);
   const softCompactTokens = useTimelineStore((s) => s.softCompactTokens);
@@ -61,16 +60,16 @@ export function useTokenUsage(
   const seenParseErrors = useRef<Set<string>>(new Set());
 
   // -- React Query: token-usage snapshot, cached by agentId --
-  // staleTime 30s: within 30s, switch-back uses cache directly
-  // gcTime 30min: keep inactive thread cache so returning from another
-  //   page restores instantly, not just a quick sidebar agent-switch
+  // Inactive selections release their cached snapshots.
   const tokenQuery = useQuery({
     queryKey: ["token-usage", agentId] as const,
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- the `enabled` gate below guarantees agentId is set before queryFn runs (standard TanStack idiom the types cannot see)
-    queryFn: () => api.getTokenUsage(agentId!),
-    enabled: agentId != null,
-    staleTime: 30_000,
-    gcTime: 30 * 60_000,
+    queryFn: ({ signal }) => {
+      if (agentId === null) throw new Error("A token read requires an agent");
+      return api.getTokenUsage(agentId, signal);
+    },
+    enabled: agentId !== null && isVisible,
+    staleTime: 0,
+    gcTime: 0,
     // A transient checkpoint read failure (gateway restart / DB reconnect
     // window) is served as 0/0 by the backend — the SSE token_usage push
     // refreshes the UI only while the agent is actually working, so an idle
@@ -81,7 +80,7 @@ export function useTokenUsage(
     retryDelay: (attempt) => 2 ** attempt * 1000,
   });
 
-  // -- On agent switch: hot cache hit → set cached value instantly; cold cache → reset to 0 --
+  // -- Seed the selected read from available data, otherwise reset to zero --
   // All three token fields (usage / reasoning / max) move through the single
   // applyTokenUsage gate in one set(), so contextTokens and maxContextTokens can
   // never disagree across two renders. This is ungated (no isEventForThread) —
@@ -99,7 +98,7 @@ export function useTokenUsage(
 
     const cached = queryClient.getQueryData<TokenUsageResponse>(["token-usage", agentId]);
     if (cached) {
-      // Hot cache hit: use cached value directly; React Query refreshes in background
+      // Seed an existing snapshot while the activation read runs.
       applyTokenUsage(
         cached.input_tokens,
         cached.reasoning_tokens,
@@ -107,17 +106,8 @@ export function useTokenUsage(
         cached.soft_compact_tokens,
         cached.hard_compact_tokens,
       );
-      // Force the background refresh the line above promises: within
-      // staleTime (30s) a key change on an already-mounted observer does NOT
-      // refetch (TanStack gates that path on staleness), and an idle agent
-      // emits no SSE token_usage event to repair the value — so without this
-      // invalidate the context bar would keep the previous visit's snapshot
-      // until the next switch. Mirrors useTimeline's invalidate-on-switch-back;
-      // a cold key is skipped (the enabled observer fetches on its own), and a
-      // fetch already in flight is deduped by the query cache.
-      void queryClient.invalidateQueries({ queryKey: ["token-usage", agentId] });
     } else {
-      // Cold cache: reset to 0; React Query is fetching
+      // No snapshot: reset until the selected read completes.
       applyTokenUsage(0, 0, 0, 0, 0);
     }
   }, [agentId, queryClient, applyTokenUsage]);
@@ -155,10 +145,8 @@ export function useTokenUsage(
   const onConnectionEvent = useCallback(
     (ev: ConnectionEvent) => {
       switch (ev.type) {
-        case "poll":
-          if (agentId != null) {
-            void queryClient.invalidateQueries({ queryKey: ["token-usage", agentId] });
-          }
+        case "open":
+          requestRepair();
           return;
         case "parse-failed": {
           const key = String(ev.error);
@@ -167,13 +155,12 @@ export function useTokenUsage(
           showError(`Token usage SSE parse failed: ${key}`);
           return;
         }
-        case "open":
         case "reconnecting":
         case "closed":
           return;
       }
     },
-    [agentId, queryClient, showError],
+    [requestRepair, showError],
   );
 
   useAgentEventStream(onEvent, onConnectionEvent);

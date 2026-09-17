@@ -1675,8 +1675,10 @@ describe("public three-state agent status projection", () => {
 });
 
 describe("fold owner reconnect reconcile", () => {
-  it("invalidates only global-fold query families when the SSE connection opens", async () => {
-    const invalidateSpy = vi.spyOn(_qc, "invalidateQueries");
+  it("invalidates retained global-fold query families when the SSE connection opens", async () => {
+    for (const key of RECONNECT_QUERY_KEYS) _qc.setQueryData(key, []);
+    const unrelatedKey = ["unrelated-read-model"];
+    _qc.setQueryData(unrelatedKey, []);
     renderHook(() => undefined, { wrapper });
     await waitForEventSource();
 
@@ -1687,16 +1689,10 @@ describe("fold owner reconnect reconcile", () => {
       );
     });
 
-    expect(invalidateSpy).toHaveBeenCalledTimes(RECONNECT_QUERY_KEYS.length);
-    for (const queryKey of RECONNECT_QUERY_KEYS) {
-      expect(invalidateSpy).toHaveBeenCalledWith({
-        queryKey,
-        exact:
-          queryKey === AGENTS_QUERY_KEY ||
-          queryKey === TERMINATED_AGENTS_QUERY_KEY,
-      });
+    for (const key of RECONNECT_QUERY_KEYS) {
+      expect(_qc.getQueryState(key)?.isInvalidated).toBe(true);
     }
-    expect(invalidateSpy).not.toHaveBeenCalledWith();
+    expect(_qc.getQueryState(unrelatedKey)?.isInvalidated).toBe(false);
   });
 
   it("refetches each scoped roster exactly once on reconnect", async () => {

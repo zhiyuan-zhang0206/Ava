@@ -3,7 +3,7 @@
 // The pure reducer for ONE thread's streaming timeline. Extracted from
 // timeline.ts (applySystemEvent + mergeSnapshotWithStreaming + helpers) and
 // timeline-store.ts (foldEvent + ThreadTimelineState): the fold lives in
-// lib/fold/, the store keeps only thread-cache management (parking/LRU/switch).
+// lib/fold/, while the store owns selected-view lifecycle and notifications.
 //
 // Input: initial BackendTimelineItem list from GET /timeline (the
 // LangGraph state.messages view; the inbound_messages table only
@@ -595,12 +595,8 @@ const EMPTY_STREAMING_IDS: ReadonlySet<string> = new Set();
 // =============================================================
 // One thread's fold state + per-thread reducer (from timeline-store)
 // =============================================================
-/** One thread's foldable timeline state — the unit that lives in the top-level
- *  store fields while the thread is active, and in a `threads` map bucket while
- *  it is parked. Token fields are intentionally absent: they are cached
- *  per-thread in React Query (`["token-usage", agentId]`) via useTokenUsage, so
- *  bucketing them here would double the per-thread token source. `foldEvent` is
- *  the pure reducer over this shape. */
+/** Selected timeline reducer state. Token values are managed separately by
+ * useTokenUsage. No inactive conversation retains this state. */
 export interface ThreadTimelineState {
   items: BackendTimelineItem[];
   streamingIds: Set<string>;
@@ -612,7 +608,7 @@ export interface ThreadTimelineState {
    * cold thread start. */
   olderFetchCount: number;
   /** Compact-reset window flag (per-thread). Set when compact_done arrives
-   * for this thread (active or parked): the whole history was rewritten
+   * for the selected thread: the whole history was rewritten
    * (shrink), keep-all merging would resurrect pre-compact items, and a GET
    * fired during the window may read a lagging pre-compact checkpoint.
    * While set, GET merges are dropped and the first NON-EMPTY
@@ -620,8 +616,7 @@ export interface ThreadTimelineState {
   resetPending: boolean;
 }
 /** Fold one SSE business event into a SINGLE thread's timeline state — the pure
- *  reducer shared by the active thread (top-level fields) and every parked
- *  background thread (a `threads` bucket). Returns a new ThreadTimelineState.
+ *  reducer used for both per-event and batched active-view updates.
  *  `token_usage` / `agent_spawned` / `agent_updated` never reach here — they are
  *  handled by `processSseEvent` before this (token writes the top-level active
  *  token fields only; spawn/update belong to the agents query cache). */

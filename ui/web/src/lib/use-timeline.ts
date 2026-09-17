@@ -1,40 +1,6 @@
-// useTimeline custom hook — maintains timeline items + SSE folding +
-// reload coordination.
-//
-// State sources:
-//   (a) React Query ["timeline", agentId] — GET /api/agents/{id}/timeline
-//       snapshot, with per-thread cache + stale-while-revalidate. Cache
-//       hit on switching back to a previously visited thread shows
-//       data instantly while a background refresh runs.
-//   (b) SSE /api/system — push-based event stream (global broadcast).
-//   (c) Zustand timeline store (useTimelineStore) — source of UI render,
-//       maintained by (a) snapshot + (b) SSE folding + reload merging.
-//
-// reload triggers:
-//   - agentId change → React Query supplies data under the new queryKey
-//     (cache hit or fetch); switchThread additionally unparks the live-folded
-//     bucket if this thread was recently visited (fresher than the snapshot).
-//   - SSE timeline_snapshot → the full snapshot pushed by the gateway,
-//     folded directly into the active thread (no HTTP refetch).
-//
-// staleTime=5min design decision (PR3): the store now folds SSE events into a
-// per-thread bucket even while a thread is parked (background), so a hot
-// switch-back restores live state without needing an HTTP refresh. The
-// aggressive staleTime=0 (refetch on every observe) is therefore redundant;
-// 5min keeps switch-back from firing a background refetch that would only
-// re-apply what SSE already folded. Explicit refetch is still forced where the
-// snapshot can genuinely diverge from the fold — compact_done (history rewrite)
-// and reconnect (events missed during the gap) — via invalidateQueries, which
-// ignores staleTime. gcTime=30min preserves the cache for cold-bucket hot hits
-// (a thread evicted from the parked-threads LRU, or returning from another page).
-//
-// Aw-Snap memory bound: the fleet-wide timeline prefetch (usePrefetchTimelines)
-// was REMOVED — it cached one full timeline (with the ~128KB system-prompt
-// item plus historical items) per fleet agent for gcTime=30min, the dominant
-// renderer-heap retention source (~445 agents × ~2-3 copies measured in the
-// heap). This hook's ["timeline", id] query (full, WITH the prompt) fires only
-// for agents actually opened, so live copies ≈ visited agents + the active
-// thread, never the fleet size.
+// The selected conversation owns one HTTP tail snapshot and one live view.
+// Switching drops inactive live state; durable older history stays pageable.
+// Snapshot reads and history pages abort when their selection loses ownership.
 
 "use client";
 
@@ -43,6 +9,7 @@ import { startTransition, useCallback, useEffect, useLayoutEffect, useRef } from
 
 import { api } from "./api";
 import { useDisplayLimit } from "./display-limits";
+import { useAgentReadRepair } from "./use-agent-read-repair";
 import { inspectLiveQueryKey } from "./inspector-queries";
 import { errMsg } from "./errors";
 import { noteTurnStart } from "./interaction-timing";
@@ -71,9 +38,9 @@ function startsTurn(event: SystemEvent): boolean {
 }
 
 /** SSE connection state — UI uses it to show banners ("disconnected /
- *  reconnecting"). Parse failures and hidden-tab poll ticks are signals,
+ *  reconnecting"). Parse failures are signals,
  *  not health-state changes. */
-export type ConnectionState = Exclude<ConnectionEvent["type"], "parse-failed" | "poll">;
+export type ConnectionState = Exclude<ConnectionEvent["type"], "parse-failed">;
 
 export interface UseTimelineResult {
   items: BackendTimelineItem[];
@@ -83,9 +50,7 @@ export interface UseTimelineResult {
   connectionState: ConnectionState;
   /** Whether the current turn is running — derived from the SSE
    *  event stream; the composer button uses it to switch between
-   *  send / stop. More timely than the agents-table status 15s poll,
-   *  avoiding the race where you want to cancel after send but the
-   *  button is still send. Turn boundaries:
+   *  send / stop as the selected conversation progresses. Turn boundaries:
    *    start: inbound_arrived / chat_start / code_start / reasoning_start /
    *           exec_start
    *           (chat/code/reasoning/exec)
@@ -121,20 +86,26 @@ export function useTimeline(
 ): UseTimelineResult {
   const queryClient = useQueryClient();
 
-  // -- React Query: timeline snapshot, cached by agentId --
-  // staleTime 5min: the store's per-thread SSE folding keeps buckets fresh, so
-  //   a switch-back does not need a background refetch. compact_done / reconnect
-  //   still force a fresh pull via invalidateQueries (which ignores staleTime).
-  // gcTime 30min: keep inactive thread cache so a cold-bucket hot-hit shows
-  //   instantly on agent switch AND on returning from another page.
+  const { isVisible, requestRepair } = useAgentReadRepair("timeline", agentId);
+  const olderRequest = useRef<AbortController | null>(null);
   const timelineQuery = useQuery({
     queryKey: ["timeline", agentId] as const,
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- the `enabled` gate below guarantees agentId is set before queryFn runs (standard TanStack idiom the types cannot see)
-    queryFn: () => api.getTimeline(agentId!),
-    enabled: agentId != null,
-    staleTime: 5 * 60_000,
-    gcTime: 30 * 60_000,
+    queryFn: ({ signal }) => {
+      if (agentId === null) throw new Error("A timeline read requires an agent");
+      return api.getTimeline(agentId, { signal });
+    },
+    enabled: agentId !== null && isVisible,
+    staleTime: 0,
+    gcTime: 0,
   });
+
+  useEffect(() => {
+    if (!isVisible && agentId !== null) {
+      olderRequest.current?.abort();
+      useTimelineStore.setState({ loadingOlder: false });
+    }
+    return () => { olderRequest.current?.abort(); };
+  }, [agentId, isVisible]);
 
   // -- Subscribe to timeline state from the Zustand store --
   const items = useTimelineStore((s) => s.items);
@@ -158,65 +129,21 @@ export function useTimeline(
   // errors. Reset on the open event (new connection resets noisy state).
   const seenParseErrors = useRef<Set<string>>(new Set());
 
-  // Agent ids whose compact_done arrived but whose post-compact snapshot has
-  // not yet — the deferred invalidate trigger (see onSystemEvent). Agent id 0
-  // is never here: compact_done always carries the compacting agent's id.
-  const pendingCompactAgentsRef = useRef<Set<number>>(new Set());
+  const compactPending = useRef(false);
 
-  // The last TimelineResponse object already reflected in the active thread —
-  // keyed by object identity. Its PR3 job: stop the data effect below from
-  // re-folding an HTTP snapshot that switchThread already accounted for. On a
-  // switch-back, switchThread unparks the live-folded bucket (fresher than the
-  // React Query snapshot); this ref points at that cached response so the data
-  // effect skips it and does NOT clobber the fresh bucket with the stale
-  // snapshot. A real refetch (compact_done / reconnect / staleTime expiry)
-  // always yields a NEW object → never skipped, so genuine refreshes still
-  // fold. Object identity is immune to rapid A→B→A switches a boolean would
-  // confuse (R4).
   const lastAppliedDataRef = useRef<TimelineResponse | null>(null);
 
-  // -- On agent switch: park/unpark via switchThread; record the cached
-  //    response so the data effect doesn't re-fold it over the fresh bucket --
-  //    useLayoutEffect: fires synchronously before browser paint so the user
-  //    never sees the old agent's items flash on the new agent's timeline.
   useLayoutEffect(() => {
-    if (agentId == null) return;
     seenParseErrors.current.clear();
-
-    // Check the React Query cache — getQueryData reads synchronously and does not trigger fetch.
-    // The cache holds the full timeline (with the system-prompt item) only for
-    // agents actually opened in this session — the fleet-wide prefetch was
-    // removed (Aw-Snap fix): it retained one ~128KB prompt copy plus historical
-    // items per fleet agent for gcTime=30min, the dominant renderer-heap
-    // source. A never-opened agent seeds cold and the on-demand query lands
-    // within a fetch.
-    const cached = queryClient.getQueryData<TimelineResponse>(["timeline", agentId]);
-    // Atomic switch: park the outgoing thread, unpark this one (parked bucket
-    // wins; else seed from `cached`; else cold). Record the cached object so the
-    // data effect below skips re-folding it in the same commit.
-    switchThread(agentId, cached ? cached.items : null, cached ? cached.has_more : false);
+    compactPending.current = false;
+    const cached = agentId === null ? null :
+      queryClient.getQueryData<TimelineResponse>(["timeline", agentId]);
+    switchThread(agentId, cached?.items ?? null, cached?.has_more ?? false);
     lastAppliedDataRef.current = cached ?? null;
-    // Reconcile any thread we switch back to that has a cached snapshot — even
-    // one with a live SSE-folded bucket. The bucket is NOT a freshness guarantee:
-    // an event missed during a socket gap leaves it silently stale with no
-    // signal, and with staleTime=5min neither the cache nor the fold-skip guard
-    // would ever repair it. So force a background refetch whenever there is
-    // cached data; the reload merge returns the SAME reference when content is
-    // unchanged (a fresh bucket → zero render cost), so a redundant refetch is
-    // cheap and closes the stale-bucket drift window. A cold thread with NO cache
-    // is skipped: useQuery already fetches it on mount, so invalidating would
-    // double-fetch.
-    if (cached) {
-      void queryClient.invalidateQueries({ queryKey: ["timeline", agentId] });
-    }
+    return () => { switchThread(null, null, false); };
   }, [agentId, queryClient, switchThread]);
 
-  // -- React Query data change → feed into Zustand reloadSnapshot --
-  // Skip re-folding a response the switch effect already accounted for
-  // (identified by object reference) — re-applying a cached snapshot over the
-  // unparked live bucket would drop SSE-folded messages. Any real refetch
-  // produces a new TimelineResponse, so background refreshes still flow through
-  // reloadSnapshot; only the exact object switchThread just recorded is skipped.
+  // Apply each distinct authoritative response once.
   useEffect(() => {
     if (!timelineQuery.data || agentId == null) return;
     if (timelineQuery.data === lastAppliedDataRef.current) return;
@@ -249,49 +176,22 @@ export function useTimeline(
     ev.role === "reasoning_delta" ||
     ev.role === "exec_output_chunk";
 
-  // The agent publishes a timeline_snapshot on each graph node enter, so the
-  // frontend no longer needs to refetch. LLMDone and InboundCommitted also no
-  // longer trigger refetch — their responsibility is replaced by the
-  // agent-published timeline_snapshot.
-  //
-  // compact_done is the exception: compaction replaces the whole history (the
-  // old messages are removed, not appended to), and the snapshot merge is
-  // built for growth, not shrinkage. The cache must reconcile to the
-  // authoritative post-compact state — but an invalidate fired HERE reads the
-  // checkpoint BEFORE the compact commits (the commit lands a beat later, on
-  // remote machines seconds later) and would cache the lagging pre-compact
-  // snapshot; a later switch-back then seeds it and keep-all merging
-  // resurrects the old bubbles. So defer the invalidate to the first
-  // NON-EMPTY post-compact timeline_snapshot for that agent: by then the
-  // checkpoint is committed (the snapshot is emitted from the in-memory state
-  // after the compacting super-steps), the refetch returns the new history,
-  // and the cache + switch-back stay clean. The store's reset window drops
-  // the refetch's merge while it is open, so the visible thread is unaffected
-  // either way.
-  //
-  // The same deferred point invalidates the agent's other per-agent REST
-  // snapshots (task #1959): the inspector's live + windowed queries, the
-  // pending strip, and the token-usage context bar all cache per-agent data
-  // under the app-wide staleTime, and a compact that happens while the agent
-  // is NOT the active thread reaches the frontend through the widened
-  // all-events filter (parked threads are selected). Invalidating them at the
-  // post-compact snapshot marks the inactive entries so a later switch-back
-  // refetches post-compact data even within staleTime — the same
-  // commit-safe timing the timeline uses. An active observer (the compacting
-  // agent is being viewed) refetches right then: the since-compact inspector
-  // window and the context bar refresh without waiting out the 60s / 30s
-  // interval ticks.
+  // Compaction changes the selected read models; inactive views own no work.
   const trackCompactForInvalidation = useCallback(
     (ev: SystemEvent) => {
+      if (agentId === null || ev.agent_id !== agentId) return;
       if (ev.role === "impersonation_changed" || ev.role === "inbound_arrived") {
         void queryClient.invalidateQueries({ queryKey: ["timeline", ev.agent_id] });
       } else if (ev.role === "compact_done") {
-        pendingCompactAgentsRef.current.add(ev.agent_id);
+        compactPending.current = true;
+        olderRequest.current?.abort();
+        void queryClient.cancelQueries({ queryKey: ["timeline", agentId], exact: true });
       } else if (
         ev.role === "timeline_snapshot" &&
         (ev.items as unknown as unknown[] | undefined)?.length &&
-        pendingCompactAgentsRef.current.delete(ev.agent_id)
+        compactPending.current
       ) {
+        compactPending.current = false;
         void queryClient.invalidateQueries({ queryKey: ["timeline", ev.agent_id] });
         void queryClient.invalidateQueries({
           queryKey: inspectLiveQueryKey(ev.agent_id),
@@ -301,7 +201,7 @@ export function useTimeline(
         void queryClient.invalidateQueries({ queryKey: ["token-usage", ev.agent_id] });
       }
     },
-    [queryClient],
+    [agentId, queryClient],
   );
 
   // Streaming-delta roles — rendered through startTransition so a burst of
@@ -361,25 +261,16 @@ export function useTimeline(
   const onConnectionEvent = useCallback(
     (ev: ConnectionEvent) => {
       switch (ev.type) {
-        case "poll":
-          if (agentId != null) {
-            void queryClient.invalidateQueries({ queryKey: ["timeline", agentId] });
-          }
-          return;
         case "open":
           processConnectionEvent({ type: "open" });
           seenParseErrors.current.clear();
-          // Reconnect fallback: any events pushed while the stream was down
-          // (a compact, new turns) were missed. Refetch the snapshot so the
-          // timeline catches up to whatever happened during the gap. Harmless
-          // on the initial open — the query is already loading then.
-          if (agentId != null) {
-            void queryClient.invalidateQueries({ queryKey: ["timeline", agentId] });
-          }
+          // Opening during an initial/ongoing read cannot trust that read
+          // to cover the subscription gap; require a trailing repair.
+          requestRepair();
           // A compact whose post-compact snapshot was lost in the gap is now
           // covered by the reconnect refetch — drop any pending marker so a
           // later snapshot does not double-invalidate.
-          pendingCompactAgentsRef.current.clear();
+          compactPending.current = false;
           return;
         case "reconnecting":
           processConnectionEvent({ type: "reconnecting" });
@@ -396,7 +287,7 @@ export function useTimeline(
         }
       }
     },
-    [showError, processConnectionEvent, queryClient, agentId],
+    [showError, processConnectionEvent, requestRepair],
   );
 
   useAgentEventStream(onSystemEvent, onConnectionEvent, onSystemEventBatch);
@@ -413,9 +304,9 @@ export function useTimeline(
   // Resolves true when a fetch actually ran — the compact-history retention
   // hook (use-compact-history-retention.ts) walks N segments off this.
   const loadOlderSegment = useCallback(async (): Promise<boolean> => {
-    if (agentId == null) return false;
+    if (agentId == null || !isVisible) return false;
     const st = useTimelineStore.getState();
-    if (!st.hasMoreOlder || st.loadingOlder) return false;
+    if (st.activeThreadId !== agentId || !st.hasMoreOlder || st.loadingOlder) return false;
     // Current standing context is never a cursor: the re-attached prompt, the
     // standing head notes (exec timeout / timezone / cluster memory / agent id
     // / agent memory — re-attached by the gateway beside the prompt), and
@@ -454,22 +345,25 @@ export function useTimeline(
     // Exponential growth: first fetch N, second 2N, third 4N, … capped at 1000
     // (the endpoint's protective le — a constant, not config).
     const limit = Math.min(olderBaseLimit * Math.pow(2, st.olderFetchCount), 1000);
+    const controller = new AbortController();
+    olderRequest.current = controller;
     beginLoadOlder();
     try {
-      const page = await api.getTimeline(agentId, { before: oldest.item_id, limit });
+      const page = await api.getTimeline(agentId, { before: oldest.item_id, limit, signal: controller.signal });
       // Agent switch mid-flight: drop the result so it can't contaminate
       // the now-active thread (switchThread already cleared loadingOlder).
-      if (useTimelineStore.getState().activeThreadId !== agentId) return false;
+      if (controller.signal.aborted || useTimelineStore.getState().activeThreadId !== agentId) return false;
       prependOlder(page.items, page.has_more);
       // Bump the counter so the next scroll-up doubles the window.
       useTimelineStore.getState().incrementOlderFetchCount();
       return true;
     } catch (e: unknown) {
+      if (controller.signal.aborted) return false;
       useTimelineStore.setState({ loadingOlder: false });
       showError(`Failed to load older messages: ${errMsg(e)}`);
       return false;
     }
-  }, [agentId, beginLoadOlder, prependOlder, showError, olderBaseLimit]);
+  }, [agentId, isVisible, beginLoadOlder, prependOlder, showError, olderBaseLimit]);
   const loadOlder = useCallback(() => {
     void loadOlderSegment();
   }, [loadOlderSegment]);
@@ -479,6 +373,7 @@ export function useTimeline(
   // session(s) — the logic lives in use-compact-history-retention.ts.
   useCompactHistoryRetention({
     agentId,
+    isVisible,
     loadOlderSegment,
     hasMoreOlder,
     loadingOlder,

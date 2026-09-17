@@ -1,33 +1,9 @@
-// Zustand store — SSE-driven streaming timeline state only.
-//
-// Split out of the app store (store.ts, which now holds pure-client UI +
-// cluster-coordination state) so that the high-frequency SSE fold — one set()
-// per code_delta / chat_delta chunk — notifies ONLY timeline subscribers.
-// Zustand notifies every subscriber of a store on each set() and re-runs their
-// selector; keeping the timeline in its own store means a burst of streaming
-// deltas never runs the sidebar / spawn-dialog / cluster-banner selectors. The
-// two stores never cross-read (the timeline gate `activeThreadId` and the
-// sidebar selection `activeId` are coordinated only at the hook level, in
-// useTimeline), so the split is a clean cut, not a shared-slice carve-out.
-//
-// Server data (agents list, stats, timeline snapshot, token usage) lives in
-// TanStack Query. This store holds the LIVE render state the SSE stream folds
-// into on top of that snapshot.
-//
-// Per-thread timeline caching (R1/R2/R3): the filtered SSE stream
-// (`/api/system/all?agents=<activeId>`) carries the active agent's events. The ACTIVE thread's
-// timeline state lives in the top-level fields (items / turnActive /
-// streamingCode / streamingIds / hasMoreOlder); every INACTIVE (parked)
-// thread's state lives in `threads: Map<agentId, ThreadTimelineState>`.
-// A thread is in exactly one place — top-level while active, the map while
-// parked — and `switchThread` is the single mover (park the outgoing thread,
-// unpark the incoming one, delete the active id from the map). So background
-// buffered/in-flight events for a just-switched-away thread still fold into its
-// parked bucket instead of being dropped (R3), and switching back restores the
-// parked state instantly (R2) before REST reconciliation. Token fields are NOT
-// per-thread here — they keep their own per-thread cache in React Query
-// (`["token-usage", agentId]`) via useTokenUsage; duplicating them into the
-// bucket would be a second per-thread token source.
+// Selected conversation render state: HTTP snapshots plus live SSE folds.
+// A dedicated Zustand store keeps high-frequency timeline updates from waking
+// sidebar, spawn-dialog and cluster-banner subscribers. useTimeline coordinates
+// its activeThreadId with the UI selection; the stores never cross-read.
+// Switching replaces the view from an HTTP tail snapshot and releases inactive
+// histories. Durable history remains available through paging.
 
 "use client";
 
@@ -38,7 +14,6 @@ import {
   mergeSnapshotWithStreaming,
   sortByItemId,
 } from "./fold/timeline";
-import type { ThreadTimelineState } from "./fold/timeline";
 import { isEventForThread } from "./timeline";
 import type { BackendTimelineItem, SystemEvent } from "./types";
 import type { ConnectionState } from "./use-timeline";
@@ -83,14 +58,6 @@ export interface TimelineState {
   /** Active thread agent_id — used to validate SSE events; updated when switching agents */
   activeThreadId: number | null;
 
-  /** Parked (inactive) threads' foldable timeline state, keyed by agent_id.
-   * The ACTIVE thread is never in here (its state lives in the top-level
-   * fields above); `switchThread` parks the outgoing thread and unparks the
-   * incoming one. Background SSE events for a parked thread fold into its
-   * bucket (see `processSseEvent`) so switching back is instant (R2/R3).
-   * LRU-capped at MAX_PARKED_THREADS — a chatty background thread never grows
-   * this unbounded. Ephemeral (not persisted). */
-  threads: Map<number, ThreadTimelineState>;
   /** Item ids the frontend has streamed this turn but that are not yet
    * committed (added on agent chat/code/reasoning *_start/*_delta, removed
    * once a snapshot commits them). On `cancelled` these are exactly the
@@ -100,26 +67,8 @@ export interface TimelineState {
    * boundary after SSE-missed snapshots, and never touches code_output. */
   streamingIds: Set<string>;
 
-  /** Agent ids whose compact_done arrived while the thread was PARKED (no
-   * active reset window to carry the flag). On switch-back the reset window
-   * is armed for the thread (whatever it seeds — the parked bucket, or the
-   * React Query cache which may hold the lagging pre-compact snapshot — is
-   * replaced wholesale by the first post-compact snapshot instead of being
-   * keep-merged, so the old history cannot resurrect). Cleared when the
-   * reset completes (first non-empty snapshot), on switch-back (consumed),
-   * or on reconnect. The active-thread flag lives in `resetPending`; this
-   * set is the parked-thread counterpart. */
-  compactedThreadIds: ReadonlySet<number>;
-
-  /** Compact-reset window flag (active thread only). Set when compact_done
-   * arrives: the whole history was rewritten (shrink), keep-all merging
-   * would resurrect pre-compact items, and a GET fired by the compact
-   * invalidation may read a lagging (pre-compact) checkpoint. While set,
-   * GET merges are dropped; the NEXT timeline_snapshot SSE event (SSE
-   * ordering guarantees it is post-compact — the compacting turn's
-   * init_context enter) replaces the thread's items wholesale and clears
-   * the flag. Cleared on SSE reconnect (GET becomes trusted again) and on
-   * thread switch (per-thread flag). */
+  /** Compact replacement is pending. Preserve the visible view until its
+   * nonempty snapshot arrives; selection and reconnect reset this flag. */
   resetPending: boolean;
 
   /** Bumped every time a compact wholesale-replace lands on the ACTIVE
@@ -127,15 +76,13 @@ export interface TimelineState {
    * `compactReplaceAgent` names the thread it replaced. Consumers use it
    * as the edge for post-compact view work that must run ONCE per rewrite
    * — the compact-history re-attach loads the previous segment(s) after
-   * this fires (task #3698). The parked-thread swap does not bump: its
-   * replacement renders only after a later switch-back. */
+   * this fires (task #3698). Inactive agents own no live state. */
   compactReplaceSeq: number;
   compactReplaceAgent: number | null;
 
   /** The active thread's in-flight compact run — drives the ticking
    * "Compacting" block. Set by `compact_started` / `compact_finished` for the
-   * active thread only (parked threads drop it, like token_usage — the
-   * committed summary is their durable record). Retired when the run's
+   * active thread only. Retired when the run's
    * summary item lands in `items` (matched by `compact_id`), replaced by a
    * newer run, and cleared on thread switch. */
   liveCompact: LiveCompact | null;
@@ -150,23 +97,11 @@ export interface TimelineState {
 
   /** How many times loadOlder has been called on the active thread —
    * drives exponential growth of the older-window fetch limit.
-   * Tracks the same value as ThreadTimelineState.olderFetchCount for the
-   * active thread; travels with the thread through park/unpark. */
+   * Reset when the selected conversation changes. */
   olderFetchCount: number;
 
-  /** Monotonic "force the viewport to the bottom + re-stick" signal — the
-   * SINGLE force-scroll trigger the timeline honors. Bumped for exactly the
-   * two moments a scroll-to-bottom is unconditional: an agent switch
-   * (`switchThread`, bumped in the same `set()` that installs the new
-   * thread's items, so the timeline's layout effect pins AFTER the new items
-   * are in the DOM — no stale-bottom race) and a send
-   * (`requestScrollToBottom`). Content growth is NOT a bump: the timeline's
-   * ResizeObserver + the controller's latched sticky flag handle streamed
-   * growth on their own. Deliberately not bumped by `reloadSnapshot` /
-   * `prependOlder` — a mid-stream snapshot refresh or a scroll-up load-older
-   * must never yank the viewport to the bottom. This replaces the old
-   * dual trigger (parent-owned `scrollToken` + a separate `activeThreadId`
-   * effect), which double-pinned on switch and pinned before items loaded. */
+  /** Force the viewport to bottom on selection or send. Reads/history paging
+   * never bump this signal; ordinary content growth follows the sticky controller. */
   scrollToBottomRequest: number;
   /** Bump `scrollToBottomRequest` — called on send (the switch bump happens
    * inside `switchThread`). */
@@ -191,30 +126,12 @@ export interface TimelineState {
    * msg_count = `len(state.messages)`. */
   reloadSnapshot: (snapshot: BackendTimelineItem[], msg_count: number, hasMoreOlder: boolean) => void;
 
-  /** Atomic agent switch — the SINGLE writer of `activeThreadId` AND the single
-   * mover between top-level (active) and the `threads` map (parked). In one
-   * `set()`: park the outgoing active thread's timeline state into the map,
-   * then load the incoming thread. Load precedence: (1) a PARKED bucket wins —
-   * it holds background-folded events newer than any HTTP snapshot (R2/R3);
-   * (2) else seed from `cached` (React Query already holds a snapshot → hot
-   * restore, no flash); (3) else cold (empty until the fetch lands). The item
-   * swap, turn/streaming flags, `streamingIds`, the older-window flags, the
-   * token reset, and the force-scroll bump all move together — so the SSE gate
-   * (`activeThreadId`) and the loaded items can never disagree mid-switch.
-   * Token fields reset to cold here; `useTokenUsage` restores the hot value
-   * through `applyTokenUsage` in the same commit (React batches → no flicker).
-   * The map is LRU-capped after parking. */
-  switchThread: (agentId: number, cached: BackendTimelineItem[] | null, hasMoreOlder: boolean) => void;
+  /** Replace the selected view atomically; inactive views retain no live state. */
+  switchThread: (agentId: number | null, cached: BackendTimelineItem[] | null, hasMoreOlder: boolean) => void;
 
-  /** Write the three context-window token fields atomically — input usage, the
-   * reasoning portion, and the model's max input ceiling. The single gate for
-   * token state, so `contextTokens` and `maxContextTokens` can never split-brain
-   * across two renders (the old bug: `tokenUsage` through `processSseEvent` +
-   * `maxContextTokens` through a bare `setState`). `useTokenUsage` calls
-   * this for cold reset / hot restore / HTTP snapshot; live per-call SSE
-   * `token_usage` still flows through `processSseEvent`, which leaves
-   * `maxContextTokens` / `softCompactTokens` / `hardCompactTokens` (per-model
-   * constants) untouched. */
+  /** Atomically apply the selected HTTP token snapshot, including its model
+   * ceiling and compact thresholds. Live SSE token_usage changes usage only;
+   * selection resets all fields together. */
   applyTokenUsage: (
     input: number,
     reasoning: number,
@@ -240,42 +157,11 @@ export interface TimelineState {
 }
 
 // =============================================================
-// Per-thread timeline reducer + LRU
+// Selected timeline reducer
 // =============================================================
 
-/** How many parked (inactive) threads keep their live-folded state. Beyond
- *  this, the least-recently-parked thread is evicted; revisiting it cold-fetches
- *  (its React Query snapshot may still hot-restore within gcTime). Bounds the
- *  map so a fleet of chatty background agents can't grow it unbounded. */
-// KEEP (task #3696 exception inventory): 32 is the working set a browsing
-// session realistically cycles through; eviction is safe — a switch-back
-// re-seeds from the React Query cache within gcTime, else one fetch.
-const MAX_PARKED_THREADS = 32;
-
-// Per-thread item count is deliberately UNBOUNDED (user ruling 2026-08-26,
-// task #1734): with AVA_TIMELINE_COMPACT_HISTORY=-1 the scroll-up history
-// paging must be able to walk every retained compact segment, and the old
-// 6000-item cap truncated the loaded history the moment it was reached —
-// which is exactly the behavior the ruling removed. The backend already
-// bounds each fetch window (limit <= 1000, exponential fetch growth capped
-// at 1000 in use-timeline.ts) and enforces the segment-depth contract via
-// `has_more`, so the frontend only accumulates what the user deliberately
-// scrolls through. The remaining memory bounds are cross-thread: parked
-// threads are LRU-capped at MAX_PARKED_THREADS and React Query's per-thread
-// timeline cache is gcTime-bounded.
-
-/** Evict least-recently-parked buckets until the map is within the cap. A Map
- *  preserves insertion order, and `switchThread` re-`set`s the just-parked
- *  thread last (most recent), so the oldest live at the front. Mutates in place
- *  — callers pass a fresh copy. */
-function evictLruThreads(threads: Map<number, ThreadTimelineState>): void {
-  while (threads.size > MAX_PARKED_THREADS) {
-    const oldest = threads.keys().next().value;
-    if (oldest === undefined) break;
-    threads.delete(oldest);
-  }
-}
-
+// Active history remains fully pageable. Switching releases the loaded view;
+// it does not delete durable history or retain inactive live buckets.
 
 /**
  * The timeline kinds that mark a history rewrite — the compact envelope rows
@@ -287,29 +173,9 @@ const COMPACT_ENVELOPE_KINDS: ReadonlySet<string> = new Set([
   "inbound_compact_summary",
 ]);
 
-/**
- * Whether `incoming` carries a compact envelope the local items never folded
- * — the history was rewritten by a compact the local state missed (an SSE
- * gap: the re-key/reconnect window dropped compact_done + the post-compact
- * snapshot). The envelope item is rendered only by the rewrite itself
- * (shared/timeline.py `_compact_item`), so a snapshot that shows one the
- * local items don't share is post-compact relative to them. Keep-all merging
- * the two would resurrect the compacted-away items, so callers replace
- * wholesale when this is true.
- *
- * Identity = item_id + kind + created_at. created_at is the message's real
- * `ava_created_at` — stamped by the producing node at creation and
- * render-stable on both the SSE-snapshot and REST paths (shared/timeline.py
- * `next_ts` returns the stamped value verbatim). Neither payload nor
- * inbound_id is part of the identity: `message_timestamps` prefixes the
- * payload with a render-time `now_timestamp()`, so the same compact
- * re-rendered has a different payload and comparing it would fire the
- * replace on every post-compact snapshot; `_compact_item` hardcodes
- * inbound_id=None, so that comparison could never engage either. A missing
- * item_id means the envelope moved (the rewrite re-positioned it); a
- * same-slot envelope with a different created_at is a newer compact that
- * reused the wiped slot.
- */
+/** Detect an unseen compact envelope by its stable rendered identity.
+ * This is not a directional checkpoint revision; the ordering redesign must
+ * replace it before arbitrary delayed same-agent reads can be proven safe. */
 function crossedUnseenCompact(
   local: BackendTimelineItem[],
   incoming: BackendTimelineItem[],
@@ -342,12 +208,9 @@ function retireLiveCompact(
  * batch path can never diverge from the per-event path.
  */
 function applySseEvent(state: TimelineState, ev: SystemEvent): Partial<TimelineState> {
-  // token_usage is a thread's own concern but NOT part of ThreadTimelineState
-  // — the token fields are cached per-thread in React Query and mirrored to
-  // the top-level active-thread fields. Write the active thread's token
-  // fields; a parked thread's token event is dropped (its value is restored
-  // from React Query on switch-back). agent_id=0 is a system reset (passes
-  // isEventForThread), which writes tokenUsage=0 on the active thread as before.
+  // Only selected-agent token events write the context bar. Selection resets
+  // these fields; useTokenUsage supplies the newly selected HTTP snapshot.
+  // agent_id=0 system resets follow the shared event-routing rule.
   if (ev.role === "token_usage") {
     return isEventForThread(ev, state.activeThreadId)
       ? { tokenUsage: ev.input_tokens, reasoningTokens: ev.reasoning_tokens ?? 0 }
@@ -387,33 +250,19 @@ function applySseEvent(state: TimelineState, ev: SystemEvent): Partial<TimelineS
         },
       };
     }
-    // compact_done = the whole history was rewritten (shrink). keep-all
-    // merging would resurrect pre-compact items, and a GET fired during
-    // the window may read a lagging pre-compact checkpoint — so arm the
-    // reset window: the first NON-EMPTY timeline_snapshot (SSE ordering
-    // guarantees it is post-compact — the rebuilt head renders at the
-    // next node enter) replaces the items wholesale. The pre-compact
-    // items stay visible until that swap: clearing them here made the
-    // context panel flash blank for the whole window (sub-second locally,
-    // seconds on remote machines — the "context UI doesn't refresh after
-    // compact" report).
+    // Keep the visible content until the compact replacement arrives.
     if (ev.role === "compact_done") {
       return {
         streamingIds: new Set(),
         // Old foldEvent treated compact_done as a code-end (streamingCode
         // false, turnActive untouched); preserve that flag behavior.
         streamingCode: false,
+        loadingOlder: false,
+        olderFetchCount: 0,
         resetPending: true,
       };
     }
-    // First snapshot inside the reset window: overall replace, not merge.
-    // The backend publishes a full-window snapshot on the post-compact
-    // node enter (its cursor is past the shrunk history), so this is a
-    // complete, race-free (in-memory) view of the new history. An EMPTY
-    // snapshot (a wiped-but-not-yet-rebuilt history, e.g. the
-    // post-REMOVE_ALL init_context enter on an older backend) is skipped
-    // — replacing with [] would blank the panel before the real history
-    // arrives.
+    // The first nonempty compact snapshot replaces the selected segment.
     if (ev.role === "timeline_snapshot") {
       const snapItems = ev.items as unknown as BackendTimelineItem[];
       // A full-window snapshot (0.0 present) whose compact envelope the local
@@ -444,8 +293,7 @@ function applySseEvent(state: TimelineState, ev: SystemEvent): Partial<TimelineS
         turnActive: state.turnActive,
         hasMoreOlder: state.hasMoreOlder,
         olderFetchCount: state.olderFetchCount,
-        // The active thread's reset window state rides in the fold input
-        // so a parked fold inside foldEvent keeps it (foldEvent spreads t).
+        // The selected thread owns the compact reset window.
         resetPending: state.resetPending,
       },
       ev,
@@ -462,82 +310,7 @@ function applySseEvent(state: TimelineState, ev: SystemEvent): Partial<TimelineS
     };
   }
 
-  // PARKED (inactive) thread with a live bucket: fold in the background so
-  // switching back is instant (R3). Non-parked, non-active threads have no
-  // bucket → drop (unchanged from the old isEventForThread gate). This
-  // never re-renders the active view: no render selector reads `threads`.
-  const parked = state.threads.get(ev.agent_id);
-  const threads = new Map(state.threads);
-  if (ev.role === "compact_done") {
-    // compact_done rewrites the whole history (a shrink); foldEvent is
-    // built for growth and can't reconcile it. Mark the thread so a
-    // switch-back seeds cold with the reset window armed (the React Query
-    // cache may hold the lagging pre-compact snapshot) — the first
-    // post-compact snapshot then replaces wholesale. A live bucket keeps
-    // its items (still visible on switch-back) with the flag set; a
-    // bucketless thread is covered by the marker alone.
-    const compactedThreadIds = new Set(state.compactedThreadIds);
-    compactedThreadIds.add(ev.agent_id);
-    if (parked) {
-      threads.set(ev.agent_id, {
-        ...parked,
-        streamingIds: new Set(),
-        streamingCode: false,
-        resetPending: true,
-      });
-    }
-    return { threads, compactedThreadIds };
-  }
-  if (parked) {
-    // Parked reset window: same wholesale-replace rule as the active
-    // thread — the first non-empty post-compact snapshot replaces the
-    // bucket and clears the marker. The same replace fires when a FULL-window
-    // snapshot (0.0 present) crossed a compact the bucket never folded (its
-    // compact_done was lost in an SSE gap): without it the pre-compact items
-    // would sit in the bucket and keep-merge back in on switch-back.
-    if (ev.role === "timeline_snapshot") {
-      const snapItems = ev.items as unknown as BackendTimelineItem[];
-      const crossedCompact =
-        snapItems.some((it) => it.item_id === "0.0") &&
-        crossedUnseenCompact(parked.items, snapItems);
-      if (parked.resetPending || crossedCompact) {
-        if (snapItems.length === 0) return {};
-        const compactedThreadIds = new Set(state.compactedThreadIds);
-        compactedThreadIds.delete(ev.agent_id);
-        threads.set(ev.agent_id, {
-          ...parked,
-          items: snapItems,
-          streamingIds: new Set(),
-          resetPending: false,
-          hasMoreOlder: parked.hasMoreOlder,
-        });
-        return { threads, compactedThreadIds };
-      }
-    }
-    threads.set(ev.agent_id, foldEvent(parked, ev));
-  }
-  // Bucketless compact marker: compact_done arms the reset window for a
-  // thread with NO parked bucket via `compactedThreadIds` (a later
-  // switch-back seeds cold + resetPending, so the lagging pre-compact
-  // cache cannot be keep-merged back in). The reset window's whole job is
-  // done by the FIRST timeline_snapshot after compact_done — SSE order
-  // guarantees it is the full post-compact snapshot (the backend emits it
-  // from in-memory state on the post-compact node enter). For a parked
-  // thread with a bucket that snapshot is folded into the bucket and
-  // clears the window there; for a BUCKLESS thread it is dropped, so the
-  // marker would otherwise survive until a switch-back and arm a STALE
-  // window: the HTTP snapshot is dropped inside it, and the first
-  // *incremental* snapshot (the full one already passed, the agent may
-  // still be streaming) replaces the fresh seed wholesale — the timeline
-  // ends up showing only the tail ("show only the last detail block, earlier
-  // messages never trigger loading", Task #994). Consume the marker here: the full
-  // snapshot happened, nothing is left to protect.
-  if (ev.role === "timeline_snapshot" && state.compactedThreadIds.has(ev.agent_id)) {
-    const nextCompacted = new Set(state.compactedThreadIds);
-    nextCompacted.delete(ev.agent_id);
-    return { threads, compactedThreadIds: nextCompacted };
-  }
-  return { threads };
+  return {};
 }
 
 export const useTimelineStore = create<TimelineState>()((set, get) => ({
@@ -551,9 +324,7 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
   softCompactTokens: 0,
   hardCompactTokens: 0,
   activeThreadId: null,
-  threads: new Map(),
   streamingIds: new Set(),
-  compactedThreadIds: new Set(),
   resetPending: false,
   compactReplaceSeq: 0,
   compactReplaceAgent: null,
@@ -619,30 +390,17 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
         items: s.items.some((it) => it.interrupted)
           ? s.items.map((it) => (it.interrupted ? { ...it, interrupted: false } : it))
           : s.items,
-        // The SSE stream is the trusted source again — and the reconnect
-        // invalidates the timeline query, whose GET must now be allowed to
-        // apply (a compact that happened while disconnected has long since
-        // committed its checkpoint by now). Clear the reset window.
+        // Reopening requests a fresh snapshot and releases the compact guard.
+        // The existing wire contract cannot prove its commit order.
         resetPending: false,
-        compactedThreadIds: new Set(),
       }));
     }
   },
 
   reloadSnapshot: (snapshot, msg_count, hasMoreOlder) => {
     set((s) => {
-      // A fetched snapshot that crossed a compact the local items never
-      // folded (its envelope item is one the local state doesn't share — the
-      // compact_done + post-compact snapshot were lost in an SSE gap):
-      // keep-all merging would resurrect the compacted-away history. Replace
-      // wholesale instead — the local items, in-flight partials included,
-      // are dropped: the compact wiped that whole generation, so nothing of
-      // it can be right. This also satisfies an armed reset window (a crossed
-      // snapshot IS the post-compact state), while a non-crossed GET inside
-      // the window keeps being dropped: it may read a lagging pre-compact
-      // checkpoint (compact commits asynchronously; compact_done fires before
-      // the commit lands) — keep-all would resurrect the old history.
-      // hasMoreOlder refreshes either way — the truncation is real.
+      // A compact changes item coordinates. During the reset window only
+      // a snapshot showing that rewrite can replace the old view.
       const crossedCompact = crossedUnseenCompact(s.items, snapshot);
       if (s.resetPending && !crossedCompact) {
         return { hasMoreOlder };
@@ -660,94 +418,34 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
         items: merged,
         hasMoreOlder,
         resetPending: crossedCompact ? false : s.resetPending,
+        // Reconnect can discover the rewrite without any compact SSE event.
+        // A cold snapshot seeds a view; only an existing view needs retention.
+        compactReplaceSeq: crossedCompact && s.items.length > 0 ? s.compactReplaceSeq + 1 : s.compactReplaceSeq,
+        compactReplaceAgent: crossedCompact && s.items.length > 0 ? s.activeThreadId : s.compactReplaceAgent,
         liveCompact: retireLiveCompact(s.liveCompact, merged),
       };
     });
   },
 
   switchThread: (agentId, cached, hasMoreOlder) => {
-    // Agent switch. In ONE set(): (1) park the outgoing active thread's
-    // timeline state into the map; (2) load the incoming thread — a PARKED
-    // bucket wins (it holds background-folded events, fresher than any HTTP
-    // snapshot: R2/R3), else seed from `cached` (hot React Query snapshot →
-    // instant restore, no flash), else cold (empty until the fetch lands).
-    // activeThreadId + the item swap move together, so the SSE gate and the
-    // loaded items never disagree mid-switch. Bumping scrollToBottomRequest in
-    // the same set() pins the timeline to the new thread's bottom AFTER its
-    // items are in the DOM (the layout effect reads the post-swap DOM). Token
-    // fields go cold here; useTokenUsage restores the hot value through
-    // applyTokenUsage in the same commit (React batches → no flicker) — tokens
-    // are NOT parked (React Query is their per-thread cache).
-    set((s) => {
-      const threads = new Map(s.threads);
-      // Park the outgoing active thread (its live top-level state).
-      if (s.activeThreadId != null) {
-        threads.set(s.activeThreadId, {
-          items: s.items,
-          streamingIds: s.streamingIds,
-          streamingCode: s.streamingCode,
-          turnActive: s.turnActive,
-          hasMoreOlder: s.hasMoreOlder,
-          olderFetchCount: s.olderFetchCount,
-          // Carry the reset window into the parked bucket: a compact that
-          // started while the thread was active keeps its flag so the first
-          // post-compact snapshot replaces wholesale after switch-back too.
-          resetPending: s.resetPending,
-        });
-      }
-      // The active thread lives in the top-level fields, never in the map.
-      const parked = threads.get(agentId);
-      threads.delete(agentId);
-      // A thread whose compact_done arrived while parked (marker set) keeps
-      // the reset window armed on switch-back: whatever it seeds (the parked
-      // bucket, or the cached snapshot — possibly the lagging pre-compact
-      // one) is replaced wholesale by the first post-compact snapshot instead
-      // of being keep-merged, so the old history cannot resurrect. Consume
-      // the marker here; a later switch-back (after the snapshot has already
-      // folded into the bucket or refreshed the cache) is clean.
-      const compactedThreadIds = new Set(s.compactedThreadIds);
-      const wasCompacted = compactedThreadIds.delete(agentId);
-      // Re-inserting the outgoing thread above moved it to most-recent; evict
-      // the least-recently-parked beyond the cap (the just-loaded thread is
-      // already removed, so it can't be evicted).
-      evictLruThreads(threads);
-      const loaded = parked ?? {
-        items: cached ?? [],
-        streamingIds: new Set(),
-        streamingCode: false,
-        turnActive: false,
-        hasMoreOlder: cached ? hasMoreOlder : false,
-        olderFetchCount: 0,
-        resetPending: wasCompacted,
-      };
-      return {
-        threads,
-        activeThreadId: agentId,
-        items: loaded.items,
-        streamingIds: loaded.streamingIds,
-        streamingCode: loaded.streamingCode,
-        turnActive: loaded.turnActive,
-        hasMoreOlder: loaded.hasMoreOlder,
-        olderFetchCount: loaded.olderFetchCount,
-        // Preserve the live connection state: switchThread only swaps the
-        // thread — stamping "open" here would wrongly clear the
-        // all-events-stream disconnect banner until the next connection event
-        // (the stream may actually be reconnecting right now).
-        connectionState: s.connectionState,
-        resetPending: parked ? parked.resetPending : wasCompacted,
-        // A live compact run belongs to the outgoing thread; the incoming
-        // thread has none until its own compact_started arrives.
-        liveCompact: null,
-        compactedThreadIds,
-        tokenUsage: 0,
-        reasoningTokens: 0,
-        maxContextTokens: 0,
-        softCompactTokens: 0,
-        hardCompactTokens: 0,
-        loadingOlder: false,
-        scrollToBottomRequest: s.scrollToBottomRequest + 1,
-      };
-    });
+    set((s) => ({
+      activeThreadId: agentId,
+      items: cached ?? [],
+      streamingIds: new Set(),
+      streamingCode: false,
+      turnActive: false,
+      hasMoreOlder: cached !== null && hasMoreOlder,
+      olderFetchCount: 0,
+      resetPending: false,
+      liveCompact: null,
+      tokenUsage: 0,
+      reasoningTokens: 0,
+      maxContextTokens: 0,
+      softCompactTokens: 0,
+      hardCompactTokens: 0,
+      loadingOlder: false,
+      scrollToBottomRequest: s.scrollToBottomRequest + 1,
+    }));
   },
 
   applyTokenUsage: (input, reasoning, maxContext, softCompact, hardCompact) =>
