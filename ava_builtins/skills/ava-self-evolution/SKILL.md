@@ -270,8 +270,8 @@ that roughly daily. The batch command collects one day; Monday's summary
 collects seven. Failed/fumbled runs, an unexplained empty window, a missing
 scan, or a hard failure also wake this agent so a broken data source cannot hide.
 
-**Read-failure fallback.** Dense-window `/api/events` 500s and no-observability refusals (`observability_read_unavailable`) fall back to the local event
-mirror: daily scan automatic, weekly count likewise; manual `reference/mirror_backfill.py <days> [week]`; detail: `reference/no-observability-fallback.md`.
+**Read-failure fallback.** No-observability refusals (`observability_read_unavailable`) fall back to the local event
+mirror automatically: daily scan + weekly count. Dense-window `/api/events` 500s stay manual — `reference/mirror_backfill.py <days> [week]`; detail: `reference/no-observability-fallback.md`.
 
 ## Cron integration
 
