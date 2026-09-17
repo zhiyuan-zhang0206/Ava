@@ -245,6 +245,54 @@ def test_registration_lock_is_not_inherited_by_subprocesses(throwaway_root: Path
         pg_tools._unregister_throwaway(registration)
 
 
+def test_registration_publishes_the_lock_already_held(throwaway_root: Path) -> None:
+    """`_register_throwaway` returns with `owner.lock` present AND locked — the
+    invariant the sweep's `lock acquirable => owner dead` judgment rests on: a
+    concurrent sweep can never observe a created-but-unlocked lock file, the
+    mid-claim state it would reap (#3629)."""
+    import fcntl
+
+    instance = _write_instance(throwaway_root, "ava-pg-published")
+    registration = pg_tools._register_throwaway(instance, 5557)
+    assert registration is not None
+    try:
+        lock = instance / pg_tools._OWNER_LOCK_NAME
+        assert lock.is_file()
+        assert not (instance / pg_tools._CLAIM_LOCK_NAME).exists()  # renamed away
+        fd = os.open(lock, os.O_RDWR)
+        try:
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        finally:
+            os.close(fd)
+    finally:
+        pg_tools._unregister_throwaway(registration)
+
+
+def test_claim_window_never_exposes_an_unlocked_lock(
+    throwaway_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression for #3629: at the instant the claim takes its flock — the exact
+    window a concurrent sweep inspects — the published `owner.lock` name must not
+    exist yet; only the rename after the lock makes it visible, already held."""
+    import fcntl
+
+    instance = _write_instance(throwaway_root, "ava-pg-claim-window")
+    seen: dict[str, bool] = {}
+    real_flock = fcntl.flock
+
+    def probing_flock(fd: int, op: int) -> None:
+        real_flock(fd, op)
+        seen.setdefault("published_at_lock", (instance / pg_tools._OWNER_LOCK_NAME).exists())
+
+    monkeypatch.setattr(fcntl, "flock", probing_flock)
+    registration = pg_tools._register_throwaway(instance, 5558)
+    try:
+        assert seen["published_at_lock"] is False
+    finally:
+        pg_tools._unregister_throwaway(registration)
+
+
 def test_a_real_cluster_data_dir_is_never_a_throwaway_dir(
     throwaway_root: Path, tmp_path: Path
 ) -> None:
