@@ -902,18 +902,7 @@
     "windowedUnavailable": "窗口化检查器数据不可用",
     "retryWindowed": "重试窗口化数据",
     "openRunTimeline": "打开运行时间线",
-    "jumpNotice": "通知",
-    "metricsDurationExact": "已记录的耗时使用精确值。",
-    "metricsDurationBuckets": "历史耗时按一秒分桶。",
-    "metricsDurationMixed": "耗时包含精确值和历史一秒分桶数据。",
-    "metricsMissingDurations": "部分已记录轮次缺少耗时，无法计算吞吐率。",
-    "metricsRetainedDurations": "较早的精确耗时仍然保留，但无法归入此时间窗口。",
-    "metricsObserved": "已记录的观测数据",
-    "metricsPartial": "历史数据覆盖不完整",
-    "metricsUnavailable": "此时间范围没有可用的已记录数据。",
-    "compactBoundaryUnavailable": "无法确定上一次已完成的压缩边界。",
-    "metricsLastObserved": "最近记录时间：{at}",
-    "metricsNoObservation": "暂无观测记录时间。"
+    "jumpNotice": "通知"
   },
   "openTasksNotice": {
     "title": "该 agent 仍有 {count} 个未关闭任务",
