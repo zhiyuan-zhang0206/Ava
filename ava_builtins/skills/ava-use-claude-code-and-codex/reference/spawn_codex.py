@@ -266,13 +266,15 @@ def _app_server_command(
         f"kill $AP 2>/dev/null; sleep 1; kill -9 $AP 2>/dev/null; rm -f {shlex.quote(socket_path)}; }}"
         " &"
     )
+    # The server pid travels as ${!} (the POSIX spelling): interactive panes
+    # with history expansion can abort the whole line on a bare $! (review C1).
     return (
         f"(cd {shlex.quote(workspace.as_posix())} && "
         f"CODEX_HOME={shlex.quote(str(owner.state_dir))} "
         f"{launch_caller_assignment('codex', caller_instance)}"
         f"exec codex app-server --listen {shlex.quote(endpoint)}"
         ' -c approval_policy="never" -c sandbox_mode="danger-full-access"'
-        f" > {shlex.quote(str(log_path))} 2>&1) & AP=$!; "
+        f" > {shlex.quote(str(log_path))} 2>&1) & AP=${{!}}; "
         f"{janitor}"
     )
 

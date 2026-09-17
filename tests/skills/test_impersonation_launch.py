@@ -76,7 +76,7 @@ def test_takeover_launcher_wires_one_explicit_shared_app_server(tmp_path: Path) 
     server = module._app_server_command(owner, workspace, endpoint)
     tui = module._codex_command(owner, workspace, None, remote=endpoint)
     assert f"codex app-server --listen {endpoint}" in server
-    assert "AP=$!" in server and "kill $AP" in server
+    assert "AP=${!}" in server and "kill $AP" in server
     assert f"rm -f {endpoint.removeprefix('unix://')}" in server
     assert 'approval_policy="never"' in server
     assert 'sandbox_mode="danger-full-access"' in server
@@ -98,12 +98,18 @@ def test_supervised_launch_command_is_unchanged(tmp_path: Path) -> None:
     )
 
 
-def test_app_server_wait_accepts_a_bound_socket(tmp_path: Path) -> None:
+def test_app_server_wait_accepts_a_bound_socket() -> None:
+    import shutil
     import socket as socket_module
+    import tempfile
     import threading
 
     module = _load_spawn("takeover_spawn_codex_wait_ok")
-    path = tmp_path / "probe.sock"
+    # A bound AF_UNIX path must stay under the kernel's ~104-byte limit, and
+    # macOS pytest tmp dirs (/private/var/folders/...) exceed it (review C2) —
+    # build a short private dir under the system temp root instead.
+    short_dir = Path(tempfile.mkdtemp(prefix="ava-f1-", dir=tempfile.gettempdir()))
+    path = short_dir / "probe.sock"
     listener = socket_module.socket(socket_module.AF_UNIX, socket_module.SOCK_STREAM)
     listener.bind(str(path))
     listener.listen(1)
@@ -121,6 +127,7 @@ def test_app_server_wait_accepts_a_bound_socket(tmp_path: Path) -> None:
     finally:
         listener.close()
         thread.join(timeout=5)
+        shutil.rmtree(short_dir, ignore_errors=True)
     assert accepted == [True]
 
 
