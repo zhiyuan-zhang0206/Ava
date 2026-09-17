@@ -24,6 +24,7 @@ from cli.commands._converge_legacy_permission_watcher import remove_legacy_permi
 from cli.commands._converge_os_jobs import (
     ensure_cluster_autostart,
     ensure_health_probe_cron,
+    ensure_hold_watchdog,
     ensure_logs_maintenance,
     ensure_packages_refresh_job,
     ensure_pr_flow_job,
@@ -652,6 +653,16 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     ConvergeStep(
         "watchdog probe job",
         ensure_watchdog_probe,
+        requires_unit_config=True,
+    ),
+    # The probe keeps the watchdog alive; this one bounds an ORPHANED
+    # maintenance hold (task #3887) — the 2026-09-17 S3 blackout shape: a
+    # stopped unit nobody owns, with the OS scheduler the only live layer.
+    # One job per home (the hold is host-level) and retired under the root
+    # supervisor, mirroring the probe's session/root split.
+    ConvergeStep(
+        "hold watchdog job",
+        ensure_hold_watchdog,
         requires_unit_config=True,
     ),
     # Boot-time autostart of the whole cluster. host_global so only the prod

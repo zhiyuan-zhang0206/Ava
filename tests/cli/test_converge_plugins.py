@@ -126,6 +126,7 @@ _HOST_INTEGRATION_STEP_NAMES = frozenset(
         "reap stale Windows tasks",
         "health probe cron job",
         "watchdog probe job",
+        "hold watchdog job",
     }
 )
 

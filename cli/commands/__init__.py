@@ -34,6 +34,11 @@ from cli.commands._cluster_boot_unit import (
 from cli.commands._cluster_cancel import cmd_cluster_cancel
 from cli.commands._cluster_cron import cmd_cron_register, cmd_cron_unregister
 from cli.commands._cluster_health import cmd_health_probe
+from cli.commands._cluster_hold_watchdog import (
+    cmd_hold_watchdog,
+    cmd_hold_watchdog_register,
+    cmd_hold_watchdog_unregister,
+)
 from cli.commands._cluster_recover import cmd_cluster_recover
 from cli.commands._cluster_rollback import cmd_rollback
 from cli.commands._cluster_watchdog_probe import (
@@ -352,6 +357,9 @@ __all__ = [
     "cmd_firewall_sync",
     "cmd_grafana_render",
     "cmd_health_probe",
+    "cmd_hold_watchdog",
+    "cmd_hold_watchdog_register",
+    "cmd_hold_watchdog_unregister",
     "cmd_lgtm_off",
     "cmd_lgtm_on",
     "cmd_lgtm_status",

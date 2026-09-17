@@ -96,6 +96,14 @@ phase) lives in
 operation" — the automation is the same steps, so an operator can take over
 wherever an attempt stopped.
 
+## The OS-side hold watchdog (task #3887)
+
+When a full stop takes the watchdog round and the database down with it, an
+ownerless post-stop hold has no in-cluster actor left — the 2026-09-17 S3
+blackout shape. The OS scheduler carries the companion job that completes such a
+hold once; the design, bounds and semantics split are in
+[[services/watchdog/pause-recovery/hold-watchdog.ava.okf.md|Hold watchdog — completing an orphaned maintenance hold out-of-band]].
+
 ## Dead-holder deploy-lease reclamation
 
 The automatic counterpart of `ava cluster recover`: a lease whose holder is

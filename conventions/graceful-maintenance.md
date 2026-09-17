@@ -216,6 +216,20 @@ end: it restores service and resumes after its readiness gate, without the
 explicit hold — unless blocking failed receipts remain, in which case it
 refuses before launching services (clear those first, as for `resume --cancel`).
 
+A post-stop hold whose shepherding process is gone no longer waits for a human
+indefinitely: since task #3887 an OS-scheduled watchdog (`ava cluster
+hold-watchdog`, one job per home; the design half of tasks #3722/#3723) spends
+ONE bounded attempt at the same stop → start → resume sequence once the hold
+outlives its age bound (30 minutes by default, `AVA_HOLD_WATCHDOG_MIN_AGE_SECONDS`),
+and only when every ownership signal is decidable and empty: a DEAD recorded
+shepherd, no live updater handoff / orchestration session / updater lock, no
+start or stop in flight, no failed receipts. A hold released while that attempt
+was in flight is recorded as rescued, never as completed. The table above stays
+the manual path — and the fallback when the watchdog is disabled
+(`AVA_STRANDED_HOLD_RECOVERY`) or unregistered (`ava cluster
+hold-watchdog-unregister`), or the hold is younger than its bound or carries
+failed receipts.
+
 `resume --cancel` refuses while blocking failed receipts remain. Fix the root
 cause first, then release the latch with the sanctioned repair — only on a
 `preparing`/`draining` hold, and only while the agent-host has no active
@@ -245,6 +259,11 @@ recovery was a single official `ava start`.
    read-only over an independent link (ssh plus state files), never through the
    message plane, which is itself the surface under test — and never executes
    stop legs.
+
+   Since #3887 there is also an automatic last-resort rescuer to fall back on:
+   the OS-scheduled hold watchdog completes a provably orphaned post-stop hold
+   once, bounded by its age floor — a backstop for when no designated actor
+   survives, never a substitute for naming one.
 
 2. **Keep the progress record off the stopped surface.** The authoritative
    record is a progress file written on a non-target machine (or pulled there
