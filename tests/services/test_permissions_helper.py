@@ -802,6 +802,35 @@ def test_info_plist_allows_ui_for_panel_mode() -> None:
     assert plist.get("LSUIElement") is True
 
 
+def _parse_strings(path: Path) -> dict[str, str]:
+    entries: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith(("/*", "//")):
+            continue
+        key_part, separator, value_part = line.partition(" = ")
+        assert separator, line
+        entries[key_part.strip('"')] = value_part.rstrip(";").strip('"')
+    return entries
+
+
+def test_panel_locale_catalogs_are_symmetric() -> None:
+    """en (base) and zh-Hans panel catalogs carry identical key sets; en is ASCII."""
+    locales = (
+        Path(__file__).resolve().parents[2]
+        / "services"
+        / "permissions_helper"
+        / "helper"
+        / "locales"
+    )
+    en = _parse_strings(locales / "en.lproj" / "Localizable.strings")
+    zh = _parse_strings(locales / "zh-Hans.lproj" / "Localizable.strings")
+    assert en
+    assert set(en) == set(zh)
+    assert all(value.isascii() for value in en.values())
+    assert all(value for value in zh.values())
+
+
 # --- Signing --------------------------------------------------------------
 # TCC keys the helper's grants on the stable certificate, so an ad-hoc identity
 # is never an acceptable substitute -- and a current bundle is never re-signed.
@@ -823,8 +852,16 @@ def _stage_bundle(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, exe_presen
         exe = app / "Contents" / "MacOS" / "AvaPermissionsHelper"
         exe.parent.mkdir(parents=True)
         exe.write_bytes(b"\x00")  # written last, so its mtime is at least the sources'
+    locales = tmp_path / "locales"
+    en_lproj = locales / "en.lproj"
+    en_lproj.mkdir(parents=True)
+    (en_lproj / "Localizable.strings").write_text('"panel.title" = "Ava Permissions Helper";')
+    zh_lproj = locales / "zh-Hans.lproj"
+    zh_lproj.mkdir()
+    (zh_lproj / "Localizable.strings").write_text('"panel.title" = "zh";')
     monkeypatch.setattr(lifecycle, "_SOURCE", src)
     monkeypatch.setattr(lifecycle, "_INFO_PLIST", info)
+    monkeypatch.setattr(lifecycle, "_LOCALES", locales)
     monkeypatch.setattr(lifecycle, "_BUILD_DIR", build)
     monkeypatch.setattr(lifecycle, "_LEGACY_BUILD_DIR", tmp_path / "checkout-build")
     return app
@@ -1121,6 +1158,37 @@ def test_source_content_change_forces_rebuild(
 
     assert lifecycle.build_and_sign() == (app, True)
     assert any(c[0] == "swiftc" for c in _argvs(recorded))
+
+
+def test_locale_content_change_forces_rebuild(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.permissions_helper import lifecycle
+
+    app = _stage_bundle(monkeypatch, tmp_path, exe_present=True)
+    recorded = _fake_tools(monkeypatch, authority=lifecycle._CERT_CN)
+    _write_current_build_state(app, lifecycle._source_content_hash())
+    locale_file = lifecycle._LOCALES / "en.lproj" / "Localizable.strings"
+    locale_file.write_text('"panel.title" = "Changed";')
+
+    assert lifecycle.build_and_sign() == (app, True)
+    assert any(c[0] == "swiftc" for c in _argvs(recorded))
+
+
+def test_build_copies_locale_resources_into_the_bundle(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.permissions_helper import lifecycle
+
+    app = _stage_bundle(monkeypatch, tmp_path, exe_present=False)
+    _fake_tools(monkeypatch, authority=None)
+
+    assert lifecycle.build_and_sign() == (app, True)
+    for language in ("en", "zh-Hans"):
+        source = lifecycle._LOCALES / (language + ".lproj") / "Localizable.strings"
+        copied = app / "Contents" / "Resources" / (language + ".lproj") / "Localizable.strings"
+        assert copied.is_file()
+        assert copied.read_text() == source.read_text()
 
 
 def test_missing_build_state_forces_rebuild(

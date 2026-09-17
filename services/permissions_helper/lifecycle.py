@@ -69,6 +69,7 @@ _BUNDLE_ID = HELPER_BUNDLE_ID  # alias: the job identity lives in launchd_job
 _SERVICE_DIR = Path(__file__).resolve().parent
 _SOURCE = _SERVICE_DIR / "helper" / "main.swift"
 _INFO_PLIST = _SERVICE_DIR / "helper" / "Info.plist"
+_LOCALES = _SERVICE_DIR / "helper" / "locales"
 _BUILD_DIR = shared.paths.permissions_helper_app_dir()
 _LEGACY_BUILD_DIR = _SERVICE_DIR / "build"
 _BUILD_STATE_NAME = "build-state.json"
@@ -318,10 +319,12 @@ def _expected_dr() -> str:
 
 
 def _source_content_hash() -> str:
-    """Hash every input that determines the helper's compiled signing identity."""
+    """Hash every input that determines the built helper bundle."""
     digest = hashlib.sha256()
     digest.update(_SOURCE.read_bytes())
     digest.update(_INFO_PLIST.read_bytes())
+    for path in sorted(p for p in _LOCALES.rglob("*") if p.is_file()):
+        digest.update(path.relative_to(_LOCALES).as_posix().encode() + path.read_bytes())
     digest.update(_expected_dr().encode())
     return digest.hexdigest()
 
@@ -597,6 +600,8 @@ def build_and_sign() -> tuple[Path, bool]:
     (app / "Contents" / "Info.plist").write_bytes(_INFO_PLIST.read_bytes())
     exe.write_bytes(binary.read_bytes())
     exe.chmod(0o755)
+    for lproj in sorted(_LOCALES.glob("*.lproj")):
+        shutil.copytree(lproj, app / "Contents" / "Resources" / lproj.name, dirs_exist_ok=True)
 
     try:
         _run(

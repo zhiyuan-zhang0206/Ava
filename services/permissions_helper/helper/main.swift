@@ -1260,37 +1260,185 @@ func dispatch(_ req: [String: Any], listeningFD: Int32) -> [String: Any] {
 
 // MARK: - Panel mode
 
-/// Minimal Phase A skeleton for the user-facing panel: shown only when the
-/// process was launched without a socket path (see `socketPath()`). The status
-/// matrix and one-click onboarding arrive in Phase B; this stage proves the
-/// mode split, the window, and the signing/rebuild path stay intact.
-final class PanelDelegate: NSObject, NSApplicationDelegate {
+/// Panel-mode copy: Localizable.strings from the app bundle (source lives in
+/// helper/locales/<lang>.lproj, copied into Contents/Resources at build; en is
+/// the base catalog, zh-Hans ships alongside). A missing catalog falls back to
+/// the key itself, so a bare-binary dev run shows raw keys -- expected.
+func panelString(_ key: String) -> String {
+    NSLocalizedString(key, comment: "")
+}
+
+/// Launch parameters for a panel instance, parsed from argv. The launchd
+/// daemon never reaches this code (it always carries a socket path).
+struct PanelArgs {
+    var repo: String?
+    var helperSocket: String?
+    var tier = "L2"
+
+    static func parse(_ argv: [String]) -> PanelArgs {
+        var args = PanelArgs()
+        var index = 1
+        while index < argv.count {
+            let flag = argv[index]
+            let value = index + 1 < argv.count ? argv[index + 1] : nil
+            switch flag {
+            case "--repo":
+                args.repo = value
+                index += 2
+            case "--helper-socket":
+                args.helperSocket = value
+                index += 2
+            case "--tier":
+                if let value = value {
+                    args.tier = value
+                }
+                index += 2
+            default:
+                index += 1
+            }
+        }
+        return args
+    }
+}
+
+/// The panel controller: grant matrix, tier picker, the one-click fill-missing
+/// run driven through scripts/tcc-onboard-helper-grants.py (the single source
+/// of truth for probes and triggers), and a live run log.
+final class PanelDelegate: NSObject, NSApplicationDelegate, NSTableViewDataSource, NSTableViewDelegate {
+    private static let rowOrder = [
+        "desktop", "documents", "downloads",
+        "apple-events:Finder", "apple-events:Terminal", "apple-events:System Events",
+        "apple-events:Safari", "apple-events:Google Chrome",
+        "screen-recording", "accessibility",
+        "appdata", "media", "icloud", "fda", "devtools",
+    ]
+
+    private let args: PanelArgs
+    private var window: NSWindow?
+    private let tierPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let refreshButton = NSButton(frame: .zero)
+    private let fixButton = NSButton(frame: .zero)
+    private let spinner = NSProgressIndicator(frame: .zero)
+    private let statusLabel = NSTextField(labelWithString: "")
+    private let tableView = NSTableView(frame: .zero)
+    private let logView = NSTextView(frame: NSRect(x: 0, y: 0, width: 100, height: 80))
+    private var rows: [(name: String, status: String)] = []
+
+    private var process: Process?
+    private var logHandle: FileHandle?
+    private var logPath: String?
+    private var logOffset = 0
+    private var pollTimer: Timer?
+    private var reportsBeforeRun: Set<String> = []
+    private let workdir = "/tmp/ava-panel-tcc"
+
+    init(args: PanelArgs) {
+        self.args = args
+        super.init()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        buildWindow()
+        if let repo = args.repo,
+           FileManager.default.fileExists(atPath: repo + "/scripts/tcc-onboard-helper-grants.py") {
+            runTool(check: true)
+        } else {
+            setStatus(panelString("panel.error.noRepo"), color: .systemRed)
+        }
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        return true
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        process?.terminate()
+    }
+
+    private func buildWindow() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 640, height: 240),
-            styleMask: [.titled, .closable, .miniaturizable],
+            contentRect: NSRect(x: 0, y: 0, width: 780, height: 560),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
-        window.title = "Ava Permissions Helper"
+        window.title = panelString("panel.title")
         window.isReleasedWhenClosed = false
+        self.window = window
 
-        let label = NSTextField(labelWithString:
-            "Panel mode (Phase A skeleton) - the grant matrix and one-click onboarding arrive in Phase B.")
-        label.alignment = .center
-        label.maximumNumberOfLines = 0
-        label.lineBreakMode = .byWordWrapping
-        label.translatesAutoresizingMaskIntoConstraints = false
+        tierPopup.addItems(withTitles: ["L1", "L2", "L3"])
+        tierPopup.selectItem(withTitle: args.tier)
+        refreshButton.title = panelString("panel.refresh")
+        refreshButton.target = self
+        refreshButton.action = #selector(refreshTapped)
+        refreshButton.bezelStyle = .rounded
+        fixButton.title = panelString("panel.fix")
+        fixButton.target = self
+        fixButton.action = #selector(fixTapped)
+        fixButton.bezelStyle = .rounded
+        spinner.style = .spinning
+        spinner.controlSize = .small
+        spinner.isDisplayedWhenStopped = false
+        statusLabel.lineBreakMode = .byTruncatingTail
+        statusLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        let topBar = NSStackView(views: [
+            NSTextField(labelWithString: panelString("panel.tier")),
+            tierPopup,
+            refreshButton,
+            fixButton,
+            spinner,
+            statusLabel,
+        ])
+        topBar.orientation = .horizontal
+        topBar.spacing = 8
+        topBar.alignment = .centerY
+
+        let serviceColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("service"))
+        serviceColumn.title = panelString("panel.col.item")
+        serviceColumn.width = 420
+        let statusColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("status"))
+        statusColumn.title = panelString("panel.col.status")
+        statusColumn.width = 300
+        tableView.addTableColumn(serviceColumn)
+        tableView.addTableColumn(statusColumn)
+        tableView.dataSource = self
+        tableView.delegate = self
+        tableView.usesAlternatingRowBackgroundColors = true
+        let tableScroll = NSScrollView(frame: .zero)
+        tableScroll.documentView = tableView
+        tableScroll.hasVerticalScroller = true
+        tableScroll.borderType = .bezelBorder
+
+        logView.isEditable = false
+        logView.isSelectable = true
+        logView.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        logView.minSize = NSSize(width: 0, height: 0)
+        logView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        logView.isVerticallyResizable = true
+        logView.isHorizontallyResizable = false
+        logView.autoresizingMask = [.width]
+        logView.textContainer?.widthTracksTextView = true
+        let logScroll = NSScrollView(frame: .zero)
+        logScroll.documentView = logView
+        logScroll.hasVerticalScroller = true
+        logScroll.borderType = .bezelBorder
+
+        let root = NSStackView(views: [topBar, tableScroll, logScroll])
+        root.orientation = .vertical
+        root.spacing = 10
+        root.edgeInsets = NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+        root.translatesAutoresizingMaskIntoConstraints = false
+        tableScroll.translatesAutoresizingMaskIntoConstraints = false
+        tableScroll.heightAnchor.constraint(equalToConstant: 240).isActive = true
 
         if let content = window.contentView {
-            content.addSubview(label)
+            content.addSubview(root)
             NSLayoutConstraint.activate([
-                label.centerXAnchor.constraint(equalTo: content.centerXAnchor),
-                label.centerYAnchor.constraint(equalTo: content.centerYAnchor),
-                label.leadingAnchor.constraint(
-                    greaterThanOrEqualTo: content.leadingAnchor, constant: 24),
-                label.trailingAnchor.constraint(
-                    lessThanOrEqualTo: content.trailingAnchor, constant: -24),
+                root.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+                root.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+                root.topAnchor.constraint(equalTo: content.topAnchor),
+                root.bottomAnchor.constraint(equalTo: content.bottomAnchor),
             ])
         }
 
@@ -1303,16 +1451,194 @@ final class PanelDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        return true
+    @objc private func refreshTapped() {
+        runTool(check: true)
+    }
+
+    @objc private func fixTapped() {
+        runTool(check: false)
+    }
+
+    private func runTool(check: Bool) {
+        guard process == nil else {
+            return
+        }
+        guard let repo = args.repo else {
+            setStatus(panelString("panel.error.noRepo"), color: .systemRed)
+            return
+        }
+        let python = repo + "/.venv/bin/python"
+        let tool = repo + "/scripts/tcc-onboard-helper-grants.py"
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: python), fileManager.fileExists(atPath: tool) else {
+            setStatus(panelString("panel.error.noRepo"), color: .systemRed)
+            return
+        }
+        try? fileManager.createDirectory(atPath: workdir, withIntermediateDirectories: true)
+        let existing = (try? fileManager.contentsOfDirectory(atPath: workdir)) ?? []
+        reportsBeforeRun = Set(existing.filter { $0.hasPrefix("report-") })
+        let logName = "panel-run-" + String(Int(Date().timeIntervalSince1970)) + ".log"
+        let logFullPath = workdir + "/" + logName
+        logPath = logFullPath
+        logOffset = 0
+        _ = fileManager.createFile(atPath: logFullPath, contents: nil)
+        logHandle = FileHandle(forWritingAtPath: logFullPath)
+
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: python)
+        var arguments = [tool, "--tier", tierPopup.titleOfSelectedItem ?? args.tier, "--workdir", workdir]
+        if check {
+            arguments.append("--check")
+        }
+        task.arguments = arguments
+        task.currentDirectoryURL = URL(fileURLWithPath: repo)
+        var environment = ProcessInfo.processInfo.environment
+        if let socket = args.helperSocket {
+            environment["AVA_PERMISSIONS_HELPER_SOCKET"] = socket
+        }
+        task.environment = environment
+        task.standardOutput = logHandle
+        task.standardError = logHandle
+        task.terminationHandler = { [weak self] _ in
+            DispatchQueue.main.async { self?.runFinished() }
+        }
+        do {
+            try task.run()
+        } catch {
+            logHandle = nil
+            setStatus(panelString("panel.error.launch"), color: .systemRed)
+            return
+        }
+        process = task
+        setRunning(true)
+        setStatus(panelString(check ? "panel.status.checking" : "panel.status.running"), color: .secondaryLabelColor)
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            self?.pollLog()
+        }
+    }
+
+    private func runFinished() {
+        pollTimer?.invalidate()
+        pollTimer = nil
+        process = nil
+        logHandle = nil
+        setRunning(false)
+        pollLog()
+        loadLatestReport()
+    }
+
+    private func loadLatestReport() {
+        let fileManager = FileManager.default
+        let names = (try? fileManager.contentsOfDirectory(atPath: workdir)) ?? []
+        let fresh = names.filter { $0.hasPrefix("report-") && $0.hasSuffix(".json") && !reportsBeforeRun.contains($0) }
+        guard let latest = fresh.sorted().last,
+              let data = fileManager.contents(atPath: workdir + "/" + latest),
+              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            setStatus(panelString("panel.error.report"), color: .systemRed)
+            return
+        }
+        let statuses = (object["statuses"] as? [String: String]) ?? [:]
+        rows = orderedRows(from: statuses)
+        tableView.reloadData()
+        let unresolved = (object["unresolved"] as? Bool) ?? true
+        if unresolved {
+            // One count rule lives in the tool; the panel renders the reported number.
+            let count = (object["unresolved_count"] as? Int) ?? 0
+            setStatus(String(format: panelString("panel.status.unresolved"), count), color: .systemOrange)
+        } else {
+            setStatus(panelString("panel.status.pass"), color: .systemGreen)
+        }
+    }
+
+    private func pollLog() {
+        guard let logPath = logPath, let handle = FileHandle(forReadingAtPath: logPath) else {
+            return
+        }
+        defer { try? handle.close() }
+        guard (try? handle.seek(toOffset: UInt64(logOffset))) != nil else {
+            return
+        }
+        let data = (try? handle.readToEnd()) ?? Data()
+        guard !data.isEmpty else {
+            return
+        }
+        logOffset += data.count
+        if let text = String(data: data, encoding: .utf8) {
+            appendLog(text)
+        }
+    }
+
+    private func orderedRows(from statuses: [String: String]) -> [(name: String, status: String)] {
+        let entries = statuses.map { (name: $0.key, status: $0.value) }
+        return entries.sorted { left, right in
+            let leftRank = Self.rowOrder.firstIndex(of: left.name) ?? Int.max
+            let rightRank = Self.rowOrder.firstIndex(of: right.name) ?? Int.max
+            if leftRank != rightRank {
+                return leftRank < rightRank
+            }
+            return left.name < right.name
+        }
+    }
+
+    private func appendLog(_ text: String) {
+        logView.textStorage?.append(NSAttributedString(string: text))
+        logView.scrollToEndOfDocument(nil)
+    }
+
+    private func setStatus(_ text: String, color: NSColor) {
+        statusLabel.stringValue = text
+        statusLabel.textColor = color
+    }
+
+    private func setRunning(_ running: Bool) {
+        refreshButton.isEnabled = !running
+        fixButton.isEnabled = !running
+        tierPopup.isEnabled = !running
+        if running {
+            spinner.startAnimation(nil)
+        } else {
+            spinner.stopAnimation(nil)
+        }
+    }
+
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        return rows.count
+    }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard let tableColumn = tableColumn else {
+            return nil
+        }
+        let entry = rows[row]
+        let text = tableColumn.identifier.rawValue == "service" ? entry.name : entry.status
+        let label = NSTextField(labelWithString: text)
+        label.lineBreakMode = .byTruncatingTail
+        if tableColumn.identifier.rawValue == "status" {
+            label.textColor = statusColor(for: entry.status)
+        }
+        return label
+    }
+
+    private func statusColor(for status: String) -> NSColor {
+        if status.contains("granted") {
+            return .systemGreen
+        }
+        if status.contains("denied") || status.contains("missing") {
+            return .systemRed
+        }
+        if status.contains("unresolved") || status.contains("pending") {
+            return .systemOrange
+        }
+        return .labelColor
     }
 }
 
 /// Run as the user-facing panel; never returns. Reached only without a socket.
 func runPanelMode() -> Never {
+    let args = PanelArgs.parse(CommandLine.arguments)
     let app = NSApplication.shared
     _ = app.setActivationPolicy(.accessory)
-    let delegate = PanelDelegate()
+    let delegate = PanelDelegate(args: args)
     app.delegate = delegate
     app.run()
     exit(0)
@@ -1322,7 +1648,9 @@ func runPanelMode() -> Never {
 
 func socketPath() -> String {
     if let p = ProcessInfo.processInfo.environment["AVA_PERMISSIONS_HELPER_SOCKET"] { return p }
-    if CommandLine.arguments.count > 1 { return CommandLine.arguments[1] }
+    if CommandLine.arguments.count > 1, !CommandLine.arguments[1].hasPrefix("--") {
+        return CommandLine.arguments[1]
+    }
     // No socket path: this process is not the launchd daemon -- it is a
     // user-facing launch (Finder double-click / `open -n -a`), so it becomes
     // the panel instance instead of exiting.

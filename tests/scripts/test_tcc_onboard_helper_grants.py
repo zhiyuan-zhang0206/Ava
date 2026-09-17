@@ -68,3 +68,16 @@ def test_groups_for_tier_defaults_to_the_implemented_set() -> None:
 def test_groups_for_tier_returns_the_table_entry() -> None:
     assert _mod.groups_for_tier("L2") == _mod.TIER_GROUPS["L2"]
     assert _mod.groups_for_tier("L0") == ()
+
+
+def test_count_unresolved_follows_the_single_resolution_rule() -> None:
+    assert _mod.count_unresolved({}) == 0
+    statuses = {
+        "granted-item": "granted",
+        "already-granted-item": "already granted",
+        "denied-item": "denied",
+        "stale-item": "unresolved (timed out)",
+        "missing-item": "missing",
+        "unknown-item": "unknown",
+    }
+    assert _mod.count_unresolved(statuses) == 4

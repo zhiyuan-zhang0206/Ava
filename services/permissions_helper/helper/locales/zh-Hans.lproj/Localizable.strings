@@ -1,0 +1,13 @@
+"panel.title" = "Ava 权限面板";
+"panel.tier" = "目标档位：";
+"panel.refresh" = "检查当前状态";
+"panel.fix" = "补齐缺失授权";
+"panel.col.item" = "项目";
+"panel.col.status" = "状态";
+"panel.status.checking" = "正在检查当前授权……";
+"panel.status.running" = "正在触发缺失授权——如有系统弹窗出现，请逐一点击……";
+"panel.status.pass" = "目标档位已满足——所需授权均在位。";
+"panel.status.unresolved" = "有 %d 项未解决——见下方日志与报告。";
+"panel.error.noRepo" = "请以 --repo <仓库路径> [--helper-socket <路径>] 启动面板以启用运行。";
+"panel.error.launch" = "无法启动授权工具——见日志。";
+"panel.error.report" = "运行已结束但未找到报告——见日志。";
