@@ -10,16 +10,23 @@ from __future__ import annotations
 import signal
 import subprocess
 import time
+from collections.abc import Mapping
 from pathlib import Path
 
 import psycopg
 
 
-def start_foreground_postgres(argv: list[str], *, log: Path) -> subprocess.Popen[bytes]:
-    """Transfer the child handle before readiness checks can fail or be cancelled."""
+def start_foreground_postgres(
+    argv: list[str], *, log: Path, env: Mapping[str, str] | None = None
+) -> subprocess.Popen[bytes]:
+    """Transfer the child handle before readiness checks can fail or be cancelled.
+
+    `env` is the child's environment (None inherits the caller's); the throwaway
+    fixture passes `pg_start_env()` so the postmaster is never started without a
+    locale (Task #3754)."""
     with log.open("ab", buffering=0) as output:
         return subprocess.Popen(  # noqa: S603 -- resolved postgres and caller-owned data directory
-            argv, stdin=subprocess.DEVNULL, stdout=output, stderr=output
+            argv, stdin=subprocess.DEVNULL, stdout=output, stderr=output, env=env
         )
 
 
