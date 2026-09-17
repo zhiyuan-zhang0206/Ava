@@ -125,25 +125,46 @@ def test_uvicorn_access_info_gated_away(loguru_records: list[dict]) -> None:
 
 
 def test_gateway_uvicorn_run_passes_log_config_none() -> None:
-    """The gateway's `uvicorn.run` call must stay `log_config=None` — the
-    whole point of #970. Guarded statically so a future edit cannot silently
-    reintroduce uvicorn's dictConfig clobber."""
+    """The gateway launch assembly must keep `log_config=None` — the whole point
+    of #970. The launch parameters live in `serve_kwargs()` (the one dict
+    `uvicorn.run` consumes as `**kwargs`), so the pin follows the call into the
+    returned dict literal; a future edit cannot silently reintroduce uvicorn's
+    dictConfig clobber."""
     src = (_REPO_ROOT / "gateway" / "_server.py").read_text()
     tree = ast.parse(src)
-    found: list[ast.keyword] = []
+
+    run_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "run"
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "uvicorn"
+    ]
+    assert run_calls, "uvicorn.run call not found in gateway/_server.py"
+    for call in run_calls:
+        assert not call.args, "uvicorn.run must receive no positional arguments"
+        assert len(call.keywords) == 1 and call.keywords[0].arg is None, (
+            "uvicorn.run must receive the serve_kwargs() assembly as **kwargs"
+        )
+        target = call.keywords[0].value
+        assert isinstance(target, ast.Call) and isinstance(target.func, ast.Name)
+        assert target.func.id == "serve_kwargs"
+
+    entries: list[ast.expr | None] = []
     for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "run"
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == "uvicorn"
-        ):
-            found = [k for k in node.keywords if k.arg == "log_config"]
-            break
-    assert found, "uvicorn.run call not found in gateway/_server.py"
-    assert len(found) == 1
-    assert isinstance(found[0].value, ast.Constant) and found[0].value.value is None
+        if isinstance(node, ast.FunctionDef) and node.name == "serve_kwargs":
+            for child in ast.walk(node):
+                if isinstance(child, ast.Dict):
+                    entries.extend(
+                        value
+                        for key, value in zip(child.keys, child.values, strict=True)
+                        if isinstance(key, ast.Constant) and key.value == "log_config"
+                    )
+    assert len(entries) == 1, "serve_kwargs() must carry exactly one 'log_config' entry"
+    entry = entries[0]
+    assert isinstance(entry, ast.Constant) and entry.value is None
 
 
 def _assert_uvicorn_config_passes_log_config_none(path: Path) -> None:
