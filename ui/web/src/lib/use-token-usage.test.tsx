@@ -34,16 +34,16 @@ afterEach(() => {
 });
 
 describe("useTokenUsage agent switch", () => {
-  it("refreshes when returning to a previously selected agent", async () => {
+  it("serves a returned-to agent from cache; the reattach reconcile refreshes it", async () => {
     getTokenUsage.mockImplementation((id) => Promise.resolve(tokenFixture(id)));
-    // A global cache default must not suppress activation reads.
+    // Cold keys fetch regardless of a global staleTime default.
     const qc = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: 5 * 60_000 } },
     });
     const wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={qc}>{children}</QueryClientProvider>
     );
-    const { rerender } = renderHook(
+    const { result, rerender } = renderHook(
       ({ id }: { id: number | null }) => useTokenUsage(id, () => undefined),
       { initialProps: { id: 1 }, wrapper },
     );
@@ -57,10 +57,12 @@ describe("useTokenUsage agent switch", () => {
     await waitFor(() => expect(getTokenUsage).toHaveBeenCalledTimes(2));
     expect(getTokenUsage).toHaveBeenLastCalledWith(2, expect.any(AbortSignal) as AbortSignal);
 
-    // Returning reads again even when the selection changed only moments ago.
+    // Returning inside the retention window seeds from cache and fires no
+    // read of its own (task #3900 batch 2) — the re-attach reconcile
+    // (agent-reconcile.ts) is the one refresh.
     rerender({ id: 1 });
-    await waitFor(() => expect(getTokenUsage).toHaveBeenCalledTimes(3));
-    expect(getTokenUsage).toHaveBeenLastCalledWith(1, expect.any(AbortSignal) as AbortSignal);
+    await waitFor(() => expect(result.current.contextTokens).toBe(1000));
+    expect(getTokenUsage).toHaveBeenCalledTimes(2);
   });
 
   it("reports contextPending until the cold key's first snapshot lands", async () => {

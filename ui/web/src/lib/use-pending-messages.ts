@@ -23,7 +23,9 @@ import { useQuery } from "@tanstack/react-query";
 import { useCallback, useRef } from "react";
 
 import { api } from "./api";
+import { useAgentReconcile } from "./agent-reconcile";
 import { useAgentReadRepair } from "./use-agent-read-repair";
+import { CONVERSATION_RETENTION_MS } from "./switch-budget";
 import { isEventForThread } from "./timeline";
 import type { PendingInbound, SystemEvent } from "./types";
 import type { ConnectionEvent } from "./useEventStream";
@@ -74,6 +76,7 @@ export function usePendingMessages(
   showError: (msg: string) => void,
 ): PendingInbound[] {
   const { isVisible, requestRepair } = useAgentReadRepair("pending", agentId);
+  const { requestReconcile } = useAgentReconcile(agentId);
   const seenParseErrors = useRef<Set<string>>(new Set());
 
   const query = useQuery({
@@ -83,9 +86,14 @@ export function usePendingMessages(
       return api.getPendingMessages(agentId, signal);
     },
     enabled: agentId !== null && isVisible,
-    staleTime: 0,
-    // Retain no inactive selected-detail snapshots.
-    gcTime: 0,
+    // A retained queue is also fresh (task #3900 batch 2): a switch back
+    // shows it immediately and fires no read of its own — RQ auto-reads a
+    // key switch only when the target key is stale. The one refresh is the
+    // re-attach reconcile (agent-reconcile.ts); the queue's own event
+    // invalidations (inbound/turn roles below) still refetch explicitly.
+    staleTime: CONVERSATION_RETENTION_MS,
+    gcTime: CONVERSATION_RETENTION_MS,
+    refetchOnMount: false,
   });
 
   const onEvent = useCallback(
@@ -111,7 +119,9 @@ export function usePendingMessages(
       // surfaced (deduped) so schema drift doesn't fail silently.
       switch (ev.type) {
         case "open":
-          requestRepair();
+          // The shared composed reconcile refreshes the queue (and the other
+          // two conversation models) with one request on re-attach.
+          requestReconcile();
           return;
         case "parse-failed": {
           const key = String(ev.error);
@@ -125,7 +135,7 @@ export function usePendingMessages(
           return;
       }
     },
-    [requestRepair, showError],
+    [requestReconcile, showError],
   );
 
   useAgentEventStream(onEvent, onConnectionEvent);

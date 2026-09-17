@@ -14,12 +14,16 @@ events plus system signals. The timeline store holds one selected view.
 state, pagination state, and token fields; inactive agents have no live buckets
 or compact-marker subscriptions.
 
-The selected timeline query reads one bounded tail on activation. Inactive
-queries have zero garbage-collection time. Query cancellation reaches `fetch`
-through its AbortSignal. The selected pending-message and token-usage reads
-share this selection/visibility ownership. A stream open during an existing
-read leaves a trailing read, including the initial no-cache request; leaving
-the view disposes that repair before cancelling the HTTP request. Older-page requests have selection-scoped controllers:
+The selected conversation's three models (timeline / token-usage / pending)
+are retained per agent for the 30-minute switch window (`lib/switch-budget.ts`):
+a switch back seeds from the retained window and paints immediately, and the
+mount/key-change path fires no read of its own. One composed re-attach
+reconcile (`agent-reconcile.ts`) refreshes all three: a stream open during an
+existing read leaves a trailing composed read (including the initial no-cache
+request), a second gap during the composed read leaves one more, and the
+composed write never overwrites a newer read. Leaving the view aborts the
+in-flight request through its AbortSignal and disposes queued reconcile work,
+so query cancellation reaches `fetch`. Older-page requests have selection-scoped controllers:
 a late response after A-to-B-to-A cannot append to the new A view, and cancellation
 does not produce an error toast or clear the new view's loading state.
 
@@ -28,7 +32,9 @@ and `compactReplaceAgent` trigger reattachment of the configured previous compac
 sessions through the same cancellable history-page read.
 
 History remains fully accessible through explicit paging. Switching releases
-loaded inactive history, not durable records. The active view still retains all
+the inactive store view (scroll-loaded history is not retained); only the tail
+window stays cached, for the 30-minute window. Durable records are untouched.
+The active view still retains all
 pages the user loads; this change does not claim a bound on deep-history memory
 or DOM size. Those rendering concerns are independent of subscription ownership.
 

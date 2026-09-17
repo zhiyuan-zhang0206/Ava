@@ -6,9 +6,11 @@ import { useCallback, useEffect, useRef } from "react";
 import { createQueryRepairScheduler } from "./fold/repair";
 import { useDocumentVisible } from "./use-document-visible";
 
-/** The three selected-stream readers share the same ownership boundary.
- * Opening during a read requires a trailing read; losing selection/visibility
- * abandons both that repair and its HTTP request. This does not version data.
+/** The three selected-stream readers share the same ownership boundary:
+ * losing selection/visibility abandons in-flight reads and trailing work.
+ * Pending still repairs its own key on the events that change the queue; the
+ * open-gap trailing read is the shared composed reconcile's job
+ * (agent-reconcile.ts), which the three readers request together.
  */
 export function useAgentReadRepair(
   domain: "timeline" | "pending" | "token-usage",

@@ -7,11 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "./api";
 import { usePendingMessages } from "./use-pending-messages";
 import { useTokenUsage } from "./use-token-usage";
-import type { SystemEvent, TokenUsageResponse } from "./types";
+import type { ConversationSnapshotResponse, SystemEvent, TokenUsageResponse } from "./types";
 import type { ConnectionEvent } from "./useEventStream";
 
 vi.mock("./api", () => ({
-  api: { getPendingMessages: vi.fn(), getTokenUsage: vi.fn() },
+  api: { getPendingMessages: vi.fn(), getTokenUsage: vi.fn(), getConversationSnapshot: vi.fn() },
 }));
 
 const connectionHandlers = new Set<(event: ConnectionEvent) => void>();
@@ -36,9 +36,10 @@ function pushOpen(): void {
 }
 
 type Domain = "token-usage" | "pending";
+// "snapshot" = the composed re-attach reconcile read (agent-reconcile.ts).
 interface Read {
   id: number;
-  domain: Domain;
+  domain: Domain | "snapshot";
   signal: AbortSignal | undefined;
   finish: (value: number) => void;
 }
@@ -49,6 +50,15 @@ const showError = vi.fn();
 function tokenSnapshot(input: number): TokenUsageResponse {
   return { input_tokens: input, output_tokens: 0, reasoning_tokens: 0,
     max_input_tokens: 100_000, soft_compact_tokens: 70_000, hard_compact_tokens: 90_000 };
+}
+
+function composedSnapshot(value: number): ConversationSnapshotResponse {
+  return {
+    timeline: { items: [], msg_count: 0, has_more: false },
+    token_usage: tokenSnapshot(value),
+    pending: [{ id: value, content: String(value), source: "user", images: null,
+      created_at: "2026-09-16T00:00:00Z" }],
+  };
 }
 
 function useRead(domain: Domain, id: number | null) {
@@ -73,6 +83,9 @@ beforeEach(() => {
       { id: value, content: String(value), source: "user", images: null, created_at: "2026-09-16T00:00:00Z" },
     ]) });
   }));
+  vi.mocked(api.getConversationSnapshot).mockImplementation((id, signal) => new Promise((resolve) => {
+    reads.push({ id, signal, domain: "snapshot", finish: (value) => resolve(composedSnapshot(value)) });
+  }));
 });
 
 afterEach(() => {
@@ -83,19 +96,32 @@ afterEach(() => {
 });
 
 describe.each<Domain>(["token-usage", "pending"])("%s selected read ownership", (domain) => {
-  it("repairs an initial opening gap and another reconnect during that repair", async () => {
+  it("repairs an initial opening gap through one composed read, and trails a second gap", async () => {
     const { result } = renderHook(() => useRead(domain, 42), { wrapper });
     await waitFor(() => expect(reads).toHaveLength(1));
     pushOpen();
-    pushOpen();
-    expect(reads).toHaveLength(1);
+    pushOpen(); // same-tick burst of the gap repair
+    expect(reads).toHaveLength(1); // joined the in-flight read, not stacked
     await act(async () => { reads[0].finish(1); await Promise.resolve(); });
     await waitFor(() => expect(reads).toHaveLength(2));
-    pushOpen();
+    expect(reads[1].domain).toBe("snapshot"); // one composed read
+    pushOpen(); // a second gap while the composed read is in flight
     await act(async () => { reads[1].finish(2); await Promise.resolve(); });
     await waitFor(() => expect(reads).toHaveLength(3));
     await act(async () => { reads[2].finish(3); await Promise.resolve(); });
     await waitFor(() => expect(result.current).toBe(3));
+  });
+
+  it("one open reads the composed snapshot, never a per-domain repair", async () => {
+    const { result } = renderHook(() => useRead(domain, 42), { wrapper });
+    await waitFor(() => expect(reads).toHaveLength(1));
+    await act(async () => { reads[0].finish(1); await Promise.resolve(); });
+    pushOpen();
+    await waitFor(() => expect(reads).toHaveLength(2));
+    expect(reads[1].domain).toBe("snapshot");
+    await act(async () => { reads[1].finish(2); await Promise.resolve(); });
+    await waitFor(() => expect(result.current).toBe(2));
+    expect(reads.filter((read) => read.domain === domain)).toHaveLength(1);
   });
 
   it("aborts obsolete A-to-B-to-A requests and rejects their late values", async () => {
