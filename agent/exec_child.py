@@ -370,7 +370,26 @@ def _run_code(code: str, payload: Any) -> None:
         payload.sdk_calls = sdk_telemetry.tally_entries(tally)
 
 
-def _run(request_path: str, result_path: str) -> None:  # noqa: PLR0915 — one child lifecycle: boot, run, deliver, envelope
+def _finalize_telemetry() -> None:
+    """Deliver queued records before a clean exit — only when a queue exists.
+
+    The emitter loads `shared.telemetry` off its first record, so a zero-record
+    child skips everything here and exits without the telemetry / OTel imports
+    (task #3816 M3); `flush()` itself is a no-op while the backend was never
+    brought up (`_logs is None`).
+    """
+    if "shared.telemetry" not in sys.modules:
+        return
+    from shared import telemetry
+
+    telemetry.sync()
+    if "shared.telemetry_otlp" in sys.modules:
+        from shared import telemetry_otlp
+
+        telemetry_otlp.flush()
+
+
+def _run(request_path: str, result_path: str) -> None:
     """Child body: read the request, set up identity + plugins + state, run the
     code, write the result envelope."""
     _import_runtime()
@@ -394,9 +413,9 @@ def _run(request_path: str, result_path: str) -> None:  # noqa: PLR0915 — one 
 
             bind_child_incarnation(request.incarnation)
         _init_logger(request.agent_id)
-        from shared import telemetry_otlp
-
-        telemetry_otlp.warmup()
+        # No eager OTLP warmup: the backend comes up lazily on the first export
+        # (shared.telemetry_otlp._ensure), so a zero-record child never imports
+        # the OTel SDK at all (task #3816 M3).
     # Two-phase overlay application, mirroring the agent process's own boot:
     # framework fields early (before any settings read), plugin fields after
     # plugins load (apply_config_overlay needs _PLUGIN_CONFIGS bound first).
@@ -439,12 +458,10 @@ def _run(request_path: str, result_path: str) -> None:  # noqa: PLR0915 — one 
         # processor — a short-lived child exits before the 5s batch window
         # would fire on its own. A timed-out or cancelled child skips this
         # (the parent is already killing it and the JSONL mirror holds the
-        # records), so teardown timing stays as before warmup().
+        # records); a zero-record child skips it too, so its exit never imports
+        # the telemetry / OTel modules at all (task #3816 M3).
         if payload.kind in ("done", "lifecycle"):
-            from shared import telemetry, telemetry_otlp
-
-            telemetry.sync()
-            telemetry_otlp.flush()
+            _finalize_telemetry()
     except BaseException as exc:
         # Only a post-run telemetry sync/flush failure lands here (_run_code
         # catches everything): report it with the REAL code_reached flag —
