@@ -15,7 +15,7 @@ def test_external_identity_round_trip(subject: str) -> None:
     rendered = wrap_inbound("hello", caller.source())
     assert rendered == f"External agent ({subject} / run-42; asserted provenance):\n\nhello"
     # Not confusable with other source families: agent's "Agent N:" label, or
-    # the bracketed headers — user's bare "[ts]" and system's "[system]".
+    # the bracketed headers — the bare "[ts]" (user / ui:page) and "[system]".
     assert not rendered.startswith(("Agent ", "["))
 
 

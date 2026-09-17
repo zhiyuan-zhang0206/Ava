@@ -6,6 +6,7 @@ source type:
 - `system` / `system:<subtype>` → raw text, no wrap (no timestamp)
 - `agent:N` → "Agent N [timestamp]:" prefix
 - `user` → bare "[timestamp]" header (no label)
+- `ui:page:<name>` → same bare "[timestamp]" header as `user`
 - `watcher:N` → "Watcher (id N) [ts]:" prefix
 - unrecognized → ValueError (fail-fast)
 
@@ -55,10 +56,11 @@ class TestUserSource:
 
 class TestPageCallback:
     """`source='ui:page:<name>'` — an HTML page the agent started posts back. It
-    reads as "User"; the agent recovers which page from <name>."""
+    wraps as the same bare "[ts]" header as `user`; the agent recovers which
+    page from <name>."""
 
-    def test_page_callback_wraps_as_user(self) -> None:
-        assert wrap_inbound("chose B", "ui:page:compare") == f"User {_TS}:\n\nchose B"
+    def test_page_callback_wraps_same_as_user(self) -> None:
+        assert wrap_inbound("chose B", "ui:page:compare") == f"{_TS}\n\nchose B"
 
     def test_page_callback_validates(self) -> None:
         validate_source("ui:page:compare")  # no raise
@@ -202,6 +204,9 @@ class TestMessageTimestampsOff:
 
     def test_user_no_timestamp(self) -> None:
         assert wrap_inbound("hi", "user") == "hi"
+
+    def test_page_no_timestamp(self) -> None:
+        assert wrap_inbound("hi", "ui:page:compare") == "hi"
 
     def test_agent_no_timestamp(self) -> None:
         assert wrap_inbound("hi", "agent:5") == "Agent 5:\n\nhi"
