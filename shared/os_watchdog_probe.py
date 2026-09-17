@@ -100,6 +100,13 @@ def _plist_path(role: str, slug: str) -> Path:
     return Path.home() / "Library" / "LaunchAgents" / f"{probe_label(role, slug)}.plist"
 
 
+def _probe_log_file() -> Path:
+    """The one log file both scheduler kinds append the probe's output to:
+    launchd's ``StandardOutPath`` / ``StandardErrorPath``, and the crontab
+    line's redirect. One function so the two registrations cannot drift."""
+    return Path(settings.general.ava_home) / "logs" / "watchdog-probe.log"
+
+
 def _plist_content(role: str, interval_s: int) -> str:
     """launchd plist for the watchdog probe.
 
@@ -110,7 +117,7 @@ def _plist_content(role: str, interval_s: int) -> str:
     to spawn itself. The first fire one interval later is late enough.
     """
     ava_path = ava_binary_path()
-    log_file = Path(settings.general.ava_home) / "logs" / "watchdog-probe.log"
+    log_file = _probe_log_file()
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -238,6 +245,11 @@ def _register_linux(role: str, interval_s: int) -> int:
     A host without crontab (hermetic bench / CI container) is a host that cannot
     provide this capability: warn and skip rather than fail the whole bring-up,
     matching how ``os_cron`` / ``os_autostart`` degrade.
+
+    The registered line also captures the probe's output into
+    ``_probe_log_file()`` — the same file the launchd plist names. cron mails
+    or drops job output otherwise, and the probe's stderr lines (stand-down,
+    revival) are the held-stop observation's only record (task #3867).
     """
     if shutil.which("crontab") is None:
         print(  # noqa: T201
@@ -248,9 +260,13 @@ def _register_linux(role: str, interval_s: int) -> int:
 
     minutes = max(1, interval_s // 60)
     marker = _cron_marker(role, _home_slug())
+    # mkdir -p because a redirect into a missing directory would fail the whole
+    # command — killing the job, not just losing its output.
+    log_file = _probe_log_file()
     entry = (
-        f"*/{minutes} * * * * {cron_env_prefix()}{ava_binary_path()} "
-        f"cluster watchdog-probe --role {role}  {marker}"
+        f"*/{minutes} * * * * {cron_env_prefix()}mkdir -p {log_file.parent} && "
+        f"{ava_binary_path()} cluster watchdog-probe --role {role} "
+        f">> {log_file} 2>&1  {marker}"
     )
 
     with crontab_lock():

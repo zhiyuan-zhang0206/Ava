@@ -19,6 +19,7 @@ import pytest
 
 from shared import os_cron
 from shared import os_watchdog_probe as probe
+from shared.config import settings
 
 
 @pytest.fixture()
@@ -231,6 +232,30 @@ def test_register_linux_rounds_sub_minute_interval_up(monkeypatch: pytest.Monkey
     monkeypatch.setattr(probe.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
     assert probe._register_linux("gateway", 5) == 0
     assert written["body"].startswith("*/1 * * * *")
+
+
+def test_register_linux_captures_output_to_the_shared_log(monkeypatch: pytest.MonkeyPatch) -> None:
+    """cron has no StandardErrorPath: without the redirect the probe's stderr —
+    its only channel under the scheduler — is mailed / dropped, and the
+    held-stop observation cannot see the probe stand down (task #3867). The
+    redirect targets the same file the launchd plist names."""
+    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(probe, "ava_binary_path", lambda: "/x/ava")
+    written: dict[str, str] = {}
+
+    def _run(cmd, **kw):  # type: ignore[no-untyped-def]
+        if cmd == ["crontab", "-"]:
+            written["body"] = kw["input"]
+            return type("R", (), {"returncode": 0, "stderr": "", "stdout": ""})()
+        return type("R", (), {"returncode": 1, "stderr": "no crontab for u", "stdout": ""})()
+
+    monkeypatch.setattr(probe.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
+    assert probe._register_linux("gateway", 60) == 0
+
+    log_file = Path(settings.general.ava_home) / "logs" / "watchdog-probe.log"
+    body = written["body"]
+    assert f"mkdir -p {log_file.parent}" in body
+    assert f">> {log_file} 2>&1" in body
 
 
 def test_unregister_linux_is_a_noop_without_our_line(monkeypatch: pytest.MonkeyPatch) -> None:
