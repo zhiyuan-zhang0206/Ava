@@ -415,6 +415,37 @@ def renew_update_lock(holder: str, *, ttl_s: float = LOCK_TTL_S) -> bool:
     return renewed
 
 
+def _transition_refusal_reason(cur: Any, holder: str) -> str:
+    """Name the scenario that blocked a holder-scoped lease transition.
+
+    `rowcount == 0` from the guarded transitions has two distinct causes (task
+    #2683): a durable pending publication holds the row back until its checked
+    protocol clears it, or the row is no longer this holder's lease — reclaimed
+    past TTL because the caller outran `LOCK_TTL_S`, or two orchestrations ran
+    concurrently. The caller's WARNING says which one it actually was; read the
+    guard state on the failure path only, the transition itself stays one
+    guarded UPDATE.
+    """
+    cur.execute(
+        "SELECT holder, "
+        "COALESCE(managed_writer_evidence->'pending','null'::jsonb) = 'null'::jsonb "
+        "FROM deployment_state WHERE id = 1"
+    )
+    row = cur.fetchone()
+    if row is not None:
+        if not bool(row[1]):
+            return (
+                "a durable pending publication refuses the transition "
+                "(its checked protocol must clear pending first)"
+            )
+        if row[0] != holder:
+            return (
+                "the lease was reclaimed past TTL "
+                "(a rollout outran LOCK_TTL_S, or two ran concurrently)"
+            )
+    return "the guarded row no longer matched at write time"
+
+
 def release_update_lock(holder: str) -> None:
     """Release the lock iff `holder` still holds it — a no-op when another holder
     has since reclaimed it past a TTL expiry, so a slow release never clobbers a
@@ -437,14 +468,17 @@ def release_update_lock(holder: str) -> None:
         if cur.rowcount == 1:
             logger.info("[cluster-lock] released by {holder}", holder=holder)
         else:
-            # We did not hold it at release time — another orchestration reclaimed it
-            # past the TTL. That means this rollout outran LOCK_TTL_S (or two ran at
-            # once); surface it rather than swallow, since it signals the serialization
-            # was breached.
+            # The guarded UPDATE refused. Either a durable pending publication held
+            # the row back (its checked protocol must clear pending first), or the
+            # lease is no longer this holder's — reclaimed past TTL because the
+            # rollout outran LOCK_TTL_S (or two ran concurrently). Surface which one
+            # it actually was rather than swallow either: the first is the designed
+            # refusal, the second signals the serialization was breached (task
+            # #2683).
             logger.warning(
-                "update lock not held by {holder} at release (reclaimed past TTL — "
-                "a rollout outran LOCK_TTL_S, or two ran concurrently)",
+                "update lock not held by {holder} at release — {reason}",
                 holder=holder,
+                reason=_transition_refusal_reason(cur, holder),
             )
 
 
@@ -572,9 +606,10 @@ def settle_update_lock(holder: str, *, hosts: list[str], ttl_s: float = SETTLE_T
             )
         else:
             logger.warning(
-                "settle hold by {holder} did not land — the lease is no longer theirs "
-                "(reclaimed past TTL). The cluster is unguarded while it settles.",
+                "settle hold by {holder} did not land — {reason}. The cluster is "
+                "unguarded while it settles.",
                 holder=holder,
+                reason=_transition_refusal_reason(cur, holder),
             )
         return held
 
