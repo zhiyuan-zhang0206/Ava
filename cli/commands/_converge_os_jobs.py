@@ -143,6 +143,37 @@ def ensure_watchdog_probe(ctx: ConvergeCtx) -> None:
             register_watchdog_probe(role)
 
 
+def ensure_hold_watchdog(_ctx: ConvergeCtx) -> None:
+    """Keep the OS-scheduled hold watchdog in step with this host's service driver.
+
+    Session mode (the default): register ONE job for this home — the
+    maintenance hold is host-level, so unlike the per-capability watchdog
+    probe a box carrying both capabilities needs exactly one job.
+
+    Root mode: RETIRE it, the same rule the watchdog probe follows. The root
+    supervisor owns local transitions; a second OS-side actor driving the
+    same lifecycle locks is the double-master shape the retirement exists to
+    avoid. The next converge with the switch back off falls through to the
+    register branch — the gray-rollout revert restores the job by itself.
+    Deliberately NOT gated on `os_jobs_enabled()`: cleanup has to work
+    wherever registration is forbidden too.
+
+    Delegates to `shared.os_hold_watchdog`; idempotent either way."""
+    import cli.commands as _ns
+
+    if _ns._root_driven_enabled():
+        from shared.os_hold_watchdog import unregister_hold_watchdog
+
+        unregister_hold_watchdog()
+        return
+    from shared.os_hold_watchdog import register_hold_watchdog
+
+    register_hold_watchdog()
+    # POSIX: failure propagates so converge fails fast (an orphaned hold would
+    # otherwise never be completed). Windows degrades to a warning — see
+    # WindowsPlatformBackend.register_hold_watchdog.
+
+
 def ensure_cluster_autostart(_ctx: ConvergeCtx) -> None:
     """Register the boot-time autostart job so a machine reboot brings this
     cluster's gateway / agents / daemons back up without a manual `ava start`

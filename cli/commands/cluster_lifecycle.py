@@ -291,6 +291,7 @@ def _unregister_scheduled_jobs(home: Path) -> None:
     from shared.os_autostart import unregister_autostart
     from shared.os_boot_unit import uninstall as uninstall_boot_unit
     from shared.os_cron import unregister_os_cron
+    from shared.os_hold_watchdog import unregister_hold_watchdog
     from shared.os_logs_job import unregister_logs_job
     from shared.os_packages import unregister_packages_job
     from shared.os_watchdog_probe import unregister_watchdog_probe
@@ -308,6 +309,7 @@ def _unregister_scheduled_jobs(home: Path) -> None:
         ("packages refresh", lambda: unregister_packages_job(home)),
         ("watchdog probe (gateway)", lambda: unregister_watchdog_probe("gateway", home)),
         ("watchdog probe (agent-runner)", lambda: unregister_watchdog_probe("agent-runner", home)),
+        ("hold watchdog", lambda: unregister_hold_watchdog(home)),
         ("fleet UI gate", lambda: unregister_gate(home)),
     ]
     failed: list[str] = []
@@ -325,7 +327,8 @@ def _unregister_scheduled_jobs(home: Path) -> None:
     else:
         print(
             f"✓ removed '{home}' OS-scheduled jobs "
-            "(health probe, watchdog probes, autostart, boot unit, logs maintenance)"
+            "(health probe, watchdog probes, hold watchdog, autostart, boot unit, "
+            "logs maintenance)"
         )
 
 

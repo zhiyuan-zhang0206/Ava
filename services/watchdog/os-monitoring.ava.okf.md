@@ -12,6 +12,8 @@ tags: []
 
 Registration happens in the converge step (`cli/commands/_converge_os_jobs.py:ensure_watchdog_probe`) on every `ava start` / `ava update`, gated by `AVA_OS_JOBS_ENABLED` (default on). The `watchdog-probe` / `-register` / `-unregister` CLI commands live in `cli/parsers/cluster.py` (built by `cli/main.py`'s argparse tree).
 
+A sibling job — `shared/os_hold_watchdog.py`, one per cluster home (no capability fan-out) — runs `ava cluster hold-watchdog` at `settings.gateway.hold_watchdog_interval_seconds` (300s default). Its subject is not the watchdog but an ORPHANED maintenance hold: it completes a provably ownerless post-stop hold once, out-of-band and without the database (task #3887; see [[services/watchdog/pause-recovery/pause-recovery.ava.okf.md]]). Registered by the same converge file (`ensure_hold_watchdog`) and retired on a root-driven host like the probe.
+
 ## Key dependencies
 - [[services/watchdog/watchdog.ava.okf.md]] — the watchdog this probe keeps alive
 

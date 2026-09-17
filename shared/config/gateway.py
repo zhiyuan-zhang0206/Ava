@@ -288,6 +288,73 @@ class GatewaySettings(EnvSettings):
         },
     )
 
+    hold_watchdog_min_age_seconds: float = Field(
+        default=1800.0,
+        gt=0,
+        allow_inf_nan=False,
+        alias="AVA_HOLD_WATCHDOG_MIN_AGE_SECONDS",
+        description=(
+            "The minimum age of an orphaned maintenance hold before the OS-scheduled "
+            "hold watchdog may complete it (task #3887). An ownerless hold past this "
+            "bound is completed once through the official stop/start/resume ladder; "
+            "below it the watchdog only observes. 30 minutes is the same window the "
+            "pre-stop automatic release uses (task #3270): a transition still in "
+            "flight - or an operator about to return - is never misread. Must be "
+            "finite and positive. Read by the watchdog job on every run."
+        ),
+        json_schema_extra={
+            "restart_required": "ops",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    hold_watchdog_cooldown_seconds: float = Field(
+        default=900.0,
+        ge=0,
+        allow_inf_nan=False,
+        alias="AVA_HOLD_WATCHDOG_COOLDOWN_SECONDS",
+        description=(
+            "The cooldown between two hold-watchdog attempts within one hold "
+            "generation (task #3887). The mechanism spends one attempt per episode "
+            "(task #3142's budget shape); the cooldown additionally forbids a second "
+            "attempt - a re-declared record, or a state still settling from the "
+            "first attempt - from being spent immediately. Must be finite and "
+            "non-negative. Read by the watchdog job on every run."
+        ),
+        json_schema_extra={
+            "restart_required": "ops",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    hold_watchdog_interval_seconds: int = Field(
+        default=300,
+        gt=0,
+        le=3600,
+        alias="AVA_HOLD_WATCHDOG_INTERVAL_SECONDS",
+        description=(
+            "How often the OS-scheduled hold watchdog evaluates this host's "
+            "maintenance hold (task #3887). Evaluation is a handful of local "
+            "file/lock reads; recovery latency is the completion bound plus at most "
+            "one interval. Capped at one hour: the mechanism's whole value is a "
+            "bounded blackout, and a longer period would let one missed cycle "
+            "stretch the recovery past an incident-sized window. Applied at "
+            "registration (converge): the launchd StartInterval / crontab minute "
+            "cadence / Task Scheduler period each run the command at this cadence, "
+            "so a change takes effect at the next converge."
+        ),
+        json_schema_extra={
+            "restart_required": "ops",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     abandoned_hold_auto_release: bool = Field(
         default=True,
         alias="AVA_ABANDONED_HOLD_AUTO_RELEASE",

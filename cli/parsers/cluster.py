@@ -184,6 +184,24 @@ def _h_cluster_watchdog_probe_unregister(args: argparse.Namespace) -> int:
     return cmd_watchdog_probe_unregister(args.role)
 
 
+def _h_cluster_hold_watchdog(_args: argparse.Namespace) -> int:
+    from cli.commands import cmd_hold_watchdog
+
+    return cmd_hold_watchdog()
+
+
+def _h_cluster_hold_watchdog_register(_args: argparse.Namespace) -> int:
+    from cli.commands import cmd_hold_watchdog_register
+
+    return cmd_hold_watchdog_register()
+
+
+def _h_cluster_hold_watchdog_unregister(_args: argparse.Namespace) -> int:
+    from cli.commands import cmd_hold_watchdog_unregister
+
+    return cmd_hold_watchdog_unregister()
+
+
 def _h_cluster_boot_unit_install(args: argparse.Namespace) -> int:
     from cli.commands import cmd_boot_unit_install
 
@@ -218,6 +236,9 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         _h_cluster_health_probe,
         _h_cluster_health_probe_register,
         _h_cluster_health_probe_unregister,
+        _h_cluster_hold_watchdog,
+        _h_cluster_hold_watchdog_register,
+        _h_cluster_hold_watchdog_unregister,
         _h_cluster_ls,
         _h_cluster_pause,
         _h_cluster_pitr_activate,
@@ -619,6 +640,31 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         "--role", required=True, choices=["gateway", "agent-runner"]
     )
     cluster_wp_unregister_p.set_defaults(func=_h_cluster_watchdog_probe_unregister)
+
+    # --- `ava cluster hold-watchdog` ---
+    # The command the OS scheduler runs; completes a provably orphaned
+    # maintenance hold once (task #3887), without depending on the database.
+    # Also useful by hand to check "would the watchdog act on this host
+    # right now?".
+    cluster_hold_watchdog_p = cluster_sub.add_parser(
+        "hold-watchdog",
+        help="complete this host's orphaned maintenance hold, once, when provably orphaned",
+    )
+    cluster_hold_watchdog_p.set_defaults(func=_h_cluster_hold_watchdog)
+
+    # Manual counterparts to the converge step, for debugging a host whose
+    # job went missing without re-running a full `ava start`.
+    cluster_hw_register_p = cluster_sub.add_parser(
+        "hold-watchdog-register",
+        help="register the OS-scheduled hold watchdog for this home",
+    )
+    cluster_hw_register_p.set_defaults(func=_h_cluster_hold_watchdog_register)
+
+    cluster_hw_unregister_p = cluster_sub.add_parser(
+        "hold-watchdog-unregister",
+        help="remove the OS-scheduled hold watchdog for this home",
+    )
+    cluster_hw_unregister_p.set_defaults(func=_h_cluster_hold_watchdog_unregister)
 
     # --- `ava cluster boot-unit` — the distro-level boot unit (Linux) ---
     # The systemd unit that owns the boot convergence path on Linux hosts

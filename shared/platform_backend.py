@@ -163,7 +163,7 @@ class PlatformBackend(abc.ABC):
         registered."""
         ...
 
-    # -- watchdog probe -----------------------------------------------------
+    # -- watchdog jobs ------------------------------------------------------
 
     @abc.abstractmethod
     def register_watchdog_probe(self, role: str, interval_s: int = 60) -> None:
@@ -189,6 +189,20 @@ class PlatformBackend(abc.ABC):
     def unregister_watchdog_probe(self, role: str, slug: str) -> None:
         """Remove ``role``'s watchdog probe job on the cluster whose home slug is
         ``slug``. Safe when none is registered."""
+        ...
+
+    @abc.abstractmethod
+    def register_hold_watchdog(self, interval_s: int) -> None:
+        """Register the OS job that completes an orphaned hold; one per HOME.
+
+        Host-level (unlike the per-capability probes); the verdict is ``shared.hold_watchdog``,
+        the public path ``shared.os_hold_watchdog`` applying the ``os_jobs_enabled()`` gate.
+        Idempotent; POSIX raises on failure, the Windows backend degrades to a loud warning."""
+        ...
+
+    @abc.abstractmethod
+    def unregister_hold_watchdog(self, slug: str) -> None:
+        """Remove home ``slug``'s hold-watchdog job; safe when none is registered."""
         ...
 
     # -- process ------------------------------------------------------------
@@ -329,7 +343,7 @@ class MacPlatformBackend(PlatformBackend):
 
         _unregister_macos(slug)
 
-    # -- watchdog probe --
+    # -- watchdog jobs --
 
     def register_watchdog_probe(self, role: str, interval_s: int = 60) -> None:
         from shared.os_watchdog_probe import _register_macos
@@ -342,6 +356,17 @@ class MacPlatformBackend(PlatformBackend):
         from shared.os_watchdog_probe import _unregister_macos
 
         _unregister_macos(role, slug)
+
+    def register_hold_watchdog(self, interval_s: int) -> None:
+        from shared.os_hold_watchdog import _register_macos
+
+        if _register_macos(interval_s) != 0:
+            raise RuntimeError("hold-watchdog registration failed on macOS")
+
+    def unregister_hold_watchdog(self, slug: str) -> None:
+        from shared.os_hold_watchdog import _unregister_macos
+
+        _unregister_macos(slug)
 
     # -- process --
 
@@ -456,7 +481,7 @@ class LinuxPlatformBackend(PlatformBackend):
 
         _unregister_linux(slug)
 
-    # -- watchdog probe --
+    # -- watchdog jobs --
 
     def register_watchdog_probe(self, role: str, interval_s: int = 60) -> None:
         from shared.os_watchdog_probe import _register_linux
@@ -469,6 +494,17 @@ class LinuxPlatformBackend(PlatformBackend):
         from shared.os_watchdog_probe import _unregister_linux
 
         _unregister_linux(role, slug)
+
+    def register_hold_watchdog(self, interval_s: int) -> None:
+        from shared.os_hold_watchdog import _register_linux
+
+        if _register_linux(interval_s) != 0:
+            raise RuntimeError("hold-watchdog registration failed on Linux")
+
+    def unregister_hold_watchdog(self, slug: str) -> None:
+        from shared.os_hold_watchdog import _unregister_linux
+
+        _unregister_linux(slug)
 
     # -- process --
 
@@ -653,7 +689,7 @@ class WindowsPlatformBackend(PlatformBackend):
 
         logger.debug("PR-flow sampler job: no Windows registration path (slug={})", slug)
 
-    # -- watchdog probe --
+    # -- watchdog jobs --
 
     def register_watchdog_probe(self, role: str, interval_s: int = 60) -> None:
         from shared.os_watchdog_probe import _register_windows
@@ -678,6 +714,25 @@ class WindowsPlatformBackend(PlatformBackend):
         from shared.os_watchdog_probe import _unregister_windows
 
         _unregister_windows(role, slug)
+
+    def register_hold_watchdog(self, interval_s: int) -> None:
+        from shared.os_hold_watchdog import _register_windows
+
+        reason = _register_windows(interval_s)
+        if reason is not None:
+            print(  # noqa: T201
+                "  ! hold watchdog: schtasks registration failed — continuing without it; "
+                f"an orphaned hold will not complete automatically: {reason}",
+                file=sys.stderr,
+            )
+            from loguru import logger
+
+            logger.error("hold-watchdog registration failed on Windows: {}", reason)
+
+    def unregister_hold_watchdog(self, slug: str) -> None:
+        from shared.os_hold_watchdog import _unregister_windows
+
+        _unregister_windows(slug)
 
     # -- process --
 
