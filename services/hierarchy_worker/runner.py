@@ -31,7 +31,7 @@ from services.hierarchy_worker.scan import scan
 from shared.config import settings
 from shared.db import connect
 from shared.db_transaction import write_transaction
-from shared.log import logger
+from shared.log import init_gateway_process, logger
 
 # The deployed source root: shared/ sits at the repo root in prod and in a
 # worktree alike (the c9-daily-report precedent), and the child must import
@@ -49,14 +49,18 @@ class ClaimedJob:
 
 
 def prepare() -> None:
-    """One-time host start: verify the schema, announce the process.
+    """One-time host start: open the process sinks, verify the schema, announce.
 
-    Called by the schedule host before its first tick. A drifted schema
-    raises here, so the manager's crash path (backoff + breaker + last_error)
-    exposes it instead of every tick failing on its own.
+    Called by the schedule host before its first tick. The process-boot seam
+    runs first — the schedule runner is otherwise sink-less, so the start /
+    scan / claim lines and a drifted-schema crash would all be dropped
+    records — then a drifted schema raises, so the manager's crash path
+    (backoff + breaker + last_error) exposes it instead of every tick failing
+    on its own.
     """
     from shared.migrations import assert_schema_current
 
+    init_gateway_process(name="schedule-hierarchy-worker")
     assert_schema_current(settings.data_plane.db_url)
     logger.info("hierarchy worker started (pid {pid})", pid=os.getpid())
 

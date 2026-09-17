@@ -6,21 +6,33 @@ with first-build tail semantics, the live-job de-dup, the retry backoff vs
 immediate continuation drain, stale-running recovery, the atomic claim, the
 child side's row outcome (scope + cursor advance only on a complete run),
 the tick's drain and crash mapping (a tick drains back-to-back; a transient
-failure ends the tick; code<->DB drift raises), and one real child-process
+failure ends the tick; code<->DB drift raises), one real child-process
 round trip over an agent with no checkpoint history (zero model calls — the
-empty-history edge is the fixture).
+empty-history edge is the fixture), and the process-boot sink seam on both
+sides of the worker (task #3868): the host's prepare() and the child's
+job.main() open the log / event-pipeline sinks, so a real child subprocess's
+records reach stderr and the events JSONL mirror.
 """
 
 from __future__ import annotations
+
+import subprocess
+import sys
+from datetime import UTC, datetime
+from pathlib import Path
 
 import psycopg
 import pytest
 
 from services.hierarchy_worker import execute as execute_module
+from services.hierarchy_worker import job as job_module
 from services.hierarchy_worker import runner
 from services.hierarchy_worker.scan import ScanOutcome, scan
 from shared.config import settings
 from shared.hierarchy.pipeline import MaterializedTree
+from shared.paths import logs_dir
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 # Lexicographically ordered UUIDv6-shaped checkpoint ids, one per `nth`.
@@ -364,6 +376,60 @@ def test_child_round_trip_on_empty_history(db_conn: psycopg.Connection) -> None:
     assert state is not None and state[0] == cid(1)
 
 
+def test_job_main_inits_the_child_process_sinks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`job.main` boots the child's process sinks before executing.
+
+    `shared/log.py` drops loguru's default handler at import, so without the
+    seam every record the child produces — the `llm_usage` rows that are the
+    worker's metering ledger included — is silently discarded (task #3868)."""
+    order: list[str] = []
+
+    def fake_init(*, name: str) -> None:
+        order.append(f"init:{name}")
+
+    def fake_execute(job_id: int) -> int:
+        order.append(f"execute:{job_id}")
+        return 7
+
+    monkeypatch.setattr(job_module, "init_gateway_process", fake_init)
+    monkeypatch.setattr(execute_module, "execute_job", fake_execute)
+
+    assert job_module.main(["--job-id", "77"]) == 7
+    assert order == ["init:hierarchy-worker", "execute:77"]
+
+
+def test_child_process_records_reach_the_event_mirror() -> None:
+    """A real child subprocess boots its process sinks (task #3868).
+
+    The job-vanished error reaches stderr, and the child's records — its boot
+    row and the error line — land in the events JSONL mirror under process
+    `hierarchy-worker`. Before the seam, the same probe exited 1 with zero
+    output and zero records."""
+    child = subprocess.run(
+        [sys.executable, "-m", "services.hierarchy_worker.job", "--job-id", "999999"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert child.returncode == 1
+    assert "vanished" in child.stderr
+
+    mirror = logs_dir() / f"events-{datetime.now(UTC).strftime('%Y%m%d')}.jsonl"
+    assert mirror.exists(), "the child wrote no events mirror — its sink seam did not boot"
+    child_lines = [
+        line
+        for line in mirror.read_text(encoding="utf-8").splitlines()
+        if '"process":"hierarchy-worker"' in line
+    ]
+    assert any('"event_name":"service_started"' in line for line in child_lines)
+    assert any(
+        '"event_name":"log"' in line and "vanished before execution" in line for line in child_lines
+    )
+
+
 class _FakeConnection:
     """Just enough of `connect(autocommit=True)`'s context manager for ticks."""
 
@@ -437,3 +503,25 @@ def test_run_tick_raises_on_schema_drift(monkeypatch: pytest.MonkeyPatch) -> Non
 
     with pytest.raises(psycopg.ProgrammingError):
         runner.run_tick()
+
+
+def test_prepare_inits_the_host_process_sinks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The host's one-time start opens its process sinks before the schema
+    check: the schedule runner process is otherwise sink-less, so the start /
+    scan / claim lines and a drifted-schema crash would all be dropped
+    records (task #3868)."""
+    order: list[str] = []
+
+    def fake_init(*, name: str) -> None:
+        order.append(f"init:{name}")
+
+    def fake_schema(db_url: str) -> None:
+        order.append("schema")
+
+    monkeypatch.setattr(runner, "init_gateway_process", fake_init)
+    monkeypatch.setattr("shared.migrations.assert_schema_current", fake_schema)
+
+    runner.prepare()
+    assert order == ["init:schedule-hierarchy-worker", "schema"]
