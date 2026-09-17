@@ -68,6 +68,20 @@ class DeliveryOutboxFields:
         },
     )
 
+    delivery_outbox_abandoned_retention_days: int = Field(
+        default=30,
+        gt=0,
+        alias="AVA_DELIVERY_OUTBOX_ABANDONED_RETENTION_DAYS",
+        description="Abandoned-record retention (days): how long a record abandoned as undeliverable is kept on disk for inspection before the flush pass expires it. 30 days covers incident follow-up; the `delivery_outbox_abandoned` telemetry event carries the signal beyond that. Abandoned entries are excluded from `delivery_outbox_max_entries`, so without this window the journal would grow without bound. Expiry pauses while `delivery_outbox_enabled` is off — the switch is inert, never destructive.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     delivery_outbox_dedup_window_seconds: float = Field(
         default=900.0,
         gt=0,

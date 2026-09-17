@@ -28,6 +28,7 @@ def _limits(**overrides: object) -> outbox.DeliveryOutboxLimits:
         "enabled": True,
         "retry_backoff_steps": (30.0, 60.0, 300.0, 900.0),
         "budget_seconds": 43200.0,
+        "abandoned_retention_days": 30,
         "dedup_window_seconds": 900.0,
         "flush_interval_seconds": 30.0,
         "max_entries": 128,
@@ -349,6 +350,53 @@ def test_flush_past_budget_not_due_defers_until_the_attempt(
     entry = outbox._read(path)
     assert entry is not None
     assert entry.abandon_reason == "budget" and entry.flush_attempts == 3
+
+
+def test_flush_expires_abandoned_records_after_retention(
+    journal: Path, db_conn: psycopg.Connection, pool: ConnectionPool
+) -> None:
+    """The inspection window is bounded: an abandoned record past its
+    retention is pruned by the next pass, without being re-attempted."""
+    agent_id = _agent(db_conn)
+    path = _record(agent_id=agent_id, now=_NOW)
+    assert path is not None
+    entry = outbox._read(path)
+    assert entry is not None
+    outbox._abandon(path, entry, "budget", _NOW)
+    report = outbox.flush(pool, now=_NOW + timedelta(days=31))
+    assert report.expired == 1 and not path.exists()
+    assert outbox.flush(pool, now=_NOW + timedelta(days=32)).expired == 0
+
+
+def test_flush_keeps_abandoned_records_inside_retention(
+    journal: Path, db_conn: psycopg.Connection, pool: ConnectionPool
+) -> None:
+    agent_id = _agent(db_conn)
+    path = _record(agent_id=agent_id, now=_NOW)
+    assert path is not None
+    entry = outbox._read(path)
+    assert entry is not None
+    outbox._abandon(path, entry, "budget", _NOW)
+    assert outbox.flush(pool, now=_NOW + timedelta(days=29)).expired == 0
+    assert path.exists()
+
+
+def test_flush_disabled_keeps_expired_records(
+    journal: Path,
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The kill switch is inert, never destructive: no expiry while off."""
+    agent_id = _agent(db_conn)
+    path = _record(agent_id=agent_id, now=_NOW)
+    assert path is not None
+    entry = outbox._read(path)
+    assert entry is not None
+    outbox._abandon(path, entry, "budget", _NOW)
+    _patch_limits(monkeypatch, enabled=False)
+    report = outbox.flush(pool, now=_NOW + timedelta(days=31))
+    assert report.expired == 0 and path.exists()
 
 
 def test_flush_abandons_missing_agent(

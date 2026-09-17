@@ -55,14 +55,15 @@ async def _run(pool: ConnectionPool, interval: float) -> None:
             except Exception:
                 _log.exception("[delivery-outbox] flush pass failed; records kept")
             else:
-                if report.touched:
+                if report.touched or report.expired:
                     _log.info(
                         "[delivery-outbox] flush pass: delivered={} abandoned={} "
-                        "deferred={} unreadable={}",
+                        "deferred={} unreadable={} expired={}",
                         report.delivered,
                         report.abandoned,
                         report.deferred,
                         report.unreadable,
+                        report.expired,
                     )
         await asyncio.sleep(interval)
         try:

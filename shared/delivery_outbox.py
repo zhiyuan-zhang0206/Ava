@@ -23,7 +23,9 @@ that window on the sending machine:
 - **Escalate (keep it loud).** A delivery that cannot land within the budget,
   or that fails permanently (missing agent, key conflict), is abandoned with a
   WARNING, a `delivery_outbox_abandoned` telemetry event, and the record kept
-  on disk (marked `abandoned`) instead of vanishing.
+  on disk (marked `abandoned`) instead of vanishing. The inspection window is
+  bounded: the flush pass expires abandoned records
+  `delivery_outbox_abandoned_retention_days` (30d default) after abandonment.
 
 **Exactness.** All attempts and the flush share ONE idempotency key per logical
 message: `logical_key` reuses the pending key for the same
@@ -92,6 +94,7 @@ class DeliveryOutboxLimits:
     enabled: bool
     retry_backoff_steps: tuple[float, ...]
     budget_seconds: float
+    abandoned_retention_days: int
     dedup_window_seconds: float
     flush_interval_seconds: float
     max_entries: int
@@ -114,6 +117,7 @@ def limits() -> DeliveryOutboxLimits:
             float(step) for step in values["delivery_outbox_retry_backoff_steps_s"]
         ),
         budget_seconds=float(values["delivery_outbox_budget_seconds"]),
+        abandoned_retention_days=int(values["delivery_outbox_abandoned_retention_days"]),
         dedup_window_seconds=float(values["delivery_outbox_dedup_window_seconds"]),
         flush_interval_seconds=float(values["delivery_outbox_flush_interval_seconds"]),
         max_entries=int(values["delivery_outbox_max_entries"]),
@@ -487,6 +491,7 @@ class FlushReport:
     abandoned: int = 0
     deferred: int = 0
     unreadable: int = 0
+    expired: int = 0
 
     @property
     def touched(self) -> int:
@@ -588,6 +593,13 @@ def _due_at(entry: OutboxEntry, steps: tuple[float, ...]) -> datetime:
     return base + timedelta(seconds=step)
 
 
+def _abandoned_expired(entry: OutboxEntry, moment: datetime, retention_days: int) -> bool:
+    """True once an abandoned record's inspection window has elapsed."""
+    if entry.abandoned_at is None:
+        return False
+    return (moment - _parse_iso(entry.abandoned_at)).total_seconds() >= retention_days * 86400
+
+
 def _record_failed_flush(path: Path, entry: OutboxEntry, moment: datetime) -> OutboxEntry:
     """Persist one failed flush attempt; returns the updated entry."""
     updated = replace(
@@ -610,6 +622,8 @@ def flush(pool: FlushPool, *, now: datetime | None = None) -> FlushReport:
     after the attempt, never before it: an entry owed a retry at budget time
     still gets it (a flusher stalled across the budget gives the message its
     chance once services return), and a successful attempt delivers at any age.
+    An abandoned record is also expired — this pass prunes it — once
+    `delivery_outbox_abandoned_retention_days` have elapsed since abandonment.
     While the outbox is disabled, nothing is touched and records stay for a
     re-enable or the operator.
     """
@@ -618,7 +632,7 @@ def flush(pool: FlushPool, *, now: datetime | None = None) -> FlushReport:
     directory = journal_dir()
     if not directory.is_dir():
         return FlushReport()
-    delivered = abandoned = deferred = unreadable = 0
+    delivered = abandoned = deferred = unreadable = expired = 0
     for path in sorted(directory.iterdir()):
         if path.suffix != _ENTRY_SUFFIX or not path.is_file():
             continue
@@ -628,6 +642,15 @@ def flush(pool: FlushPool, *, now: datetime | None = None) -> FlushReport:
             logger.warning("[delivery-outbox] unreadable record kept for inspection: {}", path)
             continue
         if entry.state != "pending":
+            # Abandoned records keep their inspection window, then this pass
+            # expires them (no-op while the outbox is off — the switch is
+            # inert, never destructive).
+            if snapshot.enabled and _abandoned_expired(
+                entry, moment, snapshot.abandoned_retention_days
+            ):
+                with suppress(OSError):
+                    path.unlink()
+                expired += 1
             continue
         if not snapshot.enabled:
             deferred += 1
@@ -684,4 +707,5 @@ def flush(pool: FlushPool, *, now: datetime | None = None) -> FlushReport:
         abandoned=abandoned,
         deferred=deferred,
         unreadable=unreadable,
+        expired=expired,
     )

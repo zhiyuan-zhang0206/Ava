@@ -174,6 +174,7 @@ def test_delivery_outbox_defaults() -> None:
     assert configured.delivery_outbox_enabled is True
     assert configured.delivery_outbox_retry_backoff_steps_s == [30.0, 60.0, 300.0, 900.0]
     assert configured.delivery_outbox_budget_seconds == 43200.0
+    assert configured.delivery_outbox_abandoned_retention_days == 30
     assert configured.delivery_outbox_dedup_window_seconds == 900.0
     assert configured.delivery_outbox_flush_interval_seconds == 30.0
     assert configured.delivery_outbox_max_entries == 128
@@ -195,6 +196,16 @@ def test_delivery_outbox_backoff_rejects_empty_or_nonpositive_steps(raw: str) ->
 
     with pytest.raises(pydantic.ValidationError):
         DaemonSettings.model_validate({"AVA_DELIVERY_OUTBOX_RETRY_BACKOFF_STEPS_S": raw})
+
+
+@pytest.mark.parametrize("raw", ["0", "-1"])
+def test_delivery_outbox_abandoned_retention_rejects_nonpositive(raw: str) -> None:
+    import pydantic
+
+    from shared.config.daemon import DaemonSettings
+
+    with pytest.raises(pydantic.ValidationError):
+        DaemonSettings.model_validate({"AVA_DELIVERY_OUTBOX_ABANDONED_RETENTION_DAYS": raw})
 
 
 def test_hierarchy_budget_must_stay_below_deadline() -> None:
