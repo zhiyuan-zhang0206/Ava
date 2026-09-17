@@ -538,8 +538,8 @@ def relay_inbox(lease_id: str, relay_token: str, *, limit: int = 100) -> list[di
 
     The controller identity cannot read here and the relay token cannot release,
     renew or ACK anything — the handoff is scoped by construction. ``limit``
-    matches the controller inbox page (default 100, validated 1..1000 — task
-    #3696 exception inventory): one bounded read per relay poll.
+    matches the controller inbox page (default 100, validated 1..1000)
+    — task #3696 exception inventory): one bounded read per relay poll.
     """
     if not 1 <= limit <= 1000:
         raise ValueError("Inbox limit must be from 1 through 1000")

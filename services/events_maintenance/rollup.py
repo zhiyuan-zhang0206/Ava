@@ -65,8 +65,8 @@ from shared.loki_query_budget import FairQueryBudget
 
 _HTTP_TIMEOUT_S = 60.0
 # Serialized by design (capacity 1): the maintenance sweep must not crowd out
-# live reads; 4 waiters + a 30s wait cap the queue-join cost (task #3696
-# exception inventory).
+# live reads; 4 waiters + a 30s wait cap the queue-join cost
+# (task #3696 exception inventory).
 _query_budget = FairQueryBudget(capacity=1, max_waiters=4, wait_timeout_s=30.0)
 
 

@@ -14,8 +14,7 @@ from shared.db_transaction import write_transaction
 # reconciliation and the approaching-expiry reminder scan each take one page.
 # The pass stays a short transaction and the next cycle (default 60s) picks up
 # any remainder, so a backlog drains over cycles rather than one long pass —
-# an internal batch quantity, not a tuning knob (task #3696 exception
-# inventory).
+# an internal batch quantity, not a tuning knob (task #3696 exception inventory).
 _PASS_BATCH = 200
 
 

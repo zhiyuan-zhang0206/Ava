@@ -107,8 +107,8 @@ DEFAULT_AGENT_MIN = 1
 DEFAULT_CRASH_LOOP_MAX_RESTARTS = 5
 # Crash-loop window: restarts within the last 10 minutes count toward the
 # loop (with DEFAULT_CRASH_LOOP_MAX_RESTARTS above); wide enough for a
-# flapping daemon to trip, narrow enough that old restarts age out (task
-# #3696 exception inventory).
+# flapping daemon to trip, narrow enough that old restarts age out
+# (task #3696 exception inventory).
 DEFAULT_CRASH_LOOP_WINDOW_MINUTES = 10
 DEFAULT_CONSECUTIVE_THRESHOLD = 3
 _LIVENESS_ATTEMPTS = 3

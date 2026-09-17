@@ -141,8 +141,7 @@ class GCSRestartableStreamingObjectStore:
             with blob.open(
                 "wb",
                 # Same 8 MiB granularity the packer's stream chunk uses
-                # (services/pitr/base_stream.py) — task #3696 exception
-                # inventory.
+                # (services/pitr/base_stream.py) — task #3696 exception inventory.
                 chunk_size=8 * 1024 * 1024,
                 if_generation_match=0,
                 checksum="crc32c",

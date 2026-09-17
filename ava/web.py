@@ -189,8 +189,7 @@ def _search_one(query: str, count: int) -> list[SearchResult]:
             e.code,
             _WEB_READ_POLICY.max_attempts,
             # Error-detail excerpt for the log line: 200 chars keep one line
-            # readable; the full body is not carried (task #3696 exception
-            # inventory).
+            # readable; the full body is not carried (task #3696 exception inventory).
             detail[:200],
         )
         raise SearchError(f"Brave Search HTTP {e.code}: {detail}") from e
@@ -347,8 +346,7 @@ def _read_page(url: str, max_chars: int) -> tuple[str, str, str, bool]:
             "Jina Reader HTTP %s after %d attempts: %s",
             e.code,
             _WEB_READ_POLICY.max_attempts,
-            # Same excerpt cap as the search path above (task #3696 exception
-            # inventory).
+            # Same excerpt cap as the search path above (task #3696 exception inventory).
             detail[:200],
         )
         raise FetchError(f"Jina Reader HTTP {e.code}: {detail}") from e

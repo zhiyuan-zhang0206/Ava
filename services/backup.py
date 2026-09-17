@@ -102,8 +102,8 @@ _log = logging.getLogger(__name__)
 ACTIVATION_KEEP = 2
 # Newest activation snapshots kept in their own prune slot: two covers the
 # current PITR activation's logical floor plus the one before it; an unresolved
-# activation's snapshot is pinned on top of this window (task #3696
-# exception inventory).
+# activation's snapshot is pinned on top of this window
+# (task #3696 exception inventory).
 # The managed name grammar (markers, formats, regex) lives in
 # `services.pitr.logical_dump_names`: the retention classifier parses the
 # very same grammar, so the writer and the planner cannot drift on what a
