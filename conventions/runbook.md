@@ -1492,9 +1492,12 @@ properties are load-bearing:
   task action has no env slot and relies on the interpreter path alone.
 - **A health probe never reloads its own launchd label.** Auto-rollback runs
   `ava start` below the health-probe LaunchAgent, and `launchctl bootout` would
-  terminate that whole recovery process tree. Registration recognizes the
-  inherited `XPC_SERVICE_NAME`, leaves the existing plist untouched, and lets
-  the next external converge apply any pending spec change.
+  terminate that whole recovery process tree. Registration defers on the
+  direct child's label match (the env fast path) or on a proven live-process-
+  tree match (`launchctl print` pid + `ps` ancestry walk) — the inherited
+  `XPC_SERVICE_NAME` alone is not proof for descendants, which read "0"
+  (`postmortems/0008`) — leaves the existing plist untouched, and lets the
+  next external converge apply any pending spec change.
 - **Windows task settings are stated, not inherited.** Registration goes through a
   task definition (`schtasks /Create /XML`, written to
   `$AVA_HOME/run/schtasks/<kind>.xml`) rather than `/Create` flags, because Task
