@@ -12,8 +12,6 @@ how to use the Ava CLI and Python SDK, how messages flow, when to renew, and
 how to end. It is self-contained: everything you need is here plus your
 briefing, which arrives inline in your launch message.
 
-> **Suspended:** takeover execution is suspended pending fixes; it resumes with the fix line. This guide documents the target flow.
-
 ## Operating contract
 
 - **Start.** Your briefing arrived inline in your launch message — read it

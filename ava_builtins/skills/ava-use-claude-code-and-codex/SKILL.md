@@ -248,9 +248,6 @@ Two levers:
 
 ## Mode B — takeover (impersonation)
 
-> **Suspended:** takeover execution is suspended pending fixes; it resumes with
-> the fix line. Do not launch takeovers until the suspension is lifted.
-
 The tool **replaces you**: it talks to the human through your normal Ava chat
 and calls Ava capabilities under your identity while your execution is paused.
 A takeover is **file-less and supervisor-less** — nothing from Mode A applies:
