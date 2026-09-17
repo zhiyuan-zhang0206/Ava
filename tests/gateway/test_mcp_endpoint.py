@@ -37,10 +37,16 @@ def _enable_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _sse_messages(body: str) -> list[dict[str, Any]]:
-    """Every JSON-RPC message out of an SSE response body, in order."""
+    """Every JSON-RPC message out of an SSE response body, in order.
+
+    Lines split on "\n" only - never str.splitlines(): that also breaks on
+    U+0085 / U+2028 / U+2029, which are legal unescaped inside a JSON
+    string (the /mcp writer emits them raw), and a split there truncates
+    the JSON literal being decoded.
+    """
     out: list[dict[str, Any]] = []
     for event in body.replace("\r\n", "\n").split("\n\n"):
-        data = [line[5:].strip() for line in event.splitlines() if line.startswith("data:")]
+        data = [line[5:].strip() for line in event.split("\n") if line.startswith("data:")]
         if data:
             out.append(json.loads("\n".join(data)))
     return out
@@ -535,3 +541,19 @@ def test_tool_call_audit_identifies_client_and_redacts_args() -> None:
         "instance": str(body["id"]),
     }
     assert body["token"] not in json.dumps(attributes)
+
+
+# ── SSE decoding: Unicode line separators that are legal raw in JSON ─────
+#
+# U+0085 / U+2028 / U+2029 may appear unescaped inside a JSON string, and
+# the /mcp writer emits them raw on the legacy streamable-HTTP path
+# (pydantic model_dump_json, then sse-starlette, which splits lines on
+# CR/LF only) - so the test decoder must never split a data line there.
+
+
+@pytest.mark.parametrize("ch", ("\u0085", "\u2028", "\u2029"), ids=("U+0085", "U+2028", "U+2029"))
+def test_sse_messages_keeps_unicode_line_separators(ch: str) -> None:
+    """One frame, one data line; the payload decodes unchanged."""
+    message = {"jsonrpc": "2.0", "id": 1, "result": {"label": f"a{ch}b"}}
+    body = "event: message\r\ndata: " + json.dumps(message, ensure_ascii=False) + "\r\n\r\n"
+    assert _sse_messages(body) == [message]
