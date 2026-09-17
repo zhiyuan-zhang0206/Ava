@@ -105,6 +105,13 @@ def codex_app_server_socket(key: CodingSessionKey, generation: str) -> Path:
     macOS). The name is scoped to one generation, so a dying predecessor can
     never unlink a successor's socket; a crashed generation's stale file is
     inert.
+
+    ``key.cluster`` is canonically the resolved Ava home (``canonical_key``),
+    so ``<key.cluster>/run`` is the same directory ``shared.paths.run_dir()``
+    returns; it is built from the key here to keep this helper key-scoped and
+    settings-free, mirroring ``generation_state_dir`` (review N1). Privacy is
+    inherited: ``ava_home()`` is created 0o700 and the house run-dir helpers
+    set no separate mode.
     """
     return (
         Path(key.cluster)
