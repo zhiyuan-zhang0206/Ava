@@ -43,8 +43,10 @@ Usage:
 Tiers: --tier names the machine's target authorization set (design v1). L0
 refuses to probe or trigger at all (maintenance windows); L1..L3 grow the
 item set. Groups whose trigger method is still pending verification
-(appdata, media, icloud, fda, devtools) are reported as pending and never
-attempted, so an L2/L3 run stays honest about what it can not yet reach.
+(appdata, media, icloud, fda, devtools) have their grant state read from the
+same preflight matrix and are never attempted: a non-granted state is
+reported unresolved instead of guessing at a request the tool can not yet
+reproduce.
 
 Exit codes: 0 = every requested item is granted/verified; 1 = unresolved
 items remain (details in the report and at the workdir); 2 = setup failure
@@ -72,17 +74,18 @@ DEFAULT_WORKDIR = "/tmp/tcc-onboard-helper-grants"  # noqa: S108 - scratch evide
 IMPLEMENTED_GROUPS = ("folders", "apple-events", "sr-ax")
 """Groups this build can inventory and trigger end to end."""
 
-PENDING_GROUPS: dict[str, str] = {
-    # Target-tier groups whose trigger method is still pending verification:
-    # named in reports, never attempted.
-    "appdata": "trigger method pending verification",
-    "media": "trigger method pending verification",
-    "icloud": "trigger method pending verification",
-    "fda": "trigger method pending verification",
-    "devtools": "trigger method pending verification",
+UNTRIGGERABLE_GROUPS: dict[str, tuple[str, ...]] = {
+    # Extended-tier groups whose grant state is preflight-readable while the
+    # trigger method is still pending verification: the state is read and
+    # reported; an ungranted state is never attempted.
+    "appdata": ("kTCCServiceSystemPolicyAppData",),
+    "media": ("kTCCServiceMediaLibrary", "kTCCServicePhotos"),
+    "icloud": ("kTCCServiceFileProviderDomain", "kTCCServiceUbiquity"),
+    "fda": ("kTCCServiceSystemPolicyAllFiles",),
+    "devtools": ("kTCCServiceDeveloperTool",),
 }
 
-ITEM_GROUPS = IMPLEMENTED_GROUPS + tuple(PENDING_GROUPS)
+ITEM_GROUPS = IMPLEMENTED_GROUPS + tuple(UNTRIGGERABLE_GROUPS)
 """Every group name accepted by --items / --tier."""
 
 TIER_GROUPS: dict[str, tuple[str, ...]] = {
@@ -109,10 +112,11 @@ APPLE_EVENT_TARGETS: tuple[tuple[str, str], ...] = (
     ("Google Chrome", 'tell application "Google Chrome" to get version'),
 )
 
-PREFLIGHT_SERVICES = [item[1] for item in FOLDER_ITEMS] + [
-    "kTCCServiceSystemPolicyAllFiles",
-    "kTCCServiceScreenCapture",
-]
+PREFLIGHT_SERVICES = (
+    [item[1] for item in FOLDER_ITEMS]
+    + ["kTCCServiceScreenCapture"]
+    + [service for services in UNTRIGGERABLE_GROUPS.values() for service in services]
+)
 
 POLL_S = 2.0
 PREFLIGHT_EVERY_N_POLLS = 3
@@ -333,6 +337,15 @@ def classify_apple_event(text: str) -> str:
     return f"unresolved ({text})"
 
 
+def state_status(services: tuple[str, ...], matrix: dict[str, str]) -> str:
+    """Item status for an untriggerable group: granted only when every service is."""
+    states = {service: matrix.get(service, "unknown") for service in services}
+    if all(value == "granted" for value in states.values()):
+        return "granted"
+    detail = ", ".join(f"{service}={value}" for service, value in sorted(states.items()))
+    return f"unresolved ({detail}; trigger method pending verification)"
+
+
 def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item and report live together
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument(
@@ -343,7 +356,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
     parser.add_argument(
         "--check",
         action="store_true",
-        help="inventory only: preflight the folder + system services, never trigger a dialog",
+        help="inventory only: preflight folder + system + extended services, never trigger a dialog",
     )
     target = parser.add_mutually_exclusive_group()
     target.add_argument(
@@ -358,8 +371,8 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
         "--items",
         help="comma-separated subset of: "
         + ",".join(IMPLEMENTED_GROUPS)
-        + " (report-only pending groups: "
-        + ",".join(PENDING_GROUPS)
+        + " (state-read-only extended groups: "
+        + ",".join(UNTRIGGERABLE_GROUPS)
         + ")",
     )
     parser.add_argument(
@@ -408,13 +421,17 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
     for service in PREFLIGHT_SERVICES:
         print(f"  {service}: {matrix.get(service, 'unknown')}")
 
-    pending = [group for group in items if group in PENDING_GROUPS]
+    untriggerable = [group for group in items if group in UNTRIGGERABLE_GROUPS]
     if args.tier is not None:
         print(f"tier {args.tier} -- groups: {', '.join(items)}")
-    if pending:
-        print("pending groups (report-only until their trigger method is verified):")
-        for group in pending:
-            print(f"  {group}: {PENDING_GROUPS[group]}")
+    if untriggerable:
+        print("extended groups (state read via preflight; trigger method pending verification):")
+        for group in untriggerable:
+            states = ", ".join(
+                f"{service}={matrix.get(service, 'unknown')}"
+                for service in UNTRIGGERABLE_GROUPS[group]
+            )
+            print(f"  {group}: {states}")
 
     statuses: dict[str, str] = {}
     unresolved = False
@@ -495,16 +512,16 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
                 " Privacy & Security > Accessibility."
             )
 
-    for group in pending:
-        statuses[group] = "pending verification (not triggered)"
-        unresolved = True
+    for group in untriggerable:
+        statuses[group] = state_status(UNTRIGGERABLE_GROUPS[group], matrix)
+        unresolved = unresolved or statuses[group] != "granted"
 
     report = {
         "run_id": run_id,
         "host": os.uname().nodename,
         "tier": args.tier,
         "groups": items,
-        "pending_groups": pending,
+        "untriggerable_groups": untriggerable,
         "check_only": args.check,
         "matrix": matrix,
         "statuses": statuses,
@@ -517,8 +534,11 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
         print(f"  {item_id}: {value}")
     if args.check:
         print("note: --check never shows AppleEvents rows (see the docstring).")
-    if pending:
-        print("pending groups (not yet triggerable): " + ", ".join(pending))
+    if untriggerable:
+        print(
+            "extended groups (state read only; trigger method pending verification): "
+            + ", ".join(untriggerable)
+        )
     if unresolved:
         print(
             "ONBOARD INCOMPLETE -- resolve the items above, then re-run (it skips granted items)."
