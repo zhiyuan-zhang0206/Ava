@@ -197,7 +197,11 @@ class GatewayClient:
                 while "\n\n" in buf:
                     frame, buf = buf.split("\n\n", 1)
                     data = None
-                    for line in frame.splitlines():
+                    # Split on "\n" only - str.splitlines() also breaks on
+                    # U+0085 / U+2028 / U+2029, which are legal unescaped
+                    # inside a JSON string; a split there truncates the
+                    # payload and the frame is dropped.
+                    for line in frame.split("\n"):
                         if line.startswith("data:"):
                             data = line[5:].strip()
                     if data and data != '{"role":"heartbeat"}':
