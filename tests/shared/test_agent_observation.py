@@ -6,7 +6,8 @@ import psycopg
 import pytest
 
 from shared.agent_observation import LIVENESS_PASS_INTERVAL_S, MACHINE_OFFLINE_AFTER_FAILURES
-from shared.agent_snapshot import AgentListSummary, select_all, select_one
+from shared.agent_roster import AgentCard, select_roster
+from shared.agent_snapshot import select_one
 from tests.conftest import spawn_agent
 
 
@@ -42,6 +43,6 @@ def test_snapshot_retains_independent_probe_and_lease_clocks(
         if probe is None
         else probe + timedelta(seconds=LIVENESS_PASS_INTERVAL_S * MACHINE_OFFLINE_AFTER_FAILURES)
     )
-    summary = next(row for row in select_all(db_conn, fields="summary") if row.agent_id == aid)
-    assert isinstance(summary, AgentListSummary)
+    summary = next(row for row in select_roster(db_conn).agents if row.agent_id == aid)
+    assert isinstance(summary, AgentCard)
     assert summary.observation == evidence

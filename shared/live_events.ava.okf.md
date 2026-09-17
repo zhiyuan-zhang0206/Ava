@@ -69,8 +69,8 @@ segments stay globally distinct.
 | Role | When | Extra fields |
 |---|---|---|
 | `inbound_arrived` | any inbound INSERT completed (UI echoes immediately) | `inbound_id`, `kind`, `source`, `content` |
-| `agent_spawned` | new agent row INSERTed (spawn / fork); sidebar upserts | `snapshot` |
-| `agent_updated` | user-visible `agents_meta` UPDATE from any writer — resurrect, respawn, row claim, claim-node transitions, terminate cleanup, `mark_agent_exited_op`, and heartbeat liveness edges entering/leaving `offline` | `snapshot` |
+| `agent_spawned` | committed creation invalidates the live roster; consumers read authoritative cards and ancestry | none |
+| `agent_updated` | committed lifecycle or display-state change invalidates agent reads; no snapshot state is applied from the event | none |
 | `label_updated` | `agents.label` written (spawn-time generation / rename / reset) | `label` (nullable) |
 | `notice_posted` | `ava.ui.notify()` row created | `notice_id`, `priority`, `title`, `task_id` (nullable) |
 | `notice_resolved` | notice dismissed | `notice_id` |
@@ -94,5 +94,5 @@ segments stay globally distinct.
 
 ## Key Dependencies
 
-- [[agents-contract.ava.okf.md]] — the sibling agent ↔ gateway contract; `AgentSnapshot` (`shared/agent_snapshot.py`) is the payload of `agent_spawned` / `agent_updated`
+- [[agents-contract.ava.okf.md]] — the sibling agent ↔ gateway contract; lifecycle hints carry only `agent_id` and `role`, while authoritative state comes from roster/directory/detail reads.
 - [[gateway/routers/sse.ava.okf.md]] — the gateway leg that fans this channel out to browsers over SSE

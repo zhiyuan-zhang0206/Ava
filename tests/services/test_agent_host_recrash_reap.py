@@ -231,7 +231,7 @@ async def test_settle_boundary_prompt_reaps_the_second_crash_at_once(
     monkeypatch.setattr("agent.corpse_reap.insert_event_log_async", _event)
     published: list[int] = []
 
-    async def _publish(_pool: object, agent_id: int) -> None:
+    async def _publish(agent_id: int) -> None:
         published.append(agent_id)
 
     monkeypatch.setattr("agent.corpse_reap.publish_agent_updated", _publish)

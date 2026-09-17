@@ -26,7 +26,7 @@ export interface InspectorWindowState {
   setInspectorHours: (hours: number | null) => void;
 }
 
-/** Session-scoped aggregate window shared by the panel and row prefetch. */
+/** Session-scoped window for the selected Inspector's statistics. */
 export function useInspectorHours(): InspectorWindowState {
   const inspectorHours = useStore((s) => s.inspectorHours);
   const setInspectorHours = useStore((s) => s.setInspectorHours);

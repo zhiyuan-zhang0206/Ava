@@ -72,14 +72,15 @@ def _report_agent() -> int:
         if agent_id <= 0:
             raise RuntimeError(f"{_REPORT_AGENT_ENV} must be a positive agent id")
         return agent_id
-    matches = [
-        agent
-        for agent in ava.agents.list_agents(filter_by_status=(S.RUNNING, S.IDLING, S.TERMINATED))
-        if agent.label == _REPORT_LABEL
-    ]
-    if not matches:
-        raise RuntimeError(f"no report agent labelled {_REPORT_LABEL!r} is available")
-    return max(matches, key=lambda agent: agent.agent_id).agent_id
+    before_id = None
+    while True:
+        page = ava.agents.list_agents(scope="all", query=_REPORT_LABEL, before_id=before_id)
+        for agent in page.agents:
+            if agent.label == _REPORT_LABEL and agent.status in (S.RUNNING, S.IDLING, S.TERMINATED):
+                return agent.agent_id
+        if page.next_cursor is None:
+            raise RuntimeError(f"no report agent labelled {_REPORT_LABEL!r} is available")
+        before_id = page.next_cursor
 
 
 def _report_failure(detail: str) -> None:

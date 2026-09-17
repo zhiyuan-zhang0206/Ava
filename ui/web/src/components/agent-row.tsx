@@ -46,7 +46,7 @@ import {
 import { api } from "@/lib/api";
 import { useUserSettings } from "@/lib/use-user-settings";
 import type { TimeMode, DateFormat } from "@/lib/types";
-import { PRIORITY_BG, topNoticePriority } from "@/lib/notices";
+import { PRIORITY_BG } from "@/lib/notices";
 import { formatRelativeTime } from "@/lib/sidebar";
 import { formatShort } from "@/lib/time";
 import type { AgentRow, PublicAgentStatus } from "@/lib/types";
@@ -342,7 +342,7 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
                 jumping count is a dynamic signal). */}
             {(() => {
               const p = notifyAwaitingReply
-                ? topNoticePriority(agent.notices_awaiting_response)
+                ? agent.highest_notice_priority
                 : null;
               return p ? (
                 <span
@@ -351,7 +351,7 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
                     PRIORITY_BG[p],
                   )}
                 >
-                  {agent.notices_awaiting_response.length}
+                  {agent.awaiting_response_count}
                 </span>
               ) : null;
             })()}

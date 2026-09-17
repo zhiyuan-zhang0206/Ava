@@ -106,6 +106,7 @@ vi.mock("@/lib/sidebar", async () => {
 vi.mock("@/lib/api", () => ({
   api: {
     patchAgentLabel: vi.fn().mockResolvedValue(undefined),
+    listAgents: vi.fn(() => Promise.resolve({ agents: state.agents.filter((a) => a.status === "terminated"), next_cursor: null })),
   },
 }));
 
@@ -275,7 +276,7 @@ function makeAgent(overrides: Partial<AgentRow>): AgentRow {
     label: null,
     machine: "test",
     supports_vision: true,
-    notices_awaiting_response: [], unread_notice_count: 0,
+    awaiting_response_count: 0, highest_notice_priority: null, unread_notice_count: 0,
     heartbeat_paused_until: null,
     liveness_state: "online",
     ...overrides,
@@ -296,7 +297,8 @@ const handlerFns = {
 // call picks them up automatically, mirroring real HomeShell wiring.
 const handlers = new Proxy(handlerFns, {
   get(target, prop, receiver) {
-    if (prop === "agents") return state.agents;
+    if (prop === "agents") return state.agents.filter((a) => a.status !== "terminated");
+    if (prop === "ancestors") return state.agents.filter((a) => a.status === "terminated");
     if (prop === "pendingActions") return state.pendingActions;
     if (prop === "pendingSpawnCount") return state.pendingSpawnCount;
     if (prop === "isLoading") return state.isLoading;
@@ -306,6 +308,7 @@ const handlers = new Proxy(handlerFns, {
     return [
       ...Object.keys(handlerFns),
       "agents",
+      "ancestors",
       "pendingActions",
       "pendingSpawnCount",
       "isLoading",
@@ -519,7 +522,7 @@ describe("SidebarBody empty / tree / spawning placeholder", () => {
     expect(screen.queryByTestId("row-2")).toBeNull();
   });
 
-  it("flat mode + roster still loading with live rows present → renders rows immediately", () => {
+  it("flat mode shares the same coherent initial roster boundary", () => {
     // Flat mode carries no hierarchy claim, so it keeps its instant first
     // paint from the live roster (no regression for the default view mode).
     state.isLoading = true;
@@ -529,8 +532,8 @@ describe("SidebarBody empty / tree / spawning placeholder", () => {
       makeAgent({ agent_id: 2, label: "second" }),
     ];
     wrap(<AgentSidebar {...handlers} />);
-    expect(screen.getByTestId("row-1")).toBeTruthy();
-    expect(screen.getByTestId("row-2")).toBeTruthy();
+    expect(screen.queryByTestId("row-1")).toBeNull();
+    expect(screen.queryByTestId("row-2")).toBeNull();
   });
 
   it("pendingSpawnCount=2 → renders 2 SpawningRows, quiet by default (no motion)", () => {
@@ -1061,10 +1064,10 @@ describe("Tree render depth (sub-agent indent)", () => {
 });
 
 describe("terminated toggle", () => {
-  it("no terminated agents → no toggle button", () => {
+  it("archive is reachable without preloading terminated agents", () => {
     state.agents = [makeAgent({ agent_id: 1, status: "idling" })];
     wrap(<AgentSidebar {...handlers} />);
-    expect(screen.queryByLabelText("Show terminated agents")).toBeNull();
+    expect(screen.getByLabelText("Show terminated agents")).toBeTruthy();
     expect(screen.queryByLabelText("Hide terminated agents")).toBeNull();
   });
 
@@ -1082,15 +1085,15 @@ describe("terminated toggle", () => {
     expect(screen.queryByTestId("row-3")).toBeNull();
   });
 
-  it("showTerminated=true → terminated rows rendered, toggle shows count + hide", () => {
+  it("opening history fetches bounded archived rows separately", async () => {
     state.agents = [
       makeAgent({ agent_id: 1, status: "idling" }),
       makeAgent({ agent_id: 2, status: "terminated" }),
     ];
     state.showTerminated = true;
     wrap(<AgentSidebar {...handlers} />);
-    expect(screen.getByText("Hide 1 terminated")).toBeTruthy();
-    expect(screen.getByTestId("row-2")).toBeTruthy();
+    expect(screen.getByText("Hide history")).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId("row-2")).toBeTruthy());
   });
 
   it("malformed persisted setting stays opt-out", () => {
@@ -1149,13 +1152,13 @@ describe("agent tree: live child of a terminated parent mounts on the nearest vi
     expect(screen.queryByTestId("row-240")).toBeNull();
   });
 
-  it("terminated shown: 312 keeps its true lineage position under 240", () => {
+  it("opening archive preserves the live tree and exposes the historical row separately", async () => {
     state.showTerminated = true;
     state.agents = lineageRoster();
     wrap(<AgentSidebar {...handlers} />);
     expect(screen.getByTestId("row-228").getAttribute("data-depth")).toBe("0");
-    expect(screen.getByTestId("row-240").getAttribute("data-depth")).toBe("1");
-    expect(screen.getByTestId("row-312").getAttribute("data-depth")).toBe("2");
+    await waitFor(() => expect(screen.getByTestId("row-240").getAttribute("data-depth")).toBe("0"));
+    expect(screen.getByTestId("row-312").getAttribute("data-depth")).toBe("1");
   });
 });
 
@@ -1447,7 +1450,7 @@ describe("awaiting-reply indicator (notification.awaiting_reply)", () => {
 
   it("default off → no waiting indicator even when agents have open notices", () => {
     state.agents = [
-      makeAgent({ agent_id: 1, notices_awaiting_response: [notice] }),
+      makeAgent({ agent_id: 1, awaiting_response_count: ([notice]).length, highest_notice_priority: ([notice])[0]?.priority ?? null }),
     ];
     wrap(<AgentSidebar {...handlers} />);
     expect(screen.queryByTitle(/waiting on you/)).toBeNull();
@@ -1456,8 +1459,8 @@ describe("awaiting-reply indicator (notification.awaiting_reply)", () => {
   it("opted in → red-dot indicator with the cross-agent count", () => {
     state.userSettings = { "notification.awaiting_reply": true };
     state.agents = [
-      makeAgent({ agent_id: 1, notices_awaiting_response: [notice] }),
-      makeAgent({ agent_id: 2, notices_awaiting_response: [{ ...notice, id: 2 }] }),
+      makeAgent({ agent_id: 1, awaiting_response_count: ([notice]).length, highest_notice_priority: ([notice])[0]?.priority ?? null }),
+      makeAgent({ agent_id: 2, awaiting_response_count: ([{ ...notice, id: 2 }]).length, highest_notice_priority: ([{ ...notice, id: 2 }])[0]?.priority ?? null }),
     ];
     state.activeId = 2;
     wrap(<AgentSidebar {...handlers} />);

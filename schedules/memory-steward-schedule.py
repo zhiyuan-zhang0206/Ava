@@ -31,7 +31,7 @@ from shared.watcher import next_fire
 
 ensure_agent_status_members(
     S,
-    {"IDLING", "RESTARTING", "RUNNING", "TERMINATED"},
+    {"TERMINATED"},
     schedule_name="memory-arbiter",
 )
 
@@ -47,25 +47,21 @@ TRIGGERS = [
 
 def ensure_agent(label, prompt):
     """Find or resurrect the Memory Steward agent by label."""
-    mine = [
-        a
-        for a in ava.agents.list_agents(
-            filter_by_status=(
-                S.RUNNING,
-                S.IDLING,
-                S.TERMINATED,
-                S.RESTARTING,
-            )
-        )
-        if a.label == label
-    ]
-    if mine:
-        a = max(mine, key=lambda r: r.agent_id)
-        if a.status == S.TERMINATED:
-            ava.agents.resurrect(a.agent_id, prompt)
-        else:
-            ava.agents.send_message(a.agent_id, prompt)
-        return a.agent_id
+    before_id = None
+    while True:
+        page = ava.agents.list_agents(scope="all", query=label, before_id=before_id)
+        # Directory pages are newest first; substring search still needs an exact label match.
+        for agent in page.agents:
+            if agent.label != label:
+                continue
+            if agent.status == S.TERMINATED:
+                ava.agents.resurrect(agent.agent_id, prompt)
+            else:
+                ava.agents.send_message(agent.agent_id, prompt)
+            return agent.agent_id
+        if page.next_cursor is None:
+            break
+        before_id = page.next_cursor
     return ava.agents.spawn(prompt=prompt, label=label)  # pyright: ignore[reportCallIssue] — fleet plugin wraps spawn with label
 
 

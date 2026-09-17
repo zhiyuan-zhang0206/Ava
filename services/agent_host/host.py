@@ -317,7 +317,7 @@ class AgentHost:
                     bind_agent_config(pins),
                     bind_agent_plugin_config(plugin_pins),
                 ):
-                    await publish_agent_updated(self._control_pool, agent_id)
+                    await publish_agent_updated(agent_id)
                     runtime = await self._runtime_for(agent_id, stored.fingerprint)
                     outcome = await self._drive_turns(agent_id, runtime)
             except asyncio.CancelledError:

@@ -2123,3 +2123,6 @@ INSERT INTO schema_migrations (name) VALUES ('20260916T172008_observed-agent-met
 -- Earlier pause-table comments are superseded by the current read contract.
 INSERT INTO schema_migrations (name) VALUES ('20260828T191814_heartbeat-pause-log');
 INSERT INTO schema_migrations (name) VALUES ('20260831T185300_heartbeat-pause-comment-update');
+
+CREATE INDEX agents_meta_live_roster_idx ON agents_meta (id) WHERE status <> 'terminated';
+INSERT INTO schema_migrations (name) VALUES ('20260916T171506_index-live-agent-roster');

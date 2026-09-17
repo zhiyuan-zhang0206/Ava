@@ -30,7 +30,7 @@ class _FakeResp:
 
 
 def _agent_row(agent_id: int, status: str, machine: str, label: str | None) -> dict[str, object]:
-    """The fields `cmd_agents_ls` reads from an /api/agents summary row."""
+    """The fields `cmd_agents_ls` reads from an agent directory card."""
     return {
         "agent_id": agent_id,
         "status": status,
@@ -68,20 +68,25 @@ def test_agents_ls_renders_rows(
     def fake_get(url: str, **kwargs: object) -> _FakeResp:
         seen["url"] = url
         seen["headers"] = kwargs.get("headers")
+        seen["params"] = kwargs.get("params")
         return _FakeResp(
-            [
-                {
-                    **_agent_row(1, "idling", "runner-a", "alpha"),
-                    "workspace": "/runner/local/workspaces/agent-1",
-                },
-                _agent_row(22, "terminated", "runner-long", None),
-            ]
+            {
+                "agents": [
+                    {
+                        **_agent_row(1, "idling", "runner-a", "alpha"),
+                        "workspace": "/runner/local/workspaces/agent-1",
+                    },
+                    _agent_row(22, "terminated", "runner-long", None),
+                ],
+                "next_cursor": None,
+            }
         )
 
     monkeypatch.setattr(httpx, "get", fake_get)
     assert _agents.cmd_agents_ls() == 0
     assert seen == {
-        "url": "http://gw:8000/api/agents?fields=summary",
+        "url": "http://gw:8000/api/agents",
+        "params": {"scope": "live", "query": "", "limit": 100},
         "headers": {"Authorization": "Bearer secret"},
     }
     out = capsys.readouterr().out
@@ -96,9 +101,70 @@ def test_agents_ls_renders_rows(
 def test_agents_ls_empty(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(httpx, "get", lambda *_a, **_k: _FakeResp([]))  # pyright: ignore[reportUnknownArgumentType]
+    def fake_get(*_args: object, **_kwargs: object) -> _FakeResp:
+        return _FakeResp({"agents": [], "next_cursor": None})
+
+    monkeypatch.setattr(httpx, "get", fake_get)
     assert _agents.cmd_agents_ls() == 0
     assert "(no agents)" in capsys.readouterr().out
+
+
+def test_agents_ls_passes_page_arguments_and_prints_cursor(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_get(_url: str, **kwargs: object) -> _FakeResp:
+        calls.append(kwargs)
+        return _FakeResp(
+            {
+                "agents": [_agent_row(42, "terminated", "mini", "research")],
+                "next_cursor": 42,
+            }
+        )
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    assert _agents.cmd_agents_ls(scope="terminated", query="research", before_id=99, limit=1) == 0
+    assert len(calls) == 1
+    assert calls[0]["params"] == {
+        "scope": "terminated",
+        "query": "research",
+        "before_id": 99,
+        "limit": 1,
+    }
+    assert "repeat with --before-id 42" in capsys.readouterr().out
+
+
+def test_agents_ls_parser_passes_page_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
+    import argparse
+
+    from cli.parsers.agents import _add_agents_parser
+
+    parser = argparse.ArgumentParser()
+    _add_agents_parser(parser.add_subparsers())
+    args = parser.parse_args(
+        [
+            "agents",
+            "ls",
+            "--scope",
+            "terminated",
+            "--query",
+            "research",
+            "--before-id",
+            "42",
+            "--limit",
+            "5",
+        ]
+    )
+    seen: dict[str, object] = {}
+
+    def fake_command(**kwargs: object) -> int:
+        seen.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(_agents, "cmd_agents_ls", fake_command)
+    assert args.func(args) == 0
+    assert seen == {"scope": "terminated", "query": "research", "before_id": 42, "limit": 5}
 
 
 def test_agents_ls_preserves_http_error_behavior(monkeypatch: pytest.MonkeyPatch) -> None:

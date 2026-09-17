@@ -68,6 +68,7 @@ def test_agent_row_str_includes_machine() -> None:
         label=None,
         status=AgentStatus.RUNNING,
         spawner="user",
+        fork_source_agent_id=None,
         machine="m1",
         spawned_at=now,
         started_at=now,

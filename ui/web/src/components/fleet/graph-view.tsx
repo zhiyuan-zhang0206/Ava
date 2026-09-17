@@ -13,20 +13,11 @@
 // adapts it to the shared node/edge model, and adds the time-window selector +
 // empty states. The Task Graph renders the same canvas with square nodes.
 //
-// Lineage re-parenting needs the terminated roster: the graph payload is
-// live-only (the backend excludes terminated nodes and edges), so the parent
-// rows of terminated intermediates must come from TERMINATED_AGENTS_QUERY_KEY.
-// Home seeds that cache through useAgents, but a direct /fleet session never
-// mounts it — this view therefore mounts both roster queries itself (same
-// keys, same cache: no duplicate fetch, and the global fold keeps them fresh).
-// The canvas also holds its first paint until that initial roster load settles
-// (see rosterPending below): a partial re-parent map would paint a layout that
-// flips when the terminated half lands — the same pair of caches the sidebar
-// tree fixed for the same reason (#2074).
+// The shared live-roster read includes precisely the ancestor links needed
+// by live nodes, including on a direct /fleet navigation.
 
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -35,11 +26,7 @@ import { WindowSelect } from "@/components/window-select";
 import { STATS_WINDOW_LABELS, STATS_WINDOWS, type StatsWindowHours } from "@/lib/sidebar";
 import type { PublicAgentStatus } from "@/lib/types";
 import { useFleetGraph } from "@/lib/use-fleet-graph";
-import {
-  AGENTS_QUERY_KEY,
-  TERMINATED_AGENTS_QUERY_KEY,
-  fetchAgentRoster,
-} from "@/lib/use-agents";
+import { useAgentRoster } from "@/lib/use-agents";
 
 import {
   FORCE_DEFAULTS,
@@ -134,7 +121,6 @@ export function GraphView({
   onSelectAgent: (id: number | null) => void;
 }) {
   const router = useRouter();
-  const queryClient = useQueryClient();
   const t = useTranslations("fleet.graph");
 
 
@@ -159,33 +145,9 @@ export function GraphView({
     decayLambda: DECAY_LAMBDA,
   });
 
-  // Roster subscriptions for lineageById (see the module note). Subscribing —
-  // rather than a bare getQueryData read — guarantees the terminated cache is
-  // fetched on a direct /fleet load AND re-runs the lineage map when a roster
-  // lands or a lifecycle fold updates it.
-  const { data: liveRoster, isLoading: liveRosterLoading } = useQuery({
-    queryKey: AGENTS_QUERY_KEY,
-    queryFn: () => fetchAgentRoster(queryClient, "live"),
-    staleTime: Infinity,
-  });
-  const { data: terminatedRoster, isLoading: terminatedRosterLoading } = useQuery({
-    queryKey: TERMINATED_AGENTS_QUERY_KEY,
-    queryFn: () => fetchAgentRoster(queryClient, "terminated"),
-    staleTime: Infinity,
-  });
-
-  // While the initial roster load is still in flight the canvas must not
-  // paint. The merged live + terminated roster is the re-parenting input, and
-  // the terminated half (thousands of rows) resolves seconds after the live
-  // half on a cold load. findNearestLiveAncestor walks the parent chain
-  // through lineageById, so a terminated intermediate that has not landed yet
-  // ends the walk at itself: its live descendant paints as an isolated node
-  // (#312 -> #240 -> #228 would float #312) and jumps into place when the
-  // terminated roster arrives — a first-paint flip, the same race the sidebar
-  // tree fixed in #2074. isLoading is true only for the cold fetch — cached
-  // rosters are not gated, so navigation and reconnect refetches still paint
-  // instantly.
-  const rosterPending = liveRosterLoading || terminatedRosterLoading;
+  const { data: roster, isLoading: rosterPending } = useAgentRoster();
+  const liveRoster = roster?.agents;
+  const ancestors = roster?.ancestors;
 
   const statusLabels: Record<PublicAgentStatus, string> = useMemo(
     () => ({
@@ -212,7 +174,7 @@ export function GraphView({
     for (const a of liveRoster ?? []) {
       map.set(a.agent_id, a);
     }
-    for (const a of terminatedRoster ?? []) {
+    for (const a of ancestors ?? []) {
       map.set(a.agent_id, a);
     }
     for (const n of graph.nodes) {
@@ -221,7 +183,7 @@ export function GraphView({
       }
     }
     return map;
-  }, [liveRoster, terminatedRoster, graph.nodes]);
+  }, [liveRoster, ancestors, graph.nodes]);
 
   // Adapt the fleet graph to the shared node/edge model.
   // User ruling 2026-09-07 21:02: Every live agent remains in the graph (children

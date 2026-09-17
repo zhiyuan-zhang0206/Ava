@@ -119,7 +119,7 @@ async def apply_hosted_lifecycle(
                 (incarnation.agent_id, row[0]),
             )
     if lifecycle_kind == "terminate":
-        await publish_agent_updated(pool, incarnation.agent_id)
+        await publish_agent_updated(incarnation.agent_id)
     return lifecycle_kind
 
 
@@ -554,7 +554,7 @@ async def settle_hosted_runtime(
                 payload={"from": "running", "to": "idling"},
             )
     if changed:
-        await publish_agent_updated(pool, incarnation.agent_id)
+        await publish_agent_updated(incarnation.agent_id)
     return changed
 
 

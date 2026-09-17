@@ -23,9 +23,7 @@ from psycopg_pool import ConnectionPool
 from gateway import neighbors
 from gateway.routers.agents_forward import _forward_spawn_to_remote
 from gateway.schemas import (
-    AgentCompact,
     AgentRow,
-    AgentSummary,
     BornChainResponse,
     BornChainRow,
     LabelPatchRequest,
@@ -34,7 +32,7 @@ from gateway.schemas import (
 from ops.agent_spawn import create_agent_row
 from ops.ops_lifecycle import _spawn_prechecks_blocking
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
-from shared import agent_snapshot
+from shared import agent_roster, agent_snapshot
 from shared.agents import (
     AgentNotFound,
     ForkConfigChangeNotAllowed,
@@ -133,33 +131,27 @@ def get_models() -> ModelsResponse:
 @router.get("/api/agents")
 def get_agents(
     request: Request,
-    scope: Annotated[agent_snapshot.AgentListScope, Query()] = "all",
-    fields: Annotated[agent_snapshot.AgentListFields, Query()] = "full",
-) -> list[AgentRow | AgentSummary | AgentCompact]:
-    """List agent snapshots for the requested roster scope.
-
-    ``all`` is the compatibility default for SDK / ops callers.
-    Frontend fleet/sidebar readers request ``live`` so Postgres excludes
-    terminated history before evaluating the per-agent snapshot lookups, and
-    request ``terminated`` alongside it: the sidebar's spawn tree needs the
-    terminated rows as lineage joints (an alive child of a terminated parent
-    re-parents under the nearest visible ancestor — #312 orphan regression).
-    Every scope returns raw spawner / fork-source truth; the show-terminated
-    UI toggle only controls rendering, never the fetch.
-
-    ``fields=full`` preserves the historical response. ``fields=summary`` is
-    the reduced SQL projection used by roster consumers; ``fields=compact``
-    remains as a legacy narrow projection. The CLI renders four fields from the
-    summary projection. Detail and SSE keep the full snapshot.
-    All scopes remain unpaginated for wire compatibility.
-    """
+    scope: Annotated[agent_roster.AgentDirectoryScope, Query()] = "live",
+    query: Annotated[str, Query(max_length=200)] = "",
+    before_id: Annotated[int | None, Query(gt=0, le=9223372036854775807)] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+) -> agent_roster.AgentDirectoryPage:
+    """Read one directory page. History is explicit and never fetched implicitly."""
     with request.app.state.db_pool.connection() as conn:
-        snapshots = agent_snapshot.select_all(conn, scope=scope, fields=fields)
-    if fields == "summary":
-        return [AgentSummary.model_validate(s.model_dump()) for s in snapshots]
-    if fields == "compact":
-        return [AgentCompact.model_validate(s.model_dump()) for s in snapshots]
-    return [AgentRow.model_validate(s.model_dump()) for s in snapshots]
+        return agent_roster.list_directory(
+            conn,
+            scope=scope,
+            query=query,
+            before_id=before_id,
+            limit=limit,
+        )
+
+
+@router.get("/api/agents/roster")
+def get_agent_roster(request: Request) -> agent_roster.AgentRoster:
+    """Read the live tree and its necessary ancestor links in one snapshot."""
+    with request.app.state.db_pool.connection() as conn:
+        return agent_roster.select_roster(conn)
 
 
 def _patch_label_blocking(pool: ConnectionPool, agent_id: int, new_label: str | None) -> None:
@@ -459,14 +451,11 @@ async def post_agents(body: SpawnAgentRequest, request: Request) -> SpawnedAgent
 
 @router.get("/api/agents/{agent_id}")
 def get_agent(agent_id: int, request: Request) -> AgentRow:
-    """Full state of a single agent — spot-check endpoint for frontend / ops.
-    Previously also served SDK `get_status` (removed — agents no longer query
-    peer status; FleetView uses its own API, self-evo uses `list_agents()`).
+    """Full detail addressed by ID, including terminated agents outside loaded pages.
 
-    Shares the AgentRow schema (including last_active_at computation) with
-    `GET /api/agents` (list all).
-
-    404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).
+    The browser and SDK status readers use this independent selection boundary.
+    Notice bodies stay here and in the Inbox; directory cards contain counts.
+    A nonexistent ID returns 404 rather than falling back to another agent.
     """
     with request.app.state.db_pool.connection() as conn:
         snap = agent_snapshot.select_one(conn, agent_id)

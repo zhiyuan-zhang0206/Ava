@@ -209,10 +209,10 @@ def _reap_expired_notices_blocking(pool: ConnectionPool) -> list[tuple[int, int]
                 source="system:notice-expire",
             )
             reaped.append((agent_id, nid))
-        for aid in updated_agents:
-            with suppress(Exception):
-                publish_agent_updated_sync(conn, aid)
-        return reaped
+    for aid in updated_agents:
+        with suppress(Exception):
+            publish_agent_updated_sync(aid)
+    return reaped
 
 
 def _reap_expired_pages_blocking(pool: ConnectionPool) -> list[tuple[int, str, int]]:

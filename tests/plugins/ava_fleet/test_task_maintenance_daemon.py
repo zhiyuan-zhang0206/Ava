@@ -181,8 +181,8 @@ class TestRemind:
         owner = _make_agent(db_conn)
         published: list[tuple[int, int]] = []
 
-        def _capture_publish(conn: psycopg.Connection, agent_id: int) -> None:
-            with conn.cursor() as cur:
+        def _capture_publish(agent_id: int) -> None:
+            with db_conn.cursor() as cur:
                 cur.execute(
                     "SELECT count(*) FROM inbound_messages WHERE agent_id = %s", (agent_id,)
                 )
@@ -194,9 +194,8 @@ class TestRemind:
 
         daemon._deliver_message(pool, owner, "reminder")
 
-        # The publisher sees the inbound before this connection commits, proving
-        # the daemon passed its delivery transaction connection rather than
-        # opening a second connection after the insert.
+        # This separate connection must already see the committed inbound
+        # when its invalidation hint is published.
         assert published == [(owner, 1)]
         assert _inbound_messages(db_conn, owner) == [("reminder", "system_note", "system")]
 

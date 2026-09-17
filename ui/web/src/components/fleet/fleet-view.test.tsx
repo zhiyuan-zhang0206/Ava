@@ -139,7 +139,7 @@ function makeAgent(over: Partial<AgentRow> & { agent_id: number }): AgentRow {
     label: null,
     machine: "test",
     supports_vision: true,
-    notices_awaiting_response: [], unread_notice_count: 0,
+    awaiting_response_count: 0, highest_notice_priority: null, unread_notice_count: 0,
     heartbeat_paused_until: null,
     liveness_state: "online",
     ...over,
@@ -251,7 +251,7 @@ describe("FleetView (desktop)", () => {
     agentsMock.mockReturnValue([
       makeAgent({
         agent_id: 1,
-        notices_awaiting_response: [{ id: 1, title: "Q", content: null, priority: "P0", require_response: true, blocking: true, created_at: "2026-06-06T00:00:00Z" }],
+        awaiting_response_count: ([{ id: 1, title: "Q", content: null, priority: "P0", require_response: true, blocking: true, created_at: "2026-06-06T00:00:00Z" }]).length, highest_notice_priority: "P0",
       }),
     ]);
     wrap(<FleetView />);
@@ -349,7 +349,7 @@ describe("FleetView (mobile)", () => {
       makeAgent({
         agent_id: 1,
         status: "running",
-        notices_awaiting_response: [{ id: 1, title: "Q", content: null, priority: "P3", require_response: true, blocking: false, created_at: "2026-06-06T00:00:00Z" }],
+        awaiting_response_count: ([{ id: 1, title: "Q", content: null, priority: "P3", require_response: true, blocking: false, created_at: "2026-06-06T00:00:00Z" }]).length, highest_notice_priority: "P3",
         unread_notice_count: 3,
       }),
     ]);

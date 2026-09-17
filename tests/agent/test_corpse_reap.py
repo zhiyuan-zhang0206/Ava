@@ -76,7 +76,7 @@ def reap_spies(monkeypatch: pytest.MonkeyPatch) -> tuple[list[dict[str, object]]
         if payload is not None and payload.get("reason") == "corpse_reaper":
             events.append(payload)
 
-    async def _publish(_pool: object, agent_id: int) -> None:
+    async def _publish(agent_id: int) -> None:
         published.append(agent_id)
 
     monkeypatch.setattr("agent.corpse_reap.insert_event_log_async", _event)

@@ -22,7 +22,7 @@ plane only.
 The seven tools are **thin handlers over the same internal functions the REST
 routers call** (`_spawn_preflight_blocking` + `_forward_spawn_to_remote`,
 `post_agent_terminate`, `deliver_chat_inbound`, `load_checkpoint_messages`,
-`agent_snapshot`, `get_cluster_status`) — no business logic of its own, no
+`agent_roster`, `agent_snapshot`, `get_cluster_status`) — no business logic of its own, no
 self-HTTP round-trip (2026-06-07 CLI↔gateway boundary decision). The tool
 surface and result shapes match the existing stdio `ava mcp serve`, which this
 endpoint replaces over time.
@@ -50,8 +50,9 @@ endpoint replaces over time.
   server-verified credential fact without storing the token.
 - **Scope**: `read` clients may list/inspect agents, messages, and cluster
   status. `spawn_agent`, `send_message`, and `terminate_agent` require `write`.
-- **Roster reads**: `list_agents` starts from the same SQL-level agent summary
-  projection as the REST, SDK, and stdio MCP roster reads; `get_agent` remains
+- **Directory reads**: `list_agents` returns the same bounded scalar-card page
+  as REST and stdio MCP. Scope defaults to live; historical search and cursor
+  traversal are explicit, with at most 200 rows per call. `get_agent` remains
   the full single-agent diagnostic view.
 - **Audit**: a `_AuditMiddleware` on the MCPServer records every `tools/call`
   as a `mcp_tool_call` event with client id/name and outcome. Each argument is
