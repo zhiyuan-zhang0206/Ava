@@ -91,15 +91,19 @@ EXPECTED = {
 
 
 def _load_pack() -> None:
-    """Import the core observability module (fresh core registry each call)."""
+    """Import the core observability definition modules (fresh core registry
+    each call). The pack spans two modules since the task #3697 S1 line-budget
+    split moved the frontend telemetry specs to ``core_metrics_frontend``."""
     import importlib
     import sys
 
     core_metrics.clear_core_registry()
-    module_name = "shared.core_metrics_observability"
-    if module_name in sys.modules:
-        del sys.modules[module_name]
-    importlib.import_module(module_name)
+    for module_name in (
+        "shared.core_metrics_observability",
+        "shared.core_metrics_frontend",
+    ):
+        sys.modules.pop(module_name, None)
+        importlib.import_module(module_name)
 
 
 def _all_rendered() -> dict[str, list[str]]:

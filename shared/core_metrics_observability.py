@@ -132,6 +132,9 @@ core_metrics.register_core_metric(
         ),
         target_names=["cost usd"],
         output=["grafana"],
+        panel_id=40,
+        section="LLM",
+        order=5,
     )
 )
 
@@ -188,6 +191,9 @@ core_metrics.register_core_metric(
         ],
         target_names=["provider_error", "stalled_retry", "turn_aborted", "overloaded_retry"],
         output=["grafana", "inspector"],
+        panel_id=22,
+        section="LLM",
+        order=6,
     )
 )
 
@@ -212,6 +218,9 @@ core_metrics.register_core_metric(
         ),
         target_names=["ok_pct"],
         output=["grafana", "inspector"],
+        panel_id=23,
+        section="core",
+        order=19,
     )
 )
 
@@ -239,7 +248,13 @@ core_metrics.register_core_metric(
             "(rate(ava_turn_end_duration_seconds_bucket[10m])))",
         ],
         target_names=["p95_s", "p50_s"],
+        field_defaults={"color": {"mode": "palette-classic"}},
+        custom={"lineInterpolation": "smooth", "spanNulls": True, "fillOpacity": 12},
+        options={"legend": {"calcs": ["mean", "max", "last"], "displayMode": "table"}},
         output=["grafana"],
+        panel_id=24,
+        section="Gateway & execution",
+        order=2,
     )
 )
 
@@ -269,6 +284,10 @@ core_metrics.register_core_metric(
         ),
         target_names=["summary/history %"],
         output=["grafana"],
+        thresholds=[],
+        panel_id=50,
+        section="Cost analysis",
+        order=5,
     )
 )
 
@@ -290,6 +309,10 @@ core_metrics.register_core_metric(
         query=_count("category={category}", "5m", matchers="event_name={event_name}") + " / 5",
         target_names=["compactions/min"],
         output=["grafana"],
+        thresholds=[],
+        panel_id=51,
+        section="Cost analysis",
+        order=6,
     )
 )
 
@@ -363,6 +386,10 @@ core_metrics.register_core_metric(
             "other",
         ],
         output=["grafana"],
+        panel_id=25,
+        section="Gateway & execution",
+        order=3,
+        position=(12, 113),
     )
 )
 
@@ -441,6 +468,9 @@ core_metrics.register_core_metric(
             "other",
         ],
         output=["grafana"],
+        panel_id=26,
+        section="Gateway & execution",
+        order=4,
     )
 )
 
@@ -467,6 +497,10 @@ core_metrics.register_core_metric(
             "/ ($__interval_ms / 60000)"
         ),
         output=["grafana"],
+        panel_id=27,
+        section="Fleet",
+        order=0,
+        target_names=["{{source}}"],
     )
 )
 
@@ -491,6 +525,10 @@ core_metrics.register_core_metric(
             "[$__interval])) / ($__interval_ms / 60000)"
         ),
         output=["grafana"],
+        panel_id=28,
+        section="Fleet",
+        order=1,
+        target_names=["{{event_name}}"],
     )
 )
 
@@ -515,8 +553,11 @@ core_metrics.register_core_metric(
             f'topk(20, sum by ({_SDK_ATTR["fn"]}) (sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
             f'category={{category}} | unwrap {_SDK_ATTR["sample_rate"]} | __error__="" [$__range])))'
         ),
-        target_names=["calls"],
+        target_names=["{{attributes_fn}}"],
         output=["grafana"],
+        panel_id=29,
+        section="Gateway & execution",
+        order=6,
     )
 )
 
@@ -556,8 +597,11 @@ core_metrics.register_core_metric(
             f"category={{category}} | "
             f"unwrap {_LLM_ATTR['cost_usd']} [$__range]))",
         ],
-        target_names=["calls", "in tokens", "out tokens", "cost usd"],
+        target_names=["{{agent_id}}", "{{agent_id}}", "{{agent_id}}", "{{agent_id}}"],
         output=["grafana"],
+        panel_id=30,
+        section="LLM",
+        order=7,
     )
 )
 
@@ -612,14 +656,17 @@ core_metrics.register_core_metric(
         ],
         target_names=["idle", "compact", "lifecycle", "other"],
         output=["grafana"],
+        panel_id=31,
+        section="Gateway & execution",
+        order=5,
     )
 )
 
 # ── delivery health ──────────────────────────────────────────────────────────
 
-for event_name, title, target_name in (
-    ("delivery_stalled", "Delivery stalled (window)", "stalled"),
-    ("delivery_poisoned", "Delivery poisoned (window)", "poisoned"),
+for event_name, title, target_name, panel_id, order in (
+    ("delivery_stalled", "Delivery stalled (window)", "stalled", 32, 2),
+    ("delivery_poisoned", "Delivery poisoned (window)", "poisoned", 52, 3),
 ):
     core_metrics.register_core_metric(
         MetricSpec(
@@ -637,6 +684,11 @@ for event_name, title, target_name in (
             query_type="logql",
             query=_count("category={category}", "$__range", matchers="event_name={event_name}"),
             target_names=[target_name],
+            panel_id=panel_id,
+            section="Fleet",
+            order=order,
+            field_defaults={"color": {"mode": "palette-classic"}},
+            width=6,
             output=["grafana"],
         )
     )
@@ -685,108 +737,8 @@ core_metrics.register_core_metric(
         query='sum(rate({service_name="unknown_service"} | json | __error__="" [1m]))',
         target_names=["events_per_s"],
         output=["grafana"],
-    )
-)
-
-# ── frontend user-modeling telemetry ─────────────────────────────────────────
-
-core_metrics.register_core_metric(
-    MetricSpec(
-        name="ava_obs_frontend_interactions",
-        title="Frontend interactions (per minute)",
-        description=(
-            "Frontend interaction volume per minute (5-minute buckets / 5, "
-            "total frontend_interaction events): the entry panel of "
-            "user-modeling telemetry, doubling as volume monitoring — an "
-            "abnormal interaction spike (an instrumentation loop bug) is "
-            "immediately visible here. event_name='frontend_interaction', "
-            "category='telemetry', source='user'."
-        ),
-        event_name="frontend_interaction",
-        category="telemetry",
-        unit="short",
-        panel="timeseries",
-        query_type="logql",
-        query=_count(
-            'category={category} | source="user"',
-            "5m",
-            matchers="event_name={event_name}",
-        )
-        + " / 5",
-        target_names=["interactions"],
-        output=["grafana"],
-    )
-)
-
-core_metrics.register_core_metric(
-    MetricSpec(
-        name="ava_obs_frontend_top_elements",
-        title="Frontend interactions (Top 15 elements)",
-        description=(
-            "Top 15 in-window interactions grouped by attributes.element — "
-            "ranking of the interaction points users click/trigger most "
-            "(spawn/composer-send/setting-change/page-view/...). "
-            "event_name='frontend_interaction', category='telemetry'."
-        ),
-        event_name="frontend_interaction",
-        category="telemetry",
-        unit="short",
-        panel="table",
-        query_type="logql",
-        query=(
-            f'topk(15, sum by ({_FRONTEND_ATTR["element"]}) (count_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-            f'category={{category}} | source="user" [$__range])))'
-        ),
-        target_names=["interactions"],
-        output=["grafana"],
-    )
-)
-
-core_metrics.register_core_metric(
-    MetricSpec(
-        name="ava_obs_frontend_page_views",
-        title="Frontend page views (Top 15)",
-        description=(
-            "Top 15 in-window page views (element='page-view') grouped by "
-            "attributes.page — which screens users spend the most time on. "
-            "event_name='frontend_interaction', category='telemetry'."
-        ),
-        event_name="frontend_interaction",
-        category="telemetry",
-        unit="short",
-        panel="table",
-        query_type="logql",
-        query=(
-            f'topk(15, sum by ({_FRONTEND_ATTR["page"]}) (count_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-            f'category={{category}} | source="user" | '
-            f'{_FRONTEND_ATTR["element"]}="page-view" [$__range])))'
-        ),
-        target_names=["views"],
-        output=["grafana"],
-    )
-)
-
-core_metrics.register_core_metric(
-    MetricSpec(
-        name="ava_obs_frontend_settings_changes",
-        title="Settings changes (Top 15)",
-        description=(
-            "Top 15 in-window user setting changes (element='setting-change') "
-            "grouped by attributes.key — which settings/layout/preferences "
-            "users adjusted (display.* / behavior.* keys). "
-            "event_name='frontend_interaction', category='telemetry'."
-        ),
-        event_name="frontend_interaction",
-        category="telemetry",
-        unit="short",
-        panel="table",
-        query_type="logql",
-        query=(
-            f'topk(15, sum by ({_FRONTEND_ATTR["key"]}) (count_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-            f'category={{category}} | source="user" | '
-            f'{_FRONTEND_ATTR["element"]}="setting-change" [$__range])))'
-        ),
-        target_names=["changes"],
-        output=["grafana"],
+        panel_id=33,
+        section="core",
+        order=15,
     )
 )
