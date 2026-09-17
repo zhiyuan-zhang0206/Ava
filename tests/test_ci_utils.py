@@ -1223,11 +1223,21 @@ def _diag_job(name: str, job_id: int = 9, conclusion: str = "FAILURE") -> dict:
 
 
 def _diag_runs(run_id: int = 10) -> str:
-    """Real-shaped REST runs payload with one CI run (issue #1945)."""
+    """Real-shaped REST runs payload with one CI run (issue #1945).
+
+    The run carries `status: completed` — the field `ci_job_rerun` reads to
+    decide whether a re-run is admissible (task #3764)."""
     return json.dumps(
         {
             "total_count": 1,
-            "workflow_runs": [{"id": run_id, "name": "CI", "created_at": "2026-09-09T10:00:00Z"}],
+            "workflow_runs": [
+                {
+                    "id": run_id,
+                    "name": "CI",
+                    "created_at": "2026-09-09T10:00:00Z",
+                    "status": "completed",
+                }
+            ],
         }
     )
 
