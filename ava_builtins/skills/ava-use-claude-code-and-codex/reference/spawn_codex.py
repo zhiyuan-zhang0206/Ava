@@ -130,6 +130,20 @@ def _wait_for_ready(sid: int, timeout: float = 90.0) -> None:
     )
 
 
+def _dead_session_warning(action: str, exc: ValueError) -> None:
+    """Warn — never raise — when a receipt checkpoint meets a dead session.
+
+    The checkpoint's contract is loud-not-fatal: the operator sees the warning
+    and checks the session. An escaped ValueError is read as launch failure by
+    the caller, which kills the session and rolls the generation back.
+    """
+    print(
+        "  -> WARNING: submission unverified "
+        f"({action} failed: {exc}); the session may have ended. "
+        "Check the session before relying on it."
+    )
+
+
 def _verify_submitted(sid: int, codex_home: Path, timeout: float = 60.0) -> None:
     """The bootstrap message must actually submit, not park in the composer.
 
@@ -137,11 +151,18 @@ def _verify_submitted(sid: int, codex_home: Path, timeout: float = 60.0) -> None
     new sessions jsonl appears under codex_home. If neither within ``timeout``,
     send one Enter (Enter submits a single-line queued message; the historical
     "Tab submits" note is wrong — 2026-09-03 #5779 re-test) and re-check.
+    Kept loud but not fatal: a dead session's capture()/send_keys() refusal
+    warns and returns — an escaped ValueError would roll the launch back (the
+    caller kills the session and terminates the generation on exceptions).
     """
     print("verifying the bootstrap message was submitted...")
     deadline = time.time() + timeout
     while time.time() < deadline:
-        output = ava.shell.sessions.capture(sid, scrollback=False)
+        try:
+            output = ava.shell.sessions.capture(sid, scrollback=False)
+        except ValueError as exc:
+            _dead_session_warning("capture", exc)
+            return
         if "Working" in output:
             print("  -> submitted (Working visible)")
             return
@@ -156,9 +177,17 @@ def _verify_submitted(sid: int, codex_home: Path, timeout: float = 60.0) -> None
                 return
         time.sleep(3)
     print("  -> not submitted within window; sending Enter once")
-    ava.shell.sessions.send_keys(sid, "Enter")
+    try:
+        ava.shell.sessions.send_keys(sid, "Enter")
+    except ValueError as exc:
+        _dead_session_warning("Enter retry", exc)
+        return
     time.sleep(5)
-    output = ava.shell.sessions.capture(sid, scrollback=False)
+    try:
+        output = ava.shell.sessions.capture(sid, scrollback=False)
+    except ValueError as exc:
+        _dead_session_warning("capture", exc)
+        return
     if "Working" in output:
         print("  -> submitted after Enter retry")
     else:

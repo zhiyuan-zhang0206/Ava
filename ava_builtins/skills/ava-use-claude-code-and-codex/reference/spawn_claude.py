@@ -163,7 +163,8 @@ def _verify_start_receipt(sid: int, timeout: float = 45.0) -> None:
     Claude transcript freshly records the bootstrap. When it stays absent,
     press Enter once (a stale composer entry submits there) and re-check. Kept
     loud but not fatal: the session may still be rendering; the operator sees
-    the warning. A dead session's capture() refusal is reported the same way.
+    the warning. A dead session's send_keys()/capture() refusal is reported the
+    same way.
     """
     print("verifying the takeover bootstrap was submitted...")
     started = time.time()
@@ -174,7 +175,15 @@ def _verify_start_receipt(sid: int, timeout: float = 45.0) -> None:
             return
         time.sleep(2)
     print("  -> no submission evidence yet; sending Enter once")
-    ava.shell.sessions.send_keys(sid, "Enter")
+    try:
+        ava.shell.sessions.send_keys(sid, "Enter")
+    except ValueError as exc:
+        print(
+            "  -> WARNING: start-receipt=not-submitted "
+            f"(Enter retry failed: {exc}); the session may have ended. "
+            "Check the session before relying on it."
+        )
+        return
     time.sleep(5)
     if _bootstrap_submitted(started):
         print("  -> start-receipt=submitted after Enter retry")
