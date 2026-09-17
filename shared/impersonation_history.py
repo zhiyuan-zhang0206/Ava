@@ -1,4 +1,4 @@
-"""Permanent session history and structured handoff files.
+"""Permanent session history and structured session-record files.
 
 The UUID is a private reference retained for pre-upgrade checkpoint receipts.
 Every public handle, path and display uses the agent-scoped integer session id.

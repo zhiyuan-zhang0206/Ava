@@ -64,6 +64,7 @@ from agent.graph._context import AvaContext, agent_id_from_config
 from agent.graph._node_log import flush_node_exit_aggregate, node_lifecycle
 from agent.graph._nodes import BEFORE_LLM, CLAIM, END
 from agent.impersonation import claim_gate
+from agent.impersonation_handoff import resume_note_pending
 from agent.inbound_ownership import RuntimeOwnershipLostError
 from agent.messages import has_conversation
 
@@ -112,7 +113,14 @@ async def _claim_node_impl(
         # success (llm_node). The overflow reason is deliberately NOT parked:
         # it must keep flowing to decide()'s forced-compact arm, which runs on
         # dispatched wakes only.
-        if state.halted or not has_conversation(state.messages) or state.circuit.parks_idle:
+        # A trailing end-of-session note is the resumed input (deliver_handoff):
+        # waive the fresh-window term so a takeover of a never-spoken agent still
+        # runs its first turn instead of idling out with the note unprocessed.
+        if (
+            state.halted
+            or (not has_conversation(state.messages) and not resume_note_pending(state))
+            or state.circuit.parks_idle
+        ):
             drain = build_attach_drain(state, ctx)
             if drain is not None:
                 return Command[ClaimGoto](update=drain, goto=CLAIM)
