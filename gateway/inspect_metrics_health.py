@@ -23,10 +23,15 @@ backend keeps the record instead of the panel:
   (agent, family, condition) episode in the existing alerts store
   (``source="inspect-metrics"``, severity ``warning``), through the same
   helpers every other writer uses (upsert, SSE publish, IM gated by
-  ``alerts.im_notify_enabled``). A later read that no longer shows the
-  condition resolves the instance. The episode key reuses the store's own
-  unresolved row when the in-process map is cold (a gateway restart must not
-  orphan an instance).
+  ``alerts.im_notify_enabled``).
+
+Both episode edges DERIVE FROM THE STORE, never from an in-process map: every
+evaluated call reads this agent's open instances (one bounded query) and
+resolves each whose condition the read no longer shows, so a gateway restart
+cannot strand an instance the next read already sees cleared; a re-fire
+reuses the stored instance instead of minting a duplicate (review finding on
+#2790; the sibling writers derive their resolve edges from the store the same
+way).
 
 Best-effort by contract: this runs on the statistics read path — a DB, IM or
 SSE hiccup must never fail the read; every emitter swallows and logs.
@@ -38,6 +43,8 @@ import threading
 import time
 from datetime import UTC, datetime
 from typing import Any
+
+from psycopg.rows import dict_row
 
 from gateway.schemas.inspect_metrics import InspectMetricsMetadata
 from shared.alerts import (
@@ -68,8 +75,6 @@ _EXPECTED = frozenset(
 _lock = threading.Lock()
 # (agent, family, condition) -> monotonic seconds of the last logged emission.
 _last_logged: dict[tuple[int, str, str], float] = {}
-# Open unexpected-episode map: (agent, family, condition) -> starts_at.
-_episodes: dict[tuple[int, str, str], datetime] = {}
 
 
 def _cooldown_seconds() -> float:
@@ -131,30 +136,52 @@ def _unresolved_start(conn: Any, fp: str) -> datetime | None:
     return row[0] if row else None
 
 
+def _open_episode_keys(pool: Any, agent_id: int) -> set[tuple[int, str, str]]:
+    """The episode keys this agent's store still holds open.
+
+    Resolve edges derive from the store, never an in-process map: after a
+    gateway restart the map would be cold while the rows are still open, and
+    a read that shows the condition gone must still close them (review
+    finding on #2790). One bounded read. Rows that fail to decode a
+    family/condition pair are left untouched — this reconcile only ever
+    closes what it fully understands.
+    """
+    with pool.connection(timeout=1.0) as conn, conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            "SELECT labels FROM alerts WHERE source = 'inspect-metrics'"
+            " AND status = 'unresolved' AND labels->>'agent_id' = %s",
+            (str(agent_id),),
+        )
+        rows = cur.fetchall()
+    keys: set[tuple[int, str, str]] = set()
+    for row in rows:
+        labels: dict[str, Any] = row["labels"] or {}
+        family = str(labels.get("family") or "")
+        condition = str(labels.get("condition") or "")
+        if family and condition:
+            keys.add((agent_id, family, condition))
+    return keys
+
+
 def _emit_episode(pool: Any, agent_id: int, family: str, condition: str, *, firing: bool) -> None:
-    """One firing/resolved edge through the standard alerts machinery."""
+    """One firing/resolved edge through the standard alerts machinery.
+
+    The episode identity is (agent, family, condition) — the alert
+    fingerprint — and its starts_at comes from the store: an unresolved row
+    is reused (dedup), a resolved or absent one starts now. A resolve edge
+    with nothing open is a no-op.
+    """
     labels = _alert_labels(agent_id, family, condition)
     fp = alert_fingerprint(labels)
-    key = (agent_id, family, condition)
     stamp = f"[{home_label(ava_home())}]"
     state = "limited by" if firing else "recovered from"
     summary = f"{stamp} inspector metrics: agent {agent_id} {family} {state} {condition}"
     with write_transaction(pool) as conn:
-        starts_at: datetime | None = None
-        if firing:
-            with _lock:
-                starts_at = _episodes.get(key)
-            if starts_at is None:
-                starts_at = _unresolved_start(conn, fp)
-            if starts_at is None:
-                starts_at = datetime.now(UTC)
-        else:
-            with _lock:
-                starts_at = _episodes.pop(key, None)
-            if starts_at is None:
-                starts_at = _unresolved_start(conn, fp)
-            if starts_at is None:
+        starts_at = _unresolved_start(conn, fp)
+        if starts_at is None:
+            if not firing:
                 return  # nothing open — a resolve edge has no one to tell
+            starts_at = datetime.now(UTC)
         alert = {
             "status": "firing" if firing else "resolved",
             "labels": labels,
@@ -167,9 +194,6 @@ def _emit_episode(pool: Any, agent_id: int, family: str, condition: str, *, firi
         )
         lang = display_language(conn)
         text = notify_text(alert, lang) if should_notify else ""
-        if firing:
-            with _lock:
-                _episodes[key] = alert_key[1]
     if not row:
         return
     # SSE publish + IM are best-effort tails — same split as the ingest funnel
@@ -197,8 +221,9 @@ def note_inspect_metrics_coverage(
     spawned_at: datetime,
 ) -> None:
     """Log every coverage limit (cooldown-deduped) and alert the unexpected
-    ones; resolve episodes whose condition a later read no longer shows.
-    Never raises — see the module docstring."""
+    ones; resolve every open episode whose condition this read no longer
+    shows (store-derived — see _open_episode_keys). Never raises — see the
+    module docstring."""
     try:
         historical = _historical(metadata, spawned_at=spawned_at)
         conditions = _conditions(metadata)
@@ -224,11 +249,10 @@ def note_inspect_metrics_coverage(
             )
             if _unexpected(condition, historical=historical):
                 _emit_episode(pool, agent_id, family, condition, firing=True)
-        # A condition the store still holds open but this read no longer shows
-        # has cleared — close its episode (per evaluated agent only).
-        with _lock:
-            stale = [k for k in _episodes if k[0] == agent_id and k not in present]
-        for key in stale:
+        # Conditions this read no longer shows cannot still be firing — close
+        # every open instance for them. The open set comes from the store
+        # (not an in-process map), so a cold process resolves them too.
+        for key in _open_episode_keys(pool, agent_id) - present:
             _emit_episode(pool, agent_id, key[1], key[2], firing=False)
     except Exception:
         logger.exception("inspect metrics coverage note failed", agent_id=agent_id)
