@@ -22,9 +22,11 @@ are specified in [[cluster-isolation.ava.okf.md|Telemetry cluster isolation]].
 
 - `shared/telemetry_otlp.py` — events → OTLP logs + metrics when enabled
   (default **on** for the registered `.ava` production identity). Production
-  exec children warm and flush the same backend; test/ad-hoc exec children stay
-  off unless an operator supplies an explicit endpoint. Their request-file
-  handshake is not an export authority.
+  exec children hold their records until exit, hold saturation, or the max-age
+  bound (`shared.telemetry_otlp_defer`, task #3816 M4b) instead of warming the
+  exporter stack at boot; test/ad-hoc exec children stay off unless an operator
+  supplies an explicit endpoint. Their request-file handshake is not an export
+  authority.
 - `shared/trace.py` — spans → OTLP/HTTP (protobuf wire, content-stripped) to
   the sidecar's `/v1/traces`; the sidecar's file exporter writes the OTLP/JSON
   mirror. Producer timeout, circuit-breaker, shedding, and synchronous-flush

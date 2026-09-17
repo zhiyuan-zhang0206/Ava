@@ -197,7 +197,12 @@ def _init_logger(agent_id: int | None) -> None:
     """File sink only, plus a best-effort event-pipeline sink for sdk_call
     events. The pipeline open is best-effort here — a DB outage must not stop
     agent code from running (unlike the agent process, which fails loud at
-    boot). A failure degrades to the file sink with a warning."""
+    boot). A failure degrades to the file sink with a warning.
+
+    With the sink in place, the boot timing line becomes the child's first
+    event-pipeline record, so the OTLP side is armed for deferred export here,
+    before any record can flow (task #3816 M4b; see
+    `shared.telemetry_otlp_defer`). A failed sink registration skips the arm."""
     if agent_id is None:
         return
     init_subprocess_logger(agent_id=agent_id)
@@ -211,15 +216,25 @@ def _init_logger(agent_id: int | None) -> None:
             "for this exec reach the file sink only",
             agent_id=agent_id,
         )
+        return
+    from shared import telemetry_otlp
+
+    telemetry_otlp.defer_until_exit()
 
 
 def _emit_child_boot_timing() -> None:
     """Record the child-ready boundary before executing agent-authored code."""
     duration_ms = (time.perf_counter() - _CHILD_BOOT_STARTED_AT) * 1000
+    extra: dict[str, object] = {}
+    module = sys.modules.get("shared.telemetry_otlp")
+    if module is not None and hasattr(module, "deferred_state"):
+        # Diagnostic marker (task #3816 M4b): held for deferred export?
+        extra["otlp_deferred"] = module.deferred_state()
     logger.info(
         "exec child boot completed in {duration_ms:.1f}ms",
         event="exec_child_boot",
         duration_ms=duration_ms,
+        **extra,
     )
 
 
@@ -375,8 +390,10 @@ def _finalize_telemetry() -> None:
 
     The emitter loads `shared.telemetry` off its first record, so a zero-record
     child skips everything here and exits without the telemetry / OTel imports
-    (task #3816 M3); `flush()` itself is a no-op while the backend was never
-    brought up (`_logs is None`).
+    (task #3816 M3). For a child with records, `telemetry_otlp.finalize()`
+    completes a deferred hold — the backend comes up and the backlog ships here
+    when the child lived below saturation and the max-age bound (task #3816
+    M4b) — and stays a plain flush for a never-deferred backend.
     """
     if "shared.telemetry" not in sys.modules:
         return
@@ -386,7 +403,7 @@ def _finalize_telemetry() -> None:
     if "shared.telemetry_otlp" in sys.modules:
         from shared import telemetry_otlp
 
-        telemetry_otlp.flush()
+        telemetry_otlp.finalize()
 
 
 def _run(request_path: str, result_path: str) -> None:
@@ -453,13 +470,14 @@ def _run(request_path: str, result_path: str) -> None:
     try:
         _run_code(request.code, payload)
         # Deliver queued SDK-call events before a clean exit. sync() lands the
-        # pipeline's held batch (queue + drain-thread batch), flush() then
-        # drains the OTLP backend queue and force-flushes the SDK batch
-        # processor — a short-lived child exits before the 5s batch window
-        # would fire on its own. A timed-out or cancelled child skips this
-        # (the parent is already killing it and the JSONL mirror holds the
-        # records); a zero-record child skips it too, so its exit never imports
-        # the telemetry / OTel modules at all (task #3816 M3).
+        # pipeline's held batch (queue + drain-thread batch); finalize() then
+        # completes a deferred OTLP hold (bring-up + backlog drain +
+        # force-flush, task #3816 M4b) or plain-flushes a live backend — a
+        # short-lived child exits before the 5s batch window would fire on its
+        # own. A timed-out or cancelled child skips this (the parent is
+        # already killing it and the JSONL mirror holds the records); a
+        # zero-record child skips it too, so its exit never imports the
+        # telemetry / OTel modules at all (task #3816 M3).
         if payload.kind in ("done", "lifecycle"):
             _finalize_telemetry()
     except BaseException as exc:
