@@ -38,8 +38,8 @@ The four normalizations (each applied to both sides before comparison):
 
 All 84 panels are covered since S2 (task #3697) registered the last 18; the
 fixture-only worklist (``_S2_PENDING``) is empty. The fidelity lock compares
-panel content (not gridPos) — the full board geometry is locked by the layout
-replay against the fixture's 94 entries.
+panel content AND geometry (gridPos) panel-for-panel; the layout replay
+separately locks the engine on the fixture's full 94-entry geometry.
 """
 
 from __future__ import annotations
@@ -180,8 +180,8 @@ def test_rendered_panels_match_the_provisioning_file(
     world: tuple[list[MetricSpec], list[MetricSpec], dict[str, Any]],
 ) -> None:
     """Every registered grafana spec renders one panel equal to its fixture
-    counterpart — the migration lock (gridPos excluded until S2 lands; the
-    engine's geometry is locked separately below)."""
+    counterpart — the migration lock: content and geometry (gridPos) both,
+    modulo the four enumerable normalizations."""
     core_specs, plugin_specs, dashboard = world
     fixture = _fixture()
     fixture_by_title: dict[str, Any] = {
@@ -216,9 +216,6 @@ def test_rendered_panels_match_the_provisioning_file(
                 expected.setdefault("fieldConfig", {}).setdefault("defaults", {})["custom"] = (
                     actual_defaults["custom"]
                 )
-        for key in ("gridPos",):
-            expected.pop(key, None)
-            actual.pop(key, None)
         deltas = _panel_diffs(expected, actual, spec.title)
         if deltas:
             problems.append(f"{spec.name}: " + "; ".join(deltas[:6]))
