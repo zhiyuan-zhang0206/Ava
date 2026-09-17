@@ -1,7 +1,5 @@
 # Let the coding agent take over your identity
 
-> **Suspended:** takeover execution is suspended pending fixes; it resumes with the fix line. The steps below describe the target flow — do not launch takeovers until the suspension is lifted.
-
 Use this mode when Codex should replace you, address the human through your
 normal Ava chat, and call Ava capabilities as you. A takeover is **file-less**:
 write the briefing as text and pass it inline with `--brief` — no task file, no

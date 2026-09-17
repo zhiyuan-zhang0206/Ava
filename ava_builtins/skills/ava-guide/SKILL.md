@@ -41,9 +41,8 @@ consumes and ACKs inbound messages with `ava impersonate inbox` / `ack`, renews 
 Python attachment (`ava.external.attach`) remains for the executor's other `ava.*`
 capabilities.
 
-Takeover execution is suspended pending fixes; it resumes with the fix line. The
-executor's field manual is `.agents/skills/impersonator-guide/SKILL.md`; launching a
-takeover from an Ava agent goes through the spawn scripts' `--impersonate-self`
+The executor's field manual is `.agents/skills/impersonator-guide/SKILL.md`; launching
+a takeover from an Ava agent goes through the spawn scripts' `--impersonate-self`
 (see Ava Use Claude Code and Codex).
 
 ## Sub-skills

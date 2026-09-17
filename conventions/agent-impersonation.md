@@ -1,7 +1,5 @@
 # External agent impersonation
 
-> **Suspended:** takeover execution is suspended pending fixes; it resumes with the fix line. The commands below describe the target flow.
-
 A trusted Codex or Claude Code process on an Ava agent's machine can take over
 its identity. Preparation drains native work and saves its checkpoint before
 activation. It does not ask the native model to approve. TTL is an explicit
