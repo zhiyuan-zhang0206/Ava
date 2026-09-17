@@ -712,6 +712,28 @@ def test_warmup_initializes_enabled_backend(otlp_backend) -> None:
     assert backend._thread is not None  # pyright: ignore[reportUnknownMemberType]
 
 
+def test_export_batch_builds_backend_once(otlp_backend) -> None:
+    """The first record brings the backend up; later batches reuse it (idempotent)."""
+    backend, _log_exporter, _metric_reader = otlp_backend
+
+    telemetry_otlp.export_batch([_event()])
+    first = backend._logs  # pyright: ignore[reportUnknownMemberType]
+    assert first is not None
+    telemetry_otlp.export_batch([_event()])
+    assert backend._logs is first  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_flush_without_init_is_noop() -> None:
+    """flush() on a never-brought-up backend: no raise, no thread, no queue work.
+
+    The exec child's zero-record exit path must never touch OTel — this is the
+    backend-side half of that contract (task #3816 M3)."""
+    backend = telemetry_otlp._OtlpBackend()
+    backend.flush()
+    assert backend._thread is None
+    assert backend._queue.empty()
+
+
 def test_flag_off_disables_export(otlp_backend: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """AVA_TELEMETRY_OTLP_ENABLED=false -> export is a no-op: no backend
     bring-up, no records, no queue traffic."""
