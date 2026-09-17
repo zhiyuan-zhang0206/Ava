@@ -239,3 +239,31 @@ def test_startup_timeout_keeps_the_child_handle_for_cleanup(
         for registration in registrations:
             if registration not in released:
                 unregister(registration)
+
+
+def test_foreground_start_is_handed_the_built_start_env(
+    foreground_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Task #3754: the direct `postgres` spawn receives the same explicit start
+    env as the pg_ctl path (see pg_tools.pg_start_env) — the postmaster is
+    never started without a locale."""
+    process = MagicMock(spec=subprocess.Popen)
+    process.poll.return_value = None
+    process.wait.return_value = 0
+    spawn = MagicMock(return_value=process)
+    sentinel = {"LC_ALL": "en_US.UTF-8"}
+    monkeypatch.setattr(pg_tools, "pg_start_env", lambda: sentinel)
+    monkeypatch.setattr(pg_tools, "start_foreground_postgres", spawn)
+
+    def never_ready(*_args: Any, **_kwargs: Any) -> None:
+        raise TimeoutError("injected readiness deadline")
+
+    monkeypatch.setattr(pg_tools, "wait_foreground_postgres", never_ready)
+
+    with (
+        pytest.raises(TimeoutError),
+        pg_tools.throwaway_postgres(base=foreground_root, foreground=True),
+    ):
+        pytest.fail("readiness never succeeds in this test")
+
+    assert spawn.call_args.kwargs["env"] == sentinel
