@@ -289,10 +289,11 @@ class PluginMetricResult(BaseModel):
     GET /api/agents/{id}/inspect/metrics.
 
     Mirrors the registered MetricSpec (see `shared/plugin_metrics.py`):
-    `panel` selects the payload — `timeseries` / `barchart` metrics carry
-    `series` (a bounded recent window, 24h in 1h buckets by default, so at
-    most a couple of dozen points), `stat` metrics carry `value` (the single
-    aggregate). `error` is set (with `series`/`value` empty) when the metric's
+    `panel` selects the payload — `timeseries` / `barchart` / `table` metrics
+    carry `series` (a bounded recent window, 24h in 1h buckets by default, so
+    at most a couple of dozen points), `stat` metrics carry `value` (the
+    single aggregate); a `logs` metric (a Grafana streaming surface) folds as
+    `series` here. `error` is set (with `series`/`value` empty) when the metric's
     query failed at execution time — the panel shows the rest of the metrics
     and surfaces the failure inline instead of 500ing the whole request;
     registry-level problems (missing/malformed/tampered file, a template that
@@ -305,7 +306,7 @@ class PluginMetricResult(BaseModel):
     description: str = ""
     plugin: str = ""
     unit: str = "short"
-    panel: Literal["timeseries", "stat", "barchart", "table"]
+    panel: Literal["timeseries", "stat", "barchart", "table", "logs"]
     error: str | None = None
     value: float | None = None
     series: list[MetricPoint] = Field(default_factory=list)

@@ -29,6 +29,9 @@ core_metrics.register_core_metric(
         field_defaults={"color": {"mode": "fixed", "fixedColor": "orange"}},
         width=8,
         height=4,
+        panel_id=48,
+        section="core",
+        order=12,
     )
 )
 
@@ -47,5 +50,8 @@ core_metrics.register_core_metric(
         field_defaults={"color": {"mode": "fixed", "fixedColor": "red"}},
         width=8,
         height=4,
+        panel_id=49,
+        section="core",
+        order=13,
     )
 )

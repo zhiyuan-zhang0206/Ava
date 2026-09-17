@@ -97,9 +97,12 @@ summaries cover the same information.
 
 ## Files
 
-- `ava-ops-main.json` — the only dashboard, hand-maintained (the
-  generator did not survive the archive→public port; MetricSpec changes
-  are reflected here by hand — see below).
+- `ava-ops-main.json` — the only dashboard. Still hand-maintained for now
+  (the generator did not survive the archive→public port), but the render
+  path is being rebuilt (task #3697): `shared/grafana_dashboard.py` renders
+  the metric registries into this file's shape, `ava lgtm render` previews
+  (diff) or force-writes it, and slice S3 flips converge onto the render —
+  from then on a MetricSpec change no longer needs a hand mirror here.
 - Deleted 2026-08-23 (a dashboard file removed from this directory is
   dropped from Grafana on the next provisioning reload — `dashboards.yml`
   has `disableDeletion: false`, verified live on the merge day):
@@ -164,6 +167,12 @@ agents` stat over `agents_meta`), plus the Task #882 fields:
   chart default).
 - `thresholds` — absolute-threshold steps; an explicit empty list (`[]`)
   suppresses the default green base entirely.
+- `panel_id` / `section` / `order` / `position` / `transformations` —
+  dashboard placement pins (task #3697): the as-is panel id and section row
+  (core panels), the render rank within the section, an absolute grid
+  position for the rare flow deviation, and verbatim Grafana transformations
+  (the PR-flow day tables' `joinByField` + `organize`). Plugin panel ids are
+  allocated per plugin block, sorted by plugin name from 1001.
 
 ### Loki legend naming
 
@@ -221,7 +230,9 @@ empty ratio / error ratio plus passive-recall search and filter latency).
 Greedy 24-column grid, **no overlapping gridPos**: stats 8x4 (three per
 row), charts/tables 12x7 (two per row), the business/anomaly event logs 24x7, the raw event stream 24x10, the
 event-type table 24x7, row headers h=1 w=24. Rows start exactly at the
-previous block's bottom (no gap row).
+previous block's bottom (no gap row) — the renderer's flow engine implements
+exactly this, plus the explicit spec pins (task #3697): the one pinned panel
+position and the one historical three-row gap before the `LLM` row.
 
 **Do not add `autofitpanels`**: on Grafana 13.1.x it collapses every panel
 to a 30px title bar at narrow window widths.

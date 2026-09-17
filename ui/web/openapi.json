@@ -12552,7 +12552,8 @@
               "timeseries",
               "stat",
               "barchart",
-              "table"
+              "table",
+              "logs"
             ],
             "title": "Panel"
           },
@@ -12593,7 +12594,7 @@
           "panel"
         ],
         "title": "PluginMetricResult",
-        "description": "One plugin metric rendered for the inspector surface — an element of\nGET /api/agents/{id}/inspect/metrics.\n\nMirrors the registered MetricSpec (see `shared/plugin_metrics.py`):\n`panel` selects the payload — `timeseries` / `barchart` metrics carry\n`series` (a bounded recent window, 24h in 1h buckets by default, so at\nmost a couple of dozen points), `stat` metrics carry `value` (the single\naggregate). `error` is set (with `series`/`value` empty) when the metric's\nquery failed at execution time — the panel shows the rest of the metrics\nand surfaces the failure inline instead of 500ing the whole request;\nregistry-level problems (missing/malformed/tampered file, a template that\nfails the safety re-validation) are HTTP errors instead."
+        "description": "One plugin metric rendered for the inspector surface — an element of\nGET /api/agents/{id}/inspect/metrics.\n\nMirrors the registered MetricSpec (see `shared/plugin_metrics.py`):\n`panel` selects the payload — `timeseries` / `barchart` / `table` metrics\ncarry `series` (a bounded recent window, 24h in 1h buckets by default, so\nat most a couple of dozen points), `stat` metrics carry `value` (the\nsingle aggregate); a `logs` metric (a Grafana streaming surface) folds as\n`series` here. `error` is set (with `series`/`value` empty) when the metric's\nquery failed at execution time — the panel shows the rest of the metrics\nand surfaces the failure inline instead of 500ing the whole request;\nregistry-level problems (missing/malformed/tampered file, a template that\nfails the safety re-validation) are HTTP errors instead."
       },
       "PluginStat": {
         "properties": {

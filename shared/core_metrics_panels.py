@@ -3,9 +3,11 @@
 ``deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json``, migrated to core-metric registrations
 (Task #882) and from Postgres-event SQL to Loki LogQL (Task #1280).
 
-The core dashboard panels (ids < 1000) are registered here as core metrics.
-The four statistics-coverage tiles are included with the original panels, and
-the hand-maintained JSON remains the rendered dashboard source of truth.
+The core dashboard panels (ids < 1000) are registered here as core metrics,
+each carrying its as-is placement pins (``panel_id`` / ``section`` /
+``order`` — task #3697). The four statistics-coverage tiles are included with
+the original panels; the JSON stays the deployment source until slice S3 of
+task #3697 flips it to a ``shared.grafana_dashboard`` render.
 
 Query dialect (Task #1280): event panels read the stream from Loki instead of
 the retired PG ``events`` table — the same read the alert rules (R1-R7) use.
@@ -79,15 +81,6 @@ _DELIVERY_ATTR = {k: f"attributes_{k}" for k in DELIVERY_STALLED_KEYS}
 _GATEWAY_ATTR = {k: f"attributes_{k}" for k in GATEWAY_LATENCY_KEYS}
 
 
-def _llm_cost(window: str) -> str:
-    """Usage-time LLM cost snapshots over one Grafana/Loki range vector."""
-    return (
-        f"sum(sum_over_time({_SEL_EV} | json | "
-        f"category={{category}} | "
-        f"unwrap {_LLM_ATTR['cost_usd']} [{window}]))"
-    )
-
-
 def _count(pipeline: str, window: str, matchers: str | None = None) -> str:
     """One count_over_time series — every count wraps in sum(...): the
     unknown_service family has >500 streams over a day, and an unaggregated
@@ -112,6 +105,9 @@ core_metrics.register_core_metric(
         target_names=["calls"],
         width=8,
         height=4,
+        panel_id=1,
+        section="core",
+        order=0,
     )
 )
 
@@ -129,6 +125,9 @@ core_metrics.register_core_metric(
         field_defaults={"color": {"mode": "fixed", "fixedColor": "orange"}},
         width=8,
         height=4,
+        panel_id=2,
+        section="core",
+        order=1,
     )
 )
 
@@ -138,7 +137,7 @@ core_metrics.register_core_metric(
         title="Error (window)",
         event_name="error",
         category="telemetry",
-        unit="s",
+        unit="short",
         panel="stat",
         query=_count('category=~"{category_re}|log" | level=~"error|critical"', "$__range"),
         query_type="logql",
@@ -147,6 +146,9 @@ core_metrics.register_core_metric(
         field_defaults={"color": {"mode": "fixed", "fixedColor": "red"}},
         width=8,
         height=4,
+        panel_id=3,
+        section="core",
+        order=2,
     )
 )
 
@@ -164,6 +166,9 @@ core_metrics.register_core_metric(
         field_defaults={"color": {"mode": "fixed", "fixedColor": "orange"}},
         width=8,
         height=4,
+        panel_id=4,
+        section="core",
+        order=3,
     )
 )
 
@@ -182,6 +187,9 @@ core_metrics.register_core_metric(
         field_defaults={"color": {"mode": "fixed", "fixedColor": "red"}},
         width=8,
         height=4,
+        panel_id=5,
+        section="core",
+        order=4,
     )
 )
 
@@ -199,28 +207,12 @@ core_metrics.register_core_metric(
         query="""SELECT count(*) AS "live agents" FROM agents_meta WHERE status IN ('running','idling')""",
         width=8,
         height=4,
+        panel_id=6,
+        section="core",
+        order=5,
     )
 )
 
-
-core_metrics.register_core_metric(
-    MetricSpec(
-        name="core_llm_cost_24h",
-        title="LLM cost (window)",
-        event_name="llm_usage",
-        category="telemetry",
-        unit="currencyUSD",
-        panel="stat",
-        # cost_usd rides in every llm_usage payload (task #2626) — unwrap it
-        # instead of mirroring MODEL_PRICING into SQL (405 ruling, 2026-08-14).
-        query=_llm_cost("$__range"),
-        query_type="logql",
-        target_names=["llm cost"],
-        field_defaults={"decimals": 2},
-        width=8,
-        height=4,
-    )
-)
 
 core_metrics.register_core_metric(
     MetricSpec(
@@ -242,118 +234,15 @@ core_metrics.register_core_metric(
         target_names=["tokens"],
         width=8,
         height=4,
-    )
-)
-
-core_metrics.register_core_metric(
-    MetricSpec(
-        name="core_llm_cost_today_estimate",
-        title="LLM cost estimate — day pace",
-        description=(
-            "Projected full-day LLM spend from usage-time cost snapshots over the "
-            "dashboard time window. Formula: window spend × 86,400 / elapsed "
-            "seconds in the panel range."
-        ),
-        event_name="llm_usage",
-        category="telemetry",
-        unit="currencyUSD",
-        panel="stat",
-        query=f"({_llm_cost('$__range')}) * 86400 / $__range_s",
-        query_type="logql",
-        target_names=["today estimate"],
-        field_defaults={"decimals": 2},
-        width=8,
-        height=4,
-    )
-)
-
-core_metrics.register_core_metric(
-    MetricSpec(
-        name="core_llm_cost_month_estimate",
-        title="LLM cost estimate — 30-day pace",
-        description=(
-            "Projected 30-day LLM spend from usage-time cost snapshots over the "
-            "dashboard time window. Formula: window spend × 2,592,000 / elapsed "
-            "seconds in the panel range."
-        ),
-        event_name="llm_usage",
-        category="telemetry",
-        unit="currencyUSD",
-        panel="stat",
-        query=f"({_llm_cost('$__range')}) * 2592000 / $__range_s",
-        query_type="logql",
-        target_names=["month estimate"],
-        field_defaults={"decimals": 2},
-        width=8,
-        height=4,
+        panel_id=8,
+        section="core",
+        order=7,
     )
 )
 
 
 # ── chart panels (12-wide, two per row) ──────────────────────────────
 
-core_metrics.register_core_metric(
-    MetricSpec(
-        name="core_llm_cost_daily",
-        title="LLM cost / minute",
-        description=(
-            "Usage-time LLM cost snapshots grouped into $__interval buckets, "
-            "normalized to a per-minute USD rate (bucket sum / interval "
-            "seconds * 60)."
-        ),
-        event_name="llm_usage",
-        category="telemetry",
-        unit="currencyUSD",
-        panel="barchart",
-        query=_llm_cost("$__interval") + " / ($__interval_ms / 60000)",
-        query_type="logql",
-        target_names=["cost usd"],
-        thresholds=[],
-    )
-)
-
-core_metrics.register_core_metric(
-    MetricSpec(
-        name="core_llm_cost_by_model",
-        title="LLM cost by model (Top 20)",
-        description=(
-            "Top 20 models by windowed usage-time cost snapshots. The model name "
-            "is the llm_usage payload's attributes_model label."
-        ),
-        event_name="llm_usage",
-        category="telemetry",
-        unit="currencyUSD",
-        panel="table",
-        query=(
-            f'topk(20, sum by (attributes_model) (sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} '
-            f"| json | category={{category}} | "
-            f'attributes_model!="" | unwrap {_LLM_ATTR["cost_usd"]} [$__range])))'
-        ),
-        query_type="logql",
-        target_names=["cost usd"],
-        thresholds=[],
-    )
-)
-
-core_metrics.register_core_metric(
-    MetricSpec(
-        name="core_llm_cost_by_agent",
-        title="LLM cost by agent (Top 20)",
-        description="Top 20 agents by windowed usage-time LLM cost snapshots.",
-        event_name="llm_usage",
-        category="telemetry",
-        unit="currencyUSD",
-        panel="table",
-        query=(
-            f'topk(20, sum by (agent_id) (sum_over_time({{service_name="unknown_service", event_name={{event_name}}, agent_id!=""}} '
-            f"| json | category={{category}} | "
-            f"unwrap {_LLM_ATTR['cost_usd']} [$__range])))"
-        ),
-        query_type="logql",
-        target_names=["cost usd"],
-        thresholds=[],
-    )
-)
 
 core_metrics.register_core_metric(
     MetricSpec(
@@ -371,6 +260,10 @@ core_metrics.register_core_metric(
         query_type="logql",
         width=8,
         height=4,
+        panel_id=44,
+        section="core",
+        order=8,
+        target_names=["input"],
     )
 )
 
@@ -390,6 +283,10 @@ core_metrics.register_core_metric(
         query_type="logql",
         width=8,
         height=4,
+        panel_id=45,
+        section="core",
+        order=9,
+        target_names=["output"],
     )
 )
 
@@ -413,6 +310,10 @@ core_metrics.register_core_metric(
         field_defaults={"decimals": 2},
         width=8,
         height=4,
+        panel_id=46,
+        section="core",
+        order=10,
+        target_names=["cache hit %"],
     )
 )
 
@@ -435,6 +336,10 @@ core_metrics.register_core_metric(
         field_defaults={"decimals": 1},
         width=8,
         height=4,
+        panel_id=47,
+        section="core",
+        order=11,
+        target_names=["avg turn s"],
     )
 )
 
@@ -470,6 +375,9 @@ core_metrics.register_core_metric(
         query_type="logql",
         target_names=["stalled <60s", "stalled 60-600s", "stalled >600s"],
         thresholds=[ThresholdStep(color="red", value=80.0)],
+        panel_id=9,
+        section="Fleet",
+        order=4,
     )
 )
 
@@ -499,6 +407,9 @@ core_metrics.register_core_metric(
         target_names=["tokens/s"],
         custom={"fillOpacity": 25, "axisLabel": "tokens/s"},
         thresholds=[ThresholdStep(color="red", value=80.0)],
+        panel_id=10,
+        section="LLM",
+        order=0,
     )
 )
 
@@ -529,6 +440,9 @@ core_metrics.register_core_metric(
             "axisLabel": "tokens/min",
         },
         thresholds=[],
+        panel_id=11,
+        section="core",
+        order=17,
     )
 )
 
@@ -571,6 +485,9 @@ core_metrics.register_core_metric(
         target_names=["overall", "max agent", "min agent"],
         custom={"axisLabel": "cache hit %"},
         thresholds=[ThresholdStep(color="red", value=80.0)],
+        panel_id=12,
+        section="core",
+        order=18,
     )
 )
 
@@ -589,9 +506,14 @@ def _tps(
     attr_key: str,
     attr_label: str,
     tps_label: str,
+    *,
+    panel_id: int,
+    order: int,
+    legend_label: str | None = None,
 ) -> None:
     tok = _LLM_ATTR[attr_key]
     timing = _LLM_ATTR[attr_label]
+    legend = legend_label or tps_label
     avg = (
         f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
         f'category={{category}} | {timing}!="" | '
@@ -620,9 +542,12 @@ def _tps(
             query_type="logql",
             query=avg,
             targets=[f"max({per_agent})", f"min({per_agent})"],
-            target_names=[f"avg {tps_label}", f"max {tps_label}", f"min {tps_label}"],
+            target_names=[f"avg {legend}", f"max {legend}", f"min {legend}"],
             custom={"fillOpacity": 25, "axisLabel": tps_label},
             thresholds=[],
+            panel_id=panel_id,
+            section="LLM",
+            order=order,
         )
     )
 
@@ -639,6 +564,8 @@ _tps(
     "in_total",
     "latency_ms",
     "in tokens/s",
+    panel_id=13,
+    order=1,
 )
 
 _tps(
@@ -655,6 +582,8 @@ _tps(
     "out_total",
     "latency_ms",
     "out tokens/s",
+    panel_id=14,
+    order=2,
 )
 
 _tps(
@@ -672,6 +601,9 @@ _tps(
     "out_total",
     "decode_ms",
     "out tokens/s",
+    panel_id=15,
+    order=3,
+    legend_label="gen out tokens/s",
 )
 
 core_metrics.register_core_metric(
@@ -690,6 +622,9 @@ core_metrics.register_core_metric(
         # bucket (mean 660); no meaningful per-minute red line — same
         # suppress-the-default call as the TPS panels.
         thresholds=[],
+        panel_id=16,
+        section="LLM",
+        order=4,
     )
 )
 
@@ -697,7 +632,7 @@ core_metrics.register_core_metric(
     MetricSpec(
         name="core_event_health",
         title="Event health — WARNING+ERROR vs total (per minute)",
-        description="Per-minute event counts (5-minute buckets / 5): warning+error+critical vs all telemetry/log events.",
+        description="Per-minute event counts — 5-minute count buckets normalized to per minute (bucket count / 5): warning+error+critical vs all telemetry/log events.",
         event_name="event",
         category="telemetry",
         unit="short",
@@ -710,6 +645,9 @@ core_metrics.register_core_metric(
         custom={"axisLabel": "events/min"},
         # 80 per 5-minute bucket, rescaled to the per-minute basis (80 / 5).
         thresholds=[ThresholdStep(color="red", value=16.0)],
+        panel_id=17,
+        section="core",
+        order=14,
     )
 )
 
@@ -735,6 +673,9 @@ core_metrics.register_core_metric(
             "axisLabel": "tokens/min",
         },
         thresholds=[],
+        panel_id=18,
+        section="core",
+        order=16,
     )
 )
 
@@ -771,6 +712,9 @@ core_metrics.register_core_metric(
         query_type="logql",
         target_names=["p50", "p95", "p99", "max"],
         custom={"axisLabel": "ms"},
+        panel_id=19,
+        section="Gateway & execution",
+        order=0,
     )
 )
 
@@ -796,5 +740,8 @@ core_metrics.register_core_metric(
         ],
         target_names=["p95 {{attributes_route}}", "p99 {{attributes_route}}"],
         custom={"axisLabel": "ms"},
+        panel_id=20,
+        section="Gateway & execution",
+        order=1,
     )
 )

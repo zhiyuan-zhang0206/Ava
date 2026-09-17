@@ -333,6 +333,10 @@ def _h_lgtm(args: argparse.Namespace) -> int:
         return cmd_lgtm_on()
     if args.lgtm_cmd == "off":
         return cmd_lgtm_off()
+    if args.lgtm_cmd == "render":
+        from cli.commands import cmd_grafana_render
+
+        return cmd_grafana_render(force=args.force, repo_only=args.repo_only)
     return cmd_lgtm_status()
 
 
@@ -354,6 +358,24 @@ def _add_lgtm_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
     ):
         p = lgtm_sub.add_parser(name, help=help_text)
         p.set_defaults(func=_h_lgtm)
+    render_p = lgtm_sub.add_parser(
+        "render",
+        help="render the ava-ops dashboard from the metric registries and diff it "
+        "against this host's provisioning copy (--force writes the render)",
+    )
+    render_p.add_argument(
+        "--force",
+        action="store_true",
+        help="write the render into this host's provisioning tree (atomic; the "
+        "diff preview is the default)",
+    )
+    render_p.add_argument(
+        "--repo-only",
+        action="store_true",
+        help="skip the installed-plugin registry read — render the checkout's "
+        "plugins only (for a preview on a host without a reachable database)",
+    )
+    render_p.set_defaults(func=_h_lgtm)
 
 
 def _add_trace_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
