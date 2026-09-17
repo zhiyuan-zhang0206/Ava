@@ -7,6 +7,7 @@ their bodies, so patching the module attributes here takes effect at call time.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import httpx
@@ -20,6 +21,10 @@ class _FakeResp:
         self._payload = payload
         self.status_code = status_code
         self.text = str(payload)
+
+    @property
+    def is_success(self) -> bool:
+        return 200 <= self.status_code < 300
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
@@ -47,6 +52,32 @@ def _gateway_base(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+@pytest.fixture(autouse=True)
+def _outbox_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Send tests exercise the real outbox glue against a throwaway $AVA_HOME —
+    never the operator's live journal — with the knobs stubbed so no config or
+    dotenv read is involved."""
+    from shared import delivery_outbox
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.general, "ava_home", str(tmp_path))
+    monkeypatch.setattr(
+        delivery_outbox,
+        "limits",
+        lambda: delivery_outbox.DeliveryOutboxLimits(
+            enabled=True,
+            retry_backoff_steps=(30.0, 60.0, 300.0, 900.0),
+            budget_seconds=43200.0,
+            dedup_window_seconds=900.0,
+            flush_interval_seconds=30.0,
+            max_entries=128,
+        ),
+    )
+    delivery_outbox._reset_caches_for_tests()
+    yield
+    delivery_outbox._reset_caches_for_tests()
+
+
 def _patch_post(monkeypatch: pytest.MonkeyPatch, payload: object) -> dict[str, object]:
     """Patch httpx.post to record url/json and return `payload`; return the record."""
     seen: dict[str, object] = {}
@@ -54,6 +85,7 @@ def _patch_post(monkeypatch: pytest.MonkeyPatch, payload: object) -> dict[str, o
     def fake_post(url: str, **kwargs: object) -> _FakeResp:
         seen["url"] = url
         seen["json"] = kwargs.get("json")
+        seen["headers"] = kwargs.get("headers")
         return _FakeResp(payload)
 
     monkeypatch.setattr(httpx, "post", fake_post)
@@ -311,3 +343,132 @@ def test_agents_send_surfaces_error_body(
     with pytest.raises(httpx.HTTPStatusError):
         _agents.cmd_agents_send(5, "msg", "external_agent:codex")
     assert "Unrecognized inbound source" in capsys.readouterr().err
+
+
+# ── deferred-delivery outbox coverage on the send path (task #3769) ──────────
+
+
+def test_agents_send_transport_failure_is_recorded(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A refused connection records the notice under the shared key (with the
+    Idempotency-Key header on the attempt) and still raises — the CLI's exit
+    semantics are untouched."""
+    recorded: list[dict[str, object]] = []
+    seen: dict[str, object] = {}
+
+    def fake_logical_key(**_kw: object) -> str:
+        return "key-cli-1"
+
+    def fake_record(**kw: object) -> None:
+        recorded.append(kw)
+
+    def fail_post(url: str, **kwargs: object) -> object:
+        seen.update(kwargs)
+        raise httpx.ConnectError("gateway down")
+
+    monkeypatch.setattr("shared.delivery_outbox.logical_key", fake_logical_key)
+    monkeypatch.setattr("shared.delivery_outbox.record_failed_send", fake_record)
+    monkeypatch.setattr(httpx, "post", fail_post)
+    with pytest.raises(httpx.ConnectError):
+        _agents.cmd_agents_send(5, "notice", "shell:3")
+    assert recorded == [
+        {
+            "agent_id": 5,
+            "source": "shell:3",
+            "content": "notice",
+            "client_message_id": "key-cli-1",
+        }
+    ]
+    headers = seen["headers"]
+    assert isinstance(headers, dict)
+    assert headers["Idempotency-Key"] == "key-cli-1"
+
+
+def test_agents_send_transient_http_is_recorded(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """429/5xx is the replayable failure class: it is recorded, and the
+    response body is still surfaced before the raise."""
+    recorded: list[dict[str, object]] = []
+
+    def fake_logical_key(**_kw: object) -> str:
+        return "key-cli-1"
+
+    def fake_record(**kw: object) -> None:
+        recorded.append(kw)
+
+    def fake_post(*_a: object, **_k: object) -> _FakeResp:
+        return _FakeResp({"detail": "backend down"}, status_code=503)
+
+    monkeypatch.setattr("shared.delivery_outbox.logical_key", fake_logical_key)
+    monkeypatch.setattr("shared.delivery_outbox.record_failed_send", fake_record)
+    monkeypatch.setattr(httpx, "post", fake_post)
+    with pytest.raises(httpx.HTTPStatusError):
+        _agents.cmd_agents_send(5, "notice", "shell:3")
+    assert [kw["client_message_id"] for kw in recorded] == ["key-cli-1"]
+    assert "backend down" in capsys.readouterr().err
+
+
+def test_agents_send_success_retires_the_pending_record(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A delivered notice retires any pending record for the same logical
+    message, and carries the shared key as its Idempotency-Key."""
+    retired: list[dict[str, object]] = []
+
+    def fake_logical_key(**_kw: object) -> str:
+        return "key-cli-1"
+
+    def fake_retire(**kw: object) -> None:
+        retired.append(kw)
+
+    monkeypatch.setattr("shared.delivery_outbox.logical_key", fake_logical_key)
+    monkeypatch.setattr("shared.delivery_outbox.note_send_succeeded", fake_retire)
+    seen = _patch_post(monkeypatch, {"status": "delivered"})
+    assert _agents.cmd_agents_send(5, "build done", "shell:3") == 0
+    assert retired == [
+        {"agent_id": 5, "source": "shell:3", "content": "build done", "key": "key-cli-1"}
+    ]
+    headers = seen["headers"]
+    assert isinstance(headers, dict)
+    assert headers["Idempotency-Key"] == "key-cli-1"
+
+
+def test_agents_send_client_error_records_nothing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A 4xx is application semantics — replay cannot change it, so nothing is
+    recorded and nothing is retired."""
+    calls: list[dict[str, object]] = []
+
+    def fake_logical_key(**_kw: object) -> str:
+        return "key-cli-1"
+
+    def fake_call(**kw: object) -> None:
+        calls.append(kw)
+
+    def fake_post(*_a: object, **_k: object) -> _FakeResp:
+        return _FakeResp({"detail": "Unrecognized inbound source"}, status_code=422)
+
+    monkeypatch.setattr("shared.delivery_outbox.logical_key", fake_logical_key)
+    monkeypatch.setattr("shared.delivery_outbox.record_failed_send", fake_call)
+    monkeypatch.setattr("shared.delivery_outbox.note_send_succeeded", fake_call)
+    monkeypatch.setattr(httpx, "post", fake_post)
+    with pytest.raises(httpx.HTTPStatusError):
+        _agents.cmd_agents_send(5, "msg", "external_agent:codex")
+    assert calls == []
+
+
+def test_agents_send_degrades_to_unkeyed_when_outbox_fails(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An unusable outbox must not change the send's outcome: the notice goes
+    out without a key and the degradation is named on stderr."""
+
+    def boom(**_kw: object) -> str:
+        raise RuntimeError("outbox broken")
+
+    monkeypatch.setattr("shared.delivery_outbox.logical_key", boom)
+    seen = _patch_post(monkeypatch, {"status": "delivered"})
+    assert _agents.cmd_agents_send(5, "build done", "shell:3") == 0
+    assert "unkeyed" in capsys.readouterr().err
+    headers = seen["headers"]
+    assert isinstance(headers, dict)
+    assert "Idempotency-Key" not in headers
