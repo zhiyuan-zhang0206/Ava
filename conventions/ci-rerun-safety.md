@@ -10,6 +10,15 @@ preparation` is retried, and only when its failure shape is the known
 cold-offline family (task #3285); every other workflow or shape is left to
 manual triage.
 
+Re-runs are admissible only once the run reads `completed`: while any job is
+still going, the job-level endpoint answers 403 "The workflow run containing
+this job is already running" and the run-level endpoints answer 403 "This
+workflow is already running" (probed 2026-09-17, task #3764; the REST docs
+state the 30-day window, not this precondition). `ci-rerun.yml` therefore
+fires on `workflow_run: completed`, and `--rerun-failed-jobs` reports a
+still-running run as waiting with the recovery action instead of forwarding
+the 403.
+
 The guard is not atomic with GitHub's rerun API. CI therefore partitions native
 concurrency by ref **and immutable tested revision (`github.sha`)**. For PRs this
 also distinguishes merge revisions when the base changes without a head change.
