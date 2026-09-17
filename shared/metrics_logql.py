@@ -38,7 +38,7 @@ _LOKI_EVENT_SELECTOR = 'service_name="unknown_service"'
 resource the unified emitter ships to (gateway/loki_events.py: _SELECTOR)."""
 
 
-def _validate_logql_template(template: str, name: str) -> None:
+def _validate_logql_template(template: str, name: str, *, raw_view: bool = False) -> None:
     """Lightweight LogQL template checks (task #1280): the query must select
     the event stream and pipeline ``| json``. event_name/agent_id are promoted
     index labels since the 2026-08-23 cutover, so event-scoped templates match
@@ -49,7 +49,10 @@ def _validate_logql_template(template: str, name: str) -> None:
     {event_name}/{category} placeholders (registry metadata is the single
     source of truth) unless the query has no event_name/category filter at
     all — whole-stream queries (e.g. the event rate panel) legitimately
-    filter on neither."""
+    filter on neither. ``raw_view`` (a ``logs`` panel) waives the placeholder
+    rule: a raw stream view defines its own predicate — the Events tier view
+    filters level/category/event_name as panel content, not as registry
+    metadata — so only the stream-selector and json checks apply."""
     if _LOKI_EVENT_SELECTOR not in template:
         raise _plugin_metrics.InvalidMetricQuery(
             f"metric {name!r} LogQL query must select the event stream {{{_LOKI_EVENT_SELECTOR}}}"
@@ -64,7 +67,7 @@ def _validate_logql_template(template: str, name: str) -> None:
         "{event_name}" in template or "{category}" in template or "{category_re}" in template
     )
     has_event_filter = "event_name=" in template or "category=" in template
-    if not has_placeholder and has_event_filter:
+    if not has_placeholder and has_event_filter and not raw_view:
         raise _plugin_metrics.InvalidMetricQuery(
             f"metric {name!r} LogQL query filters event_name/category without "
             "the {event_name}/{category} placeholders (registry metadata is "
@@ -93,4 +96,4 @@ def validate_spec_logql(spec: _plugin_metrics.MetricSpec) -> None:
     the dialect branch of ``plugin_metrics.validate_spec_sql``, kept here so
     this module owns the whole LogQL contract."""
     for template in [spec.query, *(spec.targets or [])]:
-        _validate_logql_template(template, spec.name)
+        _validate_logql_template(template, spec.name, raw_view=spec.panel == "logs")
