@@ -29,6 +29,7 @@ venv and the user present:
 ```bash
 .venv/bin/python scripts/tcc-onboard-helper-grants.py --check    # inventory only, zero dialogs
 .venv/bin/python scripts/tcc-onboard-helper-grants.py            # interactive: trigger missing grants
+.venv/bin/python scripts/tcc-onboard-helper-grants.py --tier L2  # the machine target tier (design v1)
 .venv/bin/python scripts/tcc-onboard-helper-grants.py --items folders --timeout 180
 ```
 
@@ -52,6 +53,23 @@ venv and the user present:
   the tool verifies them from the helper ping and points at System Settings
   when either is missing.
 
+## Tiers (design v1)
+
+The machine-facing contract: a target tier names the authorization set a host
+should hold. User decisions 2026-09-17: the full tier includes Full Disk
+Access, and macmini's target is L2.
+
+| Tier | Contents |
+|---|---|
+| L0 silent | No grants targeted; the tool refuses to probe or trigger (maintenance windows). |
+| L1 standard | Folder rows x3 + AppleEvents x5 + Screen Recording / Accessibility (the pre-tier set). |
+| L2 extended | L1 + other-app data + media library + iCloud surface. |
+| L3 full | L2 + Full Disk Access (the heavy item) + DeveloperTool + future items. |
+
+Groups whose trigger method is still pending verification (`appdata`, `media`,
+`icloud`, `fda`, `devtools`) are named in the report and never attempted; an
+L2/L3 run reports them as pending until their verification round lands.
+
 ## Trigger mechanics worth knowing
 
 - **Documents can not be triggered through the helper file APIs.** The
@@ -69,8 +87,10 @@ venv and the user present:
 - **A helper build without the nursery `spawn` wire method can not be
   onboarded.** Older builds answer `unknown method: spawn`; rebuild the helper
   first (same signing identity), then run this tool.
-- **Full Disk Access is out of scope.** The audit found no evidence it is
-  needed; the tool ignores it.
+- **Full Disk Access is the L3 heavy item.** The 2026-09-12 audit found no
+  evidence it was needed, but the user placed it in the full tier (2026-09-17).
+  Its trigger method is pending verification; it is never attempted before
+  that.
 - **Multiple helper instances on one host share the same TCC identity.** A
   second cluster instance (its own build, launchd service and socket -- e.g. a
   dev/test instance) needs no separate onboarding when its helper is built
@@ -84,7 +104,7 @@ venv and the user present:
 
 | Machine | Helper | Folder rows | SR / AX | Notes |
 |---|---|---|---|---|
-| macmini | running, spawn wire OK (rebuilt 2026-09-13, same signing identity) | Desktop/Documents/Downloads granted | granted | Onboarded 2026-09-12; spawn backend enabled + verified. Rebuild 2026-09-13 kept every grant (stable identity); re-verified 2026-09-14: spawn-chain PASS, preflight matrix green. |
+| macmini | running, spawn wire OK (rebuilt 2026-09-13, same signing identity) | Desktop/Documents/Downloads granted | granted | Onboarded 2026-09-12; spawn backend enabled + verified. Rebuild 2026-09-13 kept every grant (stable identity); re-verified 2026-09-14: spawn-chain PASS, preflight matrix green. Target tier: L2 (user 2026-09-17). |
 | company-mini | running, build predates `spawn` | to onboard after rebuild | granted | Rebuild first, same signing identity (an identity change silently drops the Accessibility grant) |
 | macbook-air | running, build predates `spawn` | to onboard after rebuild | granted | Same as company-mini |
 | company-air | not installed | all first-time | first-time | Fresh install + sign + first grants in one user-present session |
