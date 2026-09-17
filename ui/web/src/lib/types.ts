@@ -268,6 +268,16 @@ export interface TimelineResponse {
   readonly has_more: boolean;
 }
 
+// GET /api/agents/{id}/conversation-snapshot response (task #3900 batch 2) —
+// the three conversation read models composed into one switch-refresh read
+// (agent-reconcile.ts). Sections are the same frontend types the standalone
+// readers consume; the gateway composes its standalone payloads server-side.
+export interface ConversationSnapshotResponse {
+  readonly timeline: TimelineResponse;
+  readonly token_usage: TokenUsageResponse;
+  readonly pending: PendingInbound[];
+}
+
 // --- SystemEvent (events.py) — hand-written mirror ---
 //
 // All events flow through a single SSE channel `/api/agents/{id}/system`.

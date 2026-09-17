@@ -2,8 +2,9 @@
 //
 // Two data sources:
 // 1. React Query ["token-usage", agentId] — GET /api/agents/{id}/token-usage
-//    selected snapshot, read on activation and repaired after stream gaps.
-//    Inactive snapshots are released when selection changes.
+//    selected snapshot, read on activation; after a stream gap the shared
+//    composed reconcile refreshes it (agent-reconcile.ts). The window is
+//    retained per agent so a switch back inside it seeds from cache.
 // 2. Real-time SSE token_usage event — published when an LLM call completes,
 //    updating the selected context bar. SSE rate = one per LLM call.
 //
@@ -13,7 +14,8 @@
 //
 // SSE subscription uses the AgentEventStreamProvider shared active-agent
 // connection (the same throttled stream as useTimeline). Reopening after a
-// hidden period repairs the selected snapshot; hidden pages do not poll.
+// hidden period refreshes the selected snapshot through the shared reconcile;
+// hidden pages do not poll.
 //
 // Token count has migrated from local useState to Zustand store.tokenUsage.
 
@@ -23,7 +25,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useLayoutEffect, useRef } from "react";
 
 import { api } from "./api";
+import { useAgentReconcile } from "./agent-reconcile";
 import { useAgentReadRepair } from "./use-agent-read-repair";
+import { CONVERSATION_RETENTION_MS } from "./switch-budget";
 import { useTimelineStore } from "./timeline-store";
 import type { SystemEvent, TokenUsageResponse } from "./types";
 import type { ConnectionEvent } from "./useEventStream";
@@ -47,7 +51,8 @@ export function useTokenUsage(
   showError: (msg: string) => void,
 ): TokenUsageState {
   const queryClient = useQueryClient();
-  const { isVisible, requestRepair } = useAgentReadRepair("token-usage", agentId);
+  const { isVisible } = useAgentReadRepair("token-usage", agentId);
+  const { requestReconcile } = useAgentReconcile(agentId);
   const tokenUsage = useTimelineStore((s) => s.tokenUsage);
   const maxContextTokens = useTimelineStore((s) => s.maxContextTokens);
   const softCompactTokens = useTimelineStore((s) => s.softCompactTokens);
@@ -60,7 +65,6 @@ export function useTokenUsage(
   const seenParseErrors = useRef<Set<string>>(new Set());
 
   // -- React Query: token-usage snapshot, cached by agentId --
-  // Inactive selections release their cached snapshots.
   const tokenQuery = useQuery({
     queryKey: ["token-usage", agentId] as const,
     queryFn: ({ signal }) => {
@@ -68,8 +72,13 @@ export function useTokenUsage(
       return api.getTokenUsage(agentId, signal);
     },
     enabled: agentId !== null && isVisible,
-    staleTime: 0,
-    gcTime: 0,
+    // A retained snapshot is also fresh (task #3900 batch 2): a switch back
+    // seeds from cache (the layout effect below) and fires no read of its
+    // own — RQ auto-reads a key switch only when the target key is stale.
+    // The one refresh is the re-attach reconcile (agent-reconcile.ts).
+    staleTime: CONVERSATION_RETENTION_MS,
+    gcTime: CONVERSATION_RETENTION_MS,
+    refetchOnMount: false,
     // A transient checkpoint read failure (gateway restart / DB reconnect
     // window) is served as 0/0 by the backend — the SSE token_usage push
     // refreshes the UI only while the agent is actually working, so an idle
@@ -146,7 +155,9 @@ export function useTokenUsage(
     (ev: ConnectionEvent) => {
       switch (ev.type) {
         case "open":
-          requestRepair();
+          // The shared composed reconcile refreshes this snapshot (and the
+          // other two conversation models) with one request on re-attach.
+          requestReconcile();
           return;
         case "parse-failed": {
           const key = String(ev.error);
@@ -160,7 +171,7 @@ export function useTokenUsage(
           return;
       }
     },
-    [requestRepair, showError],
+    [requestReconcile, showError],
   );
 
   useAgentEventStream(onEvent, onConnectionEvent);

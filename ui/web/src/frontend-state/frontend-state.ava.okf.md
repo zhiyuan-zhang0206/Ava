@@ -38,7 +38,11 @@ The global fold owns read-model repair. Hints coalesce under a fixed deadline;
 reads never cancel an already-running repair, and hints received during that
 read require a trailing repair. Every stream reconnect requests reconciliation,
 including another disconnect inside a previous repair window. Settled query
-keys release their scheduling state.
+keys release their scheduling state. The selected conversation trio (timeline /
+token-usage / pending) reconciles under the same rules through one composed
+read per re-attach (`agent-reconcile.ts`): it joins reads in flight, trails a
+second gap during a read, and abandons queued and in-flight work when selection
+or visibility is lost.
 
 ## Zustand `store.ts` (Pure UI + Cluster Coordination)
 

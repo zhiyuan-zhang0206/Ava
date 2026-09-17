@@ -135,6 +135,7 @@ from gateway.routers import (
 from gateway.routers import (
     config as config_router,
 )
+from gateway.routers import conversation as conversation_router
 from gateway.routers import (
     default_model as default_model_router,
 )
@@ -752,6 +753,7 @@ app.include_router(cluster_router.router)
 app.include_router(machine_pause_router.router)
 app.include_router(commands_router.router)
 app.include_router(config_router.router)
+app.include_router(conversation_router.router)
 app.include_router(default_model_router.router)
 app.include_router(settings_router.router)
 app.include_router(schedules_router.router)

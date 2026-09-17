@@ -1,6 +1,8 @@
 // The selected conversation owns one HTTP tail snapshot and one live view.
 // Switching drops inactive live state; durable older history stays pageable.
 // Snapshot reads and history pages abort when their selection loses ownership.
+// A retained window renders instantly on a switch back; the shared reconcile
+// (agent-reconcile.ts) refreshes the trio with one read on every re-attach.
 
 "use client";
 
@@ -8,12 +10,14 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { startTransition, useCallback, useEffect, useLayoutEffect, useRef } from "react";
 
 import { api } from "./api";
+import { useAgentReconcile } from "./agent-reconcile";
 import { useDisplayLimit } from "./display-limits";
 import { useAgentReadRepair } from "./use-agent-read-repair";
 import { inspectLiveQueryKey } from "./inspector-queries";
 import { errMsg } from "./errors";
 import { noteTurnStart } from "./interaction-timing";
 import { useTimelineStore } from "./timeline-store";
+import { CONVERSATION_RETENTION_MS } from "./switch-budget";
 import { isReattachedTimelineContext, parseItemIdParts, standingHeadNoteIds } from "./timeline";
 import { useCompactHistoryRetention } from "./use-compact-history-retention";
 
@@ -86,7 +90,8 @@ export function useTimeline(
 ): UseTimelineResult {
   const queryClient = useQueryClient();
 
-  const { isVisible, requestRepair } = useAgentReadRepair("timeline", agentId);
+  const { isVisible } = useAgentReadRepair("timeline", agentId);
+  const { requestReconcile, abortReconcile } = useAgentReconcile(agentId);
   const olderRequest = useRef<AbortController | null>(null);
   const timelineQuery = useQuery({
     queryKey: ["timeline", agentId] as const,
@@ -95,8 +100,14 @@ export function useTimeline(
       return api.getTimeline(agentId, { signal });
     },
     enabled: agentId !== null && isVisible,
-    staleTime: 0,
-    gcTime: 0,
+    // A retained window is also fresh (task #3900 batch 2): switching back
+    // seeds from cache and paints immediately, and the switch itself fires
+    // no read — RQ auto-reads a key switch only when the target key is
+    // stale. The one refresh is the re-attach reconcile
+    // (agent-reconcile.ts); SSE invalidations still refetch explicitly.
+    staleTime: CONVERSATION_RETENTION_MS,
+    gcTime: CONVERSATION_RETENTION_MS,
+    refetchOnMount: false,
   });
 
   useEffect(() => {
@@ -186,6 +197,10 @@ export function useTimeline(
         compactPending.current = true;
         olderRequest.current?.abort();
         void queryClient.cancelQueries({ queryKey: ["timeline", agentId], exact: true });
+        // Same reason the timeline query's own fetch is cancelled above: a
+        // composed reconcile read started before the compact must not land
+        // its pre-compact snapshot after the post-compact window.
+        abortReconcile();
       } else if (
         ev.role === "timeline_snapshot" &&
         (ev.items as unknown as unknown[] | undefined)?.length &&
@@ -201,7 +216,7 @@ export function useTimeline(
         void queryClient.invalidateQueries({ queryKey: ["token-usage", ev.agent_id] });
       }
     },
-    [agentId, queryClient],
+    [agentId, queryClient, abortReconcile],
   );
 
   // Streaming-delta roles — rendered through startTransition so a burst of
@@ -265,10 +280,12 @@ export function useTimeline(
           processConnectionEvent({ type: "open" });
           seenParseErrors.current.clear();
           // Opening during an initial/ongoing read cannot trust that read
-          // to cover the subscription gap; require a trailing repair.
-          requestRepair();
+          // to cover the subscription gap; require a trailing read — the
+          // shared composed reconcile joins in-flight reads, then refreshes
+          // all three conversation models with one request.
+          requestReconcile();
           // A compact whose post-compact snapshot was lost in the gap is now
-          // covered by the reconnect refetch — drop any pending marker so a
+          // covered by the reconnect reconcile — drop any pending marker so a
           // later snapshot does not double-invalidate.
           compactPending.current = false;
           return;
@@ -287,7 +304,7 @@ export function useTimeline(
         }
       }
     },
-    [showError, processConnectionEvent, requestRepair],
+    [showError, processConnectionEvent, requestReconcile],
   );
 
   useAgentEventStream(onSystemEvent, onConnectionEvent, onSystemEventBatch);

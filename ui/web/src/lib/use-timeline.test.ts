@@ -26,7 +26,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "./api";
 import { noteTurnStart } from "./interaction-timing";
-import type { BackendTimelineItem, SystemEvent, TimelineResponse } from "./types";
+import type {
+  BackendTimelineItem,
+  ConversationSnapshotResponse,
+  SystemEvent,
+  TimelineResponse,
+} from "./types";
 import { parseItemId } from "./timeline";
 import { useTimelineStore } from "./timeline-store";
 import { useTimeline } from "./use-timeline";
@@ -55,6 +60,7 @@ vi.mock("react", async (importOriginal) => {
 vi.mock("./api", () => ({
   api: {
     getTimeline: vi.fn(),
+    getConversationSnapshot: vi.fn(),
     getSettings: vi.fn(),
     // useDisplayLimit reads the display config domain; an empty field
     // list keeps every baked fallback (limit assertions below).
@@ -162,6 +168,17 @@ function tlResp(items: BackendTimelineItem[] = [], has_more = false): TimelineRe
   return { items, msg_count: max + 1, has_more };
 }
 
+// The composed switch-refresh payload (agent-reconcile.ts) around a timeline
+// window; token/pending sections stay empty where a test doesn't read them.
+function composedSnapshot(timeline: TimelineResponse): ConversationSnapshotResponse {
+  return {
+    timeline,
+    token_usage: { input_tokens: 0, output_tokens: 0, reasoning_tokens: 0,
+      max_input_tokens: 0, soft_compact_tokens: 0, hard_compact_tokens: 0 },
+    pending: [],
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   currentEventHandler = null;
@@ -169,6 +186,7 @@ beforeEach(() => {
   currentBatchHandler = null;
   // Default getTimeline returns empty; each test resets as needed
   vi.mocked(api.getTimeline).mockReset().mockResolvedValue(tlResp([]));
+  vi.mocked(api.getConversationSnapshot).mockReset().mockResolvedValue(composedSnapshot(tlResp([])));
   vi.mocked(api.getSettings).mockResolvedValue({ settings: [] });
   // Restore any store actions a prior test swapped for spies, so switchThread /
   // reloadSnapshot are the real (stable) references again before this test runs.
@@ -214,6 +232,8 @@ function wrapper({ children }: { children: React.ReactNode }) {
 }
 
 // -- tests ─────────────────────────────────────────────────────────────────
+
+
 
 
 describe("useTimeline mount + initial fetch", () => {
@@ -620,28 +640,36 @@ describe("useTimeline agentId switch", () => {
 
 
 
-  it("activation refreshes a retained HTTP snapshot", async () => {
+  it("activation seeds a retained snapshot; the reattach reconcile refreshes it", async () => {
     const showError = vi.fn();
-    // Seed a snapshot that can be displayed while the activation read runs.
+    // Seed a retained snapshot that renders while the reattach reconcile runs.
     queryClient.setQueryData<TimelineResponse>(
       ["timeline", 7],
       tlResp([snapshotItem({ item_id: "1.0", payload: "stale cached" })]),
     );
-    // Activation returns the latest durable tail.
-    vi.mocked(api.getTimeline).mockResolvedValue(
-      tlResp([
+    // The composed reconcile returns the current authoritative tail.
+    vi.mocked(api.getConversationSnapshot).mockReset().mockResolvedValue(
+      composedSnapshot(tlResp([
         snapshotItem({ item_id: "1.0", payload: "fresh" }),
         snapshotItem({ item_id: "2.0", payload: "happened while away" }),
-      ]),
+      ])),
     );
 
     const { result, unmount } = renderHook(() => useTimeline(7, showError), { wrapper });
 
-    // staleTime: 0 refreshes the cached seed on activation.
+    // With cached data the mount issues no read of its own (task #3900
+    // batch 2) — the retained window paints immediately.
+    await waitFor(() =>
+      expect(result.current.items.map((i) => i.payload)).toEqual(["stale cached"]),
+    );
+    expect(api.getTimeline).not.toHaveBeenCalled();
+
+    // The re-attach reconcile refreshes it.
+    pushConnectionEvent({ type: "open" });
     await waitFor(() =>
       expect(result.current.items.map((i) => i.payload)).toEqual(["fresh", "happened while away"]),
     );
-    expect(api.getTimeline).toHaveBeenCalledWith(7, expect.objectContaining({ signal: expect.any(AbortSignal) as AbortSignal }));
+    expect(api.getConversationSnapshot).toHaveBeenCalledWith(7, expect.any(AbortSignal) as AbortSignal);
     unmount();
   });
 
@@ -1316,24 +1344,39 @@ describe("useTimeline connectionState", () => {
     unmount();
   });
 
-  it("opening the selected stream invalidates its snapshot", async () => {
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
-    renderHook(() => useTimeline(42, vi.fn()), { wrapper });
-    await waitFor(() => expect(api.getTimeline).toHaveBeenCalledWith(42, expect.objectContaining({ signal: expect.any(AbortSignal) as AbortSignal })));
-    invalidateSpy.mockClear();
+  it("opening the selected stream reconciles through one composed snapshot read", async () => {
+    vi.mocked(api.getTimeline).mockResolvedValue(
+      tlResp([snapshotItem({ item_id: "1.0", payload: "initial read" })]),
+    );
+    vi.mocked(api.getConversationSnapshot).mockReset().mockResolvedValue(
+      composedSnapshot(tlResp([
+        snapshotItem({ item_id: "1.0", payload: "reconciled after gap" }),
+        snapshotItem({ item_id: "2.0", payload: "committed while away" }),
+      ])),
+    );
+    const { result } = renderHook(() => useTimeline(42, vi.fn()), { wrapper });
+    await waitFor(() => expect(result.current.items[0]?.payload).toBe("initial read"));
 
     pushConnectionEvent({ type: "open" });
 
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["timeline", 42] }, { cancelRefetch: false });
+    await waitFor(() =>
+      expect(result.current.items.map((item) => item.payload)).toEqual(
+        ["reconciled after gap", "committed while away"],
+      ),
+    );
+    expect(api.getConversationSnapshot).toHaveBeenCalledTimes(1);
+    // The per-domain trailing repair is replaced, not stacked: the composed
+    // read is the only read the re-attach cost.
+    expect(api.getTimeline).toHaveBeenCalledTimes(1);
   });
 
-  it("open with no active agent does not invalidate a timeline snapshot", () => {
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+  it("open with no active agent does not reconcile a snapshot", async () => {
     renderHook(() => useTimeline(null, vi.fn()), { wrapper });
 
     pushConnectionEvent({ type: "open" });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
 
-    expect(invalidateSpy).not.toHaveBeenCalled();
+    expect(api.getConversationSnapshot).not.toHaveBeenCalled();
   });
 
   it("parse-failed: first toast fires; subsequent same-error toasts deduped (no flood)", async () => {
@@ -1874,11 +1917,15 @@ describe("selected timeline ownership", () => {
     }
   });
 
-  it("returning after an inactive compact reads only the current authoritative tail", async () => {
+  it("returning after an inactive compact refreshes to the authoritative tail on reattach", async () => {
     let compacted = false;
     vi.mocked(api.getTimeline).mockImplementation((id) => Promise.resolve(
       tlResp([snapshotItem({ item_id: "1.0", payload: id === 1 && compacted ? "compacted A" : `agent ${id}` })]),
     ));
+    vi.mocked(api.getConversationSnapshot).mockReset().mockImplementation(() =>
+      Promise.resolve(composedSnapshot(tlResp([
+        snapshotItem({ item_id: "1.0", payload: "compacted A" }),
+      ]))));
     const { result, rerender } = renderHook(({ id }: { id: number }) => useTimeline(id, vi.fn()), {
       initialProps: { id: 1 }, wrapper,
     });
@@ -1888,18 +1935,31 @@ describe("selected timeline ownership", () => {
     compacted = true;
     pushEvent({ role: "chat_delta", agent_id: 1, item_id: "8.0", content: "late old A" });
     rerender({ id: 1 });
+
+    // The retained snapshot seeds the switch back; the per-domain read does
+    // not re-run (task #3900 batch 2). A late delta for the thread was never
+    // folded into it.
+    await waitFor(() => expect(result.current.items.map((item) => item.payload)).toEqual(["agent 1"]));
+    pushConnectionEvent({ type: "open" });
     await waitFor(() => expect(result.current.items.map((item) => item.payload)).toEqual(["compacted A"]));
-    await waitFor(() => expect(queryClient.getQueryCache().findAll({ queryKey: ["timeline"] })).toHaveLength(1));
+
+    expect(api.getTimeline).toHaveBeenCalledTimes(2); // cold A + cold B only
+    expect(api.getConversationSnapshot).toHaveBeenCalledTimes(1);
+    // Both per-agent windows stay retained for a switch back.
+    expect(queryClient.getQueryCache().findAll({ queryKey: ["timeline"] })).toHaveLength(2);
   });
 });
 
 
-describe("selected opening-gap repair", () => {
+describe("selected opening-gap reconcile", () => {
   it("reads again after a pre-open initial read settles", async () => {
     let finish!: (value: TimelineResponse) => void;
     vi.mocked(api.getTimeline)
       .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }))
-      .mockResolvedValue(tlResp([snapshotItem({ item_id: "1.0", payload: "committed before stream opened" })]));
+      .mockResolvedValue(tlResp([snapshotItem({ item_id: "1.0", payload: "unexpected per-domain read" })]));
+    vi.mocked(api.getConversationSnapshot).mockReset().mockResolvedValue(
+      composedSnapshot(tlResp([snapshotItem({ item_id: "1.0", payload: "committed before stream opened" })])),
+    );
     const { result } = renderHook(() => useTimeline(42, vi.fn()), { wrapper });
     await waitFor(() => expect(api.getTimeline).toHaveBeenCalledTimes(1));
     pushConnectionEvent({ type: "open" });
@@ -1908,7 +1968,40 @@ describe("selected opening-gap repair", () => {
       await Promise.resolve();
     });
     await waitFor(() => expect(result.current.items[0]?.payload).toBe("committed before stream opened"));
-    expect(api.getTimeline).toHaveBeenCalledTimes(2);
+    // The trailing read joined the in-flight initial read (no overlap) and
+    // came from the composed endpoint — the per-domain read never re-ran.
+    expect(api.getConversationSnapshot).toHaveBeenCalledTimes(1);
+    expect(api.getTimeline).toHaveBeenCalledTimes(1);
+  });
+
+  it("compact_done aborts an in-flight reconcile: the pre-compact snapshot never lands", async () => {
+    vi.mocked(api.getTimeline).mockResolvedValue(
+      tlResp([snapshotItem({ item_id: "1.0", payload: "stable" })]),
+    );
+    let finishSnapshot!: (value: ConversationSnapshotResponse) => void;
+    vi.mocked(api.getConversationSnapshot).mockReset().mockImplementation(
+      () => new Promise((resolve) => { finishSnapshot = resolve; }),
+    );
+    const { result } = renderHook(() => useTimeline(42, vi.fn()), { wrapper });
+    await waitFor(() => expect(result.current.items[0]?.payload).toBe("stable"));
+
+    pushConnectionEvent({ type: "open" });
+    await waitFor(() => expect(api.getConversationSnapshot).toHaveBeenCalledTimes(1));
+
+    // A compact lands while the composed read is in flight. The read must be
+    // aborted — a pre-compact snapshot must not overwrite the post-compact
+    // window (the timeline query's own fetch is cancelled for the same reason).
+    pushEvent({ role: "compact_done", agent_id: 42 });
+
+    await act(async () => {
+      finishSnapshot(composedSnapshot(
+        tlResp([snapshotItem({ item_id: "1.0", payload: "pre-compact ghost" })]),
+      ));
+      await Promise.resolve();
+    });
+    expect(result.current.items.map((item) => item.payload)).toEqual(["stable"]);
+    expect(queryClient.getQueryData<TimelineResponse>(["timeline", 42]))
+      .toMatchObject({ items: [{ payload: "stable" }] });
   });
 });
 
@@ -1916,14 +2009,17 @@ describe("selected opening-gap repair", () => {
 describe("compact retention request ownership", () => {
   it("a reconnect-only compact replacement reattaches the previous session once", async () => {
     let compacted = false;
+    const tailWindow = () => tlResp(compacted ? postWindow() : [
+      snapshotItem({ item_id: "90.0", payload: "before gap" }),
+    ], true);
     vi.mocked(api.getTimeline).mockImplementation((_id, opts) => {
       if (opts?.before) return Promise.resolve(tlResp([
         snapshotItem({ item_id: "s1.gap.1.0", payload: "retained across reconnect" }),
       ], false));
-      return Promise.resolve(tlResp(compacted ? postWindow() : [
-        snapshotItem({ item_id: "90.0", payload: "before gap" }),
-      ], true));
+      return Promise.resolve(tailWindow());
     });
+    vi.mocked(api.getConversationSnapshot).mockReset().mockImplementation(() =>
+      Promise.resolve(composedSnapshot(tailWindow())));
     const { result } = renderHook(() => useTimeline(1, vi.fn()), { wrapper });
     await waitFor(() => expect(result.current.items[0]?.payload).toBe("before gap"));
     compacted = true;
@@ -1931,8 +2027,11 @@ describe("compact retention request ownership", () => {
     await waitFor(() => expect(result.current.items.map((item) => item.payload)).toContain("retained across reconnect"));
     expect(useTimelineStore.getState().compactReplaceSeq).toBe(1);
     pushConnectionEvent({ type: "open" });
-    await waitFor(() => expect(api.getTimeline).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(api.getConversationSnapshot).toHaveBeenCalledTimes(2));
     expect(useTimelineStore.getState().compactReplaceSeq).toBe(1);
+    // The re-attach refreshes only through the composed read; the single
+    // `before` fetch is the retention's own cross-segment read.
+    expect(api.getTimeline).toHaveBeenCalledTimes(2);
     expect(vi.mocked(api.getTimeline).mock.calls.filter((call) => call[1]?.before)).toHaveLength(1);
   });
 

@@ -2280,6 +2280,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/{agent_id}/conversation-snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Conversation Snapshot
+         * @description Compose the three conversation reads in one round trip.
+         *
+         *     Calls the standalone routes' own functions — no duplicated logic. A
+         *     nonexistent agent 404s through the timeline read, matching
+         *     `GET .../timeline` (token usage and pending tolerate absence, but are not
+         *     reached then).
+         */
+        get: operations["get_conversation_snapshot_api_agents__agent_id__conversation_snapshot_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/config/default-model": {
         parameters: {
             query?: never;
@@ -4805,6 +4830,20 @@ export interface components {
             tokens: number;
             /** Children */
             children?: components["schemas"]["ContextSection"][];
+        };
+        /**
+         * ConversationSnapshotResponse
+         * @description The selected agent's three conversation read models, one point in time.
+         *
+         *     `timeline` carries the same head window `GET .../timeline` serves (no
+         *     cursor); `token_usage` and `pending` mirror their standalone endpoints
+         *     section-for-section (drift is caught by the side-by-side contract test).
+         */
+        ConversationSnapshotResponse: {
+            timeline: components["schemas"]["TimelineResponse"];
+            token_usage: components["schemas"]["TokenUsageResponse"];
+            /** Pending */
+            pending: components["schemas"]["PendingInbound"][];
         };
         /**
          * DefaultModelView
@@ -10671,6 +10710,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ResolvedConfigView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_conversation_snapshot_api_agents__agent_id__conversation_snapshot_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationSnapshotResponse"];
                 };
             };
             /** @description Validation Error */
