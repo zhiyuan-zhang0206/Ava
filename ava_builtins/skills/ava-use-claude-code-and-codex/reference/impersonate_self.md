@@ -24,9 +24,9 @@ workspace and pass that directory as the spawn workspace argument, so the
 workspace is directly the impersonator's working directory (other locations
 are not forbidden; this is the recommended default). A workspace that already
 carries a live canonical generation is refused (`--cancel-generation` it
-first). Only the Codex path is live — Claude Code's takeover launch path is
-still being reworked (task #3688), and `spawn_claude.py --impersonate-self`
-refuses to run.
+first). Both launch paths are live: `spawn_claude.py --impersonate-self` takes
+the same inline `--brief`; its executor starts the Claude Monitor relay itself,
+from the briefing and the request output.
 
 The two states, and nothing else:
 

@@ -39,7 +39,7 @@ def bootstrap_message(
         "when issuing the request so the native relay uses this session's owner."
         if provider == "codex"
         else "Immediately start the Claude Monitor relay with --session <returned id> and the "
-        "returned relay credential, as described in the guide."
+        "returned relay credential, as the request output instructs."
     )
     return (
         f"You will take over Ava agent {agent_id}, the agent that launched you. "

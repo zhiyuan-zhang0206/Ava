@@ -284,8 +284,8 @@ a takeover reads no files. The workspace must not carry a live canonical
 generation (`--cancel-generation <generation>` first). The takeover generation
 is recorded without files or supervisor — its coding session alone is its
 liveness signal — so do not start `watch_work.py` or any other file watcher
-for it. `spawn_claude.py --impersonate-self` refuses to launch: Claude's
-file-less path is still being reworked (task #3688) — use Codex.
+for it. The same command works with `spawn_claude.py` — its briefing starts
+the executor's own Claude Monitor relay.
 
 The full procedure is [Let the coding agent take over your identity](reference/impersonate_self.md);
 the takeover process's own operating manual is the `impersonator-guide` skill.
