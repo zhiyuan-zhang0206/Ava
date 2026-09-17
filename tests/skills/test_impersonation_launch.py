@@ -125,8 +125,12 @@ def test_app_server_wait_accepts_a_bound_socket() -> None:
     try:
         module._wait_for_app_server(f"unix://{path}", timeout=5.0)
     finally:
-        listener.close()
+        # Join before closing the listener: under CI load the accept thread can
+        # be scheduled only after the waiter returns; closing first makes the
+        # pending accept() raise EBADF on a dead fd and the observation this
+        # test asserts is lost (backend shard 6/16 red, 2026-09-17).
         thread.join(timeout=5)
+        listener.close()
         shutil.rmtree(short_dir, ignore_errors=True)
     assert accepted == [True]
 
