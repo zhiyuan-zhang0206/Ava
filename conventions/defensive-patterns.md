@@ -41,9 +41,12 @@ process's ancestry — never against the inherited environment: only the job's
 direct child reads `XPC_SERVICE_NAME`, every exec'd descendant reads `"0"`, and
 a guard keyed on that value silently misses exactly where converges run
 ([`postmortems/0008`](../postmortems/0008-the-inherited-scheduler-identity-can-lie.md)).
-The label comparison may stay as a cheap fast path, never as the proof. On
-proven ownership, leave the durable spec untouched and defer replacement to an
-external converge so the pending change remains detectable.
+The label comparison may stay as the direct child's fast path (a match
+defers; only the direct child has ever matched), never as the proof for
+descendant callers, which read `"0"` and must prove ownership against the
+live process tree. On proven ownership, leave the durable spec untouched and
+defer replacement to an external converge so the pending change remains
+detectable.
 Evidence: [`postmortems/0005`](../postmortems/0005-a-supervisor-cannot-replace-itself.md).
 
 ### A flag cannot fix the rollout that introduces it

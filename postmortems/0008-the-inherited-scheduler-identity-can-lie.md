@@ -18,7 +18,8 @@ a second time, but the guard added then never fired: it keyed on the inherited
 DIRECT child — every exec'd descendant reads `"0"`, which is exactly where
 converges run. Registration now proves ownership against the scheduler's own
 view (the job's live pid inside this process's ancestry); the environment
-comparison remains only a fast path.
+comparison remains as the direct child's fast path — a match defers — never
+as the proof for descendants.
 
 ## Timeline
 
@@ -73,18 +74,23 @@ Escape analysis:
 
 - `shared.platform.descends_from_launchd_job(label)`: asks `launchctl print`
   for the job's live pid and walks this process's ancestry with `ps`;
-  `launchd_job_loaded` shares the loaded-verdict helper. Proven ownership
-  defers; everything else proceeds as before.
+  one shared print resolution with `launchd_job_loaded`, which reports the
+  loaded verdict the gate layer's `_job_loaded` checks also carry (the shared
+  surface they can converge onto). Proven ownership defers; everything else
+  proceeds as before.
 - `shared/os_cron._register_macos` and
   `shared/os_watchdog_probe._register_macos` (the repo-wide call sites of
-  `launchd_job_label`, verified by grep) defer on proven ancestry; the env
-  comparison stays as a cheap fast path, never the proof.
+  `launchd_job_label`, verified by grep) defer on proven ancestry, with the env
+  label match kept as the direct child's fast path; the comparison never
+  stands as the proof for descendants.
 - Tests: `test_register_macos_defers_when_ancestry_proves_the_job` (env reads
   `"0"`, ancestry proves self -> defer; the watchdog suite pins its twin) plus
   siblings — env-zero external reload still proceeds, and platform-level walk
   semantics (not loaded / not running / unreadable ancestor -> not proof).
-  Red battery: with the pre-fix source restored, the three new ownership guards
-  fail (the env-only guard falls through to bootout).
+  Red battery: with the guard logic restored to env-only, the two new defer
+  guards fail — `test_register_macos_defers_when_ancestry_proves_the_job`,
+  `test_probe_defers_when_ancestry_proves_the_job` (the env-only guard falls
+  through to bootout).
 - Validated on the host itself BEFORE shipping: a disposable LaunchAgent
   reproduced the env behaviour and the pid-walk detected ownership
   (SELF-FOUND), so the fix's mechanism is observed, not assumed.
