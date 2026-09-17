@@ -1666,6 +1666,91 @@ def test_watchdog_probe_switch_off_registers_again(
     assert unregistered == []
 
 
+# --- hold watchdog registration --------------------------------------------
+# One job per HOME: the maintenance hold is host-level state, so a box
+# carrying two capabilities completes it in one place. Retired under the root
+# supervisor with the probe's session/root split.
+
+
+def _record_hold_registrations(monkeypatch: pytest.MonkeyPatch) -> list[bool]:
+    seen: list[bool] = []
+    monkeypatch.setattr("shared.os_hold_watchdog.register_hold_watchdog", lambda: seen.append(True))
+    return seen
+
+
+def _record_hold_unregistrations(monkeypatch: pytest.MonkeyPatch) -> list[bool]:
+    seen: list[bool] = []
+    monkeypatch.setattr(
+        "shared.os_hold_watchdog.unregister_hold_watchdog", lambda: seen.append(True)
+    )
+    return seen
+
+
+def test_hold_watchdog_registers_once_per_home(
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A single box runs BOTH watchdogs but holds ONE maintenance journal; the
+    registration count must not follow the capability fan-out."""
+    registered = _record_hold_registrations(monkeypatch)
+    unregistered = _record_hold_unregistrations(monkeypatch)
+    _converge.ensure_hold_watchdog(
+        _ctx(tmp_path, home, roles=frozenset({"gateway", "agent-runner"}))  # pyright: ignore[reportUnknownArgumentType]
+    )
+    assert registered == [True]
+    assert unregistered == []
+
+
+def test_hold_watchdog_root_driven_retires(
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.services, "root_driver_enabled", True)
+    registered = _record_hold_registrations(monkeypatch)
+    unregistered = _record_hold_unregistrations(monkeypatch)
+    _converge.ensure_hold_watchdog(_ctx(tmp_path, home, roles=frozenset({"gateway"})))  # pyright: ignore[reportUnknownArgumentType]
+    assert registered == []
+    assert unregistered == [True]
+
+
+def test_hold_watchdog_retirement_not_gated_on_os_jobs(
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Deregistration must work where registration is forbidden (the same rule
+    the watchdog probe's retirement follows)."""
+    from shared import os_cron
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.services, "root_driver_enabled", True)
+    monkeypatch.setattr(os_cron, "os_jobs_enabled", lambda: False)
+    unregistered = _record_hold_unregistrations(monkeypatch)
+    _converge.ensure_hold_watchdog(_ctx(tmp_path, home, roles=frozenset({"gateway"})))  # pyright: ignore[reportUnknownArgumentType]
+    assert unregistered == [True]
+
+
+def test_hold_watchdog_switch_off_registers_again(
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.services, "root_driver_enabled", False)
+    registered = _record_hold_registrations(monkeypatch)
+    unregistered = _record_hold_unregistrations(monkeypatch)
+    _converge.ensure_hold_watchdog(
+        _ctx(tmp_path, home, roles=frozenset({"gateway", "agent-runner"}))  # pyright: ignore[reportUnknownArgumentType]
+    )
+    assert registered == [True]
+    assert unregistered == []
+
+
+def test_hold_watchdog_step_runs_on_both_roles():
+    """Not gateway-gated: a runner-only box carries the same host-level hold
+    and must complete it too."""
+    step = next(s for s in _converge.CONVERGE_STEPS if s.name == "hold watchdog job")
+    assert step.roles == _converge.ALL_ROLES
+    assert step.requires_unit_config is True
+
+
 # --- stale schtasks reap ---------------------------------------------------
 # A home-slug change leaves ghost tasks firing under the old \Ava\ folder,
 # racing the current slug's /Create on every converge (win 2026-08-11, task

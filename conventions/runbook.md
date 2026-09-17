@@ -608,6 +608,28 @@ read by the watchdogs each tick) — the alarm and the manual steps in
 read the attempt's outcome from the host's record
 (`stranded_hold_recovery_note`) and `$AVA_HOME/logs/hold-recover-<epoch>.log`.
 
+A **post-stop hold whose owner is gone is also completed once, out-of-band**
+(task #3887). #3142's completion above needs a live watchdog round and a
+reachable database; a FULL stop shape has neither — the 2026-09-17 S3 blackout
+left 110 minutes of downtime with only the OS scheduler alive (task #3719). So
+the OS schedule carries a second, independent job: `ava cluster hold-watchdog`
+(one per home, ~5 min cadence), which reads only host-local state — the hold
+journal, its shepherding identity, the updater handoff/updater lock,
+orchestration sessions, the held-stop marker, the lifecycle lock — and, when
+the hold is provably ownerless (recorded shepherd DEAD, nothing executing, no
+failed receipts, post-stop phase, past its age bound — 30 minutes,
+`AVA_HOLD_WATCHDOG_MIN_AGE_SECONDS`), completes it once through the same
+stop/start/resume legs, in its own process (no spawn channel: `ava start` is
+what brings the database back). One attempt per hold generation (local
+CAS `$AVA_HOME/state/hold-watchdog-attempt`, 900s cooldown); a hold released
+while an attempt is in flight is recorded as rescued, never as completed.
+Kill-switch: `AVA_STRANDED_HOLD_RECOVERY` (shared with #3142 — the field is
+settings-lite resolvable, so on a gateway host an `.env` edit applies at the
+next job run; on a pure agent-runner the job resolves the process environment
+or the ON default — to withhold it there, `ava cluster hold-watchdog-unregister`
+removes the job outright). Audit: `$AVA_HOME/logs/hold-watchdog.log` (job log)
+plus a per-attempt `hold-watchdog-<epoch>.log`.
+
 A **rollout that stops making progress** is reclaimed by the gateway watchdog
 (`ops/controllers/stalled_rollout.py`) rather than waiting for a human. Every layer
 above asks whether the lock holder is *alive*; this one asks whether it is getting
