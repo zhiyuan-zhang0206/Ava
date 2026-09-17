@@ -196,7 +196,7 @@ def mark_reaped_and_notify_if_owner_still_terminated(
 
 
 async def reap_terminated_owner_watchers(
-    pool: ConnectionPool, *, timeout_s: float, batch: int
+    pool: ConnectionPool, *, timeout_s: float, batch: int, stop: asyncio.Event | None = None
 ) -> list[tuple[int, int]]:
     """Kill watcher sessions whose owner agent is terminated for good.
 
@@ -210,10 +210,16 @@ async def reap_terminated_owner_watchers(
     terminal, so the owner must be told to re-register if it still needs the
     schedule (the notice delivers on the owner's next resurrect; it never
     resurrects the owner itself).
+
+    A set ``stop`` defers the not-yet-started rows to the next pass (same
+    shutdown contract as ``_reap_expired_shells``): shutdown waits for the
+    in-flight dispatch, never for the rest of the batch.
     """
     rows = await asyncio.to_thread(terminated_owner_watcher_rows, pool, batch=batch)
     reaped: list[tuple[int, int]] = []
     for agent_id, session_id, machine in rows:
+        if stop is not None and stop.is_set():
+            break
         try:
             result = await cluster_rpc.dispatch_to_machine(
                 machine,

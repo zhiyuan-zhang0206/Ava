@@ -47,7 +47,15 @@ flushed, and its original continuation and resources finish. A restart
 arriving just after claim can allow another iteration before the next claim;
 this is not an instruction-level freeze. SDK dependencies stay available
 through this drain. Service stopping then closes new ops work and waits for
-already-admitted handlers and executor work before signalling services.
+already-admitted handlers and executor work before signalling services. A
+signalled gateway drains its in-flight connections under a finite budget
+(`gateway.gateway_graceful_shutdown_timeout_seconds`, default 30s — well inside
+this command's default 300s deadline); past the budget uvicorn cancels the
+remaining request and stream tasks and the lifespan cleanup runs, so an
+unfinished streaming response cannot hold the process open. The TTL reaper's
+serial remote-dispatch batches stop starting new dispatches once shutdown
+begins, so that cleanup waits for an in-flight dispatch, never the remaining
+batch — deferred rows are re-selected by the next boot's pass.
 
 The existing home-local journal survives a CLI crash, host reboot and an
 offline database. An incomplete drain or stop retains the hold and reports
