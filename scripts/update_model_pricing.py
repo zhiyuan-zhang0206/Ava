@@ -5,9 +5,10 @@ Provider adapters are intentionally strict and independent. A changed page
 shape, missing model, unknown meter, or unit invariant is an error: automation
 must never turn an upstream parsing mistake into a price used for billing.
 
-The page prices three catalog entries through two columns: `deepseek-flash`
-prices the retired deepseek-v4-flash / deepseek-v4-flash-vision-exp names
-(DeepSeek keeps accepting and billing them at the Flash price), and
+The page prices four catalog entries through two columns: the
+`deepseek-flash` column prices the canonical `deepseek-flash` id plus the
+retired deepseek-v4-flash / deepseek-v4-flash-vision-exp names (DeepSeek keeps
+accepting and billing them at the Flash price), and
 `deepseek-v4-pro` retires onto the Flash column at the page's published
 instant, recorded as the entry's future period. Peak windows are the page's
 daily UTC hours; the page scopes them Monday through Friday, so this ledger
@@ -64,9 +65,10 @@ _METERS = {
     "1M OUTPUT TOKENS": "output",
 }
 # Official page columns → the catalog entries each column prices. Since the
-# V4.1-Flash release (2026-09-10) three entries are priced through two
-# columns: footnote (1) keeps the retired deepseek-v4-flash and
-# deepseek-v4-flash-vision-exp names accepted and billed at the Flash price.
+# 2026-09-17 rename (task #3750) four entries are priced through two columns:
+# the flash column prices the canonical deepseek-flash id, and footnote (1)
+# keeps the retired deepseek-v4-flash and deepseek-v4-flash-vision-exp names
+# accepted and billed at the Flash price.
 # deepseek-v4.1-flash-expires-on-0910 is deliberately NOT priced from the
 # page: it is an internal beta the page never listed (announced 2026-09-08,
 # same pricing as v4-flash), its rates are pinned manually in the plugin +
@@ -74,7 +76,11 @@ _METERS = {
 # wired for a ~2-day model. An equality check below keeps the fetched page in
 # lockstep with this roster.
 _DEEPSEEK_COLUMNS: dict[str, tuple[str, ...]] = {
-    "deepseek-flash": ("deepseek-v4-flash", "deepseek-v4-flash-vision-exp"),
+    "deepseek-flash": (
+        "deepseek-flash",
+        "deepseek-v4-flash",
+        "deepseek-v4-flash-vision-exp",
+    ),
     "deepseek-v4-pro": ("deepseek-v4-pro",),
 }
 

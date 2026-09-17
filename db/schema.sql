@@ -1367,9 +1367,9 @@ CREATE TABLE cluster_defaults (
     updated_at TIMESTAMPTZ,
     updated_by TEXT
 );
--- Seed matches migrations/20260912T100020_default-model-deepseek-v4-flash.sql:
+-- Seed matches migrations/20260917T045040_default-model-deepseek-flash.sql:
 -- a fresh baseline must resolve the same default as a migrated prod DB.
-INSERT INTO cluster_defaults (id, llm_model) VALUES (1, 'deepseek-v4-flash');
+INSERT INTO cluster_defaults (id, llm_model) VALUES (1, 'deepseek-flash');
 
 -- ─────────────── schedules ───────────────
 -- Gateway-hosted schedules: persistent supervised sessions (a `script` + a

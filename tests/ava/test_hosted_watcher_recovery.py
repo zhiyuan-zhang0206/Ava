@@ -58,7 +58,7 @@ async def cold_host(
     agent_id = _agent_row
     db_conn.execute(
         "UPDATE agents_meta SET machine=%s,status='idling',config_overlay=%s WHERE id=%s",
-        (machine_name(), Jsonb({"llm_model": "deepseek-v4-flash"}), agent_id),
+        (machine_name(), Jsonb({"llm_model": "deepseek-flash"}), agent_id),
     )
     db_conn.commit()
     model = FakeListChatModel(responses=[])
@@ -98,7 +98,7 @@ async def cold_host(
         scheduler = TurnScheduler(host.run_turn)
         try:
             yield agent_id, host, scheduler
-            assert built and set(built) == {"deepseek-v4-flash"}
+            assert built and set(built) == {"deepseek-flash"}
             assert host.stats.turns_started > 0
         finally:
             await scheduler.aclose()

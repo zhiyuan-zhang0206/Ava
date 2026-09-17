@@ -391,7 +391,7 @@ def build_chat_model(
     registry default, else the provider default).
 
     Args:
-        model: e.g. `claude-sonnet-5` / `deepseek-v4-flash`.
+        model: e.g. `claude-sonnet-5` / `deepseek-flash`.
         thinking: cross-provider thinking switch (Anthropic Messages API
             shape). `{"type": "disabled"}` turns reasoning off where the
             provider supports it (short-text paths like label generation —

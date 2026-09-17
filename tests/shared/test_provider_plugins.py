@@ -66,6 +66,7 @@ _REPO_MODEL_VENDORS = {
     "claude-opus-5": "anthropic",
     "claude-sonnet-4-6": "anthropic",
     "claude-sonnet-5": "anthropic",
+    "deepseek-flash": "deepseek",
     "deepseek-v4-flash": "deepseek",
     "deepseek-v4-flash-vision-exp": "deepseek",
     "deepseek-v4-pro": "deepseek",
@@ -294,7 +295,7 @@ def test_zero_provider_plugins_fail_loud_and_remain_retryable(
 def test_repo_model_vendor_vocabulary_is_complete() -> None:
     ensure_provider_plugins_loaded()
 
-    assert len(_REPO_MODEL_VENDORS) == 35
+    assert len(_REPO_MODEL_VENDORS) == 36
     assert set(MODELS) == _REPO_MODEL_VENDORS.keys()
     # Catalog-only entries: a registered chat model pops its archive entry, so
     # what remains is the catalog-only services plus models the registry no
@@ -343,20 +344,20 @@ def test_repo_deepseek_provider_is_enabled_and_registers_complete_contract() -> 
     ensure_provider_plugins_loaded()
 
     deepseek_models = {
+        "deepseek-flash",
         "deepseek-v4-pro",
         "deepseek-v4-flash",
         "deepseek-v4-flash-vision-exp",
     }
     assert deepseek_models <= MODELS.keys()
-    # V4 Pro and the vision experiment stay registered (facts + final price)
-    # but are withdrawn from the spawn picker (user order 2026-09-10); both
-    # resolve to deepseek-v4-flash before provider construction.
-    assert set(SUPPORTED_MODELS["deepseek"]) == deepseek_models - {
-        "deepseek-v4-pro",
-        "deepseek-v4-flash-vision-exp",
-    }
-    assert MODELS["deepseek-v4-pro"].unavailable_fallback == "deepseek-v4-flash"
-    assert MODELS["deepseek-v4-flash-vision-exp"].unavailable_fallback == "deepseek-v4-flash"
+    # V4 Pro, the renamed-away V4 Flash id and the vision experiment stay
+    # registered (facts + final price) but are withdrawn from the spawn picker
+    # (user orders 2026-09-10 / 2026-09-17); all three resolve to
+    # deepseek-flash before provider construction.
+    assert set(SUPPORTED_MODELS["deepseek"]) == {"deepseek-flash"}
+    assert MODELS["deepseek-v4-pro"].unavailable_fallback == "deepseek-flash"
+    assert MODELS["deepseek-v4-flash"].unavailable_fallback == "deepseek-flash"
+    assert MODELS["deepseek-v4-flash-vision-exp"].unavailable_fallback == "deepseek-flash"
     assert pricing.model_vendor("deepseek-v4-pro") == "deepseek"
 
     from shared.lm.factory import _MODEL_KEY_MAP, provider_key_map

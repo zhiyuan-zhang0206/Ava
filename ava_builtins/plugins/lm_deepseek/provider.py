@@ -154,6 +154,29 @@ register(
         stop_spec=None,
     ),
     models={
+        # The provider's current canonical flash-tier name (user report
+        # 2026-09-17, task #3750: DeepSeek retired the V4 Flash name — the
+        # pricing page's footnote (1) now reads "Use `deepseek-flash` as the
+        # model name"). Same window, output cap, cutoff, effort vocabulary,
+        # tuning and price as the retired `deepseek-v4-flash` entry; it is the
+        # same model renamed, and old configurations resolve here.
+        "deepseek-flash": ModelSpec(
+            provider="deepseek",
+            spawnable=True,
+            context_window=1_000_000,
+            max_output_tokens=384_000,
+            knowledge_cutoff="2026-04",
+            model_identity="You are running on DeepSeek Flash.",
+            effort_levels=("high", "max"),
+            tuning=ModelTuning(
+                reasoning_effort="max",  # same as the retired v4 entries: Ava is not an auto-promoted harness
+                llm_stream_ttft_timeout_seconds=600.0,  # same documented 10-minute queue
+                # Same decision as every deepseek entry (2026-08-29): soft 374k /
+                # hard 512k on the 1M window — 0.512 / 0.374 exactly.
+                auto_compact_fraction=0.512,
+                compact_reminder_fraction=0.374,
+            ),
+        ),
         # Withdrawn from new selections 2026-09-10 (user order): DeepSeek serves
         # only the flash tier now, and its pricing page confirms V4 Pro's
         # orderly retirement — from 12:00 Beijing Time on 2026-09-14 (=
@@ -161,11 +184,11 @@ register(
         # billed at the V4.1 Flash price (the pricing periods below record that
         # succession). The entry stays registered so its facts, tuning and final
         # price remain; existing configurations keep working by resolving to
-        # `deepseek-v4-flash` before provider construction.
+        # `deepseek-flash` before provider construction.
         "deepseek-v4-pro": ModelSpec(
             provider="deepseek",
             spawnable=False,
-            unavailable_fallback="deepseek-v4-flash",
+            unavailable_fallback="deepseek-flash",
             context_window=1_000_000,
             max_output_tokens=384_000,
             knowledge_cutoff="2026-04",
@@ -192,9 +215,17 @@ register(
                 compact_reminder_fraction=0.374,
             ),
         ),
+        # Retired from new selections 2026-09-17 (user order, task #3750): the
+        # provider renamed the flash tier to `deepseek-flash` (the V4.1-Flash
+        # era's canonical name; its pricing page keeps the old
+        # `deepseek-v4-flash` name accepted and billed at the Flash price).
+        # The entry stays registered so its facts, tuning and price history
+        # remain; existing configurations keep working by resolving to
+        # `deepseek-flash` before provider construction.
         "deepseek-v4-flash": ModelSpec(
             provider="deepseek",
-            spawnable=True,
+            spawnable=False,
+            unavailable_fallback="deepseek-flash",
             context_window=1_000_000,
             max_output_tokens=384_000,
             knowledge_cutoff="2026-04",
@@ -217,11 +248,11 @@ register(
         # Withdrawn from new selections 2026-09-10 (user order): the vision
         # experiment is stopped. The entry stays registered so its facts, tuning,
         # media matrix and final price remain; existing configurations keep
-        # working by resolving to `deepseek-v4-flash` before provider construction.
+        # working by resolving to `deepseek-flash` before provider construction.
         "deepseek-v4-flash-vision-exp": ModelSpec(
             provider="deepseek",
             spawnable=False,
-            unavailable_fallback="deepseek-v4-flash",
+            unavailable_fallback="deepseek-flash",
             context_window=1_000_000,
             max_output_tokens=384_000,
             # No vision-specific cutoff published; carries the v4 family's value.
@@ -247,6 +278,51 @@ register(
         # spawn validation (unknown model) instead of silently running something else.
     },
     pricing={
+        # New id, new ledger row: a single open period carrying the flash
+        # column's current rates (checked against the official page
+        # 2026-09-17) — usage under this id can only begin with the rename,
+        # and the pre-rename rate history stays in the retired
+        # `deepseek-v4-flash` entry it succeeds (same single-current-period
+        # shape as deepseek-v4.1-flash-expires-on-0910).
+        "deepseek-flash": PriceRates(
+            cache_miss=0.15,
+            cache_hit=0.003,
+            output=0.6,
+            source_url="https://api-docs.deepseek.com/quick_start/pricing/",
+            source_checked_at="2026-09-17",
+            vendor="deepseek",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="0.15",
+                            cache_hit="0.003",
+                            output="0.6",
+                            windows=(
+                                PriceWindow(
+                                    start="01:00:00",
+                                    end="04:00:00",
+                                    cache_miss="0.3",
+                                    cache_hit="0.006",
+                                    output="1.2",
+                                ),
+                                PriceWindow(
+                                    start="06:00:00",
+                                    end="10:00:00",
+                                    cache_miss="0.3",
+                                    cache_hit="0.006",
+                                    output="1.2",
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
         "deepseek-v4-pro": PriceRates(
             cache_miss=0.15,
             cache_hit=0.003,

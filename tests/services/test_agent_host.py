@@ -1427,15 +1427,15 @@ class TestNormalizedModelConfig:
 
         await asyncio.wait_for(host.run_turn(1), 2)
 
-        assert [observation.model for observation in graph.observations] == ["deepseek-v4-flash"]
-        assert [observation.llm.name for observation in graph.observations] == ["deepseek-v4-flash"]
+        assert [observation.model for observation in graph.observations] == ["deepseek-flash"]
+        assert [observation.llm.name for observation in graph.observations] == ["deepseek-flash"]
         assert host.stats.config_normalized == 1
         # The once-per-state warning carries the agent and both ids, so a usage
         # row attributed to the withdrawn pin can be reconciled against it.
         assert [event for event, _ in warnings] == ["host_config_normalized"]
         assert warnings[0][1]["agent_id"] == 1
         assert warnings[0][1]["requested"] == "deepseek-v4-flash-vision-exp"
-        assert warnings[0][1]["resolved"] == "deepseek-v4-flash"
+        assert warnings[0][1]["resolved"] == "deepseek-flash"
 
     async def test_a_withdrawn_pin_normalizes_and_an_available_pin_is_untouched(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
@@ -1460,7 +1460,7 @@ class TestNormalizedModelConfig:
         await asyncio.wait_for(host.run_turn(2), 2)
 
         assert [observation.model for observation in graph.observations] == [
-            "deepseek-v4-flash",
+            "deepseek-flash",
             "gemini-3.7-flash",
         ]
         assert host.stats.config_normalized == 1
@@ -1484,14 +1484,12 @@ class TestNormalizedModelConfig:
 
         await asyncio.wait_for(host.run_turn(1), 2)
         await asyncio.wait_for(host.run_turn(1), 2)
-        rows[1] = _Row(overlay={"llm_model": "deepseek-v4-flash"})
+        rows[1] = _Row(overlay={"llm_model": "deepseek-flash"})
         await asyncio.wait_for(host.run_turn(1), 2)
 
         assert warnings == ["host_config_normalized"]
         assert host.stats.config_normalized == 2
-        assert [observation.model for observation in graph.observations] == [
-            "deepseek-v4-flash"
-        ] * 3
+        assert [observation.model for observation in graph.observations] == ["deepseek-flash"] * 3
 
     async def test_an_unregistered_pin_is_rejected_not_normalized(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch

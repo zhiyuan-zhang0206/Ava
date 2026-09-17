@@ -58,7 +58,7 @@ class TestGet:
         with TestClient(app) as client:
             resp = client.get("/api/config/default-model")
         assert resp.status_code == 200, resp.text
-        assert resp.json() == {"model": "deepseek-v4-flash", "source": "config"}
+        assert resp.json() == {"model": "deepseek-flash", "source": "config"}
 
     def test_resolves_a_withdrawn_cluster_row(self, db_conn: psycopg.Connection) -> None:
         """A row written while its model was still spawnable keeps the id; the
@@ -71,15 +71,15 @@ class TestGet:
         with TestClient(app) as client:
             resp = client.get("/api/config/default-model")
         assert resp.status_code == 200, resp.text
-        assert resp.json() == {"model": "deepseek-v4-flash", "source": "cluster"}
+        assert resp.json() == {"model": "deepseek-flash", "source": "cluster"}
 
 
 class TestPut:
     def test_accepts_a_spawnable_model(self) -> None:
         with TestClient(app) as client:
-            resp = client.put("/api/config/default-model", json={"model": "deepseek-v4-flash"})
+            resp = client.put("/api/config/default-model", json={"model": "deepseek-flash"})
         assert resp.status_code == 200, resp.text
-        assert resp.json() == {"model": "deepseek-v4-flash", "source": "cluster"}
+        assert resp.json() == {"model": "deepseek-flash", "source": "cluster"}
 
     def test_rejects_an_unknown_model(self) -> None:
         """Fail fast at the write site: a bad id stored here would only surface at a

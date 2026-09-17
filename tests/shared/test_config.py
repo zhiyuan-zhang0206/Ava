@@ -694,10 +694,10 @@ def test_sdk_nameerror_hint_enabled_config_contract() -> None:
 
 
 def test_llm_model_code_default_is_deepseek_flash() -> None:
-    """An unset AVA_MODEL must fall back to deepseek-v4-flash (user ruling 2026-09-10)."""
+    """An unset AVA_MODEL must fall back to deepseek-flash (user rulings 2026-09-10 / 2026-09-17)."""
     from shared.config.lm import LmSettings
 
-    assert LmSettings.model_fields["llm_model"].default == "deepseek-v4-flash"
+    assert LmSettings.model_fields["llm_model"].default == "deepseek-flash"
 
 
 # --- agent_communication_style: enum + legacy-boolean alias ---

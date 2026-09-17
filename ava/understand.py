@@ -51,7 +51,7 @@ from shared.lm._effort import (
 from shared.lm.attach_constants import ATTACH_MEDIA_MIME
 
 # Provider split by modality is config-driven: settings.lm.understand_text_model
-# (default deepseek-v4-flash) handles literal strings / text files;
+# (default deepseek-flash) handles literal strings / text files;
 # settings.lm.understand_media_model (default gemini-3.5-flash) handles binary
 # media. The default IDs live in shared/lm/factory.py:SUPPORTED_MODELS. The media
 # model goes through the SAME provider factory as every other LLM path
