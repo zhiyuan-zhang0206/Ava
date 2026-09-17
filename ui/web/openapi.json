@@ -12992,6 +12992,54 @@
           "disk_pct": {
             "type": "number",
             "title": "Disk Pct"
+          },
+          "battery_percent": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Battery Percent"
+          },
+          "battery_power": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "ac",
+                  "battery"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Battery Power"
+          },
+          "battery_charging": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Battery Charging"
+          },
+          "battery_remaining_min": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Battery Remaining Min"
           }
         },
         "type": "object",
@@ -13006,7 +13054,7 @@
           "disk_pct"
         ],
         "title": "ResourceSample",
-        "description": "This machine's CPU / memory / disk at the moment it was read."
+        "description": "This machine's CPU / memory / disk / battery at the moment it was read."
       },
       "RestartAgentRequest": {
         "properties": {

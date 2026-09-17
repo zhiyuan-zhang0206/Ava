@@ -6698,7 +6698,7 @@ export interface components {
         };
         /**
          * ResourceSample
-         * @description This machine's CPU / memory / disk at the moment it was read.
+         * @description This machine's CPU / memory / disk / battery at the moment it was read.
          */
         ResourceSample: {
             /** Ts */
@@ -6717,6 +6717,14 @@ export interface components {
             disk_total_gb: number;
             /** Disk Pct */
             disk_pct: number;
+            /** Battery Percent */
+            battery_percent?: number | null;
+            /** Battery Power */
+            battery_power?: ("ac" | "battery") | null;
+            /** Battery Charging */
+            battery_charging?: boolean | null;
+            /** Battery Remaining Min */
+            battery_remaining_min?: number | null;
         };
         /**
          * RestartAgentRequest

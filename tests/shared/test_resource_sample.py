@@ -11,7 +11,13 @@ from __future__ import annotations
 import psutil
 import pytest
 
-from shared.resource_sample import _CPU_INTERVAL_S, ResourceSample, resource_sample
+from shared.resource_sample import (
+    _CPU_INTERVAL_S,
+    ResourceSample,
+    _battery_sample,
+    _parse_battery,
+    resource_sample,
+)
 
 
 class TestResourceSample:
@@ -62,3 +68,90 @@ class TestResourceSample:
         )
         with pytest.raises(RuntimeError, match="no psutil"):
             resource_sample()
+
+
+class TestBatterySample:
+    """Battery fields ride the same one-shot sample (task #3743).
+
+    macOS only, best-effort: read failures degrade to None fields instead of
+    failing the probe, and a machine with no battery reports nothing.
+    """
+
+    PMSET_CHARGING = (
+        "Now drawing from 'AC Power'\n"
+        " -InternalBattery-0 (id=26607715)\t80%; charging; 1:03 remaining present: true\n"
+    )
+    PMSET_DISCHARGING = (
+        "Now drawing from 'Battery Power'\n"
+        " -InternalBattery-0 (id=1)\t23%; discharging; 3:47 remaining present: true\n"
+    )
+    PMSET_NO_ESTIMATE = (
+        "Now drawing from 'Battery Power'\n"
+        " -InternalBattery-0 (id=1)\t42%; discharging; (no estimate) present: true\n"
+    )
+    PMSET_CHARGED = (
+        "Now drawing from 'AC Power'\n"
+        " -InternalBattery-0 (id=1)\t100%; charged; 0:00 remaining present: true\n"
+    )
+    PMSET_DESKTOP = "Now drawing from 'AC Power'\n"
+
+    def test_parse_charging_on_ac(self) -> None:
+        assert _parse_battery(self.PMSET_CHARGING) == {
+            "battery_percent": 80,
+            "battery_power": "ac",
+            "battery_charging": True,
+            "battery_remaining_min": 63,
+        }
+
+    def test_parse_discharging(self) -> None:
+        assert _parse_battery(self.PMSET_DISCHARGING) == {
+            "battery_percent": 23,
+            "battery_power": "battery",
+            "battery_charging": False,
+            "battery_remaining_min": 227,
+        }
+
+    def test_no_estimate_omits_remaining_only(self) -> None:
+        assert _parse_battery(self.PMSET_NO_ESTIMATE) == {
+            "battery_percent": 42,
+            "battery_power": "battery",
+            "battery_charging": False,
+        }
+
+    def test_charged_is_not_charging(self) -> None:
+        assert _parse_battery(self.PMSET_CHARGED) == {
+            "battery_percent": 100,
+            "battery_power": "ac",
+            "battery_charging": False,
+            "battery_remaining_min": 0,
+        }
+
+    def test_desktop_reports_nothing(self) -> None:
+        assert _parse_battery(self.PMSET_DESKTOP) == {}
+
+    def test_off_macos_reports_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import shared.resource_sample as module
+
+        monkeypatch.setattr(module.sys, "platform", "linux")
+        assert _battery_sample() == {}
+
+    def test_read_failure_degrades_to_no_fields(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import subprocess
+
+        import shared.resource_sample as module
+
+        def _raise_timeout(*_a: object, **_k: object) -> object:
+            raise subprocess.TimeoutExpired("pmset", 2)
+
+        monkeypatch.setattr(module.subprocess, "run", _raise_timeout)
+        assert _battery_sample() == {}
+
+    def test_sample_carries_battery_fields(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import shared.resource_sample as module
+
+        monkeypatch.setattr(module, "_battery_sample", lambda: _parse_battery(self.PMSET_CHARGING))
+        s = resource_sample()
+        assert s.battery_percent == 80
+        assert s.battery_power == "ac"
+        assert s.battery_charging is True
+        assert s.battery_remaining_min == 63
