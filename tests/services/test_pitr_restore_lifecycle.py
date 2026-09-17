@@ -37,6 +37,7 @@ from services.pitr.restore_proof import (
     publish_candidate_proof,
     verify_candidate_proof,
 )
+from shared import pg_tools
 
 
 def test_sandbox_config_ignores_restored_config_and_disables_host_side_effects(
@@ -446,6 +447,37 @@ def test_spawn_sandbox_postgres_runs_postgres_directly_in_our_group(
     assert kwargs["stdin"] is restore_postgres.subprocess.DEVNULL
     assert isinstance(kwargs["stdout"], int)
     assert isinstance(kwargs["stderr"], int)
+
+
+def test_spawn_sandbox_postgres_carries_the_start_env_fallback(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """Task #3829: a locale-less caller (launchd, a non-interactive drill
+    start) must not hand the sandbox postmaster a locale-less environment —
+    the spawn carries the same explicit start env as every other Postgres
+    start in this codebase (`pg_start_env`, Task #3754); on macOS the missing
+    locale is the "postmaster became multithreaded during startup" abort."""
+    captured: dict[str, Any] = {}
+
+    class FakePopen:
+        def __init__(self, argv: list[str], **kwargs: Any) -> None:
+            captured["env"] = kwargs.get("env")
+
+    monkeypatch.setattr(restore_postgres.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(pg_tools, "is_macos", lambda: True)
+    monkeypatch.delenv("LC_ALL", raising=False)
+    monkeypatch.delenv("LANG", raising=False)
+
+    _spawn_sandbox_postgres(
+        Path("/pg/postgres"),
+        tmp_path / "data",
+        tmp_path / "sandbox-postgresql.conf",
+        tmp_path / "sandbox-postgres.log",
+    )
+
+    env = captured["env"]
+    assert env["LC_ALL"] == "en_US.UTF-8"
+    assert env["PATH"] == os.environ["PATH"], "the caller's env is inherited otherwise"
 
 
 def test_wait_for_sandbox_identity_raises_crash_with_log_tail(
