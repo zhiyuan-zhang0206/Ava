@@ -539,13 +539,14 @@ def insert_compact_request_inbound(db: psycopg.Connection, agent_id: int) -> int
 def list_inbound_messages(
     db: psycopg.Connection,
     agent_id: int,
-    limit: int = 500,
+    limit: int,
 ) -> list[InboundRow]:
     """Read inbound_messages rows for the given agent (including
     done) in created_at ascending order.
 
     Used by the /timeline endpoint — fetched when merging three
-    sources for external inbound records.
+    sources for external inbound records. Callers state their own
+    bound: there is no default (task #3696).
     """
     with db.cursor() as cur:
         cur.execute(
