@@ -537,7 +537,10 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
 
     # ── Phase 0: pre-flight git fetch on every agent-runner ──────────────────
     # Every selected runner must confirm fetch. Missing acknowledgements abort
-    # before pause; no unavailable participant is silently excluded.
+    # before pause; no unavailable participant is silently excluded. With
+    # `fetch_via_gateway` on, the gateway (the cluster's only wall-crossing
+    # fetcher) has already fetched GitHub above, and each runner's fetch must
+    # come from the gateway — a wall-source origin refuses in the op.
     with _stage_telemetry("phase0_fetch"):
         phase0_failed = _run_preflight_fetch(agent_runners, restart_only=restart_only)
     if phase0_failed:

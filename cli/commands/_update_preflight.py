@@ -11,6 +11,8 @@ rollout with the cluster untouched:
 - `_resolve_rollout_target` — the single commit this rollout pins every node to.
 - `_run_preflight_fetch` — Phase 0: fan out a lightweight `git fetch` to every
   agent-runner, aborting on any missing acknowledgement before a host is paused.
+  Under `settings.general.fetch_via_gateway` each acknowledged fetch must also be
+  a non-wall source (`ops.ops_cluster.cluster_fetch_op` refuses otherwise).
 - `_rollout_preflight` — classify the imminent change + pin the target; returns
   an early rc for the docs-only / frontend-only fast paths.
 
@@ -108,16 +110,29 @@ def _run_preflight_fetch(
     been paused, stranding it indefinitely (the 2026-07-25 runner
     incident). Failing early here aborts the rollout with nothing paused.
 
+    Under `settings.general.fetch_via_gateway` (central fetch) the gateway's own
+    fetch has already run in preflight — the gateway is the cluster's only
+    wall-crossing fetcher — and each runner's fetch must come from the gateway: a
+    runner whose `origin` still addresses a wall host refuses in
+    `cluster_fetch_op` and surfaces here as a failed acknowledgement (still
+    before any pause).
+
     Every selected runner must answer. Unreachable is not proof of stopped
     execution: its native agents may still have database connectivity. Failure
     aborts before anyone pauses or any schema change begins.
     """
     import cli.commands as _ns
+    from shared.config import settings
 
     if not agent_runners or restart_only:
         return False
 
     print(f"\n→ Phase 0: pre-flight git fetch on {len(agent_runners)} agent-runner(s)")
+    if settings.general.fetch_via_gateway:
+        print(
+            "  central fetch (fetch_via_gateway): the gateway fetched GitHub; runners "
+            "must fetch from the gateway source (a wall-source origin is refused)"
+        )
     fetch_results = _ns._fan_out(
         agent_runners,
         "/api/cluster/fetch",
