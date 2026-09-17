@@ -129,3 +129,72 @@ def test_collector_allowed_for_home_accepts_station_capability(
     finally:
         reset_identity()
     assert observability.collector_allowed_for_home(home) is False
+
+
+# ── the read-boundary refusal predicate (2026-09-17) ───────────────────────
+# The gateway's read gate refuses observability reads on a non-station home
+# with no explicit Loki URL: 503 problem+json, code
+# observability_read_unavailable. Readers (the self-evolution collect path,
+# the weekly trigger) must recognize exactly this shape and no other.
+
+
+class _RefusalResponse:
+    """Duck-typed httpx.Response: status + parsed body (or a decode error)."""
+
+    def __init__(self, status_code: int, payload: object, *, json_error: bool = False) -> None:
+        self.status_code = status_code
+        self._payload = payload
+        self._json_error = json_error
+
+    def json(self) -> object:
+        if self._json_error:
+            raise ValueError("not json")
+        return self._payload
+
+
+_REFUSAL_BODY = {
+    "type": "about:blank",
+    "code": "observability_read_unavailable",
+    "status": 503,
+    "detail": "observability reads unavailable for this cluster; set AVA_TELEMETRY_LOKI_URL",
+    "retryable": True,
+}
+
+
+def test_refusal_detail_matches_the_no_observability_problem() -> None:
+    response = _RefusalResponse(503, _REFUSAL_BODY)
+    assert observability.observability_refusal_detail(response) == _REFUSAL_BODY["detail"]
+
+
+def test_refusal_detail_falls_back_to_the_default_detail() -> None:
+    """A problem body without a usable detail still names the state."""
+    response = _RefusalResponse(503, {"code": "observability_read_unavailable"})
+    assert (
+        observability.observability_refusal_detail(response)
+        == "observability reads unavailable for this cluster"
+    )
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        _RefusalResponse(503, {"code": "loki_query_budget_unavailable"}),
+        _RefusalResponse(503, "<html>a proxy's error page</html>"),
+        _RefusalResponse(503, {}, json_error=True),
+        _RefusalResponse(200, _REFUSAL_BODY),
+        _RefusalResponse(500, _REFUSAL_BODY),
+        object(),
+    ],
+    ids=[
+        "other-503-code",
+        "non-dict-body",
+        "unparseable-body",
+        "same-code-wrong-status",
+        "same-code-500",
+        "not-a-response",
+    ],
+)
+def test_refusal_detail_is_none_for_every_other_shape(response: object) -> None:
+    """Narrow on purpose: only 503 + the exact code count, so a transient
+    outage (or a proxy page) is never mistaken for the policy state."""
+    assert observability.observability_refusal_detail(response) is None

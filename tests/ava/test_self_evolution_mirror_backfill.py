@@ -65,9 +65,9 @@ def _consumer(backfill_mod: Any, rows: dict[str, list[dict[str, Any]]]) -> Any:
     return backfill_mod._mirror_fetch_factory(rows)
 
 
-def _no_records(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
-    """collect() stub for tests that only exercise the mirror reading."""
-    return []
+def _no_records(*args: Any, **kwargs: Any) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """collect_with_counts() stub for tests that only exercise the mirror reading."""
+    return [], {"seen": 0, "excluded_test": 0, "skipped_meta": 0}
 
 
 def test_consumer_dedups_by_id(backfill_mod: Any) -> None:
@@ -182,7 +182,9 @@ def test_backfill_wires_dedup_into_collect(
     monkeypatch.setattr(backfill_mod, "MIRROR_DIR", logs)
     captured: dict[str, list[dict[str, Any]]] = {}
 
-    def fake_collect(days: int, week: str, **kw: Any) -> list[dict[str, Any]]:
+    def fake_collect_with_counts(
+        days: int, week: str, **kw: Any
+    ) -> tuple[list[dict[str, Any]], dict[str, int]]:
         frm, to = kw.get("from_"), kw.get("to")
         # Consume the installed consumer inside collect() — the exact point the
         # real pipeline consumes it, while the temp rows still exist (Task
@@ -191,14 +193,15 @@ def test_backfill_wires_dedup_into_collect(
             backfill_mod.collect._fetch_events_window("telemetry", frm, to)
         )
         captured["audit"] = list(backfill_mod.collect._fetch_events_window("audit", frm, to))
-        return []
+        return [], {"seen": 0, "excluded_test": 0, "skipped_meta": 0}
 
-    monkeypatch.setattr(backfill_mod.collect, "collect", fake_collect)
+    monkeypatch.setattr(backfill_mod.collect, "collect_with_counts", fake_collect_with_counts)
 
-    path, missing = backfill_mod.backfill(1, "test-week")
+    path, missing, counts = backfill_mod.backfill(1, "test-week")
 
     assert [r["id"] for r in captured["telemetry"]] == [1, 2]
     assert [r["id"] for r in captured["audit"]] == [4]
+    assert counts == {"seen": 0, "excluded_test": 0, "skipped_meta": 0}
     assert missing == []
     assert path == tmp_path / "self_evolution" / "daily" / "test-week.jsonl"
     assert path.exists()
@@ -220,9 +223,9 @@ def test_backfill_reports_missing_days_and_exits_nonzero(
 
     monkeypatch.setattr(backfill_mod, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(backfill_mod, "MIRROR_DIR", logs)
-    monkeypatch.setattr(backfill_mod.collect, "collect", _no_records)
+    monkeypatch.setattr(backfill_mod.collect, "collect_with_counts", _no_records)
 
-    path, missing = backfill_mod.backfill(1, "test-week")
+    path, missing, _counts = backfill_mod.backfill(1, "test-week")
 
     assert missing == days[1:]
     assert path.exists()
@@ -247,7 +250,7 @@ def test_main_exits_zero_when_all_days_present(
         _write_mirror_day(logs, day, [])
     monkeypatch.setattr(backfill_mod, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(backfill_mod, "MIRROR_DIR", logs)
-    monkeypatch.setattr(backfill_mod.collect, "collect", _no_records)
+    monkeypatch.setattr(backfill_mod.collect, "collect_with_counts", _no_records)
     monkeypatch.setattr(sys, "argv", ["mirror_backfill.py", "1", "test-week"])
 
     with pytest.raises(SystemExit) as exc:
@@ -352,18 +355,21 @@ def test_backfill_merges_days_and_cleans_up(
     monkeypatch.setattr(backfill_mod, "MIRROR_DIR", logs)
     captured: dict[str, list[dict[str, Any]]] = {}
 
-    def fake_collect(days: int, week: str, **kw: Any) -> list[dict[str, Any]]:
+    def fake_collect_with_counts(
+        days: int, week: str, **kw: Any
+    ) -> tuple[list[dict[str, Any]], dict[str, int]]:
         frm, to = kw.get("from_"), kw.get("to")
         captured["telemetry"] = list(
             backfill_mod.collect._fetch_events_window("telemetry", frm, to)
         )
-        return []
+        return [], {"seen": 0, "excluded_test": 0, "skipped_meta": 0}
 
-    monkeypatch.setattr(backfill_mod.collect, "collect", fake_collect)
+    monkeypatch.setattr(backfill_mod.collect, "collect_with_counts", fake_collect_with_counts)
 
-    path, missing = backfill_mod.backfill(2, "test-week")
+    path, missing, counts = backfill_mod.backfill(2, "test-week")
 
     assert [r["id"] for r in captured["telemetry"]] == [1, 2]
+    assert counts == {"seen": 0, "excluded_test": 0, "skipped_meta": 0}
     assert missing == []
     assert path.exists()
     daily = tmp_path / "self_evolution" / "daily"
@@ -385,7 +391,7 @@ def test_backfill_restores_fetch_events_window(
         _write_mirror_day(logs, day, [])
     monkeypatch.setattr(backfill_mod, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(backfill_mod, "MIRROR_DIR", logs)
-    monkeypatch.setattr(backfill_mod.collect, "collect", _no_records)
+    monkeypatch.setattr(backfill_mod.collect, "collect_with_counts", _no_records)
     sentinel = object()
     monkeypatch.setattr(backfill_mod.collect, "_fetch_events_window", sentinel)
 
@@ -407,7 +413,7 @@ def test_backfill_sweeps_stale_orphan_temp_dirs(
         _write_mirror_day(logs, day, [])
     monkeypatch.setattr(backfill_mod, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(backfill_mod, "MIRROR_DIR", logs)
-    monkeypatch.setattr(backfill_mod.collect, "collect", _no_records)
+    monkeypatch.setattr(backfill_mod.collect, "collect_with_counts", _no_records)
     daily = tmp_path / "self_evolution" / "daily"
     daily.mkdir(parents=True)
     stale = daily / "mirror-backfill-deadbeef"
@@ -422,3 +428,44 @@ def test_backfill_sweeps_stale_orphan_temp_dirs(
 
     assert not stale.exists(), "stale orphan must be swept"
     assert fresh.exists(), "young dir must survive"
+
+
+def test_collect_from_mirror_returns_records_counts_missing_without_writing(
+    backfill_mod: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The daily scan's automatic fallback consumes collect_from_mirror()
+    directly: it must hand back (records, counts, missing_days) — counts feed
+    the daily sentinel — pass include_test through, and write NOTHING (the
+    scan owns the daily/<week>.jsonl write)."""
+    now = datetime.now(UTC)
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    days = _window_days(now, 1)
+    ts_in = (now - timedelta(hours=1)).isoformat()
+    _write_mirror_day(logs, days[0], [_row(1, ts_in), _row(1, ts_in), _row(2, ts_in)])
+    for day in days[1:]:
+        _write_mirror_day(logs, day, [])
+    monkeypatch.setattr(backfill_mod, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(backfill_mod, "MIRROR_DIR", logs)
+    captured: dict[str, Any] = {}
+
+    def fake_collect_with_counts(
+        days: int, week: str, **kw: Any
+    ) -> tuple[list[dict[str, Any]], dict[str, int]]:
+        frm, to = kw.get("from_"), kw.get("to")
+        captured["telemetry"] = list(
+            backfill_mod.collect._fetch_events_window("telemetry", frm, to)
+        )
+        captured["include_test"] = kw.get("include_test")
+        return [{"agent_id": 1, "label": "ok"}], {"seen": 1, "excluded_test": 0, "skipped_meta": 0}
+
+    monkeypatch.setattr(backfill_mod.collect, "collect_with_counts", fake_collect_with_counts)
+
+    records, counts, missing = backfill_mod.collect_from_mirror(1, "test-week", include_test=True)
+
+    assert [r["id"] for r in captured["telemetry"]] == [1, 2]  # duplicate id deduped
+    assert captured["include_test"] is True  # measurement flag passes through
+    assert records == [{"agent_id": 1, "label": "ok"}]
+    assert counts == {"seen": 1, "excluded_test": 0, "skipped_meta": 0}
+    assert missing == []
+    assert not (tmp_path / "self_evolution" / "daily" / "test-week.jsonl").exists()

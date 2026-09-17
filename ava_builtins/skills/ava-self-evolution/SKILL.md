@@ -270,8 +270,8 @@ that roughly daily. The batch command collects one day; Monday's summary
 collects seven. Failed/fumbled runs, an unexplained empty window, a missing
 scan, or a hard failure also wake this agent so a broken data source cannot hide.
 
-**Loki-failure fallback.** On dense windows `/api/events` can 500; run
-`reference/mirror_backfill.py <days> [week]` — collect from the local event mirror (rows deduped by event id).
+**Read-failure fallback.** Dense-window `/api/events` 500s and no-observability refusals (`observability_read_unavailable`) fall back to the local event
+mirror: daily scan automatic, weekly count likewise; manual `reference/mirror_backfill.py <days> [week]`; detail: `reference/no-observability-fallback.md`.
 
 ## Cron integration
 

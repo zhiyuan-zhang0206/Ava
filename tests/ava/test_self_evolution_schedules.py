@@ -9,8 +9,9 @@ never int(None) crash, never a silent 0 that skips the week's deep run.
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -73,3 +74,87 @@ def test_count_events_raises_when_total_missing(
 
     with pytest.raises(RuntimeError, match="no total"):
         weekly_mod.count_events(datetime.now(UTC))
+
+
+# ── no-observability fallback (2026-09-17) ──────────────────────────────────
+
+
+class _StatusResp:
+    """httpx.Response-alike: a status + a parsed problem body. The refusal
+    path must check the body without ever calling raise_for_status."""
+
+    def __init__(self, status_code: int, payload: object) -> None:
+        self.status_code = status_code
+        self._payload = payload
+
+    def raise_for_status(self) -> None:
+        raise AssertionError("the refusal path must not raise_for_status")
+
+    def json(self) -> object:
+        return self._payload
+
+
+def test_count_events_falls_back_to_mirror_on_no_observability_refusal(
+    weekly_mod: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A no-observability cluster refuses /api/events reads (503
+    observability_read_unavailable — a policy state): the weekly trigger
+    counts the window from the local mirror instead of raising, so the
+    schedule's fire path cannot crash-loop there."""
+    refusal = _StatusResp(
+        503,
+        {
+            "code": "observability_read_unavailable",
+            "status": 503,
+            "detail": "observability reads unavailable for this cluster",
+        },
+    )
+    calls: list[dict[str, object]] = []
+
+    def get(
+        url: str,
+        *,
+        params: dict[str, object] | None = None,
+        headers: dict[str, object] | None = None,
+        timeout: object = None,
+    ) -> Any:
+        calls.append(dict(params or {}))
+        return refusal
+
+    monkeypatch.setattr(httpx, "get", get)
+
+    def _count_stub(_since: datetime) -> int:
+        return 12345
+
+    monkeypatch.setattr(weekly_mod, "_count_mirror_events", _count_stub)
+
+    assert weekly_mod.count_events(datetime.now(UTC)) == 12345
+    assert calls and calls[0]["with_total"] == 1  # the request shape is unchanged
+
+
+def test_count_mirror_events_filters_the_window_by_ts(
+    weekly_mod: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Mirror files partition rows by append day, not by ts, so a boundary
+    day's file holds rows from both sides of the window: the counter must
+    filter each line's ts to [since, now]. Missing day files count as zero."""
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    now = datetime.now(UTC)
+    since = now - timedelta(days=1)
+    in_window = (since + timedelta(hours=1)).isoformat()
+    before_window = (since - timedelta(hours=1)).isoformat()
+    after_window = (now + timedelta(minutes=5)).isoformat()
+
+    def row(ts: str) -> dict[str, object]:
+        return {"ts": ts, "category": "telemetry", "event_name": "turn_end"}
+
+    (logs / f"events-{since:%Y%m%d}.jsonl").write_text(
+        json.dumps(row(in_window)) + "\n" + json.dumps(row(before_window)) + "\n"
+    )
+    (logs / f"events-{now:%Y%m%d}.jsonl").write_text(
+        json.dumps(row(in_window)) + "\n" + json.dumps(row(after_window)) + "\n"
+    )
+    monkeypatch.setattr("shared.paths.logs_dir", lambda: logs)
+
+    assert weekly_mod._count_mirror_events(since) == 2  # in_window twice; edges dropped
