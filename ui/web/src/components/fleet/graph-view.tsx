@@ -318,24 +318,6 @@ export function GraphView({
     [statusLabels, t],
   );
 
-  // Stale age indicator — tick every 30s so "Xm ago" advances while the tab is open.
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNowMs(Date.now()), 30_000);
-    return () => clearInterval(timer);
-  }, []);
-
-  const snapshotAge = graph.snapshot_at ? nowMs - Date.parse(graph.snapshot_at) : null;
-  const snapshotMinutes = snapshotAge != null ? Math.floor(snapshotAge / 60_000) : null;
-  const snapshotAgeLabel =
-    snapshotMinutes != null
-      ? snapshotMinutes < 1
-        ? t("snapshotNow")
-        : snapshotMinutes < 60
-          ? t("snapshotMinutes", { count: snapshotMinutes })
-          : t("snapshotHours", { count: Math.floor(snapshotMinutes / 60) })
-      : null;
-
   return (
     <div className={cn("relative h-full w-full", OVERFLOW_HIDDEN)}>
       <ForceGraph
@@ -379,34 +361,11 @@ export function GraphView({
           />
         }
       />
-      {graph.stale ? (
-        <p
-          role="status"
-          className="pointer-events-none absolute right-3 top-3 inline-flex items-center gap-1 rounded border border-amber-500/30 bg-background/80 px-2 py-1 text-[10px] text-amber-600 backdrop-blur dark:text-amber-400"
-        >
-          <span aria-hidden className="size-1.5 rounded-full bg-amber-500" />
-          {snapshotAge
-            ? t("staleSnapshot", { age: snapshotAgeLabel ?? "" })
-            : t("staleLastKnown")}
-        </p>
-      ) : graph.telemetry_stale ? (
-        <p
-          role="status"
-          className="pointer-events-none absolute right-3 top-3 inline-flex items-center gap-1 rounded border border-border bg-background/80 px-2 py-1 text-[10px] text-muted-foreground backdrop-blur"
-        >
-          <span aria-hidden className="size-1.5 rounded-full bg-muted-foreground" />
-          {t("telemetryDegraded")}
-        </p>
-      ) : null}
-      {graph.truncated ? (
-        <p
-          role="status"
-          className="pointer-events-none absolute right-3 top-10 inline-flex items-center gap-1 rounded border border-orange-500/30 bg-background/80 px-2 py-1 text-[10px] text-orange-600 backdrop-blur dark:text-orange-400"
-        >
-          <span aria-hidden className="size-1.5 rounded-full bg-orange-500" />
-          {t("truncated")}
-        </p>
-      ) : null}
+      {/* Backend degradation markers (stale snapshot age, telemetry lag,
+          truncation) are deliberately NOT rendered: the graph shows its
+          agents/edges or the neutral empty state, and these signals go to
+          internal alerting instead of the user surface (user ruling
+          2026-09-18, task #3893). */}
       {paintedNodes.length === 0 ? (
         <p className={cn("absolute inset-0 items-center justify-center text-xs text-muted-foreground", FLEX)}>
           {loading || rosterPending ? t("loading") : error ? t("unavailable") : t("empty")}

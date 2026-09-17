@@ -772,17 +772,9 @@
       "legend": "Agent 图例",
       "ariaLabel": "编队关系图",
       "window": "图时间窗口",
-      "staleSnapshot": "数据过期 — 快照来自 {age}",
-      "staleLastKnown": "数据过期 — 使用最后的已知图",
-      "telemetryDegraded": "遥测降级 — 更新可能延迟",
-      "truncated": "已截断 — 达到边数上限",
       "loading": "加载中…",
       "unavailable": "图不可用。",
-      "empty": "没有可绘制的 Agent。",
-      "snapshotNow": "不足一分钟前",
-      "snapshotMinutes": "{count} 分钟前",
-      "snapshotHours": "{count} 小时前",
-      "snapshotDays": "{count} 天前"
+      "empty": "没有可绘制的 Agent。"
     },
     "task": {
       "status": {
