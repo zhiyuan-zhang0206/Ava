@@ -160,13 +160,14 @@ class GatewaySettings(EnvSettings):
         default=5.0,
         alias="AVA_STATUS_PROBE_BACKOFF_BASE_SECONDS",
         description=(
-            "First re-probe gap (seconds) for a machine whose most recent "
-            "status_probe was unreachable; each consecutive failure doubles it, "
-            "capped at status_probe_backoff_cap_seconds (task #3507 lifted the "
-            "min(5*2**n, 300) schedule literals into config under the "
-            "numeric-limits convention). 5s is the panel poll cadence: the "
-            "first re-dial waits one poll interval instead of dialing a down "
-            "host on every poll."
+            "Base (seconds) of the per-machine status_probe re-probe backoff "
+            "(task #3507 lifted the min(5*2**n, 300) schedule literals into "
+            "config under the numeric-limits convention). The window after n "
+            "consecutive failures is base * 2**n seconds - the first re-dial "
+            "waits 10s at this default - capped at "
+            "status_probe_backoff_cap_seconds. 5s ties the base to the panel "
+            "poll cadence, so an unreachable host is not dialed more than once "
+            "per poll interval at the low end."
         ),
         json_schema_extra={
             "restart_required": "gateway",
