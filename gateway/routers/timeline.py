@@ -446,7 +446,10 @@ def get_timeline(
     with request.app.state.db_pool.connection() as conn:
         if not agent_exists(conn, agent_id):
             raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
-        # All chat inbound anchors, no limit — anchors drive ts alignment.
+        # All chat inbound anchors — they drive the ts alignment below. The
+        # 100_000 ceiling is a protective bound, not a page size: truncation
+        # would drop alignment anchors, so the read stays a literal rather
+        # than config (task #3696 exception inventory).
         chat_anchors = (
             []
             if historical_request or (cursor is None and before is not None)
