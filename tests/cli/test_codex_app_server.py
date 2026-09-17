@@ -222,9 +222,21 @@ def test_default_control_endpoint_follows_codex_home(
 def test_live_submit_treats_a_bare_unix_endpoint_as_the_default_socket(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
-    sock = tmp_path / "app-server-control" / "app-server-control.sock"
-    sock.parent.mkdir(parents=True)
+    """A bare ``unix://`` resolves through ``default_control_socket()``.
+
+    The bind lives at ``tmp_path`` directly: the production suffix
+    ``app-server-control/app-server-control.sock`` (42 bytes) pushes a CI
+    runner's deep pytest tmp root over the 107-byte sun_path limit — the first
+    CI run failed exactly there with ``AF_UNIX path too long``. The resolver is
+    pinned to a short path; its CODEX_HOME mapping stays covered by
+    ``test_default_control_endpoint_follows_codex_home``.
+    """
+    sock = tmp_path / "codex.sock"
+
+    def short_default_socket() -> Path:
+        return sock
+
+    monkeypatch.setattr(codex_app_server, "default_control_socket", short_default_socket)
     server = FakeAppServer()
     server.start(sock)
     try:
