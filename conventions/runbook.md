@@ -1518,6 +1518,8 @@ Normal `ava start` resumes only after readiness. See the
 [pause/stop procedure](graceful-maintenance.md) for partial stop, coordinated
 multi-machine ordering, failure recovery and the first-deployment limitation.
 
+Stop-class drills and operations: see the executor-cancellation insurance and hold handover section of [graceful maintenance](graceful-maintenance.md).
+
 `ava cluster update` additionally owns checkout, dependency, schema, readiness
 and recovery stages. Use its installed implementation and dry-run; these are
 not a manual checkout recipe. A merged PR does not replace an already imported
