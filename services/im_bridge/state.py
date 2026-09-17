@@ -81,7 +81,11 @@ def _load_outbox() -> list[_OutboxEntry]:
     if not path.exists():
         return []
     entries: list[_OutboxEntry] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    # Split on "\n" only - str.splitlines() also breaks on U+0085 /
+    # U+2028 / U+2029, which are legal unescaped inside a JSON string
+    # (the writer emits them raw); a split there truncates the line and
+    # the entry is dropped.
+    for line in path.read_text(encoding="utf-8").split("\n"):
         stripped = line.strip()
         if not stripped:
             continue

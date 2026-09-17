@@ -1242,6 +1242,34 @@ def test_outbox_replay_delivers_and_clears(monkeypatch: pytest.MonkeyPatch, tmp_
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("ch", ("\u0085", "\u2028", "\u2029"), ids=("U+0085", "U+2028", "U+2029"))
+def test_outbox_round_trip_keeps_unicode_line_separators(
+    ch: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """Regression (#3880, sibling of #1032): a queued message whose text
+    carries U+0085 / U+2028 / U+2029 must survive the outbox round-trip.
+    splitlines() split the JSONL line there, the reload skipped the entry
+    ("skipping malformed outbox line"), and the next full rewrite erased it
+    from disk — the drop #1032 exists to prevent."""
+    monkeypatch.setattr(settings.general, "ava_home", tmp_path)
+    gateway = FakeGateway(send_failures=10)
+    core = _core(gateway)
+    adapter = FakeTypingAdapter()
+    core.register(adapter)
+    state = core._get_or_create_state("telegram", "12345")
+    state.current_agent_id = 405
+    text = f"a{ch}b"
+    msg = InboundMessage(channel="telegram", chat_id="12345", text=text)
+
+    async def scenario() -> None:
+        await core.handle_inbound(msg)  # enqueue fails → outboxed
+        outbox = state_mod._load_outbox()
+        assert len(outbox) == 1
+        assert outbox[0].text == text
+
+    asyncio.run(scenario())
+
+
 def test_push_snapshot_watermark_is_per_chat() -> None:
     """Regression (audit round 2, P1): the watermark used to be keyed by
     agent alone, so two chats switched to the same agent clobbered each
