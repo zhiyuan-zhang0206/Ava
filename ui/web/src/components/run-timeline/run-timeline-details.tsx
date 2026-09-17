@@ -131,11 +131,15 @@ export function TurnDetailPanel({
   onClose: () => void;
 }) {
   const facts = turnFacts(row, labels);
+  // `relative z-10` (task #3825): the compare view paints its cross-lane arrow
+  // overlay above the charts; a panel must sit above that overlay (and below
+  // the z-20 popover), or arrows crossing this lane cover the panel card when
+  // the layouts stack under `lg`.
   return (
     <aside
       role="region"
       aria-label={labels.turnDetails}
-      className="h-fit space-y-4 rounded-[10px] border border-border bg-card p-4 text-foreground"
+      className="relative z-10 h-fit space-y-4 rounded-[10px] border border-border bg-card p-4 text-foreground"
     >
       <header className={cn(FLEX, "items-start justify-between gap-3")}>
         <div>
@@ -222,11 +226,13 @@ export function LayerDetailPanel({
   labels: RunTimelineChartLabels;
   onClose: () => void;
 }) {
+  // Same layering as TurnDetailPanel (task #3825): above the compare arrow
+  // overlay, below the popover.
   return (
     <aside
       role="region"
       aria-label={labels.layerDetails}
-      className="h-fit space-y-4 rounded-[10px] border border-border bg-card p-4 text-foreground"
+      className="relative z-10 h-fit space-y-4 rounded-[10px] border border-border bg-card p-4 text-foreground"
     >
       <header className={cn(FLEX, "items-start justify-between gap-3")}>
         <div>
