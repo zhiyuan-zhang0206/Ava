@@ -106,7 +106,7 @@ function ag(agent_id: number, overrides: Partial<AgentRowType> = {}): AgentRowTy
     machine: "test-machine",
     supports_vision: true,
     liveness_state: "online",
-    notices_awaiting_response: [],
+    awaiting_response_count: 0, highest_notice_priority: null,
     unread_notice_count: 0,
     heartbeat_paused_until: null,
     ...overrides,
@@ -489,7 +489,7 @@ describe("AgentRow awaiting-reply badge gating (notification.awaiting_reply)", (
     const { queryByTitle } = render(
       <AgentRow
         {...baseProps}
-        agent={ag(1, { notices_awaiting_response: [notice] })}
+        agent={ag(1, { awaiting_response_count: ([notice]).length, highest_notice_priority: ([notice])[0]?.priority ?? null })}
         depth={0}
         ancestorsIsLast={[]}
       />,
@@ -501,7 +501,7 @@ describe("AgentRow awaiting-reply badge gating (notification.awaiting_reply)", (
     const { getByText } = renderWithSettings(
       <AgentRow
         {...baseProps}
-        agent={ag(1, { notices_awaiting_response: [notice] })}
+        agent={ag(1, { awaiting_response_count: ([notice]).length, highest_notice_priority: ([notice])[0]?.priority ?? null })}
         depth={0}
         ancestorsIsLast={[]}
       />,

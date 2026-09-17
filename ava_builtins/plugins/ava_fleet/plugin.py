@@ -39,9 +39,7 @@ __description__: str = (
 
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from typing import Any, TypedDict, cast
-
-import psycopg
+from typing import Any, TypedDict
 
 import ava
 import ava._boot
@@ -51,11 +49,6 @@ from shared.live_announce import publish_agent_updated_sync
 from shared.priority import validate_priority
 
 from . import task_registry
-
-# ava.DB is a lazy proxy that transparently forwards to the real psycopg
-# connection; the shared.live_announce helpers below want the concrete Connection
-# type, so name the proxy as what it stands in for at this one boundary.
-_DB = cast(psycopg.Connection, ava.DB)
 
 
 def set_label(text: str) -> None:
@@ -73,7 +66,7 @@ def set_label(text: str) -> None:
             source="self",
             payload={"new_label": text or None},
         )
-    publish_agent_updated_sync(_DB, ava._boot.agent_id())
+    publish_agent_updated_sync(ava._boot.agent_id())
 
 
 def get_label() -> str:

@@ -263,7 +263,8 @@ def test_stale_batch_marker_is_indexed_alerted_and_its_workers_terminated(
         owner_prompts.append(prompt)
         return 999
 
-    monkeypatch.setattr(schedule, "_all_agents", lambda: agents)
+    statuses = {agent.agent_id: agent.status for agent in agents}
+    monkeypatch.setattr(schedule.ava.agents, "get_status", statuses.__getitem__)
     monkeypatch.setattr(schedule.ava.agents, "terminate", terminate)
     monkeypatch.setattr(schedule, "ensure_agent", alert_owner)
 
@@ -297,7 +298,15 @@ def test_worker_sweep_terminates_only_workers_outside_the_current_batch(
         assert force
         terminated.append(agent_id)
 
-    monkeypatch.setattr(schedule, "_all_agents", lambda: agents)
+    def list_agents(*, scope: str, query: str, before_id: int | None) -> SimpleNamespace:
+        assert scope == "live"
+        assert before_id is None
+        return SimpleNamespace(
+            agents=[a for a in agents if query in a.label and a.status != schedule.S.TERMINATED],
+            next_cursor=None,
+        )
+
+    monkeypatch.setattr(schedule.ava.agents, "list_agents", list_agents)
     monkeypatch.setattr(schedule.ava.agents, "terminate", terminate)
 
     schedule._sweep_leftover_workers({102})

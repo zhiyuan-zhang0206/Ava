@@ -13,7 +13,7 @@ One writer per cache/flag: TanStack Query owns server data and persisted prefere
 ## Three Mechanisms Division of Responsibilities
 
 Termination toasts follow the response: `enqueued` means requested, not exited,
-even for force. Only SSE updates lifecycle rows; a response-carried `open_tasks`
+even for force. Authoritative roster reads update lifecycle rows; a response-carried `open_tasks`
 hint raises the open-tasks notice (display-only, no state write).
 
 | Mechanism | Responsibility | File |
@@ -26,6 +26,13 @@ hint raises the open-tasks notice (display-only, no state write).
 `display.*`/`behavior.*` covers: Thinking/Code/Output expand defaults, inspector toggles, sidebar collapse/view mode/sort/stats/show terminated, fleet queue collapse + left panel tab, task graph mode + done/canceled filters, force params (graph + task graph), shell terminal theme, spawn model/preset/reasoning_effort, notification and confirmation toggles, UI language (`display.language`, i18n locale via `i18n/language-provider.tsx`; framework copy only, data plane never translated — `decisions/2026-08-05-frontend-i18n-next-intl.md`) — defaults in `lib/types.ts:USER_SETTING_DEFAULTS`. `content-toggle-store.ts` stays a thin `useUserSettings` wrapper. `inspector-panel-store.ts` is breakpoint-aware (task #793): on desktop (≥ lg) the inspector is a side panel, so `display.inspector_open` stays a DB-backed workspace preference (default closed); on mobile (< lg) it is a full-screen overlay that hides the timeline, so its open state is **per-session volatile state** (`mobileInspectorOpen` in `store.ts`, default closed) and mobile toggles never write the shared setting — opening/closing the overlay on a phone must not yank the desktop panel. `lib/settings-migration.ts` (`<SettingsMigration/>`, once after auth) moves leftover localStorage keys into the DB one by one then deletes them (failure retains the key for retry); the 8 per-device keys are excluded; the old zustand-persist blob (`ava-spawn-prefs`) follows a separate blob-to-field path.
 
 Server data is not mirrored into Zustand — the sidebar reads `useAgents → useQuery`.
+
+The agent tree owns one coherent live snapshot plus minimal ancestor links.
+History is a separate paginated/searchable read with only its current page
+retained. Selection uses an ID detail read when the agent is outside the live
+roster; a terminated or bookmarked agent does not require fetching history.
+Lifecycle SSE frames are ID hints, never unversioned full snapshots to replay
+onto a newer database result. No terminated-agent cache accumulates events.
 
 The global fold owns read-model repair. Hints coalesce under a fixed deadline;
 reads never cancel an already-running repair, and hints received during that

@@ -172,14 +172,12 @@ def test_initialize_negotiates_and_lists_seven_tools() -> None:
     }
 
 
-def test_list_agents_uses_summary_projection_and_returns_compact_rows(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_list_agents_reads_one_directory_page(monkeypatch: pytest.MonkeyPatch) -> None:
     from gateway import mcp_endpoint
-    from shared.agent_snapshot import AgentListSummary
+    from shared.agent_roster import AgentCard, AgentDirectoryPage
 
-    seen: dict[str, str] = {}
-    snapshot = AgentListSummary.model_validate(
+    seen: dict[str, Any] = {}
+    card = AgentCard.model_validate(
         {
             "agent_id": 1,
             "spawner": "mcp",
@@ -194,41 +192,53 @@ def test_list_agents_uses_summary_projection_and_returns_compact_rows(
             "machine": "test-machine",
             "supports_vision": True,
             "liveness_state": "online",
-            "notices_awaiting_response": [],
+            "observation": {},
+            "awaiting_response_count": 0,
+            "highest_notice_priority": None,
             "unread_notice_count": 0,
             "heartbeat_paused_until": None,
         }
     )
+    page = AgentDirectoryPage(agents=[card], next_cursor=1)
 
-    def fake_select_all(_conn: object, *, fields: str) -> list[AgentListSummary]:
-        seen["fields"] = fields
-        return [snapshot]
+    def fake_list_directory(_conn: object, **kwargs: Any) -> AgentDirectoryPage:
+        seen.update(kwargs)
+        return page
 
-    monkeypatch.setattr(mcp_endpoint.agent_snapshot, "select_all", fake_select_all)
+    monkeypatch.setattr(mcp_endpoint.agent_roster, "list_directory", fake_list_directory)
     with TestClient(app) as client:
         token = _create_token(client)
-        result = _tool_call(client, token, "list_agents", {})
-    rows = _tool_result(result)
-    assert seen == {"fields": "summary"}
-    assert rows == [
-        {
-            "agent_id": 1,
-            "status": "idling",
-            "label": "MCP worker",
-            "machine": "test-machine",
-            "spawner": "mcp",
-            "last_active_at": "2026-09-01T00:00:02+00:00",
-        }
-    ]
+        result = _tool_call(
+            client,
+            token,
+            "list_agents",
+            {
+                "scope": "all",
+                "query": "worker",
+                "before_id": 42,
+                "limit": 5,
+            },
+        )
+    assert seen == {"scope": "all", "query": "worker", "before_id": 42, "limit": 5}
+    assert _tool_result(result) == page.model_dump(mode="json")
     assert not result["result"].get("isError")
 
 
-def test_list_agents_rejects_unknown_status() -> None:
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"scope": "active"},
+        {"limit": 0},
+        {"limit": 201},
+        {"before_id": 0},
+        {"query": "x" * 201},
+    ],
+)
+def test_list_agents_rejects_invalid_directory_arguments(arguments: dict[str, object]) -> None:
     with TestClient(app) as client:
         token = _create_token(client)
-        result = _tool_call(client, token, "list_agents", {"status": "active"})
+        result = _tool_call(client, token, "list_agents", arguments)
     assert result["result"].get("isError") is True
-    assert "unknown agent status" in _tool_result(result)
 
 
 # ── fleet tools against the in-process ops stand-ins ─────────────────────
@@ -355,7 +365,7 @@ def test_read_scope_cannot_call_write_tools() -> None:
 
     assert denied["result"].get("isError") is True
     assert "requires write scope" in _tool_result(denied)
-    assert agents == []
+    assert agents == {"agents": [], "next_cursor": None}
 
 
 def test_scope_denial_is_audited_as_an_error_without_raw_args() -> None:
@@ -373,17 +383,17 @@ def test_scope_denial_is_audited_as_an_error_without_raw_args() -> None:
 
 
 def test_tool_error_does_not_reintroduce_raw_args_into_audit() -> None:
-    status = "private-invalid-status"
+    scope = "private-invalid-scope"
     with TestClient(app) as client:
         token = _create_token(client, name="audit-error-client", scope="read")
-        result = _tool_call(client, token, "list_agents", {"status": status})
+        result = _tool_call(client, token, "list_agents", {"scope": scope})
 
-    assert status in _tool_result(result)
+    assert scope in _tool_result(result)
     hits = _audit_hits("list_agents", "audit-error-client")
-    assert hits, "no mcp_tool_call event for invalid status reached the mirror"
+    assert hits, "no mcp_tool_call event for invalid scope reached the mirror"
     attributes = hits[-1]["attributes"]
     assert attributes["outcome"] == "error"
-    assert status not in json.dumps(attributes, ensure_ascii=False)
+    assert scope not in json.dumps(attributes, ensure_ascii=False)
 
 
 def test_cluster_status_reports_this_host(monkeypatch: pytest.MonkeyPatch) -> None:

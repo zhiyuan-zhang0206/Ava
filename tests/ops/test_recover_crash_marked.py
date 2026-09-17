@@ -81,7 +81,7 @@ def stubs(monkeypatch: pytest.MonkeyPatch) -> _Stubs:
     def _record_event(**kwargs: object) -> None:
         events.append(kwargs)
 
-    def _record_publish(_conn: object, agent_id: int) -> None:
+    def _record_publish(agent_id: int) -> None:
         published.append(agent_id)
 
     monkeypatch.setattr(ops_lifecycle, "insert_event_log", _record_event)

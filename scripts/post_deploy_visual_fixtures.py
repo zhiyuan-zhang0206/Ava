@@ -1,6 +1,10 @@
-"""Fixed browser fixtures for data-dominated post-deploy surfaces."""
+"""Fixed browser fixtures for data-dominated post-deploy surfaces.
 
-AGENT = {
+Live roster, paged directory, and selected detail mirror their separate wire
+contracts so the gate exercises the same selection path as the application.
+"""
+
+AGENT: dict[str, object] = {
     "agent_id": 1,
     "spawner": "user",
     "status": "idling",
@@ -8,14 +12,32 @@ AGENT = {
     "spawned_at": "2026-09-01T00:00:00Z",
     "started_at": "2026-09-01T00:00:01Z",
     "last_active_at": "2026-09-01T00:00:02Z",
+    "last_inbound_at": "2026-09-01T00:00:02Z",
     "label": "visual fixture agent",
     "machine": "visual-host",
     "supports_vision": True,
     "notices_awaiting_response": [],
     "unread_notice_count": 0,
     "fork_source_agent_id": None,
+    "fork_source_checkpoint_id": None,
     "heartbeat_paused_until": None,
     "liveness_state": "online",
+    "last_probe_at": None,
+    "observation": {
+        "machine_probe_at": None,
+        "machine_probe_valid_until": None,
+        "runtime_lease_expires_at": None,
+        "runtime_owner": "unknown",
+    },
+}
+AGENT_CARD: dict[str, object] = {
+    **{
+        key: value
+        for key, value in AGENT.items()
+        if key not in {"notices_awaiting_response", "fork_source_checkpoint_id", "last_probe_at"}
+    },
+    "awaiting_response_count": 0,
+    "highest_notice_priority": None,
 }
 HEARTBEAT = {
     "interval_s": 300,
@@ -137,7 +159,9 @@ RUN_TIMELINE = {
     },
 }
 FIXTURES: dict[str, object] = {
-    "/api/agents": [AGENT],
+    "/api/agents/roster": {"agents": [AGENT_CARD], "ancestors": []},
+    "/api/agents": {"agents": [AGENT_CARD], "next_cursor": None},
+    "/api/agents/1": AGENT,
     "/api/notices": {"open": [], "awaiting": [], "resolved_page": [], "next_cursor": None},
     "/api/tasks": {"tasks": []},
     "/api/agents/1/timeline": {"items": [], "msg_count": 0, "has_more": False},

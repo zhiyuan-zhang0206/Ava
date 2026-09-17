@@ -74,7 +74,6 @@ from ava._gateway_transport import (
 from ava._gateway_transport import (
     _patch as _patch,
 )
-from shared.agents import AgentStatus
 from shared.agents import GatewayUnavailable as GatewayUnavailable
 
 
@@ -297,35 +296,27 @@ def get_born_chain(agent_id: int) -> list[dict]:
     return resp.json()["ancestors"]
 
 
-def list_agents(filter_by_status: tuple[AgentStatus, ...] | None = None) -> list[dict[str, Any]]:
-    """GET /api/agents → AgentSummary roster rows (optional status filter).
-
-    The request sets ``fields=summary``. Each dict carries agent_id, spawner,
-    fork_source_agent_id, status, pid, spawned_at, started_at, last_active_at,
-    last_inbound_at, label, machine, supports_vision, liveness_state,
-    notices_awaiting_response, unread_notice_count, and
-    heartbeat_paused_until. The gateway first applies the broadest safe SQL
-    scope: filters that cannot match terminated rows request ``scope=live``; a
-    terminated-only filter requests ``scope=terminated``; mixed / unfiltered
-    calls preserve the full historical ``scope=all`` contract. The exact
-    public-status filter remains client-side.
-
-    ``filter_by_status``: a non-empty tuple of AgentStatus values to keep;
-    None or an empty tuple returns all agents unfiltered.
-    """
-    scope = "all"
-    if filter_by_status:
-        requested = set(filter_by_status)
-        if requested == {AgentStatus.TERMINATED}:
-            scope = "terminated"
-        elif AgentStatus.TERMINATED not in requested:
-            scope = "live"
-    resp = _get("/api/agents", params={"scope": scope, "fields": "summary"})
+def list_agents(
+    *,
+    scope: str = "live",
+    query: str = "",
+    before_id: int | None = None,
+    limit: int = 100,
+) -> dict[str, Any]:
+    """Read one bounded directory page; the caller owns cursor traversal."""
+    params: dict[str, str | int] = {"scope": scope, "query": query, "limit": limit}
+    if before_id is not None:
+        params["before_id"] = before_id
+    resp = _get("/api/agents", params=params)
     _raise_from_response(resp)
-    rows: list[dict[str, Any]] = resp.json()
-    if filter_by_status:
-        rows = [r for r in rows if r["status"] in filter_by_status]
-    return rows
+    return resp.json()
+
+
+def get_agent(agent_id: int) -> dict[str, Any]:
+    """Read an agent directly, independently of directory scope or pagination."""
+    resp = _get(f"/api/agents/{agent_id}")
+    _raise_from_response(resp)
+    return resp.json()
 
 
 def terminate(

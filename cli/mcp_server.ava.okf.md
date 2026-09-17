@@ -30,17 +30,21 @@ enough that an external model can hold the whole surface.
 |---|---|---|
 | `spawn_agent` | `POST /api/agents` | start an agent on a goal; returns its id at once |
 | `send_message` | `POST /api/agents/{id}/messages` | queue an instruction / answer for a running agent |
-| `list_agents` | `GET /api/agents?fields=summary` | every agent, compacted to the fields a caller steers by |
+| `list_agents` | `GET /api/agents` | one directory page with explicit scope, search, cursor, and limit |
 | `get_agent` | `GET /api/agents/{id}` | one agent's full state, incl. blocking questions |
 | `get_messages` | `GET /api/agents/{id}/messages` | transcript as role + text + the code it ran |
 | `terminate_agent` | `POST /api/agents/{id}/terminate` | destructive: end the agent; `message` is retained for resurrection (`force` kills mid-step) |
 | `cluster_status` | `GET /api/cluster/status` | is the cluster up, and is it paused |
 
-`list_agents` and `get_messages` project rather than forward: the raw rows carry
-pids, activity timestamps and provider metadata that cost a model context
-without changing any decision. `get_messages` keeps the `execute_code` argument
-of each turn — Ava agents act by writing Python, so dropping the code would show
-an agent that talks and never acts.
+`list_agents` forwards the bounded directory page unchanged: `agents` contains
+scalar cards and `next_cursor` identifies the next page. Defaults to live
+agents; `scope="terminated"` or `"all"` includes historical agents explicitly.
+Search matches a label substring or exact agent ID, and each call reads at most
+200 rows. Callers retain the same scope and query while traversing cursors.
+
+`get_messages` projects transcript rows to role, text, and the `execute_code`
+argument of each turn. Ava agents act by writing Python, so dropping the code
+would show an agent that talks and never acts.
 
 ## Invariants
 
@@ -62,10 +66,8 @@ an agent that talks and never acts.
   `ToolError` carrying the gateway's own `detail` (a 422's per-field list
   flattened to `loc: msg`). That message is the only channel the external model
   has for correcting its own call, and a 404 that read as an empty result would
-  be indistinguishable from an idle agent. The one filter applied proxy-side —
-  `list_agents(status=...)` — validates against `AgentStatus` for the same
-  reason: an unrecognized value errors with the legal set rather than returning
-  the empty list a model would read as "the fleet is empty".
+  be indistinguishable from an idle agent. Directory scope and page bounds are
+  validated before the request; no proxy-side filtering hides rows within a page.
 
 ## Notes
 

@@ -494,17 +494,16 @@ def test_response_notice_content_edits_publish_refreshed_snapshot(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """Content-only edits keep a response-required notice in the live snapshot.
+    """Content-only edits invalidate the selected agent's authoritative read.
 
-    The inspector consumes ``AgentUpdated.snapshot.notices_awaiting_response``.
-    ``NoticePosted`` refreshes the unified Inbox queue, while this snapshot
-    refreshes the inspector's response-required worklist and its detail body.
+    NoticePosted refreshes the Inbox queue; AgentUpdated requests current
+    detail so the inspector can read the edited response-required notice.
     """
     from gateway.routers import notices as notices_router
 
     published_agent_ids: list[int] = []
 
-    def _capture_snapshot(_conn: psycopg.Connection, published_agent_id: int) -> None:
+    def _capture_snapshot(published_agent_id: int) -> None:
         published_agent_ids.append(published_agent_id)
 
     # The route must publish this after every durable create/edit. It is absent
@@ -649,8 +648,8 @@ def test_dismissing_response_notice_refreshes_inspector_snapshot(
 
     published_awaiting: list[list[str]] = []
 
-    def _capture_snapshot(conn: psycopg.Connection, published_agent_id: int) -> None:
-        snapshot = select_one(conn, published_agent_id)
+    def _capture_snapshot(published_agent_id: int) -> None:
+        snapshot = select_one(db_conn, published_agent_id)
         assert snapshot is not None
         published_awaiting.append([notice.title for notice in snapshot.notices_awaiting_response])
 
@@ -684,8 +683,8 @@ def test_cross_type_supersede_refreshes_inbox_and_inspector_projections(
     posted: list[int] = []
     resolved: list[int] = []
 
-    def _capture_snapshot(conn: psycopg.Connection, published_agent_id: int) -> None:
-        snapshot = select_one(conn, published_agent_id)
+    def _capture_snapshot(published_agent_id: int) -> None:
+        snapshot = select_one(db_conn, published_agent_id)
         assert snapshot is not None
         published_awaiting.append([notice.title for notice in snapshot.notices_awaiting_response])
 

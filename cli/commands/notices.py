@@ -43,16 +43,21 @@ def _print_notice(
         print(f"    {n['content'][:120]}")
 
 
-def _agent_status_map(base: str, headers: dict[str, str], dial_get: Any) -> dict[int, str]:
-    """agent_id -> status for every agent (terminated ones included).
+def _agent_status_map(
+    base: str, headers: dict[str, str], dial_get: Any, agent_ids: set[int]
+) -> dict[int, str]:
+    """Resolve only agents referenced by the bounded notice result.
 
-    The open-notices feed does not carry agent liveness; a stale-backlog
-    cleanup (Task #1149) needs it to tell terminated agents' notices — the
-    invalid backlog — from live agents' open notices, which stay put.
+    Missing agents remain unknown and cannot authorize stale-notice cleanup.
     """
-    resp = dial_get(f"{base}/agents", timeout=_TIMEOUT_S, headers=headers)
-    resp.raise_for_status()
-    return {a["agent_id"]: a["status"] for a in resp.json()}
+    statuses: dict[int, str] = {}
+    for agent_id in sorted(agent_ids):
+        resp = dial_get(f"{base}/agents/{agent_id}", timeout=_TIMEOUT_S, headers=headers)
+        if resp.status_code == 404:
+            continue
+        resp.raise_for_status()
+        statuses[agent_id] = resp.json()["status"]
+    return statuses
 
 
 def cmd_notices_list(
@@ -78,16 +83,16 @@ def cmd_notices_list(
     notices = resp.json()
     if agent_id is not None:
         notices = [n for n in notices if n["agent_id"] == agent_id]
-    statuses: dict[int, str] = {}
-    if stale:
-        statuses = _agent_status_map(base, headers, dial_get)
-        notices = [n for n in notices if statuses.get(n["agent_id"]) == "terminated"]
     if priority:
         notices = [n for n in notices if n["priority"] == priority.upper()]
     if type_filter == "fyi":
         notices = [n for n in notices if not n["require_response"]]
     elif type_filter == "decision":
         notices = [n for n in notices if n["require_response"]]
+    statuses: dict[int, str] = {}
+    if stale:
+        statuses = _agent_status_map(base, headers, dial_get, {n["agent_id"] for n in notices})
+        notices = [n for n in notices if statuses.get(n["agent_id"]) == "terminated"]
     if not notices:
         print("No open notices." if not stale else "No stale notices (terminated agents).")
         return 0
@@ -142,7 +147,7 @@ def cmd_notices_clear(*, agent_id: int | None, force: bool, stale: bool = False)
     resp.raise_for_status()
     notices = resp.json()
     if stale:
-        statuses = _agent_status_map(base, headers, dial_get)
+        statuses = _agent_status_map(base, headers, dial_get, {n["agent_id"] for n in notices})
         notices = [n for n in notices if statuses.get(n["agent_id"]) == "terminated"]
         if not notices:
             print("No stale notices (terminated agents).")

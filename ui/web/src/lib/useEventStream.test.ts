@@ -24,7 +24,6 @@ import { AuthProvider, useAuth } from "./auth-context";
 import { RECONNECT_QUERY_KEYS } from "./fold";
 import { useFoldOwner } from "./fold/owner";
 import { AGENTS_QUERY_KEY } from "./fold/agents";
-import type { AgentRow, WireAgentRow } from "./types";
 import type { SystemEvent } from "./types";
 import type { ConnectionEvent } from "./useEventStream";
 import {
@@ -159,26 +158,6 @@ function withProviderAndClient() {
   return { qc, wrapper };
 }
 
-// Minimal AgentRow for fold-cache assertions (shape mirrors fold/fold.test.ts).
-const baseAgent: WireAgentRow = {
-  agent_id: 1,
-  label: "a",
-  status: "running",
-  last_active_at: "2026-05-10T00:00:00Z", last_inbound_at: "2026-05-10T00:00:00Z",
-  spawner: "user",
-  fork_source_agent_id: null,
-  fork_source_checkpoint_id: null,
-  pid: 100,
-  spawned_at: "2026-05-10T00:00:00Z",
-  started_at: "2026-05-10T00:00:01Z",
-  machine: "test",
-  supports_vision: true,
-  notices_awaiting_response: [],
-  unread_notice_count: 0,
-  heartbeat_paused_until: null,
-  liveness_state: "online",
-  last_probe_at: null,
-};
 
 // -- tests ─────────────────────────────────────────────────────────────────
 
@@ -1033,7 +1012,7 @@ describe("fold subscription lifecycle (Task #1033 regression)", () => {
   it("fold subscription survives the Provider re-render that SSE onopen triggers", async () => {
     const { qc, wrapper } = withProviderAndClient();
     // Seed the agents cache so the fold's empty-cache guard accepts the merge.
-    qc.setQueryData(AGENTS_QUERY_KEY, []);
+    qc.setQueryData(AGENTS_QUERY_KEY, { agents: [], ancestors: [] });
     renderHook(() => useEventStream(() => undefined, () => undefined), { wrapper });
     await waitForInstance();
 
@@ -1052,13 +1031,12 @@ describe("fold subscription lifecycle (Task #1033 regression)", () => {
         JSON.stringify({
           role: "agent_spawned",
           agent_id: 2,
-          snapshot: { ...baseAgent, agent_id: 2, label: "spawned-after-open" },
         }),
       );
     });
 
-    const agents = qc.getQueryData<AgentRow[]>(AGENTS_QUERY_KEY);
-    expect(agents?.map((a) => a.agent_id)).toEqual([2]);
+    await waitFor(() => expect(qc.getQueryState(AGENTS_QUERY_KEY)?.isInvalidated).toBe(true));
+    expect(qc.getQueryData(AGENTS_QUERY_KEY)).toEqual({ agents: [], ancestors: [] });
   });
 
   it("useFoldOwner returns a stable reference across re-renders", () => {

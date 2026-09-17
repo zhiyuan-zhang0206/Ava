@@ -806,21 +806,18 @@ class TestGetAncestors:
 
 
 class TestListAgents:
-    def test_gateway_client_requests_summary_projection(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """The SDK preserves its row shape without requesting the full snapshot."""
+    def test_gateway_client_reads_exactly_one_page(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import ava._gateway_client as gateway_client
 
-        seen: dict[str, object] = {}
+        calls: list[tuple[str, dict[str, object]]] = []
+        page: dict[str, object] = {"agents": [], "next_cursor": 17}
 
         class _Response:
-            def json(self) -> list[dict[str, object]]:
-                return []
+            def json(self) -> dict[str, object]:
+                return page
 
         def fake_get(path: str, *, params: dict[str, object]) -> _Response:
-            seen["path"] = path
-            seen["params"] = params
+            calls.append((path, params))
             return _Response()
 
         def fake_raise(_response: object) -> None:
@@ -829,179 +826,162 @@ class TestListAgents:
         monkeypatch.setattr(gateway_client, "_get", fake_get)
         monkeypatch.setattr(gateway_client, "_raise_from_response", fake_raise)
 
-        assert gateway_client.list_agents((AgentStatus.RUNNING, AgentStatus.IDLING)) == []
-        assert seen == {
-            "path": "/api/agents",
-            "params": {"scope": "live", "fields": "summary"},
-        }
-
-    def test_default_filter_returns_running_and_idling(self, db_conn: psycopg.Connection) -> None:
-        """Default filter=(RUNNING, IDLING), only returns these two status agents."""
-        ava._boot._agent_id = _spawn_agent()
-        a_id = ava.agents.spawn()
-        b_id = ava.agents.spawn()
-        c_id = ava.agents.spawn()  # terminal rows stay outside the default live filter
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (ava.self.AGENT_ID,)
-            )
-            cur.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (a_id,))
-            cur.execute("UPDATE agents_meta SET status = 'idling' WHERE id = %s", (b_id,))
-            cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (c_id,))
-        db_conn.commit()
-
-        rows = ava.agents.list_agents()
-        ids = {r.agent_id for r in rows}
-        assert ids == {a_id, b_id}
-        assert all(
-            r.status in (ava.agents.AgentStatus.RUNNING, ava.agents.AgentStatus.IDLING)
-            for r in rows
+        assert (
+            gateway_client.list_agents(scope="terminated", query="research", before_id=42, limit=5)
+            == page
         )
+        assert calls == [
+            (
+                "/api/agents",
+                {
+                    "scope": "terminated",
+                    "query": "research",
+                    "before_id": 42,
+                    "limit": 5,
+                },
+            )
+        ]
 
-    def test_custom_filter_returns_matching_only(self, db_conn: psycopg.Connection) -> None:
-        """Explicitly passing filter_by_status only returns matching ones."""
-        ava._boot._agent_id = _spawn_agent()
-        a_id = ava.agents.spawn()
-        b_id = ava.agents.spawn()
-        with db_conn.cursor() as cur:
-            cur.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (a_id,))
-            cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (b_id,))
-        db_conn.commit()
-
-        rows = ava.agents.list_agents(filter_by_status=(ava.agents.AgentStatus.TERMINATED,))
-        assert [r.agent_id for r in rows] == [b_id]
-
-    def test_empty_list_when_no_match(
-        self,
-        db_conn: psycopg.Connection,
+    def test_default_scope_includes_all_nonterminated_states(
+        self, db_conn: psycopg.Connection
     ) -> None:
-        """When no matching agent, returns empty list."""
-        with db_conn.cursor() as cur:
-            cur.execute("SELECT count(*) FROM agents_meta WHERE status IN ('running','idling')")
-            row = cur.fetchone()
-            assert row is not None
-            count = row[0]
-        assert count == 0
-        assert ava.agents.list_agents() == []
-
-    def test_empty_tuple_returns_all_agents(self, db_conn: psycopg.Connection) -> None:
-        """Empty tuple equivalent to None / no filter, returns all agents."""
-        ava._boot._agent_id = _spawn_agent()
-        a_id = ava.agents.spawn()
-        b_id = ava.agents.spawn()
-        with db_conn.cursor() as cur:
-            cur.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (a_id,))
-            cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (b_id,))
+        ids = [_spawn_agent() for _ in range(4)]
+        for agent_id, status in zip(
+            ids, ("running", "idling", "restarting", "terminated"), strict=True
+        ):
+            db_conn.execute("UPDATE agents_meta SET status = %s WHERE id = %s", (status, agent_id))
         db_conn.commit()
 
-        # empty tuple → no filter, returns all (including helper and terminated)
-        rows = ava.agents.list_agents(filter_by_status=())
-        ids = {r.agent_id for r in rows}
-        assert a_id in ids
-        assert b_id in ids
-        assert len(ids) >= 2  # at least includes the two spawned agents (might include helper)
+        page = ava.agents.list_agents()
+        assert isinstance(page, ava.agents.AgentDirectoryPage)
+        assert [row.agent_id for row in page.agents] == list(reversed(ids[:3]))
+        assert page.next_cursor is None
 
-    def test_none_filter_returns_all_agents(self, db_conn: psycopg.Connection) -> None:
-        """filter_by_status=None no filter, returns all agents."""
-        ava._boot._agent_id = _spawn_agent()
-        a_id = ava.agents.spawn()
-        b_id = ava.agents.spawn()
-        with db_conn.cursor() as cur:
-            cur.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (a_id,))
-            cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (b_id,))
-        db_conn.commit()
-
-        rows = ava.agents.list_agents(filter_by_status=None)
-        ids = {r.agent_id for r in rows}
-        assert a_id in ids
-        assert b_id in ids
-        assert len(ids) >= 2  # at least includes the two spawned agents
-
-    def test_includes_terminated_when_asked(self, db_conn: psycopg.Connection) -> None:
-        """Explicitly passing TERMINATED can list terminated agents."""
-        ava._boot._agent_id = _spawn_agent()
-        a_id = ava.agents.spawn()
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "UPDATE agents_meta SET status = 'restarting' WHERE id = %s", (ava.self.AGENT_ID,)
+    def test_terminated_pages_preserve_cursor_and_search(self, db_conn: psycopg.Connection) -> None:
+        ids = [_spawn_agent() for _ in range(5)]
+        for agent_id in ids:
+            db_conn.execute(
+                "UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,)
             )
-            cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (a_id,))
+            db_conn.execute(
+                "UPDATE agents SET label = %s WHERE id = %s", ("archived worker", agent_id)
+            )
+        db_conn.execute("UPDATE agents SET label = 'unrelated' WHERE id = %s", (ids[2],))
         db_conn.commit()
 
-        rows = ava.agents.list_agents(
-            filter_by_status=(
-                ava.agents.AgentStatus.RUNNING,
-                ava.agents.AgentStatus.IDLING,
-                ava.agents.AgentStatus.TERMINATED,
-            )
+        first = ava.agents.list_agents(scope="terminated", query="archived", limit=2)
+        assert [row.agent_id for row in first.agents] == [ids[4], ids[3]]
+        assert first.next_cursor == ids[3]
+        second = ava.agents.list_agents(
+            scope="terminated",
+            query="archived",
+            before_id=first.next_cursor,
+            limit=2,
         )
-        assert [r.agent_id for r in rows] == [a_id]
+        assert [row.agent_id for row in second.agents] == [ids[1], ids[0]]
+        assert second.next_cursor is None
 
-    def test_agent_row_str_hides_none_fields(self, db_conn: psycopg.Connection) -> None:
-        """AgentRow.__str__ doesn't show None fields."""
+    def test_empty_page_has_no_cursor(self, db_conn: psycopg.Connection) -> None:
+        page = ava.agents.list_agents()
+        assert page.agents == []
+        assert page.next_cursor is None
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"scope": "active"},
+            {"limit": 0},
+            {"limit": 201},
+            {"before_id": 0},
+            {"query": "x" * 201},
+        ],
+    )
+    def test_invalid_page_arguments_fail_before_reading(
+        self, kwargs: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def forbidden(**_kwargs: Any) -> None:
+            pytest.fail("invalid page arguments must not make a request")
+
+        monkeypatch.setattr(ava.agents._client, "list_agents", forbidden)
+        with pytest.raises(ValueError):
+            ava.agents.list_agents(**kwargs)
+
+    def test_get_status_uses_direct_detail_not_directory(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[str] = []
+
+        class _Response:
+            def json(self) -> dict[str, str]:
+                return {"status": "terminated"}
+
+        def fake_get(path: str) -> _Response:
+            calls.append(path)
+            return _Response()
+
+        def fake_raise(_response: object) -> None:
+            return None
+
+        monkeypatch.setattr(ava.agents._client, "_get", fake_get)
+        monkeypatch.setattr(ava.agents._client, "_raise_from_response", fake_raise)
+        assert ava.agents.get_status(1) == AgentStatus.TERMINATED
+        assert calls == ["/api/agents/1"]
+
+    def test_get_status_for_missing_agent_raises(self, db_conn: psycopg.Connection) -> None:
+        with pytest.raises(AgentNotFound):
+            ava.agents.get_status(999999)
+
+    @pytest.mark.parametrize("fork_source_agent_id", [None, 3])
+    def test_directory_row_preserves_fork_source(
+        self, monkeypatch: pytest.MonkeyPatch, fork_source_agent_id: int | None
+    ) -> None:
+        def directory_page(**_kwargs: object) -> dict[str, object]:
+            return {
+                "agents": [
+                    {
+                        "agent_id": 9,
+                        "label": "forked worker",
+                        "status": "idling",
+                        "spawner": "agent:8",
+                        "fork_source_agent_id": fork_source_agent_id,
+                        "machine": "mini",
+                        "spawned_at": "2026-09-17T00:00:00Z",
+                        "started_at": None,
+                        "last_active_at": "2026-09-17T00:00:00Z",
+                        "last_inbound_at": "2026-09-17T00:00:00Z",
+                        "pid": None,
+                        "heartbeat_paused_until": None,
+                    }
+                ],
+                "next_cursor": None,
+            }
+
+        monkeypatch.setattr(ava.agents._client, "list_agents", directory_page)
+        row = ava.agents.list_agents().agents[0]
+        assert row.fork_source_agent_id == fork_source_agent_id
+        assert row.spawner == "agent:8"
+
+    def test_agent_row_keeps_domain_fields(self, db_conn: psycopg.Connection) -> None:
         ava._boot._agent_id = _spawn_agent()
-        a_id = ava.agents.spawn()
-        with db_conn.cursor() as cur:
-            cur.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (a_id,))
+        agent_id = ava.agents.spawn()
+        db_conn.execute("UPDATE agents SET label = 'test-agent' WHERE id = %s", (agent_id,))
+        db_conn.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (agent_id,))
         db_conn.commit()
 
-        rows = ava.agents.list_agents(filter_by_status=(ava.agents.AgentStatus.RUNNING,))
-        assert len(rows) == 1
-        s = str(rows[0])
-        assert f"#{a_id}" in s
-        assert "running" in s
-        # pid is None → not shown in str; label also not set
-        assert "pid=" not in s
-
-    def test_agent_row_str_shows_present_fields(self, db_conn: psycopg.Connection) -> None:
-        """Fields with values should appear in __str__ output."""
-        ava._boot._agent_id = _spawn_agent()
-        a_id = ava.agents.spawn()
-        # Set a label via the db (label is on agents table, not agents_meta)
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "UPDATE agents SET label = 'test-agent' WHERE id = %s",
-                (a_id,),
-            )
-            cur.execute(
-                "UPDATE agents_meta SET status = 'running' WHERE id = %s",
-                (a_id,),
-            )
-        db_conn.commit()
-
-        rows = ava.agents.list_agents(filter_by_status=(ava.agents.AgentStatus.RUNNING,))
-        assert len(rows) == 1
-        s = str(rows[0])
-        assert "test-agent" in s
-        assert "machine=" in s
-
-    def test_agent_row_returns_full_dataclass_fields(self, db_conn: psycopg.Connection) -> None:
-        """All AgentRow fields are programmatically accessible, not trimmed like str() of None."""
-        ava._boot._agent_id = _spawn_agent()
-        a_id = ava.agents.spawn()
-        assert _agent_spawner(db_conn, a_id) == f"agent:{ava.self.AGENT_ID}"
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (ava.self.AGENT_ID,)
-            )
-            cur.execute("UPDATE agents_meta SET status = 'idling' WHERE id = %s", (a_id,))
-        db_conn.commit()
-
-        rows = ava.agents.list_agents(filter_by_status=(ava.agents.AgentStatus.IDLING,))
-        assert len(rows) == 1
-        r = rows[0]
-        assert r.agent_id == a_id
-        assert r.status == ava.agents.AgentStatus.IDLING
-        # Lifecycle status transitions preserve spawn lineage (immutable spawner):
-        # terminating the parent does not rewrite the child's spawn record.
-        assert r.spawner == f"agent:{ava.self.AGENT_ID}"
-        assert r.label is None  # no label set on this test agent
-        assert r.pid is None
-        assert r.spawned_at is not None
-        assert r.last_active_at is not None
-        # machine is not empty, default is gateway's local machine_name() (db default 'unknown'
-        # only triggered by manual INSERT, spawn path brings value)
-        assert r.machine and isinstance(r.machine, str)
+        page = ava.agents.list_agents(query=str(agent_id))
+        assert len(page.agents) == 1
+        row = page.agents[0]
+        assert row.agent_id == agent_id
+        assert row.status is AgentStatus.RUNNING
+        assert row.spawner == f"agent:{ava.self.AGENT_ID}"
+        assert row.fork_source_agent_id is None
+        assert row.label == "test-agent"
+        assert row.pid is None
+        assert row.spawned_at is not None and row.last_active_at is not None
+        assert row.machine
+        assert f"#{agent_id}" in str(row)
+        assert "test-agent" in str(row) and "machine=" in str(row)
+        assert "pid=" not in str(row)
 
 
 class TestSpawnConfig:

@@ -143,14 +143,11 @@ def test_list_stale_filters_terminated(monkeypatch: pytest.MonkeyPatch) -> None:
 
     def fake_get(url: str, **kw: Any) -> _Resp:
         calls.append(url)
-        if url == "http://gw/api/agents":
-            return _Resp(
-                200,
-                [
-                    {"agent_id": 7, "status": "terminated"},
-                    {"agent_id": 9, "status": "running"},
-                ],
-            )
+        if url == "http://gw/api/agents/7":
+            return _Resp(200, {"agent_id": 7, "status": "terminated"})
+        if url == "http://gw/api/agents/9":
+            return _Resp(200, {"agent_id": 9, "status": "running"})
+        assert url == "http://gw/api/notices/open"
         return _Resp(
             200,
             [
@@ -163,7 +160,11 @@ def test_list_stale_filters_terminated(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw")
     monkeypatch.setattr("shared.machine.gateway_auth_headers", dict)
     assert cmd_notices_list(agent_id=None, priority=None, type_filter=None, stale=True) == 0
-    assert calls == ["http://gw/api/notices/open", "http://gw/api/agents"]
+    assert calls == [
+        "http://gw/api/notices/open",
+        "http://gw/api/agents/7",
+        "http://gw/api/agents/9",
+    ]
 
 
 def test_clear_stale_resolves_only_terminated(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -173,14 +174,11 @@ def test_clear_stale_resolves_only_terminated(monkeypatch: pytest.MonkeyPatch) -
     posted: list[tuple[str, dict[str, object]]] = []
 
     def fake_get(url: str, **kw: Any) -> _Resp:
-        if url == "http://gw/api/agents":
-            return _Resp(
-                200,
-                [
-                    {"agent_id": 7, "status": "terminated"},
-                    {"agent_id": 9, "status": "restarting"},
-                ],
-            )
+        if url == "http://gw/api/agents/7":
+            return _Resp(200, {"agent_id": 7, "status": "terminated"})
+        if url == "http://gw/api/agents/9":
+            return _Resp(200, {"agent_id": 9, "status": "restarting"})
+        assert url == "http://gw/api/notices/open"
         return _Resp(
             200,
             [
@@ -210,3 +208,51 @@ def test_clear_stale_rejects_agent(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw")
     monkeypatch.setattr("shared.machine.gateway_auth_headers", dict)
     assert cmd_notices_clear(agent_id=7, force=True, stale=True) == 2
+
+
+def test_stale_lookup_deduplicates_only_agents_in_filtered_notices(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cli.commands.notices import cmd_notices_list
+
+    calls: list[str] = []
+
+    def fake_get(url: str, **kw: Any) -> _Resp:
+        calls.append(url)
+        if url == "http://gw/api/agents/7":
+            return _Resp(200, {"agent_id": 7, "status": "terminated"})
+        assert url == "http://gw/api/notices/open"
+        return _Resp(
+            200,
+            [_notice(1, 7), _notice(2, 7), _notice(3, 9, require_response=True)],
+        )
+
+    monkeypatch.setattr("shared.http_dial.get", fake_get)
+    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw")
+    monkeypatch.setattr("shared.machine.gateway_auth_headers", dict)
+    assert cmd_notices_list(agent_id=None, priority=None, type_filter="fyi", stale=True) == 0
+    assert calls == ["http://gw/api/notices/open", "http://gw/api/agents/7"]
+
+
+def test_stale_empty_notice_queue_never_reads_directory(dial: dict[str, list[tuple]]) -> None:
+    from cli.commands.notices import cmd_notices_clear, cmd_notices_list
+
+    assert cmd_notices_list(agent_id=None, priority=None, type_filter=None, stale=True) == 0
+    assert cmd_notices_clear(agent_id=None, force=True, stale=True) == 0
+    assert [url for url, _ in dial["get"]] == ["http://gw/api/notices/open"] * 2
+
+
+def test_stale_clear_keeps_notices_of_missing_agents(
+    monkeypatch: pytest.MonkeyPatch, dial: dict[str, list[tuple]]
+) -> None:
+    from cli.commands.notices import cmd_notices_clear
+
+    def fake_get(url: str, **kw: Any) -> _Resp:
+        if url == "http://gw/api/agents/7":
+            return _Resp(404)
+        assert url == "http://gw/api/notices/open"
+        return _Resp(200, [_notice(1, 7)])
+
+    monkeypatch.setattr("shared.http_dial.get", fake_get)
+    assert cmd_notices_clear(agent_id=None, force=True, stale=True) == 0
+    assert dial["post"] == []

@@ -13,7 +13,7 @@ import contextlib
 import logging
 import time
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from services.im_bridge import copy, notice_bridge, push_watchdog
 from services.im_bridge.gateway_client import GatewayClient
@@ -25,7 +25,14 @@ from services.im_bridge.state import (
     _save_outbox,
     _save_switch_state,
 )
-from services.im_bridge.types import ChatState, IMAdapter, InboundMessage, Reply, SpawnDraft
+from services.im_bridge.types import (
+    AgentRow,
+    ChatState,
+    IMAdapter,
+    InboundMessage,
+    Reply,
+    SpawnDraft,
+)
 from shared.config import settings
 
 _log = logging.getLogger("services.im_bridge.core")
@@ -289,7 +296,14 @@ class IMBridgeCore(SpawnMenuMixin):
         one line and every agent (id + label + status) is a tap target; plain
         channels get the full text list since buttons never render there."""
 
-        agents = await self.gateway.list_agents()
+        agents: list[AgentRow] = []
+        before_id = None
+        while True:
+            page = await self.gateway.list_agents(scope="live", before_id=before_id)
+            agents.extend(page["agents"])
+            before_id = page["next_cursor"]
+            if before_id is None:
+                break
         alive = sorted(
             (a for a in agents if a.get("status") in _LIVE_STATUSES),
             key=lambda a: a["agent_id"],
@@ -312,20 +326,29 @@ class IMBridgeCore(SpawnMenuMixin):
         ]
         return Reply(copy.LIVE_AGENTS_TITLE + "\n" + "\n".join(lines))
 
+    async def _find_switch_target(self, arg: str) -> AgentRow | None:
+        """IDs are direct lookups; labels match exactly within scoped search pages."""
+        if arg.isdecimal():
+            return await self.gateway.get_agent(int(arg))
+        scopes: tuple[Literal["live", "terminated"], ...] = ("live", "terminated")
+        for scope in scopes:
+            before_id = None
+            while True:
+                page = await self.gateway.list_agents(scope=scope, query=arg, before_id=before_id)
+                for agent in page["agents"]:
+                    if (agent["label"] or "").casefold() == arg.casefold():
+                        return agent
+                before_id = page["next_cursor"]
+                if before_id is None:
+                    break
+        return None
+
     async def _cmd_switch(self, state: ChatState, arg: str) -> Reply | list[Reply]:
         if not arg:
             # user ruling: /switch without an id is an error — the picker
             # lives on /list's tap-to-switch card, not here
             return Reply(copy.SWITCH_USAGE)
-        agents = await self.gateway.list_agents()
-        target = next(
-            (
-                a
-                for a in agents
-                if str(a["agent_id"]) == arg or (a.get("label") or "").lower() == arg.lower()
-            ),
-            None,
-        )
+        target = await self._find_switch_target(arg)
         if target is None:
             return Reply(copy.AGENT_NOT_FOUND.format(arg=arg))
         if target.get("status") not in _LIVE_STATUSES:
@@ -367,8 +390,7 @@ class IMBridgeCore(SpawnMenuMixin):
     async def _cmd_status(self, state: ChatState) -> Reply:
         if state.current_agent_id is None:
             return Reply(copy.NO_AGENT_SWITCHED)
-        agents = await self.gateway.list_agents()
-        a = next((x for x in agents if x["agent_id"] == state.current_agent_id), None)
+        a = await self.gateway.get_agent(state.current_agent_id)
         if a is None:
             state.current_agent_id = None
             self._persist_switch(state)

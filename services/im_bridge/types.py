@@ -31,11 +31,23 @@ class SpawnDraft:
 
 
 class AgentRow(TypedDict):
-    """One row of GET /api/agents — the fields the IM surface reads."""
+    """The compact directory fields needed by the IM picker."""
 
     agent_id: int
     label: str | None
     status: str
+
+
+class AgentDirectoryPage(TypedDict):
+    """One bounded directory response with an exclusive ID cursor."""
+
+    agents: list[AgentRow]
+    next_cursor: int | None
+
+
+class AgentDetail(AgentRow):
+    """Individual agent fields displayed by /status."""
+
     machine: str | None
     spawned_at: str | None
     started_at: str | None

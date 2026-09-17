@@ -408,10 +408,9 @@ def create_agent_row(
             if label:
                 prompt = f"{prompt}\n\nYour label has been set to {label}."
             insert_inbound_message(conn, new_id, prompt, source=prompt_source)
-        # Publish AgentSpawned right after DB commit — the frontend sidebar adds
-        # the new row immediately (unclaimed status='idling'); the agent process's own
-        # status transitions later publish AgentUpdated to advance it.
-        publish_agent_spawned_sync(conn, new_id)
+        # After commit, invalidate the live roster so readers include this row
+        # and its true ancestry. Later status changes publish the same kind of hint.
+        publish_agent_spawned_sync(new_id)
     # Launch is the runner's job now (the launch op) — the row is created and
     # the caller forwards it. The `agent_spawned` telemetry event keeps its
     # registered name (contract.py) — the row INSERT is still the spawn

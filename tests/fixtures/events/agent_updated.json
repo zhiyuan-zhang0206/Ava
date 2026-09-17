@@ -1,25 +1,4 @@
 {
   "agent_id": 7,
-  "role": "agent_updated",
-  "snapshot": {
-    "agent_id": 7,
-    "spawner": "user",
-    "fork_source_agent_id": null,
-    "fork_source_checkpoint_id": null,
-    "status": "running",
-    "pid": 12345,
-    "spawned_at": "2026-01-01T00:00:00Z",
-    "started_at": "2026-01-01T00:00:05Z",
-    "last_active_at": "2026-01-01T00:00:10Z",
-    "last_inbound_at": "2026-01-01T00:00:07Z",
-    "label": "demo",
-    "machine": "test-host",
-    "supports_vision": true,
-    "liveness_state": "online",
-    "last_probe_at": null,
-    "observation": null,
-    "notices_awaiting_response": [],
-    "unread_notice_count": 0,
-    "heartbeat_paused_until": null
-  }
+  "role": "agent_updated"
 }

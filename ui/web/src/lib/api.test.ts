@@ -29,12 +29,12 @@ beforeEach(() => {
     "fetch",
     vi.fn((url: string, init?: RequestInit) => {
       calls.push({ url, init });
-      // GET /api/agents returns an array by contract (listAgents maps over it);
+      // GET /api/agents returns one page (listAgents maps its agents field);
       // every other stubbed endpoint here only has its URL/method asserted, so a
       // bare object suffices.
       const isListAgents = !init?.method && /\/api\/agents(?:\?|$)/.test(url);
       return Promise.resolve(
-        new Response(JSON.stringify(isListAgents ? [] : {}), {
+        new Response(JSON.stringify(isListAgents ? { agents: [], next_cursor: null } : {}), {
           status: 200,
           headers: { "content-type": "application/json" },
         }),
@@ -145,14 +145,14 @@ describe("lifecycle endpoints", () => {
     expect(calls).toHaveLength(1);
     // After happy-dom provides window, API_BASE is inferred as http://localhost:8000;
     // tests only anchor the endpoint path (gateway contract); host part is ignored.
-    expect(calls[0].url).toMatch(/\/api\/agents\?scope=live&fields=summary$/);
+    expect(calls[0].url).toMatch(/\/api\/agents\?scope=live&limit=100$/);
     // GET goes through the f() wrapper by default (no method, no body).
     expect(calls[0].init?.method).toBeUndefined();
   });
 
   it("listAgents requests terminated history only when explicit", async () => {
-    await api.listAgents("terminated");
-    expect(calls[0].url).toMatch(/\/api\/agents\?scope=terminated&fields=summary$/);
+    await api.listAgents({ scope: "terminated" });
+    expect(calls[0].url).toMatch(/\/api\/agents\?scope=terminated&limit=100$/);
   });
 
   it("listAgents projects every internal transition to the public three-state model", async () => {
@@ -168,10 +168,10 @@ describe("lifecycle endpoints", () => {
         Promise.resolve(
           new Response(
             JSON.stringify(
-              statuses.map((status, index) => ({
+              { agents: statuses.map((status, index) => ({
                 agent_id: index + 1,
-                status,
-              })),
+                status, awaiting_response_count: 0, highest_notice_priority: null,
+              })), next_cursor: null },
             ),
             { status: 200, headers: { "content-type": "application/json" } },
           ),
@@ -181,7 +181,7 @@ describe("lifecycle endpoints", () => {
 
     const rows = await api.listAgents();
 
-    expect(rows.map((row) => row.status)).toEqual([
+    expect(rows.agents.map((row) => row.status)).toEqual([
       "running",
       "idling",
       "idling",

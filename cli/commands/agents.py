@@ -5,7 +5,7 @@ the gateway or opening the web UI. Each verb forwards to an existing gateway rou
 (the gateway owns the effect; the CLI adds only rendering + arg parsing) and fails
 fast (`raise_for_status()`) on any HTTP error. Ordered by escalating force:
 
-  ls              GET  /api/agents?fields=summary        list id / status / machine / label
+  ls              GET  /api/agents                       read one directory page
   send <id> <txt> POST /api/agents/{id}/messages         deliver a chat inbound (source required)
   cancel <id>     POST /api/cancel                       halt the current action -> idle, stays alive
   restart <id>    POST /api/agents/{id}/restart          bounce the process, state preserved
@@ -43,18 +43,21 @@ class _AgentListItem(BaseModel):
     label: str | None
 
 
-def cmd_agents_ls() -> int:
-    """List every agent's id, status, machine, and label via the summary projection.
-
-    Terminated agents are listed too (the gateway returns the full set); the
-    status column is the live lifecycle state."""
+def cmd_agents_ls(
+    *, scope: str = "live", query: str = "", before_id: int | None = None, limit: int = 100
+) -> int:
+    """Render one agent directory page and its continuation cursor."""
     from shared.http_dial import get as dial_get
     from shared.machine import gateway_api_base, gateway_auth_headers
 
-    url = f"{gateway_api_base()}/api/agents?fields=summary"
-    resp = dial_get(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers())
+    url = f"{gateway_api_base()}/api/agents"
+    params: dict[str, str | int] = {"scope": scope, "query": query, "limit": limit}
+    if before_id is not None:
+        params["before_id"] = before_id
+    resp = dial_get(url, params=params, timeout=_TIMEOUT_S, headers=gateway_auth_headers())
     resp.raise_for_status()
-    rows = [_AgentListItem.model_validate(r) for r in resp.json()]
+    page = resp.json()
+    rows = [_AgentListItem.model_validate(r) for r in page["agents"]]
 
     if not rows:
         print("(no agents)")
@@ -70,6 +73,8 @@ def cmd_agents_ls() -> int:
             f"{str(r.agent_id).rjust(id_w)}  {str(r.status).ljust(status_w)}  "
             f"{r.machine.ljust(machine_w)}  {label}"
         )
+    if page["next_cursor"] is not None:
+        print(f"(more agents: repeat with --before-id {page['next_cursor']})")
     return 0
 
 

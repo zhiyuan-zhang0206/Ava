@@ -154,7 +154,13 @@
     "expandStatistics": "Expand statistics",
     "collapseStatistics": "Collapse statistics",
     "noMatch": "No agents match “{query}”",
-    "searchAgent": "Search agent"
+    "searchAgent": "Search agent",
+    "archive": "Agent history",
+    "hideArchive": "Hide history",
+    "archiveRetry": "History unavailable. Retry",
+    "archiveLatest": "Latest",
+    "archiveOlder": "Older",
+    "archiveSearch": "Search agent history"
   },
   "spawn": {
     "models": "Models",

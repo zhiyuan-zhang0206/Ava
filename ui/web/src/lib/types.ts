@@ -26,7 +26,12 @@ export type CancelRequested = Schemas["CancelRequested"];
  *  control-plane states, not the status vocabulary the console presents. */
 export type WireAgentStatus = Schemas["AgentStatus"];
 export type WireAgentRow = Schemas["AgentRow"];
-export type WireAgentSummary = Schemas["AgentSummary"];
+export type WireAgentCard = Schemas["AgentCard"];
+export type AgentLineage = Schemas["AgentLineage"];
+export interface AgentRoster { agents: AgentRow[]; ancestors: AgentLineage[] }
+export interface AgentDirectoryPage { agents: AgentRow[]; next_cursor: number | null }
+export type WireAgentRoster = Schemas["AgentRoster"];
+export type WireAgentDirectoryPage = Schemas["AgentDirectoryPage"];
 
 /** The console's complete, user-facing agent status model. Liveness remains a
  *  separate `AgentRow.liveness_state` axis, so an internally restarting agent
@@ -36,8 +41,9 @@ export type PublicAgentStatus = Extract<
   WireAgentStatus,
   "running" | "idling" | "terminated"
 >;
-export type AgentRow = Omit<WireAgentSummary, "status"> & {
+export type AgentRow = Omit<WireAgentCard, "status" | "observation"> & {
   readonly status: PublicAgentStatus;
+  readonly observation?: WireAgentCard["observation"] | null;
 };
 
 /** Collapse every known wire lifecycle state into the public three-state model.
@@ -60,13 +66,12 @@ export function projectAgentStatusValue(status: WireAgentStatus): PublicAgentSta
   }
 }
 
-/** Project one raw gateway/SSE row before it enters any frontend cache. */
-export function projectAgentStatus(row: WireAgentSummary): AgentRow {
+/** Project one gateway card or selected detail before it enters frontend state. */
+export function projectAgentStatus(row: WireAgentCard | WireAgentRow): AgentRow {
   const status = projectAgentStatusValue(row.status);
   if (
     status === row.status &&
-    !("fork_source_checkpoint_id" in row) &&
-    !("last_probe_at" in row)
+    "awaiting_response_count" in row
   ) {
     return row as AgentRow;
   }
@@ -85,7 +90,8 @@ export function projectAgentStatus(row: WireAgentSummary): AgentRow {
     supports_vision: row.supports_vision,
     liveness_state: row.liveness_state,
     observation: row.observation,
-    notices_awaiting_response: row.notices_awaiting_response,
+    awaiting_response_count: "awaiting_response_count" in row ? row.awaiting_response_count : row.notices_awaiting_response.length,
+    highest_notice_priority: "highest_notice_priority" in row ? row.highest_notice_priority : (row.notices_awaiting_response.map((n) => n.priority).sort()[0] ?? null),
     unread_notice_count: row.unread_notice_count,
     heartbeat_paused_until: row.heartbeat_paused_until,
   };
@@ -408,16 +414,14 @@ export interface TimelineSnapshotEvent extends BaseEvent {
 
 // AgentSnapshot is structurally identical to WireAgentRow (the HTTP schema)
 // — see shared/agent_snapshot.py for the canonical Python definition.
-// It is projected by the agents fold before entering the public AgentRow cache.
+// Only selected detail reads use it; lifecycle SSE events carry ID hints.
 export type AgentSnapshot = WireAgentRow;
 
 export interface AgentSpawnedEvent extends BaseEvent {
   readonly role: "agent_spawned";
-  readonly snapshot: AgentSnapshot;
 }
 export interface AgentUpdatedEvent extends BaseEvent {
   readonly role: "agent_updated";
-  readonly snapshot: AgentSnapshot;
 }
 export interface NoticePostedEvent extends BaseEvent {
   readonly role: "notice_posted";

@@ -35,9 +35,10 @@ import hashlib
 import json
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
-from typing import Any, Literal, cast
+from typing import Annotated, Any, Literal, cast
 
 from fastapi import FastAPI, HTTPException, Request
+from pydantic import Field
 from starlette.responses import JSONResponse
 
 from gateway import mcp_clients
@@ -46,10 +47,10 @@ from gateway.request_principal import AuthPrincipal, PrincipalScopeError, princi
 from gateway.routers import agents as _agents_router
 from gateway.routers._delivery import deliver_chat_inbound
 from gateway.routers.agents_lifecycle import terminate_agent_with_open_tasks
-from gateway.schemas import AgentRow, AgentSummary
+from gateway.schemas import AgentRow
 from ops.agents import get_agent_status
 from ops.rpc_schemas import SpawnAgentRequest, TerminateAgentRequest
-from shared import agent_snapshot
+from shared import agent_roster, agent_snapshot
 from shared.agents import AvaAgentError
 from shared.audit_events import insert_event_log
 from shared.caller_identity import CallerIdentity
@@ -88,25 +89,6 @@ Every tool here acts on one cluster — the one this gateway belongs to.
 There is no cluster argument."""
 
 
-def _compact_agent(row: AgentSummary) -> dict[str, Any]:
-    """The fields an external agent steers by, out of a roster summary.
-
-    The gateway summary excludes full-only lifecycle fields before they leave
-    Postgres; this compact tool result trims the remaining roster state for a
-    model's context. `get_agent` returns the full record for the cases that
-    need it. Timestamps serialize to ISO strings so the tool result stays
-    JSON-safe.
-    """
-    return {
-        "agent_id": row.agent_id,
-        "status": row.status,
-        "label": row.label,
-        "machine": row.machine,
-        "spawner": row.spawner,
-        "last_active_at": row.last_active_at.isoformat() if row.last_active_at else None,
-    }
-
-
 def _message_text(content: Any) -> str:
     """Flatten one message's content to text (str, or list of typed blocks)."""
     if isinstance(content, str):
@@ -140,18 +122,6 @@ def _project_message(msg: dict[str, Any]) -> dict[str, Any]:
     if code:
         projected["code"] = code
     return projected
-
-
-def _validate_status(status: str) -> None:
-    """Reject a status filter that matches no lifecycle state (an unrecognized
-    value must be an error listing the legal states, never an empty list)."""
-    from mcp.server.mcpserver.exceptions import ToolError
-
-    from shared.agents import AgentStatus
-
-    if status not in set(AgentStatus):
-        legal = ", ".join(sorted(s.value for s in AgentStatus))
-        raise ToolError(f"unknown agent status {status!r}; the states are: {legal}")
 
 
 def _json_type(value: Any) -> str:
@@ -266,11 +236,18 @@ class _AuditMiddleware:
         return result
 
 
-def _select_all_blocking(pool: Any) -> list[Any]:
-    """Sync snapshot SELECT for list_agents — via to_thread (async handlers
-    must not block the event loop)."""
+def _select_directory_blocking(
+    pool: Any,
+    *,
+    scope: agent_roster.AgentDirectoryScope,
+    query: str,
+    before_id: int | None,
+    limit: int,
+) -> agent_roster.AgentDirectoryPage:
     with pool.connection() as conn:
-        return agent_snapshot.select_all(conn, fields="summary")
+        return agent_roster.list_directory(
+            conn, scope=scope, query=query, before_id=before_id, limit=limit
+        )
 
 
 def _select_one_blocking(pool: Any, agent_id: int) -> Any:
@@ -300,31 +277,36 @@ def _register_read_tools(
     typed_server = cast(MCPServer, server)
 
     @typed_server.tool()
-    async def list_agents(status: str | None = None) -> list[dict[str, Any]]:
-        """List the agents in this Ava cluster with their live state.
+    async def list_agents(
+        scope: Literal["live", "terminated", "all"] = "live",
+        query: Annotated[str, Field(max_length=200)] = "",
+        before_id: Annotated[int | None, Field(ge=1, le=9223372036854775807)] = None,
+        limit: Annotated[int, Field(ge=1, le=200)] = 100,
+    ) -> dict[str, Any]:
+        """Read one agent directory page, newest IDs first.
 
-        Returns one entry per agent: its id, lifecycle status, label, the
-        machine it runs on, who spawned it, and when it was last active.
-        Terminated agents are included — pass `status` to narrow to one state,
-        e.g. "running" (working right now), "idling" (alive, waiting for
-        input) or "terminated" (finished). An unrecognized `status` is an
-        error listing the states that exist, never an empty list.
+        `live` includes all nonterminated agents; use `terminated` for history
+        or `all` for both. `query` matches a label substring or an exact agent
+        ID. Returns `agents` and `next_cursor`: pass that cursor as `before_id`
+        with the same filters to continue. None means no further results.
+        Each call reads at most `limit` agents (1 through 200).
         """
-        if status is not None:
-            _validate_status(status)
-        snapshots = await asyncio.to_thread(_select_all_blocking, pool)
-        rows = [AgentSummary.model_validate(s.model_dump()) for s in snapshots]
-        if status is not None:
-            rows = [r for r in rows if r.status == status]
-        return [_compact_agent(r) for r in rows]
+        page = await asyncio.to_thread(
+            _select_directory_blocking,
+            pool,
+            scope=scope,
+            query=query,
+            before_id=before_id,
+            limit=limit,
+        )
+        return page.model_dump(mode="json")
 
     @typed_server.tool()
     async def get_agent(agent_id: int) -> dict[str, Any]:
         """Read the full state of one agent by id.
 
-        Includes everything `list_agents` returns plus what the agent is
-        doing right now and any questions it is blocked on waiting for an
-        answer — answer those with `send_message`.
+        Includes lifecycle details, what the agent is doing right now, and any
+        questions it is blocked on waiting for an answer — answer those with `send_message`.
         """
         snap = await asyncio.to_thread(_select_one_blocking, pool, agent_id)
         if snap is None:

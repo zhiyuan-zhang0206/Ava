@@ -150,7 +150,8 @@ def test_get_agents_returns_spawned(db_conn: psycopg.Connection) -> None:
     with TestClient(app) as client:
         resp = client.get("/api/agents")
     assert resp.status_code == 200
-    rows = resp.json()
+    assert resp.json()["next_cursor"] is None
+    rows = resp.json()["agents"]
     ids = {r["agent_id"] for r in rows}
     assert t1 in ids
     assert t2 in ids

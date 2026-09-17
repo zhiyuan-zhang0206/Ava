@@ -348,13 +348,9 @@ async def run_liveness_pass(
     for (name, _url), ok in zip(runners, results, strict=True):
         await _record_probe(pool, name, ok=ok, deploy_explains=deploy_explanations[name])
     changed_agent_ids = _merge_liveness(pool)
-    if changed_agent_ids:
-        # `_merge_liveness` committed before this best-effort live projection.
-        # Reuse one connection for the canonical snapshots so a host edge does
-        # not open one Postgres connection per affected agent.
-        with pool.connection() as conn:
-            for agent_id in changed_agent_ids:
-                publish_agent_updated_sync(conn, agent_id)
+    # `_merge_liveness` committed before these best-effort invalidation hints.
+    for agent_id in changed_agent_ids:
+        publish_agent_updated_sync(agent_id)
     _log.info(
         "[heartbeat] liveness pass: %d machines probed (%d reachable), agents_meta merged",
         len(runners),

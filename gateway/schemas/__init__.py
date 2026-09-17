@@ -12,9 +12,7 @@ their unchanged OpenAPI names, so `cli` validates them without importing up into
 """
 
 from gateway.schemas.agents import (
-    AgentCompact,
     AgentRow,
-    AgentSummary,
 )
 from gateway.schemas.cluster import (
     ClusterOpRequest,
@@ -192,7 +190,6 @@ from shared.api_contracts import (
 
 __all__ = [
     "AgentActivity",
-    "AgentCompact",
     "AgentCost",
     "AgentEventRow",
     "AgentEventsResponse",
@@ -205,7 +202,6 @@ __all__ = [
     "AgentMetricsReport",
     "AgentRow",
     "AgentStats",
-    "AgentSummary",
     "AgentTps",
     "BornChainResponse",
     "BornChainRow",

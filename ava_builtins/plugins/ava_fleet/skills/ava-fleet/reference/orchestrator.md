@@ -18,9 +18,10 @@ logic, reinforced here, so the spawn path itself reminds you to look first.
    domain. Messaging it is cheaper and faster than spawning a fresh agent that must
    rebuild all of that context from zero.
 
-2. **Check all agents.** Call `ava.agents.list_agents()` when the right agent might not
-   be in your immediate neighbor graph — a long-running service agent, a domain-specific
-   PoC, or a role you have not interacted with recently.
+2. **Search the directory.** Call `ava.agents.list_agents(scope="all", query="<role>")`
+   when the right agent might not be in your immediate neighbor graph. Inspect
+   `page.agents`; if more matches are needed, pass `page.next_cursor` as
+   `before_id` with the same scope/query. A single page is not the whole fleet.
 
 3. **Message the existing agent.** If you find one whose role fits, send it the task with
    `ava.agents.send_message()`. The existing agent keeps everything it knows about the

@@ -4,30 +4,12 @@
 // query cache. The owner (EventStreamProvider) feeds every system event here
 // and applies the returned outcome; hooks only read their keys.
 //
-// Domain dispatch:
-// - agents  (["agents","live"] + ["agents","terminated"] history)
-//                                      — fold (move/upsert, label patch)
-// - pages   (["agent-pages", id] + ["all-pages"]) — fold (opened/closed)
-// - notices (["notices"], ["notices-resolved"])   — invalidate (no full row)
-// - fleet-graph (["fleet-graph"])   — invalidate, coalesced with trailing repair (owner)
-// - tasks   (["tasks"])             — invalidate, coalesced with trailing repair (owner)
-//
-// Reconnect: the owner invalidates only these fold-owned query families once
-// on (re)open. Unrelated settings/config/inspector queries did not miss global
-// fold events and are not part of the repair fan-out.
+// Lifecycle hints schedule authoritative roster/directory/detail reads.
+// Pages fold their explicit changes; notices, fleet graph and tasks invalidate.
+// The owner coalesces reads and guarantees trailing repair across event races.
 
-import {
-  AGENTS_QUERY_KEY,
-  AGENTS_SNAPSHOT_BUFFER_KEY,
-  TERMINATED_AGENTS_QUERY_KEY,
-  TERMINATED_AGENTS_SNAPSHOT_BUFFER_KEY,
-} from "./agents";
-import type { AgentRow, PageRow, SystemEvent } from "../types";
-import {
-  appendAgentSnapshotEvent,
-  foldAgents,
-  type AgentSnapshotEventBuffer,
-} from "./agents";
+import { AGENTS_QUERY_KEY, AGENT_DIRECTORY_QUERY_KEY, AGENT_DETAIL_QUERY_KEY, foldAgents } from "./agents";
+import type { PageRow, SystemEvent } from "../types";
 import { FLEET_GRAPH_KEY_PREFIX, foldFleetGraph } from "./graph";
 import {
   foldNotices,
@@ -47,7 +29,8 @@ export const AGENT_PAGES_QUERY_KEY_PREFIX = ["agent-pages"] as const;
  * settings, config, and inspector aggregates did not miss global-fold events. */
 export const RECONNECT_QUERY_KEYS: readonly (readonly unknown[])[] = [
   AGENTS_QUERY_KEY,
-  TERMINATED_AGENTS_QUERY_KEY,
+  AGENT_DIRECTORY_QUERY_KEY,
+  AGENT_DETAIL_QUERY_KEY,
   AGENT_PAGES_QUERY_KEY_PREFIX,
   ALL_PAGES_QUERY_KEY,
   NOTICES_QUERY_KEY,
@@ -55,7 +38,7 @@ export const RECONNECT_QUERY_KEYS: readonly (readonly unknown[])[] = [
   FLEET_GRAPH_KEY_PREFIX,
   TASKS_QUERY_KEY,
 ];
-export { AGENTS_QUERY_KEY, TERMINATED_AGENTS_QUERY_KEY } from "./agents";
+export { AGENTS_QUERY_KEY, AGENT_DIRECTORY_QUERY_KEY, AGENT_DETAIL_QUERY_KEY } from "./agents";
 export { NOTICES_QUERY_KEY, NOTICES_RESOLVED_QUERY_KEY } from "./notices";
 export { TASKS_QUERY_KEY } from "./tasks";
 export { FLEET_GRAPH_KEY_PREFIX } from "./graph";
@@ -65,7 +48,7 @@ export interface FoldContext {
   getQueryData: (key: readonly unknown[]) => unknown;
   /** Apply a cache write (a folded value). */
   setQueryData: (key: readonly unknown[], value: unknown) => void;
-  /** Invalidate a query family (debounce policy lives in the owner). */
+  /** Invalidate a query family (coalescing and trailing repair live in the owner). */
   invalidateQueries: (key: readonly unknown[]) => void;
 }
 
@@ -93,31 +76,7 @@ export function foldAgainstCache(
   const writes: FoldWrite[] = [];
   const invalidations: FoldInvalidation[] = [];
 
-  // agents — fold (upsert / label patch), guarded against un-seeded caches.
-  const agentsPrev = ctx.getQueryData(AGENTS_QUERY_KEY) as AgentRow[] | undefined;
-  const agentsNext = foldAgents(agentsPrev, ev, "live");
-  if (agentsNext !== undefined) writes.push({ key: AGENTS_QUERY_KEY, value: agentsNext });
-  const terminatedPrev = ctx.getQueryData(TERMINATED_AGENTS_QUERY_KEY) as
-    | AgentRow[]
-    | undefined;
-  const terminatedNext = foldAgents(terminatedPrev, ev, "terminated");
-  if (terminatedNext !== undefined) {
-    writes.push({ key: TERMINATED_AGENTS_QUERY_KEY, value: terminatedNext });
-  }
-  // A GET snapshot can be older than an SSE lifecycle event received while
-  // that request is in flight. Buffer the event for every active fetch
-  // generation; the queryFn replays it over the response before publishing
-  // the snapshot. Buffers exist only while a scoped request is active.
-  for (const bufferKey of [
-    AGENTS_SNAPSHOT_BUFFER_KEY,
-    TERMINATED_AGENTS_SNAPSHOT_BUFFER_KEY,
-  ]) {
-    const previous = ctx.getQueryData(bufferKey) as
-      | AgentSnapshotEventBuffer
-      | undefined;
-    const next = appendAgentSnapshotEvent(previous, ev);
-    if (next !== undefined) writes.push({ key: bufferKey, value: next });
-  }
+  invalidations.push(...foldAgents(ev).invalidations);
 
   // pages — the event's per-agent cache (only if it exists — the guard inside
   // foldPages keeps an un-fetched key un-seeded) + the fleet-wide one.
@@ -132,8 +91,7 @@ export function foldAgainstCache(
     if (allNext !== undefined) writes.push({ key: ALL_PAGES_QUERY_KEY, value: allNext });
   }
 
-  // notices / fleet-graph / tasks — invalidation policies (the owner applies
-  // its debounce for the graph/tasks families).
+  // Notices / fleet graph / tasks share the owner's bounded coalescing policy.
   invalidations.push(...foldNotices(ev).invalidations);
   invalidations.push(...foldFleetGraph(ev).invalidations);
   invalidations.push(...foldTasks(ev).invalidations);
