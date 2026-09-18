@@ -18,6 +18,9 @@ Successful Prometheus/Loki reads also pass through the gateway-latency
 heartbeat guard. Old or missing heartbeat samples retain and cache the fetched
 graph, marked separately as telemetry-degraded; only incomplete or fallback
 data uses the graph's stale flag.
+
+Each stale-serving fallback emits one `fleet_graph_stale` event per episode
+via `_emit_stale`, watched by the ops rule `ava-ops-fleet-graph-stale` (#3925).
 """
 
 from __future__ import annotations
@@ -50,6 +53,7 @@ from gateway.schemas import (
 )
 from shared import telemetry
 from shared.config import settings
+from shared.events.contract import FleetGraphStaleReason
 from shared.log import logger
 from shared.loki_index_labels import ARCHIVE_FLOOR_AT, ARCHIVE_FREEZE_AT, INDEX_LABEL_CUTOVER_AT
 from shared.observability import cluster_label
@@ -85,6 +89,10 @@ _FROZEN_LEGACY_CACHE_KEY = "fleet_graph:frozen:legacy:v1"
 
 _TELEMETRY_READ_TIMEOUT_S = 8.0
 _ROUTE_TIMEOUT_S = 10.0
+
+# The fixed `route` value of every `fleet_graph_stale` event (task #3925): a
+# closed constant, never a request-derived path; reasons live in the contract.
+_STALE_ROUTE = "fleet_graph"
 
 # The OTLP-mapped llm_usage counters (shared/telemetry_otlp._record_metrics:
 # int payload field -> Counter named ava_<event>_<field>, Prometheus appends
@@ -427,17 +435,39 @@ def _write_archive_cache(
     _write_frozen_json(_FROZEN_ARCHIVE_CACHE_KEY, payload, cache_name="Loki archive", ttl=ttl)
 
 
-def _emit_archive_degraded(route: str, reason: str) -> None:
-    """One telemetry row per degraded frozen-archive read.
+def _stale_emit_interval_s() -> float:
+    """Seconds between `fleet_graph_stale` events per reason — settings-backed
+    so the storm guard is operator-tunable, and a seam tests use to disable it."""
+    return settings.display.fleet_graph_stale_emit_interval_s
 
-    The routes answer fast when degraded (fail-open), so slow-route latency
-    alerts no longer see the stall — this event keeps the degradation
-    attributable in the stream instead (2026-08-29/30 incident, task #2004)."""
+
+_stale_emit_at: dict[str, float] = {}
+_stale_emit_lock = threading.Lock()
+
+
+def _emit_stale(reason: FleetGraphStaleReason) -> None:
+    """One `fleet_graph_stale` event per degradation episode.
+
+    Every stale-serving fallback funnels through here, so a degraded answer
+    is attributable in the event stream (and alertable) instead of only in a
+    logger.warning line (task #3925, user ruling 2026-09-18). `route` is the
+    fixed `_STALE_ROUTE`; `reason` is the closed FleetGraphStaleReason set.
+
+    Rate cap: at most one event per reason per
+    `display.fleet_graph_stale_emit_interval_s` seconds — the alert counts
+    episodes (two in ten minutes), not polls or storms.
+    """
+    now = time.monotonic()
+    with _stale_emit_lock:
+        last = _stale_emit_at.get(reason)
+        if last is not None and now - last < _stale_emit_interval_s():
+            return
+        _stale_emit_at[reason] = now
     telemetry.emit(
         "telemetry",
-        "archive_fetch_degraded",
+        "fleet_graph_stale",
         level="warning",
-        attributes={"route": route, "reason": reason},
+        attributes={"route": _STALE_ROUTE, "reason": reason},
     )
 
 
@@ -460,7 +490,7 @@ def _cached_archive_edges() -> tuple[list[dict[str, Any]], bool]:
         return cached
     if not _ARCHIVE_FETCH_LOCK.acquire(timeout=_ARCHIVE_FETCH_WAIT_S):
         logger.warning("fleet_graph Loki archive fetch already in flight — serving stale graph")
-        _emit_archive_degraded("fleet_graph", "lock_wait")
+        _emit_stale("lock_wait")
         return [], True
     try:
         cached = _read_archive_cache()
@@ -474,7 +504,7 @@ def _cached_archive_edges() -> tuple[list[dict[str, Any]], bool]:
             # polls does not re-run the same doomed scan.
             logger.warning("fleet_graph Loki archive fetch failed — serving stale graph: {}", exc)
             _write_archive_cache([], degraded=True, ttl=_NEGATIVE_CACHE_TTL_SECONDS)
-            _emit_archive_degraded("fleet_graph", "fetch_failed")
+            _emit_stale("fetch_failed")
             return [], True
         _write_archive_cache(rows)
         return rows, False
@@ -590,7 +620,7 @@ def _build_nodes(
 
 
 @router.get("/api/fleet/graph")
-def get_fleet_graph(
+def get_fleet_graph(  # noqa: PLR0915 — one linear fallback chain; each stale-serving return site owns its _emit_stale reason
     request: Request,
     include_terminated: Annotated[  # noqa: FBT002
         bool,
@@ -664,6 +694,7 @@ def get_fleet_graph(
         # A canceled PG query cannot provide a fresh node set, but a complete
         # prior graph is still strictly more useful than an empty fleet.
         logger.warning("fleet_graph query canceled (statement timeout) — serving stale graph")
+        _emit_stale("pg_timeout")
         return _stale_graph(key, [])
 
     node_rows = pg_data.node_rows
@@ -673,6 +704,7 @@ def get_fleet_graph(
     # triggers degradation, and degraded results never replace last-good data.
     if _monotonic() > deadline:
         logger.warning("fleet_graph PG phase exceeded route budget — serving stale graph")
+        _emit_stale("pg_budget")
         return _stale_graph(key, _build_nodes(node_rows))
 
     # --- Pre-cutover edges from the Loki archive stream (task #1281) ---
@@ -682,9 +714,14 @@ def get_fleet_graph(
     try:
         archive_rows, archive_degraded = _cached_archive_edges()
     except (httpx.HTTPError, loki_query_budget.LokiQueryBudgetError) as exc:
+        # An escape from the cached archive read stays the fetch_failed side
+        # of the archive family (lock_wait / fetch_failed).
         logger.warning("fleet_graph archive query failed — serving stale graph: {}", exc)
+        _emit_stale("fetch_failed")
         return _stale_graph(key, _build_nodes(node_rows))
     if archive_degraded:
+        # Emitted where detected (lock-wait skip / failed scan); a negative-
+        # cache re-serve of the same episode must not re-emit per poll.
         logger.warning("fleet_graph Loki archive unavailable — serving stale graph")
         return _stale_graph(key, _build_nodes(node_rows))
 
@@ -697,9 +734,11 @@ def get_fleet_graph(
         in_retained, out_retained, in_win, out_win = _fetch_prom_tokens(hours)
     except prom_metrics.PromQueryBudgetError as exc:
         logger.warning("fleet_graph Prometheus query budget refused — serving stale graph: {}", exc)
+        _emit_stale("prom_budget")
         return _stale_graph(key, _build_nodes(node_rows))
     except (httpx.HTTPError, ValueError) as exc:
         logger.warning("fleet_graph Prometheus query failed — serving stale graph: {}", exc)
+        _emit_stale("prom_failed")
         return _stale_graph(key, _build_nodes(node_rows))
 
     nodes = _build_nodes(
@@ -711,18 +750,27 @@ def get_fleet_graph(
     )
 
     if _monotonic() > deadline:
+        # Both over-budget shapes (deadline crossed / admission refused) share prom_budget.
         logger.warning("fleet_graph Prometheus phase exceeded route budget — serving stale graph")
+        _emit_stale("prom_budget")
         return _stale_graph(key, nodes)
 
     # --- Loki side: cached legacy history + live indexed tail ---
     try:
         loki_rows, truncated = _fetch_loki_edges(now=now)
-    except (httpx.HTTPError, loki_query_budget.LokiQueryBudgetError) as exc:
+    except loki_query_budget.LokiQueryBudgetError as exc:
+        # PoolTimeout subclass: match the refused admission before the transport failure.
+        logger.warning("fleet_graph Loki query budget refused — serving stale graph: {}", exc)
+        _emit_stale("loki_budget")
+        return _stale_graph(key, nodes)
+    except httpx.HTTPError as exc:
         logger.warning("fleet_graph Loki query failed — serving stale graph: {}", exc)
+        _emit_stale("loki_failed")
         return _stale_graph(key, nodes)
 
     if _monotonic() > deadline:
         logger.warning("fleet_graph Loki phase exceeded route budget — serving stale graph")
+        _emit_stale("loki_budget")
         return _stale_graph(key, nodes)
 
     live_ids: set[int] | None = None

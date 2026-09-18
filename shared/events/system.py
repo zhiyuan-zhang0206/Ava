@@ -319,6 +319,39 @@ class ArchiveFetchDegraded(TypedDict):
     reason: str
 
 
+# The closed reason vocabulary of `fleet_graph_stale` (task #3925): every
+# stale-serving fallback on GET /api/fleet/graph names WHY it degraded — a
+# failed upstream read, a refused query admission, or a phase crossing the
+# route budget. Keep the set closed: the alert rule and dashboards rely on
+# it.
+FleetGraphStaleReason = Literal[
+    "lock_wait",
+    "fetch_failed",
+    "pg_timeout",
+    "pg_budget",
+    "prom_budget",
+    "prom_failed",
+    "loki_budget",
+    "loki_failed",
+]
+
+
+class FleetGraphStale(TypedDict):
+    """`fleet_graph_stale` payload — one degraded fleet-graph serving episode.
+
+    Emitted when GET /api/fleet/graph serves the stale/last-good graph
+    because an upstream read (Postgres / Prometheus / Loki / the frozen
+    archive) failed, was refused, or crossed the route budget. One event per
+    degradation episode, not per poll: the frozen-archive causes fire where
+    the degradation is detected, re-serving from the archive's 60s negative
+    cache does not re-emit, and a per-reason emission rate cap bounds
+    retry-storm floods (task #3925, user ruling 2026-09-18).
+    """
+
+    route: str
+    reason: FleetGraphStaleReason
+
+
 class PromQueryFailed(TypedDict):
     """`prom_query_failed` payload — gateway/prom_metrics.py transport failure."""
 

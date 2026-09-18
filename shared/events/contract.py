@@ -84,6 +84,8 @@ from shared.events.system import Auth401Rejected as Auth401Rejected
 from shared.events.system import CheckpointTableSizes as CheckpointTableSizes
 from shared.events.system import EventClassReopened as EventClassReopened
 from shared.events.system import EventSpec as EventSpec
+from shared.events.system import FleetGraphStale as FleetGraphStale
+from shared.events.system import FleetGraphStaleReason as FleetGraphStaleReason
 from shared.events.system import GateAuthProbeFailed as GateAuthProbeFailed
 from shared.events.system import GatewayEventLoop as GatewayEventLoop
 from shared.events.system import GatewayLatency as GatewayLatency

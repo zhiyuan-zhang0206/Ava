@@ -43,9 +43,9 @@ The contact point posts to the gateway's alert ingest endpoint — loopback
 `127.0.0.1:8000` when the observatory is local, the gateway's reachable
 address when `AVA_OBSERVABILITY_URL` points at a remote station.
 
-## Rules (34)
+## Rules (36)
 
-The rules are split between `ava-ops` (24 rules, evaluated every minute:
+The rules are split between `ava-ops` (26 rules, evaluated every minute:
 R1-R6, the watchdog-tick and gateway-metrics silence rules, R8-R12, and
 R14-R16) and
 `ava-ops-slow` (ten rules, evaluated every five minutes: R7, R13, R17's two
@@ -72,6 +72,21 @@ Application layer — the Loki event stream plus the LLM latency histogram:
 | `ava-ops-gw-latency-slow-warning` | `ava-ops-slow` | Gateway latency: slow route p95 | p95 > 5s for 5m (Loki, slow route class) | 5m | warning |
 | `ava-ops-gw-latency-slow-error` | `ava-ops-slow` | Gateway latency: slow route p95 | p95 > 10s for 5m (same route class) | 5m | error |
 | `ava-ops-tempo-backend-down` | `ava-ops-slow` | remote Tempo backend reachable | up{job="tempo"}=0 for 1h (Prometheus) | 1h | warning |
+| `ava-ops-events-low-water` | `ava-ops` | event stream below low-water mark | count in 5m < 150 (Loki) | 10m | warning |
+| `ava-ops-fleet-graph-stale` | `ava-ops` | fleet graph served stale | `fleet_graph_stale` episodes in 10m > 1 (Loki) | 0m | warning |
+| `ava-ops-telemetry-queue-loss` | `ava-ops` | telemetry queue lost events | a machine+process+queue's last drop < 300s old (Prometheus) | 0s | error |
+| `ava-ops-recovery-drill-failed` | `ava-ops` | scheduled recovery drill failed | `recovery_drill_failed` (level=error) by drill in 1h > 0 (Loki) | 0m | error |
+| `ava-ops-llm-rate-limit` | `ava-ops-slow` | LLM provider rate-limit burst | HTTP 429s by vendor in 5m > 5 (Loki) | 0m | warning |
+| `ava-ops-pitr-storage-growth` | `ava-ops-slow` | remote PITR storage growth | ratio vs 7d-ago footprint > 1.25 (Prometheus) | 1h | warning |
+
+For `ava-ops-fleet-graph-stale`, the threshold counts degradation
+**episodes** (two in ten minutes): the gateway emits one `fleet_graph_stale`
+event per degraded episode and rate-caps repeats per reason
+(`AVA_FLEET_GRAPH_STALE_EMIT_INTERVAL_S`, 30s default), so a retry storm
+cannot fabricate a cluster while a single blip stays quiet. Expected windows
+(LGTM maintenance, planned upgrades) are silenced in Grafana — no per-rule
+window is provisioned. TODO: revisit provisioned mute timings once a
+machine-readable expected-window source exists.
 
 Infrastructure layer (issue #46) — the per-machine OTel Collector sidecar's
 own scrapes, labelled `host` (OS hostname / physical identity) and
@@ -85,6 +100,8 @@ thresholds are deployment facts, not framework constants — what counts as
 | `ava-ops-host-cpu-saturated` | non-idle CPU | avg by machine_name > 0.90 (Prometheus) | 15m | warning |
 | `ava-ops-host-memory-pressure` | memory utilization | avg by machine_name > 0.90 (Prometheus) | 15m | warning |
 | `ava-ops-host-disk-watermark` | filesystem utilization | max by machine_name+mountpoint > 0.90, excluding /mnt/wsl/docker-desktop/* (Prometheus) | 15m | warning |
+| `ava-ops-host-disk-watermark-93` | filesystem utilization | same series > 0.93 — approaching the Loki WAL hard stop (Prometheus) | 15m | warning |
+| `ava-ops-host-disk-watermark-95` | filesystem utilization | same series > 0.95 — at the Loki WAL hard stop (Prometheus) | 5m | critical |
 | `ava-ops-pg-connection-saturation` | Postgres backends vs max | ratio > 0.80 (Prometheus) | 15m | warning |
 | `ava-ops-redis-memory` | Redis resident set | > 2 GiB (Prometheus) | 15m | warning |
 
@@ -105,6 +122,18 @@ alerting until the process restarts — it resolves after a clean 5-minute
 window. The silence query's 5-minute absence window is already its
 debounce, hence no second `for` delay. Its 24-hour historical machine set expires
 retired machines naturally; the fleet heartbeat owns permanent membership.
+
+Storage and store growth — absolute-size gauges from the OTLP metric mirror
+(`ava_checkpoint_table_sizes` / `ava_memory_search_stats` /
+`ava_pitr_remote_inventory`), queried from Prometheus:
+
+| uid | Group | Metric | Condition | `for` | Severity |
+|-----|-------|--------|-----------|-------|----------|
+| `ava-ops-checkpoint-blobs-warning` | `ava-ops` | checkpoint_blobs physical size | > 2.5 GiB (Prometheus) | 2h | warning |
+| `ava-ops-checkpoint-blobs-error` | `ava-ops` | checkpoint_blobs physical size | > 4 GiB (Prometheus) | 2h | error |
+| `ava-ops-memory-search-rows-warning` | `ava-ops` | memory-search store rows | > 30000 (Prometheus) | 2h | warning |
+| `ava-ops-memory-search-rows-critical` | `ava-ops` | memory-search store rows | > 100000 (Prometheus) | 2h | critical |
+| `ava-ops-pitr-storage-growth` | `ava-ops-slow` | remote PITR storage footprint | ratio vs 7d-ago footprint > 1.25 (Prometheus) | 1h | warning |
 
 The five slow-request rules (R17-R19) close the user-visible-latency gap:
 R17's fast-route thresholds are calibrated against seven days of route data,

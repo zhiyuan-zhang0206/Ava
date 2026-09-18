@@ -309,6 +309,25 @@ class DisplaySettings(EnvSettings):
             "scope": "cluster-pinned",
         },
     )
+    fleet_graph_stale_emit_interval_s: float = Field(
+        default=30.0,
+        ge=0,
+        alias="AVA_FLEET_GRAPH_STALE_EMIT_INTERVAL_S",
+        description=(
+            "Least seconds between two `fleet_graph_stale` events for the same "
+            "reason on GET /api/fleet/graph — one event per degradation episode, "
+            "not per poll. The ops alert counts episodes (two in ten minutes), so "
+            "a retry storm or a tight poll loop must not flood the event stream "
+            "and fake a cluster; 30s is one frontend poll cycle, so independent "
+            "degradation waves stay distinguishable. 0 disables the cap."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
 
     plugin_stats_max_detail_chars: int = Field(
         default=500,
