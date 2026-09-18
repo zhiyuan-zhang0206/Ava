@@ -411,10 +411,56 @@ async def post_memory_refresh() -> MemoryRefreshResponse:
     return MemoryRefreshResponse(head=head)
 
 
+def _pool_revision(root: Path) -> str | None:
+    """Cheap change marker for the gateway memory checkout: its git HEAD.
+
+    The checkout is advanced only by explicit pulls (refresh, consolidation),
+    and those commit or fast-forward — so HEAD moves exactly when the note set
+    may have changed. Returns None when git cannot answer (not a repo, no git
+    binary, timeout), which disables the cache rather than risking a stale
+    graph.
+    """
+    try:
+        out = subprocess.run(  # noqa: S603 - fixed argv, no shell
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    return out.stdout.strip() or None
+
+
+# maxsize=4 is headroom for refresh races — consecutive revisions requested
+# around a pull/consolidation (a refresh can advance the pool more than once)
+# must not evict each other and re-run the ~2s build. Not a tuning knob.
+@lru_cache(maxsize=4)
+def _cached_memory_graph(
+    root_str: str,
+    revision: str,  # noqa: ARG001 - the revision keys the lru cache
+) -> MemoryGraphResponse:
+    """The graph for one pool revision, built once (task #4008).
+
+    The full walk+parse of a ~2k-note pool costs ~2s and the endpoint used to
+    re-run it on every request; keying on the revision rebuilds after a pull
+    and lets the lru bound drop older revisions. The cached object is returned
+    by reference and is only ever read (pydantic serializes per request).
+    """
+    return _build_memory_graph(Path(root_str))
+
+
 @router.get("/api/memory/graph", response_model=MemoryGraphResponse)
 def get_memory_graph() -> MemoryGraphResponse:
     """Return concept notes and cross-links from the gateway memory bundle."""
-    return _build_memory_graph(gateway_memory_dir())
+    root = gateway_memory_dir()
+    revision = _pool_revision(root)
+    if revision is None:
+        return _build_memory_graph(root)
+    return _cached_memory_graph(str(root), revision)
 
 
 @router.get("/api/memory/note", response_model=MemoryNoteResponse)

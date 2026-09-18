@@ -412,7 +412,12 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
     }));
   }, [graph.edges]);
 
-  const { positions, layout } = useForceLayout(simNodes, simLinks, params);
+  // Task #4008: warm the ~2k-node layout in time-budgeted slices before the
+  // render — the live per-tick render storm saturated the main thread for
+  // seconds (measured 5.0s of long tasks on the before side).
+  const { positions, layout } = useForceLayout(simNodes, simLinks, params, {
+    prewarmTicks: 320,
+  });
 
   // ── Zoom / pan via d3-zoom ──
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -477,6 +482,13 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
   // to 50%. Selection uses the same set, but doesn't dim on its own — the
   // selected node is shown in the side panel so dimming would fight it.
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  // Node lookup for the render path — a per-node `.find()` over all nodes is
+  // O(N^2) per render (task #4008).
+  const nodeById = useMemo(
+    () => new Map(graph.nodes.map((n) => [n.id, n])),
+    [graph.nodes],
+  );
+
   const hoverRelatives = useMemo(() => {
     if (hoveredId == null) return null;
     const set = new Set(neighborMap.get(hoveredId) ?? []);
@@ -649,9 +661,7 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
           {/* Nodes */}
           <g>
             {placed.map(({ node, p }) => {
-              const memNode = graph.nodes.find(
-                (n) => n.id === node.id,
-              );
+              const memNode = nodeById.get(String(node.id));
               if (!memNode) return null;
               const isSelected = selectedId === node.id;
               const isFolder = memNode.kind === "folder";
