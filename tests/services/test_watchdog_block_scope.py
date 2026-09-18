@@ -191,6 +191,7 @@ def test_db_scoped_block_holds_back_exactly_the_dbs_users(monkeypatch: pytest.Mo
     assert kept == {
         "brew-pin",
         "permissions-helper",
+        "browser-reach",
         "browser",
         "browser-mcp",
         "mcp-daemon",
