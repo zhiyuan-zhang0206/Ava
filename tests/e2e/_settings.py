@@ -27,3 +27,22 @@ def pin_expand_runs_all(gateway_url: str) -> None:
         timeout=30.0,
     )
     resp.raise_for_status()
+
+
+def pin_compact_history_off(gateway_url: str) -> None:
+    """Pin compact-history retention to 0 — legacy clear-on-compact.
+
+    The unset default retains ONE previous compact session (user ruling
+    2026-09-17, task #3698): after a compact the previous session re-attaches
+    automatically above the new window through a cross-segment fetch, so the
+    compacted-away exchanges are visible again ON PURPOSE. A test asserting
+    they are GONE isolates the window-composition machinery by restoring the
+    legacy behavior on the same REST surface the frontend uses; the retention
+    feature itself is covered by its own tests.
+    """
+    resp = httpx.put(
+        f"{gateway_url}/api/settings/display.compact_history_sessions",
+        json={"value": 0},
+        timeout=30.0,
+    )
+    resp.raise_for_status()

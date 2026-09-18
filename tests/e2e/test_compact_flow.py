@@ -135,6 +135,11 @@ def test_force_compact_renders_envelope_without_unrecognized_marker(e2e_env: E2E
     assert page.get_by_text(_UNRECOGNIZED_RE).count() == 0, (
         f"unrecognized system_marker alarm rendered after compact — {unrecognized_warnings}"
     )
+    # Pump the playwright loop once before reading the collected list: the
+    # page.on("console") deliveries only run while a call is in flight, so a
+    # warning emitted right before this assert could still be in flight
+    # (task #3927 class).
+    page.evaluate("() => 1")
     assert unrecognized_warnings == [], (
         f"[timeline] unrecognized console warnings fired after compact: {unrecognized_warnings}"
     )
