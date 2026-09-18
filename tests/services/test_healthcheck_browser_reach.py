@@ -173,6 +173,22 @@ def test_throttle_skips_rounds_within_interval(
     assert calls == ["ok", "ok"]
 
 
+def test_canary_skip_is_a_non_verdict(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG, logger=hc._log.name)
+    _set_canary(monkeypatch, "skip")
+    _set_host(monkeypatch, ok=True)
+    monkeypatch.setattr(hc, "_consecutive_failures", 2)
+
+    hc.main()
+    # A skip (CDP control plane unusable / unexpected payload) is not a
+    # reachability verdict: no count movement, no report, no recovery log.
+    assert hc._consecutive_failures == 2
+    assert _records(caplog, logging.ERROR) == []
+    assert _records(caplog, logging.INFO) == []
+
+
 def test_canary_never_raises(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
