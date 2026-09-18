@@ -7,6 +7,8 @@ message shows in the timeline snapshot instead. A multimodal inbound also
 carries its image reference urls so the strip can render thumbnails.
 """
 
+from uuid import uuid4
+
 import psycopg
 from fastapi.testclient import TestClient
 
@@ -156,3 +158,128 @@ def test_pending_tolerates_malformed_content_blocks(db_conn: psycopg.Connection)
 
     assert resp.status_code == 200
     assert resp.json()[0]["images"] is None
+
+
+def _active_lease(db_conn: psycopg.Connection, agent_id: int) -> str:
+    """A minimal unexpired active lease row (the takeover's delivery authority)."""
+    lease_id = str(uuid4())
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_impersonations"
+            "(id, agent_id, source, machine, status, ttl_seconds, expires_at, activated_at) "
+            "VALUES (%s, %s, 'external_agent:codex', 'test-machine', 'active', 3600, "
+            "clock_timestamp() + interval '1 hour', clock_timestamp())",
+            (lease_id, agent_id),
+        )
+    db_conn.commit()
+    return lease_id
+
+
+def test_active_takeover_hides_transcribed_chat_from_the_strip(
+    db_conn: psycopg.Connection,
+) -> None:
+    """#3683: a chat the takeover trail has transcribed must not show in both
+    the timeline and the strip. The inbound trigger stamps the session trail
+    (what the timeline renders); the strip drops the row; the row itself
+    stays pending for the ACK/release machinery."""
+    tid = _seed_agent(db_conn)
+    _active_lease(db_conn, tid)
+    mid = insert_inbound_message(db_conn, tid, "absorbed by the takeover", source="user")
+    trail = db_conn.execute(
+        "SELECT count(*) FROM agent_impersonation_entries "
+        "WHERE kind = 'message' AND event_key = 'inbound:' || %s::text",
+        (mid,),
+    ).fetchone()
+    assert trail == (1,)
+
+    with TestClient(app) as client:
+        resp = client.get(f"/api/agents/{tid}/pending")
+
+    assert resp.status_code == 200
+    assert resp.json() == []
+    row = db_conn.execute("SELECT status FROM inbound_messages WHERE id = %s", (mid,)).fetchone()
+    assert row == ("pending",)
+
+
+def test_relay_read_hides_while_live_and_reappears_after_release(
+    db_conn: psycopg.Connection,
+) -> None:
+    """J1 evidence alone (read by the relay, no trail) hides the row while
+    the lease is live; a release that never ACKed must surface it again for
+    the native agent — delivery evidence counts only while the lease is
+    alive."""
+    tid = _seed_agent(db_conn)
+    mid = insert_inbound_message(db_conn, tid, "read before activation", source="user")
+    lease_id = _active_lease(db_conn, tid)
+    db_conn.execute(
+        "INSERT INTO agent_impersonation_messages(lease_id, inbound_id) VALUES (%s, %s)",
+        (lease_id, mid),
+    )
+    db_conn.commit()
+
+    with TestClient(app) as client:
+        assert client.get(f"/api/agents/{tid}/pending").json() == []
+
+    db_conn.execute(
+        "UPDATE agent_impersonations SET status = 'released', ended_at = clock_timestamp() "
+        "WHERE id = %s",
+        (lease_id,),
+    )
+    db_conn.commit()
+
+    with TestClient(app) as client:
+        items = client.get(f"/api/agents/{tid}/pending").json()
+    assert [it["id"] for it in items] == [mid]
+
+
+def test_lapsed_lease_does_not_hide(db_conn: psycopg.Connection) -> None:
+    """Delivery authority dies with the lease deadline: an active-status row
+    past its expiry must not hide anything (the predicate requires
+    expires_at > now()). Read through the helper — the app-level reaper
+    reaps a lapsed lease and posts its terminal note, which would race this
+    assertion."""
+    tid = _seed_agent(db_conn)
+    mid = insert_inbound_message(db_conn, tid, "late again", source="user")
+    lease_id = _active_lease(db_conn, tid)
+    db_conn.execute(
+        "INSERT INTO agent_impersonation_messages(lease_id, inbound_id) VALUES (%s, %s)",
+        (lease_id, mid),
+    )
+    db_conn.execute(
+        "UPDATE agent_impersonations SET expires_at = clock_timestamp() - interval '1 second' "
+        "WHERE id = %s",
+        (lease_id,),
+    )
+    db_conn.commit()
+
+    rows = list_pending_inbounds(db_conn, tid)
+    assert [r.id for r in rows] == [mid]
+
+
+def test_acked_message_stays_out_of_the_strip_after_release(
+    db_conn: psycopg.Connection,
+) -> None:
+    """ACK is `done`: excluded as an ordinary settled row, before and after
+    the session ends."""
+    tid = _seed_agent(db_conn)
+    lease_id = _active_lease(db_conn, tid)
+    mid = insert_inbound_message(db_conn, tid, "handled", source="user")
+    db_conn.execute(
+        "INSERT INTO agent_impersonation_messages(lease_id, inbound_id) VALUES (%s, %s)",
+        (lease_id, mid),
+    )
+    db_conn.execute("UPDATE inbound_messages SET status = 'done' WHERE id = %s", (mid,))
+    db_conn.execute(
+        "UPDATE agent_impersonation_messages SET acknowledged_at = clock_timestamp() "
+        "WHERE lease_id = %s AND inbound_id = %s",
+        (lease_id, mid),
+    )
+    db_conn.execute(
+        "UPDATE agent_impersonations SET status = 'released', ended_at = clock_timestamp() "
+        "WHERE id = %s",
+        (lease_id,),
+    )
+    db_conn.commit()
+
+    with TestClient(app) as client:
+        assert client.get(f"/api/agents/{tid}/pending").json() == []

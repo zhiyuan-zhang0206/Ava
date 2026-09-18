@@ -190,9 +190,11 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # usage-write warning (task #3944's task_usage_record_failed) raises the
     # current total to 190; the stats-dashboard stale fallback (task #3973's
     # stats_dashboard_stale — the route serving its last-good response after a
-    # failed recompute) raises the current total to 191.
+    # failed recompute) raises the current total to 191; the finished-turn
+    # inbound reconcile (task #3999: host_turn_reconcile_skipped +
+    # host_turn_reconcile_failed) raises the current total to 193.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 191
+    assert len(_TELEMETRY_KINDS) == 193
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:

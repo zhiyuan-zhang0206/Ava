@@ -557,12 +557,14 @@ class TestPoolIsolation:
         ]
 
 
-class TestAbortSettlementReconcile:
-    """An aborted settlement disposes the turn's claimed inbounds (task #3615).
+class TestSettlementReconciles:
+    """A settlement disposes the inbounds its turn claimed.
 
-    This locks WHEN the pass dispatches — only the settled abort, and only
-    after the settle. Its own gates live in
-    `test_agent_host_abort_reconcile.py`; the row-visible split in
+    The settled abort disposes them (task #3615); a finished non-crashed
+    turn runs the same pass at its own settlement too (#3999). This locks
+    WHEN each pass dispatches — after the settle, and never for a crash.
+    Their own gates live in `test_agent_host_abort_reconcile.py` /
+    `test_agent_host_turn_reconcile.py`; the row-visible split in
     `tests/agent/test_reconcile_after_abort.py`.
     """
 
@@ -586,8 +588,14 @@ class TestAbortSettlementReconcile:
         async def reconcile(_pool: object, _checkpointer: object, _incarnation: object) -> None:
             order.append("reconcile")
 
+        async def reconcile_turn(
+            _pool: object, _checkpointer: object, _incarnation: object
+        ) -> None:
+            order.append("reconcile-turn")
+
         monkeypatch.setattr(settlement, "settle_and_stamp_turn", settle_and_stamp)
         monkeypatch.setattr(settlement, "reconcile_inbounds_after_abort", reconcile)
+        monkeypatch.setattr(settlement, "reconcile_inbounds_after_turn", reconcile_turn)
         monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
         monkeypatch.setattr(host, "_drive_turns", drive)
         await asyncio.wait_for(host.run_turn(1), 2)
@@ -617,15 +625,21 @@ class TestAbortSettlementReconcile:
             await self._run_ending(wired, monkeypatch, drive, order)
         assert order == ["settle"]
 
-    async def test_clean_turn_never_reconciles(
+    async def test_finished_turn_reconciles_after_the_settle(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """The finished turn's flushed checkpoint settles its claimed rows
+        (#3999): the pass runs right after the settle, never for a crash.
+        A cancelled turn carries the same outcome shape without the flush —
+        its unconfirmable claims re-deliver at-least-once (see the pass's
+        docstring)."""
+
         async def drive(_agent: int, _runtime: object) -> TurnOutcome:
             return TurnOutcome(exited=False, crashed=False)
 
         order: list[str] = []
         await self._run_ending(wired, monkeypatch, drive, order)
-        assert order == ["settle"]
+        assert order == ["settle", "reconcile-turn"]
 
 
 class TestConcurrentAgentIsolation:
@@ -1408,6 +1422,13 @@ class TestNormalizedModelConfig:
         from shared.lm._plugin_providers import ensure_provider_plugins_loaded
 
         ensure_provider_plugins_loaded()
+
+    @pytest.fixture(autouse=True)
+    def _isolate_settlement_reconcile(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """These tests lock config normalization and its exact warning list;
+        the settlement reconcile (locked in `TestSettlementReconciles`) must
+        not add its own events here."""
+        monkeypatch.setattr(settlement, "reconcile_inbounds_after_turn", AsyncMock())
 
     async def test_a_withdrawn_birth_pin_is_normalized_before_the_turn_binds_it(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
