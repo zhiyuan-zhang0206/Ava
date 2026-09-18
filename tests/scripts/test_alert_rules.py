@@ -452,10 +452,33 @@ _KIND_EXTENSIONS = {
     "histogram": ("_bucket", "_count", "_sum"),
 }
 
+# Fields where the declared payload type mispredicts the emitted kind. The
+# emitter picks the kind from the runtime value type
+# (`counter if isinstance(value, int)`), so an int-passing emit site renders a
+# Counter despite a `float` declaration — `_bucket/_count/_sum` never exist for
+# it. Each entry pins the kind actually emitted; keep it in step with the emit
+# site. `None` marks a field whose emit sites pass BOTH ints and floats
+# (first-value-wins per process): both families carry live samples, no fixed
+# name is reliable, and deriving none forces a normalization decision instead
+# of blessing a name half the fleet never emits.
+#   delivery_stalled.age_s: `round(age_s)` (services/delivery_watchdog) —
+#     `_bucket` never observed (0/72h).
+#   shell_ttl_renewed.ttl_s: whole-second `ttl` (ava/shell/sessions) —
+#     `_bucket` dead since >72h (32 older samples only).
+#   heartbeat_paused.duration_s: int and float callers both live
+#     (24h: 390 vs 320 samples) — unstable.
+_RUNTIME_KIND_FIELDS: dict[tuple[str, str], str | None] = {
+    ("delivery_stalled", "age_s"): "counter",
+    ("shell_ttl_renewed", "ttl_s"): "counter",
+    ("heartbeat_paused", "duration_s"): None,
+}
+
 # Escape hatch for rule references the derivation below cannot produce —
-# metrics from events whose payloads declare no keys, or instrumentation
-# outside the telemetry event map. Add an entry only after checking the name
-# against live Prometheus (`/api/v1/label/__name__/values`), with a rationale.
+# metrics from events whose payloads declare no keys, instrumentation outside
+# the telemetry event map, or live series from runtime attributes the payload
+# model does not declare (e.g. "ava_chrome_page_ttl_renewed_page_id_total").
+# Add an entry only after checking the name against live Prometheus
+# (`/api/v1/label/__name__/values`), with a rationale.
 # Empty today: every ava_* reference in the rules derives from the registry.
 _UNLISTED_METRIC_NAMES: dict[str, str] = {}
 
@@ -477,10 +500,13 @@ def _strip_optional(hint: Any) -> Any:
 
 def _metric_kind(event: str, field: str) -> str | None:
     """The instrument kind for one payload field: the disposition override,
-    else the int->Counter / float->Histogram default. None = no metric."""
+    then the runtime-kind pins, else the int->Counter / float->Histogram
+    declared-type default. None = no metric."""
     override = _METRIC_DISPOSITION.get((event, field), "default")
     if override != "default":
         return override
+    if (event, field) in _RUNTIME_KIND_FIELDS:
+        return _RUNTIME_KIND_FIELDS[(event, field)]
     spec = EVENTS[event]
     if spec.payload is None:
         return None
@@ -513,8 +539,13 @@ def _rendered_names(event: str, field: str) -> set[str]:
 
 
 def _emitted_metric_names() -> dict[str, str]:
-    """Every Prometheus series name the OTLP event map can emit, mapped to
-    its `event.field` source."""
+    """Every Prometheus series name derivable from the declared payloads and
+    dispositions, mapped to its `event.field` source.
+
+    Live and derivable can disagree in both directions: the runtime-kind pins
+    (`_RUNTIME_KIND_FIELDS`) and runtime attributes the payload models do not
+    declare ("ava_chrome_page_ttl_renewed_page_id_total") are outside this
+    set — a rule referencing one needs an `_UNLISTED_METRIC_NAMES` entry."""
     names: dict[str, str] = {}
     for event in sorted(telemetry_events()):
         for field in payload_keys(event):
@@ -573,6 +604,18 @@ def test_unit_one_gauges_render_with_the_ratio_suffix() -> None:
         "ava_turn_end_duration_seconds_count",
         "ava_turn_end_duration_seconds_sum",
     }
+
+
+def test_runtime_typed_fields_pin_their_emitted_kind() -> None:
+    """Fields whose declared type mispredicts the emitted kind (task #4002
+    review): the emit sites pass ints, so the live series is a Counter and
+    the histogram family either never existed or is dead. Pinning the counter
+    stops a rule from being told a non-existent `_bucket` family is fine —
+    the #4002 silent-NoData shape, mirrored. The unstable field derives
+    nothing on purpose."""
+    assert _rendered_names("delivery_stalled", "age_s") == {"ava_delivery_stalled_age_s_total"}
+    assert _rendered_names("shell_ttl_renewed", "ttl_s") == {"ava_shell_ttl_renewed_ttl_s_total"}
+    assert _rendered_names("heartbeat_paused", "duration_s") == set()
 
 
 def test_unlisted_metric_names_have_no_stale_entries() -> None:
