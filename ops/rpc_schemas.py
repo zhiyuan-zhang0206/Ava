@@ -6,8 +6,9 @@ the ops layer: gateway imports them downward, and ops/services never have to
 reach up into gateway. Split out of the former monolithic ops/schemas.py.
 
 The terminate exchange (request / response / open-task hint) lives in
-`ops/rpc_terminate.py` and the shared content guardrail in `ops/rpc_content.py`;
-both are re-exported here so every import path stays stable.
+`ops/rpc_terminate.py`, the shared content guardrail in `ops/rpc_content.py`,
+and the billing batch-recovery exchange in `ops/rpc_billing_recovery.py`; all
+are re-exported here so every import path stays stable.
 """
 
 from datetime import datetime
@@ -22,6 +23,13 @@ from pydantic import (
     model_validator,
 )
 
+# Re-exported so existing `ops.rpc_schemas` importers keep their import paths.
+from ops.rpc_billing_recovery import BillingBalanceReport as BillingBalanceReport
+from ops.rpc_billing_recovery import BillingHaltedAliveRow as BillingHaltedAliveRow
+from ops.rpc_billing_recovery import BillingResurrectAgentOutcome as BillingResurrectAgentOutcome
+from ops.rpc_billing_recovery import BillingResurrectAgentResponse as BillingResurrectAgentResponse
+from ops.rpc_billing_recovery import BillingResurrectRequest as BillingResurrectRequest
+from ops.rpc_billing_recovery import BillingResurrectResponse as BillingResurrectResponse
 from ops.rpc_content import UserContent
 
 # Re-exported so existing `ops.rpc_schemas` importers keep their import paths.

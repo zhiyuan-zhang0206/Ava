@@ -182,9 +182,11 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # deepseek stall-wave mitigation (task #3884's stream_stall_pair_terminated
     # — two adjacent stalls ended a call early) raises the current total to 186;
     # fleet_graph_stale (task #3925's stale-serving degradation episode)
-    # raises the current total to 187.
+    # raises the current total to 187; the billing batch-recovery run (task
+    # #3919's billing_resurrect_run — the operator-triggered post-outage rescue)
+    # raises the current total to 188.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 187
+    assert len(_TELEMETRY_KINDS) == 188
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:

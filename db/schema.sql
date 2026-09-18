@@ -162,6 +162,7 @@ CREATE TABLE agents_meta (
     last_compact_at            TIMESTAMPTZ,              -- Legacy compact marker without a durable completion writer; NULL means unknown, not never compacted.
     last_turn_fatal_at        TIMESTAMPTZ,              -- first fatal turn crash since the last completed LLM turn (the corpse marker: NULL = healthy, set = crash-dead). Stamped with COALESCE (never refreshed while dead) by the hosted runner at crash catch time (agent/hosted_ownership.stamp_turn_fatal); cleared by a completed LLM turn (_persist_last_active) and the resurrect transition. The agent_host beat's reaper terminates marked idling rows past CORPSE_REAP_GRACE_S with termination_source='reaper', and a crash under an already-set mark (a retry dying again) terminates the row at its own settle point via agent/corpse_reap.reap_recrashed_corpse without waiting out the grace; renew_hosted_owner skips marked rows so their lease decays.
     permanent_reject_streak    INTEGER NOT NULL DEFAULT 0 CHECK (permanent_reject_streak >= 0),  -- consecutive PERMANENT-class provider rejections since the last completed LLM turn (the recovery circuit breaker, task #3617): +1 at each permanent fatal turn settlement (agent/_runloop.py), reset to 0 by the same completed-turn UPDATE that clears last_turn_fatal_at (agent/graph/_llm.py::_persist_last_active). >= 2 halts every automatic recovery path (event-path resurrect / watchdog re-dispatch+retry / the stalled crash-marked harvest op / the relaxed reaper-marked trigger) until a turn succeeds; a manual resurrect stays exempt. See shared/recovery_breaker.py.
+    last_permanent_reject_reason TEXT,                   -- the CIRCUIT_REASON_* class (agent/state_channels) of the current consecutive permanent-reject streak: written in the SAME statement as the permanent_reject_streak +1 by shared/recovery_breaker.record_permanent_reject_turn, cleared with the streak by the completed-turn UPDATE. 'billing' + streak >= 2 is the billing batch-recovery whitelist (task #3919). NULL = no permanent rejection on the current streak (incl. pre-column rows — never guessed).
     runtime_generation UUID,
     runtime_kind TEXT CHECK (runtime_kind IN ('process', 'hosted')),
     runtime_owner UUID,
@@ -197,6 +198,14 @@ COMMENT ON COLUMN agents_meta.closed_at IS
     'manual resurrect clears the column (reopening, audited via the resurrect '
     'event payload). Stamped by every terminate path carrying final=true; keeps '
     'the first closure time. NULL = open.';
+
+COMMENT ON COLUMN agents_meta.last_permanent_reject_reason IS
+    'The reason class of the current consecutive permanent-reject streak '
+    '(the _circuit_reason value of the latest permanent provider rejection: '
+    '''billing'' for HTTP 402). Written with the streak increment and cleared '
+    'with it by the completed-turn UPDATE. The billing batch-recovery entry '
+    'reads ''billing'' here (task #3919). NULL = no permanent rejection on '
+    'the current streak; never backfilled by guess.';
 
 -- ─────────────── agent_activity ───────────────
 -- Append-only trail of an agent's self-reported activity. ava.self.log()
@@ -2154,3 +2163,7 @@ INSERT INTO schema_migrations (name) VALUES ('20260916T171506_index-live-agent-r
 -- agents_meta.closed_at is represented above. Fresh DBs stamp the migration
 -- instead of replaying the strict ADD COLUMN delta.
 INSERT INTO schema_migrations (name) VALUES ('20260917T195200_add-agents-meta-closed-at');
+
+-- agents_meta.last_permanent_reject_reason is represented above. Fresh DBs
+-- stamp the migration instead of replaying the ADD COLUMN delta.
+INSERT INTO schema_migrations (name) VALUES ('20260918T031422_last-permanent-reject-reason');

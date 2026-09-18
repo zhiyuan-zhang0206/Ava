@@ -269,7 +269,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     # ── gateway/routers/inventory.py ───────────────────────────────────
     ("GET", "/api/inventory"): RouteContract(),
     ("PUT", "/api/inventory"): RouteContract(note="full inventory replace — PUT is idempotent"),
-    # ── gateway/routers/lifecycle.py ───────────────────────────────────
+    # ── gateway/routers/agents_lifecycle.py ───────────────────────────
     ("POST", "/api/agents/{agent_id}/compact"): RouteContract(
         note="enqueue compact — repeats just re-summarize"
     ),
@@ -279,6 +279,9 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     ("POST", "/api/agents/{agent_id}/resurrect"): RouteContract(
         note="already_alive branch makes repeats harmless"
+    ),
+    ("POST", "/api/agents/resurrect-billing"): RouteContract(
+        note="preview by default; execute is balance-gated + single-flight, a rerun is an audited no-op"
     ),
     ("POST", "/api/agents/{agent_id}/restart"): RouteContract(
         note="enqueue restart — repeats are harmless"

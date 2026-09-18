@@ -15,7 +15,10 @@ tags:
 send_message, list, and patch. CRUD and spawn live in `agents.py`; lifecycle
 actions live in `agents_lifecycle.py`; message and state reads live in
 `agents_state.py`; `agents_forward.py` provides the cross-machine forwarding
-helpers.
+helpers. The billing batch-recovery entry is `POST /api/agents/resurrect-billing`
+(a read-only preview unless the body sets `execute`; orchestration in
+`ops/billing_recovery.py`, per-agent dispatch via the versioned
+`resurrect-billing-v1` home action).
 
 `/api/cancel` cancels a running turn. `/api/models` exposes available models,
 and `/api/agents/{id}/exited` finalizes an agent exit.
@@ -34,7 +37,7 @@ cache-valid: only ADDITIONS to `skills_to_inject_into_system_prompt` /
 `fork_config_change_not_allowed`); the added skills ride the fork inbound
 payload and load at the context tail. A fork without config inherits the
 source's overlay + preset verbatim. See
-[[decisions/2026-09-10-preset-in-config-overlay-fork-cache.md]].
+[decision](../../decisions/2026-09-10-preset-in-config-overlay-fork-cache.md).
 
 ## List projections
 

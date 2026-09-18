@@ -23,8 +23,8 @@ generated from it and never hand-synced. event_names that violate the naming rul
 
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
-| audit (category=audit) | `events` | 24 | events table |
-| telemetry (category=telemetry) | `events` | 187 | events table |
+| audit (category=audit) | `events` | 25 | events table |
+| telemetry (category=telemetry) | `events` | 188 | events table |
 | log (category=log) | `events` | 13 | events table |
 | file-only (destination=file) | file log | 1 | file only (not the events table) |
 | SSE live | Redis → frontend (not persisted) | 31 role | live projection |
@@ -55,7 +55,7 @@ spans go through the trace channel (30d).
 
 ---
 
-## 2. Audit events (24 primary category=audit; 24 status_change with extra_categories)
+## 2. Audit events (25 primary category=audit; 25 status_change with extra_categories)
 
 **Meaning convention**: category=audit rows are append-only operation audits, one row
 = one agent operation fact. `source` (who triggered: `agent:N` / `user` / `system` /
@@ -73,6 +73,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `restart` | agent restart initiated | business | — | events |
 | `cancel` | in-flight turn cancelled | business | — | events |
 | `resurrect` | terminated agent woken | business | — | events |
+| `billing_resurrect` | billing batch recovery run: billing-class halt victims reinstated after the provider balance gate passed (task #3919) | business | — | events |
 | `restart_completed` | restart finished | business | — | events |
 | `hosted_legacy_adoption` | a hosted successor replaced a legacy NULL-resource owner before lease expiry on machine-local evidence (dead predecessor probe set) | business | — | events |
 | `compact` | agent context compacted | business | — | events |
@@ -91,7 +92,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 187)
+## 3. Telemetry events (category=telemetry, 188)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -188,6 +189,7 @@ consumers: see the comments at each emit point.
 | `dangling_tool_pairing_repaired` | dangling tool pairing repaired | anomaly | — | — | events |
 | `agent_spawned` | agent process started | observation | spawner, forked_from | — | events |
 | `agent_resurrected` | agent resurrected | observation | — | — | events |
+| `billing_resurrect_run` | billing batch recovery run finished | observation | — | — | events |
 | `agent_terminated` | agent terminated | observation | — | — | events |
 | `agent_revived` | agent revived | noise | — | — | events |
 | `respawn_phase1` | restart phase 1 | noise | — | — | events |

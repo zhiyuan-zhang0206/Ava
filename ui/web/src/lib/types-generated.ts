@@ -481,6 +481,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/resurrect-billing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Agents Resurrect Billing
+         * @description Billing batch recovery — the explicit, operator-triggered entry (task #3919).
+         *
+         *     `execute=false` (the default) is a strictly read-only preview: the
+         *     billing-class halt candidates, the halted-but-alive survey (report-only),
+         *     and the provider balance readout, nothing written. `execute=true` re-checks the provider balance (the run refuses
+         *     below the configured floor) and then resurrects each candidate on its home
+         *     machine through the versioned `resurrect-billing-v1` op, which enforces the
+         *     closed fence and the billing-halt whitelist under the metadata row lock.
+         *     Idempotent: the candidate set self-clears after a run, a repeated run is an
+         *     audited no-op, and a concurrent second run is refused by the run-level
+         *     advisory lock.
+         */
+        post: operations["post_agents_resurrect_billing_api_agents_resurrect_billing_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents/{agent_id}/restart": {
         parameters: {
             query?: never;
@@ -4399,6 +4429,114 @@ export interface components {
             /** Alerts */
             alerts: components["schemas"]["AlertRow"][];
             meta: components["schemas"]["AlertsListMeta"];
+        };
+        /**
+         * BillingBalanceReport
+         * @description Provider balance probe result carried on every billing-recovery response.
+         *
+         *     `ok=False` always carries the human-readable `detail`; the run refuses
+         *     execution on it (fail closed).
+         */
+        BillingBalanceReport: {
+            /** Ok */
+            ok: boolean;
+            /** Detail */
+            detail: string;
+            /** Threshold */
+            threshold: number;
+            /** Total */
+            total?: number | null;
+            /** Currency */
+            currency?: string | null;
+        };
+        /**
+         * BillingHaltedAliveRow
+         * @description One billing-halted agent that is still alive — reported, never actioned.
+         *
+         *     The entry only resurrects terminated victims. A halted agent that is still
+         *     alive parks heartbeats and clears its own halt on the next successful turn,
+         *     so the batch lists these rows for operator visibility and deliberately
+         *     takes no action on them; releasing their hold is a follow-up candidate,
+         *     not part of this entry.
+         */
+        BillingHaltedAliveRow: {
+            /** Agent Id */
+            agent_id: number;
+            /** Machine */
+            machine: string;
+            /** Streak */
+            streak: number;
+        };
+        /**
+         * BillingResurrectAgentOutcome
+         * @description One agent's line in the billing batch-recovery summary.
+         *
+         *     `candidate` (dry-run listing) / `resurrected` / `already_alive` /
+         *     `refused` / `deferred` / `failed`; `reason` carries the guard or failure
+         *     detail where one exists.
+         */
+        BillingResurrectAgentOutcome: {
+            /** Agent Id */
+            agent_id: number;
+            /** Machine */
+            machine: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "candidate" | "resurrected" | "already_alive" | "refused" | "deferred" | "failed";
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
+         * BillingResurrectRequest
+         * @description POST /api/agents/resurrect-billing request body — the explicit,
+         *     operator-triggered billing batch-recovery entry (task #3919).
+         *
+         *     `execute=False` (the default) is a strictly read-only preview: the
+         *     billing-class halt candidates, the halted-but-alive survey, and the
+         *     provider balance readout, nothing written. `execute=True` re-checks the
+         *     provider balance and, when the gate passes, resurrects each candidate on
+         *     its home machine through the versioned `resurrect-billing-v1` op.
+         */
+        BillingResurrectRequest: {
+            /**
+             * Execute
+             * @default false
+             */
+            execute: boolean;
+        };
+        /**
+         * BillingResurrectResponse
+         * @description POST /api/agents/resurrect-billing response — the run-level summary.
+         *
+         *     `preview`: dry-run. `executed`: the run acted (a no-op when the whitelist
+         *     was already empty — also audited). `refused`: the run did not act;
+         *     `refusal_reason` names the gate ('balance gate not satisfied: ...' or a
+         *     concurrent run holding the single-flight lock).
+         *
+         *     `agents` carries the candidates (preview) or the per-agent outcomes;
+         *     `halted_alive` is the report-only survey of billing-halted rows that are
+         *     still alive — never actioned.
+         */
+        BillingResurrectResponse: {
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "dry_run" | "execute";
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "preview" | "executed" | "refused";
+            /** Refusal Reason */
+            refusal_reason?: string | null;
+            balance: components["schemas"]["BillingBalanceReport"];
+            /** Agents */
+            agents: components["schemas"]["BillingResurrectAgentOutcome"][];
+            /** Halted Alive */
+            halted_alive: components["schemas"]["BillingHaltedAliveRow"][];
         };
         /** Body_upload_files_api_agents__agent_id__uploads_post */
         Body_upload_files_api_agents__agent_id__uploads_post: {
@@ -8830,6 +8968,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ResurrectAgentResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_agents_resurrect_billing_api_agents_resurrect_billing_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["BillingResurrectRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BillingResurrectResponse"];
                 };
             };
             /** @description Validation Error */

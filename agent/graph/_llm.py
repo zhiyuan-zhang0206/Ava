@@ -571,7 +571,8 @@ async def _persist_last_active(ctx: AvaContext, agent_id: int, text: str) -> Non
       also the recovery signal that closes the recovery circuit breaker
       (`shared/recovery_breaker.py`) — the only reset, so two consecutive
       permanent rejections with no success between them keep it >= the halt
-      threshold.
+      threshold. `last_permanent_reject_reason` is cleared with it — the reason
+      class belongs to the streak generation.
     - last_message_text = the AI text WHEN this turn produced any: it survives
       compact (which replaces the whole checkpoint but not this column), read
       back by get_last_message.
@@ -587,14 +588,14 @@ async def _persist_last_active(ctx: AvaContext, agent_id: int, text: str) -> Non
             if text:
                 await cur.execute(
                     "UPDATE agents_meta SET last_active_at = now(), last_message_text = %s, "
-                    "last_turn_fatal_at = NULL, permanent_reject_streak = 0 "
+                    "last_turn_fatal_at = NULL, permanent_reject_streak = 0, last_permanent_reject_reason = NULL "
                     "WHERE id = %s",
                     (text, agent_id),
                 )
             else:
                 await cur.execute(
                     "UPDATE agents_meta SET last_active_at = now(), last_turn_fatal_at = NULL, "
-                    "permanent_reject_streak = 0 "
+                    "permanent_reject_streak = 0, last_permanent_reject_reason = NULL "
                     "WHERE id = %s",
                     (agent_id,),
                 )

@@ -833,12 +833,14 @@ async def test_completed_turn_resets_the_streak_and_clears_the_marker(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> None:
     """The completed-turn UPDATE is the single reset: it clears the corpse
-    marker and the recovery-breaker streak together (agent/graph/_llm.py)."""
+    marker, the recovery-breaker streak, and the recorded reject reason
+    together (agent/graph/_llm.py)."""
     from agent.graph._llm import _persist_last_active
 
     child_id = spawn_agent(spawner="user")
     db_conn.execute(
-        "UPDATE agents_meta SET permanent_reject_streak = 2, last_turn_fatal_at = now() "
+        "UPDATE agents_meta SET permanent_reject_streak = 2, "
+        "last_permanent_reject_reason = 'billing', last_turn_fatal_at = now() "
         "WHERE id = %s",
         (child_id,),
     )
@@ -850,7 +852,8 @@ async def test_completed_turn_resets_the_streak_and_clears_the_marker(
         "done",
     )
     row = db_conn.execute(
-        "SELECT permanent_reject_streak, last_turn_fatal_at FROM agents_meta WHERE id = %s",
+        "SELECT permanent_reject_streak, last_turn_fatal_at, last_permanent_reject_reason "
+        "FROM agents_meta WHERE id = %s",
         (child_id,),
     ).fetchone()
-    assert row == (0, None)
+    assert row == (0, None, None)
