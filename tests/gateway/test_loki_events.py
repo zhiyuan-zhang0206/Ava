@@ -385,7 +385,7 @@ class TestGlobalQueryBudget:
                         "retention_period": "84h",
                         "max_query_series": 20000,
                     },
-                    "querier": {"max_concurrent": 4},
+                    "querier": {"max_concurrent": LOKI_QUERY_CONCURRENCY},
                     "ingester": {"wal": {"disk_full_threshold": 0.9}},
                 }
             )
@@ -396,7 +396,7 @@ class TestGlobalQueryBudget:
                         "retention_period": "84h",
                         "max_query_series": 2000,
                     },
-                    "querier": {"max_concurrent": 4},
+                    "querier": {"max_concurrent": LOKI_QUERY_CONCURRENCY},
                     "ingester": {"wal": {"disk_full_threshold": 0.95}},
                 }
             )
