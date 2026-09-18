@@ -40,7 +40,7 @@ def _wake(hold: MaintenanceHold) -> None:
 
 
 def _lifecycle_wait_seconds() -> float:
-    """The bounded wait when preparation meets an in-flight lifecycle command.
+    """The bounded wait when preparation meets in-flight work it did not author.
 
     Task #3591: 0 disables the wait (the pre-#3591 refuse-immediately
     behavior); maintenance-authored commands never wait regardless.
@@ -68,12 +68,12 @@ def _prepare(holder: str, at: datetime, *, driver: HoldDriver | None = None) -> 
     #3270); daemon-driven pauses pass None and keep the handoff/outcome as
     their ownership evidence.
 
-    An unfinished agent lifecycle command belonging to another actor is
-    bounded-waited (task #3591): preparation retries until it resolves, up to
+    In-flight work this actor did not author is bounded-waited (task #3591):
+    an agent lifecycle command, and claimed ordinary work on a parked agent,
+    are retried until they resolve, up to
     `settings.gateway.pause_lifecycle_wait_seconds` (0 refuses immediately),
     and only then aborts with the wait result in the message. A
-    maintenance-authored command or claimed ordinary work still refuses
-    immediately.
+    maintenance-authored command still refuses immediately.
     """
     roles = machine_role()
     identity = host_identity() if "agent-runner" in roles and host_running() else None
@@ -103,7 +103,7 @@ def _prepare(holder: str, at: datetime, *, driver: HoldDriver | None = None) -> 
 def _prepare_cohort(
     holder: str, at: datetime, identity: HostIdentity | None, *, driver: HoldDriver | None
 ) -> MaintenanceHold:
-    """Prepare the cohort, bounded-waiting out in-flight lifecycle commands.
+    """Prepare the cohort, bounded-waiting out in-flight work it did not author.
 
     Every retry re-runs preparation — including the lifecycle-collision check —
     inside a fresh row-locked transaction under the same `(holder,
@@ -136,7 +136,7 @@ def _prepare_cohort(
                 _emit_lifecycle_wait(waited, "refused", waited_on)
                 raise RuntimeError(
                     f"{collision}; waited {waited:.1f}s — refusing without a wait "
-                    "(maintenance-class or non-lifecycle work)"
+                    "(maintenance-authored work)"
                 ) from collision
             remaining = deadline - time.monotonic()
             if remaining <= 0:
