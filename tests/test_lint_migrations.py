@@ -205,3 +205,172 @@ def test_schema_missing_baseline_seed_fails(monkeypatch, tmp_path):
     """A schema.sql that does not stamp the baseline sentinel is rejected."""
     lint, _ = _lint(monkeypatch, tmp_path, schema_body="-- no baseline seed here")
     assert lint.main() == 1
+
+
+# ── check 8: folded strict migrations must be stamped in the baseline seed ──
+
+
+_FOLDED_SCHEMA = (
+    """
+CREATE TABLE widgets (
+    id BIGINT PRIMARY KEY,
+    folded_col INT,
+    CONSTRAINT widgets_ck CHECK (id > 0)
+);
+CREATE TABLE fuzz (
+    id BIGINT PRIMARY KEY,
+    CONSTRAINT fuzz_ck CHECK (id > 0)
+);
+CREATE TABLE gadgets (id BIGINT PRIMARY KEY);
+CREATE INDEX gadgets_idx ON gadgets (id);
+CREATE TRIGGER gadgets_trg AFTER UPDATE ON gadgets
+    FOR EACH ROW EXECUTE FUNCTION touch_gadget();
+"""
+    + _BASELINE_INSERT
+)
+
+
+def _write_migration(d, stem: str, body: str) -> None:
+    (d / f"{stem}.sql").write_text(body)
+    (d / f"{stem}.down.sql").write_text("SELECT 1;")
+
+
+def test_folded_strict_add_column_without_seed_fails(monkeypatch, tmp_path):
+    """A strict ADD COLUMN whose column already sits in db/schema.sql must be
+    stamped in the baseline seed — a fresh DB replays the unseeded migration and
+    dies on `column ... already exists`."""
+    lint, d = _lint(monkeypatch, tmp_path, schema_body=_FOLDED_SCHEMA)
+    _write_migration(d, f"{_TS}_add-folded-col", "ALTER TABLE widgets ADD COLUMN folded_col INT;")
+    assert lint.main() == 1
+
+
+def test_folded_strict_add_column_with_seed_passes(monkeypatch, tmp_path):
+    stem = f"{_TS}_add-folded-col"
+    lint, d = _lint(
+        monkeypatch,
+        tmp_path,
+        schema_body=_FOLDED_SCHEMA + f"\nINSERT INTO schema_migrations (name) VALUES ('{stem}');\n",
+    )
+    _write_migration(d, stem, "ALTER TABLE widgets ADD COLUMN folded_col INT;")
+    assert lint.main() == 0
+
+
+def test_idempotent_add_column_needs_no_seed(monkeypatch, tmp_path):
+    """`ADD COLUMN IF NOT EXISTS` is replay-safe on a fresh DB — no seed needed."""
+    lint, d = _lint(monkeypatch, tmp_path, schema_body=_FOLDED_SCHEMA)
+    _write_migration(
+        d, f"{_TS}_add-folded-col", "ALTER TABLE widgets ADD COLUMN IF NOT EXISTS folded_col INT;"
+    )
+    assert lint.main() == 0
+
+
+def test_do_block_guarded_add_column_needs_no_seed(monkeypatch, tmp_path):
+    """A statement inside a DO block owns its guard — exempt from the seed rule."""
+    lint, d = _lint(monkeypatch, tmp_path, schema_body=_FOLDED_SCHEMA)
+    _write_migration(
+        d,
+        f"{_TS}_guarded-add",
+        "DO $$\nBEGIN\n    IF NOT EXISTS (SELECT 1 FROM information_schema.columns) THEN\n"
+        "        ALTER TABLE widgets ADD COLUMN folded_col INT;\n    END IF;\nEND $$;",
+    )
+    assert lint.main() == 0
+
+
+def test_rebuilt_constraint_needs_no_seed(monkeypatch, tmp_path):
+    """DROP + ADD of the same object in one migration is a replay-safe rebuild."""
+    lint, d = _lint(monkeypatch, tmp_path, schema_body=_FOLDED_SCHEMA)
+    _write_migration(
+        d,
+        f"{_TS}_rebuild-widgets-ck",
+        "ALTER TABLE widgets DROP CONSTRAINT widgets_ck;\n"
+        "ALTER TABLE widgets ADD CONSTRAINT widgets_ck CHECK (id > 0);",
+    )
+    assert lint.main() == 0
+
+
+def test_unfolded_strict_add_column_needs_no_seed(monkeypatch, tmp_path):
+    """A column absent from db/schema.sql cannot hit already-exists on replay;
+    whether the baseline is missing the change at all is the smoke convergence
+    gate's question, not this check's."""
+    lint, d = _lint(monkeypatch, tmp_path, schema_body=_FOLDED_SCHEMA)
+    _write_migration(d, f"{_TS}_add-new-col", "ALTER TABLE widgets ADD COLUMN brand_new INT;")
+    assert lint.main() == 0
+
+
+def test_same_named_object_on_another_table_needs_no_seed(monkeypatch, tmp_path):
+    """Table-qualified matching: `folded_col` / `widgets_ck` exist on `widgets`,
+    not on `fuzz` — adding them to `fuzz` is not a folded delta."""
+    lint, d = _lint(monkeypatch, tmp_path, schema_body=_FOLDED_SCHEMA)
+    _write_migration(
+        d,
+        f"{_TS}_fuzz-additions",
+        "ALTER TABLE fuzz ADD COLUMN folded_col INT;\n"
+        "ALTER TABLE fuzz ADD CONSTRAINT widgets_ck CHECK (id > 0);",
+    )
+    assert lint.main() == 0
+
+
+def test_folded_strict_create_table_without_seed_fails(monkeypatch, tmp_path):
+    lint, d = _lint(monkeypatch, tmp_path, schema_body=_FOLDED_SCHEMA)
+    _write_migration(d, f"{_TS}_create-gadgets", "CREATE TABLE gadgets (id BIGINT PRIMARY KEY);")
+    assert lint.main() == 1
+
+
+def test_folded_strict_create_index_without_seed_fails(monkeypatch, tmp_path):
+    lint, d = _lint(monkeypatch, tmp_path, schema_body=_FOLDED_SCHEMA)
+    _write_migration(d, f"{_TS}_create-gadgets-idx", "CREATE INDEX gadgets_idx ON gadgets (id);")
+    assert lint.main() == 1
+
+
+def test_rebuilt_index_needs_no_seed(monkeypatch, tmp_path):
+    lint, d = _lint(monkeypatch, tmp_path, schema_body=_FOLDED_SCHEMA)
+    _write_migration(
+        d,
+        f"{_TS}_rebuild-gadgets-idx",
+        "DROP INDEX IF EXISTS gadgets_idx;\nCREATE INDEX gadgets_idx ON gadgets (id);",
+    )
+    assert lint.main() == 0
+
+
+def test_folded_strict_create_trigger_without_seed_fails(monkeypatch, tmp_path):
+    lint, d = _lint(monkeypatch, tmp_path, schema_body=_FOLDED_SCHEMA)
+    _write_migration(
+        d,
+        f"{_TS}_create-gadgets-trg",
+        "CREATE TRIGGER gadgets_trg AFTER UPDATE ON gadgets\n"
+        "    FOR EACH ROW EXECUTE FUNCTION touch_gadget();",
+    )
+    assert lint.main() == 1
+
+
+def test_rebuilt_trigger_needs_no_seed(monkeypatch, tmp_path):
+    lint, d = _lint(monkeypatch, tmp_path, schema_body=_FOLDED_SCHEMA)
+    _write_migration(
+        d,
+        f"{_TS}_rebuild-gadgets-trg",
+        "DROP TRIGGER IF EXISTS gadgets_trg ON gadgets;\n"
+        "CREATE TRIGGER gadgets_trg AFTER UPDATE ON gadgets\n"
+        "    FOR EACH ROW EXECUTE FUNCTION touch_gadget();",
+    )
+    assert lint.main() == 0
+
+
+def test_folded_strict_add_constraint_without_seed_fails(monkeypatch, tmp_path):
+    lint, d = _lint(monkeypatch, tmp_path, schema_body=_FOLDED_SCHEMA)
+    _write_migration(
+        d,
+        f"{_TS}_add-widgets-ck",
+        "ALTER TABLE widgets ADD CONSTRAINT widgets_ck CHECK (id > 0);",
+    )
+    assert lint.main() == 1
+
+
+def test_cross_migration_replay_chain_needs_no_seed(monkeypatch, tmp_path):
+    """An earlier unseeded migration dropping the object makes a later add of it
+    replay-safe (the replay drops, then re-adds) — no seed required on either."""
+    lint, d = _lint(monkeypatch, tmp_path, schema_body=_FOLDED_SCHEMA)
+    _write_migration(d, f"{_TS}_drop-folded-col", "ALTER TABLE widgets DROP COLUMN folded_col;")
+    _write_migration(
+        d, f"{_TS2}_readd-folded-col", "ALTER TABLE widgets ADD COLUMN folded_col INT;"
+    )
+    assert lint.main() == 0
