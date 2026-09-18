@@ -32,9 +32,7 @@ tags:
 ## ava_fleet Plugin Injections
 
 The following members are mounted onto the `ava.self` namespace by the `ava_fleet` plugin (non-core), allowing agents to report status to the fleet monitoring view. See plugin-side OKF for details.
-- `log(text)` — Append a timestamped line to the activity trail; users see the latest behavior/current state in fleet view.
-- `set_label(text)` — Set role label (stable role name, not task summary); peers discover you via this label using `get_neighbors`, and your responsibility chain via `get_ancestors`.
-- `get_label() → str` — Read current role label (empty string if none).
+- `set_label(text)` — Set role label (stable role name, not task summary); peers discover you via this label using `get_neighbors`, and your responsibility chain via `get_ancestors`. The label is also stated in your own agent-ID context note at every window establishment.
 
 ## Key Dependencies
 - [[lifecycle.ava.okf.md]] — underlying implementation of restart/terminate

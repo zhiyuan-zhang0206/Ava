@@ -11,7 +11,6 @@ import io
 import logging
 import weakref
 from collections.abc import Callable
-from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
@@ -680,41 +679,37 @@ def _invest_in_the_future_section() -> str:
 def _workspace_section() -> str:
     """One-paragraph pointer to the per-agent workspace dir. Empty before a
     process identity is established (snapshot test / dev REPL renders) — the
-    path is per-agent, so there is nothing stable to say without one. Also
-    empty when settings.agent.workspace_in_system_prompt is off (bench runners):
-    only the section is gated — the folder still exists and relative-path
-    resolution still targets it.
+    note that carries the concrete path is injected beside this prompt, so
+    without an identity there is nothing to point at. Also empty when
+    settings.agent.workspace_in_system_prompt is off (bench runners): only the
+    section is gated — the folder still exists and relative-path resolution
+    still targets it.
 
-    Uses ``{YOUR_AGENT_ID}`` placeholder so the system prompt is fork-safe:
-    a fork copies the source agent's conversation (including the
-    SystemMessage) into a new agent with a different id. The actual id is
-    injected as a context note (``agent_id_note``) after each compact and at
-    cold start — it lives outside the SystemMessage, so a fork does not
-    carry a stale id."""
+    The concrete path is deliberately NOT interpolated here: a fork copies the
+    source agent's conversation (including the SystemMessage) into a new agent
+    with a different id, so a baked-in id or path would name the source's
+    folder. The section stays cluster-identical text; the per-agent path rides
+    the ``agent_id_note`` context note instead — injected after each compact
+    and at cold start, and regrafted by a fork, so it is always the reader's
+    own path."""
     import ava
 
     aid = ava._boot.agent_id()
     if aid is None or not settings.agent.workspace_in_system_prompt:
         return ""
     # Ensure the workspace directory exists (mkdir side effect).
-    ws = workspace_dir(aid)
-    try:
-        base = f"~/{ws.relative_to(Path.home())}"
-    except ValueError:
-        base = str(ws)
-    # Replace the concrete agent id with placeholder so the SystemMessage
-    # carries no per-agent id — fork-safe. The agent learns its real id
-    # from the ``agent_id_note`` context note injected beside this prompt.
-    ws_display = base.replace(str(aid), "{YOUR_AGENT_ID}")
+    workspace_dir(aid)
     return (
         "# Workspace\n\n"
-        f"Your workspace is `{ws_display}` — your own stable folder for "
-        "files you download or produce (reports, statements, artifacts). It "
-        "survives restarts and nothing cleans it up behind you; relative paths "
-        "in file and shell operations resolve here by default. Using it is "
-        "optional: work that has a natural home — a repo checkout, a location "
-        "the user names — belongs there, not in the workspace. Other agents "
-        "have their own; share a file by sending its absolute path." + workspace_section_hint()
+        "Your workspace is your per-agent folder — it is named with your agent "
+        "id, and your exact path is stated in your agent-ID note. It is your "
+        "own stable folder for files you download or produce (reports, "
+        "statements, artifacts). It survives restarts and nothing cleans it up "
+        "behind you; relative paths in file and shell operations resolve here "
+        "by default. Using it is optional: work that has a natural home — a "
+        "repo checkout, a location the user names — belongs there, not in the "
+        "workspace. Other agents have their own; share a file by sending its "
+        "absolute path." + workspace_section_hint()
     )
 
 

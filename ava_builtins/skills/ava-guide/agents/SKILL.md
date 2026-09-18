@@ -31,8 +31,9 @@ spawn/fork/resurrect/send_message and decay over time), and `get_ancestors`
 to see the spawn chain above an agent (who spawned whom, nearest first —
 the responsibility-attribution read).
 
-Each agent can have a **label** (`ava.self.set_label` / `get_label`) — a
-human-readable role/name that persists once set.
+Each agent can have a **label** (`ava.self.set_label`) — a
+human-readable role/name that persists once set; it is also stated in the
+agent's own agent-ID context note at each window establishment.
 
 SDK reference: `ava.agents` (`spawn` / `terminate` / `restart` / `resurrect` /
 `send_message` / `list_agents` / `list_machines` / `get_neighbors` /
