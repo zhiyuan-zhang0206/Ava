@@ -42,12 +42,14 @@ from shared import plugin_contributions
 from shared.config import settings
 from shared.config.turn_view import turn_settings
 from shared.log import logger
+from shared.paths import workspace_dir
 
 NoteBuilder = Callable[[], HumanMessage | None]
 
 # The rank scale for the standing head — the reading order, lowest first:
 # the operational constants (exec timeout, then the cluster clock), then the
-# shared world (cluster memory index), then identity (agent id), then the
+# shared world (cluster memory index), then identity (agent id with label +
+# machine + workspace), then the
 # personal store (per-agent memory index, then the inheritable blocks read
 # from the chain above), then preloaded skill bodies. The
 # ava_memory plugin pins the two memory ranks; everything else registered
@@ -145,6 +147,26 @@ def fork_notes() -> list[HumanMessage]:
 # ── Framework-owned notes ──
 
 
+def _established_agent_id(note: str) -> int | None:
+    """Resolve the current agent identity for a standing note, or None.
+
+    Reads through `ava._boot.agent_id()`, which resolves the hosted runner's
+    turn contextvar first: the agent host hosts many agents' turns in one
+    process and establishes no process-wide id, so reading the `_agent_id`
+    process slot directly would silently drop the note from every hosted head
+    (task #3939 — the identity line was missing for two weeks before the skip
+    was noticed). The skip is debug-logged: a legitimately absent identity
+    (snapshot renders, dev REPL, container mode) stays quiet at normal levels,
+    but a production regression leaves a trace.
+    """
+    from ava._boot import agent_id
+
+    aid = agent_id()
+    if aid is None:  # pyright: ignore[reportUnnecessaryComparison] — agent_id() is None pre-bootstrap.
+        logger.debug("[context-notes] {} note skipped: no agent identity established", note)
+    return aid
+
+
 _EXEC_TIMEOUT_FRAMING = (
     "Your execute_code call has a hard wall-clock timeout of "
     "{timeout_s:.0f} seconds ({timeout_display}). "
@@ -166,9 +188,7 @@ def exec_timeout_note() -> HumanMessage | None:
     """A context note stating the execute_code hard timeout.
 
     Returns ``None`` when this process has no established agent identity."""
-    from ava._boot import _agent_id as _raw_aid
-
-    if _raw_aid is None:
+    if _established_agent_id("exec-timeout") is None:
         return None
     timeout_s = settings.sandbox.exec_timeout_seconds
     return system_note_message(
@@ -216,9 +236,7 @@ def timezone_note() -> HumanMessage | None:
     `restart_required: agent`, which re-establishes the head.
 
     Returns ``None`` when this process has no established agent identity."""
-    from ava._boot import _agent_id as _raw_aid
-
-    if _raw_aid is None:
+    if _established_agent_id("timezone") is None:
         return None
     now = datetime.now(ZoneInfo(settings.general.timezone))
     return system_note_message(
@@ -228,23 +246,90 @@ def timezone_note() -> HumanMessage | None:
     )
 
 
+def _own_label(agent_id: int) -> str | None:
+    """The agent's current label, whitespace-normalized, or None.
+
+    Fail-soft on purpose: the identity line must render even when the label
+    read cannot (DB blip, row not yet auto-named), so every failure degrades to
+    "no label clause" — never to a missing identity line. A label is free text
+    (set by the agent via `ava.self.set_label` or by the gateway), so its
+    whitespace is collapsed before it enters the one-line note.
+    """
+    import ava
+
+    try:
+        with ava.DB.cursor() as cur:
+            cur.execute("SELECT label FROM agents WHERE id=%s", (agent_id,))
+            row = cur.fetchone()
+    except Exception as exc:  # fail-soft by design: the identity line outranks the label clause
+        logger.debug("[context-notes] agent-id label read failed: {!r}", exc)
+        return None
+    if row is None or not row[0]:
+        return None
+    return " ".join(str(row[0]).split())
+
+
+def _machine_clause() -> str | None:
+    """The host's machine name, whitespace-normalized, or None when unset.
+
+    Fail-soft like the label: a host whose machine name cannot be resolved
+    still states the agent's identity line."""
+    from shared.machine import machine_name
+
+    try:
+        name = machine_name()
+    except Exception as exc:  # fail-soft by design: a missing machine clause must not sink the head
+        logger.debug("[context-notes] agent-id machine read failed: {!r}", exc)
+        return None
+    return " ".join(name.split()) or None
+
+
+def _workspace_path(agent_id: int) -> str | None:
+    """The agent's concrete workspace path, or None when the section is off.
+
+    This is where the concrete path lives: the `# Workspace` prompt section is
+    deliberately id-free (a fork copies the SystemMessage verbatim, so a
+    baked-in path would name the source agent's folder), so the per-agent path
+    rides this note instead — regrafted by a fork. Same on/off gate as the
+    section: bench runners that turn the section off keep their prompts free of
+    workspace chatter."""
+    if not settings.agent.workspace_in_system_prompt:
+        return None
+    ws = workspace_dir(agent_id)
+    try:
+        return f"~/{ws.relative_to(Path.home())}"
+    except ValueError:
+        return str(ws)
+
+
 @register_context_note(on_fork=True, rank=RANK_AGENT_ID)
 def agent_id_note() -> HumanMessage | None:
-    """A context note stating the agent's own id.
+    """A context note stating the agent's own identity: id, label, machine,
+    workspace path — each clause fail-soft.
 
     It lives outside the SystemMessage (as a system-styled HumanMessage) so a
     fork — which copies the source agent's full conversation including the
-    SystemMessage — does not carry a stale id into the new agent. That is also
-    why it is an `on_fork` note: the inherited SystemMessage names the source.
+    SystemMessage — does not carry a stale identity into the new agent. That is
+    also why it is an `on_fork` note: the inherited SystemMessage names the
+    source. The note is also where the `# Workspace` section points for the
+    concrete path, for the same fork-safety reason.
 
     Returns ``None`` when this process has no established agent identity."""
-    from ava._boot import _agent_id as _raw_aid
-
-    aid = _raw_aid
+    aid = _established_agent_id("agent-id")
     if aid is None:
         return None
+    clauses: list[str] = []
+    label = _own_label(aid)
+    if label:
+        clauses.append(f"label: {label}")
+    machine = _machine_clause()
+    if machine:
+        clauses.append(f"machine: {machine}")
+    detail = f" ({', '.join(clauses)})" if clauses else ""
+    workspace = _workspace_path(aid)
+    tail = f" Your workspace is {workspace}." if workspace else ""
     return system_note_message(
-        content=f"Your Agent ID is {aid}.",
+        content=f"Your Agent ID is {aid}{detail}.{tail}",
         tag=NoteTag.AGENT_ID,
         created_at=datetime.now(UTC),
     )

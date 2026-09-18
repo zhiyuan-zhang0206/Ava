@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Self — Agent Self-Presentation
-description: "ava_fleet injects fleet members into ava.self: role label (set_label/get_label). Heartbeat pause/memory compaction/lifecycle (pause_heartbeat/compact/restart/terminate/update) are core ava.self, not provided by this plugin."
+description: "ava_fleet injects fleet members into ava.self: role label (set_label). Heartbeat pause/memory compaction/lifecycle (pause_heartbeat/compact/restart/terminate/update) are core ava.self, not provided by this plugin."
 tags:
 - fleet
 - self
@@ -12,9 +12,9 @@ tags:
 
 ## Responsibility
 
-ava_fleet injects two fleet members into `ava.self` — `set_label` / `get_label` (`plugins/ava_fleet/plugin.py` `register_namespace_member`) — letting agents report their role to the fleet monitoring view. The label that humans see for each agent when scanning the fleet view is provided by these two.
+ava_fleet injects the `set_label` fleet member into `ava.self` (`plugins/ava_fleet/plugin.py` `register_namespace_member`) — letting agents report their role to the fleet monitoring view and to their own agent-ID context note. The label that humans see for each agent when scanning the fleet view is provided by this member.
 
-> **Boundary**: The **core** members of `ava.self` (AGENT_ID / MACHINE_SPEC / SELF_MACHINE_NAME / pause_heartbeat / compact / restart / terminate / update) are provided by `ava/self.py` and remain even if fleet is disabled — see documentation at [[ava/self.ava.okf.md|ava.self]]. Disabling fleet only removes the two members below.
+> **Boundary**: The **core** members of `ava.self` (AGENT_ID / MACHINE_SPEC / SELF_MACHINE_NAME / pause_heartbeat / compact / restart / terminate / update) are provided by `ava/self.py` and remain even if fleet is disabled — see documentation at [[ava/self.ava.okf.md|ava.self]]. Disabling fleet only removes the members below.
 
 ## API
 
@@ -26,10 +26,9 @@ Sets the agent's role label — the name displayed in the fleet graph.
 - Task names are legitimate labels for ephemeral workers — a worker's "role" is its task
 - Other agents discover and locate peers by label through `get_neighbors`, and read the responsibility chain above you through `get_ancestors`
 - Once set, it is not automatically replaced; explicit call needed to change
-
-### `ava.self.get_label() -> str`
-
-Reads the current role label. Returns empty string when there is no label.
+- The label is stated in the agent's own agent-ID context note at every window
+  establishment — agents read their current label there, and it is how a peer
+  renders your role without a getter call
 
 ## Data Model
 

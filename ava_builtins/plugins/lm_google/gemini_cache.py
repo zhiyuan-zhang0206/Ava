@@ -43,7 +43,7 @@ shapes drift):
   ``_REFRESH_BELOW_SECONDS``.
 
 Sharing: the system prompt is byte-stable across same-build agents (the
-``{YOUR_AGENT_ID}`` placeholder keeps it fork-safe; per-agent notes ride as
+it carries no per-agent id — fork-safe; per-agent notes ride as
 separate HumanMessages), so one cache per (model, prompt+tool hash) serves
 every agent on the API key. Processes adopt each other's caches via
 ``caches.list()`` matched on display_name ``ava-sys-{model}-{key16}``; the

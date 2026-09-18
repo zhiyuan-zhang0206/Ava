@@ -2,7 +2,7 @@
 
 Loaded only in the agent process: `agent._extensions` imports this module after
 `plugin.py` on the full path (host boot / graph build). The plugin's SDK
-**surface** — `ava.self.set_label`/`get_label`, the `ava.ui` notice members,
+**surface** — `ava.self.set_label`, the `ava.ui` notice members,
 the `ava.tasks` registry namespace, and the `agents.spawn` label wrap — lives
 in `plugin.py` and loads in agent-launched children too (task #3633).
 """

@@ -6,9 +6,10 @@ autonomous deployment) strips the whole surface at once. Two groups:
 
 **Self-presentation** (`ava.self.*`, pull — the human scans the monitoring view):
 
-1. **Label** `ava.self.set_label(text)` / `ava.self.get_label()` — the agent's
-   role / name shown next to it. A label the agent sets itself sticks (it is not
-   replaced automatically afterwards); reading returns the current one.
+1. **Label** `ava.self.set_label(text)` — the agent's role / name shown next to
+   it, and stated in the agent's own agent-ID context note at each window
+   establishment. A label the agent sets itself sticks (it is not replaced
+   automatically afterwards).
 
 **Notices to the user's queue** (`ava.ui.*`, push — the agent grabs triage):
 
@@ -69,14 +70,6 @@ def set_label(text: str) -> None:
     from shared.live_announce import publish_agent_updated_sync
 
     publish_agent_updated_sync(ava._boot.agent_id())
-
-
-def get_label() -> str:
-    with ava.DB.cursor() as cur:
-        cur.execute("SELECT label FROM agents WHERE id=%s", (ava._boot.agent_id(),))
-        # The agent's own row must exist — a missing row should blow up here,
-        # not be papered over as "no label".
-        return cur.fetchone()[0] or ""
 
 
 # Sentinel for edit_notice: distinguishes "argument not passed" from an explicit
@@ -315,7 +308,6 @@ ava.register_namespace_member("ui", "notify", notify)
 ava.register_namespace_member("ui", "edit_notice", edit_notice)
 ava.register_namespace_member("ui", "dismiss_notice", dismiss_notice)
 ava.register_namespace_member("self", "set_label", set_label)
-ava.register_namespace_member("self", "get_label", get_label)
 
 
 # ── ava.tasks SDK namespace — the task registry (see task_registry.py) ───────
