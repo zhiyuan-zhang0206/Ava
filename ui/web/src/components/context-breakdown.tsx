@@ -181,21 +181,36 @@ export function ContextButton(props: ContextButtonProps) {
               <X className="size-3.5" />
             </button>
           </div>
-          <ContextBreakdownBody agentId={agentId} {...meter} />
+          <ContextBreakdownBody agentId={agentId} />
         </div>
       ) : null}
     </>
   );
 }
 
-function ContextBreakdownBody({
-  agentId,
-  maxContextTokens,
-  softCompactTokens,
-  hardCompactTokens,
-}: {
-  agentId: number;
-} & Omit<ContextButtonProps, "agentId" | "contextTokens" | "open" | "onOpenChange">) {
+/** The breakdown as a standalone card — the composer panel's body rendered
+ * inline (run page, task #4023 P4-3), chart-side above the timeline. Demo
+ * parity: the pilot-w1 card caps at 520px (`#cbd` in its stylesheet). */
+export function ContextBreakdownCard({ agentId }: { agentId: number }) {
+  return (
+    <section
+      data-testid="context-breakdown-card"
+      aria-label="Context breakdown"
+      className="max-w-[520px] rounded border border-border bg-card p-4"
+    >
+      <h2 className="mb-2 text-sm font-semibold">Context breakdown</h2>
+      <ContextBreakdownBody agentId={agentId} />
+    </section>
+  );
+}
+
+/** The breakdown itself, fetched lazily per agent. Shared by the composer's
+ * anchored panel (`ContextButton`) and the run page's card
+ * (`ContextBreakdownCard`). Thresholds are read from the response — the
+ * endpoint mirrors the token-usage values (`resolve_context_budget`), so the
+ * body carries no live meter props; the collapsed `ContextMeter` keeps its
+ * own live values. */
+function ContextBreakdownBody({ agentId }: { agentId: number }) {
   const { data, isPending, isError, error, refetch } = useQuery({
     queryKey: ["context-breakdown", agentId] as const,
     queryFn: () => api.getContextBreakdown(agentId),
@@ -237,27 +252,10 @@ function ContextBreakdownBody({
       </div>
     );
   }
-  return (
-    <BreakdownContent
-      data={data}
-      maxContextTokens={maxContextTokens}
-      softCompactTokens={softCompactTokens}
-      hardCompactTokens={hardCompactTokens}
-    />
-  );
+  return <BreakdownContent data={data} />;
 }
 
-function BreakdownContent({
-  data,
-  maxContextTokens,
-  softCompactTokens,
-  hardCompactTokens,
-}: {
-  data: ContextBreakdownResponse;
-  maxContextTokens: number;
-  softCompactTokens: number;
-  hardCompactTokens: number;
-}) {
+function BreakdownContent({ data }: { data: ContextBreakdownResponse }) {
   // The anchor the percentages are relative to: the provider truth when a call
   // has run, else the chars/4 estimate.
   const total = data.total_input_tokens > 0 ? data.total_input_tokens : data.estimated_total;
@@ -281,7 +279,9 @@ function BreakdownContent({
     categories.push({ key: "system_notes", tokens: systemNotesTokens });
   }
   categories.sort((a, b) => b.tokens - a.tokens);
-  const hasThresholds = maxContextTokens > 0 && hardCompactTokens > 0;
+  // Thresholds come from the response itself (the endpoint mirrors the
+  // token-usage values) — see ContextBreakdownResponse's field docs.
+  const hasThresholds = data.max_input_tokens > 0 && data.hard_compact_tokens > 0;
   // The whole section block is collapsible like a single section row — chevron
   // disclosure, collapsed by default so a tall breakdown stays compact.
   const [sectionsOpen, setSectionsOpen] = useState(false);
@@ -302,12 +302,12 @@ function BreakdownContent({
       <p className="text-muted-foreground text-xs tabular-nums" data-testid="context-breakdown-total">
         <span className="block">
           {formatTokens(total)}
-          {maxContextTokens > 0 ? ` / ${formatTokens(maxContextTokens)}` : ""} tokens
+          {data.max_input_tokens > 0 ? ` / ${formatTokens(data.max_input_tokens)}` : ""} tokens
         </span>
         {hasThresholds ? (
           <span className="block">
-            wind-down {formatTokens(softCompactTokens)} · auto-compact{" "}
-            {formatTokens(hardCompactTokens)}
+            wind-down {formatTokens(data.soft_compact_tokens)} · auto-compact{" "}
+            {formatTokens(data.hard_compact_tokens)}
           </span>
         ) : null}
       </p>

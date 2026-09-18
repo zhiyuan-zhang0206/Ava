@@ -46,6 +46,7 @@
     "zoomIn": "Zoom in",
     "zoomOut": "Zoom out",
     "resetWindow": "Reset window",
+    "resetAxis": "Reset axis",
     "flipLayers": "Flip layer order",
     "axisGroup": "X axis",
     "axisTime": "Time",

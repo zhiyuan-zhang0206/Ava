@@ -46,6 +46,7 @@
     "zoomIn": "放大",
     "zoomOut": "缩小",
     "resetWindow": "重置窗口",
+    "resetAxis": "回到全轴",
     "flipLayers": "翻转层序（粗⇅细）",
     "axisGroup": "横轴",
     "axisTime": "时间",
