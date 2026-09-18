@@ -94,7 +94,7 @@ import {
 } from "@/lib/sticky";
 import type { BackendTimelineItem } from "@/lib/types";
 import { useTimelineStore } from "@/lib/timeline-store";
-import { BAR_HEIGHT_PX, BAR_CLEAR_TOP_PADDING_CLASS, FLEX, FLEX_1, MIN_H_0, OVERFLOW_HIDDEN } from "@/lib/layout";
+import { BAR_HEIGHT_PX, BAR_CLEAR_TOP_PADDING_CLASS, FLEX_1, MIN_H_0, OVERFLOW_HIDDEN } from "@/lib/layout";
 import { cn } from "@/lib/utils";
 import { useTimelineColors } from "@/lib/use-timeline-colors";
 
@@ -102,7 +102,7 @@ import { ConnectionNotice } from "@/components/connection-notice";
 import { CompactingBlock } from "./compacting-block";
 import { findClosestStuckHeaderId, TurnBlock } from "./run-block";
 import { classifyItem, groupIntoTurns, type TimelineGroup } from "./runs";
-import { LoadOlderButton, PullToLoadIndicator, ColdLoadSpinner, ScrollToBottomButton } from "./overlays";
+import { CompactHistoryDivider, LoadOlderButton, PullToLoadIndicator, ColdLoadSpinner, ScrollToBottomButton } from "./overlays";
 import { TimelineRow, cardConfigFor } from "./row";
 
 
@@ -212,35 +212,6 @@ function groupTimelineSegments(items: readonly BackendTimelineItem[]): RenderGro
     start = end;
   }
   return result;
-}
-
-// The divider's dashed rule: longer dashes and gaps than the browser's
-// `border-dashed` (~2-3px) at a 1:1 ratio, and a deeper color than
-// `border-border` so the line is legible in the dark theme (user feedback
-// 2026-09-17, task #3870). currentColor lets `text-*` carry the tone.
-const DIVIDER_RULE_CLASS =
-  "h-px bg-[repeating-linear-gradient(to_right,currentColor_0_6px,transparent_6px_12px)] text-muted-foreground/60";
-
-function CompactHistoryDivider({ rank }: { readonly rank: number }) {
-  const t = useTranslations("timeline");
-  // rank 0 = the live boundary between retained history and the current
-  // post-compact segment (task #3698); the historical ranks keep the
-  // scroll-back copy. The rule + label alone mark a compact boundary, not a
-  // message divider — no arrow glyph (removed per the same 2026-09-17
-  // report, task #3870).
-  const label = rank === 0 ? t("compactBoundaryDivider") : t("compactHistoryDivider");
-  return (
-    <div
-      data-testid="compact-history-divider"
-      data-segment-rank={rank}
-      aria-live="off"
-      className={cn("items-center gap-2 py-1 text-[11px] text-muted-foreground/70", FLEX)}
-    >
-      <span aria-hidden="true" className={cn(DIVIDER_RULE_CLASS, FLEX_1)} />
-      <span className="shrink-0">{label}</span>
-      <span aria-hidden="true" className={cn(DIVIDER_RULE_CLASS, FLEX_1)} />
-    </div>
-  );
 }
 
 export function TimelineView({
@@ -1117,6 +1088,13 @@ export function TimelineView({
   // Reuse its grouping until a snapshot, history page, or live item changes it.
   const groups = useMemo(() => groupTimelineSegments(items), [items]);
 
+  // Task #3932: when the list's TOPMOST row is a compact-history divider and
+  // older pages remain, that divider carries the load-earlier control itself.
+  // The floating button yields to it (one entry at the boundary); deeper
+  // dividers stay pure labels.
+  const topDividerLoadsOlder =
+    (groups[0]?.dividerRank ?? null) !== null && hasMoreOlder;
+
   const handleScrollToBottom = useCallback(() => {
     const viewport =
       viewportRef.current ??
@@ -1138,7 +1116,7 @@ export function TimelineView({
     <div ref={wrapperRef} className={cn("relative", FLEX_1, MIN_H_0, OVERFLOW_HIDDEN)}>
       <PullToLoadIndicator pullDistance={pullDistance} pullThreshold={PULL_THRESHOLD_PX} loadingOlder={loadingOlder} />
       <LoadOlderButton
-        visible={atTop && hasMoreOlder && !loadingOlder && pullDistance === 0}
+        visible={atTop && hasMoreOlder && !loadingOlder && pullDistance === 0 && !topDividerLoadsOlder}
         onClick={handleLoadOlderClick}
       />
       <ColdLoadSpinner show={loading && items.length === 0} />
@@ -1230,7 +1208,15 @@ export function TimelineView({
             return (
               <Fragment key={`segment-group:${groupKey}`}>
                 {entry.dividerRank === null ? null : (
-                  <CompactHistoryDivider rank={entry.dividerRank} />
+                  <CompactHistoryDivider
+                    rank={entry.dividerRank}
+                    onLoadOlder={
+                      entry === groups[0] && topDividerLoadsOlder
+                        ? handleLoadOlderClick
+                        : undefined
+                    }
+                    loadingOlder={loadingOlder}
+                  />
                 )}
                 {renderedGroup}
               </Fragment>

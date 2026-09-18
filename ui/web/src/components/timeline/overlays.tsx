@@ -9,7 +9,7 @@ import { ArrowDown, ArrowUp, Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { cn } from "@/lib/utils";
-import { FLEX } from "@/lib/layout";
+import { FLEX, FLEX_1 } from "@/lib/layout";
 
 export interface PullToLoadIndicatorProps {
   pullDistance: number;
@@ -205,5 +205,81 @@ export function ScrollToBottomButton({
     >
       <ArrowDown className="size-4" />
     </button>
+  );
+}
+
+// The divider's dashed rule: longer dashes and gaps than the browser's
+// `border-dashed` (~2-3px) at a 1:1 ratio, and a deeper color than
+// `border-border` so the line is legible in the dark theme (user feedback
+// 2026-09-17, task #3870). currentColor lets `text-*` carry the tone.
+const DIVIDER_RULE_CLASS =
+  "h-px bg-[repeating-linear-gradient(to_right,currentColor_0_6px,transparent_6px_12px)] text-muted-foreground/60";
+
+export function CompactHistoryDivider({
+  rank,
+  onLoadOlder,
+  loadingOlder = false,
+}: {
+  readonly rank: number;
+  /** Present when this divider is the list's topmost row and older pages
+   *  remain: the row then carries the load-earlier control itself, so the
+   *  boundary and the loading affordance are ONE entry — instead of a
+   *  floating "Load earlier messages" button stacked right above a divider
+   *  whose copy reads like the same offer (task #3932). */
+  readonly onLoadOlder?: () => void;
+  readonly loadingOlder?: boolean;
+}) {
+  const t = useTranslations("timeline");
+  // rank 0 = the live boundary between retained history and the current
+  // post-compact segment (task #3698); the historical ranks keep the
+  // scroll-back copy. As a pure label the rule carries no glyph (removed per
+  // the 2026-09-17 report, task #3870); as the load control it adopts the
+  // load-earlier button's arrow + pill treatment.
+  const label = rank === 0 ? t("compactBoundaryDivider") : t("compactHistoryDivider");
+  if (onLoadOlder === undefined) {
+    return (
+      <div
+        data-testid="compact-history-divider"
+        data-segment-rank={rank}
+        aria-live="off"
+        className={cn("items-center gap-2 py-1 text-[11px] text-muted-foreground/70", FLEX)}
+      >
+        <span aria-hidden="true" className={cn(DIVIDER_RULE_CLASS, FLEX_1)} />
+        <span className="shrink-0">{label}</span>
+        <span aria-hidden="true" className={cn(DIVIDER_RULE_CLASS, FLEX_1)} />
+      </div>
+    );
+  }
+  return (
+    <div
+      data-testid="compact-history-divider"
+      data-segment-rank={rank}
+      data-load-control="true"
+      aria-live="off"
+      className={cn("items-center gap-2 py-1 text-[11px] text-muted-foreground/70", FLEX)}
+    >
+      <span aria-hidden="true" className={cn(DIVIDER_RULE_CLASS, FLEX_1)} />
+      <button
+        type="button"
+        data-testid="load-older-divider"
+        onClick={onLoadOlder}
+        disabled={loadingOlder}
+        className={cn(
+          "items-center gap-1.5 shrink-0 px-2.5 py-1 rounded-full",
+          "bg-background border border-border shadow-sm",
+          "text-[11px] text-muted-foreground hover:text-foreground",
+          "focus-visible:ring-[3px] focus-visible:ring-ring/50",
+          FLEX,
+        )}
+      >
+        {loadingOlder ? (
+          <Loader2 className="size-3 animate-spin text-primary" />
+        ) : (
+          <ArrowUp className="size-3" />
+        )}
+        {t("loadEarlier")}
+      </button>
+      <span aria-hidden="true" className={cn(DIVIDER_RULE_CLASS, FLEX_1)} />
+    </div>
   );
 }
