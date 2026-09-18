@@ -55,6 +55,48 @@ class _ServiceRuntimeSettings(EnvSettings):
         },
     )
 
+    browser_reach_probe_interval_s: int = Field(
+        default=300,
+        alias="AVA_BROWSER_REACH_PROBE_INTERVAL_S",
+        description="Throttle for the browser-reach canary (seconds): the canary opens and closes one background about:blank target in the shared headed browser, so probing every watchdog round would churn the user's tab strip. 300s keeps that negligible while bounding a sticky hang to threshold*interval (~15 min). 0 disables the throttle.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": True,
+        },
+    )
+
+    browser_reach_timeout_s: float = Field(
+        default=6.0,
+        alias="AVA_BROWSER_REACH_TIMEOUT_S",
+        description="Wall-clock budget for one browser-reach canary (seconds): bounds CDP target setup plus the in-page fetch. The 2026-09-18 hang left fetches pending for 9s+, so a smaller budget separates a quick network reject from a hang without stalling the watchdog round; the host-path control read uses the same budget.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": True,
+        },
+    )
+
+    browser_reach_failure_threshold: int = Field(
+        default=3,
+        alias="AVA_BROWSER_REACH_FAILURE_THRESHOLD",
+        description="Consecutive failing browser-reach probes before the single ERROR (single-round jitter suppression); the episode then stays quiet until a healthy probe re-arms it. 3 probes at the 300s default interval bound detection at ~15 min.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": True,
+        },
+    )
+
     permissions_helper_enabled: bool = Field(
         default=True,
         validation_alias=AliasChoices(

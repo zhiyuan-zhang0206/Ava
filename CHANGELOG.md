@@ -8,6 +8,15 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
 ## [Unreleased]
 
 ### Added
+- The watchdog gains a `browser-reach` check (agent-runner, browser-enabled
+  hosts): a canary fetch through the shared Chrome — a throwaway background
+  `about:blank` target closed in `finally` — contrasted with a same-process
+  read of the gateway health URL, so "the browser's own network face cannot
+  reach the gateway" (the 2026-09-18 stale-tab pool hang, task #3921) is
+  detected instead of staying green. Report-only after
+  `AVA_BROWSER_REACH_FAILURE_THRESHOLD` consecutive failing probes (one ERROR
+  with both readings and the recovery pointer); throttled by
+  `AVA_BROWSER_REACH_PROBE_INTERVAL_S`, bounded by `AVA_BROWSER_REACH_TIMEOUT_S`.
 - Chrome pages created through the shared browser (an explicit `new_page`, or
   the auto-created page on a page-less first navigate) carry a hard TTL —
   `AVA_CHROME_PAGE_DEFAULT_TTL_SECONDS`, 24h default — and the browser-mcp

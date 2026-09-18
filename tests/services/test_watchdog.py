@@ -447,6 +447,34 @@ def test_checks_for_capability_agent_runner_returns_ops_and_agent_host(
     ]
 
 
+def test_checks_for_capability_agent_runner_browser_enabled_pins_browser_reach(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With the browser enabled, the hand-added browser-reach check sits between
+    permissions-helper and the derived services — the order the checklist
+    documents (brew-pin -> permissions-helper -> browser-reach -> services)."""
+    monkeypatch.setattr("shared.config.settings.services.browser_enabled", True)
+    monkeypatch.setattr("shared.config.settings.services.permissions_helper_enabled", True)
+    monkeypatch.setattr("ops.spec._computer_mcp_gate_reason", lambda: None)
+    monkeypatch.setattr("ops.spec.browser_incapability", lambda: None)
+    monkeypatch.setattr("ops.spec.browser_mcp_incapability", lambda: None)
+    monkeypatch.setattr(wd, "read_skipped", set)
+    names = [c.name for c in wd._checks_for_capability("agent-runner")]
+    assert names == [
+        "brew-pin",
+        "permissions-helper",
+        "browser-reach",
+        "page-server",
+        "agent-host",
+        "ops",
+        "browser",
+        "browser-mcp",
+        "computer-mcp",
+        "mcp-daemon",
+        "otel-collector",
+    ]
+
+
 def test_checks_for_capability_rejects_unknown_role() -> None:
     with pytest.raises(ValueError, match="unknown watchdog role"):
         wd._checks_for_capability("bogus")  # type: ignore[arg-type]

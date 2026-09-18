@@ -20,8 +20,9 @@ the `services_for_capabilities_annotated` view used by `ava start`, so a service
 that start gates out is not resurrected; the reason is logged at debug and
 surfaced by `ava status`.
 
-Six pseudo-checks have no ServiceSpec. `brew-pin` runs for both capabilities;
-enabled agent-runners add `permissions-helper`; gateway watchdogs prepend
+Seven pseudo-checks have no ServiceSpec. `brew-pin` runs for both capabilities;
+enabled agent-runners add `permissions-helper`, and browser-enabled
+agent-runners add `browser-reach`; gateway watchdogs prepend
 `redis-acl` and `pgbouncer`, then append marker-gated `lgtm` and the remote
 `station-probe`. A station-capable runner also appends `lgtm`. `pg-backup` is a
 regular service healthcheck. `--disable-service X` also removes pseudo-checks.
@@ -42,7 +43,8 @@ its own schedule and the watchdog only probes its last-success health
 
 ## Agent-runner order
 
-`brew-pin` → enabled `permissions-helper` → the derived agent-runner services in
+`brew-pin` → enabled `permissions-helper` → browser-enabled `browser-reach` →
+the derived agent-runner services in
 `build_services()` order (`agent-host`, `page-server`, `ops`, the gated browser/computer services, `mcp-daemon`,
 then `otel-collector` and plugin services). A station-capable runner appends
 `lgtm`.
