@@ -85,6 +85,16 @@ export default function RunTimelinePage({
     };
   }, [params]);
 
+  // P4-1 (#4023, 3187 review condition): the focus trail is scoped to one
+  // identity window — switching the session, or the route's agentId resolving
+  // to a different agent in place, invalidates every crumb. The functional
+  // updater returns the previous array when it is already empty, so a switch
+  // without a trail costs no render.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- identity-keyed reset, not a render loop
+    setTrail((previous) => (previous.length === 0 ? previous : []));
+  }, [agentId, session]);
+
   const safeAgentId = agentId ?? 0;
   const requestsBucketsUpfront = usesTimelineBuckets(windowOverride);
   const turnQuery = useQuery({

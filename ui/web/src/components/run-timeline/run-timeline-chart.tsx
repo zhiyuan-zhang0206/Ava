@@ -156,6 +156,20 @@ export function RunTimelineChart({
   // committed window so successive frames pan from the newest window (P4-1).
   const latestWindowRef = useRef(timeline.window);
   const suppressClickRef = useRef(false);
+  // P4-1 (#4023): gesture state lives in refs — a drag spans many renders
+  // (the first move flips `dragging`, each flush moves the window, and the page
+  // re-creates its onZoomWindow closure every render), so effect-local state
+  // would be rebuilt mid-gesture — the PR #2887 review bug (3242).
+  const dragRef = useRef<{ startX: number; base: TimelineWindowOverride; moved: boolean } | null>(
+    null,
+  );
+  const dragFrameRef = useRef(0);
+  const dragPendingDxRef = useRef(0);
+  const onZoomWindowRef = useRef(onZoomWindow);
+
+  useEffect(() => {
+    onZoomWindowRef.current = onZoomWindow;
+  });
   const rail = useMemo(() => prioritizedRailEvents(timeline.events), [timeline.events]);
   const layers = showSummaries ? timeline.layers : undefined;
   const pendingSpans = showSummaries ? timeline.pending : undefined;
@@ -291,7 +305,10 @@ export function RunTimelineChart({
     // per animation frame so at most one window update lands per frame —
     // while Ctrl/⌘+wheel zooms around the cursor (exp sensitivity 0.0022,
     // the demo's). preventDefault stays scoped to this element, so the page
-    // scroll is never hijacked outside the chart.
+    // scroll is never hijacked outside the chart. The callback runs through
+    // onZoomWindowRef: the page re-creates its closure every render, and a
+    // dependency on that identity would tear this effect down on every parent
+    // render mid-gesture (PR #2887 review, 3242).
     let frame = 0;
     let pendingPan = 0;
     const flushPan = () => {
@@ -299,7 +316,7 @@ export function RunTimelineChart({
       const fraction = pendingPan;
       pendingPan = 0;
       if (fraction === 0) return;
-      onZoomWindow(panWindow(latestWindowRef.current, fraction, new Date()));
+      onZoomWindowRef.current(panWindow(latestWindowRef.current, fraction, new Date()));
     };
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
@@ -312,7 +329,9 @@ export function RunTimelineChart({
       if (event.ctrlKey || event.metaKey) {
         if (event.deltaY === 0) return;
         const factor = Math.exp(event.deltaY * 0.0022);
-        onZoomWindow(zoomWindowAround(latestWindowRef.current, factor, anchor, new Date()));
+        onZoomWindowRef.current(
+          zoomWindowAround(latestWindowRef.current, factor, anchor, new Date()),
+        );
         return;
       }
       const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
@@ -324,45 +343,58 @@ export function RunTimelineChart({
       visualization.removeEventListener("wheel", onWheel);
       if (frame) cancelAnimationFrame(frame);
     };
-  }, [layout.plot.left, layout.plot.width, onZoomWindow]);
+  }, [layout.plot.left, layout.plot.width]);
 
   useEffect(() => {
     const visualization = visualizationRef.current;
     if (!visualization) return;
     // P4-1 (#4023): drag pans the window (grab semantics: pulling left shows
     // later times). Once the gesture exceeds the threshold its click is
-    // suppressed, so click-to-read stays reliable on every block.
-    let drag: { startX: number; base: TimelineWindowOverride } | null = null;
-    let frame = 0;
-    let pendingDx = 0;
-    let moved = false;
+    // suppressed, so click-to-read stays reliable on every block. Gesture
+    // state sits in refs and finalization is unconditional, so a mid-gesture
+    // re-render can neither stall the drag nor leak the grab cursor or the
+    // click suppression (PR #2887 review, 3242).
     const flushPan = () => {
-      frame = 0;
-      const dx = pendingDx;
-      pendingDx = 0;
-      if (!drag || !moved || dx === 0) return;
-      onZoomWindow(panWindow(drag.base, -dx / Math.max(200, layout.plot.width), new Date()));
+      dragFrameRef.current = 0;
+      const drag = dragRef.current;
+      const dx = dragPendingDxRef.current;
+      dragPendingDxRef.current = 0;
+      if (!drag || !drag.moved || dx === 0) return;
+      onZoomWindowRef.current(
+        panWindow(drag.base, -dx / Math.max(200, layout.plot.width), new Date()),
+      );
     };
     const onPointerDown = (event: PointerEvent) => {
       if (event.button !== 0) return;
-      drag = { startX: event.clientX, base: latestWindowRef.current };
-      moved = false;
+      dragRef.current = { startX: event.clientX, base: latestWindowRef.current, moved: false };
+      dragPendingDxRef.current = 0;
       suppressClickRef.current = false;
     };
     const onPointerMove = (event: PointerEvent) => {
+      const drag = dragRef.current;
       if (!drag) return;
       const dx = event.clientX - drag.startX;
-      if (!moved) {
+      if (!drag.moved) {
         if (Math.abs(dx) <= DRAG_THRESHOLD_PX) return;
-        moved = true;
+        drag.moved = true;
         setDragging(true);
       }
-      pendingDx = dx;
-      if (frame === 0) frame = requestAnimationFrame(flushPan);
+      dragPendingDxRef.current = dx;
+      if (dragFrameRef.current === 0) {
+        dragFrameRef.current = requestAnimationFrame(flushPan);
+      }
     };
     const endDrag = () => {
+      const drag = dragRef.current;
       if (!drag) return;
-      if (moved) {
+      if (dragFrameRef.current !== 0) {
+        cancelAnimationFrame(dragFrameRef.current);
+        dragFrameRef.current = 0;
+      }
+      // Flush whatever motion is still pending, then clear the grab state.
+      flushPan();
+      dragRef.current = null;
+      if (drag.moved) {
         suppressClickRef.current = true;
         // The click that follows pointerup lands within a frame; clear the
         // flag right after so it can never stick.
@@ -370,14 +402,7 @@ export function RunTimelineChart({
           suppressClickRef.current = false;
         }, 150);
       }
-      drag = null;
-      moved = false;
-      pendingDx = 0;
       setDragging(false);
-      if (frame) {
-        cancelAnimationFrame(frame);
-        frame = 0;
-      }
     };
     visualization.addEventListener("pointerdown", onPointerDown);
     window.addEventListener("pointermove", onPointerMove);
@@ -388,9 +413,12 @@ export function RunTimelineChart({
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", endDrag);
       window.removeEventListener("pointercancel", endDrag);
-      if (frame) cancelAnimationFrame(frame);
+      if (dragFrameRef.current !== 0) {
+        cancelAnimationFrame(dragFrameRef.current);
+        dragFrameRef.current = 0;
+      }
     };
-  }, [layout.plot.width, onZoomWindow]);
+  }, [layout.plot.width]);
 
   if (timeline.rows.length === 0) {
     return (

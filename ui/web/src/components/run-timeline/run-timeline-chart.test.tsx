@@ -572,6 +572,59 @@ describe("RunTimelineChart", () => {
     expect(onZoomWindow).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps a drag gesture alive across a mid-gesture parent re-render (P4-1 / #2887 review)", () => {
+    const panBefore = vi.fn();
+    const panAfter = vi.fn();
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
+    const flushFrames = () => {
+      for (const callback of frames.splice(0)) callback(0);
+    };
+
+    const { rerender } = render(
+      <RunTimelineChart
+        timeline={timeline}
+        labels={labels}
+        onDrillBucket={vi.fn()}
+        onZoomWindow={panBefore}
+      />,
+    );
+    const visualization = screen.getByRole("group", { name: "Timeline visualization" });
+    const turn = screen.getByRole("button", { name: "Turn 1" });
+
+    fireEvent.pointerDown(visualization, { button: 0, clientX: 100 });
+    fireEvent.pointerMove(window, { clientX: 140 });
+    flushFrames();
+    expect(panBefore).toHaveBeenCalledTimes(1);
+
+    // The page re-creates its onZoomWindow closure on every render; a parent
+    // re-render mid-gesture must not reset the gesture (PR #2887 review: the
+    // effect-local draft reset there, applying one frame and leaking the rest).
+    rerender(
+      <RunTimelineChart
+        timeline={timeline}
+        labels={labels}
+        onDrillBucket={vi.fn()}
+        onZoomWindow={panAfter}
+      />,
+    );
+
+    fireEvent.pointerMove(window, { clientX: 220 });
+    flushFrames();
+    expect(panAfter).toHaveBeenCalledTimes(1);
+    expect(panBefore).toHaveBeenCalledTimes(1);
+
+    fireEvent.pointerUp(window);
+    // The drag's click is swallowed, and the grab cursor is gone.
+    fireEvent.click(turn);
+    expect(screen.queryByRole("region", { name: "Turn details" })).toBeNull();
+    expect(visualization.className).not.toContain("cursor-grabbing");
+  });
+
   it("keeps a persistent readout line and names the hovered block (P4-1)", () => {
     render(<RunTimelineChart timeline={timeline} labels={labels} {...chartActions} withReadout />);
 
