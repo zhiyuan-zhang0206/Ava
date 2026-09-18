@@ -187,6 +187,19 @@ _POINTER_TARGET_RE = re.compile(r"\]\(([^)#]+?\.md)\)")
 """Target filename of a markdown pointer line, as the pool validator reads it."""
 
 
+def _pointer_target(line: str) -> str | None:
+    """Target filename of a bullet pointer line, or None for other lines.
+
+    The first `](name.md)` link on the line is its target — the same read the
+    pool validator and `_insert_dir_pointer` use. Reading the target instead
+    of pattern-matching the bracketed title keeps the lookup working for any
+    title text: titles may contain `]`, e.g. `md5[:12]`."""
+    if not line.lstrip().startswith(("*", "-")):
+        return None
+    match = _POINTER_TARGET_RE.search(line)
+    return match.group(1) if match is not None else None
+
+
 def _dir_pointer_line(title: str, filename: str, description: str) -> str:
     """Render one directory-index entry (gen_indexes.py shape, no truncation)."""
     description = description.replace("\n", " ")
@@ -304,13 +317,12 @@ def _upsert_subdir_index(root: Path, relative_path: str, title: str, description
     dir_rel, _, filename = relative_path.rpartition("/")
     directory = root / dir_rel
     pointer = _dir_pointer_line(title, filename, description)
-    target = re.compile(rf"^[*-] \[[^]]+\]\({re.escape(filename)}\) [-\u2014] .*$")
 
     def update(text: str) -> str:
         if not text.strip():
             return _render_dir_index(directory, dir_rel)
         lines = text.splitlines()
-        matches = [index for index, line in enumerate(lines) if target.fullmatch(line)]
+        matches = [index for index, line in enumerate(lines) if _pointer_target(line) == filename]
         if matches:
             lines[matches[0]] = pointer
             for index in reversed(matches[1:]):
@@ -335,11 +347,12 @@ def _upsert_index(
         return
     index_path = root / "MEMORY.md"
     pointer = _pointer_line(title, relative_path, description)
-    target = re.compile(rf"^- \[[^]]+\]\({re.escape(relative_path)}\) — .*$")
 
     def update(text: str) -> str:
         lines = text.splitlines()
-        matches = [index for index, line in enumerate(lines) if target.fullmatch(line)]
+        matches = [
+            index for index, line in enumerate(lines) if _pointer_target(line) == relative_path
+        ]
         if matches:
             lines[matches[0]] = pointer
             for index in reversed(matches[1:]):
