@@ -71,6 +71,13 @@ export interface ContextButtonProps {
   hardCompactTokens: number;
 }
 
+/** The collapsed readout's numeric text hides below sm (QA sweep 2026-09-18
+ *  F3): at 390px the composer meta row is shared with the upload button and
+ *  the Details control, and the text truncated to "Co". The gauge stays — its
+ *  aria-label carries used/max/soft/hard — and the popup shows the numbers in
+ *  full. */
+const READOUT_TEXT_CLASS = "hidden sm:inline";
+
 /** The composer's context readout as a button: the inline `ContextMeter` gauge
  * that, when clicked, expands the breakdown panel in place (lazy-loaded on
  * expand).
@@ -113,7 +120,7 @@ export function ContextButton(props: ContextButtonProps) {
   }, [open, onOpenChange]);
 
   if (agentId == null) {
-    return <ContextMeter {...meter} barWidthClassName={barWidthClassName} />;
+    return <ContextMeter {...meter} barWidthClassName={barWidthClassName} textClassName={READOUT_TEXT_CLASS} />;
   }
 
   return (
@@ -126,7 +133,7 @@ export function ContextButton(props: ContextButtonProps) {
         aria-expanded={open}
         className={cn("rounded-sm text-left hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring", MIN_W_0)}
       >
-        <ContextMeter {...meter} barWidthClassName={barWidthClassName} />
+        <ContextMeter {...meter} barWidthClassName={barWidthClassName} textClassName={READOUT_TEXT_CLASS} />
       </button>
       {open ? (
         // bottom-full anchors the panel's bottom to the meta row's top, so it
