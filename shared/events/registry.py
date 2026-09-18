@@ -494,6 +494,26 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         "retries the disposal of the claimed rows",
         tier="anomaly",
     ),
+    # finished-turn inbound reconcile (task #3999) — a finished (non-crashed)
+    # turn disposes its own claimed inbounds at its settlement, behind the
+    # turn-end checkpoint flush; same fail-closed gates as the abort pass
+    "host_turn_reconcile_skipped": _telemetry(
+        "host_turn_reconcile_skipped",
+        "the finished hosted turn skipped the immediate inbound reconcile "
+        "(fail-closed) — the claimed rows are left to the next cold admission. "
+        "Carries the reason: the soft switch is off (disabled), the turn's "
+        "resources never fully settled (resources_unsettled), or the runtime "
+        "ownership was already replaced (ownership_lost — the replacement "
+        "disposes the rows)",
+        tier="noise",
+    ),
+    "host_turn_reconcile_failed": _telemetry(
+        "host_turn_reconcile_failed",
+        "the immediate inbound reconcile at a finished hosted turn raised "
+        "— the host does not treat it as fatal and the next cold admission "
+        "retries the disposal of the claimed rows",
+        tier="anomaly",
+    ),
     "host_admission_wait_exceeded": _telemetry(
         "host_admission_wait_exceeded",
         "a hosted turn has queued at the host admission gate "
