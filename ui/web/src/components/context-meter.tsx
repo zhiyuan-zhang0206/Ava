@@ -49,6 +49,11 @@ export interface ContextMeterProps {
    *  "compact" (the original fixed size) for callers that don't read the
    *  display setting. */
   barWidthClassName?: string;
+  /** Extra classes for the numeric text. The composer passes a narrow-hide
+   *  class (QA sweep 2026-09-18 F3: at 390px the readout truncated to "Co"
+   *  beside the Details control); the values stay reachable via the gauge's
+   *  aria-label and the breakdown popup. */
+  textClassName?: string;
   className?: string;
 }
 
@@ -68,6 +73,7 @@ export function ContextMeter({
   softCompactTokens,
   hardCompactTokens,
   barWidthClassName = CONTEXT_METER_WIDTH_CLASS.compact,
+  textClassName,
   className,
 }: ContextMeterProps) {
   const t = useTranslations("contextMeter");
@@ -140,7 +146,7 @@ export function ContextMeter({
           ) : null}
         </span>
       ) : null}
-      <span className="truncate tabular-nums">
+      <span className={cn("truncate tabular-nums", textClassName)}>
         Context: {formatTokens(contextTokens)}
         {hasWindow ? `/${formatTokens(maxContextTokens)}` : ""}
         {hasThresholds

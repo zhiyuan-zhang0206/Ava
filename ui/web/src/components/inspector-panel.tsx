@@ -86,9 +86,12 @@ const WINDOWS: { labelKey: string; value: number | null }[] = [
  * Responsive (user ruling 2026-08-23, superseding the 2026-08-05 floating
  * overlay ruling on desktop): at ≥ lg it fills a resizable right-side panel;
  * below lg it is a full-screen overlay with a backdrop, matching the mobile
- * sidebar drawer. The header X closes both forms and the backdrop closes the
- * mobile overlay; Escape deliberately does not close either form (user ruling
- * 2026-08-24).
+ * sidebar drawer. At ≥ lg the top-bar InspectorToggle is the panel's one
+ * close control (user ruling 2026-08-24 — a header X here duplicated its
+ * "Close inspector" affordance, QA sweep 2026-09-18 F2); below lg the overlay
+ * header X closes it (the overlay covers the toggle, so the X is the only
+ * reachable close) and the backdrop closes it too. Escape deliberately does
+ * not close either form (user ruling 2026-08-24).
  */
 // A subtle "live refresh is failing" marker for the inspector header. Shown only
 // when we already have a snapshot to display (stale-while-error) — a cold failure
@@ -338,14 +341,21 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
   const body = (
     <>
       <header className={cn("relative items-center gap-2 px-4", BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS, FLEX)}>
-        <button
-          type="button"
-          onClick={toggle}
-          aria-label={t("closeInspector")}
-          className="shrink-0 rounded p-1 -ml-1 text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
-        >
-          <X className="size-5" />
-        </button>
+        {!isLarge ? (
+          // Mobile-only close (see the header note above): the full-screen
+          // overlay covers the page header, so the top-bar InspectorToggle is
+          // unreachable; on desktop that toggle IS the close control and a
+          // second same-named X here would duplicate it (QA sweep 2026-09-18
+          // F2).
+          <button
+            type="button"
+            onClick={toggle}
+            aria-label={t("closeInspector")}
+            className="shrink-0 rounded p-1 -ml-1 text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+          >
+            <X className="size-5" />
+          </button>
+        ) : null}
         <span className={cn("truncate font-mono text-xs tracking-wide text-muted-foreground", MIN_W_0, FLEX_1)}>
           {t("title")}
         </span>
