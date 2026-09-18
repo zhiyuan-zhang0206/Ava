@@ -629,7 +629,10 @@ class TestSettlementReconciles:
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The finished turn's flushed checkpoint settles its claimed rows
-        (#3999): the pass runs right after the settle, never for a crash."""
+        (#3999): the pass runs right after the settle, never for a crash.
+        A cancelled turn carries the same outcome shape without the flush —
+        its unconfirmable claims re-deliver at-least-once (see the pass's
+        docstring)."""
 
         async def drive(_agent: int, _runtime: object) -> TurnOutcome:
             return TurnOutcome(exited=False, crashed=False)

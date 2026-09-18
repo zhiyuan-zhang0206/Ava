@@ -193,11 +193,15 @@ async def reconcile_inbounds_after_turn(
     The pass must stay behind the turn's flush of the throttled nstep tail
     (`host.py` `_invoke_until_done` flushes before its return): reading a
     checkpoint with a skipped tail would misread a committed message as
-    missing and reset its row to `pending` (duplicate delivery). Fail-closed:
-    any gap skips the pass and leaves the rows to the next cold admission,
-    which retries the reconcile. The settle boundary runs outside the turn's
-    bind window, so re-establish the same incarnation (the inbound owner lock
-    fences on that lease) around the call.
+    missing and reset its row to `pending` (duplicate delivery). Cancelled
+    turns land here too — their outcome is neither crashed nor aborted and
+    they carry no finished-turn flush: the pass then reads the last flushed
+    checkpoint, and a claim the interrupted turn cannot confirm returns to
+    `pending` for re-delivery, the same at-least-once call a cold admission
+    would make. Fail-closed: any gap skips the pass and leaves the rows to
+    the next cold admission, which retries the reconcile. The settle boundary
+    runs outside the turn's bind window, so re-establish the same incarnation
+    (the inbound owner lock fences on that lease) around the call.
     """
     agent_id = incarnation.agent_id
     if not settings.daemon.host_turn_reconcile_enabled:
