@@ -383,11 +383,13 @@ def _configure_probe(
     status_code: int = 200,
     raise_error: Exception | None = None,
     key: str | None = "secret",
+    file_key: str | None = None,
     floor: float = 1.0,
+    capture: dict[str, Any] | None = None,
 ) -> None:
     from pydantic import SecretStr
 
-    from shared import http_dial
+    from shared import http_dial, runtime_config
     from shared.config import settings
 
     monkeypatch.setattr(
@@ -395,7 +397,16 @@ def _configure_probe(
     )
     monkeypatch.setattr(settings.daemon, "billing_recovery_min_balance", floor, raising=False)
 
+    # Hermetic .env-file stub: the probe's gateway fallback reads the unit .env
+    # through read_env_aliases; never let a real $AVA_HOME/.env leak into a test.
+    def _stub_read_env_aliases() -> dict[str, str]:
+        return {} if file_key is None else {"DEEPSEEK_API_KEY": file_key}
+
+    monkeypatch.setattr(runtime_config, "read_env_aliases", _stub_read_env_aliases)
+
     def _get(url: str, **kwargs: Any) -> _FakeResponse:
+        if capture is not None:
+            capture.update(kwargs)
         if raise_error is not None:
             raise raise_error
         return _FakeResponse(status_code, payload)
@@ -456,6 +467,38 @@ def test_balance_probe_fails_closed_on_transport_error(monkeypatch: pytest.Monke
 
 def test_balance_probe_fails_closed_without_a_key(monkeypatch: pytest.MonkeyPatch) -> None:
     _configure_probe(monkeypatch, key=None)
+
+    report = billing_recovery.fetch_provider_balance()
+
+    assert report.ok is False and "not configured" in report.detail
+
+
+def test_balance_probe_falls_back_to_the_env_file_when_gateway_pops_the_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gateway profile: Settings carries no key; the unit .env file supplies it."""
+    captured: dict[str, Any] = {}
+    _configure_probe(
+        monkeypatch,
+        payload={
+            "is_available": True,
+            "balance_infos": [{"currency": "CNY", "total_balance": "660.27"}],
+        },
+        key=None,
+        file_key="sk-from-env-file",
+        capture=captured,
+    )
+
+    report = billing_recovery.fetch_provider_balance()
+
+    assert report.ok is True and report.total == 660.27
+    assert captured["headers"]["Authorization"] == "Bearer sk-from-env-file"
+
+
+def test_balance_probe_fails_closed_when_neither_settings_nor_env_file_has_the_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_probe(monkeypatch, key=None, file_key=None)
 
     report = billing_recovery.fetch_provider_balance()
 
