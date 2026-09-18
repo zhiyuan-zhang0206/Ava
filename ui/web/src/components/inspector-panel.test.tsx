@@ -1479,6 +1479,31 @@ describe("InspectorPanel liveness (merged section, Task #1195)", () => {
     expect(screen.getByText("Status")).toBeTruthy();
     expect(screen.getByText("Running")).toBeTruthy();
   });
+
+  it("orders the liveness cells birth → heartbeat → machine/status (task #3952)", async () => {
+    getAgentInspectLive.mockResolvedValue(
+      liveFixture({
+        liveness_state: "online",
+        heartbeat: {
+          interval_s: 300,
+          next_at: "2026-09-18T06:00:00Z",
+          paused_until: null,
+          heartbeat_pending: false,
+          last_pause: { at: "2026-09-18T05:00:00Z", duration_s: 1800 },
+        },
+      }),
+    );
+    render(<InspectorPanel agentId={1} />);
+    await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
+    const section = screen.getByText("Liveness").closest("section");
+    expect(section).not.toBeNull();
+    const text = section!.textContent;
+    const labels = ["Birth", "Next heartbeat", "Last pause", "Machine", "Status"];
+    const idx = labels.map((label) => text.indexOf(label));
+    expect(idx.every((i) => i >= 0)).toBe(true);
+    // Non-decreasing document order = the user's field order (task #3952).
+    expect(idx).toEqual([...idx].sort((a, b) => a - b));
+  });
 });
 
 describe("InspectorPanel agent switch (task #1939)", () => {
