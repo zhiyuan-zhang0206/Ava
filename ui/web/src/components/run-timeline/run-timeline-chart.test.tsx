@@ -1,9 +1,17 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import fixture3187Json from "../../../fixtures/run-timeline-3187.json";
 import fixture405Json from "../../../fixtures/run-timeline-405.json";
 import type { RunTimelineResponse } from "@/lib/types";
+
+import { runTimelineLabels } from "@/test-support/run-timeline-labels";
+
+// P4-2 message panel fetches through the api client; the chart tests only
+// exercise it through the message-details route mock.
+const { getRunTimelineMessage } = vi.hoisted(() => ({ getRunTimelineMessage: vi.fn() }));
+vi.mock("@/lib/api", () => ({ api: { getRunTimelineMessage } }));
 
 import { RunTimelineChart } from "./run-timeline-chart";
 
@@ -92,47 +100,7 @@ const timeline: RunTimelineResponse = {
   },
 };
 
-const labels = {
-  chart: "Timeline chart",
-  visualization: "Timeline visualization",
-  time: "Time",
-  eventRail: "Event rail",
-  input: "Input",
-  output: "Output",
-  turn: "Turn",
-  bucket: "Bucket",
-  cost: "Cost",
-  model: "Model",
-  empty: "No activity in this window.",
-  moreEvents: (count: number, summary: string) => `+${count} more (${summary})`,
-  turnDetails: "Turn details",
-  timeRange: "Time range",
-  activeSeconds: "Active seconds",
-  latency: "Latency",
-  executions: "Executions",
-  tool: "Tool",
-  status: "Status",
-  succeeded: "Succeeded",
-  failed: "Failed",
-  anomalies: "Anomalies",
-  none: "None",
-  noExecutions: "No executions",
-  closeDetails: "Close details",
-  eventDetails: "Event details",
-  layerDetails: "Layer details",
-  layerSummary: "Summary",
-  pendingLabel: "Pending",
-  pendingExplainer:
-    "This stretch has no understanding layer yet — it appears after the next seal (compact); history is not backfilled.",
-  pendingAria: "Pending layer segment",
-  showMore: "Show more",
-  showLess: "Show less",
-  kind: "Kind",
-  timestamp: "Timestamp",
-  detail: "Detail",
-  crumbRoot: "Initial window",
-  readoutIdle: "Wheel / drag to pan · Ctrl+wheel to zoom · hover for info · click to read",
-};
+const labels = runTimelineLabels();
 const chartActions = {
   onDrillBucket: vi.fn(),
   onZoomWindow: vi.fn(),
@@ -707,5 +675,200 @@ describe("RunTimelineChart", () => {
       { from: "2026-08-29T08:10:00.000Z", to: "2026-08-29T08:55:00.000Z" },
       labels.pendingLabel,
     );
+  });
+
+  const stripTimeline: RunTimelineResponse = {
+    agent_id: 42,
+    window: { from: "2026-09-19T00:00:00Z", to: "2026-09-19T01:00:00Z" },
+    meta: {
+      n_turns: 1,
+      wall_span_s: 3600,
+      active_s: 4,
+      tokens_in: 120,
+      tokens_out: 12,
+      cost_usd: 0.02,
+      n_exec_failed: 0,
+      n_compact: 0,
+      n_restart: 0,
+      fallback_turns: 0,
+      unmatched_turns: 0,
+    },
+    rows: [
+      {
+        turn: 1,
+        n_turns: 1,
+        start: "2026-09-19T00:05:00Z",
+        end: "2026-09-19T00:05:04Z",
+        active_s: 4,
+        trace_id: null,
+        checkpoint_id: null,
+        ok: true,
+        llm: {
+          calls: 1,
+          in_total: 120,
+          cache_read: 0,
+          out_total: 12,
+          reasoning: 0,
+          latency_ms: 1000,
+          cost_usd: 0.02,
+          model: "deepseek-flash",
+        },
+        execs: [],
+        anomalies: [],
+        tags: [],
+      },
+    ],
+    events: [],
+    boundaries: {
+      initialize_turn: 1,
+      last_before_compact_turn: null,
+      post_window_turns: 0,
+      has_activity_after_window: false,
+    },
+    layers: [
+      { id: "root", depth: 0, parent: null, start: "2026-09-19T00:00:00Z", end: "2026-09-19T01:00:00Z", summary: "root summary" },
+      { id: "blk", depth: 1, parent: "root", start: "2026-09-19T00:05:00Z", end: "2026-09-19T00:30:00Z", summary: "block summary" },
+    ],
+    messages: [
+      { key: "c.0", idx: 0, ts: null, kind: "prompt", source: null, chars: 400, parts: [{ kind: "prompt", chars: 400 }] },
+      {
+        key: "c.1",
+        idx: 1,
+        ts: "2026-09-19T00:10:00Z",
+        kind: "ai",
+        source: null,
+        chars: 300,
+        parts: [
+          { kind: "think", chars: 100 },
+          { kind: "text", chars: 200 },
+        ],
+      },
+      { key: "c.2", idx: 2, ts: "2026-09-19T00:20:00Z", kind: "inbound", source: "user", chars: 100, parts: [{ kind: "inbound", chars: 100 }] },
+      { key: "c.3", idx: 3, ts: "2026-09-19T00:40:00Z", kind: "exec", source: null, chars: 200, parts: [{ kind: "out", chars: 200 }] },
+    ],
+    messages_truncated: false,
+  };
+
+  it("renders the raw-context strip and legend, and opens the message panel on click (P4-2)", async () => {
+    getRunTimelineMessage.mockResolvedValue({
+      key: "c.2",
+      kind: "inbound",
+      ts: "2026-09-19T00:20:00Z",
+      source: "user",
+      chars: 100,
+      parts: [{ kind: "inbound", chars: 100, text: "ping from user", text_truncated: false }],
+      content_truncated: false,
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <RunTimelineChart timeline={stripTimeline} labels={labels} {...chartActions} />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getAllByTestId("strip-message-button")).toHaveLength(4);
+    expect(screen.getByRole("list", { name: "Message categories" })).not.toBeNull();
+    expect(screen.queryByTestId("strip-truncated")).toBeNull();
+
+    fireEvent.click(screen.getAllByTestId("strip-message-button")[2]);
+    const panel = await screen.findByRole("region", { name: "Message details" });
+    expect(await within(panel).findByText("ping from user")).not.toBeNull();
+    expect(getRunTimelineMessage).toHaveBeenCalledWith(42, "c.2", { full: false });
+  });
+
+  it("does not render the strip or legend in the compare context (M7)", () => {
+    render(
+      <RunTimelineChart timeline={stripTimeline} labels={labels} widthOverride={640} {...chartActions} />,
+    );
+    expect(screen.queryAllByTestId("strip-message-button")).toHaveLength(0);
+    expect(screen.queryByTestId("strip-track")).toBeNull();
+    expect(screen.queryByRole("list", { name: "Message categories" })).toBeNull();
+  });
+
+  it("marks covered messages related when a summary node is selected (P4-2)", () => {
+    render(<RunTimelineChart timeline={stripTimeline} labels={labels} {...chartActions} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Layer details blk" }));
+    const related = screen.getAllByTestId("strip-message-related");
+    expect(related.map((node) => node.getAttribute("data-message-index"))).toEqual(["1", "2"]);
+    expect(screen.queryByTestId("strip-message-selected")).toBeNull();
+  });
+
+  it("reports the hovered message and its summary leaf in the readout (P4-2)", () => {
+    render(<RunTimelineChart timeline={stripTimeline} labels={labels} {...chartActions} withReadout />);
+
+    fireEvent.pointerEnter(screen.getAllByTestId("strip-message-button")[3]);
+    expect(screen.getByTestId("timeline-readout").textContent).toMatch(
+      /#3 · tool output · .* · 200 chars \uFF5C summary: L0#root/,
+    );
+  });
+
+  it("dims non-matching strip parts when a legend category is active (P4-2)", () => {
+    render(<RunTimelineChart timeline={stripTimeline} labels={labels} {...chartActions} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "thinking" }));
+    const parts = screen.getAllByTestId("strip-part");
+    const lit = parts.filter((part) => part.getAttribute("opacity") === "1");
+    const dim = parts.filter((part) => part.getAttribute("opacity") === "0.12");
+    expect(lit.length).toBeGreaterThan(0);
+    expect(lit.every((part) => part.getAttribute("data-strip-color") === "think")).toBe(true);
+    expect(lit.length + dim.length).toBe(parts.length);
+  });
+
+  it("shows the truncation notice when the strip is flagged truncated (P4-2)", () => {
+    render(
+      <RunTimelineChart
+        timeline={{ ...stripTimeline, messages_truncated: true }}
+        labels={labels}
+        {...chartActions}
+      />,
+    );
+    expect(screen.getByTestId("strip-truncated").textContent).toBe("Earlier messages are not shown");
+  });
+
+  it("routes strip double-click focus through onFocusWindow with a message label (P4-2)", () => {
+    const onFocusWindow = vi.fn();
+    render(
+      <RunTimelineChart
+        timeline={stripTimeline}
+        labels={labels}
+        onDrillBucket={vi.fn()}
+        onZoomWindow={vi.fn()}
+        onFocusWindow={onFocusWindow}
+      />,
+    );
+
+    fireEvent.doubleClick(screen.getAllByTestId("strip-message-button")[1]);
+    expect(onFocusWindow).toHaveBeenCalledTimes(1);
+    const [target, label] = onFocusWindow.mock.calls[0] as [{ from: string; to: string }, string];
+    expect(label).toBe("Message 1");
+    expect(Date.parse(target.from)).toBeLessThan(Date.parse(target.to));
+  });
+
+  it("outlines the covering summary chain when a message is selected (P4-2)", async () => {
+    getRunTimelineMessage.mockResolvedValue({
+      key: "c.1",
+      kind: "ai",
+      ts: "2026-09-19T00:10:00Z",
+      source: null,
+      chars: 300,
+      parts: [{ kind: "text", chars: 300, text: "answer text", text_truncated: false }],
+      content_truncated: false,
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <RunTimelineChart timeline={stripTimeline} labels={labels} {...chartActions} />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getAllByTestId("strip-message-button")[1]);
+    await screen.findByRole("region", { name: "Message details" });
+
+    // The message's ts is covered by root (depth 0) and blk (depth 1); both
+    // layer blocks take the path stroke.
+    const blocks = screen.getAllByTestId("layer-block");
+    const pathBlocks = blocks.filter((block) => block.getAttribute("stroke") === "var(--series-4)");
+    expect(pathBlocks.map((block) => block.getAttribute("data-layer-node-index"))).toEqual(["0", "1"]);
   });
 });

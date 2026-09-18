@@ -430,6 +430,10 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/agents/{agent_id}/run-timeline"): RouteContract(
         note="read-only event-driven run waterfall (Loki-backed)",
     ),
+    # ── gateway/routers/run_timeline_strip.py ─────────────────────────
+    ("GET", "/api/agents/{agent_id}/run-timeline/message"): RouteContract(
+        note="one raw-context message's part texts — long parts clip with content_truncated; full=true returns the whole body",
+    ),
     # ── gateway/routers/ui_contributions.py ───────────────────────────────────
     ("GET", "/api/ui/contributions"): RouteContract(),
     # ── gateway/routers/uploads.py ───────────────────────────────────

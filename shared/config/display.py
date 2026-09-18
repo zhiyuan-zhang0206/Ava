@@ -83,6 +83,48 @@ class DisplaySettings(EnvSettings):
         },
     )
 
+    run_timeline_messages_max: int = Field(
+        default=600,
+        ge=1,
+        le=2000,
+        alias="AVA_RUN_TIMELINE_MESSAGES_MAX",
+        description=(
+            "Max context messages one run-timeline response's raw strip carries "
+            "(GET /api/agents/{id}/run-timeline). 600 messages is roughly 1-3 DOM "
+            "nodes per entry on one chart row - the readable and interactive "
+            "density budget; a session's context is compact-bounded, so 600 covers "
+            "a normal session. Beyond it the newest 600 win and the response marks "
+            "the truncation (messages_truncated), never a silent cut."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    run_timeline_message_text_max: int = Field(
+        default=20000,
+        ge=1000,
+        le=200000,
+        alias="AVA_RUN_TIMELINE_MESSAGE_TEXT_MAX",
+        description=(
+            "Per-part text budget of one run-timeline message read "
+            "(GET /api/agents/{id}/run-timeline/message), in characters. A longer "
+            "part returns clipped with content_truncated=true and the panel "
+            "refetches with full=true; 20k characters is about one screenful of "
+            "tool output, keeping the panel's first read bounded while the full "
+            "text stays one click away."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     notices_open_default_limit: int = Field(
         default=200,
         ge=1,

@@ -28,14 +28,24 @@ interface LayerTrackProps {
 export function LayerTrackGeometry({
   rows,
   selectedIndex,
+  pathIndexes,
+  dimmed,
 }: {
   rows: TimelineLayerRowLayout[];
   selectedIndex: number | null;
+  /** P4-2 (#4023): chain nodes covering the selected message — outlined as
+   *  the message's path through the summary stack (demo `.blk.path`). */
+  pathIndexes?: ReadonlySet<number>;
+  /** P4-2: a legend category is active; non-selected blocks mute to 0.12,
+   *  the demo's category-highlight rule. */
+  dimmed?: boolean;
 }) {
   return (
     <>
       {rows.flatMap((layerRow) =>
         layerRow.blocks.map((block) => {
+          const selected = selectedIndex === block.nodeIndex;
+          const inPath = pathIndexes?.has(block.nodeIndex) ?? false;
           return (
             <rect
               key={`layer-${block.nodeIndex}`}
@@ -47,9 +57,10 @@ export function LayerTrackGeometry({
               height={layerRow.height}
               rx="6"
               fill="var(--series-2)"
-              fillOpacity={selectedIndex === block.nodeIndex ? 0.95 : 0.6}
-              stroke={selectedIndex === block.nodeIndex ? "var(--foreground)" : "var(--card)"}
-              strokeWidth={selectedIndex === block.nodeIndex ? 2 : 1}
+              fillOpacity={selected ? 0.95 : 0.6}
+              stroke={selected ? "var(--foreground)" : inPath ? "var(--series-4)" : "var(--card)"}
+              strokeWidth={selected ? 2 : inPath ? 1.5 : 1}
+              opacity={dimmed && !selected ? 0.12 : 1}
             />
           );
         }),

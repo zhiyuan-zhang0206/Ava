@@ -59,6 +59,7 @@ import type { NoticesFeed,
   ResolvedConfigView,
   RestartAgentResponse,
   ResurrectAgentResponse,
+  RunTimelineMessageDetails,
   RunTimelineResponse,
   ShellCapture,
   SpawnAgentRequest,
@@ -262,6 +263,21 @@ export const api = {
     const query = params.toString();
     return f(`/api/agents/${agentId}/run-timeline${query ? `?${query}` : ""}`).then(
       ok<RunTimelineResponse>,
+    );
+  },
+
+  // One raw-context strip message's parts as text (P4-2, task #4023). Parts
+  // clipped by the per-read budget report `text_truncated`; `full` refetches
+  // the uncut text.
+  getRunTimelineMessage: (
+    agentId: number,
+    key: string,
+    options?: { full?: boolean },
+  ): Promise<RunTimelineMessageDetails> => {
+    const params = new URLSearchParams({ key });
+    if (options?.full) params.set("full", "true");
+    return f(`/api/agents/${agentId}/run-timeline/message?${params.toString()}`).then(
+      ok<RunTimelineMessageDetails>,
     );
   },
 
