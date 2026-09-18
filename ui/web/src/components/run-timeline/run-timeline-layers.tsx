@@ -12,6 +12,7 @@ import type { RunTimelineResponse } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 import {
+  layerFocusLabel,
   layerNodeLabel,
   TIMELINE_POPOVER_ID,
   type RunTimelineChartLabels,
@@ -63,10 +64,15 @@ export function LayerTrackButtons({
   labels,
   onSelect,
   onZoom,
+  onHover,
 }: LayerTrackProps & {
   labels: RunTimelineChartLabels;
   onSelect: (index: number) => void;
-  onZoom: (window: TimelineWindowOverride) => void;
+  /** P4-1 (#4023): label rides along so double-click focus can name the
+   *  block it pushed onto the crumb path. */
+  onZoom: (window: TimelineWindowOverride, label: string) => void;
+  /** P4-1 (#4023): hover feed for the persistent readout line. */
+  onHover?: (nodeIndex: number | null) => void;
 }) {
   return (
     <>
@@ -82,7 +88,11 @@ export function LayerTrackButtons({
               data-testid="layer-block-button"
               data-layer-node-index={block.nodeIndex}
               onClick={() => onSelect(block.nodeIndex)}
-              onDoubleClick={() => onZoom({ from: node.start, to: node.end })}
+              onPointerEnter={onHover ? () => onHover(block.nodeIndex) : undefined}
+              onPointerLeave={onHover ? () => onHover(null) : undefined}
+              onFocus={onHover ? () => onHover(block.nodeIndex) : undefined}
+              onBlur={onHover ? () => onHover(null) : undefined}
+              onDoubleClick={() => onZoom({ from: node.start, to: node.end }, layerFocusLabel(node))}
               className="absolute rounded-md outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2"
               style={{
                 left: `${block.left}px`,
@@ -156,7 +166,8 @@ export function PendingTrackButtons({
   labels: RunTimelineChartLabels;
   onShowPopover: (element: HTMLButtonElement) => void;
   onHidePopover: (event: PointerEvent<HTMLButtonElement> | FocusEvent<HTMLButtonElement>) => void;
-  onZoom: (window: TimelineWindowOverride) => void;
+  /** P4-1 (#4023): the focus label names the stretch on the crumb path. */
+  onZoom: (window: TimelineWindowOverride, label: string) => void;
   describedIndex: number | null;
 }) {
   return (
@@ -176,7 +187,7 @@ export function PendingTrackButtons({
           onFocus={(event) => onShowPopover(event.currentTarget)}
           onBlur={onHidePopover}
           onClick={(event) => onShowPopover(event.currentTarget)}
-          onDoubleClick={() => onZoom({ from: block.start, to: block.end })}
+          onDoubleClick={() => onZoom({ from: block.start, to: block.end }, labels.pendingLabel)}
           className="absolute rounded-md outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2"
           style={{
             left: `${block.left}px`,

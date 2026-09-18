@@ -27,6 +27,9 @@ interface TimelineLayoutInput {
   events: RunTimelineResponse["events"];
   layers?: RunTimelineResponse["layers"];
   pending?: RunTimelineResponse["pending"];
+  /** P4-1 task #4023: render the layer stack fine-first (coarse rows move to
+   *  the bottom). Placeholders keep riding their host row. */
+  flipLayers?: boolean;
 }
 
 export interface TimelinePoint {
@@ -236,10 +239,25 @@ export function buildTimelineLayout(input: TimelineLayoutInput) {
     const width = Math.min(plot.right - left, Math.max(MIN_TURN_WIDTH, endX - startX));
     return { index, start: span.start, end: span.end, left, width };
   });
+  // P4-1 (#4023, demo parity): flip reverses the stack top-to-bottom by
+  // re-assigning row tops. The host row of the placeholders keeps its
+  // identity (by depth), so a flip moves the band with its row instead of
+  // re-targeting another row.
+  const orderedLayerRows: TimelineLayerRowLayout[] = input.flipLayers
+    ? [...layerRows].reverse().map((layerRow, rowIndex) => ({
+        ...layerRow,
+        top: layersTop + rowIndex * (LAYER_ROW_HEIGHT + LAYER_ROW_GAP),
+      }))
+    : layerRows;
   // Placeholders ride the first layer row; with no sealed rows they get one
   // synthesized row so the layer band still renders (B spec, 2026-09-18).
+  const pendingHostDepth = layerRows.length > 0 ? layerRows[0].depth : null;
+  const pendingHostRow =
+    pendingHostDepth === null
+      ? undefined
+      : orderedLayerRows.find((layerRow) => layerRow.depth === pendingHostDepth);
   const pendingRow = {
-    top: layerRows.length > 0 ? layerRows[0].top : layersTop,
+    top: pendingHostRow?.top ?? layersTop,
     height: LAYER_ROW_HEIGHT,
   };
   const layersBottom =
@@ -257,7 +275,7 @@ export function buildTimelineLayout(input: TimelineLayoutInput) {
     plot,
     ticks,
     track: { top: trackTop, height: TRACK_HEIGHT },
-    layerRows,
+    layerRows: orderedLayerRows,
     pendingRow,
     pendingBlocks,
     turns,

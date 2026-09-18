@@ -4,6 +4,7 @@ import {
   bucketLabel,
   centerZoomWindow,
   needsBuckets,
+  panWindow,
   pickBucketSeconds,
   usesTimelineBuckets,
   zoomWindowAround,
@@ -112,5 +113,37 @@ describe("zoomWindowAround", () => {
       from: "2026-08-22T12:00:00.000Z",
       to: "2026-08-29T12:00:00.000Z",
     });
+  });
+});
+
+
+describe("panWindow", () => {
+  const now = new Date("2026-08-29T12:00:00Z");
+
+  it("slides the window by a fraction of its own span", () => {
+    expect(
+      panWindow({ from: "2026-08-29T10:00:00Z", to: "2026-08-29T11:00:00Z" }, 0.25, now),
+    ).toEqual({ from: "2026-08-29T10:15:00.000Z", to: "2026-08-29T11:15:00.000Z" });
+  });
+
+  it("stops at now on the right edge instead of running into the future", () => {
+    expect(
+      panWindow({ from: "2026-08-29T11:00:00Z", to: "2026-08-29T11:30:00Z" }, 2, now),
+    ).toEqual({ from: "2026-08-29T11:30:00.000Z", to: "2026-08-29T12:00:00.000Z" });
+  });
+
+  it("stops at the seven-day retention floor on the left edge", () => {
+    expect(
+      panWindow({ from: "2026-08-23T00:00:00Z", to: "2026-08-23T01:00:00Z" }, -50, now),
+    ).toEqual({ from: "2026-08-22T12:00:00.000Z", to: "2026-08-22T13:00:00.000Z" });
+  });
+
+  it("rejects a non-increasing window and a non-finite offset", () => {
+    expect(() =>
+      panWindow({ from: "2026-08-29T10:00:00Z", to: "2026-08-29T10:00:00Z" }, 0.1, now),
+    ).toThrow(RangeError);
+    expect(() =>
+      panWindow({ from: "2026-08-29T10:00:00Z", to: "2026-08-29T11:00:00Z" }, Number.NaN, now),
+    ).toThrow(RangeError);
   });
 });

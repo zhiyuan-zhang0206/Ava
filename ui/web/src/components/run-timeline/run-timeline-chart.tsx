@@ -2,7 +2,7 @@
 
 import {
   type FocusEvent,
-  type PointerEvent,
+  type PointerEvent as ReactPointerEvent,
   useEffect,
   useMemo,
   useRef,
@@ -13,6 +13,7 @@ import { FLEX, MIN_W_0 } from "@/lib/layout";
 import type { RunTimelineResponse } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+import { TimelineCrumbs, type TimelineCrumbEntry } from "./run-timeline-crumbs";
 import {
   LayerDetailPanel,
   rowFailed,
@@ -31,7 +32,8 @@ import {
   PendingTrackGeometry,
   RawSummaryBand,
 } from "./run-timeline-layers";
-import { zoomWindowAround, type TimelineWindowOverride } from "./request-level";
+import { buildReadoutText, TimelineReadout } from "./run-timeline-readout";
+import { panWindow, zoomWindowAround, type TimelineWindowOverride } from "./request-level";
 import { buildTimelineLayout } from "./timeline-layout";
 
 export type { RunTimelineChartLabels } from "./run-timeline-details";
@@ -43,6 +45,10 @@ export const MIN_DETAIL_CANVAS_WIDTH = 320;
 // summarized (`skippedByKind`), not drawn.
 const EVENT_RAIL_LIMIT = 120;
 const TIMELINE_POPOVER_WIDTH = 288;
+// P4-1 (#4023) interaction detail, not a user setting: a drag shorter than
+// this stays a click on the block under the pointer (the demo used the same
+// threshold); only longer movements turn the gesture into a pan.
+const DRAG_THRESHOLD_PX = 4;
 // Rail kinds the backend still emits after the task #2591 narrowing: execution
 // and halt events no longer appear on the rail (they live in turn rows).
 const EVENT_RAIL_PRIORITY = new Set([
@@ -98,6 +104,11 @@ export function RunTimelineChart({
   showSummaries = true,
   widthOverride,
   onDetailOpenChange,
+  flipLayers,
+  trail,
+  onCrumbSelect,
+  onFocusWindow,
+  withReadout,
 }: {
   timeline: RunTimelineResponse;
   labels: RunTimelineChartLabels;
@@ -111,6 +122,18 @@ export function RunTimelineChart({
   /** Reports detail-panel visibility; the compare view sizes every lane from
    *  whether ANY lane's panel is open. */
   onDetailOpenChange?: (open: boolean) => void;
+  /** P4-1 (#4023): render the layer stack fine-first (demo flip). */
+  flipLayers?: boolean;
+  /** P4-1 (#4023): focus path the crumb bar shows; the compare view passes
+   *  none, so it renders no crumb bar. */
+  trail?: TimelineCrumbEntry[];
+  /** P4-1: select a crumb (-1 = the initial window). */
+  onCrumbSelect?: (index: number) => void;
+  /** P4-1: double-click routes through the page so it can push a crumb
+   *  (the compare view keeps the plain zoom). */
+  onFocusWindow?: (window: TimelineWindowOverride, label: string) => void;
+  /** P4-1: persistent hover readout above the chart. */
+  withReadout?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const visualizationRef = useRef<HTMLDivElement>(null);
@@ -127,6 +150,26 @@ export function RunTimelineChart({
   const [selectedLayerIndex, setSelectedLayerIndex] = useState<number | null>(null);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [popoverTarget, setPopoverTarget] = useState<TimelinePopoverTarget | null>(null);
+  const [hoveredLayerIndex, setHoveredLayerIndex] = useState<number | null>(null);
+  const [dragging, setDragging] = useState(false);
+  // Wheel/drag gestures batch into frames; the flush reads the latest
+  // committed window so successive frames pan from the newest window (P4-1).
+  const latestWindowRef = useRef(timeline.window);
+  const suppressClickRef = useRef(false);
+  // P4-1 (#4023): gesture state lives in refs — a drag spans many renders
+  // (the first move flips `dragging`, each flush moves the window, and the page
+  // re-creates its onZoomWindow closure every render), so effect-local state
+  // would be rebuilt mid-gesture — the PR #2887 review bug (3242).
+  const dragRef = useRef<{ startX: number; base: TimelineWindowOverride; moved: boolean } | null>(
+    null,
+  );
+  const dragFrameRef = useRef(0);
+  const dragPendingDxRef = useRef(0);
+  const onZoomWindowRef = useRef(onZoomWindow);
+
+  useEffect(() => {
+    onZoomWindowRef.current = onZoomWindow;
+  });
   const rail = useMemo(() => prioritizedRailEvents(timeline.events), [timeline.events]);
   const layers = showSummaries ? timeline.layers : undefined;
   const pendingSpans = showSummaries ? timeline.pending : undefined;
@@ -139,8 +182,9 @@ export function RunTimelineChart({
         events: rail.events,
         layers,
         pending: pendingSpans,
+        flipLayers,
       }),
-    [canvasWidth, layers, pendingSpans, rail.events, timeline.rows, timeline.window],
+    [canvasWidth, flipLayers, layers, pendingSpans, rail.events, timeline.rows, timeline.window],
   );
   const selectedRow =
     selectedRowIndex === null ? null : (timeline.rows[selectedRowIndex] ?? null);
@@ -185,11 +229,15 @@ export function RunTimelineChart({
     setPopoverTarget({ kind, index, left, top: targetTop, width });
   };
 
-  const showPopover = (event: PointerEvent<HTMLButtonElement> | FocusEvent<HTMLButtonElement>) => {
+  const showPopover = (
+    event: ReactPointerEvent<HTMLButtonElement> | FocusEvent<HTMLButtonElement>,
+  ) => {
     showPopoverFor(event.currentTarget);
   };
 
-  const hidePopover = (event: PointerEvent<HTMLButtonElement> | FocusEvent<HTMLButtonElement>) => {
+  const hidePopover = (
+    event: ReactPointerEvent<HTMLButtonElement> | FocusEvent<HTMLButtonElement>,
+  ) => {
     if (event.type === "pointerleave" && event.currentTarget === document.activeElement) return;
     if (event.relatedTarget instanceof Node && popoverRef.current?.contains(event.relatedTarget)) return;
     const { kind, index } = readPopoverKey(event.currentTarget);
@@ -203,6 +251,32 @@ export function RunTimelineChart({
   const hoveredEvent =
     popoverTarget?.kind === "event" ? (rail.events[popoverTarget.index] ?? null) : null;
   const hoveredPending = popoverTarget?.kind === "pending";
+  const hoveredLayer =
+    hoveredLayerIndex === null ? null : (timeline.layers?.[hoveredLayerIndex] ?? null);
+  const hoveredPendingBlock =
+    popoverTarget?.kind === "pending" ? (layout.pendingBlocks[popoverTarget.index] ?? null) : null;
+  const readoutText = buildReadoutText(
+    {
+      row: hoveredRow,
+      event: hoveredEvent,
+      layer: hoveredLayer,
+      pending: hoveredPendingBlock
+        ? { start: hoveredPendingBlock.start, end: hoveredPendingBlock.end }
+        : null,
+    },
+    labels,
+  );
+  const focusWindow = (window: TimelineWindowOverride, label: string) => {
+    if (onFocusWindow) {
+      onFocusWindow(window, label);
+    } else {
+      onZoomWindow(window);
+    }
+  };
+
+  useEffect(() => {
+    latestWindowRef.current = timeline.window;
+  }, [timeline.window]);
 
   useEffect(() => {
     if (widthOverride !== undefined) return;
@@ -227,8 +301,24 @@ export function RunTimelineChart({
   useEffect(() => {
     const visualization = visualizationRef.current;
     if (!visualization) return;
-    const zoomOnWheel = (event: WheelEvent) => {
-      if ((!event.ctrlKey && !event.metaKey) || event.deltaY === 0) return;
+    // P4-1 (#4023, demo parity): plain wheel pans the window — accumulated
+    // per animation frame so at most one window update lands per frame —
+    // while Ctrl/⌘+wheel zooms around the cursor (exp sensitivity 0.0022,
+    // the demo's). preventDefault stays scoped to this element, so the page
+    // scroll is never hijacked outside the chart. The callback runs through
+    // onZoomWindowRef: the page re-creates its closure every render, and a
+    // dependency on that identity would tear this effect down on every parent
+    // render mid-gesture (PR #2887 review, 3242).
+    let frame = 0;
+    let pendingPan = 0;
+    const flushPan = () => {
+      frame = 0;
+      const fraction = pendingPan;
+      pendingPan = 0;
+      if (fraction === 0) return;
+      onZoomWindowRef.current(panWindow(latestWindowRef.current, fraction, new Date()));
+    };
+    const onWheel = (event: WheelEvent) => {
       event.preventDefault();
       const bounds = visualization.getBoundingClientRect();
       const cursorX = event.clientX - bounds.left;
@@ -236,12 +326,99 @@ export function RunTimelineChart({
         0,
         Math.min(1, (cursorX - layout.plot.left) / layout.plot.width),
       );
-      const factor = event.deltaY < 0 ? 0.8 : 1.25;
-      onZoomWindow(zoomWindowAround(timeline.window, factor, anchor, new Date()));
+      if (event.ctrlKey || event.metaKey) {
+        if (event.deltaY === 0) return;
+        const factor = Math.exp(event.deltaY * 0.0022);
+        onZoomWindowRef.current(
+          zoomWindowAround(latestWindowRef.current, factor, anchor, new Date()),
+        );
+        return;
+      }
+      const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+      pendingPan += (delta / Math.max(200, layout.plot.width)) * 1.15;
+      if (frame === 0) frame = requestAnimationFrame(flushPan);
     };
-    visualization.addEventListener("wheel", zoomOnWheel, { passive: false });
-    return () => visualization.removeEventListener("wheel", zoomOnWheel);
-  }, [layout.plot.left, layout.plot.width, onZoomWindow, timeline.window]);
+    visualization.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      visualization.removeEventListener("wheel", onWheel);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [layout.plot.left, layout.plot.width]);
+
+  useEffect(() => {
+    const visualization = visualizationRef.current;
+    if (!visualization) return;
+    // P4-1 (#4023): drag pans the window (grab semantics: pulling left shows
+    // later times). Once the gesture exceeds the threshold its click is
+    // suppressed, so click-to-read stays reliable on every block. Gesture
+    // state sits in refs and finalization is unconditional, so a mid-gesture
+    // re-render can neither stall the drag nor leak the grab cursor or the
+    // click suppression (PR #2887 review, 3242).
+    const flushPan = () => {
+      dragFrameRef.current = 0;
+      const drag = dragRef.current;
+      const dx = dragPendingDxRef.current;
+      dragPendingDxRef.current = 0;
+      if (!drag || !drag.moved || dx === 0) return;
+      onZoomWindowRef.current(
+        panWindow(drag.base, -dx / Math.max(200, layout.plot.width), new Date()),
+      );
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      dragRef.current = { startX: event.clientX, base: latestWindowRef.current, moved: false };
+      dragPendingDxRef.current = 0;
+      suppressClickRef.current = false;
+    };
+    const onPointerMove = (event: PointerEvent) => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      const dx = event.clientX - drag.startX;
+      if (!drag.moved) {
+        if (Math.abs(dx) <= DRAG_THRESHOLD_PX) return;
+        drag.moved = true;
+        setDragging(true);
+      }
+      dragPendingDxRef.current = dx;
+      if (dragFrameRef.current === 0) {
+        dragFrameRef.current = requestAnimationFrame(flushPan);
+      }
+    };
+    const endDrag = () => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      if (dragFrameRef.current !== 0) {
+        cancelAnimationFrame(dragFrameRef.current);
+        dragFrameRef.current = 0;
+      }
+      // Flush whatever motion is still pending, then clear the grab state.
+      flushPan();
+      dragRef.current = null;
+      if (drag.moved) {
+        suppressClickRef.current = true;
+        // The click that follows pointerup lands within a frame; clear the
+        // flag right after so it can never stick.
+        window.setTimeout(() => {
+          suppressClickRef.current = false;
+        }, 150);
+      }
+      setDragging(false);
+    };
+    visualization.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", endDrag);
+    window.addEventListener("pointercancel", endDrag);
+    return () => {
+      visualization.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", endDrag);
+      window.removeEventListener("pointercancel", endDrag);
+      if (dragFrameRef.current !== 0) {
+        cancelAnimationFrame(dragFrameRef.current);
+        dragFrameRef.current = 0;
+      }
+    };
+  }, [layout.plot.width]);
 
   if (timeline.rows.length === 0) {
     return (
@@ -270,14 +447,26 @@ export function RunTimelineChart({
             <span>{labels.time}</span>
             <span>{labels.eventRail}</span>
           </div>
+          {trail !== undefined ? (
+            <TimelineCrumbs entries={trail} labels={labels} onSelect={onCrumbSelect} />
+          ) : null}
+          {withReadout ? <TimelineReadout text={readoutText} labels={labels} /> : null}
           <div ref={scrollRef} data-testid="run-timeline-scroll" className="overflow-x-auto">
             <div
               ref={visualizationRef}
               data-testid="run-timeline-visualization"
               role="group"
               aria-label={labels.visualization}
+              onClickCapture={(event) => {
+                if (suppressClickRef.current) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  suppressClickRef.current = false;
+                }
+              }}
               className={cn(
                 "relative",
+                dragging && "cursor-grabbing select-none",
                 widthOverride === undefined &&
                   (selectedRow ? "min-w-[320px]" : "min-w-[1000px]"),
               )}
@@ -499,7 +688,8 @@ export function RunTimelineChart({
                     setSelectedRowIndex(null);
                     setSummaryOpen(false);
                   }}
-                  onZoom={onZoomWindow}
+                  onZoom={focusWindow}
+                  onHover={withReadout ? setHoveredLayerIndex : undefined}
                 />
               ) : null}
 
@@ -510,7 +700,7 @@ export function RunTimelineChart({
                   labels={labels}
                   onShowPopover={showPopoverFor}
                   onHidePopover={hidePopover}
-                  onZoom={onZoomWindow}
+                  onZoom={focusWindow}
                   describedIndex={popoverTarget?.kind === "pending" ? popoverTarget.index : null}
                 />
               ) : null}

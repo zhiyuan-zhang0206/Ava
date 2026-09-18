@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render as rtlRender, waitFor } from "@testing-library/react";
+import { fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RunTimelineResponse, UserSettingListResponse } from "@/lib/types";
@@ -25,6 +25,59 @@ vi.mock("@/lib/api", () => ({ api: { getRunTimeline, getSettings } }));
 import RunTimelinePage from "./page";
 
 const NOW = new Date("2026-09-05T14:26:00.000Z");
+
+// P4-1 trail scope (#4023): a pending stretch gives the chart a focusable
+// block, so a double click can push a crumb before an identity switch.
+const pendingResponse: RunTimelineResponse = {
+  agent_id: 42,
+  window: { from: "2026-09-05T14:00:00.000Z", to: "2026-09-05T14:26:00.000Z" },
+  meta: {
+    n_turns: 1,
+    wall_span_s: 1560,
+    active_s: 4,
+    tokens_in: 120,
+    tokens_out: 12,
+    cost_usd: 0.02,
+    n_exec_failed: 0,
+    n_compact: 1,
+    n_restart: 0,
+    fallback_turns: 0,
+    unmatched_turns: 0,
+  },
+  rows: [
+    {
+      turn: 1,
+      n_turns: 1,
+      start: "2026-09-05T14:00:00.000Z",
+      end: "2026-09-05T14:00:04.000Z",
+      active_s: 4,
+      trace_id: null,
+      checkpoint_id: null,
+      ok: true,
+      llm: {
+        calls: 1,
+        in_total: 120,
+        cache_read: 0,
+        out_total: 12,
+        reasoning: 0,
+        latency_ms: 1500,
+        cost_usd: 0.02,
+        model: "deepseek-flash",
+      },
+      execs: [],
+      anomalies: [],
+      tags: [],
+    },
+  ],
+  events: [],
+  boundaries: {
+    initialize_turn: 1,
+    last_before_compact_turn: 1,
+    post_window_turns: 0,
+    has_activity_after_window: false,
+  },
+  pending: [{ start: "2026-09-05T14:05:00.000Z", end: "2026-09-05T14:20:00.000Z" }],
+};
 
 function render() {
   const queryClient = new QueryClient({
@@ -155,5 +208,44 @@ describe("compare entry", () => {
         "/insights/compare?agents=42",
       ),
     );
+  });
+});
+
+describe("trail scope (P4-1)", () => {
+  it("clears the focus trail when the session changes", async () => {
+    getRunTimeline.mockResolvedValue(pendingResponse);
+    const { getByRole, queryByTestId } = render();
+
+    fireEvent.doubleClick(
+      await screen.findByRole("button", { name: "Pending layer segment" }),
+    );
+    expect(await screen.findByTestId("timeline-crumbs")).toBeTruthy();
+
+    fireEvent.click(getByRole("button", { name: "Current session" }));
+
+    await waitFor(() => expect(queryByTestId("timeline-crumbs")).toBeNull());
+  });
+
+  it("clears the focus trail when the resolved agentId changes in place", async () => {
+    getRunTimeline.mockResolvedValue(pendingResponse);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { rerender, queryByTestId } = rtlRender(
+      <QueryClientProvider client={queryClient}>
+        <RunTimelinePage params={Promise.resolve({ agentId: "42" })} />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.doubleClick(
+      await screen.findByRole("button", { name: "Pending layer segment" }),
+    );
+    expect(await screen.findByTestId("timeline-crumbs")).toBeTruthy();
+
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <RunTimelinePage params={Promise.resolve({ agentId: "43" })} />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(queryByTestId("timeline-crumbs")).toBeNull());
   });
 });

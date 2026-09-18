@@ -7,6 +7,15 @@ import type { RunTimelineResponse } from "@/lib/types";
 
 import { RunTimelineChart } from "./run-timeline-chart";
 
+// jsdom has no PointerEvent; the drag tests need pointer coordinates, so give
+// pointer events a MouseEvent body (P4-1, task #4023).
+if (typeof window !== "undefined" && typeof window.PointerEvent === "undefined") {
+  Object.defineProperty(window, "PointerEvent", {
+    value: class PointerEventPolyfill extends MouseEvent {},
+    configurable: true,
+  });
+}
+
 const timeline: RunTimelineResponse = {
   agent_id: 405,
   window: { from: "2026-08-29T08:00:00Z", to: "2026-08-29T09:00:00Z" },
@@ -121,6 +130,8 @@ const labels = {
   kind: "Kind",
   timestamp: "Timestamp",
   detail: "Detail",
+  crumbRoot: "Initial window",
+  readoutIdle: "Wheel / drag to pan · Ctrl+wheel to zoom · hover for info · click to read",
 };
 const chartActions = {
   onDrillBucket: vi.fn(),
@@ -290,7 +301,7 @@ describe("RunTimelineChart", () => {
     expect(screen.queryByRole("region", { name: "Turn details" })).toBeNull();
   });
 
-  it("zooms around the ctrl-wheel cursor without hijacking a plain wheel", () => {
+  it("pans on a plain wheel and zooms around the ctrl-wheel cursor (P4-1)", () => {
     const onZoomWindow = vi.fn();
     render(
       <RunTimelineChart
@@ -302,6 +313,11 @@ describe("RunTimelineChart", () => {
     );
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-29T10:00:00Z"));
+    // Flush the wheel pan's animation frame synchronously.
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
     const visualization = screen.getByRole("group", { name: "Timeline visualization" });
     vi.spyOn(visualization, "getBoundingClientRect").mockReturnValue({
       x: 100,
@@ -315,45 +331,37 @@ describe("RunTimelineChart", () => {
       toJSON: () => ({}),
     });
 
+    // A plain wheel pans the window — the chart-scoped preventDefault is what
+    // keeps the page from scrolling underneath it.
     const plainWheel = new WheelEvent("wheel", {
       bubbles: true,
       cancelable: true,
-      clientX: 366,
       deltaY: -1,
     });
+    Object.defineProperty(plainWheel, "clientX", { value: 366 });
     visualization.dispatchEvent(plainWheel);
-    expect(plainWheel.defaultPrevented).toBe(false);
-    expect(onZoomWindow).not.toHaveBeenCalled();
+    expect(plainWheel.defaultPrevented).toBe(true);
+    expect(onZoomWindow).toHaveBeenCalledTimes(1);
+    const panned = onZoomWindow.mock.calls[0][0] as { from: string; to: string };
+    expect(Date.parse(panned.to) - Date.parse(panned.from)).toBe(3_600_000);
+    expect(Date.parse(panned.from)).toBeLessThan(Date.parse(timeline.window.from));
 
+    // Ctrl+wheel zooms in around the cursor; the cursor keeps its instant, so
+    // the window start moves later.
+    onZoomWindow.mockClear();
     const zoomWheel = new WheelEvent("wheel", {
       bubbles: true,
       cancelable: true,
-      clientX: 366,
-      deltaY: -1,
+      deltaY: -120,
     });
     Object.defineProperty(zoomWheel, "ctrlKey", { value: true });
     Object.defineProperty(zoomWheel, "clientX", { value: 366 });
     visualization.dispatchEvent(zoomWheel);
-    expect(onZoomWindow).toHaveBeenCalledWith({
-      from: "2026-08-29T08:03:00.000Z",
-      to: "2026-08-29T08:51:00.000Z",
-    });
     expect(zoomWheel.defaultPrevented).toBe(true);
-
-    // Wheel down (deltaY > 0) zooms out — locks the platform direction.
-    const zoomOutWheel = new WheelEvent("wheel", {
-      bubbles: true,
-      cancelable: true,
-      clientX: 366,
-      deltaY: 1,
-    });
-    Object.defineProperty(zoomOutWheel, "ctrlKey", { value: true });
-    Object.defineProperty(zoomOutWheel, "clientX", { value: 366 });
-    visualization.dispatchEvent(zoomOutWheel);
-    expect(onZoomWindow).toHaveBeenLastCalledWith({
-      from: "2026-08-29T07:56:15.000Z",
-      to: "2026-08-29T09:11:15.000Z",
-    });
+    expect(onZoomWindow).toHaveBeenCalledTimes(1);
+    const zoomed = onZoomWindow.mock.calls[0][0] as { from: string; to: string };
+    expect(Date.parse(zoomed.to) - Date.parse(zoomed.from)).toBeLessThan(3_600_000);
+    expect(Date.parse(zoomed.from)).toBeGreaterThan(Date.parse(timeline.window.from));
   });
 
   it("shows the full event label on hover and focus through one shared popover", () => {
@@ -529,4 +537,175 @@ describe("RunTimelineChart", () => {
     expect(screen.queryByTestId("raw-summary")).toBeNull();
   });
 
+  it("suppresses the block click once a drag crosses the 4px threshold (P4-1)", () => {
+    const onZoomWindow = vi.fn();
+    render(
+      <RunTimelineChart
+        timeline={timeline}
+        labels={labels}
+        onDrillBucket={vi.fn()}
+        onZoomWindow={onZoomWindow}
+      />,
+    );
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    const visualization = screen.getByRole("group", { name: "Timeline visualization" });
+    const turn = screen.getByRole("button", { name: "Turn 1" });
+
+    // A drag longer than the threshold pans and swallows the click it releases.
+    fireEvent.pointerDown(visualization, { button: 0, clientX: 100 });
+    fireEvent.pointerMove(window, { clientX: 140 });
+    fireEvent.pointerUp(window);
+    fireEvent.click(turn);
+    expect(onZoomWindow).toHaveBeenCalledTimes(1);
+    const panned = onZoomWindow.mock.calls[0][0] as { from: string; to: string };
+    expect(Date.parse(panned.to) - Date.parse(panned.from)).toBe(3_600_000);
+    expect(screen.queryByRole("region", { name: "Turn details" })).toBeNull();
+
+    // A press without movement still selects the block.
+    fireEvent.pointerDown(visualization, { button: 0, clientX: 100 });
+    fireEvent.pointerUp(window);
+    fireEvent.click(turn);
+    expect(screen.getByRole("region", { name: "Turn details" })).toBeTruthy();
+    expect(onZoomWindow).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a drag gesture alive across a mid-gesture parent re-render (P4-1 / #2887 review)", () => {
+    const panBefore = vi.fn();
+    const panAfter = vi.fn();
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
+    const flushFrames = () => {
+      for (const callback of frames.splice(0)) callback(0);
+    };
+
+    const { rerender } = render(
+      <RunTimelineChart
+        timeline={timeline}
+        labels={labels}
+        onDrillBucket={vi.fn()}
+        onZoomWindow={panBefore}
+      />,
+    );
+    const visualization = screen.getByRole("group", { name: "Timeline visualization" });
+    const turn = screen.getByRole("button", { name: "Turn 1" });
+
+    fireEvent.pointerDown(visualization, { button: 0, clientX: 100 });
+    fireEvent.pointerMove(window, { clientX: 140 });
+    flushFrames();
+    expect(panBefore).toHaveBeenCalledTimes(1);
+
+    // The page re-creates its onZoomWindow closure on every render; a parent
+    // re-render mid-gesture must not reset the gesture (PR #2887 review: the
+    // effect-local draft reset there, applying one frame and leaking the rest).
+    rerender(
+      <RunTimelineChart
+        timeline={timeline}
+        labels={labels}
+        onDrillBucket={vi.fn()}
+        onZoomWindow={panAfter}
+      />,
+    );
+
+    fireEvent.pointerMove(window, { clientX: 220 });
+    flushFrames();
+    expect(panAfter).toHaveBeenCalledTimes(1);
+    expect(panBefore).toHaveBeenCalledTimes(1);
+
+    fireEvent.pointerUp(window);
+    // The drag's click is swallowed, and the grab cursor is gone.
+    fireEvent.click(turn);
+    expect(screen.queryByRole("region", { name: "Turn details" })).toBeNull();
+    expect(visualization.className).not.toContain("cursor-grabbing");
+  });
+
+  it("keeps a persistent readout line and names the hovered block (P4-1)", () => {
+    render(<RunTimelineChart timeline={timeline} labels={labels} {...chartActions} withReadout />);
+
+    expect(screen.getByTestId("timeline-readout").textContent).toBe(labels.readoutIdle);
+    fireEvent.focus(screen.getByRole("button", { name: "Turn 1" }));
+    const text = screen.getByTestId("timeline-readout").textContent;
+    expect(text).toContain("Turn 1");
+    expect(text).toContain("$0.02");
+  });
+
+  it("renders the focus path only when a trail exists and reports crumb picks (P4-1)", () => {
+    const onCrumbSelect = vi.fn();
+    const { rerender } = render(
+      <RunTimelineChart timeline={timeline} labels={labels} {...chartActions} withReadout />,
+    );
+    expect(screen.queryByTestId("timeline-crumbs")).toBeNull();
+
+    rerender(
+      <RunTimelineChart
+        timeline={timeline}
+        labels={labels}
+        {...chartActions}
+        withReadout
+        trail={[{ label: "L1#7", from: "2026-08-29T08:00:00Z", to: "2026-08-29T08:30:00Z" }]}
+        onCrumbSelect={onCrumbSelect}
+      />,
+    );
+    const crumbs = screen.getByTestId("timeline-crumbs");
+    expect(within(crumbs).getByText("Initial window")).toBeTruthy();
+    fireEvent.click(within(crumbs).getByText("Initial window"));
+    expect(onCrumbSelect).toHaveBeenCalledWith(-1);
+    fireEvent.click(within(crumbs).getByText(/L1#7/));
+    expect(onCrumbSelect).toHaveBeenCalledWith(0);
+  });
+
+  it("flips the layer stack order when flipLayers is set (P4-1)", () => {
+    const layeredTimeline: RunTimelineResponse = {
+      ...timeline,
+      layers: [
+        { id: "L0#0", depth: 0, parent: null, start: "2026-08-29T08:00:00Z", end: "2026-08-29T09:00:00Z", summary: "overview text" },
+        { id: "L1#0", depth: 1, parent: "L0#0", start: "2026-08-29T08:00:00Z", end: "2026-08-29T08:30:00Z", summary: "stage a" },
+        { id: "L1#1", depth: 1, parent: "L0#0", start: "2026-08-29T08:30:00Z", end: "2026-08-29T09:00:00Z", summary: "stage b" },
+      ],
+    };
+    const { container, rerender } = render(
+      <RunTimelineChart timeline={layeredTimeline} labels={labels} {...chartActions} />,
+    );
+    const rowY = () =>
+      Array.from(container.querySelectorAll('[data-testid="layer-block"]'), (block) =>
+        Number(block.getAttribute("y")),
+      );
+    const before = rowY();
+    const rowTop = before[0];
+    const nextRowTop = before[1];
+    expect(before).toEqual([rowTop, nextRowTop, nextRowTop]);
+
+    rerender(<RunTimelineChart timeline={layeredTimeline} labels={labels} {...chartActions} flipLayers />);
+    // Depth 1 (two blocks) now rides the top row; depth 0 moves below it.
+    expect(rowY()).toEqual([rowTop, rowTop, nextRowTop]);
+  });
+
+  it("routes double-click focus through onFocusWindow with a block label (P4-1)", () => {
+    const onFocusWindow = vi.fn();
+    const pendingTimeline: RunTimelineResponse = {
+      ...timeline,
+      pending: [{ start: "2026-08-29T08:10:00Z", end: "2026-08-29T08:55:00Z" }],
+    };
+    render(
+      <RunTimelineChart
+        timeline={pendingTimeline}
+        labels={labels}
+        onDrillBucket={vi.fn()}
+        onZoomWindow={vi.fn()}
+        onFocusWindow={onFocusWindow}
+      />,
+    );
+
+    fireEvent.doubleClick(screen.getByRole("button", { name: "Pending layer segment" }));
+    expect(onFocusWindow).toHaveBeenCalledWith(
+      { from: "2026-08-29T08:10:00.000Z", to: "2026-08-29T08:55:00.000Z" },
+      labels.pendingLabel,
+    );
+  });
 });

@@ -150,6 +150,28 @@ describe("buildTimelineLayout", () => {
     expect(layout.layerRows).toEqual([]);
     expect(layout.track.top).toBe(62);
   });
+
+  it("flips the layer stack fine-first while placeholders keep their host row (P4-1)", () => {
+    const layout = buildTimelineLayout({
+      width: 1000,
+      window: { from: "2026-09-02T08:00:00Z", to: "2026-09-02T09:00:00Z" },
+      rows: [row],
+      events: [],
+      layers: [
+        { id: "L0#0", depth: 0, parent: null, start: "2026-09-02T08:00:00Z", end: "2026-09-02T09:00:00Z", summary: "overview" },
+        { id: "L1#0", depth: 1, parent: "L0#0", start: "2026-09-02T08:00:00Z", end: "2026-09-02T08:30:00Z", summary: "stage a" },
+      ],
+      pending: [{ start: "2026-09-02T08:30:00Z", end: "2026-09-02T09:00:00Z" }],
+      flipLayers: true,
+    });
+
+    expect(layout.layerRows.map((layerRow) => layerRow.depth)).toEqual([1, 0]);
+    expect(layout.layerRows[0].top).toBe(62);
+    expect(layout.layerRows[1].top).toBe(62 + 22 + 6);
+    // The placeholder host row is the pre-flip first row (depth 0): the
+    // placeholder moved with its row instead of re-targeting another one.
+    expect(layout.pendingRow).toEqual({ top: 62 + 22 + 6, height: 22 });
+  });
 });
 
 describe("mergePendingSpans", () => {

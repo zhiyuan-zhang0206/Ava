@@ -84,5 +84,7 @@ export function chartLabels(
     kind: t("kind"),
     timestamp: t("timestamp"),
     detail: t("detail"),
+    crumbRoot: t("crumbRoot"),
+    readoutIdle: t("readoutIdle"),
   };
 }

@@ -43,6 +43,10 @@ export interface RunTimelineChartLabels {
   kind: string;
   timestamp: string;
   detail: string;
+  /** P4-1 (#4023): root crumb of the focus path ("Initial window"). */
+  crumbRoot: string;
+  /** P4-1 (#4023): idle line of the persistent hover readout. */
+  readoutIdle: string;
 }
 
 export interface TimelinePopoverTarget {
@@ -65,6 +69,11 @@ export function layerNodeLabel(
   labels: RunTimelineChartLabels,
 ): string {
   return `${labels.layerDetails} ${node.id}`;
+}
+
+/** Short label for a focused layer node on the crumb path (`L2#136406`). */
+export function layerFocusLabel(node: NonNullable<RunTimelineResponse["layers"]>[number]): string {
+  return `L${node.depth}#${node.id}`;
 }
 
 function currency(amount: number): string {
