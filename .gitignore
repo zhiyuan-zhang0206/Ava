@@ -110,3 +110,9 @@ okf-d3.html
 
 # Local vitest artifact (task #3758)
 ui/web/junit.xml
+
+# CI-usage attribution ledger — runtime data of scripts/ci_accounting.py,
+# appended on cluster hosts by the c9-daily-report schedule. Gitignored so
+# the source-tree guard stays quiet and `git clean -fd` leaves it in place
+# (the guard's documented contract for gitignored paths).
+/scripts/ci_usage/
