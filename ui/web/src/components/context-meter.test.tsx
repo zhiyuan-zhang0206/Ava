@@ -40,6 +40,13 @@ describe("ContextMeter", () => {
     );
   });
 
+  it("merges textClassName into the numeric text (callers hide it at narrow widths)", () => {
+    render(<ContextMeter {...full} textClassName="hidden sm:inline" />);
+    const text = screen.getByTestId("context-meter").querySelector("span.truncate");
+    expect(text?.className).toContain("hidden");
+    expect(text?.className).toContain("sm:inline");
+  });
+
   it("fill is neutral below the soft threshold", () => {
     render(<ContextMeter {...full} contextTokens={300_000} />);
     expect(screen.getByTestId("context-meter-fill").className).toContain("bg-muted-foreground/60");

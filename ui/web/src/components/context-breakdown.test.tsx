@@ -275,6 +275,18 @@ describe("ContextButton", () => {
     await waitFor(() => expect(screen.getByRole("img").className).toContain("w-48"));
   });
 
+  it("hides the collapsed readout's numeric text below sm — the gauge carries the value (QA sweep 2026-09-18 F3)", () => {
+    wrap(<Harness agentId={7} {...meterProps} />);
+    // At 390px the composer meta row is shared with the upload button and the
+    // Details control; the full text cannot fit (it truncated to "Co"), so it
+    // hides below sm. The numbers stay reachable — the gauge's aria-label
+    // carries them, and tapping the meter opens the breakdown popup.
+    const text = screen.getByTestId("context-meter").querySelector("span.truncate");
+    expect(text?.className).toContain("hidden");
+    expect(text?.className).toContain("sm:inline");
+    expect(screen.getByRole("img").getAttribute("aria-label")).toContain("Context");
+  });
+
   it("the panel clips horizontal overflow instead of scrolling — overflow-x-hidden paired with overflow-y-auto", async () => {
     getContextBreakdown.mockResolvedValue(breakdown);
     wrap(<Harness agentId={7} {...meterProps} />);

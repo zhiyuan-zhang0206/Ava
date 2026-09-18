@@ -1212,13 +1212,15 @@ describe("InspectorPanel desktop", () => {
     expect(header?.className).not.toContain("border-b");
   });
 
-  it("closes when clicking the X button", async () => {
+  it("has no X close — the top-bar toggle is the desktop close (QA sweep 2026-09-18 F2)", async () => {
     getAgentInspectStatistics.mockResolvedValue(fixture());
     render(<InspectorPanel agentId={1} />);
 
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
-    fireEvent.click(screen.getByRole("button", { name: "Close inspector" }));
-    expect(toggle).toHaveBeenCalledOnce();
+    // One "Close inspector" affordance per view: on desktop that is the
+    // InspectorToggle chip (its own describe block covers the click → toggle),
+    // so the shared header must not render a second same-named close button.
+    expect(screen.queryByRole("button", { name: "Close inspector" })).toBeNull();
   });
 
   it("Escape does not close the panel on desktop", async () => {
