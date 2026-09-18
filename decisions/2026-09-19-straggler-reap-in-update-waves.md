@@ -21,8 +21,9 @@ the hosted world's own machinery.
 1. **Window W** — new cluster-pinned `update_straggler_reap_seconds` (default
    15, 0 disables). Counted per cohort member from ITS restart command's
    issuance (`inbound_messages.created_at`, DB clock). Only update-family
-   drains (`pause_local_cluster`, the update quiesce) reap; interactive
-   pause/stop/restart keep the never-kill contract.
+   drains (`pause_local_cluster` — spawn_update's Phase A, the update quiesce,
+   and the restart-only `spawn_restart` chain) reap; the local stop family
+   (`ava stop`/`pause`/`restart`) keeps the never-kill contract.
 2. **Kill = a CAS mark, not a signal.** The drain CAS-marks the row
    `running → 'restarting'` and `agent.db.has_pending_interrupt` treats that
    mark (with its still-un-applied maintenance restart) as an in-flight abort

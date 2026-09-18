@@ -196,7 +196,18 @@ def _classify(
         if not row.active_for(owner) and row.agent_id not in applied
     ]
     if invalid:
-        raise RuntimeError(f"maintenance requires the live original native owner: {invalid}")
+        stranded = [
+            row.agent_id for row in rows if row.agent_id in invalid and row.status == "restarting"
+        ]
+        guidance = (
+            " (a stranded update straggler-reap mark clears via `ava start` —"
+            " settle + wake — or at the next agent-host boot)"
+            if stranded
+            else ""
+        )
+        raise RuntimeError(
+            f"maintenance requires the live original native owner: {invalid}{guidance}"
+        )
     return (
         hold
         if captured
