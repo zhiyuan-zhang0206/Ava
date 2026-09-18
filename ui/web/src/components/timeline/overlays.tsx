@@ -17,7 +17,9 @@ export interface PullToLoadIndicatorProps {
   loadingOlder: boolean;
   /** Task #3932: the load control is embedded in the topmost divider row and
    *  carries the loading feedback itself (pill spinner) — the ring then serves
-   *  the pull gesture only, staying hidden while pullDistance is 0. */
+   *  the pull gesture only, staying hidden while pullDistance is 0. Task
+   *  #3934: while the control is inline, the ring's band also clears that row
+   *  so the gesture sweep never crosses the pill. */
   inlineLoadControl?: boolean;
 }
 
@@ -56,7 +58,11 @@ export function PullToLoadIndicator({
         transform: `translate(-50%, ${loadingOlder ? 12 : Math.min(pullDistance * 0.4, 20)}px) scale(${loadingOlder ? 1 : 0.75 + 0.25 * progress})`,
       }}
       className={cn(
-        "absolute top-14 left-1/2 z-20 pointer-events-none",
+        "absolute left-1/2 z-20 pointer-events-none",
+        // Task #3934: with the control inline (task #3932) the top-14 band
+        // hosts the pill — the ring clears that row instead, starting at its
+        // bottom edge (88px: pill band 56-84 + the row's py-1).
+        inlineLoadControl ? "top-22" : "top-14",
         "size-9 rounded-full",
         "bg-background border border-border shadow-md",
         "items-center justify-center text-primary",
