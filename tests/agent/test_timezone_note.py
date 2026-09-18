@@ -72,4 +72,23 @@ def test_opts_out_without_an_agent_identity(monkeypatch: pytest.MonkeyPatch) -> 
     """Snapshot renders and the dev REPL have no identity; the note declines
     rather than producing a head fragment out of context."""
     monkeypatch.setattr("ava._boot._agent_id", None)
+    monkeypatch.delenv("AVA_AGENT_ID", raising=False)
     assert timezone_note() is None
+
+
+def test_renders_under_a_hosted_turn_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The hosted runner hosts many agents' turns in one process and establishes
+    no process-wide id — the turn contextvar is the identity. The note must
+    resolve through it, not the process slot (task #3939: reading the slot
+    directly silently dropped this note from every hosted head)."""
+    from shared.turn_identity import bind_turn_identity
+
+    monkeypatch.setattr("ava._boot._agent_id", None)
+    monkeypatch.delenv("AVA_AGENT_ID", raising=False)
+    monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
+
+    with bind_turn_identity(29):
+        note = timezone_note()
+
+    assert note is not None
+    assert "Asia/Shanghai" in str(note.content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]

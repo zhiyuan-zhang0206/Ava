@@ -41,7 +41,7 @@ The system prompt carried in every LLM call, built **once per context window** �
 - `_temporal_awareness_section` — Time awareness, including the `ai-capability-timescale` skill invoke at scheduling, estimation, and feasibility-judgment moments
 - `ava_memory.memory_discipline_section` — Cross-session durable-knowledge behavior
 - `_invest_in_the_future_section` — Framework's one cross-domain future-signal rule; `AVA_SYSTEM_PROMPT_INVEST_FUTURE` defaults on and selects the smallest closing action for a signal that could improve later work
-- `_workspace_section` — Workspace description
+- `_workspace_section` — Workspace description (id-free for fork safety; the concrete path is stated by the agent-ID context note)
 
 **Capabilities group** (lives in `_capabilities.py`, registered by `_system_prompt` so the render order stays the reading order):
 - `capabilities_section` — The skill + MCP tool index (dynamically generated). `skills_to_inject_into_system_prompt` defaults to `*` = the whole loaded catalog; an explicit list narrows one agent's index. Narrowing hides entries from THIS listing only — `ava.help(ava.skills)` still enumerates the full catalog and an unlisted skill stays reachable by name, which the header says out loud

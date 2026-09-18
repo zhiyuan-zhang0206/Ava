@@ -2,9 +2,9 @@
 
 Two layers:
 - plugin load end-to-end (`_load_extensions` real path): registers the
-  `ava.self.set_label` / `get_label` self members + the `ava.ui.notify` /
+  `ava.self.set_label` self member + the `ava.ui.notify` /
   `edit_notice` / `dismiss_notice` push members + a system-prompt section.
-- `set_label()` / `get_label()` write/read the agent's own label (sticky, so the
+- `set_label()` writes the agent's own label (sticky, so the
   labeler won't overwrite it) — reflected in the agent snapshot (the single
   source the monitoring view reads). `notify()` / `edit_notice()` /
   `dismiss_notice()` write and read the unified agent_notices queue
@@ -87,7 +87,7 @@ def _load_activity_plugin() -> Iterator[None]:
 
 
 def test_plugin_registers_self_members(_load_activity_plugin: None):
-    for name in ("set_label", "get_label"):
+    for name in ("set_label",):
         assert callable(getattr(ava.self, name))
         assert name in ava.self.__all_for_ava__
 
@@ -255,15 +255,22 @@ def test_core_spawn_has_no_label_arg():
     assert "label" not in inspect.signature(ava.agents.spawn).parameters
 
 
-def test_set_and_get_label_sticky(_load_activity_plugin: None, db_conn: psycopg.Connection):
+def _label_of(db_conn: psycopg.Connection, agent_id: int) -> str | None:
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT label FROM agents WHERE id=%s", (agent_id,))
+        row = cur.fetchone()
+    return None if row is None else row[0]
+
+
+def test_set_label_sticky(_load_activity_plugin: None, db_conn: psycopg.Connection):
     agent_id = _seed_agent(db_conn)
     original = ava._boot._agent_id
     ava._boot._agent_id = agent_id
     try:
-        assert ava.self.get_label() == ""  # type: ignore[attr-defined]
+        assert _label_of(db_conn, agent_id) is None
 
         ava.self.set_label("auth-refactor lead")  # type: ignore[attr-defined]
-        assert ava.self.get_label() == "auth-refactor lead"  # type: ignore[attr-defined]
+        assert _label_of(db_conn, agent_id) == "auth-refactor lead"
         snap = select_one(db_conn, agent_id)
         assert snap is not None and snap.label == "auth-refactor lead"
 
@@ -275,7 +282,7 @@ def test_set_and_get_label_sticky(_load_activity_plugin: None, db_conn: psycopg.
 
         # Empty string clears back to the default (#N fallback).
         ava.self.set_label("")  # type: ignore[attr-defined]
-        assert ava.self.get_label() == ""  # type: ignore[attr-defined]
+        assert _label_of(db_conn, agent_id) is None
     finally:
         ava._boot._agent_id = original
 

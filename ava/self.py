@@ -85,7 +85,7 @@ def __getattr__(name: str) -> object:
 
         return InvalidConfigOverlay
     # Plugin members land on ava.self via register_namespace_member (ava_fleet
-    # adds log / set_label / get_label). In an agent-launched persistent-shell
+    # adds set_label). In an agent-launched persistent-shell
     # child they are absent until plugins load, and this module already exists so
     # ava.__getattr__ never fires — trigger the shared lazy load here, then retry.
     import sys as _sys
