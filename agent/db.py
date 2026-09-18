@@ -474,31 +474,41 @@ async def has_pending_inbound_after(
 
 
 async def has_pending_interrupt(pool: AsyncConnectionPool, agent_id: int) -> bool:
-    """Whether a status='pending' EXTERNAL interrupt (kind cancel/terminate) is queued.
+    """Whether an external in-flight abort signal is queued for this agent.
 
-    The in-flight llm/exec node polls this (via `subscribe_interrupt`) to abort
-    the current action the moment a pause/terminate lands — without claiming the
-    row. The dispatch itself (cancel -> idle, terminate -> END) stays in the
-    claim node, the single owner of inbound semantics.
+    Two classes fire. The first is a status='pending' EXTERNAL interrupt (kind
+    cancel/terminate): the in-flight llm/exec node polls this (via
+    `subscribe_interrupt`) to abort the current action the moment a
+    pause/terminate lands — without claiming the row; the dispatch itself
+    (cancel -> idle, terminate -> END) stays in the claim node, the single
+    owner of inbound semantics. The second is the update straggler-reap mark
+    (task #4016): the drain CAS-marked the row 'restarting' while its un-applied
+    maintenance restart command is still pending/claimed, which is the durable
+    truncation signal for exactly this agent — the in-flight exec/LLM aborts and
+    the dying turn's own fences (status predicates) end it without applying.
 
     Self-initiated lifecycle (`source='self'`, i.e. `ava.self.terminate()` /
     restart from inside the agent's own exec) is EXCLUDED: that path already
     raises `_LifecycleExit` inside the exec child, which the exec node handles
     directly, so the watcher must not also fire on the agent's own row — doing
     so would race the clean lifecycle exit with an external cancel. Only
-    external interrupts (user / admin / peer) need
+    external interrupts (user / admin / peer / reap) need
     the in-flight abort; the self row is still dispatched normally at claim.
     """
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             "SELECT 1 FROM inbound_messages i WHERE i.agent_id=%s "
-            "AND i.kind IN ('cancel','terminate') AND i.source <> 'self' "
-            "AND (i.status='pending' OR (i.status='claimed' AND i.kind='terminate' "
+            "AND i.source <> 'self' AND ("
+            "(i.kind IN ('cancel','terminate') AND "
+            "(i.status='pending' OR (i.status='claimed' AND i.kind='terminate' "
             "AND i.applied_at IS NOT NULL AND i.observed_at IS NULL AND EXISTS ("
             "SELECT 1 FROM agents_meta m WHERE m.id=i.agent_id "
             "AND m.lifecycle_command_id=i.id AND m.runtime_kind='hosted' "
-            "AND m.runtime_generation=i.target_generation AND m.runtime_owner=i.target_owner))) "
-            "LIMIT 1",
+            "AND m.runtime_generation=i.target_generation AND m.runtime_owner=i.target_owner)))) "
+            "OR (i.kind='restart' AND i.applied_at IS NULL AND i.status IN ('pending','claimed') "
+            "AND EXISTS (SELECT 1 FROM agents_meta r "
+            "WHERE r.id=i.agent_id AND r.status='restarting'))"
+            ") LIMIT 1",
             (agent_id,),
         )
         return await cur.fetchone() is not None

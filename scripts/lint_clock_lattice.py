@@ -144,6 +144,14 @@ def _registered_clock_names() -> frozenset[str]:
 # lattice neighbour. Every entry states which.
 _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
     (
+        "shared/straggler_reap.py",
+        "REAP_LIFECYCLE_OUTCOME",
+    ): "the honest lifecycle_result outcome value for a reaped command, not a clock",
+    (
+        "shared/straggler_reap.py",
+        "REAP_LIFECYCLE_REASON",
+    ): "the lifecycle_result reason value for the update straggler reap, not a clock",
+    (
         "agent/graph/_node_log.py",
         "_STALL_GUARD_EXEMPT",
     ): "frozenset of exempt node kinds, not a clock",

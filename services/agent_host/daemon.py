@@ -80,6 +80,7 @@ from shared.helper_chain_guard import parent_chain_intact
 from shared.hosted_force import recover_orphaned_hosted_forces
 from shared.log import init_gateway_process, logger
 from shared.machine import machine_name
+from shared.straggler_reap import settle_stranded_reaps_async
 from shared.timing import assert_clock_lattice
 
 _log = logging.getLogger("services.agent_host.daemon")
@@ -608,6 +609,10 @@ async def run() -> None:
         # a stuck agent has really been silent.
         scheduler = TurnScheduler(host.run_turn, activity_clock=host.last_active_at)
         beat = asyncio.create_task(_beat_forever(liveness, host, scheduler, local_machine))
+        # Straggler-reap marks settle before anything else may look at the row
+        # (task #4016): a predecessor boot reaped mid-wave left rows unrunnable;
+        # their first-admission wakes are injected after the scheduler exists.
+        settled_reaps = await settle_stranded_reaps_async(control_pool, local_machine)
         settled = await settle_stale_running_rows(control_pool, local_machine)
         logger.info("hosted boot settle: settled {n} stale running row(s)", n=len(settled))
 
@@ -635,6 +640,11 @@ async def run() -> None:
         background = _spawn_background_tasks(workload_pool)
         try:
             await _schedule_watcher_recovery(host, scheduler)
+            # Settled reap rows need one admission each: the cold build's
+            # reconcile re-delivers the claimed ordinary work the reap cut
+            # short, and the dangling-tool repair closes the truncated turn.
+            for agent_id in settled_reaps:
+                scheduler.wake(agent_id)
             await InboundWakeDispatcher(
                 settings.data_plane.redis_url,
                 scheduler,

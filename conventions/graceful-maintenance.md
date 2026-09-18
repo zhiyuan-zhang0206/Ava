@@ -57,6 +57,14 @@ serial remote-dispatch batches stop starting new dispatches once shutdown
 begins, so that cleanup waits for an in-flight dispatch, never the remaining
 batch — deferred rows are re-selected by the next boot's pass.
 
+An update-family drain (a rollout's Phase A, `spawn_update`) additionally
+reaps its stragglers: a cohort member still un-landed
+`update_straggler_reap_seconds` (default 15) after its restart command was
+issued is truncated and released with the honest `reaped` outcome instead of
+aborting the wave (task #4016; interactive pause/stop/restart drains never
+reap). Its mark is settled at the next agent-host boot or local resume, and
+its claimed work re-delivers on the new code.
+
 The existing home-local journal survives a CLI crash, host reboot and an
 offline database. An incomplete drain or stop retains the hold and reports
 failure. A drain that hits its deadline reports every unfinished agent — its

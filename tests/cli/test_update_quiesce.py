@@ -16,7 +16,8 @@ def test_every_update_mode_uses_native_pause(monkeypatch: pytest.MonkeyPatch, mo
     pause = MagicMock()
     monkeypatch.setattr(agent_pause, "pause_agents", pause)
     assert _up._quiesce_local_agents(mode)
-    pause.assert_called_once_with(settings.gateway.update_quiesce_timeout_seconds)
+    # Update-family drains enable the straggler reap (task #4016).
+    pause.assert_called_once_with(settings.gateway.update_quiesce_timeout_seconds, reap=True)
 
 
 def test_timeout_is_not_force_authorization(monkeypatch: pytest.MonkeyPatch) -> None:
