@@ -13,6 +13,7 @@ never-applied command is closed with an honest `lifecycle_result`.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -255,6 +256,47 @@ def test_unpause_settles_stranded_reaps_and_wakes_them(
     assert db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent,)).fetchone() == (
         "idling",
     )
+
+
+async def test_settle_async_restores_the_same_shape(db_conn: psycopg.Connection, aops_pool) -> None:
+    """The boot transport is the same settle on the async pool."""
+    from shared.straggler_reap import settle_stranded_reaps_async
+
+    agent = create_agent(db_conn)
+    db_conn.execute(
+        "INSERT INTO agents_meta(id,status,machine,runtime_kind,runtime_owner,"
+        "runtime_generation) VALUES(%s,'restarting',%s,'hosted',%s,%s)",
+        (agent, machine_name(), uuid4(), uuid4()),
+    )
+    command = insert_inbound_message(
+        db_conn, agent, "", "system:maintenance", kind="restart", payload=_MAINTENANCE_PAYLOAD
+    )
+    db_conn.commit()
+
+    settled = await settle_stranded_reaps_async(aops_pool, machine_name())
+
+    assert settled == [agent]
+    assert db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent,)).fetchone() == (
+        "idling",
+    )
+    payload = db_conn.execute(
+        "SELECT payload->'lifecycle_result' FROM inbound_messages WHERE id=%s", (command,)
+    ).fetchone()
+    assert payload is not None and payload[0] == {
+        "outcome": REAP_LIFECYCLE_OUTCOME,
+        "reason": REAP_LIFECYCLE_REASON,
+    }
+
+
+def test_record_reaped_rejects_agents_outside_the_cohort() -> None:
+    """The honest receipt is only for this hold's captured cohort."""
+    when = datetime(2026, 9, 19, tzinfo=UTC)
+    pause_owner.begin_maintenance("ops:test:1", when)
+    pause_owner.change_maintenance(
+        "ops:test:1", when, MaintenanceHold(), MaintenanceHold("draining", {7: 100})
+    )
+    with pytest.raises(RuntimeError, match="cohort"):
+        maintenance.record_reaped(9, "update_straggler_reap")
 
 
 def test_reaped_receipts_roundtrip_and_reject_invalid_shapes() -> None:
