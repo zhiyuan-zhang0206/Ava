@@ -129,6 +129,7 @@
     "arrowReadout": "#{source} → #{target} · {time}",
     "arrowClusterReadout": "#{source} → #{target} · {time} ×{count}",
     "arrowReadoutHint": "Hover a message arrow for details.",
+    "stripReadFailedHint": "Message data could not be read: no per-message strip.",
     "stripAria": "Raw context messages",
     "stripTruncated": "Earlier messages are not shown",
     "stripMessageAria": "Message {idx} · {kind} · {time} · {chars} chars",
