@@ -8,6 +8,13 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
 ## [Unreleased]
 
 ### Added
+- The cluster health probe gains two alert-only provider-account checks: a
+  balance minimum (`AVA_PROVIDER_GUARD_BALANCE_MIN_CNY`, default 500 CNY)
+  read from the provider's balance endpoint fires *before* the account runs
+  dry, and a halted-agents check fires while at least
+  `AVA_PROVIDER_GUARD_BLOCKED_AGENTS_MIN` agents sit halted by permanent
+  provider rejections — both ride the existing 300s probe tick and edge-alert
+  pipeline on the gateway host (task #3918).
 - The watchdog gains a `browser-reach` check (agent-runner, browser-enabled
   hosts): a canary fetch through the shared Chrome — a throwaway background
   `about:blank` target closed in `finally` — contrasted with a same-process
@@ -48,6 +55,12 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
   admission).
 
 ### Fixed
+- A `plugins_config.json` entry whose plugin directory is gone is now reported
+  through the canonical plugin-load reporter (loguru ERROR + a
+  `plugin_load_failed` event, once per process) instead of a plain warning —
+  the dangling `codex_usage` / `deepseek_balance` entries on a 2026-09-11
+  host stayed invisible to every alert surface while their plugins were
+  silently disabled (task #3918).
 - Hosted-force recovery no longer defers forever on an unreadable exec request
   envelope. An envelope whose own bytes cannot be read — the zero-byte or
   partial remnant a killed parent leaves — carries no attribution, so it is

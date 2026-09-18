@@ -44,9 +44,10 @@ Per-face containment, the face's dotted name, and the load forms in full:
 ## Disabled means never imported
 The enable set comes from the per-machine `plugins_config.json`, read by both
 loaders through `shared/plugins_config`: host boot via `load_for_runtime()`
-(a long-lived consumer — a dangling entry is warned and skipped), the graph
-loader via `load()`, falling back to `load(allow_dangling=True)` after
-reporting each dangling name through the canonical reporter. A plugin with
+and the graph loader via `load()`, each falling back to
+`load(allow_dangling=True)` when a config entry's plugin directory is gone —
+every dangling name is reported once per process through the canonical
+reporter and treated as disabled. A plugin with
 `enabled: false` is imported by neither `plugin.py` loader (issue #2161: the
 boot loader imported every directory on disk regardless of config, so `ava
 plugins disable` changed nothing about startup). Host boot passes the enabled

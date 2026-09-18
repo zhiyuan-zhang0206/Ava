@@ -41,6 +41,7 @@ Checks (all must pass for exit 0):
    checks 5-7: an edited tree is the 2026-08-28 outage class (it broke
    `import ava` for every agent), but rollback does not undo an on-disk edit —
    the converge guard resets the tree on the next start/update.
+9-10. Provider account guard — balance minimum / halted agents; alert-only like checks 5-8.
 
 **A failure a running deploy explains does not advance the auto-rollback counter, and
 resets it** (`_deploy_suppression`). The same live lease is an expected transition
@@ -99,6 +100,7 @@ from cli.commands._health_alerts import (
     _notify_owner,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via _cluster_health)
     _reset_failure_count,
 )
+from cli.commands._provider_guard import run_provider_guard
 from shared.loki_index_labels import LokiReadEra, event_stream_selector, split_index_label_window
 
 # Default thresholds. Overridable via CLI flags; the cron wrapper's
@@ -760,6 +762,10 @@ def run_health_probe(
     if source_check is not None:
         return source_check
     print("  ✓ source tree integrity")
+
+    # 9-10. Provider account guard — alert-only, like checks 5-8 (see `_provider_guard`).
+    if (guard_rc := run_provider_guard(home, alert_failure=_alert_failure)) is not None:
+        return guard_rc
 
     # All checks passed (the counter was already reset once checks 1-4 passed,
     # above the alert-only check 5) — clear the alert edge state.
