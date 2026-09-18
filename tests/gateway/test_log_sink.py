@@ -514,8 +514,9 @@ def test_sink_delta_read_compat_reconstruction_is_a_registered_event(sink_logger
 
     # Find the row by name rather than taking the mirror's last line: ambient
     # metered `sdk_call` rows can land in the per-test mirror after this test's
-    # own row (tests/conftest.py's cluster-spawn guard probes `ava.mcps`, whose
-    # module `__getattr__` calls the metered `servers()`).
+    # own row. (The historical source was the conftest cluster-spawn guard's
+    # `ava.mcps` probe, fixed in task #3950; the find-by-name defense stays for
+    # any other ambient emitter.)
     from shared.paths import logs_dir
 
     telemetry.sync()
