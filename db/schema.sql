@@ -1680,7 +1680,7 @@ CREATE TABLE IF NOT EXISTS agent_impersonations (
     relay_token_hash TEXT,
     relay_heartbeat_at TIMESTAMPTZ,
     relay_last_failure_at TIMESTAMPTZ,
-    relay_batch_window_seconds INTEGER NOT NULL DEFAULT 30
+    relay_batch_window_seconds INTEGER NOT NULL DEFAULT 0
         CHECK (relay_batch_window_seconds BETWEEN 0 AND 300),
     CHECK (applied_version >= 0 AND applied_version <= delta_version),
     CHECK (jsonb_array_length(plugin_delta) = delta_version),

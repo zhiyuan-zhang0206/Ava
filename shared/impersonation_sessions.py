@@ -19,14 +19,14 @@ def request(
     reason: str = "",
     thread_id: str | None = None,
     codex_remote: str | None = None,
-    batch_window_seconds: int = 30,
+    batch_window_seconds: int = 0,
 ) -> dict[str, Any]:
     """Request an automatic safe-boundary takeover; return credentials once.
 
     ``batch_window_seconds`` is the relay's routine-message merge window (see
-    ``control.request``): 30s coalesces routine arrivals into one hint per
-    window while user chat and cancel always hint immediately; 0 disables
-    merging (validated 0..300; task #3696 exception inventory).
+    ``control.request``): 0, the default, delivers routine arrivals immediately;
+    1..300 coalesces them into one hint per window while user chat and cancel
+    always hint immediately (validated 0..300; task #3696 exception inventory).
     """
     result = control.request(
         agent_id,

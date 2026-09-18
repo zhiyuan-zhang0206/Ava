@@ -46,6 +46,11 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
   a `chrome_page_ttl_expired` / `chrome_page_ttl_renewed` event (task #3035).
 
 ### Changed
+- The impersonation relay delivers routine inbox arrivals immediately by
+  default: the per-lease merge window (`relay_batch_window_seconds` — request
+  `--batch-window`) defaults to 0, with merging still available per lease
+  (0..300 seconds); user chats, cancels and renewal reminders never wait in
+  any case (task #3997).
 - A macOS `ava start` whose own chain runs outside the GUI login session no
   longer brings services up in place (they would inherit the wrong launchd
   domain — the state that wedges the shared browser): an operator-shaped start

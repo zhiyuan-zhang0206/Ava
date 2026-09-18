@@ -88,9 +88,10 @@ def _add_impersonation_parser(sub: argparse._SubParsersAction[argparse.ArgumentP
         "--batch-window",
         dest="relay_batch_window_seconds",
         type=partial(_integer_range, minimum=0, maximum=300),
-        default=30,
-        help="relay merge window in seconds, 0..300: routine arrivals (not user "
-        "chats, not cancels) coalesce into one hint per window; 0 disables merging",
+        default=0,
+        help="relay merge window in seconds, 0..300, default 0 (deliver "
+        "immediately): routine arrivals (not user chats, not cancels) coalesce "
+        "into one hint per window when set",
     )
     request.set_defaults(func=_h_impersonate)
     parsers: dict[str, argparse.ArgumentParser] = {}

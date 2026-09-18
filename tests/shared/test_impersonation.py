@@ -531,7 +531,7 @@ def test_claude_request_mints_a_scoped_relay_credential(db_conn: psycopg.Connect
 def test_request_validates_and_records_the_batch_window(db_conn: psycopg.Connection) -> None:
     owner = _agent(db_conn)
     lease = _request(owner, provider="codex")
-    assert lease["relay_batch_window_seconds"] == 30  # default: merge enabled
+    assert lease["relay_batch_window_seconds"] == 0  # default: deliver immediately
     for bad in (-1, 301, 1.5, True, "30"):
         with pytest.raises(ValueError, match="relay_batch_window_seconds"):
             leases.request(

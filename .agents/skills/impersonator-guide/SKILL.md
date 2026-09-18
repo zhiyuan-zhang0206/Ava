@@ -112,6 +112,12 @@ normal timeline as the Ava agent's own, with both values recorded in the session
 metadata. The CLI records observed process facts
 separately. For peers, use the borrowed identity through the SDK below.
 
+**Message economy.** Send only what the work needs: work content, blockers,
+questions. Every message — and every hint, re-delivery or reminder it
+triggers — is model work somewhere (tokens, not free). No pleasantries, no
+courtesy pings, no duplicate notices of one fact, no "just checking in". One
+substantive message per milestone beats a stream of small ones.
+
 ## Renewal: only when the Ava side reminds you
 
 The lease TTL is the recovery boundary: if you die or the connection breaks,
@@ -139,10 +145,15 @@ The correct model:
 ava impersonate renew <session_id> --agent <agent_id> --ttl 3600
 ```
 
-Pick the smallest TTL that covers the remaining work (1..86400 seconds; the
-clock restarts at the moment you renew). Omitting `--ttl` keeps the current
-length. After renewing, keep working — the next reminder comes before the new
-expiry if the work is still running.
+Estimate the TTL short — pick the smallest window that covers the work ahead
+(1..86400 seconds; the clock restarts at the moment you renew). The same rule
+applies when a lease is requested up front: for a task that looks like about
+an hour, ask for about 30 minutes and extend in steps — several short renewals
+are the intended pattern, not a failure. Each renewal is a deliberate liveness
+check, and a short window is the backstop that returns control to the Ava
+agent soon after the session dies instead of parking the agent for a long
+span. Omitting `--ttl` keeps the current length. After renewing, keep working
+— the next reminder comes before the new expiry if the work is still running.
 
 Hard rules:
 

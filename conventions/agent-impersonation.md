@@ -3,7 +3,11 @@
 A trusted Codex or Claude Code process on an Ava agent's machine can take over
 its identity. Preparation drains native work and saves its checkpoint before
 activation. It does not ask the native model to approve. TTL is an explicit
-recovery deadline; renewal and initial takeover follow the same trust model.
+recovery deadline, for renewal and the initial takeover alike — estimate it
+short: take the smallest window that covers the next slice (about 30 minutes
+when the work ahead looks like about an hour) and extend by renewal. A short
+window is the deadlock backstop; a long one parks the agent for its whole
+span if the external side dies.
 
 ## Start a named session
 
@@ -101,6 +105,10 @@ to stop; ACK after stopping. `reminder` indicates an approaching TTL deadline:
 decide whether to renew once or release. Renew explicitly, never in an automated
 heartbeat loop. TTL is 1..86400 seconds; relay liveness does not extend it.
 
+Messages are model work — a delivered message wakes a model on its receiving
+side (tokens, not free): send substantive traffic (work, blockers, questions),
+not chatter; routine status belongs in the release summary.
+
 ## Return control
 
 Stop external work and close attachments before releasing:
@@ -114,7 +122,7 @@ The summary must be written by the impersonator. Ava generates one JSON file at
 `<agent workspace>/impersonation/0.json`, with session/process metadata, all
 incoming/outgoing messages, inbound ACK state, lifecycle history, original
 consumed SDK/API events and counts (calls, task changes, recipients, duration).
-The file is saved before native execution resumes. The summary and file path
+The file is saved before the native agent resumes. The summary and file path
 arrive as the first new system note, ahead of subsequent normal input. Captured
 unacknowledged input remains in the JSON for the native agent to handle.
 
