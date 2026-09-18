@@ -136,7 +136,12 @@ def pending_command(agent_id: int) -> int | None:
     if current is None or current.maintenance is None:
         return None
     hold = current.maintenance
-    if hold.phase != "draining" or agent_id in hold.drained or agent_id in hold.failures:
+    if (
+        hold.phase != "draining"
+        or agent_id in hold.drained
+        or agent_id in hold.reaped
+        or agent_id in hold.failures
+    ):
         return None
     return hold.commands.get(agent_id) or None
 
@@ -163,6 +168,46 @@ def record_drained(agent_id: int, command_id: int, *, failure: str | None = None
             if failure is None
             else replace(hold, failures={**hold.failures, agent_id: failure})
         )
+        assert current.holder is not None and current.acquired_at is not None  # noqa: S101
+        try:
+            pause_owner.change_maintenance(
+                current.holder,
+                current.acquired_at,
+                hold,
+                updated,
+            )
+        except RuntimeError:
+            newer = snapshot()
+            if newer is None or not newer.matches(current.holder, current.acquired_at):
+                raise
+            if newer.maintenance == hold:
+                raise
+        else:
+            return
+
+
+def record_reaped(agent_id: int, reason: str) -> None:
+    """Record a reaped receipt without pretending a flush or apply happened.
+
+    The drain CAS-marked the agent 'restarting' and interrupted its in-flight
+    turn (task #4016): no checkpoint flush and no lifecycle apply completed,
+    so this is deliberately NOT a `drained` receipt and never a `failures`
+    latch -- it releases the drain for this agent and nothing more. The mark
+    is settled at the successor boundary; certification of this member checks
+    the honest reap state instead (maintenance_cohort.verify_drained).
+    """
+    while True:
+        current = snapshot()
+        if current is None or current.maintenance is None:
+            return
+        hold = current.maintenance
+        if hold.commands.get(agent_id) is None:
+            raise RuntimeError("reaped agent does not belong to this maintenance cohort")
+        if agent_id in hold.failures:
+            raise RuntimeError("failed continuation cannot be reaped in the same hold")
+        if agent_id in hold.reaped:
+            return
+        updated = replace(hold, reaped={**hold.reaped, agent_id: reason})
         assert current.holder is not None and current.acquired_at is not None  # noqa: S101
         try:
             pause_owner.change_maintenance(
@@ -264,7 +309,9 @@ def set_phase(holder: str, acquired_at: datetime, phase: str) -> pause_owner.Pau
     }
     if phase != allowed.get(hold.phase):
         raise RuntimeError(f"invalid maintenance transition: {hold.phase} -> {phase}")
-    if phase == "drained" and (hold.failures or set(hold.drained) != set(hold.commands)):
+    if phase == "drained" and (
+        hold.failures or set(hold.drained) | set(hold.reaped) != set(hold.commands)
+    ):
         raise RuntimeError("resume cohort has not fully drained")
     updated = MaintenanceHold.decode({**hold.encode(), "phase": phase})
     return pause_owner.change_maintenance(holder, acquired_at, hold, updated)

@@ -18,6 +18,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.db import has_pending_interrupt
 from agent.graph._interrupt import subscribe_interrupt
 from shared.db import create_agent
+from shared.machine import machine_name
 
 # The watcher polls on a 2s cadence; the initial SELECT is immediate. Generous
 # windows vs flake; the poll-interval tests are serial (flaky-marked) because
@@ -75,6 +76,59 @@ class TestHasPendingInterrupt:
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         _insert(db_conn, tid, "terminate", source="agent:9")  # pyright: ignore[reportUnknownArgumentType]
         assert await has_pending_interrupt(aops_pool, tid) is True
+
+    async def test_true_on_straggler_reap_mark(self, db_conn, aops_pool: AsyncConnectionPool):
+        # Task #4016: the drain CAS-marked the row 'restarting' while its
+        # un-applied maintenance restart is still pending/claimed — that pair
+        # IS the durable truncation signal for this agent's in-flight turn.
+        tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+        _insert(db_conn, tid, "restart", source="system:maintenance")  # pyright: ignore[reportUnknownArgumentType]
+        db_conn.execute(  # pyright: ignore[reportUnknownMemberType]
+            "INSERT INTO agents_meta(id,status,machine,runtime_kind) "
+            "VALUES(%s,'restarting',%s,'hosted')",
+            (tid, machine_name()),
+        )
+        db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+        assert await has_pending_interrupt(aops_pool, tid) is True
+
+    async def test_false_on_unmarked_maintenance_restart(
+        self, db_conn, aops_pool: AsyncConnectionPool
+    ):
+        # The pre-#4016 drain waits for the turn boundary: a pending restart
+        # alone never aborts in-flight work.
+        tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+        _insert(db_conn, tid, "restart", source="system:maintenance")  # pyright: ignore[reportUnknownArgumentType]
+        db_conn.execute(  # pyright: ignore[reportUnknownMemberType]
+            "INSERT INTO agents_meta(id,status,machine,runtime_kind) "
+            "VALUES(%s,'running',%s,'hosted')",
+            (tid, machine_name()),
+        )
+        db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+        assert await has_pending_interrupt(aops_pool, tid) is False
+
+    async def test_false_on_reap_mark_with_a_resolved_command(
+        self, db_conn, aops_pool: AsyncConnectionPool
+    ):
+        # A mark whose command already applied is not a truncation signal —
+        # the turn reached its boundary; the settle face owns such a row.
+        tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+        _insert(db_conn, tid, "restart", source="system:maintenance")  # pyright: ignore[reportUnknownArgumentType]
+        from uuid import uuid4
+
+        owner, generation = uuid4(), uuid4()
+        db_conn.execute(  # pyright: ignore[reportUnknownMemberType]
+            "UPDATE inbound_messages SET status='claimed', claimed_at=clock_timestamp(), "
+            "target_generation=%s, target_owner=%s, applied_at=clock_timestamp() "
+            "WHERE agent_id=%s AND kind='restart'",
+            (generation, owner, tid),
+        )
+        db_conn.execute(  # pyright: ignore[reportUnknownMemberType]
+            "INSERT INTO agents_meta(id,status,machine,runtime_kind) "
+            "VALUES(%s,'restarting',%s,'hosted')",
+            (tid, machine_name()),
+        )
+        db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+        assert await has_pending_interrupt(aops_pool, tid) is False
 
 
 class TestSubscribeInterrupt:

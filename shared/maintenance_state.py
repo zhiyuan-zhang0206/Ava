@@ -19,6 +19,12 @@ class MaintenanceHold:
     # A zero value means preparation has not yet durably enqueued it.
     commands: dict[int, int] = field(default_factory=dict[int, int])
     drained: tuple[int, ...] = ()
+    # Reaped receipts (task #4016): the agent held this wave's restart command
+    # past its straggler window without reaching a turn boundary, so the drain
+    # CAS-marked it 'restarting' and interrupted its in-flight turn. Never a
+    # flush/apply -- deliberately NOT part of `drained`; the mark is settled
+    # at the successor boundary (shared/straggler_reap.py).
+    reaped: dict[int, str] = field(default_factory=dict[int, str])
     failures: dict[int, str] = field(default_factory=dict[int, str])
     # Crash-equivalent receipts: the turn raised a database-outage exception,
     # so the continuation outcome is unknown but durable (the restart pointer
@@ -41,6 +47,7 @@ class MaintenanceHold:
             "phase": self.phase,
             "commands": {str(agent): command for agent, command in self.commands.items()},
             "drained": list(self.drained),
+            "reaped": {str(agent): reason for agent, reason in self.reaped.items()},
             "failures": {str(agent): reason for agent, reason in self.failures.items()},
             "undelivered": {str(agent): reason for agent, reason in self.undelivered.items()},
             "repaired": {str(agent): reason for agent, reason in self.repaired.items()},
@@ -62,6 +69,11 @@ class MaintenanceHold:
             raise ValueError("maintenance receipt is outside the resume cohort")
         if len(set(receipts)) != len(receipts):
             raise ValueError("duplicate maintenance receipt")
+        reaped = _receipts(raw.get("reaped", {}), "reaped receipts")
+        if any(agent not in parsed for agent in reaped):
+            raise ValueError("reaped receipt is outside the resume cohort")
+        if set(receipts) & set(reaped):
+            raise ValueError("drained and reaped receipts overlap")
         failed = _receipts(raw["failures"], "maintenance failures")
         undelivered = _receipts(raw.get("undelivered", {}), "undelivered receipts")
         repaired = _receipts(raw.get("repaired", {}), "repaired receipts")
@@ -78,6 +90,7 @@ class MaintenanceHold:
             phase,
             parsed,
             tuple(cast(list[int], receipts)),
+            reaped,
             failed,
             undelivered,
             repaired,

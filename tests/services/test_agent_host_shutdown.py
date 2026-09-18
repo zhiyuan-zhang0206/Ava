@@ -92,6 +92,7 @@ def _exercise_shutdown(failure: str) -> None:
             AgentHost=MagicMock(return_value=host),
             TurnScheduler=MagicMock(return_value=scheduler),
             _beat_forever=beat,
+            settle_stranded_reaps_async=AsyncMock(return_value=[]),
             settle_stale_running_rows=AsyncMock(return_value=[]),
             start_health_server=AsyncMock(return_value=object()),
             stop_health_server=close_health,

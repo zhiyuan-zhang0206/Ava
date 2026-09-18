@@ -226,6 +226,33 @@ class GatewaySettings(EnvSettings):
         },
     )
 
+    update_straggler_reap_seconds: float = Field(
+        default=15.0,
+        ge=0,
+        allow_inf_nan=False,
+        alias="AVA_UPDATE_STRAGGLER_REAP_SECONDS",
+        description=(
+            "Grace window for a native cohort agent to reach its turn boundary "
+            "during an update/rollback drain (task #4016), counted from its own "
+            "restart command's issuance. An agent still un-landed at expiry is "
+            "reaped: CAS-marked 'restarting', its in-flight turn interrupted by "
+            "the durable reap signal (in-flight exec/LLM work truncated), and "
+            "released with the honest drain outcome 'reaped' -- no flush/apply "
+            "receipt is fabricated and its claimed ordinary work is re-delivered "
+            "when the successor boot or local resume settles the mark. Only "
+            "update-family drains reap; interactive pause/stop/restart drains "
+            "keep their never-kill contract. 0 disables the reap (the drain "
+            "times out and the wave aborts/retries as before). Decoupled from "
+            "exec_timeout_seconds; must be finite and non-negative."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     update_backup_precheck: bool = Field(
         default=True,
         alias="AVA_UPDATE_BACKUP_PRECHECK",

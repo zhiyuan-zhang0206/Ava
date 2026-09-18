@@ -1,6 +1,13 @@
 """Operations, gateway, and log event declarations."""
 
-from shared.events.payloads import IdleWake, LlmRetry, PauseLifecycleWait, SilentIdle
+from shared.events.payloads import (
+    IdleWake,
+    LlmRetry,
+    PauseLifecycleWait,
+    SilentIdle,
+    UpdateStragglerReaped,
+    UpdateStragglerReapSettled,
+)
 from shared.events.registry import _audit as _audit
 from shared.events.registry import _telemetry as _telemetry
 from shared.events.registry import _telemetry_audit as _telemetry_audit
@@ -46,6 +53,20 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         "pause_lifecycle_wait",
         "preparation bounded-waited in-flight work it did not author",
         payload=PauseLifecycleWait,
+        tier="anomaly",
+    ),
+    # straggler reap (task #4016): the drain truncates + releases an un-landed
+    # cohort member; the successor boot/resume settles the mark.
+    "update_straggler_reaped": _telemetry(
+        "update_straggler_reaped",
+        "drain reaped straggler cohort agent(s) past their restart window",
+        payload=UpdateStragglerReaped,
+        tier="anomaly",
+    ),
+    "update_straggler_reap_settled": _telemetry(
+        "update_straggler_reap_settled",
+        "successor boundary settled stranded straggler-reap marks",
+        payload=UpdateStragglerReapSettled,
         tier="anomaly",
     ),
     # db resilience

@@ -1,0 +1,50 @@
+---
+type: doc
+title: Update straggler reap — truncation, honest receipts, successor settle
+description: An update-family drain truncates and releases a cohort member still un-landed past its restart window as `reaped`, and a successor boundary settles the mark so the agent re-runs on the new code.
+status: current
+---
+
+# Update straggler reap — truncation, honest receipts, successor settle
+
+An update-family drain (a rollout's Phase A, `spawn_update`) may reap its
+stragglers (task #4016; user ruling 2026-09-19): a native hosted cohort member
+still un-landed `update_straggler_reap_seconds` (default 15; 0 disables) after
+ITS restart command was issued is truncated and released with the honest
+`reaped` outcome instead of aborting the wave. Interactive pause/stop/restart
+drains never reap.
+
+The kill is a durable mark, not a signal. `ops.agent_pause` CAS-marks the row
+`restarting` (from `running`, against the observed owner/generation);
+`agent.db.has_pending_interrupt` reads that mark together with the member's
+still-un-applied maintenance restart as an in-flight abort signal, so the
+running exec/LLM node truncates within its existing poll cadence and the exec
+subsystem settles its child tree. The mark's status predicates fence every
+old-incarnation write path (claim acceptance, lifecycle apply, settle, corpse
+stamp), so a dying turn can only end cleanly — it can never clobber the reap
+or latch a blocking drain failure.
+
+Receipts are honest end to end. The member lands in `MaintenanceHold.reaped`
+(a receipt deliberately not `drained`, never a fabricated flush/apply);
+`pending_command` excludes it from held-control wakes; `verify_drained`
+certifies it by the reap state — the row still `restarting` and its command
+never applied nor observed — and rejects drift. A refused reap aborts the
+drain with the hold retained, exactly like the timeout it replaces, and the
+wave report carries a `reaped` count line next to the telemetry row.
+
+The mark is settled at a successor boundary: the agent-host boot, or the local
+unpause (`shared/straggler_reap.settle_stranded_reaps[_async]`, called from
+`ops.cluster_pause.unpause_local_cluster` — the compensating resume of an
+aborted wave runs while the host stayed up). Settlement closes the
+never-applied command as `done` with
+`lifecycle_result={"outcome": "reaped", "reason": "update_straggler_reap"}`,
+returns the row to `idling` with ownership and lease released, and the caller
+wakes the agent once. That first admission runs the existing inbound reconcile
+(uncommitted claimed ordinary rows return to `pending` and are re-delivered)
+and the dangling-tool repair — the truncated work re-runs on the new code,
+at-least-once, with side-effect replay accepted by the ruling.
+
+Rows under an external takeover (`agent_impersonations` requested / accepted /
+live-active) are never reaped; W is decoupled from `exec_timeout_seconds`; and
+a reaped turn blocked where asyncio cannot interrupt it is bounded by the
+wave's own stop leg — the drain never waits on it.

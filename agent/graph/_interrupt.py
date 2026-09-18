@@ -3,8 +3,9 @@
 When entering an interruptible section (the LLM stream or code execution), the
 node uses `async with subscribe_interrupt(...) as event:` to get an
 asyncio.Event; the context manager spawns a background task that watches for a
-durable interrupt inbound (kind 'cancel' or 'terminate') for this agent and
-sets the event the moment one is queued. The node races its work vs
+durable interrupt inbound — kind 'cancel'/'terminate', or the update
+straggler-reap mark (a 'restarting' row carrying its un-applied maintenance
+restart command) — for this agent and sets the event the moment one is queued. The node races its work vs
 `event.wait()` and aborts when the event fires.
 
 Durability is the whole point. The signal is a real `inbound_messages` row
