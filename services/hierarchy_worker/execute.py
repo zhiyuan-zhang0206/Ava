@@ -68,7 +68,12 @@ def execute_job(job_id: int) -> int:
     model = settings.lm.hierarchy_model
     started = time.monotonic()
     try:
-        advance_target = _advance_target(agent_id, trigger_boundary)
+        # Each channel reads only its own bookkeeping target: a compact run
+        # computes the cursor it may advance to; a tail run computes its seal
+        # target below instead.
+        advance_target = (
+            _advance_target(agent_id, trigger_boundary) if kind == KIND_COMPACT else None
+        )
         # The tail delta gate's value: the newest checkpoint read *before* the
         # load — a conservative lower bound of what this run seals (a write
         # after the read triggers the next job instead of being skipped, the
@@ -125,7 +130,7 @@ def _record_done(
     tree: MaterializedTree,
     written: int,
     model: str,
-    advance_target: str,
+    advance_target: str | None,
     kind: str,
     tail_seal_target: str | None,
 ) -> None:
@@ -170,6 +175,7 @@ def _record_done(
             else:  # KIND_COMPACT — execute_job rejects unknown kinds up front.
                 # Fully covered: the cursor may move. The `<` guard keeps it
                 # monotone even if anything ever advanced it further already.
+                assert advance_target is not None  # noqa: S101 — computed for compact runs
                 conn.execute(
                     "UPDATE hierarchy_worker_state"
                     " SET last_processed_boundary = %s, updated_at = now()"
