@@ -81,6 +81,16 @@ export interface RunTimelineChartLabels {
   messageNoText: string;
   /** Shared retry label for the message body's error state. */
   retry: string;
+  /** P4-2b (#4023): context axis — the hidden-rail hint (the pending clause
+   *  appears only when the window carries placeholders), the readout's char
+   *  position suffix, and the char unit used by crumbs and the readout. */
+  railHidden: string;
+  railHiddenPending: string;
+  readoutPosition: (position: string) => string;
+  charsUnit: string;
+  /** P4-2b: accessible name of the tick scale on the context axis
+   *  ("Character counts"); the time axis reuses `time`. */
+  charTicks: string;
 }
 
 export interface TimelinePopoverTarget {

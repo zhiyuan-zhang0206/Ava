@@ -31,6 +31,11 @@
       "line": 1
     },
     {
+      "file": "src/app/insights/run/[agentId]/page.tsx",
+      "rule": "local/source-lines",
+      "line": 1
+    },
+    {
       "file": "src/components/agent-row.tsx",
       "rule": "local/source-lines",
       "line": 33

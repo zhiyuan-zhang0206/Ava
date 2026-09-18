@@ -94,5 +94,10 @@ export function runTimelineLabels(): RunTimelineChartLabels {
     messagePartTruncated: "truncated",
     messageNoText: "No text",
     retry: "Retry",
+    railHidden: "Event rail is only visible on the time axis.",
+    railHiddenPending: "Event rail and pending placeholders are only visible on the time axis.",
+    readoutPosition: (position) => `position ${position}`,
+    charsUnit: "chars",
+    charTicks: "Character counts",
   };
 }
