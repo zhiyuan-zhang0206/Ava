@@ -173,6 +173,9 @@ export type ContextSection = Schemas["ContextSection"];
 // --- Run timeline (GET /api/agents/{id}/run-timeline) ---
 
 export type RunTimelineResponse = Schemas["RunTimelineResponse"];
+export type RunTimelineMessage = Schemas["RunTimelineMessage"];
+export type RunTimelineMessagePart = Schemas["RunTimelineMessagePart"];
+export type RunTimelineMessageDetails = Schemas["RunTimelineMessageDetails"];
 
 // --- Per-agent inspector panel (GET /api/agents/{id}/inspect/statistics) ---
 

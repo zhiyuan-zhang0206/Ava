@@ -4,6 +4,8 @@ import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout";
 import type { RunTimelineResponse } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+import type { StripColorClass, StripLegendCategory } from "./strip-categories";
+
 export const TIMELINE_POPOVER_ID = "run-timeline-popover";
 
 export interface RunTimelineChartLabels {
@@ -47,6 +49,38 @@ export interface RunTimelineChartLabels {
   crumbRoot: string;
   /** P4-1 (#4023): idle line of the persistent hover readout. */
   readoutIdle: string;
+  /** P4-2 (#4023): raw-context strip row, legend, and message panel. */
+  stripAria: string;
+  stripTruncated: string;
+  stripMessageAria: (idx: number, kind: string, time: string, chars: string) => string;
+  stripPartLabels: Record<StripColorClass, string>;
+  legendTitle: string;
+  legendHint: string;
+  legendLabels: Record<StripLegendCategory, string>;
+  readoutMessage: (
+    idx: number,
+    kind: string,
+    time: string,
+    chars: string,
+    leaf: string | null,
+  ) => string;
+  messageDetails: string;
+  messageCharsLabel: string;
+  messageSource: string;
+  messageLabel: (idx: number) => string;
+  messageChars: (chars: string) => string;
+  messagePart: (kind: string, chars: string) => string;
+  messageChain: string;
+  messageFocus: string;
+  messageShowSummary: string;
+  messageBody: string;
+  messageLoading: string;
+  messageLoadFailed: string;
+  messageExpandFull: string;
+  messagePartTruncated: string;
+  messageNoText: string;
+  /** Shared retry label for the message body's error state. */
+  retry: string;
 }
 
 export interface TimelinePopoverTarget {
@@ -92,7 +126,7 @@ function timePart(date: Date): string {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
-function timestampLabel(value: string): string {
+export function timestampLabel(value: string): string {
   const date = new Date(value);
   return `${datePart(date)} ${timePart(date)}`;
 }
@@ -124,7 +158,7 @@ function turnFacts(row: RunTimelineResponse["rows"][number], labels: RunTimeline
   };
 }
 
-function DetailMetric({ label, value }: { label: string; value: string }) {
+export function DetailMetric({ label, value }: { label: string; value: string }) {
   return (
     <div className="space-y-1 rounded-[10px] border border-border bg-muted px-3 py-2">
       <dt className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{label}</dt>

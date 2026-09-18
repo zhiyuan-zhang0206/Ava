@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import { TimelineCrumbs, type TimelineCrumbEntry } from "./run-timeline-crumbs";
 import {
   LayerDetailPanel,
+  layerFocusLabel,
   rowFailed,
   rowLabel,
   tickLabel,
@@ -25,6 +26,9 @@ import {
   type RunTimelineChartLabels,
   type TimelinePopoverTarget,
 } from "./run-timeline-details";
+import { StripLegend } from "./run-timeline-legend";
+import { MessageDetailPanel } from "./run-timeline-message-panel";
+import { StripTrackButtons, StripTrackGeometry, StripTruncatedHint } from "./run-timeline-strip";
 import {
   LayerTrackButtons,
   LayerTrackGeometry,
@@ -33,69 +37,21 @@ import {
   RawSummaryBand,
 } from "./run-timeline-layers";
 import { buildReadoutText, TimelineReadout } from "./run-timeline-readout";
-import { panWindow, zoomWindowAround, type TimelineWindowOverride } from "./request-level";
+import { eventChipClass, prioritizedRailEvents } from "./run-timeline-rail";
+import { useTimelineGestures } from "./use-timeline-gestures";
+import type { TimelineWindowOverride } from "./request-level";
+import { coveredMessageIndexes, messageChainIndexes } from "./strip-layout";
+import type { StripLegendCategory } from "./strip-categories";
 import { buildTimelineLayout } from "./timeline-layout";
 
 export type { RunTimelineChartLabels } from "./run-timeline-details";
 
 const MIN_CANVAS_WIDTH = 1000;
 export const MIN_DETAIL_CANVAS_WIDTH = 320;
-// KEEP (task #3696 exception inventory): rail density cap — priority kinds
-// first, then the rest, capped at 120 chips; the skipped remainder is
-// summarized (`skippedByKind`), not drawn.
-const EVENT_RAIL_LIMIT = 120;
 const TIMELINE_POPOVER_WIDTH = 288;
-// P4-1 (#4023) interaction detail, not a user setting: a drag shorter than
-// this stays a click on the block under the pointer (the demo used the same
-// threshold); only longer movements turn the gesture into a pan.
-const DRAG_THRESHOLD_PX = 4;
-// Rail kinds the backend still emits after the task #2591 narrowing: execution
-// and halt events no longer appear on the rail (they live in turn rows).
-const EVENT_RAIL_PRIORITY = new Set([
-  "compact",
-  "auto_compact",
-  "restart_completed",
-  "resurrect",
-  "agent_terminated",
-  "terminate",
-]);
-
-function eventChipClass(kind: string): string {
-  if (kind.includes("failed") || kind.includes("timeout")) {
-    return "border-[var(--series-5)] bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-400";
-  }
-  if (kind === "compact" || kind === "auto_compact") {
-    return "border-violet-300 bg-violet-50 text-violet-700 dark:bg-violet-950/30 dark:text-violet-400";
-  }
-  if (kind.includes("restart") || kind.includes("resurrect")) {
-    return "border-blue-300 bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:text-blue-400";
-  }
-  return "border-border bg-card text-muted-foreground";
-}
-
-function prioritizedRailEvents(events: RunTimelineResponse["events"]) {
-  const indexed = events.map((event, index) => ({ event, index }));
-  const selected = [
-    ...indexed.filter(({ event }) => EVENT_RAIL_PRIORITY.has(event.kind)),
-    ...indexed.filter(({ event }) => !EVENT_RAIL_PRIORITY.has(event.kind)),
-  ].slice(0, EVENT_RAIL_LIMIT);
-  const selectedIndexes = new Set(selected.map(({ index }) => index));
-  const skippedByKind = new Map<string, number>();
-  for (const { event, index } of indexed) {
-    if (!selectedIndexes.has(index)) {
-      skippedByKind.set(event.kind, (skippedByKind.get(event.kind) ?? 0) + 1);
-    }
-  }
-  selected.sort((left, right) => Date.parse(left.event.ts) - Date.parse(right.event.ts));
-  return {
-    events: selected.map(({ event }) => event),
-    skippedCount: events.length - selected.length,
-    skippedSummary: [...skippedByKind.entries()]
-      .map(([kind, count]) => `${kind}×${count}`)
-      .join(", "),
-  };
-}
-
+// P4-2 (#4023): a stable empty set for the strip relationship memos, so the
+// consumers do not see a fresh identity on every render.
+const NO_INDEXES: ReadonlySet<number> = new Set();
 export function RunTimelineChart({
   timeline,
   labels,
@@ -148,31 +104,25 @@ export function RunTimelineChart({
       : Math.max(MIN_DETAIL_CANVAS_WIDTH, Math.round(widthOverride));
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
   const [selectedLayerIndex, setSelectedLayerIndex] = useState<number | null>(null);
+  const [selectedMessageIndex, setSelectedMessageIndex] = useState<number | null>(null);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [popoverTarget, setPopoverTarget] = useState<TimelinePopoverTarget | null>(null);
   const [hoveredLayerIndex, setHoveredLayerIndex] = useState<number | null>(null);
+  const [hoveredMessageIndex, setHoveredMessageIndex] = useState<number | null>(null);
+  const [activeCategory, setActiveCategory] = useState<StripLegendCategory | null>(null);
   const [dragging, setDragging] = useState(false);
-  // Wheel/drag gestures batch into frames; the flush reads the latest
-  // committed window so successive frames pan from the newest window (P4-1).
-  const latestWindowRef = useRef(timeline.window);
+  // P4-1 (#4023): the pan/zoom gesture wiring lives in useTimelineGestures
+  // (refs + unconditional finalization, see the PR #2887 review); the chart
+  // owns only the click suppression the drag sets.
   const suppressClickRef = useRef(false);
-  // P4-1 (#4023): gesture state lives in refs — a drag spans many renders
-  // (the first move flips `dragging`, each flush moves the window, and the page
-  // re-creates its onZoomWindow closure every render), so effect-local state
-  // would be rebuilt mid-gesture — the PR #2887 review bug (3242).
-  const dragRef = useRef<{ startX: number; base: TimelineWindowOverride; moved: boolean } | null>(
-    null,
-  );
-  const dragFrameRef = useRef(0);
-  const dragPendingDxRef = useRef(0);
-  const onZoomWindowRef = useRef(onZoomWindow);
-
-  useEffect(() => {
-    onZoomWindowRef.current = onZoomWindow;
-  });
   const rail = useMemo(() => prioritizedRailEvents(timeline.events), [timeline.events]);
   const layers = showSummaries ? timeline.layers : undefined;
   const pendingSpans = showSummaries ? timeline.pending : undefined;
+  // P4-2 (#4023): the raw-context strip is a single-view surface (M7 — the
+  // compare density is not designed), rendered only when the response
+  // carries the messages field (null = degraded read, same stance as
+  // layers/inbounds).
+  const stripMessages = widthOverride === undefined ? (timeline.messages ?? undefined) : undefined;
   const layout = useMemo(
     () =>
       buildTimelineLayout({
@@ -182,18 +132,43 @@ export function RunTimelineChart({
         events: rail.events,
         layers,
         pending: pendingSpans,
+        messages: stripMessages,
         flipLayers,
       }),
-    [canvasWidth, flipLayers, layers, pendingSpans, rail.events, timeline.rows, timeline.window],
+    [
+      canvasWidth,
+      flipLayers,
+      layers,
+      pendingSpans,
+      rail.events,
+      stripMessages,
+      timeline.rows,
+      timeline.window,
+    ],
   );
   const selectedRow =
     selectedRowIndex === null ? null : (timeline.rows[selectedRowIndex] ?? null);
   const selectedLayer =
     selectedLayerIndex === null ? null : (timeline.layers?.[selectedLayerIndex] ?? null);
+  const selectedMessage =
+    selectedMessageIndex === null ? null : (timeline.messages?.[selectedMessageIndex] ?? null);
   const tickSpacingMs =
     (Date.parse(timeline.window.to) - Date.parse(timeline.window.from)) /
     (layout.ticks.length - 1);
   const includeTickSeconds = tickSpacingMs < 60_000;
+  // P4-2 (#4023) cross-highlights: selecting a summary node lights its
+  // covered messages ("related", the demo's rule); selecting a message
+  // outlines the chain of summary blocks covering it ("path").
+  const relatedMessageIndexes = useMemo(() => {
+    if (selectedLayerIndex === null || !timeline.layers || !timeline.messages) return NO_INDEXES;
+    const node = timeline.layers[selectedLayerIndex];
+    return new Set(coveredMessageIndexes(timeline.messages, node.start, node.end));
+  }, [selectedLayerIndex, timeline.layers, timeline.messages]);
+  const messageChain = useMemo(() => {
+    if (selectedMessageIndex === null || !timeline.messages) return [];
+    return messageChainIndexes(timeline.layers, timeline.messages[selectedMessageIndex]?.ts ?? null);
+  }, [selectedMessageIndex, timeline.messages, timeline.layers]);
+  const chainLayerIndexes = useMemo(() => new Set(messageChain), [messageChain]);
 
   const readPopoverKey = (
     element: HTMLButtonElement,
@@ -253,6 +228,14 @@ export function RunTimelineChart({
   const hoveredPending = popoverTarget?.kind === "pending";
   const hoveredLayer =
     hoveredLayerIndex === null ? null : (timeline.layers?.[hoveredLayerIndex] ?? null);
+  const hoveredMessage =
+    hoveredMessageIndex === null ? null : (timeline.messages?.[hoveredMessageIndex] ?? null);
+  const hoveredMessageChain =
+    hoveredMessage === null ? [] : messageChainIndexes(timeline.layers, hoveredMessage.ts);
+  const hoveredMessageLeaf =
+    hoveredMessageChain.length > 0
+      ? (timeline.layers?.[hoveredMessageChain[hoveredMessageChain.length - 1]] ?? null)
+      : null;
   const hoveredPendingBlock =
     popoverTarget?.kind === "pending" ? (layout.pendingBlocks[popoverTarget.index] ?? null) : null;
   const readoutText = buildReadoutText(
@@ -262,6 +245,12 @@ export function RunTimelineChart({
       layer: hoveredLayer,
       pending: hoveredPendingBlock
         ? { start: hoveredPendingBlock.start, end: hoveredPendingBlock.end }
+        : null,
+      message: hoveredMessage
+        ? {
+            message: hoveredMessage,
+            leaf: hoveredMessageLeaf ? layerFocusLabel(hoveredMessageLeaf) : null,
+          }
         : null,
     },
     labels,
@@ -273,10 +262,51 @@ export function RunTimelineChart({
       onZoomWindow(window);
     }
   };
-
-  useEffect(() => {
-    latestWindowRef.current = timeline.window;
-  }, [timeline.window]);
+  /** P4-2 (#4023): the time window covering a strip bar plus padding — the
+   *  demo's "zoom to this message". Null when the strip is absent or the
+   *  index is out of range. */
+  const messageFocusWindow = (index: number): TimelineWindowOverride | null => {
+    const strip = layout.strip;
+    if (!strip) return null;
+    const bar = strip.messages.at(index);
+    if (!bar) return null;
+    const spanMs = Date.parse(timeline.window.to) - Date.parse(timeline.window.from);
+    const toTime = (px: number) =>
+      Date.parse(timeline.window.from) + ((px - layout.plot.left) / layout.plot.width) * spanMs;
+    const padPx = Math.max(0.6 * bar.width, layout.plot.width / 200);
+    const fromPx = Math.max(layout.plot.left, bar.left - padPx);
+    const toPx = Math.max(
+      fromPx + 0.5,
+      Math.min(layout.plot.left + layout.plot.width, bar.left + bar.width + padPx),
+    );
+    return {
+      from: new Date(toTime(fromPx)).toISOString(),
+      to: new Date(toTime(toPx)).toISOString(),
+    };
+  };
+  const selectedMessageFocus =
+    selectedMessageIndex === null ? null : messageFocusWindow(selectedMessageIndex);
+  // Selection is exclusive across the three detail sources (turn / summary
+  // node / raw message): each picker clears the other two and closes the
+  // summary band the panel supersedes.
+  const selectRow = (index: number) => {
+    setSelectedRowIndex(index);
+    setSelectedLayerIndex(null);
+    setSelectedMessageIndex(null);
+    setSummaryOpen(false);
+  };
+  const selectLayer = (index: number) => {
+    setSelectedLayerIndex(index);
+    setSelectedRowIndex(null);
+    setSelectedMessageIndex(null);
+    setSummaryOpen(false);
+  };
+  const selectMessage = (index: number) => {
+    setSelectedMessageIndex(index);
+    setSelectedRowIndex(null);
+    setSelectedLayerIndex(null);
+    setSummaryOpen(false);
+  };
 
   useEffect(() => {
     if (widthOverride !== undefined) return;
@@ -294,131 +324,20 @@ export function RunTimelineChart({
   // Detail-panel visibility is a shared concern in the compare view: it sizes
   // every lane from whether ANY lane's panel is open.
   useEffect(() => {
-    onDetailOpenChange?.(selectedRow !== null || selectedLayer !== null);
+    onDetailOpenChange?.(
+      selectedRow !== null || selectedLayer !== null || selectedMessage !== null,
+    );
     return () => onDetailOpenChange?.(false);
-  }, [onDetailOpenChange, selectedRow, selectedLayer]);
+  }, [onDetailOpenChange, selectedRow, selectedLayer, selectedMessage]);
 
-  useEffect(() => {
-    const visualization = visualizationRef.current;
-    if (!visualization) return;
-    // P4-1 (#4023, demo parity): plain wheel pans the window — accumulated
-    // per animation frame so at most one window update lands per frame —
-    // while Ctrl/⌘+wheel zooms around the cursor (exp sensitivity 0.0022,
-    // the demo's). preventDefault stays scoped to this element, so the page
-    // scroll is never hijacked outside the chart. The callback runs through
-    // onZoomWindowRef: the page re-creates its closure every render, and a
-    // dependency on that identity would tear this effect down on every parent
-    // render mid-gesture (PR #2887 review, 3242).
-    let frame = 0;
-    let pendingPan = 0;
-    const flushPan = () => {
-      frame = 0;
-      const fraction = pendingPan;
-      pendingPan = 0;
-      if (fraction === 0) return;
-      onZoomWindowRef.current(panWindow(latestWindowRef.current, fraction, new Date()));
-    };
-    const onWheel = (event: WheelEvent) => {
-      event.preventDefault();
-      const bounds = visualization.getBoundingClientRect();
-      const cursorX = event.clientX - bounds.left;
-      const anchor = Math.max(
-        0,
-        Math.min(1, (cursorX - layout.plot.left) / layout.plot.width),
-      );
-      if (event.ctrlKey || event.metaKey) {
-        if (event.deltaY === 0) return;
-        const factor = Math.exp(event.deltaY * 0.0022);
-        onZoomWindowRef.current(
-          zoomWindowAround(latestWindowRef.current, factor, anchor, new Date()),
-        );
-        return;
-      }
-      const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
-      pendingPan += (delta / Math.max(200, layout.plot.width)) * 1.15;
-      if (frame === 0) frame = requestAnimationFrame(flushPan);
-    };
-    visualization.addEventListener("wheel", onWheel, { passive: false });
-    return () => {
-      visualization.removeEventListener("wheel", onWheel);
-      if (frame) cancelAnimationFrame(frame);
-    };
-  }, [layout.plot.left, layout.plot.width]);
-
-  useEffect(() => {
-    const visualization = visualizationRef.current;
-    if (!visualization) return;
-    // P4-1 (#4023): drag pans the window (grab semantics: pulling left shows
-    // later times). Once the gesture exceeds the threshold its click is
-    // suppressed, so click-to-read stays reliable on every block. Gesture
-    // state sits in refs and finalization is unconditional, so a mid-gesture
-    // re-render can neither stall the drag nor leak the grab cursor or the
-    // click suppression (PR #2887 review, 3242).
-    const flushPan = () => {
-      dragFrameRef.current = 0;
-      const drag = dragRef.current;
-      const dx = dragPendingDxRef.current;
-      dragPendingDxRef.current = 0;
-      if (!drag || !drag.moved || dx === 0) return;
-      onZoomWindowRef.current(
-        panWindow(drag.base, -dx / Math.max(200, layout.plot.width), new Date()),
-      );
-    };
-    const onPointerDown = (event: PointerEvent) => {
-      if (event.button !== 0) return;
-      dragRef.current = { startX: event.clientX, base: latestWindowRef.current, moved: false };
-      dragPendingDxRef.current = 0;
-      suppressClickRef.current = false;
-    };
-    const onPointerMove = (event: PointerEvent) => {
-      const drag = dragRef.current;
-      if (!drag) return;
-      const dx = event.clientX - drag.startX;
-      if (!drag.moved) {
-        if (Math.abs(dx) <= DRAG_THRESHOLD_PX) return;
-        drag.moved = true;
-        setDragging(true);
-      }
-      dragPendingDxRef.current = dx;
-      if (dragFrameRef.current === 0) {
-        dragFrameRef.current = requestAnimationFrame(flushPan);
-      }
-    };
-    const endDrag = () => {
-      const drag = dragRef.current;
-      if (!drag) return;
-      if (dragFrameRef.current !== 0) {
-        cancelAnimationFrame(dragFrameRef.current);
-        dragFrameRef.current = 0;
-      }
-      // Flush whatever motion is still pending, then clear the grab state.
-      flushPan();
-      dragRef.current = null;
-      if (drag.moved) {
-        suppressClickRef.current = true;
-        // The click that follows pointerup lands within a frame; clear the
-        // flag right after so it can never stick.
-        window.setTimeout(() => {
-          suppressClickRef.current = false;
-        }, 150);
-      }
-      setDragging(false);
-    };
-    visualization.addEventListener("pointerdown", onPointerDown);
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", endDrag);
-    window.addEventListener("pointercancel", endDrag);
-    return () => {
-      visualization.removeEventListener("pointerdown", onPointerDown);
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", endDrag);
-      window.removeEventListener("pointercancel", endDrag);
-      if (dragFrameRef.current !== 0) {
-        cancelAnimationFrame(dragFrameRef.current);
-        dragFrameRef.current = 0;
-      }
-    };
-  }, [layout.plot.width]);
+  useTimelineGestures({
+    visualizationRef,
+    plot: layout.plot,
+    window: timeline.window,
+    zoomWindow: onZoomWindow,
+    suppressClickRef,
+    setDragging,
+  });
 
   if (timeline.rows.length === 0) {
     return (
@@ -433,7 +352,12 @@ export function RunTimelineChart({
 
   return (
     <section aria-label={labels.chart} className="rounded-[10px] border border-border bg-card p-3">
-      <div className={cn("grid gap-3", selectedRow || selectedLayer ? "lg:grid-cols-[minmax(0,1fr)_320px]" : "")}>
+      <div
+        className={cn(
+          "grid gap-3",
+          selectedRow || selectedLayer || selectedMessage ? "lg:grid-cols-[minmax(0,1fr)_320px]" : "",
+        )}
+      >
         <div ref={popoverLayerRef} className={cn(MIN_W_0, "relative space-y-2")}>
           {showSummaries && timeline.summary ? (
             <RawSummaryBand
@@ -542,10 +466,25 @@ export function RunTimelineChart({
                   stroke="var(--border)"
                 />
                 {layout.layerRows.length > 0 && timeline.layers ? (
-                  <LayerTrackGeometry rows={layout.layerRows} selectedIndex={selectedLayerIndex} />
+                  <LayerTrackGeometry
+                    rows={layout.layerRows}
+                    selectedIndex={selectedLayerIndex}
+                    pathIndexes={chainLayerIndexes}
+                    dimmed={activeCategory !== null}
+                  />
                 ) : null}
                 {layout.pendingBlocks.length > 0 ? (
                   <PendingTrackGeometry row={layout.pendingRow} blocks={layout.pendingBlocks} />
+                ) : null}
+                {layout.strip && stripMessages ? (
+                  <StripTrackGeometry
+                    plot={layout.plot}
+                    row={layout.strip}
+                    messages={stripMessages}
+                    selectedIndex={selectedMessageIndex}
+                    relatedIndexes={relatedMessageIndexes}
+                    activeCategory={activeCategory}
+                  />
                 ) : null}
                 {layout.turns.map((turn, index) => {
                   const row = timeline.rows[turn.rowIndex];
@@ -648,9 +587,7 @@ export function RunTimelineChart({
                       if (row.turn === null) {
                         onDrillBucket(row);
                       } else {
-                        setSelectedRowIndex(turn.rowIndex);
-                        setSelectedLayerIndex(null);
-                        setSummaryOpen(false);
+                        selectRow(turn.rowIndex);
                       }
                       // The panel supersedes the hover card: clicking a block
                       // must not leave the popover covering the track (the
@@ -683,11 +620,7 @@ export function RunTimelineChart({
                   rows={layout.layerRows}
                   layers={timeline.layers}
                   labels={labels}
-                  onSelect={(index) => {
-                    setSelectedLayerIndex(index);
-                    setSelectedRowIndex(null);
-                    setSummaryOpen(false);
-                  }}
+                  onSelect={selectLayer}
                   onZoom={focusWindow}
                   onHover={withReadout ? setHoveredLayerIndex : undefined}
                 />
@@ -704,8 +637,37 @@ export function RunTimelineChart({
                   describedIndex={popoverTarget?.kind === "pending" ? popoverTarget.index : null}
                 />
               ) : null}
+
+              {layout.strip && stripMessages ? (
+                <StripTrackButtons
+                  row={layout.strip}
+                  messages={stripMessages}
+                  labels={labels}
+                  onSelect={selectMessage}
+                  onFocus={(index) => {
+                    const target = messageFocusWindow(index);
+                    const message = stripMessages.at(index);
+                    if (target && message) {
+                      focusWindow(target, labels.messageLabel(message.idx));
+                    }
+                  }}
+                  onHover={withReadout ? setHoveredMessageIndex : undefined}
+                />
+              ) : null}
+              {layout.strip && stripMessages && timeline.messages_truncated ? (
+                <StripTruncatedHint plot={layout.plot} row={layout.strip} labels={labels} />
+              ) : null}
             </div>
           </div>
+          {layout.strip && stripMessages ? (
+            <StripLegend
+              active={activeCategory}
+              labels={labels}
+              onToggle={(category) =>
+                setActiveCategory((current) => (current === category ? null : category))
+              }
+            />
+          ) : null}
           {popoverTarget && (hoveredRow || hoveredEvent || hoveredPending) ? (
             <TimelinePopover
               target={popoverTarget}
@@ -727,6 +689,21 @@ export function RunTimelineChart({
           <TurnDetailPanel row={selectedRow} labels={labels} onClose={() => setSelectedRowIndex(null)} />
         ) : selectedLayer ? (
           <LayerDetailPanel node={selectedLayer} labels={labels} onClose={() => setSelectedLayerIndex(null)} />
+        ) : selectedMessage ? (
+          <MessageDetailPanel
+            key={selectedMessage.key}
+            agentId={timeline.agent_id}
+            message={selectedMessage}
+            chain={messageChain.flatMap((index) => {
+              const node = timeline.layers?.[index];
+              return node ? [{ index, node }] : [];
+            })}
+            labels={labels}
+            focusTarget={selectedMessageFocus}
+            onFocus={focusWindow}
+            onClose={() => setSelectedMessageIndex(null)}
+            onSelectLayer={selectLayer}
+          />
         ) : null}
       </div>
     </section>
