@@ -90,10 +90,11 @@ def emitted(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
         _category: str,
         event_name: str,
         *,
-        attributes: dict[str, Any],
+        attributes: dict[str, Any] | None = None,
         **_kwargs: object,
     ) -> None:
         if event_name == _STALE_EVENT:
+            assert attributes is not None  # the emitter always names route+reason
             captured.append(dict(attributes))
 
     monkeypatch.setattr(telemetry, "emit", capture_emit)
