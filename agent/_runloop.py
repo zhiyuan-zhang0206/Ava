@@ -11,6 +11,7 @@ from langgraph.graph.state import CompiledStateGraph
 from agent.hooks.compact import CompactionFailedError
 from agent.state import BaseAgentState
 from shared.audit_events import insert_event_log_async
+from shared.config.turn_view import turn_settings
 from shared.live_events import Error
 from shared.log import logger
 
@@ -106,6 +107,21 @@ def _provider_recovery(reason: str) -> str:
     return "Choose a different model overlay or resolve the provider policy rejection, then send a new message."
 
 
+def _model_vendor() -> str | None:
+    """Vendor key of this turn's model — the account a failure bills to.
+
+    The classifier stamps the same read onto the ``llm_provider_error`` log's
+    ``vendor`` field (`agent/graph/_llm_errors.py`), so the human-facing
+    reports and the machine event name the same account: a DeepSeek balance
+    rejection stays ``vendor=deepseek`` even when it surfaced through the
+    anthropic-compat path (``provider=anthropic`` — the 2026-09-18 billing
+    wave, task #3916). ``None`` for an unregistered model prefix.
+    """
+    from shared.lm.factory import provider_key_of_model
+
+    return provider_key_of_model(turn_settings.lm.llm_model)
+
+
 async def _record_permanent_reject_outcome(
     ctx: AvaContext,
     agent_id: int,
@@ -189,6 +205,7 @@ async def _record_permanent_reject_outcome(
             agent_id,
             error_class=exc.error_class or "permanent",
             provider=exc.provider,
+            vendor=_model_vendor(),
             status=exc.status,
             reason=SUPPRESS_REASON_PERMANENT_REJECT,
             occurred_at=occurred_at if occurred_at is not None else datetime.now(UTC),
@@ -361,6 +378,7 @@ async def _handle_fatal_llm_error(
                     agent_id,
                     error_class=exc.error_class,
                     provider=exc.provider,
+                    vendor=_model_vendor(),
                     status=exc.status,
                     reason=reason,
                     occurred_at=occurred_at if occurred_at is not None else datetime.now(UTC),

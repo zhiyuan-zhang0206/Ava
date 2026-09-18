@@ -126,6 +126,7 @@ async def enqueue_fatal_provider_report_to_nearest_alive_ancestor(
     *,
     error_class: str,
     provider: str | None,
+    vendor: str | None,
     status: int | None,
     reason: str,
     occurred_at: datetime,
@@ -138,14 +139,18 @@ async def enqueue_fatal_provider_report_to_nearest_alive_ancestor(
     ancestor has the canonical live status-and-lease predicate.
     The note text is assembled from structured classifier fields; it never
     receives the provider exception or agent history, which might contain the
-    content that the provider rejected.
+    content that the provider rejected. ``vendor`` is the model's provider key
+    — the account the request bills to (deepseek / claude / …); ``provider``
+    is the SDK/protocol path that raised (anthropic for DeepSeek's compat
+    endpoint). The note names both, vendor first, so the report identifies
+    the billed account and not only the path (task #3916).
 
     Returns the notified ancestor id, or ``None`` when no live birth ancestor
     exists. The inbound transaction commits before its best-effort Redis wake.
     """
     content = (
         f"Descendant agent {failed_agent_id} is blocked after a permanent provider rejection. "
-        f"error_class={error_class} provider={provider} status={status} reason={reason} "
+        f"error_class={error_class} vendor={vendor} provider={provider} status={status} reason={reason} "
         f"timestamp={occurred_at.isoformat()} where={_FATAL_PROVIDER_REPORT_LOCATION}"
     )
     async with async_write_transaction(pool) as conn, conn.cursor() as cur:

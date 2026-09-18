@@ -125,6 +125,7 @@ class TestFatalProviderReport:
             failed,
             error_class="permanent",
             provider="test-provider",
+            vendor="test-vendor",
             status=400,
             reason="test-reason",
             occurred_at=datetime.now(UTC),
