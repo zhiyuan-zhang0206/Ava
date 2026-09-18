@@ -7190,6 +7190,27 @@ export interface components {
             unmatched_turns: number;
         };
         /**
+         * RunTimelinePendingSpan
+         * @description One pending stretch -- window activity no sealed understanding layer covers.
+         *
+         *     The layer-track placeholder source (B, 2026-09-18): rendered de-emphasized
+         *     so an uncovered stretch reads as "not generated yet", not as a missing
+         *     feature. Only stretches right of the agent's sealed coverage are reported;
+         *     never-sealed history is omitted (nothing is promised for it).
+         */
+        RunTimelinePendingSpan: {
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+        };
+        /**
          * RunTimelineResponse
          * @description GET /api/agents/{agent_id}/run-timeline response.
          */
@@ -7206,6 +7227,8 @@ export interface components {
             /** Layers */
             layers?: components["schemas"]["RunTimelineLayerNode"][] | null;
             summary?: components["schemas"]["RunTimelineSummary"] | null;
+            /** Pending */
+            pending?: components["schemas"]["RunTimelinePendingSpan"][] | null;
             /** Inbounds */
             inbounds?: components["schemas"]["RunTimelineInbound"][] | null;
         };
