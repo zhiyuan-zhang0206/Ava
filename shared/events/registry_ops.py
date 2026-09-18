@@ -11,6 +11,7 @@ from shared.events.system import (
     CheckpointTableSizes,
     EventClassReopened,
     EventSpec,
+    FleetGraphStale,
     GateAuthProbeFailed,
     GatewayEventLoop,
     GatewayLatency,
@@ -372,6 +373,13 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         "archive_fetch_degraded",
         "frozen Loki archive read degraded (lock-wait skip or failed scan)",
         payload=ArchiveFetchDegraded,
+        tier="anomaly",
+    ),
+    "fleet_graph_stale": _telemetry(
+        "fleet_graph_stale",
+        "the fleet-graph route served the stale/last-good graph after a degraded "
+        "upstream read — one event per degradation episode, not per poll",
+        payload=FleetGraphStale,
         tier="anomaly",
     ),
     "prom_query_failed": EventSpec(
