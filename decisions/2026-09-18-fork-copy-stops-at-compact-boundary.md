@@ -1,4 +1,4 @@
-# Fork copies back to the newest compaction boundary, not the whole chain
+# Fork copies back to the compaction boundary below the fork point, not the whole chain
 
 ## Context
 
@@ -30,16 +30,23 @@ again — a permanent, silently worsening failure.
 ## Decision
 
 The copy walks up from the fork point and stops at (and including) the first
-checkpoint stamped `compact_boundary`. Blobs are narrowed to the
+checkpoint stamped `compact_boundary` strictly below it — the fork checkpoint
+itself never terminates the walk. Blobs are narrowed to the
 `(checkpoint_ns, channel, version)` triples the copied checkpoints actually
 reference through `channel_versions`.
 
-A boundary checkpoint is written by `mark_compact_boundary` as the
-full-snapshot record of the segment it closes, so it resumes without any
-ancestor of its own. That makes the copy bounded by one compacted segment —
-roughly one model context window — instead of by thread age. A thread that
-never compacted has no boundary and is still copied to its root, which is that
-thread's whole history and by definition under one context window.
+A boundary is not a self-contained snapshot on a delta-written thread: it is an
+ordinary checkpoint stamped by `mark_compact_boundary`, and its content is
+rebuilt by folding the write chain, so the copied window must contain the
+compaction reset (REMOVE_ALL) that opened the fork point's segment. The walk
+therefore stops strictly below the fork point — when the fork point is itself a
+boundary the copy continues down to the next boundary below. Cutting the window
+AT the boundary could contain neither a reset nor a materialized snapshot, and
+the replica read back empty (task #3979 regression, fixed before merge). The
+copy stays bounded — at most two compacted segments, roughly two context
+windows — instead of by thread age. A thread that never compacted has no
+boundary and is still copied to its root, which is that thread's whole history
+and by definition under one context window.
 
 The blob filter uses the same join `PostgresSaver.SELECT_SQL` uses to read
 blobs (`jsonb_each_text(checkpoint -> 'channel_versions')` joined to
@@ -75,12 +82,13 @@ now starts from exactly what its parent currently sees.
 - **Copy only the fork-point checkpoint.** Correct only for full-snapshot
   threads. Delta-written threads keep message content in `checkpoint_writes`
   attached to earlier checkpoints of the segment, so the replica would lose
-  message history. Stopping at the boundary keeps exactly the segment those
-  writes belong to.
+  message history — and a window cut exactly at the fork boundary folds against
+  no reset at all (task #3979).
 
 ## Consequences
 
-- Fork cost is bounded by one compacted segment instead of thread lifetime;
+- Fork cost is bounded by the fork point's segment window — at most two
+  compacted segments — instead of thread lifetime;
   the failure mode it caused is structural, so this removes a class of spawn
   outage rather than one instance.
 - Pre-boundary history is no longer carried into forks. The source thread is
@@ -92,5 +100,5 @@ now starts from exactly what its parent currently sees.
 - Existing chains are untouched, and stay that way by design: monotonic
   retention is the intended behavior, so a growing store is not a defect to
   chase. The target is a *linear* store, not a small one — bounding each fork
-  to one segment is what keeps total write volume linear in a thread's life
-  instead of quadratic.
+  to its segment window is what keeps total write volume linear in a thread's
+  life instead of quadratic.

@@ -91,24 +91,30 @@ def _copy_checkpoint_chain(
     """Copy the source agent's LangGraph state at source_checkpoint_id as the
     new_agent's first checkpoints.
 
-    The copy stops at the newest compaction boundary at or below the fork
-    point, so its size is bounded by one compacted segment (~one model
-    context window) instead of the thread's whole history. A boundary
-    checkpoint is stamped `compact_boundary` by `mark_compact_boundary` and is
-    the full-snapshot record of the segment it closes, so it needs no
-    ancestors of its own to resume from. A thread that never compacted has no
-    boundary and is copied back to its root — which is that thread's whole
-    history, still one context window's worth. Chains are retained in full by
-    design (delta-written threads are exempt from checkpoint trimming — the
-    never-delete ruling, tasks #3180/#3181), so chain length tracks a thread's
-    whole life. Bounding the copy is what keeps repeated forks O(N) in rows
+    The copy is one segment window: the ancestor walk stops at (and includes)
+    the nearest compaction boundary strictly below the fork point, so its size
+    is bounded by at most two compacted segments instead of the thread's whole
+    history. The fork checkpoint itself never terminates the walk — when it is
+    itself a boundary the walk continues down to the next boundary below —
+    because a boundary is NOT a self-contained snapshot on a delta-written
+    thread: it is an ordinary checkpoint stamped `compact_boundary` by
+    `mark_compact_boundary`, and its content is rebuilt by folding the write
+    chain. Cutting the window AT a boundary could contain neither a
+    materialized snapshot nor the compaction reset (REMOVE_ALL) that opened
+    the fork point's segment, and the replica read back empty (task #3979). A
+    thread that never compacted has no boundary and is copied back to its root
+    — which is that thread's whole history, still one context window's worth.
+    Chains are retained in full by design (delta-written threads are exempt
+    from checkpoint trimming — the never-delete ruling, tasks #3180/#3181),
+    so chain length tracks a thread's whole life. Bounding the copy is what keeps repeated forks O(N) in rows
     written rather than O(N^2); an unbounded copy also eventually exceeds
     `statement_timeout`.
 
     Rows copied:
     - **checkpoints**: target ckpt_id and its ancestors, recursively following
       parent_checkpoint_id, stopping at (and including) the first
-      `compact_boundary` checkpoint
+      `compact_boundary` checkpoint strictly below the target (the target
+      itself always walks past)
     - **checkpoint_blobs**: only the (ns, channel, version) triples the copied
       checkpoints actually reference through their `channel_versions` — the
       same join PostgresSaver's SELECT_SQL uses to read them, so nothing a
@@ -140,9 +146,14 @@ def _copy_checkpoint_chain(
               FROM checkpoints c
               JOIN chain ON c.thread_id = %(src)s
                        AND c.checkpoint_id = chain.parent_checkpoint_id
-             -- Walk past a row only when it is not itself a boundary: the
-             -- boundary is copied, its ancestors are not.
-             WHERE NOT COALESCE(
+             -- Walk past a row only when it is not a boundary — except the
+             -- fork row itself, which never terminates its own walk: when the
+             -- fork checkpoint IS a boundary, the walk continues down to the
+             -- next boundary below it, so the copied window contains the reset
+             -- that opened the fork point's segment (a boundary is metadata on
+             -- an ordinary checkpoint, not a self-contained snapshot).
+             WHERE chain.checkpoint_id = %(ckpt)s
+                OR NOT COALESCE(
                  (chain.metadata ->> 'compact_boundary')::boolean, false
              )
         )
@@ -170,7 +181,8 @@ def _copy_checkpoint_chain(
               FROM checkpoints c
               JOIN chain ON c.thread_id = %(src)s
                        AND c.checkpoint_id = chain.parent_checkpoint_id
-             WHERE NOT COALESCE(
+             WHERE chain.checkpoint_id = %(ckpt)s
+                OR NOT COALESCE(
                  (chain.metadata ->> 'compact_boundary')::boolean, false
              )
         )
@@ -198,7 +210,8 @@ def _copy_checkpoint_chain(
               FROM checkpoints c
               JOIN chain ON c.thread_id = %(src)s
                        AND c.checkpoint_id = chain.parent_checkpoint_id
-             WHERE NOT COALESCE(
+             WHERE chain.checkpoint_id = %(ckpt)s
+                OR NOT COALESCE(
                  (chain.metadata ->> 'compact_boundary')::boolean, false
              )
         ),

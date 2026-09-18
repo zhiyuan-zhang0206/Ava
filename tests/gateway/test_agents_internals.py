@@ -952,8 +952,8 @@ class TestSpawnFork:
     def test_fork_stops_at_the_newest_compact_boundary(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A compaction boundary is the full-snapshot record of the segment it closes, so the
-        copy includes it and stops — its ancestors stay behind and the copy size stays bounded."""
+        """A fork above a boundary copies down to (and including) it and stops: its ancestors
+        stay behind, so the copy stays bounded by the fork point's segment window."""
         source = _spawn_agent()
         _insert_checkpoint(db_conn, source, "a", parent_id=None)
         _insert_checkpoint(db_conn, source, "b", parent_id="a", compact_boundary=True)
@@ -965,17 +965,34 @@ class TestSpawnFork:
         assert sorted(_checkpoint_ids(db_conn, new_id)) == ["b", "c"]
         assert sorted(_checkpoint_ids(db_conn, source)) == ["a", "b", "c"]
 
-    def test_fork_at_a_boundary_copies_only_that_checkpoint(
+    def test_fork_at_a_boundary_walks_to_the_root_without_a_previous_boundary(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Forking exactly at a boundary copies that one self-contained snapshot."""
+        """The fork checkpoint never terminates its own walk. Forking exactly at a boundary
+        continues down to the next boundary below it — with no boundary below, the window is
+        the full chain (the old cut-at-the-boundary window read back empty; the read-back
+        assertions live in tests/shared/test_delta_read_compat.py)."""
         source = _spawn_agent()
         _insert_checkpoint(db_conn, source, "a", parent_id=None)
         _insert_checkpoint(db_conn, source, "b", parent_id="a", compact_boundary=True)
 
         new_id = _spawn_agent(fork_from=source, fork_checkpoint="b")
 
-        assert _checkpoint_ids(db_conn, new_id) == ["b"]
+        assert _checkpoint_ids(db_conn, new_id) == ["a", "b"]
+
+    def test_fork_at_a_boundary_stops_at_the_previous_boundary(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With a boundary below the fork point, the walk descends to it and stops: the copy
+        spans at most two compacted segments, not the whole chain."""
+        source = _spawn_agent()
+        _insert_checkpoint(db_conn, source, "a", parent_id=None, compact_boundary=True)
+        _insert_checkpoint(db_conn, source, "b", parent_id="a")
+        _insert_checkpoint(db_conn, source, "c", parent_id="b", compact_boundary=True)
+
+        new_id = _spawn_agent(fork_from=source, fork_checkpoint="c")
+
+        assert sorted(_checkpoint_ids(db_conn, new_id)) == ["a", "b", "c"]
 
     def test_fork_stops_at_the_nearest_boundary_when_several_exist(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
