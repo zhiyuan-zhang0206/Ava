@@ -99,6 +99,67 @@ def test_personal_write_creates_entry_and_upserts_index(memory_plugin: Any, tmp_
     )
 
 
+def test_personal_write_updates_pointer_whose_title_contains_bracket(
+    memory_plugin: Any, tmp_path: Path
+) -> None:
+    """A title containing `]` (e.g. `md5[:12]`) still replaces its existing
+    pointer line in place — the old title class `[^]]+` could not reach the
+    `](file.md)` anchor across the bracket and appended a duplicate."""
+    ava.memory.write(
+        "md5-notes",
+        "First body.\n",
+        title="md5[:12] digest notes",
+        description="First description",
+        tags=["type/reference"],
+    )
+    index = tmp_path / "workspace" / "memory" / "MEMORY.md"
+    assert index.read_text(encoding="utf-8") == (
+        "- [md5[:12] digest notes](md5-notes.md) — First description\n"
+    )
+
+    ava.memory.write(
+        "md5-notes",
+        "Second body.\n",
+        title="md5[:12] digest notes",
+        description="Updated description",
+        tags=["type/reference"],
+    )
+
+    assert index.read_text(encoding="utf-8") == (
+        "- [md5[:12] digest notes](md5-notes.md) — Updated description\n"
+    )
+
+
+def test_personal_write_dedupes_legacy_duplicate_pointer_lines(
+    memory_plugin: Any, tmp_path: Path
+) -> None:
+    """Pointer lines a bracketed title accumulated converge to one canonical
+    line on the next write, and unrelated entries stay untouched."""
+    memory_dir = tmp_path / "workspace" / "memory"
+    memory_dir.mkdir(parents=True)
+    index = memory_dir / "MEMORY.md"
+    index.write_text(
+        "- [md5[:12] digest notes](md5-notes.md) — First description\n"
+        "- [Digest notes](md5-notes.md) — Second description\n"
+        "- [Unrelated note](other-note.md) — Keep me\n"
+        "- [md5[:12] digest notes](md5-notes.md) — Third description\n",
+        encoding="utf-8",
+    )
+
+    ava.memory.write(
+        "md5-notes",
+        "Body.\n",
+        title="md5[:12] digest notes",
+        description="Canonical description",
+        tags=["type/reference"],
+    )
+
+    assert index.read_text(encoding="utf-8") == (
+        "- [md5[:12] digest notes](md5-notes.md) — Canonical description\n"
+        "- [Unrelated note](other-note.md) — Keep me\n"
+    )
+
+
 def test_personal_write_uses_hosted_turn_identity(
     memory_plugin: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -299,6 +360,38 @@ def test_shared_subdir_write_updates_pointer_without_duplicating(
         if "medication-log.md" in line
     ]
     assert pointers == ["* [Medication log](medication-log.md) - Updated description"]
+    assert _pool_validator().validate_indexes(pool) == []
+
+
+def test_shared_subdir_write_updates_bracketed_title_and_dedupes(
+    memory_plugin: Any, tmp_path: Path
+) -> None:
+    """Subdirectory indexes use the same title-agnostic match: a bracketed
+    title replaces in place and legacy duplicates converge to one line."""
+    pool = _pool_with_pointers(tmp_path)
+    health = pool / "health"
+    health.mkdir()
+    (health / "index.md").write_text(
+        "# health/\n\n## Subdirectories\n\n*(none)*\n\n## Notes\n\n"
+        "* [md5[:12] log](medication-log.md) - Old description\n"
+        "* [Medication log](medication-log.md) - Stale duplicate\n",
+        encoding="utf-8",
+    )
+
+    ava.memory.write(
+        "health/medication-log",
+        "Tracked.\n",
+        title="md5[:12] log",
+        description="Updated description",
+        tags=["type/project"],
+        store="shared",
+    )
+
+    index = health / "index.md"
+    lines = index.read_text(encoding="utf-8").splitlines()
+    assert [line for line in lines if "medication-log.md" in line] == [
+        "* [md5[:12] log](medication-log.md) - Updated description"
+    ]
     assert _pool_validator().validate_indexes(pool) == []
 
 

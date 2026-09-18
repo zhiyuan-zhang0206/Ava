@@ -370,7 +370,9 @@ def validate_factchecks(bundle: Path) -> list[str]:
 _POINTER_RE = re.compile(r"\]\(([^)#]+?\.md)\)")
 
 
-_POINTER_LINE_RE = re.compile(r"\[([^\]]+)\]\(([^)#]+?\.md)\)")
+# A title may itself contain bracketed text (e.g. `md5[:12]`): the title is
+# bracket-balanced and line-local, ending at the `](` of the target link.
+_POINTER_LINE_RE = re.compile(r"\[((?:[^\[\]\n]|\[[^\]\n]*\])*?)\]\(([^)#]+?\.md)\)")
 
 
 def _pointer_lines(content: str) -> list[tuple[str, str]]:
