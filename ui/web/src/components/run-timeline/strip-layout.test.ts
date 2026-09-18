@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import type { RunTimelineMessage, RunTimelineResponse } from "@/lib/types";
 
-import { buildStripLayout, coveredMessageIndexes, messageChainIndexes } from "./strip-layout";
+import {
+  buildContextStripLayout,
+  buildStripLayout,
+  coveredMessageIndexes,
+  messageChainIndexes,
+} from "./strip-layout";
 
 type LayerNode = NonNullable<RunTimelineResponse["layers"]>[number];
 
@@ -196,5 +201,64 @@ describe("messageChainIndexes", () => {
   it("stops cleanly when a parent id is missing", () => {
     const orphaned: LayerNode[] = [layer("L2", 1, "missing", "2026-09-19T00:00:00Z", "2026-09-19T01:00:00Z")];
     expect(messageChainIndexes(orphaned, "2026-09-19T00:10:00Z")).toEqual([0]);
+  });
+});
+
+describe("buildContextStripLayout", () => {
+  const messages = () => [
+    message({ key: "c.0", ts: null, chars: 400, parts: [{ kind: "prompt", chars: 400 }] }),
+    message({ key: "c.1", chars: 300 }),
+    message({ key: "c.2", chars: 200 }),
+  ];
+
+  it("lays messages end to end in character units (head message first)", () => {
+    const layout = buildContextStripLayout(messages(), { from: 0, to: 900 }, PLOT);
+    const scale = PLOT.width / 900;
+    const offsets = [0, 400, 700];
+    layout.messages.forEach((bar, index) => {
+      expect(bar.left).toBeCloseTo(PLOT.left + offsets[index] * scale, 9);
+      expect(bar.width).toBeCloseTo([400, 300, 200][index] * scale, 9);
+    });
+    expect(layout.messages[0].left).toBe(PLOT.left);
+  });
+
+  it("keeps widths exactly proportional to characters", () => {
+    const layout = buildContextStripLayout(messages(), { from: 0, to: 900 }, PLOT);
+    const [first, second, third] = layout.messages;
+    expect(first.width / second.width).toBeCloseTo(400 / 300, 12);
+    expect(second.width / third.width).toBeCloseTo(300 / 200, 12);
+  });
+
+  it("maps the viewport onto the plot, letting geometry fall outside", () => {
+    const layout = buildContextStripLayout(messages(), { from: 200, to: 500 }, PLOT);
+    const scale = PLOT.width / 300;
+    // Message 1 spans [0, 400): its left lies left of the plot.
+    expect(layout.messages[0].left).toBeCloseTo(PLOT.left + (0 - 200) * scale, 9);
+    expect(layout.messages[0].width).toBeCloseTo(400 * scale, 9);
+    // Message 3 spans [700, 900): off the right edge entirely.
+    const third = layout.messages[2];
+    expect(third.left).toBeCloseTo(PLOT.left + (700 - 200) * scale, 9);
+    expect(third.left).toBeGreaterThan(PLOT.left + PLOT.width);
+  });
+
+  it("splits a bar into char-proportional parts", () => {
+    const split = [
+      message({ key: "c.1", chars: 100, parts: [{ kind: "think", chars: 40 }, { kind: "text", chars: 60 }] }),
+    ];
+    const layout = buildContextStripLayout(split, { from: 0, to: 100 }, PLOT);
+    const bar = layout.messages[0];
+    const [think, text] = bar.parts;
+    expect(think.left).toBeCloseTo(bar.left, 9);
+    expect(think.width).toBeCloseTo(bar.width * 0.4, 9);
+    expect(text.left).toBeCloseTo(bar.left + bar.width * 0.4, 9);
+    expect(text.width).toBeCloseTo(bar.width * 0.6, 9);
+  });
+
+  it("degrades cleanly without messages or with a collapsed view", () => {
+    expect(buildContextStripLayout([], { from: 0, to: 100 }, PLOT)).toEqual({ messages: [], scale: 0 });
+    expect(buildContextStripLayout(messages(), { from: 5, to: 5 }, PLOT)).toEqual({
+      messages: [],
+      scale: 0,
+    });
   });
 });

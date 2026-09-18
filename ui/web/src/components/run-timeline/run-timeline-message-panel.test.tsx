@@ -85,7 +85,10 @@ function panelProps() {
     message,
     chain,
     labels,
-    focusTarget: { from: "2026-09-19T00:09:00Z", to: "2026-09-19T00:11:00Z" },
+    focusTarget: {
+      kind: "time" as const,
+      window: { from: "2026-09-19T00:09:00Z", to: "2026-09-19T00:11:00Z" },
+    },
     onFocus: vi.fn(),
     onClose: vi.fn(),
     onSelectLayer: vi.fn(),
@@ -156,7 +159,25 @@ describe("MessageDetailPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Zoom to this message" }));
     expect(props.onFocus).toHaveBeenCalledWith(
-      { from: "2026-09-19T00:09:00Z", to: "2026-09-19T00:11:00Z" },
+      { kind: "time", window: { from: "2026-09-19T00:09:00Z", to: "2026-09-19T00:11:00Z" } },
+      "Message 7",
+    );
+  });
+
+  it("routes a context-axis focus target unchanged (P4-2b)", async () => {
+    getRunTimelineMessage.mockResolvedValue(details({}));
+    const props = panelProps();
+    wrap(
+      <MessageDetailPanel
+        {...props}
+        focusTarget={{ kind: "context", view: { from: 100, to: 400 } }}
+      />,
+    );
+    await screen.findByText("hello world");
+
+    fireEvent.click(screen.getByRole("button", { name: "Zoom to this message" }));
+    expect(props.onFocus).toHaveBeenCalledWith(
+      { kind: "context", view: { from: 100, to: 400 } },
       "Message 7",
     );
   });

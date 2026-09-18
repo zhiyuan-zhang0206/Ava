@@ -1,7 +1,15 @@
+import { formatTokensCompact } from "@/lib/format-number";
 import type { RunTimelineResponse } from "@/lib/types";
 
+import type { TimelineContextView } from "./context-view";
+import { tickLabel } from "./run-timeline-details";
 import { timeCoordinate } from "./scales";
-import { buildStripLayout, coveredMessageIndexes, type StripMessageLayout } from "./strip-layout";
+import {
+  buildContextStripLayout,
+  buildStripLayout,
+  coveredMessageIndexes,
+  type StripMessageLayout,
+} from "./strip-layout";
 
 const CANVAS_PADDING = 32;
 const AXIS_Y = 38;
@@ -39,6 +47,13 @@ interface TimelineLayoutInput {
   /** P4-1 task #4023: render the layer stack fine-first (coarse rows move to
    *  the bottom). Placeholders keep riding their host row. */
   flipLayers?: boolean;
+  /** P4-2b task #4023: x projection — "time" (default; the fetch window is
+   *  the axis) or "context" (messages end to end in character units under a
+   *  local viewport). */
+  axis?: "time" | "context";
+  /** P4-2b task #4023: the char-domain viewport of the context axis
+   *  (required in context mode; fail fast when missing). */
+  contextView?: TimelineContextView;
 }
 
 export interface TimelinePoint {
@@ -83,7 +98,9 @@ export interface TimelinePendingSpanLayout {
 
 export interface TimelineTickLayout {
   x: number;
-  timestamp: string;
+  /** Stable render key: the ISO stamp (time) or the char value (context). */
+  key: string;
+  label: string;
 }
 
 export interface TimelineEventLayout {
@@ -118,6 +135,80 @@ function projectedX(
   plotWidth: number,
 ): number {
   return Math.round(plotLeft + timeCoordinate(timestamp, window.from, window.to, plotWidth));
+}
+
+/** The context axis needs a viewport to project through; fail fast when
+ *  the caller selected the axis without one. */
+function requireContextView(input: TimelineLayoutInput): TimelineContextView {
+  const view = input.contextView;
+  if (view === undefined) {
+    throw new Error("run-timeline layout: the context axis requires a contextView");
+  }
+  return view;
+}
+
+/** The time axis' uniform clock grid (five ticks); seconds appear when the
+ *  grid is finer than a minute. */
+function timeTicks(
+  window: RunTimelineResponse["window"],
+  plot: { left: number; width: number },
+): TimelineTickLayout[] {
+  const windowStart = Date.parse(window.from);
+  const windowSpan = Date.parse(window.to) - windowStart;
+  const divisions = 4;
+  const includeSeconds = windowSpan / divisions < 60_000;
+  return Array.from({ length: divisions + 1 }, (_, index) => {
+    const timestamp = new Date(windowStart + (windowSpan * index) / divisions).toISOString();
+    return {
+      x: Math.round(plot.left + (plot.width * index) / divisions),
+      key: timestamp,
+      label: tickLabel(timestamp, includeSeconds),
+    };
+  });
+}
+
+/** The context axis' char grid (P4-2b): 1-2-5 steps sized for about eight
+ *  divisions across the viewport, labelled by the shared compact formatter. */
+function contextTicks(
+  view: TimelineContextView,
+  plot: { left: number; width: number },
+): TimelineTickLayout[] {
+  const span = view.to - view.from;
+  if (!(span > 0) || !(plot.width > 0)) return [];
+  const rough = span / 8;
+  const magnitude = 10 ** Math.floor(Math.log10(rough));
+  const step =
+    [1, 2, 5]
+      .map((multiple) => magnitude * multiple)
+      .find((candidate) => candidate >= rough) ?? magnitude * 10;
+  const ticks: TimelineTickLayout[] = [];
+  for (let index = Math.ceil(view.from / step); index * step <= view.to; index += 1) {
+    const value = index * step;
+    ticks.push({
+      x: Math.round(plot.left + ((value - view.from) / span) * plot.width),
+      key: String(value),
+      label: formatTokensCompact(value),
+    });
+  }
+  return ticks;
+}
+
+/** Clamp an interval to the plot box; null when no part is visible.
+ *
+ * The context axis maps a viewport over geometry that can fall outside the
+ * plot, so an interactive overlay (an HTML button) must clamp exactly where
+ * the SVG clip cuts — otherwise an invisible clickable box lives outside
+ * the plot (PR #2892 review, generalized for P4-2b). `minWidth` keeps the
+ * strip's 1px affordance for bars thinner than a pixel. */
+export function clampIntervalToPlot(
+  left: number,
+  width: number,
+  plot: { left: number; width: number },
+  minWidth = 0,
+): { left: number; width: number } | null {
+  const start = Math.max(left, plot.left);
+  const end = Math.min(left + Math.max(width, minWidth), plot.left + plot.width);
+  return end > start ? { left: start, width: end - start } : null;
 }
 
 function eventChipWidth(kind: string): number {
@@ -172,31 +263,46 @@ export function buildTimelineLayout(input: TimelineLayoutInput) {
     right: width - CANVAS_PADDING,
     width: geometry.width,
   };
-  const windowStart = Date.parse(input.window.from);
-  const windowSpan = Date.parse(input.window.to) - windowStart;
+  const context = input.axis === "context" ? { view: requireContextView(input) } : null;
   // P4-2 (#4023): the strip's message geometry, shared by the strip row and
-  // the message-derived layer blocks below.
+  // the message-derived layer blocks below. The context axis (P4-2b) swaps
+  // the time packing for the linear char layout of the same messages.
   const stripMessages = input.messages ?? [];
   const strip =
     stripMessages.length > 0
-      ? buildStripLayout(stripMessages, input.window, { left: plot.left, width: plot.width })
+      ? context
+        ? buildContextStripLayout(stripMessages, context.view, { left: plot.left, width: plot.width })
+        : buildStripLayout(stripMessages, input.window, { left: plot.left, width: plot.width })
       : null;
-  const ticks: TimelineTickLayout[] = Array.from({ length: 5 }, (_, index) => ({
-    x: Math.round(plot.left + (plot.width * index) / 4),
-    timestamp: new Date(windowStart + (windowSpan * index) / 4).toISOString(),
-  }));
-  const turns: TimelineTurnLayout[] = input.rows.map((row, rowIndex) => {
+  const ticks = context
+    ? contextTicks(context.view, { left: plot.left, width: plot.width })
+    : timeTicks(input.window, { left: plot.left, width: plot.width });
+  const turns: TimelineTurnLayout[] = input.rows.flatMap((row, rowIndex) => {
+    if (context) {
+      // P4-2b: a turn spans its covered messages (M5 ruling); a turn with no
+      // covered message has no character anchor and is omitted.
+      if (strip === null) return [];
+      const covered = coveredMessageIndexes(stripMessages, row.start, row.end);
+      if (covered.length === 0) return [];
+      const first = strip.messages[covered[0]];
+      const last = strip.messages[covered[covered.length - 1]];
+      const left = first.left;
+      const width = last.left + last.width - left;
+      return [{ rowIndex, projectedStartX: left, projectedEndX: left + width, left, width }];
+    }
     const projectedStartX = projectedX(row.start, input.window, plot.left, plot.width);
     const projectedEndX = projectedX(row.end, input.window, plot.left, plot.width);
     const left = Math.min(projectedStartX, plot.right - MIN_TURN_WIDTH);
     const turnWidth = Math.min(plot.right - left, Math.max(MIN_TURN_WIDTH, projectedEndX - projectedStartX));
-    return {
-      rowIndex,
-      projectedStartX,
-      projectedEndX,
-      left,
-      width: turnWidth,
-    };
+    return [
+      {
+        rowIndex,
+        projectedStartX,
+        projectedEndX,
+        left,
+        width: turnWidth,
+      },
+    ];
   });
 
   const laneRightEdges: number[] = [];
@@ -244,29 +350,40 @@ export function buildTimelineLayout(input: TimelineLayoutInput) {
       .filter(({ node }) => node.depth === depth)
       .sort((a, b) => Date.parse(a.node.start) - Date.parse(b.node.start));
     const top = layersTop + rowIndex * (LAYER_ROW_HEIGHT + LAYER_ROW_GAP);
-    const blocks = nodes.map(({ node, nodeIndex }) => {
+    const blocks = nodes.flatMap(({ node, nodeIndex }) => {
       // D3 (#4023): a block spans its first-to-last covered message, so it
       // lines up with the char-width strip it summarizes. A node covering no
       // placeable message (no strip, or only legacy/unplaceable stamps)
-      // falls back to the plain time projection.
+      // falls back to the plain time projection — except on the context
+      // axis, where that fallback does not exist: a node with no covered
+      // message has no character anchor and is omitted (P4-2b).
       if (strip) {
         const covered = coveredMessageIndexes(stripMessages, node.start, node.end);
         if (covered.length > 0) {
           const first = strip.messages[covered[0]];
           const last = strip.messages[covered[covered.length - 1]];
+          if (context) {
+            // Raw view-mapped extent — the plot clip cuts it and the button
+            // layer clamps; clamping here would forge edge slivers for
+            // off-view blocks.
+            const left = first.left;
+            const width = last.left + last.width - left;
+            return [{ nodeIndex, left, width }];
+          }
           const left = Math.min(first.left, plot.right - MIN_TURN_WIDTH);
           const width = Math.min(
             plot.right - left,
             Math.max(MIN_TURN_WIDTH, last.left + last.width - left),
           );
-          return { nodeIndex, left, width };
+          return [{ nodeIndex, left, width }];
         }
       }
+      if (context) return [];
       const startX = projectedX(node.start, input.window, plot.left, plot.width);
       const endX = projectedX(node.end, input.window, plot.left, plot.width);
       const left = Math.min(startX, plot.right - MIN_TURN_WIDTH);
       const width = Math.min(plot.right - left, Math.max(MIN_TURN_WIDTH, endX - startX));
-      return { nodeIndex, left, width };
+      return [{ nodeIndex, left, width }];
     });
     return { depth, top, height: LAYER_ROW_HEIGHT, blocks };
   });

@@ -39,7 +39,7 @@ describe("buildTimelineLayout", () => {
 
     expect(layout.plot).toEqual({ left: 32, right: 968, width: 936 });
     expect(layout.ticks.map((tick) => tick.x)).toEqual([32, 266, 500, 734, 968]);
-    expect(layout.ticks[2].timestamp).toBe("2026-09-02T08:30:00.000Z");
+    expect(layout.ticks[2].key).toBe("2026-09-02T08:30:00.000Z");
     expect(layout.turns[0]).toMatchObject({ projectedStartX: 32, projectedEndX: 188, left: 32, width: 156 });
     expect(layout.events[0].source).toEqual({ x: 500, y: 38 });
     expect(layout.events[0].destination).toEqual({ x: 500, y: 54 });
@@ -203,5 +203,137 @@ describe("plotGeometry", () => {
   it("exposes the plot insets and the time-axis y for outside consumers", () => {
     expect(plotGeometry(1000)).toEqual({ left: 32, width: 936, axisY: 38 });
     expect(plotGeometry(0)).toEqual({ left: 32, width: 256, axisY: 38 });
+  });
+});
+
+const contextMessages: NonNullable<RunTimelineResponse["messages"]> = [
+  {
+    key: "c.0",
+    idx: 0,
+    ts: null,
+    kind: "prompt",
+    source: null,
+    chars: 400,
+    parts: [{ kind: "prompt", chars: 400 }],
+  },
+  {
+    key: "c.1",
+    idx: 1,
+    ts: "2026-09-02T08:05:00Z",
+    kind: "ai",
+    source: null,
+    chars: 300,
+    parts: [{ kind: "text", chars: 300 }],
+  },
+  {
+    key: "c.2",
+    idx: 2,
+    ts: "2026-09-02T08:40:00Z",
+    kind: "ai",
+    source: null,
+    chars: 300,
+    parts: [{ kind: "text", chars: 300 }],
+  },
+];
+
+const secondRow: RunTimelineResponse["rows"][number] = {
+  ...row,
+  turn: 2,
+  start: "2026-09-02T08:30:00Z",
+  end: "2026-09-02T08:50:00Z",
+};
+
+describe("context axis (P4-2b)", () => {
+  const window = { from: "2026-09-02T08:00:00Z", to: "2026-09-02T09:00:00Z" };
+
+  it("projects strip, blocks, and turns linearly in character units", () => {
+    const layout = buildTimelineLayout({
+      width: 1000,
+      window,
+      rows: [row, secondRow],
+      events: [],
+      messages: contextMessages,
+      axis: "context",
+      contextView: { from: 0, to: 1000 },
+      layers: [
+        { id: "L0#0", depth: 0, parent: null, start: window.from, end: window.to, summary: "overview" },
+        { id: "L1#9", depth: 1, parent: "L0#0", start: window.from, end: "2026-09-02T08:01:00Z", summary: "empty stage" },
+      ],
+    });
+
+    // Strip: exact cumulative char positions on the 936px plot.
+    const strip = layout.strip;
+    expect(strip).not.toBeNull();
+    expect(strip?.messages[0].left).toBeCloseTo(32, 6);
+    expect(strip?.messages[1].left).toBeCloseTo(32 + 400 * 0.936, 6);
+    expect(strip?.messages[2].left).toBeCloseTo(32 + 700 * 0.936, 6);
+
+    // Blocks: the covered-message extent; the ts-less head message is never
+    // covered, and a node without covered messages is omitted.
+    expect(layout.layerRows[0].blocks).toHaveLength(1);
+    expect(layout.layerRows[0].blocks[0].left).toBeCloseTo(32 + 400 * 0.936, 6);
+    expect(layout.layerRows[0].blocks[0].width).toBeCloseTo(600 * 0.936, 6);
+    expect(layout.layerRows[1].blocks).toHaveLength(0);
+
+    // Turns: the same covered-message mapping (M5).
+    expect(layout.turns).toHaveLength(2);
+    expect(layout.turns[0].left).toBeCloseTo(32 + 400 * 0.936, 6);
+    expect(layout.turns[0].width).toBeCloseTo(300 * 0.936, 6);
+    expect(layout.turns[1].left).toBeCloseTo(32 + 700 * 0.936, 6);
+  });
+
+  it("draws 1-2-5 character ticks across the viewport", () => {
+    const layout = buildTimelineLayout({
+      width: 1000,
+      window,
+      rows: [row],
+      events: [],
+      messages: contextMessages,
+      axis: "context",
+      contextView: { from: 0, to: 1000 },
+    });
+
+    expect(layout.ticks.map((tick) => tick.key)).toEqual(["0", "200", "400", "600", "800", "1000"]);
+    expect(layout.ticks.map((tick) => tick.label)).toEqual(["0", "200", "400", "600", "800", "1.0k"]);
+    expect(layout.ticks[0].x).toBe(32);
+    expect(layout.ticks[1].x).toBe(219);
+    expect(layout.ticks[5].x).toBe(968);
+  });
+
+  it("maps a zoomed viewport without clamping geometry (the clip cuts)", () => {
+    const layout = buildTimelineLayout({
+      width: 1000,
+      window,
+      rows: [row],
+      events: [],
+      messages: contextMessages,
+      axis: "context",
+      contextView: { from: 600, to: 800 },
+      layers: [
+        { id: "L0#0", depth: 0, parent: null, start: window.from, end: window.to, summary: "overview" },
+      ],
+    });
+
+    const strip = layout.strip;
+    expect(strip?.messages[2].left).toBeCloseTo(32 + 100 * 4.68, 6);
+    expect(strip?.messages[2].width).toBeCloseTo(300 * 4.68, 6);
+    // Raw geometry: the block's left edge lies outside the plot to the left.
+    const block = layout.layerRows[0].blocks[0];
+    expect(block.left).toBeCloseTo(32 + (400 - 600) * 4.68, 6);
+    expect(block.left).toBeLessThan(layout.plot.left);
+    expect(block.left + block.width).toBeCloseTo(32 + (1000 - 600) * 4.68, 6);
+  });
+
+  it("fails fast when the context axis has no viewport", () => {
+    expect(() =>
+      buildTimelineLayout({
+        width: 1000,
+        window,
+        rows: [row],
+        events: [],
+        messages: contextMessages,
+        axis: "context",
+      }),
+    ).toThrow(/contextView/);
   });
 });

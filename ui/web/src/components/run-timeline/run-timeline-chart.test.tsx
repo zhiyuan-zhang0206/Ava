@@ -616,7 +616,9 @@ describe("RunTimelineChart", () => {
         labels={labels}
         {...chartActions}
         withReadout
-        trail={[{ label: "L1#7", from: "2026-08-29T08:00:00Z", to: "2026-08-29T08:30:00Z" }]}
+        trail={[
+          { kind: "time", label: "L1#7", from: "2026-08-29T08:00:00Z", to: "2026-08-29T08:30:00Z" },
+        ]}
         onCrumbSelect={onCrumbSelect}
       />,
     );
@@ -674,6 +676,31 @@ describe("RunTimelineChart", () => {
     expect(onFocusWindow).toHaveBeenCalledWith(
       { from: "2026-08-29T08:10:00.000Z", to: "2026-08-29T08:55:00.000Z" },
       labels.pendingLabel,
+    );
+  });
+
+  it("routes layer-block double-click focus through onFocusWindow on the time axis (P4-1)", () => {
+    const onFocusWindow = vi.fn();
+    const layered: RunTimelineResponse = {
+      ...timeline,
+      layers: [
+        { id: "blk", depth: 0, parent: null, start: "2026-08-29T08:00:00Z", end: "2026-08-29T08:10:00Z", summary: "block summary" },
+      ],
+    };
+    render(
+      <RunTimelineChart
+        timeline={layered}
+        labels={labels}
+        onDrillBucket={vi.fn()}
+        onZoomWindow={vi.fn()}
+        onFocusWindow={onFocusWindow}
+      />,
+    );
+
+    fireEvent.doubleClick(screen.getByRole("button", { name: "Layer details blk" }));
+    expect(onFocusWindow).toHaveBeenCalledWith(
+      { from: "2026-08-29T08:00:00Z", to: "2026-08-29T08:10:00Z" },
+      "L0#blk",
     );
   });
 
@@ -870,5 +897,317 @@ describe("RunTimelineChart", () => {
     const blocks = screen.getAllByTestId("layer-block");
     const pathBlocks = blocks.filter((block) => block.getAttribute("stroke") === "var(--series-4)");
     expect(pathBlocks.map((block) => block.getAttribute("data-layer-node-index"))).toEqual(["0", "1"]);
+  });
+
+  // P4-2b (#4023): the context axis — the same strip in exact character
+  // units under a local viewport; gestures and focus are pure viewport
+  // updates (never a refetch), the event rail hides with an in-place hint,
+  // and the time-only pending placeholders drop out.
+
+  it("hides the event rail on the context axis and explains it in place (P4-2b)", () => {
+    const railTimeline: RunTimelineResponse = {
+      ...stripTimeline,
+      events: [{ ts: "2026-09-19T00:15:00Z", kind: "compact", trace_id: null, label: null }],
+    };
+    render(
+      <RunTimelineChart
+        timeline={railTimeline}
+        labels={labels}
+        onDrillBucket={vi.fn()}
+        onZoomWindow={vi.fn()}
+        axis="context"
+        contextView={{ from: 0, to: 1000 }}
+        contextTotal={1000}
+        onContextView={vi.fn()}
+        onContextFocus={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryAllByTestId("event-chip")).toHaveLength(0);
+    expect(screen.getByTestId("rail-hidden-hint").textContent).toBe(labels.railHidden);
+    // The strip itself stays on the context axis.
+    expect(screen.getAllByTestId("strip-message-button")).toHaveLength(4);
+  });
+
+  it("omits pending placeholders on the context axis and appends the hint clause (P4-2b)", () => {
+    const pendingTimeline: RunTimelineResponse = {
+      ...stripTimeline,
+      pending: [{ start: "2026-09-19T00:12:00Z", end: "2026-09-19T00:20:00Z" }],
+    };
+    const control = render(
+      <RunTimelineChart
+        timeline={pendingTimeline}
+        labels={labels}
+        onDrillBucket={vi.fn()}
+        onZoomWindow={vi.fn()}
+      />,
+    );
+    expect(screen.getAllByTestId("pending-block-button")).toHaveLength(1);
+    control.unmount();
+
+    render(
+      <RunTimelineChart
+        timeline={pendingTimeline}
+        labels={labels}
+        onDrillBucket={vi.fn()}
+        onZoomWindow={vi.fn()}
+        axis="context"
+        contextView={{ from: 0, to: 1000 }}
+        contextTotal={1000}
+        onContextView={vi.fn()}
+        onContextFocus={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryAllByTestId("pending-block")).toHaveLength(0);
+    expect(screen.queryAllByTestId("pending-block-button")).toHaveLength(0);
+    expect(screen.getByTestId("rail-hidden-hint").textContent).toBe(labels.railHiddenPending);
+  });
+
+  it("routes wheel pan and ctrl-wheel zoom to the context viewport with zero refetches (P4-2b)", () => {
+    const onContextView = vi.fn();
+    const onZoomWindow = vi.fn();
+    render(
+      <RunTimelineChart
+        timeline={stripTimeline}
+        labels={labels}
+        onDrillBucket={vi.fn()}
+        onZoomWindow={onZoomWindow}
+        axis="context"
+        contextView={{ from: 200, to: 800 }}
+        contextTotal={1000}
+        onContextView={onContextView}
+        onContextFocus={vi.fn()}
+      />,
+    );
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    const visualization = screen.getByRole("group", { name: "Timeline visualization" });
+    vi.spyOn(visualization, "getBoundingClientRect").mockReturnValue({
+      x: 100,
+      y: 0,
+      top: 0,
+      right: 1100,
+      bottom: 200,
+      left: 100,
+      width: 1000,
+      height: 200,
+      toJSON: () => ({}),
+    });
+
+    // A plain wheel pans the local viewport, keeping its span; the time-axis
+    // fetch callback never fires.
+    const plainWheel = new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -1 });
+    Object.defineProperty(plainWheel, "clientX", { value: 366 });
+    visualization.dispatchEvent(plainWheel);
+    expect(plainWheel.defaultPrevented).toBe(true);
+    expect(onContextView).toHaveBeenCalledTimes(1);
+    const panned = onContextView.mock.calls[0][0] as { from: number; to: number };
+    expect(panned.to - panned.from).toBeCloseTo(600);
+    expect(panned.from).toBeLessThan(200);
+
+    // Ctrl+wheel zooms around the cursor (25% across the plot): the span
+    // shrinks and the viewport start moves later.
+    onContextView.mockClear();
+    const zoomWheel = new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -120 });
+    Object.defineProperty(zoomWheel, "ctrlKey", { value: true });
+    Object.defineProperty(zoomWheel, "clientX", { value: 366 });
+    visualization.dispatchEvent(zoomWheel);
+    expect(zoomWheel.defaultPrevented).toBe(true);
+    expect(onContextView).toHaveBeenCalledTimes(1);
+    const zoomed = onContextView.mock.calls[0][0] as { from: number; to: number };
+    expect(zoomed.to - zoomed.from).toBeLessThan(600);
+    expect(zoomed.from).toBeGreaterThan(200);
+
+    expect(onZoomWindow).not.toHaveBeenCalled();
+  });
+
+  it("pans the context viewport on drag with zero refetches (P4-2b)", () => {
+    const onContextView = vi.fn();
+    const onZoomWindow = vi.fn();
+    render(
+      <RunTimelineChart
+        timeline={stripTimeline}
+        labels={labels}
+        onDrillBucket={vi.fn()}
+        onZoomWindow={onZoomWindow}
+        axis="context"
+        contextView={{ from: 200, to: 800 }}
+        contextTotal={1000}
+        onContextView={onContextView}
+        onContextFocus={vi.fn()}
+      />,
+    );
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    const visualization = screen.getByRole("group", { name: "Timeline visualization" });
+
+    // Dragging content left reveals later characters: the viewport slides
+    // its span forward, and the time-axis fetch callback never fires.
+    fireEvent.pointerDown(visualization, { button: 0, clientX: 500 });
+    fireEvent.pointerMove(window, { clientX: 420 });
+    fireEvent.pointerUp(window);
+    expect(onContextView).toHaveBeenCalledTimes(1);
+    const panned = onContextView.mock.calls[0][0] as { from: number; to: number };
+    expect(panned.from).toBeGreaterThan(200);
+    expect(panned.to - panned.from).toBeCloseTo(600);
+    expect(onZoomWindow).not.toHaveBeenCalled();
+  });
+
+  it("pushes a char-range crumb target when a strip bar is double-clicked on the context axis (P4-2b)", () => {
+    const onContextFocus = vi.fn();
+    const onFocusWindow = vi.fn();
+    const onZoomWindow = vi.fn();
+    render(
+      <RunTimelineChart
+        timeline={stripTimeline}
+        labels={labels}
+        onDrillBucket={vi.fn()}
+        onZoomWindow={onZoomWindow}
+        onFocusWindow={onFocusWindow}
+        axis="context"
+        contextView={{ from: 200, to: 800 }}
+        contextTotal={1000}
+        onContextView={vi.fn()}
+        onContextFocus={onContextFocus}
+      />,
+    );
+
+    // Message c.1 spans chars 400-700; the focus pads by half its width.
+    fireEvent.doubleClick(screen.getAllByTestId("strip-message-button")[1]);
+    expect(onContextFocus).toHaveBeenCalledWith({ from: 250, to: 850 }, "Message 1");
+    expect(onFocusWindow).not.toHaveBeenCalled();
+    expect(onZoomWindow).not.toHaveBeenCalled();
+  });
+
+  it("focuses a layer block's covered-message union on the context axis (P4-2b)", () => {
+    const onContextFocus = vi.fn();
+    const onFocusWindow = vi.fn();
+    render(
+      <RunTimelineChart
+        timeline={stripTimeline}
+        labels={labels}
+        onDrillBucket={vi.fn()}
+        onZoomWindow={vi.fn()}
+        onFocusWindow={onFocusWindow}
+        axis="context"
+        contextView={{ from: 0, to: 1000 }}
+        contextTotal={1000}
+        onContextView={vi.fn()}
+        onContextFocus={onContextFocus}
+      />,
+    );
+
+    // blk covers messages c.1-c.2 (chars 400-800): the union spans 400
+    // characters, so the pad is 200 on each side.
+    fireEvent.doubleClick(screen.getByRole("button", { name: "Layer details blk" }));
+    expect(onContextFocus).toHaveBeenCalledWith({ from: 200, to: 1000 }, "L1#blk");
+    expect(onFocusWindow).not.toHaveBeenCalled();
+  });
+
+  it("labels the context ticks with compact character counts under a named scale (P4-2b)", () => {
+    const { container } = render(
+      <RunTimelineChart
+        timeline={stripTimeline}
+        labels={labels}
+        onDrillBucket={vi.fn()}
+        onZoomWindow={vi.fn()}
+        axis="context"
+        contextView={{ from: 0, to: 1000 }}
+        contextTotal={1000}
+        onContextView={vi.fn()}
+        onContextFocus={vi.fn()}
+      />,
+    );
+
+    const tickLabels = Array.from(container.querySelectorAll("[data-timeline-tick]"), (tick) => tick.textContent);
+    expect(tickLabels).toEqual(["0", "200", "400", "600", "800", "1.0k"]);
+    expect(screen.getByRole("group", { name: labels.charTicks })).toBeTruthy();
+    expect(screen.queryByRole("group", { name: labels.time })).toBeNull();
+  });
+
+  it("routes the message panel's focus action through onContextFocus on the context axis (P4-2b)", async () => {
+    getRunTimelineMessage.mockResolvedValue({
+      key: "c.1",
+      kind: "ai",
+      ts: "2026-09-19T00:10:00Z",
+      source: null,
+      chars: 300,
+      parts: [{ kind: "text", chars: 300, text: "answer text", text_truncated: false }],
+      content_truncated: false,
+    });
+    const onContextFocus = vi.fn();
+    const onZoomWindow = vi.fn();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <RunTimelineChart
+          timeline={stripTimeline}
+          labels={labels}
+          onDrillBucket={vi.fn()}
+          onZoomWindow={onZoomWindow}
+          axis="context"
+          contextView={{ from: 200, to: 800 }}
+          contextTotal={1000}
+          onContextView={vi.fn()}
+          onContextFocus={onContextFocus}
+        />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getAllByTestId("strip-message-button")[1]);
+    const panel = await screen.findByRole("region", { name: "Message details" });
+    fireEvent.click(within(panel).getByRole("button", { name: labels.messageFocus }));
+    expect(onContextFocus).toHaveBeenCalledWith({ from: 250, to: 850 }, "Message 1");
+    expect(onZoomWindow).not.toHaveBeenCalled();
+  });
+
+  it("appends the char position to the readout when hovering a message on the context axis (P4-2b)", () => {
+    render(
+      <RunTimelineChart
+        timeline={stripTimeline}
+        labels={labels}
+        onDrillBucket={vi.fn()}
+        onZoomWindow={vi.fn()}
+        axis="context"
+        contextView={{ from: 200, to: 800 }}
+        contextTotal={1000}
+        onContextView={vi.fn()}
+        onContextFocus={vi.fn()}
+        withReadout
+      />,
+    );
+
+    fireEvent.pointerEnter(screen.getAllByTestId("strip-message-button")[1]);
+    expect(screen.getByTestId("timeline-readout").textContent).toMatch(
+      /#1 \u00b7 agent thinking \u00b7 .* \u00b7 300 chars \uFF5C summary: L1#blk \uFF5C position 400-700 chars/,
+    );
+  });
+
+  it("clamps every strip button into the plot when the viewport is zoomed in (P4-2b)", () => {
+    render(
+      <RunTimelineChart
+        timeline={stripTimeline}
+        labels={labels}
+        onDrillBucket={vi.fn()}
+        onZoomWindow={vi.fn()}
+        axis="context"
+        contextView={{ from: 0, to: 30 }}
+        contextTotal={1000}
+        onContextView={vi.fn()}
+        onContextFocus={vi.fn()}
+      />,
+    );
+
+    // Only c.0's opening characters are in view; every later message starts
+    // past the plot's right edge and renders no button.
+    const buttons = screen.getAllByTestId("strip-message-button");
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].style.left).toBe("32px");
+    expect(buttons[0].style.width).toBe("936px");
   });
 });

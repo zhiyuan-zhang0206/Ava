@@ -3,8 +3,13 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
+import {
+  clampContextView,
+  zoomContextViewAround,
+  type TimelineContextView,
+} from "@/components/run-timeline/context-view";
 import { RunTimelineChart } from "@/components/run-timeline/run-timeline-chart";
 import type { TimelineCrumbEntry } from "@/components/run-timeline/run-timeline-crumbs";
 import {
@@ -66,6 +71,10 @@ export default function RunTimelinePage({
   const [toInput, setToInput] = useState("");
   const [flipLayers, setFlipLayers] = useState(false);
   const [trail, setTrail] = useState<TimelineCrumbEntry[]>([]);
+  // P4-2b (#4023): the x projection and, on the context axis, the local char
+  // viewport the gestures drive (pure display state — never a request key).
+  const [axis, setAxis] = useState<"time" | "context">("time");
+  const [contextView, setContextView] = useState<TimelineContextView | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -136,6 +145,18 @@ export default function RunTimelinePage({
   const defaultToInput = timeline ? dateTimeInputValue(timeline.window.to) : "";
   const selectedFromInput = fromInput || defaultFromInput;
   const selectedToInput = toInput || defaultToInput;
+  const contextTotal = useMemo(() => {
+    let total = 0;
+    for (const message of timeline?.messages ?? []) {
+      total += Math.max(0, message.chars);
+    }
+    return total;
+  }, [timeline?.messages]);
+  const axisDisabled = contextTotal === 0;
+  const effectiveContextView = useMemo(
+    () => contextView ?? { from: 0, to: contextTotal },
+    [contextView, contextTotal],
+  );
 
   const selectWindow = (next: TimelineWindowOverride) => {
     setWindowOverride(next);
@@ -158,6 +179,12 @@ export default function RunTimelinePage({
   };
 
   const zoomBy = (factor: number) => {
+    if (axis === "context") {
+      setContextView((view) =>
+        zoomContextViewAround(view ?? { from: 0, to: contextTotal }, factor, 0.5, contextTotal),
+      );
+      return;
+    }
     const visibleWindow = timeline?.window ?? windowOverride;
     if (visibleWindow === null) return;
     selectWindow(centerZoomWindow(visibleWindow, factor, new Date()));
@@ -170,22 +197,67 @@ export default function RunTimelinePage({
     setTrail([]);
   };
 
+  /** P4-2b (#4023): "back to the full axis" — resets the local viewport on
+   *  the context axis; on the time axis it resets the window (the fetch
+   *  window IS the time axis' full extent). */
+  const resetToFullAxis = () => {
+    if (axis === "context") {
+      setContextView({ from: 0, to: contextTotal });
+      setTrail([]);
+      return;
+    }
+    resetWindow();
+  };
+
   /** P4-1 (#4023): double-click focus — pushes a crumb, then moves the window. */
   const focusWindow = (next: TimelineWindowOverride, label: string) => {
-    setTrail((previous) => [...previous, { label, from: next.from, to: next.to }]);
+    setTrail((previous) => [...previous, { kind: "time", label, from: next.from, to: next.to }]);
     selectWindow(next);
+  };
+
+  /** P4-2b (#4023): switching the x projection resets the view to the full
+   *  axis and clears the trail (the demo's setAxis semantics; crumbs never
+   *  mix domains). */
+  const selectAxis = (next: "time" | "context") => {
+    if (next === axis) return;
+    setAxis(next);
+    setTrail([]);
+    if (next === "context") {
+      setContextView({ from: 0, to: contextTotal });
+    }
+  };
+
+  /** P4-2b: viewport updates from the chart's gestures — clamped at this one
+   *  choke point. */
+  const updateContextView = (next: TimelineContextView) => {
+    setContextView(clampContextView(next.from, next.to, contextTotal));
+  };
+
+  /** P4-2b: context-axis focus — pushes a char-range crumb, then moves the
+   *  viewport (the mirror of focusWindow). */
+  const focusContextView = (next: TimelineContextView, label: string) => {
+    const clamped = clampContextView(next.from, next.to, contextTotal);
+    setTrail((previous) => [
+      ...previous,
+      { kind: "context", label, from: clamped.from, to: clamped.to },
+    ]);
+    setContextView(clamped);
   };
 
   /** P4-1: a crumb restores its range; the root crumb returns to the initial window. */
   const selectCrumb = (index: number) => {
     if (index < 0) {
-      resetWindow();
+      resetToFullAxis();
       return;
     }
     const entry = trail.at(index);
     if (!entry) return;
     setTrail((previous) => previous.slice(0, index + 1));
-    selectWindow({ from: entry.from, to: entry.to });
+    if (entry.kind === "context") {
+      setContextView(clampContextView(entry.from, entry.to, contextTotal));
+    } else {
+      selectWindow({ from: entry.from, to: entry.to });
+    }
   };
 
   const drillBucket = (row: RunTimelineResponse["rows"][number]) => {
@@ -211,6 +283,28 @@ export default function RunTimelinePage({
     setSession(nextSession);
     resetWindow();
   };
+
+  // P4-2b (#4023): the context viewport projects the fetched messages. A
+  // same-window refresh only moves the domain's end (clamp); a window change
+  // replaces the data, so the view resets to the full axis and char-ranged
+  // crumbs (meaningless against the new data) clear.
+  useEffect(() => {
+    if (axis !== "context") return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- domain-keyed clamp, not a render loop
+    setContextView((view) =>
+      view === null ? view : clampContextView(view.from, view.to, contextTotal),
+    );
+  }, [axis, contextTotal]);
+
+  const windowKey = timeline ? `${timeline.window.from}|${timeline.window.to}` : null;
+  const previousWindowKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    const previous = previousWindowKeyRef.current;
+    previousWindowKeyRef.current = windowKey;
+    if (previous === null || previous === windowKey || axis !== "context") return;
+    setTrail([]);
+    setContextView({ from: 0, to: contextTotal });
+  }, [axis, contextTotal, windowKey]);
 
   if (paramsResolved && agentId === null) {
     return (
@@ -292,10 +386,37 @@ export default function RunTimelinePage({
               >
                 {t("flipLayers")}
               </button>
+              <span role="group" aria-label={t("axisGroup")} className={cn(FLEX, "items-center gap-0.5")}>
+                <button
+                  type="button"
+                  aria-pressed={axis === "time"}
+                  onClick={() => selectAxis("time")}
+                  className={cn(
+                    "rounded border px-2 py-1 font-mono text-xs",
+                    axis === "time" ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted",
+                  )}
+                >
+                  {t("axisTime")}
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={axis === "context"}
+                  disabled={axisDisabled}
+                  title={axisDisabled ? t("axisDisabled") : t("axisContextTitle")}
+                  onClick={() => selectAxis("context")}
+                  className={cn(
+                    "rounded border px-2 py-1 font-mono text-xs",
+                    axis === "context" ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted",
+                    axisDisabled && "opacity-50",
+                  )}
+                >
+                  {t("axisContext")}
+                </button>
+              </span>
               <button
                 type="button"
                 aria-label={t("resetWindow")}
-                onClick={resetWindow}
+                onClick={resetToFullAxis}
                 className="rounded border border-border px-2 py-1 font-mono text-xs hover:bg-muted"
               >
                 {t("resetWindow")}
@@ -414,6 +535,11 @@ export default function RunTimelinePage({
                 onCrumbSelect={selectCrumb}
                 onFocusWindow={focusWindow}
                 withReadout
+                axis={axis}
+                contextView={effectiveContextView}
+                contextTotal={contextTotal}
+                onContextView={updateContextView}
+                onContextFocus={focusContextView}
               />
             </>
           ) : timelinePending ? (

@@ -9,17 +9,18 @@ import {
   useState,
 } from "react";
 
+import { formatTokensCompact } from "@/lib/format-number";
 import { FLEX, MIN_W_0 } from "@/lib/layout";
 import type { RunTimelineResponse } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+import type { TimelineContextView } from "./context-view";
 import { TimelineCrumbs, type TimelineCrumbEntry } from "./run-timeline-crumbs";
 import {
   LayerDetailPanel,
   layerFocusLabel,
   rowFailed,
   rowLabel,
-  tickLabel,
   TimelinePopover,
   TIMELINE_POPOVER_ID,
   TurnDetailPanel,
@@ -27,7 +28,7 @@ import {
   type TimelinePopoverTarget,
 } from "./run-timeline-details";
 import { StripLegend } from "./run-timeline-legend";
-import { MessageDetailPanel } from "./run-timeline-message-panel";
+import { MessageDetailPanel, type MessageFocusTarget } from "./run-timeline-message-panel";
 import { StripTrackButtons, StripTrackGeometry, StripTruncatedHint } from "./run-timeline-strip";
 import {
   LayerTrackButtons,
@@ -42,7 +43,7 @@ import { useTimelineGestures } from "./use-timeline-gestures";
 import type { TimelineWindowOverride } from "./request-level";
 import { coveredMessageIndexes, messageChainIndexes } from "./strip-layout";
 import type { StripLegendCategory } from "./strip-categories";
-import { buildTimelineLayout } from "./timeline-layout";
+import { buildTimelineLayout, clampIntervalToPlot } from "./timeline-layout";
 
 export type { RunTimelineChartLabels } from "./run-timeline-details";
 
@@ -65,6 +66,11 @@ export function RunTimelineChart({
   onCrumbSelect,
   onFocusWindow,
   withReadout,
+  axis = "time",
+  contextView,
+  contextTotal,
+  onContextView,
+  onContextFocus,
 }: {
   timeline: RunTimelineResponse;
   labels: RunTimelineChartLabels;
@@ -88,6 +94,19 @@ export function RunTimelineChart({
   /** P4-1: double-click routes through the page so it can push a crumb
    *  (the compare view keeps the plain zoom). */
   onFocusWindow?: (window: TimelineWindowOverride, label: string) => void;
+  /** P4-2b (#4023): the x projection — the page's axis toggle drives it; the
+   *  compare view never passes it (stays on the time axis). */
+  axis?: "time" | "context";
+  /** P4-2b: char-domain viewport + domain size of the context axis (present
+   *  whenever `axis` is "context"). */
+  contextView?: TimelineContextView;
+  contextTotal?: number;
+  /** P4-2b: gestures and +/- route here on the context axis — pure viewport
+   *  updates that never refetch. */
+  onContextView?: (view: TimelineContextView) => void;
+  /** P4-2b: double-click focus on the context axis (char-range crumb push,
+   *  the mirror of onFocusWindow). */
+  onContextFocus?: (view: TimelineContextView, label: string) => void;
   /** P4-1: persistent hover readout above the chart. */
   withReadout?: boolean;
 }) {
@@ -134,9 +153,13 @@ export function RunTimelineChart({
         pending: pendingSpans,
         messages: stripMessages,
         flipLayers,
+        axis,
+        contextView,
       }),
     [
+      axis,
       canvasWidth,
+      contextView,
       flipLayers,
       layers,
       pendingSpans,
@@ -146,16 +169,22 @@ export function RunTimelineChart({
       timeline.window,
     ],
   );
+  const contextMode = axis === "context";
+  // P4-2b: cumulative char offsets of the strip messages — one source for
+  // the context focus targets and readout positions.
+  const messageOffsets = useMemo(() => {
+    const offsets = [0];
+    for (const message of timeline.messages ?? []) {
+      offsets.push(offsets[offsets.length - 1] + Math.max(0, message.chars));
+    }
+    return offsets;
+  }, [timeline.messages]);
   const selectedRow =
     selectedRowIndex === null ? null : (timeline.rows[selectedRowIndex] ?? null);
   const selectedLayer =
     selectedLayerIndex === null ? null : (timeline.layers?.[selectedLayerIndex] ?? null);
   const selectedMessage =
     selectedMessageIndex === null ? null : (timeline.messages?.[selectedMessageIndex] ?? null);
-  const tickSpacingMs =
-    (Date.parse(timeline.window.to) - Date.parse(timeline.window.from)) /
-    (layout.ticks.length - 1);
-  const includeTickSeconds = tickSpacingMs < 60_000;
   // P4-2 (#4023) cross-highlights: selecting a summary node lights its
   // covered messages ("related", the demo's rule); selecting a message
   // outlines the chain of summary blocks covering it ("path").
@@ -250,6 +279,10 @@ export function RunTimelineChart({
         ? {
             message: hoveredMessage,
             leaf: hoveredMessageLeaf ? layerFocusLabel(hoveredMessageLeaf) : null,
+            position:
+              contextMode && hoveredMessageIndex !== null
+                ? `${formatTokensCompact(messageOffsets[hoveredMessageIndex])}-${formatTokensCompact(messageOffsets[hoveredMessageIndex + 1])} ${labels.charsUnit}`
+                : undefined,
           }
         : null,
     },
@@ -284,8 +317,53 @@ export function RunTimelineChart({
       to: new Date(toTime(toPx)).toISOString(),
     };
   };
+  /** P4-2b (#4023): a char range padded by half its width, floored at a
+   *  two-hundredth of the domain — the shared focus padding of the strip
+   *  bars and the layer blocks (the demo's rule). */
+  const contextFocusRange = (from: number, to: number): TimelineContextView | null => {
+    if (contextTotal === undefined) return null;
+    const pad = Math.max(0.5 * (to - from), contextTotal / 200);
+    return { from: from - pad, to: to + pad };
+  };
+  /** P4-2b (#4023): the char range covering a strip message plus padding —
+   *  the context axis' "zoom to this message" (mirror of messageFocusWindow). */
+  const contextMessageFocus = (index: number): TimelineContextView | null => {
+    if (timeline.messages?.at(index) === undefined) return null;
+    return contextFocusRange(messageOffsets[index], messageOffsets[index + 1]);
+  };
+  /** P4-2b: the char range covering a layer block's messages plus padding —
+   *  the block's "zoom to this block" on the context axis (the mirror of
+   *  contextMessageFocus over the covered-message union). */
+  const contextBlockFocus = (nodeIndex: number): TimelineContextView | null => {
+    const node = timeline.layers?.at(nodeIndex);
+    const messages = timeline.messages;
+    if (node === undefined || !messages) return null;
+    const covered = coveredMessageIndexes(messages, node.start, node.end);
+    if (covered.length === 0) return null;
+    return contextFocusRange(
+      messageOffsets[covered[0]],
+      messageOffsets[covered[covered.length - 1] + 1],
+    );
+  };
+  /** P4-2b: the panel's "zoom to this message" routes through the active
+   *  axis. */
+  const messageFocusTarget = (index: number): MessageFocusTarget | null => {
+    if (contextMode) {
+      const view = contextMessageFocus(index);
+      return view === null ? null : { kind: "context", view };
+    }
+    const window = messageFocusWindow(index);
+    return window === null ? null : { kind: "time", window };
+  };
   const selectedMessageFocus =
-    selectedMessageIndex === null ? null : messageFocusWindow(selectedMessageIndex);
+    selectedMessageIndex === null ? null : messageFocusTarget(selectedMessageIndex);
+  const focusMessage = (target: MessageFocusTarget, label: string) => {
+    if (target.kind === "time") {
+      focusWindow(target.window, label);
+    } else {
+      onContextFocus?.(target.view, label);
+    }
+  };
   // Selection is exclusive across the three detail sources (turn / summary
   // node / raw message): each picker clears the other two and closes the
   // summary band the panel supersedes.
@@ -333,8 +411,12 @@ export function RunTimelineChart({
   useTimelineGestures({
     visualizationRef,
     plot: layout.plot,
+    mode: contextMode ? "context" : "time",
     window: timeline.window,
     zoomWindow: onZoomWindow,
+    contextView,
+    contextTotal,
+    onContextView,
     suppressClickRef,
     setDragging,
   });
@@ -403,6 +485,16 @@ export function RunTimelineChart({
                 height={layout.height}
                 className="absolute inset-0 block"
               >
+                <defs>
+                  <clipPath id="run-timeline-plot-clip">
+                    <rect
+                      x={layout.plot.left}
+                      y="0"
+                      width={layout.plot.width}
+                      height={layout.height}
+                    />
+                  </clipPath>
+                </defs>
                 <line
                   x1={layout.plot.left}
                   x2={layout.plot.right}
@@ -412,7 +504,7 @@ export function RunTimelineChart({
                 />
                 {layout.ticks.map((tick) => (
                   <line
-                    key={tick.timestamp}
+                    key={tick.key}
                     x1={tick.x}
                     x2={tick.x}
                     y1={layout.axisY - 4}
@@ -421,7 +513,7 @@ export function RunTimelineChart({
                     strokeDasharray="2 4"
                   />
                 ))}
-                {layout.connectors.map((connector) => (
+                {contextMode ? null : layout.connectors.map((connector) => (
                   <path
                     key={connector.eventIndex}
                     data-testid="event-connector"
@@ -436,7 +528,7 @@ export function RunTimelineChart({
                     strokeWidth="1"
                   />
                 ))}
-                {layout.events.map((event) => (
+                {contextMode ? null : layout.events.map((event) => (
                   <g key={event.eventIndex}>
                     <circle
                       data-testid="event-source-node"
@@ -456,15 +548,16 @@ export function RunTimelineChart({
                     />
                   </g>
                 ))}
-                <rect
-                  x={layout.plot.left}
-                  y={layout.track.top}
-                  width={layout.plot.width}
-                  height={layout.track.height}
-                  rx="10"
-                  fill="var(--muted)"
-                  stroke="var(--border)"
-                />
+                <g clipPath="url(#run-timeline-plot-clip)">
+                  <rect
+                    x={layout.plot.left}
+                    y={layout.track.top}
+                    width={layout.plot.width}
+                    height={layout.track.height}
+                    rx="10"
+                    fill="var(--muted)"
+                    stroke="var(--border)"
+                  />
                 {layout.layerRows.length > 0 && timeline.layers ? (
                   <LayerTrackGeometry
                     rows={layout.layerRows}
@@ -473,7 +566,7 @@ export function RunTimelineChart({
                     dimmed={activeCategory !== null}
                   />
                 ) : null}
-                {layout.pendingBlocks.length > 0 ? (
+                {!contextMode && layout.pendingBlocks.length > 0 ? (
                   <PendingTrackGeometry row={layout.pendingRow} blocks={layout.pendingBlocks} />
                 ) : null}
                 {layout.strip && stripMessages ? (
@@ -511,27 +604,34 @@ export function RunTimelineChart({
                     />
                   );
                 })}
+                </g>
               </svg>
 
-              {layout.ticks.map((tick, index) => {
-                const left = Math.max(0, Math.min(layout.width - 72, tick.x - 36));
-                return (
-                  <span
-                    key={tick.timestamp}
-                    data-timeline-tick=""
-                    data-testid="fixed-timeline-text"
-                    className={cn(
-                      "absolute w-[72px] font-mono text-[10px] tabular-nums text-muted-foreground",
-                      index === 0 ? "text-left" : index === layout.ticks.length - 1 ? "text-right" : "text-center",
-                    )}
-                    style={{ left: `${Math.round(left)}px`, top: "4px" }}
-                  >
-                    {tickLabel(tick.timestamp, includeTickSeconds)}
-                  </span>
-                );
-              })}
+              <div
+                role="group"
+                aria-label={contextMode ? labels.charTicks : labels.time}
+                className="pointer-events-none absolute inset-0"
+              >
+                {layout.ticks.map((tick, index) => {
+                  const left = Math.max(0, Math.min(layout.width - 72, tick.x - 36));
+                  return (
+                    <span
+                      key={tick.key}
+                      data-timeline-tick=""
+                      data-testid="fixed-timeline-text"
+                      className={cn(
+                        "absolute w-[72px] font-mono text-[10px] tabular-nums text-muted-foreground",
+                        index === 0 ? "text-left" : index === layout.ticks.length - 1 ? "text-right" : "text-center",
+                      )}
+                      style={{ left: `${Math.round(left)}px`, top: "4px" }}
+                    >
+                      {tick.label}
+                    </span>
+                  );
+                })}
+              </div>
 
-              {layout.events.map((eventLayout) => {
+              {contextMode ? null : layout.events.map((eventLayout) => {
                 const event = rail.events[eventLayout.eventIndex];
                 return (
                   <button
@@ -564,10 +664,22 @@ export function RunTimelineChart({
                 );
               })}
 
-              {layout.turns.map((turn) => {
+              {contextMode ? (
+                <p
+                  data-testid="rail-hidden-hint"
+                  className="absolute font-mono text-[10px] text-muted-foreground"
+                  style={{ left: `${layout.plot.left}px`, top: `${layout.axisY + 8}px` }}
+                >
+                  {layout.pendingBlocks.length > 0 ? labels.railHiddenPending : labels.railHidden}
+                </p>
+              ) : null}
+
+              {layout.turns.flatMap((turn) => {
                 const row = timeline.rows[turn.rowIndex];
+                const box = clampIntervalToPlot(turn.left, turn.width, layout.plot);
+                if (box === null) return [];
                 const label = rowLabel(row, labels);
-                return (
+                return [
                   <button
                     key={turn.rowIndex}
                     type="button"
@@ -596,13 +708,13 @@ export function RunTimelineChart({
                     }}
                     className="absolute rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2"
                     style={{
-                      left: `${turn.left}px`,
+                      left: `${box.left}px`,
                       top: `${layout.track.top}px`,
-                      width: `${turn.width}px`,
+                      width: `${box.width}px`,
                       height: `${layout.track.height}px`,
                     }}
                   >
-                    {row.turn !== null && turn.width >= 32 ? (
+                    {row.turn !== null && box.width >= 32 ? (
                       <span
                         data-testid="fixed-timeline-text"
                         className="block truncate px-1 font-mono text-[10px] font-semibold text-white"
@@ -611,22 +723,34 @@ export function RunTimelineChart({
                         {row.turn}
                       </span>
                     ) : null}
-                  </button>
-                );
+                  </button>,
+                ];
               })}
 
               {layout.layerRows.length > 0 && timeline.layers ? (
                 <LayerTrackButtons
+                  plot={layout.plot}
                   rows={layout.layerRows}
                   layers={timeline.layers}
                   labels={labels}
                   onSelect={selectLayer}
-                  onZoom={focusWindow}
+                  onFocus={(index) => {
+                    const node = timeline.layers?.[index];
+                    if (!node) return;
+                    if (contextMode) {
+                      const target = contextBlockFocus(index);
+                      if (target && onContextFocus) {
+                        onContextFocus(target, layerFocusLabel(node));
+                      }
+                      return;
+                    }
+                    focusWindow({ from: node.start, to: node.end }, layerFocusLabel(node));
+                  }}
                   onHover={withReadout ? setHoveredLayerIndex : undefined}
                 />
               ) : null}
 
-              {layout.pendingBlocks.length > 0 ? (
+              {!contextMode && layout.pendingBlocks.length > 0 ? (
                 <PendingTrackButtons
                   row={layout.pendingRow}
                   blocks={layout.pendingBlocks}
@@ -646,9 +770,17 @@ export function RunTimelineChart({
                   labels={labels}
                   onSelect={selectMessage}
                   onFocus={(index) => {
-                    const target = messageFocusWindow(index);
                     const message = stripMessages.at(index);
-                    if (target && message) {
+                    if (!message) return;
+                    if (contextMode) {
+                      const target = contextMessageFocus(index);
+                      if (target && onContextFocus) {
+                        onContextFocus(target, labels.messageLabel(message.idx));
+                      }
+                      return;
+                    }
+                    const target = messageFocusWindow(index);
+                    if (target) {
                       focusWindow(target, labels.messageLabel(message.idx));
                     }
                   }}
@@ -680,7 +812,7 @@ export function RunTimelineChart({
               onPointerLeave={() => setPopoverTarget(null)}
             />
           ) : null}
-          {rail.skippedCount > 0 ? (
+          {rail.skippedCount > 0 && !contextMode ? (
             <p className="px-1 font-mono text-[10px] text-muted-foreground">
               {labels.moreEvents(rail.skippedCount, rail.skippedSummary)}
             </p>
@@ -701,7 +833,7 @@ export function RunTimelineChart({
             })}
             labels={labels}
             focusTarget={selectedMessageFocus}
-            onFocus={focusWindow}
+            onFocus={focusMessage}
             onClose={() => setSelectedMessageIndex(null)}
             onSelectLayer={selectLayer}
           />

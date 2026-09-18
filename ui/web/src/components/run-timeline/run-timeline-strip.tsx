@@ -18,7 +18,7 @@ import {
   type StripColorClass,
   type StripLegendCategory,
 } from "./strip-categories";
-import type { TimelineStripRowLayout } from "./timeline-layout";
+import { clampIntervalToPlot, type TimelineStripRowLayout } from "./timeline-layout";
 
 const STRIP_CLIP_ID = "run-timeline-strip-clip";
 
@@ -130,13 +130,14 @@ export function StripTrackButtons({
   return (
     <>
       {row.messages.map((bar, index) => {
-        // A bar may over-extend the plot's right edge (the response window is
-        // the axis where the demo's would have grown). The SVG side is clipped;
-        // this HTML layer clamps explicitly, or an invisible clickable box — and
-        // ghost horizontal scroll — would live past the edge (PR #2892 review).
-        // A bar with no visible part renders no button.
-        const right = Math.min(bar.left + Math.max(1, bar.width), plot.left + plot.width);
-        if (right <= bar.left) return null;
+        // A bar may fall outside the plot on either edge (the window-clipped
+        // tail on the time axis; the local viewport on the context axis). The
+        // SVG side is clipped; this HTML layer clamps explicitly, or an
+        // invisible clickable box — and ghost horizontal scroll — would live
+        // outside (PR #2892 review, generalized for P4-2b). A bar with no
+        // visible part renders no button.
+        const box = clampIntervalToPlot(bar.left, bar.width, plot, 1);
+        if (box === null) return null;
         const message = messages[index];
         const kind = labels.stripPartLabels[stripMessageClass(message)];
         const time = message.ts === null ? labels.none : timestampLabel(message.ts);
@@ -157,9 +158,9 @@ export function StripTrackButtons({
               "absolute rounded-[2px] outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-1",
             )}
             style={{
-              left: `${bar.left}px`,
+              left: `${box.left}px`,
               top: `${row.top}px`,
-              width: `${right - bar.left}px`,
+              width: `${box.width}px`,
               height: `${row.height}px`,
             }}
           />
