@@ -89,6 +89,14 @@ def get_stats_dashboard(
     None (frontend shows "—"). Until the unlabeled legacy slice expires on 2026-08-30,
     the ledger removes the fixed-cost full-window token scans; afterward the
     indexed Loki tail keeps the same self-healing late-write behavior.
+
+    A failed recompute (Loki transport error or refused query admission) serves
+    the window's last-good response marked `stale` (its `as_of` keeps the
+    original read time) while it is within `display.stats_dashboard_stale_max_s`;
+    past the cap — or with no last-good payload — the route keeps its retriable
+    503, so a real outage surfaces within the cap. Each degradation episode
+    emits one `stats_dashboard_stale` event, rate-capped per reason by the
+    `stats_dashboard_stale_emit_interval_s` display setting.
     """
     cached = _stats_dashboard.cache_get(hours)
     if cached is not None:
@@ -187,9 +195,15 @@ def get_stats_dashboard(
             for event_class, count in shard_counts.items():
                 class_counts[event_class] = class_counts.get(event_class, 0) + count
     except loki_query_budget.LokiQueryBudgetError:
+        stale = _stats_dashboard.serve_stale(hours, reason="loki_budget")
+        if stale is not None:
+            return stale
         # Preserve the process-wide admission handler's machine-readable reason.
         raise
     except httpx.HTTPError as exc:
+        stale = _stats_dashboard.serve_stale(hours, reason="loki_failed")
+        if stale is not None:
+            return stale
         raise_backend_unavailable(exc)
 
     with request.app.state.db_pool.connection() as conn:
@@ -231,6 +245,7 @@ def get_stats_dashboard(
         errors_net=error.net,
         total_events=total_events,
         plugin_stats=_stats_dashboard.plugin_stat_rows(request.app.state.db_pool),
+        as_of=datetime.now(UTC),
     )
     _stats_dashboard.cache_put(hours, response)
     return response

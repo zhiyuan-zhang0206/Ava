@@ -55,9 +55,14 @@ whose class has an active dismissal in `event_dismissals` land in
 `*_dismissed`, the rest in `*_net`, and dismissed + net == the raw total —
 the same cancellation the daemon's fixed-six-hour Grafana gauges apply. The `llm_usage.cost_usd` sum is
 the usage-time quote snapshot, not historical tokens repriced against today's
-registry. A local budget refusal retains the global typed 503 response; a Loki
-transport/status failure is a retriable 503 with `Retry-After: 1` after
-`loki_events` records the failing query shape.
+registry. While a last-good response for the window is within
+`display.stats_dashboard_stale_max_s`, a failed recompute — a local budget
+refusal or a Loki transport/status failure — serves that last-good response
+marked `stale` (its `as_of` keeps the original read time) and emits one
+rate-capped `stats_dashboard_stale` event; with no last-good response, or
+past the cap, both degrade to the pre-existing 503 paths (the global typed
+budget envelope / a retriable `Retry-After: 1` after `loki_events` records
+the failing query shape).
 
 Every dashboard Loki read is explicitly scoped to the current home-derived
 cluster label. The fleet graph's Loki event tail applies the same dimension,

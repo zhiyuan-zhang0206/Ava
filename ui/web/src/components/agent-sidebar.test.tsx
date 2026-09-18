@@ -677,6 +677,7 @@ describe("StatsCards tri-state (loading / data / error)", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.stats = {
       live_count: 5,
+      stale: false,
       window_hours: 24,
       tokens: { input: 12_345, output: 6_789, cache_read: 0, cache_hit_pct: 80 },
       cost_usd: 1.2345,
@@ -712,6 +713,7 @@ describe("StatsCards tri-state (loading / data / error)", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.stats = {
       live_count: 5,
+      stale: false,
       window_hours: 24,
       tokens: { input: 12_345, output: 6_789, cache_read: 0, cache_hit_pct: 80 },
       cost_usd: 1.2345,
@@ -751,6 +753,7 @@ describe("StatsCards tri-state (loading / data / error)", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.stats = {
       live_count: 5,
+      stale: false,
       window_hours: 24,
       tokens: { input: 100, output: 50, cache_read: 0, cache_hit_pct: 80 },
       cost_usd: 1,
@@ -777,6 +780,7 @@ describe("StatsCards tri-state (loading / data / error)", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.stats = {
       live_count: 0,
+      stale: false,
       window_hours: 24,
       tokens: { input: 1_500_000, output: 0, cache_read: 0, cache_hit_pct: 0 },
       cost_usd: 0,
@@ -799,6 +803,7 @@ describe("StatsCards tri-state (loading / data / error)", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.stats = {
       live_count: 0,
+      stale: false,
       window_hours: 24,
       tokens: { input: 100, output: 50, cache_read: 0, cache_hit_pct: 0 },
       cost_usd: 0,
@@ -822,6 +827,7 @@ describe("plugin stat cards", () => {
   function statsWith(pluginStats: StatsDashboard["plugin_stats"]): StatsDashboard {
     return {
       live_count: 7,
+      stale: false,
       window_hours: 24,
       tokens: { input: 100, output: 50, cache_read: 0, cache_hit_pct: 0 },
       cost_usd: 0,
@@ -963,6 +969,7 @@ describe("StatsCards window selector", () => {
     state.statsWindowHours = 1;
     state.stats = {
       live_count: 5,
+      stale: false,
       window_hours: 24,
       tokens: { input: 12_345, output: 6_789, cache_read: 0, cache_hit_pct: 80 },
       cost_usd: 1.2345,
@@ -1007,6 +1014,7 @@ describe("StatsCards window selector", () => {
     state.statsWindowHours = 168;
     state.stats = {
       live_count: 5,
+      stale: false,
       window_hours: 168,
       applied_window_hours: 84,
       tokens: { input: 100, output: 50, cache_read: 0, cache_hit_pct: 0 },

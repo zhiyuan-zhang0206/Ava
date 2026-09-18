@@ -352,6 +352,29 @@ class FleetGraphStale(TypedDict):
     reason: FleetGraphStaleReason
 
 
+# The closed reason vocabulary of `stats_dashboard_stale` (task #3973): the
+# stats-dashboard route names WHY a live recompute failed — a Loki transport
+# failure or a refused query admission. Keep the set closed: consumers rely
+# on it.
+StatsDashboardStaleReason = Literal[
+    "loki_failed",
+    "loki_budget",
+]
+
+
+class StatsDashboardStale(TypedDict):
+    """`stats_dashboard_stale` payload — one degraded stats-dashboard serving episode.
+
+    Emitted when GET /api/stats/dashboard serves its last-good whole response
+    because the live recompute failed (Loki transport failure or refused
+    query admission). One event per degradation episode, not per poll, and a
+    per-reason emission rate cap bounds retry-storm floods (task #3973).
+    """
+
+    route: str
+    reason: StatsDashboardStaleReason
+
+
 class PromQueryFailed(TypedDict):
     """`prom_query_failed` payload — gateway/prom_metrics.py transport failure."""
 

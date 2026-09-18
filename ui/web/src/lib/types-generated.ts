@@ -3109,6 +3109,14 @@ export interface paths {
          *     None (frontend shows "—"). Until the unlabeled legacy slice expires on 2026-08-30,
          *     the ledger removes the fixed-cost full-window token scans; afterward the
          *     indexed Loki tail keeps the same self-healing late-write behavior.
+         *
+         *     A failed recompute (Loki transport error or refused query admission) serves
+         *     the window's last-good response marked `stale` (its `as_of` keeps the
+         *     original read time) while it is within `display.stats_dashboard_stale_max_s`;
+         *     past the cap — or with no last-good payload — the route keeps its retriable
+         *     503, so a real outage surfaces within the cap. Each degradation episode
+         *     emits one `stats_dashboard_stale` event, rate-capped per reason by the
+         *     `stats_dashboard_stale_emit_interval_s` display setting.
          */
         get: operations["get_stats_dashboard_api_stats_dashboard_get"];
         put?: never;
@@ -7686,6 +7694,12 @@ export interface components {
          *     `plugin_stats` is not windowed (see `PluginStat`): the runtime values
          *     behind cards that plugins declare under `contributions.ui.stats`, joined
          *     by the console on `(plugin, id)`.
+         *
+         *     `stale` is true when this payload is the route's last-good response,
+         *     served because a live recompute failed while the payload was within the
+         *     stale cap (`display.stats_dashboard_stale_max_s`); `as_of` is the UTC
+         *     time the served payload's reads were assembled — a stale fallback keeps
+         *     its original timestamp so a client can show the data's age.
          */
         StatsDashboard: {
             /** Live Count */
@@ -7714,6 +7728,13 @@ export interface components {
             total_events: number;
             /** Plugin Stats */
             plugin_stats: components["schemas"]["PluginStat"][];
+            /**
+             * Stale
+             * @default false
+             */
+            stale: boolean;
+            /** As Of */
+            as_of?: string | null;
         };
         /**
          * StatsTokens

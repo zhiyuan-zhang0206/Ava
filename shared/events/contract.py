@@ -111,6 +111,8 @@ from shared.events.system import ResolutionStatus as ResolutionStatus
 from shared.events.system import ResolvedMarker as ResolvedMarker
 from shared.events.system import ScheduleStalled as ScheduleStalled
 from shared.events.system import SseLifecycle as SseLifecycle
+from shared.events.system import StatsDashboardStale as StatsDashboardStale
+from shared.events.system import StatsDashboardStaleReason as StatsDashboardStaleReason
 from shared.events.system import TelemetryReadRecovered as TelemetryReadRecovered
 from shared.events.system import TelemetryReadStale as TelemetryReadStale
 from shared.events.system import WatchdogTick as WatchdogTick

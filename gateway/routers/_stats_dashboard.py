@@ -1,7 +1,14 @@
-"""Whole-response cache for the sidebar stats-dashboard route."""
+"""Whole-response cache + last-good stale serving for the stats-dashboard route.
+
+Entries persist after the fresh TTL expires: besides the 60s hit path, the
+route's stale-serving fallback reads the most recent successful response for a
+window (`cache_get_last_good`) and serves it marked `stale` (`serve_stale`)
+when a recompute fails (task #3973).
+"""
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from datetime import UTC, date, datetime, timedelta
@@ -11,7 +18,9 @@ from typing import Any, NamedTuple, cast
 from psycopg_pool import ConnectionPool
 
 from gateway.schemas import PluginStat, PluginStatStatus, StatsDashboard, StatsWindowHours
-from shared import plugin_stats
+from shared import plugin_stats, telemetry
+from shared.config import settings
+from shared.events.contract import StatsDashboardStaleReason
 from shared.loki_index_labels import ledger_gap_plan, retention_floor
 
 # The sidebar polls every 30 seconds. Caching the complete response for 60
@@ -19,6 +28,11 @@ from shared.loki_index_labels import ledger_gap_plan, retention_floor
 _CACHE_TTL_S = 60.0
 _cache: dict[int, tuple[float, StatsDashboard]] = {}
 _cache_lock = threading.Lock()
+
+
+def _monotonic() -> float:
+    """Cache-clock seam, kept local so tests do not alter anyio timing."""
+    return time.monotonic()
 
 
 class _TokenLedgerSums(NamedTuple):
@@ -63,7 +77,7 @@ def cache_get(hours: StatsWindowHours) -> StatsDashboard | None:
     """Return a fresh cached response for the requested window, if present."""
     with _cache_lock:
         hit = _cache.get(int(hours))
-        if hit is None or hit[0] + _CACHE_TTL_S <= time.monotonic():
+        if hit is None or hit[0] + _CACHE_TTL_S <= _monotonic():
             return None
         return hit[1]
 
@@ -71,7 +85,90 @@ def cache_get(hours: StatsWindowHours) -> StatsDashboard | None:
 def cache_put(hours: StatsWindowHours, response: StatsDashboard) -> None:
     """Store the immutable response after its complete backend read succeeds."""
     with _cache_lock:
-        _cache[int(hours)] = (time.monotonic(), response)
+        _cache[int(hours)] = (_monotonic(), response)
+
+
+def cache_get_last_good(hours: StatsWindowHours, *, max_age_s: float) -> StatsDashboard | None:
+    """The window's most recent successful response, while within `max_age_s`.
+
+    Deliberately ignores the fresh-cache TTL: this exists for the route's
+    stale-serving fallback, which keeps serving the last-good payload after a
+    failed recompute until it passes the cap. `max_age_s <= 0` disables the
+    fallback (always None); an absent window is also None.
+    """
+    if max_age_s <= 0:
+        return None
+    with _cache_lock:
+        hit = _cache.get(int(hours))
+        if hit is None or _monotonic() - hit[0] > max_age_s:
+            return None
+        return hit[1]
+
+
+# ── stale serving (task #3973) ─────────────────────────────────────────────
+# When a live recompute fails on a transient Loki error, the route serves the
+# window's last-good response (marked `stale`) instead of a 503, for at most
+# `display.stats_dashboard_stale_max_s` — so a slow window stops flapping the
+# sidebar while a real outage still surfaces as 503 within the cap. One
+# `stats_dashboard_stale` event per degradation episode, per-reason rate-capped
+# (the `fleet_graph_stale` pattern, task #3925).
+_STALE_ROUTE = "/api/stats/dashboard"
+_log = logging.getLogger(__name__)
+
+_stale_emit_at: dict[str, float] = {}
+_stale_emit_lock = threading.Lock()
+
+
+def _stale_emit_interval_s() -> float:
+    """Seconds between `stats_dashboard_stale` events per reason — settings-backed
+    so the storm guard is operator-tunable, and a seam tests use to disable it."""
+    return settings.display.stats_dashboard_stale_emit_interval_s
+
+
+def _emit_stale(reason: StatsDashboardStaleReason) -> None:
+    """One `stats_dashboard_stale` event per degradation episode.
+
+    Emitted when GET /api/stats/dashboard serves a last-good response because
+    the live recompute failed (Loki transport failure or refused admission).
+    `route` is the fixed `_STALE_ROUTE`; `reason` is the closed
+    `StatsDashboardStaleReason` set. Rate cap: at most one event per reason per
+    `display.stats_dashboard_stale_emit_interval_s` seconds — the event counts
+    episodes, not polls or storms.
+    """
+    now = time.monotonic()
+    with _stale_emit_lock:
+        last = _stale_emit_at.get(reason)
+        if last is not None and now - last < _stale_emit_interval_s():
+            return
+        _stale_emit_at[reason] = now
+    telemetry.emit(
+        "telemetry",
+        "stats_dashboard_stale",
+        level="warning",
+        attributes={"route": _STALE_ROUTE, "reason": reason},
+    )
+
+
+def serve_stale(
+    hours: StatsWindowHours, *, reason: StatsDashboardStaleReason
+) -> StatsDashboard | None:
+    """Serve the window's last-good response, marked `stale`, within the age cap.
+
+    Returns None when stale serving is disabled (cap <= 0), nothing is cached
+    for the window, or the last-good payload has passed the cap — the caller
+    then keeps the route's normal failure contract. Only transient read
+    failures call this; the deliberate `ObservabilityReadUnavailable` isolation
+    is not a candidate.
+    """
+    last_good = cache_get_last_good(hours, max_age_s=settings.display.stats_dashboard_stale_max_s)
+    if last_good is None:
+        return None
+    _log.warning(
+        "GET /api/stats/dashboard: recompute failed (%s) — serving stale last-good response",
+        reason,
+    )
+    _emit_stale(reason)
+    return last_good.model_copy(update={"stale": True})
 
 
 def _utc_midnight(value: datetime | date) -> datetime:

@@ -34,6 +34,7 @@ from shared.events.system import (
     ResolvedMarker,
     ScheduleStalled,
     SseLifecycle,
+    StatsDashboardStale,
     TelemetryReadRecovered,
     TelemetryReadStale,
     WatchdogTick,
@@ -380,6 +381,13 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         "the fleet-graph route served the stale/last-good graph after a degraded "
         "upstream read — one event per degradation episode, not per poll",
         payload=FleetGraphStale,
+        tier="anomaly",
+    ),
+    "stats_dashboard_stale": _telemetry(
+        "stats_dashboard_stale",
+        "the stats-dashboard route served its last-good response after a failed "
+        "recompute — one event per degradation episode, not per poll",
+        payload=StatsDashboardStale,
         tier="anomaly",
     ),
     "prom_query_failed": EventSpec(
