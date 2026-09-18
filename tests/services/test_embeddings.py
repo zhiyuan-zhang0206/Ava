@@ -31,6 +31,7 @@ from services.memory_indexer.embeddings.gemini import (
     DIM,
     GeminiEmbeddingProvider,
 )
+from shared.lm._plugin_providers import ensure_provider_plugins_loaded
 
 
 def _provider() -> GeminiEmbeddingProvider:
@@ -172,6 +173,18 @@ def _assert_unpriced_embedding_span(tracer: _RecordingTracer, *, tok_in: int) ->
     assert span.attributes["ava.billing.usage_kind"] == "embedding"
     assert span.attributes["ava.billing.cost"] == 0.0
     assert span.attributes["ava.billing.unpriced"] is True
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _load_provider_plugins() -> None:
+    """Load the provider plugins so `vendor_of_model` can resolve a vendor.
+
+    The billing-span assertions need one: `_log_usage` skips span emission
+    when `vendor_of_model` returns None, and a bare registry resolves
+    nothing — so without this the file only passed when an earlier test
+    module in the same worker happened to load the plugins (#4031).
+    """
+    ensure_provider_plugins_loaded()
 
 
 @pytest.fixture(autouse=True)
