@@ -205,8 +205,13 @@ async def settle_checkpoint(
         await asyncio.to_thread(mark_plugin_applied, session["id"], version, incarnation)
     if session["automatic"] and session["handoff_applied_at"] is None:
         from agent.impersonation_handoff import deliver_handoff
+        from shared.impersonation import aborted_detail
 
-        await deliver_handoff(graph, session, incarnation)
+        # A supervisor-aborted lease (task #3998) carries its death cause as
+        # "aborted: <detail>" in rejection_reason; the end note names it.
+        await deliver_handoff(
+            graph, session, incarnation, reason=aborted_detail(session.get("rejection_reason"))
+        )
     return False
 
 
@@ -214,13 +219,23 @@ async def settle_checkpoint(
 
 _RELAY_READY_TIMEOUT_S = 30.0
 _RELAY_READY_POLL_S = 1.0
-_RELAY_RESPAWN_MIN_SECONDS = 60.0
+
+# Fresh-start plumbing (task #3998): captured at import, i.e. at this process's
+# start. Monotonic for the window age; wall-clock for comparing DB heartbeat
+# timestamps against this process's own boot.
+_PROCESS_STARTED_MONOTONIC = time.monotonic()
+_PROCESS_STARTED_WALL = datetime.now(UTC)
+
+# Agents whose current lease saw one not-alive pass with unreadable
+# (denied/unknown) anchors: the second consecutive pass aborts. Keyed to the
+# lease id it was recorded for, so a successor lease never inherits a verdict.
+_anchor_obscured: dict[int, str] = {}
 
 
 class _RelayChild:
     """The native runtime's bound relay for one lease, spawned at activation."""
 
-    __slots__ = ("last_spawn_attempt", "lease_id", "process", "spawned_at", "token")
+    __slots__ = ("lease_id", "process", "spawned_at", "token")
 
     def __init__(
         self,
@@ -233,7 +248,6 @@ class _RelayChild:
         self.process = process
         self.token = token
         self.spawned_at = spawned_at
-        self.last_spawn_attempt = spawned_at
 
 
 # Keyed by agent: the agent-host service drives several agents in one process.
@@ -250,6 +264,7 @@ def drop_relay_supervision(agent_id: int) -> None:
     relay that keeps running until then is still delivering real messages.
     """
     _relay_children.pop(agent_id, None)
+    _anchor_obscured.pop(agent_id, None)
 
 
 def _spawn_codex_relay(
@@ -431,22 +446,89 @@ def _roll_back_relay_failure(
     return False
 
 
+def _provider_anchor_states(process_metadata: object) -> list[str]:
+    """The lease's recorded provider anchors classified against the live table."""
+    from shared._impersonation_store import provider_anchor_states
+
+    return provider_anchor_states(process_metadata)
+
+
+def _reprovision_window_active() -> bool:
+    """Whether the fresh-start window for the codex re-provision carve-out is open."""
+    from shared.config import settings
+
+    window = float(settings.agent.impersonation_reprovision_window_seconds)
+    return window > 0 and (time.monotonic() - _PROCESS_STARTED_MONOTONIC) <= window
+
+
+def _relay_beat_predates_boot(heartbeat: datetime | None) -> bool:
+    """No heartbeat, or the last beat predates this process start.
+
+    A relay that beat after this process booted died under our watch; the
+    carve-out only re-provisions the restart-shaped loss (task #3998).
+    """
+    if heartbeat is None:
+        return True
+    if heartbeat.tzinfo is None:
+        heartbeat = heartbeat.replace(tzinfo=UTC)
+    return heartbeat < _PROCESS_STARTED_WALL
+
+
+async def _abort_for_death(
+    session: dict[str, Any], agent_id: int, component: str, detail: str
+) -> bool:
+    """Stop the lease after a core-component death; emits impersonation_aborted."""
+    from shared.impersonation import ImpersonationError, abort_lease
+
+    incarnation = current_incarnation(agent_id)
+    if incarnation is None:
+        return False
+    try:
+        ended = await asyncio.to_thread(abort_lease, session["id"], incarnation, detail)
+    except (ImpersonationError, RuntimeError):
+        return False
+    if ended is None:
+        return False
+    from shared.log import logger
+
+    logger.warning(
+        "impersonation stopped after a core-component death: {detail}",
+        event="impersonation_aborted",
+        agent_id=agent_id,
+        lease_id=str(session["id"]),
+        session_id=session.get("session_id"),
+        component=component,
+        detail=detail,
+    )
+    return True
+
+
 async def supervise_relay(session: dict[str, Any] | None, agent_id: int) -> None:
-    """Respawn a dead bound relay, or tear it down — the native supervision seam.
+    """Stop the takeover when a core component died -- the native supervision seam.
 
     Two call sites: the claim gate (native loop paused or resuming) and the
     held-controls pass while an active lease parks the agent outside the graph
-    (services/agent_host/host.py `_apply_held_controls`). The claim gate never
-    runs during an active lease, so the held-controls path is the lease's only
-    native supervision point there; the dispatcher's pending scan keeps waking
-    agents with an open lease, giving it a periodic trigger even without
-    inbound traffic.
+    (services/agent_host/host.py `_apply_held_controls`). The dispatcher's
+    pending scan keeps waking agents with an open lease, giving the seam a
+    periodic trigger even without inbound traffic (task #3998).
 
-    Hot-path cost (fresh heartbeat): one `native_status` read plus a datetime
-    comparison — no model calls, no graph work, no polling. Only a stale
-    heartbeat escalates: at most one provision write, one relay spawn, and the
-    rate-limited failure stamp. The relay itself heartbeats the lease row; a
-    stale heartbeat with pending inbound must not be silent.
+    Judgment (the 2026-09-19 variant-A ruling):
+    - component A -- the executor: the recorded provider anchors all gone
+      (dead/reused) stop the lease; a single unreadable pass (AccessDenied /
+      unknown) waits for a second consecutive pass; no anchors at all is
+      skipped, never read as "all dead".
+    - component B -- the bound relay: a stale heartbeat stops the lease. The one
+      narrow exception: a codex relay this process never minted (restart), whose
+      durable mint mark belongs to an earlier incarnation and whose last beat
+      predates this process start, may be re-provisioned -- only inside the
+      fresh-start window (AVA_IMPERSONATION_REPROVISION_WINDOW_SECONDS).
+    - a claude controller-session relay can never be re-provisioned from here:
+      a stale heartbeat always stops the lease.
+
+    Hot-path cost (fresh heartbeat): one `native_status` read, the anchor
+    classification and a datetime comparison -- no model calls, no graph work.
+    Only a stale heartbeat escalates: at most one provision write, one relay
+    spawn, and the rate-limited failure stamp.
     """
     from shared.impersonation import (
         ImpersonationError,
@@ -464,36 +546,74 @@ async def supervise_relay(session: dict[str, Any] | None, agent_id: int) -> None
         return
     if session["status"] != "active":
         return
+
+    # Component A: the executor's recorded process chain.
+    states = _provider_anchor_states(session.get("process_metadata"))
+    if states:
+        if "alive" in states:
+            _anchor_obscured.pop(agent_id, None)
+        elif set(states) <= {"dead", "reused"} or _anchor_obscured.get(agent_id) == session["id"]:
+            _anchor_obscured.pop(agent_id, None)
+            await _abort_for_death(session, agent_id, "executor", "the executor process is gone")
+            return
+        else:
+            # Unreadable or unknown anchors: one more pass before the verdict.
+            _anchor_obscured[agent_id] = session["id"]
+            return
+
     if _heartbeat_fresh(session["relay_heartbeat_at"]):
         return
+
+    # Component B: the bound relay.
     if session["relay_provider"] != "codex":
-        # A controller-session relay (claude) cannot be respawned from here:
-        # stamp the failure durably and let the controller's own supervision
-        # see it. The wake path also alerts on delivery.
-        await asyncio.to_thread(_stamp_relay_failure, session, agent_id, record_relay_failure)
+        # A controller-session relay (claude) cannot be re-provisioned from
+        # here and has no native-side mint record to read: a stale heartbeat
+        # stops the lease (task #3998, variant A).
+        await _abort_for_death(session, agent_id, "relay", "the bound relay stopped heartbeating")
         return
     now = time.monotonic()
-    if child is not None and child.process.poll() is None:
-        if now - child.spawned_at < _RELAY_READY_TIMEOUT_S:
-            return  # startup grace: a fresh spawn may not have heartbeated yet
-        await asyncio.to_thread(_terminate_relay, child)  # alive but silent: hung
-    if child is not None and now - child.last_spawn_attempt < _RELAY_RESPAWN_MIN_SECONDS:
+    if (
+        child is not None
+        and child.process.poll() is None
+        and now - child.spawned_at < _RELAY_READY_TIMEOUT_S
+    ):
+        return  # startup grace: a fresh spawn may not have heartbeated yet
+    if child is not None:
+        # This process holds the handle (so it minted the credential) and the
+        # relay still stopped:
+        # stop the lease (no respawn). A live-but-silent relay is terminated
+        # here; a dead one is already gone, so the handle is simply dropped.
+        _relay_children.pop(agent_id, None)
+        await asyncio.to_thread(_terminate_relay, child)
+        await _abort_for_death(session, agent_id, "relay", "the bound relay stopped heartbeating")
+        return
+    incarnation = current_incarnation(agent_id)
+    if incarnation is None:
         await asyncio.to_thread(_stamp_relay_failure, session, agent_id, record_relay_failure)
         return
-    token = child.token if child is not None else None
-    if token is None:
-        # This process did not mint the credential (restarted mid-lease):
-        # re-provision, which also revokes any lingering duplicate relay.
-        incarnation = current_incarnation(agent_id)
-        if incarnation is None:
-            await asyncio.to_thread(_stamp_relay_failure, session, agent_id, record_relay_failure)
-            return
-        token = secrets.token_urlsafe(32)
-        try:
-            await asyncio.to_thread(provision_relay, session["id"], incarnation, token)
-        except (ImpersonationError, RuntimeError):
-            await asyncio.to_thread(_stamp_relay_failure, session, agent_id, record_relay_failure)
-            return
+    minted = session.get("relay_minted_generation")
+    if minted is not None and str(minted) == str(incarnation.generation):
+        # The durable mark says this incarnation minted the credential: the
+        # record only went missing in memory -- a plain relay death, stop.
+        await _abort_for_death(session, agent_id, "relay", "the bound relay stopped heartbeating")
+        return
+    if not (
+        _reprovision_window_active() and _relay_beat_predates_boot(session["relay_heartbeat_at"])
+    ):
+        # Outside the fresh-start window, or the relay demonstrably beat after
+        # this process started: the loss is not restart-shaped -- stop.
+        await _abort_for_death(session, agent_id, "relay", "the bound relay stopped heartbeating")
+        return
+    # Carve-out: this process never minted the relay, an earlier incarnation
+    # did, the loss predates our boot and we are inside the fresh-start window:
+    # re-provision (which also revokes any lingering credential and stamps the
+    # new mint mark in the same transaction).
+    token = secrets.token_urlsafe(32)
+    try:
+        await asyncio.to_thread(provision_relay, session["id"], incarnation, token)
+    except (ImpersonationError, RuntimeError):
+        await asyncio.to_thread(_stamp_relay_failure, session, agent_id, record_relay_failure)
+        return
     spawned_at = time.monotonic()
     _relay_children[agent_id] = _RelayChild(
         session["id"],
@@ -511,7 +631,7 @@ async def supervise_relay(session: dict[str, Any] | None, agent_id: int) -> None
     from shared.log import logger
 
     logger.warning(
-        "respawning impersonation relay after a stale heartbeat",
+        "re-provisioning impersonation relay inside the fresh-start window",
         agent_id=agent_id,
         lease_id=str(session["id"]),
     )

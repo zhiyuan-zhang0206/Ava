@@ -550,7 +550,10 @@ class AgentHost:
         dispatcher's current turn-progress clock to be stale. Expired foreign
         owners include quiet idle rows whose lease expires after boot. Wakes
         retain admission/resource fences; an empty halted claim spends no model
-        call. Held maintenance only wakes its restart cohort.
+        call. Held maintenance wakes its restart cohort; outside a hold this
+        scan also keeps the steady held rows on its cadence: an open lease
+        needs the held pass's pull-based supervision (task #3998), never wake
+        delivery alone.
         """
         held_wakes = maintenance_receipts.pending_wakes(self._maintenance_failed)
         if held_wakes is not None:
@@ -602,14 +605,7 @@ class AgentHost:
                     "      AND m.runtime_owner IS NOT NULL AND m.last_turn_fatal_at IS NULL "
                     "      AND m.runtime_owner IS DISTINCT FROM %s "
                     "      AND (m.lease_expires_at IS NULL OR m.lease_expires_at<=now()))) "
-                    "  AND m.machine = %s "
-                    "  AND (m.runtime_owner IS DISTINCT FROM %s OR NOT EXISTS ("
-                    "    SELECT 1 FROM agent_impersonations held "
-                    "    WHERE held.agent_id=m.id AND held.status='active' "
-                    "    AND held.expires_at>clock_timestamp()) "
-                    "    OR EXISTS (SELECT 1 FROM inbound_messages control "
-                    "    WHERE control.agent_id=m.id AND control.status IN ('pending','claimed') "
-                    "    AND control.kind IN ('restart','terminate')))",
+                    "  AND m.machine = %s ",
                     (
                         stale_after_s,
                         stale_after_s,
@@ -619,7 +615,6 @@ class AgentHost:
                         stale_after_s,
                         self._owner,
                         self._machine,
-                        self._owner,
                     ),
                 )
             ).fetchall()

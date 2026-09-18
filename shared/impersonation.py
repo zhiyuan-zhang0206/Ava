@@ -584,9 +584,13 @@ def provision_relay(
 ) -> dict[str, Any]:
     """Mint or re-mint the scoped relay credential on the lease row.
 
-    Called by the accepting native runtime at activation (codex) and again
-    when it respawns a dead relay. Re-provisioning revokes any earlier relay
-    credential, so a slow-dying duplicate relay loses authority and exits.
+    Called by the accepting native runtime at activation (codex) and again when
+    a restart lost the in-memory handle inside its fresh-start window (task
+    #3998). Re-provisioning revokes any earlier relay credential, so a
+    slow-dying duplicate relay loses authority and exits. The durable mint mark
+    (timestamp + minting incarnation, task #3998) is written in the same
+    transaction; the supervisor reads it after a restart to tell an earlier
+    incarnation's mint from "never minted".
     """
     with write_transaction() as conn:
         require_native(conn, incarnation)
@@ -602,8 +606,10 @@ def provision_relay(
         ):
             raise ImpersonationError("Relay provisioning belongs to the accepting incarnation")
         conn.execute(
-            "UPDATE agent_impersonations SET relay_token_hash=%s WHERE id=%s",
-            (token_hash(relay_token), lease_id),
+            "UPDATE agent_impersonations SET relay_token_hash=%s,"
+            "relay_minted_at=clock_timestamp(),relay_minted_generation=%s,"
+            "relay_minted_owner=%s WHERE id=%s",
+            (token_hash(relay_token), incarnation.generation, incarnation.owner, lease_id),
         )
         return public(lock_lease(conn, lease_id))
 
@@ -669,6 +675,66 @@ def record_relay_failure(lease_id: str, incarnation: RuntimeIncarnation) -> bool
             (lease_id, _RELAY_FAILURE_STAMP_SECONDS),
         ).fetchone()
     return row is not None
+
+
+_ABORTED_REASON_PREFIX = "aborted: "
+
+
+def aborted_detail(reason: object) -> str | None:
+    """The component-death detail of a supervisor-aborted lease, else None."""
+    if not isinstance(reason, str) or not reason.startswith(_ABORTED_REASON_PREFIX):
+        return None
+    return reason.removeprefix(_ABORTED_REASON_PREFIX).strip() or None
+
+
+def abort_lease(
+    lease_id: str, incarnation: RuntimeIncarnation, detail: str
+) -> dict[str, Any] | None:
+    """Stop a takeover whose core component died (task #3998), like a TTL expiry.
+
+    ``detail`` is the plain death phrase ("the executor process is gone" / "the
+    bound relay stopped heartbeating"). The lease goes terminal ("expired")
+    with ``rejection_reason`` recorded as ``aborted: <detail>`` — the request's
+    own ``reason`` (its stated purpose) is preserved, and the resume chain
+    reads the prefixed marker back via ``aborted_detail``. A non-automatic
+    active lease also gets the legacy end note (the automatic note is delivered
+    by the resume chain), and pending renewal reminders are dismissed.
+    Idempotent: an already-terminal lease returns None. Every writer's lease
+    lock serializes with claim-time expiry, the TTL reaper and the terminate
+    trigger, so an abort that loses the race is a no-op here.
+    """
+    detail = detail.strip()
+    if not detail:
+        raise ValueError("A nonempty abort detail is required")
+    reason = f"{_ABORTED_REASON_PREFIX}{detail}"
+    with write_transaction() as conn:
+        require_native(conn, incarnation)
+        lease = lock_lease(conn, lease_id)
+        if lease["agent_id"] != incarnation.agent_id:
+            raise ImpersonationError("Lease abort requires the native-held lease")
+        if lease["status"] not in OPEN:
+            return None
+        inbound_id = None
+        if lease["status"] == "active" and not lease["automatic"]:
+            inbound_id = insert_handoff(
+                conn,
+                lease,
+                f"Impersonation {lease['id']} by {lease['source']} stopped — {detail}. "
+                "Control has returned; unacknowledged messages remain pending.",
+                expired=True,
+            )
+        conn.execute(
+            "UPDATE agent_impersonations SET status='expired',ended_at=clock_timestamp(),"
+            "rejection_reason=%s,summary_inbound_id=%s WHERE id=%s",
+            (reason, inbound_id, lease_id),
+        )
+        dismiss_reminders(conn, lease)
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute("SELECT * FROM agent_impersonations WHERE id=%s", (lease_id,))
+            ended = cur.fetchone()
+            assert ended is not None  # noqa: S101 — locked overhead row exists
+    _wake(lease["agent_id"])
+    return public(ended)
 
 
 def relay_liveness_alert(agent_id: int) -> None:

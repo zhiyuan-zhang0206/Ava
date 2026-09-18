@@ -1680,11 +1680,15 @@ CREATE TABLE IF NOT EXISTS agent_impersonations (
     relay_token_hash TEXT,
     relay_heartbeat_at TIMESTAMPTZ,
     relay_last_failure_at TIMESTAMPTZ,
+    relay_minted_at TIMESTAMPTZ,
+    relay_minted_generation UUID,
+    relay_minted_owner UUID,
     relay_batch_window_seconds INTEGER NOT NULL DEFAULT 0
         CHECK (relay_batch_window_seconds BETWEEN 0 AND 300),
     CHECK (applied_version >= 0 AND applied_version <= delta_version),
     CHECK (jsonb_array_length(plugin_delta) = delta_version),
     CHECK ((accepted_generation IS NULL) = (accepted_owner IS NULL)),
+    CHECK ((relay_minted_generation IS NULL) = (relay_minted_owner IS NULL)),
     CHECK (
         (relay_provider IS NULL
             AND relay_thread_id IS NULL
@@ -2174,3 +2178,7 @@ INSERT INTO schema_migrations (name) VALUES ('20260918T031422_last-permanent-rej
 -- The tail kind + the worker-state delta column are represented above. Fresh
 -- DBs stamp the migration instead of replaying the ALTER delta.
 INSERT INTO schema_migrations (name) VALUES ('20260918T113600_hierarchy-tail-seal');
+
+-- The relay mint mark columns are represented above. Fresh DBs stamp the
+-- migration instead of replaying the strict ADD COLUMN delta.
+INSERT INTO schema_migrations (name) VALUES ('20260919T020500_impersonation-relay-minted');
