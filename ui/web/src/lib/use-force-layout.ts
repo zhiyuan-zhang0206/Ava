@@ -68,6 +68,12 @@ export interface ForceLayoutOptions {
   // without raising gravity, which would drown the Repulsion knob entirely.
   // A fixed per-view constant, applied at build; not a user-tunable param.
   chargeDistanceMax?: number;
+  /** Warm-up iteration bound for large graphs (task #4008): manual steps
+   *  run in time-budgeted slices on rAF — no per-tick events, so positions
+   *  commit explicitly as the layout settles and each frame stays under the
+   *  slice budget. Stops early at alphaMin; 0 (default) keeps the original
+   *  live-timer settle. */
+  prewarmTicks?: number;
 }
 
 /**
@@ -95,6 +101,9 @@ export function useForceLayout(
   const linkRef = useRef<ForceLink<SimNode, SimLink> | null>(null);
   const fxRef = useRef<ForceX<SimNode> | null>(null);
   const fyRef = useRef<ForceY<SimNode> | null>(null);
+  // True while a warm-up slice loop owns the simulation (task #4008): the
+  // live-apply effect must not restart the timer out from under it.
+  const warmupRef = useRef(false);
 
   // Latest force params, read by the build effect (which is keyed on the
   // node/edge signature, not params) so a rebuild always uses the current knobs.
@@ -187,32 +196,88 @@ export function useForceLayout(
     if (fx) sim.force("x", fx);
     if (fy) sim.force("y", fy);
 
-    // Frame counter: throttle React state updates during simulation.
-    let frameCount = 0;
-    sim.on("tick", () => {
-      frameCount++;
+    const snapshot = (): Map<number | string, Pos> => {
       const snap = new Map<number | string, Pos>();
       for (const s of simNodes) {
         if (s.x != null && s.y != null) snap.set(s.id, { x: s.x, y: s.y });
       }
+      return snap;
+    };
+
+    // Task #4008: large graphs warm up in time-budgeted slices. The plain
+    // timer path couples one step per frame with an every-second-tick React
+    // render of every element; here manual steps (which dispatch no events)
+    // run under a per-frame budget and commit positions explicitly — the
+    // graph paints early and stays interactive while the layout settles.
+    const prewarm = optionsRef.current.prewarmTicks ?? 0;
+    let warmRaf: number | null = null;
+    let warmTicks = 0;
+    if (prewarm > 0) {
+      sim.stop();
+      sim.alpha(0.9);
+      warmupRef.current = true;
+      let slices = 0;
+      const slice = (): void => {
+        warmRaf = null;
+        const t0 = performance.now();
+        while (
+          sim.alpha() > sim.alphaMin() &&
+          warmTicks < prewarm &&
+          performance.now() - t0 < 12
+        ) {
+          sim.tick();
+          warmTicks += 1;
+        }
+        slices += 1;
+        const done = sim.alpha() <= sim.alphaMin() || warmTicks >= prewarm;
+        // Commit early once (the graph paints almost immediately) and then
+        // sparsely — each commit repaints the whole SVG, so a full-graph
+        // render is the expensive unit here, not the tick.
+        if (done || slices <= 2 || slices % 32 === 0) {
+          const snap = snapshot();
+          posRef.current = snap;
+          setPositions(snap);
+        }
+        if (!done) {
+          warmRaf = requestAnimationFrame(slice);
+        } else {
+          warmupRef.current = false;
+          if (sim.alpha() > sim.alphaMin()) {
+            sim.restart();
+          }
+        }
+      };
+      warmRaf = requestAnimationFrame(slice);
+    }
+
+    // Frame counter: throttle React state updates during simulation.
+    let frameCount = 0;
+    sim.on("tick", () => {
+      frameCount++;
+      const snap = snapshot();
       posRef.current = snap;
       // Throttle to every 2nd frame (~30 fps React renders).
       if (frameCount % 2 !== 0) return;
       setPositions(snap);
     });
     sim.on("end", () => {
-      const snap = new Map<number | string, Pos>();
-      for (const s of simNodes) {
-        if (s.x != null && s.y != null) snap.set(s.id, { x: s.x, y: s.y });
-      }
+      const snap = snapshot();
       posRef.current = snap;
       setPositions(snap);
     });
-    sim.alpha(0.9).restart();
+    if (prewarm > 0) {
+      // Resume only the residual decay; the warmed alpha keeps the tail short
+      // (and it is empty when the warm-up already reached alphaMin).
+      if (sim.alpha() > sim.alphaMin()) sim.restart();
+    } else {
+      sim.alpha(0.9).restart();
+    }
     simRef.current = sim;
 
     return () => {
       sim.stop();
+      warmupRef.current = false;
+      if (warmRaf != null) cancelAnimationFrame(warmRaf);
     };
   }, [signature]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -251,6 +316,9 @@ export function useForceLayout(
       fyRef.current = null;
     }
     sim.alphaDecay(params.alphaDecay);
+    // The warm-up slice loop owns the simulation until it finishes; restarting
+    // here would put the timer render path back mid-warm-up (task #4008).
+    if (warmupRef.current) return;
     sim.alpha(0.3).restart();
   }, [params]);
 
