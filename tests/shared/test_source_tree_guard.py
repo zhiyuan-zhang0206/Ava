@@ -90,6 +90,23 @@ def test_whitelisted_runtime_artifacts_are_not_violations(
     assert stg.source_tree_violations(repo) == ()
 
 
+def test_gitignored_paths_are_not_violations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Gitignored runtime paths need no whitelist entry: the detector never
+    sees them (the documented contract — e.g. the ci_accounting ledger at
+    ``scripts/ci_usage/``)."""
+    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / "no-home")
+    repo = _init_source(tmp_path / "source")
+    (repo / ".gitignore").write_text("scripts/ci_usage/\n")
+    _git(repo, "add", ".gitignore")
+    _git(repo, "commit", "-m", "ignore ci usage ledger")
+    (repo / "scripts" / "ci_usage").mkdir(parents=True)
+    (repo / "scripts" / "ci_usage" / "ledger.jsonl").write_text("{}\n")
+
+    assert stg.source_tree_violations(repo) == ()
+
+
 def test_tracked_modification_is_a_violation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -259,6 +276,27 @@ def test_repair_cleans_untracked_and_keeps_whitelist(
     assert (repo / "frontend" / ".next" / "build.txt").exists()
     assert repair.cleaned == ("junk.txt", "junkdir/inner.txt")
     assert repair.kept_whitelisted == ("frontend/.next/build.txt",)
+
+
+def test_repair_keeps_gitignored_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The clean step (``git clean -fd``, no ``-x``) leaves gitignored runtime
+    data in place, so the ledger survives repairs like a whitelisted artefact."""
+    repo = _init_source(tmp_path / "source")
+    (repo / ".gitignore").write_text("scripts/ci_usage/\n")
+    _git(repo, "add", ".gitignore")
+    _git(repo, "commit", "-m", "ignore ci usage ledger")
+    monkeypatch.setattr("shared.source_integrity.get", lambda: _git(repo, "rev-parse", "HEAD"))
+    ledger = repo / "scripts" / "ci_usage" / "ledger.jsonl"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text("{}\n")
+
+    repair = stg.repair_source_tree(repo)
+
+    assert repair is not None
+    assert repair.errors == ()
+    assert repair.cleaned == ()
+    assert repair.kept_whitelisted == ()
+    assert ledger.exists()
 
 
 def test_repair_emits_telemetry_when_it_acts(
