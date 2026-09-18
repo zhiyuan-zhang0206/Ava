@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { RunTimelineChart } from "@/components/run-timeline/run-timeline-chart";
+import type { TimelineCrumbEntry } from "@/components/run-timeline/run-timeline-crumbs";
 import {
   bucketLabel,
   centerZoomWindow,
@@ -63,6 +64,8 @@ export default function RunTimelinePage({
   const windowReady = selectedWindowOverride !== undefined || initialWindowOverride !== null;
   const [fromInput, setFromInput] = useState("");
   const [toInput, setToInput] = useState("");
+  const [flipLayers, setFlipLayers] = useState(false);
+  const [trail, setTrail] = useState<TimelineCrumbEntry[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -131,6 +134,7 @@ export default function RunTimelinePage({
   };
 
   const setZoomWindow = (hours: number) => {
+    setTrail([]);
     const now = new Date();
     const presetSpanMs = hours * 60 * 60 * 1000;
     const next = timeline
@@ -153,6 +157,25 @@ export default function RunTimelinePage({
     setWindowOverride(null);
     setFromInput("");
     setToInput("");
+    setTrail([]);
+  };
+
+  /** P4-1 (#4023): double-click focus — pushes a crumb, then moves the window. */
+  const focusWindow = (next: TimelineWindowOverride, label: string) => {
+    setTrail((previous) => [...previous, { label, from: next.from, to: next.to }]);
+    selectWindow(next);
+  };
+
+  /** P4-1: a crumb restores its range; the root crumb returns to the initial window. */
+  const selectCrumb = (index: number) => {
+    if (index < 0) {
+      resetWindow();
+      return;
+    }
+    const entry = trail.at(index);
+    if (!entry) return;
+    setTrail((previous) => previous.slice(0, index + 1));
+    selectWindow({ from: entry.from, to: entry.to });
   };
 
   const drillBucket = (row: RunTimelineResponse["rows"][number]) => {
@@ -170,6 +193,7 @@ export default function RunTimelinePage({
     const from = new Date(selectedFromInput);
     const to = new Date(selectedToInput);
     if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from >= to) return;
+    setTrail([]);
     setWindowOverride({ from: from.toISOString(), to: to.toISOString() });
   };
 
@@ -233,7 +257,7 @@ export default function RunTimelinePage({
               <button
                 type="button"
                 aria-label={t("zoomOut")}
-                onClick={() => zoomBy(2)}
+                onClick={() => zoomBy(1.6)}
                 className="rounded border border-border px-2 py-1 font-mono text-xs hover:bg-muted"
               >
                 −
@@ -241,10 +265,22 @@ export default function RunTimelinePage({
               <button
                 type="button"
                 aria-label={t("zoomIn")}
-                onClick={() => zoomBy(0.5)}
+                onClick={() => zoomBy(0.625)}
                 className="rounded border border-border px-2 py-1 font-mono text-xs hover:bg-muted"
               >
                 +
+              </button>
+              <button
+                type="button"
+                aria-pressed={flipLayers}
+                aria-label={t("flipLayers")}
+                onClick={() => setFlipLayers((value) => !value)}
+                className={cn(
+                  "rounded border px-2 py-1 font-mono text-xs",
+                  flipLayers ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted",
+                )}
+              >
+                {t("flipLayers")}
               </button>
               <button
                 type="button"
@@ -363,6 +399,11 @@ export default function RunTimelinePage({
                 onDrillBucket={drillBucket}
                 onZoomWindow={selectWindow}
                 showSummaries={showTimelineSummaries}
+                flipLayers={flipLayers}
+                trail={trail}
+                onCrumbSelect={selectCrumb}
+                onFocusWindow={focusWindow}
+                withReadout
               />
             </>
           ) : timelinePending ? (
