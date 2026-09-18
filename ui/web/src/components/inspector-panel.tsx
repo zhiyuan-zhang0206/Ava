@@ -760,11 +760,12 @@ function ActivitySection({ inspect }: { inspect: AgentInspectStatistics }) {
 
 /**
  * Liveness — one merged section (Task #1195, user ruling 2026-08-12) with
- * five cells: machine and lifecycle status (moved here from the tree row and
- * the conversation header by task #3904), agent birth, next heartbeat, and
- * last pause. The gateway-owned derived liveness state colors the HeartPulse
- * icon when offline. The "every N" badge and old "Last judged" cell remain
- * omitted.
+ * five cells in display order: agent birth, next heartbeat, last pause, then
+ * machine and lifecycle status (moved here from the tree row and the
+ * conversation header by task #3904; ordered to trail the heartbeat cells
+ * per the user's 2026-09-18 field-order report, task #3952). The
+ * gateway-owned derived liveness state colors the HeartPulse icon when
+ * offline. The "every N" badge and old "Last judged" cell remain omitted.
  */
 /** Lifecycle status → its agentRow label. The conversation header used to
  *  capitalize the raw value; the status renders in Liveness now (task #3904). */
@@ -789,11 +790,6 @@ function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
   return (
     <Section icon={<HeartPulse className={cn("size-3", offline && "text-destructive")} />} title={t("sectionLiveness")}>
       <div className="grid grid-cols-2 gap-1">
-        <Metric label={t("metricMachine")} value={inspect.machine} />
-        <Metric
-          label={t("metricStatus")}
-          value={statusKey ? tStatus(statusKey as Parameters<typeof tStatus>[0]) : inspect.status}
-        />
         <Metric
           className="col-span-2"
           label={t("metricBirth")}
@@ -807,6 +803,11 @@ function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
               ? `${formatRelative(lastPause.at)} · ${formatInterval(Math.round(lastPause.duration_s))}`
               : t("neverPaused")
           }
+        />
+        <Metric label={t("metricMachine")} value={inspect.machine} />
+        <Metric
+          label={t("metricStatus")}
+          value={statusKey ? tStatus(statusKey as Parameters<typeof tStatus>[0]) : inspect.status}
         />
       </div>
     </Section>
