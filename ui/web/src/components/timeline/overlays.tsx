@@ -15,6 +15,10 @@ export interface PullToLoadIndicatorProps {
   pullDistance: number;
   pullThreshold?: number;
   loadingOlder: boolean;
+  /** Task #3932: the load control is embedded in the topmost divider row and
+   *  carries the loading feedback itself (pill spinner) — the ring then serves
+   *  the pull gesture only, staying hidden while pullDistance is 0. */
+  inlineLoadControl?: boolean;
 }
 
 // Pull-down-to-load indicator — circular progress ring that fills up as the user
@@ -25,10 +29,14 @@ export function PullToLoadIndicator({
   pullDistance,
   pullThreshold = 56,
   loadingOlder,
+  inlineLoadControl = false,
 }: PullToLoadIndicatorProps) {
   const t = useTranslations("timeline");
   const progress = Math.min(1, Math.max(0, pullDistance / pullThreshold));
-  const isVisible = loadingOlder || pullDistance > 0;
+  // With the control inline (task #3932), the pill is the loading feedback —
+  // the ring would stack a second spinner on the same spot, so it surfaces
+  // only while the pull gesture itself is in progress.
+  const isVisible = pullDistance > 0 || (loadingOlder && !inlineLoadControl);
   const isFilled = progress >= 1;
 
   const radius = 7;

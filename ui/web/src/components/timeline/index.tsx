@@ -1114,7 +1114,7 @@ export function TimelineView({
 
   return (
     <div ref={wrapperRef} className={cn("relative", FLEX_1, MIN_H_0, OVERFLOW_HIDDEN)}>
-      <PullToLoadIndicator pullDistance={pullDistance} pullThreshold={PULL_THRESHOLD_PX} loadingOlder={loadingOlder} />
+      <PullToLoadIndicator pullDistance={pullDistance} pullThreshold={PULL_THRESHOLD_PX} loadingOlder={loadingOlder} inlineLoadControl={topDividerLoadsOlder} />
       <LoadOlderButton
         visible={atTop && hasMoreOlder && !loadingOlder && pullDistance === 0 && !topDividerLoadsOlder}
         onClick={handleLoadOlderClick}

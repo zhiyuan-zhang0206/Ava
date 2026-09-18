@@ -371,6 +371,22 @@ describe("compact history segment dividers", () => {
     expect(dividers[0].getAttribute("data-load-control")).toBeNull();
     expect(screen.getByText("Original history before compact")).toBeTruthy();
   });
+
+  it("hides the pull ring's loader while the inline control carries the loading state (task #3932)", () => {
+    const items = [
+      makeItem({ item_id: "s1.old-boundary.0.0", kind: "agent_chat", payload: "old" }),
+      makeItem({ item_id: "1.0", kind: "agent_chat", payload: "current" }),
+    ];
+    render(<TimelineView items={items} hasMoreOlder loadingOlder onLoadOlder={vi.fn()} />);
+    // One loading feedback, not two: the row's pill spins, while the ring
+    // stays a pull-gesture indicator (shown only while pullDistance > 0).
+    const ring = screen.getByTestId("pull-down-load-indicator");
+    expect(ring.getAttribute("aria-hidden")).toBe("true");
+    expect(ring.className).toContain("opacity-0");
+    expect(
+      screen.getByTestId("load-older-divider").querySelector("svg")?.getAttribute("class"),
+    ).toContain("animate-spin");
+  });
 });
 
 // Inter-agent / system inbound / compaction / framework-note markers default
