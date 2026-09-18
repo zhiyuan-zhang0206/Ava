@@ -211,7 +211,7 @@ class GeneralSettings(EnvSettings):
     machine_serve_gateway: bool | None = Field(
         default=None,
         alias="AVA_MACHINE_SERVE_GATEWAY",
-        description="Whether this host serves the gateway capability (Postgres/Redis + HTTP gateway + gateway daemons). A host serves gateway and/or agent-runner; at least one must be true. None = fall back to the `$AVA_HOME/machine_serve_gateway` file.",
+        description="Whether this host serves the gateway capability (Postgres/Redis + HTTP gateway + gateway daemons). A host serves gateway and/or agent-runner and/or observability-station; at least one must be true. None = fall back to the `$AVA_HOME/machine_serve_gateway` file.",
         json_schema_extra={
             "restart_required": "all",
             "writable": False,
@@ -224,7 +224,7 @@ class GeneralSettings(EnvSettings):
     machine_serve_agent_runner: bool | None = Field(
         default=None,
         alias="AVA_MACHINE_SERVE_AGENT_RUNNER",
-        description="Whether this host serves the agent-runner capability (agent host, ops server, and watchdog). A host serves gateway and/or agent-runner; at least one must be true. None = fall back to the `$AVA_HOME/machine_serve_agent_runner` file.",
+        description="Whether this host serves the agent-runner capability (agent host, ops server, and watchdog). A host serves gateway and/or agent-runner and/or observability-station; at least one must be true. None = fall back to the `$AVA_HOME/machine_serve_agent_runner` file.",
         json_schema_extra={
             "restart_required": "all",
             "writable": False,

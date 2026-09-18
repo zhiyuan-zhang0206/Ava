@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Machine Identity & Capabilities
-description: '`shared/machine.py` — this host''s stable name plus its capability SET (`gateway` and/or `agent-runner`). A host runs the union of its capabilities'' services; the `machines` table is the cluster-wide view of the same two labels.'
+description: '`shared/machine.py` — this host''s stable name plus its capability SET (`gateway` / `agent-runner` / `observability-station`, any subset). A host runs the union of its capabilities'' services; the `machines` table is the cluster-wide view of the same two labels.'
 tags:
 - shared
 - library
@@ -20,30 +20,32 @@ Two labels define a host in a multi-machine deployment, both resolved by
   from it. Deliberately **not** `socket.gethostname()`, which drifts on macOS
   when switching wifi.
 - **`machine_role()`** — a **frozenset** of capabilities, not a single role.
-  Prefer `is_gateway()` / `is_agent_runner()` over comparing the set.
+  Prefer `is_gateway()` / `is_agent_runner()` / `is_observability_station()`
+  over comparing the set.
 
 Precedence for both: env var > `$AVA_HOME/<field>` file > fail loud
-(`MachineNameMissing` / `MachineRoleMissing`). The role comes from two
-*independent* booleans — `AVA_MACHINE_SERVE_GATEWAY` and
-`AVA_MACHINE_SERVE_AGENT_RUNNER` — so a single box is not a third role, just
-both flags true.
+(`MachineNameMissing` / `MachineRoleMissing`). The role comes from three
+*independent* booleans — `AVA_MACHINE_SERVE_GATEWAY` /
+`AVA_MACHINE_SERVE_AGENT_RUNNER` / `AVA_MACHINE_SERVE_OBSERVABILITY_STATION` —
+so a single box is not a third role, just the relevant flags true.
 
 There is **no TTY prompt**: `ava start` writes the files from its flags, and a
 missing value prints an actionable error and exits 1. An agent calling `ava`
 (e.g. `ava cluster status`) has no TTY and would hang on a prompt.
 
-## The two capabilities
+## The capabilities
 
 | Capability | Owns | Data plane it uses |
 |---|---|---|
 | `gateway` | the HTTP gateway + this cluster's Postgres / Redis / Milvus + the gateway-side daemons | its own local instances |
 | `agent-runner` | the agent host + the ops server | its own local instances when the host is also `gateway`; otherwise a gateway node's, via `AVA_DB_URL` / `AVA_REDIS_URL` / `AVA_MILVUS_URI` in its `.env` |
+| `observability-station` | the native LGTM observability backends (Loki / Prometheus / Grafana) — the declarative form of the `$AVA_HOME/lgtm-host` marker | none of its own — native processes on this host; Grafana dials Loki / Prometheus / Postgres over the host loopback |
 
 A host runs the **union** of its capabilities' services — the per-service
 capability declaration is `ServiceSpec.capabilities` in `ops/spec.py`, and the
 resulting roster is documented in [[../services/services.ava.okf.md]]. A **single box**
 (`gateway,agent-runner`) is therefore not a special case in the code, just the
-host where both sets are non-empty and the reachable address is loopback.
+host with several non-empty capability sets and the loopback reachable address.
 
 **Only one gateway per cluster.** The labeler / heartbeat / report /
 memory-indexer daemons would race on the same DB rows if two ran, and one

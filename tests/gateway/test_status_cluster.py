@@ -548,7 +548,7 @@ class TestProbeAgentRunner:
         from datetime import UTC, datetime
 
         async def fake_enqueue(*_a: object, **_kw: object) -> dict[str, object]:
-            # Missing the required serve_gateway / serve_agent_runner fields.
+            # Missing the required serve_gateway / serve_agent_runner / serve_observability_station fields.
             return {"machine_name": "wsl", "paused": True}
 
         monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", fake_enqueue)

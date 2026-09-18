@@ -22,13 +22,14 @@ wifi).
 Precedence:
 - machine_name: env `AVA_MACHINE_NAME` > `$AVA_HOME/machine_name` file >
   MachineNameMissing.
-- machine_role: derived from two independent capability flags, each resolved
-  env `AVA_MACHINE_SERVE_GATEWAY` / `AVA_MACHINE_SERVE_AGENT_RUNNER` (bool) >
-  `$AVA_HOME/machine_serve_gateway` / `machine_serve_agent_runner` file >
+- machine_role: derived from independent capability flags, each resolved env
+  `AVA_MACHINE_SERVE_GATEWAY` / `AVA_MACHINE_SERVE_AGENT_RUNNER` /
+  `AVA_MACHINE_SERVE_OBSERVABILITY_STATION` (bool) > `$AVA_HOME/machine_serve_gateway` /
+  `machine_serve_agent_runner` / `machine_serve_observability_station` file >
   False. A host with no capability raises MachineRoleMissing.
 
 When first passing `ava start --machine-name X --serve-gateway`, the CLI writes
-the files; if neither capability is set, it fails loud and prints an actionable
+the files; if no capability is set, it fails loud and prints an actionable
 hint. **No** TTY prompt — agent-first design, agent has no TTY and would hang.
 """
 
@@ -65,11 +66,11 @@ class MachineNameMissing(RuntimeError):  # noqa: N818 — "state description" na
 
 
 class MachineRoleMissing(RuntimeError):  # noqa: N818
-    """This host serves neither gateway nor agent-runner (both AVA_MACHINE_SERVE_* flags + files off) — multi-machine setup is incomplete."""
+    """This host serves no capability (every AVA_MACHINE_SERVE_* flag + its file off) — multi-machine setup is incomplete."""
 
 
 class MachineRoleInvalid(ValueError):  # noqa: N818
-    """role contains a token that is not 'gateway' / 'agent-runner', or is empty — typo or wrong input."""
+    """role contains a token that is not 'gateway' / 'agent-runner' / 'observability-station', or is empty — typo or wrong input."""
 
 
 class GatewayApiBaseMissing(RuntimeError):  # noqa: N818 — state description, same style as MachineNameMissing
@@ -160,9 +161,9 @@ def machine_name() -> str:
 def machine_role() -> MachineRoles:
     """Get this host's capability set. settings (env-backed) > file > raise.
 
-    Returns a frozenset of capabilities, each `gateway` or `agent-runner`; a
-    single-box host carries both. Prefer `is_gateway()` / `is_agent_runner()`
-    at branch sites.
+    Returns a frozenset of capabilities, each `gateway`, `agent-runner`, or
+    `observability-station`. Prefer `is_gateway()` / `is_agent_runner()` /
+    `is_observability_station()` at branch sites.
 
     Raises:
         MachineRoleMissing: not set.
@@ -293,7 +294,7 @@ def parse_serve_value(value: str, source: str) -> bool:
     """Parse a capability flag's textual value (a `$AVA_HOME/machine_serve_*` file)
     strictly. Blank is off; a recognized true / false token resolves; anything else
     raises. A typo (`treu`, `gateway`, `2`) must NOT silently become False — that
-    would start the host the wrong shape (e.g. gateway-only when both were meant)
+    would start the host the wrong shape (e.g. gateway-only when agent-runner was meant too)
     while looking healthy.
 
     Raises:
