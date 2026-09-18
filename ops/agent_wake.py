@@ -15,6 +15,7 @@ from shared.agents import (
     MachinePaused,
     ResurrectAlreadyAlive,
     ResurrectBudgetExhausted,
+    ResurrectRefused,
 )
 from shared.audit_events import insert_event_log
 from shared.config import field_alias, get_field, settings
@@ -150,11 +151,18 @@ def _prepare_resurrect_attempt(
     prompt: str | None,
     trigger_inbound_id: int | None,
     trigger_inbound_kind: Literal["chat", "compact_request", "system_note"] | None,
+    billing_recovery: bool = False,
 ) -> bool:
     """Commit resurrection and its optional prompt before waking the host.
 
     Returns whether this call reopened a closed agent (the explicit branch
     cleared `closed_at`), so the caller can record it on the resurrect event.
+
+    `billing_recovery=True` (the versioned `resurrect-billing-v1` action, task
+    #3919) re-checks the billing-victim contract under the same row lock: a
+    closed row or a row that is not a billing-class recovery-breaker halt is
+    refused (`ResurrectRefused`) — the batch entry never crosses the closure
+    marker and only reinstates the recorded billing cohort.
     """
     from shared.envelope import reject_unnegotiated_caller
     from shared.exec_owner_recovery import recover_local_resources
@@ -165,7 +173,9 @@ def _prepare_resurrect_attempt(
     with write_transaction() as conn, conn.cursor() as cur:
         latched_machine = _lock_active_home_machine(cur, agent_id)
         cur.execute(
-            "SELECT status,machine,closed_at FROM agents_meta WHERE id = %s FOR UPDATE", (agent_id,)
+            "SELECT status,machine,closed_at,permanent_reject_streak,last_permanent_reject_reason "
+            "FROM agents_meta WHERE id = %s FOR UPDATE",
+            (agent_id,),
         )
         row = cur.fetchone()
         if row is None:
@@ -178,6 +188,19 @@ def _prepare_resurrect_attempt(
             raise ResurrectAlreadyAlive(
                 f"agent {agent_id} is in {current.value!r} state, not 'terminated'"
             )
+        if billing_recovery:
+            from shared.recovery_breaker import (
+                HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
+                PERMANENT_REJECT_REASON_BILLING,
+            )
+
+            if row[2] is not None:
+                raise ResurrectRefused("closed")
+            if (
+                row[3] < HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
+                or row[4] != PERMANENT_REJECT_REASON_BILLING
+            ):
+                raise ResurrectRefused("not_billing_halted")
         if resurrected_by == "system":
             cur.execute(
                 "SELECT count(*) FROM inbound_messages "
@@ -232,6 +255,7 @@ def resurrect_agent(
     prompt: str | None = None,
     trigger_inbound_id: int | None = None,
     trigger_inbound_kind: Literal["chat", "compact_request", "system_note"] | None = None,
+    billing_recovery: bool = False,
 ) -> int:
     """Atomically restore native intent and enqueue lifecycle plus optional chat.
 
@@ -244,8 +268,12 @@ def resurrect_agent(
     `RECOVERY_BREAKER_CLEAR`) and an open agent (no closure marker); explicit
     manual resurrection passes no trigger and keeps its unconditional
     contract — it reopens a closed agent (clearing `closed_at`) and the audit
-    event carries `"reopened": true`. The host resumes the existing checkpoint
-    after the transaction commits.
+    event carries `"reopened": true`. The versioned billing batch-recovery
+    action (`billing_recovery=True`) is the one explicit caller that must not
+    reopen: it refuses a closed row and any non-billing-class halt
+    (`ResurrectRefused`), and marks the resurrect event payload with
+    `via='billing_recovery'`. The host resumes the existing checkpoint after
+    the transaction commits.
     """
     if (trigger_inbound_id is None) != (trigger_inbound_kind is None):
         raise ValueError("trigger inbound id and kind must be provided together")
@@ -255,10 +283,13 @@ def resurrect_agent(
         prompt=prompt,
         trigger_inbound_id=trigger_inbound_id,
         trigger_inbound_kind=trigger_inbound_kind,
+        billing_recovery=billing_recovery,
     )
     payload: dict[str, object] = {"prompt": prompt} if prompt else {}
     if reopened:
         payload["reopened"] = True
+    if billing_recovery:
+        payload["via"] = "billing_recovery"
     insert_event_log(
         event_type="resurrect",
         agent_id=agent_id,

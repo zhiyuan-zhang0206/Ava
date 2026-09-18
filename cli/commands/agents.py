@@ -31,6 +31,12 @@ from pydantic import BaseModel
 
 _TIMEOUT_S = 15.0
 
+# The billing batch performs N launch-and-confirm cycles across home machines;
+# 10 minutes bounds a fleet-scale recovery (23 agents in the 2026-09-18
+# incident, dispatch concurrency 6) while still failing a wedged gateway well
+# inside an operator's attention span.
+_BATCH_TIMEOUT_S = 600.0
+
 
 def _caller_body(source: str | None, *, field: str = "source") -> dict[str, str]:
     """Opt-in provenance; no caller metadata is authentication evidence."""
@@ -284,6 +290,51 @@ def cmd_agents_resurrect(agent_id: int, *, source: str | None = None) -> int:
     resp.raise_for_status()
     print(f"  ✓ agent {agent_id} resurrect: {resp.json().get('status')}")
     return 0
+
+
+def cmd_agents_resurrect_billing(*, execute: bool) -> int:
+    """`ava agents resurrect-billing` — POST /api/agents/resurrect-billing.
+
+    The explicit post-outage recovery entry (task #3919): with no flags it
+    prints a strictly read-only preview — the billing-class halt candidates,
+    the halted-but-alive survey, and the provider balance readout; with
+    `--execute` it runs the batch (balance gate -> per-agent
+    `resurrect-billing-v1` on each home machine) and prints the per-agent
+    outcome. Refused runs exit 1; previews and runs exit 0.
+    """
+    from shared.http_dial import post as dial_post
+    from shared.machine import gateway_api_base, gateway_auth_headers
+
+    url = f"{gateway_api_base()}/api/agents/resurrect-billing"
+    resp = dial_post(
+        url,
+        json={"execute": execute},
+        timeout=_BATCH_TIMEOUT_S,
+        headers=gateway_auth_headers(),
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    balance = data["balance"]
+    print(f"  mode: {data['mode']} — outcome: {data['outcome']}")
+    if data.get("refusal_reason"):
+        print(f"  refused: {data['refusal_reason']}")
+    print(f"  balance: ok={balance['ok']} — {balance['detail']}")
+    agents = data["agents"]
+    if not agents:
+        print("  (no billing-class halt victims to resurrect)")
+    for a in agents:
+        suffix = f" — {a['reason']}" if a.get("reason") else ""
+        print(f"  - agent {a['agent_id']} [{a['machine']}] {a['status']}{suffix}")
+    halted = data.get("halted_alive") or []
+    if halted:
+        print(
+            "  halted but alive — no action needed; the halt clears on their next successful turn:"
+        )
+        for a in halted:
+            print(f"  - agent {a['agent_id']} [{a['machine']}] streak={a['streak']}")
+    if not execute:
+        print("  (preview only; rerun with --execute to perform)")
+    return 1 if data.get("outcome") == "refused" else 0
 
 
 def _terminate(

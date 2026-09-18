@@ -25,6 +25,8 @@ from gateway.routers.agents_forward import _forward_to_home_machine
 from gateway.schemas import CancelRequest, CompactEnqueued
 from ops import ops_lifecycle as _ops
 from ops.rpc_schemas import (
+    BillingResurrectRequest,
+    BillingResurrectResponse,
     CancelRequested,
     OpenTaskRow,
     OpenTasksHint,
@@ -217,6 +219,28 @@ async def post_agent_resurrect(
         body.model_dump(),
     )
     return ResurrectAgentResponse.model_validate(forwarded)
+
+
+@router.post("/api/agents/resurrect-billing")
+async def post_agents_resurrect_billing(
+    request: Request,
+    body: BillingResurrectRequest = Body(default_factory=BillingResurrectRequest),  # noqa: B008
+) -> BillingResurrectResponse:
+    """Billing batch recovery — the explicit, operator-triggered entry (task #3919).
+
+    `execute=false` (the default) is a strictly read-only preview: the
+    billing-class halt candidates, the halted-but-alive survey (report-only),
+    and the provider balance readout, nothing written. `execute=true` re-checks the provider balance (the run refuses
+    below the configured floor) and then resurrects each candidate on its home
+    machine through the versioned `resurrect-billing-v1` op, which enforces the
+    closed fence and the billing-halt whitelist under the metadata row lock.
+    Idempotent: the candidate set self-clears after a run, a repeated run is an
+    audited no-op, and a concurrent second run is refused by the run-level
+    advisory lock.
+    """
+    from ops.billing_recovery import run_billing_recovery
+
+    return await run_billing_recovery(execute=body.execute, pool=request.app.state.db_pool)
 
 
 @router.post("/api/agents/{agent_id}/restart")

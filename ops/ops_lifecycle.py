@@ -100,6 +100,7 @@ from ops.resurrect_gates import (
     wake_suppression_active as _wake_suppression_active,
 )
 from ops.rpc_schemas import (
+    BillingResurrectAgentResponse,
     CancelRequested,
     RecoverCrashMarkedResponse,
     RestartAgentRequest,
@@ -675,7 +676,7 @@ async def recover_crash_marked_if_stalled(
 _LIFECYCLE_PATH = re.compile(
     r"^/api/agents/(?P<id>\d+)/"
     r"(?P<action>terminate|resurrect|resurrect-explicit-v2|"
-    r"resurrect-if-pending-work-v2|recover-crash-marked-v2|restart)$"
+    r"resurrect-if-pending-work-v2|resurrect-billing-v1|recover-crash-marked-v2|restart)$"
 )
 
 
@@ -689,6 +690,7 @@ async def lifecycle_op(
 ) -> (
     TerminateAgentResponse
     | ResurrectAgentResponse
+    | BillingResurrectAgentResponse
     | RecoverCrashMarkedResponse
     | RestartAgentResponse
 ):
@@ -697,7 +699,8 @@ async def lifecycle_op(
     ops server serializes it into the /ops response).
 
     Path shapes accepted: terminate/restart plus the versioned internal
-    `resurrect-explicit-v2`, guarded `resurrect-if-pending-work-v2`, and
+    `resurrect-explicit-v2`, guarded `resurrect-if-pending-work-v2`,
+    billing-guarded `resurrect-billing-v1` (task #3919), and
     `recover-crash-marked-v2` (the stalled-corpse harvest) paths.
     Legacy `resurrect` is recognized only to reject it. This is the
     version-skew fail-closed boundary: an old runner rejects the v2 paths and a
@@ -737,6 +740,10 @@ async def lifecycle_op(
             trigger_inbound_id=trigger_inbound_id,
             trigger_inbound_kind=trigger_inbound_kind,
         )
+    if action == "resurrect-billing-v1":
+        from ops.billing_recovery import resurrect_billing_agent_op
+
+        return await resurrect_billing_agent_op(agent_id)
     if action == "recover-crash-marked-v2":
         return await recover_crash_marked_op(agent_id)
     if action == "restart":

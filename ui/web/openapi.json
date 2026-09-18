@@ -689,6 +689,44 @@
         }
       }
     },
+    "/api/agents/resurrect-billing": {
+      "post": {
+        "summary": "Post Agents Resurrect Billing",
+        "description": "Billing batch recovery — the explicit, operator-triggered entry (task #3919).\n\n`execute=false` (the default) is a strictly read-only preview: the\nbilling-class halt candidates, the halted-but-alive survey (report-only),\nand the provider balance readout, nothing written. `execute=true` re-checks the provider balance (the run refuses\nbelow the configured floor) and then resurrects each candidate on its home\nmachine through the versioned `resurrect-billing-v1` op, which enforces the\nclosed fence and the billing-halt whitelist under the metadata row lock.\nIdempotent: the candidate set self-clears after a run, a repeated run is an\naudited no-op, and a concurrent second run is refused by the run-level\nadvisory lock.",
+        "operationId": "post_agents_resurrect_billing_api_agents_resurrect_billing_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BillingResurrectRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingResurrectResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/agents/{agent_id}/restart": {
       "post": {
         "summary": "Post Agent Restart",
@@ -8219,6 +8257,190 @@
         ],
         "title": "AlertsListResponse",
         "description": "Unresolved-first alert history + the count the UI badge shows."
+      },
+      "BillingBalanceReport": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          },
+          "threshold": {
+            "type": "number",
+            "title": "Threshold"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "detail",
+          "threshold"
+        ],
+        "title": "BillingBalanceReport",
+        "description": "Provider balance probe result carried on every billing-recovery response.\n\n`ok=False` always carries the human-readable `detail`; the run refuses\nexecution on it (fail closed)."
+      },
+      "BillingHaltedAliveRow": {
+        "properties": {
+          "agent_id": {
+            "type": "integer",
+            "title": "Agent Id"
+          },
+          "machine": {
+            "type": "string",
+            "title": "Machine"
+          },
+          "streak": {
+            "type": "integer",
+            "title": "Streak"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "machine",
+          "streak"
+        ],
+        "title": "BillingHaltedAliveRow",
+        "description": "One billing-halted agent that is still alive — reported, never actioned.\n\nThe entry only resurrects terminated victims. A halted agent that is still\nalive parks heartbeats and clears its own halt on the next successful turn,\nso the batch lists these rows for operator visibility and deliberately\ntakes no action on them; releasing their hold is a follow-up candidate,\nnot part of this entry."
+      },
+      "BillingResurrectAgentOutcome": {
+        "properties": {
+          "agent_id": {
+            "type": "integer",
+            "title": "Agent Id"
+          },
+          "machine": {
+            "type": "string",
+            "title": "Machine"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "candidate",
+              "resurrected",
+              "already_alive",
+              "refused",
+              "deferred",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "machine",
+          "status"
+        ],
+        "title": "BillingResurrectAgentOutcome",
+        "description": "One agent's line in the billing batch-recovery summary.\n\n`candidate` (dry-run listing) / `resurrected` / `already_alive` /\n`refused` / `deferred` / `failed`; `reason` carries the guard or failure\ndetail where one exists."
+      },
+      "BillingResurrectRequest": {
+        "properties": {
+          "execute": {
+            "type": "boolean",
+            "title": "Execute",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "BillingResurrectRequest",
+        "description": "POST /api/agents/resurrect-billing request body — the explicit,\noperator-triggered billing batch-recovery entry (task #3919).\n\n`execute=False` (the default) is a strictly read-only preview: the\nbilling-class halt candidates, the halted-but-alive survey, and the\nprovider balance readout, nothing written. `execute=True` re-checks the\nprovider balance and, when the gate passes, resurrects each candidate on\nits home machine through the versioned `resurrect-billing-v1` op."
+      },
+      "BillingResurrectResponse": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "dry_run",
+              "execute"
+            ],
+            "title": "Mode"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "preview",
+              "executed",
+              "refused"
+            ],
+            "title": "Outcome"
+          },
+          "refusal_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refusal Reason"
+          },
+          "balance": {
+            "$ref": "#/components/schemas/BillingBalanceReport"
+          },
+          "agents": {
+            "items": {
+              "$ref": "#/components/schemas/BillingResurrectAgentOutcome"
+            },
+            "type": "array",
+            "title": "Agents"
+          },
+          "halted_alive": {
+            "items": {
+              "$ref": "#/components/schemas/BillingHaltedAliveRow"
+            },
+            "type": "array",
+            "title": "Halted Alive"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mode",
+          "outcome",
+          "balance",
+          "agents",
+          "halted_alive"
+        ],
+        "title": "BillingResurrectResponse",
+        "description": "POST /api/agents/resurrect-billing response — the run-level summary.\n\n`preview`: dry-run. `executed`: the run acted (a no-op when the whitelist\nwas already empty — also audited). `refused`: the run did not act;\n`refusal_reason` names the gate ('balance gate not satisfied: ...' or a\nconcurrent run holding the single-flight lock).\n\n`agents` carries the candidates (preview) or the per-agent outcomes;\n`halted_alive` is the report-only survey of billing-halted rows that are\nstill alive — never actioned."
       },
       "Body_upload_files_api_agents__agent_id__uploads_post": {
         "properties": {

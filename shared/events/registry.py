@@ -114,7 +114,7 @@ def _telemetry(
 
 
 _EVENTS_RUNTIME: dict[str, EventSpec] = {
-    # ── audit (category=audit, 17) — registry.md §2, append-only operations ──
+    # ── audit (category=audit, 18) — registry.md §2, append-only operations ──
     # The lineage class (retention_class="lineage"): spawn/fork/resurrect plus
     # the ops-mirror names of the same two facts (agent_spawned /
     # agent_resurrected, emitted telemetry-side). The mirrors are bundled
@@ -127,6 +127,11 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
     "restart": _audit("restart", "agent restart initiated"),
     "cancel": _audit("cancel", "in-flight turn cancelled"),
     "resurrect": _audit("resurrect", "terminated agent woken", retention_class="lineage"),
+    "billing_resurrect": _audit(
+        "billing_resurrect",
+        "billing batch recovery run: billing-class halt victims reinstated after "
+        "the provider balance gate passed (task #3919)",
+    ),
     "restart_completed": _audit("restart_completed", "restart finished"),
     "hosted_legacy_adoption": _audit(
         "hosted_legacy_adoption",
@@ -639,6 +644,9 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
     ),
     "agent_resurrected": _telemetry(
         "agent_resurrected", "agent resurrected", retention_class="lineage"
+    ),
+    "billing_resurrect_run": _telemetry(
+        "billing_resurrect_run", "billing batch recovery run finished"
     ),
     "agent_terminated": _telemetry("agent_terminated", "agent terminated"),
     "agent_revived": _telemetry("agent_revived", "agent revived", tier="noise"),

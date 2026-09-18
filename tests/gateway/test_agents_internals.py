@@ -742,7 +742,8 @@ class TestResurrectAgent:
         def tracking_execute(self: Any, query: Any, *args: Any, **kwargs: Any) -> Any:
             result = original_execute(self, query, *args, **kwargs)
             if query == (
-                "SELECT status,machine,closed_at FROM agents_meta WHERE id = %s FOR UPDATE"
+                "SELECT status,machine,closed_at,permanent_reject_streak,"
+                "last_permanent_reject_reason FROM agents_meta WHERE id = %s FOR UPDATE"
             ):
                 status_select_cursors.add(id(self))
             return result

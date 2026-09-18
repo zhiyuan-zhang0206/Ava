@@ -218,6 +218,24 @@ class ResurrectAlreadyAlive(ResurrectError): ...  # noqa: N818
 class ResurrectBudgetExhausted(ResurrectError): ...  # noqa: N818
 
 
+class ResurrectRefused(ResurrectError):  # noqa: N818 — style consistent with ResurrectAlreadyAlive
+    """A resurrect guard refused — the billing batch-recovery whitelist (task #3919).
+
+    Raised under the metadata row lock when the versioned `resurrect-billing-v1`
+    action finds the row outside its contract: closed (the batch entry never
+    crosses the closure marker — only a single explicit manual resurrect
+    reopens), or not a billing-class recovery-breaker halt. Caught locally by
+    the billing op and turned into a structured per-agent outcome; like
+    `ResurrectAlreadyAlive` it is not wire-encoded (no ErrorReason entry).
+
+    `reason` is the machine-readable guard name: 'closed' / 'not_billing_halted'.
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 class ForkSourceEmpty(ForkError, AvaAgentError):  # noqa: N818 — style consistent with ENOENT
     """Source agent has no checkpoint — cannot fork.
 

@@ -1552,6 +1552,39 @@ orchestrator. Update needs no stdin confirmation; `ava stop` asks unless `-y`
 is supplied.
 
 
+### Agent recovery after a provider billing stoppage
+
+A provider balance exhaustion (e.g. DeepSeek HTTP 402) classifies as a
+permanent rejection; two consecutive ones open the recovery breaker
+(`permanent_reject_streak >= 2`, reason `billing`) and the corpse reaper
+terminates the victims. Recovery after a top-up is one explicit command:
+
+```bash
+ava agents resurrect-billing            # strictly read-only preview
+ava agents resurrect-billing --execute  # balance gate -> resurrect each candidate on its home machine
+```
+
+The preview itself is the identification tool: it lists the billing-class halt
+victims (terminated, not closed, streak at the halt threshold, reason
+`billing`, and not `user` / `integrity`-terminated), the halted-but-alive rows
+(report-only — no action is needed; the halt clears on their next successful
+turn), and the live provider balance readout. `--execute` refuses (exit 1)
+unless the balance endpoint reports the account available above
+`AVA_BILLING_RECOVERY_MIN_BALANCE` (default 1.0); a probe failure refuses too —
+fix the account or the `AVA_BILLING_RECOVERY_*` config and rerun. The run is
+idempotent: the candidate set self-clears, a rerun is an audited no-op, and a
+concurrent second run is refused by the run-level single-flight lock.
+
+Boundaries: closed agents (`terminate --final`), `user` / `integrity`-
+terminated rows, and halted-but-alive agents are never actioned — the last
+recover on their next inbound; the others stay a per-agent human decision
+(`ava agents resurrect <id>`). Audit lands on the `billing_resurrect` event
+(balance readout + candidate / resurrected / refused / deferred / failed sets)
+plus `billing_resurrect_run` telemetry; each resurrected agent's own
+`resurrect` event carries `via='billing_recovery'`. Rationale and rejected
+alternatives: [billing batch resurrect decision](../decisions/2026-09-18-billing-batch-resurrect.md).
+
+
 ## Private-network deployment (phone / multi-device access)
 
 The gateway binds all interfaces on the **gateway host** (both address
