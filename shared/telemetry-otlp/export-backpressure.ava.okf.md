@@ -54,7 +54,7 @@ The emitter, OTLP log queue, and OTel SDK batch queue report actual loss as `eve
 `n`, `queue`, and `last_dropped_at`. Local error diagnostics bypass the saturated
 queue and always write stderr, including standalone scripts before logging setup.
 Delayed summaries preserve the actual loss time. OTLP loss reports go straight to the JSONL mirror and metric instruments;
-`ava_event_log_drop_last_dropped_at` drives the immediate error-level
+`ava_event_log_drop_last_dropped_at_ratio` drives the immediate error-level
 `ava-ops-telemetry-queue-loss` Grafana alert, resolving after five loss-free minutes.
 The metrics lane can report even while log delivery is saturated. A collector or
 metrics-export outage still delays remote visibility; existing exporter-silence
