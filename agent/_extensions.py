@@ -51,18 +51,16 @@ def _discovered_and_config() -> tuple[dict[str, Path], plugins_cfg.PluginsConfig
 
     A config entry whose plugin directory is gone (interrupted upgrade, manual
     rm) must not block the load: each dangling name is reported through the one
-    canonical reporter and treated as disabled (the same contract the loader
-    always had — 2026-08-28 ava_ledger incident).
+    canonical reporter (once per process, via `plugins_cfg._report_dangling`)
+    and treated as disabled (the same contract the loader always had —
+    2026-08-28 ava_ledger incident).
     """
     discovered = plugins_cfg._discover_plugins()
     known = set(discovered)
     try:
         config = plugins_cfg.load(known)
     except plugins_cfg.DanglingPlugin as exc:
-        from shared import plugin_load_report
-
-        for name in sorted(exc.names):
-            plugin_load_report.report_plugin_load_failure(name, exc)
+        plugins_cfg._report_dangling(exc)
         config = plugins_cfg.load(known, allow_dangling=True)
     return discovered, config
 

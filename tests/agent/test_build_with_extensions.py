@@ -388,13 +388,18 @@ def test_external_plugin_relative_import_resolves_when_plugins_prefix_is_shadowe
     assert sys.modules["plugins.ava_ledger"].__path__ == [str(pdir)]
 
 
-def test_dangling_config_entry_skipped_with_warning(
+def test_dangling_config_entry_reported_and_skipped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A config entry whose plugin directory is gone (interrupted upgrade,
-    manual rm) must not block the plugin load: reported loudly, treated as
-    disabled, the rest of the config intact.
+    manual rm) must not block the plugin load: reported through the canonical
+    fail-soft reporter (loguru ERROR + `plugin_load_failed` event), treated as
+    disabled, the rest of the config intact. The reporter's once-per-process
+    memo is reset so this test does not depend on interpreter run order.
     """
+    from shared import plugins_config
+
+    monkeypatch.setattr(plugins_config, "_dangling_reported", set[str]())
     _make_external_plugin("audit")
     write_local({"plugins": {"audit": {"enabled": True}, "vanished": {"enabled": True}}})
 

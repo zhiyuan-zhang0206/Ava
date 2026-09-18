@@ -262,9 +262,41 @@ def load(known_plugins: set[str], *, allow_dangling: bool = False) -> PluginsCon
     return cfg
 
 
+# Dangling names already reported through the canonical reporter in THIS
+# process. `load_for_runtime` also sits on gateway request paths
+# (ui_contributions / plugin_ui / plugin inspector), where the same dangling
+# set would otherwise re-report on every request; the first report is the
+# signal and repeats are noise. Process lifetime bounds the suppression — a
+# fresh process (next boot / request worker / CLI run) reports again.
+_dangling_reported: set[str] = set()
+
+
+def _report_dangling(exc: DanglingPlugin) -> None:
+    """Report dangling config entries through the one canonical fail-soft reporter.
+
+    Both dangling-handling load sites — the runtime wrapper below and the
+    agent-boot loader (`agent/_extensions.py`) — drop the entries (treated as
+    disabled) and report each name through `shared.plugin_load_report`, so a
+    plugin that is enabled in the machine config but absent from disk is as
+    visible as every other contained plugin failure: loguru ERROR plus the
+    `plugin_load_failed` telemetry event. The 2026-09-11 macmini incident
+    (`codex_usage` / `deepseek_balance` enabled with their directories gone)
+    ran for days on a plain WARNING that only a log grep ever found. Each name
+    reports once per process (see `_dangling_reported`); the caller keeps the
+    fail-soft contract — dropping the entry must never block a start.
+    """
+    from shared import plugin_load_report
+
+    fresh = sorted(set(exc.names) - _dangling_reported)
+    _dangling_reported.update(fresh)
+    for name in fresh:
+        plugin_load_report.report_plugin_load_failure(name, exc)
+
+
 def load_for_runtime(known_plugins: set[str]) -> PluginsConfig:
     """Runtime-load wrapper around `load()`: dangling config entries are dropped
-    (treated as disabled) with a warning instead of raising DanglingPlugin.
+    (treated as disabled) and reported through the canonical reporter instead
+    of raising DanglingPlugin.
 
     For long-lived / start-critical consumers — converge (`ava start`), the
     model-provider factory, gateway request paths, ops inventory — a config
@@ -272,18 +304,13 @@ def load_for_runtime(known_plugins: set[str]) -> PluginsConfig:
     must not block a service from starting or answering. This is the same
     fail-soft contract `_load_extensions` follows (2026-08-28 ava_ledger
     incident); interactive CLI paths (`set_local_enabled`) keep the strict
-    `load()` and its DanglingPlugin error.
+    `load()` and its DanglingPlugin error. Each dangling name is reported once
+    per process through `_report_dangling`.
     """
     try:
         return load(known_plugins)
     except DanglingPlugin as exc:
-        from shared.log import logger
-
-        logger.warning(
-            "plugins config references non-existent plugin(s) {} — skipped "
-            "(fail-soft); `ava plugins update` prunes them",
-            sorted(exc.names),
-        )
+        _report_dangling(exc)
         return load(known_plugins, allow_dangling=True)
 
 
