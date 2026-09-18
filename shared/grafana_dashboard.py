@@ -20,7 +20,7 @@ next band when the panel would end past column 24; a section row header is a
   order; panels without one render after the ordered ones, in registration
   order).
 - ``position`` — an absolute grid position for the rare panel whose historical
-  placement deviates from the flow (the one pin: exec outcomes at 12,113).
+  placement deviates from the flow (the one pin: exec outcomes at 12,120).
 - ``gap_before`` in the section registry — the historical three-row gap before
   the LLM row.
 

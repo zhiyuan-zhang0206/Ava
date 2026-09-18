@@ -199,6 +199,49 @@ core_metrics.register_core_metric(
 
 core_metrics.register_core_metric(
     MetricSpec(
+        name="ava_obs_llm_stall_rate",
+        title="Provider stalls (per minute)",
+        description=(
+            "Provider stall health per minute (5-minute buckets / 5): "
+            "stream_stalled_retry counted by vendor — a stalled stream "
+            "segment (first-chunk / mid-stream gap / total-duration bound) "
+            "was retried; the vendor dimension is the provider-health read "
+            "added with the deepseek stall-wave mitigation (task #3884) — "
+            "plus stream_stall_pair_terminated (two adjacent stalls: the "
+            "stream segment and its non-streaming fallback both timed out, "
+            "so the call was terminated early for the delayed stall-retry "
+            "schedule). The pair event is deliberately outside "
+            "LLM_ERROR_FAMILY (it co-emits 1:1 with the adjacent stall, "
+            "which the family already counts) — this panel and the "
+            "ava-ops-llm-stall-pair rule are its display surface (task "
+            "#3948). event_name='stream_stalled_retry' + "
+            "'stream_stall_pair_terminated', category='telemetry'."
+        ),
+        event_name="stream_stalled_retry",
+        category="telemetry",
+        unit="short",
+        panel="timeseries",
+        query_type="logql",
+        query=(
+            'sum by (attributes_vendor) (count_over_time({service_name="unknown_service", '
+            "event_name={event_name}} | json | "
+            "category={category} [5m])) / 5"
+        ),
+        targets=[
+            'sum(count_over_time({service_name="unknown_service", '
+            'event_name="stream_stall_pair_terminated"} | json | '
+            "category={category} [5m])) / 5",
+        ],
+        target_names=["{{attributes_vendor}}", "stall pairs"],
+        output=["grafana"],
+        panel_id=53,
+        section="LLM",
+        order=8,
+    )
+)
+
+core_metrics.register_core_metric(
+    MetricSpec(
         name="ava_obs_turn_ok_rate",
         title="Turn success rate",
         description=(
@@ -389,7 +432,7 @@ core_metrics.register_core_metric(
         panel_id=25,
         section="Gateway & execution",
         order=4,
-        position=(12, 113),
+        position=(12, 120),
     )
 )
 

@@ -223,6 +223,13 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         family=LLM_ERROR_FAMILY,
         tier="anomaly",
     ),
+    # Deliberately NOT in LLM_ERROR_FAMILY (task #3884, caliber reaffirmed
+    # 2026-09-18): every pair co-emits 1:1 with the stream_stalled_retry that
+    # precedes it, and the family's consumers sum the family — including the
+    # pair would double-count that call and silently raise the ops error
+    # baseline the moment it deployed. Its display surface is the dedicated
+    # "Provider stalls" panel plus the ava-ops-llm-stall-pair rule (task
+    # #3948); test_event_contract pins the family at four members.
     "stream_stall_pair_terminated": _telemetry(
         "stream_stall_pair_terminated",
         "two adjacent stream stalls (stream segment + non-streaming fallback) terminated "

@@ -53,6 +53,8 @@ _EXPECTED_UIDS = {
     "ava-ops-events-freshness",
     "ava-ops-events-low-water",
     "ava-ops-fleet-graph-stale",
+    "ava-ops-llm-stall-pair",
+    "ava-ops-llm-stall-burst",
     "ava-ops-gateway-metrics-silent",
     "ava-ops-watchdog-tick-stale",
     "ava-ops-checkpoint-blobs-warning",
@@ -110,7 +112,7 @@ def _load_groups() -> list[dict[str, Any]]:
     assert [group["name"] for group in groups] == ["ava-ops", "ava-ops-slow"]
     assert [group["folder"] for group in groups] == ["Ava", "Ava"]
     assert [group["interval"] for group in groups] == ["1m", "5m"]
-    assert [len(group["rules"]) for group in groups] == [26, 10]
+    assert [len(group["rules"]) for group in groups] == [28, 10]
     return groups
 
 
@@ -242,6 +244,8 @@ def test_loki_rules_filter_to_prod_cluster_after_json() -> None:
         ("ava-ops-trace-disk-watermark", 'event_name="trace"'),
         ("ava-ops-llm-rate-limit", 'event_name="llm_provider_error"'),
         ("ava-ops-llm-billing-quota", 'event_name="llm_provider_error"'),
+        ("ava-ops-llm-stall-pair", 'event_name="stream_stall_pair_terminated"'),
+        ("ava-ops-llm-stall-burst", 'event_name="stream_stalled_retry"'),
     ],
 )
 def test_event_name_rules_filter_by_event_name(uid: str, event_filter: str) -> None:
@@ -495,6 +499,50 @@ def test_billing_rule_names_vendor_and_model_in_the_notification() -> None:
     # shared/alerts.py:notify_text truncates the summary at 200 chars; the
     # template must still say what happened once the labels expand.
     assert len(summary) <= 200, f"summary is {len(summary)} chars, IM truncates at 200"
+
+
+def test_llm_stall_pair_rule_fires_on_the_first_pair() -> None:
+    """A stream+fallback double stall is the worst single-call stall shape:
+    the call is terminated for the delayed stall-retry schedule. Fires on the
+    first pair (threshold > 0, R13-style) over a 15m window that is the whole
+    debounce (tasks #3889/#3948)."""
+    rules = {r["uid"]: r for r in _load_rules()}
+    rule = rules["ava-ops-llm-stall-pair"]
+
+    assert _exprs(rule, "loki") == [
+        'sum(count_over_time({service_name="unknown_service", '
+        'event_name="stream_stall_pair_terminated"} | json | cluster=".ava" | '
+        'category="telemetry" [15m]))'
+    ]
+    assert rule["for"] == "0m"
+    assert rule["noDataState"] == "OK"
+    assert rule["execErrState"] == "OK"
+    assert rule["labels"] == {
+        "severity": "warning",
+        "ruleUID": "ava-ops-llm-stall-pair",
+        "metric": "llm_stall_pair",
+        "team": "ava-ops",
+    }
+    assert _threshold_params(rule) == [[0]]
+    threshold = next(d for d in rule["data"] if d["model"].get("type") == "threshold")
+    assert threshold["model"]["conditions"][0]["evaluator"]["type"] == "gt"
+
+
+def test_llm_stall_burst_rule_groups_stalls_by_vendor() -> None:
+    """The burst names the stalling provider: one instance per vendor, ≥5
+    stalled streams in 15m — above the trailing-7d benign ceiling of 2/15m,
+    inside the 2026-09-14/15 wave's 2-9/15m range (task #3948)."""
+    rules = {r["uid"]: r for r in _load_rules()}
+    rule = rules["ava-ops-llm-stall-burst"]
+    expr = _exprs(rule, "loki")[0]
+
+    assert "sum by (attributes_vendor)" in expr
+    assert 'event_name="stream_stalled_retry"' in expr
+    assert "[15m]" in expr
+    assert _threshold_params(rule) == [[4]]
+    assert rule["for"] == "0m"
+    assert rule["labels"]["severity"] == "warning"
+    assert "{{ $labels.attributes_vendor }}" in rule["annotations"]["summary"]
 
 
 def test_delivery_stalled_rule_filters_fresh_by_age() -> None:
