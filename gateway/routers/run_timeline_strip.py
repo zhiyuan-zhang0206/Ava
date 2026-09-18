@@ -9,10 +9,14 @@ text stays out of the window response and is served by the detail route.
 
 from __future__ import annotations
 
+import threading
+import time
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from langchain_core.messages import BaseMessage
 
 from gateway.routers._eval_guard import deny_isolated_result_read
 from gateway.schemas.run_timeline import (
@@ -51,6 +55,106 @@ _MESSAGE_SEGMENT_WALK_MAX = 3
 # a real time axis; the strip excludes them and reports truncation instead of
 # stacking them at the window's left edge.
 _LEGACY_TS_FLOOR = datetime(2020, 1, 1, tzinfo=UTC)
+
+
+# --- short-TTL segment cache (review condition 10, 2026-09-19) -------------
+#
+# Every strip request re-reads the agent's current checkpoint segment (plus a
+# compact-history segment and the boundary list when the window reaches past
+# it); on a busy agent that is ~0.9s of the endpoint's cost, and pan/zoom
+# fires one request per settled gesture frame — multiple requests a second.
+# The message-details route reads the same segments, so a tiny per-process
+# cache removes the repeat cost for both. The shared checkpoint layer already
+# promises what this relies on: cold-load reads may serve the last committed
+# snapshot, and a slightly stale view is acceptable on these paths.
+#
+# TTLs and the entry bound are cache tuning, not display behavior — constants
+# with reasons, like the walk cap above.
+_CACHE_TTL_CURRENT_S = 5.0  # the current segment grows as the agent commits
+_CACHE_TTL_SEALED_S = 60.0  # a sealed compact-history segment is immutable
+_CACHE_TTL_BOUNDARIES_S = 30.0  # boundary ids change only on compact
+# Memory bound: one agent's strip working set is its current segment plus up
+# to three history segments, and the gateway is shared by concurrently viewed
+# agents; twelve entries cover two such working sets plus headroom, without
+# letting segment-sized payloads accumulate per process.
+_CACHE_MAX_ENTRIES = 12
+
+
+class SegmentReadCache:
+    """Tiny per-process LRU + TTL cache for the checkpoint segments the
+    strip reads. `clock` is injectable for tests."""
+
+    def __init__(self, max_entries: int, clock: Callable[[], float] = time.monotonic) -> None:
+        self._entries: dict[tuple[object, ...], tuple[float, object]] = {}
+        self._lock = threading.Lock()
+        self._max_entries = max_entries
+        self._clock = clock
+
+    def clear(self) -> None:
+        """Drop every entry (tests; an operator has no reason to call this)."""
+        with self._lock:
+            self._entries.clear()
+
+    def get(self, key: tuple[object, ...], ttl_s: float, load: Callable[[], object]) -> object:
+        """The cached value for *key* when younger than *ttl_s*, else a fresh
+        load (done outside the lock — a concurrent miss may load in parallel,
+        last write wins)."""
+        now = self._clock()
+        with self._lock:
+            hit = self._entries.get(key)
+            if hit is not None and now - hit[0] <= ttl_s:
+                self._entries.pop(key)
+                self._entries[key] = hit  # refresh LRU position
+                return hit[1]
+        value = load()
+        with self._lock:
+            self._entries.pop(key, None)
+            self._entries[key] = (now, value)
+            while len(self._entries) > self._max_entries:
+                self._entries.pop(next(iter(self._entries)))
+        return value
+
+
+_STRIP_CACHE = SegmentReadCache(_CACHE_MAX_ENTRIES)
+
+
+def _cached_current_messages(agent_id: int) -> list[BaseMessage]:
+    from shared.checkpoint import load_checkpoint_messages
+
+    return cast(
+        "list[BaseMessage]",
+        _STRIP_CACHE.get(
+            ("current", agent_id),
+            _CACHE_TTL_CURRENT_S,
+            lambda: load_checkpoint_messages(agent_id),
+        ),
+    )
+
+
+def _cached_boundaries(agent_id: int) -> list[str]:
+    from shared.checkpoint import list_compact_boundary_checkpoint_ids
+
+    return cast(
+        "list[str]",
+        _STRIP_CACHE.get(
+            ("boundaries", agent_id),
+            _CACHE_TTL_BOUNDARIES_S,
+            lambda: list_compact_boundary_checkpoint_ids(agent_id),
+        ),
+    )
+
+
+def _cached_segment_messages(agent_id: int, boundary: str) -> list[BaseMessage]:
+    from shared.checkpoint import load_checkpoint_messages_segment
+
+    return cast(
+        "list[BaseMessage]",
+        _STRIP_CACHE.get(
+            ("segment", agent_id, boundary),
+            _CACHE_TTL_SEALED_S,
+            lambda: load_checkpoint_messages_segment(agent_id, boundary),
+        ),
+    )
 
 
 _PART_KIND_BY_ITEM: dict[str, RunTimelineMessagePartKind] = {
@@ -173,26 +277,20 @@ def _strip_messages_for_window(
     segment's earliest placeable message. Truncation (message budget or the
     segment walk cap) is always reported, never silent.
     """
-    from shared.checkpoint import (
-        list_compact_boundary_checkpoint_ids,
-        load_checkpoint_messages,
-        load_checkpoint_messages_segment,
-    )
-
     budget = settings.display.run_timeline_messages_max
     truncated = False
 
-    current = load_checkpoint_messages(agent_id)
+    current = _cached_current_messages(agent_id)
     anchors = _chat_inbound_anchors(agent_id) if needs_chat_anchors(current) else []
     current_items, _ = build_timeline_items(current, anchors)
     groups = _group_strip_items(current_items)
 
     current_min = _placed_min_ts(groups)
     if current_min is None or current_min > window_start:
-        boundaries = list_compact_boundary_checkpoint_ids(agent_id)
+        boundaries = _cached_boundaries(agent_id)
         covered = False
         for rank, boundary in enumerate(boundaries[:_MESSAGE_SEGMENT_WALK_MAX], start=1):
-            segment = load_checkpoint_messages_segment(agent_id, boundary)
+            segment = _cached_segment_messages(agent_id, boundary)
             if not segment:
                 continue
             segment_items, _ = build_timeline_items(
@@ -239,13 +337,12 @@ def strip_for_window_or_none(
 
 def _strip_message_group(agent_id: int, key: str) -> list[TimelineItem]:
     """Resolve one strip key to its items; 404 for unknown or malformed keys."""
-    from shared.checkpoint import load_checkpoint_messages, load_checkpoint_messages_segment
 
     def not_found() -> HTTPException:
         return HTTPException(status_code=404, detail=f"message {key} not found")
 
     if key.startswith("c."):
-        current = load_checkpoint_messages(agent_id)
+        current = _cached_current_messages(agent_id)
         anchors = _chat_inbound_anchors(agent_id) if needs_chat_anchors(current) else []
         items, _ = build_timeline_items(current, anchors)
     elif key.startswith("s") and "." in key:
@@ -253,7 +350,7 @@ def _strip_message_group(agent_id: int, key: str) -> list[TimelineItem]:
         if "." not in rest:
             raise not_found()
         boundary, _idx = rest.rsplit(".", 1)
-        segment = load_checkpoint_messages_segment(agent_id, boundary)
+        segment = _cached_segment_messages(agent_id, boundary)
         if not segment:
             raise not_found()
         items, _ = build_timeline_items(segment, [], segment_prefix=f"{rank}.{boundary}")

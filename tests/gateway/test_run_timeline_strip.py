@@ -395,3 +395,84 @@ def test_message_details_clip_and_full_refetch(monkeypatch: pytest.MonkeyPatch) 
     uncut = strip.get_run_timeline_message(7, "c.5", True)
     assert uncut.content_truncated is False
     assert uncut.parts[0].text == "y" * 40
+
+
+# --- short-TTL segment cache (review condition 10, 2026-09-19) --------------
+
+
+@pytest.fixture(autouse=True)
+def _clear_strip_cache() -> None:
+    """The strip cache is process-global; every test starts from cold so a
+    stubbed loader's value can never leak into the next test."""
+    strip._STRIP_CACHE.clear()
+
+
+def test_segment_cache_serves_within_ttl_and_reloads_after() -> None:
+    now = [100.0]
+    cache = strip.SegmentReadCache(max_entries=4, clock=lambda: now[0])
+    loads: list[int] = []
+
+    def load() -> str:
+        loads.append(1)
+        return "v"
+
+    assert cache.get(("k",), 5.0, load) == "v"
+    assert cache.get(("k",), 5.0, load) == "v"
+    assert len(loads) == 1
+
+    now[0] += 5.5  # past the TTL
+    assert cache.get(("k",), 5.0, load) == "v"
+    assert len(loads) == 2
+
+
+def test_segment_cache_evicts_the_least_recently_used_entry() -> None:
+    cache = strip.SegmentReadCache(max_entries=2, clock=lambda: 0.0)
+    cache.get(("a",), 60.0, lambda: "a")
+    cache.get(("b",), 60.0, lambda: "b")
+    cache.get(("a",), 60.0, lambda: "a")  # refresh a's recency
+    cache.get(("c",), 60.0, lambda: "c")  # evicts b
+
+    reloaded: list[str] = []
+
+    def load_b() -> str:
+        reloaded.append("b")
+        return "b"
+
+    assert cache.get(("b",), 60.0, load_b) == "b"
+    assert reloaded == ["b"]
+
+
+def test_strip_and_details_reads_share_the_cached_segment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window_start = datetime(
+        2026, 9, 1, 0, 0, tzinfo=UTC
+    )  # time-bomb-ok: explicit fixture window input
+    items = [
+        _item("1.0", "system_prompt", "p" * 10),
+        _item("2.0", "agent_chat", "b" * 10, created_at="2026-09-01T00:30:00+00:00"),
+    ]
+    monkeypatch.setattr(strip, "settings", _strip_settings(600, 20000))
+    monkeypatch.setattr(strip, "needs_chat_anchors", _no_anchors)
+
+    def _build(
+        _messages: list[object], _anchors: list[object], **_kwargs: object
+    ) -> tuple[list[TimelineItem], int]:
+        return items, 2
+
+    monkeypatch.setattr(strip, "build_timeline_items", _build)
+    loads: list[int] = []
+
+    def _counting(agent_id: int) -> list[object]:
+        loads.append(agent_id)
+        return ["m"]
+
+    monkeypatch.setattr(checkpoint, "load_checkpoint_messages", _counting)
+    monkeypatch.setattr(checkpoint, "list_compact_boundary_checkpoint_ids", _no_boundaries)
+
+    messages, _ = strip._strip_messages_for_window(7, window_start, window_start.replace(hour=1))
+    # The ts-less head (c.1) stays in the strip, sorted first.
+    assert [message.key for message in messages] == ["c.1", "c.2"]
+    group = strip._strip_message_group(7, "c.2")
+    assert len(group) == 1
+    assert loads == [7]  # one read served both the strip and the details call
