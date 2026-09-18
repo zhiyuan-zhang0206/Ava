@@ -47,9 +47,11 @@ always carry the identity username, with or without a password.
 
 ## Flags
 
-- `--role gateway,agent-runner` — REQUIRED (no default). Sets the serve flags,
-  and decides whether to birth at all: only gateway-capable units birth. A pure
-  agent-runner gets its connection facts from `ava enroll` instead.
+- `--role` — REQUIRED (no default); a comma-separated capability set
+  (`gateway` / `agent-runner` / `observability-station`, any subset). Sets the
+  serve flags, and decides whether to birth at all: only gateway-capable units
+  birth. A pure agent-runner gets its connection facts from `ava enroll`
+  instead.
 - `--cluster-secret TOKEN` — compatibility argv input for the cluster secret;
   prefer the URL-safe `AVA_INSTALL_CLUSTER_SECRET` one-shot environment input.
 - `--worktree` — births a dev worktree's cluster at `--home` (default
