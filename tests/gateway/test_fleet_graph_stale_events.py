@@ -109,21 +109,40 @@ def _install_redis(monkeypatch: pytest.MonkeyPatch) -> _FakeRedis:
     return redis
 
 
+def _empty_pg_phase(*_args: object, **_kwargs: object) -> Any:
+    """Stand-in for `_fetch_pg_graph`: empty node rows, no Postgres."""
+    import gateway.routers.fleet_graph as fg
+
+    return fg._PgGraphData([])
+
+
+def _empty_prom_tokens(*_args: object, **_kwargs: object) -> dict[str, float]:
+    return {}
+
+
+def _empty_loki_tail(**_kwargs: object) -> tuple[list[Any], bool]:
+    return [], False
+
+
+def _empty_archive_rows() -> tuple[list[Any], bool]:
+    return [], False
+
+
 def _stub_pg(monkeypatch: pytest.MonkeyPatch) -> None:
     """The node phase answers empty without touching Postgres."""
     import gateway.routers.fleet_graph as fg
 
-    monkeypatch.setattr(fg, "_fetch_pg_graph", lambda *_a, **_k: fg._PgGraphData([]))
+    monkeypatch.setattr(fg, "_fetch_pg_graph", _empty_pg_phase)
 
 
 def _stub_archive_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     import gateway.routers.fleet_graph as fg
 
-    monkeypatch.setattr(fg, "_cached_archive_edges", lambda: ([], False))
+    monkeypatch.setattr(fg, "_cached_archive_edges", _empty_archive_rows)
 
 
 def _stub_prom_ok(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(prom_metrics, "sum_by", lambda *_a, **_k: {})
+    monkeypatch.setattr(prom_metrics, "sum_by", _empty_prom_tokens)
 
 
 def _get_stale() -> tuple[int, bool]:
@@ -270,7 +289,7 @@ def test_prom_admission_budget_emits(
     monkeypatch.setattr(fg, "_monotonic", lambda: next(monotonic))
 
     def refused(*_a: object, **_k: object) -> dict[str, float]:
-        raise prom_metrics.PromQueryBudgetError("query budget refused")
+        raise prom_metrics.PromQueryBudgetError("queue_full")
 
     monkeypatch.setattr(prom_metrics, "sum_by", refused)
 
@@ -334,7 +353,7 @@ def test_loki_admission_budget_emits(
     _stub_prom_ok(monkeypatch)
 
     def refused(**_kwargs: object) -> tuple[list[Any], bool]:
-        raise loki_query_budget.LokiQueryBudgetError("loki queue full")
+        raise loki_query_budget.LokiQueryBudgetError("queue_full")
 
     monkeypatch.setattr(fg, "_fetch_loki_edges", refused)
 
@@ -378,7 +397,7 @@ def test_loki_phase_budget_emits(
     _stub_prom_ok(monkeypatch)
     monotonic = iter((0.0, 0.0, 0.0, fg._ROUTE_TIMEOUT_S + 0.1))
     monkeypatch.setattr(fg, "_monotonic", lambda: next(monotonic))
-    monkeypatch.setattr(fg, "_fetch_loki_edges", lambda **_kwargs: ([], False))
+    monkeypatch.setattr(fg, "_fetch_loki_edges", _empty_loki_tail)
 
     status, stale = _get_stale()
     assert status == 200
@@ -396,7 +415,7 @@ def test_healthy_response_emits_nothing(
     _stub_pg(monkeypatch)
     _stub_archive_ok(monkeypatch)
     _stub_prom_ok(monkeypatch)
-    monkeypatch.setattr(fg, "_fetch_loki_edges", lambda **_kwargs: ([], False))
+    monkeypatch.setattr(fg, "_fetch_loki_edges", _empty_loki_tail)
 
     with TestClient(app) as client:
         resp = client.get("/api/fleet/graph")
