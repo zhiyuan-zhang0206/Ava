@@ -1,7 +1,7 @@
 """Event-registry zero-enforcement gate — R2-C \u5355\u4e00\u4e8b\u5b9e\u6e90\u7eaa\u5f8b.
 
 `shared/events/contract.py` \u7684 `EVENTS` \u662f event_name \u552f\u4e00\u4e8b\u5b9e\u6765\u6e90\uff1b\u672c\u6a21\u5757\u662f
-**\u9a8c\u8bc1\u8005**\uff08\u4e0d\u662f\u63a5\u7f1d——\u6ce8\u518c\u8868\u4e4b\u5916\u4e0d\u518d\u6709\u624b\u5de5\u5feb\u7167\uff09\u3002\u56db\u4e2a\u5b88\u536b\uff1a
+**\u9a8c\u8bc1\u8005**\uff08\u4e0d\u662f\u63a5\u7f1d——\u6ce8\u518c\u8868\u4e4b\u5916\u4e0d\u518d\u6709\u624b\u5de5\u5feb\u7167\uff09\u3002\u4e94\u4e2a\u5b88\u536b\uff1a
 
 1. **\u524d\u5411**\uff1a\u751f\u4ea7\u4ee3\u7801\u91cc\u6bcf\u4e2a\u9759\u6001 `event=` \u5b57\u9762\u91cf\u5fc5\u987b\u5df2\u6ce8\u518c\u3002\u672a\u6ce8\u518c =
    `telemetry.emit` fail-fast\uff08\u65b0\u4ee3\u7801\uff09\u6216\u9759\u9ed8\u843d category=log 30d\uff08\u65e7\u8def\u5f84\uff09\uff0c
@@ -14,6 +14,9 @@
 4. **SQL \u952e\u6ce8\u5165**\uff1a\u8bfb\u53d6\u7aef SQL \u91cc\u7684 attributes \u952e\u5b57\u9762\u91cf\uff08`->>'` \u4e0e `?`
    \u4e24\u79cd\u5f62\u6001\uff09\u5fc5\u987b\u662f\u4e00\u4e2a payload TypedDict \u7684\u58f0\u660e\u952e\uff08`registered_payload_keys`\uff09
    ——"\u6539\u540d\u4e8b\u4ef6 = \u6ce8\u518c\u8868\u4e00\u884c + \u6240\u6709\u5f15\u7528\u70b9\u7f16\u8bd1/\u6d4b\u8bd5\u5931\u8d25"\u7684 SQL \u534a\u8fb9\u3002
+5. **label-only \u6d3e\u751f**\uff1a\u751f\u4ea7\u4ee3\u7801\u91cc loguru \u8bb0\u5f55\u8c03\u7528\u94fe\uff08`logger[.bind/.opt]*(...).<level>`\uff09\u5408\u5e76\u540e\u7684
+   keywords \u542b `label=`\u3001\u4e0d\u542b `event=` \u65f6\uff0clabel \u5fc5\u987b\u662f `EVENTS` \u4e2d\u7684\u5df2\u6ce8\u518c\u540d\uff1b\u52a8\u6001\uff08\u975e\u5b57\u9762\u91cf\uff09
+   label fail-closed——\u9759\u6001\u4e0d\u53ef\u8bc1\u3002\u5426\u5219 sink \u5185 emit \u629b ValueError\uff1a\u884c\u4e22\u5931 + traceback\u3002
 
 \u9650\u5236\uff08\u7ee7\u627f\u81ea scan_kinds\uff09\uff1a\u9759\u6001\u5b57\u9762\u91cf\u626b\u63cf\u770b\u4e0d\u5230\u52a8\u6001\u4ea7\u751f\u7684\u540d\u5b57\uff08\u53d8\u91cf
 `event_type`\u3001dict \u503c\u3001\u4e09\u5143\u8868\u8fbe\u5f0f\uff09——\u5b83\u4eec\u5728 `_SQL_OR_DYNAMIC_KINDS` \u91cc\u9010\u6761
@@ -261,3 +264,100 @@ def test_attributes_key_literals_are_registered() -> None:
         "on the event's payload TypedDict, or use the registry SQL fragment "
         "constants."
     )
+
+
+# ── fifth guard — label-only derivation ─────────────────────────────────────
+
+
+def test_label_only_calls_derive_registered_names() -> None:
+    """Label-only gate: when a loguru record call's merged chain keywords
+    carry `label=` and no `event=`, the label is the runtime fallback event
+    name (resolution: event -> label -> "log"), so it must be registered — an
+    unregistered label raises inside the sink and the row is lost with a
+    traceback. A non-literal (dynamic) label fails closed: pass an explicit
+    `event=` or a registered literal label."""
+    findings = scan_kinds.scan_label_only_calls(_REPO)
+    dynamic = [(f.path, f.lineno) for f in findings if f.label is None]
+    assert not dynamic, (
+        "label-only call(s) with a dynamic (non-literal) label — the static "
+        f"gate cannot prove they are registered: {dynamic}. Pass an explicit "
+        "event= or a literal label that is registered in EVENTS."
+    )
+    unregistered = [
+        (f.path, f.lineno, f.label)
+        for f in findings
+        if f.label is not None and f.label not in EVENTS
+    ]
+    assert not unregistered, (
+        "label-only call(s) with an unregistered label: "
+        f"{unregistered}. Register the label in shared/events/contract.py "
+        "EVENTS (one EventSpec line), or pass an explicit event=."
+    )
+
+
+# The guard's scanner, pinned on synthetic sources — positive (literal),
+# fail-closed (dynamic), and negative (event= chains, non-logger `label=`
+# surfaces). A scanner regression must not ride on the repo-wide scan alone.
+
+_SYNTHETIC_IMPORT = "from shared.log import logger\n"
+
+
+def test_label_scan_flags_literal_and_dynamic_labels() -> None:
+    """Literal label-only calls are found; a non-literal label is reported as
+    dynamic (label=None) — the fail-closed case the guard rejects."""
+    findings = scan_kinds.find_label_only_calls(
+        _SYNTHETIC_IMPORT
+        + 'logger.info("[{label}] {body}", label="exec", body="x")\n'
+        + 'logger.warning("w", label=f"kind-{value}")\n'
+        + 'logger.bind(label="bound").error("e")\n'
+        + 'logger.opt(colors=True).info("m", label="opt-chain")\n',
+        filename="synthetic.py",
+    )
+    assert [(f.lineno, f.label) for f in findings] == [
+        (2, "exec"),
+        (3, None),
+        (4, "bound"),
+        (5, "opt-chain"),
+    ]
+
+
+def test_label_scan_merges_chains_and_skips_event_or_non_logger() -> None:
+    """Chains merge in write order (later link wins); any `event=` in the
+    chain exempts the call; calls rooted outside the logger set are not
+    matched (the ServiceProbe-style surfaces with their own `label=`)."""
+    findings = scan_kinds.find_label_only_calls(
+        _SYNTHETIC_IMPORT
+        + 'logger.bind(label="outer").bind(label="inner").info("m")\n'
+        + 'logger.bind(label="bound").info("m", label="call")\n'
+        + 'logger.bind(event="registered_thing").info("m")\n'
+        + 'logger.bind(event="registered_thing").info("m", label="x")\n'
+        + 'logger.info("m")\n'
+        + 'client.info("m", label="x")\n'
+        + 'ServiceProbe(label="probe")\n'
+        + '_render_skill_bodies(label="nope")\n',
+        filename="synthetic.py",
+    )
+    assert [(f.lineno, f.label) for f in findings] == [(2, "inner"), (3, "call")]
+
+
+def test_label_scan_covers_loguru_imports_and_module_aliases() -> None:
+    """Every logger-root spelling is matched: the loguru-direct import, a
+    renamed import, a `shared.log` module alias, and the literal
+    `shared.log.logger` attribute chain."""
+    findings = scan_kinds.find_label_only_calls(
+        "import shared.log as _log\n"
+        "import shared.log\n"
+        "from loguru import logger as lg\n"
+        "from shared.log import logger\n"
+        '_log.logger.info("m", label="alias")\n'
+        'shared.log.logger.warning("m", label="attr-chain")\n'
+        'lg.info("m", label="renamed-import")\n'
+        'logger.info("m", label="plain")\n',
+        filename="synthetic.py",
+    )
+    assert [(f.lineno, f.label) for f in findings] == [
+        (5, "alias"),
+        (6, "attr-chain"),
+        (7, "renamed-import"),
+        (8, "plain"),
+    ]
