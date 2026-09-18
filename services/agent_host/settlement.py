@@ -5,7 +5,11 @@ turn — the corpse marker + idling settle — and, for a settled abort,
 additionally reconciles the inbounds that turn claimed. That reconcile is the
 same pass a cold admission would run, moved to the point where the abort
 became durable, so the rows are not left for a cold admission or boot that may
-never come (task #3615). A turn that dies again under its own corpse mark is
+never come (task #3615). A finished, non-crashed turn runs the same pass at
+its own settlement too — its flushed checkpoint is the earliest point that
+can confirm which rows committed (#3999), so chat rows no longer sit
+`claimed` until a next boot or abort. A turn that dies again under its own
+corpse mark is
 prompt-reaped here too — the same termination the beat reaper performs, moved
 up to the retry's failure (task #3616). Split into its own module to keep
 `host.py` inside the file-size ceiling.
@@ -27,7 +31,12 @@ from shared.log import logger
 from shared.runtime_incarnation import RuntimeIncarnation
 from shared.turn_identity import bind_turn_identity, hosted_resources_settled
 
-__all__ = ["close_hosted_turn", "prompt_reap_after_recrash", "reconcile_inbounds_after_abort"]
+__all__ = [
+    "close_hosted_turn",
+    "prompt_reap_after_recrash",
+    "reconcile_inbounds_after_abort",
+    "reconcile_inbounds_after_turn",
+]
 
 
 async def close_hosted_turn(
@@ -37,17 +46,20 @@ async def close_hosted_turn(
     incarnation: RuntimeIncarnation,
     outcome: TurnOutcome,
 ) -> None:
-    """Settle the finished turn, dispose a settled abort's claimed rows, then
-    prompt-reap a corpse that re-crashed under its own mark.
+    """Settle the finished turn, dispose its claimed rows (the abort pass, or
+    a finished turn's own pass), then prompt-reap a corpse that re-crashed
+    under its own mark.
 
-    Order matters: the abort reconcile needs the abort's own live incarnation
+    Order matters: both reconcile passes need the turn's own live incarnation
     (its lease fence), and the reap terminates that incarnation — so the reap
-    runs last, after both."""
+    runs last, after them."""
     settlement = await settle_and_stamp_turn(
         control_pool, incarnation, exited=outcome.exited, crashed=outcome.crashed
     )
     if outcome.aborted:
         await reconcile_inbounds_after_abort(pool, checkpointer, incarnation)
+    elif not outcome.crashed:
+        await reconcile_inbounds_after_turn(pool, checkpointer, incarnation)
     if outcome.crashed:
         await prompt_reap_after_recrash(control_pool, incarnation, settlement)
 
@@ -159,6 +171,72 @@ async def reconcile_inbounds_after_abort(
         logger.warning(
             "host abort reconcile failed — the next cold admission retries it",
             event="host_abort_reconcile_failed",
+            agent_id=agent_id,
+            exc_info=True,
+        )
+
+
+async def reconcile_inbounds_after_turn(
+    pool: AsyncConnectionPool,
+    checkpointer: AsyncPostgresSaver,
+    incarnation: RuntimeIncarnation,
+) -> None:
+    """Dispose the finished turn's claimed inbounds at its settlement point.
+
+    A finished turn's chat rows otherwise stay `'claimed'` until the next
+    cold admission or abort; the turn's own settlement is the earliest
+    durable point that can confirm them (#3999). The pass runs the same
+    inbound reconcile a cold admission would: rows whose message reached the
+    checkpoint go `done`, uncommitted rows return to `pending` for the next
+    claim, and rows past the stale threshold are dead-lettered.
+
+    The pass must stay behind the turn's flush of the throttled nstep tail
+    (`host.py` `_invoke_until_done` flushes before its return): reading a
+    checkpoint with a skipped tail would misread a committed message as
+    missing and reset its row to `pending` (duplicate delivery). Cancelled
+    turns land here too — their outcome is neither crashed nor aborted and
+    they carry no finished-turn flush: the pass then reads the last flushed
+    checkpoint, and a claim the interrupted turn cannot confirm returns to
+    `pending` for re-delivery, the same at-least-once call a cold admission
+    would make. Fail-closed: any gap skips the pass and leaves the rows to
+    the next cold admission, which retries the reconcile. The settle boundary
+    runs outside the turn's bind window, so re-establish the same incarnation
+    (the inbound owner lock fences on that lease) around the call.
+    """
+    agent_id = incarnation.agent_id
+    if not settings.daemon.host_turn_reconcile_enabled:
+        logger.info(
+            "turn inbound reconcile disabled — claimed rows wait for the next cold admission",
+            event="host_turn_reconcile_skipped",
+            agent_id=agent_id,
+            reason="disabled",
+        )
+        return
+    if not hosted_resources_settled():
+        logger.warning(
+            "turn inbound reconcile skipped: turn resources unresolved — "
+            "the next cold admission disposes the claimed rows",
+            event="host_turn_reconcile_skipped",
+            agent_id=agent_id,
+            reason="resources_unsettled",
+        )
+        return
+    try:
+        async with database_phase():
+            with bind_turn_identity(agent_id, incarnation=incarnation):
+                await _reconcile_claimed_inbounds_at_startup(pool, checkpointer, agent_id)
+    except RuntimeOwnershipLostError:
+        logger.warning(
+            "turn inbound reconcile skipped: runtime ownership already replaced — "
+            "the replacement disposes the claimed rows",
+            event="host_turn_reconcile_skipped",
+            agent_id=agent_id,
+            reason="ownership_lost",
+        )
+    except Exception:
+        logger.warning(
+            "turn inbound reconcile failed — the next cold admission retries it",
+            event="host_turn_reconcile_failed",
             agent_id=agent_id,
             exc_info=True,
         )

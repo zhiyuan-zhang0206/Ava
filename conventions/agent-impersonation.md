@@ -109,6 +109,36 @@ Messages are model work — a delivered message wakes a model on its receiving
 side (tokens, not free): send substantive traffic (work, blockers, questions),
 not chatter; routine status belongs in the release summary.
 
+## Message states and delivery
+
+An inbound row moves `pending` -> `claimed` -> `done` (or is dead-lettered,
+a second deliberate arrival at `done` for a claim older than the stale
+threshold). Native chat rows are confirmed at settlement points: every
+finished turn, boot/recovery, and abort settlement. A claim whose message
+never reached the checkpoint returns to `pending` and is delivered again —
+a delivered message is never silently lost.
+
+During an active takeover the native row stays `pending` even after the
+executor's pipeline has it — that column is the native claim view, not a
+delivery verdict. The web pending strip hides what the takeover has already
+absorbed: while an unexpired active session exists, a pending chat that the
+session trail has transcribed (what the timeline renders) or that the relay
+has read appears in the timeline only — the same message is never shown
+twice (#3683). If the session ends without an ACK, those rows are pending
+and visible again for the native agent.
+
+| kind | native flow | takeover flow |
+| --- | --- | --- |
+| chat | pending -> claimed -> done (a compact batch may fall a claim back to pending) | read -> ACK -> done; unacknowledged, uncaptured rows stay pending for the native claim |
+| cancel / terminate / restart | claimed -> done (control path; the host fulfils the intent) | delivered + ACK |
+| restart_completed / resurrect / fork | first claim consumes it -> done | delivered + ACK |
+| compact_request / compact_summary | claimed -> done | delivered + ACK |
+| heartbeat | claimed -> done | not delivered during takeover; the native claim consumes it after |
+| system_note / reminder | claimed -> done | delivered + ACK (a reminder also expires/dismisses) |
+
+An automatic session's handoff receipt consumes its captured backlog to
+`done`; uncaptured unacknowledged rows stay `pending` for the native agent.
+
 ## Return control
 
 Stop external work and close attachments before releasing:

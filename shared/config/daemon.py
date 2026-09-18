@@ -146,6 +146,20 @@ class DaemonSettings(
         },
     )
 
+    host_turn_reconcile_enabled: bool = Field(
+        default=True,
+        alias="AVA_HOST_TURN_RECONCILE_ENABLED",
+        description="Hosted agent-runner: at every finished non-crashed turn, dispose the turn's claimed 'chat' inbounds immediately (committed to the flushed checkpoint -> done, uncommitted -> pending for the next claim, past the stale threshold -> dead-lettered) instead of leaving them claimed until the next cold admission or abort. The throttled checkpoint tail is flushed first; off restores the deferred behavior.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": True,
+        },
+    )
+
     hosted_recrash_prompt_reap_enabled: bool = Field(
         default=False,
         alias="AVA_HOSTED_RECRASH_PROMPT_REAP_ENABLED",

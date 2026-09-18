@@ -70,6 +70,17 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
   admission).
 
 ### Fixed
+- Inbound state semantics converge sooner and never double-show during a
+  takeover (task #3999, from the #3683 duplicate display): every finished
+  hosted turn now reconciles its own claimed `chat` rows at settlement — the
+  throttled checkpoint tail is flushed first (`AVA_HOST_TURN_RECONCILE_ENABLED`)
+  — so a handled message reaches `done` without waiting for the next boot or
+  abort, and the pending strip (`GET /api/agents/{id}/pending`) hides a chat
+  the active session absorbed: while an unexpired active session exists, a
+  pending chat that the session trail transcribed or the relay read appears
+  in the timeline only, and returns to the strip if the session ends
+  unacknowledged. The row itself stays `pending`; the strip is a read-surface
+  view.
 - A `plugins_config.json` entry whose plugin directory is gone is now reported
   through the canonical plugin-load reporter (loguru ERROR + a
   `plugin_load_failed` event, once per process) instead of a plain warning —
