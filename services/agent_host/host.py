@@ -550,9 +550,10 @@ class AgentHost:
         dispatcher's current turn-progress clock to be stale. Expired foreign
         owners include quiet idle rows whose lease expires after boot. Wakes
         retain admission/resource fences; an empty halted claim spends no model
-        call. Held maintenance wakes its restart cohort and the steady held
-        rows: an open lease needs the pull-based supervision cadence of the
-        held pass (task #3998), never relying on wake delivery alone.
+        call. Held maintenance wakes its restart cohort; outside a hold this
+        scan also keeps the steady held rows on its cadence: an open lease
+        needs the held pass's pull-based supervision (task #3998), never wake
+        delivery alone.
         """
         held_wakes = maintenance_receipts.pending_wakes(self._maintenance_failed)
         if held_wakes is not None:
