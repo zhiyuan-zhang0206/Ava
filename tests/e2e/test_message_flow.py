@@ -129,14 +129,25 @@ def test_message_flow_renders_full_turn_without_unrecognized_marker(e2e_env: E2E
         f"[timeline] unrecognized console warnings fired: {unrecognized_warnings}"
     )
 
-    # ── DB: the inbound was claimed (two-phase dispatch). 'claimed' is the
-    # steady state for chat inbounds — 'done' only lands at process startup
-    # reconcile or compaction (agent/db.py finalize_claimed_inbounds), so a
-    # single read after IDLING is deterministic here. ──
-    with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT kind, status FROM inbound_messages WHERE agent_id = %s ORDER BY id",
-            (agent_id,),
-        )
-        rows = cur.fetchall()
-    assert rows and rows[-1] == ("chat", "claimed"), rows
+    # ── DB: the finished turn disposed its claim — the chat row is 'done'. ──
+    # Message states (conventions/agent-impersonation.md): a native chat row
+    # moves pending -> claimed -> done, confirmed at settlement points —
+    # every finished turn (#3999, services/agent_host/settlement.py
+    # reconcile_inbounds_after_turn), a boot/recovery, or an abort. 'claimed'
+    # is the mid-turn state only. Poll: the settle pass runs with the turn's
+    # close, and a regression that leaves the row claimed must read red.
+    def inbound_settled() -> tuple[bool, object]:
+        with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT kind, status FROM inbound_messages WHERE agent_id = %s ORDER BY id",
+                (agent_id,),
+            )
+            rows = cur.fetchall()
+        return bool(rows) and rows[-1] == ("chat", "done"), rows
+
+    poll_until(
+        inbound_settled,
+        timeout=30.0,
+        interval=0.25,
+        what=f"agent {agent_id} chat inbound to settle to 'done' after the finished turn",
+    )
