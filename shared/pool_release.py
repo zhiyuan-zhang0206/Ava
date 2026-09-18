@@ -9,7 +9,7 @@ performs one connection at a time: the idle set empties, the connection count
 drops with it, and a later borrow grows the pool again through the stock
 maintenance task.
 
-Pinned to the psycopg-pool release `uv.lock` holds (3.3.1): both flavors share
+Pinned to the psycopg-pool release `uv.lock` holds (3.3.2): both flavors share
 one private face — `_lock`, `_pool`, `_nconns`, `_nconns_min`,
 `_close_connection` (`pool.py` / `pool_async.py`). Connections close outside
 the lock, mirroring `drain()`, so a slow close cannot pin the pool.

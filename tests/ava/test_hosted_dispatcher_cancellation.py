@@ -1,12 +1,14 @@
 """A cancelled dispatcher unwinds even when a pool check swallows the cancel.
 
-psycopg_pool's async `getconn()` absorbs a `CancelledError` that lands while it
-checks a connection: it returns the connection to the pool and retries without
-re-raising (upstream psycopg#1345, still present in 3.3.1). A cancelled task
-then keeps running with an outstanding cancellation that nothing will ever
-deliver again, and `await task` hangs forever. The dispatcher re-asserts a
-pending cancellation across its database scan; this test parks a connection
-check so the cancel lands in exactly that window (task #3513).
+A cancelled dispatcher must unwind even when the cancellation lands inside a
+psycopg_pool connection check. Up to 3.3.1 the pool absorbed that cancellation
+(it returned the connection and retried without re-raising — upstream
+psycopg#1345), leaving the task running with an outstanding cancellation that
+nothing would ever deliver again; the dispatcher's scan-boundary re-assertion
+turned that into an unwind. From psycopg_pool 3.3.2 the pool propagates the
+cancellation itself (upstream #1401). This test parks a connection check so the
+cancel lands in exactly that window, and requires the cancelled dispatcher to
+unwind either way (task #3513).
 """
 
 import asyncio
@@ -46,9 +48,10 @@ async def blocked_first_check(
 ) -> AsyncIterator[asyncio.Event]:
     """Park the pool's first connection check so a cancel lands inside it.
 
-    The parked call is cancelled; the pool's retry runs the real check and the
-    `getconn()` completes normally — the exact swallow this test pins. Later
-    checks pass through to the real method.
+    The parked call is cancelled; whether the pool propagates that cancellation
+    (psycopg_pool >= 3.3.2) or a boundary swallow would strand the task
+    (<= 3.3.1), the dispatcher must still unwind. Later checks pass through to
+    the real method so the pool stays usable.
     """
     real = AsyncConnectionPool._check_connection
     in_check = asyncio.Event()
