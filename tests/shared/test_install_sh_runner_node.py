@@ -1,4 +1,10 @@
-"""Agent-runner install must provision Node.js for its shared browser service."""
+"""`scripts/install.sh --role` contracts around the agent-runner install.
+
+The runner install must provision Node.js for its shared browser service, and
+the --role validator must accept the full capability set (`gateway` /
+`agent-runner` / `observability-station`), pass the token through to the birth
+step, and still refuse an unknown token before any side effect.
+"""
 
 from __future__ import annotations
 
@@ -10,9 +16,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _run_agent_runner_install(
-    tmp_path: Path, *, node_exit: int = 0, os_name: str | None = None
+    tmp_path: Path,
+    *,
+    node_exit: int = 0,
+    os_name: str | None = None,
+    role: str = "agent-runner",
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
-    """Run a scratch agent-runner install with a controllable Node provisioner."""
+    """Run a scratch install of `role` with a controllable Node provisioner."""
     home = tmp_path / "home"
     checkout = home / "source"
     provision = checkout / "scripts" / "provision"
@@ -41,8 +51,8 @@ def _run_agent_runner_install(
     python.write_text(f'#!/bin/sh\necho "birth $*" >> "{calls}"\n')
     python.chmod(0o755)
 
-    proc = subprocess.run(
-        ["bash", "scripts/install.sh", "--role", "agent-runner"],
+    proc = subprocess.run(  # noqa: S603 — fixed argv; `role` is a test-controlled token
+        ["bash", "scripts/install.sh", "--role", role],
         cwd=checkout,
         env={
             "AVA_HOME": str(home),
@@ -69,6 +79,26 @@ def test_agent_runner_install_provisions_node_before_cluster_birth(tmp_path: Pat
     assert proc.returncode == 0, proc.stderr
     assert "node" in recorded
     assert any(line.startswith("birth -m cli.install_cluster") for line in recorded)
+
+
+def test_observability_station_role_reaches_birth_with_the_token(tmp_path: Path) -> None:
+    """--role observability-station passes the validator and reaches the birth
+    step unchanged — cli.install_cluster writes the serve flags from this argv."""
+    proc, recorded = _run_agent_runner_install(tmp_path, role="observability-station")
+    assert proc.returncode == 0, proc.stderr
+    assert any(
+        line.startswith("birth ") and line.endswith("--role observability-station")
+        for line in recorded
+    )
+
+
+def test_unknown_role_token_is_refused_before_side_effects(tmp_path: Path) -> None:
+    """Widening the case list must not accept arbitrary text: an unknown token
+    still exits 2 with the usage, before any provisioning or birth runs."""
+    proc, recorded = _run_agent_runner_install(tmp_path, role="gateway,gofer")
+    assert proc.returncode == 2
+    assert "got: 'gateway,gofer'" in proc.stderr
+    assert recorded == [], "a refused role must not run provisioning or birth"
 
 
 def test_agent_runner_install_warns_and_completes_when_node_provisioning_fails(
