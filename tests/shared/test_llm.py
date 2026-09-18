@@ -95,6 +95,9 @@ class TestModelContextWindow:
     def test_glm_5_3_flash_is_1m(self) -> None:
         assert MODEL_CONTEXT_WINDOW["glm-5.3-flash"] == 1_000_000
 
+    def test_glm_5_3_flashx_is_1m(self) -> None:
+        assert MODEL_CONTEXT_WINDOW["glm-5.3-flashx"] == 1_000_000
+
     def test_qwen3_8_flash_window_is_thinking_mode_input(self) -> None:
         """Same convention as qwen3.8-max: the roster runs with thinking on,
         so the 983,616 reasoning-mode input ceiling is the binding one."""

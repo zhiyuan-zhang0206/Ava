@@ -320,12 +320,31 @@ def test_glm_5_3_flash_registry_facts() -> None:
     assert resolve_setting("llm_retry_max_attempts", model="glm-5.3-flash") == 10
 
 
+def test_glm_5_3_flashx_registry_facts() -> None:
+    """The high-speed serving sibling of glm-5.3-flash (same model at 200
+    tokens/s; docs.z.ai/guides/vlm/glm-5.3-flash publishes both ids on one
+    page) shares the series' window, cutoff estimate, effort vocabulary,
+    always-on thinking, and the GLM-family retry posture — priced separately
+    in the catalog."""
+    spec = MODELS["glm-5.3-flashx"]
+    assert spec.provider == "glm"
+    assert spec.spawnable
+    assert spec.context_window == 1_000_000
+    assert spec.knowledge_cutoff == "2025-12"
+    assert spec.effort_levels == ("low", "high", "max")
+    assert spec.media_types == frozenset({"image"})
+    assert resolve_setting("reasoning_effort", model="glm-5.3-flashx") == "max"
+    assert resolve_setting("llm_retry_max_attempts", model="glm-5.3-flashx") == 10
+
+
 def test_glm_5_3_series_thinking_cannot_be_disabled() -> None:
-    """Both GLM-5.3 models always think — thinking.type=disabled is rejected by
-    the endpoint (400, error code 1210, live-checked 2026-08-27), so the builder
-    must warn instead of sending the disabled body (kimi-k3 pattern)."""
+    """The GLM-5.3-series models always think — thinking.type=disabled is
+    rejected by the endpoint (400, error code 1210, live-checked 2026-08-27),
+    so the builder must warn instead of sending the disabled body (kimi-k3
+    pattern)."""
     assert MODELS["glm-5.3"].thinking_always_on
     assert MODELS["glm-5.3-flash"].thinking_always_on
+    assert MODELS["glm-5.3-flashx"].thinking_always_on
     # glm-5.2 keeps the off switch — the family boundary is 5.3, not glm-*.
     assert not MODELS["glm-5.2"].thinking_always_on
 
@@ -360,6 +379,7 @@ def test_image_media_types_match_the_verified_model_matrix() -> None:
         "gpt-5.4-mini",
         "kimi-k3",
         "glm-5.3-flash",
+        "glm-5.3-flashx",
         "qwen3.8-max",
         "qwen3.8-27b",
         "qwen3.8-flash",

@@ -33,13 +33,16 @@ def test_qa_pricing_scenarios_use_plugin_runtime_semantics() -> None:
     assert rates_at("glm-5.3-flash", datetime(2026, 9, 15, tzinfo=UTC), 1) == Rates(
         0.15, 0.03, 0.50
     )
+    assert rates_at("glm-5.3-flashx", datetime(2026, 9, 15, tzinfo=UTC), 1) == Rates(
+        0.37, 0.075, 1.25
+    )
     assert rates_at("deepseek-v4-pro", _HISTORICAL, 1) == Rates(0.435, 0.003625, 0.87)
 
 
 def test_all_plugin_models_match_archive_at_four_instant_classes() -> None:
     archive = _archive_catalog()
 
-    assert len(pricing._PLUGIN_PRICES) == 36
+    assert len(pricing._PLUGIN_PRICES) == 37
     for model, plugin_price in sorted(pricing._PLUGIN_PRICES.items()):
         assert model in archive
         input_tokens = 200_001 if model == "gemini-3.1-pro-preview" else 1_000_000
