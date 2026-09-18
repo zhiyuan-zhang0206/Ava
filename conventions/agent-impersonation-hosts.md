@@ -17,7 +17,7 @@ activate rolls the acceptance back loudly: the lease ends `rejected` with the
 reason, the native agent receives a system note and keeps running.
 
 The relay waits natively for preparation and quiescence, then delivers the
-session's start message — the opener recorded on the lease during preparation —
+session's start message — the `start_message` recorded on the lease during preparation —
 even if the inbox is empty. Rejection or expiry also wakes the controller;
 waiting for activation never requires a model to poll status.
 The relay authenticates with the lease's scoped `relay_token` — never the
@@ -177,8 +177,9 @@ the [channel protocol](https://code.claude.com/docs/en/channels-reference).
   pushed again after five minutes, marked as re-delivery, until the host ACKs
   it or the lease ends. Rows already pending at activation push immediately
   (they waited through preparation); fresh routine arrivals coalesce inside the
-  lease's configured merge window (default 30 seconds), while user chats,
-  cancels and renewal reminders never wait. New messages arriving under an
+  lease's configured merge window when one is set (0..300 seconds; default 0
+  pushes immediately), while user chats, cancels and renewal reminders never
+  wait. New messages arriving under an
   outstanding batch push as their own batch.
 - Pushes are debounced (default 0.5 seconds, maximum 30) and emitted at most
   once every two seconds. Terminal control notices are immediate. Every relay

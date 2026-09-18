@@ -1,7 +1,7 @@
-"""Cooperative same-machine leases; native execution remains the checkpoint owner.
+"""Cooperative same-machine leases; the native agent remains the checkpoint owner.
 
 No code is executed here. External Python processes bind their own SDK identity,
-read/ack durable inbox rows and stage plugin state until native execution resumes.
+read/ack durable inbox rows and stage plugin state until the native agent resumes.
 """
 
 import secrets
@@ -72,7 +72,7 @@ def request(
     relay_provider: str,
     relay_thread_id: str | None = None,
     relay_codex_remote: str | None = None,
-    relay_batch_window_seconds: int = 30,
+    relay_batch_window_seconds: int = 0,
     name: str = "",
     executor_name: str = "",
     process_metadata: dict[str, Any] | None = None,
@@ -88,9 +88,10 @@ def request(
     here (its relay runs inside the controller's own session); the codex
     credential is minted by the native side at activation instead.
 
-    ``relay_batch_window_seconds`` is the relay's routine-message merge window:
-    arrivals that are neither a user chat nor a cancel coalesce into one hint
-    per window (user messages always hint immediately). 0 disables merging.
+    ``relay_batch_window_seconds`` is the relay's routine-message merge window
+    (0..300; default 0 delivers immediately): when set, arrivals that are
+    neither a user chat nor a cancel coalesce into one hint per window (user
+    messages always hint immediately).
     """
     ttl = _ttl(ttl_seconds)
     if automatic and (not name.strip() or not executor_name.strip()):
@@ -195,15 +196,16 @@ def accept(
     incarnation: RuntimeIncarnation,
     start_message: str,
 ) -> dict[str, Any]:
-    """Record native preparation and the required brief for the external session.
+    """Record native preparation and the required start message for the external session.
 
-    The brief becomes the relay's first host message at activation, so the
-    controller starts with the native agent's own words instead of a synthetic
-    hint. An empty brief is rejected: user ruling 2026-09-08 (decision C).
+    The start message becomes the relay's first host message at activation, so
+    the controller starts with the native agent's own words instead of a
+    synthetic hint. An empty start message is rejected: user ruling 2026-09-08
+    (decision C).
     """
     if not start_message.strip():
         raise ImpersonationError(
-            "A nonempty start message is required: write the handoff brief the "
+            "A nonempty start message is required: write the briefing the "
             "external session needs (current work, context, expectations, how "
             "to ACK inbox messages)."
         )

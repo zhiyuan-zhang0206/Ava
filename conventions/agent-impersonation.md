@@ -3,7 +3,11 @@
 A trusted Codex or Claude Code process on an Ava agent's machine can take over
 its identity. Preparation drains native work and saves its checkpoint before
 activation. It does not ask the native model to approve. TTL is an explicit
-recovery deadline; renewal and initial takeover follow the same trust model.
+recovery deadline, for renewal and the initial takeover alike — estimate it
+short: take the smallest window that covers the next slice (about 30 minutes
+when the work ahead looks like about an hour) and extend by renewal. A short
+window is the deadlock backstop; a long one parks the agent for its whole
+span if the external side dies.
 
 ## Start a named session
 
@@ -100,6 +104,10 @@ processing state, never history retention. `cancel` asks the external controller
 to stop; ACK after stopping. `reminder` indicates an approaching TTL deadline:
 decide whether to renew once or release. Renew explicitly, never in an automated
 heartbeat loop. TTL is 1..86400 seconds; relay liveness does not extend it.
+
+Messages are model work — a delivered message wakes a model on its receiving
+side (tokens, not free): send substantive traffic (work, blockers, questions),
+not chatter; routine status belongs in the release summary.
 
 ## Return control
 

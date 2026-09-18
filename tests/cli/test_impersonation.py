@@ -290,6 +290,24 @@ def test_batch_window_zero_disables_merge() -> None:
         assert args.relay_batch_window_seconds == int(value)
 
 
+def test_batch_window_defaults_to_zero() -> None:
+    """Merging is opt-in: a request without --batch-window parses to 0."""
+    args = _args(
+        "request",
+        "--name",
+        "Fix login",
+        "--agent",
+        "405",
+        "--as",
+        "codex",
+        "--provider",
+        "codex",
+        "--thread-id",
+        "t",
+    )
+    assert args.relay_batch_window_seconds == 0
+
+
 @pytest.mark.parametrize("remote", [None, "unix:///tmp/ava-codex.sock"])
 def test_relay_parser(remote: str | None) -> None:
     args = _args(
