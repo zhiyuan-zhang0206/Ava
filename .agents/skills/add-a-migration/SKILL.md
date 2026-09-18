@@ -29,16 +29,22 @@ applies pending migrations on the way up).
    schema_migrations (the runner does it)
 2. Write the paired `migrations/YYYYMMDDTHHMMSS_<kebab-name>.down.sql` reversing it
    (mandatory — the baseline is the rollback floor, so everything above it must be reversible)
-3. Sync the corresponding schema change into `db/schema.sql` (the baseline stays current)
+3. Sync the corresponding schema change into `db/schema.sql` (the baseline stays current).
+   When the change is **non-idempotent** (strict — no `IF NOT EXISTS` / `OR REPLACE`),
+   also stamp this migration's name in the seed section — `INSERT INTO schema_migrations
+   (name) VALUES ('<name>')` — because a fresh DB replays every unseeded migration and
+   would fail on `already exists` (lint check 8 enforces the mechanically detectable cases)
 4. PR review focus: running `db/schema.sql` on a fresh DB and running the baseline + all
    post-baseline migrations on a dev DB must converge to the same schema
 
 ## Pre-commit lint
 
 In CI, `scripts/lint_migrations.py` statically checks the timestamp filename format
-(`YYYYMMDDTHHMMSS_<kebab-name>.sql`, a real datetime), name uniqueness, up/down pairing, and
-that `db/schema.sql` stamps the baseline sentinel and no longer carries a `generate_series`
-seed. Local pre-check: `.venv/bin/python scripts/lint_migrations.py`. There is no
+(`YYYYMMDDTHHMMSS_<kebab-name>.sql`, a real datetime), name uniqueness, up/down pairing, that
+`db/schema.sql` stamps the baseline sentinel and no longer carries a `generate_series` seed,
+and that a migration whose strict (non-idempotent) DDL is already folded into the baseline
+is stamped in the seed — an unstamped strict delta dies on the first fresh-DB bootstrap, so
+lint fails it early. Local pre-check: `.venv/bin/python scripts/lint_migrations.py`. There is no
 continuity / next-number / cross-branch-collision check — timestamp names are collision-free by
 construction.
 
