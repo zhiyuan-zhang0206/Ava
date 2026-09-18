@@ -13,6 +13,7 @@ never-applied command is closed with an honest `lifecycle_result`.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -315,3 +316,69 @@ def test_reaped_receipts_roundtrip_and_reject_invalid_shapes() -> None:
                 "reaped": {"7": "update_straggler_reap"},
             }
         )
+
+
+# Write-side enumeration guard for the reap mark's shape (review, task #4016):
+# the drain's CAS is the only writer that moves a row into 'restarting', and
+# it does so only while the member's un-applied maintenance restart is still
+# live — `agent.db.has_pending_interrupt` turns exactly that shape into an
+# abort signal for the agent's in-flight turn. A new writer or a widened
+# WHERE must update this list and the read predicate together. Mirrors
+# tests/shared/test_crash_row_writers.py (task #3617).
+
+_REPO = Path(__file__).resolve().parents[2]
+# Production trees only, mirroring the crash-row writer guard's scope.
+_SCAN_DIRS = ("agent", "ava", "ava_builtins", "cli", "gateway", "ops", "services", "shared")
+
+_REAP_STAMP = re.compile(r"SET\s+status\s*=\s*['\"]restarting['\"]")
+_REAP_CLEAR = re.compile(r"SET\s+status\s*=\s*['\"]idling['\"][\s\S]{0,600}?restarting")
+
+
+def _production_sources() -> dict[str, str]:
+    sources: dict[str, str] = {}
+    for directory in _SCAN_DIRS:
+        for path in sorted((_REPO / directory).rglob("*.py")):
+            sources[path.relative_to(_REPO).as_posix()] = path.read_text(encoding="utf-8")
+    return sources
+
+
+def test_only_the_reap_stamps_the_restarting_mark() -> None:
+    """The drain's CAS is the sole writer of the shape `has_pending_interrupt`
+    reads as the truncation signal; a second stamp site would abort turns it
+    was never meant to touch."""
+    sources = _production_sources()
+    stamped = {rel for rel, text in sources.items() if _REAP_STAMP.search(text)}
+    assert stamped == {"ops/agent_pause.py"}
+
+    text = sources["ops/agent_pause.py"]
+    match = _REAP_STAMP.search(text)
+    assert match is not None
+    start = text.rfind("def _reap_agent", 0, match.start())
+    assert start >= 0, "the reap stamp moved out of _reap_agent"
+    window = text[start : match.end() + 400]
+    # The stamp keeps its full CAS envelope: only a running, hosted, owned row
+    # with the matching generation may be marked — a wider WHERE would mark
+    # rows no settle face reclaims.
+    for pattern in (
+        r"AND\s+status\s*=\s*'running'",
+        r"runtime_kind\s*=\s*'hosted'",
+        r"runtime_owner\s*=\s*%s",
+        r"runtime_generation\s*=\s*%s",
+    ):
+        assert re.search(pattern, window), f"the reap stamp lost its CAS guard {pattern!r}"
+    # ...and only while the member's un-applied maintenance restart is live —
+    # the other half of the shape the interrupt reads.
+    for fragment in (
+        "applied_at IS NULL",
+        "observed_at IS NULL",
+        "status IN ('pending','claimed')",
+        "payload ? 'maintenance'",
+    ):
+        assert fragment in window, fragment
+
+
+def test_restarting_mark_exits_are_enumerated() -> None:
+    """Rows leave 'restarting' through exactly the settle face and the legacy
+    cold normalization — a new exit must be weighed against the interrupt."""
+    cleared = {rel for rel, text in _production_sources().items() if _REAP_CLEAR.search(text)}
+    assert cleared == {"shared/straggler_reap.py", "shared/maintenance_cold.py"}
