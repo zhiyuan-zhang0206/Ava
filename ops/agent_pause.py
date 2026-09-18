@@ -3,8 +3,17 @@
 The local pause journal closes new admission while existing actions keep their
 SDK dependencies. It survives a data-plane outage; the restart itself and its
 checkpoint remain in PostgreSQL. No external-agent ownership is acquired here.
+
+Update-family drains additionally reap their stragglers (`reap=True`, task
+#4016): a cohort member still un-landed W seconds after its restart command
+was issued is CAS-marked 'restarting' — the durable truncation signal — and
+released with the honest `reaped` outcome, never a fabricated flush receipt.
+Its mark is settled at the successor boot or local resume
+(`shared/straggler_reap.py`), which restores the row to runnable and lets the
+ordinary reconcile re-deliver its claimed work on the new code.
 """
 
+import logging
 import math
 import os
 import time
@@ -18,6 +27,8 @@ from shared.db import connect, publish_inbound_wake
 from shared.hold_driver import HoldDriver
 from shared.machine import machine_name, machine_role
 from shared.maintenance_state import MaintenanceHold
+
+_log = logging.getLogger(__name__)
 
 PAUSE_TIMEOUT_SECONDS = 300.0
 
@@ -152,10 +163,162 @@ def _prepare_cohort(
         return hold
 
 
-def _drain(holder: str, at: datetime, timeout: float) -> None:
+def _straggler_reap_seconds() -> float:
+    """The straggler window W in seconds; 0 disables the reap (task #4016)."""
+    from shared.config import settings
+
+    return settings.gateway.update_straggler_reap_seconds
+
+
+def _reap_due(hold: MaintenanceHold, pending: list[int], window: float) -> list[int]:
+    """Cohort members whose restart command has been issued for at least W.
+
+    W is counted per member from ITS command's issuance (`created_at`, read on
+    the DB clock so a retried hold and this process cannot disagree): the
+    moment this wave asked the agent to restart. A member without a committed
+    command (0) has not been asked yet and is never due.
+    """
+    ids = [hold.commands[agent] for agent in pending if hold.commands.get(agent)]
+    if not ids:
+        return []
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT id, EXTRACT(EPOCH FROM (clock_timestamp() - created_at)) "
+            "FROM inbound_messages WHERE id = ANY(%s)",
+            (ids,),
+        ).fetchall()
+    ages = {int(row[0]): float(row[1]) for row in rows}
+    due: list[int] = []
+    for agent in pending:
+        age = ages.get(hold.commands.get(agent, 0))
+        if age is not None and age >= window:
+            due.append(agent)
+    return due
+
+
+def _reap_agent(agent: int, command_id: int) -> str:
+    """CAS one straggler 'restarting' — the durable truncation mark.
+
+    The mark alone is the kill: `agent.db.has_pending_interrupt` reads it as
+    an abort signal, so the agent's in-flight exec/LLM work is truncated
+    within its existing poll cadence and every old-incarnation write path is
+    fenced by the status CAS predicates it leaves behind. Returns ``reaped``
+    (marked, or already marked by this drain), ``moved`` (the agent landed or
+    left the running state on its own), or a ``refused:<reason>`` /
+    ``excluded:<reason>`` descriptor the caller classifies.
+    """
+    with connect() as conn, conn.transaction():
+        row = conn.execute(
+            "SELECT status, runtime_kind, runtime_owner, runtime_generation "
+            "FROM agents_meta WHERE id=%s FOR UPDATE",
+            (agent,),
+        ).fetchone()
+        if row is None:
+            return "refused:row-missing"
+        status, kind, owner, generation = row
+        if status == "restarting":
+            return "reaped"
+        if status != "running" or kind != "hosted" or owner is None or generation is None:
+            return "moved"
+        # A mark without its live signal would strand the row: the truncation
+        # read (has_pending_interrupt) needs this un-applied maintenance
+        # restart, and the settle face matches the same shape. If the command
+        # already resolved, there is nothing to truncate — let the ordinary
+        # path finish it.
+        command = conn.execute(
+            "SELECT 1 FROM inbound_messages WHERE id=%s AND agent_id=%s AND kind='restart' "
+            "AND applied_at IS NULL AND observed_at IS NULL AND status IN ('pending','claimed') "
+            "AND payload ? 'maintenance'",
+            (command_id, agent),
+        ).fetchone()
+        if command is None:
+            return "moved"
+        control = conn.execute(
+            "SELECT 1 FROM agent_impersonations WHERE agent_id=%s "
+            "AND (status IN ('requested','accepted') "
+            "OR (status='active' AND expires_at>clock_timestamp())) LIMIT 1",
+            (agent,),
+        ).fetchone()
+        if control is not None:
+            return "excluded:takeover"
+        changed = conn.execute(
+            "UPDATE agents_meta SET status='restarting' WHERE id=%s AND status='running' "
+            "AND runtime_kind='hosted' AND runtime_owner=%s AND runtime_generation=%s",
+            (agent, owner, generation),
+        ).rowcount
+        if changed != 1:
+            return "refused:cas-lost"
+    return "reaped"
+
+
+def _reap_agents(
+    hold: MaintenanceHold, due: list[int], window: float, *, noted_exclusions: set[int]
+) -> bool:
+    """Mark every due straggler, then record the honest reaped receipts.
+
+    Marks land before any receipt: a hold that lists a member as reaped must
+    never name one still in ordinary flight (receipt honesty, task #4016).
+    Takeover/external-control rows are excluded (noted once per drain) and
+    left to the ordinary timeout path; a refused reap aborts the drain with
+    the hold retained — the pre-#4016 abort/retry fallback, never a fabricated
+    reap. Returns whether any member was newly marked (a mark changes the
+    hold, so the caller re-reads it).
+    """
+    marked: list[int] = []
+    for agent in due:
+        if agent in noted_exclusions or agent in hold.reaped:
+            continue
+        outcome = _reap_agent(agent, hold.commands[agent])
+        if outcome == "reaped":
+            marked.append(agent)
+        elif outcome == "moved":
+            noted_exclusions.add(agent)
+            _log.info(
+                "[pause] straggler %s left the running state before its reap mark "
+                "landed; the ordinary drain path finishes it",
+                agent,
+            )
+        elif outcome.startswith("excluded:"):
+            noted_exclusions.add(agent)
+            _log.info(
+                "[pause] straggler %s is under external control (%s); not reaped — "
+                "the ordinary timeout path applies",
+                agent,
+                outcome.partition(":")[2],
+            )
+        else:
+            raise RuntimeError(
+                f"straggler reap refused for agent {agent}: {outcome.partition(':')[2]} — "
+                "hold retained"
+            )
+    for agent in marked:
+        maintenance.record_reaped(agent, "update_straggler_reap")
+    if marked:
+        from shared import telemetry
+
+        telemetry.emit(
+            "telemetry",
+            "update_straggler_reaped",
+            attributes={"agents": marked, "window_s": window},
+        )
+        _log.warning(
+            "[pause] reaped %d straggler(s) past the %gs restart window "
+            "(truncated, no flush receipt): %s",
+            len(marked),
+            window,
+            marked,
+        )
+    return bool(marked)
+
+
+def _drain(holder: str, at: datetime, timeout: float, *, reap: bool = False) -> None:
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("drain timeout must be finite and positive")
     deadline = time.monotonic() + timeout
+    noted_exclusions: set[int] = set()
+    # The age query dials the DB; one check per second is far inside W's
+    # resolution and keeps the wait loop off the connection path.
+    next_reap_check = 0.0
     while True:
         hold = _hold(holder, at)
         if hold.phase == "preparing":
@@ -168,10 +331,18 @@ def _drain(holder: str, at: datetime, timeout: float) -> None:
                 "fix the root cause, then ava maintenance repair --operation "
                 f"{holder} --acquired-at {at.isoformat()}"
             )
-        if set(hold.drained) == set(hold.commands):
+        if set(hold.drained) | set(hold.reaped) == set(hold.commands):
             with connect() as conn:
                 maintenance_cohort.verify_drained(conn, hold)
-            if "agent-runner" in machine_role() and host_running() and host_identity().active:
+            # Wait out the host's still-registering turns — except the reaped
+            # members: their mark already released them, and the wave must not
+            # stall on a truncated turn unwinding (a C-blocked one would hold
+            # the whole drain; the stop leg bounds that death instead).
+            if (
+                "agent-runner" in machine_role()
+                and host_running()
+                and host_identity().active - set(hold.reaped)
+            ):
                 budget = deadline - time.monotonic()
                 if budget <= 0:
                     raise TimeoutError("agent-host continuations did not finish before deadline")
@@ -182,13 +353,21 @@ def _drain(holder: str, at: datetime, timeout: float) -> None:
             if time.monotonic() > deadline:
                 raise TimeoutError("drain verification exceeded its deadline; hold retained")
             return
+        pending = sorted(set(hold.commands) - set(hold.drained) - set(hold.reaped))
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            pending = sorted(set(hold.commands) - set(hold.drained))
+            reaped_note = f" (reaped this wave: {sorted(hold.reaped)})" if hold.reaped else ""
             raise TimeoutError(
                 "drain timed out without force; hold retained for agents "
-                f"{pending}\n{_stall_report(hold, pending)}"
+                f"{pending}{reaped_note}\n{_stall_report(hold, pending)}"
             )
+        if reap and pending and time.monotonic() >= next_reap_check:
+            window = _straggler_reap_seconds()
+            if window > 0:
+                next_reap_check = time.monotonic() + 1.0
+                due = _reap_due(hold, pending, window)
+                if due and _reap_agents(hold, due, window, noted_exclusions=noted_exclusions):
+                    continue
         time.sleep(min(0.2, remaining))
 
 
@@ -282,13 +461,23 @@ def _stall_line(
 
 
 def pause_agents(
-    timeout: float = PAUSE_TIMEOUT_SECONDS, *, driver: HoldDriver | None = None
+    timeout: float = PAUSE_TIMEOUT_SECONDS,
+    *,
+    driver: HoldDriver | None = None,
+    reap: bool = False,
 ) -> None:
     """Idempotently drain this unit, leaving persistent terminals untouched.
 
     `driver` is minted by operator-side callers (`ava stop` / `ava pause`);
     daemon-driven callers (`spawn_update`, the update quiesce) pass None so a
     long-lived caller process never masks a dead ladder shepherd.
+
+    `reap` enables the update straggler reap (task #4016): a cohort member
+    still un-landed W seconds after its restart command's issuance is
+    CAS-marked 'restarting' (truncating its in-flight turn) and released with
+    the honest `reaped` outcome, instead of aborting the whole drain. Only
+    update-family callers pass True; interactive pause/stop/restart drains
+    keep the never-kill contract.
     """
     current = pause_owner.read()
     if current.status == "invalid":
@@ -308,7 +497,7 @@ def pause_agents(
         _prepare(holder, at, driver=driver)
     hold = _hold(holder, at)
     if hold.phase in ("preparing", "draining", "drained"):
-        _drain(holder, at, timeout)
+        _drain(holder, at, timeout, reap=reap)
 
 
 def resume_agents() -> None:

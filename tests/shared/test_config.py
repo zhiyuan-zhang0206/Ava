@@ -707,6 +707,40 @@ def test_update_quiesce_timeout_requires_positive_finite_values() -> None:
         GatewaySettings.model_validate({"update_quiesce_timeout_seconds": "0"})
 
 
+@pytest.mark.parametrize("bad", ["inf", "-inf", "nan"])
+def test_update_straggler_reap_rejects_non_finite(bad: str) -> None:
+    """W must be finite at the parsing layer: an infinite window would never
+    fire (and is meaningless as a grace), NaN would poison the age comparison."""
+    from pydantic import ValidationError
+
+    from shared.config.gateway import GatewaySettings
+
+    with pytest.raises(ValidationError):
+        GatewaySettings.model_validate({"update_straggler_reap_seconds": bad})
+
+
+def test_update_straggler_reap_accepts_zero_and_defaults_to_15() -> None:
+    from pydantic import ValidationError
+
+    from shared.config.gateway import GatewaySettings
+
+    # 0 disables the reap by contract; 15 is the approved default.
+    assert (
+        GatewaySettings.model_validate(
+            {"update_straggler_reap_seconds": "0"}
+        ).update_straggler_reap_seconds
+        == 0.0
+    )
+    assert (
+        GatewaySettings.model_validate(
+            {"update_straggler_reap_seconds": "7"}
+        ).update_straggler_reap_seconds
+        == 7.0
+    )
+    with pytest.raises(ValidationError):
+        GatewaySettings.model_validate({"update_straggler_reap_seconds": "-1"})
+
+
 def test_cluster_secret_validator_allows_url_safe_and_empty() -> None:
     """Empty (off / default) and URL-safe tokens pass — they are safe in URLs,
     redis.conf, and a bearer header."""

@@ -56,21 +56,32 @@ def pause_local_cluster() -> None:
     The existing admission journal also keeps watchdogs and schedule admission
     paused. Posture becomes 503 only when the caller actually stops services,
     after all participating runners have completed their ordinary restarts.
+
+    This entry is update-family only (Phase A, `spawn_update`, the update CLI's
+    local leg), so the drain enables the straggler reap (task #4016): a member
+    still un-landed past `update_straggler_reap_seconds` is truncated and
+    released as `reaped` instead of aborting the wave.
     """
     from ops.agent_pause import pause_agents
     from shared.config import settings
 
-    pause_agents(settings.gateway.update_quiesce_timeout_seconds)
+    pause_agents(settings.gateway.update_quiesce_timeout_seconds, reap=True)
 
 
 def unpause_local_cluster() -> None:
-    """Restore posture, then release this unit's existing agent pause."""
+    """Restore posture, then release this unit's existing agent pause.
+
+    The resume/start boundary also settles any stranded straggler-reap marks
+    (task #4016): the compensating resume of an aborted wave runs while this
+    host stayed up, so the marker rows would otherwise outlive their drain.
+    """
     from ops.agent_pause import resume_agents
     from shared import maintenance
 
     current = maintenance.snapshot()
     if current is None:
         _unpause_local_cluster()
+        _settle_stranded_reaps()
         return
     assert current.holder is not None and current.acquired_at is not None  # noqa: S101
     if (refusal := _hold_refusal(current)) is not None:
@@ -84,6 +95,40 @@ def unpause_local_cluster() -> None:
     with maintenance.authorized_start(current.holder, current.acquired_at):
         _unpause_local_cluster()
     resume_agents()
+    _settle_stranded_reaps()
+
+
+def _settle_stranded_reaps() -> None:
+    """Restore rows a wave's straggler reap left marked, then wake each one.
+
+    Best-effort by design: a settle failure leaves the mark in place (the row
+    stays unrunnable) and the next boot or resume retries it; it must not block
+    this unit's resume. The wake is what lets the settled agent's first
+    admission run the existing inbound reconcile and re-deliver the work the
+    reap truncated (task #4016).
+    """
+    from shared.db import connect
+    from shared.machine import machine_name
+    from shared.straggler_reap import (
+        announce_settled,
+        publish_settled_wakes,
+        settle_stranded_reaps,
+    )
+
+    try:
+        with connect() as conn, conn.transaction():
+            settled = settle_stranded_reaps(conn, machine_name())
+    except Exception:
+        _log.warning(
+            "[cluster] stranded straggler-reap settle failed; the mark stays for the "
+            "next boot/resume to retry",
+            exc_info=True,
+        )
+        return
+    if settled:
+        _log.info("[cluster] restored stranded straggler-reap row(s): %s", settled)
+        announce_settled(settled, site="resume")
+    publish_settled_wakes(settled)
 
 
 def _hold_refusal(current: PauseOwnerSnapshot) -> str | None:

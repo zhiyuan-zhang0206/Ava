@@ -419,6 +419,31 @@ class PauseLifecycleWait(TypedDict):
     agents: list[int]
 
 
+class UpdateStragglerReaped(TypedDict):
+    """`update_straggler_reaped` payload — ops/agent_pause.py::_drain.
+
+    One row per drain pass that reaped stragglers (task #4016): the cohort
+    members CAS-marked 'restarting' past the configured restart window, and
+    the window in force. The durable trail is the hold journal's `reaped`
+    receipts plus each member's mark (settled at the successor boot/resume).
+    """
+
+    agents: list[int]
+    window_s: float
+
+
+class UpdateStragglerReapSettled(TypedDict):
+    """`update_straggler_reap_settled` payload — shared/straggler_reap.py.
+
+    One row per boot/resume boundary that restored stranded reap marks
+    (task #4016). `site` is "boot" (the agent-host boot) or "resume" (the
+    local unpause/start path).
+    """
+
+    agents: list[int]
+    site: str
+
+
 class ShellTtlRenewed(TypedDict):
     """`shell_ttl_renewed` payload — ava/shell/sessions.py renew().
 

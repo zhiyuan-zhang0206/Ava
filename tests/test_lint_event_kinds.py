@@ -105,6 +105,7 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "resolution_status",
         "checkpoint_table_sizes",  # services/events_maintenance/blob_vacuum.py telemetry.emit (positional)
         "pause_lifecycle_wait",  # ops/agent_pause.py:_emit_lifecycle_wait (positional emit)
+        "update_straggler_reaped",  # ops/agent_pause.py:_reap_agents (positional emit)
         # Positional emit from the frozen-archive reader (task #2004).
         "archive_fetch_degraded",  # gateway/neighbors.py:_emit_archive_degraded
         # The fleet-graph stale-serving fallback (task #3925): one positional
