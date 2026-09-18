@@ -242,7 +242,7 @@ describe("StripTrackButtons", () => {
     expect(screen.getAllByTestId("strip-message-button")).toHaveLength(4);
   });
 
-  it("clamps buttons at the plot's right edge and drops labels beyond it", () => {
+  it("clamps buttons at the plot edges and drops labels beyond them", () => {
     const plotRight = PLOT.left + PLOT.width;
     const overflowRow: TimelineStripRowLayout = {
       top: 120,
@@ -251,6 +251,7 @@ describe("StripTrackButtons", () => {
         { messageIndex: 0, key: "c.0", left: 40, width: 100, parts: [] },
         { messageIndex: 1, key: "c.1", left: 960, width: 60, parts: [] },
         { messageIndex: 2, key: "c.2", left: plotRight + 10, width: 40, parts: [] },
+        { messageIndex: 3, key: "c.3", left: PLOT.left - 20, width: 30, parts: [] },
       ],
     };
     render(
@@ -264,20 +265,25 @@ describe("StripTrackButtons", () => {
       />,
     );
     const buttons = screen.getAllByTestId("strip-message-button");
-    // The bar past the plot edge renders no button at all; the crossing one
-    // keeps a box whose right edge is exactly the plot edge.
-    expect(buttons).toHaveLength(2);
+    // The bar past the plot edge renders no button at all; the crossing bars
+    // keep a box whose edge is exactly the plot edge.
+    expect(buttons).toHaveLength(3);
     expect(buttons.map((button) => button.getAttribute("data-message-index"))).toEqual([
       "0",
       "1",
+      "3",
     ]);
     for (const button of buttons) {
       const left = Number.parseFloat(button.style.left);
       const width = Number.parseFloat(button.style.width);
+      expect(left).toBeGreaterThanOrEqual(PLOT.left);
       expect(left + width).toBeLessThanOrEqual(plotRight);
     }
     expect(buttons[1].style.left).toBe("960px");
     expect(buttons[1].style.width).toBe("40px");
+    // The left-overhanging bar's box starts exactly at the plot edge.
+    expect(buttons[2].style.left).toBe(`${PLOT.left}px`);
+    expect(buttons[2].style.width).toBe("10px");
   });
 });
 

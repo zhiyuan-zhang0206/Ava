@@ -79,6 +79,34 @@ const pendingResponse: RunTimelineResponse = {
   pending: [{ start: "2026-09-05T14:05:00.000Z", end: "2026-09-05T14:20:00.000Z" }],
 };
 
+// P4-2b (#4023): the same shape with raw-context messages (chars sum 1000),
+// so the character axis is available.
+const messagesResponse: RunTimelineResponse = {
+  ...pendingResponse,
+  messages: [
+    { key: "c.0", idx: 0, ts: null, kind: "prompt", source: null, chars: 400, parts: [{ kind: "prompt", chars: 400 }] },
+    {
+      key: "c.1",
+      idx: 1,
+      ts: "2026-09-05T14:05:00.000Z",
+      kind: "ai",
+      source: null,
+      chars: 300,
+      parts: [
+        { kind: "think", chars: 100 },
+        { kind: "text", chars: 200 },
+      ],
+    },
+    { key: "c.2", idx: 2, ts: "2026-09-05T14:10:00.000Z", kind: "inbound", source: "user", chars: 100, parts: [{ kind: "inbound", chars: 100 }] },
+    { key: "c.3", idx: 3, ts: "2026-09-05T14:20:00.000Z", kind: "exec", source: null, chars: 200, parts: [{ kind: "out", chars: 200 }] },
+  ],
+  messages_truncated: false,
+};
+
+function tickTexts(container: HTMLElement): (string | null)[] {
+  return Array.from(container.querySelectorAll("[data-timeline-tick]"), (tick) => tick.textContent);
+}
+
 function render() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -247,5 +275,174 @@ describe("trail scope (P4-1)", () => {
     );
 
     await waitFor(() => expect(queryByTestId("timeline-crumbs")).toBeNull());
+  });
+});
+
+describe("context axis (P4-2b)", () => {
+  it("disables the characters axis without message data", async () => {
+    getRunTimeline.mockResolvedValue(pendingResponse);
+    const { getByRole } = render();
+
+    await screen.findByLabelText("Run timeline chart");
+    const contextButton = getByRole("button", { name: "Characters" }) as HTMLButtonElement;
+    expect(contextButton.disabled).toBe(true);
+    expect(contextButton.title).toBe("No message data in this window");
+  });
+
+  it("switches to the character axis and drives its viewport with zero refetches", async () => {
+    getRunTimeline.mockResolvedValue(messagesResponse);
+    const { container, getByRole } = render();
+
+    await waitFor(() =>
+      expect((getByRole("button", { name: "Characters" }) as HTMLButtonElement).disabled).toBe(false),
+    );
+    fireEvent.click(getByRole("button", { name: "Characters" }));
+    expect(getByRole("button", { name: "Characters" }).getAttribute("aria-pressed")).toBe("true");
+    // Switching the projection is a pure view change: no request.
+    expect(getRunTimeline).toHaveBeenCalledTimes(1);
+    expect(tickTexts(container)).toEqual(["0", "200", "400", "600", "800", "1.0k"]);
+
+    // +/- drive the local char viewport on the context axis: still no request.
+    fireEvent.click(getByRole("button", { name: "Zoom in" }));
+    expect(tickTexts(container)).toEqual(["200", "300", "400", "500", "600", "700", "800"]);
+    expect(getRunTimeline).toHaveBeenCalledTimes(1);
+  });
+
+  it("pushes a character-range crumb on strip double-click and clears it on reset", async () => {
+    getRunTimeline.mockResolvedValue(messagesResponse);
+    const { container, getByRole, queryByTestId } = render();
+
+    await waitFor(() =>
+      expect((getByRole("button", { name: "Characters" }) as HTMLButtonElement).disabled).toBe(false),
+    );
+    fireEvent.click(getByRole("button", { name: "Characters" }));
+
+    // Message c.1 spans chars 400-700; the focus pads by half its width.
+    fireEvent.doubleClick(screen.getAllByTestId("strip-message-button")[1]);
+    const crumbs = await screen.findByTestId("timeline-crumbs");
+    expect(crumbs.textContent).toContain("Message 1");
+    expect(crumbs.textContent).toContain("250\u2013850 chars");
+    expect(tickTexts(container)).toEqual(["300", "400", "500", "600", "700", "800"]);
+
+    // "Back to the full axis" is a pure viewport reset on the context axis.
+    fireEvent.click(getByRole("button", { name: "Reset window" }));
+    await waitFor(() => expect(queryByTestId("timeline-crumbs")).toBeNull());
+    expect(tickTexts(container)).toEqual(["0", "200", "400", "600", "800", "1.0k"]);
+    expect(getRunTimeline).toHaveBeenCalledTimes(1);
+  });
+
+  it("clamps the character viewport when the message total shrinks in a same-window refresh", async () => {
+    getRunTimeline.mockResolvedValue(messagesResponse);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { container, getByRole } = rtlRender(
+      <QueryClientProvider client={queryClient}>
+        <RunTimelinePage params={Promise.resolve({ agentId: "42" })} />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() =>
+      expect((getByRole("button", { name: "Characters" }) as HTMLButtonElement).disabled).toBe(false),
+    );
+    fireEvent.click(getByRole("button", { name: "Characters" }));
+    fireEvent.doubleClick(screen.getAllByTestId("strip-message-button")[1]);
+    await screen.findByTestId("timeline-crumbs");
+    expect(tickTexts(container)).toEqual(["300", "400", "500", "600", "700", "800"]);
+
+    // The refresh keeps the window but drops the last two messages (chars sum
+    // 1000 to 700): the viewport clamps and the char-range crumb stays.
+    const firstCall = getRunTimeline.mock.calls[0] as
+      | [number, { from?: string; to?: string }]
+      | undefined;
+    const options = firstCall?.[1] ?? {};
+    queryClient.setQueryData(
+      ["run-timeline", 42, options.from ?? null, options.to ?? null, "compact", "turn"],
+      { ...messagesResponse, messages: messagesResponse.messages?.slice(0, 2) },
+    );
+
+    await waitFor(() =>
+      expect(tickTexts(container)).toEqual(["100", "200", "300", "400", "500", "600", "700"]),
+    );
+    expect(screen.getByTestId("timeline-crumbs").textContent).toContain("Message 1");
+    expect(getRunTimeline).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the characters axis disabled in bucket mode without message data", async () => {
+    getSettings.mockResolvedValue({
+      settings: [
+        {
+          key: "display.run_timeline_window_hours",
+          value: 24,
+          updated_at: "2026-09-05T14:00:00.000Z",
+        },
+      ],
+    });
+    getRunTimeline.mockResolvedValue({
+      ...pendingResponse,
+      rows: [{ ...pendingResponse.rows[0], turn: null, n_turns: 12 }],
+    });
+    const { getByRole } = render();
+
+    await waitFor(() =>
+      expect(getRunTimeline).toHaveBeenCalledWith(42, expect.objectContaining({ level: "bucket" })),
+    );
+    await screen.findByLabelText("Run timeline chart");
+    const contextButton = getByRole("button", { name: "Characters" }) as HTMLButtonElement;
+    expect(contextButton.disabled).toBe(true);
+  });
+
+  it("resets the character viewport and trail when the data window changes", async () => {
+    getRunTimeline.mockResolvedValueOnce(messagesResponse).mockResolvedValueOnce({
+      ...messagesResponse,
+      window: { from: "2026-09-05T13:26:00.000Z", to: "2026-09-05T14:26:00.000Z" },
+    });
+    const { container, getByRole, queryByTestId } = render();
+
+    await waitFor(() =>
+      expect((getByRole("button", { name: "Characters" }) as HTMLButtonElement).disabled).toBe(false),
+    );
+    fireEvent.click(getByRole("button", { name: "Characters" }));
+    fireEvent.doubleClick(screen.getAllByTestId("strip-message-button")[1]);
+    await screen.findByTestId("timeline-crumbs");
+    expect(tickTexts(container)).toEqual(["300", "400", "500", "600", "700", "800"]);
+
+    // A window preset is a data control: it refetches, and the new data
+    // resets the view to the full axis and clears the char-range trail.
+    fireEvent.click(getByRole("button", { name: "1h" }));
+    await waitFor(() => expect(getRunTimeline).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(queryByTestId("timeline-crumbs")).toBeNull());
+    expect(tickTexts(container)).toEqual(["0", "200", "400", "600", "800", "1.0k"]);
+  });
+
+  it("falls back to the time axis when the message projection drops out", async () => {
+    getRunTimeline.mockResolvedValue(messagesResponse);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { container, getByRole } = rtlRender(
+      <QueryClientProvider client={queryClient}>
+        <RunTimelinePage params={Promise.resolve({ agentId: "42" })} />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() =>
+      expect((getByRole("button", { name: "Characters" }) as HTMLButtonElement).disabled).toBe(false),
+    );
+    fireEvent.click(getByRole("button", { name: "Characters" }));
+    expect(tickTexts(container)).toEqual(["0", "200", "400", "600", "800", "1.0k"]);
+
+    // A degraded refresh without the message projection must not park the
+    // chart on a blank context view: the page falls back to the time axis.
+    const firstCall = getRunTimeline.mock.calls[0] as
+      | [number, { from?: string; to?: string }]
+      | undefined;
+    const options = firstCall?.[1] ?? {};
+    queryClient.setQueryData(
+      ["run-timeline", 42, options.from ?? null, options.to ?? null, "compact", "turn"],
+      { ...messagesResponse, messages: null },
+    );
+
+    await waitFor(() =>
+      expect(getByRole("button", { name: "Time" }).getAttribute("aria-pressed")).toBe("true"),
+    );
+    expect((getByRole("button", { name: "Characters" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(tickTexts(container).some((tick) => tick?.includes(":"))).toBe(true);
   });
 });

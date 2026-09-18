@@ -39,20 +39,23 @@ export function buildReadoutText(
     event?: RunTimelineResponse["events"][number] | null;
     layer?: NonNullable<RunTimelineResponse["layers"]>[number] | null;
     pending?: { start: string; end: string } | null;
-    /** P4-2 (#4023): hovered raw-context message + its covering summary leaf. */
-    message?: { message: RunTimelineMessage; leaf: string | null } | null;
+    /** P4-2 (#4023): hovered raw-context message + its covering summary
+     *  leaf; P4-2b adds the char position of the hovered message on the
+     *  context axis. */
+    message?: { message: RunTimelineMessage; leaf: string | null; position?: string } | null;
   },
   labels: RunTimelineChartLabels,
 ): string | null {
   if (input.message) {
-    const { message, leaf } = input.message;
-    return labels.readoutMessage(
+    const { message, leaf, position } = input.message;
+    const line = labels.readoutMessage(
       message.idx,
       labels.stripPartLabels[stripMessageClass(message)],
       message.ts === null ? labels.none : point(new Date(message.ts)),
       message.chars.toLocaleString(),
       leaf,
     );
+    return position === undefined ? line : `${line} \uFF5C ${labels.readoutPosition(position)}`;
   }
   if (input.row) {
     const row = input.row;

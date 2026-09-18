@@ -14,11 +14,19 @@ import { FLEX, MIN_W_0 } from "@/lib/layout";
 import type { RunTimelineMessage, RunTimelineMessageDetails, RunTimelineResponse } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+import type { TimelineContextView } from "./context-view";
 import { DetailMetric, layerFocusLabel, timestampLabel, type RunTimelineChartLabels } from "./run-timeline-details";
 import type { TimelineWindowOverride } from "./request-level";
 import { stripMessageClass, stripPartClass, type StripColorClass } from "./strip-categories";
 
 type LayerNode = NonNullable<RunTimelineResponse["layers"]>[number];
+
+/** P4-2b (#4023): the panel's focus action in whichever x domain is active —
+ *  a time window, or a char range on the context axis. The chart builds the
+ *  target and routes it back through the page. */
+export type MessageFocusTarget =
+  | { kind: "time"; window: TimelineWindowOverride }
+  | { kind: "context"; view: TimelineContextView };
 
 function PartBody({
   part,
@@ -70,8 +78,8 @@ export function MessageDetailPanel({
   /** Covering summary chain, ancestors first — each chip selects its node. */
   chain: { index: number; node: LayerNode }[];
   labels: RunTimelineChartLabels;
-  focusTarget: TimelineWindowOverride | null;
-  onFocus: (window: TimelineWindowOverride, label: string) => void;
+  focusTarget: MessageFocusTarget | null;
+  onFocus: (target: MessageFocusTarget, label: string) => void;
   onClose: () => void;
   onSelectLayer: (index: number) => void;
 }) {

@@ -5,16 +5,18 @@
 // each entry restores the range captured when the block was focused. The
 // compare view does not pass entries, so it renders no bar.
 
+import { formatTokensCompact } from "@/lib/format-number";
 import { FLEX, MIN_W_0 } from "@/lib/layout";
 import { cn } from "@/lib/utils";
 
 import type { RunTimelineChartLabels } from "./run-timeline-details";
 
-export interface TimelineCrumbEntry {
-  label: string;
-  from: string;
-  to: string;
-}
+/** P4-2b (#4023): a crumb restores whatever range it captured — a time
+ *  window, or a char range on the context axis (the two domains never mix
+ *  within one trail: switching axes clears it). */
+export type TimelineCrumbEntry =
+  | { kind: "time"; label: string; from: string; to: string }
+  | { kind: "context"; label: string; from: number; to: number };
 
 function pad(value: number): string {
   return String(value).padStart(2, "0");
@@ -69,7 +71,9 @@ export function TimelineCrumbs({
           >
             {entry.label}{" "}
             <span className="font-mono text-[10px] tabular-nums">
-              {shortRange(entry.from, entry.to)}
+              {entry.kind === "time"
+                ? shortRange(entry.from, entry.to)
+                : `${formatTokensCompact(entry.from)}–${formatTokensCompact(entry.to)} ${labels.charsUnit}`}
             </span>
           </button>
         </span>

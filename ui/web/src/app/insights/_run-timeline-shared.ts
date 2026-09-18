@@ -133,5 +133,10 @@ export function chartLabels(
     messagePartTruncated: t("messagePartTruncated"),
     messageNoText: t("messageNoText"),
     retry: t("retry"),
+    railHidden: t("railHidden"),
+    railHiddenPending: t("railHiddenPending"),
+    readoutPosition: (position) => t("readoutPosition", { position }),
+    charsUnit: t("charsUnit"),
+    charTicks: t("charTicks"),
   };
 }

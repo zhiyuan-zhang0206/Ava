@@ -108,6 +108,48 @@ export function buildStripLayout(
   return { messages: stripMessages, scale };
 }
 
+/** Linear char-domain layout for the context axis (P4-2b): every message
+ *  takes exactly its character slot, end to end, and the viewport maps
+ *  [view.from, view.to] onto the plot. The demo's `lay()` else-branch, with
+ *  our local viewport in place of its full-axis extent; no refetch is
+ *  involved — the caller passes plain character numbers. Geometry may fall
+ *  outside the plot (the SVG clip cuts it; buttons clamp), so widths stay
+ *  exactly char-proportional. */
+export function buildContextStripLayout(
+  messages: RunTimelineMessage[],
+  view: { from: number; to: number },
+  plot: { left: number; width: number },
+): StripLayout {
+  const width = Math.max(1, plot.width);
+  const span = view.to - view.from;
+  if (messages.length === 0 || !(span > 0)) {
+    return { messages: [], scale: 0 };
+  }
+  const scale = width / span;
+  const toX = (char: number) => plot.left + (char - view.from) * scale;
+  let offset = 0;
+  const stripMessages: StripMessageLayout[] = messages.map((message, index) => {
+    const chars = Math.max(0, message.chars);
+    const left = toX(offset);
+    const barWidth = chars * scale;
+    let partCursor = left;
+    const parts = message.parts.map((part) => {
+      const partWidth = Math.max(0, part.chars) * scale;
+      const layout = {
+        kind: part.kind,
+        chars: part.chars,
+        left: partCursor,
+        width: partWidth,
+      };
+      partCursor += partWidth;
+      return layout;
+    });
+    offset += chars;
+    return { messageIndex: index, key: message.key, left, width: barWidth, parts };
+  });
+  return { messages: stripMessages, scale };
+}
+
 /** Message indexes whose stamp falls inside a layer node's [start, end] —
  *  the demo's span test, here on timestamps. The ts-less head message is
  *  never "covered" by a summary node. */

@@ -12,13 +12,16 @@ import type { RunTimelineResponse } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 import {
-  layerFocusLabel,
   layerNodeLabel,
   TIMELINE_POPOVER_ID,
   type RunTimelineChartLabels,
 } from "./run-timeline-details";
 import type { TimelineWindowOverride } from "./request-level";
-import type { TimelineLayerRowLayout, TimelinePendingSpanLayout } from "./timeline-layout";
+import {
+  clampIntervalToPlot,
+  type TimelineLayerRowLayout,
+  type TimelinePendingSpanLayout,
+} from "./timeline-layout";
 
 interface LayerTrackProps {
   rows: TimelineLayerRowLayout[];
@@ -70,28 +73,35 @@ export function LayerTrackGeometry({
 }
 
 export function LayerTrackButtons({
+  plot,
   rows,
   layers,
   labels,
   onSelect,
-  onZoom,
+  onFocus,
   onHover,
 }: LayerTrackProps & {
+  /** P4-2b (#4023): the plot box the button layer clamps to — the context
+   *  axis projects geometry that can fall outside it. */
+  plot: { left: number; width: number };
   labels: RunTimelineChartLabels;
   onSelect: (index: number) => void;
-  /** P4-1 (#4023): label rides along so double-click focus can name the
-   *  block it pushed onto the crumb path. */
-  onZoom: (window: TimelineWindowOverride, label: string) => void;
+  /** P4-1/P4-2b (#4023): double-click focus — reports the block's node
+   *  index, and the chart routes it through the active axis' domain (a time
+   *  window, or a char viewport). */
+  onFocus: (nodeIndex: number) => void;
   /** P4-1 (#4023): hover feed for the persistent readout line. */
   onHover?: (nodeIndex: number | null) => void;
 }) {
   return (
     <>
       {rows.flatMap((layerRow) =>
-        layerRow.blocks.map((block) => {
+        layerRow.blocks.flatMap((block) => {
+          const box = clampIntervalToPlot(block.left, block.width, plot);
+          if (box === null) return [];
           const node = layers[block.nodeIndex];
           const firstLine = node.summary.split("\n")[0];
-          return (
+          return [
             <button
               key={`layer-btn-${block.nodeIndex}`}
               type="button"
@@ -103,26 +113,26 @@ export function LayerTrackButtons({
               onPointerLeave={onHover ? () => onHover(null) : undefined}
               onFocus={onHover ? () => onHover(block.nodeIndex) : undefined}
               onBlur={onHover ? () => onHover(null) : undefined}
-              onDoubleClick={() => onZoom({ from: node.start, to: node.end }, layerFocusLabel(node))}
+              onDoubleClick={() => onFocus(block.nodeIndex)}
               className="absolute rounded-md outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2"
               style={{
-                left: `${block.left}px`,
+                left: `${box.left}px`,
                 top: `${layerRow.top}px`,
-                width: `${block.width}px`,
+                width: `${box.width}px`,
                 height: `${layerRow.height}px`,
               }}
             >
-              {block.width >= 40 ? (
+              {box.width >= 40 ? (
                 <span
                   data-testid="fixed-timeline-text"
                   className="block truncate px-1 text-[10px] font-medium text-foreground"
-                  style={{ left: `${block.left}px` }}
+                  style={{ left: `${box.left}px` }}
                 >
                   {firstLine}
                 </span>
               ) : null}
-            </button>
-          );
+            </button>,
+          ];
         }),
       )}
     </>
