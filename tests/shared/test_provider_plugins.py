@@ -80,6 +80,7 @@ _REPO_MODEL_VENDORS = {
     "glm-5.2": "zhipu",
     "glm-5.3": "zhipu",
     "glm-5.3-flash": "zhipu",
+    "glm-5.3-flashx": "zhipu",
     "gpt-5.4-mini": "openai",
     "gpt-5.5": "openai",
     "gpt-5.6-luna": "openai",
@@ -295,7 +296,7 @@ def test_zero_provider_plugins_fail_loud_and_remain_retryable(
 def test_repo_model_vendor_vocabulary_is_complete() -> None:
     ensure_provider_plugins_loaded()
 
-    assert len(_REPO_MODEL_VENDORS) == 36
+    assert len(_REPO_MODEL_VENDORS) == 37
     assert set(MODELS) == _REPO_MODEL_VENDORS.keys()
     # Catalog-only entries: a registered chat model pops its archive entry, so
     # what remains is the catalog-only services plus models the registry no
@@ -541,6 +542,7 @@ def test_repo_zhipu_provider_is_enabled_and_registers_complete_contract() -> Non
         "glm-5.2",
         "glm-5.3",
         "glm-5.3-flash",
+        "glm-5.3-flashx",
     }
     assert glm_models <= MODELS.keys()
     assert set(SUPPORTED_MODELS["glm"]) == glm_models
