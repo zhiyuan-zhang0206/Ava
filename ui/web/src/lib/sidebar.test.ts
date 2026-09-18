@@ -100,6 +100,7 @@ describe("useStatsDashboard shared polling", () => {
     vi.useFakeTimers();
     getStatsDashboard.mockResolvedValue({
       live_count: 1,
+      stale: false,
       window_hours: 24,
       tokens: { input: 0, output: 0, cache_read: 0, cache_hit_pct: 0 },
       cost_usd: 0,
@@ -170,6 +171,7 @@ describe("useStatsDashboard shared polling", () => {
     // ticks after it resume at the plain interval.
     getStatsDashboard.mockResolvedValue({
       live_count: 1,
+      stale: false,
       window_hours: 24,
       tokens: { input: 0, output: 0, cache_read: 0, cache_hit_pct: 0 },
       cost_usd: 0,

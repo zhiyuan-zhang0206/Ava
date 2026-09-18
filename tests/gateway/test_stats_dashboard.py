@@ -11,7 +11,10 @@ populated via INSERT of real rows.
 
 from __future__ import annotations
 
+import time
 from collections import Counter
+from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 from types import SimpleNamespace
@@ -25,9 +28,10 @@ from fastapi.testclient import TestClient
 from gateway import loki_events, loki_query_budget
 from gateway.app import app
 from gateway.routers import _stats_dashboard, status
-from gateway.schemas import StatsWindowHours, window_delta
-from shared import plugin_stats
+from gateway.schemas import StatsDashboard, StatsWindowHours, window_delta
+from shared import plugin_stats, telemetry
 from shared.cluster import home_label
+from shared.config import settings
 from shared.loki_index_labels import EVENT_STREAM_RETENTION, retention_floor
 from shared.paths import ava_home
 from tests.gateway.loki_fake import FakeLoki
@@ -50,6 +54,67 @@ def fake_loki(monkeypatch: pytest.MonkeyPatch) -> FakeLoki:
 def clear_llm_usage_sums_cache() -> None:
     """Keep every FakeLoki test isolated from the route's 60-second cache."""
     _stats_dashboard.cache_clear()
+
+
+# ── stale serving (task #3973) ─────────────────────────────────────────────
+
+_STALE_EVENT = "stats_dashboard_stale"
+
+
+class _CacheClock:
+    """Deterministic cache clock over `_stats_dashboard._monotonic`."""
+
+    def __init__(self) -> None:
+        self._t = time.monotonic()
+
+    def __call__(self) -> float:
+        return self._t
+
+    def advance(self, seconds: float) -> None:
+        self._t += seconds
+
+
+@pytest.fixture
+def cache_clock(monkeypatch: pytest.MonkeyPatch) -> _CacheClock:
+    clock = _CacheClock()
+    monkeypatch.setattr(_stats_dashboard, "_monotonic", clock)
+    return clock
+
+
+@pytest.fixture(autouse=True)
+def _reset_stale_emitter() -> Iterator[None]:
+    """The stale emitter's per-reason rate cap is process-global state."""
+    _stats_dashboard._stale_emit_at.clear()
+    yield
+    _stats_dashboard._stale_emit_at.clear()
+
+
+@pytest.fixture(autouse=True)
+def emitted(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """Capture the attributes of every `stats_dashboard_stale` emission."""
+    captured: list[dict[str, Any]] = []
+
+    def capture_emit(
+        _category: str,
+        event_name: str,
+        *,
+        attributes: dict[str, Any] | None = None,
+        **_kwargs: object,
+    ) -> None:
+        if event_name == _STALE_EVENT:
+            assert attributes is not None  # the emitter always names route+reason
+            captured.append(dict(attributes))
+
+    monkeypatch.setattr(telemetry, "emit", capture_emit)
+    return captured
+
+
+def _raise_loki_timeout(*_args: Any, **_kwargs: Any) -> float:
+    raise httpx.ReadTimeout("Loki timed out")
+
+
+def _raise_loki_budget(*_args: Any, **_kwargs: Any) -> float:
+    raise loki_query_budget.LokiQueryBudgetError("queue_full")
 
 
 def _insert_agent_row(db: psycopg.Connection, label: str = "t") -> int:
@@ -174,7 +239,8 @@ def test_dashboard_local_loki_budget_rejection_is_503(
     monkeypatch: pytest.MonkeyPatch,
     reason: Literal["queue_full", "acquire_timeout"],
 ) -> None:
-    """Dashboard saturation uses the same retriable 503 wire contract."""
+    """Dashboard saturation uses the same retriable 503 wire contract (no
+    last-good payload exists here, so the stale fallback cannot apply)."""
 
     def reject(*args: Any, **kwargs: Any) -> float:
         raise loki_query_budget.LokiQueryBudgetError(reason)
@@ -201,7 +267,8 @@ def test_dashboard_loki_transport_error_is_retriable_503(
     loki_method: Literal["attribute_aggregate", "count_events"],
     error: httpx.HTTPError,
 ) -> None:
-    """Loki transport failures become the dashboard's typed retry response."""
+    """Loki transport failures become the dashboard's typed retry response (no
+    last-good payload exists here, so the stale fallback cannot apply)."""
 
     def unavailable(*args: Any, **kwargs: Any) -> float:
         raise error
@@ -961,3 +1028,196 @@ def test_dashboard_plugin_stats_is_empty_without_writers() -> None:
     with TestClient(app) as client:
         body = client.get("/api/stats/dashboard").json()
     assert body["plugin_stats"] == []
+
+
+# ── stale serving (task #3973) ─────────────────────────────────────────────
+
+
+def test_dashboard_fresh_response_carries_freshness_fields(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki, emitted: list[dict[str, Any]]
+) -> None:
+    """A healthy recompute reports stale=false and its as_of read time."""
+    db_conn.commit()
+    with TestClient(app) as client:
+        response = client.get("/api/stats/dashboard")
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["stale"] is False
+    as_of = datetime.fromisoformat(body["as_of"])
+    assert as_of.tzinfo is not None
+    assert abs((datetime.now(UTC) - as_of).total_seconds()) < 60
+    assert emitted == []
+
+
+def test_dashboard_serves_stale_last_good_on_loki_failure(
+    db_conn: psycopg.Connection,
+    fake_loki: FakeLoki,
+    emitted: list[dict[str, Any]],
+    cache_clock: _CacheClock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed recompute inside the stale cap serves the last-good payload,
+    marked stale, keeping its original as_of — not a 503."""
+    fake_loki.add(
+        event="llm_usage",
+        payload={"in_total": 10, "out_total": 5, "cache_read": 0, "cost_usd": 1.0},
+    )
+    db_conn.commit()
+    with TestClient(app) as client:
+        fresh = client.get("/api/stats/dashboard").json()
+        assert fresh["stale"] is False
+        assert fresh["as_of"] is not None
+        assert emitted == []
+
+        monkeypatch.setattr(loki_events, "attribute_aggregate", _raise_loki_timeout)
+        cache_clock.advance(61.0)  # fresh TTL expired, inside the stale cap
+        response = client.get("/api/stats/dashboard")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["stale"] is True
+    assert body["as_of"] == fresh["as_of"]
+    assert body["cost_usd"] == fresh["cost_usd"]
+    assert emitted == [{"route": "/api/stats/dashboard", "reason": "loki_failed"}]
+
+
+def test_dashboard_serves_stale_last_good_on_budget_rejection(
+    db_conn: psycopg.Connection,
+    fake_loki: FakeLoki,
+    emitted: list[dict[str, Any]],
+    cache_clock: _CacheClock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A refused Loki admission also falls back to the last-good payload."""
+    fake_loki.add(
+        event="llm_usage",
+        payload={"in_total": 10, "out_total": 5, "cache_read": 0, "cost_usd": 1.0},
+    )
+    db_conn.commit()
+    with TestClient(app) as client:
+        fresh = client.get("/api/stats/dashboard").json()
+        monkeypatch.setattr(loki_events, "attribute_aggregate", _raise_loki_budget)
+        cache_clock.advance(61.0)
+        response = client.get("/api/stats/dashboard")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["stale"] is True
+    assert body["as_of"] == fresh["as_of"]
+    assert emitted == [{"route": "/api/stats/dashboard", "reason": "loki_budget"}]
+
+
+def test_dashboard_stale_past_cap_is_retriable_503(
+    db_conn: psycopg.Connection,
+    fake_loki: FakeLoki,
+    emitted: list[dict[str, Any]],
+    cache_clock: _CacheClock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Past the cap the last-good payload is no longer served — the route
+    keeps its retriable 503 and emits no stale event."""
+    fake_loki.add(
+        event="llm_usage",
+        payload={"in_total": 10, "out_total": 5, "cache_read": 0, "cost_usd": 1.0},
+    )
+    db_conn.commit()
+    with TestClient(app) as client:
+        client.get("/api/stats/dashboard")
+        monkeypatch.setattr(loki_events, "attribute_aggregate", _raise_loki_timeout)
+        cache_clock.advance(settings.display.stats_dashboard_stale_max_s + 1.0)
+        response = client.get("/api/stats/dashboard")
+
+    assert response.status_code == 503
+    assert emitted == []
+
+
+def test_dashboard_stale_cap_reads_the_setting(
+    db_conn: psycopg.Connection,
+    fake_loki: FakeLoki,
+    cache_clock: _CacheClock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The stale window is the configured cap (task #3973): a smaller cap
+    expires the fallback sooner."""
+    monkeypatch.setattr(settings.display, "stats_dashboard_stale_max_s", 120.0)
+    fake_loki.add(
+        event="llm_usage",
+        payload={"in_total": 10, "out_total": 5, "cache_read": 0, "cost_usd": 1.0},
+    )
+    db_conn.commit()
+    with TestClient(app) as client:
+        client.get("/api/stats/dashboard")
+        monkeypatch.setattr(loki_events, "attribute_aggregate", _raise_loki_timeout)
+        cache_clock.advance(61.0)
+        inside = client.get("/api/stats/dashboard")
+        cache_clock.advance(61.0)  # total age 122s > the 120s cap
+        outside = client.get("/api/stats/dashboard")
+
+    assert inside.status_code == 200
+    assert inside.json()["stale"] is True
+    assert outside.status_code == 503
+
+
+def test_dashboard_stale_events_are_rate_capped_per_reason(
+    db_conn: psycopg.Connection,
+    fake_loki: FakeLoki,
+    emitted: list[dict[str, Any]],
+    cache_clock: _CacheClock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Repeated stale serves within the emit interval collapse into one event
+    (the event counts episodes, not polls); interval 0 disables the cap."""
+    fake_loki.add(
+        event="llm_usage",
+        payload={"in_total": 10, "out_total": 5, "cache_read": 0, "cost_usd": 1.0},
+    )
+    db_conn.commit()
+    with TestClient(app) as client:
+        client.get("/api/stats/dashboard")
+        monkeypatch.setattr(loki_events, "attribute_aggregate", _raise_loki_timeout)
+        cache_clock.advance(61.0)
+        assert client.get("/api/stats/dashboard").status_code == 200
+        assert client.get("/api/stats/dashboard").status_code == 200
+        assert len(emitted) == 1
+
+        def _no_cap() -> float:
+            return 0.0
+
+        monkeypatch.setattr(_stats_dashboard, "_stale_emit_interval_s", _no_cap)
+        assert client.get("/api/stats/dashboard").status_code == 200
+
+    assert len(emitted) == 2
+
+
+def test_dashboard_stale_serving_concurrent_smoke(
+    db_conn: psycopg.Connection,
+    fake_loki: FakeLoki,
+    emitted: list[dict[str, Any]],
+    cache_clock: _CacheClock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Concurrent fallbacks all serve the same stale payload and one event."""
+    fake_loki.add(
+        event="llm_usage",
+        payload={"in_total": 10, "out_total": 5, "cache_read": 0, "cost_usd": 1.0},
+    )
+    db_conn.commit()
+    with TestClient(app):
+        fresh = status.get_stats_dashboard(
+            SimpleNamespace(app=app),  # type: ignore[arg-type]
+            StatsWindowHours.H24,
+        )
+        monkeypatch.setattr(loki_events, "attribute_aggregate", _raise_loki_timeout)
+        cache_clock.advance(61.0)
+        request = SimpleNamespace(app=app)
+
+        def call(_: int) -> StatsDashboard:
+            return status.get_stats_dashboard(request, StatsWindowHours.H24)  # type: ignore[arg-type]
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            results = list(executor.map(call, range(4)))
+
+    assert all(result.stale for result in results)
+    assert {result.as_of for result in results} == {fresh.as_of}
+    assert len(emitted) == 1

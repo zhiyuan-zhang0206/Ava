@@ -133,7 +133,13 @@ class StatsDashboard(BaseModel):
 
     `plugin_stats` is not windowed (see `PluginStat`): the runtime values
     behind cards that plugins declare under `contributions.ui.stats`, joined
-    by the console on `(plugin, id)`."""
+    by the console on `(plugin, id)`.
+
+    `stale` is true when this payload is the route's last-good response,
+    served because a live recompute failed while the payload was within the
+    stale cap (`display.stats_dashboard_stale_max_s`); `as_of` is the UTC
+    time the served payload's reads were assembled — a stale fallback keeps
+    its original timestamp so a client can show the data's age."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -151,6 +157,8 @@ class StatsDashboard(BaseModel):
     errors_net: NonNegativeInt
     total_events: NonNegativeInt
     plugin_stats: list[PluginStat]
+    stale: bool = False
+    as_of: datetime | None = None
 
 
 class MetricsMeta(BaseModel):

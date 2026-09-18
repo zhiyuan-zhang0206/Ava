@@ -329,6 +329,47 @@ class DisplaySettings(EnvSettings):
         },
     )
 
+    stats_dashboard_stale_max_s: float = Field(
+        default=600.0,
+        ge=0,
+        alias="AVA_STATS_DASHBOARD_STALE_MAX_S",
+        description=(
+            "How long (seconds) GET /api/stats/dashboard may keep serving its "
+            "last-good whole response, marked stale, after recomputes start "
+            "failing. 600s (ten minutes) covers the minute-scale Loki slow "
+            "windows this fallback exists for — a 24h-window aggregate stays "
+            "readable at that age — while bounding how long a real outage can "
+            "hide behind stale data: past the cap the route fails to 503 as "
+            "before, so a genuine failure surfaces within ten minutes. 0 "
+            "disables stale serving (a failed recompute 503s immediately)."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    stats_dashboard_stale_emit_interval_s: float = Field(
+        default=30.0,
+        ge=0,
+        alias="AVA_STATS_DASHBOARD_STALE_EMIT_INTERVAL_S",
+        description=(
+            "Least seconds between two `stats_dashboard_stale` events for the same "
+            "reason on GET /api/stats/dashboard — one event per degradation "
+            "episode, not per poll, so a retry storm cannot flood the event "
+            "stream. 30s is one sidebar poll cycle, so independent degradation "
+            "waves stay distinguishable. 0 disables the cap."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     plugin_stats_max_detail_chars: int = Field(
         default=500,
         gt=0,

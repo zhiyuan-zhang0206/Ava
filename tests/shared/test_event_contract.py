@@ -188,9 +188,11 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # (task #3897's delta_read_compat — a delta-written checkpoint materialized
     # for a plain reader) raises the current total to 189; the task-registry
     # usage-write warning (task #3944's task_usage_record_failed) raises the
-    # current total to 190.
+    # current total to 190; the stats-dashboard stale fallback (task #3973's
+    # stats_dashboard_stale — the route serving its last-good response after a
+    # failed recompute) raises the current total to 191.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 190
+    assert len(_TELEMETRY_KINDS) == 191
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:

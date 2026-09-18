@@ -110,6 +110,9 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         # The fleet-graph stale-serving fallback (task #3925): one positional
         # emit per degradation episode behind the route's emitter.
         "fleet_graph_stale",  # gateway/routers/fleet_graph.py:_emit_stale (positional emit)
+        # The stats-dashboard stale-serving fallback (task #3973): same shape,
+        # behind gateway/routers/status.py's emitter.
+        "stats_dashboard_stale",  # gateway/routers/status.py:_emit_dashboard_stale (positional emit)
         # Legacy bracketed name: the pre-W8-rename value, still a migrate_events.py
         # mapping target and present in existing DB rows. New code must not emit it;
         # the registration survives only to backfill the metric.
