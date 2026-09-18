@@ -337,6 +337,7 @@ def _finalize_turn_observability(
             logger.warning(
                 "[{label}] {body}",
                 label="task-usage",
+                event="task_usage_record_failed",
                 body=f"failed to record usage for task {task_id}",
             )
     usage = final_msg.usage_metadata or {}
