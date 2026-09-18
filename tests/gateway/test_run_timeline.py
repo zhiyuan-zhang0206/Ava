@@ -331,8 +331,13 @@ def test_narrative_for_window_uses_the_store_and_skips_summary_on_full_coverage(
     def _nodes(*_args: object, **_kwargs: object) -> list[StoredNode]:
         return nodes
 
+    def _no_extent(_agent_id: int) -> None:
+        return None
+
     monkeypatch.setattr("shared.hierarchy.store.load_window_nodes", _nodes)
-    layers, summary = _narrative_for_window(405, start, end)
+    monkeypatch.setattr("shared.hierarchy.store.load_coverage_extent", _no_extent)
+    layers, summary, pending = _narrative_for_window(405, start, end, activity=[(start, end)])
+    assert pending is None
     assert summary is None
     assert layers is not None
     (layer,) = layers
@@ -348,9 +353,18 @@ def test_narrative_for_window_degrades_to_none_without_nodes(
     def _empty(*_args: object, **_kwargs: object) -> list[StoredNode]:
         return []
 
+    def _no_extent(_agent_id: int) -> None:
+        return None
+
     monkeypatch.setattr("shared.hierarchy.store.load_window_nodes", _empty)
-    layers, summary = _narrative_for_window(424242, start, start + timedelta(hours=1))
-    assert layers is None and summary is None
+    monkeypatch.setattr("shared.hierarchy.store.load_coverage_extent", _no_extent)
+    layers, summary, pending = _narrative_for_window(
+        424242,
+        start,
+        start + timedelta(hours=1),
+        activity=[(start, start + timedelta(minutes=30))],
+    )
+    assert layers is None and summary is None and pending is None
 
 
 def test_narrative_for_window_keeps_layers_and_adds_the_fallback_on_partial(
@@ -380,13 +394,64 @@ def test_narrative_for_window_keeps_layers_and_adds_the_fallback_on_partial(
     def _fallback(_agent_id: int) -> str:
         return "latest compact summary"
 
+    def _extent(_agent_id: int) -> tuple[datetime, datetime]:
+        return (start, start + timedelta(hours=1))
+
     monkeypatch.setattr("shared.hierarchy.store.load_window_nodes", _nodes)
+    monkeypatch.setattr("shared.hierarchy.store.load_coverage_extent", _extent)
     monkeypatch.setattr("gateway.routers.run_timeline._latest_compact_summary", _fallback)
-    layers, summary = _narrative_for_window(405, start, end)
+    layers, summary, pending = _narrative_for_window(405, start, end, activity=[(start, end)])
     assert layers is not None
     (layer,) = layers
     assert layer.summary == "first half"
     assert summary is not None and summary.text == "latest compact summary"
+    assert pending is not None
+    (pending_span,) = pending
+    assert (pending_span.start, pending_span.end) == (start + timedelta(hours=1), end)
+
+
+def test_narrative_for_window_clamps_activity_to_the_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A turn straddling an edge must not promise a placeholder outside the window."""
+    start = datetime(2026, 9, 12, 4, tzinfo=UTC)
+    end = start + timedelta(hours=2)
+    nodes = [
+        StoredNode(
+            id=11,
+            depth=1,
+            span_start=0,
+            span_end=3,
+            start_ts=start,
+            end_ts=start + timedelta(hours=1),  # half the window
+            text="first half",
+            parent_id=None,
+            engine_version="0.3",
+            prompt_version="0.3",
+        )
+    ]
+
+    def _nodes(*_args: object, **_kwargs: object) -> list[StoredNode]:
+        return nodes
+
+    def _empty_summary(_agent_id: int) -> str:
+        return ""
+
+    def _extent(_agent_id: int) -> tuple[datetime, datetime]:
+        return (start, start + timedelta(hours=1))
+
+    monkeypatch.setattr("shared.hierarchy.store.load_window_nodes", _nodes)
+    monkeypatch.setattr("shared.hierarchy.store.load_coverage_extent", _extent)
+    monkeypatch.setattr("gateway.routers.run_timeline._latest_compact_summary", _empty_summary)
+    _, _, pending = _narrative_for_window(
+        405,
+        start,
+        end,
+        activity=[(start - timedelta(hours=1), end + timedelta(hours=1))],
+    )
+    assert pending is not None
+    (pending_span,) = pending
+    assert (pending_span.start, pending_span.end) == (start + timedelta(hours=1), end)
 
 
 def test_inbounds_for_window_maps_delivery_facts_to_wire_rows(

@@ -35,6 +35,9 @@ export interface RunTimelineChartLabels {
   eventDetails: string;
   layerDetails: string;
   layerSummary: string;
+  pendingLabel: string;
+  pendingExplainer: string;
+  pendingAria: string;
   showMore: string;
   showLess: string;
   kind: string;
@@ -43,7 +46,7 @@ export interface RunTimelineChartLabels {
 }
 
 export interface TimelinePopoverTarget {
-  kind: "turn" | "event";
+  kind: "turn" | "event" | "pending";
   index: number;
   left: number;
   top: number;
@@ -265,6 +268,7 @@ export function TimelinePopover({
   target,
   row,
   event,
+  pending,
   labels,
   popoverRef,
   onPointerLeave,
@@ -272,6 +276,7 @@ export function TimelinePopover({
   target: TimelinePopoverTarget;
   row: RunTimelineResponse["rows"][number] | null;
   event: RunTimelineResponse["events"][number] | null;
+  pending: boolean;
   labels: RunTimelineChartLabels;
   popoverRef: RefObject<HTMLDivElement | null>;
   onPointerLeave: PointerEventHandler<HTMLDivElement>;
@@ -286,7 +291,12 @@ export function TimelinePopover({
       style={{ left: target.left, top: target.top, width: target.width }}
       onPointerLeave={onPointerLeave}
     >
-      {facts ? (
+      {pending ? (
+        <>
+          <p className="text-xs font-semibold">{labels.pendingLabel}</p>
+          <p className="mt-2 text-[11px] text-muted-foreground">{labels.pendingExplainer}</p>
+        </>
+      ) : facts ? (
         <>
           <p className="text-xs font-semibold">{facts.label}</p>
           <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-[11px]">

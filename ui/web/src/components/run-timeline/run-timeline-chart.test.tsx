@@ -112,6 +112,10 @@ const labels = {
   eventDetails: "Event details",
   layerDetails: "Layer details",
   layerSummary: "Summary",
+  pendingLabel: "Pending",
+  pendingExplainer:
+    "This stretch has no understanding layer yet — it appears after the next seal (compact); history is not backfilled.",
+  pendingAria: "Pending layer segment",
   showMore: "Show more",
   showLess: "Show less",
   kind: "Kind",
@@ -460,6 +464,43 @@ describe("RunTimelineChart", () => {
     expect(panel).toBeTruthy();
     expect(within(panel).getByText("overview text")).toBeTruthy();
     expect(within(panel).getByText("L0 \u00b7 L0#0")).toBeTruthy();
+  });
+
+  it("draws pending placeholders and explains them without a detail panel", () => {
+    const pendingTimeline: RunTimelineResponse = {
+      ...timeline,
+      pending: [{ start: "2026-08-29T08:10:00Z", end: "2026-08-29T08:55:00Z" }],
+    };
+    const onZoomWindow = vi.fn();
+    const { container } = render(
+      <RunTimelineChart
+        timeline={pendingTimeline}
+        labels={labels}
+        onDrillBucket={vi.fn()}
+        onZoomWindow={onZoomWindow}
+      />,
+    );
+
+    // No sealed blocks in the window, yet the layer band renders (spec §5).
+    expect(container.querySelectorAll('[data-testid="layer-block"]')).toHaveLength(0);
+    expect(container.querySelectorAll('[data-testid="pending-block"]')).toHaveLength(1);
+
+    const button = screen.getByRole("button", { name: "Pending layer segment" });
+    fireEvent.pointerEnter(button);
+    const popover = screen.getByRole("tooltip");
+    expect(within(popover).getByText("Pending")).toBeTruthy();
+    expect(within(popover).getByText(labels.pendingExplainer)).toBeTruthy();
+
+    // Not selectable: no layer detail panel opens.
+    fireEvent.click(button);
+    expect(screen.queryByRole("region", { name: "Layer details" })).toBeNull();
+
+    // Double-click zooms into the stretch instead.
+    fireEvent.doubleClick(button);
+    expect(onZoomWindow).toHaveBeenCalledWith({
+      from: "2026-08-29T08:10:00.000Z",
+      to: "2026-08-29T08:55:00.000Z",
+    });
   });
 
   it("renders the raw-context summary band when only a summary is provided", () => {

@@ -1,16 +1,23 @@
 "use client";
 
 // Narrative-layer rendering for the run timeline: the layer-block geometry
-// drawn inside the chart SVG, the matching clickable overlay buttons, and the
-// raw-context summary band. Extracted from run-timeline-chart.tsx to keep that
-// file under the source budget.
+// drawn inside the chart SVG, the matching clickable overlay buttons, the
+// pending-placeholder geometry/buttons (B, task #3981), and the raw-context
+// summary band. Extracted from run-timeline-chart.tsx to keep that file under
+// the source budget.
+
+import type { FocusEvent, PointerEvent } from "react";
 
 import type { RunTimelineResponse } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-import { layerNodeLabel, type RunTimelineChartLabels } from "./run-timeline-details";
+import {
+  layerNodeLabel,
+  TIMELINE_POPOVER_ID,
+  type RunTimelineChartLabels,
+} from "./run-timeline-details";
 import type { TimelineWindowOverride } from "./request-level";
-import type { TimelineLayerRowLayout } from "./timeline-layout";
+import type { TimelineLayerRowLayout, TimelinePendingSpanLayout } from "./timeline-layout";
 
 interface LayerTrackProps {
   rows: TimelineLayerRowLayout[];
@@ -97,6 +104,97 @@ export function LayerTrackButtons({
           );
         }),
       )}
+    </>
+  );
+}
+
+/** The pending-placeholder geometry: muted, dashed, deliberately not a real
+ *  block — uncovered activity reads as "not generated yet" (B spec §3). */
+export function PendingTrackGeometry({
+  row,
+  blocks,
+}: {
+  row: { top: number; height: number };
+  blocks: TimelinePendingSpanLayout[];
+}) {
+  return (
+    <>
+      {blocks.map((block) => (
+        <rect
+          key={`pending-${block.index}`}
+          data-testid="pending-block"
+          data-pending-index={block.index}
+          x={block.left}
+          y={row.top}
+          width={block.width}
+          height={row.height}
+          rx="6"
+          fill="var(--muted)"
+          fillOpacity={0.35}
+          stroke="var(--border)"
+          strokeDasharray="4 4"
+        />
+      ))}
+    </>
+  );
+}
+
+/** Clickable shells over the pending geometry: hover/click explains the
+ *  stretch, double-click zooms it; never selectable — there is no layer
+ *  detail to open (B spec §3). */
+export function PendingTrackButtons({
+  row,
+  blocks,
+  labels,
+  onShowPopover,
+  onHidePopover,
+  onZoom,
+  describedIndex,
+}: {
+  row: { top: number; height: number };
+  blocks: TimelinePendingSpanLayout[];
+  labels: RunTimelineChartLabels;
+  onShowPopover: (element: HTMLButtonElement) => void;
+  onHidePopover: (event: PointerEvent<HTMLButtonElement> | FocusEvent<HTMLButtonElement>) => void;
+  onZoom: (window: TimelineWindowOverride) => void;
+  describedIndex: number | null;
+}) {
+  return (
+    <>
+      {blocks.map((block) => (
+        <button
+          key={`pending-btn-${block.index}`}
+          type="button"
+          aria-label={labels.pendingAria}
+          aria-describedby={describedIndex === block.index ? TIMELINE_POPOVER_ID : undefined}
+          data-testid="pending-block-button"
+          data-pending-index={block.index}
+          data-timeline-popover-kind="pending"
+          data-timeline-popover-index={block.index}
+          onPointerEnter={(event) => onShowPopover(event.currentTarget)}
+          onPointerLeave={onHidePopover}
+          onFocus={(event) => onShowPopover(event.currentTarget)}
+          onBlur={onHidePopover}
+          onClick={(event) => onShowPopover(event.currentTarget)}
+          onDoubleClick={() => onZoom({ from: block.start, to: block.end })}
+          className="absolute rounded-md outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2"
+          style={{
+            left: `${block.left}px`,
+            top: `${row.top}px`,
+            width: `${block.width}px`,
+            height: `${row.height}px`,
+          }}
+        >
+          {block.width >= 40 ? (
+            <span
+              data-testid="fixed-timeline-text"
+              className="block truncate px-1 text-[10px] font-medium text-muted-foreground"
+            >
+              {labels.pendingLabel}
+            </span>
+          ) : null}
+        </button>
+      ))}
     </>
   );
 }

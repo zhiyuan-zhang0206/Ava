@@ -130,6 +130,21 @@ class RunTimelineInbound(BaseModel):
     inbound_id: int
 
 
+class RunTimelinePendingSpan(BaseModel):
+    """One pending stretch -- window activity no sealed understanding layer covers.
+
+    The layer-track placeholder source (B, 2026-09-18): rendered de-emphasized
+    so an uncovered stretch reads as "not generated yet", not as a missing
+    feature. Only stretches right of the agent's sealed coverage are reported;
+    never-sealed history is omitted (nothing is promised for it).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    start: datetime
+    end: datetime
+
+
 class RunTimelineBoundaries(BaseModel):
     """Turn rows that anchor the initialized-context-to-compact session."""
 
@@ -155,5 +170,9 @@ class RunTimelineResponse(BaseModel):
     # Optional narrative layer — None when no summaries exist for the window.
     layers: list[RunTimelineLayerNode] | None = None
     summary: RunTimelineSummary | None = None
+    # De-emphasized placeholders for uncovered window activity -- None when
+    # there is nothing to promise (no sealed history, or nothing uncovered).
+    # Wire contract: null or a non-empty list; [] is never emitted.
+    pending: list[RunTimelinePendingSpan] | None = None
     # Chat delivery facts — None when the read degrades.
     inbounds: list[RunTimelineInbound] | None = None

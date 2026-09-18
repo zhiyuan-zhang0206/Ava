@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from shared.hierarchy.serve import select_layers
+from shared.hierarchy.serve import pending_spans, select_layers
 from shared.hierarchy.store import StoredNode
 
 W0 = datetime(2026, 9, 12, 4, 0, tzinfo=UTC)
@@ -108,3 +108,45 @@ def test_coverage_reads_the_union_across_levels() -> None:
     shallow = node(5, level=2, start=W0 + timedelta(hours=2), end=W1, text="segB")
     selection = select_layers([deep, shallow], window_start=W0, window_end=W1, max_nodes=10)
     assert selection.coverage == "full"
+
+
+# --- pending placeholders (B spec, 2026-09-18) ---
+
+P0 = datetime(2026, 9, 18, 9, 0, tzinfo=UTC)
+
+
+def span(start_min: int, end_min: int) -> tuple[datetime, datetime]:
+    return P0 + timedelta(minutes=start_min), P0 + timedelta(minutes=end_min)
+
+
+def test_pending_empty_without_sealed_history() -> None:
+    assert pending_spans([span(0, 30)], [], coverage_start=None) == ()
+
+
+def test_pending_right_tail_and_fully_covered_window() -> None:
+    covered = [span(0, 120)]
+    assert pending_spans([span(180, 210)], covered, coverage_start=covered[0][0]) == (
+        span(180, 210),
+    )
+    assert pending_spans([span(0, 90)], covered, coverage_start=covered[0][0]) == ()
+
+
+def test_pending_internal_gap_between_sealed_stretches() -> None:
+    covered = [span(0, 60), span(90, 150)]
+    assert pending_spans([span(0, 150)], covered, coverage_start=covered[0][0]) == (span(60, 90),)
+
+
+def test_pending_never_promises_left_of_coverage() -> None:
+    covered = [span(120, 180)]
+    activity = [span(0, 60), span(200, 230)]
+    assert pending_spans(activity, covered, coverage_start=covered[0][0]) == (span(200, 230),)
+
+
+def test_pending_clips_the_boundary_span_and_merges_inputs() -> None:
+    covered = [span(30, 60)]
+    assert pending_spans([span(0, 90)], covered, coverage_start=covered[0][0]) == (span(60, 90),)
+    unsorted_covered = [span(60, 90), span(0, 30)]
+    adjacent_activity = [span(30, 60), span(0, 30)]
+    assert pending_spans(
+        adjacent_activity, unsorted_covered, coverage_start=unsorted_covered[1][0]
+    ) == (span(30, 60),)

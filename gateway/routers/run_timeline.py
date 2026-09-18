@@ -29,6 +29,7 @@ from gateway.schemas.run_timeline import (
     RunTimelineLayerNode,
     RunTimelineLlm,
     RunTimelineMeta,
+    RunTimelinePendingSpan,
     RunTimelineResponse,
     RunTimelineRow,
     RunTimelineSummary,
@@ -632,7 +633,14 @@ def get_run_timeline(
         _event_name(event) in _SESSION_START_EVENTS and _event_ts(event) > window_end
         for event in post_window_events
     )
-    layers, summary = _narrative_for_window(agent_id, window_start, window_end)
+    layers, summary, pending = _narrative_for_window(
+        agent_id,
+        window_start,
+        window_end,
+        # Wall spans of the window's completed turns: the "activity presence"
+        # the pending-placeholder subtraction reads.
+        activity=[(row.start, row.end) for row in aggregate.rows],
+    )
     inbounds = _inbounds_for_window(agent_id, window_start, window_end)
     return RunTimelineResponse(
         agent_id=agent_id,
@@ -648,13 +656,22 @@ def get_run_timeline(
         ),
         layers=layers,
         summary=summary,
+        pending=pending,
         inbounds=inbounds,
     )
 
 
 def _narrative_for_window(
-    agent_id: int, window_start: datetime, window_end: datetime
-) -> tuple[list[RunTimelineLayerNode] | None, RunTimelineSummary | None]:
+    agent_id: int,
+    window_start: datetime,
+    window_end: datetime,
+    *,
+    activity: list[tuple[datetime, datetime]],
+) -> tuple[
+    list[RunTimelineLayerNode] | None,
+    RunTimelineSummary | None,
+    list[RunTimelinePendingSpan] | None,
+]:
     """The narrative layers and raw-context fallback for one window.
 
     The event timeline is the primary read; every failure here (store absent on
@@ -662,13 +679,16 @@ def _narrative_for_window(
     failing the endpoint. Response shapes follow the three coverage states:
     no layers -> summary only; full coverage -> layers only; partial coverage ->
     both (the fallback is the agent's latest compact summary -- an agent-level
-    text, not sliced to the window).
+    text, not sliced to the window). ``pending`` marks window activity (clamped
+    to the window) that the sealed coverage does not explain -- the
+    placeholders the layer track draws.
     """
-    from shared.hierarchy.serve import select_layers
-    from shared.hierarchy.store import load_window_nodes
+    from shared.hierarchy.serve import pending_spans, select_layers
+    from shared.hierarchy.store import load_coverage_extent, load_window_nodes
 
     try:
         nodes = load_window_nodes(agent_id, window_start, window_end)
+        extent = load_coverage_extent(agent_id)
         selection = select_layers(
             nodes,
             window_start=window_start,
@@ -677,7 +697,7 @@ def _narrative_for_window(
         )
     except Exception:
         logger.exception("run-timeline narrative read failed for agent {}", agent_id)
-        return None, None
+        return None, None, None
     layers = (
         [
             RunTimelineLayerNode(
@@ -698,7 +718,26 @@ def _narrative_for_window(
         text = _latest_compact_summary(agent_id)
         if text:
             summary = RunTimelineSummary(text=text)
-    return layers, summary
+    pending: list[RunTimelinePendingSpan] | None = None
+    if extent is not None:
+        # Clamp to the window: a turn straddling an edge must not promise a
+        # placeholder outside the displayed range.
+        window_activity = [
+            (max(span_start, window_start), min(span_stop, window_end))
+            for span_start, span_stop in activity
+        ]
+        spans = pending_spans(
+            window_activity,
+            [
+                (node.start_ts, node.end_ts)
+                for node in nodes
+                if node.start_ts is not None and node.end_ts is not None
+            ],
+            coverage_start=extent[0],
+        )
+        if spans:
+            pending = [RunTimelinePendingSpan(start=start, end=stop) for start, stop in spans]
+    return layers, summary, pending
 
 
 def _inbounds_for_window(
