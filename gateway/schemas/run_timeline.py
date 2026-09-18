@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -156,6 +157,90 @@ class RunTimelineBoundaries(BaseModel):
     has_activity_after_window: bool
 
 
+RunTimelineMessagePartKind = Literal[
+    "think",
+    "text",
+    "call",
+    "out",
+    "note",
+    "compact",
+    "inbound",
+    "attach",
+    "prompt",
+]
+RunTimelineMessageKind = Literal[
+    "prompt",
+    "note",
+    "compact",
+    "inbound",
+    "attach",
+    "ai",
+    "exec",
+]
+
+
+class RunTimelineMessagePart(BaseModel):
+    """One colored part of a strip message; adjacent same-kind parts merge.
+
+    ``chars`` is the part's exact content length — characters as measured
+    (the approved width/readout unit), not an estimate.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: RunTimelineMessagePartKind
+    chars: int
+
+
+class RunTimelineMessage(BaseModel):
+    """One context message in the window — the raw strip's geometry source.
+
+    ``key`` is the stable read identity the message-details route resolves
+    (current segment ``c.<msg_idx>``; compact history
+    ``s<rank>.<boundary>.<msg_idx>``). Message text deliberately stays out of
+    this response; the details route serves it on demand.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    key: str
+    idx: int
+    ts: datetime | None
+    kind: RunTimelineMessageKind
+    source: str | None
+    chars: int
+    parts: list[RunTimelineMessagePart]
+
+
+class RunTimelineMessageDetailPart(BaseModel):
+    """One part's text as the panel reads it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: RunTimelineMessagePartKind
+    chars: int
+    text: str
+    # True when this part's text was clipped by the per-read budget; a
+    # `full=true` refetch returns it uncut.
+    text_truncated: bool = False
+
+
+class RunTimelineMessageDetails(BaseModel):
+    """GET /api/agents/{agent_id}/run-timeline/message response."""
+
+    model_config = ConfigDict(frozen=True)
+
+    key: str
+    kind: RunTimelineMessageKind
+    ts: datetime | None
+    source: str | None
+    chars: int
+    parts: list[RunTimelineMessageDetailPart]
+    # True when any part came back clipped; refetch with full=true for the
+    # uncut text.
+    content_truncated: bool
+
+
 class RunTimelineResponse(BaseModel):
     """GET /api/agents/{agent_id}/run-timeline response."""
 
@@ -176,3 +261,12 @@ class RunTimelineResponse(BaseModel):
     pending: list[RunTimelinePendingSpan] | None = None
     # Chat delivery facts — None when the read degrades.
     inbounds: list[RunTimelineInbound] | None = None
+    # Raw context strip (P4-2, task #4023): one entry per state message in the
+    # window, from the same projection the console timeline serves (P4-0
+    # direction a). None when the read degrades (the narrative/inbounds
+    # posture); the details route serves each message's text on demand.
+    messages: list[RunTimelineMessage] | None = None
+    # Whether the strip read stopped early — the message budget or the compact
+    # history walk cap cut older messages away (never a silent cut; hinted in
+    # the UI). None iff ``messages`` is None.
+    messages_truncated: bool | None = None

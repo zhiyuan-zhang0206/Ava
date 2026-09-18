@@ -5247,6 +5247,65 @@
         }
       }
     },
+    "/api/agents/{agent_id}/run-timeline/message": {
+      "get": {
+        "summary": "Get Run Timeline Message",
+        "description": "One strip message's text — the on-demand read behind the panel.\n\n``key`` is the strip's stable message identity (``c.<idx>`` /\n``s<rank>.<boundary>.<idx>``). Parts longer than\n``display.run_timeline_message_text_max`` come back clipped with\n``content_truncated``; refetch with ``full=true`` for the uncut text.",
+        "operationId": "get_run_timeline_message_api_agents__agent_id__run_timeline_message_get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "key",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Key"
+            }
+          },
+          {
+            "name": "full",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Full"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunTimelineMessageDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/agents/{agent_id}/run-timeline": {
       "get": {
         "summary": "Get Run Timeline",
@@ -13759,6 +13818,218 @@
         "title": "RunTimelineLlm",
         "description": "Absolute LLM usage for a turn or an aggregated time bucket."
       },
+      "RunTimelineMessage": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "idx": {
+            "type": "integer",
+            "title": "Idx"
+          },
+          "ts": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ts"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "prompt",
+              "note",
+              "compact",
+              "inbound",
+              "attach",
+              "ai",
+              "exec"
+            ],
+            "title": "Kind"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "chars": {
+            "type": "integer",
+            "title": "Chars"
+          },
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/RunTimelineMessagePart"
+            },
+            "type": "array",
+            "title": "Parts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "idx",
+          "ts",
+          "kind",
+          "source",
+          "chars",
+          "parts"
+        ],
+        "title": "RunTimelineMessage",
+        "description": "One context message in the window — the raw strip's geometry source.\n\n``key`` is the stable read identity the message-details route resolves\n(current segment ``c.<msg_idx>``; compact history\n``s<rank>.<boundary>.<msg_idx>``). Message text deliberately stays out of\nthis response; the details route serves it on demand."
+      },
+      "RunTimelineMessageDetailPart": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "think",
+              "text",
+              "call",
+              "out",
+              "note",
+              "compact",
+              "inbound",
+              "attach",
+              "prompt"
+            ],
+            "title": "Kind"
+          },
+          "chars": {
+            "type": "integer",
+            "title": "Chars"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "text_truncated": {
+            "type": "boolean",
+            "title": "Text Truncated",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "chars",
+          "text"
+        ],
+        "title": "RunTimelineMessageDetailPart",
+        "description": "One part's text as the panel reads it."
+      },
+      "RunTimelineMessageDetails": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "prompt",
+              "note",
+              "compact",
+              "inbound",
+              "attach",
+              "ai",
+              "exec"
+            ],
+            "title": "Kind"
+          },
+          "ts": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ts"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "chars": {
+            "type": "integer",
+            "title": "Chars"
+          },
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/RunTimelineMessageDetailPart"
+            },
+            "type": "array",
+            "title": "Parts"
+          },
+          "content_truncated": {
+            "type": "boolean",
+            "title": "Content Truncated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "kind",
+          "ts",
+          "source",
+          "chars",
+          "parts",
+          "content_truncated"
+        ],
+        "title": "RunTimelineMessageDetails",
+        "description": "GET /api/agents/{agent_id}/run-timeline/message response."
+      },
+      "RunTimelineMessagePart": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "think",
+              "text",
+              "call",
+              "out",
+              "note",
+              "compact",
+              "inbound",
+              "attach",
+              "prompt"
+            ],
+            "title": "Kind"
+          },
+          "chars": {
+            "type": "integer",
+            "title": "Chars"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "chars"
+        ],
+        "title": "RunTimelineMessagePart",
+        "description": "One colored part of a strip message; adjacent same-kind parts merge.\n\n``chars`` is the part's exact content length — characters as measured\n(the approved width/readout unit), not an estimate."
+      },
       "RunTimelineMeta": {
         "properties": {
           "n_turns": {
@@ -13924,6 +14195,31 @@
               }
             ],
             "title": "Inbounds"
+          },
+          "messages": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RunTimelineMessage"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Messages"
+          },
+          "messages_truncated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Messages Truncated"
           }
         },
         "type": "object",

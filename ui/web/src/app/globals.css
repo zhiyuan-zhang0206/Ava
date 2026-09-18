@@ -82,6 +82,20 @@
   --series-3: #1baf7a;
   --series-4: #eda100;
   --series-5: #e34948;
+  /* raw-context strip part colors (P4-2, task #4023): the demo timeline's
+     palette, remapped onto theme variables. Keep the light/dark pair in
+     sync. */
+  --strip-think: rgb(96 165 250 / 40%);
+  --strip-text: rgb(16 185 129 / 50%);
+  --strip-call: rgb(6 182 212 / 70%);
+  --strip-out: rgb(245 158 11 / 50%);
+  --strip-note: rgb(20 184 166 / 40%);
+  --strip-ib-agent: rgb(167 139 250 / 60%);
+  --strip-ib-user: rgb(156 163 175 / 60%);
+  --strip-ib-sys: rgb(56 189 248 / 60%);
+  --strip-compact: rgb(56 189 248 / 60%);
+  --strip-prompt: rgb(129 140 248 / 40%);
+  --strip-other: rgb(228 231 236);
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
@@ -132,6 +146,17 @@
   --series-3: #199e70;
   --series-4: #c98500;
   --series-5: #e66767;
+  --strip-think: rgb(96 165 250 / 55%);
+  --strip-text: rgb(16 185 129 / 62%);
+  --strip-call: rgb(6 182 212 / 75%);
+  --strip-out: rgb(245 158 11 / 62%);
+  --strip-note: rgb(20 184 166 / 55%);
+  --strip-ib-agent: rgb(167 139 250 / 68%);
+  --strip-ib-user: rgb(156 163 175 / 68%);
+  --strip-ib-sys: rgb(56 189 248 / 68%);
+  --strip-compact: rgb(56 189 248 / 68%);
+  --strip-prompt: rgb(129 140 248 / 55%);
+  --strip-other: rgb(113 113 122 / 55%);
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);

@@ -1,6 +1,7 @@
 import type { RunTimelineResponse } from "@/lib/types";
 
 import { timeCoordinate } from "./scales";
+import { buildStripLayout, coveredMessageIndexes, type StripMessageLayout } from "./strip-layout";
 
 const CANVAS_PADDING = 32;
 const AXIS_Y = 38;
@@ -10,6 +11,9 @@ const EVENT_LANE_PITCH = 30;
 const EVENT_CHIP_GAP = 8;
 const TRACK_HEIGHT = 36;
 const TRACK_GAP = 24;
+// P4-2 (#4023): the raw-context strip row (demo: a 26px band below the
+// blocks). Message bars live inside it; the row is the chart's bottom-most.
+const STRIP_ROW_HEIGHT = 26;
 const MIN_TURN_WIDTH = 6;
 const LAYER_ROW_HEIGHT = 22;
 const LAYER_ROW_GAP = 6;
@@ -27,6 +31,11 @@ interface TimelineLayoutInput {
   events: RunTimelineResponse["events"];
   layers?: RunTimelineResponse["layers"];
   pending?: RunTimelineResponse["pending"];
+  /** P4-2 task #4023: raw-context messages for the bottom strip row; when
+   *  present, layer blocks also take their geometry from the covered
+   *  messages (D3 — the strip is char-width proportional, so a block is its
+   *  first-to-last covered message). */
+  messages?: RunTimelineResponse["messages"];
   /** P4-1 task #4023: render the layer stack fine-first (coarse rows move to
    *  the bottom). Placeholders keep riding their host row. */
   flipLayers?: boolean;
@@ -56,6 +65,12 @@ export interface TimelineLayerRowLayout {
   top: number;
   height: number;
   blocks: TimelineLayerBlockLayout[];
+}
+
+export interface TimelineStripRowLayout {
+  top: number;
+  height: number;
+  messages: StripMessageLayout[];
 }
 
 export interface TimelinePendingSpanLayout {
@@ -159,6 +174,13 @@ export function buildTimelineLayout(input: TimelineLayoutInput) {
   };
   const windowStart = Date.parse(input.window.from);
   const windowSpan = Date.parse(input.window.to) - windowStart;
+  // P4-2 (#4023): the strip's message geometry, shared by the strip row and
+  // the message-derived layer blocks below.
+  const stripMessages = input.messages ?? [];
+  const strip =
+    stripMessages.length > 0
+      ? buildStripLayout(stripMessages, input.window, { left: plot.left, width: plot.width })
+      : null;
   const ticks: TimelineTickLayout[] = Array.from({ length: 5 }, (_, index) => ({
     x: Math.round(plot.left + (plot.width * index) / 4),
     timestamp: new Date(windowStart + (windowSpan * index) / 4).toISOString(),
@@ -223,6 +245,23 @@ export function buildTimelineLayout(input: TimelineLayoutInput) {
       .sort((a, b) => Date.parse(a.node.start) - Date.parse(b.node.start));
     const top = layersTop + rowIndex * (LAYER_ROW_HEIGHT + LAYER_ROW_GAP);
     const blocks = nodes.map(({ node, nodeIndex }) => {
+      // D3 (#4023): a block spans its first-to-last covered message, so it
+      // lines up with the char-width strip it summarizes. A node covering no
+      // placeable message (no strip, or only legacy/unplaceable stamps)
+      // falls back to the plain time projection.
+      if (strip) {
+        const covered = coveredMessageIndexes(stripMessages, node.start, node.end);
+        if (covered.length > 0) {
+          const first = strip.messages[covered[0]];
+          const last = strip.messages[covered[covered.length - 1]];
+          const left = Math.min(first.left, plot.right - MIN_TURN_WIDTH);
+          const width = Math.min(
+            plot.right - left,
+            Math.max(MIN_TURN_WIDTH, last.left + last.width - left),
+          );
+          return { nodeIndex, left, width };
+        }
+      }
       const startX = projectedX(node.start, input.window, plot.left, plot.width);
       const endX = projectedX(node.end, input.window, plot.left, plot.width);
       const left = Math.min(startX, plot.right - MIN_TURN_WIDTH);
@@ -270,11 +309,22 @@ export function buildTimelineLayout(input: TimelineLayoutInput) {
 
   return {
     width,
-    height: trackTop + TRACK_HEIGHT + 20,
+    height:
+      strip === null
+        ? trackTop + TRACK_HEIGHT + 20
+        : trackTop + TRACK_HEIGHT + TRACK_GAP + STRIP_ROW_HEIGHT + 20,
     axisY: AXIS_Y,
     plot,
     ticks,
     track: { top: trackTop, height: TRACK_HEIGHT },
+    strip:
+      strip === null
+        ? null
+        : {
+            top: trackTop + TRACK_HEIGHT + TRACK_GAP,
+            height: STRIP_ROW_HEIGHT,
+            messages: strip.messages,
+          },
     layerRows: orderedLayerRows,
     pendingRow,
     pendingBlocks,

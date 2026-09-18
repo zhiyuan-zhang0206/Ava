@@ -5,9 +5,10 @@
 // truncates with an ellipsis and sits outside the chart body, so hover info
 // never covers the track; full detail stays in the popover and the panel.
 
-import type { RunTimelineResponse } from "@/lib/types";
+import type { RunTimelineMessage, RunTimelineResponse } from "@/lib/types";
 
 import { rowLabel, type RunTimelineChartLabels } from "./run-timeline-details";
+import { stripMessageClass } from "./strip-categories";
 
 function pad(value: number): string {
   return String(value).padStart(2, "0");
@@ -15,6 +16,11 @@ function pad(value: number): string {
 
 function clock(date: Date): string {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+/** One point stamp for the readout line (P4-2): short date + clock. */
+function point(date: Date): string {
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${clock(date)}`;
 }
 
 function range(from: string, to: string): string {
@@ -33,9 +39,21 @@ export function buildReadoutText(
     event?: RunTimelineResponse["events"][number] | null;
     layer?: NonNullable<RunTimelineResponse["layers"]>[number] | null;
     pending?: { start: string; end: string } | null;
+    /** P4-2 (#4023): hovered raw-context message + its covering summary leaf. */
+    message?: { message: RunTimelineMessage; leaf: string | null } | null;
   },
   labels: RunTimelineChartLabels,
 ): string | null {
+  if (input.message) {
+    const { message, leaf } = input.message;
+    return labels.readoutMessage(
+      message.idx,
+      labels.stripPartLabels[stripMessageClass(message)],
+      message.ts === null ? labels.none : point(new Date(message.ts)),
+      message.chars.toLocaleString(),
+      leaf,
+    );
+  }
   if (input.row) {
     const row = input.row;
     return `${rowLabel(row, labels)} · ${range(row.start, row.end)} · ${row.execs.length} ${labels.executions} · $${row.llm.cost_usd.toFixed(2)}`;
