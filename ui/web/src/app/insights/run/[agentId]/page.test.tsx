@@ -412,4 +412,37 @@ describe("context axis (P4-2b)", () => {
     await waitFor(() => expect(queryByTestId("timeline-crumbs")).toBeNull());
     expect(tickTexts(container)).toEqual(["0", "200", "400", "600", "800", "1.0k"]);
   });
+
+  it("falls back to the time axis when the message projection drops out", async () => {
+    getRunTimeline.mockResolvedValue(messagesResponse);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { container, getByRole } = rtlRender(
+      <QueryClientProvider client={queryClient}>
+        <RunTimelinePage params={Promise.resolve({ agentId: "42" })} />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() =>
+      expect((getByRole("button", { name: "Characters" }) as HTMLButtonElement).disabled).toBe(false),
+    );
+    fireEvent.click(getByRole("button", { name: "Characters" }));
+    expect(tickTexts(container)).toEqual(["0", "200", "400", "600", "800", "1.0k"]);
+
+    // A degraded refresh without the message projection must not park the
+    // chart on a blank context view: the page falls back to the time axis.
+    const firstCall = getRunTimeline.mock.calls[0] as
+      | [number, { from?: string; to?: string }]
+      | undefined;
+    const options = firstCall?.[1] ?? {};
+    queryClient.setQueryData(
+      ["run-timeline", 42, options.from ?? null, options.to ?? null, "compact", "turn"],
+      { ...messagesResponse, messages: null },
+    );
+
+    await waitFor(() =>
+      expect(getByRole("button", { name: "Time" }).getAttribute("aria-pressed")).toBe("true"),
+    );
+    expect((getByRole("button", { name: "Characters" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(tickTexts(container).some((tick) => tick?.includes(":"))).toBe(true);
+  });
 });

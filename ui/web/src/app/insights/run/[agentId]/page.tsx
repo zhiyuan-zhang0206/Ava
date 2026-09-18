@@ -306,6 +306,16 @@ export default function RunTimelinePage({
     setContextView({ from: 0, to: contextTotal });
   }, [axis, contextTotal, windowKey]);
 
+  // P4-2b (#4023): the character axis projects the message list; when a
+  // refresh drops it (a degraded read), fall back to the time axis instead
+  // of parking the chart on a blank, disabled context view.
+  useEffect(() => {
+    if (axis !== "context" || !axisDisabled) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- data-keyed fallback, not a render loop
+    setAxis("time");
+    setTrail([]);
+  }, [axis, axisDisabled]);
+
   if (paramsResolved && agentId === null) {
     return (
       <main id="main-content">
