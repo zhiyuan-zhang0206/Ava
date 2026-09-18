@@ -3,11 +3,11 @@
 Called by `cmd_start`, which writes the resolved value to file when the arg is
 given so subsequent starts need no flags.
 
-Capabilities (serve_gateway / serve_agent_runner) are two independent booleans,
-each resolved env (settings bool) > `$AVA_HOME/machine_serve_<cap>` file > CLI
-arg; the string setup fields (machine_name / description / memory_remote /
-gateway_url) are resolved by `_SetupField` below, gated by which capabilities
-this host carries.
+Capabilities (serve_gateway / serve_agent_runner / serve_observability_station)
+are independent booleans, each resolved env (settings bool) >
+`$AVA_HOME/machine_serve_<cap>` file > CLI arg; the string setup fields
+(machine_name / description / memory_remote / gateway_url) are resolved by
+`_SetupField` below, gated by which capabilities this host carries.
 """
 
 from __future__ import annotations

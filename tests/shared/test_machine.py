@@ -1,6 +1,7 @@
 """`shared/machine.py` unit tests — machine_name and machine_role env/file precedence + validation.
 
-machine_role is derived from two independent capability booleans (serve_gateway / serve_agent_runner);
+machine_role is derived from independent capability booleans
+(serve_gateway / serve_agent_runner / serve_observability_station);
 each boolean: env (settings bool|None) > `$AVA_HOME/machine_serve_*` file > False.
 `_parse_roles` / `_coerce_roles` are kept, only used in the set_identity injection path (see bottom).
 """
