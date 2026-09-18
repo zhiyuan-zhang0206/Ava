@@ -352,6 +352,45 @@ class ObservabilitySettings(EnvSettings):
         },
     )
 
+    loki_class_cache_enabled: bool = Field(
+        default=True,
+        alias="AVA_LOKI_CLASS_CACHE_ENABLED",
+        description=(
+            "Minute-floor result cache for the dashboard's per-class warning/error "
+            "counts (count_event_classes) — the one Loki aggregation family that "
+            "used to re-query uncached on every dashboard refresh (task #3891). "
+            "Like the count_events/attribute_aggregate caches, a result can be up "
+            "to 60s stale; the 30s dashboard poll cadence and the non-alerting "
+            "panel make that acceptable. Off: every call queries Loki directly."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    loki_events_cache_max_entries: int = Field(
+        default=1024,
+        gt=0,
+        alias="AVA_LOKI_EVENTS_CACHE_MAX_ENTRIES",
+        description=(
+            "Entry cap of the gateway's Loki aggregation result cache; a full "
+            "cache evicts the least-recently-used entry (task #3891 B2). 1024 "
+            "keeps about 8x headroom over the measured peak of ~130 distinct "
+            "keys/minute across all cached families; LRU eviction only guards "
+            "storm-day amplification — normal churn stays far under the cap. "
+            "Changing it takes effect at the next gateway start."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     lgtm_listen_host: str = Field(
         default="127.0.0.1",
         alias="AVA_LGTM_LISTEN_HOST",

@@ -10,7 +10,13 @@ import sys
 from types import ModuleType
 from typing import ClassVar
 
-from gateway import _loki_aggregates, _loki_event_rows, _loki_logql, _loki_transport
+from gateway import (
+    _loki_aggregates,
+    _loki_class_counts,
+    _loki_event_rows,
+    _loki_logql,
+    _loki_transport,
+)
 
 # Compatibility test seams retained while their owners live in private modules.
 telemetry = _loki_transport.telemetry
@@ -47,9 +53,10 @@ attribute_aggregate = _loki_aggregates.attribute_aggregate
 count_by_event_name = _loki_aggregates.count_by_event_name
 attribute_distribution = _loki_aggregates.attribute_distribution
 count_grouped = _loki_aggregates.count_grouped
-count_event_classes = _loki_aggregates.count_event_classes
 count_events_series = _loki_aggregates.count_events_series
 attribute_max_series = _loki_aggregates.attribute_max_series
+
+count_event_classes = _loki_class_counts.count_event_classes
 
 
 class _LokiEventsFacade(ModuleType):
