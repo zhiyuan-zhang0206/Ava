@@ -23,7 +23,7 @@ from typing import Any
 
 import pytest
 
-from cli.commands import _cluster_health, _health_alerts
+from cli.commands import _cluster_health, _health_alerts, _provider_guard
 
 # Captured at import, before the autouse `_sent_alerts` fixture stubs the module
 # attributes — the handles the unit tests use to reach the real send/ingest
@@ -313,6 +313,19 @@ def _all_checks_pass(monkeypatch: pytest.MonkeyPatch) -> None:
     # non-git path. Every pass-all fixture stubs it; the source-tree tests
     # below stub it themselves with specific outcomes.
     monkeypatch.setattr(_cluster_health, "_source_tree_failure", lambda: None)
+
+
+@pytest.fixture(autouse=True)
+def _provider_guard_healthy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Checks 9-10 read a live provider API and the real agent table; stub the
+    guard healthy everywhere so this file's tests stay hermetic. The guard's
+    own tests below re-point `run_provider_guard` at the real one to exercise
+    the wiring."""
+
+    def _ok(_home: Path, *, alert_failure: object) -> None:
+        return None
+
+    monkeypatch.setattr(_cluster_health, "run_provider_guard", _ok)
 
 
 @pytest.fixture
@@ -2245,3 +2258,58 @@ def test_editable_install_healthy_records_keep_probe_green(
     monkeypatch.setattr(_cluster_health, "_source_tree_failure", lambda: None)
 
     assert _cluster_health.run_health_probe() == 0
+
+
+# ─── provider account guard: checks 9-10 (see `_provider_guard`) ─────────────
+
+_PROVIDER_GUARD_FAILURE = "FAIL: provider balance — below the configured minimum"
+
+
+def test_provider_guard_failure_alerts_without_rollback_counter(
+    _all_checks_pass: None,
+    _home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    _sent_alerts: list[str],
+) -> None:
+    """Checks 9-10 are alert-only, like checks 5-8: a drained provider account
+    fails the probe and alerts the owner, but never feeds the auto-rollback
+    counter — rolling code back does not fund the account (the 2026-09-18
+    outage class)."""
+    monkeypatch.setattr(_cluster_health, "run_provider_guard", _provider_guard.run_provider_guard)
+
+    def _failure() -> str:
+        return _PROVIDER_GUARD_FAILURE
+
+    monkeypatch.setattr(_provider_guard, "provider_guard_failure", _failure)
+    _write_aged_alert_state(_home, _PROVIDER_GUARD_FAILURE)
+
+    rc = _cluster_health.run_health_probe(auto_rollback=True, threshold=3)
+
+    assert rc == 1
+    assert _read_count(_home).splitlines()[0] == "0"  # alert-only: reset, never advanced
+    assert len(_sent_alerts) == 1
+    assert "provider balance" in _sent_alerts[0]
+
+
+def test_provider_guard_recovery_resolves_the_stored_episode(
+    _all_checks_pass: None,
+    _home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    _sent_alerts: list[str],
+) -> None:
+    """The resolve edge re-derives from the on-disk episode store: each probe
+    run is a fresh cron process, so a later run whose condition is gone must
+    resolve whatever episode the store recorded, not what a process remembers
+    (review vector #2790)."""
+    _write_aged_alert_state(_home, _PROVIDER_GUARD_FAILURE, severity="warning")
+    monkeypatch.setattr(_cluster_health, "run_provider_guard", _provider_guard.run_provider_guard)
+
+    def _passing() -> None:
+        return None
+
+    monkeypatch.setattr(_provider_guard, "provider_guard_failure", _passing)
+
+    assert _cluster_health.run_health_probe() == 0
+    assert not (_home / _cluster_health.ALERT_STATE_FILE).exists()
+    assert len(_sent_alerts) == 1
+    assert "cluster recovered" in _sent_alerts[0]
