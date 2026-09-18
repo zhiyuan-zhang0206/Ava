@@ -56,6 +56,7 @@ class _SilentIdleContinueHook(Hook):
             logger.info(
                 "[{label}] {body}",
                 label="silent-idle",
+                event="silent_idle",
                 body="defer: auto-compact predicted, skipping continue nudge this turn",
             )
             return None

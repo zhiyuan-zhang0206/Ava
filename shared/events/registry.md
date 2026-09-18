@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 25 | events table |
-| telemetry (category=telemetry) | `events` | 188 | events table |
+| telemetry (category=telemetry) | `events` | 190 | events table |
 | log (category=log) | `events` | 13 | events table |
 | file-only (destination=file) | file log | 1 | file only (not the events table) |
 | SSE live | Redis → frontend (not persisted) | 31 role | live projection |
@@ -92,7 +92,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 188)
+## 3. Telemetry events (category=telemetry, 190)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -175,6 +175,7 @@ consumers: see the comments at each emit point.
 | `pr_flow_run` | PR-flow sampler run — point-in-time Trunk queue depth (absolute state) | observation | queue_depth | — | events |
 | `task_reminder_digest` | overdue-task owner digest | noise | owner_id, task_count, task_ids | — | events |
 | `task_escalation` | stalled-task escalation | observation | owner_id, task_count, task_ids, leg | — | events |
+| `task_usage_record_failed` | task usage recording failed | anomaly | — | — | events |
 | `delivery_stalled` | delivery backlog | anomaly | inbound_id, age_s | — | events |
 | `loki_write_path_probe_failed` | Loki write-path probe failed | anomaly | consecutive_failures, reason | — | events |
 | `delivery_poisoned` | delivery backlog — permanently-failing inbound poisoned (dispatch cap reached) | anomaly | inbound_id, dispatch_count, age_s | — | events |
@@ -187,6 +188,7 @@ consumers: see the comments at each emit point.
 | `idle_cas_lost` | idle-flip CAS race lost — degraded, not fatal | anomaly | — | — | events |
 | `boot_timing` | boot duration | noise | — | — | events |
 | `dangling_tool_pairing_repaired` | dangling tool pairing repaired | anomaly | — | — | events |
+| `delta_read_compat` | delta-written checkpoint messages reconstructed for a plain reader (task #3180 transition layer) | noise | — | — | events |
 | `agent_spawned` | agent process started | observation | spawner, forked_from | — | events |
 | `agent_resurrected` | agent resurrected | observation | — | — | events |
 | `billing_resurrect_run` | billing batch recovery run finished | observation | — | — | events |

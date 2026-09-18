@@ -582,6 +582,9 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
     "task_escalation": _telemetry(
         "task_escalation", "stalled-task escalation", payload=TaskEscalation
     ),
+    "task_usage_record_failed": _telemetry(
+        "task_usage_record_failed", "task usage recording failed", tier="anomaly"
+    ),
     "delivery_stalled": _telemetry(
         "delivery_stalled", "delivery backlog", payload=DeliveryStalled, tier="anomaly"
     ),
@@ -635,6 +638,12 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
     "boot_timing": _telemetry("boot_timing", "boot duration", tier="noise"),
     "dangling_tool_pairing_repaired": _telemetry(
         "dangling_tool_pairing_repaired", "dangling tool pairing repaired", tier="anomaly"
+    ),
+    "delta_read_compat": _telemetry(
+        "delta_read_compat",
+        "delta-written checkpoint messages reconstructed for a plain reader "
+        "(task #3180 transition layer)",
+        tier="noise",
     ),
     "agent_spawned": _telemetry(
         "agent_spawned",

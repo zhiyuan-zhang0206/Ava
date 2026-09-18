@@ -478,3 +478,59 @@ def test_deploy_quieting_cache_holds_answer_through_read_failure(
     sink_logger.warning("slow acquire", event="db_pool_acquire_slow", elapsed=2.0)  # pyright: ignore[reportUnknownMemberType]
     _event, _agent_id, level, _payload = _last_event()
     assert level == "info", "cached lease must quiet within the TTL"
+
+
+# ─── call-site contract: the delta read-compat reconstruction (task #3897) ──
+#
+# `_log_reconstruction` was a label-only call site whose label was not a
+# registry entry: every read of a delta-written checkpoint derived its
+# event_name from the label fallback, `telemetry.emit` raised inside the sink
+# (the row was lost) and loguru logged the internal error on every such read.
+# The call now passes an explicit `event=` — registered as `delta_read_compat`
+# in shared/events/registry.py (naming rules §6.2: label is display-only).
+
+
+def test_sink_delta_read_compat_reconstruction_is_a_registered_event(sink_logger) -> None:
+    """The reconstruction line lands as its registered event, end to end.
+
+    Drives the real `_log_reconstruction` through the real loguru → emitter
+    sink. Before the fix the call raised `ValueError` inside the sink
+    (catch=False here) and nothing reached the mirror; this locks both the
+    explicit `event=` at the call site and the name's registration."""
+    from types import SimpleNamespace
+
+    from langgraph.checkpoint.base import CheckpointTuple
+
+    from shared.delta_read_compat import _log_reconstruction
+
+    tuple_ = cast(
+        CheckpointTuple,
+        SimpleNamespace(
+            config={"configurable": {"thread_id": "thread-1"}},
+            checkpoint={"id": "checkpoint-1"},
+        ),
+    )
+    _log_reconstruction(tuple_, 3)
+
+    # Find the row by name rather than taking the mirror's last line: ambient
+    # metered `sdk_call` rows can land in the per-test mirror after this test's
+    # own row (tests/conftest.py's cluster-spawn guard probes `ava.mcps`, whose
+    # module `__getattr__` calls the metered `servers()`).
+    from shared.paths import logs_dir
+
+    telemetry.sync()
+    day = datetime.now(UTC).strftime("%Y%m%d")
+    rows = [
+        json.loads(line)
+        for line in (logs_dir() / f"events-{day}.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    matches = [row for row in rows if row["event_name"] == "delta_read_compat"]
+    assert matches, (
+        f"no delta_read_compat row in the mirror (got {[r['event_name'] for r in rows]})"
+    )
+    payload = matches[-1]["attributes"]
+    assert payload["label"] == "delta-read-compat"
+    assert payload["body"] == (
+        "reconstructed messages for thread=thread-1 checkpoint=checkpoint-1: 3 messages"
+    )
