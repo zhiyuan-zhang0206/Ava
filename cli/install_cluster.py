@@ -11,8 +11,9 @@ connection facts arrive via `ava enroll` — it only gets the serve flags
 written. Nothing is ever started here; that stays `ava start`.
 
 The `--role` capability set also decides the serve flags
-(AVA_MACHINE_SERVE_GATEWAY / AVA_MACHINE_SERVE_AGENT_RUNNER), written into the
-home's `.env` so a later `ava start` resolves them with no `--serve-*` flags.
+(AVA_MACHINE_SERVE_GATEWAY / AVA_MACHINE_SERVE_AGENT_RUNNER /
+AVA_MACHINE_SERVE_OBSERVABILITY_STATION), written into the home's `.env` so a
+later `ava start` resolves them with no `--serve-*` flags.
 
 The cluster secret follows the role (user decision: off is fully off). A
 single-machine role (`gateway,agent-runner` on one box) births a NO-AUTH
@@ -132,6 +133,9 @@ def _serve_flag_env(role: frozenset[str]) -> dict[str, str]:
     return {
         "AVA_MACHINE_SERVE_GATEWAY": "true" if "gateway" in role else "false",
         "AVA_MACHINE_SERVE_AGENT_RUNNER": "true" if "agent-runner" in role else "false",
+        "AVA_MACHINE_SERVE_OBSERVABILITY_STATION": (
+            "true" if "observability-station" in role else "false"
+        ),
     }
 
 
@@ -505,7 +509,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--role",
         required=True,
-        help="capability set (comma-separated: gateway,agent-runner); decides the "
+        help="capability set (comma-separated: gateway,agent-runner,observability-station); decides the "
         "serve flags and whether a cluster is birthed (gateway-capable only). "
         "No default — the install must state the unit's shape explicitly.",
     )
@@ -555,7 +559,9 @@ def main(argv: list[str] | None = None) -> int:
 
     role = frozenset(tok.strip() for tok in args.role.split(",") if tok.strip())
     if not role or not role <= _VALID_CAPS:
-        p.error(f"invalid --role {args.role!r} (tokens: gateway, agent-runner)")
+        p.error(
+            f"invalid --role {args.role!r} (tokens: gateway, agent-runner, observability-station)"
+        )
 
     return cmd_install_cluster(
         home=home,

@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Ava install script — OS-aware, capability-scoped entry across macOS / Linux (incl. WSL / containers) / Windows (WSL2).
 #
-# Capabilities (a host carries one or both):
-#   gateway        macOS: brew pg17 + redis@8.2 (native); Linux: apt pg17 + redis.
-#   agent-runner   no local pg/redis (a runner-only host connects to a gateway's instance).
+# Capabilities (a host carries any subset):
+#   gateway                macOS: brew pg17 + redis@8.2 (native); Linux: apt pg17 + redis.
+#   agent-runner           no local pg/redis (a runner-only host connects to a gateway's instance).
+#   observability-station  hosts the LGTM observability backends (Loki/Prometheus/Grafana); no local pg/redis.
 #
 # Linux provision (CLI tools / node / pg17 / redis / pgbouncer) presence-checks
 # its packages and skips apt on a host that already has them — a WSL distro
@@ -14,7 +15,7 @@
 # All paths share: uv + Python 3.12, locked Python installation, ~/.local/bin/ava symlink.
 #
 # --role is REQUIRED — a comma-separated capability set, no default. A single box
-# carries BOTH on one unit (owns the data plane AND runs agents); split
+# carries any subset on one unit (owns the data plane AND runs agents); split
 # deployments give each capability its own machine. See .agents/skills/deploy-ava-cluster/SKILL.md.
 #
 # Usage:
@@ -87,7 +88,7 @@ while [ $# -gt 0 ]; do
             CLUSTER_SECRET="$2"; shift 2 ;;
         --role=*) ROLE="${1#--role=}"; shift ;;
         --role)
-            [ $# -ge 2 ] || { echo "install.sh: --role requires an argument — a capability set, e.g. gateway,agent-runner | gateway | agent-runner" >&2; exit 2; }
+            [ $# -ge 2 ] || { echo "install.sh: --role requires an argument — a capability set, e.g. gateway,agent-runner | gateway | agent-runner | observability-station" >&2; exit 2; }
             ROLE="$2"; shift 2 ;;
         --mirror=*) MIRROR="${1#--mirror=}"; shift ;;
         --mirror)
@@ -132,14 +133,16 @@ else
     [ -z "$WT_PATH" ] || die "--path requires --worktree"
     [ "$SEED" = 1 ] || die "--no-seed requires --worktree"
 
-    # --role is a comma-separated capability set: gateway, agent-runner, or both.
+    # --role is a comma-separated capability set: gateway, agent-runner,
+    # observability-station — any subset. The token set mirrors
+    # cli/install_cluster.py's _VALID_CAPS (which re-validates at birth).
     # Validate every token; an empty set or an unknown token fails loud.
     role_valid=1
     [ -n "$ROLE" ] || role_valid=0
     _old_ifs="$IFS"; IFS=','
     for tok in $ROLE; do
         case "$tok" in
-            gateway|agent-runner) ;;
+            gateway|agent-runner|observability-station) ;;
             *) role_valid=0 ;;
         esac
     done
@@ -148,16 +151,18 @@ else
         cat >&2 <<EOF
 install.sh: --role is required — a comma-separated capability set, no default (got: '${ROLE}').
 
-  gateway        owns Postgres/Redis + the HTTP gateway.
-  agent-runner   runs agents; a runner-only host connects to a gateway by URL.
+  gateway                owns Postgres/Redis + the HTTP gateway.
+  agent-runner           runs agents; a runner-only host connects to a gateway by URL.
+  observability-station  hosts the LGTM observability backends (Loki/Prometheus/Grafana); no local pg/redis.
 
-A single box carries BOTH on one unit (owns the data plane AND runs agents).
+A single box carries any subset on one unit (owns the data plane AND runs agents).
 Split deployments give each capability its own machine. Walkthrough:
 .agents/skills/deploy-ava-cluster/SKILL.md.
 
   ./scripts/install.sh --role gateway,agent-runner   # single box (most installs)
   ./scripts/install.sh --role gateway                # gateway-only host
   ./scripts/install.sh --role agent-runner           # runner-only host
+  ./scripts/install.sh --role observability-station  # LGTM observability backends host
 
 Dev worktree clusters use --worktree instead (no --role):
   ./scripts/install.sh --worktree [--path ~/.ava-<name>]
@@ -170,9 +175,9 @@ fi
 # The install's final birth step runs initdb, and Postgres refuses to run
 # initdb as root — a fresh Linux VPS usually lands you as root, and the failure
 # would come only after the whole toolchain install. Refuse up front when the
-# role implies a birth. Runner-only hosts never birth (identity arrives via
-# `ava enroll`), so they stay allowed as root. The apt steps below use
-# passwordless sudo automatically (`prov_sudo`) when run as a non-root user.
+# role implies a birth. Roles without `gateway` never birth, so they stay
+# allowed as root. The apt steps below use passwordless sudo automatically
+# (`prov_sudo`) when run as a non-root user.
 if [ "$OS" = "Linux" ] && [ "$(id -u)" = 0 ] && [ "${AVA_ALLOW_ROOT_INSTALL:-0}" != 1 ]; then
     _needs_birth=0
     if [ "$WORKTREE" = 1 ]; then
@@ -195,7 +200,7 @@ would fail after the full toolchain install.
   git clone https://github.com/zhiyuan-zhang0206/Ava.git source && cd source
   ./scripts/install.sh --role gateway,agent-runner
 
-Runner-only hosts (--role agent-runner, no local data plane) may install as root.
+Roles without gateway (runner-only / observability-station, no local data plane) may install as root.
 Containers that pre-provision the pg template may set AVA_ALLOW_ROOT_INSTALL=1.
 EOF
         exit 2
