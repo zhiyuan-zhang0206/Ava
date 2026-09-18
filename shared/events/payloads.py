@@ -407,11 +407,11 @@ class HeartbeatPaused(TypedDict):
 class PauseLifecycleWait(TypedDict):
     """`pause_lifecycle_wait` payload — ops/agent_pause.py::_prepare.
 
-    One row per preparation episode that met an unfinished agent lifecycle
-    command it did not author (task #3591). ``waited_s`` is the bounded retry
-    time before the outcome: ``resolved`` (the command finished and
-    preparation proceeded), ``exceeded`` (the bound was spent — abort), or
-    ``refused`` (maintenance-class / non-lifecycle work — no wait by design).
+    One row per preparation episode that met in-flight work it did not author
+    (task #3591). ``waited_s`` is the bounded retry time before the outcome:
+    ``resolved`` (the work finished and preparation proceeded), ``exceeded``
+    (the bound was spent — abort), or ``refused`` (maintenance-authored work —
+    no wait by design).
     """
 
     waited_s: float

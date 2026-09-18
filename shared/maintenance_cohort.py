@@ -25,10 +25,11 @@ class LifecycleCollisionError(RuntimeError):
     Raised before the cohort is frozen (task #3591) so a bounded retry has a
     clean boundary: a collision leaves the journal untouched, and the retry
     re-derives the cohort from the resolved world under the same row locks.
-    ``waitable`` is True only when every competing command is an ordinary
-    agent lifecycle operation (``restart``/``terminate`` without a maintenance
-    payload); maintenance-authored commands and claimed ordinary work keep
-    their refuse-now semantics, and a mix refuses too.
+    ``waitable`` is True only when every competing row carries no maintenance
+    payload: an ordinary agent lifecycle operation (``restart``/``terminate``)
+    and claimed ordinary work on a parked agent both enter the bounded wait;
+    maintenance-authored commands keep their refuse-now semantics, and a mix
+    refuses too.
     """
 
     def __init__(self, detail: str, agent_ids: list[int], *, waitable: bool) -> None:
@@ -231,17 +232,32 @@ def _applied_capture(
 def _require_resolved(
     conn: psycopg.Connection, hold: MaintenanceHold, *, cold: frozenset[int] = frozenset()
 ) -> None:
-    unresolved = conn.execute(
-        "SELECT DISTINCT agent_id FROM inbound_messages WHERE agent_id=ANY(%s) "
-        "AND ((status='claimed' AND (NOT (agent_id=ANY(%s)) OR kind='terminate' "
-        "OR (kind='restart' AND applied_at IS NULL))) "
-        "OR (status='pending' AND kind IN ('restart','terminate')))",
-        (list(hold.parked), list(cold)),
-    ).fetchall()
-    if unresolved:
-        raise RuntimeError(
-            f"parked agents have unresolved claimed work: {[row[0] for row in unresolved]}"
-        )
+    """The second guard on the same collision, with the same waitability rule.
+
+    ``_refuse_inflight_lifecycle`` runs first and already covers every parked
+    row it finds unresolved; this repeats the parked half independently so a
+    change to either query cannot silently skip parked agents (task #3591). It
+    raises the same typed collision: parked rows without a maintenance payload
+    enter the bounded wait; maintenance-authored rows refuse immediately — and
+    preparation still never freezes past unresolved parked claims.
+    """
+    rows = [
+        _CommandRow(*row)
+        for row in conn.execute(
+            "SELECT agent_id, id, kind, status, applied_at IS NOT NULL, payload->'maintenance' "
+            "FROM inbound_messages WHERE agent_id=ANY(%s) AND status IN ('pending','claimed') "
+            "ORDER BY agent_id, id",
+            (list(hold.parked),),
+        ).fetchall()
+    ]
+    unresolved = [row for row in rows if _unresolved_parked(row, row.agent_id, cold)]
+    if not unresolved:
+        return
+    raise LifecycleCollisionError(
+        "; ".join(_collision_line(row.agent_id, [row]) for row in unresolved),
+        sorted({row.agent_id for row in unresolved}),
+        waitable=all(row.maintenance is None for row in unresolved),
+    )
 
 
 class _CommandRow(NamedTuple):
@@ -272,9 +288,9 @@ def _refuse_inflight_lifecycle(
     downstream refusal checks — the per-member pending-command check in
     ``_restart`` and the parked-agent predicate of ``_require_resolved`` — one
     step earlier, carrying the waitability the retry decision needs: ordinary
-    agent lifecycle operations (restart/terminate without a maintenance
-    payload) are waitable; maintenance-authored commands and claimed ordinary
-    work are not.
+    work without a maintenance payload is waitable — both an in-flight agent
+    lifecycle operation (restart/terminate) and claimed ordinary work on a
+    parked agent; maintenance-authored commands are not.
     """
     agents = sorted(set(hold.commands) | set(hold.parked))
     if not agents:
@@ -307,7 +323,7 @@ def _refuse_inflight_lifecycle(
                 continue
             lines.append(_collision_line(agent_id, [row]))
             blocked.append(agent_id)
-            waitable = waitable and row.kind in ("restart", "terminate") and row.maintenance is None
+            waitable = waitable and row.maintenance is None
     if not lines:
         return
     raise LifecycleCollisionError("; ".join(lines), sorted(set(blocked)), waitable=waitable)

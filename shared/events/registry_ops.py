@@ -44,7 +44,7 @@ _EVENTS_OPS: dict[str, EventSpec] = {
     # pause / rollout lifecycle
     "pause_lifecycle_wait": _telemetry(
         "pause_lifecycle_wait",
-        "preparation bounded-waited an in-flight agent lifecycle command",
+        "preparation bounded-waited in-flight work it did not author",
         payload=PauseLifecycleWait,
         tier="anomaly",
     ),

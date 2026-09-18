@@ -1,11 +1,12 @@
-"""Bounded wait for in-flight agent lifecycle commands during preparation (task #3591).
+"""Bounded wait for in-flight work during preparation (task #3591).
 
-Three states, per the acceptance criteria: a command that resolves during the
-wait lets preparation proceed; one that outlives the bound aborts with the wait
+Three states, per the acceptance criteria: work that resolves during the wait
+lets preparation proceed; one that outlives the bound aborts with the wait
 result in the message and an ``exceeded`` event; and a collision-free
-preparation is the unchanged pre-#3591 path. Class separation (maintenance
-commands and claimed ordinary work refuse without waiting) and the clean retry
-boundary (a collision freezes nothing) are asserted alongside.
+preparation is the unchanged pre-#3591 path. Class separation (maintenance-
+authored commands refuse without waiting; ordinary lifecycle commands and
+claimed ordinary work on a parked agent wait) and the clean retry boundary (a
+collision freezes nothing) are asserted alongside.
 """
 
 import asyncio
@@ -23,6 +24,7 @@ from ops.agent_pause_probe import HostIdentity
 from shared import maintenance, maintenance_cohort, pause_owner, telemetry
 from shared.db import insert_inbound_message
 from shared.machine import machine_name
+from shared.maintenance_state import MaintenanceHold
 from tests.agent.test_maintenance import WHEN, _agent
 from tests.agent.test_maintenance import isolate as isolate
 
@@ -44,6 +46,14 @@ def _events(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
 
     monkeypatch.setattr(telemetry, "emit", fake)
     return calls
+
+
+def _claim(conn: psycopg.Connection[Any], message: int) -> None:
+    """Bring one inbound row to the claimed state the wait must observe."""
+    conn.execute(
+        "UPDATE inbound_messages SET status='claimed', claimed_at=clock_timestamp() WHERE id=%s",
+        (message,),
+    )
 
 
 def _resolve_lifecycle_command(conn: psycopg.Connection[Any], command: int) -> None:
@@ -231,15 +241,105 @@ def test_parked_agent_lifecycle_command_is_waitable(
     assert raised.value.agent_ids == (agent,)
 
 
-def test_parked_claimed_ordinary_work_refuses_without_wait(
+def test_parked_claimed_ordinary_work_is_waitable(
     db_conn: psycopg.Connection[Any],
 ) -> None:
     agent = _agent(db_conn)
     message = insert_inbound_message(db_conn, agent, "hello", "user")
-    db_conn.execute(
-        "UPDATE inbound_messages SET status='claimed', claimed_at=clock_timestamp() WHERE id=%s",
-        (message,),
+    _claim(db_conn, message)
+    db_conn.commit()
+    pause_owner.begin_maintenance("move", WHEN)
+
+    with pytest.raises(maintenance_cohort.LifecycleCollisionError) as raised:
+        maintenance_cohort.prepare(
+            db_conn, machine=machine_name(), host_owner=None, holder="move", acquired_at=WHEN
+        )
+    assert raised.value.waitable
+    assert raised.value.agent_ids == (agent,)
+    assert "unresolved claimed work" in str(raised.value)
+
+    # The collision ran before the capture: the retry starts from the clean
+    # preparing boundary, not from a partial cohort.
+    hold = maintenance.require_operation("move", WHEN).maintenance
+    assert hold is not None and hold.phase == "preparing" and hold.commands == {}
+
+
+def test_parked_claimed_work_resolving_during_wait_prepares(
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent = _agent(db_conn)
+    message = insert_inbound_message(db_conn, agent, "hello", "user")
+    _claim(db_conn, message)
+    db_conn.commit()
+    _as_live_host(monkeypatch, uuid4())
+    monkeypatch.setattr(agent_pause, "_lifecycle_wait_seconds", lambda: 5.0)
+    monkeypatch.setattr(agent_pause, "_LIFECYCLE_WAIT_POLL_SECONDS", 0.05)
+    events = _events(monkeypatch)
+
+    real_prepare = maintenance_cohort.prepare
+
+    def resolving_prepare(*args: Any, **kwargs: Any) -> maintenance_cohort.MaintenanceHold:
+        try:
+            return real_prepare(*args, **kwargs)
+        except maintenance_cohort.LifecycleCollisionError:
+            db_conn.execute("UPDATE inbound_messages SET status='done' WHERE id=%s", (message,))
+            db_conn.commit()
+            raise
+
+    monkeypatch.setattr(maintenance_cohort, "prepare", resolving_prepare)
+    agent_pause._prepare("move", WHEN)
+
+    hold = agent_pause._hold("move", WHEN)
+    assert hold.phase == "draining"
+    assert set(hold.commands) == set()
+    assert hold.parked == (agent,)
+    assert [event["event_name"] for event in events] == ["pause_lifecycle_wait"]
+    attributes = events[0]["attributes"]
+    assert attributes["outcome"] == "resolved"
+    assert attributes["agents"] == [agent]
+    assert 0 < attributes["waited_s"] < 5.0
+
+
+def test_parked_claimed_work_outliving_the_bound_aborts(
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent = _agent(db_conn)
+    message = insert_inbound_message(db_conn, agent, "hello", "user")
+    _claim(db_conn, message)
+    db_conn.commit()
+    _as_live_host(monkeypatch, uuid4())
+    monkeypatch.setattr(agent_pause, "_lifecycle_wait_seconds", lambda: 0.3)
+    monkeypatch.setattr(agent_pause, "_LIFECYCLE_WAIT_POLL_SECONDS", 0.05)
+    events = _events(monkeypatch)
+
+    with pytest.raises(RuntimeError, match=r"waited .*still unfinished after the") as raised:
+        agent_pause._prepare("move", WHEN)
+    assert not isinstance(raised.value, maintenance_cohort.LifecycleCollisionError)
+    assert "unresolved claimed work" in str(raised.value)
+
+    # Fail-closed: nothing was captured, and the hold stays preparing.
+    hold = agent_pause._hold("move", WHEN)
+    assert hold.phase == "preparing" and hold.commands == {} and hold.parked == ()
+    assert [event["attributes"]["outcome"] for event in events] == ["exceeded"]
+    assert events[0]["attributes"]["agents"] == [agent]
+    assert events[0]["attributes"]["waited_s"] > 0
+
+
+def test_parked_maintenance_command_refuses_without_wait(
+    db_conn: psycopg.Connection[Any],
+) -> None:
+    agent = _agent(db_conn)
+    command = insert_inbound_message(
+        db_conn,
+        agent,
+        "",
+        "system:maintenance",
+        kind="restart",
+        payload={"maintenance": {"holder": "other-move", "acquired_at": WHEN.isoformat()}},
     )
+    _claim(db_conn, command)
     db_conn.commit()
     pause_owner.begin_maintenance("move", WHEN)
 
@@ -248,4 +348,49 @@ def test_parked_claimed_ordinary_work_refuses_without_wait(
             db_conn, machine=machine_name(), host_owner=None, holder="move", acquired_at=WHEN
         )
     assert not raised.value.waitable
-    assert "unresolved claimed work" in str(raised.value)
+    assert raised.value.agent_ids == (agent,)
+    assert "another unfinished lifecycle command" in str(raised.value)
+
+
+def test_parked_claim_guards_agree_on_waitability(
+    db_conn: psycopg.Connection[Any],
+) -> None:
+    """Both parked guards carry the same rule: ordinary work waits, maintenance refuses.
+
+    ``_require_resolved`` sits behind ``_refuse_inflight_lifecycle`` as the
+    second guard, and preparation's retry decision depends on the two staying
+    consistent (task #4013).
+    """
+    agent = _agent(db_conn)
+    message = insert_inbound_message(db_conn, agent, "hello", "user")
+    _claim(db_conn, message)
+    db_conn.commit()
+    hold = MaintenanceHold(parked=(agent,))
+
+    with pytest.raises(maintenance_cohort.LifecycleCollisionError) as collision_guard:
+        maintenance_cohort._refuse_inflight_lifecycle(
+            db_conn, hold, frozenset[int](), holder="move", acquired_at=WHEN
+        )
+    with pytest.raises(maintenance_cohort.LifecycleCollisionError) as resolved_guard:
+        maintenance_cohort._require_resolved(db_conn, hold)
+    assert collision_guard.value.waitable and resolved_guard.value.waitable
+    assert collision_guard.value.agent_ids == resolved_guard.value.agent_ids == (agent,)
+
+    command = insert_inbound_message(
+        db_conn,
+        agent,
+        "",
+        "system:maintenance",
+        kind="restart",
+        payload={"maintenance": {"holder": "other-move", "acquired_at": WHEN.isoformat()}},
+    )
+    _claim(db_conn, command)
+    db_conn.commit()
+
+    with pytest.raises(maintenance_cohort.LifecycleCollisionError) as collision_refused:
+        maintenance_cohort._refuse_inflight_lifecycle(
+            db_conn, hold, frozenset[int](), holder="move", acquired_at=WHEN
+        )
+    with pytest.raises(maintenance_cohort.LifecycleCollisionError) as resolved_refused:
+        maintenance_cohort._require_resolved(db_conn, hold)
+    assert not collision_refused.value.waitable and not resolved_refused.value.waitable

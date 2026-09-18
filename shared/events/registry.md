@@ -222,7 +222,7 @@ consumers: see the comments at each emit point.
 | `page_restore_failed` | page restore failed | anomaly | — | — | events |
 | `page_restore_closed` | page restore closed | noise | — | — | events |
 | `page_restore_notified` | page restore notified | noise | — | — | events |
-| `pause_lifecycle_wait` | preparation bounded-waited an in-flight agent lifecycle command | anomaly | waited_s, outcome, agents | — | events |
+| `pause_lifecycle_wait` | preparation bounded-waited in-flight work it did not author | anomaly | waited_s, outcome, agents | — | events |
 | `db_outage_wait` | db outage wait | anomaly | — | — | events |
 | `db_outage_pause` | db outage pause | anomaly | — | — | events |
 | `db_outage_reconcile_retry` | db outage reconcile retry | anomaly | — | — | events |
