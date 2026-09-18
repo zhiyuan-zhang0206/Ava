@@ -16,7 +16,7 @@ During streaming each line is memoized `TimelineRow` + `React.memo` PythonCode/C
 
 ## Segments and dividers
 
-Historical ranks group separately; localized presentation-only dividers never enter items or anchor counts — the rank-0 dashed divider labels the live boundary into the current post-compact segment ("Context compacted", task #3698), while historical ranks keep the scroll-back label (original history before compact); the rule carries long dashes at a 1:1 ratio and a demoted tone, and no arrow glyph (user feedback 2026-09-17, task #3870).
+Historical ranks group separately; localized dividers never enter items or anchor counts — the rank-0 dashed divider labels the live boundary into the current post-compact segment ("Context compacted", task #3698), while the other historical ranks carry the scroll-back label (original history before compact); the rule carries long dashes at a 1:1 ratio and a demoted tone, and a plain label carries no arrow glyph (user feedback 2026-09-17, task #3870). When the topmost row is a historical divider and older pages remain, that row instead hosts the load-earlier control — an inline pill (arrow glyph; spinner while loading) that the floating load-earlier button yields to; deeper historical dividers stay plain labels (task #3932).
 
 ## Cross-compact paging
 

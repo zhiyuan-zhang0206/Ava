@@ -311,6 +311,82 @@ describe("compact history segment dividers", () => {
       screen.getAllByTestId("compact-history-divider").map((d) => d.dataset.segmentRank),
     ).toEqual(["1", "0"]);
   });
+
+  it("merges the load-earlier control into the topmost divider while older pages remain (task #3932)", () => {
+    const items = [
+      makeItem({ item_id: "s1.old-boundary.0.0", kind: "agent_chat", payload: "old" }),
+      makeItem({ item_id: "1.0", kind: "agent_chat", payload: "current" }),
+    ];
+    const onLoadOlder = vi.fn();
+    render(<TimelineView items={items} hasMoreOlder onLoadOlder={onLoadOlder} />);
+
+    // The topmost row (rank 1) is itself the control; the descriptive copy it
+    // replaces is not rendered beside it — one entry, not two.
+    const control = screen.getByTestId("load-older-divider");
+    expect(control.textContent).toContain("Load earlier messages");
+    expect(screen.queryByText("Original history before compact")).toBeNull();
+    const dividers = screen.getAllByTestId("compact-history-divider");
+    expect(dividers[0].getAttribute("data-load-control")).toBe("true");
+    expect(dividers[0].dataset.segmentRank).toBe("1");
+    // Deeper dividers stay pure labels — the merge is positional, not global.
+    expect(dividers[1].getAttribute("data-load-control")).toBeNull();
+    expect(dividers[1].textContent).toContain("Context compacted");
+
+    // The floating variant yields to the in-row control at the same spot.
+    const floating = screen.getByTestId("load-older-button");
+    expect(floating.closest("div")?.className).toContain("opacity-0");
+
+    fireEvent.click(control);
+    expect(onLoadOlder).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the floating control when the topmost row is not a divider (contrast)", () => {
+    const items = [makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })];
+    render(<TimelineView items={items} hasMoreOlder onLoadOlder={vi.fn()} />);
+    const viewport = screen.getByTestId("scroll-viewport");
+    act(() => {
+      viewport.scrollTop = 0;
+      viewport.dispatchEvent(new Event("scroll"));
+    });
+    expect(screen.queryByTestId("load-older-divider")).toBeNull();
+    const wrapper = screen.getByTestId("load-older-button").closest("div");
+    expect(wrapper?.className).toContain("opacity-100");
+  });
+
+  it("shows the in-flight state on the merged control, then restores the label once exhausted", () => {
+    const items = [
+      makeItem({ item_id: "s1.old-boundary.0.0", kind: "agent_chat", payload: "old" }),
+      makeItem({ item_id: "1.0", kind: "agent_chat", payload: "current" }),
+    ];
+    const { rerender } = render(
+      <TimelineView items={items} hasMoreOlder loadingOlder onLoadOlder={vi.fn()} />,
+    );
+    const control = screen.getByTestId<HTMLButtonElement>("load-older-divider");
+    expect(control.disabled).toBe(true);
+    expect(control.querySelector("svg")?.getAttribute("class")).toContain("animate-spin");
+
+    rerender(<TimelineView items={items} onLoadOlder={vi.fn()} />);
+    expect(screen.queryByTestId("load-older-divider")).toBeNull();
+    const dividers = screen.getAllByTestId("compact-history-divider");
+    expect(dividers[0].getAttribute("data-load-control")).toBeNull();
+    expect(screen.getByText("Original history before compact")).toBeTruthy();
+  });
+
+  it("hides the pull ring's loader while the inline control carries the loading state (task #3932)", () => {
+    const items = [
+      makeItem({ item_id: "s1.old-boundary.0.0", kind: "agent_chat", payload: "old" }),
+      makeItem({ item_id: "1.0", kind: "agent_chat", payload: "current" }),
+    ];
+    render(<TimelineView items={items} hasMoreOlder loadingOlder onLoadOlder={vi.fn()} />);
+    // One loading feedback, not two: the row's pill spins, while the ring
+    // stays a pull-gesture indicator (shown only while pullDistance > 0).
+    const ring = screen.getByTestId("pull-down-load-indicator");
+    expect(ring.getAttribute("aria-hidden")).toBe("true");
+    expect(ring.className).toContain("opacity-0");
+    expect(
+      screen.getByTestId("load-older-divider").querySelector("svg")?.getAttribute("class"),
+    ).toContain("animate-spin");
+  });
 });
 
 // Inter-agent / system inbound / compaction / framework-note markers default
