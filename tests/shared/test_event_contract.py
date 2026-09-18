@@ -184,9 +184,13 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # fleet_graph_stale (task #3925's stale-serving degradation episode)
     # raises the current total to 187; the billing batch-recovery run (task
     # #3919's billing_resurrect_run — the operator-triggered post-outage rescue)
-    # raises the current total to 188.
+    # raises the current total to 188; the delta read-compat reconstruction
+    # (task #3897's delta_read_compat — a delta-written checkpoint materialized
+    # for a plain reader) raises the current total to 189; the task-registry
+    # usage-write warning (task #3944's task_usage_record_failed) raises the
+    # current total to 190.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 188
+    assert len(_TELEMETRY_KINDS) == 190
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:

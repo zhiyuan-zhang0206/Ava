@@ -225,6 +225,7 @@ def _log_reconstruction(tuple_: CheckpointTuple, count: int) -> None:
     logger.info(
         "[{label}] {body}",
         label="delta-read-compat",
+        event="delta_read_compat",
         body=(
             f"reconstructed messages for thread={configurable.get('thread_id')}"
             f" checkpoint={tuple_.checkpoint['id']}: {count} messages"

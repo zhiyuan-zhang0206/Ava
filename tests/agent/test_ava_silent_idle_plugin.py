@@ -16,6 +16,7 @@ Covered:
 """
 
 import sys
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -105,9 +106,13 @@ async def test_noop_when_empty(_loaded):
     assert await _loaded.silent_idle_continue_before_llm(_state([]), _runtime(), _config()) is None  # pyright: ignore[reportUnknownMemberType]
 
 
-async def test_defers_when_auto_compact_would_fire(_loaded, monkeypatch: pytest.MonkeyPatch):
+async def test_defers_when_auto_compact_would_fire(
+    _loaded, monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+):
     """When auto-compact would replace messages this turn, the nudge defers
-    (returns None) so it does not collide with compaction's `messages` write."""
+    (returns None) so it does not collide with compaction's `messages` write —
+    and the defer log names the registered `silent_idle` event (the raw
+    'silent-idle' label is not an event and would raise in the emitter)."""
     # Pin the force-compact ceiling to 1 token (regardless of model) so any
     # non-empty history triggers it; occupancy here is the chars/4 fallback.
     from shared.lm.context_budget import ContextBudget
@@ -118,3 +123,8 @@ async def test_defers_when_auto_compact_would_fire(_loaded, monkeypatch: pytest.
     monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", lambda _model: budget)  # pyright: ignore[reportUnknownArgumentType]
     state = _state([HumanMessage(content="a long history " * 20), _reasoning_only_ai()])
     assert await _loaded.silent_idle_continue_before_llm(state, _runtime(), _config()) is None  # pyright: ignore[reportUnknownMemberType]
+    assert any(
+        record["extra"].get("label") == "silent-idle"
+        and record["extra"].get("event") == "silent_idle"
+        for record in loguru_records
+    )
