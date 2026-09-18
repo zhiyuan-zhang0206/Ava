@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { ContextBreakdownCard } from "@/components/context-breakdown";
 import {
   clampContextView,
   zoomContextViewAround,
@@ -208,6 +209,11 @@ export default function RunTimelinePage({
     }
     resetWindow();
   };
+
+  /** P4-3 (#4023): the reset control's label is mode-aware — on the context
+   *  axis it returns to the full axis extent (there is no window), matching
+   *  the demo's full-axis wording; on the time axis it stays "Reset window". */
+  const resetLabel = axis === "context" ? t("resetAxis") : t("resetWindow");
 
   /** P4-1 (#4023): double-click focus — pushes a crumb, then moves the window. */
   const focusWindow = (next: TimelineWindowOverride, label: string) => {
@@ -425,11 +431,11 @@ export default function RunTimelinePage({
               </span>
               <button
                 type="button"
-                aria-label={t("resetWindow")}
+                aria-label={resetLabel}
                 onClick={resetToFullAxis}
                 className="rounded border border-border px-2 py-1 font-mono text-xs hover:bg-muted"
               >
-                {t("resetWindow")}
+                {resetLabel}
               </button>
             </div>
           </div>
@@ -534,6 +540,9 @@ export default function RunTimelinePage({
                   </div>
                 ))}
               </section>
+              {/* P4-3 (#4023): the context breakdown card — the composer
+                  panel's body rendered inline above the chart (demo order). */}
+              {agentId !== null ? <ContextBreakdownCard agentId={agentId} /> : null}
               <RunTimelineChart
                 timeline={timeline}
                 labels={chartLabels(t)}

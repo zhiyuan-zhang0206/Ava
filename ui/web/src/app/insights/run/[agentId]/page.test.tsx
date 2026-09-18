@@ -2,9 +2,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { RunTimelineResponse, UserSettingListResponse } from "@/lib/types";
+import type {
+  ContextBreakdownResponse,
+  RunTimelineResponse,
+  UserSettingListResponse,
+} from "@/lib/types";
 
-const { getRunTimeline, getSettings } = vi.hoisted(() => ({
+const { getRunTimeline, getSettings, getContextBreakdown } = vi.hoisted(() => ({
   getRunTimeline: vi.fn<
     (
       agentId: number,
@@ -18,9 +22,12 @@ const { getRunTimeline, getSettings } = vi.hoisted(() => ({
     ) => Promise<RunTimelineResponse>
   >(),
   getSettings: vi.fn<() => Promise<UserSettingListResponse>>(),
+  getContextBreakdown: vi.fn<(agentId: number) => Promise<ContextBreakdownResponse>>(),
 }));
 
-vi.mock("@/lib/api", () => ({ api: { getRunTimeline, getSettings } }));
+vi.mock("@/lib/api", () => ({
+  api: { getRunTimeline, getSettings, getContextBreakdown },
+}));
 
 import RunTimelinePage from "./page";
 
@@ -103,6 +110,23 @@ const messagesResponse: RunTimelineResponse = {
   messages_truncated: false,
 };
 
+// P4-3 (#4023): the context-breakdown card's fixture — thresholds mirror the
+// gateway's resolved window for this agent's model.
+const cbdFixture: ContextBreakdownResponse = {
+  total_input_tokens: 1000,
+  estimated_total: 250,
+  max_input_tokens: 1_000_000,
+  soft_compact_tokens: 374_000,
+  hard_compact_tokens: 512_000,
+  sections: [{ name: "(preamble)", tokens: 100 }],
+  categories: [
+    { kind: "system_prompt", tokens: 400 },
+    { kind: "output", tokens: 300 },
+    { kind: "context_note", tokens: 30 },
+    { kind: "automation", tokens: 50 },
+  ],
+};
+
 function tickTexts(container: HTMLElement): (string | null)[] {
   return Array.from(container.querySelectorAll("[data-timeline-tick]"), (tick) => tick.textContent);
 }
@@ -125,6 +149,8 @@ beforeEach(() => {
   getRunTimeline.mockReturnValue(new Promise(() => undefined));
   getSettings.mockReset();
   getSettings.mockResolvedValue({ settings: [] });
+  getContextBreakdown.mockReset();
+  getContextBreakdown.mockResolvedValue(cbdFixture);
 });
 
 afterEach(() => {
@@ -325,7 +351,7 @@ describe("context axis (P4-2b)", () => {
     expect(tickTexts(container)).toEqual(["300", "400", "500", "600", "700", "800"]);
 
     // "Back to the full axis" is a pure viewport reset on the context axis.
-    fireEvent.click(getByRole("button", { name: "Reset window" }));
+    fireEvent.click(getByRole("button", { name: "Reset axis" }));
     await waitFor(() => expect(queryByTestId("timeline-crumbs")).toBeNull());
     expect(tickTexts(container)).toEqual(["0", "200", "400", "600", "800", "1.0k"]);
     expect(getRunTimeline).toHaveBeenCalledTimes(1);
@@ -444,5 +470,52 @@ describe("context axis (P4-2b)", () => {
     );
     expect((getByRole("button", { name: "Characters" }) as HTMLButtonElement).disabled).toBe(true);
     expect(tickTexts(container).some((tick) => tick?.includes(":"))).toBe(true);
+  });
+});
+
+describe("context breakdown card (P4-3)", () => {
+  it("renders the card for the page's agent once the timeline loads", async () => {
+    getRunTimeline.mockResolvedValue(pendingResponse);
+    render();
+
+    const card = await screen.findByTestId("context-breakdown-card");
+    expect(card.querySelector("h2")?.textContent).toBe("Context breakdown");
+    await waitFor(() => expect(getContextBreakdown).toHaveBeenCalledWith(42));
+    expect(getContextBreakdown).toHaveBeenCalledTimes(1);
+    // The merged legend row proves the shared body rendered inside the card.
+    expect(screen.getByText("System notes")).toBeTruthy();
+  });
+
+  it("does not fetch or render the card while the timeline is pending", async () => {
+    render(); // getRunTimeline stays pending (beforeEach default)
+    await screen.findByRole("heading", { name: "Run timeline — agent 42" });
+    expect(screen.queryByTestId("context-breakdown-card")).toBeNull();
+    expect(getContextBreakdown).not.toHaveBeenCalled();
+  });
+
+  it("keeps the card data separate from timeline refetches (window change)", async () => {
+    getRunTimeline.mockResolvedValue(messagesResponse);
+    const { getByRole, getByTestId } = render();
+    await screen.findByTestId("context-breakdown-card");
+    await waitFor(() => expect(getContextBreakdown).toHaveBeenCalledTimes(1));
+
+    // A window preset is a timeline data control: the timeline refetches while
+    // the card — agent-scoped, not window-scoped — does not.
+    fireEvent.click(getByRole("button", { name: "1h" }));
+    await waitFor(() => expect(getRunTimeline).toHaveBeenCalledTimes(2));
+    expect(getContextBreakdown).toHaveBeenCalledTimes(1);
+    expect(getByTestId("context-breakdown-card")).toBeTruthy();
+  });
+
+  it("labels the reset control by axis (P4-3 micro item)", async () => {
+    getRunTimeline.mockResolvedValue(messagesResponse);
+    const { getByRole } = render();
+    await waitFor(() =>
+      expect((getByRole("button", { name: "Characters" }) as HTMLButtonElement).disabled).toBe(false),
+    );
+    expect(getByRole("button", { name: "Reset window" })).toBeTruthy();
+    fireEvent.click(getByRole("button", { name: "Characters" }));
+    expect(getByRole("button", { name: "Reset axis" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Reset window" })).toBeNull();
   });
 });
