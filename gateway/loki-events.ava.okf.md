@@ -48,13 +48,20 @@ structured metadata.
   interpolation (`percentile_cont` semantics — the old SQL used
   `percentile_cont`), `count` for line counts; optional `group_by` on another
   payload attribute (per-model token sums).
-- **Aggregation result cache** — `count_events()` and
-  `attribute_aggregate()` share successful results for 60 seconds. Window
+- **`count_event_classes()`** — the dashboard sidebar's per-class
+  warning/error counts over the selected window (the input to the daemon's
+  three-way split): the events-maintenance daemon's grouped query run through
+  the gateway's own budget; cached like `count_events()` (task #3891 B1).
+- **Aggregation result cache** — `count_events()`, `attribute_aggregate()`, and
+  `count_event_classes()` share successful results for 60 seconds. Window
   bounds are keyed on a minute grid so repeated 30-second dashboard polls and
   common clock-aligned shards reuse the same Loki result; concurrent misses for
   one key share the leader's result, while bounded waiters fall back to their
   own query if the leader never finishes. Failures are never cached, and
-  grouped results are copied before returning to callers.
+  grouped results are copied before returning to callers. A full cache evicts
+  the least recently used entry at `AVA_LOKI_EVENTS_CACHE_MAX_ENTRIES`
+  (default 1024); the class-count family can be switched off with
+  `AVA_LOKI_CLASS_CACHE_ENABLED=off` (task #3891).
 - **Read gate** — a gateway home without `lgtm-host` refuses the implicit
   loopback Loki URL before any HTTP call. The gateway maps the typed refusal to
   HTTP 503. An explicit `AVA_TELEMETRY_LOKI_URL` is the operator escape hatch;
@@ -86,10 +93,11 @@ structured metadata.
 
 ## Entry points
 
-- `query_events()` / `count_events()` / `attribute_aggregate()` — called by
-  `gateway/routers/agent_events.py`, `gateway/routers/cluster.py`,
-  `gateway/routers/events.py`, `gateway/routers/run_timeline.py`,
-  `gateway/routers/agent_inspect.py`.
+- `query_events()` / `count_events()` / `attribute_aggregate()` /
+  `count_event_classes()` — called by `gateway/routers/agent_events.py`,
+  `gateway/routers/cluster.py`, `gateway/routers/events.py`,
+  `gateway/routers/run_timeline.py`, `gateway/routers/agent_inspect.py`,
+  and `gateway/routers/status.py` (`/api/stats/dashboard`).
 
 ## Notes
 
