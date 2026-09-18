@@ -43,9 +43,9 @@ The contact point posts to the gateway's alert ingest endpoint — loopback
 `127.0.0.1:8000` when the observatory is local, the gateway's reachable
 address when `AVA_OBSERVABILITY_URL` points at a remote station.
 
-## Rules (36)
+## Rules (38)
 
-The rules are split between `ava-ops` (26 rules, evaluated every minute:
+The rules are split between `ava-ops` (28 rules, evaluated every minute:
 R1-R6, the watchdog-tick and gateway-metrics silence rules, R8-R12, and
 R14-R16) and
 `ava-ops-slow` (ten rules, evaluated every five minutes: R7, R13, R17's two
@@ -78,6 +78,8 @@ Application layer — the Loki event stream plus the LLM latency histogram:
 | `ava-ops-recovery-drill-failed` | `ava-ops` | scheduled recovery drill failed | `recovery_drill_failed` (level=error) by drill in 1h > 0 (Loki) | 0m | error |
 | `ava-ops-llm-rate-limit` | `ava-ops-slow` | LLM provider rate-limit burst | HTTP 429s by vendor in 5m > 5 (Loki) | 0m | warning |
 | `ava-ops-pitr-storage-growth` | `ava-ops-slow` | remote PITR storage growth | ratio vs 7d-ago footprint > 1.25 (Prometheus) | 1h | warning |
+| `ava-ops-llm-stall-pair` | `ava-ops` | LLM stream stall pair | `stream_stall_pair_terminated` in 15m > 0 (Loki) | 0m | warning |
+| `ava-ops-llm-stall-burst` | `ava-ops` | LLM provider stall burst | `stream_stalled_retry` per vendor in 15m > 4 (Loki) | 0m | warning |
 
 For `ava-ops-fleet-graph-stale`, the threshold counts degradation
 **episodes** (two in ten minutes): the gateway emits one `fleet_graph_stale`
@@ -87,6 +89,20 @@ cannot fabricate a cluster while a single blip stays quiet. Expected windows
 (LGTM maintenance, planned upgrades) are silenced in Grafana — no per-rule
 window is provisioned. TODO: revisit provisioned mute timings once a
 machine-readable expected-window source exists.
+
+The two provider-stall rules (task #3948) surface the stall-wave telemetry:
+`ava-ops-llm-stall-burst` is calibrated on the trailing 7 days (63 stalls
+total; outside the wave, trailing-15m counts never exceeded 2; the
+2026-09-14/15 deepseek wave ran 2-9 per 15 minutes for three hours, six
+windows ≥5, 24 in its worst hour) — ≥5 in
+15 minutes for one vendor is sustained provider pressure, while a single
+stall is by design absorbed by one retry. A stall that defeats the fallback
+escalates via `ava-ops-llm-stall-pair`, which fires on the FIRST pair: the
+call lost both segments, and its delayed retry pushes the turn minutes out
+even when it recovers. `stream_stall_pair_terminated` is deliberately
+outside `LLM_ERROR_FAMILY` (it co-emits 1:1 with the adjacent
+`stream_stalled_retry` the family already counts); the `Provider stalls`
+panel and the stall-pair rule are its display surface (tasks #3889/#3948).
 
 Infrastructure layer (issue #46) — the per-machine OTel Collector sidecar's
 own scrapes, labelled `host` (OS hostname / physical identity) and
