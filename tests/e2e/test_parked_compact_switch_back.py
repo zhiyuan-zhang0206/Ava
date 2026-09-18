@@ -19,10 +19,12 @@ This test locks the full flow in the real browser:
 2. switch to agent B in the sidebar (A becomes a parked thread)
 3. force-compact A while it is parked (the exact call the UI button makes)
 4. wait for the compact to commit (REST timeline shows the envelope)
-5. switch back to A and assert, at the network layer, a fresh GET /timeline
-   fired for A AFTER the compact, and at the DOM layer the post-compact state
-   renders — the compact envelope is present and the pre-compact replies are
-   GONE (no resurrection).
+5. switch back to A and assert, at the network layer, a fresh conversation
+   refresh read fired for A AFTER the compact (since task #3900 batch 2 that
+   read is the composed reconcile GET /conversation-snapshot; the standalone
+   /timeline read also satisfies the contract), and at the DOM layer the
+   post-compact state renders — the compact envelope is present and the
+   pre-compact replies are GONE (no resurrection).
 
 Deflake note: the switch-back deliberately does NOT sleep for the SSE frames.
 The stream can lose the parked thread's compact events entirely (the
@@ -33,6 +35,16 @@ with auto-retrying counts. The frontend heals the lost-event case at the
 merge (the fetched snapshot's compact envelope is a fingerprint the stale
 bucket cannot match → wholesale replace), so the condition always converges
 instead of racing a clock.
+
+Witness note (task #3927): the refresh read is witnessed twice — a fetch
+observer installed in the page right before the switch, and the browser-level
+request event. The wait pumps the playwright event loop on every poll, because
+page.on(...) deliveries only run while a call is in flight — a bare sleep
+waits blind through the read it is waiting for. The test also pins
+display.compact_history_sessions=0: with its default the pre-compact session
+legitimately re-attaches above the new window (user ruling 2026-09-17, task
+#3698), which a "no resurrection" count would misread; the retention feature
+keeps its own coverage.
 """
 
 from __future__ import annotations
@@ -50,7 +62,7 @@ from shared.agents import AgentStatus
 from shared.config import settings
 from tests.e2e._db import wait_for_status
 from tests.e2e._env import E2EEnv
-from tests.e2e._settings import pin_expand_runs_all
+from tests.e2e._settings import pin_compact_history_off, pin_expand_runs_all
 from tests.e2e.fakes.scenarios.parked_compact import (
     POST_COMPACT_NARRATION,
     REPLY_1,
@@ -132,6 +144,11 @@ def test_switch_back_after_parked_compact_shows_post_compact_state(e2e_env: E2EE
         # timeline item, folded out of the DOM by the default details level
         # "none" (user ruling 2026-09-17). Pin the expanded rendering.
         pin_expand_runs_all(gateway_url)
+        # …and pin compact-history retention off: with its default (one
+        # retained session, user ruling 2026-09-17) the pre-compact exchanges
+        # deliberately re-attach above the new window, which a
+        # "no resurrection" count would misread as the #1959 regression.
+        pin_compact_history_off(gateway_url)
 
         page.goto(e2e_env.agent_url)
         page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)
@@ -156,24 +173,66 @@ def test_switch_back_after_parked_compact_shows_post_compact_state(e2e_env: E2EE
         wait_for_status(agent_a, AgentStatus.IDLING.value)
 
         # ── 4. switch back: network evidence + post-compact DOM state ──
-        timeline_requests: list[str] = []
+        # The refresh read under test: task #3900 batch 2 replaced the
+        # per-domain trailing reads with one composed reconcile — the SSE
+        # open on switch-back fires GET /api/agents/{A}/conversation-snapshot
+        # (agent-reconcile.ts writes the timeline/token-usage/pending keys in
+        # one read). Accept either URL: the contract is "one conversation
+        # refresh read after the switch-back", and the standalone /timeline
+        # read stays valid for callers that still use it.
+        switch_back_reads: list[str] = []
         page.on(
             "request",
             lambda req: (
-                timeline_requests.append(req.url)
-                if f"/api/agents/{agent_a}/timeline" in req.url
+                switch_back_reads.append(req.url)
+                if (
+                    f"/api/agents/{agent_a}/timeline" in req.url
+                    or f"/api/agents/{agent_a}/conversation-snapshot" in req.url
+                )
                 else None
             ),
+        )
+        # Install the refresh-read witness in the page itself, right before the
+        # switch (why in-page, and why a second witness: see the wait below).
+        page.evaluate(
+            """(agentId) => {
+                window.__refreshReads = [];
+                const orig = window.fetch;
+                window.fetch = (input, init) => {
+                    const url = String(input);
+                    if (
+                        url.includes('/api/agents/' + agentId + '/conversation-snapshot') ||
+                        url.includes('/api/agents/' + agentId + '/timeline')
+                    ) {
+                        window.__refreshReads.push(url);
+                    }
+                    return orig(input, init);
+                };
+            }""",
+            str(agent_a),
         )
         _sidebar_row(page, agent_a).click()
         page.wait_for_function(f"location.href.includes('agent_id={agent_a}')", timeout=15_000)
 
-        # Network layer: switching back after the parked compact must re-fire
-        # the timeline fetch (the stale-while-revalidate reconcile).
+        # Network layer: switching back after a parked compact must re-fire the
+        # conversation refresh read (the stale-while-revalidate reconcile).
+        #
+        # The wait must keep the playwright event loop pumping: page.on(...)
+        # handlers only run while a call is in flight, so a bare sleep can sit
+        # blind through the very read under test (task #3927 — the old
+        # `while ...: time.sleep(0.2)` loop missed reads that had already
+        # fired). Each evaluate below is that pump, and the read is also
+        # witnessed in the page by the fetch observer installed above, so a
+        # hiccup on either witness path still leaves the other to testify.
         deadline = time.monotonic() + 15.0
-        while not timeline_requests and time.monotonic() < deadline:
+        while time.monotonic() < deadline:
+            if page.evaluate("() => window.__refreshReads.length > 0") or switch_back_reads:
+                break
             time.sleep(0.2)
-        assert timeline_requests, "switch-back after a parked compact did not refetch the timeline"
+        assert page.evaluate("() => window.__refreshReads.length > 0") or switch_back_reads, (
+            "switch-back after a parked compact fired no conversation refresh read "
+            "(neither /timeline nor /conversation-snapshot; witnessed in-page and as a request event)"
+        )
 
         # DOM layer: the post-compact state renders — the compact envelope is
         # there and the compacted-away replies are GONE (the regression left
