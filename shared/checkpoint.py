@@ -153,6 +153,29 @@ def list_compact_boundary_checkpoint_ids(agent_id: int, *, limit: int | None = N
     return [str(row[0]) for row in rows]
 
 
+def latest_checkpoint_id(agent_id: int) -> str | None:
+    """Return the agent's newest retained checkpoint id, or None.
+
+    The tail channel's delta source (task #3981 C): the tail gate compares it
+    against the last tail-sealed id. Same UUIDv6 ordering assumption as the
+    boundary listing.
+
+    Raises:
+        CheckpointReadError: the checkpoint table could not be read.
+    """
+    try:
+        with _checkpoint_read_connection() as conn:
+            row = conn.execute(
+                "SELECT max(checkpoint_id) FROM checkpoints WHERE thread_id = %s",
+                (str(agent_id),),
+            ).fetchone()
+    except Exception as exc:
+        raise CheckpointReadError(f"latest checkpoint read failed for agent {agent_id}") from exc
+    if row is None or row[0] is None:
+        return None
+    return str(row[0])
+
+
 def _msgpack_array_length(header: bytes) -> int:
     """Read a MessagePack array length from its at-most-five-byte header.
 

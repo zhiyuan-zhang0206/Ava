@@ -1954,7 +1954,7 @@ END $$;
 CREATE TABLE hierarchy_jobs (
     id BIGSERIAL PRIMARY KEY,
     agent_id BIGINT NOT NULL,
-    kind TEXT NOT NULL CHECK (kind IN ('compact')),
+    kind TEXT NOT NULL CHECK (kind IN ('compact', 'tail')),
     trigger_boundary TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'done', 'failed')),
     include_tail BOOLEAN NOT NULL,
@@ -1990,10 +1990,13 @@ COMMENT ON TABLE hierarchy_jobs IS
 -- ─────────────── hierarchy_worker_state ───────────────
 -- Per-agent scan cursor of the hierarchy worker: the newest compact boundary
 -- fully covered. First sight records it without building (silent baseline);
--- a job advances it only when the run skipped nothing.
+-- a job advances it only when the run skipped nothing. last_tail_seal_cp_id
+-- is the tail channel's delta gate (task #3981 C): the newest checkpoint id a
+-- tail seal has covered; null until the first tail seal.
 CREATE TABLE hierarchy_worker_state (
     agent_id BIGINT PRIMARY KEY,
     last_processed_boundary TEXT NOT NULL,
+    last_tail_seal_cp_id TEXT,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -2167,3 +2170,7 @@ INSERT INTO schema_migrations (name) VALUES ('20260917T195200_add-agents-meta-cl
 -- agents_meta.last_permanent_reject_reason is represented above. Fresh DBs
 -- stamp the migration instead of replaying the ADD COLUMN delta.
 INSERT INTO schema_migrations (name) VALUES ('20260918T031422_last-permanent-reject-reason');
+
+-- The tail kind + the worker-state delta column are represented above. Fresh
+-- DBs stamp the migration instead of replaying the ALTER delta.
+INSERT INTO schema_migrations (name) VALUES ('20260918T113600_hierarchy-tail-seal');

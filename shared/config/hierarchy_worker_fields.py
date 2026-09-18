@@ -156,3 +156,77 @@ class HierarchyWorkerFields:
             "scope": "cluster-pinned",
         },
     )
+
+    hierarchy_tail_seal_enabled: bool = Field(
+        default=False,
+        alias="AVA_HIERARCHY_TAIL_SEAL_ENABLED",
+        description=(
+            "Enable the tail-seal channel (task #3981 C): idle agents' "
+            "trailing stretch is sealed so default run-timeline windows show "
+            "real layer blocks. Ships dark (False); the pilot gates the "
+            "switch-on (its report + the in-loop user are notified first)."
+        ),
+        json_schema_extra={
+            "capability": "gateway",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    hierarchy_tail_idle_minutes: float = Field(
+        default=15.0,
+        gt=0,
+        alias="AVA_HIERARCHY_TAIL_IDLE_MINUTES",
+        description=(
+            "Idle gate (minutes): a tail seal is due only after the agent's "
+            "newest checkpoint has been quiet this long. 15min sits inside "
+            "the 30min default window's geometry (after a stop, the window's "
+            "right half becomes a real block) and avoids sealing a stretch "
+            "that merely paused mid-turn."
+        ),
+        json_schema_extra={
+            "capability": "gateway",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    hierarchy_tail_min_interval_minutes: float = Field(
+        default=60.0,
+        gt=0,
+        alias="AVA_HIERARCHY_TAIL_MIN_INTERVAL_MINUTES",
+        description=(
+            "Minimum gap (minutes) between tail seals for one agent — the "
+            "cost ceiling (<=24 seals/day/agent). A clean continuation "
+            "(budget-truncated, no failures) drains immediately instead."
+        ),
+        json_schema_extra={
+            "capability": "gateway",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    hierarchy_tail_max_per_tick: int = Field(
+        default=3,
+        ge=1,
+        alias="AVA_HIERARCHY_TAIL_MAX_PER_TICK",
+        description=(
+            "Most tail jobs one scan tick may enqueue. The serial worker "
+            "drains the minute-tick queue quickly; the cap prevents one tick "
+            "from stacking a burst of heavy builds behind a quiet stretch."
+        ),
+        json_schema_extra={
+            "capability": "gateway",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )

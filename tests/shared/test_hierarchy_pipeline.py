@@ -340,6 +340,80 @@ def test_growth_replays_sealed_batches_and_recuts_only_the_tail(
     assert spans2 == {(0, 14), (15, 29), (31, 47)}
 
 
+def test_tail_seal_swap_converges_and_a_second_seal_generates_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The C-leg swap/idempotency contract (review 3187): a tail-sealing pass
+    over a history a compact pass already cut produces the same tree as one
+    direct tail-sealing pass; sealing the same history again reuses every
+    cell's input — zero model calls."""
+    msgs: list[BaseMessage] = [inbound(f"step {i}") for i in range(30)]
+    msgs.append(compact())
+    msgs.extend(inbound(f"tail {i}") for i in range(10))
+
+    def fake_loader(agent_id: int) -> list[BaseMessage]:
+        return list(msgs)
+
+    monkeypatch.setattr(pipeline_module, "load_checkpoint_messages_full", fake_loader)
+
+    # Path 1: the compact-driven pass (tail pending), then the tail pass.
+    compact_pass = build_agent_tree(
+        7, llm=FakeLLM(_fitting_responder), model=MODEL, include_tail=False
+    )
+    tail_pass = build_agent_tree(7, llm=FakeLLM(_fitting_responder), model=MODEL)
+    # Path 2: one tail-sealing pass over the same history.
+    direct = build_agent_tree(7, llm=FakeLLM(_fitting_responder), model=MODEL)
+
+    def shape(tree: MaterializedTree) -> list[tuple[int, tuple[int, int], tuple[str, ...], str]]:
+        # Structural comparison: the all-reuse path emits the same cells in a
+        # different completion order than the generation path.
+        return sorted((n.level, n.span, n.children, n.kind) for n in tree.nodes)
+
+    assert compact_pass.errors == () and tail_pass.errors == () and direct.errors == ()
+    assert shape(tail_pass) == shape(direct)
+
+    known = {node.input_hash: node.text for node in tail_pass.nodes}
+    fake2 = FakeLLM(lambda _m: "should not be called")
+    again = build_agent_tree(7, llm=fake2, model=MODEL, known_texts=known)
+    assert fake2.calls == []
+    assert again.generated == 0 and again.reused == len(tail_pass.nodes)
+    assert shape(again) == shape(tail_pass)
+
+
+def test_growth_after_a_tail_seal_replays_compacts_and_recuts_the_tail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A compact pass over a grown history replays every compact-sealed cell
+    and leaves the tail pending; the tail pass then re-cuts only the tail —
+    the same cells a direct run produces."""
+    msgs: list[BaseMessage] = [inbound(f"step {i}") for i in range(30)]
+    msgs.append(compact())
+    msgs.extend(inbound(f"tail {i}") for i in range(10))
+
+    def fake_loader(agent_id: int) -> list[BaseMessage]:
+        return list(msgs)
+
+    monkeypatch.setattr(pipeline_module, "load_checkpoint_messages_full", fake_loader)
+
+    first = build_agent_tree(7, llm=FakeLLM(_fitting_responder), model=MODEL)
+    msgs.extend(inbound(f"tail {i}") for i in range(10, 17))
+
+    compact_only = build_agent_tree(
+        7, llm=FakeLLM(_fitting_responder), model=MODEL, include_tail=False
+    )
+    second = build_agent_tree(7, llm=FakeLLM(_fitting_responder), model=MODEL)
+
+    assert first.errors == () and compact_only.errors == () and second.errors == ()
+    spans1 = {node.span for node in first.nodes if node.level == 1}
+    spans_compact_only = {node.span for node in compact_only.nodes if node.level == 1}
+    spans2 = {node.span for node in second.nodes if node.level == 1}
+    assert spans1 == {(0, 14), (15, 29), (31, 40)}
+    # The compact cells replay identically; the grown tail stays pending until
+    # the tail pass re-cuts it.
+    assert spans_compact_only == {(0, 14), (15, 29)}
+    assert spans2 == {(0, 14), (15, 29), (31, 47)}
+
+
 # ---- generation budget + ordering (task #3704 P2b) ----
 
 
