@@ -1794,7 +1794,8 @@ def test_cmd_cluster_status_renders_pin_and_role_columns(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The roster has a `pin` column (✓/✗ from each row's on_pin) and a `role`
-    column derived from the serve_gateway/serve_agent_runner capability flags
+    column derived from the serve_gateway / serve_agent_runner /
+    serve_observability_station capability flags
     (regression for the KeyError('role') crash)."""
     roster = [
         _machine_row(
