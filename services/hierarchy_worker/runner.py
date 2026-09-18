@@ -132,13 +132,19 @@ def run_tick() -> None:
         try:
             with connect(autocommit=True) as conn:
                 outcome = scan(conn)
-                if outcome.baselined or outcome.enqueued or outcome.stale_recovered:
+                if (
+                    outcome.baselined
+                    or outcome.enqueued
+                    or outcome.tail_enqueued
+                    or outcome.stale_recovered
+                ):
                     logger.info(
                         "hierarchy scan: tracked={tracked} baselined={baselined}"
-                        " enqueued={enqueued} stale_recovered={stale}",
+                        " enqueued={enqueued} tail_enqueued={tail} stale_recovered={stale}",
                         tracked=outcome.agents_tracked,
                         baselined=outcome.baselined,
                         enqueued=outcome.enqueued,
+                        tail=outcome.tail_enqueued,
                         stale=outcome.stale_recovered,
                     )
                 job = claim_next(conn)

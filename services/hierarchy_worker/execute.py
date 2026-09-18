@@ -4,9 +4,11 @@ Executed as `python -m services.hierarchy_worker.job --job-id N` (the
 entrypoint in `job.py` calls `execute_job`). The child owns its job row's
 completion: it writes the materialized nodes, records the run's scope and
 token stats, and — only when the run skipped nothing — advances the agent's
-scan cursor. A crash, a kill, or the parent's deadline leaves the row
-`running`; the parent runner recovers it, and a retry resumes from the hash
-cache with zero redone nodes.
+scan cursor (a `compact` job) or the tail-seal delta column (a `tail` job,
+task #3981 C; a tail run advances no cursor — it seals a trailing stretch,
+it does not claim compact coverage). A crash, a kill, or the parent's
+deadline leaves the row `running`; the parent runner recovers it, and a
+retry resumes from the hash cache with zero redone nodes.
 
 The cursor advance target is the newest boundary read *before* loading: the
 load reads every boundary that exists at its own later start, so the target
@@ -20,7 +22,8 @@ from __future__ import annotations
 import time
 import traceback
 
-from shared.checkpoint import list_compact_boundary_checkpoint_ids
+from services.hierarchy_worker.scan import KIND_COMPACT, KIND_TAIL
+from shared.checkpoint import latest_checkpoint_id, list_compact_boundary_checkpoint_ids
 from shared.config import settings
 from shared.db import connect
 from shared.db_transaction import write_transaction
@@ -38,7 +41,7 @@ def execute_job(job_id: int) -> int:
     """Run one `running` job to completion; returns the child's exit code."""
     with connect(autocommit=True) as conn:
         row = conn.execute(
-            "SELECT agent_id, trigger_boundary, include_tail, status"
+            "SELECT agent_id, trigger_boundary, include_tail, status, kind"
             " FROM hierarchy_jobs WHERE id = %s",
             (job_id,),
         ).fetchone()
@@ -49,6 +52,11 @@ def execute_job(job_id: int) -> int:
     trigger_boundary = str(row[1])
     include_tail = bool(row[2])
     status = str(row[3])
+    kind = str(row[4])
+    if kind not in (KIND_COMPACT, KIND_TAIL):
+        # The DB CHECK admits exactly the known kinds; anything else is code
+        # running ahead of its schema — explode rather than guess bookkeeping.
+        raise ValueError(f"unknown hierarchy job kind: {kind!r}")
     if status != "running":
         # The parent owns claiming; a non-running row means a recovery raced
         # this child — nothing to do, and not an error.
@@ -61,6 +69,11 @@ def execute_job(job_id: int) -> int:
     started = time.monotonic()
     try:
         advance_target = _advance_target(agent_id, trigger_boundary)
+        # The tail delta gate's value: the newest checkpoint read *before* the
+        # load — a conservative lower bound of what this run seals (a write
+        # after the read triggers the next job instead of being skipped, the
+        # same rule as the cursor's advance target).
+        tail_seal_target = latest_checkpoint_id(agent_id) if kind == KIND_TAIL else None
         known = load_known_texts(agent_id)
         deadline = started + settings.daemon.hierarchy_job_budget_seconds
         tree = build_agent_tree(
@@ -73,7 +86,7 @@ def execute_job(job_id: int) -> int:
             deadline=deadline,
         )
         written = write_tree(agent_id, tree.nodes, model=model)
-        _record_done(job_id, agent_id, tree, written, model, advance_target)
+        _record_done(job_id, agent_id, tree, written, model, advance_target, kind, tail_seal_target)
         logger.info(
             "hierarchy job {job} done: agent {agent} batches={batches} nodes={nodes}"
             " generated={generated} reused={reused} failed={failed} skipped={skipped}"
@@ -113,8 +126,15 @@ def _record_done(
     written: int,
     model: str,
     advance_target: str,
+    kind: str,
+    tail_seal_target: str | None,
 ) -> None:
-    """Write the attempt's outcome, and advance the cursor when it is clean."""
+    """Write the attempt's outcome; bookkeeping advances only when clean.
+
+    A `compact` run moves the scan cursor; a `tail` run records its sealed
+    stretch on `last_tail_seal_cp_id` instead (both guarded monotone, and
+    both only when the run skipped nothing).
+    """
     with write_transaction() as conn:
         conn.execute(
             "UPDATE hierarchy_jobs SET status = 'done', finished_at = now(),"
@@ -138,14 +158,24 @@ def _record_done(
             ),
         )
         if tree.skipped == 0:
-            # Fully covered: the cursor may move. The `<` guard keeps it
-            # monotone even if anything ever advanced it further already.
-            conn.execute(
-                "UPDATE hierarchy_worker_state"
-                " SET last_processed_boundary = %s, updated_at = now()"
-                " WHERE agent_id = %s AND last_processed_boundary < %s",
-                (advance_target, agent_id, advance_target),
-            )
+            if kind == KIND_TAIL:
+                if tail_seal_target is not None:
+                    conn.execute(
+                        "UPDATE hierarchy_worker_state"
+                        " SET last_tail_seal_cp_id = %s, updated_at = now()"
+                        " WHERE agent_id = %s"
+                        "   AND (last_tail_seal_cp_id IS NULL OR last_tail_seal_cp_id < %s)",
+                        (tail_seal_target, agent_id, tail_seal_target),
+                    )
+            else:  # KIND_COMPACT — execute_job rejects unknown kinds up front.
+                # Fully covered: the cursor may move. The `<` guard keeps it
+                # monotone even if anything ever advanced it further already.
+                conn.execute(
+                    "UPDATE hierarchy_worker_state"
+                    " SET last_processed_boundary = %s, updated_at = now()"
+                    " WHERE agent_id = %s AND last_processed_boundary < %s",
+                    (advance_target, agent_id, advance_target),
+                )
 
 
 def _record_failed(job_id: int, error: str) -> None:
