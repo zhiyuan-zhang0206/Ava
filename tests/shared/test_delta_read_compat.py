@@ -370,6 +370,89 @@ async def test_fork_copies_the_delta_write_chain(
     assert _ids((await vanilla.aget_state(forked_cfg)).values["messages"]) == truth
 
 
+async def test_fork_at_a_boundary_replicates_the_source_state(
+    aops_pool: AsyncConnectionPool, db_conn: psycopg.Connection
+) -> None:
+    """Forking exactly at a compact boundary replicates the source's state there.
+
+    A boundary is not a self-contained snapshot on a delta-written thread: its
+    content folds from the write chain, so the copy must carry the segment
+    window down to the previous boundary (or the root) — a window cut AT the
+    boundary contains neither the segment's reset nor a snapshot, and the
+    replica read back empty (task #3979). Both branches: a first boundary
+    (window to root) and a boundary with a boundary below it ([B1..B2])."""
+    source = create_agent(db_conn)
+    t_b1 = create_agent(db_conn)
+    t_b2 = create_agent(db_conn)
+    db_conn.commit()
+    saver = _saver(aops_pool)
+    delta = _delta_app(saver)
+    cfg = _config(str(source))
+
+    # Segment 1: two turns (4 messages), then the compact-shaped write
+    # sequence — stamp the newest checkpoint, REMOVE_ALL, restore summary+tail.
+    await delta.ainvoke({"messages": [], "n": 0, "target": 2}, cfg, recursion_limit=60)  # pyright: ignore[reportUnknownMemberType]
+    b1 = (await _checkpoint_ids(aops_pool, str(source)))[-1]
+    async with aops_pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "UPDATE checkpoints SET metadata = metadata || jsonb_build_object('compact_boundary', true)"
+            " WHERE thread_id = %s AND checkpoint_id = %s",
+            (str(source), b1),
+        )
+    await delta.aupdate_state(cfg, {"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES)]})
+    await delta.aupdate_state(
+        cfg,
+        {
+            "messages": [
+                SystemMessage(id="sum0", content="summary 0"),
+                HumanMessage(id="tail0", content="tail"),
+            ]
+        },
+    )
+
+    # Segment 2: two more turns, then a second compact (boundary B2).
+    await delta.ainvoke({"n": 2, "target": 4}, cfg, recursion_limit=60)  # pyright: ignore[reportUnknownMemberType, reportArgumentType]
+    b2 = (await _checkpoint_ids(aops_pool, str(source)))[-1]
+    async with aops_pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "UPDATE checkpoints SET metadata = metadata || jsonb_build_object('compact_boundary', true)"
+            " WHERE thread_id = %s AND checkpoint_id = %s",
+            (str(source), b2),
+        )
+    await delta.aupdate_state(cfg, {"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES)]})
+    await delta.aupdate_state(
+        cfg,
+        {
+            "messages": [
+                SystemMessage(id="sum1", content="summary 1"),
+                HumanMessage(id="tail1", content="tail"),
+            ]
+        },
+    )
+    await delta.ainvoke({"n": 4, "target": 5}, cfg, recursion_limit=60)  # pyright: ignore[reportUnknownMemberType, reportArgumentType]
+
+    src_b1 = _ids((await delta.aget_state(_config(str(source), b1))).values["messages"])
+    src_b2 = _ids((await delta.aget_state(_config(str(source), b2))).values["messages"])
+    assert src_b1 == ["u0", "a0", "u1", "a1"]
+    assert src_b2 == ["sum0", "tail0", "u2", "a2", "u3", "a3"]
+
+    with db_conn.cursor() as cur:
+        _copy_checkpoint_chain(cur, source, b1, t_b1)
+        _copy_checkpoint_chain(cur, source, b2, t_b2)
+    db_conn.commit()
+
+    # Native delta read: fork@B1's window is the whole chain (no boundary
+    # below); fork@B2's is [B1..B2].
+    assert _ids((await delta.aget_state(_config(str(t_b1)))).values["messages"]) == src_b1
+    assert _ids((await delta.aget_state(_config(str(t_b2)))).values["messages"]) == src_b2
+
+    # Compat read of the same replicas.
+    wrap_saver_reads_with_delta_reconstruction(saver)
+    vanilla = _vanilla_app(saver)
+    assert _ids((await vanilla.aget_state(_config(str(t_b1)))).values["messages"]) == src_b1
+    assert _ids((await vanilla.aget_state(_config(str(t_b2)))).values["messages"]) == src_b2
+
+
 async def test_startup_reconcile_reads_reconstructed_delta_state(
     aops_pool: AsyncConnectionPool, db_conn: psycopg.Connection
 ) -> None:
