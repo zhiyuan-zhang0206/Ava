@@ -21,6 +21,7 @@
     "composerInput": "Message your agent",
     "composerPlaceholder": "send a message",
     "composerPlaceholderResurrect": "send a message to resurrect this agent",
+    "failed": "Failed",
     "filesUploadingHint": "Uploading file(s) — Enter sends the text now; files are delivered when the upload finishes.",
     "deliveryUnconfirmedStatus": "Delivery unconfirmed. Reconcile this message before sending another.",
     "deliveryUnconfirmedToast": "Delivery unconfirmed. Retry the same message to reconcile it, or explicitly send another.",
@@ -558,6 +559,35 @@
     "none": "None",
     "detailsMode": "Details mode",
     "detailsLevel": "Details level"
+  },
+  "contextBreakdown": {
+    "title": "Context breakdown",
+    "subtitle": "The composition of the current context",
+    "close": "Close context breakdown",
+    "loading": "Loading…",
+    "failedHttp": "Failed to load the context breakdown — the server returned an error: {message}",
+    "failedUnreachable": "Failed to load the context breakdown — could not reach the gateway: {message}",
+    "retry": "Retry",
+    "empty": "No context recorded yet — the breakdown appears after the agent's first turn.",
+    "tokensUnit": "tokens",
+    "thresholds": "wind-down {soft} · auto-compact {hard}",
+    "sections": "System prompt sections",
+    "expand": "Expand {target}",
+    "collapse": "Collapse {target}",
+    "estimateNote": "* Total is an estimate",
+    "categories": {
+      "system_prompt": "System prompt",
+      "compact_summary": "Compact summary",
+      "cluster_memory": "Cluster memory",
+      "agent_memory": "Agent memory",
+      "system_notes": "System notes",
+      "user_input": "User input",
+      "agent_messages": "Agent messages",
+      "reasoning": "Thinking",
+      "output": "Text output",
+      "tool_call": "Tool calls",
+      "tool_response": "Tool responses"
+    }
   },
   "contextMeter": {
     "context": "Context: {used} / {max} tokens",

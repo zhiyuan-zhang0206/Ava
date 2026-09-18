@@ -21,6 +21,7 @@
     "composerInput": "给 agent 发送消息",
     "composerPlaceholder": "发送消息",
     "composerPlaceholderResurrect": "发送消息以复活此 agent",
+    "failed": "失败",
     "filesUploadingHint": "文件上传中——回车将只发送文字，文件上传完成后送达。",
     "deliveryUnconfirmedStatus": "消息是否送达尚未确认。请先核对这条消息，再发送下一条。",
     "deliveryUnconfirmedToast": "消息是否送达尚未确认。请重试同一条消息进行核对，或明确选择发送另一条。",
@@ -558,6 +559,35 @@
     "none": "无",
     "detailsMode": "详情模式",
     "detailsLevel": "详情级别"
+  },
+  "contextBreakdown": {
+    "title": "上下文构成",
+    "subtitle": "当前上下文的构成",
+    "close": "关闭上下文构成",
+    "loading": "加载中…",
+    "failedHttp": "无法加载上下文构成——服务端返回错误：{message}",
+    "failedUnreachable": "无法加载上下文构成——无法连接网关：{message}",
+    "retry": "重试",
+    "empty": "暂无上下文记录——agent 首个回合后出现明细。",
+    "tokensUnit": "tokens",
+    "thresholds": "软阈值 {soft} · 自动压缩 {hard}",
+    "sections": "系统提示词分节",
+    "expand": "展开 {target}",
+    "collapse": "收起 {target}",
+    "estimateNote": "* 总量为估算值",
+    "categories": {
+      "system_prompt": "系统提示词",
+      "compact_summary": "压缩摘要",
+      "cluster_memory": "集群记忆",
+      "agent_memory": "agent 记忆",
+      "system_notes": "系统提示",
+      "user_input": "用户输入",
+      "agent_messages": "agent 消息",
+      "reasoning": "思考",
+      "output": "文本输出",
+      "tool_call": "工具调用",
+      "tool_response": "工具输出"
+    }
   },
   "contextMeter": {
     "context": "上下文：{used} / {max} tokens",

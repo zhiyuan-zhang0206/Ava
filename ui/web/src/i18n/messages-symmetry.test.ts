@@ -54,4 +54,12 @@ describe("i18n message catalogs", () => {
       "2 \u4e2a turn \u7f3a\u5c11 tracing \u5173\u8054\u6570\u636e\uff08span_id \u7f3a\u5931\u540e\u5df2\u6309\u65f6\u95f4\u7a97\u56de\u9000\uff0c\u6216\u4ecd\u672a\u5339\u914d\uff09\u3002",
     );
   });
+
+  it("zh covers the context breakdown surface (title, labels, estimate note)", () => {
+    const zhCard = createTranslator({ locale: "zh", messages: zh, namespace: "contextBreakdown" });
+    expect(zhCard("title")).toBe("\u4e0a\u4e0b\u6587\u6784\u6210");
+    expect(zhCard("categories.system_prompt")).toBe("\u7cfb\u7edf\u63d0\u793a\u8bcd");
+    expect(zhCard("categories.tool_response")).toBe("\u5de5\u5177\u8f93\u51fa");
+    expect(zhCard("estimateNote")).toBe("* \u603b\u91cf\u4e3a\u4f30\u7b97\u503c");
+  });
 });

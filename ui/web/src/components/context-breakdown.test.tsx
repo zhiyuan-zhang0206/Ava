@@ -498,4 +498,29 @@ describe("ContextBreakdownCard (P4-3)", () => {
     fireEvent.click(screen.getByTestId("context-breakdown-retry"));
     await screen.findByTestId("context-breakdown-categories");
   });
+
+  it("carries the scope subtitle on the card (agent-scoped, not the window)", async () => {
+    getContextBreakdown.mockResolvedValue(breakdown);
+    wrap(<ContextBreakdownCard agentId={7} />);
+    const subtitle = await screen.findByTestId("context-breakdown-subtitle");
+    expect(subtitle.textContent).toBe("The composition of the current context");
+  });
+
+  it("footnotes the total while the anchor is the chars/4 estimate (no provider truth)", async () => {
+    getContextBreakdown.mockResolvedValue({
+      ...breakdown,
+      total_input_tokens: 0,
+      estimated_total: 125_000,
+    });
+    wrap(<ContextBreakdownCard agentId={7} />);
+    const note = await screen.findByTestId("context-breakdown-estimate-note");
+    expect(note.textContent).toBe("* Total is an estimate");
+  });
+
+  it("no estimate footnote when the total comes from provider truth", async () => {
+    getContextBreakdown.mockResolvedValue(breakdown);
+    wrap(<ContextBreakdownCard agentId={7} />);
+    await screen.findByTestId("context-breakdown-total");
+    expect(screen.queryByTestId("context-breakdown-estimate-note")).toBeNull();
+  });
 });
