@@ -29,6 +29,8 @@ import pytest
 import yaml
 
 from gateway import _loki_logql, loki_events, loki_events_cache, loki_query_budget
+from services.events_maintenance.resolution import EventClass
+from shared.config import settings
 from shared.events.contract import lineage_event_names
 from shared.loki_index_labels import (
     EVENT_STREAM_RETENTION,
@@ -214,13 +216,57 @@ def test_aggregation_cache_expires_at_ttl(monkeypatch: pytest.MonkeyPatch) -> No
     assert loki_events_cache.get(key) is None
 
 
-def test_aggregation_cache_clears_at_entry_cap() -> None:
+def test_aggregation_cache_evicts_least_recently_used_at_entry_cap() -> None:
     for value in range(1025):
         loki_events_cache.put((value,), value)
 
+    # The 1025th insert overflows the 1024-entry cap: only the oldest key drops.
     assert loki_events_cache.get((0,)) is None
-    assert loki_events_cache.get((1023,)) is None
+    assert loki_events_cache.get((1,)) == 1
     assert loki_events_cache.get((1024,)) == 1024
+
+
+def test_aggregation_cache_get_refreshes_recency(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings.observability, "loki_events_cache_max_entries", 2)
+    loki_events_cache.put(("a",), 1)
+    loki_events_cache.put(("b",), 2)
+
+    assert loki_events_cache.get(("a",)) == 1  # refreshes "a" to the newest position
+
+    loki_events_cache.put(("c",), 3)  # evicts "b", the least recently used
+
+    assert loki_events_cache.get(("b",)) is None
+    assert loki_events_cache.get(("a",)) == 1
+    assert loki_events_cache.get(("c",)) == 3
+
+
+def test_aggregation_cache_capacity_stays_at_the_configured_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings.observability, "loki_events_cache_max_entries", 4)
+    for value in range(12):
+        loki_events_cache.put((value,), value)
+
+    assert len(loki_events_cache._cache) == 4
+    assert loki_events_cache.get((8,)) == 8
+    assert loki_events_cache.get((11,)) == 11
+    assert loki_events_cache.get((7,)) is None
+
+
+def test_aggregation_cache_concurrent_put_get_smoke(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings.observability, "loki_events_cache_max_entries", 32)
+
+    def hammer(worker: int) -> None:
+        for value in range(64):
+            key = (worker, value % 16)
+            loki_events_cache.put(key, value)
+            loki_events_cache.get(key)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for future in [pool.submit(hammer, worker) for worker in range(8)]:
+            future.result(timeout=10)
+
+    assert len(loki_events_cache._cache) <= 32
 
 
 def test_aggregation_cache_clear_detaches_inflight_without_stranding_waiters() -> None:
@@ -1572,6 +1618,167 @@ class TestCountEvents:
         )
         assert rows == [] and has_more is False
         assert client.calls == []
+
+
+# ─── count_event_classes (httpx mocked) ──────────────────────────────────────
+
+
+def _class_payload(*, count: str, level: str = "warning") -> dict[str, Any]:
+    """One grouped class-count result vector, the shape the daemon query returns."""
+    return {
+        "data": {
+            "result": [
+                {
+                    "metric": {
+                        "category": "telemetry",
+                        "level": level,
+                        "event_name": "agent_restart",
+                        "source": "test",
+                    },
+                    "value": [1723300000, count],
+                }
+            ]
+        }
+    }
+
+
+_CLASS = EventClass(
+    category="telemetry", level="warning", event_name="agent_restart", source="test"
+)
+
+
+class TestCountEventClasses:
+    def test_cache_hit_within_minute(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = _install(monkeypatch, _class_payload(count="3"))
+        from_ = datetime(2026, 8, 1, 0, 0, 5, tzinfo=UTC)
+        to = datetime(2026, 8, 1, 1, 0, 5, tzinfo=UTC)
+
+        first = loki_events.count_event_classes(from_=from_, to=to, cluster="home")
+        second = loki_events.count_event_classes(
+            from_=from_ + timedelta(seconds=40),
+            to=to + timedelta(seconds=40),
+            cluster="home",
+        )
+
+        assert first == {_CLASS: 3}
+        assert second == {_CLASS: 3}
+        assert len(client.calls) == 1
+
+    def test_cache_miss_on_new_minute(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = _install(
+            monkeypatch,
+            [_class_payload(count="3"), _class_payload(count="7")],
+        )
+        from_ = datetime(2026, 8, 1, tzinfo=UTC)
+        to = datetime(2026, 8, 1, 1, tzinfo=UTC)
+
+        first = loki_events.count_event_classes(from_=from_, to=to, cluster="home")
+        second = loki_events.count_event_classes(
+            from_=from_ + timedelta(minutes=2),
+            to=to + timedelta(minutes=2),
+            cluster="home",
+        )
+
+        assert first == {_CLASS: 3}
+        assert second == {_CLASS: 7}
+        assert len(client.calls) == 2
+
+    def test_cache_expires_after_ttl(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = _install(
+            monkeypatch,
+            [_class_payload(count="3"), _class_payload(count="9")],
+        )
+        clock = [1000.0]
+        monkeypatch.setattr(loki_events_cache.time, "monotonic", lambda: clock[0])
+        from_ = datetime(2026, 8, 1, tzinfo=UTC)
+        to = datetime(2026, 8, 1, 1, tzinfo=UTC)
+
+        assert loki_events.count_event_classes(from_=from_, to=to, cluster="home") == {_CLASS: 3}
+        clock[0] += loki_events_cache.TTL_S + 0.5
+        assert loki_events.count_event_classes(from_=from_, to=to, cluster="home") == {_CLASS: 9}
+        assert len(client.calls) == 2
+
+    def test_cache_key_isolates_window_and_cluster(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = _install(
+            monkeypatch,
+            [
+                _class_payload(count="3"),
+                _class_payload(count="7"),
+                _class_payload(count="9"),
+                _class_payload(count="5"),
+            ],
+        )
+        base = datetime(2026, 8, 1, tzinfo=UTC)
+        window_start, window_end = base, base + timedelta(hours=1)
+
+        home = loki_events.count_event_classes(from_=window_start, to=window_end, cluster="home")
+        away = loki_events.count_event_classes(from_=window_start, to=window_end, cluster="away")
+        shifted = loki_events.count_event_classes(
+            from_=window_start + timedelta(minutes=5),
+            to=window_end + timedelta(minutes=5),
+            cluster="home",
+        )
+        unscoped = loki_events.count_event_classes(from_=window_start, to=window_end)
+
+        assert home == {_CLASS: 3}
+        assert away == {_CLASS: 7}
+        assert shifted == {_CLASS: 9}
+        assert unscoped == {_CLASS: 5}
+        assert len(client.calls) == 4
+        assert '| cluster="home" or cluster=""' in client.calls[0][1]["query"]
+        assert '| cluster="away" or cluster=""' in client.calls[1][1]["query"]
+        assert '| cluster="' not in client.calls[3][1]["query"]
+
+    def test_concurrent_same_key_misses_run_one_query(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = _SlowClient(_FakeResponse(_class_payload(count="3")))
+        monkeypatch.setattr(loki_events, "_client", _accessor(client))
+        barrier = threading.Barrier(2)
+        from_ = datetime(2026, 8, 1, tzinfo=UTC)
+        to = datetime(2026, 8, 2, tzinfo=UTC)
+
+        def count() -> dict[EventClass, int]:
+            barrier.wait(timeout=1)
+            return loki_events.count_event_classes(from_=from_, to=to, cluster="home")
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = [
+                future.result(timeout=3) for future in [pool.submit(count) for _ in range(2)]
+            ]
+
+        assert results == [{_CLASS: 3}, {_CLASS: 3}]
+        assert len(client.calls) == 1
+
+    def test_result_dicts_are_copies_of_the_cached_entry(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = _install(monkeypatch, _class_payload(count="3"))
+        from_ = datetime(2026, 8, 1, tzinfo=UTC)
+        to = datetime(2026, 8, 1, 1, tzinfo=UTC)
+
+        first = loki_events.count_event_classes(from_=from_, to=to, cluster="home")
+        first[_CLASS] = 99  # mutating a miss result must not poison the cache
+        second = loki_events.count_event_classes(from_=from_, to=to, cluster="home")
+        assert second == {_CLASS: 3}
+        second[_CLASS] = 77  # nor does mutating a hit result
+        third = loki_events.count_event_classes(from_=from_, to=to, cluster="home")
+        assert third == {_CLASS: 3}
+        assert first is not second and second is not third
+        assert len(client.calls) == 1
+
+    def test_switch_off_queries_every_call(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = _install(
+            monkeypatch,
+            [_class_payload(count="3"), _class_payload(count="3")],
+        )
+        monkeypatch.setattr(settings.observability, "loki_class_cache_enabled", False)
+        from_ = datetime(2026, 8, 1, tzinfo=UTC)
+        to = datetime(2026, 8, 1, 1, tzinfo=UTC)
+
+        assert loki_events.count_event_classes(from_=from_, to=to, cluster="home") == {_CLASS: 3}
+        assert loki_events.count_event_classes(from_=from_, to=to, cluster="home") == {_CLASS: 3}
+        assert len(client.calls) == 2
 
 
 class TestInspectorAggregates:
