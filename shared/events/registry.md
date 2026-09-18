@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 25 | events table |
-| telemetry (category=telemetry) | `events` | 193 | events table |
+| telemetry (category=telemetry) | `events` | 194 | events table |
 | log (category=log) | `events` | 13 | events table |
 | file-only (destination=file) | file log | 1 | file only (not the events table) |
 | SSE live | Redis → frontend (not persisted) | 31 role | live projection |
@@ -92,7 +92,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 193)
+## 3. Telemetry events (category=telemetry, 194)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -159,6 +159,7 @@ consumers: see the comments at each emit point.
 | `host_abort_reconcile_failed` | the immediate inbound reconcile at a settled hosted turn abort raised — the host does not treat it as fatal and the next cold admission retries the disposal of the claimed rows | anomaly | — | — | events |
 | `host_turn_reconcile_skipped` | the finished hosted turn skipped the immediate inbound reconcile (fail-closed) — the claimed rows are left to the next cold admission. Carries the reason: the soft switch is off (disabled), the turn's resources never fully settled (resources_unsettled), or the runtime ownership was already replaced (ownership_lost — the replacement disposes the rows) | noise | — | — | events |
 | `host_turn_reconcile_failed` | the immediate inbound reconcile at a finished hosted turn raised — the host does not treat it as fatal and the next cold admission retries the disposal of the claimed rows | anomaly | — | — | events |
+| `impersonation_aborted` | the native impersonation supervisor detected a dead core component (the executor's recorded process chain all dead/reused, or the bound relay's heartbeat stale past the exception window) and closed the lease: carries the agent, lease, session, the dead component (executor | relay) and its detail; the end note is delivered through the resume chain | anomaly | — | — | events |
 | `host_admission_wait_exceeded` | a hosted turn has queued at the host admission gate (AVA_HOST_MAX_CONCURRENT_TURNS) for at least AVA_HOST_ADMISSION_WAIT_ALERT_SECONDS — carries the agent, its current wait, the limit and the queue depth; reported once per wait episode. Queueing is the configured memory/runtime trade-off working, not an error; a wait this long means the queue is backing up (raise the limit or inspect the turns holding slots). The wait is exempt from stall cancellation — cancelling it would only re-queue it at the tail | anomaly | — | — | events |
 | `hosted_boot_recovery_stalled` | hosted boot recovery was deferred for the same agent on three consecutive boots — retained exec request evidence is not clearing on its own, so the ordinary per-boot warning is escalated to this counted anomaly event; inspect the named evidence and its disposition commands | anomaly | — | — | events |
 | `host_turn_stall_detected` | the hosted dispatcher's durable scan found an in-flight turn whose turn-progress clock (agent/_turn_progress.py: node enters, completed LLM steps, streamed LLM chunks) has been silent past the wedged budget while NO pending inbound exists — the turn-level fake-alive shape (process alive, turn dead) that pending-row and pid-based detectors cannot see. The turn task is cancelled and the agent rescheduled; a turn that refuses to unwind instead escalates to a daemon restart | anomaly | — | — | events |

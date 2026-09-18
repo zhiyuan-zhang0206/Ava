@@ -105,7 +105,11 @@ def _receipt(session: dict[str, Any], incarnation: RuntimeIncarnation) -> None:
 
 
 async def deliver_handoff(
-    graph: Any, session: dict[str, Any], incarnation: RuntimeIncarnation
+    graph: Any,
+    session: dict[str, Any],
+    incarnation: RuntimeIncarnation,
+    *,
+    reason: str | None = None,
 ) -> None:
     """Save file, append the first resumed input, flush checkpoint, then receipt.
 
@@ -115,6 +119,9 @@ async def deliver_handoff(
     The receipt is followed by a best-effort wake: the note's first turn must run
     even when nothing else is queued (claim also resumes on the trailing note, so
     an empty queue is not an idle verdict).
+
+    ``reason`` is the death cause of a supervisor-aborted session (task #3998);
+    when present, the note names it right after the session-end sentence.
     """
     import httpx
 
@@ -134,8 +141,9 @@ async def deliver_handoff(
     snapshot = await graph.aget_state(config)
     receipt = f"{session['agent_id']}:{session['session_id']}"
     if snapshot.values.get("impersonation_handoff_id") != receipt:
+        stopped = f" This session was stopped early: {reason}." if reason else ""
         note = system_note_message(
-            content=f"Impersonation session {session['session_id']} has ended. "
+            content=f"Impersonation session {session['session_id']} has ended.{stopped} "
             f'The takeover identified itself as "{session["name"]}".\n\nExternal summary:\n{summary}\n\n'
             f"If you need more detail than the summary, the complete structured "
             f"record of this session is available at: {path}\n"

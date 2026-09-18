@@ -699,6 +699,61 @@ def test_record_relay_failure_is_rate_limited(db_conn: psycopg.Connection) -> No
     assert leases.record_relay_failure(lease["id"], owner) is False
 
 
+def test_abort_lease_stops_the_takeover_and_keeps_the_request_reason(
+    db_conn: psycopg.Connection,
+) -> None:
+    """A core-component death (task #3998) stops the takeover like an expiry:
+    the cause lands in rejection_reason prefixed "aborted: ", the request's own
+    reason survives, a non-automatic lease gets the legacy end note, and a
+    second abort is a no-op."""
+    owner = _agent(db_conn)
+    lease = _active(owner)
+    ended = leases.abort_lease(lease["id"], owner, "the executor process is gone")
+    assert ended is not None
+    assert ended["status"] == "expired"
+    assert ended["rejection_reason"] == "aborted: the executor process is gone"
+    assert ended["reason"] == "Handle the next message"
+    note = db_conn.execute(
+        "SELECT content FROM inbound_messages WHERE id=%s", (ended["summary_inbound_id"],)
+    ).fetchone()
+    assert note is not None
+    assert "stopped — the executor process is gone" in note[0]
+    # An abort that loses the race (lease already terminal) is a no-op.
+    assert leases.abort_lease(lease["id"], owner, "the executor process is gone") is None
+
+
+def test_abort_lease_leaves_the_automatic_end_note_to_the_resume_chain(
+    db_conn: psycopg.Connection,
+) -> None:
+    """An automatic takeover's end note belongs to the resume chain
+    (deliver_handoff), never to the abort transaction itself (task #3998)."""
+    owner = _agent(db_conn)
+    lease = leases.request(
+        owner.agent_id,
+        caller=CallerIdentity(kind="external_agent", subject="codex", instance="test"),
+        ttl_seconds=300,
+        reason="Handle the next message",
+        process_metadata=recorded_tree(),
+        relay_provider="codex",
+        relay_thread_id=str(uuid4()),
+        automatic=True,
+        name="Auto takeover",
+        executor_name="Codex: test",
+    )
+    leases.accept(lease["id"], owner.agent_id, owner, "Handoff brief")
+    leases.activate(lease["id"], owner)
+    ended = leases.abort_lease(lease["id"], owner, "the bound relay stopped heartbeating")
+    assert ended is not None
+    assert ended["status"] == "expired"
+    assert ended["rejection_reason"] == "aborted: the bound relay stopped heartbeating"
+    assert ended["summary_inbound_id"] is None
+    assert db_conn.execute(
+        "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='chat' "
+        "AND source='system:impersonation'",
+        (owner.agent_id,),
+    ).fetchone() == (0,)
+
+
 def test_relay_liveness_alert_logs_only_for_stale_active_leases(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:

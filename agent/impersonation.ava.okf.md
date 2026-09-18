@@ -19,16 +19,23 @@ their slot and reject ordinary active-session wakes before runtime preparation.
 The legacy consent version and accept/reject calls remain available only for
 requests already created by older clients during an upgrade.
 
-`supervise_relay` is the native supervision seam for the bound relay, called
-from two places: the claim gate (native loop paused or resuming) and the
-held-controls pass (services/agent_host/host.py `_apply_held_controls`) while
-an active lease parks the agent outside the graph — the dispatcher's pending
-scan keeps waking agents with an open lease, so the held path re-checks the
-relay heartbeat periodically even without inbound traffic. The hot path is one
-native-status read plus a heartbeat comparison; only a stale heartbeat
-escalates to provision, spawn, or the rate-limited failure stamp. A dead codex
-relay is respawned (or re-provisioned after a host turnover); a claude relay's
-failure is stamped for the controller's own supervision.
+`supervise_relay` is the native supervision seam, called from two places: the
+claim gate (native loop paused or resuming) and the held-controls pass
+(services/agent_host/host.py `_apply_held_controls`) while an active lease
+parks the agent outside the graph — the dispatcher's pending scan wakes rows
+with an open lease periodically, pull-based from the database, so supervision
+does not depend on wake delivery. It stops the takeover when a core component
+died (task #3998): all recorded controller anchors dead/reused (a single
+unreadable pass waits for a second consecutive pass; no anchors is skipped),
+or a relay heartbeat stale past 45 seconds. The one exception is a codex relay
+minted by an earlier incarnation whose last beat predates this process start,
+inside the fresh-start window (`AVA_IMPERSONATION_REPROVISION_WINDOW_SECONDS`,
+0 disables) — re-provisioned and respawned instead of stopped; a claude relay
+is never re-provisioned. Stopping is the abort path: terminal `expired` with
+`aborted: <detail>` in rejection_reason, a held relay process terminated,
+reminders dismissed, and the resume chain's end note names the cause. The hot
+path is one native-status read, the anchor classification and a heartbeat
+comparison.
 
 The claim gate leaves chat, heartbeat and compaction input pending while held.
 Node guards suppress initialization hooks, automatic compaction, and execution
@@ -55,10 +62,12 @@ marks the log version applied. Recovery skips checkpoint-receipted versions,
 so a crash between checkpoint and acknowledgement cannot apply an additive
 reducer twice. Core lifecycle fields cannot be changed by plugin deltas.
 
-Tests: `tests/agent/test_impersonation.py` covers gates and receipt recovery;
+Tests: `tests/agent/test_impersonation.py` covers gates, receipt recovery, the
+component-death judgments and the fresh-start window;
 `tests/agent/test_impersonation_integration.py` exercises PostgreSQL, buffered
 checkpoints, the compiled graph, a real exec child, peer inbox acknowledgement,
-release summary, and native resumption with plugin state.
+release summary, native resumption with plugin state, and the abort→resume
+chain including the death-caused end note.
 
 `agent/impersonation_handoff.py` saves one JSON file under the agent workspace,
 then appends the impersonator summary and path as the first new system note.

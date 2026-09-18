@@ -444,7 +444,6 @@ class TestPendingInboundBackstop:
             180.0,
             host._owner,
             "this-box",
-            host._owner,
         )
         assert "m.runtime_owner=%s" in pool.sql
         assert "force.target_generation=m.runtime_generation" in pool.sql

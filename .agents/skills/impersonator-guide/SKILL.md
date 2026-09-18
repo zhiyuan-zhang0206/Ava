@@ -23,7 +23,11 @@ briefing, which arrives inline in your launch message.
 - **End.** You end by releasing control with a summary. The release summary is
   your end message: what you did, what you verified, what remains open and
   where to resume from. Release resumes the Ava agent: one system note wakes it
-  with your summary, and it continues from there.
+  with your summary, and it continues from there. The Ava side also stops a
+  lease by itself when a core component dies — your executor process, or the
+  relay delivering your messages; the end note names the cause. A stopped lease
+  is over: do not keep acting, and do not request a new takeover — a fresh one
+  is arranged by the Ava side.
 - Everything between those two points happens under the lease. Nothing outside
   it — no acting after expiry, no self-restart, no fighting the lifecycle.
 
@@ -52,7 +56,9 @@ ava impersonate status <session_id> --agent <agent_id>
 
 The response shows the lease status and its expiry. Statuses you will see:
 `preparing` (not yet active), `active` (you may act), and terminal
-`released`, `expired`, `rejected`.
+`released`, `expired`, `rejected` (`expired` also covers a takeover the Ava
+side stopped because a core component died — the session record names the
+cause).
 
 ## Messages: receive, process, acknowledge
 
@@ -161,7 +167,8 @@ Hard rules:
   "renew every hour just in case", no chained renewals without a fresh
   reminder, no background renewal process. If no reminder has arrived, you do
   not renew — the Ava side times reminders to the actual lease.
-- If the lease expires while you work, stop immediately: further CLI and SDK
+- If the lease ends while you work — TTL expiry, or the Ava side stopping a
+  takeover whose core component died — stop immediately: further CLI and SDK
   calls fail validation. Control returns to the Ava agent with your
   unacknowledged messages and staged state preserved. Do not keep acting
   under the identity, and do not request a new lease on your own — a fresh

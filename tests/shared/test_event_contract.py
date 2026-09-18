@@ -193,8 +193,10 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # failed recompute) raises the current total to 191; the finished-turn
     # inbound reconcile (task #3999: host_turn_reconcile_skipped +
     # host_turn_reconcile_failed) raises the current total to 193.
+    # impersonation core-component death auto-stop (task #3998:
+    # impersonation_aborted) raises the current total to 194.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 193
+    assert len(_TELEMETRY_KINDS) == 194
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:
