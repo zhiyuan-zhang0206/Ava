@@ -275,6 +275,24 @@ def test_agent_runner_role_writes_flags_without_birth(
     assert env == {
         "AVA_MACHINE_SERVE_GATEWAY": "false",
         "AVA_MACHINE_SERVE_AGENT_RUNNER": "true",
+        "AVA_MACHINE_SERVE_OBSERVABILITY_STATION": "false",
+    }
+
+
+def test_observability_station_role_writes_its_flag_without_birth(
+    isolated_registry: Path, noop_infra: Path, tmp_path: Path
+) -> None:
+    """The station capability is a role like any other: all three serve flags
+    are written (station on), and a non-gateway role never births."""
+    home = tmp_path / ".ava-station"
+    rc = _install(home, role=frozenset({"observability-station"}), worktree=False)
+    assert rc == 0
+    assert cl.load_registry() == {}, "an observability-station-only install must not birth"
+    env = dotenv_values(home / ".env")
+    assert env == {
+        "AVA_MACHINE_SERVE_GATEWAY": "false",
+        "AVA_MACHINE_SERVE_AGENT_RUNNER": "false",
+        "AVA_MACHINE_SERVE_OBSERVABILITY_STATION": "true",
     }
 
 
@@ -286,6 +304,7 @@ def test_gateway_only_role_serve_flags_and_mints_secret(
     env = dotenv_values(home / ".env")
     assert env["AVA_MACHINE_SERVE_GATEWAY"] == "true"
     assert env["AVA_MACHINE_SERVE_AGENT_RUNNER"] == "false"
+    assert env["AVA_MACHINE_SERVE_OBSERVABILITY_STATION"] == "false"
     # A split gateway-only host mints a bearer plus three independent data-plane
     # credentials. Runners receive only their least-privilege projections.
     assert env["AVA_CLUSTER_SECRET"]

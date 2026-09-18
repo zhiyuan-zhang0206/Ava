@@ -66,7 +66,8 @@ class _Capability:
     string field. Resolved env (settings bool) > `$AVA_HOME/<file>` > CLI arg.
 
     Attributes:
-        capability: the capability token this flag declares ("gateway" / "agent-runner")
+        capability: the capability token this flag declares ("gateway" /
+            "agent-runner" / "observability-station")
         file: `$AVA_HOME/<file>` filename + the basename for the env var below
         cli_flag: argparse arg name (e.g. `--serve-gateway`)
         env_var: equivalent env var (e.g. `AVA_MACHINE_SERVE_GATEWAY`)
@@ -222,7 +223,7 @@ def _collect_setup_values(
         if _resolve_capability(cap, _as_bool(args[cap.settings_attr]))
     }
     if not caps:
-        # No capability resolved: the only missing items are the two serve flags;
+        # No capability resolved: the only missing items are the serve flags;
         # every value field is unresolved, so the caller's `missing` check returns
         # before reading any (the empty dict never surfaces a required key).
         return cast(SetupValues, {}), list(_CAPABILITIES)
