@@ -91,10 +91,10 @@ window is provisioned. TODO: revisit provisioned mute timings once a
 machine-readable expected-window source exists.
 
 The two provider-stall rules (task #3948) surface the stall-wave telemetry:
-`ava-ops-llm-stall-burst` is calibrated on the trailing 7 days (63 stalls
+`ava-ops-llm-stall-burst` is calibrated on the trailing 7 days (52 stalls
 total; outside the wave, trailing-15m counts never exceeded 2; the
-2026-09-14/15 deepseek wave ran 2-9 per 15 minutes for three hours, six
-windows ≥5, 24 in its worst hour) — ≥5 in
+2026-09-14/15 deepseek wave ran 2-9 per 15 minutes for three hours, three
+15m buckets ≥5, peak 9, 24 in its worst hour) — ≥5 in
 15 minutes for one vendor is sustained provider pressure, while a single
 stall is by design absorbed by one retry. A stall that defeats the fallback
 escalates via `ava-ops-llm-stall-pair`, which fires on the FIRST pair: the

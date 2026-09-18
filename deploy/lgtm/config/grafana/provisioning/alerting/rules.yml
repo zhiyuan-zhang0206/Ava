@@ -2134,11 +2134,11 @@ groups:
       # ── LLM provider stall burst, by vendor (task #3889) ──
       # stream_stalled_retry per vendor — the provider-health dimension the
       # 2026-09-14/15 deepseek stall wave lacked (task #3884's payload
-      # enrichment). Calibrated on the trailing 7d of prod data: 63 stalls
+      # enrichment). Calibrated on the trailing 7d of prod data: 52 stalls
       # total; outside the wave, trailing-15m counts never exceeded 2, while
       # the 2026-09-14/15 deepseek wave ran 2-9 per 15m for three hours (24
-      # in its worst hour, six windows ≥5; turns dying) — so ≥5 in 15m is
-      # sustained provider pressure, not one flaky call. A single
+      # in its worst hour, three 15m buckets ≥5, peak 9; turns dying) — so
+      # ≥5 in 15m is sustained provider pressure, not one flaky call. A single
       # stall is by design absorbed by one retry, and a fallback-defeating
       # stall escalates via ava-ops-llm-stall-pair. Grouped by vendor so the
       # notification names the provider; the 15m window is the whole
