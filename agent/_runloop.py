@@ -133,7 +133,7 @@ async def _record_permanent_reject_outcome(
 
     assert ctx.ops_pool is not None  # noqa: S101
     try:
-        streak = await record_permanent_reject_turn(ctx.ops_pool, agent_id)
+        streak = await record_permanent_reject_turn(ctx.ops_pool, agent_id, reason)
     except Exception:
         logger.warning(
             "failed to record a permanent-rejection streak for agent {agent_id}; "
