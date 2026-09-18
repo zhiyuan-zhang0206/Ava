@@ -115,7 +115,7 @@ thresholds are deployment facts, not framework constants — what counts as
 |-----|--------|-----------|-------|----------|
 | `ava-ops-host-cpu-saturated` | non-idle CPU | avg by machine_name > 0.90 (Prometheus) | 15m | warning |
 | `ava-ops-host-memory-pressure` | memory utilization | avg by machine_name > 0.90 (Prometheus) | 15m | warning |
-| `ava-ops-host-disk-watermark` | filesystem utilization | max by machine_name+mountpoint > 0.90, excluding /mnt/wsl/docker-desktop/* (Prometheus) | 15m | warning |
+| `ava-ops-host-disk-watermark` | filesystem utilization | max by machine_name+mountpoint > 0.90, excluding /mnt/wsl/docker-desktop/*, /Volumes/*, /private/tmp/*, /private/var/folders/* (Prometheus) | 15m | warning |
 | `ava-ops-host-disk-watermark-93` | filesystem utilization | same series > 0.93 — approaching the Loki WAL hard stop (Prometheus) | 15m | warning |
 | `ava-ops-host-disk-watermark-95` | filesystem utilization | same series > 0.95 — at the Loki WAL hard stop (Prometheus) | 5m | critical |
 | `ava-ops-pg-connection-saturation` | Postgres backends vs max | ratio > 0.80 (Prometheus) | 15m | warning |
