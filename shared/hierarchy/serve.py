@@ -14,6 +14,10 @@ The coverage result drives the response's fallback shape (the three states):
   latest compact summary -- an agent-level text, not sliced to the window);
   the single-summary-field reading of per-segment degradation.
 
+`pending_spans` carves the complement: window activity the sealed coverage
+does not explain -- the de-emphasized placeholders the client draws (the B
+placeholders, 2026-09-18) so uncovered stretches read as "not generated yet".
+
 `StoredNode.depth` is the ENGINE level (1 = the finest, leaves); the wire
 `depth` is its mirror (`top - level`), so the field name means opposite things
 in the two layers — hence the local `level` naming below. Storage guarantees
@@ -97,6 +101,59 @@ def select_layers(
         )
     covered = _covers(selected, window_start=window_start, window_end=window_end)
     return LayerSelection(layers=tuple(layers), coverage="full" if covered else "partial")
+
+
+def _merge_spans(
+    spans: Sequence[tuple[datetime, datetime]],
+) -> list[tuple[datetime, datetime]]:
+    """Sorted, merged, non-overlapping view of interval pairs (empty spans dropped)."""
+    merged: list[tuple[datetime, datetime]] = []
+    for start, stop in sorted(spans):
+        if stop <= start:
+            continue
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], stop))
+        else:
+            merged.append((start, stop))
+    return merged
+
+
+def pending_spans(
+    activity: Sequence[tuple[datetime, datetime]],
+    node_spans: Sequence[tuple[datetime, datetime]],
+    *,
+    coverage_start: datetime | None,
+) -> tuple[tuple[datetime, datetime], ...]:
+    """Activity stretches no sealed node covers -- the "pending" placeholders.
+
+    Semantics (B spec, 3187 2026-09-18): only coverage's right side is
+    promised -- activity left of `coverage_start` (the agent's GLOBAL first
+    sealed node; history is never backfilled) yields nothing, while internal
+    gaps and the right tail do. `coverage_start=None` (no sealed history)
+    returns an empty tuple: nothing to promise yet. Inputs need not be sorted
+    or merged; the result is sorted and non-overlapping.
+    """
+    if coverage_start is None:
+        return ()
+    covered = _merge_spans(node_spans)
+    pending: list[tuple[datetime, datetime]] = []
+    for start, stop in _merge_spans(activity):
+        cursor = start
+        for covered_start, covered_stop in covered:
+            if covered_stop <= cursor:
+                continue
+            if covered_start >= stop:
+                break
+            if covered_start > cursor:
+                pending.append((cursor, min(covered_start, stop)))
+            cursor = max(cursor, covered_stop)
+            if cursor >= stop:
+                break
+        if cursor < stop:
+            pending.append((cursor, stop))
+    return tuple(
+        (max(start, coverage_start), stop) for start, stop in pending if stop > coverage_start
+    )
 
 
 def _covers(nodes: Sequence[StoredNode], *, window_start: datetime, window_end: datetime) -> bool:

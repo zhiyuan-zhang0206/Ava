@@ -24,7 +24,13 @@ import {
   type RunTimelineChartLabels,
   type TimelinePopoverTarget,
 } from "./run-timeline-details";
-import { LayerTrackButtons, LayerTrackGeometry, RawSummaryBand } from "./run-timeline-layers";
+import {
+  LayerTrackButtons,
+  LayerTrackGeometry,
+  PendingTrackButtons,
+  PendingTrackGeometry,
+  RawSummaryBand,
+} from "./run-timeline-layers";
 import { zoomWindowAround, type TimelineWindowOverride } from "./request-level";
 import { buildTimelineLayout } from "./timeline-layout";
 
@@ -123,6 +129,7 @@ export function RunTimelineChart({
   const [popoverTarget, setPopoverTarget] = useState<TimelinePopoverTarget | null>(null);
   const rail = useMemo(() => prioritizedRailEvents(timeline.events), [timeline.events]);
   const layers = showSummaries ? timeline.layers : undefined;
+  const pendingSpans = showSummaries ? timeline.pending : undefined;
   const layout = useMemo(
     () =>
       buildTimelineLayout({
@@ -131,8 +138,9 @@ export function RunTimelineChart({
         rows: timeline.rows,
         events: rail.events,
         layers,
+        pending: pendingSpans,
       }),
-    [canvasWidth, layers, rail.events, timeline.rows, timeline.window],
+    [canvasWidth, layers, pendingSpans, rail.events, timeline.rows, timeline.window],
   );
   const selectedRow =
     selectedRowIndex === null ? null : (timeline.rows[selectedRowIndex] ?? null);
@@ -147,7 +155,7 @@ export function RunTimelineChart({
     element: HTMLButtonElement,
   ): Pick<TimelinePopoverTarget, "kind" | "index"> => {
     const kind = element.dataset.timelinePopoverKind;
-    if (kind !== "turn" && kind !== "event") {
+    if (kind !== "turn" && kind !== "event" && kind !== "pending") {
       throw new Error("Timeline popover trigger is missing its target kind");
     }
     const index = Number(element.dataset.timelinePopoverIndex);
@@ -157,24 +165,28 @@ export function RunTimelineChart({
     return { kind, index };
   };
 
-  const showPopover = (event: PointerEvent<HTMLButtonElement> | FocusEvent<HTMLButtonElement>) => {
+  const showPopoverFor = (element: HTMLButtonElement) => {
     const layer = popoverLayerRef.current;
     if (!layer) return;
-    const { kind, index } = readPopoverKey(event.currentTarget);
-    const targetBox = event.currentTarget.getBoundingClientRect();
+    const { kind, index } = readPopoverKey(element);
+    const targetBox = element.getBoundingClientRect();
     const layerBox = layer.getBoundingClientRect();
     const layerWidth = layerBox.width || canvasWidth;
     const width = Math.min(TIMELINE_POPOVER_WIDTH, Math.max(0, layerWidth - 16));
     const targetLeft = targetBox.width
       ? targetBox.left - layerBox.left
-      : Number.parseFloat(event.currentTarget.style.left) || 0;
+      : Number.parseFloat(element.style.left) || 0;
     const targetTop = targetBox.height
       ? targetBox.bottom - layerBox.top
-      : (Number.parseFloat(event.currentTarget.style.top) || 0) +
-        (Number.parseFloat(event.currentTarget.style.height) || 0);
+      : (Number.parseFloat(element.style.top) || 0) +
+        (Number.parseFloat(element.style.height) || 0);
     const centeredLeft = targetLeft + targetBox.width / 2 - width / 2;
     const left = Math.max(8, Math.min(layerWidth - width - 8, centeredLeft));
     setPopoverTarget({ kind, index, left, top: targetTop, width });
+  };
+
+  const showPopover = (event: PointerEvent<HTMLButtonElement> | FocusEvent<HTMLButtonElement>) => {
+    showPopoverFor(event.currentTarget);
   };
 
   const hidePopover = (event: PointerEvent<HTMLButtonElement> | FocusEvent<HTMLButtonElement>) => {
@@ -190,6 +202,7 @@ export function RunTimelineChart({
     popoverTarget?.kind === "turn" ? (timeline.rows[popoverTarget.index] ?? null) : null;
   const hoveredEvent =
     popoverTarget?.kind === "event" ? (rail.events[popoverTarget.index] ?? null) : null;
+  const hoveredPending = popoverTarget?.kind === "pending";
 
   useEffect(() => {
     if (widthOverride !== undefined) return;
@@ -342,6 +355,9 @@ export function RunTimelineChart({
                 {layout.layerRows.length > 0 && timeline.layers ? (
                   <LayerTrackGeometry rows={layout.layerRows} selectedIndex={selectedLayerIndex} />
                 ) : null}
+                {layout.pendingBlocks.length > 0 ? (
+                  <PendingTrackGeometry row={layout.pendingRow} blocks={layout.pendingBlocks} />
+                ) : null}
                 {layout.turns.map((turn, index) => {
                   const row = timeline.rows[turn.rowIndex];
                   const failed = rowFailed(row);
@@ -486,13 +502,26 @@ export function RunTimelineChart({
                   onZoom={onZoomWindow}
                 />
               ) : null}
+
+              {layout.pendingBlocks.length > 0 ? (
+                <PendingTrackButtons
+                  row={layout.pendingRow}
+                  blocks={layout.pendingBlocks}
+                  labels={labels}
+                  onShowPopover={showPopoverFor}
+                  onHidePopover={hidePopover}
+                  onZoom={onZoomWindow}
+                  describedIndex={popoverTarget?.kind === "pending" ? popoverTarget.index : null}
+                />
+              ) : null}
             </div>
           </div>
-          {popoverTarget && (hoveredRow || hoveredEvent) ? (
+          {popoverTarget && (hoveredRow || hoveredEvent || hoveredPending) ? (
             <TimelinePopover
               target={popoverTarget}
               row={hoveredRow}
               event={hoveredEvent}
+              pending={hoveredPending}
               labels={labels}
               popoverRef={popoverRef}
               onPointerLeave={() => setPopoverTarget(null)}

@@ -13,6 +13,12 @@ const TRACK_GAP = 24;
 const MIN_TURN_WIDTH = 6;
 const LAYER_ROW_HEIGHT = 22;
 const LAYER_ROW_GAP = 6;
+// Pending placeholders (B, task #3981): a merged stretch shorter than this
+// reads as stray noise rather than a promised segment; stretches within the
+// merge gap join so thin seams between sealed nodes do not fragment the band.
+// Frontend policy constants, not user settings.
+const PENDING_MIN_SPAN_MS = 3 * 60 * 1000;
+const PENDING_MERGE_GAP_MS = 2 * 60 * 1000;
 
 interface TimelineLayoutInput {
   width: number;
@@ -20,6 +26,7 @@ interface TimelineLayoutInput {
   rows: RunTimelineResponse["rows"];
   events: RunTimelineResponse["events"];
   layers?: RunTimelineResponse["layers"];
+  pending?: RunTimelineResponse["pending"];
 }
 
 export interface TimelinePoint {
@@ -46,6 +53,14 @@ export interface TimelineLayerRowLayout {
   top: number;
   height: number;
   blocks: TimelineLayerBlockLayout[];
+}
+
+export interface TimelinePendingSpanLayout {
+  index: number;
+  start: string;
+  end: string;
+  left: number;
+  width: number;
 }
 
 export interface TimelineTickLayout {
@@ -94,6 +109,40 @@ function eventChipWidth(kind: string): number {
 function connectorPath(source: TimelinePoint, destination: TimelinePoint): string {
   const middleY = Math.round((source.y + destination.y) / 2);
   return `M ${source.x} ${source.y} C ${source.x} ${middleY} ${destination.x} ${middleY} ${destination.x} ${destination.y}`;
+}
+
+/** The merged, noise-filtered pending stretches the layer track draws.
+ *
+ * The server's subtraction is exact but fragmented (seams between sealed
+ * nodes return as slivers); merging within PENDING_MERGE_GAP_MS and dropping
+ * sub-PENDING_MIN_SPAN_MS remainders keeps the band readable. Pure so the
+ * timing contract is directly testable.
+ */
+export function mergePendingSpans(
+  pending: NonNullable<RunTimelineResponse["pending"]>,
+): { start: string; end: string }[] {
+  const parsed = pending
+    .map((span) => ({ start: Date.parse(span.start), end: Date.parse(span.end) }))
+    .filter(
+      (span) => Number.isFinite(span.start) && Number.isFinite(span.end) && span.end > span.start,
+    )
+    .sort((left, right) => left.start - right.start);
+  const merged: { start: number; end: number }[] = [];
+  let last: { start: number; end: number } | undefined;
+  for (const span of parsed) {
+    if (last && span.start - last.end <= PENDING_MERGE_GAP_MS) {
+      last.end = Math.max(last.end, span.end);
+    } else {
+      last = { ...span };
+      merged.push(last);
+    }
+  }
+  return merged
+    .filter((span) => span.end - span.start >= PENDING_MIN_SPAN_MS)
+    .map((span) => ({
+      start: new Date(span.start).toISOString(),
+      end: new Date(span.end).toISOString(),
+    }));
 }
 
 /** One rounded pixel projection shared by SVG geometry and fixed HTML text. */
@@ -179,9 +228,25 @@ export function buildTimelineLayout(input: TimelineLayoutInput) {
     });
     return { depth, top, height: LAYER_ROW_HEIGHT, blocks };
   });
+  const pendingSpans = mergePendingSpans(input.pending ?? []);
+  const pendingBlocks: TimelinePendingSpanLayout[] = pendingSpans.map((span, index) => {
+    const startX = projectedX(span.start, input.window, plot.left, plot.width);
+    const endX = projectedX(span.end, input.window, plot.left, plot.width);
+    const left = Math.min(startX, plot.right - MIN_TURN_WIDTH);
+    const width = Math.min(plot.right - left, Math.max(MIN_TURN_WIDTH, endX - startX));
+    return { index, start: span.start, end: span.end, left, width };
+  });
+  // Placeholders ride the first layer row; with no sealed rows they get one
+  // synthesized row so the layer band still renders (B spec, 2026-09-18).
+  const pendingRow = {
+    top: layerRows.length > 0 ? layerRows[0].top : layersTop,
+    height: LAYER_ROW_HEIGHT,
+  };
   const layersBottom =
     layerDepths.length === 0
-      ? eventRailBottom
+      ? pendingBlocks.length > 0
+        ? layersTop + LAYER_ROW_HEIGHT
+        : eventRailBottom
       : layersTop + layerDepths.length * (LAYER_ROW_HEIGHT + LAYER_ROW_GAP) - LAYER_ROW_GAP;
   const trackTop = layersBottom + TRACK_GAP;
 
@@ -193,6 +258,8 @@ export function buildTimelineLayout(input: TimelineLayoutInput) {
     ticks,
     track: { top: trackTop, height: TRACK_HEIGHT },
     layerRows,
+    pendingRow,
+    pendingBlocks,
     turns,
     events,
     connectors,

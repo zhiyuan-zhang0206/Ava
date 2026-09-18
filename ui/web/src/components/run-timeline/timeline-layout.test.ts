@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { RunTimelineResponse } from "@/lib/types";
 
-import { buildTimelineLayout, plotGeometry } from "./timeline-layout";
+import { buildTimelineLayout, mergePendingSpans, plotGeometry } from "./timeline-layout";
 
 const row: RunTimelineResponse["rows"][number] = {
   turn: 1,
@@ -91,6 +91,54 @@ describe("buildTimelineLayout", () => {
     expect(layout.track.top).toBe(136);
   });
 
+  it("lays pending placeholders in the first layer row without touching sealed blocks", () => {
+    const layout = buildTimelineLayout({
+      width: 1000,
+      window: { from: "2026-09-02T08:00:00Z", to: "2026-09-02T09:00:00Z" },
+      rows: [row],
+      events: [],
+      layers: [
+        { id: "L0#0", depth: 0, parent: null, start: "2026-09-02T08:00:00Z", end: "2026-09-02T08:30:00Z", summary: "first half" },
+      ],
+      pending: [{ start: "2026-09-02T08:30:00Z", end: "2026-09-02T09:00:00Z" }],
+    });
+
+    expect(layout.pendingRow).toEqual({ top: layout.layerRows[0].top, height: 22 });
+    expect(layout.pendingBlocks).toEqual([
+      {
+        index: 0,
+        start: "2026-09-02T08:30:00.000Z",
+        end: "2026-09-02T09:00:00.000Z",
+        left: 500,
+        width: 468,
+      },
+    ]);
+  });
+
+  it("synthesizes a pending row when no layer rows exist and keeps the track below it", () => {
+    const layout = buildTimelineLayout({
+      width: 1000,
+      window: { from: "2026-09-02T08:00:00Z", to: "2026-09-02T09:00:00Z" },
+      rows: [row],
+      events: [],
+      pending: [{ start: "2026-09-02T08:10:00Z", end: "2026-09-02T08:40:00Z" }],
+    });
+
+    expect(layout.layerRows).toEqual([]);
+    expect(layout.pendingRow).toEqual({ top: 62, height: 22 });
+    expect(layout.pendingBlocks).toEqual([
+      {
+        index: 0,
+        start: "2026-09-02T08:10:00.000Z",
+        end: "2026-09-02T08:40:00.000Z",
+        left: 188,
+        width: 468,
+      },
+    ]);
+    // The synthesized row pushes the turn track down by its height + gap.
+    expect(layout.track.top).toBe(62 + 22 + 24);
+  });
+
   it("keeps the turn track position unchanged when no layers are present", () => {
     const layout = buildTimelineLayout({
       width: 1000,
@@ -101,6 +149,31 @@ describe("buildTimelineLayout", () => {
 
     expect(layout.layerRows).toEqual([]);
     expect(layout.track.top).toBe(62);
+  });
+});
+
+describe("mergePendingSpans", () => {
+  it("merges stretches whose gap is within two minutes and drops sub-three-minute slivers", () => {
+    const spans = mergePendingSpans([
+      { start: "2026-09-02T08:00:00Z", end: "2026-09-02T08:10:00Z" },
+      { start: "2026-09-02T08:11:00Z", end: "2026-09-02T08:20:00Z" },
+      { start: "2026-09-02T08:30:00Z", end: "2026-09-02T08:31:00Z" },
+    ]);
+
+    expect(spans).toEqual([
+      { start: "2026-09-02T08:00:00.000Z", end: "2026-09-02T08:20:00.000Z" },
+    ]);
+  });
+
+  it("keeps a stretch at exactly the three-minute floor and sorts out-of-order input", () => {
+    const spans = mergePendingSpans([
+      { start: "2026-09-02T09:00:00Z", end: "2026-09-02T09:03:00Z" },
+      { start: "2026-09-02T08:00:00Z", end: "2026-09-02T08:01:00Z" },
+    ]);
+
+    expect(spans).toEqual([
+      { start: "2026-09-02T09:00:00.000Z", end: "2026-09-02T09:03:00.000Z" },
+    ]);
   });
 });
 

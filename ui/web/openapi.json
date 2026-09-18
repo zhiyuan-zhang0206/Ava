@@ -13823,6 +13823,27 @@
         "title": "RunTimelineMeta",
         "description": "Run-level totals derived from the rows in a timeline window."
       },
+      "RunTimelinePendingSpan": {
+        "properties": {
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "End"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start",
+          "end"
+        ],
+        "title": "RunTimelinePendingSpan",
+        "description": "One pending stretch -- window activity no sealed understanding layer covers.\n\nThe layer-track placeholder source (B, 2026-09-18): rendered de-emphasized\nso an uncovered stretch reads as \"not generated yet\", not as a missing\nfeature. Only stretches right of the agent's sealed coverage are reported;\nnever-sealed history is omitted (nothing is promised for it)."
+      },
       "RunTimelineResponse": {
         "properties": {
           "agent_id": {
@@ -13875,6 +13896,20 @@
                 "type": "null"
               }
             ]
+          },
+          "pending": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RunTimelinePendingSpan"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending"
           },
           "inbounds": {
             "anyOf": [

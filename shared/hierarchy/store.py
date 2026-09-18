@@ -16,7 +16,9 @@ Read paths:
 - `load_known_texts(agent_id)` -> `{input_hash: text}`, the generation reuse
   cache that makes a rerun over unchanged history cost zero model calls;
 - `load_window_nodes(agent_id, start, end)`, nodes intersecting a window for
-  the run-timeline serving merge.
+  the run-timeline serving merge;
+- `load_coverage_extent(agent_id)`, the agent-wide `(min start, max end)`
+  sealed extent the pending-placeholder cut reads.
 
 Identity note: span identity is stable because compaction boundaries are never
 trimmed (#1125) — the stitched full history is append-only, so message indices
@@ -190,6 +192,23 @@ def load_known_texts(agent_id: int) -> dict[str, str]:
             (agent_id,),
         ).fetchall()
     return {str(input_hash): str(text) for input_hash, text in rows}
+
+
+def load_coverage_extent(agent_id: int) -> tuple[datetime, datetime] | None:
+    """The agent's global sealed coverage -- `(min start, max end)` of timed nodes.
+
+    The pending-placeholder computation cuts activity at this extent's start
+    (display never promises generation for never-sealed history), so the read
+    is agent-wide, not window-limited. `None` when no node carries timestamps.
+    """
+    with _read_connection() as conn:
+        row = conn.execute(
+            "SELECT min(start_ts), max(end_ts) FROM understanding_nodes WHERE agent_id = %s",
+            (agent_id,),
+        ).fetchone()
+    if row is None or row[0] is None or row[1] is None:
+        return None
+    return row[0], row[1]
 
 
 def load_window_nodes(agent_id: int, start: datetime, end: datetime) -> list[StoredNode]:
