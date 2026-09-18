@@ -37,6 +37,7 @@ from agent.hooks.compact import (
     emergency_compact_summary,
 )
 from agent.state import AgentState, CircuitState
+from shared.config import settings
 from shared.event_publisher import AgentEventPublisher
 from tests.agent.test_claim import (
     _compact_tail,
@@ -176,13 +177,16 @@ async def test_fatal_provider_error_emits_blocked_recovery_details() -> None:
 async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancestor(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A blocked descendant reports only metadata through immutable SPAWN lineage.
 
     The immediate parent is terminated, so the report must skip it and reach
     the nearest live ancestor. The rejected provider body is deliberately
     distinctive: no history or error body may be replayed into the ancestor's
-    prompt.
+    prompt. The provider is the anthropic-compat error path while the pinned
+    model makes the vendor the billed DeepSeek account: the report must name
+    both, vendor first (task #3916).
     """
     ancestor_id = spawn_agent(spawner="user")
     terminated_parent_id = spawn_agent(spawner=f"agent:{ancestor_id}")
@@ -203,11 +207,12 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
         )
     db_conn.commit()
 
+    monkeypatch.setattr(settings.lm, "llm_model", "deepseek-flash")
     blocked_history = "Content Exists Risk: do not replay this rejected history"
     exc = FatalProviderError(
         blocked_history,
         error_class="permanent",
-        provider="deepseek",
+        provider="anthropic",
         status=400,
     )
     occurred_at = datetime(2026, 9, 3, 8, 0, tzinfo=UTC)
@@ -230,7 +235,7 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
             ancestor_id,
             "Descendant agent "
             f"{child_id} is blocked after a permanent provider rejection. "
-            "error_class=permanent provider=deepseek status=400 reason=bad_request "
+            "error_class=permanent vendor=deepseek provider=anthropic status=400 reason=bad_request "
             "timestamp=2026-09-03T08:00:00+00:00 "
             "where=agent._runloop._handle_fatal_llm_error",
             "system_note",

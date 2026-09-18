@@ -704,6 +704,9 @@ async def test_llm_node_billing_error_logs_billing_vendor_and_model(loguru_recor
         settings.lm.llm_model = original
 
     assert "out of credit or quota" in str(exc_info.value)
+    # The exception message names the vendor next to the provider path: the
+    # runloop's block / recovery notifications embed it verbatim (task #3916).
+    assert "vendor=deepseek" in str(exc_info.value)
     classify_logs = [r for r in loguru_records if r["extra"].get("event") == "llm_provider_error"]  # pyright: ignore[reportUnknownMemberType]
     assert len(classify_logs) == 1  # pyright: ignore[reportUnknownArgumentType]
     extra = classify_logs[0]["extra"]

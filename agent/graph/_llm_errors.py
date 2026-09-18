@@ -211,7 +211,9 @@ def _classify_and_log_provider_error(exc: Exception) -> FatalProviderError | Non
     `ava-ops-llm-billing-quota` fires on the first `billing=True` row and its IM
     message has to name what stopped working. `vendor` is the model's provider
     key (deepseek / claude / …) — `classification.provider` is only the SDK
-    package that raised, which DeepSeek and Claude share.
+    package that raised, which DeepSeek and Claude share. The exception
+    message names both, so the runloop's block / recovery notifications
+    identify the same account the event does (task #3916).
     """
     classification = classify_error(exc)
     fatal_type_hit = _is_fatal_provider_error_type(exc)
@@ -221,6 +223,9 @@ def _classify_and_log_provider_error(exc: Exception) -> FatalProviderError | Non
     emit_provider_error(exc, model=model, fatal=fatal, classification=classification)
     if not fatal:
         return None
+    from shared.lm.factory import provider_key_of_model
+
+    vendor = provider_key_of_model(model)
     if classification.billing:
         reason = "provider rejected the request for billing: the key is out of credit or quota"
     elif classification.error_class is ErrorClass.PERMANENT:
@@ -228,7 +233,8 @@ def _classify_and_log_provider_error(exc: Exception) -> FatalProviderError | Non
     else:
         reason = f"provider returned configured-fatal error type {classification.error_type!r}"
     return FatalProviderError(
-        f"{reason} (HTTP {classification.status}, provider={classification.provider}): {exc}. "
+        f"{reason} (HTTP {classification.status}, vendor={vendor}, "
+        f"provider={classification.provider}): {exc}. "
         "Retry cannot succeed; aborting the turn — the agent stays alive and idles.",
         error_class=classification.error_class.value,
         provider=classification.provider,
