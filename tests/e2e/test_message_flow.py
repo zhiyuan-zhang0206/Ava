@@ -120,6 +120,11 @@ def test_message_flow_renders_full_turn_without_unrecognized_marker(e2e_env: E2E
         "unrecognized system_marker alarm rendered for a known marker — "
         f"warnings={unrecognized_warnings}"
     )
+    # Pump the playwright loop once before reading the collected list: the
+    # page.on("console") deliveries only run while a call is in flight, so a
+    # warning emitted right before this assert could still be in flight
+    # (task #3927 class).
+    page.evaluate("() => 1")
     assert unrecognized_warnings == [], (
         f"[timeline] unrecognized console warnings fired: {unrecognized_warnings}"
     )
