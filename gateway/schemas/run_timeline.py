@@ -172,6 +172,7 @@ class RunTimelineResponse(BaseModel):
     summary: RunTimelineSummary | None = None
     # De-emphasized placeholders for uncovered window activity -- None when
     # there is nothing to promise (no sealed history, or nothing uncovered).
+    # Wire contract: null or a non-empty list; [] is never emitted.
     pending: list[RunTimelinePendingSpan] | None = None
     # Chat delivery facts — None when the read degrades.
     inbounds: list[RunTimelineInbound] | None = None
