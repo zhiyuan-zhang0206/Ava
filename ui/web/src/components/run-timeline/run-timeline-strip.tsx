@@ -109,6 +109,7 @@ export function StripTrackGeometry({
 }
 
 export function StripTrackButtons({
+  plot,
   row,
   messages,
   labels,
@@ -116,6 +117,7 @@ export function StripTrackButtons({
   onFocus,
   onHover,
 }: {
+  plot: { left: number; width: number };
   row: TimelineStripRowLayout;
   messages: RunTimelineMessage[];
   labels: RunTimelineChartLabels;
@@ -128,6 +130,13 @@ export function StripTrackButtons({
   return (
     <>
       {row.messages.map((bar, index) => {
+        // A bar may over-extend the plot's right edge (the response window is
+        // the axis where the demo's would have grown). The SVG side is clipped;
+        // this HTML layer clamps explicitly, or an invisible clickable box — and
+        // ghost horizontal scroll — would live past the edge (PR #2892 review).
+        // A bar with no visible part renders no button.
+        const right = Math.min(bar.left + Math.max(1, bar.width), plot.left + plot.width);
+        if (right <= bar.left) return null;
         const message = messages[index];
         const kind = labels.stripPartLabels[stripMessageClass(message)];
         const time = message.ts === null ? labels.none : timestampLabel(message.ts);
@@ -150,7 +159,7 @@ export function StripTrackButtons({
             style={{
               left: `${bar.left}px`,
               top: `${row.top}px`,
-              width: `${Math.max(1, bar.width)}px`,
+              width: `${right - bar.left}px`,
               height: `${row.height}px`,
             }}
           />

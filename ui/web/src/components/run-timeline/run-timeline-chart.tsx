@@ -640,6 +640,7 @@ export function RunTimelineChart({
 
               {layout.strip && stripMessages ? (
                 <StripTrackButtons
+                  plot={layout.plot}
                   row={layout.strip}
                   messages={stripMessages}
                   labels={labels}

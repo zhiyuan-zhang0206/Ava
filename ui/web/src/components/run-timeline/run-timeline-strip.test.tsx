@@ -6,6 +6,7 @@ import type { RunTimelineMessage } from "@/lib/types";
 
 import { StripTrackButtons, StripTrackGeometry, StripTruncatedHint } from "./run-timeline-strip";
 import { buildStripLayout } from "./strip-layout";
+import type { TimelineStripRowLayout } from "./timeline-layout";
 
 // jsdom has no PointerEvent; the hover callback tests need pointer events,
 // so give them a MouseEvent body (same polyfill as the chart tests).
@@ -182,6 +183,7 @@ describe("StripTrackButtons", () => {
   it("labels every message button with idx, kind, time, and chars", () => {
     render(
       <StripTrackButtons
+        plot={PLOT}
         row={row}
         messages={messages}
         labels={labels}
@@ -205,6 +207,7 @@ describe("StripTrackButtons", () => {
     const onHover = vi.fn();
     render(
       <StripTrackButtons
+        plot={PLOT}
         row={row}
         messages={messages}
         labels={labels}
@@ -227,6 +230,7 @@ describe("StripTrackButtons", () => {
   it("omits hover wiring when the readout is not rendered", () => {
     render(
       <StripTrackButtons
+        plot={PLOT}
         row={row}
         messages={messages}
         labels={labels}
@@ -236,6 +240,44 @@ describe("StripTrackButtons", () => {
     );
     // No hover callbacks were passed; the button still renders and stays inert.
     expect(screen.getAllByTestId("strip-message-button")).toHaveLength(4);
+  });
+
+  it("clamps buttons at the plot's right edge and drops labels beyond it", () => {
+    const plotRight = PLOT.left + PLOT.width;
+    const overflowRow: TimelineStripRowLayout = {
+      top: 120,
+      height: 26,
+      messages: [
+        { messageIndex: 0, key: "c.0", left: 40, width: 100, parts: [] },
+        { messageIndex: 1, key: "c.1", left: 960, width: 60, parts: [] },
+        { messageIndex: 2, key: "c.2", left: plotRight + 10, width: 40, parts: [] },
+      ],
+    };
+    render(
+      <StripTrackButtons
+        plot={PLOT}
+        row={overflowRow}
+        messages={messages}
+        labels={labels}
+        onSelect={vi.fn()}
+        onFocus={vi.fn()}
+      />,
+    );
+    const buttons = screen.getAllByTestId("strip-message-button");
+    // The bar past the plot edge renders no button at all; the crossing one
+    // keeps a box whose right edge is exactly the plot edge.
+    expect(buttons).toHaveLength(2);
+    expect(buttons.map((button) => button.getAttribute("data-message-index"))).toEqual([
+      "0",
+      "1",
+    ]);
+    for (const button of buttons) {
+      const left = Number.parseFloat(button.style.left);
+      const width = Number.parseFloat(button.style.width);
+      expect(left + width).toBeLessThanOrEqual(plotRight);
+    }
+    expect(buttons[1].style.left).toBe("960px");
+    expect(buttons[1].style.width).toBe("40px");
   });
 });
 
