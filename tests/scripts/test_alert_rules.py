@@ -603,15 +603,21 @@ def test_disk_watermark_rule_is_per_mountpoint(uid: str) -> None:
         "ava-ops-host-disk-watermark-95",
     ],
 )
-def test_disk_watermark_rule_excludes_wsl_docker_desktop_mount(uid: str) -> None:
-    """The wsl machine's docker-desktop VM image is a loop device mounted
-    read-only under /mnt/wsl/docker-desktop/* and reports a constant 1.0
-    utilization — a by-design non-Ava asset, not disk growth. The rule must
-    never alert on it; the mountpoint prefix is WSL-specific, so the matcher
-    cannot hide a real volume on any other machine (task #2024)."""
+def test_disk_watermark_rule_excludes_non_asset_mounts(uid: str) -> None:
+    """Non-asset mounts report a foreign or transient fullness and must never
+    alert: the wsl machine's docker-desktop VM image (a read-only loop device
+    under /mnt/wsl/docker-desktop/* reporting a constant 1.0, task #2024);
+    macOS /Volumes/* (removable, external and network volumes plus mounted
+    DMG installers — internal volumes live under /System/Volumes/*); and
+    scratch mounts under /private/tmp/* and /private/var/folders/* (2026-09-18,
+    task #3958). The Ava data plane (root volume, /System/Volumes/Data,
+    /Users/*/OrbStack on macOS; / on wsl) stays under the watermark."""
     rules = {r["uid"]: r for r in _load_rules()}
     expr = _exprs(rules[uid], "prometheus")[0]
-    assert 'mountpoint!~"/mnt/wsl/docker-desktop.*"' in expr
+    assert (
+        'mountpoint!~"/mnt/wsl/docker-desktop.*|/Volumes/.*|/private/tmp/.*|/private/var/folders/.*"'
+        in expr
+    )
     # the grouping contract survives the matcher: still per-machine, per-mount
     assert "by (machine_name, mountpoint)" in expr
 

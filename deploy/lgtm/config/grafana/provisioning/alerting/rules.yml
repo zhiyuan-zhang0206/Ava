@@ -884,11 +884,18 @@ groups:
       # (machine_name, mountpoint):
       # on macOS the volumes of one APFS container all report the container's
       # fullness, so a single full disk legitimately fires twice.
-      # Excluded: the wsl machine's docker-desktop VM image is mounted
-      # read-only under /mnt/wsl/docker-desktop/* on a loop device and
-      # reports a constant 1.0 utilization — a by-design non-Ava asset,
-      # not disk growth (task #2024). The mountpoint prefix is WSL-specific,
-      # so no other machine is affected by the matcher.
+      # Excluded: non-asset mounts whose reported fullness is foreign or
+      # transient, never the Ava data plane. The wsl machine's docker-desktop
+      # VM image (a loop device under /mnt/wsl/docker-desktop/* reporting a
+      # constant 1.0, task #2024); macOS /Volumes/* (removable, external and
+      # network volumes plus mounted DMG installers — internal volumes live
+      # under /System/Volumes/*); /private/tmp/* and /private/var/folders/*
+      # (scratch mounts, not persistent assets). These recur with every
+      # desktop-app update: on 2026-09-18, /Volumes/Monsora* on company-air
+      # and macbook-air and /private/tmp/monsora154 on company-mini alerted
+      # at 0.99 — DMG images read ~100% full by construction (task #3958).
+      # The Ava data plane (root volume, /System/Volumes/Data,
+      # /Users/*/OrbStack on macOS; / on wsl) keeps its watermark.
       - uid: ava-ops-host-disk-watermark
         title: "Filesystem over watermark"
         condition: D
@@ -922,7 +929,7 @@ groups:
               editorMode: code
               expr: >-
                 round(max by (machine_name, mountpoint)
-                (system_filesystem_utilization_ratio{mountpoint!~"/mnt/wsl/docker-desktop.*"}), 0.001)
+                (system_filesystem_utilization_ratio{mountpoint!~"/mnt/wsl/docker-desktop.*|/Volumes/.*|/private/tmp/.*|/private/var/folders/.*"}), 0.001)
               instant: true
               range: false
             relativeTimeRange:
@@ -993,7 +1000,7 @@ groups:
               editorMode: code
               expr: >-
                 round(max by (machine_name, mountpoint)
-                (system_filesystem_utilization_ratio{mountpoint!~"/mnt/wsl/docker-desktop.*"}), 0.001)
+                (system_filesystem_utilization_ratio{mountpoint!~"/mnt/wsl/docker-desktop.*|/Volumes/.*|/private/tmp/.*|/private/var/folders/.*"}), 0.001)
               instant: true
               range: false
             relativeTimeRange:
@@ -1060,7 +1067,7 @@ groups:
               editorMode: code
               expr: >-
                 round(max by (machine_name, mountpoint)
-                (system_filesystem_utilization_ratio{mountpoint!~"/mnt/wsl/docker-desktop.*"}), 0.001)
+                (system_filesystem_utilization_ratio{mountpoint!~"/mnt/wsl/docker-desktop.*|/Volumes/.*|/private/tmp/.*|/private/var/folders/.*"}), 0.001)
               instant: true
               range: false
             relativeTimeRange:
