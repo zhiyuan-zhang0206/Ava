@@ -360,6 +360,27 @@ def test_strip_read_forwards_the_budget(monkeypatch: pytest.MonkeyPatch) -> None
     assert seen == [120, None]
 
 
+def test_strip_read_clamps_the_requested_budget_to_the_setting_ceiling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[int | None] = []
+
+    def _capture(
+        _agent_id: int, _start: datetime, _end: datetime, budget: int | None = None
+    ) -> tuple[list[object], bool]:
+        seen.append(budget)
+        return [], False
+
+    monkeypatch.setattr(strip, "_strip_messages_for_window", _capture)
+    monkeypatch.setattr(strip, "settings", _strip_settings(600, 20000))
+    now = datetime(2026, 9, 1, 0, 0, tzinfo=UTC)  # time-bomb-ok: explicit fixture window input
+
+    strip.strip_for_window_or_none(7, now, now, 9999)
+    strip.strip_for_window_or_none(7, now, now, 600)
+
+    assert seen == [600, 600]
+
+
 def test_window_excludes_legacy_epoch_timestamps_and_flags_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

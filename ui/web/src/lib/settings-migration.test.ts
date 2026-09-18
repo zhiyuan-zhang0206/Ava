@@ -241,3 +241,10 @@ describe("display.run_timeline_window_hours default", () => {
     expect(USER_SETTING_DEFAULTS["display.run_timeline_window_hours"]).toBe(0.5);
   });
 });
+
+
+describe("display.run_timeline_compare_messages_max default", () => {
+  it("keeps the compare view's strip read budget at the calibrated 200", () => {
+    expect(USER_SETTING_DEFAULTS["display.run_timeline_compare_messages_max"]).toBe(200);
+  });
+});
