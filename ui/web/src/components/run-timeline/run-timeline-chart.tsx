@@ -66,6 +66,11 @@ export function RunTimelineChart({
   onCrumbSelect,
   onFocusWindow,
   withReadout,
+  showStrip,
+  activeCategory: controlledCategory,
+  onActiveCategoryChange,
+  showLegend,
+  onHoverMessage,
   axis = "time",
   contextView,
   contextTotal,
@@ -109,6 +114,21 @@ export function RunTimelineChart({
   onContextFocus?: (view: TimelineContextView, label: string) => void;
   /** P4-1: persistent hover readout above the chart. */
   withReadout?: boolean;
+  /** P4-4 (#4023): strip opt-in — the compare view renders its per-lane strip
+   *  despite the shared `widthOverride` canvas; unset keeps the single-view
+   *  default (strip iff the response carries messages). */
+  showStrip?: boolean;
+  /** P4-4: controlled legend selection — one shared legend row drives every
+   *  compare lane; unset keeps the chart's internal state. */
+  activeCategory?: StripLegendCategory | null;
+  /** P4-4: legend toggled — fires in both the controlled and internal modes. */
+  onActiveCategoryChange?: (category: StripLegendCategory | null) => void;
+  /** P4-4: render the legend row (default true); the compare view hides the
+   *  per-lane legends and renders one shared row instead. */
+  showLegend?: boolean;
+  /** P4-4: hovered strip message index (null on leave) — the compare view
+   *  builds its single readout line from it. */
+  onHoverMessage?: (index: number | null) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const visualizationRef = useRef<HTMLDivElement>(null);
@@ -128,7 +148,16 @@ export function RunTimelineChart({
   const [popoverTarget, setPopoverTarget] = useState<TimelinePopoverTarget | null>(null);
   const [hoveredLayerIndex, setHoveredLayerIndex] = useState<number | null>(null);
   const [hoveredMessageIndex, setHoveredMessageIndex] = useState<number | null>(null);
-  const [activeCategory, setActiveCategory] = useState<StripLegendCategory | null>(null);
+  const [internalCategory, setInternalCategory] = useState<StripLegendCategory | null>(null);
+  // P4-4 (#4023): controlled when the caller passes `activeCategory` (the
+  // compare view owns one legend for every lane); unset keeps the internal
+  // state of the single view. `onActiveCategoryChange` fires either way.
+  const activeCategory = controlledCategory !== undefined ? controlledCategory : internalCategory;
+  const toggleCategory = (category: StripLegendCategory) => {
+    const next = activeCategory === category ? null : category;
+    if (controlledCategory === undefined) setInternalCategory(next);
+    onActiveCategoryChange?.(next);
+  };
   const [dragging, setDragging] = useState(false);
   // P4-1 (#4023): the pan/zoom gesture wiring lives in useTimelineGestures
   // (refs + unconditional finalization, see the PR #2887 review); the chart
@@ -137,11 +166,12 @@ export function RunTimelineChart({
   const rail = useMemo(() => prioritizedRailEvents(timeline.events), [timeline.events]);
   const layers = showSummaries ? timeline.layers : undefined;
   const pendingSpans = showSummaries ? timeline.pending : undefined;
-  // P4-2 (#4023): the raw-context strip is a single-view surface (M7 — the
-  // compare density is not designed), rendered only when the response
-  // carries the messages field (null = degraded read, same stance as
-  // layers/inbounds).
-  const stripMessages = widthOverride === undefined ? (timeline.messages ?? undefined) : undefined;
+  // P4-2 (#4023): the strip renders when the response carries the messages
+  // field (null = degraded read, same stance as layers/inbounds). P4-4: the
+  // compare view opts in explicitly (`showStrip`) under its shared
+  // `widthOverride` canvas; unset keeps the single view's default.
+  const stripAllowed = showStrip ?? (widthOverride === undefined);
+  const stripMessages = stripAllowed ? (timeline.messages ?? undefined) : undefined;
   const layout = useMemo(
     () =>
       buildTimelineLayout({
@@ -784,7 +814,14 @@ export function RunTimelineChart({
                       focusWindow(target, labels.messageLabel(message.idx));
                     }
                   }}
-                  onHover={withReadout ? setHoveredMessageIndex : undefined}
+                  onHover={
+                    withReadout || onHoverMessage
+                      ? (index) => {
+                          setHoveredMessageIndex(index);
+                          onHoverMessage?.(index);
+                        }
+                      : undefined
+                  }
                 />
               ) : null}
               {layout.strip && stripMessages && timeline.messages_truncated ? (
@@ -792,14 +829,8 @@ export function RunTimelineChart({
               ) : null}
             </div>
           </div>
-          {layout.strip && stripMessages ? (
-            <StripLegend
-              active={activeCategory}
-              labels={labels}
-              onToggle={(category) =>
-                setActiveCategory((current) => (current === category ? null : category))
-              }
-            />
+          {showLegend !== false && layout.strip && stripMessages ? (
+            <StripLegend active={activeCategory} labels={labels} onToggle={toggleCategory} />
           ) : null}
           {popoverTarget && (hoveredRow || hoveredEvent || hoveredPending) ? (
             <TimelinePopover

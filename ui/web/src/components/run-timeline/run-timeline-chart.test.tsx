@@ -812,6 +812,96 @@ describe("RunTimelineChart", () => {
     expect(screen.queryByRole("list", { name: "Message categories" })).toBeNull();
   });
 
+  it("gates the strip on showStrip under a width override (P4-4)", () => {
+    // P4-4 (#4023): the compare view opts in explicitly; unset keeps the P4-2
+    // default (width override = no strip), and a degraded read (null) never
+    // renders one.
+    const cases: {
+      override: boolean;
+      show: boolean;
+      messages: RunTimelineResponse["messages"];
+      strip: boolean;
+    }[] = [
+      { override: false, show: false, messages: stripTimeline.messages, strip: true },
+      { override: false, show: false, messages: null, strip: false },
+      { override: false, show: true, messages: stripTimeline.messages, strip: true },
+      { override: false, show: true, messages: null, strip: false },
+      { override: true, show: false, messages: stripTimeline.messages, strip: false },
+      { override: true, show: false, messages: null, strip: false },
+      { override: true, show: true, messages: stripTimeline.messages, strip: true },
+      { override: true, show: true, messages: null, strip: false },
+    ];
+    for (const matrixCase of cases) {
+      const { unmount } = render(
+        <RunTimelineChart
+          timeline={{ ...stripTimeline, messages: matrixCase.messages }}
+          labels={labels}
+          {...chartActions}
+          {...(matrixCase.override ? { widthOverride: 640 } : {})}
+          {...(matrixCase.show ? { showStrip: true } : {})}
+        />,
+      );
+      const rendered = screen.queryAllByTestId("strip-message-button").length > 0;
+      expect(rendered, JSON.stringify(matrixCase)).toBe(matrixCase.strip);
+      unmount();
+    }
+  });
+
+  it("keeps the legend controlled with no shadow state when activeCategory is passed (P4-4)", () => {
+    const onActiveCategoryChange = vi.fn();
+    render(
+      <RunTimelineChart
+        timeline={stripTimeline}
+        labels={labels}
+        {...chartActions}
+        activeCategory="think"
+        onActiveCategoryChange={onActiveCategoryChange}
+      />,
+    );
+
+    const think = screen.getByRole("button", { name: "thinking" });
+    const textButton = screen.getByRole("button", { name: "text output" });
+    expect(think.getAttribute("aria-pressed")).toBe("true");
+    const lit = screen
+      .getAllByTestId("strip-part")
+      .filter((part) => part.getAttribute("opacity") === "1");
+    expect(lit.every((part) => part.getAttribute("data-strip-color") === "think")).toBe(true);
+
+    // Clicking another row reports the next selection and does NOT move the
+    // highlight locally — the caller owns the state (single source).
+    fireEvent.click(textButton);
+    expect(onActiveCategoryChange).toHaveBeenCalledWith("text");
+    expect(think.getAttribute("aria-pressed")).toBe("true");
+    expect(textButton.getAttribute("aria-pressed")).toBe("false");
+
+    // Clicking the active row clears.
+    fireEvent.click(think);
+    expect(onActiveCategoryChange).toHaveBeenLastCalledWith(null);
+    expect(think.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("reports strip hover through onHoverMessage even without a readout (P4-4)", () => {
+    const onHoverMessage = vi.fn();
+    render(
+      <RunTimelineChart
+        timeline={stripTimeline}
+        labels={labels}
+        {...chartActions}
+        onHoverMessage={onHoverMessage}
+      />,
+    );
+
+    const button = screen.getAllByTestId("strip-message-button")[1];
+    fireEvent.pointerEnter(button);
+    expect(onHoverMessage).toHaveBeenLastCalledWith(1);
+    // The compare wiring feeds one page-level readout — no per-lane readout
+    // element exists when only the callback is passed.
+    expect(screen.queryByTestId("timeline-readout")).toBeNull();
+
+    fireEvent.pointerLeave(button);
+    expect(onHoverMessage).toHaveBeenLastCalledWith(null);
+  });
+
   it("marks covered messages related when a summary node is selected (P4-2)", () => {
     render(<RunTimelineChart timeline={stripTimeline} labels={labels} {...chartActions} />);
 

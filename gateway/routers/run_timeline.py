@@ -604,6 +604,7 @@ def get_run_timeline(
     level: Annotated[Literal["turn", "bucket"], Query()] = "turn",
     bucket: Annotated[str | None, Query()] = None,
     session: Annotated[Literal["compact", "current"], Query()] = "compact",
+    messages_max: Annotated[int | None, Query(ge=1)] = None,
 ) -> RunTimelineResponse:
     """Return an event-driven session waterfall with turn or bucket rows."""
     now = datetime.now(UTC)
@@ -647,7 +648,9 @@ def get_run_timeline(
         activity=[(row.start, row.end) for row in aggregate.rows],
     )
     inbounds = _inbounds_for_window(agent_id, window_start, window_end)
-    messages, messages_truncated = strip_for_window_or_none(agent_id, window_start, window_end)
+    messages, messages_truncated = strip_for_window_or_none(
+        agent_id, window_start, window_end, messages_max
+    )
     return RunTimelineResponse(
         agent_id=agent_id,
         window=RunTimelineWindow(from_=window_start, to=window_end),

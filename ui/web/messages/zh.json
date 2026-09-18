@@ -129,6 +129,7 @@
     "arrowReadout": "#{source} → #{target} · {time}",
     "arrowClusterReadout": "#{source} → #{target} · {time} ×{count}",
     "arrowReadoutHint": "悬停消息箭头查看详情。",
+    "stripReadFailedHint": "消息数据读取失败：无逐条消息条带。",
     "stripAria": "原始 context 消息",
     "stripTruncated": "更早的消息未显示",
     "stripMessageAria": "消息 {idx} · {kind} · {time} · {chars} 字符",

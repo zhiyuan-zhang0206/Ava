@@ -3,7 +3,8 @@
 // Category legend for the raw-context strip (P4-2, task #4023): the demo's
 // nine rows, swatch + name, click to highlight every matching part (muted
 // 0.12 otherwise), click again to clear. Rendered below the chart; the
-// compare view does not show it (M7 — compare density is not designed yet).
+// compare view renders one shared page-level row instead of a per-lane legend
+// (P4-4, task #4023): a controlled `activeCategory` drives every lane.
 
 import { FLEX } from "@/lib/layout";
 import { cn } from "@/lib/utils";

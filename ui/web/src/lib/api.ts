@@ -252,6 +252,9 @@ export const api = {
       level?: "turn" | "bucket";
       bucket?: string;
       session?: "compact" | "current";
+      /** P4-4 (#4023): a reduced strip cap for this read (the compare view's
+       *  density budget); the server clamps it to its own ceiling. */
+      messagesMax?: number;
     },
   ): Promise<RunTimelineResponse> => {
     const params = new URLSearchParams();
@@ -260,6 +263,7 @@ export const api = {
     if (options?.level != null) params.set("level", options.level);
     if (options?.bucket != null) params.set("bucket", options.bucket);
     if (options?.session != null) params.set("session", options.session);
+    if (options?.messagesMax != null) params.set("messages_max", String(options.messagesMax));
     const query = params.toString();
     return f(`/api/agents/${agentId}/run-timeline${query ? `?${query}` : ""}`).then(
       ok<RunTimelineResponse>,
