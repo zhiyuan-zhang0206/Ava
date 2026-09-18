@@ -98,10 +98,12 @@ def _copy_checkpoint_chain(
     the full-snapshot record of the segment it closes, so it needs no
     ancestors of its own to resume from. A thread that never compacted has no
     boundary and is copied back to its root — which is that thread's whole
-    history, still one context window's worth. This keeps forks off the
-    unbounded path: delta-written threads are exempt from checkpoint trimming
-    (the never-delete ruling, tasks #3180/#3181), so their chains grow without
-    limit and a full-chain copy eventually exceeds `statement_timeout`.
+    history, still one context window's worth. Chains are retained in full by
+    design (delta-written threads are exempt from checkpoint trimming — the
+    never-delete ruling, tasks #3180/#3181), so chain length tracks a thread's
+    whole life. Bounding the copy is what keeps repeated forks O(N) in rows
+    written rather than O(N^2); an unbounded copy also eventually exceeds
+    `statement_timeout`.
 
     Rows copied:
     - **checkpoints**: target ckpt_id and its ancestors, recursively following

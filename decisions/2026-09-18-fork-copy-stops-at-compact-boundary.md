@@ -10,11 +10,14 @@ every failure named the same source thread.
 The cause is an interaction between two mechanisms that are individually
 correct:
 
-- Delta-written threads are exempt from checkpoint trimming (the never-delete
-  ruling, tasks #3180/#3181): `_TRIM_SQL`'s `delta_thread` guard makes the
-  reaper skip them. Every long-lived agent is delta-written, so its chain grows
-  without any upper bound. Measured on the live cluster: 766,183 checkpoints
-  total, with single threads at 67,032 / 48,639 / 46,034.
+- Delta-written threads are *deliberately* exempt from checkpoint trimming (the
+  never-delete ruling, tasks #3180/#3181): `_TRIM_SQL`'s `delta_thread` guard
+  makes the reaper skip them. Retention is the point — chains are meant to grow
+  monotonically and stay recoverable. Measured on the live cluster: 766,183
+  checkpoints total, with single threads at 67,032 / 48,639 / 46,034. Chain
+  length is therefore a given, not a defect. What must hold is that everything
+  reading a chain costs what it actually needs, not what the chain has
+  accumulated.
 - `_copy_checkpoint_chain` walked `parent_checkpoint_id` all the way to the
   root and copied every ancestor, plus *every* blob row of the source thread
   (`WHERE thread_id = src`, unfiltered — its own docstring conceded that the
@@ -42,6 +45,11 @@ The blob filter uses the same join `PostgresSaver.SELECT_SQL` uses to read
 blobs (`jsonb_each_text(checkpoint -> 'channel_versions')` joined to
 `checkpoint_blobs`), so nothing a reader can reach is left behind.
 
+The property this protects is complexity, not storage. A fork copies one
+segment regardless of how long the source chain is, so forking repeatedly over
+a thread's life writes O(N) rows instead of O(N²). Nothing is deleted and
+nothing is meant to be.
+
 Agent-visible semantics are unchanged, and arguably tightened: after a
 compaction the source agent itself only sees post-boundary history, so a fork
 now starts from exactly what its parent currently sees.
@@ -58,10 +66,12 @@ now starts from exactly what its parent currently sees.
 - **Raise `statement_timeout` for the spawn path.** Treats the symptom. The
   copy stays proportional to thread age, so it only moves the cliff — and it
   moves a growing amount of write amplification into every fork.
-- **Make delta threads trimmable so chains stay short.** The exemption exists
-  to keep delta chains recoverable (#3180); weakening it trades this failure
-  for a data-loss-shaped one. Independently, fork should not depend on some
-  other subsystem keeping chains short — that coupling is what broke here.
+- **Make delta threads trimmable so chains stay short.** Rejected on intent,
+  not merely on risk: retention is deliberate (#3180, reaffirmed by user ruling
+  2026-09-18 — "checkpoints only grow, that is the correct behavior"). Trimming
+  history to make a reader cheap trades a complexity bug for data loss. Fork
+  must not depend on another subsystem keeping chains short; that coupling is
+  what broke here.
 - **Copy only the fork-point checkpoint.** Correct only for full-snapshot
   threads. Delta-written threads keep message content in `checkpoint_writes`
   attached to earlier checkpoints of the segment, so the replica would lose
@@ -79,6 +89,8 @@ now starts from exactly what its parent currently sees.
 - Superseded blob versions stay with the source. They were already unreachable
   from the copy — `SELECT_SQL` only resolves versions named in
   `channel_versions`.
-- This does not shrink existing chains. The underlying unbounded growth of
-  delta-written threads (766k checkpoints and climbing) remains open and is
-  tracked separately; this entry only takes fork off that growth curve.
+- Existing chains are untouched, and stay that way by design: monotonic
+  retention is the intended behavior, so a growing store is not a defect to
+  chase. The target is a *linear* store, not a small one — bounding each fork
+  to one segment is what keeps total write volume linear in a thread's life
+  instead of quadratic.
