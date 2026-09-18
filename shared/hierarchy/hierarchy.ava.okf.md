@@ -88,6 +88,16 @@ in `hierarchy_jobs` + `hierarchy_worker_state`.
   with the trigger-time tail sealed — the same semantics as the manual first
   run (`scripts/build_hierarchy_once.py`). Every later compact-driven pass
   seals no tail and leaves it pending for the next compact.
+- **The tail seal** (task #3981 C, opt-in via `hierarchy_tail_seal_enabled`):
+  an agent whose newest checkpoint has been quiet for
+  `hierarchy_tail_idle_minutes` gets its trailing stretch sealed by a `tail`
+  job, so default run-timeline windows show real blocks instead of an
+  uncovered tail. Gates: the checkpoint delta since the last seal
+  (`hierarchy_worker_state.last_tail_seal_cp_id`), a per-agent interval (or
+  the ordinary backoff / continuation pacing), a per-tick cap, and the
+  precondition that a clean non-tail build exists — it continues coverage,
+  never initializes it. Tail cells are provisional: a rebuild re-cuts them;
+  compact-sealed cells reproduce.
 - **Slicing and the zero-redo invariant**: a job self-limits at
   `hierarchy_job_budget_seconds`, newest stretches first; the unattempted
   remainder is recorded as `skipped` and the continuation run replays the

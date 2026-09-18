@@ -232,6 +232,17 @@ def test_hierarchy_budget_must_stay_below_deadline() -> None:
     assert configured.hierarchy_job_deadline_seconds == 3600
 
 
+def test_hierarchy_tail_defaults_ship_dark() -> None:
+    """The C-leg tail knobs' defaults: off, 15min idle, 60min interval, cap 3."""
+    from shared.config.daemon import DaemonSettings
+
+    configured = DaemonSettings.model_validate({})
+    assert configured.hierarchy_tail_seal_enabled is False
+    assert configured.hierarchy_tail_idle_minutes == 15.0
+    assert configured.hierarchy_tail_min_interval_minutes == 60.0
+    assert configured.hierarchy_tail_max_per_tick == 3
+
+
 def test_current_field_values_coerces_secretstr(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """A SecretStr field read from .env must come back a SecretStr, not a bare str
     — `.get_secret_value()` consumers crash on a plain str."""
