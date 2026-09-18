@@ -164,14 +164,34 @@ def enumerate_halted_alive(conn: Connection) -> list[BillingHaltedAlive]:
     ]
 
 
+def _provider_key() -> str | None:
+    """The DeepSeek bearer for the balance probe — gateway-safe.
+
+    The Settings value when this process holds it; otherwise this unit's
+    ``.env`` file. The gateway profile pops agent-runner capability keys from
+    os.environ (Task #856), so ``settings.lm.deepseek_api_key`` resolves None
+    there while the cluster ``.env`` stays the authoritative source — the same
+    fallback shape as ``shared/lm/factory.py::_ensure_provider_key``. The file
+    read is the sanctioned gateway-side consumption path, registered in
+    ``tests/shared/test_gateway_consumer_guard.py::_FALLBACK_CONSUMED_READS``.
+    """
+    from shared.config import field_alias, settings
+    from shared.runtime_config import read_env_aliases
+
+    key = settings.lm.deepseek_api_key
+    if key is not None:
+        return key.get_secret_value()
+    return read_env_aliases().get(field_alias("deepseek_api_key")) or None
+
+
 def fetch_provider_balance() -> BillingBalanceReport:
     """Probe the provider account balance; never raises (a fail-closed report).
 
     Reads ``settings.daemon.billing_recovery_*`` for the endpoint / timeout /
-    floor and ``settings.lm.deepseek_api_key`` for the bearer — the same
-    credential the model calls use. Any transport, HTTP, or payload surprise
-    returns ``ok=False`` with the reason; the run refuses rather than acting on
-    an unverified account.
+    floor and the DeepSeek bearer via ``_provider_key()`` (the Settings value,
+    or the unit ``.env`` file under the gateway profile that pops provider
+    keys). Any transport, HTTP, or payload surprise returns ``ok=False`` with
+    the reason; the run refuses rather than acting on an unverified account.
     """
     from shared import http_dial
     from shared.config import settings
@@ -179,15 +199,15 @@ def fetch_provider_balance() -> BillingBalanceReport:
     threshold = float(settings.daemon.billing_recovery_min_balance)
     url = settings.daemon.billing_recovery_balance_url
     timeout_s = float(settings.daemon.billing_recovery_balance_timeout_s)
-    key = settings.lm.deepseek_api_key
-    if key is None:
+    bearer = _provider_key()
+    if bearer is None:
         return BillingBalanceReport(
             ok=False, detail="deepseek_api_key is not configured", threshold=threshold
         )
     try:
         resp = http_dial.get(
             url,
-            headers={"Authorization": f"Bearer {key.get_secret_value()}"},
+            headers={"Authorization": f"Bearer {bearer}"},
             timeout=timeout_s,
         )
     except httpx.HTTPError as exc:

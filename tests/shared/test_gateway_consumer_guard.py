@@ -11,6 +11,9 @@ The "right" fix when this fires is either:
   field is genuinely owned by gateway-side code, like telegram/feishu for im_bridge)
 - Move the field to a gateway-scope domain (services, daemon, gateway)
 - Move the read to a different process (agent-side code should not run in gateway)
+- Consume a popped value with the .env-file fallback when the read must stay in
+  a gateway process (shared.runtime_config.read_env_aliases) and register it in
+  _FALLBACK_CONSUMED_READS — an explicit, pinned exemption, never a blanket skip
 
 This is the structural enforcement the orchestrator asked for — the consumption
 matrix is the true source of ownership.
@@ -242,6 +245,21 @@ _AGENT_ONLY_ALLOWLIST = frozenset(
     }
 )
 
+# Reads of a popped alias that are deliberately fallback-consumed: the module
+# reads the Settings value and — when the gateway profile has popped the
+# env var (Task #856) — falls back to this unit's `.env` file via
+# `shared.runtime_config.read_env_aliases()`, the sanctioned gateway-side
+# source (same shape as shared/lm/factory.py::_ensure_provider_key). Each
+# entry is an explicit, reviewable exemption keyed by (module, field); the
+# companion test below pins every entry to fallback code that actually
+# exists, so the registry can never outlive the code it excuses.
+_FALLBACK_CONSUMED_READS: dict[tuple[str, str], str] = {
+    ("ops/billing_recovery.py", "deepseek_api_key"): (
+        "the provider-balance probe runs in-process on the gateway (the POST "
+        "route executes it); falls back to the unit .env file (task #3956)"
+    ),
+}
+
 
 @lru_cache
 def _repo_internal_import_closure(roots: tuple[str, ...]) -> set[Path]:
@@ -291,12 +309,19 @@ def _repo_internal_import_closure(roots: tuple[str, ...]) -> set[Path]:
                     "gateway",
                     "services",
                     "agent",
+                    "ops",  # gateway HTTP routes execute ops/* in-process (task #3956)
                 )
             ):
                 frontier.append(node.module)
             elif isinstance(node, ast.Import):
                 for alias in node.names:
-                    if alias.name.split(".")[0] in ("shared", "gateway", "services", "agent"):
+                    if alias.name.split(".")[0] in (
+                        "shared",
+                        "gateway",
+                        "services",
+                        "agent",
+                        "ops",
+                    ):
                         frontier.append(alias.name)
     return closure
 
@@ -324,6 +349,11 @@ def test_gateway_closure_reads_do_not_hit_popped_keys() -> None:
                 continue
             alias = field_alias(field)
             if alias in runner_cluster_aliases:
+                if (rel, field) in _FALLBACK_CONSUMED_READS:
+                    # Explicit, reviewable exemption: the module consumes this
+                    # value with the .env-file fallback (pinned below) — not a
+                    # blanket skip; the entry names both module and field.
+                    continue
                 violations.append((rel, f"{domain}.{field}", alias))
     if violations:
         msg = (
@@ -334,10 +364,11 @@ def test_gateway_closure_reads_do_not_hit_popped_keys() -> None:
         for file, access, alias in sorted(violations):
             msg += f"  {file}: settings.{access} → {alias}\n"
         msg += (
-            "\nFix: consume the key with a .env-file fallback (see "
-            "shared/lm/factory.py validate_model_config), change the field's "
-            "capability, or add the module to _AGENT_ONLY_ALLOWLIST only if it "
-            "is genuinely never executed by a gateway process."
+            "\nFix: consume the key with a .env-file fallback and register the read "
+            "in _FALLBACK_CONSUMED_READS (explicit + pinned; see "
+            "shared/runtime_config.read_env_aliases), change the field's capability, "
+            "or add the module to _AGENT_ONLY_ALLOWLIST only if it is genuinely "
+            "never executed by a gateway process."
         )
         pytest.fail(msg)
 
@@ -520,4 +551,21 @@ def test_profile_domains_match_consumption_matrix() -> None:
             f"{kind} profile contains domains nothing in the kind's code or import "
             f"closure reads — a capability-axis artifact? Remove them or prove a "
             f"consumer: {sorted(extra)}"
+        )
+
+
+def test_fallback_consumed_reads_stay_pinned_to_real_fallback_code() -> None:
+    """Every _FALLBACK_CONSUMED_READS entry must cite fallback code that exists.
+
+    The registry excuses a specific (module, field) read from the popped-alias
+    scan; this pin fails the moment the fallback call disappears, so an entry
+    can never silently outlive the code it excuses (no generically weakened
+    scan).
+    """
+    root = _repo_root()
+    for (rel, field), why in _FALLBACK_CONSUMED_READS.items():
+        src = (root / rel).read_text(errors="replace")
+        assert "read_env_aliases" in src, f"{rel}: no read_env_aliases fallback ({why})"
+        assert f'field_alias("{field}")' in src, (
+            f"{rel}: fallback does not name field {field!r} ({why})"
         )
