@@ -1136,7 +1136,7 @@ groups:
                 type: prometheus
                 uid: prometheus
               editorMode: code
-              expr: max(ava_checkpoint_table_sizes_blobs_bytes) > 2684354560
+              expr: max(ava_checkpoint_table_sizes_blobs_bytes_ratio) > 2684354560
               instant: true
               range: false
             relativeTimeRange:
@@ -1200,7 +1200,7 @@ groups:
                 type: prometheus
                 uid: prometheus
               editorMode: code
-              expr: max(ava_checkpoint_table_sizes_blobs_bytes) > 4294967296
+              expr: max(ava_checkpoint_table_sizes_blobs_bytes_ratio) > 4294967296
               instant: true
               range: false
             relativeTimeRange:
@@ -1491,7 +1491,7 @@ groups:
               editorMode: code
               expr: >-
                 time() - max by (cluster, machine, process, queue)
-                (ava_event_log_drop_last_dropped_at{cluster=".ava"})
+                (ava_event_log_drop_last_dropped_at_ratio{cluster=".ava"})
               instant: true
               range: false
             relativeTimeRange:
