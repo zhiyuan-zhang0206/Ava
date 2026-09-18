@@ -212,6 +212,7 @@ def test_glm_catalog_entries_live_only_in_the_archive() -> None:
         "glm-5.2",
         "glm-5.3",
         "glm-5.3-flash",
+        "glm-5.3-flashx",
     }
 
     assert expected.isdisjoint(runtime_models)
@@ -623,6 +624,7 @@ def test_glm_plugin_prices_equal_archive_current_base_tier(
         "glm-5.2",
         "glm-5.3",
         "glm-5.3-flash",
+        "glm-5.3-flashx",
     )
     current_instant = datetime(2026, 9, 5, tzinfo=UTC)
     plugin_rates = {model: _plugin_rates(model, current_instant) for model in model_ids}

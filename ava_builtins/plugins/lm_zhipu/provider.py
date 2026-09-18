@@ -30,10 +30,11 @@ def build(ctx: BuildContext) -> BaseChatModel:
     """glm-* branch: ReasoningContentChatModel (OpenAI-compatible).
     Thinking off rides top-level `thinking` via extra_body; otherwise
     reasoning effort rides the `reasoning_effort` constructor field.
-    Models whose reasoning is always on (glm-5.3 / glm-5.3-flash,
-    `ModelSpec.thinking_always_on`) get a warning instead — their endpoint
-    rejects thinking.type=disabled with a 400 (error code 1210), so sending
-    the body would fail the call rather than honor the intent."""
+    Models whose reasoning is always on (glm-5.3 / glm-5.3-flash /
+    glm-5.3-flashx, `ModelSpec.thinking_always_on`) get a warning instead —
+    their endpoint rejects thinking.type=disabled with a 400 (error code
+    1210), so sending the body would fail the call rather than honor the
+    intent."""
     from shared.lm._reasoning_compat import ReasoningContentChatModel
 
     # Zhipu GLM API is OpenAI-compatible (https://open.bigmodel.cn/api/paas/v4),
@@ -51,10 +52,11 @@ def build(ctx: BuildContext) -> BaseChatModel:
     glm_kwargs: dict[str, Any] = {}
     if ctx.thinking is not None and ctx.thinking.get("type") == "disabled":
         if ctx.spec is not None and ctx.spec.thinking_always_on:
-            # glm-5.3 / glm-5.3-flash always think — the endpoint rejects
-            # thinking.type=disabled (400, error code 1210, live-checked
-            # 2026-08-27). Warn like the kimi branch instead of sending a
-            # body that fails the call.
+            # glm-5.3 / glm-5.3-flash / glm-5.3-flashx always think — the
+            # endpoint rejects thinking.type=disabled (400, error code 1210,
+            # live-checked 2026-08-27 on 5.3/5.3-flash; the FlashX pair page
+            # documents the same always-on behavior). Warn like the kimi
+            # branch instead of sending a body that fails the call.
             logger.warning(
                 f"{ctx.model} cannot disable thinking; thinking={{'type': 'disabled'}} ignored"
             )
@@ -163,6 +165,42 @@ register(
                 llm_retry_max_attempts=10,
             ),
         ),
+        "glm-5.3-flashx": ModelSpec(
+            provider="glm",
+            spawnable=True,
+            # docs.z.ai/guides/vlm/glm-5.3-flash — the GLM-5.3-Flash/FlashX
+            # pair page (Context Length 1M; "GLM-5.3-FlashX is now live,
+            # delivering inference speeds of 200 tokens/s"). FlashX is the
+            # high-speed serving SKU of the same GLM-5.3-Flash model, not a
+            # superseding line: the page publishes both model codes
+            # ("glm-5.3-flash / glm-5.3-flashx") and FlashX is "not yet
+            # available on the [Coding] plan" — the two ids coexist.
+            context_window=1_000_000,
+            # Zhipu publishes no knowledge cutoff for any GLM-5 model; carries
+            # the glm-5.3 entry's conservative 2025-12 estimate forward — erring
+            # early is the safe direction (see glm-5.3's entry).
+            knowledge_cutoff="2025-12",
+            # The pair page: "Text parameters are consistent with GLM-5.3";
+            # docs.z.ai/api-reference/llm/chat-completion documents the series'
+            # effort vocabulary as low / high / max (default max).
+            effort_levels=("low", "high", "max"),
+            # Same native multimodal stack as glm-5.3-flash (video / image /
+            # text / file input per the pair page); the OpenAI-compatible
+            # binding Ava dials renders image_url blocks only — the same
+            # conservatism as qwen3.8-max (whose official modality list also
+            # includes video).
+            media_types=frozenset({"image"}),
+            # Same always-on thinking as glm-5.3 / glm-5.3-flash (pair page:
+            # "thinking.type only supports enabled").
+            thinking_always_on=True,
+            tuning=ModelTuning(
+                # Z.ai documents the GLM-5.3 series' default effort as max.
+                reasoning_effort="max",
+                # Same GLM-family overload history rationale as glm-5.2's entry
+                # (llm_retry_max_attempts=10).
+                llm_retry_max_attempts=10,
+            ),
+        ),
     },
     pricing={
         "glm-5.2": PriceRates(
@@ -255,6 +293,31 @@ register(
                             cache_miss="0.15",
                             cache_hit="0.03",
                             output="0.50",
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        "glm-5.3-flashx": PriceRates(
+            cache_miss=0.37,
+            cache_hit=0.075,
+            output=1.25,
+            source_url="https://docs.z.ai/guides/overview/pricing",
+            source_checked_at="2026-09-19",
+            vendor="zhipu",
+            # The pricing page lists FlashX with plain per-1M rates and no
+            # promotional period (checked 2026-09-19) — one unbounded base tier.
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="0.37",
+                            cache_hit="0.075",
+                            output="1.25",
                         ),
                     ),
                 ),

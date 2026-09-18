@@ -1061,7 +1061,7 @@ class TestReasoningEffortDispatch:
         assert m.extra_body == {"thinking": {"type": "disabled"}}
         assert m.reasoning_effort is None
 
-    @pytest.mark.parametrize("model", ["glm-5.3", "glm-5.3-flash"])
+    @pytest.mark.parametrize("model", ["glm-5.3", "glm-5.3-flash", "glm-5.3-flashx"])
     def test_glm_5_3_thinking_disabled_warns_instead_of_sending_body(
         self, monkeypatch: pytest.MonkeyPatch, model: str
     ) -> None:
