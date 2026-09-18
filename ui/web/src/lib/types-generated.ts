@@ -2887,6 +2887,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/{agent_id}/run-timeline/message": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Run Timeline Message
+         * @description One strip message's text — the on-demand read behind the panel.
+         *
+         *     ``key`` is the strip's stable message identity (``c.<idx>`` /
+         *     ``s<rank>.<boundary>.<idx>``). Parts longer than
+         *     ``display.run_timeline_message_text_max`` come back clipped with
+         *     ``content_truncated``; refetch with ``full=true`` for the uncut text.
+         */
+        get: operations["get_run_timeline_message_api_agents__agent_id__run_timeline_message_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents/{agent_id}/run-timeline": {
         parameters: {
             query?: never;
@@ -7163,6 +7188,93 @@ export interface components {
             model: string | null;
         };
         /**
+         * RunTimelineMessage
+         * @description One context message in the window — the raw strip's geometry source.
+         *
+         *     ``key`` is the stable read identity the message-details route resolves
+         *     (current segment ``c.<msg_idx>``; compact history
+         *     ``s<rank>.<boundary>.<msg_idx>``). Message text deliberately stays out of
+         *     this response; the details route serves it on demand.
+         */
+        RunTimelineMessage: {
+            /** Key */
+            key: string;
+            /** Idx */
+            idx: number;
+            /** Ts */
+            ts: string | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "prompt" | "note" | "compact" | "inbound" | "attach" | "ai" | "exec";
+            /** Source */
+            source: string | null;
+            /** Chars */
+            chars: number;
+            /** Parts */
+            parts: components["schemas"]["RunTimelineMessagePart"][];
+        };
+        /**
+         * RunTimelineMessageDetailPart
+         * @description One part's text as the panel reads it.
+         */
+        RunTimelineMessageDetailPart: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "think" | "text" | "call" | "out" | "note" | "compact" | "inbound" | "attach" | "prompt";
+            /** Chars */
+            chars: number;
+            /** Text */
+            text: string;
+            /**
+             * Text Truncated
+             * @default false
+             */
+            text_truncated: boolean;
+        };
+        /**
+         * RunTimelineMessageDetails
+         * @description GET /api/agents/{agent_id}/run-timeline/message response.
+         */
+        RunTimelineMessageDetails: {
+            /** Key */
+            key: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "prompt" | "note" | "compact" | "inbound" | "attach" | "ai" | "exec";
+            /** Ts */
+            ts: string | null;
+            /** Source */
+            source: string | null;
+            /** Chars */
+            chars: number;
+            /** Parts */
+            parts: components["schemas"]["RunTimelineMessageDetailPart"][];
+            /** Content Truncated */
+            content_truncated: boolean;
+        };
+        /**
+         * RunTimelineMessagePart
+         * @description One colored part of a strip message; adjacent same-kind parts merge.
+         *
+         *     ``chars`` is the part's exact content length — characters as measured
+         *     (the approved width/readout unit), not an estimate.
+         */
+        RunTimelineMessagePart: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "think" | "text" | "call" | "out" | "note" | "compact" | "inbound" | "attach" | "prompt";
+            /** Chars */
+            chars: number;
+        };
+        /**
          * RunTimelineMeta
          * @description Run-level totals derived from the rows in a timeline window.
          */
@@ -7232,6 +7344,10 @@ export interface components {
             pending?: components["schemas"]["RunTimelinePendingSpan"][] | null;
             /** Inbounds */
             inbounds?: components["schemas"]["RunTimelineInbound"][] | null;
+            /** Messages */
+            messages?: components["schemas"]["RunTimelineMessage"][] | null;
+            /** Messages Truncated */
+            messages_truncated?: boolean | null;
         };
         /**
          * RunTimelineRow
@@ -11866,6 +11982,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EventsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_timeline_message_api_agents__agent_id__run_timeline_message_get: {
+        parameters: {
+            query: {
+                key: string;
+                full?: boolean;
+            };
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunTimelineMessageDetails"];
                 };
             };
             /** @description Validation Error */

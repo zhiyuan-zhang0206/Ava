@@ -21,6 +21,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from gateway import loki_events
 from gateway.routers._backend_failure import raise_backend_unavailable
 from gateway.routers._eval_guard import deny_isolated_result_read
+from gateway.routers.run_timeline_strip import router as strip_router
+from gateway.routers.run_timeline_strip import strip_for_window_or_none
 from gateway.schemas.run_timeline import (
     RunTimelineBoundaries,
     RunTimelineEvent,
@@ -39,6 +41,9 @@ from shared.config import settings
 from shared.log import logger
 
 router = APIRouter()
+# The strip surface (P4-2) rides this router: app.py is at its line budget,
+# and the route family stays self-contained under the run-timeline path.
+router.include_router(strip_router)
 
 _RETENTION = timedelta(days=7)
 _FALLBACK_WINDOW = timedelta(hours=24)
@@ -642,6 +647,7 @@ def get_run_timeline(
         activity=[(row.start, row.end) for row in aggregate.rows],
     )
     inbounds = _inbounds_for_window(agent_id, window_start, window_end)
+    messages, messages_truncated = strip_for_window_or_none(agent_id, window_start, window_end)
     return RunTimelineResponse(
         agent_id=agent_id,
         window=RunTimelineWindow(from_=window_start, to=window_end),
@@ -658,6 +664,8 @@ def get_run_timeline(
         summary=summary,
         pending=pending,
         inbounds=inbounds,
+        messages=messages,
+        messages_truncated=messages_truncated,
     )
 
 
