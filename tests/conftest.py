@@ -1455,11 +1455,22 @@ def _stub_everywhere(
     alias of every name it exposes, and the consumers that import from it at module
     top level freeze one more each. Converting the `ops.cluster*` family's internal
     reads did not shrink that set — every name guarded here is still reached through
-    a facade alias by someone."""
+    a facade alias by someone. The alias scan reads module `__dict__`s only —
+    it must not probe `__getattr__` (PEP 562), which can execute arbitrary
+    code with side effects (task #3950)."""
     real = getattr(module, name)
     monkeypatch.setattr(module, name, stub)
     for mod in list(sys.modules.values()):
-        if getattr(mod, name, None) is real:
+        # Static lookup on purpose — never `getattr(mod, name, None)`: that
+        # invokes a module-level `__getattr__` (PEP 562) on every loaded
+        # module, and a dynamic surface can run arbitrary code while merely
+        # being probed (task #3950: `ava.mcps.__getattr__` formats its "no such
+        # server" message by calling the metered `servers()`, so the old probe
+        # emitted a burst of `sdk_call` telemetry rows on every test setup and
+        # polluted the per-test event mirror). A dynamically-served name is
+        # not a frozen alias either — the real object was never bound into the
+        # module's dict, which is exactly the surface the rebind below sets on.
+        if getattr(mod, "__dict__", {}).get(name, None) is real:
             monkeypatch.setattr(mod, name, stub)
 
 
