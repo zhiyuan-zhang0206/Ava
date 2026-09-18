@@ -9,7 +9,7 @@ tags: [frontend, timeline]
 
 The normal timeline query hydrates permanent impersonation entries under a
 checkpoint session marker. `impersonation_changed` and `inbound_arrived` refresh
-that query while native execution is parked. The same numeric item cursors,
+that query while the native agent is parked. The same numeric item cursors,
 snapshot merge and compact-history paging handle these extra blocks. There is
 no separate client message store. Each card carries optional `impersonation`
 metadata (agent/session id, name, executor and observed process); user direction

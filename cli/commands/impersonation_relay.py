@@ -82,7 +82,7 @@ class InboxSnapshot:
     coalesce (not a user chat, not a cancel, not a reminder); anything outside
     it pushes immediately. ``batch_window`` is the lease's configured merge
     window in seconds; 0 keeps the pre-window behaviour. ``start_message`` is
-    the native agent's handoff brief; empty only for leases accepted before
+    the native agent's briefing; empty only for leases accepted before
     the push protocol shipped.
     """
 
@@ -164,7 +164,7 @@ def message_push(
 
 
 def activation_hint(agent_id: int, lease_id: int | UUID) -> str:
-    """Fallback opener for a lease accepted without a start message.
+    """Fallback start message for a lease accepted without one.
 
     New accepts require a nonempty start message, so this only serves leases
     accepted before the push protocol shipped. Updated to the push contract:
@@ -362,7 +362,7 @@ async def relay_inbox(  # noqa: PLR0915 — one lease-driven state machine: term
     observation shrinks the outstanding set; the envelope ids make delivery
     idempotent, and a relay restart replays every pending row.
 
-    The start message (the native agent's handoff brief) goes first, once, when
+    The start message goes first, once, when
     the lease goes active. Rows already pending at activation skip the merge
     window — they waited through consent; later routine arrivals coalesce
     inside the configured window, while user chats, cancels and reminders
@@ -403,10 +403,10 @@ async def relay_inbox(  # noqa: PLR0915 — one lease-driven state machine: term
                 continue
             if not start_sent:
                 activation_pending = snapshot.message_ids
-                opener = snapshot.start_message or activation_hint(agent_id, lease_id)
+                start_message = snapshot.start_message or activation_hint(agent_id, lease_id)
                 if snapshot.start_message and isinstance(lease_id, int):
-                    opener += "\n\n" + activation_hint(agent_id, lease_id)
-                emit(opener)
+                    start_message += "\n\n" + activation_hint(agent_id, lease_id)
+                emit(start_message)
                 start_sent = True
                 last_emit = _loop_time()
                 continue
