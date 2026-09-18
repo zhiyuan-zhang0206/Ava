@@ -40,8 +40,10 @@ ARCHIVE_FLOOR_AT = datetime(2026, 5, 20, 0, 0, tzinfo=UTC)
 ARCHIVE_FREEZE_AT = datetime(2026, 8, 13, 3, 54, 10, 626517, tzinfo=UTC)
 EVENT_STREAM_RETENTION = timedelta(hours=84)
 # Must match deployed Loki `querier.max_concurrent`; render validation catches
-# drift before it ships (the 2026-08-18 incident).
-LOKI_QUERY_CONCURRENCY = 4
+# drift before it ships (the 2026-08-18 incident). Raised 4 to 6 with the
+# 2026-09-18 query-latency mitigation (task #3891) so queued queries drain
+# faster, still bounded within the box's 10 cores.
+LOKI_QUERY_CONCURRENCY = 6
 # WAL disk-full write throttle (ingester.wal.disk_full_threshold, verified
 # against loki 3.7.6 `-verify-config`): 0.95 tolerates the data volume's
 # 89-91% oscillation while keeping a real disk-full guard.

@@ -25,11 +25,13 @@ analytics:
   reporting_enabled: false
 
 # Single-box sizing: this instance shares one 10-core/16GB host with the
-# production cluster (Postgres, Redis, gateway, agents). max_concurrent: 4 is
-# the 3.x default, pinned explicitly so it cannot drift — it is what bounds a
-# query storm to ~4 cores of the box (2026-08-18 incident).
+# production cluster (Postgres, Redis, gateway, agents). max_concurrent: 6 —
+# raised from the 3.x default 4 with the 2026-09-18 query-latency mitigation
+# (task #3891) so queued queries drain faster; it still bounds a query storm
+# to ~6 cores of the box. Pinned explicitly so it cannot drift (2026-08-18
+# incident).
 querier:
-  max_concurrent: 4
+  max_concurrent: 6
 
 common:
   path_prefix: /loki
