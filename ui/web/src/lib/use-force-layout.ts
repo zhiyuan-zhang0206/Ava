@@ -265,13 +265,14 @@ export function useForceLayout(
       posRef.current = snap;
       setPositions(snap);
     });
-    if (prewarm > 0) {
-      // Resume only the residual decay; the warmed alpha keeps the tail short
-      // (and it is empty when the warm-up already reached alphaMin).
-      if (sim.alpha() > sim.alphaMin()) sim.restart();
-    } else {
+    if (prewarm <= 0) {
+      // No warm-up slices: the timer path owns the settle from the first tick.
       sim.alpha(0.9).restart();
     }
+    // With prewarm > 0 the slice loop owns the simulation and hands the
+    // residual alpha back to the timer when it drains (see slice()); starting
+    // the timer here would re-enter the per-tick render path mid-warm-up —
+    // the render storm task #4008 removes.
     simRef.current = sim;
 
     return () => {

@@ -435,6 +435,9 @@ def _pool_revision(root: Path) -> str | None:
     return out.stdout.strip() or None
 
 
+# maxsize=4 is headroom for refresh races — consecutive revisions requested
+# around a pull/consolidation (a refresh can advance the pool more than once)
+# must not evict each other and re-run the ~2s build. Not a tuning knob.
 @lru_cache(maxsize=4)
 def _cached_memory_graph(
     root_str: str,

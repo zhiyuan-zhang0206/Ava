@@ -57,7 +57,7 @@ afterEach(() => {
 });
 
 describe("useForceLayout warm-up (task #4008)", () => {
-  it("settles in sparse rAF slices — commits stay far below the tick count", () => {
+  it("settles in sparse rAF slices — commits stay far below the tick count", async () => {
     const rafCbs: FrameRequestCallback[] = [];
     let nextId = 0;
     vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
@@ -68,6 +68,14 @@ describe("useForceLayout warm-up (task #4008)", () => {
 
     const onCommit = vi.fn();
     const { getByTestId } = render(<Harness prewarmTicks={320} onCommit={onCommit} />);
+
+    // The slice loop owns the simulation until it drains: no timer-driven
+    // "tick" may fire before we pump. d3-timer captured the native rAF at
+    // import time, so the stub above cannot intercept it — wait real time and
+    // require silence. A setup-time sim.restart() would tick at ~60fps here,
+    // re-entering the every-tick render path this warm-up exists to avoid.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(onCommit).not.toHaveBeenCalled();
 
     // Pump frames until the warm-up drains its scheduled slices (the ~270
     // manual ticks are bounded by 320; a slice budget always makes progress).

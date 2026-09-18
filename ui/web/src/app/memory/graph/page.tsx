@@ -412,7 +412,7 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
     }));
   }, [graph.edges]);
 
-  // Task #4008: warm the ~2k-node layout synchronously before the first
+  // Task #4008: warm the ~2k-node layout in time-budgeted slices before the
   // render — the live per-tick render storm saturated the main thread for
   // seconds (measured 5.0s of long tasks on the before side).
   const { positions, layout } = useForceLayout(simNodes, simLinks, params, {
