@@ -280,7 +280,7 @@ def activate(lease_id: str, incarnation: RuntimeIncarnation) -> dict[str, Any]:
         if meta["incarnation_resources"] is not None:
             resources = decode_resources(meta["incarnation_resources"])
             if not isinstance(resources, IncarnationResources) or resources.requests:
-                raise ImpersonationError("Native execution resources have not drained")
+                raise ImpersonationError("The native agent's resources have not drained")
         conn.execute(
             "UPDATE agent_impersonations SET status='active',activated_at=clock_timestamp(),"
             "expires_at=clock_timestamp()+ttl_seconds*interval '1 second' WHERE id=%s",

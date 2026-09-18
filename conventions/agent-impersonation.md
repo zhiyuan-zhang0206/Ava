@@ -122,7 +122,7 @@ The summary must be written by the impersonator. Ava generates one JSON file at
 `<agent workspace>/impersonation/0.json`, with session/process metadata, all
 incoming/outgoing messages, inbound ACK state, lifecycle history, original
 consumed SDK/API events and counts (calls, task changes, recipients, duration).
-The file is saved before native execution resumes. The summary and file path
+The file is saved before the native agent resumes. The summary and file path
 arrive as the first new system note, ahead of subsequent normal input. Captured
 unacknowledged input remains in the JSON for the native agent to handle.
 
