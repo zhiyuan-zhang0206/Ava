@@ -162,6 +162,42 @@ def _anchor_liveness(anchor: dict[str, Any]) -> str:
     return "alive"
 
 
+def classify_anchor(anchor: dict[str, Any]) -> str:
+    """Strict liveness for one recorded anchor: alive | dead | reused | denied | unknown.
+
+    Unlike ``_anchor_liveness`` (fail-closed for caller attestation, where
+    AccessDenied reads as dead), the supervisor must not kill a possibly-live
+    executor it merely cannot read, so unreadable and unexpected states stay
+    distinguishable for the two-beat rule.
+    """
+    pid = anchor.get("pid")
+    if isinstance(pid, bool) or not isinstance(pid, int):
+        return "unknown"
+    try:
+        process = psutil.Process(pid)
+        if process.status() in (psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD):
+            return "dead"
+        birth = _number(anchor.get("created_at"))
+        if birth is not None and not create_time_matches(stable_create_time(process), birth):
+            return "reused"
+    except psutil.NoSuchProcess:
+        return "dead"
+    except psutil.AccessDenied:
+        return "denied"
+    except psutil.Error:
+        return "unknown"
+    return "alive"
+
+
+def provider_anchor_states(process_metadata: object) -> list[str]:
+    """Classify each recorded provider anchor — the supervisor's liveness view."""
+    return [
+        classify_anchor(node)
+        for node in _metadata_nodes(process_metadata)
+        if _is_provider_node(node)
+    ]
+
+
 def verify_caller(lease: dict[str, Any], caller: object) -> None:
     """Require the caller to descend from the lease's recorded controller process.
 

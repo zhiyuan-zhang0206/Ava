@@ -8,6 +8,9 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
 ## [Unreleased]
 
 ### Added
+- The `impersonation_aborted` telemetry event fires when the native supervisor
+  stops a takeover after a core-component death, carrying the agent, lease,
+  session, the dead component (executor / relay) and the detail (task #3998).
 - Grafana ops monitoring for LLM stream stalls (task #3889, wiring the
   #3884 stall telemetry): the Ops dashboard's LLM section gains a
   "Provider stalls (per minute)" panel — `stream_stalled_retry` sliced by
@@ -46,6 +49,18 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
   a `chrome_page_ttl_expired` / `chrome_page_ttl_renewed` event (task #3035).
 
 ### Changed
+- A takeover no longer outlives a dead core component, and a dead relay is no
+  longer silently respawned (task #3998, user ruling 2026-09-18): the accepting
+  runtime re-checks the recorded executor process chain and the bound relay's
+  heartbeat on every held pass — the dispatcher's pull scan now keeps held rows
+  in its periodic cadence — and closes the lease when every anchor is
+  dead/reused or the heartbeat is stale past 45 seconds: status `expired`, the
+  cause recorded as `aborted: <detail>`, a relay process still held
+  terminated, and an end-of-session note naming the cause. The single
+  restart-shaped exception — a codex relay minted by an earlier incarnation,
+  last beat before this process start, inside the fresh-start window
+  (`AVA_IMPERSONATION_REPROVISION_WINDOW_SECONDS`, default 120 s, 0 disables)
+  — is re-provisioned instead of stopped.
 - The impersonation relay delivers routine inbox arrivals immediately by
   default: the per-lease merge window (`relay_batch_window_seconds` — request
   `--batch-window`) defaults to 0, with merging still available per lease

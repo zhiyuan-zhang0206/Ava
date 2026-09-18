@@ -510,9 +510,11 @@ async def test_claim_gate_tears_down_the_relay_when_control_returns(
     assert 42 not in impersonation._relay_children
 
 
-async def test_claim_gate_respawns_a_dead_codex_relay(
+async def test_claim_gate_stops_the_lease_when_its_minted_codex_relay_died(
     monkeypatch: pytest.MonkeyPatch, incarnation: RuntimeIncarnation
 ) -> None:
+    """A relay this process minted (its token is held) that stopped
+    heartbeating stops the lease — no respawn (task #3998)."""
     from datetime import UTC, datetime, timedelta
 
     impersonation._relay_children.clear()
@@ -521,17 +523,19 @@ async def test_claim_gate_respawns_a_dead_codex_relay(
     dead = MagicMock()
     dead.poll.return_value = 1
     impersonation._relay_children[42] = impersonation._RelayChild("lease-1", dead, "old-token", 0.0)
-    impersonation._relay_children[42].last_spawn_attempt = 0.0
-    new_process = MagicMock()
-    new_process.poll.return_value = None
-    spawn = Mock(return_value=new_process)
+    abort = Mock(return_value={"id": "lease-1"})
+    monkeypatch.setattr("shared.impersonation.abort_lease", abort)
+    spawn = Mock()
     monkeypatch.setattr(impersonation, "_spawn_codex_relay", spawn)
     from agent.nodes import END
 
     decision = await impersonation.claim_gate(BaseAgentState(), 42)
     assert decision is not None and decision.goto == END
-    spawn.assert_called_once_with(42, "lease-1", "old-token", "thread-1", None, None)
-    assert impersonation._relay_children[42].process is new_process
+    abort.assert_called_once()
+    assert abort.call_args.args[0] == "lease-1"
+    assert abort.call_args.args[2] == "the bound relay stopped heartbeating"
+    spawn.assert_not_called()
+    assert 42 not in impersonation._relay_children
     impersonation._relay_children.clear()
 
 
@@ -554,9 +558,11 @@ async def test_claim_gate_respects_startup_grace_for_a_fresh_spawn(
     impersonation._relay_children.clear()
 
 
-async def test_claim_gate_stamps_a_stale_claude_relay_failure(
+async def test_claim_gate_stops_a_stale_claude_relay(
     monkeypatch: pytest.MonkeyPatch, incarnation: RuntimeIncarnation
 ) -> None:
+    """A claude controller-session relay whose heartbeat went stale stops the
+    lease — it can never be re-provisioned from this side (task #3998)."""
     from datetime import UTC, datetime, timedelta
 
     impersonation._relay_children.clear()
@@ -570,9 +576,246 @@ async def test_claim_gate_stamps_a_stale_claude_relay_failure(
 
     record = Mock(return_value=True)
     monkeypatch.setattr("shared.impersonation.record_relay_failure", record)
+    abort = Mock(return_value={"id": "lease-1"})
+    monkeypatch.setattr("shared.impersonation.abort_lease", abort)
     decision = await impersonation.claim_gate(BaseAgentState(), 42)
     assert decision is not None and decision.goto == END
-    record.assert_called_once()
+    abort.assert_called_once()
+    assert abort.call_args.args[2] == "the bound relay stopped heartbeating"
+    record.assert_not_called()
+
+
+@pytest.mark.parametrize("states", [["dead"], ["reused"], ["dead", "reused"]])
+async def test_claim_gate_stops_the_lease_when_the_executor_anchors_are_gone(
+    monkeypatch: pytest.MonkeyPatch, incarnation: RuntimeIncarnation, states: list[str]
+) -> None:
+    """Component A: all recorded provider anchors dead/reused stops the lease
+    even with a fresh relay heartbeat (task #3998)."""
+    impersonation._relay_children.clear()
+    impersonation._anchor_obscured.clear()
+    fresh = _relay_session("active", relay_heartbeat_at=datetime.now(UTC))
+    monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=fresh))
+    monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=list(states)))
+    abort = Mock(return_value={"id": "lease-1"})
+    monkeypatch.setattr("shared.impersonation.abort_lease", abort)
+    from agent.nodes import END
+
+    decision = await impersonation.claim_gate(BaseAgentState(), 42)
+    assert decision is not None and decision.goto == END
+    abort.assert_called_once()
+    assert abort.call_args.args[2] == "the executor process is gone"
+
+
+async def test_claim_gate_waits_a_second_anchor_pass_before_the_verdict(
+    monkeypatch: pytest.MonkeyPatch, incarnation: RuntimeIncarnation
+) -> None:
+    """Unreadable (AccessDenied/unknown) anchors are never a single-pass death
+    verdict; the second consecutive pass stops the lease (task #3998)."""
+    impersonation._relay_children.clear()
+    impersonation._anchor_obscured.clear()
+    session = _relay_session("active", relay_heartbeat_at=datetime.now(UTC))
+    monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
+    monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["denied"]))
+    abort = Mock(return_value={"id": "lease-1"})
+    monkeypatch.setattr("shared.impersonation.abort_lease", abort)
+
+    await impersonation.claim_gate(BaseAgentState(), 42)
+    abort.assert_not_called()
+    assert impersonation._anchor_obscured.get(42) == "lease-1"
+    await impersonation.claim_gate(BaseAgentState(), 42)
+    abort.assert_called_once()
+    impersonation._anchor_obscured.clear()
+
+
+async def test_claim_gate_skips_the_anchor_verdict_without_recorded_anchors(
+    monkeypatch: pytest.MonkeyPatch, incarnation: RuntimeIncarnation
+) -> None:
+    """No anchors at all (legacy records) is skipped, never folded into
+    "all dead": a fresh heartbeat keeps the lease (task #3998)."""
+    impersonation._relay_children.clear()
+    session = _relay_session("active", relay_heartbeat_at=datetime.now(UTC))
+    monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
+    monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=[]))
+    abort = Mock(return_value={"id": "lease-1"})
+    monkeypatch.setattr("shared.impersonation.abort_lease", abort)
+    from agent.nodes import END
+
+    decision = await impersonation.claim_gate(BaseAgentState(), 42)
+    assert decision is not None and decision.goto == END
+    abort.assert_not_called()
+
+
+async def test_claim_gate_terminates_a_hung_relay_before_stopping_the_lease(
+    monkeypatch: pytest.MonkeyPatch, incarnation: RuntimeIncarnation
+) -> None:
+    """A live relay beyond the startup grace that stopped heartbeating is
+    terminated as the lease stops — no lingering process (task #3998)."""
+    from datetime import UTC, datetime, timedelta
+
+    impersonation._relay_children.clear()
+    stale = _relay_session("active", relay_heartbeat_at=datetime.now(UTC) - timedelta(minutes=5))
+    monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=stale))
+    alive = MagicMock()
+    alive.poll.return_value = None
+    impersonation._relay_children[42] = impersonation._RelayChild("lease-1", alive, "token", 0.0)
+    terminate = Mock()
+    monkeypatch.setattr(impersonation, "_terminate_relay", terminate)
+    abort = Mock(return_value={"id": "lease-1"})
+    monkeypatch.setattr("shared.impersonation.abort_lease", abort)
+
+    await impersonation.claim_gate(BaseAgentState(), 42)
+    terminate.assert_called_once()
+    abort.assert_called_once()
+    assert 42 not in impersonation._relay_children
+    impersonation._relay_children.clear()
+
+
+async def test_claim_gate_reprovisions_a_restart_lost_codex_relay_inside_the_window(
+    monkeypatch: pytest.MonkeyPatch, incarnation: RuntimeIncarnation
+) -> None:
+    """The narrow carve-out: this process never minted the relay, the last beat
+    predates our boot and the fresh-start window is open — re-provision
+    (task #3998, variant A)."""
+    from datetime import UTC, datetime, timedelta
+
+    impersonation._relay_children.clear()
+    now = datetime.now(UTC)
+    monkeypatch.setattr(impersonation, "_PROCESS_STARTED_WALL", now)
+    monkeypatch.setattr(impersonation, "_PROCESS_STARTED_MONOTONIC", impersonation.time.monotonic())
+    monkeypatch.setattr(
+        "shared.config.settings.agent.impersonation_reprovision_window_seconds", 120.0
+    )
+    stale = _relay_session("active", relay_heartbeat_at=now - timedelta(minutes=5))
+    monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=stale))
+    provision = Mock()
+    monkeypatch.setattr("shared.impersonation.provision_relay", provision)
+    new_process = MagicMock()
+    new_process.poll.return_value = None
+    spawn = Mock(return_value=new_process)
+    monkeypatch.setattr(impersonation, "_spawn_codex_relay", spawn)
+    abort = Mock(return_value={"id": "lease-1"})
+    monkeypatch.setattr("shared.impersonation.abort_lease", abort)
+    from agent.nodes import END
+
+    decision = await impersonation.claim_gate(BaseAgentState(), 42)
+    assert decision is not None and decision.goto == END
+    provision.assert_called_once()
+    spawn.assert_called_once()
+    abort.assert_not_called()
+    assert impersonation._relay_children[42].process is new_process
+    impersonation._relay_children.clear()
+
+
+async def test_claim_gate_stops_a_restart_lost_relay_that_beat_after_boot(
+    monkeypatch: pytest.MonkeyPatch, incarnation: RuntimeIncarnation
+) -> None:
+    """A relay that demonstrably beat after this process started died under our
+    watch — the restart-shaped carve-out does not apply (task #3998)."""
+    from datetime import UTC, datetime, timedelta
+
+    impersonation._relay_children.clear()
+    now = datetime.now(UTC)
+    monkeypatch.setattr(impersonation, "_PROCESS_STARTED_WALL", now - timedelta(seconds=100))
+    monkeypatch.setattr(
+        impersonation, "_PROCESS_STARTED_MONOTONIC", impersonation.time.monotonic() - 100.0
+    )
+    monkeypatch.setattr(
+        "shared.config.settings.agent.impersonation_reprovision_window_seconds", 120.0
+    )
+    stale = _relay_session("active", relay_heartbeat_at=now - timedelta(seconds=60))
+    monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=stale))
+    provision = Mock()
+    monkeypatch.setattr("shared.impersonation.provision_relay", provision)
+    abort = Mock(return_value={"id": "lease-1"})
+    monkeypatch.setattr("shared.impersonation.abort_lease", abort)
+
+    await impersonation.claim_gate(BaseAgentState(), 42)
+    abort.assert_called_once()
+    assert abort.call_args.args[2] == "the bound relay stopped heartbeating"
+    provision.assert_not_called()
+
+
+async def test_claim_gate_stops_a_relay_minted_by_the_current_incarnation(
+    monkeypatch: pytest.MonkeyPatch, incarnation: RuntimeIncarnation
+) -> None:
+    """A durable mint mark naming this incarnation rules out the restart-shaped
+    loss (the in-memory record only went missing) — stop (task #3998)."""
+    from datetime import UTC, datetime, timedelta
+
+    impersonation._relay_children.clear()
+    now = datetime.now(UTC)
+    monkeypatch.setattr(impersonation, "_PROCESS_STARTED_WALL", now)
+    monkeypatch.setattr(impersonation, "_PROCESS_STARTED_MONOTONIC", impersonation.time.monotonic())
+    stale = _relay_session(
+        "active",
+        relay_heartbeat_at=now - timedelta(minutes=5),
+        relay_minted_generation=str(incarnation.generation),
+    )
+    monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=stale))
+    spawn = Mock()
+    monkeypatch.setattr(impersonation, "_spawn_codex_relay", spawn)
+    abort = Mock(return_value={"id": "lease-1"})
+    monkeypatch.setattr("shared.impersonation.abort_lease", abort)
+
+    await impersonation.claim_gate(BaseAgentState(), 42)
+    abort.assert_called_once()
+    spawn.assert_not_called()
+
+
+async def test_claim_gate_stops_the_restart_lost_relay_outside_the_window(
+    monkeypatch: pytest.MonkeyPatch, incarnation: RuntimeIncarnation
+) -> None:
+    """Outside the fresh-start window the restart-shaped loss stops the lease:
+    the carve-out must not degenerate into respawn-forever (task #3998)."""
+    from datetime import UTC, datetime, timedelta
+
+    impersonation._relay_children.clear()
+    now = datetime.now(UTC)
+    monkeypatch.setattr(impersonation, "_PROCESS_STARTED_WALL", now)
+    monkeypatch.setattr(
+        impersonation, "_PROCESS_STARTED_MONOTONIC", impersonation.time.monotonic() - 1000.0
+    )
+    stale = _relay_session("active", relay_heartbeat_at=now - timedelta(minutes=5))
+    monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=stale))
+    provision = Mock()
+    monkeypatch.setattr("shared.impersonation.provision_relay", provision)
+    abort = Mock(return_value={"id": "lease-1"})
+    monkeypatch.setattr("shared.impersonation.abort_lease", abort)
+
+    await impersonation.claim_gate(BaseAgentState(), 42)
+    abort.assert_called_once()
+    provision.assert_not_called()
+
+
+def test_reprovision_window_follows_the_configured_constant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The carve-out window is the config knob; 0 disables the exception."""
+    monkeypatch.setattr(impersonation, "_PROCESS_STARTED_MONOTONIC", impersonation.time.monotonic())
+    monkeypatch.setattr(
+        "shared.config.settings.agent.impersonation_reprovision_window_seconds", 120.0
+    )
+    assert impersonation._reprovision_window_active()
+    monkeypatch.setattr(impersonation, "_PROCESS_STARTED_MONOTONIC", 0.0)
+    assert not impersonation._reprovision_window_active()
+    monkeypatch.setattr(impersonation, "_PROCESS_STARTED_MONOTONIC", impersonation.time.monotonic())
+    monkeypatch.setattr(
+        "shared.config.settings.agent.impersonation_reprovision_window_seconds", 0.0
+    )
+    assert not impersonation._reprovision_window_active()
+
+
+def test_relay_beat_predates_boot_reads_the_process_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No heartbeat, or a beat before this process's boot, is restart-shaped."""
+    from datetime import timedelta
+
+    boot = datetime.now(UTC)
+    monkeypatch.setattr(impersonation, "_PROCESS_STARTED_WALL", boot)
+    assert impersonation._relay_beat_predates_boot(None)
+    assert impersonation._relay_beat_predates_boot(boot - timedelta(seconds=1))
+    assert not impersonation._relay_beat_predates_boot(boot + timedelta(seconds=1))
 
 
 async def test_successor_admission_aligns_active_lease_binding_before_release(

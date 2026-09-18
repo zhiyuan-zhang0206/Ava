@@ -514,6 +514,19 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         "retries the disposal of the claimed rows",
         tier="anomaly",
     ),
+    # impersonation core-component death auto-stop (task #3998) — the native
+    # supervisor found the executor or the bound relay gone and closed the
+    # lease instead of respawning.
+    "impersonation_aborted": _telemetry(
+        "impersonation_aborted",
+        "the native impersonation supervisor detected a dead core component "
+        "(the executor's recorded process chain all dead/reused, or the bound "
+        "relay's heartbeat stale past the exception window) and closed the "
+        "lease: carries the agent, lease, session, the dead component "
+        "(executor | relay) and its detail; the end note is delivered through "
+        "the resume chain",
+        tier="anomaly",
+    ),
     "host_admission_wait_exceeded": _telemetry(
         "host_admission_wait_exceeded",
         "a hosted turn has queued at the host admission gate "

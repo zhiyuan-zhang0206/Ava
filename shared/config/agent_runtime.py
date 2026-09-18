@@ -61,6 +61,20 @@ class AgentRuntimeSettings(EnvSettings):
         },
     )
 
+    impersonation_reprovision_window_seconds: float = Field(
+        default=120.0,
+        alias="AVA_IMPERSONATION_REPROVISION_WINDOW_SECONDS",
+        description="After a native agent process start, the window (seconds) during which a codex takeover whose relay was minted by an earlier incarnation may be re-provisioned when its heartbeat went stale instead of stopping the lease (task #3998). 120s covers boot -> first held pass (scan <=30s) -> provision write -> relay spawn -> first heartbeat (~10s) with ~2x margin. 0 disables the exception (every stale heartbeat stops the lease); beyond minutes the exception would degenerate into the respawn behaviour the 2026-09-18 ruling removed, so the window is capped at 600s.",
+        ge=0,
+        le=600,
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     heartbeat_pause_max_seconds: float = Field(
         default=86400.0,
         alias="AVA_HEARTBEAT_PAUSE_MAX_SECONDS",

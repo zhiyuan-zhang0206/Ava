@@ -78,8 +78,9 @@ The codex relay needs no manual start: the accepting runtime spawns it at
 activation from the recorded spec, handing the scoped relay credential over a
 private stdin pipe (`--token-stdin` — the credential never appears in argv,
 environment variables or files). If it cannot start, the acceptance rolls back.
-The runtime respawns it when its heartbeat goes stale while the lease is
-active. The manual form below remains for diagnostics:
+When its heartbeat goes stale the takeover stops instead of respawning the
+relay — see *Process death → auto-stop* — with one narrow restart-shaped
+exception. The manual form below remains for diagnostics:
 
 ```sh
 /path/to/checkout/.venv/bin/ava impersonate relay 42 \
@@ -167,6 +168,37 @@ MCP Channels are another supported push mechanism, but require startup opt-in
 and custom-server preview configuration; this relay uses Monitor directly. See
 the [channel protocol](https://code.claude.com/docs/en/channels-reference).
 
+## Process death → auto-stop
+
+A takeover stops when either of its two core components dies; a dead component
+is never silently respawned (task #3998, user ruling 2026-09-18). The accepting
+runtime re-checks both on the held-controls pass, which the dispatcher's
+database-backed pending scan triggers for held rows every ~30 seconds — the
+check is pull-based and never depends on wake delivery. Worst-case detection is
+the stale window plus one scan interval (≈75 s).
+
+- **Executor death.** Every pass classifies the session's recorded controller
+  anchors (pid + stable start time) against the live process table. All of them
+  dead or reused (the pid now belongs to a different process) stops the lease.
+  A single unreadable pass (AccessDenied / unknown) waits for a second
+  consecutive pass; a session that recorded no anchors (legacy rows) is
+  skipped, never read as "all dead".
+- **Relay death.** A relay heartbeat older than 45 seconds stops the lease. The
+  one narrow exception: a codex relay minted by an *earlier* incarnation (the
+  durable mint mark — time + generation + owner — lives on the lease row),
+  whose last beat predates this process's start, and only inside the
+  fresh-start window (`AVA_IMPERSONATION_REPROVISION_WINDOW_SECONDS`, default
+  120 s, 0 disables). That restart-shaped loss alone is re-provisioned and
+  respawned; a claude relay is never re-provisioned from the native side — its
+  stale heartbeat always stops the lease.
+- **What stopping does.** The lease goes terminal (`expired`) with the cause
+  recorded as `aborted: <detail>` in `rejection_reason` (the request's own
+  `reason` is preserved), pending renewal reminders are dismissed, a relay
+  process this runtime still holds is terminated, and the native agent
+  resumes: the end-of-session note names the cause ("This session was stopped
+  early: …"), and the `impersonation_aborted` event carries the dead component
+  and its detail. A fresh takeover then needs a fresh request.
+
 ## Delivery and recovery
 
 - Redis is a latency optimization. The native process also catches up from the
@@ -202,12 +234,10 @@ the [channel protocol](https://code.claude.com/docs/en/channels-reference).
   simply re-ACKs it. There is no exactly-once claim across provider
   acknowledgement or process crashes.
 - The relay heartbeats the lease row every 10 seconds; a heartbeat older than
-  45 seconds counts as stale. While the lease is active, the accepting runtime
-  respawns a dead codex relay on the next claim wake (at most once a minute),
-  and every inbound wake checks the heartbeat and logs loudly when it is stale,
-  so messages never sit silently. A claude relay cannot be respawned from the
-  native side; a stale heartbeat is stamped on the lease row
-  (`relay_last_failure_at`, visible in `impersonate status`) and logged.
+  45 seconds counts as stale and stops the lease (see *Process death →
+  auto-stop*), so messages never sit silently behind a dead relay. The one
+  exception is a restart-shaped codex loss inside the fresh-start window,
+  which is re-provisioned; a claude relay is never re-provisioned.
 - Renewal reminders: five minutes before a lease expires, the gateway inserts
   a durable inbox row of `kind="reminder"` (one per expiry deadline; the payload carries
   the session linkage) that the relay pushes like any message. Release or expiry
