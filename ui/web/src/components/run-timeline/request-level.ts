@@ -95,3 +95,36 @@ export function centerZoomWindow(
 ): TimelineWindowOverride {
   return zoomWindowAround(window, factor, 0.5, now);
 }
+
+/** Slide a timeline window by a fraction of its own span (wheel / drag pan,
+ *  P4-1 task #4023). Clamped like zoomWindowAround: a pan stops at `now` on
+ *  the right and at the retention floor on the left, so edge panning can
+ *  never produce a non-increasing or out-of-retention window. */
+export function panWindow(
+  window: TimelineWindowOverride,
+  deltaFraction: number,
+  now: Date,
+): TimelineWindowOverride {
+  const from = Date.parse(window.from);
+  const to = Date.parse(window.to);
+  const nowMs = now.getTime();
+  if (!(to > from) || !Number.isFinite(nowMs)) {
+    throw new RangeError("Timeline pan requires a valid increasing window and current time");
+  }
+  if (!Number.isFinite(deltaFraction)) {
+    throw new RangeError("Timeline pan offset must be a finite fraction");
+  }
+  const spanMs = to - from;
+  let nextFrom = from + spanMs * deltaFraction;
+  let nextTo = nextFrom + spanMs;
+  if (nextTo > nowMs) {
+    nextFrom -= nextTo - nowMs;
+    nextTo = nowMs;
+  }
+  const retentionStart = nowMs - RETENTION_MS;
+  if (nextFrom < retentionStart) {
+    nextTo += retentionStart - nextFrom;
+    nextFrom = retentionStart;
+  }
+  return { from: new Date(nextFrom).toISOString(), to: new Date(nextTo).toISOString() };
+}
