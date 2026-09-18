@@ -141,7 +141,9 @@ retired machines naturally; the fleet heartbeat owns permanent membership.
 
 Storage and store growth — absolute-size gauges from the OTLP metric mirror
 (`ava_checkpoint_table_sizes` / `ava_memory_search_stats` /
-`ava_pitr_remote_inventory`), queried from Prometheus:
+`ava_pitr_remote_inventory`), queried from Prometheus. The exporter's unit
+translation renders the dimensionless gauges with a `_ratio` suffix — the
+series the rules read are e.g. `ava_checkpoint_table_sizes_blobs_bytes_ratio`:
 
 | uid | Group | Metric | Condition | `for` | Severity |
 |-----|-------|--------|-----------|-------|----------|

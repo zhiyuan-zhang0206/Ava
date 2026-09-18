@@ -24,11 +24,17 @@ same sidecar and relayed with the infrastructure pipeline.
 
 from __future__ import annotations
 
+import re
+import types
 from pathlib import Path
-from typing import Any
+from typing import Any, NotRequired, Required, Union, get_args, get_origin, get_type_hints
 
 import pytest
 import yaml
+
+from shared.events.contract import EVENTS, payload_keys, telemetry_events
+from shared.telemetry_otlp import _METRIC_DISPOSITION
+from shared.telemetry_otlp_metrics import _strip_unit_suffix, _unit_for
 
 _RULES = (
     Path(__file__).resolve().parent.parent.parent
@@ -403,12 +409,12 @@ def test_checkpoint_blobs_high_water_rules() -> None:
         "ava-ops-checkpoint-blobs-warning": (
             "warning",
             2684354560,
-            "max(ava_checkpoint_table_sizes_blobs_bytes) > 2684354560",
+            "max(ava_checkpoint_table_sizes_blobs_bytes_ratio) > 2684354560",
         ),
         "ava-ops-checkpoint-blobs-error": (
             "error",
             4294967296,
-            "max(ava_checkpoint_table_sizes_blobs_bytes) > 4294967296",
+            "max(ava_checkpoint_table_sizes_blobs_bytes_ratio) > 4294967296",
         ),
     }
 
@@ -432,6 +438,191 @@ def test_checkpoint_blobs_high_water_rules() -> None:
         assert "statvfs" in description
         assert "05:00-08:00" in description
         assert "force runs" in description
+
+
+# ─── metric-name contract (task #4002) ───────────────────────────────────────
+
+# The unit a payload field carries on export, as the Prometheus translation
+# renders it back into the series name: a dimensionless ("1") ObservableGauge
+# becomes `_ratio`; a counter/histogram states a non-"1" unit once. A counter
+# never doubles a `_total` its name already ends with.
+_UNIT_RENDER = {"1": "_ratio", "ms": "_milliseconds", "s": "_seconds"}
+_KIND_EXTENSIONS = {
+    "counter": ("_total",),
+    "histogram": ("_bucket", "_count", "_sum"),
+}
+
+# Fields where the declared payload type mispredicts the emitted kind. The
+# emitter picks the kind from the runtime value type
+# (`counter if isinstance(value, int)`), so an int-passing emit site renders a
+# Counter despite a `float` declaration — `_bucket/_count/_sum` never exist for
+# it. Each entry pins the kind actually emitted; keep it in step with the emit
+# site. `None` marks a field whose emit sites pass BOTH ints and floats
+# (first-value-wins per process): both families carry live samples, no fixed
+# name is reliable, and deriving none forces a normalization decision instead
+# of blessing a name half the fleet never emits.
+#   delivery_stalled.age_s: `round(age_s)` (services/delivery_watchdog) —
+#     `_bucket` never observed (0/72h).
+#   shell_ttl_renewed.ttl_s: whole-second `ttl` (ava/shell/sessions) —
+#     `_bucket` dead since >72h (32 older samples only).
+#   heartbeat_paused.duration_s: int and float callers both live
+#     (24h: 390 vs 320 samples) — unstable.
+_RUNTIME_KIND_FIELDS: dict[tuple[str, str], str | None] = {
+    ("delivery_stalled", "age_s"): "counter",
+    ("shell_ttl_renewed", "ttl_s"): "counter",
+    ("heartbeat_paused", "duration_s"): None,
+}
+
+# Escape hatch for rule references the derivation below cannot produce —
+# metrics from events whose payloads declare no keys, instrumentation outside
+# the telemetry event map, or live series from runtime attributes the payload
+# model does not declare (e.g. "ava_chrome_page_ttl_renewed_page_id_total").
+# Add an entry only after checking the name against live Prometheus
+# (`/api/v1/label/__name__/values`), with a rationale.
+# Empty today: every ava_* reference in the rules derives from the registry.
+_UNLISTED_METRIC_NAMES: dict[str, str] = {}
+
+
+def _strip_optional(hint: Any) -> Any:
+    """Unwrap NotRequired/Required and the None side of an optional hint."""
+    while True:
+        origin = get_origin(hint)
+        if origin in (NotRequired, Required):
+            hint = get_args(hint)[0]
+            continue
+        if origin in (Union, types.UnionType):
+            args = [arg for arg in get_args(hint) if arg is not type(None)]
+            if len(args) == 1:
+                hint = args[0]
+                continue
+        return hint
+
+
+def _metric_kind(event: str, field: str) -> str | None:
+    """The instrument kind for one payload field: the disposition override,
+    then the runtime-kind pins, else the int->Counter / float->Histogram
+    declared-type default. None = no metric."""
+    override = _METRIC_DISPOSITION.get((event, field), "default")
+    if override != "default":
+        return override
+    if (event, field) in _RUNTIME_KIND_FIELDS:
+        return _RUNTIME_KIND_FIELDS[(event, field)]
+    spec = EVENTS[event]
+    if spec.payload is None:
+        return None
+    hint = get_type_hints(spec.payload).get(field)
+    if hint is None:
+        return None
+    hint = _strip_optional(hint)
+    if hint is float:
+        return "histogram"
+    if hint is int:
+        return "counter"
+    return None
+
+
+def _rendered_names(event: str, field: str) -> set[str]:
+    """The Prometheus series names the export translation renders for one
+    payload field."""
+    kind = _metric_kind(event, field)
+    if kind is None:
+        return set()
+    base = f"ava_{event}_{_strip_unit_suffix(field)}"
+    unit = _unit_for(field)
+    if kind == "gauge":
+        return {base + _UNIT_RENDER[unit]}
+    suffix = "" if unit == "1" else _UNIT_RENDER[unit]
+    if kind == "counter":
+        name = base + suffix
+        return {name if name.endswith("_total") else name + "_total"}
+    return {base + suffix + extension for extension in _KIND_EXTENSIONS[kind]}
+
+
+def _emitted_metric_names() -> dict[str, str]:
+    """Every Prometheus series name derivable from the declared payloads and
+    dispositions, mapped to its `event.field` source.
+
+    Live and derivable can disagree in both directions: the runtime-kind pins
+    (`_RUNTIME_KIND_FIELDS`) and runtime attributes the payload models do not
+    declare ("ava_chrome_page_ttl_renewed_page_id_total") are outside this
+    set — a rule referencing one needs an `_UNLISTED_METRIC_NAMES` entry."""
+    names: dict[str, str] = {}
+    for event in sorted(telemetry_events()):
+        for field in payload_keys(event):
+            for name in _rendered_names(event, field):
+                names[name] = f"{event}.{field}"
+    return names
+
+
+def _rule_metric_tokens() -> set[str]:
+    """The ava_* metric tokens referenced in the rule query exprs."""
+    tokens: set[str] = set()
+    for rule in _load_rules():
+        for query in rule["data"]:
+            expr = query["model"].get("expr")
+            if isinstance(expr, str):
+                tokens.update(re.findall(r"ava_[a-z0-9_]+", expr))
+    return tokens
+
+
+def test_rule_metric_references_match_the_prometheus_translation() -> None:
+    """Every metric the rules read must be a name the OTLP export translation
+    can actually render (task #4002). A missing `_ratio` suffix or a renamed
+    instrument makes the query match zero series, and with `noDataState: OK`
+    the rule then never fires — the silent-NoData class behind the 24-day
+    checkpoint_blobs miss. Only expr strings are checked; description prose
+    may use shorthand."""
+    emitted = _emitted_metric_names()
+    unknown: list[str] = []
+    for token in sorted(_rule_metric_tokens()):
+        if token in emitted or token in _UNLISTED_METRIC_NAMES:
+            continue
+        near = sorted(name for name in emitted if name.startswith(token) or token.startswith(name))[
+            :3
+        ]
+        unknown.append(f"{token} (nearest emitted: {near})")
+    assert not unknown, "rule metric names the translation cannot render: " + "; ".join(unknown)
+
+
+def test_unit_one_gauges_render_with_the_ratio_suffix() -> None:
+    """Regression pin for #4002's exact shape: a dimensionless ObservableGauge
+    is exported with `_ratio` appended, so the pre-fix names
+    (`ava_checkpoint_table_sizes_blobs_bytes`,
+    `ava_event_log_drop_last_dropped_at`) can never match a series."""
+    assert _rendered_names("checkpoint_table_sizes", "blobs_bytes") == {
+        "ava_checkpoint_table_sizes_blobs_bytes_ratio"
+    }
+    assert _rendered_names("event_log_drop", "last_dropped_at") == {
+        "ava_event_log_drop_last_dropped_at_ratio"
+    }
+    assert _rendered_names("memory_search_stats", "rows") == {"ava_memory_search_stats_rows_ratio"}
+    # The other renderings a rule author must get right: counters keep `_total`
+    # (never doubled), durations say `_seconds` once.
+    assert _rendered_names("gateway_latency", "count") == {"ava_gateway_latency_count_total"}
+    assert _rendered_names("turn_end", "duration_seconds") == {
+        "ava_turn_end_duration_seconds_bucket",
+        "ava_turn_end_duration_seconds_count",
+        "ava_turn_end_duration_seconds_sum",
+    }
+
+
+def test_runtime_typed_fields_pin_their_emitted_kind() -> None:
+    """Fields whose declared type mispredicts the emitted kind (task #4002
+    review): the emit sites pass ints, so the live series is a Counter and
+    the histogram family either never existed or is dead. Pinning the counter
+    stops a rule from being told a non-existent `_bucket` family is fine —
+    the #4002 silent-NoData shape, mirrored. The unstable field derives
+    nothing on purpose."""
+    assert _rendered_names("delivery_stalled", "age_s") == {"ava_delivery_stalled_age_s_total"}
+    assert _rendered_names("shell_ttl_renewed", "ttl_s") == {"ava_shell_ttl_renewed_ttl_s_total"}
+    assert _rendered_names("heartbeat_paused", "duration_s") == set()
+
+
+def test_unlisted_metric_names_have_no_stale_entries() -> None:
+    """An allowlist entry no rule references anymore must be removed, so the
+    escape hatch cannot rot into a permission wall."""
+    stale = sorted(set(_UNLISTED_METRIC_NAMES) - _rule_metric_tokens())
+    assert not stale, f"stale _UNLISTED_METRIC_NAMES entries: {stale}"
 
 
 def test_trace_watermark_rule_filters_degradation_action() -> None:
@@ -896,6 +1087,6 @@ def test_telemetry_queue_loss_is_an_immediate_error_on_independent_metrics() -> 
     assert rule["for"] == "0s"
     query = next(q for q in rule["data"] if q["refId"] == "A")
     assert query["datasourceUid"] == "prometheus"
-    assert "ava_event_log_drop_last_dropped_at" in query["model"]["expr"]
+    assert "ava_event_log_drop_last_dropped_at_ratio" in query["model"]["expr"]
     threshold = next(q for q in rule["data"] if q["refId"] == "D")
     assert threshold["model"]["conditions"][0]["evaluator"] == {"type": "lt", "params": [300]}
