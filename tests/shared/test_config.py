@@ -580,6 +580,9 @@ _REMOTE_WRITABLE_ALLOWLIST = frozenset(
     {
         "auto_resurrect_enabled",
         "browser_enabled",
+        "browser_reach_failure_threshold",
+        "browser_reach_probe_interval_s",
+        "browser_reach_timeout_s",
         "chrome_binary",
         "computer_use_lease_s",
         "computer_use_queue_timeout_s",
