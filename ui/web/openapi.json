@@ -5398,6 +5398,23 @@
               "default": "compact",
               "title": "Session"
             }
+          },
+          {
+            "name": "messages_max",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Messages Max"
+            }
           }
         ],
         "responses": {

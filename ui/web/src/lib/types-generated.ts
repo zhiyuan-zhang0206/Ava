@@ -12037,6 +12037,7 @@ export interface operations {
                 level?: "turn" | "bucket";
                 bucket?: string | null;
                 session?: "compact" | "current";
+                messages_max?: number | null;
             };
             header?: never;
             path: {

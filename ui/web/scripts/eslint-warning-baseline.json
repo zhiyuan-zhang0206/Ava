@@ -21,6 +21,11 @@
       "line": 1
     },
     {
+      "file": "src/app/insights/compare/_view.tsx",
+      "rule": "local/source-lines",
+      "line": 1
+    },
+    {
       "file": "src/app/insights/status/page.tsx",
       "rule": "local/source-lines",
       "line": 1

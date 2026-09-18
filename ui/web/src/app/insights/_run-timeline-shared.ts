@@ -9,6 +9,13 @@ import type { RunTimelineChartLabels } from "@/components/run-timeline/run-timel
 import type { TimelineWindowOverride } from "@/components/run-timeline/request-level";
 
 export const RUN_TIMELINE_WINDOW_HOURS_SETTING = "display.run_timeline_window_hours";
+export const RUN_TIMELINE_COMPARE_MESSAGES_MAX_SETTING = "display.run_timeline_compare_messages_max";
+// KEEP (task #3696 exception inventory): fallback when the per-user setting is
+// unset — the compare view's per-lane strip budget. The M4 density probe (P4-4)
+// measured the wheel-pan p95 at 313 ms with the server's 600 ceiling across 4
+// lanes and 123 ms at 200 (the registered bound is 150 ms), so compare reads
+// ask for 200 per lane and the server clamps the request to its own ceiling.
+export const RUN_TIMELINE_COMPARE_MESSAGES_MAX_DEFAULT = 200;
 // KEEP (task #3696 exception inventory): fallback when the per-user setting is
 // unset — the smallest window the zoom control offers (RUN_TIMELINE_ZOOM_HOURS
 // bottoms out at 0.5h), so the page opens focused on the freshest slice.
@@ -26,6 +33,12 @@ export function runTimelineWindowHours(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0
     ? value
     : RUN_TIMELINE_WINDOW_HOURS_DEFAULT;
+}
+
+export function runTimelineCompareMessagesMax(value: unknown): number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0
+    ? value
+    : RUN_TIMELINE_COMPARE_MESSAGES_MAX_DEFAULT;
 }
 
 /** The settings-derived initial window: the freshest configured slice. */

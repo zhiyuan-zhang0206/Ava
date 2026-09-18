@@ -24,6 +24,7 @@ const { getRunTimeline, getSettings, getAgentRoster, pushSpy } = vi.hoisted(() =
         level?: "turn" | "bucket";
         bucket?: string;
         session?: "compact" | "current";
+        messagesMax?: number;
       },
     ) => Promise<RunTimelineResponse>
   >(),
@@ -67,7 +68,11 @@ const row: RunTimelineResponse["rows"][number] = {
 };
 
 function timeline(
-  options: { agentId?: number; inbounds?: RunTimelineResponse["inbounds"] } = {},
+  options: {
+    agentId?: number;
+    inbounds?: RunTimelineResponse["inbounds"];
+    messages?: RunTimelineResponse["messages"];
+  } = {},
 ): RunTimelineResponse {
   return {
     agent_id: options.agentId ?? 0,
@@ -94,6 +99,23 @@ function timeline(
       has_activity_after_window: false,
     },
     inbounds: options.inbounds ?? [],
+    ...(options.messages === undefined ? {} : { messages: options.messages }),
+  };
+}
+
+type TimelineMessage = NonNullable<RunTimelineResponse["messages"]>[number];
+
+/** One raw-context strip message fixture (P4-4 #4023 compare tests). */
+function message(idx: number, overrides: Partial<TimelineMessage> = {}): TimelineMessage {
+  return {
+    key: `c.${idx}`,
+    idx,
+    ts: "2026-09-17T04:05:00Z",
+    kind: "ai",
+    source: null,
+    chars: 100,
+    parts: [{ kind: "think", chars: 100 }],
+    ...overrides,
   };
 }
 
@@ -365,6 +387,7 @@ describe("ComparePage", () => {
       from: DEFAULT_FROM,
       to: DEFAULT_TO,
       session: "compact",
+      messagesMax: 200,
     });
     expect(optionsByAgent.get(43)).toEqual(optionsByAgent.get(42));
   });
@@ -387,9 +410,24 @@ describe("ComparePage", () => {
       level: "bucket",
       bucket: "1800s",
       session: "compact",
+      messagesMax: 200,
     };
     expect(optionsByAgent.get(42)).toEqual(expected);
     expect(optionsByAgent.get(43)).toEqual(expected);
+  });
+
+  it("asks for the configured per-lane strip cap (P4-4)", async () => {
+    getSettings.mockResolvedValue({
+      settings: [
+        { key: "display.run_timeline_compare_messages_max", value: 120, updated_at: NOW.toISOString() },
+      ],
+    });
+    renderPage("42,43");
+
+    await waitFor(() => expect(getRunTimeline).toHaveBeenCalledTimes(2));
+    for (const [, options] of getRunTimeline.mock.calls) {
+      expect(options?.messagesMax).toBe(120);
+    }
   });
 
   it("labels lanes and chips with the roster names", async () => {
@@ -463,6 +501,203 @@ describe("ComparePage", () => {
 
     fireEvent.pointerEnter(screen.getByTestId("compare-arrow-hit"));
     await waitFor(() => expect(screen.getByText("#42 → #43 · 04:10 ×2")).toBeTruthy());
+  });
+
+  it("renders one strip per lane from the response messages (P4-4)", async () => {
+    getRunTimeline.mockImplementation((agentId: number) =>
+      Promise.resolve(
+        timeline({
+          agentId,
+          messages:
+            agentId === 42 ? [message(0), message(1), message(2)] : [message(0), message(1)],
+        }),
+      ),
+    );
+    renderPage("42,43");
+
+    await waitFor(() => expect(screen.getAllByTestId("strip-message-button")).toHaveLength(5));
+    expect(screen.getAllByTestId("strip-track")).toHaveLength(2);
+  });
+
+  it("renders one shared legend and dims every lane from it (P4-4)", async () => {
+    getRunTimeline.mockImplementation((agentId: number) =>
+      Promise.resolve(
+        timeline({
+          agentId,
+          messages: [
+            message(0),
+            message(1, { kind: "exec", parts: [{ kind: "out", chars: 50 }] }),
+          ],
+        }),
+      ),
+    );
+    renderPage("42,43");
+    await waitFor(() => expect(screen.getAllByTestId("strip-message-button")).toHaveLength(4));
+
+    // One page-level legend drives both lanes — per-lane legends stay off.
+    expect(screen.getAllByRole("list", { name: "Message categories" })).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "thinking" }));
+    const parts = screen.getAllByTestId("strip-part");
+    const lit = parts.filter((part) => part.getAttribute("opacity") === "1");
+    const dim = parts.filter((part) => part.getAttribute("opacity") === "0.12");
+    expect(lit.length).toBeGreaterThan(0);
+    expect(lit.every((part) => part.getAttribute("data-strip-color") === "think")).toBe(true);
+    // Both lanes carry a dimmed "out" part — the shared selection reached
+    // every lane, not just one.
+    expect(dim.filter((part) => part.getAttribute("data-strip-color") === "out").length).toBe(2);
+    expect(lit.length + dim.length).toBe(parts.length);
+  });
+
+  it("focuses the arrows from the inbound highlight without flipping the toggle (P4-4)", async () => {
+    getRunTimeline.mockImplementation((agentId: number) =>
+      Promise.resolve(
+        timeline({
+          agentId,
+          messages: [message(0)],
+          ...(agentId === 43
+            ? { inbounds: [{ ts: "2026-09-17T04:10:00Z", source: "agent:42", inbound_id: 7 }] }
+            : {}),
+        }),
+      ),
+    );
+    const { getByRole } = renderPage("42,43");
+    await waitFor(() => expect(screen.getAllByTestId("compare-arrow")).toHaveLength(1));
+
+    const arrowWidth = () => screen.getByTestId("compare-arrow").getAttribute("stroke-width");
+    expect(arrowWidth()).toBe("1.5");
+
+    // Toggle off → arrows hidden (their normal off state).
+    fireEvent.click(getByRole("button", { name: "Message arrows" }));
+    expect(screen.queryAllByTestId("compare-arrow")).toHaveLength(0);
+
+    // Highlighting "agent inbound" pulls them back emphasized — the highlight
+    // overrides the toggle without changing it.
+    fireEvent.click(getByRole("button", { name: "agent inbound" }));
+    await waitFor(() => expect(screen.getAllByTestId("compare-arrow")).toHaveLength(1));
+    expect(arrowWidth()).toBe("2.5");
+    expect(
+      getByRole("button", { name: "Message arrows" }).getAttribute("aria-pressed"),
+    ).toBe("false");
+
+    // Releasing the highlight returns to exactly the toggle state (M2).
+    fireEvent.click(getByRole("button", { name: "agent inbound" }));
+    expect(screen.queryAllByTestId("compare-arrow")).toHaveLength(0);
+
+    fireEvent.click(getByRole("button", { name: "Message arrows" }));
+    await waitFor(() => expect(screen.getAllByTestId("compare-arrow")).toHaveLength(1));
+    expect(arrowWidth()).toBe("1.5");
+  });
+
+  it("prioritizes arrow hover over strip hover in the single readout (P4-4)", async () => {
+    getRunTimeline.mockImplementation((agentId: number) =>
+      Promise.resolve(
+        timeline({
+          agentId,
+          messages: [message(0)],
+          ...(agentId === 43
+            ? { inbounds: [{ ts: "2026-09-17T04:10:00Z", source: "agent:42", inbound_id: 7 }] }
+            : {}),
+        }),
+      ),
+    );
+    renderPage("42,43");
+    await waitFor(() => expect(screen.getAllByTestId("compare-arrow")).toHaveLength(1));
+
+    fireEvent.pointerEnter(screen.getAllByTestId("strip-message-button")[0]);
+    await waitFor(() =>
+      expect(
+        screen.getByText(/^#42 · #0 · agent thinking · .* · 100 chars \uFF5C summary: None$/),
+      ).toBeTruthy(),
+    );
+
+    // Arrow hover wins; leaving the arrow falls back to the strip line.
+    fireEvent.pointerEnter(screen.getByTestId("compare-arrow-hit"));
+    await waitFor(() => expect(screen.getByText("#42 → #43 · 04:10")).toBeTruthy());
+    fireEvent.pointerLeave(screen.getByTestId("compare-arrow-hit"));
+    await waitFor(() =>
+      expect(
+        screen.getByText(/^#42 · #0 · agent thinking · .* · 100 chars \uFF5C summary: None$/),
+      ).toBeTruthy(),
+    );
+  });
+
+  it("explains a degraded strip read once every lane's read failed (P4-4)", async () => {
+    getRunTimeline.mockImplementation((agentId: number) =>
+      Promise.resolve(
+        agentId === 43 ? timeline({ messages: [message(0)] }) : timeline({ messages: null }),
+      ),
+    );
+    const { getByRole } = renderPage("42,43");
+
+    // Partial degradation: one lane still carries strips → legend, no hint.
+    await waitFor(() => expect(screen.getAllByTestId("strip-message-button")).toHaveLength(1));
+    expect(screen.queryByTestId("strip-read-failed")).toBeNull();
+    expect(screen.getAllByRole("list", { name: "Message categories" })).toHaveLength(1);
+
+    // Every lane degrades → the page-level hint explains the absence.
+    getRunTimeline.mockImplementation(() => Promise.resolve(timeline({ messages: null })));
+    fireEvent.click(getByRole("button", { name: "1h" }));
+    await waitFor(() =>
+      expect(
+        screen.getByText("Message data could not be read: no per-message strip."),
+      ).toBeTruthy(),
+    );
+    expect(screen.queryAllByTestId("strip-message-button")).toHaveLength(0);
+    expect(screen.queryByRole("list", { name: "Message categories" })).toBeNull();
+  });
+
+  it("renders strips in a bucket window when the response carries messages (P4-4)", async () => {
+    getRunTimeline.mockImplementation((agentId: number, options) =>
+      Promise.resolve(
+        timeline({
+          agentId,
+          messages:
+            options?.level === "bucket"
+              ? [message(0), message(1)]
+              : [message(0), message(1), message(2)],
+        }),
+      ),
+    );
+    const { getByRole } = renderPage("42,43");
+    await waitFor(() => expect(screen.getAllByTestId("strip-message-button")).toHaveLength(6));
+
+    // The 6h preset aggregates rows into buckets — the strip read is not gated
+    // on the level, so the messages (and their strips) are still there.
+    fireEvent.click(getByRole("button", { name: "6h" }));
+    await waitFor(() => expect(screen.getAllByTestId("strip-message-button")).toHaveLength(4));
+    expect(getRunTimeline.mock.calls.at(-1)?.[1]?.level).toBe("bucket");
+    expect(screen.queryByTestId("strip-read-failed")).toBeNull();
+    expect(screen.getAllByRole("list", { name: "Message categories" })).toHaveLength(1);
+  });
+
+  it("keeps the previous lane response on screen while a window change is in flight (P4-4)", async () => {
+    // `useQueries` hands a window change a fresh observer (matched by query
+    // hash), so keepPreviousData alone loses the previous response and the
+    // lane blanks to "loading" mid-refetch; the parent-side copy keeps the
+    // chart on screen (the single view's behavior).
+    let calls = 0;
+    const pending: ((value: RunTimelineResponse) => void)[] = [];
+    getRunTimeline.mockImplementation((agentId: number) => {
+      calls += 1;
+      if (calls <= 2) {
+        return Promise.resolve(timeline({ agentId, messages: [message(0), message(1)] }));
+      }
+      return new Promise((resolve) => pending.push(resolve));
+    });
+    const { getByRole } = renderPage("42,43");
+    await waitFor(() => expect(screen.getAllByTestId("strip-message-button")).toHaveLength(4));
+
+    fireEvent.click(getByRole("button", { name: "1h" }));
+    await waitFor(() => expect(pending.length).toBeGreaterThanOrEqual(1));
+    // The refetch is in flight — the lanes still render the previous window.
+    expect(screen.queryByText("Loading run timeline…")).toBeNull();
+    expect(screen.getAllByTestId("strip-message-button")).toHaveLength(4);
+
+    for (const resolve of pending) {
+      resolve(timeline({ messages: [message(0)] }));
+    }
+    await waitFor(() => expect(screen.getAllByTestId("strip-message-button")).toHaveLength(2));
   });
 
   it("picks agents from the roster list and rewrites the id value", async () => {

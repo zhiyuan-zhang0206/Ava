@@ -5,7 +5,7 @@
 // first), renders through the single-view chart component, and shares one
 // sticky toolbar. Message arrows come from compare-arrows.tsx.
 
-import { keepPreviousData, useQueries } from "@tanstack/react-query";
+import { useQueries } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { createRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -27,7 +27,15 @@ import {
   MIN_DETAIL_CANVAS_WIDTH,
   RunTimelineChart,
 } from "@/components/run-timeline/run-timeline-chart";
-import { tickLabel } from "@/components/run-timeline/run-timeline-details";
+import {
+  layerFocusLabel,
+  tickLabel,
+  type RunTimelineChartLabels,
+} from "@/components/run-timeline/run-timeline-details";
+import { StripLegend } from "@/components/run-timeline/run-timeline-legend";
+import { buildReadoutText } from "@/components/run-timeline/run-timeline-readout";
+import type { StripLegendCategory } from "@/components/run-timeline/strip-categories";
+import { messageChainIndexes } from "@/components/run-timeline/strip-layout";
 import { buttonVariants } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { BREAKPOINT_LG_PX } from "@/lib/breakpoint";
@@ -38,12 +46,14 @@ import { useUserSettings } from "@/lib/use-user-settings";
 import { cn } from "@/lib/utils";
 
 import {
+  RUN_TIMELINE_COMPARE_MESSAGES_MAX_SETTING,
   RUN_TIMELINE_SUMMARY_VISIBLE_SETTING,
   RUN_TIMELINE_WINDOW_HOURS_SETTING,
   RUN_TIMELINE_ZOOM_HOURS,
   chartLabels,
   dateTimeInputValue,
   initialTimelineWindow,
+  runTimelineCompareMessagesMax,
   runTimelineWindowHours,
   zoomPresetLabel,
 } from "../_run-timeline-shared";
@@ -103,6 +113,43 @@ export function sharedCanvasWidth(
   );
 }
 
+/** P4-4 (#4023): one lane's strip hover resolved to the line the single view's
+ *  readout would show for that message (chain leaf included), prefixed with
+ *  the lane's agent id — the compare page keeps one readout for every lane. */
+function laneMessageReadout(
+  lane: { agentId: number; timeline: RunTimelineResponse | undefined } | null,
+  index: number,
+  labels: RunTimelineChartLabels,
+): string | null {
+  const message = lane?.timeline?.messages?.[index];
+  if (!lane || !message) return null;
+  const chain = messageChainIndexes(lane.timeline?.layers ?? null, message.ts);
+  const leaf = chain.length > 0 ? (lane.timeline?.layers?.[chain[chain.length - 1]] ?? null) : null;
+  const line = buildReadoutText(
+    { message: { message, leaf: leaf === null ? null : layerFocusLabel(leaf) } },
+    labels,
+  );
+  return line === null ? null : `#${lane.agentId} · ${line}`;
+}
+
+/** The page-level readout line (P4-4 #4023). Its text arrives as a prop — it
+ *  mixes translated hints with lane-derived message lines, the same boundary
+ *  TimelineReadout draws in the single view. */
+function CompareReadoutLine({ text }: { text: string }) {
+  return (
+    <span
+      data-testid="compare-readout"
+      className={cn(
+        FLEX_1,
+        MIN_W_0,
+        "truncate px-1 text-right font-mono text-[10px] text-muted-foreground",
+      )}
+    >
+      {text}
+    </span>
+  );
+}
+
 export function CompareView({
   agents,
   names,
@@ -115,9 +162,26 @@ export function CompareView({
   const configuredWindowHours = runTimelineWindowHours(settings[RUN_TIMELINE_WINDOW_HOURS_SETTING]);
   const showSummaries = settings[RUN_TIMELINE_SUMMARY_VISIBLE_SETTING] !== false;
   const labels = useMemo(() => chartLabels(t), [t]);
+  // Per-lane strip budget (M4 density probe, P4-4): the server clamps the ask
+  // to its own ceiling; the single view keeps asking for the ceiling.
+  const compareMessagesMax = runTimelineCompareMessagesMax(
+    settings[RUN_TIMELINE_COMPARE_MESSAGES_MAX_SETTING],
+  );
   const [session, setSession] = useState<"compact" | "current">("compact");
   const [arrowsVisible, setArrowsVisible] = useState(true);
   const [hoveredArrow, setHoveredArrow] = useState<CompareArrowHover | null>(null);
+  // P4-4 (#4023): the strip legend is one shared page-level control — its
+  // selection drives every lane, "agent inbound" doubles as the arrow focus
+  // (M2), and strip hover reports up for the single page-level readout.
+  const [activeCategory, setActiveCategory] = useState<StripLegendCategory | null>(null);
+  const [hoveredMessage, setHoveredMessage] = useState<{ lane: number; index: number } | null>(null);
+  // One lane's previous response per agent: `useQueries` matches observers by
+  // query hash, so a window change hands each lane a FRESH observer whose
+  // `keepPreviousData` has no previous query to draw from (the lane blanks to
+  // "loading" for the refetch). Feeding the parent-side copy back as the
+  // placeholder keeps the chart on screen across window changes, exactly the
+  // single view's behavior (same observer across key changes).
+  const previousTimelines = useRef(new Map<number, RunTimelineResponse>());
   const stackRef = useRef<HTMLDivElement>(null);
   const laneRefs = useMemo(() => agents.map(() => createRef<HTMLDivElement>()), [agents]);
   const [stackWidth, setStackWidth] = useState(0);
@@ -181,9 +245,15 @@ export function CompareView({
         session,
         "turn",
       ],
-      queryFn: () => api.getRunTimeline(agentId, { ...(windowOverride ?? {}), session }),
+      queryFn: () =>
+        api.getRunTimeline(agentId, {
+          ...(windowOverride ?? {}),
+          session,
+          messagesMax: compareMessagesMax,
+        }),
       enabled: windowReady && !requestsBucketsUpfront,
-      placeholderData: keepPreviousData,
+      placeholderData: (previousData?: RunTimelineResponse) =>
+        previousData ?? previousTimelines.current.get(agentId),
     })),
   });
   const spanMs = windowOverride
@@ -211,15 +281,23 @@ export function CompareView({
           level: "bucket",
           bucket: `${bucketSeconds}s`,
           session,
+          messagesMax: compareMessagesMax,
         }),
       enabled: windowReady && shouldBucket,
-      placeholderData: keepPreviousData,
+      placeholderData: (previousData?: RunTimelineResponse) =>
+        previousData ?? previousTimelines.current.get(agentId),
     })),
   });
   const lanes = agents.map((agentId, index) => {
     const query = shouldBucket ? bucketResults[index] : turnResults[index];
     return { agentId, query, timeline: query.data };
   });
+
+  useEffect(() => {
+    for (const lane of lanes) {
+      if (lane.timeline !== undefined) previousTimelines.current.set(lane.agentId, lane.timeline);
+    }
+  }, [lanes]);
 
   const selectWindow = (next: TimelineWindowOverride) => setWindowOverride(next);
   // "Reset" here returns to the configured fresh slice (the window the page
@@ -268,7 +346,26 @@ export function CompareView({
     setHoveredArrow(null);
   };
 
+  const toggleCategory = (category: StripLegendCategory) =>
+    setActiveCategory((current) => (current === category ? null : category));
+
+  // M2 (#4023): the highlight temporarily overrides the arrows toggle without
+  // changing it — releasing the highlight returns to exactly the toggle state.
+  const focusInbound = activeCategory === "ib-agent";
+
   const fitTarget = overlapWindow(lanes.map((lane) => lane.timeline));
+  // P4-4 (#4023): the shared legend shows when any lane carries strip data
+  // (bucket responses carry it too — the read is not gated on level, see the
+  // P4-4 design note), and the page-level hint explains a degraded read
+  // (every loaded lane's messages null) — never silently.
+  const legendVisible = lanes.some((lane) => (lane.timeline?.messages?.length ?? 0) > 0);
+  const stripReadFailed =
+    lanes.some((lane) => lane.timeline !== undefined) &&
+    lanes.every((lane) => lane.timeline === undefined || lane.timeline.messages === null);
+  const hoveredLane = hoveredMessage === null ? null : (lanes[hoveredMessage.lane] ?? null);
+  // Readout priority (M: arrow hover > strip hover > idle hint).
+  const hoveredMessageLine =
+    hoveredMessage === null ? null : laneMessageReadout(hoveredLane, hoveredMessage.index, labels);
   const readout = hoveredArrow
     ? hoveredArrow.count > 1
       ? t("arrowClusterReadout", {
@@ -282,7 +379,7 @@ export function CompareView({
           target: hoveredArrow.targetAgentId,
           time: tickLabel(hoveredArrow.ts, false),
         })
-    : t("arrowReadoutHint");
+    : (hoveredMessageLine ?? t("arrowReadoutHint"));
 
   return (
     <>
@@ -372,15 +469,7 @@ export function CompareView({
                 </button>
               ))}
             </div>
-            <span
-              className={cn(
-                FLEX_1,
-                MIN_W_0,
-                "truncate px-1 text-right font-mono text-[10px] text-muted-foreground",
-              )}
-            >
-              {readout}
-            </span>
+            <CompareReadoutLine text={readout} />
           </div>
         </div>
       </div>
@@ -431,6 +520,12 @@ export function CompareView({
                     onZoomWindow={selectWindow}
                     showSummaries={showSummaries}
                     widthOverride={sharedWidth}
+                    showStrip
+                    activeCategory={activeCategory}
+                    showLegend={false}
+                    onHoverMessage={(messageIndex) =>
+                      setHoveredMessage(messageIndex === null ? null : { lane: index, index: messageIndex })
+                    }
                     onDetailOpenChange={detailOpenCallbacks[index]}
                   />
                 ) : lane.query.isPending ? (
@@ -451,7 +546,7 @@ export function CompareView({
             </div>
           );
         })}
-        {arrowsVisible && windowOverride ? (
+        {(arrowsVisible || focusInbound) && windowOverride ? (
           <CompareArrows
             containerRef={stackRef}
             laneRefs={laneRefs}
@@ -459,10 +554,24 @@ export function CompareView({
             timeWindow={windowOverride}
             hovered={hoveredArrow}
             onHoverChange={setHoveredArrow}
+            focusInbound={focusInbound}
             label={t("arrowsOverlayLabel")}
           />
         ) : null}
       </div>
+      {/* P4-4 (#4023): one shared legend at the stack bottom (M6); a degraded
+          strip read is explained, never silent. */}
+      {legendVisible ? (
+        <StripLegend active={activeCategory} labels={labels} onToggle={toggleCategory} />
+      ) : null}
+      {stripReadFailed ? (
+        <p
+          data-testid="strip-read-failed"
+          className="px-1 pt-1 font-mono text-[10px] text-muted-foreground"
+        >
+          {t("stripReadFailedHint")}
+        </p>
+      ) : null}
     </>
   );
 }

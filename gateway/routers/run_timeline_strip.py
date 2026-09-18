@@ -268,7 +268,10 @@ def _placed_min_ts(groups: list[tuple[str, list[TimelineItem]]]) -> datetime | N
 
 
 def _strip_messages_for_window(
-    agent_id: int, window_start: datetime, window_end: datetime
+    agent_id: int,
+    window_start: datetime,
+    window_end: datetime,
+    budget: int | None = None,
 ) -> tuple[list[RunTimelineMessage], bool]:
     """Assemble the raw-context strip for one window from checkpoint segments.
 
@@ -276,8 +279,12 @@ def _strip_messages_for_window(
     walked newest-first only when the window reaches before the current
     segment's earliest placeable message. Truncation (message budget or the
     segment walk cap) is always reported, never silent.
+
+    `budget` overrides the display setting for one read (the compare view's
+    reduced cap, already clamped by the caller); None keeps the setting.
     """
-    budget = settings.display.run_timeline_messages_max
+    if budget is None:
+        budget = settings.display.run_timeline_messages_max
     truncated = False
 
     current = _cached_current_messages(agent_id)
@@ -325,11 +332,22 @@ def _strip_messages_for_window(
 
 
 def strip_for_window_or_none(
-    agent_id: int, window_start: datetime, window_end: datetime
+    agent_id: int,
+    window_start: datetime,
+    window_end: datetime,
+    messages_max: int | None = None,
 ) -> tuple[list[RunTimelineMessage] | None, bool | None]:
-    """The strip read with the endpoint's degrade posture (narrative/inbounds)."""
+    """The strip read with the endpoint's degrade posture (narrative/inbounds).
+
+    `messages_max` is a requested per-read cap, clamped to the display ceiling
+    — never raised through it (P4-4, task #4023: the compare view asks for a
+    smaller strip budget). None keeps the ceiling itself.
+    """
+    budget: int | None = None
+    if messages_max is not None:
+        budget = min(messages_max, settings.display.run_timeline_messages_max)
     try:
-        return _strip_messages_for_window(agent_id, window_start, window_end)
+        return _strip_messages_for_window(agent_id, window_start, window_end, budget)
     except Exception:
         logger.exception("run-timeline strip read failed for agent {}", agent_id)
         return None, None

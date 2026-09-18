@@ -392,7 +392,12 @@ describe("context axis (P4-2b)", () => {
     expect(getRunTimeline).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the characters axis disabled in bucket mode without message data", async () => {
+  // The bucket-mode premise this test originally encoded ("a bucket request
+  // carries no messages") was disproved in P4-4 (#4023): the strip read is
+  // not gated on the level, so a response without message data means a
+  // degraded read — the input stands, its cause is read failure, not
+  // aggregation.
+  it("keeps the characters axis disabled when the response has no message data", async () => {
     getSettings.mockResolvedValue({
       settings: [
         {

@@ -181,6 +181,7 @@ export function CompareArrows({
   timeWindow,
   hovered,
   onHoverChange,
+  focusInbound,
   label,
 }: {
   /** The relative-positioned stack the lanes render in. */
@@ -190,6 +191,10 @@ export function CompareArrows({
   timeWindow: { from: string; to: string };
   hovered: CompareArrowHover | null;
   onHoverChange: (next: CompareArrowHover | null) => void;
+  /** P4-4 (#4023): the inbound legend category is highlighted — every arrow
+   *  draws emphasized even while nothing is hovered (the highlight acts as a
+   *  temporary visibility override; hovering one arrow still narrows to it). */
+  focusInbound?: boolean;
   label: string;
 }) {
   const [laneBoxes, setLaneBoxes] = useState<(LaneBox | null)[]>([]);
@@ -347,8 +352,11 @@ export function CompareArrows({
         ))}
       </defs>
       {arrows.map((arrow) => {
-        const emphasized = hovered?.id === arrow.id;
-        const dimmed = hovered !== null && !emphasized;
+        const hoveredArrow = hovered?.id === arrow.id;
+        // P4-4 (#4023): with the inbound legend highlighted the whole set is
+        // the subject — emphasized until a hover narrows the focus to one.
+        const emphasized = hoveredArrow || focusInbound === true;
+        const dimmed = hovered !== null && !hoveredArrow;
         return (
           <g key={arrow.id}>
             <path
