@@ -11,6 +11,7 @@ from typing import Any, cast
 
 import psycopg
 import pytest
+from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 import shared.db
@@ -813,15 +814,29 @@ def _insert_checkpoint(
     agent_id: int,
     ckpt_id: str,
     parent_id: str | None = None,
+    *,
+    channel_versions: dict[str, str] | None = None,
+    compact_boundary: bool = False,
 ) -> None:
     """Test helper: directly INSERT a LangGraph checkpoint row (simplified version, bypassing
     PostgresSaver's serialization overhead). The fork copy logic only cares about SQL row-level copy + chain
-    integrity, not the real content of the checkpoint blob."""
+    integrity, not the real content of the checkpoint blob.
+
+    `channel_versions` fills the mapping PostgresSaver reads blobs through, and
+    `compact_boundary` stamps the metadata flag `mark_compact_boundary` writes —
+    the two fields the fork copy actually branches on.
+    """
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO checkpoints (thread_id, checkpoint_id, parent_checkpoint_id, "
-            "checkpoint, metadata) VALUES (%s, %s, %s, '{}'::jsonb, '{}'::jsonb)",
-            (str(agent_id), ckpt_id, parent_id),
+            "checkpoint, metadata) VALUES (%s, %s, %s, %s, %s)",
+            (
+                str(agent_id),
+                ckpt_id,
+                parent_id,
+                Jsonb({"channel_versions": channel_versions or {}}),
+                Jsonb({"compact_boundary": True} if compact_boundary else {}),
+            ),
         )
     db.commit()
 
@@ -835,12 +850,34 @@ def _checkpoint_ids(db: psycopg.Connection, agent_id: int) -> list[str]:
         return [r[0] for r in cur.fetchall()]
 
 
+def _insert_blob(
+    db: psycopg.Connection, agent_id: int, channel: str, version: str, blob: bytes
+) -> None:
+    with db.cursor() as cur:
+        cur.execute(
+            "INSERT INTO checkpoint_blobs (thread_id, checkpoint_ns, channel, version, type, blob) "
+            "VALUES (%s, '', %s, %s, 'msgpack', %s)",
+            (str(agent_id), channel, version, blob),
+        )
+    db.commit()
+
+
+def _blob_rows(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, bytes]]:
+    with db.cursor() as cur:
+        cur.execute(
+            "SELECT channel, version, blob FROM checkpoint_blobs WHERE thread_id = %s "
+            "ORDER BY channel, version",
+            (str(agent_id),),
+        )
+        return cast("list[tuple[str, str, bytes]]", cur.fetchall())
+
+
 class TestSpawnFork:
     def test_fork_copies_target_and_ancestor_chain(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """fork copies target ckpt + all ancestors (recursively via parent_checkpoint_id),
-        so the new agent sees the full history."""
+        """With no compaction boundary in the chain, fork copies target ckpt + all ancestors
+        (recursively via parent_checkpoint_id), so the new agent sees the full history."""
         source = _spawn_agent()
         # construct chain: a (root) → b → c
         _insert_checkpoint(db_conn, source, "a-ckpt", parent_id=None)
@@ -885,29 +922,103 @@ class TestSpawnFork:
             row = cur.fetchone()
         assert row == (source, "x")
 
-    def test_fork_copies_blobs_for_source_agent(
+    def test_fork_copies_blobs_referenced_by_the_copied_chain(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """checkpoint_blobs are fully copied from the source agent — the actual message data is in blobs."""
+        """A blob the copied checkpoints reference through channel_versions is copied —
+        the actual message data lives in blobs."""
         source = _spawn_agent()
-        _insert_checkpoint(db_conn, source, "ck")
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO checkpoint_blobs (thread_id, checkpoint_ns, channel, version, type, blob) "
-                "VALUES (%s, '', 'messages', '1', 'msgpack', %s)",
-                (str(source), b"\xde\xad\xbe\xef"),
-            )
-        db_conn.commit()
+        _insert_checkpoint(db_conn, source, "ck", channel_versions={"messages": "1"})
+        _insert_blob(db_conn, source, "messages", "1", b"\xde\xad\xbe\xef")
 
         new_id = _spawn_agent(fork_from=source, fork_checkpoint="ck")
 
+        assert _blob_rows(db_conn, new_id) == [("messages", "1", b"\xde\xad\xbe\xef")]
+
+    def test_fork_skips_blobs_no_copied_checkpoint_references(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Superseded blob versions are left behind: PostgresSaver reads blobs only through
+        the copied checkpoints' channel_versions, so an unreferenced version is unreachable."""
+        source = _spawn_agent()
+        _insert_checkpoint(db_conn, source, "ck", channel_versions={"messages": "2"})
+        _insert_blob(db_conn, source, "messages", "1", b"\x01stale")
+        _insert_blob(db_conn, source, "messages", "2", b"\x02live")
+
+        new_id = _spawn_agent(fork_from=source, fork_checkpoint="ck")
+
+        assert _blob_rows(db_conn, new_id) == [("messages", "2", b"\x02live")]
+
+    def test_fork_stops_at_the_newest_compact_boundary(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A compaction boundary is the full-snapshot record of the segment it closes, so the
+        copy includes it and stops — its ancestors stay behind and the copy size stays bounded."""
+        source = _spawn_agent()
+        _insert_checkpoint(db_conn, source, "a", parent_id=None)
+        _insert_checkpoint(db_conn, source, "b", parent_id="a", compact_boundary=True)
+        _insert_checkpoint(db_conn, source, "c", parent_id="b")
+
+        new_id = _spawn_agent(fork_from=source, fork_checkpoint="c")
+
+        # "a" is pre-boundary history and is NOT copied.
+        assert sorted(_checkpoint_ids(db_conn, new_id)) == ["b", "c"]
+        assert sorted(_checkpoint_ids(db_conn, source)) == ["a", "b", "c"]
+
+    def test_fork_at_a_boundary_copies_only_that_checkpoint(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Forking exactly at a boundary copies that one self-contained snapshot."""
+        source = _spawn_agent()
+        _insert_checkpoint(db_conn, source, "a", parent_id=None)
+        _insert_checkpoint(db_conn, source, "b", parent_id="a", compact_boundary=True)
+
+        new_id = _spawn_agent(fork_from=source, fork_checkpoint="b")
+
+        assert _checkpoint_ids(db_conn, new_id) == ["b"]
+
+    def test_fork_stops_at_the_nearest_boundary_when_several_exist(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only the newest boundary at or below the fork point terminates the walk; older
+        segments are not copied."""
+        source = _spawn_agent()
+        _insert_checkpoint(db_conn, source, "a", parent_id=None, compact_boundary=True)
+        _insert_checkpoint(db_conn, source, "b", parent_id="a")
+        _insert_checkpoint(db_conn, source, "c", parent_id="b", compact_boundary=True)
+        _insert_checkpoint(db_conn, source, "d", parent_id="c")
+
+        new_id = _spawn_agent(fork_from=source, fork_checkpoint="d")
+
+        assert sorted(_checkpoint_ids(db_conn, new_id)) == ["c", "d"]
+
+    def test_fork_copies_writes_only_for_copied_checkpoints(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Delta-written threads keep their message content in writes, so writes must follow the
+        copied checkpoints exactly — including the boundary cut."""
+        source = _spawn_agent()
+        _insert_checkpoint(db_conn, source, "a", parent_id=None)
+        _insert_checkpoint(db_conn, source, "b", parent_id="a", compact_boundary=True)
+        _insert_checkpoint(db_conn, source, "c", parent_id="b")
+        for ckpt in ("a", "b", "c"):
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, "
+                    "task_id, idx, channel, type, blob) "
+                    "VALUES (%s, '', %s, 'task', 0, 'messages', 'msgpack', %s)",
+                    (str(source), ckpt, ckpt.encode()),
+                )
+        db_conn.commit()
+
+        new_id = _spawn_agent(fork_from=source, fork_checkpoint="c")
+
         with db_conn.cursor() as cur:
             cur.execute(
-                "SELECT channel, version, blob FROM checkpoint_blobs WHERE thread_id = %s",
+                "SELECT checkpoint_id FROM checkpoint_writes WHERE thread_id = %s ORDER BY checkpoint_id",
                 (str(new_id),),
             )
-            rows = cur.fetchall()
-        assert rows == [("messages", "1", b"\xde\xad\xbe\xef")]
+            assert [r[0] for r in cur.fetchall()] == ["b", "c"]
 
     def test_fork_unknown_checkpoint_raises_and_rolls_back(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
