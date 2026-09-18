@@ -387,6 +387,33 @@ describe("compact history segment dividers", () => {
       screen.getByTestId("load-older-divider").querySelector("svg")?.getAttribute("class"),
     ).toContain("animate-spin");
   });
+
+  it("clears the inline control's row with the pull ring's band (task #3934)", () => {
+    const items = [
+      makeItem({ item_id: "s1.old-boundary.0.0", kind: "agent_chat", payload: "old" }),
+      makeItem({ item_id: "1.0", kind: "agent_chat", payload: "current" }),
+    ];
+    const { rerender } = render(<TimelineView items={items} hasMoreOlder onLoadOlder={vi.fn()} />);
+    expect(screen.getByTestId("load-older-divider")).toBeTruthy();
+    // The inline control's row hosts the pill in the top-14 band; the ring
+    // clears that row by starting below its bottom edge instead.
+    const ring = screen.getByTestId("pull-down-load-indicator");
+    expect(ring.className).toContain("top-22");
+    expect(ring.className).not.toContain("top-14");
+
+    // No inline control: the ring keeps its default top-14 band.
+    rerender(
+      <TimelineView
+        items={[makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })]}
+        hasMoreOlder
+        onLoadOlder={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("load-older-divider")).toBeNull();
+    const plainRing = screen.getByTestId("pull-down-load-indicator");
+    expect(plainRing.className).toContain("top-14");
+    expect(plainRing.className).not.toContain("top-22");
+  });
 });
 
 // Inter-agent / system inbound / compaction / framework-note markers default
