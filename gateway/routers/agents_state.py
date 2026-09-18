@@ -603,7 +603,8 @@ def get_pending_messages(agent_id: int, request: Request) -> list[PendingInbound
     first. These have not been claimed yet, so they are absent from the
     timeline snapshot; the web UI shows them as a compact strip above the
     composer. Once a message is claimed it enters the agent's messages and
-    appears in the timeline, dropping out of this list. A multimodal
+    appears in the timeline, dropping out of this list. A chat the active takeover
+    absorbed (trail or relay read) is omitted too (#3683). A multimodal
     message carries its image reference urls (`images`) so the strip can
     render thumbnails before the claim.
 

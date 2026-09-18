@@ -522,6 +522,16 @@ def list_pending_inbounds(db: psycopg.Connection, agent_id: int) -> list[Inbound
     web UI renders these as a compact "pending" strip above the composer,
     distinct from the timeline.
 
+    Rows the active takeover pipeline has already absorbed are also
+    excluded: while an unexpired `active` lease exists, a pending chat that
+    the session trail has transcribed (an `agent_impersonation_entries`
+    row — what the timeline renders) or that the relay has read
+    (`agent_impersonation_messages`) is display-side delivered, and must
+    not appear in both the timeline and the strip (#3683). The row itself
+    stays `status='pending'` — this is a read-surface view, not a state
+    change; once the lease ends, unacknowledged rows are visible here
+    again (delivery evidence counts only while the lease is alive).
+
     `payload` rides along (unlike the other InboundRow readers) because the
     strip renders multimodal messages: the endpoint extracts their image
     reference urls from the content blocks so the browser can show
@@ -529,10 +539,26 @@ def list_pending_inbounds(db: psycopg.Connection, agent_id: int) -> list[Inbound
     """
     with db.cursor() as cur:
         cur.execute(
-            "SELECT id, content, kind, source, status, created_at, claimed_at, payload "
-            "FROM inbound_messages "
-            "WHERE agent_id = %s AND status = 'pending' AND kind = 'chat' "
-            "ORDER BY created_at ASC",
+            "SELECT ib.id, ib.content, ib.kind, ib.source, ib.status, ib.created_at, "
+            "       ib.claimed_at, ib.payload "
+            "FROM inbound_messages ib "
+            "WHERE ib.agent_id = %s AND ib.status = 'pending' AND ib.kind = 'chat' "
+            "AND NOT EXISTS ("
+            "  SELECT 1 FROM agent_impersonations lease "
+            "  WHERE lease.agent_id = ib.agent_id "
+            "    AND lease.status = 'active' "
+            "    AND lease.expires_at > clock_timestamp() "
+            "    AND (EXISTS ("
+            "      SELECT 1 FROM agent_impersonation_messages relay_read "
+            "      WHERE relay_read.lease_id = lease.id AND relay_read.inbound_id = ib.id"
+            "    ) OR EXISTS ("
+            "      SELECT 1 FROM agent_impersonation_entries transcribed "
+            "      WHERE transcribed.lease_id = lease.id "
+            "        AND transcribed.kind = 'message' "
+            "        AND transcribed.event_key = 'inbound:' || ib.id::text"
+            "    ))"
+            ") "
+            "ORDER BY ib.created_at ASC",
             (agent_id,),
         )
         return [InboundRow(*row) for row in cur.fetchall()]
