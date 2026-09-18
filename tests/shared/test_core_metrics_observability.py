@@ -1,7 +1,7 @@
 """Core observability metrics pack tests (Task #882 migration, #1280 Loki).
 
 Covers the generic observability pack migrated from the retired
-``ava_observability`` plugin to core metrics: registration shape (22 metrics
+``ava_observability`` plugin to core metrics: registration shape (23 metrics
 across grafana / inspector surfaces, plugin == "core"), the LogQL template
 safety validation, and every rendered query's structure — the stream selector,
 the ``| json`` pipeline, the event_name/category placeholders, and the
@@ -26,6 +26,7 @@ EXPECTED = {
     "ava_obs_llm_cost_usd": ("timeseries", ["grafana"], "llm_usage", "telemetry", 1),
     "ava_obs_agent_llm_cost_usd": ("timeseries", ["inspector"], "llm_usage", "telemetry", 1),
     "ava_obs_llm_error_rate": ("timeseries", ["grafana", "inspector"], "llm_usage", "telemetry", 4),
+    "ava_obs_llm_stall_rate": ("timeseries", ["grafana"], "stream_stalled_retry", "telemetry", 2),
     "ava_obs_turn_ok_rate": ("timeseries", ["grafana", "inspector"], "turn_end", "telemetry", 1),
     "ava_obs_turn_duration_s": ("timeseries", ["grafana"], "turn_end", "telemetry", 2),
     "ava_obs_compaction_summary_history_ratio": (

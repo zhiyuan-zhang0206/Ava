@@ -41,7 +41,7 @@ restored by task #3689). All sections are **expanded by default**
    (total / resolved / net) sums by construction at the default six-hour
    window (task #1935).
 2. **`LLM`** — throughput tokens/s, the three TPS series, calls/bucket,
-   cost USD, LLM errors, and per-agent Top 20.
+   cost USD, LLM errors, provider stalls, and per-agent Top 20.
 3. **`Gateway & execution`** — gateway latency p50/p95/p99/max + p95/p99 and
    sample count by route, turn duration, exec outcomes, syntax-fix triggers,
    halt classes, SDK Top 20, frontend interactions ×3, settings changes.
@@ -86,7 +86,7 @@ the same reason: the instant queries return one frame per day series, and
 without the join the table falls back to a per-series frame picker instead
 of one row per day.
 
-The dashboard now has 94 panel entries (84 panels + 10 row headers): core
+The dashboard now has 95 panel entries (85 panels + 10 row headers): core
 ids remain below 1000 (the four new stat tiles are 44–47), plugin ids are
 >= 1000 (the three plugin rows are 1001 / 1004 / 1007; their panels are
 1002–1013), host/data-plane panels are 2101–2112, the cost-analysis panels are
@@ -284,11 +284,11 @@ provisioning cycle when needed.
 ## Alerting
 
 **Live**: Grafana Alerting rules, as code in
-[`../alerting/rules.yml`](../alerting/rules.yml) — nineteen rules (2026-08-23)
+[`../alerting/rules.yml`](../alerting/rules.yml) — thirty-eight rules (2026-09-18)
 split between the one-minute `ava-ops` group and five-minute `ava-ops-slow`
 group over Loki and Prometheus: the event-health,
 backlog, restart-spike, LLM-latency, delivery, freshness, trace-watermark,
-billing, host/data-plane, and collector-delivery rules, plus the three
+billing, provider stall/pair, host/data-plane, and collector-delivery rules, plus the three
 slow-request rules R17/R18 (gateway fast-route p95 two-tier + turn-duration
 p95, `notify_im: "false"` labels — see the table, threshold calibration,
 and notification-channel notes in [`../alerting/README.md`](../alerting/README.md)).

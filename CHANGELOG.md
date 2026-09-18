@@ -8,6 +8,16 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
 ## [Unreleased]
 
 ### Added
+- Grafana ops monitoring for LLM stream stalls (task #3889, wiring the
+  #3884 stall telemetry): the Ops dashboard's LLM section gains a
+  "Provider stalls (per minute)" panel — `stream_stalled_retry` sliced by
+  vendor plus the `stream_stall_pair_terminated` pair count — and the
+  `ava-ops` alert group gains `ava-ops-llm-stall-pair` (fires on the first
+  two-adjacent-stall termination) and `ava-ops-llm-stall-burst` (≥5 stalled
+  streams per vendor per 15m; trailing-7d calibration: benign ≤2/15m, the
+  2026-09-14/15 deepseek wave ran 2-9/15m). The pair event stays outside
+  `LLM_ERROR_FAMILY` (it co-emits with the adjacent stall the family already
+  counts); the new panel and rule are its display surface (task #3948).
 - The cluster health probe gains two alert-only provider-account checks: a
   balance minimum (`AVA_PROVIDER_GUARD_BALANCE_MIN_CNY`, default 500 CNY)
   read from the provider's balance endpoint fires *before* the account runs
