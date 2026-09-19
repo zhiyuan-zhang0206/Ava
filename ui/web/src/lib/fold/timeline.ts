@@ -259,28 +259,6 @@ function upsertItemById(
   return insertItemById(items, next);
 }
 
-// Ephemeral system_marker uses a `_marker.*` id (no stable backend id;
-// all one-shot client markers). Distinguishes stable ids (also in the
-// snapshot) from transient UI state, so merge / replace logic can act
-// precisely on just the transient portion.
-const EPHEMERAL_MARKER_PREFIX = "_marker.";
-
-function isEphemeralMarker(it: BackendTimelineItem): boolean {
-  return it.item_id.startsWith(EPHEMERAL_MARKER_PREFIX);
-}
-
-function isExecStartMarker(it: BackendTimelineItem): boolean {
-  return (
-    isEphemeralMarker(it) &&
-    it.kind === "system_marker" &&
-    it.payload === "exec_start"
-  );
-}
-
-function removeExecStartMarkers(items: BackendTimelineItem[]): BackendTimelineItem[] {
-  return items.filter((it) => !isExecStartMarker(it));
-}
-
 /** Freeze live "Thinking for Xs" clocks on all reasoning items — called when
  *  any later block starts (text / code / a new reasoning block) or the turn
  *  ends. The block's elapsed (now − reasoningStartedAt) is stamped into
@@ -364,11 +342,10 @@ export function applySystemEvent(
       // Code stream finished, subprocess began executing — create a
       // code_output placeholder immediately so the output block appears
       // before any chunk arrives. The item_id matches subsequent
-      // ExecOutputChunk / ExecOutput events. Clear any exec_start
-      // markers left from a previous-format session (backward compat)
-      // and clear any codeStartedAt clocks (code writing → execution).
+      // ExecOutputChunk / ExecOutput events. Clear any codeStartedAt
+      // clocks (code writing → execution).
       return clearCodeClocks(
-        upsertItemById(removeExecStartMarkers(items), {
+        upsertItemById(items, {
           item_id: ev.item_id,
           kind: "code_output",
           source: null,
@@ -393,17 +370,16 @@ export function applySystemEvent(
       // commit version that carries an envelope header.
       return appendDeltaById(items, ev.item_id, "code_output", ev.content);
     case "exec_output":
-      // exec done → clear the "executing…" marker, then upsert
-      // exec_output (stable item_id `{exec_msg_idx}.0`). On reload it
+      // exec done → upsert exec_output (stable item_id `{exec_msg_idx}.0`).
+      // On reload it
       // collides with the gateway snapshot via same id and dedupes;
       // chunks already streamed-appended are replaced by the full
       // envelope version. Preserve execStartedAt from the chunk-created
       // item (if any) so the output chip continues showing the live
       // duration until the snapshot commits exec_ms.
       return (() => {
-        const cleaned = removeExecStartMarkers(items);
-        const existing = cleaned.find((it) => it.item_id === ev.item_id);
-        return upsertItemById(cleaned, {
+        const existing = items.find((it) => it.item_id === ev.item_id);
+        return upsertItemById(items, {
           item_id: ev.item_id,
           kind: "code_output",
           source: null,
@@ -647,8 +623,8 @@ export function foldEvent(t: ThreadTimelineState, ev: SystemEvent): ThreadTimeli
   // the still-streaming bubbles are dropped by the exact ids streamed this turn
   // (streamingIds), not a msg_count boundary that could be stale after
   // SSE-missed snapshots. code_output is never in streamingIds, so an
-  // interrupted exec's partial output survives; the empty exec placeholder and
-  // the old-format "executing…" marker are cleared. Silent: no marker added.
+  // interrupted exec's partial output survives; the empty exec placeholder is
+  // cleared. Silent: no marker added.
   if (ev.role === "cancelled") {
     return {
       ...t,
@@ -658,7 +634,6 @@ export function foldEvent(t: ThreadTimelineState, ev: SystemEvent): ThreadTimeli
       items: t.items.filter(
         (it) =>
           !t.streamingIds.has(it.item_id) &&
-          !(it.kind === "system_marker" && it.payload === "exec_start") &&
           !(it.kind === "code_output" && it.payload === "" && it.exec_ms == null),
       ),
     };

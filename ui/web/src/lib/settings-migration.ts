@@ -16,8 +16,7 @@
 // EPHEMERAL selections are deliberately NOT migrated and keep their localStorage
 // keys (per-device by design): the current mobile fleet tab
 // (`ava.fleet.mobileTab`), the last-viewed agent (`ava.active.agent_id`), and
-// the react-resizable-panels split ratios (`ava.fleet.split`,
-// `ava.fleet.queue-split`).
+// the react-resizable-panels split ratios (`ava.fleet.split`).
 //
 // The zustand-persisted spawn-composer defaults (`ava-spawn-prefs`) ARE a
 // durable preference and get migrated — but from a different shape (a zustand
