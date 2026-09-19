@@ -25,6 +25,7 @@ from langchain_core.messages import AIMessage, BaseMessage
 from shared.hierarchy.generate import (
     GenParams,
     GenRequest,
+    build_generation_llm,
     build_prompt,
     char_bounds,
     clean_text,
@@ -234,3 +235,59 @@ def test_generate_nodes_rejects_caller_bugs_before_any_call() -> None:
         generate_nodes([leaf_req("L1#1")], model=MODEL, llm=fake, max_concurrent=0)
     assert fake.calls == []
     assert generate_nodes([], model=MODEL, llm=fake) == []
+
+
+# ---- model lifecycle (task #3915): the builder closes what it built ----
+
+
+class SpyClient:
+    """Provider-client stand-in recording `close()` calls."""
+
+    def __init__(self) -> None:
+        self.closed = 0
+
+    def close(self) -> None:
+        self.closed += 1
+
+
+class ClosableFakeLLM(FakeLLM):
+    """FakeLLM carrying a spy provider client (`_client`)."""
+
+    def __init__(self, responder: Callable[[list[BaseMessage]], str | Exception]) -> None:
+        super().__init__(responder)
+        self._client = SpyClient()
+
+
+def test_generate_nodes_closes_a_self_built_llm(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = ClosableFakeLLM(lambda _messages: "ok")
+
+    def fake_build(*args: object, **kwargs: object) -> ClosableFakeLLM:
+        return fake
+
+    monkeypatch.setattr("shared.lm.factory.build_chat_model", fake_build)
+    (res,) = generate_nodes([leaf_req("L1#1")], model=MODEL, retry_attempts=0)
+    assert res.ok
+    assert fake._client.closed == 1
+
+
+def test_generate_nodes_leaves_a_caller_supplied_llm_open() -> None:
+    fake = ClosableFakeLLM(lambda _messages: "ok")
+    (res,) = generate_nodes([leaf_req("L1#1")], model=MODEL, llm=fake, retry_attempts=0)
+    assert res.ok
+    assert fake._client.closed == 0
+
+
+def test_build_generation_llm_forwards_params_effort(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_build(model: str, **kwargs: Any) -> object:
+        captured["model"] = model
+        captured["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr("shared.lm.factory.build_chat_model", fake_build)
+    build_generation_llm(MODEL)
+    assert captured["model"] == MODEL
+    assert captured["kwargs"] == {"reasoning_effort": GenParams().reasoning_effort}
+    build_generation_llm(MODEL, GenParams(reasoning_effort="max"))
+    assert captured["kwargs"] == {"reasoning_effort": "max"}
