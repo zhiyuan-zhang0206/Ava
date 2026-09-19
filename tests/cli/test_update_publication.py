@@ -1,12 +1,13 @@
-"""`cli.commands._update_publication` — the P1 journal seat, against real PostgreSQL.
+"""`cli.commands._update_publication` — the publication seats, against real PostgreSQL.
 
-The seat's only non-pure step is the journal compare-and-set on the real
-`deployment_state` row (same reasoning as `tests/shared/test_managed_writer_publication.py`:
-mocking the CAS tests nothing). Prepared receipts and candidate plans are
-constructed directly — their producers (`_release_inventory`, `_release_services`)
-are covered by their own prove scripts — so every refusal is pinned to exactly
-the fact under test. One structural test pins this slice's inertness: no
-production package imports the seat until the rollout wiring lands.
+The seats' only non-pure steps are their compare-and-set transitions on the
+real `deployment_state` row (same reasoning as
+`tests/shared/test_managed_writer_publication.py`: mocking the CAS tests
+nothing). Prepared receipts and candidate plans are constructed directly —
+their producers (`_release_inventory`, `_release_services`) are covered by
+their own prove scripts — so every refusal is pinned to exactly the fact under
+test. One structural test pins the seats' inertness: no production package
+imports the module until the rollout wiring lands.
 """
 
 from __future__ import annotations
@@ -26,17 +27,34 @@ from psycopg.types.json import Jsonb
 from cli.commands._update_publication import (
     PreparedUnitPublication,
     build_pending_publication,
+    commit_pending_publication,
     open_pending_publication,
     published_unit,
 )
-from shared.managed_writer_barrier import ManagedWriterBarrierError, RolloutIdentity
-from shared.managed_writer_observation import ExpectedUnitWriters
+from shared.cluster_lock import release_update_lock
+from shared.managed_writer_activation import (
+    NormalServiceReadback,
+    SelectorReadback,
+    UnitActivationReadback,
+    record_pending_migration,
+    record_pending_unit_readback,
+)
+from shared.managed_writer_barrier import (
+    ManagedUnit,
+    ManagedUnitClosure,
+    ManagedWriterBarrierError,
+    ManagedWriterCollection,
+    RolloutIdentity,
+)
+from shared.managed_writer_observation import ExpectedProcess, ExpectedUnitWriters
 from shared.managed_writer_publication import (
     CandidateUnitPlan,
     CommittedPublication,
     NormalService,
     PendingPublication,
     WriterPublication,
+    adopt_pending_collection,
+    require_current_publication,
 )
 from shared.runtime_publication_input import PreparationReceipt, PreparedService
 
@@ -497,11 +515,233 @@ def test_published_unit_refuses_inconsistent_prepared_facts(field: str) -> None:
         published_unit(facts)
 
 
-def test_the_seat_has_no_production_callsite() -> None:
-    """Slice 1b stays inert: only tests import the seat until the wiring lands.
+def _closure(conn: psycopg.Connection, pending: PendingPublication) -> ManagedWriterCollection:
+    row = conn.execute("SELECT clock_timestamp()").fetchone()
+    assert row is not None
+    now = row[0]
+    return ManagedWriterCollection(
+        operation=pending.operation,
+        candidate_digest=pending.candidate_digest,
+        challenge=pending.challenge,
+        collected_at=now,
+        valid_until=now + timedelta(seconds=30),
+        units=tuple(
+            ManagedUnitClosure(
+                unit=ManagedUnit(
+                    machine=entry.machine,
+                    home=entry.home,
+                    inventory_digest=entry.prepared_receipt_digest,
+                ),
+                boot_id=uuid4(),
+                observer_instance=uuid4(),
+                observation_digest="9" * 64,
+                outcome="old_writers_absent_relaunchers_fenced",
+            )
+            for entry in pending.units
+        ),
+    )
 
-    When the rollout Phase-0 wiring genuinely connects this seat, its own slice
-    must update this pin consciously rather than import it quietly.
+
+def _unit_readback(
+    conn: psycopg.Connection, pending: PendingPublication, expected: CandidateUnitPlan
+) -> UnitActivationReadback:
+    row = conn.execute("SELECT clock_timestamp()").fetchone()
+    assert row is not None
+    now = row[0]
+    service = expected.services[0]
+    return UnitActivationReadback(
+        selector=SelectorReadback(
+            unit=expected.unit,
+            challenge=pending.challenge,
+            previous_digest=expected.previous_selector_digest,
+            current_digest=expected.selector_digest,
+            observed_at=now,
+            valid_until=now + timedelta(seconds=30),
+        ),
+        services=(
+            NormalServiceReadback(
+                service=service,
+                supervisor=ExpectedProcess(pid=11, create_time=1.0),
+                child=ExpectedProcess(pid=12, create_time=2.0),
+                loaded_module=service.entrypoint,
+                executable=service.executable,
+                entrypoint=service.entrypoint,
+                artifact_digest=expected.unit.artifact_digest,
+                manifest_digest=expected.unit.manifest_digest,
+                readiness="normal",
+                observation_digest="3" * 64,
+                challenge=pending.challenge,
+                observed_at=now,
+                valid_until=now + timedelta(seconds=30),
+            ),
+        ),
+    )
+
+
+def _commit_ready_pending(
+    conn: psycopg.Connection, *, readbacks: tuple[str, ...] = (HOME, STOPPED_HOME)
+) -> PendingPublication:
+    """Journal, collection, migration receipt and the requested unit readbacks.
+
+    The pre-commit chain each seat test starts from: a live rollout, a complete
+    candidate plan, adopted closure, the applied migration SET, and readbacks
+    for exactly the named units (a strict subset for the incompleteness tests).
+    """
+    operation = _acquire_rollout(conn)
+    # The test database carries the real applied SET; the receipt must read it.
+    applied = tuple(
+        row[0] for row in conn.execute("SELECT name FROM schema_migrations ORDER BY name")
+    )
+    pending = open_pending_publication(
+        conn,
+        (_with_candidate(_facts(HOME)), _with_candidate(_facts(STOPPED_HOME))),
+        operation=operation,
+        candidate_digest=CANDIDATE_DIGEST,
+        schema_digest=SCHEMA_DIGEST,
+        applied_names=applied,
+    )
+    adopt_pending_collection(conn, _closure(conn, pending))
+    record_pending_migration(conn, pending.operation, pending.challenge)
+    assert pending.normal_start_plan is not None
+    expected = {entry.unit.home: entry for entry in pending.normal_start_plan.units}
+    for home in readbacks:
+        record_pending_unit_readback(
+            conn,
+            pending.operation,
+            pending.challenge,
+            _unit_readback(conn, pending, expected[home]),
+        )
+    return pending
+
+
+def test_commit_seat_skips_without_pending(publication_db: psycopg.Connection) -> None:
+    conn = publication_db
+    _seed_current(conn)
+    before = _evidence(conn)
+
+    assert commit_pending_publication(conn) is None
+    assert _evidence(conn) == before
+    conn.rollback()
+
+
+def test_commit_seat_publishes_the_complete_chain(publication_db: psycopg.Connection) -> None:
+    conn = publication_db
+    previous = _seed_current(conn)
+    pending = _commit_ready_pending(conn)
+    conn.commit()
+
+    conn.execute("SELECT 1")  # the caller's transaction is open
+    committed = commit_pending_publication(conn)
+    conn.commit()
+
+    assert committed is not None
+    stored = _stored_publication(conn)
+    assert stored.pending is None
+    assert stored.current is not None
+    assert stored.current.publication_id == committed
+    assert stored.current.publication_id != previous.publication_id
+    assert stored.current.operation == pending.operation
+    assert stored.current.units == pending.units
+    assert stored.current.activation_challenge == pending.challenge
+    assert stored.current.activation_digest is not None
+    conn.rollback()
+
+
+def test_commit_seat_refuses_partial_readbacks(publication_db: psycopg.Connection) -> None:
+    conn = publication_db
+    _seed_current(conn)
+    _commit_ready_pending(conn, readbacks=(HOME,))
+    conn.commit()
+    before = _evidence(conn)
+
+    conn.execute("SELECT 1")  # the caller's transaction is open
+    with pytest.raises(ManagedWriterBarrierError, match="not ready to commit"):
+        commit_pending_publication(conn)
+    conn.rollback()
+
+    assert _evidence(conn) == before
+    assert _stored_publication(conn).pending is not None
+    conn.rollback()
+
+
+def test_commit_seat_is_a_noop_after_commit(publication_db: psycopg.Connection) -> None:
+    conn = publication_db
+    _seed_current(conn)
+    _commit_ready_pending(conn)
+    conn.commit()
+
+    conn.execute("SELECT 1")
+    first = commit_pending_publication(conn)
+    conn.commit()
+    assert first is not None
+    before = _evidence(conn)
+
+    conn.execute("SELECT 1")
+    assert commit_pending_publication(conn) is None
+    assert _evidence(conn) == before
+    conn.rollback()
+
+
+def test_commit_seat_requires_a_caller_owned_transaction(
+    publication_db: psycopg.Connection,
+) -> None:
+    conn = publication_db
+    conn.commit()  # no transaction open: psycopg starts one with the caller's first statement
+
+    with pytest.raises(ManagedWriterBarrierError, match="caller-owned transaction"):
+        commit_pending_publication(conn)
+
+
+def test_commit_seat_leaves_the_release_and_phase_to_the_existing_finalizer(
+    publication_db: psycopg.Connection,
+) -> None:
+    conn = publication_db
+    _seed_current(conn)
+    _commit_ready_pending(conn)
+    conn.commit()
+
+    # A durable pending journal refuses the guarded generic release...
+    release_update_lock("gateway:pid77")
+    row = conn.execute("SELECT phase, holder FROM deployment_state WHERE id=1").fetchone()
+    assert row == ("updating", "gateway:pid77")
+
+    # ...the seat commits the evidence and nothing else...
+    conn.execute("SELECT 1")
+    committed = commit_pending_publication(conn)
+    conn.commit()
+    assert committed is not None
+    row = conn.execute("SELECT phase, holder FROM deployment_state WHERE id=1").fetchone()
+    assert row == ("updating", "gateway:pid77")
+
+    # ...ordinary admission still refuses while the phase is not stable...
+    with pytest.raises(ManagedWriterBarrierError, match="not settled"):
+        require_current_publication(
+            conn,
+            published_unit(_facts(HOME)),
+            selector_artifact_digest=_facts(HOME).artifact_digest,
+            selector_manifest_digest=_facts(HOME).manifest_digest,
+        )
+    conn.rollback()
+
+    # ...and the release now settles because the commit cleared the pending entry.
+    release_update_lock("gateway:pid77")
+    row = conn.execute("SELECT phase, holder FROM deployment_state WHERE id=1").fetchone()
+    assert row == ("stable", None)
+    require_current_publication(
+        conn,
+        published_unit(_facts(HOME)),
+        selector_artifact_digest=_facts(HOME).artifact_digest,
+        selector_manifest_digest=_facts(HOME).manifest_digest,
+    )
+    conn.rollback()
+
+
+def test_the_seat_has_no_production_callsite() -> None:
+    """Slices 1b/1e stay inert: only tests import the seats until the wiring lands.
+
+    When the rollout Phase-0 and post-Phase-B wiring genuinely connect these
+    seats, its own slice must update this pin consciously rather than import
+    them quietly.
     """
     root = Path(__file__).resolve().parents[2]
     offenders = sorted(
