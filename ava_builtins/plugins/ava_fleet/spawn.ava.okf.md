@@ -13,11 +13,11 @@ tags:
 
 ## Responsibility
 
-Agent creation, copying, termination, restart, resurrection — dynamic member management for the fleet. spawn/fork/terminate/restart/resurrect are `ava.agents` **core** methods, the fleet plugin does not register them. However, **the `label=` parameter of `spawn` is fleet-only**: wrapped around core spawn by `ava_builtins/plugins/ava_fleet/plugin.py:_spawn_with_label` (:554-584) via monkeypatch (**not** `register_namespace_member`); after disabling fleet, `spawn(label=…)` raises `TypeError`, and `create_and_assign` also disappears.
+Agent creation, copying, termination, restart, resurrection — dynamic member management for the fleet. spawn/fork/terminate/restart/resurrect are `ava.agents` **core** methods, the fleet plugin does not register them. However, **the `label=` parameter of `spawn` is fleet-only**: wrapped around core spawn by `ava_builtins/plugins/ava_fleet/plugin.py:_spawn_with_label` (:328-353) via monkeypatch (**not** `register_namespace_member`); after disabling fleet, `spawn(label=…)` raises `TypeError`, and `create_and_assign` also disappears.
 
 ## API
 
-### `ava.agents.spawn(prompt=None, fork_from=None, machine=None, config_overlay=None, label=None, preset=None) -> int`
+### `ava.agents.spawn(prompt=None, fork_from=None, machine=None, config_overlay=None, label=None) -> int`
 
 Creates a new agent, returns its agent_id.
 
@@ -26,9 +26,8 @@ Creates a new agent, returns its agent_id.
 | `prompt` | First message; omit = agent idle after creation |
 | `fork_from` | Copy that agent's conversation state to the new agent |
 | `machine` | Target machine; omit = current machine (`ava.self.SELF_MACHINE_NAME`) |
-| `config_overlay` | Per-field config override, e.g. `{"llm_model": "..."}` |
+| `config_overlay` | Per-field config override, e.g. `{"llm_model": "..."}`; a preset template is named inside it as `{"preset": "name"}` (explicit fields win per-key) |
 | `label` | Initial role/name; omit = auto-named. **fleet-only**: provided by fleet's spawn wrap; unavailable when fleet is disabled |
-| `preset` | Preset config template name; when given together with `config_overlay`, the latter wins field-by-field |
 
 ### `ava.agents.fork_from` (parameter of spawn, not a standalone function)
 
@@ -76,7 +75,7 @@ class Preset:
     updated_at: datetime
 ```
 
-Presets are used to reuse common configurations — for example, a "gmail-agent" preset pre-configures gmail skill, a specific model, and machine. `spawn(preset="gmail-agent")` creates an email processing agent.
+Presets are used to reuse common configurations — for example, a "gmail-agent" preset pre-configures gmail skill, a specific model, and machine. `spawn(config_overlay={"preset": "gmail-agent"})` creates an email processing agent.
 
 ## Lifecycle States
 

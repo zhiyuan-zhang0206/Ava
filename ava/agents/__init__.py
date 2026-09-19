@@ -350,7 +350,6 @@ def spawn(
     fork_from: int | None = None,
     machine: str | None = None,
     config_overlay: dict[str, object] | None = None,
-    preset: str | None = None,
 ) -> int:
     """Start a new agent; does not block.
 
@@ -359,8 +358,7 @@ def spawn(
     copies another agent's conversation state. `machine` defaults to your own.
     `config_overlay` names a saved config template through its `preset` key
     (`config_overlay={"preset": "name"}`); the preset's stored config is the
-    base and the explicit fields win per key. The legacy `preset` argument is
-    equivalent (deprecated) — passing both is a ValueError.
+    base and the explicit fields win per key.
 
     A fork keeps the source agent's effective config so its inherited context
     stays cache-valid: at fork, `config_overlay` may only ADD skills to
@@ -383,7 +381,6 @@ def spawn(
         machine=machine,
         config=config_overlay,
         label=None,
-        preset=preset,
     )
 
 
@@ -394,30 +391,19 @@ def _spawn_impl(
     machine: str | None,
     config: dict[str, object] | None,
     label: str | None,
-    preset: str | None = None,
 ) -> int:
     # Shared spawn body. `label` is exposed on the public `spawn` only when the
     # ava_fleet plugin wraps it (the plugin passes a real label through here);
-    # the unwrapped core spawn always passes label=None. A preset — given as the
-    # legacy `preset` argument or inside `config["preset"]` — is resolved to its
-    # config template on the gateway side; only the explicit `config` fields are
-    # validated locally (the preset's own values are validated at child boot).
+    # the unwrapped core spawn always passes label=None. A preset — named inside
+    # `config["preset"]` — is resolved to its config template on the gateway
+    # side; only the explicit `config` fields are validated locally (the
+    # preset's own values are validated at child boot).
     prompt = coerce_str(prompt, "prompt", allow_none=True)
     fork_from = coerce_typed(fork_from, "fork_from", int, allow_none=True)
     machine = coerce_str(machine, "machine", allow_none=True)
     config = coerce_typed(config, "config", dict, allow_none=True)
     label = coerce_str(label, "label", allow_none=True)
-    preset = coerce_str(preset, "preset", allow_none=True)
     spawner = ava._boot.require_actor()
-    if preset is not None:
-        merged = dict(config) if config else {}
-        if "preset" in merged:
-            raise ValueError(
-                "preset given twice — as the spawn `preset` argument and as "
-                "config_overlay['preset']; pass only one"
-            )
-        merged["preset"] = preset
-        config = merged
     if config:
         # The `preset` key is spawn-boundary metadata, not a Settings field: it
         # must not reach the overlay validators, which reject unknown keys.
@@ -440,7 +426,6 @@ def _spawn_impl(
         machine=machine if machine is not None else ava.self.SELF_MACHINE_NAME,
         config=config,
         label=label,
-        preset=None,
     )
 
 

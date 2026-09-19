@@ -137,14 +137,16 @@ class GatewayClient:
         return resp.json()
 
     async def spawn_agent(self, *, preset: str | None, config: dict[str, object] | None) -> int:
-        """POST /api/agents — create an agent, return its id. The gateway
-        folds the named preset into config; the runner never sees it."""
+        """POST /api/agents — create an agent, return its id. A named preset
+        rides config_overlay["preset"] (task #4086: the top-level field is
+        retired); the gateway folds it into config, the runner never sees it."""
         client = await self._http()
-        payload: dict[str, object] = {"spawner": "user"}
+        overlay = dict(config) if config else {}
         if preset is not None:
-            payload["preset"] = preset
-        if config:
-            payload["config"] = config
+            overlay["preset"] = preset
+        payload: dict[str, object] = {"spawner": "user"}
+        if overlay:
+            payload["config"] = overlay
         resp = await client.post("/api/agents", headers=self._headers(), json=payload)
         if resp.status_code != 201:
             raise RuntimeError(f"spawn failed: HTTP {resp.status_code} - {resp.text[:300]}")

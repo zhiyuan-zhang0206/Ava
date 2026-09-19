@@ -70,12 +70,12 @@ spawning an agent picks a preset instead of hand-writing config each time.
 
 SDK usage: `ava.agents.presets.list()` lists all presets,
 `ava.agents.presets.get(name)` fetches one (raises `PresetNotFoundError` if
-missing). Spawn with `ava.agents.spawn(..., preset="name")` — the preset is
-resolved into config on the gateway side.
+missing). Spawn with `ava.agents.spawn(..., config_overlay={"preset": "name"})`
+— the preset is resolved into config on the gateway side.
 
 Preset vs `config_overlay`: preset is the **base**, `config_overlay` is the
-**precise override** — when both are passed to `spawn`, fields in
-`config_overlay` override same-named fields in the preset. Preset values are
+**precise override** — when the overlay names a preset beside explicit fields,
+those fields override the preset's same-named ones. Preset values are
 validated only at child startup; only the explicit `config_overlay` is validated
 locally at spawn time.
 
@@ -115,7 +115,7 @@ which layer you're touching before picking the tool.
 | Layer | What it controls | Where it lives |
 |---|---|---|
 | **Cluster / host config** | Model keys, DB URLs, service ports, timezone, feature flags — the `.env` fields. | `$AVA_HOME/.env` (gateway's for cluster fields; each host's for host fields) |
-| **Agent per-agent config** | Per-agent overrides: model, skills, reasoning effort — the fields a spawn/restart overlay carries. | Passed at spawn (preset or `config_overlay`), snapshotted into the agent row |
+| **Agent per-agent config** | Per-agent overrides: model, skills, reasoning effort — the fields a spawn/restart overlay carries. | Passed at spawn (`config_overlay`, naming a preset or explicit fields), snapshotted into the agent row |
 | **Presets** | Named bundles of per-agent config — templates for spawn. | `agent_presets` DB table |
 | **User settings** | Frontend display preferences (timeline density, theme, etc.) — per-user, synced across frontends. | `user_settings` DB table (TanStack Query + `useUserSettings`) |
 
@@ -141,15 +141,15 @@ Passed at spawn time — not edited on a running agent:
 
 ```python
 # Via preset (base layer)
-ava.agents.spawn(prompt="...", preset="coder")
+ava.agents.spawn(prompt="...", config_overlay={"preset": "coder"})
 
-# Via config_overlay (precise override)
+# Via explicit fields (precise override)
 # model id from the registry roster — see the models sub-skill
 ava.agents.spawn(prompt="...", config_overlay={"llm_model": "deepseek-flash"})
 
-# Both (overlay wins per-key)
-ava.agents.spawn(prompt="...", preset="coder",
-                 config_overlay={"llm_model": "claude-opus-5"})
+# Both (explicit fields win per-key)
+ava.agents.spawn(prompt="...",
+                 config_overlay={"preset": "coder", "llm_model": "claude-opus-5"})
 ```
 
 Per-agent config is snapshotted into the agent row at spawn; changing a preset

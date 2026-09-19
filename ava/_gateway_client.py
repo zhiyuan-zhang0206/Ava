@@ -147,7 +147,6 @@ def spawn(
     machine: str | None = None,
     config: dict[str, object] | None = None,
     label: str | None = None,
-    preset: str | None = None,
 ) -> int:
     """POST /api/agents → new agent_id."""
     body: dict = {"spawner": spawner}
@@ -163,8 +162,6 @@ def spawn(
         body["config"] = config
     if label is not None:
         body["label"] = label
-    if preset is not None:
-        body["preset"] = preset
     # Non-idempotent create (doorplate: POST /api/agents = NON_IDEMPOTENT):
     # a ReadTimeout or an HTTP 5xx means the gateway may have already spawned
     # the agent (response lost, not request lost) — retrying could produce a

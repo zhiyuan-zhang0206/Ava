@@ -133,26 +133,21 @@ export function SpawnButton({ onSpawn, variant }: Props) {
   // registry's per-model tuning (every catalog model pins one — validated
   // server-side). The picker pre-selects it, so "select a model" immediately
   // shows the level that model runs at; there is no synthetic "Effort: default"
-  // option for models with a concrete default.
+  // option.
   const modelDefaultEffort =
     typeof selectedModelInfo?.reasoning_effort_default === "string"
       ? selectedModelInfo.reasoning_effort_default
       : null;
-  const hasConcreteDefault =
-    modelDefaultEffort !== null && effortLevels.includes(modelDefaultEffort);
   // Re-derived from the resolved model on every render rather than trusted
   // from the stored setting: a level the current model does not offer must not
   // reach the spawn request. Explicit selection wins, then the model's own
-  // default, then nothing (the provider's default — expressible only via the
-  // legacy "Effort: default" option, which stays for models without a concrete
-  // default). The stored setting is left as the user last set it, so switching
-  // back to a model that offers it restores it.
+  // default; a model the catalog has not resolved publishes no default, and
+  // nothing is sent for it. The stored setting is left as the user last set it,
+  // so switching back to a model that offers it restores it.
   const effectiveReasoningEffort: string | undefined =
     selectedReasoningEffort !== undefined && effortLevels.includes(selectedReasoningEffort)
       ? selectedReasoningEffort
-      : hasConcreteDefault
-        ? modelDefaultEffort
-        : undefined;
+      : (modelDefaultEffort ?? undefined);
 
   const presets = presetsData ?? [];
 
@@ -246,12 +241,10 @@ export function SpawnButton({ onSpawn, variant }: Props) {
   // two-value ladder), and the model's default effort rides along
   // (`reasoning_effort_default`, the registry's per-model tuning value — a
   // spawn with no explicit effort runs at it). Rendered only when the model
-  // offers levels: a select whose sole entry is "Effort: default" is a control
-  // with nothing to control. The select shows ONLY concrete ladder values with
-  // the model's default pre-selected (task #568) — no synthetic "Effort:
-  // default" row. The legacy "" option survives only for a model with no
-  // concrete default (no catalog model today): it sends no reasoning_effort,
-  // leaving the provider's own server-side default in force.
+  // offers levels: a model with no ladder has nothing to control. The select
+  // shows ONLY concrete ladder values with the model's default pre-selected
+  // (task #568) — no synthetic "Effort: default" row: every catalog model pins
+  // a concrete default (registry-checked), so no fallback row is needed.
   const reasoningEffortSelect =
     effortLevels.length > 0 ? (
       <select
@@ -262,7 +255,6 @@ export function SpawnButton({ onSpawn, variant }: Props) {
         }
         className={cn("w-[80px] truncate text-xs bg-transparent border border-border rounded px-1 py-0.5 text-muted-foreground hover:text-foreground focus:outline-none focus:ring-1 focus:ring-ring cursor-pointer", MIN_W_0)}
       >
-        {!hasConcreteDefault && <option value="">{t("effortDefault")}</option>}
         {effortLevels.map((effort) => (
           <option key={effort} value={effort}>
             {effort}

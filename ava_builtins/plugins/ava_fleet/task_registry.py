@@ -370,10 +370,16 @@ def create_and_assign(
         _ensure_parent_exists(cur, parent)
 
     # 1. Spawn the agent — must exist before task creation so it can be the owner.
+    # The preset folds into the overlay at the spawn boundary (task #4086).
+    overlay = dict(config_overlay) if config_overlay else {}
+    if "preset" in overlay:
+        raise ValueError(
+            "preset given twice — as `preset` and as config_overlay['preset']; pass only one"
+        )
+    overlay["preset"] = preset
     agent_id = ava.agents.spawn(
-        preset=preset,
         label=label,  # pyright: ignore[reportCallIssue] — fleet plugin wraps spawn with label
-        config_overlay=config_overlay,
+        config_overlay=overlay,
         machine=machine,
     )
 

@@ -16,9 +16,7 @@
 // with no ladder — and a model the catalog has not delivered (or no longer
 // carries) — renders no select at all, and the spawn request omits
 // reasoning_effort. The selection is re-derived from the resolved model, so a
-// level the current model does not offer is never sent. A model whose default
-// is not concrete keeps the legacy "Effort: default" ("" = provider's own
-// default) option — no catalog model does today.
+// level the current model does not offer is never sent.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -170,22 +168,6 @@ const modelsWithTwoLadders = () => ({
       context_window: 400_000,
       reasoning_effort_options: ["minimal", "low", "medium", "high"],
       reasoning_effort_default: "medium",
-    },
-  },
-  default: "deepseek-v4-pro",
-});
-
-// A ladder WITHOUT a concrete default — the legacy shape (no catalog model
-// today; kept for the fallback path where "Effort: default" must stay
-// expressible). `null` is what the wire sends for a model with no default.
-const modelsWithLegacyDefault = () => ({
-  providers: { deepseek: ["deepseek-v4-pro"] },
-  models: {
-    "deepseek-v4-pro": {
-      provider: "deepseek",
-      context_window: 128_000,
-      reasoning_effort_options: ["high", "max"],
-      reasoning_effort_default: null,
     },
   },
   default: "deepseek-v4-pro",
@@ -963,38 +945,6 @@ describe("SpawnButton model dropdown", () => {
       machine: "test-host",
       model: "deepseek-v4-pro",
       reasoning_effort: "max",
-    });
-  });
-
-  // No catalog model publishes a ladder without a concrete default today, but
-  // the fallback must stay expressible: the legacy "Effort: default" option
-  // ("" — sends nothing, provider's own default applies).
-  it("ladder without a concrete default keeps the legacy Effort: default option", async () => {
-    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
-    vi.mocked(api.getModels).mockResolvedValue(modelsWithLegacyDefault());
-    const onSpawn = vi.fn();
-    wrap(<SpawnButton variant="sm" onSpawn={onSpawn} />);
-
-    await waitFor(() => {
-      expect(screen.getByLabelText("Model")).toBeTruthy();
-    });
-    await waitFor(() => {
-      expect(screen.getByLabelText("Spawn agent").hasAttribute("disabled")).toBe(false);
-    });
-
-    const effortSelect = screen.getByLabelText<HTMLSelectElement>("Thinking effort");
-    expect([...effortSelect.options].map((o) => o.text)).toEqual([
-      "Effort: default",
-      "high",
-      "max",
-    ]);
-    expect(effortSelect.value).toBe("");
-
-    fireEvent.click(screen.getByLabelText("Spawn agent"));
-    expect(onSpawn).toHaveBeenCalledWith({
-      machine: "test-host",
-      model: undefined,
-      reasoning_effort: undefined,
     });
   });
 
