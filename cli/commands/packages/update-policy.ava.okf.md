@@ -69,8 +69,11 @@ revoked rev.
 
 ## `ava packages policy <name> [--update-mode auto|notify|off] [--check-every 24h]`
 
-Records an explicit policy on the row; explicit values survive every refresh
-pass, while unset fields resolve from the settings defaults at first sight
+Records an explicit policy on the row; at least one field is required — a
+bare `ava packages policy <name>` is a usage error before any command runs,
+and the `--check-every` duration is validated at the parse layer. Explicit
+values survive every refresh pass, while unset fields resolve from the
+settings defaults at first sight
 (`notify` records `available` without applying; `off` is never checked).
 `ava skill install … [--update-mode …] [--check-every <dur>]` records the same
 fields at install time.
