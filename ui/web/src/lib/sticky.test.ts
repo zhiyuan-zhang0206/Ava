@@ -148,6 +148,65 @@ describe("programmatic scrolls are neutralized by baseline sync", () => {
   });
 });
 
+describe("force pins (send / switch) clear the stale upward run", () => {
+  // The reader's earlier departure is spent once they COMMAND a return to
+  // the bottom. Without the reset, any post-send twitch (trackpad nudge,
+  // momentum tail) re-adds to the old run, releases following instantly,
+  // and the arriving reply is never followed — the "send didn't scroll /
+  // the view stopped following right after I sent" report (user report
+  // 2026-09-19).
+
+  it("a post-send twitch keeps following — the fresh run starts at zero", () => {
+    const ctl = createStickyController(POINTER_STICKY_THRESHOLDS);
+    pin(ctl, 2000); // at bottom
+    // Reading far up: the slow-drag run goes well past the zone.
+    ctl.handleScroll(view(1200, 2000));
+    ctl.handleScroll(view(1000, 2000));
+    expect(ctl.isSticky()).toBe(false);
+    // The user sends: the component force-pins to the bottom, fresh run.
+    const pinned = view(1400, 2000);
+    ctl.notifyPinnedToBottom(pinned, true);
+    ctl.handleScroll(pinned); // the pin's echo
+    expect(ctl.isSticky()).toBe(true);
+    // A twitch right after the send: 10px, inside the zone — the stale
+    // run must not exist to release following.
+    ctl.handleScroll(view(1390, 2000));
+    expect(ctl.isSticky()).toBe(true);
+  });
+
+  it("without a fresh run the same twitch releases following (the guarded bug)", () => {
+    const ctl = createStickyController(POINTER_STICKY_THRESHOLDS);
+    pin(ctl, 2000);
+    ctl.handleScroll(view(1200, 2000));
+    ctl.handleScroll(view(1000, 2000));
+    expect(ctl.isSticky()).toBe(false);
+    // An AUTOMATIC pin (no freshRun): the stale run survives…
+    const pinned = view(1400, 2000);
+    ctl.notifyPinnedToBottom(pinned);
+    ctl.handleScroll(pinned);
+    expect(ctl.isSticky()).toBe(true);
+    // …so the same 10px twitch adds to it and releases at once.
+    ctl.handleScroll(view(1390, 2000));
+    expect(ctl.isSticky()).toBe(false);
+  });
+
+  it("automatic (streaming) pins keep the run — a slow drag stays escapable (#2311)", () => {
+    const ctl = createStickyController(POINTER_STICKY_THRESHOLDS);
+    pin(ctl, 2000);
+    ctl.handleScroll(view(1375, 2000)); // slow-drag step: run 25, still sticky
+    expect(ctl.isSticky()).toBe(true);
+    // A chunk lands and the ResizeObserver pins (no freshRun).
+    const pinned = view(1600, 2200);
+    ctl.notifyPinnedToBottom(pinned);
+    ctl.handleScroll(pinned); // echo
+    // The drag continues one small step: run 25 + 10 > zone 30 → released.
+    // Resetting the run on automatic pins would re-arm it every chunk and
+    // glue the reader to the bottom (#2311).
+    ctl.handleScroll(view(1590, 2200));
+    expect(ctl.isSticky()).toBe(false);
+  });
+});
+
 describe("send flow: a clamp OBSERVED after a chunk grew (#1431 regression gate)", () => {
   // The load-bearing case for lastBottomScrollHeight, and the one the
   // "clamps always land at dist 0" argument misses: the clamp does land at

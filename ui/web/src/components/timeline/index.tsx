@@ -383,15 +383,20 @@ export function TimelineView({
 
   // Pin the viewport to the bottom and report the performed scroll back to
   // the controller (post-write snapshot, so the browser-clamped actual
-  // scrollTop becomes the controller's baseline).
+  // scrollTop becomes the controller's baseline). `freshRun` marks the
+  // user-commanded force pins (send / agent switch) — see the force-scroll
+  // effect below and lib/sticky.ts.
   const pinToBottom = useCallback(
-    (viewport: HTMLElement) => {
+    (viewport: HTMLElement, freshRun = false) => {
       viewport.scrollTop = viewport.scrollHeight;
-      controller.notifyPinnedToBottom({
-        scrollTop: viewport.scrollTop,
-        scrollHeight: viewport.scrollHeight,
-        clientHeight: viewport.clientHeight,
-      });
+      controller.notifyPinnedToBottom(
+        {
+          scrollTop: viewport.scrollTop,
+          scrollHeight: viewport.scrollHeight,
+          clientHeight: viewport.clientHeight,
+        },
+        freshRun,
+      );
     },
     [controller],
   );
@@ -712,7 +717,12 @@ export function TimelineView({
       wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ??
       null;
     if (!viewport) return;
-    pinToBottom(viewport);
+    // A user-commanded force-scroll (send / agent switch): pin with a
+    // FRESH run — the reader's earlier departure is spent, so a
+    // post-command twitch (trackpad nudge, momentum tail) cannot re-trigger
+    // the stale run and silently release following while the awaited reply
+    // streams in (user report 2026-09-19).
+    pinToBottom(viewport, true);
   }, [scrollToBottomRequest, pinToBottom]);
 
   // Streamed-growth auto-scroll lives in the ResizeObserver above — any
