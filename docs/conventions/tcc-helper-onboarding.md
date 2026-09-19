@@ -60,6 +60,14 @@ venv and the user present:
   `icloud` (experimental -- evidence levels in the trigger-method archive
   below). `fda` and `devtools` are never attempted, by decision.
 
+The panel (`AvaPermissionsHelper.app`, shown on a socket-less launch) drives
+the same tool: *Check status* runs `--check`; *Fill missing grants* runs it
+with `--fill-pending --confirm-user-present` -- the click is the user-present
+attestation, and there is no automatic fill path (a launch only checks). A
+panel fill raises the same extended-group dialogs as the CLI, `icloud`
+included: its prompt writes no `PROMPTING` line, so verify it by screenshot
+(see the archive below).
+
 ## Tiers (design v1)
 
 The machine-facing contract: a target tier names the authorization set a host
