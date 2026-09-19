@@ -26,11 +26,14 @@ def external_caller() -> CallerIdentity | None:
 
 
 def explicit_caller_source(source: str | None = None) -> str | None:
-    """Resolve profile/source consistently without inferring a human principal.
+    """Resolve an explicit source against the opt-in external profile.
 
-    None preserves a legacy non-opted-in call site; callers that require an
-    explicit source must reject it. An external profile cannot be overridden
-    with user/agent/system, even when a CLI flag supplies that conflicting label.
+    Kept for the #3658 negotiation line: the CLI stopped calling it when
+    provenance became explicit-only (task #4092); the module tests still
+    exercise it. ``None`` returns the profile projection (or no source);
+    callers requiring an explicit source must reject ``None`` themselves.
+    An external profile cannot be overridden with user/agent/system, even
+    when a caller supplies that conflicting label.
     """
     caller = external_caller()
     if caller is not None:

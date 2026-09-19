@@ -41,22 +41,34 @@ _BATCH_TIMEOUT_S = 600.0
 class ProvenanceError(ValueError):
     """A provenance requirement failed; the CLI reports it instead of a traceback.
 
-    Raised where a ``--source`` value (or the opt-in AVA_CALLER_IDENTITY profile)
-    is missing, malformed, or contradictory. Per-command CLI handlers catch it,
+    Raised where an explicit ``--source`` value is missing on a requiring verb
+    or is malformed. Per-command CLI handlers catch it,
     print the message, and exit 2; the command layer itself keeps raising so
     callers and tests see one honest contract.
     """
 
 
-def _caller_body(source: str | None, *, field: str = "source") -> dict[str, str]:
-    """Opt-in provenance; no caller metadata is authentication evidence."""
-    from shared.external_caller import explicit_caller_source
+def _validated_source_arg(source: str) -> str:
+    """Validate one explicit source value (the CLI parse layer runs first)."""
+    from shared.envelope import validate_source
 
     try:
-        resolved = explicit_caller_source(source)
+        validate_source(source)
     except ValueError as exc:
         raise ProvenanceError(str(exc)) from exc
-    return {field: resolved} if resolved is not None else {}
+    return source
+
+
+def _explicit_caller(source: str | None, *, field: str = "source") -> dict[str, str]:
+    """Explicit provenance only — the environment never supplies or vetoes it.
+
+    User ruling 2026-09-20: CLI parameters are explicit; the opt-in
+    AVA_CALLER_IDENTITY profile (still consumed by SDK-side stamping, see
+    ``ava._boot.default_actor``) no longer compensates an omitted ``--source``.
+    """
+    if source is None:
+        return {}
+    return {field: _validated_source_arg(source)}
 
 
 class _AgentListItem(BaseModel):
@@ -123,18 +135,11 @@ def _explicit_send_source(source: str | None) -> str:
 
     The CLI enforces `--source` at the argparse layer; this guard covers
     programmatic callers — no path may send without an explicit, valid source
-    (user ruling 2026-09-20: the AVA_CALLER_IDENTITY profile does not
-    compensate a missing parameter on this path).
+    (user ruling 2026-09-20: explicit parameters only).
     """
-    from shared.envelope import validate_source
-
     if source is None:
         raise ProvenanceError(_SEND_SOURCE_GUIDE)
-    try:
-        validate_source(source)
-    except ValueError as exc:
-        raise ProvenanceError(str(exc)) from exc
-    return source
+    return _validated_source_arg(source)
 
 
 def cmd_agents_send(
@@ -283,7 +288,7 @@ def cmd_agents_restart(
     from shared.machine import gateway_api_base, gateway_auth_headers
 
     url = f"{gateway_api_base()}/api/agents/{agent_id}/restart"
-    caller = _caller_body(source)
+    caller = _explicit_caller(source)
     if config_json is None:
         resp = dial_post(
             url,
@@ -321,7 +326,7 @@ def cmd_agents_resurrect(agent_id: int, *, source: str | None = None) -> int:
     from shared.machine import gateway_api_base, gateway_auth_headers
 
     url = f"{gateway_api_base()}/api/agents/{agent_id}/resurrect"
-    caller = _caller_body(source, field="resurrected_by")
+    caller = _explicit_caller(source, field="resurrected_by")
     resp = dial_post(
         url,
         **({"json": caller} if caller else {}),
@@ -382,9 +387,10 @@ def _terminate(
     agent_id: int, *, force: bool, source: str | None = None, final: bool = False
 ) -> int:
     """Shared POST for `terminate` (graceful) and `kill` (force) — both hit
-    POST /api/agents/{id}/terminate, differing only in the `force` flag. The
-    An explicit source/profile is forwarded unchanged. Non-opted-in legacy
-    callers retain the old server default until the negotiated transition.
+    POST /api/agents/{id}/terminate, differing only in the `force` flag. An
+    explicit source is forwarded unchanged; the environment is never consulted
+    (user ruling 2026-09-20). Omitting it claims no provenance and
+    leaves the server default in place.
     `final` closes the agent (never auto-resurrect); it is sent only when set,
     so an older gateway never receives a flag it cannot honor."""
     from shared.http_dial import post as dial_post
@@ -394,7 +400,7 @@ def _terminate(
     url = f"{gateway_api_base()}/api/agents/{agent_id}/terminate"
     resp = dial_post(
         url,
-        json={"force": force, **({"final": True} if final else {}), **_caller_body(source)},
+        json={"force": force, **({"final": True} if final else {}), **_explicit_caller(source)},
         timeout=_TIMEOUT_S,
         headers=gateway_auth_headers(),
     )
