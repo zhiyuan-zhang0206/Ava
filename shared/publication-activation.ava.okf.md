@@ -72,7 +72,10 @@ retry adopts the journaled challenge, because the begin retry check compares the
 whole entry, while a pending entry from another operation is left for that check
 to refuse — recovery stays explicit. The seat is inert until a rollout wiring
 change connects it: no production module imports it, and it performs no
-filesystem or network work.
+filesystem or network work. `cli/commands/_update_normal_release.py` carries the
+P3/P4 call positions (migration receipt, selector CAS, normal start/observe,
+`record_pending_unit_readback`) immediately behind the checked-activation gate;
+the gate remains the only blocker, and no production path reaches them yet.
 
 No production migration, normal service activation or protocol advertisement
 is performed by importing or testing these helpers.
