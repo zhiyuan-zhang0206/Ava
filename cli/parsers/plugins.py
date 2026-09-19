@@ -10,6 +10,17 @@ from __future__ import annotations
 import argparse
 
 
+def _duration(value: str) -> str:
+    """Argparse type for `--check-every`: validate the duration before any command runs."""
+    from cli.commands._packages_refresh import parse_duration
+
+    try:
+        parse_duration(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+    return value
+
+
 def _h_plugins_update(_args: argparse.Namespace) -> int:
     from cli.commands import cmd_plugins_update
 
@@ -258,6 +269,7 @@ def _add_skill_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
     skill_install_p.add_argument(
         "--check-every",
         metavar="DUR",
+        type=_duration,
         default=None,
         help="check interval for the update policy, e.g. 30m / 24h / 7d",
     )
