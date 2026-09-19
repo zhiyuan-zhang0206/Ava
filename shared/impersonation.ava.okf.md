@@ -98,6 +98,24 @@ the durable set and certifies completion. Until then, accounting remains pending
 even after the native receipt. Statistics count recorded events without
 extrapolating samples. See the consumer module for delivery-completion semantics.
 
+## CLI parameters: explicit, with four named exceptions
+
+The `ava impersonate` tree spells out every parameter that decides behavior
+(user ruling 2026-09-20; task #4102): `request` requires `--ttl` and
+`--batch-window`, `renew` requires `--ttl`, and a missing value is a usage
+error before any command runs. `send` carries the lease form — it delivers as
+the borrowed `agent:<id>`, attested by the controller session. Four options
+keep a default because one value is the only reading:
+
+- `list` / `inbox` `--limit` 100 — presentation only; the service validates
+  1..1000 (task #3696 exception inventory).
+- `inbox` `--wait` 0 — the unique "return immediately" value; any other number
+  waits, so the default cannot be confused with consent to block.
+- `say` `--phase` `commentary` — the in-progress reply is the routine phase;
+  `final` is a deliberate close.
+- `relay` `--debounce` 0.5 — internal host machinery (the relay coalesces wake
+  hints); not an operator parameter.
+
 See [[../ava/external.ava.okf.md]],
 [external agent procedure](../conventions/agent-impersonation.md), and
 [host relay setup](../conventions/agent-impersonation-hosts.md).

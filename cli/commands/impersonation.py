@@ -100,6 +100,28 @@ def _run_local(args: argparse.Namespace) -> int:
     return 0
 
 
+def _send(args: argparse.Namespace) -> int:
+    """`impersonate send` — one message to another agent as the leased identity.
+
+    Attested through the session's caller-presence rule; the delivered source is
+    ``agent:<the leased agent>`` — the borrowed identity the SDK attachment
+    stamps for ``ava.agents.send_message`` (task #4102).
+    """
+    from cli.commands.agents import send_agent_message
+    from shared import impersonation as control
+    from shared import impersonation_sessions as sessions
+    from shared.proc_tree import process_metadata
+
+    content = sys.stdin.read() if args.content == "-" else args.content
+    caller = process_metadata()
+    lease_id = sessions.private_id(args.agent_id, args.session_id)
+    lease = control.require_active(lease_id, caller)
+    source = f"agent:{lease['agent_id']}"
+    status = send_agent_message(args.target_agent_id, content, source=source)
+    _emit({"status": status, "to": args.target_agent_id, "source": source})
+    return 0
+
+
 def _dispatch(args: argparse.Namespace) -> int:
     from shared import impersonation as control
     from shared import impersonation_sessions as sessions
@@ -146,6 +168,8 @@ def _dispatch(args: argparse.Namespace) -> int:
     if command == "list":
         _emit(sessions.list_sessions(args.agent_id, before=args.before, limit=args.limit))
         return 0
+    if command == "send":
+        return _send(args)
     caller = process_metadata()
     args.lease_id = sessions.private_id(args.agent_id, args.session_id)
     if command == "status":

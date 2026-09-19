@@ -116,7 +116,7 @@ content after ambiguous delivery. Use `--phase final` for a final reply.
 The UI shows no executor or session badge on your messages — they render on the
 normal timeline as the Ava agent's own, with both values recorded in the session
 metadata. The CLI records observed process facts
-separately. For peers, use the borrowed identity through the SDK below.
+separately. For peers, use the borrowed identity through the SDK below, or from the CLI with `ava impersonate send`.
 
 **Message economy.** Send only what the work needs: work content, blockers,
 questions. Every message — and every hint, re-delivery or reminder it
@@ -158,7 +158,7 @@ an hour, ask for about 30 minutes and extend in steps — several short renewals
 are the intended pattern, not a failure. Each renewal is a deliberate liveness
 check, and a short window is the backstop that returns control to the Ava
 agent soon after the session dies instead of parking the agent for a long
-span. Omitting `--ttl` keeps the current length. After renewing, keep working
+span. `--ttl` is required: state the length you need outright. After renewing, keep working
 — the next reminder comes before the new expiry if the work is still running.
 
 Hard rules:
@@ -200,6 +200,16 @@ Inside the attachment the SDK resolves identity, plugins, and configuration as
 the borrowed agent; peer messages and spawns carry that identity. The context
 manager stages plugin state and flushes it on exit; for a long session call
 `attachment.flush()` between steps — it never renews the lease.
+
+Messaging another Ava agent needs no attachment — the CLI carries the borrowed
+identity, attested like every control command:
+
+```bash
+ava impersonate send <session_id> --agent <agent_id> --to <target_agent_id> --content 'Status: X done, Y open.'
+```
+
+The delivered source is `agent:<agent_id>`, exactly what `ava.agents.send_message`
+stamps inside the attachment.
 
 For a one-shot operation, the CLI form runs a local Python file inside an
 attachment without involving any Ava model:

@@ -170,6 +170,34 @@ def cmd_agents_send(
     the machine's ops daemon redelivers it once the gateway returns. 4xx stay
     loud and unrecorded — the wire reason is application semantics, replay
     cannot change it."""
+    # argparse enforces --source for the CLI; the guard covers programmatic callers.
+    source = _explicit_send_source(source)
+    status = send_agent_message(agent_id, content, source=source, tail_file=tail_file)
+    print(f"  ✓ agent {agent_id} send: {status}")
+    return 0
+
+
+def send_agent_message(
+    agent_id: int, content: str, *, source: str, tail_file: str | None = None
+) -> str:
+    """Deliver one chat inbound to `agent_id` carrying `source` — the single transport.
+
+    Shared by `agents send` and `impersonate send` (the attested send as a
+    leased identity): one idempotency keying, one deferred-delivery outbox
+    safety net, one error surface.
+
+    `--tail-file` appends the last `_TAIL_BYTES` bytes of PATH to the message —
+    the background-run / watcher completion notices use it to carry the end of
+    the command's output (result line or traceback) so the agent usually does
+    not need a follow-up read.
+
+    A failed send is not lost: the deferred-delivery outbox
+    (`shared.delivery_outbox`) records a transport failure or a transient HTTP
+    response (429/5xx) on this machine under the message's idempotency key, and
+    the machine's ops daemon redelivers it once the gateway returns. 4xx stay
+    loud and unrecorded — the wire reason is application semantics, replay
+    cannot change it. Returns the gateway's delivery status; HTTP errors raise
+    to the calling command."""
     import os
     import sys
     from pathlib import Path
@@ -180,8 +208,6 @@ def cmd_agents_send(
     from shared.http_dial import post as dial_post
     from shared.machine import gateway_api_base, gateway_auth_headers
 
-    # argparse enforces --source for the CLI; the guard covers programmatic callers.
-    source = _explicit_send_source(source)
     if tail_file is not None:
         # Delivering the notice is the primary contract; the tail is a rider.
         # An unreadable tail file must not abort the POST — the failure is
@@ -247,8 +273,7 @@ def cmd_agents_send(
         # legal source set / validation reason, which is the actionable part.
         print(resp.text, file=sys.stderr)
     resp.raise_for_status()
-    print(f"  ✓ agent {agent_id} send: {resp.json().get('status')}")
-    return 0
+    return str(resp.json().get("status"))
 
 
 def cmd_agents_cancel(agent_id: int) -> int:

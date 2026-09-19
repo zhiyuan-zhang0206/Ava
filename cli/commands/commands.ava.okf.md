@@ -83,7 +83,8 @@ schema change catches the DB up on its own.
 
 - `agent_timeline.py` exposes the existing timeline API as `ava agents timeline`
   and its exact `context` alias. `impersonation.py` manages explicit external
-  requests, leases, inbox acknowledgments and local Python SDK attachment;
+  requests, leases, inbox acknowledgments, local Python SDK attachment, and the
+  one attested send (`send` — task #4102).
   `impersonation_relay.py` forwards inbound availability to the owning external
   model session; `--codex-remote` routes to the app server holding a Codex thread
   without waiting for its external queue-store scan.
