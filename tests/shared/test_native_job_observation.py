@@ -95,13 +95,28 @@ def test_launchd_disk_binding_does_not_claim_loaded_image_or_enabled(
     assert result.current_digest == hashlib.sha256(raw).hexdigest()
 
 
-def test_launchd_loaded_state_drift_refuses(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    "reads",
+    [(True, False), (True, None), (False, True), (False, None), (None, True), (None, False)],
+)
+def test_launchd_loaded_verdict_must_be_identical_across_reads(
+    reads: tuple[bool | None, bool | None], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(jobs, "read_launchd_definition", constant(b"same"))
-    monkeypatch.setattr(jobs, "launchd_loaded_state", sequence(True, None))
+    monkeypatch.setattr(jobs, "launchd_loaded_state", sequence(*reads))
     with pytest.raises(jobs.NativeReadUnavailableError, match="changed"):
         jobs.observe_launchd("com.ava.test", "a" * 64, tmp_path, "b" * 64, deadline())
+
+
+@pytest.mark.parametrize("verdict", [True, False, None])
+def test_launchd_loaded_verdict_stable_reads_accept(
+    verdict: bool | None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(jobs, "read_launchd_definition", constant(b"same"))
+    monkeypatch.setattr(jobs, "launchd_loaded_state", constant(verdict))
+    result = jobs.observe_launchd("com.ava.test", "a" * 64, tmp_path, "b" * 64, deadline())
+    assert result.definition == "mismatch"
+    assert result.loaded is verdict
 
 
 def test_launchd_absent_definition_is_a_fact_not_unknown(
