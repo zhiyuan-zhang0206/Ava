@@ -214,17 +214,10 @@ async def filter_candidates(query: str, candidates: list[Candidate]) -> list[str
                 model=turn_settings.agent.memory_recall_filter_model,
                 usage_kind="chat",
             )
-            # `.text` is a property on current langchain messages and a method
-            # on older ones. Read it first and only call what is not already a
-            # string, so the current path never goes through the deprecated
-            # method call.
+            # `.text` is a property on current langchain messages (a str
+            # subclass); fall back to the raw content when it is absent.
             raw_text = getattr(reply, "text", None)
-            if isinstance(raw_text, str):
-                text = raw_text
-            elif callable(raw_text):
-                text = str(raw_text())
-            else:
-                text = str(reply.content)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+            text = raw_text if isinstance(raw_text, str) else str(reply.content)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
             picked = _parse(text, {c.path for c in candidates})
             if picked is not None:
                 kept = picked[:inject_k]

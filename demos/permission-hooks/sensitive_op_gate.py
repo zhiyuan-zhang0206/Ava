@@ -27,10 +27,10 @@ from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
-from agent.graph._context import AvaContext, agent_id_from_config
 from agent.hooks import Hook, register_before_exec
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
+from shared.context import AvaContext, agent_id_from_config
 from shared.log import logger
 
 # ── Policy tier ────────────────────────────────────────────────────────────

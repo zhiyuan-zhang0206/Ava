@@ -34,11 +34,11 @@ from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import claim_node
-from agent.graph._context import AvaContext
 from agent.hooks.compact import compose_summary_message
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState, CompactState
 from shared.config import settings
+from shared.context import AvaContext
 from shared.db import insert_inbound_message
 from tests.conftest import spawn_agent
 
