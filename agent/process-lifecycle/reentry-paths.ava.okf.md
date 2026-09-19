@@ -23,7 +23,10 @@ accept different lifecycle states.
   death and above the force-terminate inbound fence — except for a row the
   system itself reaped after a crash (`termination_source='reaper'` with the
   `last_turn_fatal_at` marker), where work from before the death still resumes
-  its owner. The home-machine lock, automatic-wake policy, suppression window
+  its owner — and the reap itself commits such work: every termination queues
+  one `hosted_turn_recovery`-marked chat and attempts the guarded resurrect on
+  the spot (task #4039), so a crash death with no arrival still recovers
+  near-field. The home-machine lock, automatic-wake policy, suppression window
   and the recovery breaker's durable streak guard that transition; a stale
   trigger cannot undo a concurrent user termination. A closed agent
   (`terminate --final`; `agents_meta.closed_at` set) is exempt from every

@@ -54,6 +54,12 @@ the successor; no OS launcher is involved.
 A queued wake keeps its original inbound identity. A changed home, paused
 machine or unsettled prior execution cannot be bypassed by retrying the wake.
 
+A corpse reap commits its own wake (task #4039): the terminating transaction
+also queues one `hosted_turn_recovery`-marked chat, and the service layer
+attempts the guarded resurrect right after — a crash death with no arriving
+work therefore still resumes near-field, with the delivery watchdog's
+terminated-owner retry as the backstop.
+
 ## Entry Points
 
 - `agent/hosted_ownership.py` — native completion and resource settlement

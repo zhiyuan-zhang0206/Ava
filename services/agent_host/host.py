@@ -76,6 +76,7 @@ from agent.startup import (
 from agent.state import BaseAgentState
 from services.agent_host import maintenance as maintenance_receipts
 from services.agent_host.admission import TurnAdmission
+from services.agent_host.crash_recovery import recover_reaped_corpses
 from services.agent_host.db_recovery import database_phase, recover_database
 from services.agent_host.dispatcher import PendingInboundWake
 from services.agent_host.runtime import (
@@ -770,11 +771,15 @@ class AgentHost:
         """Existing daemon health beat also proves idle runtime responsibility.
 
         Renewal first, corpse reap second: a reap failure must not starve
-        healthy rows' leases (the next beat retries the reap).
+        healthy rows' leases (the next beat retries the reap). The reaped
+        corpses' recovery-wake attempts ride the same step — their wake rows
+        are already committed, so a dropped attempt is deferred, not lost
+        (task #4039).
         """
         await renew_hosted_owner(self._control_pool, self._machine, self._owner)
         try:
-            await reap_crash_corpses(self._control_pool, self._machine, self._owner)
+            reaped = await reap_crash_corpses(self._control_pool, self._machine, self._owner)
+            await recover_reaped_corpses(reaped)
         except Exception:
             logger.exception(
                 "corpse reap failed — retrying next beat",
