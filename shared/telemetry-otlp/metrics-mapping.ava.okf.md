@@ -28,7 +28,9 @@ Unit comes from the field name (`_unit_for`): `_ms` -> ms, `_seconds` /
 ## Disposition
 
 Default rule: int -> Counter (things you sum), float -> Histogram (things
-you percentile). `_METRIC_DISPOSITION` overrides per (event, field):
+you percentile). Emit sites cast duration-style fields to explicit ints
+(task #4011) so a field's kind cannot flip with its caller.
+`_METRIC_DISPOSITION` overrides per (event, field):
 
 - `llm_usage.price_miss/price_hit/price_out` -> **no metric**. The
   usage-time price snapshot is a RATE (USD per 1M tokens), not a

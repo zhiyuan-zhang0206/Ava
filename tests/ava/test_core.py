@@ -262,7 +262,9 @@ class TestPauseHeartbeat:
                 event_row = obj
                 break
         assert event_row is not None
-        assert float(event_row["attributes"]["duration_s"]) == 1800.0
+        duration_s = event_row["attributes"]["duration_s"]
+        # int since the emit cast (task #4011): the metric kind rides the runtime type.
+        assert duration_s == 1800 and isinstance(duration_s, int)
 
     @pytest.mark.parametrize("bad", [0, -1, settings.agent.heartbeat_pause_max_seconds + 1])
     def test_pause_heartbeat_rejects_out_of_range(

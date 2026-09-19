@@ -485,7 +485,8 @@ def _record_renewal(agent_id: int, session_id: int, ttl: float) -> datetime:
         agent_id=agent_id,
         attributes={
             "session_id": session_id,
-            "ttl_s": ttl,
+            # int cast stabilizes the emitted metric kind (task #4011).
+            "ttl_s": round(ttl),
             "prev_expires_at": prev_expires.isoformat(),
             "new_expires_at": new_expires.isoformat(),
         },
