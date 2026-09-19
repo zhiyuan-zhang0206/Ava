@@ -23,8 +23,10 @@ import argparse
 from urllib.parse import urlsplit
 
 from shared.config import settings
+from shared.hierarchy.generate import build_generation_llm
 from shared.hierarchy.pipeline import MaterializedTree, build_agent_tree
 from shared.hierarchy.store import load_known_texts, write_tree
+from shared.lm.factory import close_chat_model
 
 # How many failed-node lines the report shows before folding the rest into a
 # count. The full set is one re-run away; the operator needs the flavor and
@@ -75,7 +77,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"target: {_db_label()} | agent {args.agent_id} | model {model}")
 
     known = load_known_texts(args.agent_id)
-    tree = build_agent_tree(args.agent_id, llm=None, model=model, known_texts=known)
+    llm = build_generation_llm(model)
+    try:
+        tree = build_agent_tree(args.agent_id, llm=llm, model=model, known_texts=known)
+    finally:
+        close_chat_model(llm)
     _report(tree, known_count=len(known))
 
     if not tree.nodes and not tree.errors:

@@ -28,8 +28,10 @@ from shared.config import settings
 from shared.db import connect
 from shared.db_transaction import write_transaction
 from shared.hierarchy import ENGINE_VERSION, PROMPT_VERSION
+from shared.hierarchy.generate import build_generation_llm
 from shared.hierarchy.pipeline import MaterializedTree, build_agent_tree
 from shared.hierarchy.store import load_known_texts, write_tree
+from shared.lm.factory import close_chat_model
 from shared.log import logger
 
 # The error text kept on the job row: a diagnostic tail, never a full dump
@@ -81,15 +83,23 @@ def execute_job(job_id: int) -> int:
         tail_seal_target = latest_checkpoint_id(agent_id) if kind == KIND_TAIL else None
         known = load_known_texts(agent_id)
         deadline = started + settings.daemon.hierarchy_job_budget_seconds
-        tree = build_agent_tree(
-            agent_id,
-            llm=None,
-            model=model,
-            include_tail=include_tail,
-            known_texts=known,
-            max_concurrent=settings.daemon.hierarchy_generation_concurrency,
-            deadline=deadline,
-        )
+        # One model for the whole job (not one per chunk): its client pool is
+        # reused across the run and closed as soon as generation ends, so
+        # provider sockets do not linger (task #3915). Built inside the try so
+        # a construction failure still records on the job row.
+        llm = build_generation_llm(model)
+        try:
+            tree = build_agent_tree(
+                agent_id,
+                llm=llm,
+                model=model,
+                include_tail=include_tail,
+                known_texts=known,
+                max_concurrent=settings.daemon.hierarchy_generation_concurrency,
+                deadline=deadline,
+            )
+        finally:
+            close_chat_model(llm)
         written = write_tree(agent_id, tree.nodes, model=model)
         _record_done(job_id, agent_id, tree, written, model, advance_target, kind, tail_seal_target)
         logger.info(
