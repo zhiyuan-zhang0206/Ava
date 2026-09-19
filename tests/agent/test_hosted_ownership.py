@@ -535,12 +535,12 @@ async def test_reap_crash_corpses_terminates_only_grace_elapsed_idling_corpses(
 
     published.clear()  # settle publishes on every flip; keep only reap's
     reaped = await reap_crash_corpses(aops_pool, "host-test", owner)
-    assert sorted(reaped) == sorted([past_grace, abandoned_corpse])
+    assert sorted(corpse.agent_id for corpse in reaped) == sorted([past_grace, abandoned_corpse])
 
-    for reaped_id in reaped:
+    for corpse in reaped:
         row = db_conn.execute(
             "SELECT status, termination_source, lease_expires_at FROM agents_meta WHERE id = %s",
-            (reaped_id,),
+            (corpse.agent_id,),
         ).fetchone()
         assert row is not None
         assert row[0] == "terminated" and row[1] == "reaper" and row[2] is None
@@ -597,7 +597,8 @@ async def test_crash_pipeline_marker_survives_settle_and_reaper_terminates(
 
     # Past the grace window the reaper terminates it with the reaper stamp.
     _set_marker(db_conn, agent_id, minutes_ago=16)
-    assert await reap_crash_corpses(aops_pool, "host-test", owner) == [agent_id]
+    reaped = await reap_crash_corpses(aops_pool, "host-test", owner)
+    assert [corpse.agent_id for corpse in reaped] == [agent_id]
     row = db_conn.execute(
         "SELECT status, termination_source FROM agents_meta WHERE id = %s", (agent_id,)
     ).fetchone()

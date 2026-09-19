@@ -174,6 +174,20 @@ class DaemonSettings(
         },
     )
 
+    hosted_crash_recovery_wake_enabled: bool = Field(
+        default=True,
+        alias="AVA_HOSTED_CRASH_RECOVERY_WAKE_ENABLED",
+        description="Hosted agent-runner: when the corpse reaper terminates a crash-marked agent (grace-window or recrash reap), commit one durable system-source recovery chat in the same transaction and let the service layer attempt the guarded auto-resurrect right after — a crash death with no arriving work otherwise has no wake left (reminder-class wakes are ignored for terminated owners), and the 2026-09-15 stall wave left one crashed agent silent for ~11 hours (task #4039). The resurrection gates (closed / wake suppression / recovery breaker) are unchanged and consulted at attempt time; the delivery watchdog's terminated-owner retry owns any deferred attempt until the chat's 24h age gate. Off restores the bare reap: only arriving work resumes the owner.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": True,
+        },
+    )
+
     page_server_poll_interval_seconds: float = Field(
         default=2.0,
         alias="AVA_PAGE_SERVER_POLL_INTERVAL_SECONDS",

@@ -196,9 +196,11 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # impersonation core-component death auto-stop (task #3998:
     # impersonation_aborted) raises the current total to 194; the update
     # straggler reap (task #4016: update_straggler_reaped +
-    # update_straggler_reap_settled) raises the current total to 196.
+    # update_straggler_reap_settled) raises the current total to 196; the
+    # corpse reaper's crash-recovery wake family (task #4039:
+    # crash_recovery_wake_queued / _attempted / _deferred) raises it to 199.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 196
+    assert len(_TELEMETRY_KINDS) == 199
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:

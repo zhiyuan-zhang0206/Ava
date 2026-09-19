@@ -11,8 +11,9 @@ can confirm which rows committed (#3999), so chat rows no longer sit
 `claimed` until a next boot or abort. A turn that dies again under its own
 corpse mark is
 prompt-reaped here too — the same termination the beat reaper performs, moved
-up to the retry's failure (task #3616). Split into its own module to keep
-`host.py` inside the file-size ceiling.
+up to the retry's failure (task #3616) — and the reaped corpse's committed
+recovery wake gets its guarded resurrect attempt on the spot (task #4039).
+Split into its own module to keep `host.py` inside the file-size ceiling.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from agent.corpse_reap import reap_recrashed_corpse
 from agent.hosted_ownership import TurnSettlement, settle_and_stamp_turn
 from agent.inbound_ownership import RuntimeOwnershipLostError
 from agent.startup import _reconcile_claimed_inbounds_at_startup
+from services.agent_host.crash_recovery import recover_reaped_corpses
 from services.agent_host.db_recovery import database_phase
 from services.agent_host.runtime import TurnOutcome
 from shared.config import settings
@@ -81,6 +83,11 @@ async def prompt_reap_after_recrash(
     Fail-closed: every gap — the gray switch still off, a settle that could
     not reach idling, a row that moved on since — skips the reap with its
     reason logged, and the grace-window reap stays the backstop.
+
+    A committed reap's recovery wake is consumed right here (task #4039):
+    the guarded auto-resurrect attempt runs immediately, and the delivery
+    watchdog's terminated-owner retry owns it if the attempt is refused or
+    loses a race with hosted-force quiescence.
     """
     stamp = settlement.stamp
     if stamp is None or not stamp.recrash:
@@ -103,13 +110,16 @@ async def prompt_reap_after_recrash(
             reason="settle_incomplete",
         )
         return
-    if not await reap_recrashed_corpse(pool, incarnation):
+    reaped = await reap_recrashed_corpse(pool, incarnation)
+    if not reaped:
         logger.info(
             "recrash prompt reap skipped: the row moved on since the crash",
             event="host_recrash_reap_skipped",
             agent_id=agent_id,
             reason="row_moved_on",
         )
+        return
+    await recover_reaped_corpses(reaped)
 
 
 async def reconcile_inbounds_after_abort(

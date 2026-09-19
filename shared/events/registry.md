@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 25 | events table |
-| telemetry (category=telemetry) | `events` | 196 | events table |
+| telemetry (category=telemetry) | `events` | 199 | events table |
 | log (category=log) | `events` | 13 | events table |
 | file-only (destination=file) | file log | 1 | file only (not the events table) |
 | SSE live | Redis → frontend (not persisted) | 31 role | live projection |
@@ -92,7 +92,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 196)
+## 3. Telemetry events (category=telemetry, 199)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -153,6 +153,9 @@ consumers: see the comments at each emit point.
 | `corpse_reaper_terminated` | the corpse reaper terminated crash-marked idling rows past the grace window (termination_source='reaper') | anomaly | — | — | events |
 | `corpse_reaper_failed` | the beat's corpse reap pass failed — retried on the next beat; leases of healthy rows are unaffected (renewal runs first) | anomaly | — | — | events |
 | `corpse_reaper_publish_failed` | a reaped corpse's frontend snapshot publish failed — best-effort; the durable terminated flip already committed | noise | — | — | events |
+| `crash_recovery_wake_queued` | the corpse reaper committed a crash death's recovery wake — one system-source chat carrying the hosted_turn_recovery marker — inside the terminating transaction, so a committed reap always has a wake to resume its owner (task #4039) | observation | — | — | events |
+| `crash_recovery_wake_attempted` | the service layer attempted the guarded auto-resurrect for a reaped corpse's committed recovery wake; carries the status the attempt returned (task #4039) | observation | — | — | events |
+| `crash_recovery_wake_deferred` | a reaped corpse's guarded resurrect attempt failed — the wake row stays pending for the delivery watchdog's terminated-owner retry until the stale age gate (task #4039) | observation | — | — | events |
 | `host_recrash_reap_skipped` | the recrash prompt reap skipped terminating a re-crashed corpse (fail-closed) — the grace-window reap stays the backstop. Carries the reason: the gray switch is off (disabled), the turn never settled to idling (settle_incomplete), or the row moved on since the crash (row_moved_on) | noise | — | — | events |
 | `host_turn_stall_aborted` | a hosted turn task ended after its no-progress abort: the invocation unwound and was dropped; the runtime was discarded by run_turn, so the next wake re-runs the startup reconcile before resuming from the checkpoint | anomaly | — | — | events |
 | `host_abort_reconcile_skipped` | the settled hosted turn abort skipped the immediate inbound reconcile (fail-closed) — the claimed rows are left to the next cold admission. Carries the reason: the soft switch is off (disabled), the turn's resources never fully settled (resources_unsettled), or the runtime ownership was already replaced (ownership_lost — the replacement disposes the rows) | noise | — | — | events |
