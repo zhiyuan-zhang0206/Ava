@@ -454,6 +454,138 @@ def test_inflight_build_same_thread_read_does_not_self_wait() -> None:
     assert proc.stdout.startswith("SELF 1 True True"), proc.stdout
 
 
+def test_inflight_build_get_field_waits_then_serves() -> None:
+    """The `get_field` face takes the same bounded wait: a reflective read that
+    lands while another thread's build is in flight waits for it and is served
+    the full value (formalized from the task #4069 QA probe)."""
+    proc = _spawn(
+        "import threading\n"
+        "import shared.config as c\n"
+        "import shared.config._full as full\n"
+        "real = full.build\n"
+        "entered = threading.Event()\n"
+        "release = threading.Event()\n"
+        "def gated():\n"
+        "    entered.set()\n"
+        "    if not release.wait(30):\n"
+        "        raise RuntimeError('gate not released')\n"
+        "    return real()\n"
+        "full.build = gated\n"
+        "out = {}\n"
+        "def read(tag):\n"
+        "    try:\n"
+        "        out[tag] = c.get_field('web_jina_reader_base')\n"
+        "    except Exception as exc:  # noqa: BLE001\n"
+        "        out[tag] = f'ERR {type(exc).__name__}: {exc}'\n"
+        "t1 = threading.Thread(target=read, args=('a',))\n"
+        "t1.start()\n"
+        "assert entered.wait(30), 'build never started'\n"
+        "t2 = threading.Thread(target=read, args=('b',))\n"
+        "t2.start()\n"
+        "t2.join(0.5)\n"
+        "held = t2.is_alive()\n"
+        "release.set()\n"
+        "t1.join(30)\n"
+        "t2.join(30)\n"
+        "same = out.get('a') == out.get('b')\n"
+        "served = str(out.get('b', '')).startswith('https://')\n"
+        "print('GETFL', c._boot_state()['upgrades'], held, same, served)\n"
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.startswith("GETFL 1 True True True"), proc.stdout
+
+
+def test_inflight_build_get_field_timeout_raises_retryable() -> None:
+    """The `get_field` bounded wait expires into the same retryable error as the
+    view faces: the reflective reader raises ConfigBuildWaitTimeoutError and a
+    later retry serves the full value (formalized from the task #4069 QA
+    probe)."""
+    proc = _spawn(
+        "import threading\n"
+        "import shared.config as c\n"
+        "import shared.config._lite as lite\n"
+        "import shared.config._full as full\n"
+        "lite._BUILD_WAIT_TIMEOUT_SECONDS = 0.3\n"
+        "real = full.build\n"
+        "entered = threading.Event()\n"
+        "release = threading.Event()\n"
+        "def gated():\n"
+        "    entered.set()\n"
+        "    if not release.wait(30):\n"
+        "        raise RuntimeError('gate not released')\n"
+        "    return real()\n"
+        "full.build = gated\n"
+        "out = {}\n"
+        "def read(tag):\n"
+        "    try:\n"
+        "        out[tag] = c.get_field('web_jina_reader_base')\n"
+        "    except Exception as exc:  # noqa: BLE001\n"
+        "        out[tag] = f'{type(exc).__name__}: {exc}'\n"
+        "t1 = threading.Thread(target=read, args=('a',))\n"
+        "t1.start()\n"
+        "assert entered.wait(30), 'build never started'\n"
+        "t2 = threading.Thread(target=read, args=('b',))\n"
+        "t2.start()\n"
+        "t2.join(5)\n"
+        "release.set()\n"
+        "t1.join(30)\n"
+        "b = str(out.get('b', ''))\n"
+        "retry = c.get_field('web_jina_reader_base')\n"
+        "print('GETFLT', c._boot_state()['upgrades'],\n"
+        "      str(out.get('a', '')).startswith('https://'),\n"
+        "      b.startswith('ConfigBuildWaitTimeoutError'), 'retry' in b,\n"
+        "      str(retry).startswith('https://'))\n"
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.startswith("GETFLT 1 True True True True"), proc.stdout
+
+
+def test_pre_install_build_death_revives_on_waiting_reader() -> None:
+    """A build that dies before installing hands the waiting reader the revive
+    path: the builder sees its real error, the waiter re-runs the build itself
+    and is served, and exactly one successful install is counted (formalized
+    from the task #4069 QA probe)."""
+    proc = _spawn(
+        "import threading\n"
+        "import shared.config as c\n"
+        "import shared.config._full as full\n"
+        "real = full.build\n"
+        "entered = threading.Event()\n"
+        "release = threading.Event()\n"
+        "calls = []\n"
+        "def gated():\n"
+        "    calls.append(1)\n"
+        "    if len(calls) == 1:\n"
+        "        entered.set()\n"
+        "        if not release.wait(30):\n"
+        "            raise RuntimeError('gate not released')\n"
+        "        raise RuntimeError('first build died before install')\n"
+        "    return real()\n"
+        "full.build = gated\n"
+        "out = {}\n"
+        "def read(tag):\n"
+        "    try:\n"
+        "        out[tag] = c.settings.web.web_jina_reader_base\n"
+        "    except Exception as exc:  # noqa: BLE001\n"
+        "        out[tag] = f'{type(exc).__name__}: {exc}'\n"
+        "t1 = threading.Thread(target=read, args=('a',))\n"
+        "t1.start()\n"
+        "assert entered.wait(30), 'build never started'\n"
+        "t2 = threading.Thread(target=read, args=('b',))\n"
+        "t2.start()\n"
+        "t2.join(0.5)\n"
+        "held = t2.is_alive()\n"
+        "release.set()\n"
+        "t1.join(30)\n"
+        "t2.join(30)\n"
+        "print('DEATH', c._boot_state()['upgrades'], held,\n"
+        "      str(out.get('a', '')).startswith('RuntimeError:'),\n"
+        "      str(out.get('b', '')).startswith('https://'))\n"
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.startswith("DEATH 1 True True True"), proc.stdout
+
+
 def test_config_build_wait_timeout_is_exported() -> None:
     """The retryable exception is importable from the public facade (the catch
     shape callers may rely on)."""

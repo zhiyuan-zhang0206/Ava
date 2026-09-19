@@ -86,13 +86,13 @@ BOOT_MODE_EAGER = "eager"
 _LITE = "lite"
 _FULL = "full"
 
-# Bound for a read waiting on another thread's in-flight eager build (task
-# #3696 exception inventory: KEEP). Not config: the wait runs before the config
-# chain exists (reading a field would itself trigger the upgrade), and the
-# value answers to an internal invariant, not a tuning surface -- 3x the
-# bootstrap fetch bound (shared/bootstrap.py _FETCH_TIMEOUT_S = 10s), the
-# slowest legitimate segment of a build. A slower build degrades to the
-# retryable ConfigBuildWaitTimeoutError, so no operator knob is warranted.
+# Internal invariant (task #3696 exception inventory): bound for a read
+# waiting on another thread's in-flight eager build. Not config: the wait runs
+# before the config chain exists (reading a field would itself trigger the
+# upgrade), and the value is fixed at 3x the bootstrap fetch bound
+# (shared/bootstrap.py _FETCH_TIMEOUT_S = 10s) -- the slowest legitimate
+# segment of a build. A slower build degrades to the retryable
+# ConfigBuildWaitTimeoutError, so no operator knob is warranted.
 _BUILD_WAIT_TIMEOUT_SECONDS = 30.0
 
 # The one upgrade lock: prepare, the build, and the install run under it.

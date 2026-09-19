@@ -28,8 +28,9 @@ it must never wait on its own build:
   thread: previous behavior (serve the lite value, or raise the window error).
   Other threads: wait.
 - The wait acquires the upgrade lock with a timeout of
-  `_BUILD_WAIT_TIMEOUT_SECONDS` (30s). The bound is a KEEP constant, not
-  config (`conventions/numeric-limits.md`, task #3696 exception inventory):
+  `_BUILD_WAIT_TIMEOUT_SECONDS` (30s). The bound is a marked
+  internal-invariant constant, not config (`conventions/numeric-limits.md`,
+  task #3696 exception inventory):
   the wait runs before the config chain exists -- reading a field would itself
   trigger the upgrade -- and the value answers to an internal invariant, not a
   tuning surface: 3x the bootstrap fetch bound (`shared/bootstrap.py`
