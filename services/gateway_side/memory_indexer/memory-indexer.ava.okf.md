@@ -13,7 +13,7 @@ Semantic indexing daemon for the memory pool — monitors `**/*.md` file changes
 **Role attribution**: gateway side (pure agent-runner doesn't run) — `ServiceSpec.capabilities=_GATEWAY` in `ops/spec.py`, roster derived by `services_for_capabilities` intersecting with the local machine's `machine_role()`.
 
 ## Core Responsibilities
-- **Cold-start full scan**: at startup diff memory pool files against Milvus index, embed new/changed files, purge deleted entries
+- **Cold-start full scan**: at startup diff memory pool files against Milvus index, embed new/changed files, purge deleted entries — worked in file-granular chunks that beat the daemon liveness between chunks, so a rebuild outlasting the liveness ceiling never reads as a stalled loop to the watchdog (2026-09-19 fix: an un-beaten rebuild was killed and restarted from zero every ~3 min, never converging)
 - **File monitoring**: watchdog Observer monitors fs events, pushes dirty paths into queue
 - **Incremental indexing**: main loop drains the queue every second (set dedup), batch embed + upsert / delete
 - **Package layout**: `daemon.py` (main loop), `embeddings/` (provider contract + Gemini adapter + factory switch `AVA_EMBEDDING_BACKEND`), `backends/` (milvus / numpy / pgvector storage behind `AVA_MEMORY_SEARCH_BACKEND`)
