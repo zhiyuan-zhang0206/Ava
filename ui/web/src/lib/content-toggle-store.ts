@@ -9,8 +9,7 @@
 //   "last" — only the last block expanded (follows streaming)
 //   "none" — all blocks collapsed
 //
-// The mode is stored as display.expand_runs_mode (string). Older values
-// are migrated transparently: "auto" → "last", true → "all", false → "none".
+// The mode is stored as display.expand_runs_mode (string).
 
 import { useCallback } from "react";
 
@@ -20,11 +19,6 @@ export type DetailsMode = "all" | "last" | "none";
 
 function normalizeMode(raw: unknown): DetailsMode {
   if (raw === "all" || raw === "last" || raw === "none") return raw;
-  // Migrate legacy "auto" → "last"
-  if (raw === "auto") return "last";
-  // Migrate legacy boolean: true → "all", false → "none"
-  if (raw === true) return "all";
-  if (raw === false) return "none";
   // Unknown value → the default mode.
   return "none";
 }

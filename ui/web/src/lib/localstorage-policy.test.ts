@@ -43,16 +43,12 @@ const ALLOWED_KEYS = new Set<string>([
   "ava.home.inspector.desktop",
 ]);
 
-// The one module allowed to reference legacy keys (to read them once + remove).
-const MIGRATION_MODULE = "lib/settings-migration.ts";
-
 function sourceFiles(): { rel: string; src: string }[] {
   return readdirSync(SRC_DIR, { recursive: true })
     .map((p) => String(p).split("\\").join("/"))
     .filter((rel) => rel.endsWith(".ts") || rel.endsWith(".tsx"))
     .filter((rel) => !rel.endsWith(".test.ts") && !rel.endsWith(".test.tsx"))
     .filter((rel) => !rel.startsWith("test-support/"))
-    .filter((rel) => rel !== MIGRATION_MODULE)
     .map((rel) => ({ rel, src: readFileSync(join(SRC_DIR, rel), "utf8") }));
 }
 

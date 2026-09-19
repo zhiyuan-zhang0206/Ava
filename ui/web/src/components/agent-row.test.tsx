@@ -296,13 +296,12 @@ describe("AgentRow inspector reads", () => {
 
 describe("AgentRow machine badge (removed, task #3904)", () => {
   // The machine name left the tree — it renders in the Inspector's Liveness
-  // block now. Multi-machine data plus the legacy setting must not print it.
+  // block now. Multi-machine data must not print it.
   it("never renders the machine name", () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     qc.setQueryData(["status"], {
       cluster: { machines: [{ name: "m1" }, { name: "m2" }] },
     });
-    qc.setQueryData(["user-settings"], { "display.show_machine_name": true });
     const { queryByText } = rtlRender(
       <QueryClientProvider client={qc}>
         <AgentRow {...baseProps} agent={ag(1)} depth={0} ancestorsIsLast={[]} />

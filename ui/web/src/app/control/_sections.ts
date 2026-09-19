@@ -104,10 +104,7 @@ export const CONTROL_SECTIONS: ControlSectionDef[] = [
 
 // Render + nav order for Insights (the read-only observability surface). Status
 // leads — "how is the cluster right now" is the most common reason to open it —
-// followed by Ops (the Grafana dashboard link). The standalone Metrics
-// section was retired 2026-08-04 (user ruling): its panels are replaced by
-// Grafana, and old Metrics deep links forward to the Ops section — see
-// RETIRED_INSIGHTS_ANCHORS below.
+// followed by Ops (the Grafana dashboard link).
 // The cluster Restart / Update actions ride the Status section header (see
 // status/page.tsx), so "watch health → act" stays one glance. Status now has
 // Services + Gateway; Resources was retired 2026-08-24 in favor of Grafana's
@@ -141,21 +138,6 @@ export const INSIGHTS_SECTIONS: ControlSectionDef[] = [
     labelKey: "alerts",
   },
 ];
-
-// Anchor ids of the retired Metrics section (2026-08-04). Old
-// /control#metrics / #metrics-* and /insights#metrics-* deep links are
-// forwarded to the Ops section — the Grafana dashboard link that replaced
-// them. Shared by the Control page's forward effect and the Insights page's
-// initial-scroll effect so the two pages can never drift apart.
-export const RETIRED_INSIGHTS_ANCHORS = new Set([
-  "metrics",
-  "metrics-syntax-fix",
-  "metrics-exec",
-  "metrics-llm-turns",
-  "metrics-agent-activity",
-  "metrics-sdk-usage",
-  "metrics-per-agents",
-]);
 
 /** Document-ordered anchor ids (sections and their subs interleaved) for a
  *  (possibly dynamically-augmented) section list — drives scroll-spy's "which
