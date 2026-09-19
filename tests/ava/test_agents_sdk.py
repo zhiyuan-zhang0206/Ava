@@ -173,7 +173,6 @@ class TestSpawn:
             machine: str,
             config: object = None,
             label: object = None,
-            preset: object = None,
         ) -> int:
             captured["machine"] = machine
             return 999
@@ -1008,19 +1007,6 @@ class TestSpawnConfig:
         agents.spawn(config_overlay={"llm_model": "claude-sonnet-5"})
         assert seen["config"] == {"llm_model": "claude-sonnet-5"}
 
-    def test_spawn_passes_preset(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The legacy spawn(preset=...) argument folds into config_overlay.preset
-        (task #2694): the gateway resolves it to a config template; the SDK only
-        carries the name inside the config map."""
-        from ava import agents
-
-        seen: dict[str, Any] = {}
-        monkeypatch.setattr(agents._client, "spawn", lambda **kw: seen.update(kw) or 3)  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(ava, "AGENT_ID", 1, raising=False)
-        agents.spawn(preset="coder")
-        assert seen["preset"] is None
-        assert seen["config"] == {"preset": "coder"}
-
     def test_spawn_preset_inside_config_passes_through(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1033,13 +1019,6 @@ class TestSpawnConfig:
         monkeypatch.setattr(ava, "AGENT_ID", 1, raising=False)
         agents.spawn(config_overlay={"preset": "coder", "llm_model": "claude-sonnet-5"})
         assert seen["config"] == {"preset": "coder", "llm_model": "claude-sonnet-5"}
-
-    def test_spawn_preset_given_twice_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ava import agents
-
-        monkeypatch.setattr(ava, "AGENT_ID", 1, raising=False)
-        with pytest.raises(ValueError, match="twice"):
-            agents.spawn(preset="coder", config_overlay={"preset": "coder"})
 
     def test_spawn_preset_key_must_be_nonempty_string(
         self, monkeypatch: pytest.MonkeyPatch

@@ -47,8 +47,8 @@ ava.agents.spawn(
 )
 ```
 `preset` is the base, the explicit overlay fields are the precise override
-(per key). The legacy `spawn(preset=...)` argument is a deprecated alias for
-the same key. The spawn boundary resolves the preset; the agent row stores the
+(per key). The former top-level `spawn(preset=...)` argument is retired
+(task #4086). The spawn boundary resolves the preset; the agent row stores the
 resolved overlay plus `agents_meta.preset_name`, and the inspector shows the
 preset reference plus only the fields that differ from the preset (diff
 display).

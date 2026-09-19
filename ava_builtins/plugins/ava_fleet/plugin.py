@@ -332,7 +332,6 @@ def _spawn_with_label(
     machine: str | None = None,
     config_overlay: dict[str, object] | None = None,
     label: str | None = None,
-    preset: str | None = None,
 ) -> int:
     """Start a new agent; does not block.
 
@@ -341,10 +340,9 @@ def _spawn_with_label(
             no context about why you spawned it. Omit to leave it idling.
         fork_from: copy that agent's conversation state into the new one.
         machine: defaults to your own.
-        config_overlay: per-agent settings overlay, e.g. {"llm_model": ...}.
+        config_overlay: per-agent settings overlay, e.g. {"llm_model": ...};
+            a preset is named inside it as {"preset": "name"} (task #4086).
         label: initial role name; omitted = auto-named.
-        preset: a saved config template to start from; config_overlay wins
-            per field.
     """
     return ava.agents._spawn_impl(
         prompt=prompt,
@@ -352,7 +350,6 @@ def _spawn_with_label(
         machine=machine,
         config=config_overlay,
         label=label,
-        preset=preset,
     )
 
 

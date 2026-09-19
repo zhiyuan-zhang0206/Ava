@@ -1275,7 +1275,7 @@ def test_create_and_assign_task_owned_by_spawned_agent(
 def test_create_and_assign_passes_spawn_args(
     db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    """create_and_assign forwards preset, label, config_overlay to spawn."""
+    """create_and_assign folds preset into the overlay it forwards to spawn."""
     agent_id = _seed_agent(db_conn)
     spawned_id = _seed_agent(db_conn)
     original = ava._boot._agent_id
@@ -1295,9 +1295,8 @@ def test_create_and_assign_passes_spawn_args(
                 parent=root_task_id,
             )
         mock_spawn.assert_called_once_with(
-            preset="researcher",
             label="test-label",
-            config_overlay={"llm_model": "fast"},
+            config_overlay={"preset": "researcher", "llm_model": "fast"},
             machine="test-machine",
         )
     finally:
@@ -1460,7 +1459,7 @@ def test_create_and_assign_remind_interval_none(
 def test_create_and_assign_uses_default_preset(
     db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    """When no preset is given, 'coder' is the default."""
+    """When no preset is given, 'coder' is the default (folded into the overlay)."""
     agent_id = _seed_agent(db_conn)
     spawned_id = _seed_agent(db_conn)
     original = ava._boot._agent_id
@@ -1472,7 +1471,7 @@ def test_create_and_assign_uses_default_preset(
         ):
             task_registry.create_and_assign("title", "description", parent=root_task_id)  # pyright: ignore[reportUnknownMemberType]
         mock_spawn.assert_called_once_with(
-            preset="coder", label=None, config_overlay=None, machine=None
+            label=None, config_overlay={"preset": "coder"}, machine=None
         )
     finally:
         ava._boot._agent_id = original

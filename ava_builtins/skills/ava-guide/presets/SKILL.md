@@ -10,8 +10,7 @@ choice, plugin config fields, and per-agent settings into a config overlay.
 Selecting a preset at spawn time seeds the new agent's config from it; an
 explicit config passed alongside wins per-key. The preset is named inside the
 config overlay — `config_overlay={"preset": "name", ...}` — resolved at the
-spawn boundary (the legacy top-level `preset` spawn argument is a deprecated
-alias for the same key).
+spawn boundary (the former top-level `preset` spawn argument is retired).
 
 Use this when:
 - The user asks to "add a new agent type" or "create a preset"
@@ -135,7 +134,7 @@ ava presets ls
 ava presets get my-preset
 
 # (Optional) spawn an agent to test
-# In the SDK: ava.agents.spawn(prompt="hello", preset="my-preset")
+# In the SDK: ava.agents.spawn(prompt="hello", config_overlay={"preset": "my-preset"})
 ```
 
 ## CLI Operations Reference

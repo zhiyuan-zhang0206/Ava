@@ -145,11 +145,11 @@ class SpawnAgentRequest(BaseModel):
     # named preset's stored overlay as the base, explicit fields win per-key, and
     # the runner only ever sees the resolved map.
     config: dict[str, object] | None = Field(default=None)
-    # DEPRECATED top-level preset — kept for one compatibility window; the
-    # gateway normalizes it to `config["preset"]` (passing both is a 400). When
-    # set, the gateway seeds config from the preset's stored overlay, then lets
-    # `config` above win per-key. Resolved and merged into `config` at the spawn
-    # boundary (post_agents), so the spawn op on the runner never sees this set.
+    # RETIRED top-level preset — a refusal-only placeholder kept for one
+    # compatibility window (task #4086): a non-null value gets a 400 pointing at
+    # `config["preset"]`, while null is tolerated as unset so an old client
+    # rolling through the window keeps spawning. The field itself is removed
+    # once the window closes.
     preset: str | None = Field(default=None, max_length=64)
     # Optional initial label (spawner-assigned role). Stored sticky so the
     # labeler does not overwrite it; the agent can change it via ava.self.set_label.

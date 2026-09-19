@@ -29,7 +29,7 @@ and `/api/agents/{id}/exited` finalizes an agent exit.
 (`config["preset"]`) at the spawn boundary: the preset's stored config is the
 base and the explicit fields win per key; the row stores the RESOLVED overlay
 plus `agents_meta.preset_name` for display (diff semantics in the inspector).
-The legacy top-level `preset` field is a deprecated alias for the overlay key.
+The former top-level `preset` field is retired (task #4086): a non-null value is refused with a 400 pointing at the overlay key, and a null is tolerated as unset for the compatibility window (the field itself is removed once the window closes).
 
 A fork must keep the source's effective config so its inherited context stays
 cache-valid: only ADDITIONS to `skills_to_inject_into_system_prompt` /
