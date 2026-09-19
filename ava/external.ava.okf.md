@@ -45,5 +45,10 @@ User-visible replies use `ava impersonate say` with a stable retry key. They
 are recorded immediately in permanent session history and rendered on the normal
 timeline, independently of plugin-state flush.
 
+Peer messages carry the same borrowed identity: `ava impersonate send
+<session_id> --agent <agent_id> --to <target> --content '...'` from the CLI, or
+`ava.agents.send_message` inside the attachment — both deliver source
+`agent:<agent_id>` (task #4102).
+
 The usage procedure and CLI commands live in
 [External agent impersonation](../conventions/agent-impersonation.md).
