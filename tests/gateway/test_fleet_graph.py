@@ -183,14 +183,12 @@ def test_loki_edge_tail_is_scoped_to_this_cluster(monkeypatch: pytest.MonkeyPatc
 
     fleet_graph._fetch_loki_edges(now=now)
 
-    # The live tail splits at the index-label cutover: the legacy interval
-    # runs from the archive freeze to the cutover, the indexed tail after it.
-    assert len(calls) == 2
+    # The live tail is the post-cutover indexed slice (the pre-cutover
+    # unlabeled era has aged out of Loki retention).
+    assert len(calls) == 1
     assert all(call["cluster"] == home_label(ava_home()) for call in calls)
-    assert calls[0]["from_"] == ARCHIVE_FREEZE_AT
-    assert calls[0]["to"] == INDEX_LABEL_CUTOVER_AT
-    assert calls[1]["from_"] == INDEX_LABEL_CUTOVER_AT
-    assert calls[1]["to"] == now
+    assert calls[0]["from_"] == INDEX_LABEL_CUTOVER_AT
+    assert calls[0]["to"] == now
 
 
 def test_loki_edge_tail_keeps_unlabeled_history_and_excludes_other_cluster(
