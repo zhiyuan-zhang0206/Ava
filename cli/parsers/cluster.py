@@ -78,6 +78,12 @@ def _h_cluster_recover(_args: argparse.Namespace) -> int:
     return cmd_cluster_recover()
 
 
+def _h_cluster_recover_pending(_args: argparse.Namespace) -> int:
+    from cli.commands import cmd_cluster_recover_pending
+
+    return cmd_cluster_recover_pending()
+
+
 def _h_cluster_cancel(_args: argparse.Namespace) -> int:
     from cli.commands import cmd_cluster_cancel
 
@@ -245,6 +251,7 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         _h_cluster_pitr_rollback,
         _h_cluster_pitr_status,
         _h_cluster_recover,
+        _h_cluster_recover_pending,
         _h_cluster_restart,
         _h_cluster_resume,
         _h_cluster_rollback,
@@ -454,6 +461,14 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         "stranded lock underneath it",
     )
     cluster_recover_p.set_defaults(func=_h_cluster_recover)
+
+    cluster_recover_pending_p = cluster_sub.add_parser(
+        "recover-pending",
+        help="[cluster] run the checked recovery for a durable pending managed-writer "
+        "publication left by an interrupted rollout (agent births stay frozen until it "
+        "completes); refuses while a live deploy owns the cluster",
+    )
+    cluster_recover_pending_p.set_defaults(func=_h_cluster_recover_pending)
 
     cluster_ls_p = cluster_sub.add_parser("ls", help="[cluster] list all registered clusters")
     cluster_ls_p.set_defaults(func=_h_cluster_ls)

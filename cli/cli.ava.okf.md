@@ -32,7 +32,7 @@ The `ava` CLI — single entry point for cluster lifecycle. `cli/main.py` builds
 
 Verbs that act on a cluster rather than on this host's services, addressed by
 **home path** (`--path`), not name: `ls` / `status` / `restart` / `down` /
-`destroy` / `rollback` / `health-probe` / `recover` / `cron-*` /
+`destroy` / `rollback` / `health-probe` / `recover` / `recover-pending` / `cron-*` /
 `watchdog-probe`. Enumerated in [[cli/cluster.ava.okf.md]].
 
 ### Agent & Ops
