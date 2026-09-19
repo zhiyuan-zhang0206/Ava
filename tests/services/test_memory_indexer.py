@@ -696,9 +696,9 @@ def test_liveness_timeout_covers_worst_embed_batch(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(settings.services, "embedding_backend", "gemini")
 
     def assert_coverage() -> float:
-        # Recompute each retry gap; sync deadlines allow one extra read window.
+        # Recompute each retry gap and the cancellation deadline per attempt.
         policy = gemini._EMBED_POLICY
-        worst_batch = policy.max_attempts * 2 * settings.services.memory_embed_timeout_seconds
+        worst_batch = policy.max_attempts * settings.services.memory_embed_timeout_seconds
         worst_batch += sum(
             max(policy.backoff(attempt), _MAX_RETRY_AFTER_RESPECT_S) + 2 * policy.jitter_span
             for attempt in range(policy.max_attempts - 1)

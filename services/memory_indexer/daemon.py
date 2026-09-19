@@ -85,12 +85,12 @@ _LOOP_INTERVAL_S = 1.0
 # Derive the ceiling from one provider batch's full retry budget: a single
 # legitimate call can exceed 180s, and several shorter calls can compound.
 # _process_paths beats before each provider/backend call, including commits
-# and deletes, so calls cannot compound in one gap (default batch budget 846s).
+# and deletes, so calls cannot compound in one gap (default batch budget 606s).
 # A false kill costs a rebuild; later true-wedge detection costs staleness
 # only, since search keeps reading the existing index.
 _LIVENESS_TIMEOUT_FLOOR_S = 180.0  # Historic ceiling; preserve other loop branches' slack.
 # Covers executor scheduling, local processing, and loop resumption. Commit
-# calls beat separately; NumPy's 300s upsert allowance fits the default 876s.
+# calls beat separately; NumPy's 300s upsert allowance fits the default 636s.
 _LIVENESS_SAFETY_MARGIN_S = 30.0
 # Startup and follow-up reconciles beat before and after file-granular chunks:
 # a full rebuild can outlive the liveness ceiling. Chunks bound preparation and

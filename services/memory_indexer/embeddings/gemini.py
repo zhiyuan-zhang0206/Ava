@@ -24,19 +24,17 @@ always-on indexer only after a successful provider call, never at module load.
 API key is read from `GEMINI_API_KEY` env — prod injects it via
 `~/.ava/.env`.
 
-No module-level httpx client (sync or async): the sync path is
-tested by patching `httpx.stream`, which a pre-built client would bypass; an
-`httpx.AsyncClient` is bound to the event loop it is first used on, and
-this module runs inside both the daemon process and the gateway (plus
-per-test loops), so a shared client would cross loops and raise. Per-call
-construction cost is negligible next to a multi-second network call (task
-#971 evaluation).
+No module-level httpx client: AsyncClient belongs to its event loop, and this
+module runs in the daemon, gateway and per-test loops. The sync path runs its
+own loop per attempt via asyncio.run with a fresh AsyncClient; it requires a
+thread without a running event loop. Async callers use embed_query_async where
+available, or a worker thread for the sync batch API. Both paths share the
+same cancellation deadline for each attempt.
 """
 
 from __future__ import annotations
 
 import asyncio
-import time
 from typing import Any
 
 import httpx
@@ -102,15 +100,13 @@ _QUERY_EMBED_POLICY = Policy(
 def worst_case_batch_seconds() -> float:
     """Budget for one embed_batch call under _EMBED_POLICY.
 
-    Sync attempts bound raw body streaming by checking the configured deadline
-    between received raw chunks, allowing one extra read window (<= 2 x timeout).
-    Response-header acquisition keeps HTTPX per-operation semantics; drip-header
-    overruns are not covered (2026-09-20 design ruling, task #4108). Async attempts
-    use cancellation. Inter-attempt sleeps allow the greater of the last backoff
-    and the shared Retry-After cap, plus both jitter terms (phase and random span).
+    Each sync or async attempt runs under an asyncio cancellation deadline equal
+    to the configured timeout. Inter-attempt sleeps allow the greater of the
+    last backoff and the shared Retry-After cap, plus both jitter terms (phase
+    and random span).
     """
     attempts = _EMBED_POLICY.max_attempts
-    request_seconds = attempts * 2 * settings.services.memory_embed_timeout_seconds
+    request_seconds = attempts * settings.services.memory_embed_timeout_seconds
     if attempts < 2:
         return request_seconds
     last_backoff = _EMBED_POLICY.backoff(attempts - 2)
@@ -178,6 +174,23 @@ def _emit_billing(body: dict[str, Any]) -> None:
         return
 
 
+async def _post_attempt_once(
+    client: httpx.AsyncClient,
+    timeout_s: float,
+    headers: dict[str, str],
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Run one HTTP attempt under the shared cancellation deadline."""
+    try:
+        async with asyncio.timeout(timeout_s):
+            response = await client.post(_ENDPOINT, json=payload, headers=headers)
+            response.raise_for_status()
+            return response.json()
+    except TimeoutError as exc:
+        # The HTTP classifier retries transport errors, not builtin TimeoutError.
+        raise httpx.ReadTimeout(f"embed attempt exceeded the deadline of {timeout_s}s") from exc
+
+
 def _embed(texts: list[str], task_type: str, *, policy: Policy = _EMBED_POLICY) -> np.ndarray:
     """Single batched `batchEmbedContents` call with retry; returns
     (N, DIM) float32. Raises after retries.
@@ -202,30 +215,23 @@ def _embed(texts: list[str], task_type: str, *, policy: Policy = _EMBED_POLICY) 
     payload = _payload(texts, task_type)
     timeout_s = settings.services.memory_embed_timeout_seconds
 
+    async def _attempt() -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            return await _post_attempt_once(client, timeout_s, headers, payload)
+
     def _call() -> dict[str, Any]:
-        deadline = time.monotonic() + timeout_s
-        with httpx.stream(
-            "POST", _ENDPOINT, json=payload, headers=headers, timeout=timeout_s
-        ) as response:
-            # Reject status without reading an unbounded error body; preserve
-            # request/response so classification and Retry-After still work.
-            if not 200 <= response.status_code < 300:
-                raise httpx.HTTPStatusError(
-                    f"Gemini embed HTTP {response.status_code}",
-                    request=response.request,
-                    response=response,
-                )
-            chunks: list[bytes] = []
-            # Observe raw reads before a content decoder can buffer them.
-            for chunk in response.iter_raw():
-                if time.monotonic() > deadline:
-                    raise httpx.ReadTimeout(f"embed attempt exceeded the deadline of {timeout_s}s")
-                chunks.append(chunk)
-            # The network stream is complete; decode locally, preserving the
-            # response's content encoding (including gzip).
-            return httpx.Response(
-                response.status_code, headers=response.headers, content=b"".join(chunks)
-            ).json()
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass  # fail-fast-ok: no running loop is the required sync calling context.
+        else:
+            raise RuntimeError(
+                "This is the sync embedding provider API; call it from a worker thread "
+                "with asyncio.to_thread or an executor. From async code use "
+                "embed_query_async where available; batch embedding stays sync "
+                "and the indexer calls it via asyncio.to_thread."
+            )
+        return asyncio.run(_attempt())
 
     try:
         body = retry(policy)(_call)
@@ -263,17 +269,7 @@ async def _embed_async(
         async with client:
 
             async def _call() -> dict[str, Any]:
-                try:
-                    async with asyncio.timeout(timeout_s):
-                        response = await client.post(_ENDPOINT, json=payload, headers=headers)
-                        response.raise_for_status()
-                        return response.json()
-                except TimeoutError as exc:
-                    # The shared HTTP classifier retries transport failures,
-                    # not builtin TimeoutError from asyncio's deadline.
-                    raise httpx.ReadTimeout(
-                        f"embed attempt exceeded the deadline of {timeout_s}s"
-                    ) from exc
+                return await _post_attempt_once(client, timeout_s, headers, payload)
 
             body = await aretry(policy)(_call)
     except EmbeddingAPIError:

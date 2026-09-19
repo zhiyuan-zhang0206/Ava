@@ -4,7 +4,8 @@ The Gemini adapter's wire behavior is pinned exactly as it was before the
 abstraction (endpoint, payload shape, auth header, per-site retry
 policies, dim, shape validation) — these tests ARE the statement that
 "Gemini adapter behavior is unchanged". The HTTP call is mocked
-(`httpx.stream` / `httpx.AsyncClient`), with a dummy API key. Deadline guards additionally use a local trickling HTTP server.
+(`httpx.AsyncClient`), with a dummy API key. Deadline guards additionally
+use a local trickling HTTP server.
 
 Also pins the factory switch: `AVA_EMBEDDING_BACKEND` dispatch, unknown
 values fail fast, and the provider declares the vector space (`dim` +
@@ -48,70 +49,65 @@ def _provider() -> GeminiEmbeddingProvider:
 
 
 class _FakeResponse(httpx.Response):
-    """Sync stream context or buffered async response with the real status contract."""
+    """Buffered response with the real HTTPX status contract."""
 
-    def __init__(
-        self, payload: dict[str, Any], *, status_ok: bool = True, buffered: bool = False
-    ) -> None:
+    def __init__(self, payload: dict[str, Any], *, status_code: int = 200) -> None:
         super().__init__(
-            200 if status_ok else 500,
-            stream=httpx.ByteStream(json.dumps(payload).encode()),
+            status_code,
+            json=payload,
             request=httpx.Request("POST", _ENDPOINT),
         )
-        if buffered:
-            self.read()
-
-    def __enter__(self) -> _FakeResponse:
-        return self
-
-    def __exit__(self, *args: object) -> None:
-        self.close()
 
 
-class _FakeStream:
-    """Records each httpx.stream call; returns embeddings or raises (in call
-    order) to simulate transient failures. `vectors` are the per-text
-    embedding rows the batch response carries back."""
+class _AsyncClient:
+    """Records attempts across client instances, including sync retry loops."""
 
     def __init__(
         self,
         vectors: list[list[float]] | None = None,
         *,
         raises_times: int = 0,
-        status_ok: bool = True,
+        status_code: int = 200,
         prompt_token_count: int | None = None,
+        response_body: dict[str, Any] | None = None,
     ) -> None:
         self._vectors = vectors or []
         self._raises_remaining = raises_times
-        self._status_ok = status_ok
+        self._status_code = status_code
         self._prompt_token_count = prompt_token_count
+        self._response_body = response_body
         self.call_count = 0
         self.calls: list[dict[str, Any]] = []
+        self.timeout = 0.0
 
-    def __call__(
-        self,
-        method: str,
-        url: str,
-        *,
-        json: dict[str, Any],
-        headers: dict[str, str],
-        timeout: float,
-    ) -> _FakeResponse:
-        assert method == "POST"
+    def __call__(self, *, timeout: float) -> _AsyncClient:
+        self.timeout = timeout
+        return self
+
+    async def __aenter__(self) -> _AsyncClient:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+    async def post(
+        self, url: str, *, json: dict[str, Any], headers: dict[str, str]
+    ) -> httpx.Response:
         self.call_count += 1
-        self.calls.append({"url": url, "json": json, "headers": headers, "timeout": timeout})
+        self.calls.append({"url": url, "json": json, "headers": headers, "timeout": self.timeout})
         if self._raises_remaining > 0:
             self._raises_remaining -= 1
             raise httpx.ConnectError("simulated network failure")
-        embeddings = [{"values": v} for v in self._vectors]
-        body: dict[str, Any] = {"embeddings": embeddings}
+        body: dict[str, Any] = {"embeddings": [{"values": v} for v in self._vectors]}
         if self._prompt_token_count is not None:
             body["usageMetadata"] = {"promptTokenCount": self._prompt_token_count}
-        return _FakeResponse(body, status_ok=self._status_ok)
+        if self._response_body is not None:
+            body = self._response_body
+        return _FakeResponse(body, status_code=self._status_code)
 
 
-def _patch_stream(monkeypatch: pytest.MonkeyPatch, fake: _FakeStream) -> None:
-    monkeypatch.setattr(httpx, "stream", fake)
+def _patch_client(monkeypatch: pytest.MonkeyPatch, fake: _AsyncClient) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", fake)
 
 
 class _RecordedSpan:
@@ -209,7 +205,7 @@ def _load_provider_plugins() -> None:
 def _dummy_gemini_key(monkeypatch: pytest.MonkeyPatch) -> None:
     """Inject a key so `_api_key()` does not short-circuit the provider.
 
-    These tests mock the HTTP call (`httpx.stream`), not auth — the key
+    These tests mock the HTTP call (`httpx.AsyncClient`), not auth — the key
     check runs before it, so without a key every success-path test would
     raise `EmbeddingAPIError` instead of exercising the request. CI has no
     GEMINI_API_KEY; running locally the prod `.env` leaked one in and hid
@@ -253,8 +249,8 @@ def test_provider_declares_vector_space() -> None:
 
 
 def test_embed_batch_shape(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = _FakeStream(vectors=[[1.0] * DIM, [2.0] * DIM])
-    _patch_stream(monkeypatch, fake)
+    fake = _AsyncClient(vectors=[[1.0] * DIM, [2.0] * DIM])
+    _patch_client(monkeypatch, fake)
     result = _provider().embed_batch(["text1", "text2"])
     assert result.shape == (2, DIM)
     assert result.dtype == np.float32
@@ -263,8 +259,8 @@ def test_embed_batch_shape(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_embed_query_shape(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = _FakeStream(vectors=[[1.0] * DIM])
-    _patch_stream(monkeypatch, fake)
+    fake = _AsyncClient(vectors=[[1.0] * DIM])
+    _patch_client(monkeypatch, fake)
     result = _provider().embed_query("hello")
     assert result.shape == (DIM,)
     body = fake.calls[-1]["json"]
@@ -275,8 +271,8 @@ def test_embed_batch_emits_priced_billing_span(
     monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
 ) -> None:
-    fake = _FakeStream(vectors=[[1.0] * DIM], prompt_token_count=123)
-    _patch_stream(monkeypatch, fake)
+    fake = _AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
+    _patch_client(monkeypatch, fake)
     tracer = _enable_tracing(monkeypatch)
 
     _provider().embed_batch(["hello"])
@@ -299,8 +295,8 @@ def test_embed_batch_unknown_model_emits_unpriced_billing_span(
     from services.memory_indexer.embeddings import gemini
 
     monkeypatch.setattr(gemini, "_MODEL_ID", "gemini-unknown-embedding-model")
-    fake = _FakeStream(vectors=[[1.0] * DIM], prompt_token_count=123)
-    _patch_stream(monkeypatch, fake)
+    fake = _AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
+    _patch_client(monkeypatch, fake)
     tracer = _enable_tracing(monkeypatch)
 
     _provider().embed_batch(["hello"])
@@ -315,8 +311,8 @@ def test_embed_batch_emits_priced_accounting_without_usage_metadata(
     monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
 ) -> None:
-    fake = _FakeStream(vectors=[[1.0] * DIM])
-    _patch_stream(monkeypatch, fake)
+    fake = _AsyncClient(vectors=[[1.0] * DIM])
+    _patch_client(monkeypatch, fake)
     tracer = _enable_tracing(monkeypatch)
 
     _provider().embed_batch(["hello"])
@@ -329,43 +325,15 @@ def test_embed_batch_emits_priced_accounting_without_usage_metadata(
 
 
 def test_embed_query_async_shape(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The async path uses `httpx.AsyncClient` (not the sync `httpx.stream`),
-    so it needs its own client fake — the wire contract it produces is the
-    same payload as the sync query path."""
-
-    class _OkAsyncClient:
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            pass
-
-        async def __aenter__(self) -> _OkAsyncClient:
-            return self
-
-        async def __aexit__(self, *args: object) -> None:
-            return None
-
-        async def post(
-            self, url: str, *, json: dict[str, Any], headers: dict[str, str]
-        ) -> _FakeResponse:
-            return _FakeResponse(
-                {"embeddings": [{"values": [1.0] * DIM} for _ in json["requests"]]},
-                buffered=True,
-            )
-
-    calls: list[dict[str, Any]] = []
-
-    class _RecordingClient(_OkAsyncClient):
-        async def post(
-            self, url: str, *, json: dict[str, Any], headers: dict[str, str]
-        ) -> _FakeResponse:
-            calls.append({"url": url, "json": json, "headers": headers})
-            return await _OkAsyncClient.post(self, url, json=json, headers=headers)
-
-    monkeypatch.setattr(httpx, "AsyncClient", _RecordingClient)
+    """Async queries use the same client seam and query payload as sync queries."""
+    fake = _AsyncClient(vectors=[[1.0] * DIM])
+    _patch_client(monkeypatch, fake)
     result = asyncio.run(_provider().embed_query_async("hello"))
     assert result.shape == (DIM,)
-    body = calls[-1]["json"]
-    assert calls[-1]["url"] == _ENDPOINT
-    assert calls[-1]["headers"]["x-goog-api-key"]
+    call = fake.calls[-1]
+    assert call["url"] == _ENDPOINT
+    assert call["headers"]["x-goog-api-key"]
+    body = call["json"]
     assert body["requests"][0]["taskType"] == "RETRIEVAL_QUERY"
     assert body["requests"][0]["outputDimensionality"] == DIM
 
@@ -373,28 +341,8 @@ def test_embed_query_async_shape(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_embed_query_async_emits_priced_billing_span(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    class _AsyncClient:
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            pass
-
-        async def __aenter__(self) -> _AsyncClient:
-            return self
-
-        async def __aexit__(self, *args: object) -> None:
-            return None
-
-        async def post(
-            self, url: str, *, json: dict[str, Any], headers: dict[str, str]
-        ) -> _FakeResponse:
-            return _FakeResponse(
-                {
-                    "embeddings": [{"values": [1.0] * DIM} for _ in json["requests"]],
-                    "usageMetadata": {"promptTokenCount": 123},
-                },
-                buffered=True,
-            )
-
-    monkeypatch.setattr(httpx, "AsyncClient", _AsyncClient)
+    fake = _AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
+    _patch_client(monkeypatch, fake)
     tracer = _enable_tracing(monkeypatch)
 
     result = asyncio.run(_provider().embed_query_async("hello"))
@@ -405,8 +353,8 @@ def test_embed_query_async_emits_priced_billing_span(
 
 def test_embed_request_payload_and_auth(monkeypatch: pytest.MonkeyPatch) -> None:
     """Wire contract: endpoint, api-key header, per-text request shape."""
-    fake = _FakeStream(vectors=[[1.0] * DIM])
-    _patch_stream(monkeypatch, fake)
+    fake = _AsyncClient(vectors=[[1.0] * DIM])
+    _patch_client(monkeypatch, fake)
     _provider().embed_batch(["hello world"])
     call = fake.calls[-1]
     assert call["url"] == _ENDPOINT
@@ -418,8 +366,8 @@ def test_embed_request_payload_and_auth(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_embed_batch_empty_short_circuit(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = _FakeStream(vectors=[])
-    _patch_stream(monkeypatch, fake)
+    fake = _AsyncClient(vectors=[])
+    _patch_client(monkeypatch, fake)
     tracer = _enable_tracing(monkeypatch)
     result = _provider().embed_batch([])
     assert result.shape == (0, DIM)
@@ -431,8 +379,8 @@ def test_embed_retries_then_succeeds(
     monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
 ) -> None:
-    fake = _FakeStream(vectors=[[1.0] * DIM], raises_times=2)
-    _patch_stream(monkeypatch, fake)
+    fake = _AsyncClient(vectors=[[1.0] * DIM], raises_times=2)
+    _patch_client(monkeypatch, fake)
     tracer = _enable_tracing(monkeypatch)
     result = _provider().embed_batch(["hello"])
     assert result.shape == (1, DIM)
@@ -445,8 +393,8 @@ def test_embed_retries_then_succeeds(
 
 
 def test_embed_raises_after_max_retries(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = _FakeStream(vectors=[[1.0] * DIM], raises_times=100)
-    _patch_stream(monkeypatch, fake)
+    fake = _AsyncClient(vectors=[[1.0] * DIM], raises_times=100)
+    _patch_client(monkeypatch, fake)
     tracer = _enable_tracing(monkeypatch)
     with pytest.raises(EmbeddingAPIError, match="failed after"):
         _provider().embed_batch(["hello"])
@@ -456,8 +404,8 @@ def test_embed_raises_after_max_retries(monkeypatch: pytest.MonkeyPatch) -> None
 def test_embed_survives_billing_emit_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     """A billing-emit exception is swallowed — the embed call still completes
     (module contract: billing can never affect the call it observes)."""
-    fake = _FakeStream(vectors=[[1.0] * DIM], prompt_token_count=123)
-    _patch_stream(monkeypatch, fake)
+    fake = _AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
+    _patch_client(monkeypatch, fake)
     _enable_tracing(monkeypatch)
 
     def _boom(**kwargs: object) -> None:
@@ -472,8 +420,8 @@ def test_embed_survives_billing_emit_failure(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_embed_http_error_status_retries_then_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     """Non-2xx (raise_for_status) is a retryable failure; exhausting retries raises."""
-    fake = _FakeStream(vectors=[[1.0] * DIM], status_ok=False)
-    _patch_stream(monkeypatch, fake)
+    fake = _AsyncClient(vectors=[[1.0] * DIM], status_code=500)
+    _patch_client(monkeypatch, fake)
     with pytest.raises(EmbeddingAPIError, match="failed after"):
         _provider().embed_query("hello")
 
@@ -497,33 +445,11 @@ def test_embed_query_async_uses_the_query_policy(
     (2 attempts), not the indexer's 4: a 429 during a fleet wake must not burn
     the search deadline on retries."""
 
-    class _FailingClient:
-        """AsyncClient stand-in whose POST always raises a transient error.
-
-        A class-level counter: the client instance is constructed inside
-        `embed_query_async`, so the test cannot reach the instance — and a
-        class (not a lambda) keeps pyright happy about `AsyncClient`'s type.
-        """
-
-        post_calls: int = 0
-
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            pass
-
-        async def __aenter__(self) -> _FailingClient:
-            return self
-
-        async def __aexit__(self, *args: object) -> None:
-            return None
-
-        async def post(self, *args: object, **kwargs: object) -> None:
-            _FailingClient.post_calls += 1
-            raise httpx.ConnectError("simulated network failure")
-
-    monkeypatch.setattr(httpx, "AsyncClient", _FailingClient)
+    fake = _AsyncClient(raises_times=100)
+    _patch_client(monkeypatch, fake)
     with pytest.raises(EmbeddingAPIError, match="failed after 2 attempts"):
         asyncio.run(_provider().embed_query_async("hello"))
-    assert _FailingClient.post_calls == _QUERY_EMBED_POLICY.max_attempts
+    assert fake.call_count == _QUERY_EMBED_POLICY.max_attempts
 
 
 def test_embed_4xx_fails_immediately(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -531,18 +457,11 @@ def test_embed_4xx_fails_immediately(monkeypatch: pytest.MonkeyPatch) -> None:
     (R2-D classify; the pre-R2 loop wasted its whole budget retrying 400/403 —
     audit 06 Q4)."""
 
-    calls: list[str] = []
-
-    def stream(method: str, url: str, **kwargs: Any) -> _FakeResponse:
-        calls.append(url)
-        response = _FakeResponse({})
-        response.status_code = 400
-        return response
-
-    monkeypatch.setattr(httpx, "stream", stream)
-    with pytest.raises(EmbeddingAPIError, match="HTTP 400"):
+    fake = _AsyncClient(status_code=400)
+    _patch_client(monkeypatch, fake)
+    with pytest.raises(EmbeddingAPIError, match="400 Bad Request"):
         _provider().embed_query("hello")
-    assert len(calls) == 1  # 4xx -> permanent -> single attempt
+    assert fake.call_count == 1  # 4xx -> permanent -> single attempt
 
 
 def test_embed_timeout_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -551,8 +470,8 @@ def test_embed_timeout_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     from shared.config import settings
 
     monkeypatch.setattr(settings.services, "memory_embed_timeout_seconds", 12.5)
-    fake = _FakeStream(vectors=[[1.0] * DIM], raises_times=1)
-    _patch_stream(monkeypatch, fake)
+    fake = _AsyncClient(vectors=[[1.0] * DIM], raises_times=1)
+    _patch_client(monkeypatch, fake)
 
     _provider().embed_batch(["hello"])
 
@@ -573,8 +492,8 @@ def test_embed_no_api_key_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     # No key must mean no network attempt — this makes that observable.
     monkeypatch.setattr(
         httpx,
-        "post",
-        lambda *_a, **_k: pytest.fail("must not POST without an API key"),  # pyright: ignore[reportUnknownArgumentType]
+        "AsyncClient",
+        lambda *_a, **_k: pytest.fail("must not construct a client without an API key"),  # pyright: ignore[reportUnknownArgumentType]
     )
     with pytest.raises(EmbeddingAPIError) as exc_info:
         _provider().embed_query("hello")
@@ -603,8 +522,8 @@ def test_embed_async_client_construction_failure_wraps(
 
 
 def test_embed_response_shape_mismatch_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = _FakeStream(vectors=[[1.0] * DIM] * 3)
-    _patch_stream(monkeypatch, fake)
+    fake = _AsyncClient(vectors=[[1.0] * DIM] * 3)
+    _patch_client(monkeypatch, fake)
     with pytest.raises(EmbeddingAPIError, match="unexpected shape"):
         _provider().embed_batch(["a", "b"])
 
@@ -612,14 +531,32 @@ def test_embed_response_shape_mismatch_raises(monkeypatch: pytest.MonkeyPatch) -
 def test_embed_malformed_response_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     """Embedding entries missing `values` -> EmbeddingAPIError, not a crash."""
 
-    def bad_stream(
-        method: str, url: str, *, json: Any, headers: Any, timeout: float
-    ) -> _FakeResponse:
-        return _FakeResponse({"embeddings": [{"nope": []}]})
-
-    monkeypatch.setattr(httpx, "stream", bad_stream)
+    fake = _AsyncClient(response_body={"embeddings": [{"nope": []}]})
+    _patch_client(monkeypatch, fake)
     with pytest.raises(EmbeddingAPIError, match="malformed"):
         _provider().embed_query("hello")
+
+
+def test_sync_embed_rejects_running_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail with caller guidance before creating a coroutine or a client."""
+
+    def unexpected_client(**kwargs: Any) -> None:
+        pytest.fail("running-loop guard must precede client construction")
+
+    monkeypatch.setattr(httpx, "AsyncClient", unexpected_client)
+
+    async def invoke() -> None:
+        with pytest.raises(RuntimeError, match="sync embedding provider API") as error:
+            gemini._embed(["hello"], "RETRIEVAL_DOCUMENT")
+        # EmbeddingAPIError is a RuntimeError; preserve the existing wrapper.
+        assert isinstance(error.value, EmbeddingAPIError)
+        assert type(error.value.__cause__) is RuntimeError
+        message = str(error.value)
+        assert "asyncio.to_thread or an executor" in message
+        assert "embed_query_async" in message
+        assert "batch embedding stays sync" in message
+
+    asyncio.run(invoke())
 
 
 # ── factory switch ────────────────────────────────────────────────────────
@@ -636,7 +573,7 @@ def test_worst_case_single_attempt_has_no_sleep(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(
         gemini, "_EMBED_POLICY", replace(gemini._EMBED_POLICY, max_attempts=1, backoff=backoff)
     )
-    assert gemini.worst_case_batch_seconds() == 2 * settings.services.memory_embed_timeout_seconds
+    assert gemini.worst_case_batch_seconds() == settings.services.memory_embed_timeout_seconds
     backoff.assert_not_called()
 
 
@@ -669,9 +606,15 @@ def test_factory_provider_named_dispatch(monkeypatch: pytest.MonkeyPatch) -> Non
 
 @contextmanager
 def _embedding_server(
-    *, compressed: bool = False, chunked: bool = False, drip: bool = True
+    *,
+    compressed: bool = False,
+    chunked: bool = False,
+    drip: bool = True,
+    framing: str | None = None,
 ) -> Generator[tuple[str, list[float]]]:
-    """Immediate headers; optional body drip with every read below the timeout."""
+    """Drip body or HTTP framing while every read gap stays below the timeout."""
+    if framing is not None:
+        chunked = True
     started: list[float] = []
     stop = threading.Event()
     body = json.dumps({"embeddings": [{"values": [1.0] * DIM}]}).encode()
@@ -706,6 +649,22 @@ def _embedding_server(
                 self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             try:
+                if framing is not None:
+                    size = f"{len(body):x}".encode()
+                    if framing == "extension":
+                        wire = [size + b";name="] + [b"x"] * 40
+                        wire.append(b"\r\n" + body + b"\r\n0\r\n\r\n")
+                    elif framing == "trailer":
+                        wire = [size + b"\r\n" + body + b"\r\n0\r\nX-Test: "]
+                        wire += [b"y"] * 40 + [b"\r\n\r\n"]
+                    else:
+                        raise AssertionError(f"unknown framing: {framing}")
+                    for fragment in wire:
+                        self.wfile.write(fragment)
+                        self.wfile.flush()
+                        if stop.wait(read_gap):
+                            return
+                    return
                 for chunk in chunks:
                     if chunked:
                         self.wfile.write(f"{len(chunk):x}\r\n".encode() + chunk + b"\r\n")
@@ -718,7 +677,7 @@ def _embedding_server(
                     self.wfile.write(b"0\r\n\r\n")
                     self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError):
-                return  # Expected when the client enforces its body deadline.
+                return  # Expected when the client cancels the attempt.
 
         def log_message(self, format: str, *args: object) -> None:
             pass
@@ -773,19 +732,23 @@ def test_embed_trickle_total_deadline(
     elapsed = time.monotonic() - started
     assert isinstance(error.value.__cause__, httpx.ReadTimeout)
     assert len(requests) == attempts
-    assert attempts * timeout <= elapsed < attempts * (2 * timeout + 0.2)
+    assert attempts * timeout <= elapsed < attempts * (timeout + 0.2)
     # Even all retries finish before one complete 2s trickle response.
     assert elapsed < 2
 
 
+@pytest.mark.parametrize("mode", ["sync", "async"])
 @pytest.mark.parametrize("attempts", [1, 3])
-def test_embed_compressed_trickle_deadline(monkeypatch: pytest.MonkeyPatch, attempts: int) -> None:
+def test_embed_compressed_trickle_deadline(
+    monkeypatch: pytest.MonkeyPatch, attempts: int, mode: str
+) -> None:
     """Gzip metadata cannot hide body reads from the deadline or retry budget."""
     from shared import resilience
 
     timeout = 0.2
     monkeypatch.setattr(settings.services, "memory_embed_timeout_seconds", timeout)
     monkeypatch.setattr(resilience, "_sleep", time.sleep)
+    monkeypatch.setattr(resilience, "_asleep", asyncio.sleep)
     policy = Policy(
         max_attempts=attempts,
         backoff=ExponentialBackoff(base=0.001, factor=1, cap=0.001),
@@ -795,18 +758,54 @@ def test_embed_compressed_trickle_deadline(monkeypatch: pytest.MonkeyPatch, atte
         monkeypatch.setattr(gemini, "_ENDPOINT", endpoint)
         started = time.monotonic()
         with pytest.raises(EmbeddingAPIError, match="exceeded the deadline") as error:
-            gemini._embed(["hello"], "RETRIEVAL_DOCUMENT", policy=policy)
+            if mode == "sync":
+                gemini._embed(["hello"], "RETRIEVAL_DOCUMENT", policy=policy)
+            else:
+                asyncio.run(gemini._embed_async(["hello"], "RETRIEVAL_QUERY", policy=policy))
         elapsed = time.monotonic() - started
         assert isinstance(error.value.__cause__, httpx.ReadTimeout)
         assert len(requests) == attempts
-        assert attempts * timeout <= elapsed < attempts * (2 * timeout + 0.2)
+        assert attempts * timeout <= elapsed < attempts * (timeout + 0.2)
         # All retries must end before the first gzip filename finishes dripping (2.25s).
         assert elapsed < 2
 
 
+@pytest.mark.parametrize("mode", ["sync", "async"])
+@pytest.mark.parametrize("framing", ["extension", "trailer"])
+@pytest.mark.parametrize("attempts", [1, 3])
+def test_embed_framing_drip_deadline(
+    monkeypatch: pytest.MonkeyPatch, mode: str, framing: str, attempts: int
+) -> None:
+    """Chunk extensions and trailers cannot hide timely reads from cancellation."""
+    from shared import resilience
+
+    timeout = 0.2
+    monkeypatch.setattr(settings.services, "memory_embed_timeout_seconds", timeout)
+    monkeypatch.setattr(resilience, "_sleep", time.sleep)
+    monkeypatch.setattr(resilience, "_asleep", asyncio.sleep)
+    policy = Policy(
+        max_attempts=attempts,
+        backoff=ExponentialBackoff(base=0.001, factor=1, cap=0.001),
+        jitter_span=0,
+    )
+    with _embedding_server(framing=framing) as (endpoint, requests):
+        monkeypatch.setattr(gemini, "_ENDPOINT", endpoint)
+        started = time.monotonic()
+        with pytest.raises(EmbeddingAPIError, match="exceeded the deadline") as error:
+            if mode == "sync":
+                gemini._embed(["hello"], "RETRIEVAL_DOCUMENT", policy=policy)
+            else:
+                asyncio.run(gemini._embed_async(["hello"], "RETRIEVAL_QUERY", policy=policy))
+        elapsed = time.monotonic() - started
+        assert isinstance(error.value.__cause__, httpx.ReadTimeout)
+        assert len(requests) == attempts
+        assert attempts * timeout <= elapsed < attempts * (timeout + 0.2)
+        assert elapsed < 2  # Cancel all attempts before one framing drip completes.
+
+
 @pytest.mark.parametrize("chunked", [False, True])
 def test_embed_gzip_response_round_trip(monkeypatch: pytest.MonkeyPatch, chunked: bool) -> None:
-    """Post-stream HTTPX decoding preserves gzip, including chunked transfer headers."""
+    """HTTPX decoding preserves gzip, including chunked transfer."""
     with _embedding_server(compressed=True, chunked=chunked, drip=False) as (endpoint, requests):
         monkeypatch.setattr(gemini, "_ENDPOINT", endpoint)
         result = _provider().embed_batch(["hello"])
@@ -814,30 +813,45 @@ def test_embed_gzip_response_round_trip(monkeypatch: pytest.MonkeyPatch, chunked
         assert len(requests) == 1
 
 
-def test_embed_stream_status_preserves_retry_after(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Status rejection never consumes the body; retry still sees its headers."""
+@pytest.mark.parametrize("mode", ["sync", "async"])
+def test_embed_status_preserves_retry_after(monkeypatch: pytest.MonkeyPatch, mode: str) -> None:
+    """Status rejection never decodes the error body; retry still sees its headers."""
     from shared import resilience
 
     calls: list[httpx.Response] = []
     sleeps: list[float] = []
 
-    class ErrorResponse(_FakeResponse):
-        def iter_raw(self, chunk_size: int | None = None) -> Iterator[bytes]:
-            if self.status_code == 429:
-                raise AssertionError("status failure must not read the body")
-            yield from super().iter_raw(chunk_size)
+    class ErrorResponse(httpx.Response):
+        def json(self, **kwargs: Any) -> Any:
+            pytest.fail("status failure must not decode the body")
 
-    def stream(*args: Any, **kwargs: Any) -> _FakeResponse:
-        if calls:
-            return _FakeResponse({"embeddings": [{"values": [1.0] * DIM}]})
-        response = ErrorResponse({})
-        response.status_code = 429
-        response.headers["Retry-After"] = "7"
-        calls.append(response)
-        return response
+        def read(self) -> bytes:
+            pytest.fail("status rejection must not read the body")
 
-    monkeypatch.setattr(httpx, "stream", stream)
+    class StatusClient(_AsyncClient):
+        async def post(
+            self, url: str, *, json: dict[str, Any], headers: dict[str, str]
+        ) -> httpx.Response:
+            if calls:
+                return _FakeResponse({"embeddings": [{"values": [1.0] * DIM}]})
+            response = ErrorResponse(
+                429,
+                headers={"Retry-After": "7"},
+                stream=httpx.ByteStream(b"error body"),
+                request=httpx.Request("POST", url),
+            )
+            calls.append(response)
+            return response
+
+    async def record_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    _patch_client(monkeypatch, StatusClient())
     monkeypatch.setattr(resilience, "_sleep", sleeps.append)
-    result = _provider().embed_batch(["hello"])
-    assert result.shape == (1, DIM)
+    monkeypatch.setattr(resilience, "_asleep", record_sleep)
+    if mode == "sync":
+        result = _provider().embed_query("hello")
+    else:
+        result = asyncio.run(_provider().embed_query_async("hello"))
+    assert result.shape == (DIM,)
     assert len(sleeps) == 1 and 6 <= sleeps[0] <= 9

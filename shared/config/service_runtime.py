@@ -466,11 +466,9 @@ class _ServiceRuntimeSettings(EnvSettings):
         default=60.0,
         alias="AVA_EMBED_TIMEOUT_SECONDS",
         description=(
-            "HTTP operation timeout and enforced attempt deadline (seconds) for Gemini "
-            "batchEmbedContents. Sync streaming checks the deadline between raw chunks, allowing "
-            "one extra read window; response-header acquisition keeps HTTPX per-operation "
-            "semantics. The memory-indexer liveness ceiling is derived as "
-            "max(180s, provider batch retry budget + 30s)."
+            "HTTP operation timeout and asyncio cancellation deadline (seconds) for each "
+            "Gemini batchEmbedContents attempt, sync or async. The memory-indexer "
+            "liveness ceiling is derived as max(180s, provider batch retry budget + 30s)."
         ),
         json_schema_extra={
             "restart_required": "gateway",
