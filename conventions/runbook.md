@@ -587,6 +587,21 @@ Recovery recipe for a stranded deploy (deploys refused, or this host stuck pause
   touch (a maintenance hold, a settle hold) follows its own hand-recovery recipe
   ([graceful maintenance](graceful-maintenance.md)).
 
+A **rollout interrupted with a durable pending publication** is recovered by the
+checked protocol, never by hand (task #4082). An interrupted managed-writer
+rollout leaves `deployment_state.managed_writer_evidence.pending` behind, and
+every symptom points at it: `ava cluster update` refuses with "a durable pending
+publication from an interrupted rollout requires its checked recovery first",
+and new agent births defer cluster-wide. `ava cluster recover-pending` is the
+operator entrance to the recovery seat (`ops/publication_recovery.py`): it
+proves every live owner gone, then — once the trusted per-unit closure producer
+is connected — takes a new rollout lease, mints a new challenge and replaces the
+abandoned operation under a fresh complete writer closure. Until that producer
+is connected the verb refuses BEFORE touching the lease, and it is deliberately
+not a repair the generic `ava cluster recover` path performs. Clearing the
+evidence by hand, hand-writing a closure, or editing `runtime_protocol_version`
+is forbidden: the record exists to make recovery checkable.
+
 A **stranded update hold is completed once, bounded** (task #3142). The record
 above makes the silent hold loud; this completes the one shape whose owner is
 provably gone AND whose state is resumable: an update-armed hold (the pause

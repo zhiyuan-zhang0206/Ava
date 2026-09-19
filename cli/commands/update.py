@@ -253,7 +253,7 @@ from shared.cluster_lock import (
     release_update_lock,
     self_holder,
     settle_update_lock,
-    update_lock_holder,
+    update_lock_refusal_detail,
 )
 from shared.config import (
     refresh_data_plane_settings as refresh_data_plane_settings,
@@ -326,12 +326,7 @@ def _run_gateway_orchestration(  # noqa: PLR0915 — one transaction-shaped life
     # owner without the mutex staying held for the multi-minute rollout.
     with ui_update_state.lifecycle_lock():
         if not acquire_update_lock(holder, kind=expected_kind):
-            print(
-                f"\n✗ another cluster update is in progress (held by "
-                f"{update_lock_holder()}); aborting (the lock auto-expires after "
-                "its TTL if that holder crashed)",
-                file=sys.stderr,
-            )
+            print(f"\n✗ {update_lock_refusal_detail()}", file=sys.stderr)
             return 1
         try:
             marker = ui_update_state.read()

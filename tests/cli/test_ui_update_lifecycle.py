@@ -23,7 +23,11 @@ def _isolated_home(
         lambda: tmp_path / "deploy-state.lifecycle.lock",
     )
     monkeypatch.setattr(update, "self_holder", lambda: "gateway:pid1")
-    monkeypatch.setattr(update, "update_lock_holder", lambda: "other:pid2")
+    monkeypatch.setattr(
+        update,
+        "update_lock_refusal_detail",
+        lambda: "another cluster update is in progress (held by other:pid2); aborting",
+    )
 
 
 def test_new_child_adopts_the_introducing_rollouts_legacy_v1_marker(
