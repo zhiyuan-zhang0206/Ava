@@ -1170,10 +1170,6 @@ describe("agent tree: live child of a terminated parent mounts on the nearest vi
   });
 });
 
-// The legacy localStorage → DB migration for display.show_terminated (and every
-// other preference key) now lives in one place — lib/settings-migration.ts —
-// and is covered by settings-migration.test.ts, not here.
-
 describe("Flat view mode", () => {
   it("renders the sort icon button (collapsed to a single icon, #723r2)", () => {
     state.sidebarViewMode = "flat";

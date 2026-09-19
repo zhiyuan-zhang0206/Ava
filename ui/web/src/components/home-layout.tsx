@@ -46,16 +46,8 @@ const PANEL_MAIN = "panel-main";
 const PANEL_TIMELINE = "panel-timeline";
 const PANEL_INSPECTOR = "panel-inspector";
 
-const COLUMNS_PANEL_IDS = [PANEL_SIDEBAR, PANEL_MAIN] as const;
-const TIMELINE_PANEL_IDS = [PANEL_TIMELINE] as const;
-const TIMELINE_AND_INSPECTOR_PANEL_IDS = [PANEL_TIMELINE, PANEL_INSPECTOR] as const;
-
-// One storage object per panel set — it carries the v3 -> v4 layout bridge, so
-// it must know which panels the group renders right now (see
-// lib/panel-layout-storage.ts).
-const COLUMNS_STORAGE = panelLayoutStorage(COLUMNS_PANEL_IDS);
-const TIMELINE_STORAGE = panelLayoutStorage(TIMELINE_PANEL_IDS);
-const TIMELINE_AND_INSPECTOR_STORAGE = panelLayoutStorage(TIMELINE_AND_INSPECTOR_PANEL_IDS);
+// SSR-safe group-split storage (see lib/panel-layout-storage.ts).
+const HOME_SPLIT_STORAGE = panelLayoutStorage();
 
 // The painted divider starts below the 44px shared title bar and the 40px
 // column-title row. Its 89px bottom gap ends at the composer's measured top
@@ -94,7 +86,7 @@ function DesktopMain({ main, inspector }: Pick<Props, "main" | "inspector">) {
   // inspector never touches the dragged two-panel split.
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: INSPECTOR_LAYOUT_ID,
-    storage: inspectorVisible ? TIMELINE_AND_INSPECTOR_STORAGE : TIMELINE_STORAGE,
+    storage: HOME_SPLIT_STORAGE,
     onlySaveAfterUserInteractions: true,
   });
 
@@ -157,7 +149,7 @@ export function HomeLayout({
   // frame swap must never rewrite the other frame's saved ratios.
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: frame.layoutId,
-    storage: COLUMNS_STORAGE,
+    storage: HOME_SPLIT_STORAGE,
     onlySaveAfterUserInteractions: true,
   });
 

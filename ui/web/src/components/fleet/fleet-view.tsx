@@ -54,7 +54,7 @@ const LS_MOBILE_TAB = "ava.fleet.mobileTab";
 const PANEL_GRAPH = "panel-graph";
 const PANEL_QUEUE = "panel-queue";
 const FLEET_SPLIT_LAYOUT_ID = "ava.fleet.split";
-const FLEET_SPLIT_STORAGE = panelLayoutStorage([PANEL_GRAPH, PANEL_QUEUE]);
+const FLEET_SPLIT_STORAGE = panelLayoutStorage();
 // The desktop left-panel view (Graph vs Task Graph) and the collapsed-queue
 // choice ARE durable preferences — DB-backed (display.fleet_left_view /
 // display.fleet_queue_collapsed) so they follow the user across frontends.

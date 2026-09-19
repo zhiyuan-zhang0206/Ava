@@ -4,7 +4,7 @@
 // anchor, and the Control-only sections (Config, Guide, …) are absent. Section
 // bodies are mocked to lightweight stubs so this covers only the shell wiring
 // (each body has its own test file), and keeps the heavy deps (api) out.
-// The Metrics section was retired 2026-08-04 (route now redirects to Grafana).
+// The Metrics section was retired 2026-08-04 (replaced by the Grafana link on Ops).
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
@@ -29,16 +29,11 @@ import InsightsPage from "./page";
 
 afterEach(cleanup);
 
-let scrolledIds: string[];
-
 beforeEach(() => {
   vi.restoreAllMocks();
   window.location.hash = "";
   // happy-dom doesn't implement scrollIntoView; the nav + hash effect call it.
-  scrolledIds = [];
-  Element.prototype.scrollIntoView = vi.fn(function (this: Element) {
-    scrolledIds.push(this.id);
-  });
+  Element.prototype.scrollIntoView = vi.fn();
 });
 
 function wrap(ui: React.ReactElement) {
@@ -123,14 +118,5 @@ describe("InsightsPage shell", () => {
     fireEvent.click(within(nav).getByRole("button", { name: "Metrics (Grafana)" }));
     expect(spy).toHaveBeenCalled();
     expect(window.location.hash).toBe("#ops-metrics");
-  });
-
-  it.each([
-    ["resources", "status"],
-    ["gateway-daemons", "status-gateway"],
-  ])("forwards retired Status %s deep links to %s", (anchorSuffix, targetId) => {
-    window.location.hash = `#status-${anchorSuffix}`;
-    wrap(<InsightsPage />);
-    expect(scrolledIds).toContain(targetId);
   });
 });
