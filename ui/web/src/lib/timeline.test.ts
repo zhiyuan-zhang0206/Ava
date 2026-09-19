@@ -1167,17 +1167,12 @@ describe("insertSorted unparseable-id reinforcement", () => {
   });
 });
 
-describe("isExecStartMarker / removeExecStartMarkers reinforcement", () => {
-  // L176/L177: isEphemeralMarker(it) && it.kind === "system_marker" && it.payload === "exec_start"
-  // mutant 1: kind check → true → any ephemeral with
-  //           payload="exec_start" is treated as exec_start.
-  // mutant 2: && → || → any ephemeral is dropped.
-  // mutant 3: payload check → true → any ephemeral system_marker is dropped.
-  // Use mergeSnapshotWithStreaming to exercise the isExecStartMarker filter path.
-  it("every ephemeral marker survives the merge (error/cancelled/old exec_start all visible)", () => {
-    // The merge's exec_start special-case was removed with the incremental
-    // redesign (no producer creates exec_start markers anymore); the
-    // generic keep rule preserves every marker.
+describe("ephemeral marker merge reinforcement", () => {
+  // No path special-cases exec_start markers anymore (the incremental
+  // redesign removed their producer); the generic keep rule preserves every
+  // ephemeral marker regardless of payload.
+  it("every ephemeral marker survives the merge (error/cancelled/exec_start all visible)", () => {
+    // The generic keep rule preserves every marker — no payload is special.
     const err = item({
       item_id: "_marker.err",
       kind: "system_marker",
@@ -1219,11 +1214,8 @@ describe("isExecStartMarker / removeExecStartMarkers reinforcement", () => {
     expect(result[0]).toBe(fake);
   });
 
-  // L176 LogicalOperator: && → ||
-  // Pin: ephemeral with non-exec_start payload must not be dropped.
-  // (Existing tests already cover this, but add one going through
-  // exec_output → removeExecStartMarkers.)
-  it("exec_output triggers removeExecStartMarkers; non-exec_start ephemeral markers must remain", () => {
+  // Pin: exec_output's upsert must not drop other ephemeral markers.
+  it("exec_output upserts by id; other ephemeral markers must remain", () => {
     const errorMarker: BackendTimelineItem = {
       item_id: "_marker.err",
       kind: "system_marker",

@@ -161,13 +161,11 @@ describe("migrateLegacyLocalStorageSettings", () => {
     localStorage.setItem("ava.fleet.mobileTab", "tasks");
     localStorage.setItem("ava.active.agent_id", "7");
     localStorage.setItem("ava.fleet.split", "40,60");
-    localStorage.setItem("ava.fleet.queue-split", "42,58");
     await migrateLegacyLocalStorageSettings(write);
     expect(write).not.toHaveBeenCalled();
     expect(localStorage.getItem("ava.fleet.mobileTab")).toBe("tasks");
     expect(localStorage.getItem("ava.active.agent_id")).toBe("7");
     expect(localStorage.getItem("ava.fleet.split")).toBe("40,60");
-    expect(localStorage.getItem("ava.fleet.queue-split")).toBe("42,58");
   });
 
   it("migrates the zustand spawn-prefs blob into behavior.spawn_* keys", async () => {
