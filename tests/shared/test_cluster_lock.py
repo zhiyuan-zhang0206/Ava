@@ -376,6 +376,34 @@ def test_update_lock_refusal_detail_names_the_live_holder(db_conn: psycopg.Conne
     assert "auto-expires" in detail
 
 
+def test_update_lock_refusal_detail_leads_with_the_live_holder_when_pending_coexists(
+    db_conn: psycopg.Connection, loguru_records: list[dict[str, Any]]
+) -> None:
+    """A rollout that already opened its journal is normally still running.
+
+    The live holder leads — a wait; `recover-pending` would refuse on that live
+    process anyway — and the durable pending publication is the follow-up hint
+    for the case that rollout never completes, never the headline.
+    """
+    _seed_pending_rollout(db_conn, _pending_operation(), expired=False)
+
+    assert acquire_update_lock("next-rollout") is False
+    detail = update_lock_refusal_detail()
+    assert "gateway:pid123" in detail
+    assert "recover-pending" in detail
+    assert detail.index("gateway:pid123") < detail.index("recover-pending")
+
+    refusals = [
+        r["message"]
+        for r in loguru_records
+        if "[cluster-lock] acquire by next-rollout REFUSED" in r["message"]
+    ]
+    assert len(refusals) == 1
+    assert "a live holder exists" in refusals[0]
+    assert "recover-pending" in refusals[0]
+    assert refusals[0].index("a live holder exists") < refusals[0].index("recover-pending")
+
+
 def test_update_lock_refusal_detail_reports_a_free_row_as_a_lost_race(
     db_conn: psycopg.Connection,
 ) -> None:
