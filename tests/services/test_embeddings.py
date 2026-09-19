@@ -614,6 +614,21 @@ def test_embed_malformed_response_raises(monkeypatch: pytest.MonkeyPatch) -> Non
 # ── factory switch ────────────────────────────────────────────────────────
 
 
+def test_worst_case_single_attempt_has_no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dataclasses import replace
+    from unittest.mock import Mock
+
+    from services.memory_indexer.embeddings import gemini
+    from shared.config import settings
+
+    backoff = Mock(side_effect=AssertionError("one attempt must not evaluate backoff"))
+    monkeypatch.setattr(
+        gemini, "_EMBED_POLICY", replace(gemini._EMBED_POLICY, max_attempts=1, backoff=backoff)
+    )
+    assert gemini.worst_case_batch_seconds() == settings.services.memory_embed_timeout_seconds
+    backoff.assert_not_called()
+
+
 def test_factory_default_is_gemini() -> None:
     """The unset switch yields the Gemini provider — behavior unchanged."""
     from shared.config import settings

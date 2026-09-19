@@ -36,8 +36,11 @@ from services.memory_indexer.backends.milvus import (
     MilvusBackend,
     _schema_current,
 )
+from services.memory_indexer.embeddings import factory, gemini
 from services.memory_indexer.embeddings.base import EmbeddingAPIError
+from shared.config import settings
 from shared.daemon_health import Liveness
+from shared.resilience import _MAX_RETRY_AFTER_RESPECT_S
 
 _DIM = 8
 _FP = "test:gemini:dim=8"
@@ -324,7 +327,12 @@ def test_process_paths_embeds_new_files(
     f2.write_text("content B")
 
     provider = _FakeProvider()
-    daemon._process_paths(_backend(milvus_client), {f1.resolve(), f2.resolve()}, provider)
+    daemon._process_paths(
+        _backend(milvus_client),
+        {f1.resolve(), f2.resolve()},
+        provider,
+        Liveness(daemon._liveness_timeout_s()),
+    )
     assert provider.embed_batch_count == 1
     meta = _backend(milvus_client).all_meta()
     assert str(f1.resolve()) in meta
@@ -340,10 +348,14 @@ def test_process_paths_skips_unchanged_hash(
     f.write_text("content")
 
     provider = _FakeProvider()
-    daemon._process_paths(_backend(milvus_client), {f.resolve()}, provider)
+    daemon._process_paths(
+        _backend(milvus_client), {f.resolve()}, provider, Liveness(daemon._liveness_timeout_s())
+    )
     assert provider.embed_batch_count == 1
 
-    daemon._process_paths(_backend(milvus_client), {f.resolve()}, provider)
+    daemon._process_paths(
+        _backend(milvus_client), {f.resolve()}, provider, Liveness(daemon._liveness_timeout_s())
+    )
     assert provider.embed_batch_count == 1  # hash unchanged, no re-embed
 
 
@@ -359,7 +371,9 @@ def test_process_paths_reembeds_on_provider_fingerprint_change(
     f.write_text("content")
 
     first = _FakeProvider()
-    daemon._process_paths(_backend(milvus_client), {f.resolve()}, first)
+    daemon._process_paths(
+        _backend(milvus_client), {f.resolve()}, first, Liveness(daemon._liveness_timeout_s())
+    )
     assert first.embed_batch_count == 1
 
     # Simulate the switch: same content, same mtime, new provider fingerprint —
@@ -370,7 +384,9 @@ def test_process_paths_reembeds_on_provider_fingerprint_change(
         fingerprint="another-provider:dim=8",
         client=milvus_client,  # pyright: ignore[reportUnknownArgumentType]
     )
-    daemon._process_paths(switched_backend, {f.resolve()}, switched)
+    daemon._process_paths(
+        switched_backend, {f.resolve()}, switched, Liveness(daemon._liveness_timeout_s())
+    )
     assert switched.embed_batch_count == 1  # re-embedded despite unchanged hash
     meta = switched_backend.all_meta()
     assert meta[str(f.resolve())][2] == "another-provider:dim=8"
@@ -382,7 +398,12 @@ def test_process_paths_deletes_missing_files(tmp_path: Path, milvus_client) -> N
         tmp_path / "ghost_nonexistent.md"
     )  # under tmp_path, definitely does not exist (never written)
     _backend(milvus_client).upsert(ghost, 1.0, "h", _vec(0), kind="body", chunk_idx=0)
-    daemon._process_paths(_backend(milvus_client), {Path(ghost)}, _FakeProvider())
+    daemon._process_paths(
+        _backend(milvus_client),
+        {Path(ghost)},
+        _FakeProvider(),
+        Liveness(daemon._liveness_timeout_s()),
+    )
     assert _backend(milvus_client).all_meta() == {}
 
 
@@ -444,7 +465,9 @@ def test_process_paths_deletes_foreign_paths_even_when_file_exists(
     foreign.write_text("content")
 
     _backend(milvus_client).upsert(str(foreign), 1.0, "h", _vec(0), kind="body", chunk_idx=0)
-    daemon._process_paths(_backend(milvus_client), {foreign}, _FakeProvider())
+    daemon._process_paths(
+        _backend(milvus_client), {foreign}, _FakeProvider(), Liveness(daemon._liveness_timeout_s())
+    )
     assert _backend(milvus_client).all_meta() == {}
 
 
@@ -469,7 +492,7 @@ def test_cold_start_reconcile_prunes_foreign_rows(
     backend.upsert(str(watched.resolve()), 1.0, "h", _vec(0), kind="body", chunk_idx=0)
     backend.upsert(str(foreign.resolve()), 1.0, "h", _vec(0), kind="body", chunk_idx=0)
 
-    daemon._reconcile(backend, _FakeProvider(), Liveness(daemon._LIVENESS_TIMEOUT_S))
+    daemon._reconcile(backend, _FakeProvider(), Liveness(daemon._liveness_timeout_s()))
     meta = _backend(milvus_client).all_meta()
     assert str(foreign.resolve()) not in meta
     assert str(watched.resolve()) in meta
@@ -501,11 +524,86 @@ def test_cold_start_reconcile_reembeds_on_provider_switch(
         fingerprint="other:provider",
         client=milvus_client,  # pyright: ignore[reportUnknownArgumentType]
     )
-    daemon._reconcile(switched_backend, switched, Liveness(daemon._LIVENESS_TIMEOUT_S))
+    daemon._reconcile(switched_backend, switched, Liveness(daemon._liveness_timeout_s()))
     # The row was re-embedded with the new fingerprint.
     meta = switched_backend.all_meta()
     assert str(watched.resolve()) in meta
     assert meta[str(watched.resolve())][2] == "other:provider"
+
+
+async def test_process_paths_beats_per_embed_batch(tmp_path: Path, milvus_client) -> None:
+    """Several slow batches must stay alive throughout the real file-processing path."""
+    paths: set[Path] = set()
+    for i in range(4 * daemon._BATCH_SIZE):
+        note = tmp_path / f"note-{i:03d}.md"
+        note.write_text(f"content {i}", encoding="utf-8")
+        paths.add(note.resolve())
+
+    class SlowProvider(_FakeProvider):
+        def embed_batch(self, texts: list[str]) -> np.ndarray:
+            time.sleep(0.15)
+            return super().embed_batch(texts)
+
+    backend = _backend(milvus_client)
+    provider = SlowProvider()
+    liveness = Liveness(0.4)
+    started = time.monotonic()
+    task = asyncio.create_task(
+        asyncio.to_thread(daemon._process_paths, backend, paths, provider, liveness)
+    )
+    samples: list[bool] = []
+    while not task.done():
+        samples.append(liveness.is_alive())
+        await asyncio.sleep(0.01)
+    await task
+    samples.append(liveness.is_alive())
+
+    assert time.monotonic() - started > 0.4
+    assert provider.embed_batch_count == 4
+    assert len(samples) > 4
+    assert all(samples), "liveness went stale within _process_paths"
+    assert set(backend.all_meta()) == {str(path) for path in paths}
+
+
+def test_liveness_timeout_covers_worst_embed_batch(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings.services, "embedding_backend", "gemini")
+    policy = gemini._EMBED_POLICY
+
+    def assert_coverage() -> float:
+        # Recompute from each actual retry sleep independently of the helper.
+        worst_batch = policy.max_attempts * settings.services.memory_embed_timeout_seconds
+        worst_batch += sum(
+            max(policy.backoff(attempt), _MAX_RETRY_AFTER_RESPECT_S) + 2 * policy.jitter_span
+            for attempt in range(policy.max_attempts - 1)
+        )
+        provider_budget = factory.worst_case_batch_seconds()
+        ceiling = daemon._liveness_timeout_s()
+        assert provider_budget >= worst_batch
+        assert ceiling >= daemon._LIVENESS_TIMEOUT_FLOOR_S
+        assert ceiling >= provider_budget + daemon._LIVENESS_SAFETY_MARGIN_S
+        return ceiling
+
+    original = assert_coverage()
+    monkeypatch.setattr(
+        settings.services,
+        "memory_embed_timeout_seconds",
+        settings.services.memory_embed_timeout_seconds + 300.0,
+    )
+    assert assert_coverage() > max(original, daemon._LIVENESS_TIMEOUT_FLOOR_S)
+
+
+def test_factory_worst_case_registry_complete(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in factory._PROVIDERS:
+        monkeypatch.setattr(settings.services, "embedding_backend", name)
+        assert factory.worst_case_batch_seconds() > 0, name
+
+    unknown = "unknown-provider"
+    monkeypatch.setattr(settings.services, "embedding_backend", unknown)
+    with pytest.raises(ValueError, match="unknown embedding provider") as provider_error:
+        factory.get_provider_named(unknown)
+    with pytest.raises(ValueError) as budget_error:
+        factory.worst_case_batch_seconds()
+    assert str(budget_error.value) == str(provider_error.value)
 
 
 def test_cold_start_reconcile_beats_liveness_across_chunks(
@@ -532,7 +630,9 @@ def test_cold_start_reconcile_beats_liveness_across_chunks(
     chunk_sizes: list[int] = []
     visited: list[str] = []
 
-    def slow_process_paths(backend: Any, paths: set[Path], provider: Any) -> None:
+    def slow_process_paths(
+        backend: Any, paths: set[Path], provider: Any, liveness: Liveness
+    ) -> None:
         chunk_sizes.append(len(paths))
         visited.extend(sorted(p.name for p in paths))
         time.sleep(0.2)
@@ -573,7 +673,9 @@ def test_reconcile_embed_error_truncates_and_returns_false(
 
     calls: list[int] = []
 
-    def failing_process_paths(backend: Any, paths: set[Path], provider: Any) -> None:
+    def failing_process_paths(
+        backend: Any, paths: set[Path], provider: Any, liveness: Liveness
+    ) -> None:
         calls.append(len(paths))
         raise EmbeddingAPIError("embed boom")
 
@@ -737,7 +839,12 @@ def test_process_paths_indexes_desc_and_body_chunks(
         encoding="utf-8",
     )
 
-    daemon._process_paths(_backend(milvus_client), {f.resolve()}, _FakeProvider())
+    daemon._process_paths(
+        _backend(milvus_client),
+        {f.resolve()},
+        _FakeProvider(),
+        Liveness(daemon._liveness_timeout_s()),
+    )
     assert str(f.resolve()) in _backend(milvus_client).all_meta()
     rows = milvus_client.query(  # pyright: ignore[reportUnknownMemberType]
         collection_name=_COLLECTION,
@@ -775,11 +882,15 @@ def test_process_paths_removes_stale_tail_when_file_shrinks(
     f = tmp_path / "long.md"
     f.write_text(_long_note(12), encoding="utf-8")
     backend = _backend(milvus_client)
-    daemon._process_paths(backend, {f.resolve()}, _FakeProvider())
+    daemon._process_paths(
+        backend, {f.resolve()}, _FakeProvider(), Liveness(daemon._liveness_timeout_s())
+    )
     assert _indexed_rows(milvus_client, f) == {("desc", 0), ("body", 0), ("body", 1), ("body", 2)}
 
     f.write_text(_long_note(3), encoding="utf-8")
-    daemon._process_paths(backend, {f.resolve()}, _FakeProvider())
+    daemon._process_paths(
+        backend, {f.resolve()}, _FakeProvider(), Liveness(daemon._liveness_timeout_s())
+    )
     assert _indexed_rows(milvus_client, f) == {("desc", 0), ("body", 0)}
     assert backend.all_meta()[str(f.resolve())][1] == content_hash(f.read_text())
 
@@ -793,11 +904,15 @@ def test_process_paths_removes_desc_row_when_description_deleted(
     f = tmp_path / "note.md"
     f.write_text("---\ndescription: old description\n---\n\nbody text", encoding="utf-8")
     backend = _backend(milvus_client)
-    daemon._process_paths(backend, {f.resolve()}, _FakeProvider())
+    daemon._process_paths(
+        backend, {f.resolve()}, _FakeProvider(), Liveness(daemon._liveness_timeout_s())
+    )
     assert _indexed_rows(milvus_client, f) == {("desc", 0), ("body", 0)}
 
     f.write_text("body text", encoding="utf-8")
-    daemon._process_paths(backend, {f.resolve()}, _FakeProvider())
+    daemon._process_paths(
+        backend, {f.resolve()}, _FakeProvider(), Liveness(daemon._liveness_timeout_s())
+    )
     assert _indexed_rows(milvus_client, f) == {("body", 0)}
     assert backend.all_meta()[str(f.resolve())][1] == content_hash(f.read_text())
 
@@ -811,11 +926,15 @@ def test_process_paths_removes_all_rows_when_file_becomes_empty(
     f = tmp_path / "note.md"
     f.write_text("---\ndescription: old description\n---\n\nbody text", encoding="utf-8")
     backend = _backend(milvus_client)
-    daemon._process_paths(backend, {f.resolve()}, _FakeProvider())
+    daemon._process_paths(
+        backend, {f.resolve()}, _FakeProvider(), Liveness(daemon._liveness_timeout_s())
+    )
     assert _indexed_rows(milvus_client, f) == {("desc", 0), ("body", 0)}
 
     f.write_text("", encoding="utf-8")
-    daemon._process_paths(backend, {f.resolve()}, _FakeProvider())
+    daemon._process_paths(
+        backend, {f.resolve()}, _FakeProvider(), Liveness(daemon._liveness_timeout_s())
+    )
     assert _indexed_rows(milvus_client, f) == set()
     assert backend.all_meta() == {}
 
@@ -841,7 +960,12 @@ def test_process_paths_calls_upsert_many_once_across_embed_batches(
     monkeypatch.setattr(daemon, "_BATCH_SIZE", 2)
     backend = _RecordingBackend()
 
-    daemon._process_paths(backend, {first.resolve(), second.resolve()}, _FakeProvider())
+    daemon._process_paths(
+        backend,
+        {first.resolve(), second.resolve()},
+        _FakeProvider(),
+        Liveness(daemon._liveness_timeout_s()),
+    )
 
     assert len(backend.calls) == 1
     assert len(backend.calls[0]) == 3
@@ -876,13 +1000,20 @@ def test_partial_embedding_failure_keeps_old_rows_intact(
     note.write_text("---\ndescription: description\n---\nbody", encoding="utf-8")
     monkeypatch.setattr(daemon, "_BATCH_SIZE", 1)
     backend = _RecordingBackend()
-    daemon._process_paths(backend, {note.resolve()}, _FakeProvider())
+    daemon._process_paths(
+        backend, {note.resolve()}, _FakeProvider(), Liveness(daemon._liveness_timeout_s())
+    )
     old_meta = backend.all_meta()
 
     note.write_text("---\ndescription: new description\n---\nnew body", encoding="utf-8")
     backend.calls.clear()
     with pytest.raises(EmbeddingAPIError, match="second batch failed"):
-        daemon._process_paths(backend, {note.resolve()}, _FailSecondBatchProvider())
+        daemon._process_paths(
+            backend,
+            {note.resolve()},
+            _FailSecondBatchProvider(),
+            Liveness(daemon._liveness_timeout_s()),
+        )
 
     # Nothing was written for the partially-embedded file; the old rows stand.
     assert backend.calls == []
@@ -912,7 +1043,10 @@ def test_complete_file_still_commits_when_another_fails(
 
     with pytest.raises(EmbeddingAPIError, match="third batch failed"):
         daemon._process_paths(
-            backend, {complete.resolve(), partial.resolve()}, _FailOnSecondFileProvider()
+            backend,
+            {complete.resolve(), partial.resolve()},
+            _FailOnSecondFileProvider(),
+            Liveness(daemon._liveness_timeout_s()),
         )
 
     meta = backend.all_meta()
@@ -1105,6 +1239,25 @@ async def test_reconcile_retry_beats_between_failed_pass_and_batch(
         task.cancel()
         with suppress(asyncio.CancelledError):
             await task
+
+
+async def test_run_unknown_provider_fails_before_health_server(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from unittest.mock import AsyncMock
+
+    health = AsyncMock()
+    monkeypatch.setattr(daemon, "_is_running", lambda: False)
+    monkeypatch.setattr(daemon, "_write_pidfile", lambda: None)
+    monkeypatch.setattr(daemon, "start_health_server", health)
+    monkeypatch.setattr(settings.services, "embedding_backend", "unknown-provider")
+
+    with pytest.raises(SystemExit) as exc:
+        await daemon.run()
+
+    assert exc.value.code == 1
+    assert "FATAL: unknown embedding provider 'unknown-provider'" in capsys.readouterr().err
+    health.assert_not_awaited()
 
 
 async def test_run_arms_retry_when_startup_reconcile_incomplete(

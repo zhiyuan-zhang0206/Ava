@@ -70,6 +70,7 @@ from services.memory_indexer.backends.base import (
 )
 from services.memory_indexer.backends.factory import get_backend
 from services.memory_indexer.backends.probe import probe_backend
+from services.memory_indexer.embeddings import factory
 from services.memory_indexer.embeddings.base import EmbeddingAPIError, EmbeddingProvider
 from services.memory_indexer.embeddings.factory import get_provider
 from shared.config import settings
@@ -85,18 +86,17 @@ _log = logging.getLogger("services.memory_indexer.daemon")
 _MEMORY_ROOT = gateway_memory_dir()
 _PIDFILE = settings.services.memory_indexer_pidfile
 _LOOP_INTERVAL_S = 1.0
-# Liveness staleness ceiling — generous because one iteration may embed a
-# whole batch via a network round-trip; beating before and after the embed
-# tolerates a slow-but-legit batch while a true wedge flips /healthz 503.
-_LIVENESS_TIMEOUT_S = 180.0
-# Startup and follow-up reconcile work their dirty set in file-granular chunks of this
-# size, beating liveness before and after each chunk. A rebuild can last minutes —
-# the startup pass runs before the drain loop starts its own beats, and a follow-up
-# pass occupies the loop while it runs. Without per-chunk beats a stretch longer
-# than _LIVENESS_TIMEOUT_S read as 'loop: stale', and the watchdog restarted the
-# daemon mid-rebuild: the rebuild restarted from zero every ~3 min, never
-# converging (2026-09-19 incident). 64 files per chunk keeps one beat-to-beat
-# stretch far below the liveness ceiling; the chunking overhead is negligible.
+# Derive the ceiling from one provider batch's full retry budget: a single
+# legitimate call can exceed 180s, and several shorter calls can compound.
+# _process_paths beats per embed batch so only one call occupies each gap.
+# A false kill costs a rebuild; later true-wedge detection costs staleness
+# only, since search keeps reading the existing index.
+_LIVENESS_TIMEOUT_FLOOR_S = 180.0  # Historic ceiling; preserve other loop branches' slack.
+# Covers executor scheduling, post-batch _commit_files, and loop resumption.
+_LIVENESS_SAFETY_MARGIN_S = 30.0
+# Startup and follow-up reconciles beat before and after file-granular chunks:
+# a full rebuild can outlive the liveness ceiling. Chunks bound preparation and
+# commit work; _process_paths also beats per network batch within each chunk.
 _RECONCILE_CHUNK_PATHS = 64
 # How often the daemon fast-forwards the gateway checkout to origin/main —
 # the refresh safety net (see module docstring). An hour bounds index
@@ -115,6 +115,13 @@ _CHUNK_MAX_CHARS = 1800
 _CHUNK_OVERLAP_CHARS = 200
 
 _MD_SUFFIX = ".md"
+
+
+def _liveness_timeout_s() -> float:
+    return max(
+        _LIVENESS_TIMEOUT_FLOOR_S,
+        factory.worst_case_batch_seconds() + _LIVENESS_SAFETY_MARGIN_S,
+    )
 
 
 class _MarkdownEventHandler(FileSystemEventHandler):
@@ -281,7 +288,7 @@ def _file_rows(content: str) -> list[tuple[str, int, str]]:
 
 
 def _process_paths(
-    backend: MemorySearchBackend, paths: set[Path], provider: EmbeddingProvider
+    backend: MemorySearchBackend, paths: set[Path], provider: EmbeddingProvider, liveness: Liveness
 ) -> None:
     """Process a batch of dirty paths: missing/foreign -> delete; else embed+upsert.
 
@@ -315,6 +322,7 @@ def _process_paths(
     loop is not blocked from serving the health probe (`/healthz`).
     Backends must be cross-thread safe (the milvus gRPC client is).
     """
+    liveness.beat()
     root = _MEMORY_ROOT.resolve()
     to_delete: list[Path] = []
     to_embed: list[tuple[Path, float, str, str]] = []  # (path, mtime, hash, content)
@@ -365,6 +373,9 @@ def _process_paths(
         for i in range(0, len(flat_rows), _BATCH_SIZE):
             batch = flat_rows[i : i + _BATCH_SIZE]
             texts = [text for *_, text in batch]
+            # Align beats with the network-bound unit: one batch per gap.
+            # The ceiling margin covers the successful/failed commit tail and return.
+            liveness.beat()
             vectors = provider.embed_batch(texts)
             for (path, mtime, hash_, kind, chunk_idx, _), vector in zip(
                 batch, vectors, strict=True
@@ -497,14 +508,10 @@ def _reconcile(
     re-embedded.
 
     The dirty set is worked in file-granular chunks (`_RECONCILE_CHUNK_PATHS`),
-    beating `liveness` before and after each chunk: cold-start reconcile runs before
-    the drain loop starts its own beats, and a full rebuild outlives the
-    liveness ceiling — an un-beaten rebuild read as a stalled loop, so the
-    watchdog killed the daemon mid-rebuild and it restarted from zero
-    (2026-09-19 incident). A chunk boundary never splits a file —
-    `_process_paths` commits a file's rows as one unit (issue #1946). An
-    `EmbeddingAPIError` keeps the pre-chunking semantics: logged, the
-    remaining chunks skipped.
+    beating `liveness` before and after each chunk. `_process_paths` also beats
+    before each embed batch so a long rebuild stays alive. Chunk boundaries
+    never split a file; its rows commit as one unit (issue #1946). An
+    `EmbeddingAPIError` is logged and the remaining chunks are skipped.
     """
     disk = _scan_disk(_MEMORY_ROOT)
     indexed = backend.all_meta()
@@ -538,7 +545,7 @@ def _reconcile(
             for i in range(0, len(ordered), _RECONCILE_CHUNK_PATHS):
                 chunk = set(ordered[i : i + _RECONCILE_CHUNK_PATHS])
                 liveness.beat()  # per chunk: a rebuild outlives the liveness ceiling
-                _process_paths(backend, chunk, provider)
+                _process_paths(backend, chunk, provider, liveness)
                 liveness.beat()  # chunk committed -> the rebuild is progressing
         except EmbeddingAPIError as exc:
             _log.error(
@@ -629,7 +636,7 @@ async def _drain_loop(
         if not batch:
             continue
         try:
-            await asyncio.to_thread(_process_paths, backend, batch, provider)
+            await asyncio.to_thread(_process_paths, backend, batch, provider, liveness)
             liveness.beat()  # embed batch returned -> loop is making progress
         except EmbeddingAPIError as exc:
             # Name the blast radius: which/how many paths lost this round.
@@ -704,7 +711,16 @@ async def run() -> None:
     _write_pidfile()
     _log.info("[indexer] pidfile written: %s", _PIDFILE)
 
-    liveness = Liveness(_LIVENESS_TIMEOUT_S)
+    # Fail fast before deriving liveness or binding healthz: an unknown
+    # AVA_EMBEDDING_BACKEND must produce the clean configuration FATAL.
+    try:
+        provider = get_provider()
+    except ValueError as exc:
+        _log.critical("[indexer] embedding provider config invalid: %s", exc)
+        sys.stderr.write(f"[memory_indexer] FATAL: {exc}\n")
+        sys.exit(1)
+
+    liveness = Liveness(_liveness_timeout_s())
     retry = _ReconcileRetrySchedule(
         base_s=settings.services.memory_indexer_reconcile_retry_backoff_seconds,
         cap_s=settings.services.memory_indexer_reconcile_retry_backoff_cap_seconds,
@@ -715,15 +731,6 @@ async def run() -> None:
     _log.info("[indexer] healthz listening on :%s", health_port("memory_indexer"))
 
     _MEMORY_ROOT.mkdir(parents=True, exist_ok=True)
-    # Fail fast on an unknown embedding provider BEFORE anything else — an
-    # unrecognized AVA_EMBEDDING_BACKEND must not keep the old provider
-    # while the operator believes the switch happened.
-    try:
-        provider = get_provider()
-    except ValueError as exc:
-        _log.critical("[indexer] embedding provider config invalid: %s", exc)
-        sys.stderr.write(f"[memory_indexer] FATAL: {exc}\n")
-        sys.exit(1)
     # Preflight the selected backend BEFORE the retry loop: a backend that can
     # never work (fatal) fails fast with the actionable fix instead of a 30s
     # retry storm; a merely-unreachable one rides into the retry loop with its

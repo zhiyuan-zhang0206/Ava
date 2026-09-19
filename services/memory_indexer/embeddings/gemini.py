@@ -42,7 +42,14 @@ import numpy as np
 
 from services.memory_indexer.embeddings.base import EmbeddingAPIError
 from shared.config import settings
-from shared.resilience import ExponentialBackoff, Policy, aretry, http_classifier, retry
+from shared.resilience import (
+    _MAX_RETRY_AFTER_RESPECT_S,
+    ExponentialBackoff,
+    Policy,
+    aretry,
+    http_classifier,
+    retry,
+)
 
 _MODEL_ID = "gemini-embedding-2"
 DIM = 3072
@@ -56,9 +63,9 @@ _ENDPOINT = (
     f"https://generativelanguage.googleapis.com/v1beta/models/{_MODEL_ID}:batchEmbedContents"
 )
 # Per-request ceiling is configurable (AVA_EMBED_TIMEOUT_SECONDS, task #698
-# G8): a 32-file batch is one round-trip and the daemon's liveness timeout
-# (180s) sits well above the default 60s, so a slow-but-legit batch does not
-# trip the healthcheck. The retry policies are module constants (R2-D) —
+# G8). The daemon derives its liveness ceiling from the full document-batch
+# retry budget below, including Retry-After and jitter, so legitimate retries
+# do not trip the healthcheck. The retry policies are module constants (R2-D) —
 # two of them, split by call site, see `_EMBED_POLICY` / `_QUERY_EMBED_POLICY`.
 
 
@@ -88,6 +95,22 @@ _QUERY_EMBED_POLICY = Policy(
     backoff=ExponentialBackoff(base=1.0, factor=2.0, cap=2.0),
     classify=http_classifier,
 )
+
+
+def worst_case_batch_seconds() -> float:
+    """Upper bound on one embed_batch call under _EMBED_POLICY.
+
+    Each attempt uses the configured request timeout. Inter-attempt sleeps
+    allow the greater of the last backoff and the shared Retry-After cap,
+    plus both jitter terms (per-process phase and random span).
+    """
+    attempts = _EMBED_POLICY.max_attempts
+    request_seconds = attempts * settings.services.memory_embed_timeout_seconds
+    if attempts < 2:
+        return request_seconds
+    last_backoff = _EMBED_POLICY.backoff(attempts - 2)
+    per_sleep = max(_MAX_RETRY_AFTER_RESPECT_S, last_backoff) + 2 * _EMBED_POLICY.jitter_span
+    return request_seconds + (attempts - 1) * per_sleep
 
 
 def _api_key() -> str:
