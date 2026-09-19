@@ -159,8 +159,10 @@ def mark_reaped_and_notify_if_owner_still_terminated(
     delivers on the agent's next resurrect through any channel, without
     resurrecting it (a reclamation notice never resurrects — the wake
     publish reaches no listener of a terminated agent, and the pending row
-    is claimed when the agent comes back). Returns the watcher's name when
-    the row was marked, None otherwise.
+    is claimed when the agent comes back). The notice attributes the reap to
+    the owner's termination: this path reclaims regardless of the watcher's
+    deadline and checks no expiry (task #4051). Returns the watcher's name
+    when the row was marked, None otherwise.
     """
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
@@ -186,8 +188,8 @@ def mark_reaped_and_notify_if_owner_still_terminated(
             agent_id,
             (
                 f"Watcher schedule {name!r} (agent {agent_id}) was reclaimed "
-                "after its TTL expired. Re-register it with ava.watcher.cron() "
-                "if it is still needed."
+                "because its owner agent was terminated. Re-register it with "
+                "ava.watcher.cron() if it is still needed."
             ),
             source="system",
             provenance=InboundProvenance(source_verified_by=None, source_transport="ops"),

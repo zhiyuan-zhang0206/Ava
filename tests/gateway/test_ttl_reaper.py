@@ -1196,8 +1196,9 @@ async def test_reap_terminated_owner_watcher_absent_marks_reaped(
     assert _watcher_status(db_conn, aid, 32) == "reaped"
     # The absent verdict is definitive too — the #2060 notice rides on it.
     assert _system_inbounds(db_conn, aid) == [
-        f"Watcher schedule 'daily' (agent {aid}) was reclaimed after its TTL "
-        "expired. Re-register it with ava.watcher.cron() if it is still needed."
+        f"Watcher schedule 'daily' (agent {aid}) was reclaimed because its "
+        "owner agent was terminated. Re-register it with ava.watcher.cron() "
+        "if it is still needed."
     ]
 
 
@@ -1213,7 +1214,9 @@ async def test_reap_terminated_owner_watcher_queues_reclamation_notice(
     the same transaction. The owner is terminated at mark time, so the notice
     is inserted as a pending inbound WITHOUT waking it (a reclamation notice
     never resurrects); it delivers on the agent's next resurrect through any
-    channel and tells it to re-register."""
+    channel and tells it to re-register. The text attributes the reap to the
+    owner's termination — the real cause; this path checks no expiry and must
+    not claim one (task #4051)."""
     aid = _terminated_agent(db_conn, source=source)
     _watcher_row(db_conn, aid, 35)
 
@@ -1228,8 +1231,9 @@ async def test_reap_terminated_owner_watcher_queues_reclamation_notice(
     assert reaped == [(aid, 35)]
     assert _watcher_status(db_conn, aid, 35) == "reaped"
     assert _system_inbounds(db_conn, aid) == [
-        f"Watcher schedule 'daily' (agent {aid}) was reclaimed after its TTL "
-        "expired. Re-register it with ava.watcher.cron() if it is still needed."
+        f"Watcher schedule 'daily' (agent {aid}) was reclaimed because its "
+        "owner agent was terminated. Re-register it with ava.watcher.cron() "
+        "if it is still needed."
     ]
     with db_conn.cursor() as cur:
         cur.execute("SELECT status FROM agents_meta WHERE id = %s", (aid,))
