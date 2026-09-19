@@ -114,9 +114,55 @@ async def test_profile_through_auth_gate_and_real_hosted_claim(
     assert "[system]" not in content and not content.startswith("[")
 
 
-@pytest.mark.parametrize(
-    "invalid", ["legacy", "missing_owner", "missing_generation", "expired", "terminated"]
-)
+# One mutation per refusal condition, plus precedence combinations that pin the
+# deterministic order: the first unmet condition is named and the later ones
+# must not leak into the message. Mutations apply to an admitted, protocol-1 row.
+_MUTATIONS: dict[str, LiteralString] = {
+    "legacy": "runtime_protocol_version = 0",
+    "missing_kind": "runtime_kind = NULL",
+    "missing_owner": "runtime_owner = NULL",
+    "missing_generation": "runtime_generation = NULL",
+    "missing_both": "runtime_generation = NULL, runtime_owner = NULL",
+    "no_lease": "lease_expires_at = NULL",
+    "expired": "lease_expires_at = clock_timestamp() - interval '1 second'",
+    "terminated": "status = 'terminated'",
+    "restarting": "status = 'restarting'",
+    "terminated_before_legacy": "status = 'terminated', runtime_protocol_version = 0",
+    "owner_before_legacy": "runtime_owner = NULL, runtime_protocol_version = 0",
+    "legacy_before_expired_lease": (
+        "runtime_protocol_version = 0, lease_expires_at = clock_timestamp() - interval '1 second'"
+    ),
+}
+
+# The condition phrase carrying its current value, and the requirement phrase,
+# each refusal must contain; _SUPPRESSED pins the lower-priority condition that
+# must not appear at all once an earlier condition has already failed.
+_EXPECTED_REFUSAL: dict[str, tuple[str, str]] = {
+    "legacy": ("runtime_protocol_version is 0", "has not activated protocol v1"),
+    "missing_kind": ("runtime_kind is NULL", "requires process or hosted"),
+    "missing_owner": ("runtime_owner is NULL", "records both"),
+    "missing_generation": ("runtime_generation is NULL", "records both"),
+    "missing_both": ("runtime_generation is NULL and runtime_owner is NULL", "records both"),
+    "no_lease": ("lease_expires_at is NULL", "no lease"),
+    "expired": ("lease_expires_at is", "expired; must be in the future"),
+    "terminated": ("status is 'terminated'", "requires running or idling"),
+    "restarting": ("status is 'restarting'", "requires running or idling"),
+    "terminated_before_legacy": ("status is 'terminated'", "requires running or idling"),
+    "owner_before_legacy": ("runtime_owner is NULL", "records both"),
+    "legacy_before_expired_lease": (
+        "runtime_protocol_version is 0",
+        "has not activated protocol v1",
+    ),
+}
+
+_SUPPRESSED: dict[str, str] = {
+    "terminated_before_legacy": "runtime_protocol_version",
+    "owner_before_legacy": "runtime_protocol_version",
+    "legacy_before_expired_lease": "lease_expires_at",
+}
+
+
+@pytest.mark.parametrize("invalid", list(_MUTATIONS))
 async def test_unready_target_rejects_before_insert(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -125,17 +171,10 @@ async def test_unready_target_rejects_before_insert(
     incarnation = await _admit(db_conn, aops_pool)
     if invalid != "legacy":
         _after_proven_old_writer_barrier(db_conn, incarnation)
-    mutations: dict[str, LiteralString] = {
-        "legacy": "runtime_protocol_version = 0",
-        "missing_owner": "runtime_owner = NULL",
-        "missing_generation": "runtime_generation = NULL",
-        "expired": "lease_expires_at = clock_timestamp() - interval '1 second'",
-        "terminated": "status = 'terminated'",
-    }
     from psycopg import sql
 
     db_conn.execute(
-        sql.SQL("UPDATE agents_meta SET {} WHERE id = %s").format(sql.SQL(mutations[invalid])),
+        sql.SQL("UPDATE agents_meta SET {} WHERE id = %s").format(sql.SQL(_MUTATIONS[invalid])),
         (incarnation.agent_id,),
     )
     db_conn.commit()
@@ -146,9 +185,33 @@ async def test_unready_target_rejects_before_insert(
         )
     assert response.status_code == 422, response.text
     assert "target runtime protocol" in response.text
+    assert "do not substitute user/system/agent" in response.text
+    named, requirement = _EXPECTED_REFUSAL[invalid]
+    assert named in response.text, response.text
+    assert requirement in response.text, response.text
+    if invalid in _SUPPRESSED:
+        assert _SUPPRESSED[invalid] not in response.text, response.text
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id = %s", (incarnation.agent_id,)
     ).fetchone() == (0,)
+
+
+def test_unknown_target_refusal_names_the_missing_row(db_conn: psycopg.Connection) -> None:
+    """No row to lock: the direct gate refusal names that, not a later condition.
+
+    The HTTP route answers 404 before the gate for a missing agent, so this
+    exercises the gate contract directly.
+    """
+    from shared.caller_protocol import CallerProtocolUnavailableError, require_caller_protocol
+
+    row = db_conn.execute("SELECT COALESCE(max(id), 0) + 1000 FROM agents").fetchone()
+    assert row is not None
+    missing_id = row[0]
+    with db_conn.transaction(), pytest.raises(CallerProtocolUnavailableError) as refusal:
+        require_caller_protocol(db_conn, missing_id, _SOURCE)
+    message = str(refusal.value)
+    assert "no agents_meta row" in message
+    assert "do not substitute user/system/agent" in message
 
 
 async def test_gate_holds_owner_lock_until_transaction_ends(

@@ -13,7 +13,11 @@ tags:
 owner, kind and fresh lease in the same transaction as the chat inbound INSERT.
 Protocol version must be at least 1 and status must be running or idling.
 Unknown, expired, terminated and legacy targets fail before INSERT with an
-actionable error; there is no source downgrade or installed-commit shortcut.
+error naming the single unmet condition (fixed order: missing row, lifecycle
+status, runtime kind, generation/owner, protocol activation, then lease), its
+current value and the repair step; the diagnosis re-reads the target row in
+the same transaction under the lock the gate already holds and runs only on
+the refusal path. There is no source downgrade or installed-commit shortcut.
 The check applies to direct chat persistence as well as HTTP delivery.
 
 MCP `send_message` accepts opt-in `caller_protocol='v1'`. The format declaration
