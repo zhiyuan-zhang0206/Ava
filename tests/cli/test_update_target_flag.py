@@ -211,20 +211,30 @@ def test_cluster_parser_directly_registers_target_flags() -> None:
 
 
 def test_parse_gate_refuses_target_combined_with_whole_cluster_flags(
-    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    from cli import commands as _commands
     from cli.main import _build_parser
 
+    def fail_if_called(**_kwargs: object) -> int:
+        raise AssertionError("cmd_update must not run: the refusal is the parse-layer gate")
+
+    monkeypatch.setattr(_commands, "cmd_update", fail_if_called)
     args = _build_parser().parse_args(["cluster", "update", "--target", "macmini", "--force"])
     assert args.func(args) == 2
     assert "cannot be combined" in capsys.readouterr().err
 
 
 def test_parse_gate_refuses_target_sha_without_target(
-    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    from cli import commands as _commands
     from cli.main import _build_parser
 
+    def fail_if_called(**_kwargs: object) -> int:
+        raise AssertionError("cmd_update must not run: the refusal is the parse-layer gate")
+
+    monkeypatch.setattr(_commands, "cmd_update", fail_if_called)
     full_sha = "abc123" + "0" * 34
     args = _build_parser().parse_args(["cluster", "update", "--target-sha", full_sha])
     assert args.func(args) == 2
