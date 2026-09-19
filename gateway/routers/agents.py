@@ -226,33 +226,36 @@ _FORK_SKILL_KEYS = ("skills_to_inject_into_system_prompt", "skills_to_expand_at_
 def _normalize_and_resolve_preset(
     pool: ConnectionPool, body: SpawnAgentRequest
 ) -> tuple[str | None, list[str] | None]:
-    """Resolve `config_overlay.preset` (or the legacy top-level `body.preset`)
-    into the effective overlay, returning the preset name.
+    """Resolve `config_overlay.preset` into the effective overlay, returning the
+    preset name.
 
     The preset's stored config is the base; the explicit `body.config` fields
     win per-key (explicit beats template). The resolved map is written back to
-    `body.config` WITHOUT the preset key and `body.preset` is cleared, so the
-    forwarded spawn carries only a plain config — the runner never sees the
-    preset. The name is returned separately: it is stored on the agent row
-    (`agents_meta.preset_name`) purely for display, next to the resolved
-    overlay.
+    `body.config` WITHOUT the preset key, so the forwarded spawn carries only a
+    plain config — the runner never sees the preset. The name is returned
+    separately: it is stored on the agent row (`agents_meta.preset_name`) purely
+    for display, next to the resolved overlay.
 
-    400 when both the legacy field and the overlay key are given (ambiguous),
-    when the overlay key is not a non-empty string, or when the named preset
+    The former top-level `body.preset` field is retired (task #4086): a non-null
+    value is refused with a 400 pointing at the overlay key, while a null — the
+    field default, which a client rolling through the compatibility window may
+    still send explicitly — is tolerated as unset so such a client keeps
+    spawning.
+
+    400 when the overlay key is not a non-empty string, or when the named preset
     does not exist (a spawn referencing a missing preset is a caller error,
     surfaced up front rather than silently ignored).
     """
-    explicit = body.config or {}
-    overlay_preset = explicit.get(_PRESET_KEY)
-    if body.preset is not None and overlay_preset is not None:
+    if body.preset is not None:
         raise HTTPException(
             status_code=400,
             detail=(
-                "preset given twice — as the top-level field and as "
-                "config_overlay.preset; pass only one"
+                "the top-level preset field is retired — pass the preset as "
+                'config_overlay={"preset": "<name>"}'
             ),
         )
-    preset_name = body.preset if body.preset is not None else overlay_preset
+    explicit = body.config or {}
+    preset_name = explicit.get(_PRESET_KEY)
     if preset_name is None:
         return None, None
     if not isinstance(preset_name, str) or not preset_name.strip():
@@ -268,7 +271,6 @@ def _normalize_and_resolve_preset(
     preset_config: dict[str, object] = row[0]
     explicit_fields = {k: v for k, v in explicit.items() if k != _PRESET_KEY}
     body.config = {**preset_config, **explicit_fields}
-    body.preset = None
     return preset_name, None
 
 

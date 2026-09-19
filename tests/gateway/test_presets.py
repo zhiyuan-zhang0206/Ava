@@ -167,47 +167,21 @@ class TestSpawnWithPreset:
         overlay, _ = self._row(db_conn, agent_id)
         return overlay
 
-    def test_preset_seeds_config_and_explicit_wins(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
-            _create(
-                client,
-                name="coder",
-                label="Coder",
-                config={
-                    "llm_model": "claude-sonnet-5",
-                    "skills_to_inject_into_system_prompt": ["a"],
-                },
-            )
-            r = client.post(
-                "/api/agents",
-                json={
-                    "spawner": "user",
-                    "preset": "coder",
-                    "config": {"llm_model": "deepseek-v4-pro"},
-                },
-            )
-            assert r.status_code == 201, r.text
-            agent_id = r.json()["id"]
-        # preset supplies skills_to_inject; the explicit llm_model overrides the
-        # preset's per-key.
-        assert self._overlay(db_conn, agent_id) == {  # pyright: ignore[reportUnknownMemberType]
-            "llm_model": "deepseek-v4-pro",
-            "skills_to_inject_into_system_prompt": ["a"],
-        }
-
-    def test_preset_only_seeds_full_config(self, db_conn: psycopg.Connection) -> None:
+    def test_top_level_preset_retired_400(self, db_conn: psycopg.Connection) -> None:
+        """The former top-level preset field is refused with a pointer at the
+        overlay key (task #4086) — it no longer seeds config."""
         with TestClient(app) as client:
             _create(client, name="coder", label="Coder", config={"llm_model": "claude-sonnet-5"})
             r = client.post("/api/agents", json={"spawner": "user", "preset": "coder"})
-            assert r.status_code == 201, r.text
-            agent_id = r.json()["id"]
-        assert self._overlay(db_conn, agent_id) == {"llm_model": "claude-sonnet-5"}  # pyright: ignore[reportUnknownMemberType]
-
-    def test_unknown_preset_400(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
-            r = client.post("/api/agents", json={"spawner": "user", "preset": "ghost"})
         assert r.status_code == 400
-        assert "ghost" in r.json()["detail"]
+        assert "config_overlay" in r.json()["detail"]
+
+    def test_top_level_preset_null_tolerated(self, db_conn: psycopg.Connection) -> None:
+        """A null top-level preset (what a client rolling through the
+        compatibility window may still send) is tolerated as unset."""
+        with TestClient(app) as client:
+            r = client.post("/api/agents", json={"spawner": "user", "preset": None})
+        assert r.status_code == 201, r.text
 
     def test_unknown_preset_in_config_400(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:
@@ -258,15 +232,6 @@ class TestSpawnWithPreset:
         overlay, preset_name = self._row(db_conn, agent_id)
         assert preset_name == "coder"
         assert overlay == {"llm_model": "claude-sonnet-5"}  # pyright: ignore[reportUnknownMemberType]
-
-    def test_preset_given_twice_400(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
-            r = client.post(
-                "/api/agents",
-                json={"spawner": "user", "preset": "coder", "config": {"preset": "coder"}},
-            )
-        assert r.status_code == 400
-        assert "twice" in r.json()["detail"]
 
     def test_preset_key_must_be_nonempty_string(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:
