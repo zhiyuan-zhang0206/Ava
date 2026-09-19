@@ -3,15 +3,11 @@
 // the left nav jumps to an anchor, and the observability sections (Status +
 // Metrics) are NOT here — they moved to /insights. Section bodies are mocked to
 // lightweight stubs so this test covers only the shell wiring (each body has its
-// own test file); that also keeps the heavy per-section deps (router, api) out.
+// own test file); that also keeps the heavy per-section deps (api) out.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-// Control's hash effect forwards migrated anchors to /insights via router.replace.
-const { replaceSpy } = vi.hoisted(() => ({ replaceSpy: vi.fn() }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: replaceSpy }) }));
 
 vi.mock("@/app/control/guide/page", () => ({ default: () => <div>GUIDE_BODY</div> }));
 vi.mock("@/app/control/config/page", () => ({ default: () => <div>CONFIG_BODY</div> }));
@@ -38,7 +34,6 @@ afterEach(cleanup);
 
 beforeEach(() => {
   vi.restoreAllMocks();
-  replaceSpy.mockClear();
   window.location.hash = "";
   // happy-dom doesn't implement scrollIntoView; the nav + hash effect call it.
   Element.prototype.scrollIntoView = vi.fn();
@@ -123,36 +118,5 @@ describe("ControlPage shell", () => {
     for (const label of ["Status", "Ops", "Metrics"]) {
       expect(within(nav).queryByRole("button", { name: label })).toBeNull();
     }
-  });
-});
-
-describe("ControlPage deep-link forwarding", () => {
-  // Status + retired Metrics anchors moved to /insights; their old /control#… deep
-  // links redirect there so a bookmark still lands on the right section.
-  it.each(["#status", "#ops"])(
-    "forwards a migrated %s deep link to /insights",
-    (hash) => {
-      window.location.hash = hash;
-      wrap(<ControlPage />);
-      expect(replaceSpy).toHaveBeenCalledWith(`/insights${hash}`);
-    },
-  );
-
-  // The Metrics page was retired 2026-08-04 (replaced by Grafana): its old
-  // /control#metrics / #metrics-* deep links now land on the Ops section,
-  // which embeds the dashboard that replaced them.
-  it.each(["#metrics", "#metrics-per-agents", "#metrics-sdk-usage"])(
-    "forwards a retired %s Metrics deep link to /insights#ops",
-    (hash) => {
-      window.location.hash = hash;
-      wrap(<ControlPage />);
-      expect(replaceSpy).toHaveBeenCalledWith("/insights#ops");
-    },
-  );
-
-  it("does NOT forward a Control-owned anchor (#config stays put)", () => {
-    window.location.hash = "#config";
-    wrap(<ControlPage />);
-    expect(replaceSpy).not.toHaveBeenCalled();
   });
 });

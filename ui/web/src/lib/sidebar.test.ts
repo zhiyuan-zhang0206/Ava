@@ -1,9 +1,7 @@
 // Sidebar preference hooks are DB-backed now (display.sidebar_*), so these tests
 // drive them against the reactive user-settings mock and assert the read-side
 // mapping: defaults, validation of stored values (sort shape,
-// stats-window whitelist), and that a setter writes the right key. The legacy
-// localStorage → DB migration is centralized and covered in
-// settings-migration.test.ts.
+// stats-window whitelist), and that a setter writes the right key.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
