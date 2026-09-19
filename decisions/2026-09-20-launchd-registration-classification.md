@@ -59,6 +59,12 @@ An explicit classification channel, declared in the registration's own
 - The receipt grows one field (`excluded_registrations`); both revalidation
   paths and the receipt digest bind it, so a classification change between
   prepare and bootstrap refuses like any other fact drift.
+- The shared consumer model (`PreparationReceipt`) carries the exclusions as a
+  required member - no default. Every receipt a reader legitimately consumes
+  is written by that same revision (prepare runs from the verified installed
+  image, and the hop revalidates against its own collector's bytes), so a
+  receipt without the field is not this revision's receipt and refuses rather
+  than passing as silently empty.
 - A wrongly declared `machine` scope hides a registration from launcher
   coverage - deliberately explicit and recorded, not silent; the declaration
   sits in the same trust class as `AVA_HOME` ownership.

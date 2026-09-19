@@ -34,7 +34,9 @@ the unit's launcher is recorded in the receipt as an excluded entry (label,
 definition digest, classification) and never enters the launcher set; the
 loaded-label check counts it. Any other registration (no declaration, another
 home, a foreign or malformed helper socket, conflicting declarations, or an
-unknown scope value) refuses the whole inventory.
+unknown scope value) refuses the whole inventory. The shared
+`PreparationReceipt` consumer model carries the recorded exclusions as a
+required member; a receipt that omits the field refuses.
 
 The existing `ExpectedUnitWriters` model carries exact process/session/job
 identities. The full secret-free prepare receipt also carries the complete

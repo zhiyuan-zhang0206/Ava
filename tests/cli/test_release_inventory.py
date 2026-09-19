@@ -9,12 +9,19 @@ unknown ownership keeps refusing the whole inventory.
 from __future__ import annotations
 
 import hashlib
+import json
 import plistlib
 from pathlib import Path
 
 import pytest
 
 from cli.commands import _release_inventory as inventory
+from shared.managed_writer_observation import (
+    ExcludedRegistration,
+    ExpectedLauncher,
+    ExpectedUnitWriters,
+)
+from shared.runtime_publication_input import PreparationReceipt, _receipt_expected
 from shared.runtime_release import ReleaseRejectedError
 
 HOME = Path("/unit")
@@ -155,3 +162,41 @@ def test_loaded_job_without_classified_definition_refuses(
     _loaded(monkeypatch, {unit, "com.ava.loaded.ghost"})
     with pytest.raises(ReleaseRejectedError, match="no inventoried definition"):
         inventory._launchd(HOME)
+
+
+def test_prepared_receipt_body_satisfies_the_publication_consumer() -> None:
+    """The sealed body must parse as the shared consumer model (task #4096 pin).
+
+    collect_inventory gained excluded_registrations after PreparationReceipt
+    was written; a producer key without the consumer member rejects the whole
+    receipt (cold-offline caught the drift on CI only). Assembly and
+    consumption stay pinned together here.
+    """
+    expected = ExpectedUnitWriters(
+        machine="proof",
+        home=str(HOME),
+        artifact_digest="a" * 64,
+        manifest_digest="b" * 64,
+        processes=(),
+        sessions=(),
+        launchers=(
+            ExpectedLauncher(
+                kind="launchd", name="com.ava.proof.probe", definition_digest="c" * 64
+            ),
+        ),
+    )
+    excluded = (
+        ExcludedRegistration(
+            label="com.ava.machine.caffeinate",
+            definition_digest="d" * 64,
+            classification="machine",
+        ),
+    )
+    body = inventory._receipt_body(
+        expected, excluded, [{"session": "ava-ops", "requires_db": True, "gate": None}]
+    )
+    encoded = json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
+
+    receipt = PreparationReceipt.model_validate_json(encoded)
+    assert receipt.excluded_registrations == excluded
+    assert _receipt_expected(encoded) == expected

@@ -49,6 +49,19 @@ class ExpectedLauncher(EvidenceModel):
     definition_digest: Digest
 
 
+class ExcludedRegistration(EvidenceModel):
+    """A com.ava.* registration classified as not this unit's writer launcher.
+
+    Recorded in the receipt (label, definition digest, classification) and never
+    silently skipped: either a machine-level registration declaring
+    AVA_JOB_SCOPE=machine, or this home's permissions-helper keeper.
+    """
+
+    label: str = Field(min_length=1, max_length=256)
+    definition_digest: Digest
+    classification: Literal["machine", "keeper"]
+
+
 class ExpectedUnitWriters(EvidenceModel):
     """Prepared unit inventory, not observed closure or an authorization token."""
 

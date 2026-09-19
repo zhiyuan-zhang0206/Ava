@@ -18,10 +18,9 @@ from pathlib import Path, PurePosixPath
 from typing import Literal, cast
 
 import psycopg
-from pydantic import Field
 
-from shared.managed_writer_barrier import Digest, EvidenceModel
 from shared.managed_writer_observation import (
+    ExcludedRegistration,
     ExpectedLauncher,
     ExpectedProcess,
     ExpectedSession,
@@ -64,19 +63,6 @@ def _sessions(home: Path) -> tuple[ExpectedSession, ...]:
     if not result:
         raise ReleaseRejectedError("empty session inventory cannot prove a serving unit")
     return tuple(result)
-
-
-class ExcludedRegistration(EvidenceModel):
-    """A com.ava.* registration classified as not this unit's writer launcher.
-
-    Recorded in the receipt (label, definition digest, classification) and never
-    silently skipped: either a machine-level registration declaring
-    AVA_JOB_SCOPE=machine, or this home's permissions-helper keeper.
-    """
-
-    label: str = Field(min_length=1, max_length=256)
-    definition_digest: Digest
-    classification: Literal["machine", "keeper"]
 
 
 def _registration_role(environment: object, home: Path) -> Literal["unit", "machine", "keeper"]:
@@ -197,6 +183,27 @@ def _service_roster() -> list[dict[str, object]]:
     return sorted(roster, key=lambda row: str(row["session"]))
 
 
+def _receipt_body(
+    expected: ExpectedUnitWriters,
+    excluded: tuple[ExcludedRegistration, ...],
+    roster: list[dict[str, object]],
+) -> dict[str, object]:
+    """Assemble the sealed receipt body; PreparationReceipt is its consumer contract."""
+    return {
+        "version": 1,
+        "expected": expected.model_dump(mode="json"),
+        "services": roster,
+        "excluded_registrations": [entry.model_dump(mode="json") for entry in excluded],
+        "inventory_digest": expected.unit().inventory_digest,
+        "closure": "unknown",
+        "unresolved": [
+            "non-session managed processes and predecessor orchestrator",
+            "system-level or alternate-user relaunchers",
+            "positive platform launcher shutdown observation",
+        ],
+    }
+
+
 def collect_inventory(
     conn: psycopg.Connection,
     release: VerifiedRelease,
@@ -255,19 +262,7 @@ def collect_inventory(
         or roster != _service_roster()
     ):
         raise ReleaseRejectedError("unit inventory changed during preparation")
-    return {
-        "version": 1,
-        "expected": expected.model_dump(mode="json"),
-        "services": roster,
-        "excluded_registrations": [entry.model_dump(mode="json") for entry in excluded],
-        "inventory_digest": expected.unit().inventory_digest,
-        "closure": "unknown",
-        "unresolved": [
-            "non-session managed processes and predecessor orchestrator",
-            "system-level or alternate-user relaunchers",
-            "positive platform launcher shutdown observation",
-        ],
-    }
+    return _receipt_body(expected, excluded, roster)
 
 
 def _write_prepared_inventory(home: Path, inventory: dict[str, object]) -> Path:
