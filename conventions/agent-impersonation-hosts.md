@@ -150,19 +150,32 @@ Monitor cannot start (no fresh heartbeat), acceptance rolls back loudly.
 {
   "command": "AVA_IMPERSONATION_RELAY_TOKEN=<relay token> /path/to/checkout/.venv/bin/ava impersonate relay 42 --session 0 --provider claude",
   "description": "Ava agent 42 inbox",
-  "persistent": true
+  "timeout_ms": 1800000
 }
 ```
 
-Each flushed stdout line becomes a notification to the Monitor's owner. The
-same subprocess stays subscribed between events; no repeated LLM polling or
-shell restart is needed. Normal Bash permissions apply. Monitor is unavailable
+Each flushed stdout line becomes a notification to the Monitor's owner; the
+same subprocess stays subscribed between events, with no repeated LLM polling.
+Every watch carries a deadline (`timeout_ms`; 5 minutes when omitted, capped at
+30 minutes — arm with 1800000). At the deadline the watch **and the relay
+process it runs are killed**, and the session receives one
+`[Monitor expired ... Re-arm it if you still need the watch.]` notice. Re-arm as
+soon as that notice arrives: the fresh arm starts a new relay that replays every
+unacknowledged row (at-least-once is unchanged), while a missed re-arm stops the
+heartbeat and the lease stops (Process death → auto-stop). The legacy
+`persistent` field is ignored; an arm without `timeout_ms` runs under the
+5-minute default. Verified on Claude Code 2.1.275 (task #4037). Normal Bash
+permissions apply. Monitor is unavailable
 with third-party model providers or the telemetry-disabling environment options
 listed in the [official Monitor reference](https://code.claude.com/docs/en/tools-reference#monitor-tool).
 Background subagents retain Monitor in their
 [documented tool set](https://code.claude.com/docs/en/sub-agents#available-tools).
 Stopping the owner or ending the session stops its monitors. An ordinary
 background Bash command does not substitute for Monitor's per-line delivery.
+
+Plugin-declared monitors run for the session lifetime instead of a per-watch
+deadline, but they are an experimental component; evaluate them before relying
+on the mechanism (task #4037).
 
 MCP Channels are another supported push mechanism, but require startup opt-in
 and custom-server preview configuration; this relay uses Monitor directly. See

@@ -49,6 +49,10 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
   a `chrome_page_ttl_expired` / `chrome_page_ttl_renewed` event (task #3035).
 
 ### Changed
+- The Claude Code Monitor relay guidance now reflects per-watch deadlines
+  (Claude Code 2.1.271+): arm with `timeout_ms: 1800000` and re-arm on the
+  expiry notice — at the deadline the watch and the relay process it runs are
+  killed, and a missed re-arm stops the lease (task #4037).
 - A takeover no longer outlives a dead core component, and a dead relay is no
   longer silently respawned (task #3998, user ruling 2026-09-18): the accepting
   runtime re-checks the recorded executor process chain and the bound relay's
