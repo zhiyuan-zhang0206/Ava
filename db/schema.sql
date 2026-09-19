@@ -208,10 +208,11 @@ COMMENT ON COLUMN agents_meta.last_permanent_reject_reason IS
     'the current streak; never backfilled by guess.';
 
 -- ─────────────── agent_activity ───────────────
--- Append-only trail of an agent's self-reported activity. ava.self.log()
--- INSERTs one (agent_id, text, created_at) row per call. The agent snapshot derives
--- the "current" activity line from the latest row per agent; the monitoring / fleet
--- view replays the full ordered trail. Supersedes agents_meta.activity (DEPRECATED, see above).
+-- Append-only trail of an agent's self-reported activity. Historical display
+-- only: the ava.self.log() SDK verb that wrote it was removed 2026-08-02, so
+-- there is no current writer. The agent snapshot derives the "current" activity
+-- line from the latest row per agent; the monitoring / fleet view replays the
+-- full ordered trail.
 CREATE TABLE agent_activity (
     id          BIGSERIAL PRIMARY KEY,
     agent_id    BIGINT NOT NULL REFERENCES agents(id),

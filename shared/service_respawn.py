@@ -88,12 +88,6 @@ def _reset_keepalive_state(label: str) -> None:
         _breaker_hold_since.pop(label, None)
 
 
-def _reset_consecutive_probe_failures(label: str) -> None:
-    """Legacy reset entry point (the tests/services/test_healthcheck_gateway.py
-    fixture); resets the whole per-label keepalive state."""
-    _reset_keepalive_state(label)
-
-
 def _record_consecutive_probe_failure(label: str) -> int:
     with _keepalive_state_lock:
         failures = _consecutive_probe_failures.get(label, 0) + 1
