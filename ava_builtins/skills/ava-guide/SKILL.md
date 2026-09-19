@@ -37,7 +37,9 @@ session. The executor talks to the human through the CLI only:
 `ava impersonate say <session_id> --agent <id> --key <key> 'text'` (`--phase final`
 for the closing message), watches the lease with `ava impersonate status` / `list`,
 consumes and ACKs inbound messages with `ava impersonate inbox` / `ack`, renews with
-`ava impersonate renew`, and ends with `ava impersonate release --summary`. The
+`ava impersonate renew`, messages other agents under the borrowed identity with
+`ava impersonate send <session_id> --agent <id> --to <target> --content 'text'`,
+and ends with `ava impersonate release --summary`. The
 Python attachment (`ava.external.attach`) remains for the executor's other `ava.*`
 capabilities.
 
