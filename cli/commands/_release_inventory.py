@@ -109,7 +109,9 @@ def _launchd(
     Only a registration declaring this exact home is a unit launcher. Machine
     scope and this home's keeper are recorded as explicit receipt exclusions;
     any other declaration refuses. Every loaded com.ava.* label must resolve to
-    a classified definition.
+    a classified definition. A *.plist without a readable label is not a
+    registration: it is skipped unless its filename claims the com.ava.*
+    namespace, which refuses.
     """
     directory = Path.home() / "Library/LaunchAgents"
     if directory.resolve(strict=True) != directory:
@@ -118,10 +120,18 @@ def _launchd(
     excluded: list[ExcludedRegistration] = []
     for path in sorted(directory.glob("*.plist")):
         encoded = _regular_bytes(path)
-        raw = plistlib.loads(encoded)
-        label = raw["Label"]
-        if not isinstance(label, str):
-            raise ReleaseRejectedError("invalid launchd label")
+        parsed: object = plistlib.loads(encoded)
+        raw: dict[str, object] = (
+            cast("dict[str, object]", parsed) if isinstance(parsed, dict) else {}
+        )
+        label = raw.get("Label")
+        if not isinstance(label, str) or not label:
+            # Not a launchd registration: a third-party file stays outside the
+            # com.ava.* namespace, while a com.ava.*-named file still claims
+            # Ava ownership and refuses instead of skipping silently.
+            if path.name.startswith("com.ava."):
+                raise ReleaseRejectedError("Ava launchd registration has no label")
+            continue
         if not label.startswith("com.ava."):
             continue
         if path.name != f"{label}.plist" or read_launchd_definition(label) != encoded:

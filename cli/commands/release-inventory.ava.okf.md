@@ -23,7 +23,9 @@ Native reads reuse `shared.native_job_observation`: launchd enumeration requires
 the current user's proven Aqua domain and two identical label snapshots. Raw
 plist bytes must match the label-addressed native reader before hashing. Cron
 uses the same bounded reader as observation. An unavailable domain is an error,
-never an empty inventory or positive shutdown result.
+never an empty inventory or positive shutdown result. A `*.plist` without a
+readable label (or without a dictionary root) is not a registration: it is
+skipped unless its filename claims the `com.ava.*` namespace, which refuses.
 
 `com.ava.*` launchd registrations are classified from their declared
 environment. This home's `AVA_HOME` declares a unit launcher; `AVA_JOB_SCOPE`
