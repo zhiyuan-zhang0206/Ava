@@ -200,3 +200,33 @@ def test_prepared_receipt_body_satisfies_the_publication_consumer() -> None:
     receipt = PreparationReceipt.model_validate_json(encoded)
     assert receipt.excluded_registrations == excluded
     assert _receipt_expected(encoded) == expected
+
+
+def test_foreign_files_without_a_readable_label_stay_outside_the_namespace(
+    launch_agents: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Third-party plists (e.g. keystone stubs) never break the inventory."""
+    unit = "com.ava.proof.probe"
+    _job(launch_agents, unit, {"AVA_HOME": str(HOME)})
+    _loaded(monkeypatch, {unit})
+    (launch_agents / "com.google.keystone.agent.plist").write_bytes(plistlib.dumps({}))
+    (launch_agents / "com.google.keystone.xpcservice.plist").write_bytes(plistlib.dumps({}))
+    (launch_agents / "com.other.array.plist").write_bytes(plistlib.dumps(["not", "a", "dict"]))
+    (launch_agents / "com.other.text.plist").write_bytes(plistlib.dumps("flat string"))
+
+    launchers, excluded = inventory._launchd(HOME)
+
+    assert [item.name for item in launchers] == [unit]
+    assert excluded == ()
+
+
+def test_ava_named_file_without_a_readable_label_refuses(launch_agents: Path) -> None:
+    """A com.ava.*-named file never skips silently, whatever its shape."""
+    broken = launch_agents / "com.ava.unlabelled.plist"
+    broken.write_bytes(plistlib.dumps({}))
+    with pytest.raises(ReleaseRejectedError, match="has no label"):
+        inventory._launchd(HOME)
+    broken.unlink()
+    (launch_agents / "com.ava.array.plist").write_bytes(plistlib.dumps(["not", "a", "dict"]))
+    with pytest.raises(ReleaseRejectedError, match="has no label"):
+        inventory._launchd(HOME)
