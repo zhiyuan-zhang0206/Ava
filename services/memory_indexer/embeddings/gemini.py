@@ -25,7 +25,7 @@ API key is read from `GEMINI_API_KEY` env — prod injects it via
 `~/.ava/.env`.
 
 No module-level httpx client (sync or async): the sync path is
-tested by patching `httpx.post`, which a pre-built client would bypass; an
+tested by patching `httpx.stream`, which a pre-built client would bypass; an
 `httpx.AsyncClient` is bound to the event loop it is first used on, and
 this module runs inside both the daemon process and the gateway (plus
 per-test loops), so a shared client would cross loops and raise. Per-call
@@ -35,6 +35,9 @@ construction cost is negligible next to a multi-second network call (task
 
 from __future__ import annotations
 
+import asyncio
+import json
+import time
 from typing import Any
 
 import httpx
@@ -100,12 +103,14 @@ _QUERY_EMBED_POLICY = Policy(
 def worst_case_batch_seconds() -> float:
     """Upper bound on one embed_batch call under _EMBED_POLICY.
 
-    Each attempt uses the configured request timeout. Inter-attempt sleeps
+    Each sync attempt enforces the configured deadline between received chunks,
+    allowing one additional read window: at most twice the request timeout.
+    Async attempts enforce the deadline with cancellation. Inter-attempt sleeps
     allow the greater of the last backoff and the shared Retry-After cap,
     plus both jitter terms (per-process phase and random span).
     """
     attempts = _EMBED_POLICY.max_attempts
-    request_seconds = attempts * settings.services.memory_embed_timeout_seconds
+    request_seconds = attempts * 2 * settings.services.memory_embed_timeout_seconds
     if attempts < 2:
         return request_seconds
     last_backoff = _EMBED_POLICY.backoff(attempts - 2)
@@ -198,9 +203,26 @@ def _embed(texts: list[str], task_type: str, *, policy: Policy = _EMBED_POLICY) 
     timeout_s = settings.services.memory_embed_timeout_seconds
 
     def _call() -> dict[str, Any]:
-        response = httpx.post(_ENDPOINT, json=payload, headers=headers, timeout=timeout_s)
-        response.raise_for_status()
-        return response.json()
+        deadline = time.monotonic() + timeout_s
+        with httpx.stream(
+            "POST", _ENDPOINT, json=payload, headers=headers, timeout=timeout_s
+        ) as response:
+            # Reject status without reading an unbounded error body; preserve
+            # request/response so classification and Retry-After still work.
+            if not 200 <= response.status_code < 300:
+                raise httpx.HTTPStatusError(
+                    f"Gemini embed HTTP {response.status_code}",
+                    request=response.request,
+                    response=response,
+                )
+            chunks: list[bytes] = []
+            for chunk in response.iter_bytes():
+                if time.monotonic() > deadline:
+                    raise httpx.ReadTimeout(
+                        f"embed attempt exceeded the total deadline of {timeout_s}s"
+                    )
+                chunks.append(chunk)
+            return json.loads(b"".join(chunks))
 
     try:
         body = retry(policy)(_call)
@@ -238,9 +260,17 @@ async def _embed_async(
         async with client:
 
             async def _call() -> dict[str, Any]:
-                response = await client.post(_ENDPOINT, json=payload, headers=headers)
-                response.raise_for_status()
-                return response.json()
+                try:
+                    async with asyncio.timeout(timeout_s):
+                        response = await client.post(_ENDPOINT, json=payload, headers=headers)
+                        response.raise_for_status()
+                        return response.json()
+                except TimeoutError as exc:
+                    # The shared HTTP classifier retries transport failures,
+                    # not builtin TimeoutError from asyncio's deadline.
+                    raise httpx.ReadTimeout(
+                        f"embed attempt exceeded the total deadline of {timeout_s}s"
+                    ) from exc
 
             body = await aretry(policy)(_call)
     except EmbeddingAPIError:

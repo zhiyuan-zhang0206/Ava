@@ -465,7 +465,12 @@ class _ServiceRuntimeSettings(EnvSettings):
     memory_embed_timeout_seconds: float = Field(
         default=60.0,
         alias="AVA_EMBED_TIMEOUT_SECONDS",
-        description="Per-request timeout (seconds) for one Gemini batchEmbedContents call. A 32-file batch is one round-trip; the memory-indexer daemon's liveness timeout (180s) sits well above it, so a slow-but-legit batch does not trip the healthcheck (task #698 G8).",
+        description=(
+            "HTTP operation timeout and enforced total attempt deadline (seconds) for Gemini "
+            "batchEmbedContents. Sync streaming checks the deadline between chunks, allowing "
+            "one extra read window. The memory-indexer liveness ceiling is derived as "
+            "max(180s, provider batch retry budget + 30s)."
+        ),
         json_schema_extra={
             "restart_required": "gateway",
             "writable": True,

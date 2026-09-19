@@ -11,12 +11,8 @@ After startup:
 
 An incomplete reconcile retries on bounded backoff and never needs a restart.
 
-Backed by the configured memory search backend
-(`AVA_MEMORY_SEARCH_BACKEND`, default `numpy` — the standalone
-milvus-lite server in the `services/milvus/` session, URI
-`AVA_MILVUS_URI` = `http://127.0.0.1:19530`). Switching backends is one
-env var + a restart; the cold-start scan rebuilds the index on the new
-backend.
+Backed by `AVA_MEMORY_SEARCH_BACKEND` (default `numpy`). Switching
+backends takes a restart; the cold-start scan rebuilds the new index.
 
 Each file indexes as 0-or-1 description row (frontmatter `description`,
 embedded on its own so short entity-bearing lines are not diluted by a
@@ -88,15 +84,17 @@ _PIDFILE = settings.services.memory_indexer_pidfile
 _LOOP_INTERVAL_S = 1.0
 # Derive the ceiling from one provider batch's full retry budget: a single
 # legitimate call can exceed 180s, and several shorter calls can compound.
-# _process_paths beats per embed batch so only one call occupies each gap.
+# _process_paths beats before each provider/backend call, including commits
+# and deletes, so calls cannot compound in one gap (default batch budget 846s).
 # A false kill costs a rebuild; later true-wedge detection costs staleness
 # only, since search keeps reading the existing index.
 _LIVENESS_TIMEOUT_FLOOR_S = 180.0  # Historic ceiling; preserve other loop branches' slack.
-# Covers executor scheduling, post-batch _commit_files, and loop resumption.
+# Covers executor scheduling, local processing, and loop resumption. Commit
+# calls beat separately; NumPy's 300s upsert allowance fits the default 876s.
 _LIVENESS_SAFETY_MARGIN_S = 30.0
 # Startup and follow-up reconciles beat before and after file-granular chunks:
 # a full rebuild can outlive the liveness ceiling. Chunks bound preparation and
-# commit work; _process_paths also beats per network batch within each chunk.
+# local work; _process_paths also beats before external calls within each chunk.
 _RECONCILE_CHUNK_PATHS = 64
 # How often the daemon fast-forwards the gateway checkout to origin/main —
 # the refresh safety net (see module docstring). An hour bounds index
@@ -344,6 +342,7 @@ def _process_paths(
         to_embed.append((p, mtime, hash_, content))
 
     for p in to_delete:
+        liveness.beat()
         backend.delete(str(p))
         _log.info("[indexer] deleted %s", p)
 
@@ -373,8 +372,7 @@ def _process_paths(
         for i in range(0, len(flat_rows), _BATCH_SIZE):
             batch = flat_rows[i : i + _BATCH_SIZE]
             texts = [text for *_, text in batch]
-            # Align beats with the network-bound unit: one batch per gap.
-            # The ceiling margin covers the successful/failed commit tail and return.
+            # One external call per gap; commit calls beat separately below.
             liveness.beat()
             vectors = provider.embed_batch(texts)
             for (path, mtime, hash_, kind, chunk_idx, _), vector in zip(
@@ -389,12 +387,12 @@ def _process_paths(
         # Only files whose rows are ALL embedded commit; a partially-embedded
         # file keeps its old rows intact (consistent old state, re-embeds on
         # the next trigger against its still-mismatching hash).
-        committed = _commit_files(backend, upsert_rows, embedded_files, file_rows)
+        committed = _commit_files(backend, upsert_rows, embedded_files, file_rows, liveness)
         for path in committed:
             _log.info("[indexer] indexed %s", path)
         raise
 
-    committed = _commit_files(backend, upsert_rows, embedded_files, file_rows)
+    committed = _commit_files(backend, upsert_rows, embedded_files, file_rows, liveness)
     for path in committed:
         _log.info("[indexer] indexed %s", path)
 
@@ -404,6 +402,7 @@ def _commit_files(
     upsert_rows: list[tuple[str, float, str, np.ndarray, str, int]],
     embedded_files: list[Path],
     file_rows: list[tuple[Path, list[tuple[float, str, str, int, str]]]],
+    liveness: Liveness,
 ) -> list[Path]:
     """Commit the fully-embedded files: delete their obsolete tail rows first,
     then upsert the new rows. Returns the committed paths (input order).
@@ -420,7 +419,9 @@ def _commit_files(
     embedded = set(embedded_files)
     committed_rows = [row for row in upsert_rows if Path(row[0]) in embedded]
     limits_by_file = {path: _kind_limits(rows) for path, rows in file_rows if path in embedded}
+    liveness.beat()
     backend.delete_stale_rows([(str(path), limits_by_file[path]) for path in embedded_files])
+    liveness.beat()
     backend.upsert_many(committed_rows)
     return list(embedded_files)
 

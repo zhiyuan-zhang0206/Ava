@@ -20,16 +20,18 @@ import logging
 import queue
 import subprocess
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import suppress
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
 import pytest
 
 from services.memory_indexer import daemon
-from services.memory_indexer.backends.base import content_hash
+from services.memory_indexer.backends.base import MemorySearchBackend, content_hash
 from services.memory_indexer.backends.milvus import (
     _COLLECTION,
     _EXPECTED_FIELDS,
@@ -38,9 +40,10 @@ from services.memory_indexer.backends.milvus import (
 )
 from services.memory_indexer.embeddings import factory, gemini
 from services.memory_indexer.embeddings.base import EmbeddingAPIError
+from shared import daemon_health
 from shared.config import settings
 from shared.daemon_health import Liveness
-from shared.resilience import _MAX_RETRY_AFTER_RESPECT_S
+from shared.resilience import _MAX_RETRY_AFTER_RESPECT_S, ExponentialBackoff
 
 _DIM = 8
 _FP = "test:gemini:dim=8"
@@ -531,10 +534,74 @@ def test_cold_start_reconcile_reembeds_on_provider_switch(
     assert meta[str(watched.resolve())][2] == "other:provider"
 
 
-async def test_process_paths_beats_per_embed_batch(tmp_path: Path, milvus_client) -> None:
+class _RecordingBackend(MemorySearchBackend):
+    """In-memory writes isolate beat placement from RPC and filesystem latency."""
+
+    name = "recording"
+
+    def __init__(self, spend: Callable[[str], None] = lambda _op: None) -> None:
+        self.rows: dict[tuple[str, str, int], tuple[float, str, str]] = {}
+        self.calls: list[str] = []
+        self.spend = spend
+
+    def connect(self) -> None:
+        raise AssertionError("processing must use the already connected backend")
+
+    def close(self) -> None:
+        raise AssertionError("processing must leave backend lifecycle to its caller")
+
+    def upsert(
+        self,
+        path: str,
+        mtime: float,
+        content_hash: str,
+        embedding: np.ndarray,
+        *,
+        kind: str,
+        chunk_idx: int,
+    ) -> None:
+        self.upsert_many([(path, mtime, content_hash, embedding, kind, chunk_idx)])
+
+    def search_topk(self, query_vector: np.ndarray, k: int) -> list[str]:
+        raise AssertionError("indexing must not search")
+
+    async def search_topk_async(
+        self, query_vector: np.ndarray, k: int, *, timeout: float
+    ) -> list[str]:
+        raise AssertionError("indexing must not search")
+
+    def all_meta(self) -> dict[str, tuple[float, str, str]]:
+        return {path: meta for (path, _, _), meta in self.rows.items()}
+
+    def delete(self, path: str) -> None:
+        self.calls.append("delete")
+        self.spend("delete")
+        self.rows = {key: meta for key, meta in self.rows.items() if key[0] != path}
+
+    def delete_stale_rows(self, entries: Sequence[tuple[str, dict[str, int]]]) -> None:
+        self.calls.append("delete_stale_rows")
+        self.spend("delete_stale_rows")
+        for path, limits in entries:
+            self.rows = {
+                key: meta
+                for key, meta in self.rows.items()
+                if key[0] != path or (key[1] in limits and key[2] < limits[key[1]])
+            }
+
+    def upsert_many(self, rows: Sequence[tuple[str, float, str, np.ndarray, str, int]]) -> None:
+        self.calls.append("upsert_many")
+        self.spend("upsert_many")
+        for path, mtime, hash_, _, kind, idx in rows:
+            self.rows[path, kind, idx] = (mtime, hash_, _FP)
+
+
+async def test_process_paths_beats_per_embed_batch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Several slow batches must stay alive throughout the real file-processing path."""
+    monkeypatch.setattr(daemon, "_BATCH_SIZE", 2)
     paths: set[Path] = set()
-    for i in range(4 * daemon._BATCH_SIZE):
+    for i in range(8 * daemon._BATCH_SIZE):
         note = tmp_path / f"note-{i:03d}.md"
         note.write_text(f"content {i}", encoding="utf-8")
         paths.add(note.resolve())
@@ -544,9 +611,9 @@ async def test_process_paths_beats_per_embed_batch(tmp_path: Path, milvus_client
             time.sleep(0.15)
             return super().embed_batch(texts)
 
-    backend = _backend(milvus_client)
+    backend = _RecordingBackend()
     provider = SlowProvider()
-    liveness = Liveness(0.4)
+    liveness = Liveness(0.6)
     started = time.monotonic()
     task = asyncio.create_task(
         asyncio.to_thread(daemon._process_paths, backend, paths, provider, liveness)
@@ -558,20 +625,84 @@ async def test_process_paths_beats_per_embed_batch(tmp_path: Path, milvus_client
     await task
     samples.append(liveness.is_alive())
 
-    assert time.monotonic() - started > 0.4
-    assert provider.embed_batch_count == 4
+    assert time.monotonic() - started > 0.6
+    assert provider.embed_batch_count == 8
     assert len(samples) > 4
     assert all(samples), "liveness went stale within _process_paths"
     assert set(backend.all_meta()) == {str(path) for path in paths}
 
 
+@pytest.mark.parametrize("fail_last_batch", [False, True])
+def test_process_paths_beats_during_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fail_last_batch: bool
+) -> None:
+    """The final embed, cleanup and upsert cannot share a beat-free interval."""
+    now = 0.0
+    monkeypatch.setattr(daemon_health, "time", SimpleNamespace(monotonic=lambda: now))
+    liveness = Liveness(daemon._liveness_timeout_s())
+    durations = {"delete_stale_rows": 5.0, "upsert_many": 300.0}
+
+    def spend(op: str) -> None:
+        nonlocal now
+        now += durations[op]
+        assert liveness.is_alive(), f"liveness stale during {op}"
+        assert liveness.stale_for() == durations[op], f"previous call compounded with {op}"
+
+    class SlowFinalProvider(_FakeProvider):
+        def embed_batch(self, texts: list[str]) -> np.ndarray:
+            nonlocal now
+            now += factory.worst_case_batch_seconds()
+            assert liveness.is_alive()
+            if fail_last_batch and self.embed_batch_count == 1:
+                raise EmbeddingAPIError("last batch failed")
+            return super().embed_batch(texts)
+
+    monkeypatch.setattr(daemon, "_BATCH_SIZE", 1)
+    paths = {tmp_path / name for name in ("a.md", "b.md")}
+    for path in paths:
+        path.write_text("body")
+    backend = _RecordingBackend(spend)
+    provider = SlowFinalProvider()
+    if fail_last_batch:
+        with pytest.raises(EmbeddingAPIError, match="last batch failed"):
+            daemon._process_paths(backend, paths, provider, liveness)
+        assert set(backend.all_meta()) == {str(tmp_path / "a.md")}
+    else:
+        daemon._process_paths(backend, paths, provider, liveness)
+        assert set(backend.all_meta()) == {str(path) for path in paths}
+    assert backend.calls == ["delete_stale_rows", "upsert_many"]
+
+
+def test_process_paths_beats_per_delete(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A delete-only drain batch may exceed the ceiling while each delete is timely."""
+    now = 0.0
+    monkeypatch.setattr(daemon_health, "time", SimpleNamespace(monotonic=lambda: now))
+    liveness = Liveness(daemon._liveness_timeout_s())
+
+    def spend(op: str) -> None:
+        nonlocal now
+        assert op == "delete"
+        now += 3.0
+        assert liveness.is_alive(), "liveness stale during accumulated deletes"
+
+    backend = _RecordingBackend(spend)
+    paths = {tmp_path / f"deleted-{i}.md" for i in range(400)}
+    backend.rows = {(str(path), "body", 0): (0.0, "old", _FP) for path in paths}
+    provider = _FakeProvider()
+    daemon._process_paths(backend, paths, provider, liveness)
+    assert now > daemon._liveness_timeout_s()
+    assert backend.all_meta() == {}
+    assert backend.calls == ["delete"] * len(paths)
+    assert provider.embed_batch_count == 0
+
+
 def test_liveness_timeout_covers_worst_embed_batch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.services, "embedding_backend", "gemini")
-    policy = gemini._EMBED_POLICY
 
     def assert_coverage() -> float:
-        # Recompute from each actual retry sleep independently of the helper.
-        worst_batch = policy.max_attempts * settings.services.memory_embed_timeout_seconds
+        # Recompute each retry gap; sync deadlines allow one extra read window.
+        policy = gemini._EMBED_POLICY
+        worst_batch = policy.max_attempts * 2 * settings.services.memory_embed_timeout_seconds
         worst_batch += sum(
             max(policy.backoff(attempt), _MAX_RETRY_AFTER_RESPECT_S) + 2 * policy.jitter_span
             for attempt in range(policy.max_attempts - 1)
@@ -584,6 +715,12 @@ def test_liveness_timeout_covers_worst_embed_batch(monkeypatch: pytest.MonkeyPat
         return ceiling
 
     original = assert_coverage()
+    monkeypatch.setattr(
+        gemini,
+        "_EMBED_POLICY",
+        replace(gemini._EMBED_POLICY, backoff=ExponentialBackoff(base=100, factor=2, cap=1000)),
+    )
+    assert_coverage()  # Later backoffs exceed Retry-After: wrong indices now fail.
     monkeypatch.setattr(
         settings.services,
         "memory_embed_timeout_seconds",
