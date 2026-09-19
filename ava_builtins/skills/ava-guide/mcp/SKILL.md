@@ -30,8 +30,11 @@ ava mcp add <name> --json '{"command": "npx", "args": ["-y", "some-mcp-server"]}
 Or build it from flags instead of JSON:
 
 ```bash
-ava mcp add <name> --command npx --arg -y --arg some-mcp-server --env KEY=VALUE
+ava mcp add <name> --command npx --arg=-y --arg some-mcp-server --env KEY=VALUE
 ```
+
+`--arg` takes one value; a value that starts with a dash needs the
+`--arg=<value>` spelling (`--arg -y` reads as a new option).
 
 `add` replaces an existing server of the same name. A newly added server
 connects the next time you call one of its tools — no restart.

@@ -285,6 +285,15 @@ def test_install_env_overrides_package_default(
     assert env["MODE"] == "live" and env["KEEP"] == "yes"
 
 
+def test_install_rejects_bad_env_at_parse_time(capsys: pytest.CaptureFixture[str]) -> None:
+    from cli.parsers import build_parser
+
+    with pytest.raises(SystemExit) as raised:
+        build_parser().parse_args(["mcp", "install", "src", "--env", "NOEQUALS"])
+    assert raised.value.code == 2
+    assert "argument --env:" in capsys.readouterr().err
+
+
 def test_install_rejects_bad_env_pair(
     unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:

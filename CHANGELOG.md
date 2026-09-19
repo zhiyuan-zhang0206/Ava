@@ -53,6 +53,12 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
   a `chrome_page_ttl_expired` / `chrome_page_ttl_renewed` event (task #3035).
 
 ### Changed
+- CLI parameter discipline, batch B3 (task #4092): `mcp add` requires exactly
+  one of `--json` / `--command` and validates both at the parse layer (bad or
+  non-object JSON, a `--env` pair without `=`, and `--arg`/`--env` without
+  `--command` are usage errors), `mcp install --env` validates `KEY=VALUE`,
+  and `ava packages policy` requires at least one field with `--check-every`
+  validated at parse time.
 - `ava impersonate request` / `renew` state their time parameters explicitly
   (task #4102): `request --ttl` and `--batch-window` and `renew --ttl` are
   required — missing values are usage errors before any command runs — the
