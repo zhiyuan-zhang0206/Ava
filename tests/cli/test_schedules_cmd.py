@@ -413,3 +413,38 @@ def test_provision_creates_builtins(
     # Second run: idempotent, nothing created.
     assert _sched.cmd_schedules_provision() == 0
     assert "(all built-in schedules already present)" in capsys.readouterr().out
+
+
+# ── parse-layer gates (task #4092, batch B4) ──
+
+
+def test_create_requires_a_script_source_at_parse_time(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Neither source is refused by the parse layer (previously the command body)."""
+    p = _build_parser()
+    with pytest.raises(SystemExit) as raised:
+        p.parse_args(["schedules", "create", "--name", "n"])
+    assert raised.value.code == 2
+    assert "one of the arguments --script --script-file is required" in capsys.readouterr().err
+
+
+def test_update_requires_at_least_one_field_at_parse_time(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    args = _build_parser().parse_args(["schedules", "update", "7"])
+    assert args.func(args) == 2
+    assert "at least one" in capsys.readouterr().err
+
+
+def test_update_passes_the_parse_gate_with_one_field(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cli.commands import schedules as _schedules
+
+    def fake(_args: object) -> int:
+        return 0
+
+    monkeypatch.setattr(_schedules, "h_schedules_update", fake)
+    args = _build_parser().parse_args(["schedules", "update", "7", "--enable"])
+    assert args.func(args) == 0

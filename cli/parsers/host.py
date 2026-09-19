@@ -233,6 +233,8 @@ def _add_stop_options(parser: argparse.ArgumentParser) -> None:
         metavar="SERVICE",
         help="retain a named service (repeatable); DB-dependent services require --keep-infra",
     )
+    # task #4092 cli-default inventory: bounded graceful drain — "failure never
+    # silently forces" makes the default safe, and ops scripts rely on it.
     parser.add_argument(
         "--timeout",
         type=float,
@@ -269,6 +271,8 @@ def _add_restart_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         action="store_true",
         help="compatibility flag; restart always uses the native drain boundary",
     )
+    # task #4092 cli-default inventory: "smooth" is the safe default — force
+    # must be asked for explicitly.
     restart_p.add_argument(
         "--mode",
         choices=("smooth", "force"),

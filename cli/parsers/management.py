@@ -8,6 +8,19 @@ parser building never loads Settings (see ``cli.main`` module docstring)."""
 from __future__ import annotations
 
 import argparse
+import json
+import sys
+
+
+def _config_overlay_json(value: str) -> str:
+    """Argparse type for `--config`: reject a non-object overlay before any command runs."""
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise argparse.ArgumentTypeError(f"invalid config JSON: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise argparse.ArgumentTypeError("config must be a JSON object")
+    return value
 
 
 def _h_config_audit(args: argparse.Namespace) -> int:
@@ -55,6 +68,18 @@ def _h_presets_create(args: argparse.Namespace) -> int:
 def _h_presets_update(args: argparse.Namespace) -> int:
     from cli.commands.presets import h_presets_update
 
+    if (
+        args.name is None
+        and args.label is None
+        and args.description is None
+        and args.config is None
+    ):
+        print(
+            "ava: pass at least one of --name / --label / --description / --config — "
+            "a partial update needs at least one field",
+            file=sys.stderr,
+        )
+        return 2
     return h_presets_update(args)
 
 
@@ -85,6 +110,21 @@ def _h_schedules_create(args: argparse.Namespace) -> int:
 def _h_schedules_update(args: argparse.Namespace) -> int:
     from cli.commands.schedules import h_schedules_update
 
+    if (
+        args.name is None
+        and args.script is None
+        and args.script_file is None
+        and args.command is None
+        and args.description is None
+        and not args.enable
+        and not args.disable
+    ):
+        print(
+            "ava: pass at least one of --name / --script / --script-file / --command / "
+            "--description / --enable / --disable — a partial update needs at least one field",
+            file=sys.stderr,
+        )
+        return 2
     return h_schedules_update(args)
 
 
@@ -165,6 +205,8 @@ def _add_config_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     unset_p.set_defaults(func=_h_config_unset)
 
     audit_p = config_sub.add_parser("audit", help="print the .env write audit trail (newest first)")
+    # task #4092 cli-default inventory: display bound — the audit view is
+    # recent-first, and a larger value only widens the printed list.
     audit_p.add_argument("--last", type=int, default=20, help="how many records to show (1..200)")
     audit_p.add_argument("--key", default=None, help="only records touching this .env alias")
     audit_p.add_argument(
@@ -201,7 +243,10 @@ def _add_presets_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
     presets_create_p.add_argument("--label", required=True, help="human-readable label")
     presets_create_p.add_argument("--description", default=None, help="what this preset is for")
     presets_create_p.add_argument(
-        "--config", default=None, help='config overlay as JSON (e.g. {"llm_model":"..."})'
+        "--config",
+        type=_config_overlay_json,
+        default=None,
+        help='config overlay as JSON (e.g. {"llm_model":"..."})',
     )
     presets_create_p.set_defaults(func=_h_presets_create)
 
@@ -212,7 +257,12 @@ def _add_presets_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
     presets_update_p.add_argument("--name", default=None, help="new unique name")
     presets_update_p.add_argument("--label", default=None, help="new label")
     presets_update_p.add_argument("--description", default=None, help="new description")
-    presets_update_p.add_argument("--config", default=None, help="new config overlay as JSON")
+    presets_update_p.add_argument(
+        "--config",
+        type=_config_overlay_json,
+        default=None,
+        help="new config overlay as JSON",
+    )
     presets_update_p.set_defaults(func=_h_presets_update)
 
     presets_delete_p = presets_sub.add_parser("delete", help="delete a preset (by name or id)")
@@ -265,7 +315,7 @@ def _add_schedules_parser(sub: argparse._SubParsersAction[argparse.ArgumentParse
 
     schedules_create_p = schedules_sub.add_parser("create", help="create a schedule")
     schedules_create_p.add_argument("--name", required=True, help="unique schedule name")
-    _add_script_args(schedules_create_p)
+    _add_script_args(schedules_create_p, required=True)
     schedules_create_p.add_argument(
         "--command", default=None, help="command that runs the script (default: python schedule.py)"
     )
@@ -314,6 +364,8 @@ def _add_schedules_parser(sub: argparse._SubParsersAction[argparse.ArgumentParse
         "logs", help="recent output (live session scrollback, else the last crash traceback)"
     )
     schedules_logs_p.add_argument("identifier", help="schedule name or numeric id")
+    # task #4092 cli-default inventory: presentation bound — the capture window
+    # for a human reader; larger values only widen the output.
     schedules_logs_p.add_argument(
         "--lines", type=int, default=200, help="how many lines to capture (default 200)"
     )
@@ -321,18 +373,21 @@ def _add_schedules_parser(sub: argparse._SubParsersAction[argparse.ArgumentParse
 
     schedules_runs_p = schedules_sub.add_parser("runs", help="run history, newest first")
     schedules_runs_p.add_argument("identifier", help="schedule name or numeric id")
+    # task #4092 cli-default inventory: presentation bound — the run-history
+    # window; larger values only widen the output.
     schedules_runs_p.add_argument(
         "--limit", type=int, default=50, help="how many rows to show (default 50)"
     )
     schedules_runs_p.set_defaults(func=_h_schedules_runs)
 
 
-def _add_script_args(parser: argparse.ArgumentParser) -> None:
+def _add_script_args(parser: argparse.ArgumentParser, *, required: bool = False) -> None:
     """The --script / --script-file pair, shared by `schedules create` and
     `update`. Mutually exclusive; `--script-file -` reads stdin (the heredoc form).
-    Neither is `required` here — create enforces exactly-one in the command body,
-    update treats both-absent as "leave the script alone"."""
-    group = parser.add_mutually_exclusive_group()
+    `create` passes `required=True` — exactly one supplies the body, a parse-layer
+    gate; `update` leaves the group optional: both-absent means "leave the script
+    alone" and other fields carry the change."""
+    group = parser.add_mutually_exclusive_group(required=required)
     group.add_argument("--script", default=None, help="script body as a literal string")
     group.add_argument(
         "--script-file", default=None, help="read the script body from PATH ('-' = stdin)"

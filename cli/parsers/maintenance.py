@@ -3,6 +3,27 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
+
+
+def _operation_arg(value: str) -> str:
+    """Argparse type for `--operation`: nonempty at the parse layer."""
+    if not value.strip():
+        raise argparse.ArgumentTypeError("operation must be nonempty")
+    return value
+
+
+def _acquired_at_arg(value: str) -> str:
+    """Argparse type for `--acquired-at`: an ISO timestamp with an explicit UTC offset."""
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"not an ISO-8601 timestamp: {exc}") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise argparse.ArgumentTypeError(
+            "needs an explicit UTC offset, e.g. '2026-09-20 03:00:00+08'"
+        )
+    return value
 
 
 def _handle(args: argparse.Namespace) -> int:
@@ -31,12 +52,20 @@ def _add_maintenance_parser(sub: argparse._SubParsersAction[argparse.ArgumentPar
         command.set_defaults(func=_handle)
         if verb != "status":
             command.add_argument(
-                "--operation", required=True, help="same holder on every participating unit"
+                "--operation",
+                required=True,
+                type=_operation_arg,
+                help="same holder on every participating unit",
             )
             command.add_argument(
-                "--acquired-at", required=True, help="same timezone-aware operation timestamp"
+                "--acquired-at",
+                required=True,
+                type=_acquired_at_arg,
+                help="same timezone-aware operation timestamp",
             )
         if verb in ("drain", "stop", "stop-data-plane"):
+            # task #4092 cli-default inventory: total wait — the wait never forces,
+            # and a slow drain raises it per invocation instead of parking forever.
             command.add_argument(
                 "--timeout",
                 type=float,

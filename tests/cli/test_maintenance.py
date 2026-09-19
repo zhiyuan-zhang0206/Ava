@@ -395,3 +395,33 @@ def test_status_without_recorded_shepherd_prints_null_driver(
     assert command.run(args) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["driver"] is None
+
+
+# ── parse-layer gates (task #4092, batch B4) ──
+
+
+def test_operation_and_acquired_at_are_gated_at_parse_time(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from cli.parsers import build_parser
+
+    with pytest.raises(SystemExit) as raised:
+        build_parser().parse_args(
+            ["maintenance", "prepare", "--operation", "op", "--acquired-at", "soon"]
+        )
+    assert raised.value.code == 2
+    assert "argument --acquired-at:" in capsys.readouterr().err
+
+    with pytest.raises(SystemExit) as raised:
+        build_parser().parse_args(
+            ["maintenance", "prepare", "--operation", "op", "--acquired-at", "2026-09-20 03:00:00"]
+        )
+    assert raised.value.code == 2
+    assert "UTC offset" in capsys.readouterr().err
+
+    with pytest.raises(SystemExit) as raised:
+        build_parser().parse_args(
+            ["maintenance", "prepare", "--operation", "  ", "--acquired-at", WHEN.isoformat()]
+        )
+    assert raised.value.code == 2
+    assert "argument --operation:" in capsys.readouterr().err
