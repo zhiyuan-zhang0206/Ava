@@ -440,8 +440,14 @@ describe("context axis (P4-2b)", () => {
     // resets the view to the full axis and clears the char-range trail.
     fireEvent.click(getByRole("button", { name: "1h" }));
     await waitFor(() => expect(getRunTimeline).toHaveBeenCalledTimes(2));
+    // The trail clears at click time (setZoomWindow), but the viewport reset
+    // rides on the second response's data (the window-key effect) — wait for
+    // the target condition itself, not for signals that hold before it lands
+    // (flake #4074: CI read the pre-reset ticks here).
     await waitFor(() => expect(queryByTestId("timeline-crumbs")).toBeNull());
-    expect(tickTexts(container)).toEqual(["0", "200", "400", "600", "800", "1.0k"]);
+    await waitFor(() =>
+      expect(tickTexts(container)).toEqual(["0", "200", "400", "600", "800", "1.0k"]),
+    );
   });
 
   it("falls back to the time axis when the message projection drops out", async () => {
