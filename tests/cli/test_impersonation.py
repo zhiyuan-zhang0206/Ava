@@ -102,6 +102,8 @@ def test_request_uses_external_identity_without_delivering_a_credential(
                 "codex",
                 "--thread-id",
                 "thread-1",
+                "--batch-window",
+                "0",
             )
         )
         == 0
@@ -113,6 +115,7 @@ def test_request_uses_external_identity_without_delivering_a_credential(
     assert seen["provider"] == "codex"
     assert seen["thread_id"] == "thread-1"
     assert seen["codex_remote"] is None
+    assert seen["batch_window_seconds"] == 0
     output = capsys.readouterr()
     assert "token" not in json.loads(output.out)
     assert "starts the codex relay automatically" in output.err
@@ -139,12 +142,16 @@ def test_request_records_the_shared_app_server_endpoint(
                 "405",
                 "--as",
                 "Codex: task1",
+                "--ttl",
+                "600",
                 "--provider",
                 "codex",
                 "--thread-id",
                 "thread-1",
                 "--codex-remote",
                 endpoint,
+                "--batch-window",
+                "0",
             )
         )
         == 0
@@ -171,8 +178,12 @@ def test_claude_request_reports_the_relay_handoff(
                 "405",
                 "--as",
                 "claude:task1",
+                "--ttl",
+                "600",
                 "--provider",
                 "claude",
+                "--batch-window",
+                "0",
             )
         )
         == 0
@@ -187,10 +198,23 @@ def test_request_requires_a_relay_provider(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     # --provider is mandatory at parse time; the codex thread requirement is
-    # enforced by shared.impersonation.request (covered in the shared tests).
+    # enforced at the CLI boundary (`_relay_spec_problem`, covered below).
     with pytest.raises(SystemExit) as raised:
-        _args("request", "--name", "Fix login", "--agent", "405", "--as", "codex")
+        _args(
+            "request",
+            "--name",
+            "Fix login",
+            "--agent",
+            "405",
+            "--as",
+            "codex",
+            "--ttl",
+            "600",
+            "--batch-window",
+            "0",
+        )
     assert raised.value.code == 2
+    assert "--provider" in capsys.readouterr().err
 
 
 def test_relay_token_channels(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -280,6 +304,8 @@ def test_batch_window_zero_disables_merge() -> None:
             "405",
             "--as",
             "codex",
+            "--ttl",
+            "600",
             "--provider",
             "codex",
             "--thread-id",
@@ -290,9 +316,67 @@ def test_batch_window_zero_disables_merge() -> None:
         assert args.relay_batch_window_seconds == int(value)
 
 
-def test_batch_window_defaults_to_zero() -> None:
-    """Merging is opt-in: a request without --batch-window parses to 0."""
-    args = _args(
+def test_request_without_batch_window_is_a_usage_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Explicit-parameter ruling: --batch-window has no default, so even the
+    documented merge-off value (0 — see #2056) must be written out."""
+    with pytest.raises(SystemExit) as raised:
+        _args(
+            "request",
+            "--name",
+            "Fix login",
+            "--agent",
+            "405",
+            "--as",
+            "codex",
+            "--ttl",
+            "600",
+            "--provider",
+            "codex",
+            "--thread-id",
+            "t",
+        )
+    assert raised.value.code == 2
+    assert "--batch-window" in capsys.readouterr().err
+
+
+def test_request_requires_explicit_ttl(capsys: pytest.CaptureFixture[str]) -> None:
+    """Explicit-parameter ruling: the lease lifetime has no default."""
+    with pytest.raises(SystemExit) as raised:
+        _args(
+            "request",
+            "--name",
+            "Fix login",
+            "--agent",
+            "405",
+            "--as",
+            "codex",
+            "--provider",
+            "codex",
+            "--thread-id",
+            "t",
+            "--batch-window",
+            "0",
+        )
+    assert raised.value.code == 2
+    assert "--ttl" in capsys.readouterr().err
+
+
+def test_renew_requires_ttl(capsys: pytest.CaptureFixture[str]) -> None:
+    """Explicit-parameter ruling: renewal states the new lifetime outright —
+    no keep-the-current-length default."""
+    with pytest.raises(SystemExit) as raised:
+        _args("renew", "0", "--agent", "405")
+    assert raised.value.code == 2
+    assert "--ttl" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("option", ["--name", "--as"])
+def test_request_display_fields_must_be_non_empty(
+    option: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    command = [
         "request",
         "--name",
         "Fix login",
@@ -300,12 +384,115 @@ def test_batch_window_defaults_to_zero() -> None:
         "405",
         "--as",
         "codex",
+        "--ttl",
+        "600",
         "--provider",
         "codex",
         "--thread-id",
         "t",
+        "--batch-window",
+        "0",
+    ]
+    command[command.index(option) + 1] = "   "
+    with pytest.raises(SystemExit) as raised:
+        _args(*command)
+    assert raised.value.code == 2
+    assert f"argument {option}:" in capsys.readouterr().err
+
+
+def test_request_relay_spec_is_checked_at_the_cli_boundary(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`_relay_spec_problem` mirrors the shared validator before dispatch."""
+    base = [
+        "request",
+        "--name",
+        "Fix login",
+        "--agent",
+        "405",
+        "--as",
+        "codex",
+        "--ttl",
+        "600",
+        "--batch-window",
+        "0",
+    ]
+    codex_without_thread = _args(*base, "--provider", "codex")
+    assert codex_without_thread.func(codex_without_thread) == 2
+    assert "needs --thread-id" in capsys.readouterr().err
+
+    bad_remote = _args(
+        *base, "--provider", "codex", "--thread-id", "t", "--codex-remote", "http://bad"
     )
-    assert args.relay_batch_window_seconds == 0
+    assert bad_remote.func(bad_remote) == 2
+    assert "unix:// or ws://" in capsys.readouterr().err
+
+    claude_with_thread = _args(*base, "--provider", "claude", "--thread-id", "t")
+    assert claude_with_thread.func(claude_with_thread) == 2
+    assert "routes to its owner" in capsys.readouterr().err
+
+
+def test_relay_spec_is_checked_at_the_cli_boundary(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    codex_without_thread = _args("relay", "405", "--lease-id", "lease", "--provider", "codex")
+    assert codex_without_thread.func(codex_without_thread) == 2
+    assert "needs --thread-id" in capsys.readouterr().err
+
+    claude_with_remote = _args(
+        "relay",
+        "405",
+        "--lease-id",
+        "lease",
+        "--provider",
+        "claude",
+        "--codex-remote",
+        "unix:///tmp/x.sock",
+    )
+    assert claude_with_remote.func(claude_with_remote) == 2
+    assert "routes to its owner" in capsys.readouterr().err
+
+
+# -- impersonate send: the attested CLI form of speaking as the leased agent --
+
+
+def test_send_requires_session_agent_target_and_content() -> None:
+    for command in (
+        ["--agent", "405", "--to", "42", "--content", "hi"],  # no session id
+        ["0", "--to", "42", "--content", "hi"],  # no --agent
+        ["0", "--agent", "405", "--content", "hi"],  # no --to
+        ["0", "--agent", "405", "--to", "42"],  # no --content
+    ):
+        with pytest.raises(SystemExit) as raised:
+            _args("send", *command)
+        assert raised.value.code == 2
+
+
+def test_send_delivers_as_the_borrowed_agent(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen: list[tuple[int, str, str]] = []
+
+    def deliver(agent_id: int, content: str, *, source: str) -> str:
+        seen.append((agent_id, content, source))
+        return "enqueued"
+
+    def require_active(lease: str, caller: dict[str, Any]) -> dict[str, Any]:
+        assert lease == "lease"
+        assert caller["pid"] > 0
+        return {"agent_id": 405}
+
+    monkeypatch.setattr(sessions, "private_id", _private_id)
+    monkeypatch.setattr(control, "require_active", require_active)
+    monkeypatch.setattr("cli.commands.agents.send_agent_message", deliver)
+    args = _args("send", "0", "--agent", "405", "--to", "42", "--content", "hi")
+    assert args.func(args) == 0
+    assert seen == [(42, "hi", "agent:405")]
+    assert json.loads(capsys.readouterr().out) == {
+        "status": "enqueued",
+        "to": 42,
+        "source": "agent:405",
+    }
 
 
 @pytest.mark.parametrize("remote", [None, "unix:///tmp/ava-codex.sock"])
@@ -411,6 +598,8 @@ def test_numeric_options_reject_out_of_bounds_values_during_parsing(
                 "codex",
                 "--thread-id",
                 "t",
+                "--batch-window",
+                "0",
             ],
             "--ttl",
             ["1", "86400"],

@@ -16,9 +16,14 @@ Use the executable and interpreter belonging to the intended checkout; bare
 
 ```bash
 ava impersonate request --agent 405 --name 'Fix login' --as 'Codex: login helper' \
-  --provider codex --thread-id CODEX_SESSION_UUID --ttl 3600 \
+  --provider codex --thread-id CODEX_SESSION_UUID --ttl 3600 --batch-window 0 \
   --reason 'Implement the login fix and return verification results'
 ```
+
+The time parameters are explicit, never defaulted: `--ttl` is the lease's
+recovery deadline (see above) and `--batch-window` the relay's merge window
+(0..300 seconds; 0 delivers routine arrivals immediately) — a missing value is
+a usage error before anything runs.
 
 `--name` describes this session; `--as` is a free executor display name. The CLI
 also records observed process names, IDs, executable and parent chain, separately
@@ -65,7 +70,7 @@ with ava.external.attach(0, agent_id=405):
     ava.agents.send_message(406, "Please review the login change")
 ```
 
-User-visible replies never go through the attachment — send them with the CLI (`ava impersonate say`, see *Talk to the human*).
+User-visible replies never go through the attachment — send them with the CLI (`ava impersonate say`, see *Talk to the human*; peer messages have their own CLI form, see *Message another agent as the borrowed identity*).
 
 An attachment binds the borrowed identity and saved configuration. SDK calls,
 plugin state accesses and flush validate the active lease. Plugin changes are
@@ -75,6 +80,20 @@ Concurrent attachments fail on conflicting state versions. External deltas canno
 clear all message history. `ava.self.restart`, `terminate` and `compact` remain
 native-loop operations; include such needs in the release summary. Durable
 `ava.agents.restart` / `terminate` requests still reach the paused dispatcher.
+
+## Message another agent as the borrowed identity
+
+Sending to another Ava agent as the played identity has a CLI form that runs
+from the controller session's own process tree, like every control command:
+
+```bash
+ava impersonate send 0 --agent 405 --to 406 --content 'Please review the login change'
+```
+
+The delivered source is `agent:405` — the borrowed identity, the same source the
+attachment stamps for `ava.agents.send_message` above. `--content -` reads the
+message from stdin. Sending under an identity that is not one's own is exactly
+what the lease attests — there is no declared form (task #4102).
 
 ## Talk to the human
 

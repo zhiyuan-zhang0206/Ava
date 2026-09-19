@@ -4,6 +4,15 @@ import shlex
 import sys
 from pathlib import Path
 
+# The generated request command spells out both former defaults because the CLI
+# takes neither as an implicit default (user ruling 2026-09-20, task #4102).
+# --ttl: the lease's recovery deadline — one hour was the request's effective
+# value before the ruling; the executor extends it deliberately from renewal
+# reminders, never on a timer (impersonator guide). --batch-window 0: deliver
+# immediately — no coalescing of routine arrivals, the former effective value.
+_TAKEOVER_TTL_SECONDS = 3600
+_TAKEOVER_BATCH_WINDOW_SECONDS = 0
+
 
 def bootstrap_message(
     agent_id: int,
@@ -31,6 +40,10 @@ def bootstrap_message(
             f"{provider.title()}: {name}",
             "--provider",
             provider,
+            "--ttl",
+            str(_TAKEOVER_TTL_SECONDS),
+            "--batch-window",
+            str(_TAKEOVER_BATCH_WINDOW_SECONDS),
             "--reason",
             "Take over the launching Ava agent. The briefing is in the launch message.",
         ]

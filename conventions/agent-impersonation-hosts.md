@@ -222,9 +222,9 @@ the stale window plus one scan interval (≈75 s).
   pushed again after five minutes, marked as re-delivery, until the host ACKs
   it or the lease ends. Rows already pending at activation push immediately
   (they waited through preparation); fresh routine arrivals coalesce inside the
-  lease's configured merge window when one is set (0..300 seconds; default 0
-  pushes immediately), while user chats, cancels and renewal reminders never
-  wait. New messages arriving under an
+  lease's configured merge window, stated explicitly at request time
+  (0..300 seconds; 0 pushes immediately), while user chats, cancels and renewal
+  reminders never wait. New messages arriving under an
   outstanding batch push as their own batch.
 - Pushes are debounced (default 0.5 seconds, maximum 30) and emitted at most
   once every two seconds. Terminal control notices are immediate. Every relay
