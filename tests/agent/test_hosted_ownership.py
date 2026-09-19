@@ -368,7 +368,7 @@ async def test_current_publication_advertises_v1_and_idle_retains_it(
         expected_from="idling",
         publication=_CurrentRuntimeAdmission(None),
     )
-    assert admitted == seeded
+    assert admitted is not None and admitted == seeded
     assert _version(db_conn, agent_id) == 1
     assert await settle_hosted_runtime(aops_pool, admitted)
     assert _version(db_conn, agent_id) == 1
@@ -389,8 +389,12 @@ async def test_held_continuation_admits_at_protocol_zero(
         (uuid4(), owner, agent_id),
     )
     db_conn.commit()
+
+    def one_pending(_agent_id: int) -> int:
+        return 1
+
     monkeypatch.setattr(maintenance, "held", lambda: True)
-    monkeypatch.setattr(maintenance, "pending_command", lambda _agent_id: 1)
+    monkeypatch.setattr(maintenance, "pending_command", one_pending)
 
     class _DeferredRuntimeAdmission(RuntimeAdmission):
         async def decide_async(self, conn: psycopg.AsyncConnection) -> AdmissionDecision:
@@ -426,7 +430,7 @@ async def test_lifecycle_apply_releases_the_advertisement(
         expected_from="idling",
         publication=_CurrentRuntimeAdmission(None),
     )
-    assert first == seeded
+    assert first is not None and first == seeded
     assert _version(db_conn, agent_id) == 1
     insert_inbound_message(db_conn, agent_id, "", "user", command)
     with bind_turn_identity(agent_id, incarnation=first):
