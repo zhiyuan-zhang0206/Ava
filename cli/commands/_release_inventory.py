@@ -124,6 +124,7 @@ def _launchd(
             raise ReleaseRejectedError("invalid launchd label")
         if not label.startswith("com.ava."):
             continue
+        # A racing deletion reads as None here and refuses like any other change.
         if path.name != f"{label}.plist" or read_launchd_definition(label) != encoded:
             raise ReleaseRejectedError("launchd definition identity changed")
         digest = hashlib.sha256(encoded).hexdigest()

@@ -82,7 +82,7 @@ def test_launchd_disk_binding_does_not_claim_loaded_image_or_enabled(
         }
     )
     monkeypatch.setattr(jobs, "read_launchd_definition", constant(raw))
-    monkeypatch.setattr(jobs, "launchd_loaded", constant(True))
+    monkeypatch.setattr(jobs, "launchd_loaded_state", constant(True))
     result = jobs.observe_launchd(
         "com.ava.test", hashlib.sha256(raw).hexdigest(), tmp_path, "a" * 64, deadline()
     )
@@ -92,15 +92,138 @@ def test_launchd_disk_binding_does_not_claim_loaded_image_or_enabled(
     assert result.loaded is True
     assert result.enabled is None  # plist Disabled is not the effective override
     assert result.loaded_image == "unknown"
+    assert result.current_digest == hashlib.sha256(raw).hexdigest()
 
 
 def test_launchd_loaded_state_drift_refuses(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(jobs, "read_launchd_definition", constant(b"same"))
-    monkeypatch.setattr(jobs, "launchd_loaded", sequence(True, None))
+    monkeypatch.setattr(jobs, "launchd_loaded_state", sequence(True, None))
     with pytest.raises(jobs.NativeReadUnavailableError, match="changed"):
         jobs.observe_launchd("com.ava.test", "a" * 64, tmp_path, "b" * 64, deadline())
+
+
+def test_launchd_absent_definition_is_a_fact_not_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(jobs, "read_launchd_definition", constant(None))
+    monkeypatch.setattr(jobs, "launchd_loaded_state", constant(False))
+    result = jobs.observe_launchd("com.ava.test", "a" * 64, tmp_path, "b" * 64, deadline())
+    assert result.definition == "absent"
+    assert result.loaded is False
+    assert result.current_digest is None
+    assert result.declared_home == "unknown"
+    assert result.declared_image == "unknown"
+
+
+@pytest.mark.parametrize("reads", [(None, b"job"), (b"job", None)])
+def test_launchd_absent_present_flip_is_drift(
+    reads: tuple[bytes | None, bytes | None], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(jobs, "read_launchd_definition", sequence(*reads))
+    monkeypatch.setattr(jobs, "launchd_loaded_state", constant(False))
+    with pytest.raises(jobs.NativeReadUnavailableError, match="changed"):
+        jobs.observe_launchd("com.ava.test", "a" * 64, tmp_path, "b" * 64, deadline())
+
+
+def test_launchd_mismatch_keeps_loaded_and_current_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    foreign = b"not even a plist: the mismatch answer is a digest summary, never a parse"
+    monkeypatch.setattr(jobs, "read_launchd_definition", constant(foreign))
+    monkeypatch.setattr(jobs, "launchd_loaded_state", constant(False))
+    result = jobs.observe_launchd("com.ava.test", "a" * 64, tmp_path, "b" * 64, deadline())
+    assert result.definition == "mismatch"
+    assert result.loaded is False
+    assert result.current_digest == hashlib.sha256(foreign).hexdigest()
+    assert result.declared_home == "unknown"
+    assert result.declared_image == "unknown"
+
+
+@pytest.mark.parametrize(
+    "limit,expected",
+    [
+        ("Aqua", "match"),
+        (["Background", "Aqua"], "match"),
+        ("Background", "unknown"),
+        (["Background"], "unknown"),
+        ({"weird": True}, "unknown"),
+        (17, "unknown"),
+    ],
+)
+def test_launchd_non_aqua_session_limit_degrades_to_unknown(
+    limit: object, expected: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    raw = plistlib.dumps(
+        {
+            "Label": "com.ava.test",
+            "ProgramArguments": ["/bin/echo", "hello"],
+            "EnvironmentVariables": {"AVA_HOME": str(tmp_path)},
+            "LimitLoadToSessionType": limit,
+        }
+    )
+    monkeypatch.setattr(jobs, "read_launchd_definition", constant(raw))
+    monkeypatch.setattr(jobs, "launchd_loaded_state", constant(False))
+    result = jobs.observe_launchd(
+        "com.ava.test", hashlib.sha256(raw).hexdigest(), tmp_path, "a" * 64, deadline()
+    )
+    assert result.definition == expected
+
+
+def test_launchd_loaded_state_true_is_the_exact_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(jobs.sys, "platform", "darwin")
+
+    def read(argv: tuple[str, ...], _until: datetime) -> subprocess.CompletedProcess[bytes]:
+        assert argv[-2:] == ("print", f"gui/{jobs.os.getuid()}/com.ava.test")
+        return subprocess.CompletedProcess(argv, 0, b"loaded details", b"")
+
+    def unexpected(*_args: object, **_kwargs: object) -> frozenset[str]:
+        raise AssertionError("a confirmed exact lookup must not enumerate")
+
+    monkeypatch.setattr(jobs, "native_read", read)
+    monkeypatch.setattr(jobs, "read_launchd_labels", unexpected)
+    assert jobs.launchd_loaded_state("com.ava.test", deadline()) is True
+
+
+def test_launchd_loaded_state_false_needs_two_equal_absent_enumeration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(jobs.sys, "platform", "darwin")
+
+    def read(argv: tuple[str, ...], _until: datetime) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(argv, 3, b"", b"no such process")
+
+    monkeypatch.setattr(jobs, "native_read", read)
+    monkeypatch.setattr(jobs, "read_launchd_labels", constant(frozenset({"com.other"})))
+    assert jobs.launchd_loaded_state("com.ava.test", deadline()) is False
+
+
+def test_launchd_loaded_state_unknown_when_enumeration_is_unusable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(jobs.sys, "platform", "darwin")
+
+    def read(argv: tuple[str, ...], _until: datetime) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(argv, 3, b"", b"no such process")
+
+    monkeypatch.setattr(jobs, "native_read", read)
+    # a drifting enumeration cannot prove absence
+    monkeypatch.setattr(
+        jobs, "read_launchd_labels", sequence(frozenset({"com.a"}), frozenset({"com.b"}))
+    )
+    assert jobs.launchd_loaded_state("com.ava.test", deadline()) is None
+    # the enumeration lists the label while its exact lookup still failed
+    monkeypatch.setattr(jobs, "read_launchd_labels", constant(frozenset({"com.ava.test"})))
+    assert jobs.launchd_loaded_state("com.ava.test", deadline()) is None
+
+    def unavailable(*_args: object, **_kwargs: object) -> frozenset[str]:
+        raise jobs.NativeReadUnavailableError("enumeration unreadable")
+
+    monkeypatch.setattr(jobs, "read_launchd_labels", unavailable)
+    assert jobs.launchd_loaded_state("com.ava.test", deadline()) is None
 
 
 def test_expired_native_query_never_starts(monkeypatch: pytest.MonkeyPatch) -> None:
