@@ -127,7 +127,7 @@ def select_throwaway_base(required_bytes: int | None = None) -> Path:
         RuntimeError: the configured override is not an existing directory.
         InsufficientThrowawaySpaceError: `required_bytes` is given and no base
             offers it. Failing here names each base and its free space instead of
-            dying mid-restore when the data outgrows its base (2026-09-14 WSL).
+            dying mid-restore when the data outgrows its base (2026-09-14 and 2026-09-19 WSL).
     """
     override = configured_base()
     if override is not None:
