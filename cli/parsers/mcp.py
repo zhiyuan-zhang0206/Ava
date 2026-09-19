@@ -8,11 +8,19 @@ mcp SDK no other verb needs) so parser building never loads Settings (see
 from __future__ import annotations
 
 import argparse
+import json
+import sys
 
 
 def _h_mcp_add(args: argparse.Namespace) -> int:
     from cli.commands import cmd_mcp_add
 
+    if args.command is None and (args.arg or args.env):
+        print(
+            "ava: --arg/--env belong to --command; pass --command or drop them",
+            file=sys.stderr,
+        )
+        return 2
     return cmd_mcp_add(
         name=args.name,
         json_spec=args.json,
@@ -106,6 +114,24 @@ def _memory_search_limit(value: str) -> int:
     return limit
 
 
+def _server_object_json(value: str) -> str:
+    """Argparse type for `mcp add --json`: reject a non-object spec before any command runs."""
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise argparse.ArgumentTypeError(f"invalid server JSON: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise argparse.ArgumentTypeError("server spec must be a JSON object")
+    return value
+
+
+def _env_pair(value: str) -> str:
+    """Argparse type for repeated `--env KEY=VALUE`."""
+    if "=" not in value:
+        raise argparse.ArgumentTypeError(f"expects KEY=VALUE, got {value!r}")
+    return value
+
+
 def _add_mcp_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     from cli.main import (
         _h_mcp_add,
@@ -150,6 +176,7 @@ def _add_mcp_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
         "--env",
         action="append",
         default=[],
+        type=_env_pair,
         help="KEY=VALUE injected into the installed copy's env, e.g. a bot token "
         "the package itself must not ship (repeatable)",
     )
@@ -174,17 +201,22 @@ def _add_mcp_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
         "or build it from --command/--arg/--env)",
     )
     mcp_add_p.add_argument("name", help="server name (key under mcpServers)")
-    mcp_add_p.add_argument(
-        "--json", default=None, help='server object as JSON, e.g. \'{"command": "npx", ...}\''
+    spec_source = mcp_add_p.add_mutually_exclusive_group(required=True)
+    spec_source.add_argument(
+        "--json",
+        type=_server_object_json,
+        help='server object as JSON, e.g. \'{"command": "npx", ...}\'',
     )
-    mcp_add_p.add_argument(
-        "--command", default=None, help="stdio server command (alternative to --json)"
-    )
+    spec_source.add_argument("--command", help="stdio server command (alternative to --json)")
     mcp_add_p.add_argument(
         "--arg", action="append", default=[], help="argument for --command (repeatable)"
     )
     mcp_add_p.add_argument(
-        "--env", action="append", default=[], help="KEY=VALUE env var for --command (repeatable)"
+        "--env",
+        action="append",
+        default=[],
+        type=_env_pair,
+        help="KEY=VALUE env var for --command (repeatable)",
     )
     mcp_add_p.set_defaults(func=_h_mcp_add)
 
