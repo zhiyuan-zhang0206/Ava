@@ -9,6 +9,7 @@ import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 from uuid import UUID
 
 import psutil
@@ -52,6 +53,32 @@ def _bootstrap_journal(stage: str, *, normal_release_planned: bool = False) -> d
         ],
         "normal_release": None,
     }
+
+
+def _spawn_attempt_model(
+    session: str = "ava-ops", nonce: UUID | None = None, *, generation: str = "gen-1"
+) -> recovery.SpawnAttempt:
+    """One journal attempt object; the nonce defaults to UUID(int=7)."""
+    value = UUID(int=7) if nonce is None else nonce
+    return recovery.SpawnAttempt(
+        nonce=value,
+        session=session,
+        cmd_digest="8" * 64,
+        cwd="/unit",
+        spawn_lock_path=f"run/updater-spawn/{generation}/{session}.gate",
+        receipt_path=f"run/updater-spawn/{generation}/{session}.{value}.receipt.json",
+        recorded_at=dt.datetime(2026, 9, 4, tzinfo=dt.UTC),
+    )
+
+
+def _spawn_attempt(
+    session: str = "ava-ops", nonce: UUID | None = None, *, generation: str = "gen-1"
+) -> dict[str, object]:
+    """The JSON (string-typed) form for payloads validated in JSON mode."""
+    dumped: dict[str, object] = json.loads(
+        _spawn_attempt_model(session, nonce, generation=generation).model_dump_json()
+    )
+    return dumped
 
 
 def _normal_journal(stage: str) -> dict[str, object]:
@@ -122,6 +149,8 @@ def _normal_journal(stage: str) -> dict[str, object]:
         "previous_selector": None,
         "stage": stage,
         "starting_session": "ava-ops" if stage == "starting" else None,
+        "starting_attempt": _spawn_attempt_model() if stage == "starting" else None,
+        "replaces": None,
         "readback": readback if stage in {"observed", "committed"} else None,
     }
     return recovery.NormalReleaseRecoveryJournal.model_validate(payload).model_dump(mode="json")
@@ -139,6 +168,8 @@ def _normal_at(base: dict[str, object], stage: str) -> dict[str, object]:
     payload = json.loads(json.dumps(base))
     payload["stage"] = stage
     payload["starting_session"] = "ava-ops" if stage == "starting" else None
+    payload["starting_attempt"] = _spawn_attempt() if stage == "starting" else None
+    payload["replaces"] = None
     payload["readback"] = (
         _normal_journal("observed")["readback"] if stage in {"observed", "committed"} else None
     )
@@ -354,6 +385,92 @@ def test_normal_recovery_rejects_identity_changes_and_phase_rollback() -> None:
     handoff.write_normal_release_recovery("bootstrap", selected)
     with pytest.raises(handoff.BootstrapRecoveryInvalidError, match="cannot transition"):
         handoff.write_normal_release_recovery("bootstrap", base)
+
+
+def _write_starting_slot(
+    stage_sequence: tuple[str, ...] = ("waiting", "selected", "bootstrap_stopped"),
+) -> dict[str, object]:
+    """Advance the retained journal through the given stages; return the base."""
+    _retained_bootstrap("candidate_ready", normal_release_planned=True)
+    base = _normal_journal("waiting")
+    for stage in stage_sequence:
+        handoff.write_normal_release_recovery("bootstrap", _normal_at(base, stage))
+    return base
+
+
+def test_starting_stage_requires_its_exact_attempt() -> None:
+    payload = _normal_journal("starting")
+    payload["starting_attempt"] = None
+    with pytest.raises(ValueError):
+        recovery.NormalReleaseRecoveryJournal.model_validate_json(json.dumps(payload))
+    other = _normal_journal("starting")
+    other["starting_attempt"] = _spawn_attempt(session="ava-other")
+    with pytest.raises(ValueError):
+        recovery.NormalReleaseRecoveryJournal.model_validate_json(json.dumps(other))
+
+
+def test_spawn_attempt_path_shape_is_pinned() -> None:
+    attempt = _spawn_attempt()
+    mutations: list[dict[str, object]] = [
+        {"spawn_lock_path": "run/updater-spawn/gen-1/other.gate"},
+        {"spawn_lock_path": "run/updater-spawn/gen-2/ava-ops.gate"},
+        {"receipt_path": f"run/updater-spawn/gen-1/ava-ops.{UUID(int=9)}.receipt.json"},
+        {"spawn_lock_path": "/run/updater-spawn/gen-1/ava-ops.gate"},
+        {"receipt_path": "../ava-ops.{nonce}.receipt.json"},
+    ]
+    for mutation in mutations:
+        candidate = {**attempt, **mutation}
+        payload = _normal_journal("starting") | {"starting_attempt": candidate}
+        with pytest.raises(ValueError):
+            recovery.NormalReleaseRecoveryJournal.model_validate_json(json.dumps(payload))
+
+
+def test_replaces_witness_only_exists_while_starting() -> None:
+    for stage in ("waiting", "selected", "bootstrap_stopped", "observed", "committed"):
+        payload = _normal_journal(stage)
+        payload["replaces"] = "spawned_dead"
+        with pytest.raises(ValueError):
+            recovery.NormalReleaseRecoveryJournal.model_validate_json(json.dumps(payload))
+
+
+def test_first_start_displaces_no_attempt() -> None:
+    base = _write_starting_slot()
+    starting = _normal_at(base, "starting")
+    starting["replaces"] = "spawned_dead"
+    with pytest.raises(handoff.BootstrapRecoveryInvalidError, match="displaces no"):
+        handoff.write_normal_release_recovery("bootstrap", starting)
+    starting["replaces"] = None
+    handoff.write_normal_release_recovery("bootstrap", starting)
+
+
+def test_starting_replacement_requires_witness_and_fresh_nonce() -> None:
+    base = _write_starting_slot(("waiting", "selected", "bootstrap_stopped", "starting"))
+    first_nonce = str(UUID(int=7))
+
+    unwitnessed = _normal_at(base, "starting")
+    unwitnessed["starting_attempt"] = _spawn_attempt(nonce=UUID(int=8))
+    unwitnessed["replaces"] = None
+    with pytest.raises(handoff.BootstrapRecoveryInvalidError, match="adjudication witness"):
+        handoff.write_normal_release_recovery("bootstrap", unwitnessed)
+
+    same_nonce = _normal_at(base, "starting")
+    same_nonce_attempt = cast("dict[str, object]", same_nonce["starting_attempt"])
+    assert same_nonce_attempt["nonce"] == first_nonce
+    same_nonce["replaces"] = "spawned_alive"
+    with pytest.raises(handoff.BootstrapRecoveryInvalidError, match="fresh attempt nonce"):
+        handoff.write_normal_release_recovery("bootstrap", same_nonce)
+
+    fresh = _normal_at(base, "starting")
+    fresh["starting_attempt"] = _spawn_attempt(nonce=UUID(int=8))
+    fresh["replaces"] = "spawned_dead"
+    handoff.write_normal_release_recovery("bootstrap", fresh)
+    retained = handoff.read_bootstrap_recovery()
+    assert retained is not None
+    journal = cast("dict[str, object]", retained["journal"])
+    retained_normal = cast("dict[str, object]", journal["normal_release"])
+    retained_attempt = cast("dict[str, object]", retained_normal["starting_attempt"])
+    assert retained_attempt["nonce"] == str(UUID(int=8))
+    assert retained_normal["replaces"] == "spawned_dead"
 
 
 def test_normal_release_recovery_requires_planned_continuation() -> None:

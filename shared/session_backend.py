@@ -76,6 +76,8 @@ class SessionBackend(abc.ABC):
         env: dict[str, str],
         login_shell: bool = True,
         exec_cmd: bool = True,
+        gate_fd: int | None = None,
+        receipt: tuple[Path, str] | None = None,
     ) -> bool:
         """Launch ``cmd`` as a detached, named background session.
 
@@ -96,6 +98,15 @@ class SessionBackend(abc.ABC):
         part of the session's work — an orchestration session whose ``tee``
         pipeline and ``[session-exit] rc=`` verdict must outlive the command it
         runs (``ops.cluster_session``).
+
+        ``gate_fd`` + ``receipt`` are the gated-spawn channel of the updater's
+        normal-release chain (``shared.spawn_receipt`` owns the mechanism): the
+        held per-session spawn-gate descriptor and the ``(receipt_path,
+        nonce)`` the child must turn into its birth receipt before exec. Only
+        the native POSIX supervisor implements them, on Linux. Every other
+        backend refuses when they are provided instead of silently degrading
+        to an unguarded fork — a gated spawn that lost its gate is exactly the
+        ambiguity the mechanism exists to remove (design R1/R8).
 
         Returns True on success. An existing live session of the same name is
         left untouched (idempotent), matching the existing guard at every call
@@ -297,6 +308,8 @@ class PosixProcSessionBackend(SessionBackend):
         env: dict[str, str],
         login_shell: bool = True,
         exec_cmd: bool = True,
+        gate_fd: int | None = None,
+        receipt: tuple[Path, str] | None = None,
     ) -> bool:
         from shared.session_env import exec_into, venv_activation_prefix
 
@@ -316,7 +329,7 @@ class PosixProcSessionBackend(SessionBackend):
             cmd = f"exec bash -lc {shlex.quote(inner)}"
         from shared import posixproc
 
-        return posixproc.new_session(name, cmd, cwd, env=env)
+        return posixproc.new_session(name, cmd, cwd, env=env, gate_fd=gate_fd, receipt=receipt)
 
     def kill_session(
         self,
@@ -416,7 +429,11 @@ class PtySessionBackend(SessionBackend):
         env: dict[str, str],
         login_shell: bool = True,
         exec_cmd: bool = True,  # noqa: ARG002 — an interactive shell is never exec'd away
+        gate_fd: int | None = None,
+        receipt: tuple[Path, str] | None = None,
     ) -> bool:
+        if gate_fd is not None or receipt is not None:
+            raise NotImplementedError(f"{type(self).__name__} has no gated spawn")
         if not login_shell:
             raise NotImplementedError(f"{type(self).__name__} only creates login shells")
         envfile = _write_session_env_file(env)
@@ -559,7 +576,11 @@ class WinprocSessionBackend(SessionBackend):
         env: dict[str, str],
         login_shell: bool = True,  # noqa: ARG002 — no login shell exists on Windows
         exec_cmd: bool = True,  # noqa: ARG002 — cmd.exe has no exec
+        gate_fd: int | None = None,
+        receipt: tuple[Path, str] | None = None,
     ) -> bool:
+        if gate_fd is not None or receipt is not None:
+            raise NotImplementedError(f"{type(self).__name__} has no gated spawn")
         from shared import winproc
 
         # `.venv/bin/python` -> the checkout's Windows interpreter is the
