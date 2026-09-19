@@ -25,12 +25,12 @@ from collections.abc import AsyncIterator
 import pytest
 from langchain_core.messages import AIMessage
 
-from agent.graph._llm import (
+from agent.graph._llm_chunk import _validate_stop_reason
+from agent.graph._llm_errors import (
     LLMStreamCorruptedError,
     LLMStreamError,
     LLMStreamTruncatedError,
     LLMStreamUnexpectedStopReasonError,
-    _validate_stop_reason,
 )
 from shared.lm._plugin_providers import ensure_provider_plugins_loaded
 
@@ -275,8 +275,8 @@ async def test_llm_node_validator_wired(
     from langgraph.runtime import Runtime
 
     from agent.graph import llm_node
-    from agent.graph._context import AvaContext
     from agent.state import AgentState
+    from shared.context import AvaContext
     from tests.agent._fakes import make_fake_ops_pool
 
     async def _truncated_stream() -> AsyncIterator[AIMessageChunk]:

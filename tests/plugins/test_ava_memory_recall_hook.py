@@ -18,11 +18,11 @@ from langchain_core.messages import AIMessage, AnyMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
-from agent.graph._context import AvaContext
 from agent.graph._memory_recall import PassiveRecall
 from agent.messages import NoteTag, inbound_message, system_note_message
 from agent.state import build_agent_state, clear_plugin_registrations
 from ava import _gateway_client
+from shared.context import AvaContext
 
 
 @pytest.fixture

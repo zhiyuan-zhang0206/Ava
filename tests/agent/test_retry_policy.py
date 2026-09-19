@@ -11,7 +11,7 @@ from collections.abc import Iterator
 import pytest
 
 from agent.graph._build import _build_llm_retry
-from agent.graph._llm import (
+from agent.graph._llm_errors import (
     FatalLLMStreamError,
     FatalProviderError,
     LLMStreamStallPairError,
@@ -117,11 +117,7 @@ def test_retry_policy_phase_jitter_deterministic_per_agent(monkeypatch: pytest.M
     amount in [0, span), so a correlated failure (429 burst / provider drift)
     cannot re-sync the fleet's retry waves into lockstep (heartbeat-daemon
     de-phasing pattern)."""
-    from agent.graph._build import (
-        _RETRY_JITTER_SPAN_S,
-        _build_llm_retry,
-        _retry_phase_jitter,
-    )
+    from agent.graph._build import _RETRY_JITTER_SPAN_S, _build_llm_retry, _retry_phase_jitter
     from shared.config import settings
 
     monkeypatch.setenv("AVA_AGENT_ID", "1234")
@@ -219,10 +215,7 @@ def test_stall_pair_wait_doubles_and_caps(bound_thread: str) -> None:
 def test_stall_pair_refuses_past_the_cap_and_resets(bound_thread: str) -> None:
     """Past `llm_stall_retry_max_consecutive` the retry is refused and the
     streak resets (the next turn starts with a fresh budget)."""
-    from agent.graph._llm_errors import (
-        _record_stall_pair_streak,
-        _stall_pair_streak,
-    )
+    from agent.graph._llm_errors import _record_stall_pair_streak, _stall_pair_streak
 
     policy = _build_llm_retry()
     _record_stall_pair_streak(bound_thread, settings.lm.llm_stall_retry_max_consecutive)

@@ -19,9 +19,7 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from agent import state as _state
 from agent.db import ClaimedInbound
 from agent.graph._chat_inbound import build_chat_inbound
-from agent.graph._context import AvaContext
 from agent.graph._context_notes import fork_notes
-from agent.graph._nodes import BEFORE_LLM, CLAIM, END
 from agent.hooks.compact import (
     COMPACT_MAX_ATTEMPTS,
     CompactionFailedError,
@@ -30,9 +28,11 @@ from agent.hooks.compact import (
 )
 from agent.hooks.compact_events import emit_compact_finished, emit_compact_started
 from agent.messages import NoteTag, system_note_message
+from agent.nodes import BEFORE_LLM, CLAIM, END
 from agent.state_channels import CIRCUIT_REASON_CONTEXT_OVERFLOW
 from ava.security import scan_content
 from shared.config import now_timestamp, settings
+from shared.context import AvaContext
 from shared.inbound import InboundKind
 from shared.live_events import Cancelled
 from shared.log import logger

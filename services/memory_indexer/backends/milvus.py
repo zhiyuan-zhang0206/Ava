@@ -118,11 +118,10 @@ def _schema_problem(client: MilvusClient, dim: int) -> str | None:
         )
     except Exception:
         return "could not be inspected"
-    # pymilvus 3.x returns a plain dict here; older versions return an object
-    # with a `.fields` attribute — accept both.
+    # pymilvus 3.x returns a plain dict here.
     # isinstance-narrowing an Any yields dict[Unknown, ...], so the fields
     # access below is silenced the same way the other pymilvus calls are.
-    raw: Any = info.get("fields") if isinstance(info, dict) else getattr(info, "fields", None)  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
+    raw: Any = info.get("fields") if isinstance(info, dict) else None  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
     raw_list: list[Any] = raw if isinstance(raw, list) else []  # pyright: ignore[reportUnknownVariableType]
     names: set[str] = {f.get("name") for f in raw_list if isinstance(f.get("name"), str)}
     primaries: set[str] = {

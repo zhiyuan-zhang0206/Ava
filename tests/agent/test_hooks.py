@@ -12,7 +12,6 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 
-from agent.graph._context import AvaContext
 from agent.hooks import (
     HOOKS,
     Hook,
@@ -23,6 +22,7 @@ from agent.hooks import (
 )
 from agent.state import AgentState
 from shared import plugin_activation, plugin_contributions
+from shared.context import AvaContext
 from shared.plugin_context import PluginContext
 from tests.agent._fakes import make_fake_ops_pool
 
@@ -243,7 +243,7 @@ async def test_runner_sees_hooks_registered_after_build():
 
 async def test_hook_can_read_agent_id_from_config():
     """hook reads agent_id via config — verifies LangGraph automatically passes config into hook."""
-    from agent.graph._context import agent_id_from_config
+    from shared.context import agent_id_from_config
 
     seen: list[int] = []
 

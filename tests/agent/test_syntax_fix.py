@@ -20,7 +20,6 @@ from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
-from agent.graph._context import AvaContext
 from agent.state import AgentState
 from ava_builtins.plugins.ava_syntax_fix._deterministic_fixes import (
     apply_all_deterministic_fixes,
@@ -59,6 +58,7 @@ from ava_builtins.plugins.ava_syntax_fix.agent_runtime import (
     syntax_fix_before_exec,
 )
 from shared.config import settings
+from shared.context import AvaContext
 
 # --- _fix_chinese_punctuation ---
 

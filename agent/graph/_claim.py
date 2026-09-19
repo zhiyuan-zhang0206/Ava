@@ -55,18 +55,15 @@ from agent.db import claim_inbound_batch
 from agent.graph._attach_drain import build_attach_drain
 from agent.graph._claim_decide import decide
 from agent.graph._claim_dispatch import _BatchState, dispatch_batch
-from agent.graph._claim_present import (
-    publish_end_timeline_snapshot,
-    publish_inbound_committed,
-)
+from agent.graph._claim_present import publish_end_timeline_snapshot, publish_inbound_committed
 from agent.graph._claim_routing import ClaimGoto, resolve_routing
-from agent.graph._context import AvaContext, agent_id_from_config
 from agent.graph._node_log import flush_node_exit_aggregate, node_lifecycle
-from agent.graph._nodes import BEFORE_LLM, CLAIM, END
 from agent.impersonation import claim_gate
 from agent.impersonation_handoff import resume_note_pending
 from agent.inbound_ownership import RuntimeOwnershipLostError
 from agent.messages import has_conversation
+from agent.nodes import BEFORE_LLM, CLAIM, END
+from shared.context import AvaContext, agent_id_from_config
 
 # Names moved to co-located submodules during the Task #1006 split, re-exported
 # here so existing `from agent.graph._claim import ...` call sites (tests) keep

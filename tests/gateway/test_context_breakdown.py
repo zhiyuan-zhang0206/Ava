@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 # Load agent.graph before agent.hooks.compact to resolve the latent graph<->compact
-# import cycle (compact.py imports agent.graph._context; _claim imports back from
+# import cycle (compact.py imports agent.hooks; _claim_decide imports back from
 # compact). Needed only because this test uses the write-side helper below —
 # gateway.context_breakdown itself must NOT need it (see
 # test_bucket_messages_works_without_agent_graph).

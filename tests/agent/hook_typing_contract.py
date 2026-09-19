@@ -26,9 +26,9 @@ To see the errors directly, delete an ignore comment and run:
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
-from agent.graph._context import AvaContext
 from agent.hooks import Hook
 from agent.state import AgentState
+from shared.context import AvaContext
 
 
 class _Ok(Hook):

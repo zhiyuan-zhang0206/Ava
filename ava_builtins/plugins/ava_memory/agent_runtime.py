@@ -15,7 +15,6 @@ import asyncio
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
-from agent.graph._context import AvaContext
 from agent.graph._context_notes import (
     RANK_CLUSTER_MEMORY,
     RANK_INHERITED_MEMORY,
@@ -30,6 +29,7 @@ from agent.messages import tail_has_recallable_inbound
 from agent.state import AgentState, MemoryState
 from shared.config import settings
 from shared.config.turn_view import turn_settings
+from shared.context import AvaContext
 from shared.log import logger
 
 from .inherit import inherited_memory_note
