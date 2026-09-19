@@ -27,9 +27,9 @@ import numpy as np
 class EmbeddingAPIError(RuntimeError):
     """An embedding provider call still failed after N retries.
 
-    The indexer daemon skips the current file and retries on the next
-    watch event; `ava.memory.search` wraps this as `IndexerUnavailable`
-    and raises to the caller.
+    The indexer daemon records the failure; a follow-up reconcile pass
+    retries the remaining dirty paths while keeping liveness beating.
+    `ava.memory.search` wraps this as `IndexerUnavailable` and raises to the caller.
     """
 
 

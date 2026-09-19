@@ -15,10 +15,13 @@ not the same semantic space).
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import queue
 import subprocess
 import time
 from collections.abc import Sequence
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -466,7 +469,7 @@ def test_cold_start_reconcile_prunes_foreign_rows(
     backend.upsert(str(watched.resolve()), 1.0, "h", _vec(0), kind="body", chunk_idx=0)
     backend.upsert(str(foreign.resolve()), 1.0, "h", _vec(0), kind="body", chunk_idx=0)
 
-    daemon._cold_start_reconcile(backend, _FakeProvider(), Liveness(daemon._LIVENESS_TIMEOUT_S))
+    daemon._reconcile(backend, _FakeProvider(), Liveness(daemon._LIVENESS_TIMEOUT_S))
     meta = _backend(milvus_client).all_meta()
     assert str(foreign.resolve()) not in meta
     assert str(watched.resolve()) in meta
@@ -498,7 +501,7 @@ def test_cold_start_reconcile_reembeds_on_provider_switch(
         fingerprint="other:provider",
         client=milvus_client,  # pyright: ignore[reportUnknownArgumentType]
     )
-    daemon._cold_start_reconcile(switched_backend, switched, Liveness(daemon._LIVENESS_TIMEOUT_S))
+    daemon._reconcile(switched_backend, switched, Liveness(daemon._LIVENESS_TIMEOUT_S))
     # The row was re-embedded with the new fingerprint.
     meta = switched_backend.all_meta()
     assert str(watched.resolve()) in meta
@@ -524,7 +527,7 @@ def test_cold_start_reconcile_beats_liveness_across_chunks(
         note.write_text(f"content {i}")
         files.append(note)
     monkeypatch.setattr(daemon, "_MEMORY_ROOT", root)
-    monkeypatch.setattr(daemon, "_COLD_START_CHUNK_PATHS", 2)  # 7 files -> 4 chunks
+    monkeypatch.setattr(daemon, "_RECONCILE_CHUNK_PATHS", 2)  # 7 files -> 4 chunks
 
     chunk_sizes: list[int] = []
     visited: list[str] = []
@@ -538,7 +541,7 @@ def test_cold_start_reconcile_beats_liveness_across_chunks(
 
     liveness = Liveness(0.4)
     started = time.monotonic()
-    daemon._cold_start_reconcile(_backend(milvus_client), _FakeProvider(), liveness)
+    assert daemon._reconcile(_backend(milvus_client), _FakeProvider(), liveness) is True
     elapsed = time.monotonic() - started
 
     # Chunked by file: call count and sizes exact, every file visited once.
@@ -551,7 +554,7 @@ def test_cold_start_reconcile_beats_liveness_across_chunks(
     assert liveness.stale_for() < 0.4
 
 
-def test_cold_start_reconcile_embed_error_keeps_single_call_semantics(
+def test_reconcile_embed_error_truncates_and_returns_false(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     milvus_client,
@@ -559,14 +562,14 @@ def test_cold_start_reconcile_embed_error_keeps_single_call_semantics(
 ) -> None:
     """Error semantics preserved from the pre-chunking reconcile (one
     try/except): an EmbeddingAPIError skips the remaining chunks and is logged
-    with the existing message — never raised — so the daemon keeps running and
-    the next fs event / restart retries."""
+    with its error repr — never raised — so the daemon keeps running and
+    the return value signals that a follow-up pass is needed."""
     root = tmp_path / "watched"
     root.mkdir()
     for i in range(6):
         (root / f"note-{i}.md").write_text(f"content {i}")
     monkeypatch.setattr(daemon, "_MEMORY_ROOT", root)
-    monkeypatch.setattr(daemon, "_COLD_START_CHUNK_PATHS", 2)  # 6 files -> 3 chunks
+    monkeypatch.setattr(daemon, "_RECONCILE_CHUNK_PATHS", 2)  # 6 files -> 3 chunks
 
     calls: list[int] = []
 
@@ -578,10 +581,13 @@ def test_cold_start_reconcile_embed_error_keeps_single_call_semantics(
 
     liveness = Liveness(600.0)
     with caplog.at_level(logging.ERROR, logger="services.memory_indexer.daemon"):
-        daemon._cold_start_reconcile(_backend(milvus_client), _FakeProvider(), liveness)
+        assert daemon._reconcile(_backend(milvus_client), _FakeProvider(), liveness) is False
 
     assert calls == [2]  # first chunk failed -> remaining chunks never ran (as before)
-    expected = f"cold-start embed failed: {EmbeddingAPIError('embed boom')!r}"
+    expected = (
+        f"reconcile embed failed: {EmbeddingAPIError('embed boom')!r}"
+        " — daemon continues; a follow-up pass will retry"
+    )
     assert expected in caplog.text
     assert liveness.is_alive()
 
@@ -849,7 +855,7 @@ def test_partial_embedding_failure_keeps_old_rows_intact(
 ) -> None:
     """A file whose embedding fails part way keeps its previous rows whole —
     all-old is the recoverable consistent state; the hash stays mismatching so
-    the next fs event or cold-start reconcile retries it (issue #1946)."""
+    the next fs event or follow-up reconcile retries it (issue #1946)."""
 
     class _FailSecondBatchProvider(_FakeProvider):
         def embed_batch(self, texts: list[str]) -> np.ndarray:
@@ -912,3 +918,214 @@ def test_complete_file_still_commits_when_another_fails(
     meta = backend.all_meta()
     assert str(complete.resolve()) in meta
     assert str(partial.resolve()) not in meta
+
+
+def test_reconcile_retry_schedule_backoff_and_reset() -> None:
+    now = 100.0
+    retry = daemon._ReconcileRetrySchedule(base_s=2.0, cap_s=9.0, clock=lambda: now)
+    assert not retry.pending
+    assert not retry.due()
+    assert retry.retry_in_s() is None
+    for delay in [2.0, 4.0, 8.0, 9.0, 9.0]:
+        assert retry.record_pass_incomplete() == delay
+        assert retry.pending
+        assert not retry.due()
+        assert retry.retry_in_s() == delay
+        now += delay - 0.25
+        assert retry.ensure_scheduled() is None
+        assert retry.retry_in_s() == 0.25  # repeated drain failures cannot postpone it
+        assert not retry.due()
+        now += 0.25
+        assert retry.due()
+        now += 1.0
+        assert retry.retry_in_s() == 0.0
+    # A quota outage may last indefinitely; the capped backoff must not overflow.
+    for _ in range(1100):
+        assert retry.record_pass_incomplete() == 9.0
+    retry.record_pass_complete()
+    assert not retry.pending
+    assert not retry.due()
+    assert retry.retry_in_s() is None
+    assert retry.ensure_scheduled() == 2.0
+    assert retry.record_pass_incomplete() == 4.0
+
+
+def test_reconcile_health_payload() -> None:
+    now = 0.0
+    retry = daemon._ReconcileRetrySchedule(base_s=2.0, cap_s=4.0, clock=lambda: now)
+    idle = {"reconcile_pending": False, "reconcile_retry_in_s": None}
+    assert daemon._reconcile_health(retry) == idle
+    retry.ensure_scheduled()
+    assert daemon._reconcile_health(retry) == {
+        "reconcile_pending": True,
+        "reconcile_retry_in_s": 2.0,
+    }
+    now = 0.76
+    assert daemon._reconcile_health(retry)["reconcile_retry_in_s"] == 1.2
+    retry.record_pass_complete()
+    assert daemon._reconcile_health(retry) == idle
+
+
+class _FlakyProvider(_FakeProvider):
+    def __init__(self, failures: int) -> None:
+        super().__init__()
+        self.failures = failures
+        self.attempts = 0
+
+    def embed_batch(self, texts: list[str]) -> np.ndarray:
+        self.attempts += 1
+        if self.attempts <= self.failures:
+            raise EmbeddingAPIError("429 Too Many Requests")
+        return super().embed_batch(texts)
+
+
+async def test_reconcile_retry_drain_loop_converges_after_embed_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    milvus_client,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # More than one reconcile chunk: recovery must fill the entire original gap.
+    files = {tmp_path / f"note-{i:03d}.md" for i in range(70)}
+    for note in files:
+        note.write_text(f"content of {note.name}")
+    monkeypatch.setattr(daemon, "_LOOP_INTERVAL_S", 0.01)
+    backend = _backend(milvus_client)
+    provider = _FlakyProvider(failures=3)
+    liveness = Liveness(1.0)
+    retry = daemon._ReconcileRetrySchedule(base_s=0.05, cap_s=0.1)
+    assert await asyncio.to_thread(daemon._reconcile, backend, provider, liveness) is False
+    retry.record_pass_incomplete()
+    with caplog.at_level(logging.INFO, logger="services.memory_indexer.daemon"):
+        task = asyncio.create_task(
+            daemon._drain_loop(backend, queue.Queue(), liveness, provider, retry)
+        )
+        try:
+            async with asyncio.timeout(5.0):
+                while retry.pending:
+                    assert not task.done()
+                    assert liveness.is_alive()
+                    await asyncio.sleep(0.01)
+            assert liveness.is_alive()
+            assert set(await asyncio.to_thread(backend.all_meta)) == {str(p) for p in files}
+            assert not retry.pending
+            assert retry.retry_in_s() is None
+            attempts = provider.attempts
+            await asyncio.sleep(0.15)  # no extra pass after the cap-sized wait elapses
+            assert provider.attempts == attempts
+            assert "gap closed; retries cleared" in caplog.text
+            assert "reconcile incomplete; retry scheduled in 0.1s" in caplog.text
+        finally:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+
+async def test_reconcile_retry_drain_failure_arms_schedule(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    milvus_client,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    note = tmp_path / "changed.md"
+    note.write_text("new content")
+    monkeypatch.setattr(daemon, "_LOOP_INTERVAL_S", 0.01)
+    backend = _backend(milvus_client)
+    provider = _FlakyProvider(failures=1)
+    dirty: queue.Queue[Path] = queue.Queue()
+    dirty.put(note)
+    liveness = Liveness(1.0)
+    retry = daemon._ReconcileRetrySchedule(base_s=0.05, cap_s=0.1)
+    task = asyncio.create_task(daemon._drain_loop(backend, dirty, liveness, provider, retry))
+    try:
+        async with asyncio.timeout(5.0):
+            while not retry.pending:
+                assert not task.done()
+                await asyncio.sleep(0.005)
+            assert dirty.empty()
+            assert "embed failed for a batch of 1 path(s)" in caplog.text
+            assert "follow-up reconcile scheduled" in caplog.text
+            while retry.pending:
+                assert not task.done()
+                assert liveness.is_alive()
+                await asyncio.sleep(0.01)
+        assert liveness.is_alive()
+        assert set(await asyncio.to_thread(backend.all_meta)) == {str(note)}
+        assert provider.attempts == 2
+        assert not retry.pending
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+
+async def test_reconcile_retry_wait_keeps_liveness_and_cancels_promptly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import Mock
+
+    monkeypatch.setattr(daemon, "_LOOP_INTERVAL_S", 0.01)
+    # Wait far longer than the heartbeat ceiling while keeping the test bounded.
+    retry = daemon._ReconcileRetrySchedule(base_s=2.0, cap_s=2.0)
+    retry.record_pass_incomplete()
+    liveness = Liveness(0.15)
+    backend = Mock()
+    task = asyncio.create_task(
+        daemon._drain_loop(backend, queue.Queue(), liveness, _FakeProvider(), retry)
+    )
+    started = time.monotonic()
+    try:
+        while time.monotonic() - started < 0.4:
+            await asyncio.sleep(0.01)
+            assert liveness.is_alive()
+            assert retry.pending
+            assert not task.done()
+        backend.all_meta.assert_not_called()  # still waiting, no pass ran yet
+    finally:
+        cancelled_at = time.monotonic()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=0.5)
+        assert time.monotonic() - cancelled_at < 0.5
+
+
+async def test_reconcile_retry_inflight_pass_cancels_promptly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from threading import Event
+    from unittest.mock import Mock
+
+    entered, release, finished = Event(), Event(), Event()
+
+    def slow_reconcile(*args: Any) -> bool:
+        entered.set()
+        try:
+            assert release.wait(timeout=2.0)
+            return True
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(daemon, "_reconcile", slow_reconcile)
+    monkeypatch.setattr(daemon, "_LOOP_INTERVAL_S", 0.01)
+    retry = daemon._ReconcileRetrySchedule(base_s=0.01, cap_s=0.01)
+    retry.record_pass_incomplete()
+    task = asyncio.create_task(
+        daemon._drain_loop(Mock(), queue.Queue(), Liveness(1.0), _FakeProvider(), retry)
+    )
+    try:
+        async with asyncio.timeout(1.0):
+            while not entered.is_set():
+                await asyncio.sleep(0.005)
+        assert not finished.is_set()  # the event loop is free while the worker waits
+        cancelled_at = time.monotonic()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=0.5)
+        assert time.monotonic() - cancelled_at < 0.5
+        assert not finished.is_set()  # cancellation does not stop the executor thread
+    finally:
+        release.set()
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+        assert await asyncio.to_thread(finished.wait, 1.0)

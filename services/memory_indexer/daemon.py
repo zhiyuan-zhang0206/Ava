@@ -9,6 +9,8 @@ After startup:
   3. Main loop drains the queue every second (set dedup), batch
      embed + upsert / delete.
 
+An incomplete reconcile retries on bounded backoff and never needs a restart.
+
 Backed by the configured memory search backend
 (`AVA_MEMORY_SEARCH_BACKEND`, default `numpy` — the standalone
 milvus-lite server in the `services/milvus/` session, URI
@@ -51,6 +53,7 @@ import re
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 
@@ -86,14 +89,15 @@ _LOOP_INTERVAL_S = 1.0
 # whole batch via a network round-trip; beating before and after the embed
 # tolerates a slow-but-legit batch while a true wedge flips /healthz 503.
 _LIVENESS_TIMEOUT_S = 180.0
-# Cold-start reconcile works its dirty set in file-granular chunks of this
-# size, beating liveness before and after each chunk. The rebuild runs before
-# the drain loop and can last minutes; with no beats a stretch longer than
-# _LIVENESS_TIMEOUT_S read as 'loop: stale', so the watchdog restarted the
-# daemon mid-rebuild and the rebuild restarted from zero every ~3 min — never
+# Startup and follow-up reconcile work their dirty set in file-granular chunks of this
+# size, beating liveness before and after each chunk. A rebuild can last minutes —
+# the startup pass runs before the drain loop starts its own beats, and a follow-up
+# pass occupies the loop while it runs. Without per-chunk beats a stretch longer
+# than _LIVENESS_TIMEOUT_S read as 'loop: stale', and the watchdog restarted the
+# daemon mid-rebuild: the rebuild restarted from zero every ~3 min, never
 # converging (2026-09-19 incident). 64 files per chunk keeps one beat-to-beat
 # stretch far below the liveness ceiling; the chunking overhead is negligible.
-_COLD_START_CHUNK_PATHS = 64
+_RECONCILE_CHUNK_PATHS = 64
 # How often the daemon fast-forwards the gateway checkout to origin/main —
 # the refresh safety net (see module docstring). An hour bounds index
 # staleness to ~1 consolidation cycle; the fetch is a no-op when main moved.
@@ -300,12 +304,12 @@ def _process_paths(
     shrunken body tail, an empty file) are deleted. If embedding fails part
     way, only the files whose rows are ALL embedded are committed — a
     partially-embedded file keeps its old rows intact, so its stored state
-    stays consistent (all-old) and the next fs event or cold-start reconcile
-    retries it against the still-mismatching content hash.
+    stays consistent (all-old) and a follow-up reconcile retries it against
+    the still-mismatching content hash.
 
     Embedding failures (`EmbeddingAPIError`) propagate after the
-    provider's internal retries — the caller (main loop) catches + logs
-    + continues (the next fs event re-triggers, indexer stays available).
+    provider's internal retries — the main loop records the failure and
+    schedules a follow-up reconcile pass while the indexer stays available.
 
     Sync function — the caller uses ``asyncio.to_thread`` so the event
     loop is not blocked from serving the health probe (`/healthz`).
@@ -395,7 +399,7 @@ def _commit_files(
 
     Delete-first is deliberate: if the upsert then fails, the file's
     surviving rows still carry the OLD content hash, so `all_meta` keeps
-    disagreeing with the file and the next fs event / cold-start reconcile
+    disagreeing with the file and the next fs event / reconcile
     re-embeds it. An upsert-first failure would leave the tail while the new
     rows' mtime/hash make the file look current — the reconcile-blind state
     issue #1946 is about.
@@ -420,10 +424,66 @@ def _kind_limits(rows: list[tuple[float, str, str, int, str]]) -> dict[str, int]
     return limits
 
 
-def _cold_start_reconcile(
+class _ReconcileRetrySchedule:
+    """Bounded-backoff schedule for follow-up reconcile passes.
+
+    The daemon keeps at most one follow-up pass scheduled. A pass that ran and
+    could not finish the dirty set raises the backoff
+    (base_s * 2 ** (n - 1), capped at cap_s); a completed pass resets it. A
+    drain-batch embed failure only makes sure a pass is scheduled (it never
+    moves an already-pending one).
+    """
+
+    def __init__(
+        self, *, base_s: float, cap_s: float, clock: Callable[[], float] = time.monotonic
+    ) -> None:
+        self._base_s = base_s
+        self._cap_s = cap_s
+        self._clock = clock
+        self._delay: float | None = None
+        self._next_at: float | None = None
+
+    @property
+    def pending(self) -> bool:
+        return self._next_at is not None
+
+    def due(self) -> bool:
+        return self._next_at is not None and self._clock() >= self._next_at
+
+    def record_pass_incomplete(self) -> float:
+        # Doubling the capped delay implements the formula without an exponent
+        # that overflows after a long quota outage.
+        self._delay = min(self._base_s if self._delay is None else self._delay * 2, self._cap_s)
+        self._next_at = self._clock() + self._delay
+        return self._delay
+
+    def record_pass_complete(self) -> None:
+        self._delay = None
+        self._next_at = None
+
+    def ensure_scheduled(self) -> float | None:
+        return None if self.pending else self.record_pass_incomplete()
+
+    def retry_in_s(self) -> float | None:
+        return None if self._next_at is None else max(0.0, self._next_at - self._clock())
+
+
+def _reconcile_health(retry: _ReconcileRetrySchedule) -> dict[str, object]:
+    """Reconcile retry state for /healthz — informational, never gates 503."""
+    retry_in = retry.retry_in_s()
+    return {
+        "reconcile_pending": retry.pending,
+        "reconcile_retry_in_s": None if retry_in is None else round(retry_in, 1),
+    }
+
+
+def _reconcile(
     backend: MemorySearchBackend, provider: EmbeddingProvider, liveness: Liveness
-) -> None:
-    """Diff disk vs index db; fill in gaps. Runs once on daemon start (in a thread executor).
+) -> bool:
+    """Diff disk vs index db; fill gaps at cold start and on scheduled follow-up passes.
+
+    Runs in a thread executor. Returns True when the dirty set finishes, False
+    when an embed failure truncates the pass so the main loop can schedule a retry.
 
     Rows whose path is outside the watched root are pruned even though the
     files still exist on disk (see `_process_paths`): they are leftovers
@@ -435,8 +495,8 @@ def _cold_start_reconcile(
     another semantic space (a provider switch), so every row must be
     re-embedded.
 
-    The dirty set is worked in file-granular chunks (`_COLD_START_CHUNK_PATHS`),
-    beating `liveness` before and after each chunk: the reconcile runs before
+    The dirty set is worked in file-granular chunks (`_RECONCILE_CHUNK_PATHS`),
+    beating `liveness` before and after each chunk: cold-start reconcile runs before
     the drain loop starts its own beats, and a full rebuild outlives the
     liveness ceiling — an un-beaten rebuild read as a stalled loop, so the
     watchdog killed the daemon mid-rebuild and it restarted from zero
@@ -468,22 +528,24 @@ def _cold_start_reconcile(
             dirty.add(path)
 
     if dirty:
-        _log.info("[indexer] cold-start reconcile: %d dirty paths", len(dirty))
+        _log.info("[indexer] reconcile: %d dirty paths", len(dirty))
         # Sorted for a deterministic chunk order; boundaries fall between
         # paths, and a path is one whole file, so no file is ever split
         # across chunks (`_process_paths` commits a file's rows as one unit).
         ordered = sorted(dirty, key=str)
         try:
-            for i in range(0, len(ordered), _COLD_START_CHUNK_PATHS):
-                chunk = set(ordered[i : i + _COLD_START_CHUNK_PATHS])
+            for i in range(0, len(ordered), _RECONCILE_CHUNK_PATHS):
+                chunk = set(ordered[i : i + _RECONCILE_CHUNK_PATHS])
                 liveness.beat()  # per chunk: a rebuild outlives the liveness ceiling
                 _process_paths(backend, chunk, provider)
                 liveness.beat()  # chunk committed -> the rebuild is progressing
         except EmbeddingAPIError as exc:
             _log.error(
-                "[indexer] cold-start embed failed: %r — daemon continues; watchdog re-triggers later",
+                "[indexer] reconcile embed failed: %r — daemon continues; a follow-up pass will retry",
                 exc,
             )
+            return False
+    return True
 
 
 def _refresh_gateway_checkout() -> None:
@@ -528,6 +590,7 @@ async def _drain_loop(
     dirty_queue: queue.Queue[Path],
     liveness: Liveness,
     provider: EmbeddingProvider,
+    retry: _ReconcileRetrySchedule,
 ) -> None:
     """Main loop: every _LOOP_INTERVAL_S drain queue, dedup, batch process.
 
@@ -545,6 +608,17 @@ async def _drain_loop(
         if now >= next_checkout_refresh:
             next_checkout_refresh = now + _CHECKOUT_REFRESH_INTERVAL_S
             await asyncio.to_thread(_refresh_gateway_checkout)
+        # Waiting is safe: every loop tick keeps beating liveness until due.
+        if retry.due():
+            # Cancellation stays prompt; an in-flight to_thread worker finishes
+            # in the background, and asyncio.run joins the executor at exit.
+            complete = await asyncio.to_thread(_reconcile, backend, provider, liveness)
+            if complete:
+                retry.record_pass_complete()
+                _log.info("[indexer] follow-up reconcile complete: gap closed; retries cleared")
+            else:
+                delay = retry.record_pass_incomplete()
+                _log.warning("[indexer] reconcile incomplete; retry scheduled in %.1fs", delay)
         batch: set[Path] = set()
         # Drain the queue until empty — queue.Empty is the loop terminator.
         with suppress(queue.Empty):
@@ -564,6 +638,11 @@ async def _drain_loop(
                 ", ".join(str(p) for p in sorted(batch)[:5]) + ("..." if len(batch) > 5 else ""),
                 exc,
             )
+            # Failed paths stay dirty on disk; reconcile re-derives them from
+            # the disk-vs-index diff, even if no further fs events arrive.
+            delay = retry.ensure_scheduled()
+            if delay is not None:
+                _log.warning("[indexer] follow-up reconcile scheduled in %.1fs", delay)
 
 
 async def _connect_backend_with_retry(
@@ -624,7 +703,13 @@ async def run() -> None:
     _log.info("[indexer] pidfile written: %s", _PIDFILE)
 
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
-    health = await start_health_server("memory_indexer", liveness=liveness)
+    retry = _ReconcileRetrySchedule(
+        base_s=settings.services.memory_indexer_reconcile_retry_backoff_seconds,
+        cap_s=settings.services.memory_indexer_reconcile_retry_backoff_cap_seconds,
+    )
+    health = await start_health_server(
+        "memory_indexer", liveness=liveness, extra=lambda: _reconcile_health(retry)
+    )
     _log.info("[indexer] healthz listening on :%s", health_port("memory_indexer"))
 
     _MEMORY_ROOT.mkdir(parents=True, exist_ok=True)
@@ -666,8 +751,10 @@ async def run() -> None:
     _log.info("[indexer] watching %s", _MEMORY_ROOT)
 
     try:
-        await asyncio.to_thread(_cold_start_reconcile, backend, provider, liveness)
-        await _drain_loop(backend, dirty_queue, liveness, provider)
+        if not await asyncio.to_thread(_reconcile, backend, provider, liveness):
+            delay = retry.record_pass_incomplete()
+            _log.warning("[indexer] startup reconcile incomplete; retry scheduled in %.1fs", delay)
+        await _drain_loop(backend, dirty_queue, liveness, provider, retry=retry)
     finally:
         observer.stop()
         observer.join(timeout=5.0)
