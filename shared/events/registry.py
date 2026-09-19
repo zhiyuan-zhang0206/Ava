@@ -457,6 +457,30 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         "durable terminated flip already committed",
         tier="noise",
     ),
+    # crash-recovery wake family (task #4039) — the reap commits the death's
+    # near-field recovery wake; the service layer consumes it right after
+    "crash_recovery_wake_queued": _telemetry(
+        "crash_recovery_wake_queued",
+        "the corpse reaper committed a crash death's recovery wake — one "
+        "system-source chat carrying the hosted_turn_recovery marker — inside "
+        "the terminating transaction, so a committed reap always has a wake "
+        "to resume its owner (task #4039)",
+        tier="observation",
+    ),
+    "crash_recovery_wake_attempted": _telemetry(
+        "crash_recovery_wake_attempted",
+        "the service layer attempted the guarded auto-resurrect for a reaped "
+        "corpse's committed recovery wake; carries the status the attempt "
+        "returned (task #4039)",
+        tier="observation",
+    ),
+    "crash_recovery_wake_deferred": _telemetry(
+        "crash_recovery_wake_deferred",
+        "a reaped corpse's guarded resurrect attempt failed — the wake row "
+        "stays pending for the delivery watchdog's terminated-owner retry "
+        "until the stale age gate (task #4039)",
+        tier="observation",
+    ),
     "host_recrash_reap_skipped": _telemetry(
         "host_recrash_reap_skipped",
         "the recrash prompt reap skipped terminating a re-crashed corpse "
