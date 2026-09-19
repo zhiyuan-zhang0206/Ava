@@ -77,6 +77,16 @@ P3/P4 call positions (migration receipt, selector CAS, normal start/observe,
 `record_pending_unit_readback`) immediately behind the checked-activation gate;
 the gate remains the only blocker, and no production path reaches them yet.
 
+The P5 completion seat, `commit_pending_publication`, lives in the same module:
+once the units recorded their normal-service readbacks, the coordinator reads
+the journaled set and publishes exactly the complete readbacks through
+`commit_current` — a partial set refuses, because an incomplete activation is
+checked recovery's to clear. The seat writes no deployment phase, holder or
+lease: ordinary admission stays deferred until the existing finalizer's release
+settles the phase, and that release's pending guard is exactly what the commit
+clears. It is inert on the same terms: no production module imports it until the
+rollout wiring slice connects the post-Phase-B step.
+
 No production migration, normal service activation or protocol advertisement
 is performed by importing or testing these helpers.
 

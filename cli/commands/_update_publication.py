@@ -1,22 +1,26 @@
-"""The P1 journal seat: assemble and open a complete pending publication.
+"""The publication seats: open the P1 journal, commit the P5 completion.
 
 `begin_pending_publication` (`shared/managed_writer_publication.py`) accepts an
 already-assembled `PendingPublication`, but nothing produced one: the sole
 callers were tests, and no production component assembled the registered-fleet
 plan or minted the single observation challenge the collection step must echo.
-This module is that seat for the existing updater's Phase-0 window.
 `build_pending_publication` derives the journaled unit tuples from per-unit
 prepared facts; `open_pending_publication` opens the journal inside the caller's
-transaction.
+transaction — the P1 seat for the existing updater's Phase-0 window.
 
-It is inert until the rollout wiring slice connects it: no production module
-imports it, and it performs no filesystem or network work — prepared facts are
-expected inventory, not closure or permission. The live-lease fence, registered
-unit coverage and the same-operation retry rule remain owned by
-`begin_pending_publication`/`lock_rollout`; this seat only supplies the plan.
-The caller owns the transaction and the short-lock discipline: nothing may run
-while the deployment/registry locks are held, and delivery is the caller's
-commit.
+`commit_pending_publication` is the P5 complement for the post-Phase-B window:
+once the units recorded their normal-service readbacks, it reads the journaled
+set and publishes exactly the complete readbacks through `commit_current`,
+leaving the deployment phase and lease with the existing finalizer.
+
+Both seats are inert until the rollout wiring slice connects them: no production
+module imports this module, and it performs no filesystem or network work —
+prepared facts are expected inventory, not closure or permission. The live-lease
+fence, registered unit coverage and the same-operation retry rule remain owned
+by `begin_pending_publication`/`lock_rollout`; the seats only supply the plan
+and the completion. The caller owns the transaction and the short-lock
+discipline: nothing may run while the deployment/registry locks are held, and
+delivery is the caller's commit.
 """
 
 from __future__ import annotations
@@ -28,6 +32,10 @@ from uuid import UUID, uuid4
 
 import psycopg
 
+from shared.managed_writer_activation import (
+    commit_current,
+    read_pending_unit_readbacks,
+)
 from shared.managed_writer_barrier import Digest, ManagedWriterBarrierError, RolloutIdentity
 from shared.managed_writer_publication import (
     CandidateUnitPlan,
@@ -185,3 +193,32 @@ def open_pending_publication(
     )
     begin_pending_publication(conn, pending)
     return pending
+
+
+def commit_pending_publication(conn: psycopg.Connection) -> UUID | None:
+    """Commit the complete pending publication; skip when there is none.
+
+    The all-unit coordinator step for the existing updater's post-Phase-B
+    window: once the units have recorded their normal-service readbacks, the
+    coordinator reads the journaled set and publishes exactly the complete
+    readbacks through ``commit_current``. Without a pending entry there is
+    nothing to commit — a stop-only rollout, or a replayed call after a
+    successful commit — and the caller continues to finalization; ordinary
+    admission stays deferred until the existing finalizer's release marks the
+    phase stable. A partial set refuses (fail-closed): an incomplete activation
+    is checked recovery's to clear, never this seat's to publish or drop.
+
+    Requires the caller's transaction (like the journal seat): the journal
+    read, the readback revalidation and the commit share one short lock window
+    with no filesystem or network work.
+    """
+    state = _locked_publication(conn)
+    pending = state.pending
+    if pending is None:
+        return None
+    readbacks = read_pending_unit_readbacks(conn, pending.operation, pending.challenge)
+    if tuple(item.selector.unit for item in readbacks) != pending.units:
+        raise ManagedWriterBarrierError(
+            "pending publication is not ready to commit: unit readbacks are incomplete"
+        )
+    return commit_current(conn, pending.operation, pending.challenge, readbacks)
