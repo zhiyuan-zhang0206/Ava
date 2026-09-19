@@ -236,6 +236,48 @@ class _ServiceRuntimeSettings(EnvSettings):
         },
     )
 
+    memory_indexer_reconcile_retry_backoff_seconds: float = Field(
+        default=60.0,
+        gt=0,
+        alias="AVA_MEMORY_INDEXER_RECONCILE_RETRY_BACKOFF_SECONDS",
+        description=(
+            "Base delay before the indexer daemon retries an incomplete reconcile "
+            "pass. The first incomplete signal uses this base; consecutive "
+            "signals (incomplete passes or drain failures that arm an idle "
+            "schedule) double the delay, capped by "
+            "memory_indexer_reconcile_retry_backoff_cap_seconds. The 60s base "
+            "covers a per-minute embedding quota window; consecutive failures "
+            "back off to the cap. Takes effect on indexer restart."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    memory_indexer_reconcile_retry_backoff_cap_seconds: float = Field(
+        default=900.0,
+        gt=0,
+        alias="AVA_MEMORY_INDEXER_RECONCILE_RETRY_BACKOFF_CAP_SECONDS",
+        description=(
+            "Ceiling of the reconcile retry backoff. 15min bounds the steady-state "
+            "cost of a long-exhausted quota (e.g. a daily limit) at one probe round "
+            "per 15 minutes, with the next attempt starting within 15 minutes "
+            "of the quota resetting — the daemon never needs a restart to "
+            "close the gap. Takes effect on indexer restart."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     page_server_health_url: str = Field(
         default="",
         alias="AVA_PAGE_SERVER_HEALTH_URL",
