@@ -26,7 +26,8 @@ from the declaration. `--provider` selects `codex` or `claude` relay transport.
 Codex's own thread UUID is a provider address, not the Ava session handle.
 Preserve `CODEX_HOME` and optionally supply `--codex-remote` so the native relay
 reaches the owning server. Claude starts its Monitor relay immediately after the
-request. See [host setup](agent-impersonation-hosts.md).
+request, armed with `timeout_ms: 1800000` and re-armed at each expiry notice.
+See [host setup](agent-impersonation-hosts.md).
 
 The response returns a per-agent integer `id` / `session_id`, starting at zero.
 There is no controller credential: control commands are authorized by the
