@@ -71,7 +71,7 @@ Application layer — the Loki event stream plus the LLM latency histogram:
 | `ava-ops-turn-duration-p95` | `ava-ops-slow` | Turn duration p95 (collective slowdown) | histogram p95 > 75s for 10m (Prometheus, 24h baseline 37.6s × 2) | 10m | warning |
 | `ava-ops-gw-latency-slow-warning` | `ava-ops-slow` | Gateway latency: slow route p95 | p95 > 5s for 5m (Loki, slow route class) | 5m | warning |
 | `ava-ops-gw-latency-slow-error` | `ava-ops-slow` | Gateway latency: slow route p95 | p95 > 10s for 5m (same route class) | 5m | error |
-| `ava-ops-tempo-backend-down` | `ava-ops-slow` | remote Tempo backend reachable | up{job="tempo"}=0 for 1h (Prometheus) | 1h | warning |
+| `ava-ops-tempo-backend-down` | `ava-ops-slow` | Tempo backend reachable | up{job="tempo"}=0 for 1h (Prometheus) | 1h | warning |
 | `ava-ops-events-low-water` | `ava-ops` | event stream below low-water mark | count in 5m < 150 (Loki) | 10m | warning |
 | `ava-ops-fleet-graph-stale` | `ava-ops` | fleet graph served stale | `fleet_graph_stale` episodes in 10m > 1 (Loki) | 0m | warning |
 | `ava-ops-telemetry-queue-loss` | `ava-ops` | telemetry queue lost events | a machine+process+queue's last drop < 300s old (Prometheus) | 0s | error |

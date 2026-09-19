@@ -260,7 +260,7 @@ Editing a file here and checking out on the LGTM host is the deployment —
 except `ava-ops-main.json`, which converge generates from the metric
 registries (edit the specs, not the JSON). The `uid` must stay `ava-ops-main`, and
 datasource uids must match `datasources.yml`. Loki and Prometheus datasource
-URLs use host loopback; Tempo is the remote WSL trace backend.
+URLs use host loopback; Tempo is the station-native trace backend.
 
 ## Import / update
 
