@@ -2,7 +2,8 @@
 
 All session records are retained, including disabled and no-longer-declared
 services. OS registrations are collected separately from the desired roster.
-Unknown ownership and unsupported platforms refuse before a receipt is written.
+Machine-level registrations and this home's keeper are classified and recorded;
+unknown ownership and unsupported platforms refuse before a receipt is written.
 """
 
 from __future__ import annotations
@@ -13,12 +14,13 @@ import platform
 import plistlib
 import sys
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
-from typing import cast
+from pathlib import Path, PurePosixPath
+from typing import Literal, cast
 
 import psycopg
 
 from shared.managed_writer_observation import (
+    ExcludedRegistration,
     ExpectedLauncher,
     ExpectedProcess,
     ExpectedSession,
@@ -63,11 +65,57 @@ def _sessions(home: Path) -> tuple[ExpectedSession, ...]:
     return tuple(result)
 
 
-def _launchd(home: Path) -> tuple[ExpectedLauncher, ...]:
+def _registration_role(environment: object, home: Path) -> Literal["unit", "machine", "keeper"]:
+    """Classify one com.ava.* registration from its declared environment.
+
+    Exactly one declaration decides the role: this home's AVA_HOME for a unit
+    launcher, AVA_JOB_SCOPE=machine for a machine-level registration, or this
+    home's own AVA_PERMISSIONS_HELPER_SOCKET for the keeper. Conflicting and
+    unknown declarations refuse; unknown ownership never passes silently.
+    """
+    if not isinstance(environment, dict):
+        raise ReleaseRejectedError("launchd registration environment is not a dictionary")
+    declared = cast("dict[str, object]", environment)
+    declared_home = declared.get("AVA_HOME")
+    scope = declared.get("AVA_JOB_SCOPE")
+    keeper_socket = declared.get("AVA_PERMISSIONS_HELPER_SOCKET")
+    if sum(value is not None for value in (declared_home, scope, keeper_socket)) > 1:
+        raise ReleaseRejectedError("launchd registration has conflicting ownership declarations")
+    if scope is not None:
+        if scope != "machine":
+            raise ReleaseRejectedError("launchd registration declares an unknown job scope")
+        return "machine"
+    if keeper_socket is not None:
+        if (
+            not isinstance(keeper_socket, str)
+            or not PurePosixPath(keeper_socket).is_absolute()
+            or ".." in PurePosixPath(keeper_socket).parts
+            or str(PurePosixPath(keeper_socket)) != keeper_socket
+        ):
+            raise ReleaseRejectedError("permissions helper registration socket is malformed")
+        if not keeper_socket.startswith(f"{home}/run/permissions-helper."):
+            raise ReleaseRejectedError("permissions helper registration belongs to another home")
+        return "keeper"
+    if declared_home == str(home):
+        return "unit"
+    raise ReleaseRejectedError("Ava launchd registration has unknown or other unit home")
+
+
+def _launchd(
+    home: Path,
+) -> tuple[tuple[ExpectedLauncher, ...], tuple[ExcludedRegistration, ...]]:
+    """Classify every com.ava.* registration in this user's LaunchAgents directory.
+
+    Only a registration declaring this exact home is a unit launcher. Machine
+    scope and this home's keeper are recorded as explicit receipt exclusions;
+    any other declaration refuses. Every loaded com.ava.* label must resolve to
+    a classified definition.
+    """
     directory = Path.home() / "Library/LaunchAgents"
     if directory.resolve(strict=True) != directory:
         raise ReleaseRejectedError("launchd inventory directory is not canonical")
     result: list[ExpectedLauncher] = []
+    excluded: list[ExcludedRegistration] = []
     for path in sorted(directory.glob("*.plist")):
         encoded = _regular_bytes(path)
         raw = plistlib.loads(encoded)
@@ -78,28 +126,29 @@ def _launchd(home: Path) -> tuple[ExpectedLauncher, ...]:
             continue
         if path.name != f"{label}.plist" or read_launchd_definition(label) != encoded:
             raise ReleaseRejectedError("launchd definition identity changed")
-        environment = raw.get("EnvironmentVariables", {})
-        # Legacy labels with no explicit home cannot be silently classified as
-        # another unit. Their ownership requires an explicit migration first.
-        if environment.get("AVA_HOME") != str(home):
-            raise ReleaseRejectedError("Ava launchd registration has unknown or other unit home")
-        result.append(
-            ExpectedLauncher(
-                kind="launchd", name=label, definition_digest=hashlib.sha256(encoded).hexdigest()
+        digest = hashlib.sha256(encoded).hexdigest()
+        role = _registration_role(raw.get("EnvironmentVariables", {}), home)
+        if role == "unit":
+            result.append(ExpectedLauncher(kind="launchd", name=label, definition_digest=digest))
+        else:
+            excluded.append(
+                ExcludedRegistration(label=label, definition_digest=digest, classification=role)
             )
-        )
     deadline = datetime.now(UTC) + timedelta(seconds=10)
     before = read_launchd_labels(deadline)
     after = read_launchd_labels(deadline)
     if before != after:
         raise ReleaseRejectedError("loaded launcher inventory changed")
     loaded = {label for label in after if label.startswith("com.ava.")}
-    if not loaded <= {item.name for item in result}:
+    inventoried = {item.name for item in result} | {item.label for item in excluded}
+    if not loaded <= inventoried:
         raise ReleaseRejectedError("loaded Ava job has no inventoried definition")
-    return tuple(result)
+    return tuple(result), tuple(excluded)
 
 
-def _launchers(home: Path) -> tuple[ExpectedLauncher, ...]:
+def _launchers(
+    home: Path,
+) -> tuple[tuple[ExpectedLauncher, ...], tuple[ExcludedRegistration, ...]]:
     if sys.platform == "darwin":
         return _launchd(home)
     if sys.platform != "linux":
@@ -115,7 +164,7 @@ def _launchers(home: Path) -> tuple[ExpectedLauncher, ...]:
             raise ReleaseRejectedError("unclassified or legacy Ava cron registration")
         digest = hashlib.sha256(line.encode()).hexdigest()
         result.append(ExpectedLauncher(kind="crontab", name=digest, definition_digest=digest))
-    return tuple(result)
+    return tuple(result), ()
 
 
 def _service_roster() -> list[dict[str, object]]:
@@ -132,6 +181,27 @@ def _service_roster() -> list[dict[str, object]]:
     if not roster or len({str(row["session"]) for row in roster}) != len(roster):
         raise ReleaseRejectedError("empty or conflicting candidate service roster")
     return sorted(roster, key=lambda row: str(row["session"]))
+
+
+def _receipt_body(
+    expected: ExpectedUnitWriters,
+    excluded: tuple[ExcludedRegistration, ...],
+    roster: list[dict[str, object]],
+) -> dict[str, object]:
+    """Assemble the sealed receipt body; PreparationReceipt is its consumer contract."""
+    return {
+        "version": 1,
+        "expected": expected.model_dump(mode="json"),
+        "services": roster,
+        "excluded_registrations": [entry.model_dump(mode="json") for entry in excluded],
+        "inventory_digest": expected.unit().inventory_digest,
+        "closure": "unknown",
+        "unresolved": [
+            "non-session managed processes and predecessor orchestrator",
+            "system-level or alternate-user relaunchers",
+            "positive platform launcher shutdown observation",
+        ],
+    }
 
 
 def collect_inventory(
@@ -165,7 +235,7 @@ def collect_inventory(
     if unit != (str(home),):
         raise ReleaseRejectedError("inventory unit is not registered")
     sessions = _sessions(home)
-    launchers = _launchers(home)
+    launchers, excluded = _launchers(home)
     if not launchers and not allow_empty_launchers:
         raise ReleaseRejectedError("empty launcher inventory is not complete coverage")
     # Exact recorded processes are stable across separate prepare/revalidate
@@ -188,22 +258,11 @@ def collect_inventory(
         final_unit != unit
         or (home / "machine_name").read_text().strip() != machine
         or sessions != _sessions(home)
-        or launchers != _launchers(home)
+        or (launchers, excluded) != _launchers(home)
         or roster != _service_roster()
     ):
         raise ReleaseRejectedError("unit inventory changed during preparation")
-    return {
-        "version": 1,
-        "expected": expected.model_dump(mode="json"),
-        "services": roster,
-        "inventory_digest": expected.unit().inventory_digest,
-        "closure": "unknown",
-        "unresolved": [
-            "non-session managed processes and predecessor orchestrator",
-            "system-level or alternate-user relaunchers",
-            "positive platform launcher shutdown observation",
-        ],
-    }
+    return _receipt_body(expected, excluded, roster)
 
 
 def _write_prepared_inventory(home: Path, inventory: dict[str, object]) -> Path:

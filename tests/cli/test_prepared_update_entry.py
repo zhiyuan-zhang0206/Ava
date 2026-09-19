@@ -226,6 +226,7 @@ def test_image_keeps_full_receipt_and_writer_inventory_digests_distinct(
         version=1,
         expected=expected,
         services=(PreparedService(session="ava-ops", requires_db=True, gate=None),),
+        excluded_registrations=(),
         inventory_digest=expected.unit().inventory_digest,
         closure="unknown",
         unresolved=("writer closure",),
