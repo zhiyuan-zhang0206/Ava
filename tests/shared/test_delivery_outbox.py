@@ -12,12 +12,14 @@ import json
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import Mock
 
 import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
 from shared import delivery_outbox as outbox
+from shared.chat_delivery import insert_chat_inbound_once
 from shared.config import settings
 from shared.db import create_agent
 
@@ -303,6 +305,7 @@ def test_flush_abandons_at_budget_after_the_failed_attempt(
     entry = outbox._read(path)
     assert entry is not None
     assert entry.state == "abandoned" and entry.abandon_reason == "budget"
+    assert entry.abandon_detail == "data plane down"
     assert entry.flush_attempts == 1
     assert _inbounds(db_conn, agent_id) == []
     # An abandoned record is terminal — later passes leave it alone.
@@ -351,6 +354,7 @@ def test_flush_past_budget_not_due_defers_until_the_attempt(
     entry = outbox._read(path)
     assert entry is not None
     assert entry.abandon_reason == "budget" and entry.flush_attempts == 3
+    assert entry.abandon_detail == "data plane down"
 
 
 def test_flush_expires_abandoned_records_after_retention(
@@ -428,6 +432,59 @@ def test_flush_abandons_missing_agent(
     assert report.abandoned == 1
     entry = outbox._read(path)
     assert entry is not None and entry.abandon_reason == "agent_missing"
+    # Detected by the flusher itself — no upstream message exists; detail stays None.
+    assert entry.abandon_detail is None
+
+
+def test_flush_abandons_caller_protocol_carrying_the_refusal_detail(
+    journal: Path,
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A gate refusal keeps its stable code AND carries the readable refusal
+    text (task #4095): the record explains itself without a log dig."""
+    emit = Mock()
+    monkeypatch.setattr("shared.telemetry.emit", emit)
+    agent_id = _agent(db_conn)
+    path = _record(agent_id=agent_id, source="external_agent:codex:run-42", now=_NOW)
+    assert path is not None
+    report = outbox.flush(pool, now=_NOW + timedelta(seconds=31))
+    assert report.abandoned == 1
+    entry = outbox._read(path)
+    assert entry is not None
+    assert entry.abandon_reason == "caller_protocol"
+    assert entry.abandon_detail is not None
+    assert entry.abandon_detail.startswith("target runtime protocol")
+    abandoned = [c for c in emit.call_args_list if c.args[1] == "delivery_outbox_abandoned"]
+    assert len(abandoned) == 1
+    attributes = abandoned[0].kwargs["attributes"]
+    assert attributes["reason"] == "caller_protocol"
+    assert attributes["detail"] == entry.abandon_detail
+
+
+def test_flush_abandons_key_conflict_carrying_the_conflict_detail(
+    journal: Path, db_conn: psycopg.Connection, pool: ConnectionPool
+) -> None:
+    """The conflict message (which field diverged) reaches the record too."""
+    agent_id = _agent(db_conn)
+    insert_chat_inbound_once(
+        db_conn,
+        agent_id=agent_id,
+        content="a different message",
+        source="user",
+        payload=None,
+        client_message_id="key-1",
+    )
+    path = _record(agent_id=agent_id, key="key-1", now=_NOW)
+    assert path is not None
+    report = outbox.flush(pool, now=_NOW + timedelta(seconds=31))
+    assert report.abandoned == 1
+    entry = outbox._read(path)
+    assert entry is not None
+    assert entry.abandon_reason == "key_conflict"
+    assert entry.abandon_detail is not None
+    assert "already identifies a different message" in entry.abandon_detail
 
 
 def test_flush_delivers_to_terminated_owner(
@@ -506,3 +563,15 @@ def test_flush_continues_past_a_corrupt_timestamp_record(
     report = outbox.flush(pool, now=_NOW + timedelta(seconds=31))
     assert report.delivered == 1 and report.unreadable == 1
     assert not good.exists() and corrupt.exists()
+
+
+def test_read_defaults_absent_abandon_detail(journal: Path) -> None:
+    """Records written before the detail field (schema stays 1) still parse:
+    the missing key reads as None instead of turning the record unreadable."""
+    path = _record(agent_id=7, now=_NOW)
+    assert path is not None
+    raw = json.loads(path.read_text())
+    del raw["abandon_detail"]
+    path.write_text(json.dumps(raw))
+    entry = outbox._read(path)
+    assert entry is not None and entry.abandon_detail is None
