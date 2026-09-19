@@ -114,7 +114,7 @@ def _telemetry(
 
 
 _EVENTS_RUNTIME: dict[str, EventSpec] = {
-    # ── audit (category=audit, 18) — registry.md §2, append-only operations ──
+    # ── audit (category=audit, 27) — registry.md §2, append-only operations ──
     # The lineage class (retention_class="lineage"): spawn/fork/resurrect plus
     # the ops-mirror names of the same two facts (agent_spawned /
     # agent_resurrected, emitted telemetry-side). The mirrors are bundled
@@ -184,6 +184,14 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
     "mcp_tool_call": _audit(
         "mcp_tool_call",
         "MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted)",
+    ),
+    "managed_writer_recovery_claimed": _audit(
+        "managed_writer_recovery_claimed",
+        "recovery claimed the abandoned rollout lease holding a durable pending publication",
+    ),
+    "managed_writer_recovery_completed": _audit(
+        "managed_writer_recovery_completed",
+        "recovery replaced the abandoned pending publication under a new lease and closure",
     ),
     # ── telemetry (category=telemetry) — registry.md §3 ──
     # frontend user modeling
