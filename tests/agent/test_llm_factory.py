@@ -21,7 +21,12 @@ from pydantic import SecretStr
 
 from shared.config import settings
 from shared.lm._plugin_providers import ensure_provider_plugins_loaded
-from shared.lm.factory import _resolve_override, build_chat_model, validate_model_config
+from shared.lm.factory import (
+    _resolve_override,
+    build_chat_model,
+    close_chat_model,
+    validate_model_config,
+)
 from shared.lm.registry import SUPPORTED_MODELS, resolve_setting
 
 ensure_provider_plugins_loaded()
@@ -1648,3 +1653,62 @@ class TestThinkingDisabledAcrossRoster:
         assert isinstance(llm, ChatGoogleGenerativeAI)
         assert llm.thinking_level == "low"
         assert llm.include_thoughts is False
+
+
+class _SpyClient:
+    """Provider-client stand-in recording `close()` calls (sync or async)."""
+
+    def __init__(self, *, async_close: bool = False) -> None:
+        self.closed = 0
+        self._async_close = async_close
+
+    def close(self) -> object:
+        if self._async_close:
+            return self._aclose()
+        self.closed += 1
+        return None
+
+    async def _aclose(self) -> None:
+        self.closed += 1
+
+
+class TestCloseChatModel:
+    """`close_chat_model` releases the provider clients a chat model holds.
+
+    Contract: only clients the instance actually holds are closed — a lazy
+    `cached_property` client the model never used must not be materialized
+    just to be closed; teardown is best-effort (a failing close is logged and
+    never propagates).
+    """
+
+    def test_closes_a_held_sync_client(self) -> None:
+        spy = _SpyClient()
+        close_chat_model(types.SimpleNamespace(_client=spy))
+        assert spy.closed == 1
+
+    def test_drives_an_async_close_to_completion(self) -> None:
+        spy = _SpyClient(async_close=True)
+        close_chat_model(types.SimpleNamespace(_async_client=spy))
+        assert spy.closed == 1
+
+    def test_closes_each_distinct_client_once(self) -> None:
+        spy = _SpyClient()
+        close_chat_model(types.SimpleNamespace(client=spy, root_client=spy))
+        assert spy.closed == 1
+
+    def test_does_not_materialize_an_unused_lazy_client(self) -> None:
+        class LazyModel:
+            @property
+            def _client(self) -> object:
+                raise AssertionError("a client the model never used must not be touched")
+
+        close_chat_model(LazyModel())
+
+    def test_a_failing_close_is_logged_and_the_rest_still_close(self) -> None:
+        class BoomClient:
+            def close(self) -> None:
+                raise RuntimeError("boom")
+
+        spy = _SpyClient()
+        close_chat_model(types.SimpleNamespace(_client=BoomClient(), client=spy))
+        assert spy.closed == 1

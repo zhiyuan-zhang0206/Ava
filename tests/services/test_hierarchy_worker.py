@@ -340,6 +340,81 @@ def test_execute_records_failures_on_the_row(
     assert row is not None and row[0] == "failed" and "kaput" in str(row[1])
 
 
+def test_execute_builds_one_model_and_closes_it(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One generation model per job, closed when the run ends (task #3915) —
+    the previous per-chunk builds each leaked an unclosed provider client."""
+    agent_id = 880_023
+    _state(db_conn, agent_id, cid(1))
+    job_id = _make_running_job(db_conn, agent_id, cid(2))
+
+    sentinel = object()
+    built: list[str] = []
+    closed: list[object] = []
+    seen_llm: list[object] = []
+
+    def fake_build(model: str) -> object:
+        built.append(model)
+        return sentinel
+
+    def fake_known(*args: object, **kwargs: object) -> dict[str, str]:
+        return {}
+
+    def fake_tree(*args: object, **kwargs: object) -> MaterializedTree:
+        seen_llm.append(kwargs["llm"])
+        return MaterializedTree(nodes=(), errors=(), pending={}, max_level=1, batches=1)
+
+    def fake_write(*args: object, **kwargs: object) -> int:
+        return 0
+
+    def fake_close(llm: object) -> None:
+        closed.append(llm)
+
+    monkeypatch.setattr(execute_module, "load_known_texts", fake_known)
+    monkeypatch.setattr(execute_module, "build_generation_llm", fake_build)
+    monkeypatch.setattr(execute_module, "close_chat_model", fake_close)
+    monkeypatch.setattr(execute_module, "build_agent_tree", fake_tree)
+    monkeypatch.setattr(execute_module, "write_tree", fake_write)
+
+    assert execute_module.execute_job(job_id) == 0
+    assert built == [settings.lm.hierarchy_model]
+    assert seen_llm == [sentinel]  # the built model is passed in, never None
+    assert closed == [sentinel]
+
+
+def test_execute_closes_the_model_even_when_generation_fails(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The close rides a `finally`: a failed run still releases the client."""
+    agent_id = 880_024
+    _state(db_conn, agent_id, cid(1))
+    job_id = _make_running_job(db_conn, agent_id, cid(2))
+
+    sentinel = object()
+    closed: list[object] = []
+
+    def fake_build(model: str) -> object:
+        return sentinel
+
+    def fake_known(*args: object, **kwargs: object) -> dict[str, str]:
+        return {}
+
+    def fake_tree(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("kaput")
+
+    def fake_close(llm: object) -> None:
+        closed.append(llm)
+
+    monkeypatch.setattr(execute_module, "load_known_texts", fake_known)
+    monkeypatch.setattr(execute_module, "build_generation_llm", fake_build)
+    monkeypatch.setattr(execute_module, "close_chat_model", fake_close)
+    monkeypatch.setattr(execute_module, "build_agent_tree", fake_tree)
+
+    assert execute_module.execute_job(job_id) == 1
+    assert closed == [sentinel]
+
+
 def test_child_round_trip_on_empty_history(db_conn: psycopg.Connection) -> None:
     """A full claim -> child -> done round trip through the real subprocess.
 

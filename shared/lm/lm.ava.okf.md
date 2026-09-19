@@ -30,6 +30,7 @@ tags:
 
 - `shared/lm/registry.py:MODELS` starts empty and is plugin-populated; derived views rebuild in place, so imported readers see new models immediately. A withdrawn model resolves persisted config to its declared spawnable fallback, never after provider failure.
 - `validate_model_config()` — spawn-boundary pre-check (`POST /api/agents`): model registered + key configured, else 400 (fail-fast vs silent hang).
+- `close_chat_model(llm)` — closes a model's provider client(s) when its owner is done (best-effort; only already-materialized clients); the hierarchy worker builds one model per job and closes it at run end (task #3915).
 - Gateway lifespan loads providers; zero bindings raises before the once flag, so a corrected config is retryable.
 - [[media-capabilities.ava.okf.md]] — per-model media resolution and attachment packing.
 - `AVA_LLM_OVERRIDE=mod:factory` injects a fake factory (e2e/multi-instance); key checks skipped.
@@ -61,9 +62,7 @@ LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str,
 - [[shared/lm/provider-plugins.ava.okf.md]] — plugin binding and `key_env`
   delivery contract.
 
-### compatibility layers
-- `_anthropic_compat.py`: `ThinkingTokensChatAnthropic` — ChatAnthropic subclass patching thinking_tokens into usage_metadata (base drops it); shared by claude/deepseek.
-- `_reasoning_compat.py`: `ReasoningContentChatModel` — ChatOpenAI subclass folding delta `reasoning_content` into canonical thinking blocks; **used by glm / mimo / qwen**. kimi uses `langchain-moonshot`; reasoning lands in `additional_kwargs["reasoning_content"]`, handled by fan-out + timeline.
+### compatibility layers — [[compatibility-layers.ava.okf.md]]
 
 ## Notes
 

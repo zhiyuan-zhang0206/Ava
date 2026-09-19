@@ -119,3 +119,7 @@ in `hierarchy_jobs` + `hierarchy_worker_state`.
   as `hierarchy-worker`, the host's `prepare()` as
   `schedule-hierarchy-worker` — so the ledger rows and the worker's own
   records actually reach the event stream (task #3868).
+- **Model lifecycle** (task #3915): a build run constructs its generation
+  model once — the worker's job child (or the manual script) builds it up
+  front and closes its provider client when generation ends — so no HTTP
+  sockets linger past the run.
