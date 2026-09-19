@@ -1,11 +1,13 @@
 """Contract tests for the manual hierarchy build entry (`scripts/build_hierarchy_once.py`).
 
-The engine and the database live behind three entry points the script composes:
-`load_known_texts` -> `build_agent_tree` -> `write_tree`. These tests fake all
-three and lock the script's own contract: dry-run builds but never writes; a
-clean run writes what was built under the resolved model; failed nodes still
-let the rest write and force exit code 1; the report shows levels, triggers and
-a bounded error list; and an empty build says so instead of failing.
+The script composes five entry points: `load_known_texts` -> `build_agent_tree`
+-> `write_tree`, plus the model lifecycle (`build_generation_llm` /
+`close_chat_model`). These tests fake all five and lock the script's own
+contract: dry-run builds but never writes; a clean run writes what was built
+under the resolved model; the model is built once and closed even when the
+build raises; failed nodes still let the rest write and force exit code 1; the
+report shows levels, triggers and a bounded error list; and an empty build says
+so instead of failing.
 """
 
 from __future__ import annotations
@@ -49,10 +51,12 @@ def _tree(
 
 
 class _Recorder:
-    """Captured interactions with the engine and storage entry points."""
+    """Captured interactions with the engine, the model and storage entry points."""
 
     def __init__(self) -> None:
         self.loaded: list[int] = []
+        self.llm_models: list[str] = []
+        self.llm_closes: list[Any] = []
         self.built: list[dict[str, Any]] = []
         self.written: list[dict[str, Any]] = []
 
@@ -62,6 +66,7 @@ def _install_fakes(
     tree: MaterializedTree,
     *,
     known: Mapping[str, str] | None = None,
+    build_error: Exception | None = None,
 ) -> _Recorder:
     rec = _Recorder()
 
@@ -69,12 +74,21 @@ def _install_fakes(
         rec.loaded.append(agent_id)
         return dict(known or {})
 
+    def fake_llm(model: str) -> Any:
+        rec.llm_models.append(model)
+        return object()
+
+    def fake_close(llm: Any) -> None:
+        rec.llm_closes.append(llm)
+
     def fake_build(
         agent_id: int, *, llm: Any, model: str, known_texts: Mapping[str, str] | None
     ) -> MaterializedTree:
         rec.built.append(
             {"agent_id": agent_id, "llm": llm, "model": model, "known_texts": known_texts}
         )
+        if build_error is not None:
+            raise build_error
         return tree
 
     def fake_write(agent_id: int, nodes: Sequence[MaterializedNode], *, model: str) -> int:
@@ -82,6 +96,8 @@ def _install_fakes(
         return len(nodes)
 
     monkeypatch.setattr(build, "load_known_texts", fake_load)
+    monkeypatch.setattr(build, "build_generation_llm", fake_llm)
+    monkeypatch.setattr(build, "close_chat_model", fake_close)
     monkeypatch.setattr(build, "build_agent_tree", fake_build)
     monkeypatch.setattr(build, "write_tree", fake_write)
     return rec
@@ -114,6 +130,8 @@ def test_clean_run_writes_nodes_under_the_resolved_model(
     assert rec.written[0]["agent_id"] == 7
     assert rec.written[0]["nodes"] == nodes
     assert rec.built[0]["model"] == settings.lm.hierarchy_model
+    assert rec.llm_models == [settings.lm.hierarchy_model]
+    assert rec.llm_closes == [rec.built[0]["llm"]]
     assert rec.written[0]["model"] == settings.lm.hierarchy_model
     assert "upserted 2 node row(s)" in capsys.readouterr().out
 
@@ -125,6 +143,7 @@ def test_model_flag_overrides_the_default_model(monkeypatch: pytest.MonkeyPatch)
 
     assert rc == 0
     assert rec.built[0]["model"] == "deepseek-v4-pro"
+    assert rec.llm_models == ["deepseek-v4-pro"]
     assert rec.written[0]["model"] == "deepseek-v4-pro"
 
 
@@ -186,3 +205,13 @@ def test_empty_build_says_so(
 
     assert rc == 0
     assert "nothing built" in capsys.readouterr().out
+
+
+def test_model_closed_even_when_the_build_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    rec = _install_fakes(monkeypatch, _tree(), build_error=RuntimeError("engine exploded"))
+
+    with pytest.raises(RuntimeError, match="engine exploded"):
+        build.main(["--agent-id", "7"])
+
+    assert rec.llm_models == [settings.lm.hierarchy_model]
+    assert rec.llm_closes == [rec.built[0]["llm"]]
