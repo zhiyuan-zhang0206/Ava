@@ -149,7 +149,7 @@ class RedisStreamHandler:
         # is the explicit drain for callers / tests.
         self._coalescer = DeltaCoalescer(self._emit_delta)
         # Whole-call wall-clock (ms) from request start to stream completion,
-        # stamped by `agent.graph._llm._stream_with_cache_retry` after the
+        # stamped by `agent.graph._llm_stream._stream_with_cache_retry` after the
         # call succeeds (retries included). Consumed by
         # `_finalize_turn_observability` → `log_llm_usage(latency_ms=...)` so
         # the llm_usage agent_event carries per-call latency for the ops

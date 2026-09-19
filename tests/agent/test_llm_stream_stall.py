@@ -26,15 +26,16 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import ExecutionInfo, Runtime
 
 from agent.graph import llm_node
-from agent.graph._context import AvaContext
-from agent.graph._llm import (
+from agent.graph._llm_errors import (
     LLMRetryBudgetExceededError,
     LLMStreamStallPairError,
+    _record_stall_pair_streak,
+    _reset_stall_pair_streak,
 )
-from agent.graph._llm_errors import _record_stall_pair_streak, _reset_stall_pair_streak
 from agent.graph._llm_stream import _consume_llm, _consume_stream_with_stall_timeout
 from agent.state import AgentState
 from shared.config import settings
+from shared.context import AvaContext
 from shared.turn_identity import bind_turn_identity
 from tests.agent._fakes import make_fake_ops_pool
 

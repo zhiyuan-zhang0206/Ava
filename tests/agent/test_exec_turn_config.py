@@ -8,13 +8,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agent.graph._context import AvaContext
 from agent.graph._exec import _run_agent_code
 from agent.graph._exec_result import _ExecDone
 from agent.graph._exec_stream import ExecOutputChunkPublisher
 from agent.state import AgentState
 from shared.config import settings
 from shared.config.turn_view import bind_agent_config, resolve_agent_config_pins
+from shared.context import AvaContext
 from shared.plugin_config_view import bind_agent_plugin_config
 from shared.turn_identity import bind_turn_identity
 

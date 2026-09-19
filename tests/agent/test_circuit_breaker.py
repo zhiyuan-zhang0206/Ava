@@ -27,8 +27,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent._runloop import _handle_fatal_llm_error
 from agent.graph import claim_node, llm_node
-from agent.graph._context import AvaContext
-from agent.graph._llm import FatalLLMStreamError, FatalProviderError
+from agent.graph._llm_errors import FatalLLMStreamError, FatalProviderError
 from agent.hooks.compact import (
     _EMERGENCY_COMPACT_MARKER,
     COMPACT_MAX_ATTEMPTS,
@@ -38,6 +37,7 @@ from agent.hooks.compact import (
 )
 from agent.state import AgentState, CircuitState
 from shared.config import settings
+from shared.context import AvaContext
 from shared.event_publisher import AgentEventPublisher
 from tests.agent.test_claim import (
     _compact_tail,

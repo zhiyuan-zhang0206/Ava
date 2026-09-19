@@ -24,8 +24,8 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 from agent.graph import exec_node, llm_node
-from agent.graph._context import AvaContext
 from agent.state import AgentState
+from shared.context import AvaContext
 from shared.live_events import EVENT_ADAPTER, ExecOutput, ExecStart
 from tests.agent._fakes import make_fake_ops_pool
 

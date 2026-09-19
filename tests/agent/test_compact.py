@@ -35,7 +35,6 @@ from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph._claim import BEFORE_LLM, END, claim_node
-from agent.graph._context import AvaContext
 from agent.hooks.compact import (
     COMPACT_MAX_ATTEMPTS,
     COMPACTION_INSTRUCTION,
@@ -47,6 +46,7 @@ from agent.hooks.compact import (
 from agent.llm import execute_code
 from agent.messages import inbound_message
 from agent.state import AgentState, CompactState
+from shared.context import AvaContext
 from shared.lm.context_budget import ContextBudget
 from tests.conftest import spawn_agent
 

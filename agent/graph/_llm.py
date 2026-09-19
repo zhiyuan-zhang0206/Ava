@@ -32,12 +32,12 @@ all plugin fields; using module attribute + deferred annotation evaluation
 picks up the dynamic class rebound by build_agent_state.
 Module layout (Task #1004 >800-line split): streaming consumption, the cancel
 race, chunk assembly + final-message validation, and the error taxonomy /
-consecutive-error tracking moved to the sibling modules ``_llm_stream.py`` /
+consecutive-error tracking live in the sibling modules ``_llm_stream.py`` /
 ``_llm_cancel.py`` / ``_llm_chunk.py`` / ``_llm_errors.py``; this module keeps
-the node entry + turn dispatch (``llm_node``, ``_llm_node_impl``) and
-re-exports the moved names for backward compatibility. ``_llm_cancel`` imports
-``LlmGoto`` from here, so ``_race_stream_vs_cancel`` is imported lazily inside
-``_llm_node_impl`` rather than at module top (keeps the import graph acyclic).
+the node entry + turn dispatch (``llm_node``, ``_llm_node_impl``). ``_llm_cancel``
+imports ``LlmGoto`` from here, so ``_race_stream_vs_cancel`` is imported lazily
+inside ``_llm_node_impl`` rather than at module top (keeps the import graph
+acyclic).
 """
 
 from __future__ import annotations
@@ -58,10 +58,12 @@ from langgraph.types import Command
 import ava
 from agent import state as _state
 from agent._turn_progress import mark_turn_progress
+from agent.nodes import AFTER_EXEC, BEFORE_EXEC
 from agent.observe import log_llm_usage
 from agent.state_channels import CircuitState
 from shared.config import settings
 from shared.config.turn_view import turn_settings
+from shared.context import AvaContext, agent_id_from_config
 from shared.db_transaction import async_write_transaction
 from shared.event_publisher import AgentEventPublisher
 from shared.live_events import TokenUsage
@@ -71,93 +73,20 @@ from shared.log import logger
 from shared.message_kwargs import read_ava_kwargs
 
 from ._callbacks import RedisStreamHandler
-from ._context import AvaContext, agent_id_from_config
-
-# Backward-compat re-exports — these names moved to the split modules
-# (`_llm_errors` / `_llm_stream` / `_llm_chunk`) in the Task #1004 >800-line
-# split but stay importable from `agent.graph._llm` so existing callers and
-# tests keep working. New code should import from the owning module.
-from ._llm_chunk import (
-    _TOOL_CLAIMED_REASONS as _TOOL_CLAIMED_REASONS,
-)
-from ._llm_chunk import (
-    _assemble_final_message,
-)
-from ._llm_chunk import (
-    _sanitize_thinking_blocks as _sanitize_thinking_blocks,
-)
-from ._llm_chunk import (
-    _validate_stop_reason as _validate_stop_reason,
-)
+from ._llm_chunk import _assemble_final_message
 from ._llm_errors import (
-    FatalLLMStreamError as FatalLLMStreamError,
-)
-from ._llm_errors import (
-    FatalProviderError as FatalProviderError,
-)
-from ._llm_errors import (
-    LLMRetryBudgetExceededError as LLMRetryBudgetExceededError,
-)
-from ._llm_errors import (
-    LLMStreamCorruptedError as LLMStreamCorruptedError,
-)
-from ._llm_errors import (
-    LLMStreamError as LLMStreamError,
-)
-from ._llm_errors import (
-    LLMStreamSilentIdleError as LLMStreamSilentIdleError,
-)
-from ._llm_errors import (
-    LLMStreamStallPairError as LLMStreamStallPairError,
-)
-from ._llm_errors import (
-    LLMStreamStallPairExhaustedError as LLMStreamStallPairExhaustedError,
-)
-from ._llm_errors import (
-    LLMStreamStallTimeoutError as LLMStreamStallTimeoutError,
-)
-from ._llm_errors import (
-    LLMStreamTruncatedError as LLMStreamTruncatedError,
-)
-from ._llm_errors import (
-    LLMStreamUnexpectedStopReasonError as LLMStreamUnexpectedStopReasonError,
-)
-from ._llm_errors import (
+    FatalLLMStreamError,
+    FatalProviderError,
+    LLMRetryBudgetExceededError,
+    LLMStreamStallPairError,
     _check_consecutive_error_cap,
     _check_stall_pair_cap,
     _clear_consecutive_errors,
     _reset_stall_pair_streak,
     _stall_pair_streak_active,
 )
-from ._llm_errors import (
-    _classify_and_log_provider_error as _classify_and_log_provider_error,
-)
-from ._llm_errors import (
-    _consecutive_errors as _consecutive_errors,
-)
-from ._llm_errors import (
-    _is_fatal_provider_error_type as _is_fatal_provider_error_type,
-)
-from ._llm_errors import (
-    _parse_provider_error_type as _parse_provider_error_type,
-)
-from ._llm_errors import (
-    _record_consecutive_error as _record_consecutive_error,
-)
-from ._llm_stream import (
-    _ainvoke_single_chunk as _ainvoke_single_chunk,
-)
-from ._llm_stream import (
-    _consume_llm as _consume_llm,
-)
-from ._llm_stream import (
-    _consume_stream_with_stall_timeout as _consume_stream_with_stall_timeout,
-)
-from ._llm_stream import (
-    _stream_with_cache_retry as _stream_with_cache_retry,
-)
+from ._llm_stream import _stream_with_cache_retry
 from ._node_log import node_lifecycle
-from ._nodes import AFTER_EXEC, BEFORE_EXEC
 from ._tool_calls import code_from_args
 
 

@@ -12,11 +12,11 @@ from agent.hooks.compact import CompactionFailedError
 from agent.state import BaseAgentState
 from shared.audit_events import insert_event_log_async
 from shared.config.turn_view import turn_settings
+from shared.context import AvaContext
 from shared.live_events import Error
 from shared.log import logger
 
-from .graph._context import AvaContext
-from .graph._llm import FatalLLMStreamError, FatalProviderError
+from .graph._llm_errors import FatalLLMStreamError, FatalProviderError
 from .state_channels import (
     CIRCUIT_REASON_AUTH,
     CIRCUIT_REASON_BAD_REQUEST,

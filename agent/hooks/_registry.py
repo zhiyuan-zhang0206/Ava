@@ -33,7 +33,7 @@ instances, so a hook that needs a threshold, a counter, or a handle keeps it on
 `self` rather than in a module global.
 
 `config` is used to get agent_id via
-`agent.graph._context.agent_id_from_config(config)` — hooks that need agent
+`shared.context.agent_id_from_config(config)` — hooks that need agent
 identity for things like INSERT inbound / marking agent-scoped events use
 this. Hooks that don't need agent_id (such as pure state-watching
 auto_compact) also take config but don't read; signature unified to keep

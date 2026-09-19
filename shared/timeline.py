@@ -42,7 +42,7 @@ from shared.message_kwargs import (
 from shared.sdk_telemetry import SdkCall, sdk_calls_by_tool_call_id
 
 # Re-export: TimelineItem's home is shared/timeline_item.py (file line budget);
-# callers keep importing it from here (agent/graph/_context.py precedent).
+# callers keep importing it from here.
 from shared.timeline_item import TimelineItem as TimelineItem
 
 # Items after the same inbound anchor are offset by a microsecond increment to

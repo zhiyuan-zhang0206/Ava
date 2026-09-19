@@ -15,7 +15,7 @@ from langgraph.runtime import Runtime
 
 from agent.graph._attach_drain import build_attach_drain
 from agent.graph._claim import _claim_node_impl
-from agent.graph._nodes import CLAIM
+from agent.nodes import CLAIM
 from agent.state import AttachEntry, AttachState, BaseAgentState
 from shared.context import AvaContext
 from shared.message_kwargs import AvaMsgType

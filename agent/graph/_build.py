@@ -34,16 +34,7 @@ from langgraph.types import RetryPolicy
 from agent._extensions import load_extensions as _load_extensions
 from agent.hooks import make_hook_runner
 from agent.impersonation import protect_native_hooks
-from agent.state import BaseAgentState, build_agent_state
-from shared.config import settings
-from shared.config.turn_view import turn_settings
-
-from ._claim import claim_node
-from ._context import AvaContext
-from ._exec import exec_node
-from ._init_context import init_context_node
-from ._llm import llm_node
-from ._nodes import (
+from agent.nodes import (
     AFTER_EXEC,
     AFTER_INIT,
     BEFORE_EXEC,
@@ -54,6 +45,15 @@ from ._nodes import (
     LLM,
     NodeName,
 )
+from agent.state import BaseAgentState, build_agent_state
+from shared.config import settings
+from shared.config.turn_view import turn_settings
+from shared.context import AvaContext
+
+from ._claim import claim_node
+from ._exec import exec_node
+from ._init_context import init_context_node
+from ._llm import llm_node
 
 # LLM node retry policy — covers network jitter + DeepSeek server-side intermittent drift.
 #
@@ -321,11 +321,9 @@ def _build_llm_retry() -> RetryPolicy:
     Returns a `_TurnScopedRetryPolicy`: the two per-agent fields resolve per read
     so one shared graph still retries each hosted agent on its own schedule.
     """
-    from agent.graph._llm import (
+    from agent.graph._llm_errors import (
         FatalLLMStreamError,
         FatalProviderError,
-    )
-    from agent.graph._llm_errors import (
         LLMStreamStallPairError,
         _record_stall_pair_streak,
         _reset_stall_pair_streak,

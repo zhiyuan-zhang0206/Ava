@@ -72,27 +72,19 @@ from agent.graph._attach_drain import build_attach_message
 from agent.graph._attach_merge import merge_attachments
 from agent.graph._exec_notes import merge_exec_notes
 from agent.messages import exec_output_message
+from agent.nodes import AFTER_EXEC
 from agent.state import AttachState, _validate_plugin_state_keys
 from ava.security import SecurityFindingEntry, take_findings
 from shared.config import settings
 from shared.config.turn_view import current_agent_config_pins
+from shared.context import AvaContext, agent_id_from_config
 from shared.exit_codes import IDLE_EXIT_CODE, SYSTEM_HALT_EXIT_CODE
-from shared.lifecycle import (
-    AgentImpersonation,
-    AgentRestart,
-    AgentTermination,
-    _SystemHalt,
-)
-from shared.live_events import (
-    Cancelled,
-    ExecOutput,
-    ExecStart,
-)
+from shared.lifecycle import AgentImpersonation, AgentRestart, AgentTermination, _SystemHalt
+from shared.live_events import Cancelled, ExecOutput, ExecStart
 from shared.log import logger
 from shared.plugin_config_view import current_agent_plugin_pins
 
 from ._agent_traceback import format_full_traceback
-from ._context import AvaContext, agent_id_from_config
 from ._exec_alerts import maybe_alert_exec_boot_failure
 from ._exec_output import crashed_no_output_body, wrap_code_output
 from ._exec_protocol import ResultPayload
@@ -108,7 +100,6 @@ from ._exec_stream import ExecOutputChunkPublisher
 from ._exec_subprocess import _run_in_subprocess
 from ._interrupt import subscribe_interrupt
 from ._node_log import node_lifecycle
-from ._nodes import AFTER_EXEC
 from ._tool_calls import merge_multiple_execute_code_tool_calls
 
 # exec_node always goto AFTER_EXEC (under the cycling topology, halted is routed by after_exec)

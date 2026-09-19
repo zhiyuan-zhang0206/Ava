@@ -26,11 +26,11 @@ from agent.graph._capabilities import (
     index_drift,
     indexed_skill_identifiers,
 )
-from agent.graph._context import AvaContext
 from agent.hooks._registry import HOOKS
 from agent.hooks.capabilities import _newly_installed_skills, register_capabilities_hooks
 from agent.state import AgentState, CapabilitiesState
 from shared.config import settings
+from shared.context import AvaContext
 from shared.message_kwargs import NoteTag
 
 _CONFIG = {"configurable": {"thread_id": "1042"}}

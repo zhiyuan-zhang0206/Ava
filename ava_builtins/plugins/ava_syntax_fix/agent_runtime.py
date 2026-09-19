@@ -16,7 +16,6 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from loguru import logger
 
-from agent.graph._context import AvaContext, agent_id_from_config
 from agent.graph._tool_calls import (
     first_tool_call_code,
     merge_multiple_execute_code_tool_calls,
@@ -26,13 +25,11 @@ from agent.hooks import Hook, register_before_exec
 from agent.messages import exec_output_message
 from agent.state import AgentState
 from shared.config.turn_view import turn_settings
+from shared.context import AvaContext, agent_id_from_config
 
 from ._deterministic_fixes import apply_all_deterministic_fixes
 from ._escapes import _fix_invalid_escapes
-from ._imports import (
-    _detect_missing_imports,
-    _insert_imports,
-)
+from ._imports import _detect_missing_imports, _insert_imports
 from ._imports import (
     _is_stdlib_module as _is_stdlib_module,  # re-exported for tests
 )
@@ -42,10 +39,7 @@ from ._imports import (
 from ._llm_repair import (
     _extract_text as _extract_text,  # re-exported for tests
 )
-from ._llm_repair import (
-    _llm_repair_syntax,
-    _render_syntax_error,
-)
+from ._llm_repair import _llm_repair_syntax, _render_syntax_error
 from ._llm_repair import (
     _strip_code_fence as _strip_code_fence,
 )

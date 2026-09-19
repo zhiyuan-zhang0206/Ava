@@ -38,7 +38,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from agent.db import ClaimedInbound, has_pending_inbound_after
-from agent.graph._context import AvaContext
+from shared.context import AvaContext
 from shared.inbound import InboundKind
 
 # The four targets claim itself routes to: BEFORE_LLM (has work), END
