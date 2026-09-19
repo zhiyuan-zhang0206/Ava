@@ -8,6 +8,18 @@ never loads Settings (see ``cli.main`` module docstring)."""
 from __future__ import annotations
 
 import argparse
+import sys
+
+
+def _validated_source(value: str) -> str:
+    """Argparse type for `--source`: reject an unknown source before any command runs."""
+    from shared.envelope import validate_source
+
+    try:
+        validate_source(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+    return value
 
 
 def _h_agents_ls(args: argparse.Namespace) -> int:
@@ -25,9 +37,13 @@ def _h_agents_timeline(args: argparse.Namespace) -> int:
 
 
 def _h_agents_send(args: argparse.Namespace) -> int:
-    from cli.commands.agents import cmd_agents_send
+    from cli.commands.agents import ProvenanceError, cmd_agents_send
 
-    return cmd_agents_send(args.agent_id, args.content, args.source, args.tail_file)
+    try:
+        return cmd_agents_send(args.agent_id, args.content, args.source, args.tail_file)
+    except ProvenanceError as exc:
+        print(f"ava: {exc}", file=sys.stderr)
+        return 2
 
 
 def _h_agents_cancel(args: argparse.Namespace) -> int:
@@ -37,15 +53,23 @@ def _h_agents_cancel(args: argparse.Namespace) -> int:
 
 
 def _h_agents_restart(args: argparse.Namespace) -> int:
-    from cli.commands.agents import cmd_agents_restart
+    from cli.commands.agents import ProvenanceError, cmd_agents_restart
 
-    return cmd_agents_restart(args.agent_id, args.config, source=args.source)
+    try:
+        return cmd_agents_restart(args.agent_id, args.config, source=args.source)
+    except ProvenanceError as exc:
+        print(f"ava: {exc}", file=sys.stderr)
+        return 2
 
 
 def _h_agents_resurrect(args: argparse.Namespace) -> int:
-    from cli.commands.agents import cmd_agents_resurrect
+    from cli.commands.agents import ProvenanceError, cmd_agents_resurrect
 
-    return cmd_agents_resurrect(args.agent_id, source=args.source)
+    try:
+        return cmd_agents_resurrect(args.agent_id, source=args.source)
+    except ProvenanceError as exc:
+        print(f"ava: {exc}", file=sys.stderr)
+        return 2
 
 
 def _h_agents_resurrect_billing(args: argparse.Namespace) -> int:
@@ -55,15 +79,23 @@ def _h_agents_resurrect_billing(args: argparse.Namespace) -> int:
 
 
 def _h_agents_terminate(args: argparse.Namespace) -> int:
-    from cli.commands.agents import cmd_agents_terminate
+    from cli.commands.agents import ProvenanceError, cmd_agents_terminate
 
-    return cmd_agents_terminate(args.agent_id, source=args.source, final=args.final)
+    try:
+        return cmd_agents_terminate(args.agent_id, source=args.source, final=args.final)
+    except ProvenanceError as exc:
+        print(f"ava: {exc}", file=sys.stderr)
+        return 2
 
 
 def _h_agents_kill(args: argparse.Namespace) -> int:
-    from cli.commands.agents import cmd_agents_kill
+    from cli.commands.agents import ProvenanceError, cmd_agents_kill
 
-    return cmd_agents_kill(args.agent_id, source=args.source, final=args.final)
+    try:
+        return cmd_agents_kill(args.agent_id, source=args.source, final=args.final)
+    except ProvenanceError as exc:
+        print(f"ava: {exc}", file=sys.stderr)
+        return 2
 
 
 def _h_notices_list(args: argparse.Namespace) -> int:
@@ -171,8 +203,10 @@ def _add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     agents_send_p.add_argument(
         "--source",
         default=None,
-        help="explicit provenance; required unless AVA_CALLER_IDENTITY is configured. "
-        "shell:N / watcher:N for notices, user only for an actual human operator",
+        required=True,
+        type=_validated_source,
+        help="provenance of the message (required). 'user' sends as the human operator; "
+        "'shell:N' / 'watcher:N' mark a machine notice; 'schedule:N' a gateway schedule",
     )
     agents_send_p.add_argument(
         "--tail-file",
@@ -236,7 +270,9 @@ def _add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
         lifecycle_parser.add_argument(
             "--source",
             default=None,
-            help="explicit provenance (or AVA_CALLER_IDENTITY); never an authorization grant",
+            type=_validated_source,
+            help="explicit provenance (or AVA_CALLER_IDENTITY); 'user' = the human operator; "
+            "never an authorization grant",
         )
 
     notices_p = sub.add_parser(
