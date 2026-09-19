@@ -123,6 +123,9 @@ from shared.bootstrap import (
 )
 from shared.config import _lite
 from shared.config._lite import (
+    ConfigBuildWaitTimeoutError as ConfigBuildWaitTimeoutError,
+)
+from shared.config._lite import (
     ensure_eager as ensure_eager,
 )
 from shared.config._lite import (
