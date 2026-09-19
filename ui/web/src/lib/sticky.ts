@@ -166,8 +166,16 @@ export interface StickyController {
   /** Report a performed pin-to-bottom (viewport.scrollTop was set to
    * scrollHeight). Pass the post-write snapshot so the browser-clamped
    * actual position becomes the new baseline. Sets sticky — a programmatic
-   * scroll-to-bottom always re-enables following. */
-  notifyPinnedToBottom(view: ScrollSnapshot): void;
+   * scroll-to-bottom always re-enables following. `freshRun` marks the
+   * user-commanded force pins (send / agent switch): it also clears the
+   * cumulative upward run, because the reader's earlier departure is spent.
+   * A stale run would otherwise release following again on the next
+   * sub-zone twitch (trackpad nudge, momentum tail) — the arriving reply
+   * then never pulls the view down (user report 2026-09-19). Automatic
+   * pins (streaming growth via handleLayoutChange) deliberately keep the
+   * run: that is what lets a slow deliberate drag-up escape over and over
+   * (#2311). */
+  notifyPinnedToBottom(view: ScrollSnapshot, freshRun?: boolean): void;
   // There is deliberately no notify() for non-pin programmatic scrolls
   // (prepend compensation). They need none: the only reader of the
   // baseline is handleScroll, which re-syncs it on every event, so the
@@ -375,8 +383,9 @@ export function createStickyController(
       sticky = true;
     },
 
-    notifyPinnedToBottom(view) {
+    notifyPinnedToBottom(view, freshRun = false) {
       stick(view);
+      if (freshRun) upwardRun = 0;
       prevScrollTop = view.scrollTop;
       prevNearBottom = true;
     },
