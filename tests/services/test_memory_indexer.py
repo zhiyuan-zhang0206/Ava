@@ -595,40 +595,36 @@ class _RecordingBackend(MemorySearchBackend):
             self.rows[path, kind, idx] = (mtime, hash_, _FP)
 
 
-async def test_process_paths_beats_per_embed_batch(
+def test_process_paths_beats_per_embed_batch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Several slow batches must stay alive throughout the real file-processing path."""
+    """Every batch gets its own beat, even when their total exceeds the ceiling."""
+    now = 0.0
+    monkeypatch.setattr(daemon_health, "time", SimpleNamespace(monotonic=lambda: now))
+    liveness = Liveness(daemon._liveness_timeout_s())
+    batch_duration = 100.0
     monkeypatch.setattr(daemon, "_BATCH_SIZE", 2)
     paths: set[Path] = set()
-    for i in range(8 * daemon._BATCH_SIZE):
+    for i in range(10 * daemon._BATCH_SIZE):
         note = tmp_path / f"note-{i:03d}.md"
         note.write_text(f"content {i}", encoding="utf-8")
         paths.add(note.resolve())
 
     class SlowProvider(_FakeProvider):
         def embed_batch(self, texts: list[str]) -> np.ndarray:
-            time.sleep(0.15)
+            nonlocal now
+            now += batch_duration
+            assert liveness.is_alive(), "liveness stale during embed batch"
+            assert liveness.stale_for() == batch_duration, "previous batch compounded with embed"
             return super().embed_batch(texts)
 
     backend = _RecordingBackend()
     provider = SlowProvider()
-    liveness = Liveness(0.6)
-    started = time.monotonic()
-    task = asyncio.create_task(
-        asyncio.to_thread(daemon._process_paths, backend, paths, provider, liveness)
-    )
-    samples: list[bool] = []
-    while not task.done():
-        samples.append(liveness.is_alive())
-        await asyncio.sleep(0.01)
-    await task
-    samples.append(liveness.is_alive())
+    daemon._process_paths(backend, paths, provider, liveness)
 
-    assert time.monotonic() - started > 0.6
-    assert provider.embed_batch_count == 8
-    assert len(samples) > 4
-    assert all(samples), "liveness went stale within _process_paths"
+    assert now > daemon._liveness_timeout_s()
+    assert provider.embed_batch_count == 10
+    assert liveness.is_alive()
     assert set(backend.all_meta()) == {str(path) for path in paths}
 
 

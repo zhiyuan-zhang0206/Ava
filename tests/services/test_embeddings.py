@@ -14,11 +14,14 @@ values fail fast, and the provider declares the vector space (`dim` +
 from __future__ import annotations
 
 import asyncio
+import gzip
 import json
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from io import BytesIO
 from typing import Any
 
 import httpx
@@ -45,14 +48,18 @@ def _provider() -> GeminiEmbeddingProvider:
 
 
 class _FakeResponse(httpx.Response):
-    """Buffered async response and sync stream context with the real status contract."""
+    """Sync stream context or buffered async response with the real status contract."""
 
-    def __init__(self, payload: dict[str, Any], *, status_ok: bool = True) -> None:
+    def __init__(
+        self, payload: dict[str, Any], *, status_ok: bool = True, buffered: bool = False
+    ) -> None:
         super().__init__(
             200 if status_ok else 500,
-            json=payload,
+            stream=httpx.ByteStream(json.dumps(payload).encode()),
             request=httpx.Request("POST", _ENDPOINT),
         )
+        if buffered:
+            self.read()
 
     def __enter__(self) -> _FakeResponse:
         return self
@@ -340,7 +347,8 @@ def test_embed_query_async_shape(monkeypatch: pytest.MonkeyPatch) -> None:
             self, url: str, *, json: dict[str, Any], headers: dict[str, str]
         ) -> _FakeResponse:
             return _FakeResponse(
-                {"embeddings": [{"values": [1.0] * DIM} for _ in json["requests"]]}
+                {"embeddings": [{"values": [1.0] * DIM} for _ in json["requests"]]},
+                buffered=True,
             )
 
     calls: list[dict[str, Any]] = []
@@ -382,7 +390,8 @@ def test_embed_query_async_emits_priced_billing_span(
                 {
                     "embeddings": [{"values": [1.0] * DIM} for _ in json["requests"]],
                     "usageMetadata": {"promptTokenCount": 123},
-                }
+                },
+                buffered=True,
             )
 
     monkeypatch.setattr(httpx, "AsyncClient", _AsyncClient)
@@ -658,29 +667,58 @@ def test_factory_provider_named_dispatch(monkeypatch: pytest.MonkeyPatch) -> Non
     assert isinstance(factory.get_provider_named("gemini"), GeminiEmbeddingProvider)
 
 
-@pytest.fixture
-def trickle_server() -> Iterator[tuple[str, list[float]]]:
-    """Every read is timely; only a total deadline can abort this response."""
+@contextmanager
+def _embedding_server(
+    *, compressed: bool = False, chunked: bool = False, drip: bool = True
+) -> Generator[tuple[str, list[float]]]:
+    """Immediate headers; optional body drip with every read below the timeout."""
     started: list[float] = []
     stop = threading.Event()
     body = json.dumps({"embeddings": [{"values": [1.0] * DIM}]}).encode()
+    if compressed:
+        buffer = BytesIO()
+        with gzip.GzipFile(filename="x" * 80, mode="wb", fileobj=buffer, mtime=0) as member:
+            member.write(body)
+        body = buffer.getvalue()
+        # Raw reads cover the long gzip filename without producing decoded bytes.
+        prefix_size, read_gap = 90, 0.025
+    else:
+        body = b" " * 40 + body
+        prefix_size, read_gap = 40, 0.05
+    chunks = (
+        [body[i : i + 1] for i in range(prefix_size)] + [body[prefix_size:]]
+        if drip
+        else [body[i : i + 11] for i in range(0, len(body), 11)]
+    )
 
     class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
         def do_POST(self) -> None:
             self.rfile.read(int(self.headers["Content-Length"]))
             started.append(time.monotonic())
             self.send_response(200)
-            self.send_header("Content-Length", str(40 + len(body)))
+            if compressed:
+                self.send_header("Content-Encoding", "gzip")
+            if chunked:
+                self.send_header("Transfer-Encoding", "chunked")
+            else:
+                self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             try:
-                for _ in range(40):
-                    self.wfile.write(b" ")
+                for chunk in chunks:
+                    if chunked:
+                        self.wfile.write(f"{len(chunk):x}\r\n".encode() + chunk + b"\r\n")
+                    else:
+                        self.wfile.write(chunk)
                     self.wfile.flush()
-                    if stop.wait(0.05):
+                    if drip and stop.wait(read_gap):
                         return
-                self.wfile.write(body)
+                if chunked:
+                    self.wfile.write(b"0\r\n\r\n")
+                    self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError):
-                return  # Expected when the client enforces its total deadline.
+                return  # Expected when the client enforces its body deadline.
 
         def log_message(self, format: str, *args: object) -> None:
             pass
@@ -696,6 +734,12 @@ def trickle_server() -> Iterator[tuple[str, list[float]]]:
         server.server_close()
         thread.join(timeout=2)
         assert not thread.is_alive()
+
+
+@pytest.fixture
+def trickle_server() -> Iterator[tuple[str, list[float]]]:
+    with _embedding_server() as server:
+        yield server
 
 
 @pytest.mark.parametrize("mode", ["sync", "async"])
@@ -721,7 +765,7 @@ def test_embed_trickle_total_deadline(
         jitter_span=0,
     )
     started = time.monotonic()
-    with pytest.raises(EmbeddingAPIError, match="total deadline") as error:
+    with pytest.raises(EmbeddingAPIError, match="exceeded the deadline") as error:
         if mode == "sync":
             gemini._embed(["hello"], "RETRIEVAL_DOCUMENT", policy=policy)
         else:
@@ -734,6 +778,42 @@ def test_embed_trickle_total_deadline(
     assert elapsed < 2
 
 
+@pytest.mark.parametrize("attempts", [1, 3])
+def test_embed_compressed_trickle_deadline(monkeypatch: pytest.MonkeyPatch, attempts: int) -> None:
+    """Gzip metadata cannot hide body reads from the deadline or retry budget."""
+    from shared import resilience
+
+    timeout = 0.2
+    monkeypatch.setattr(settings.services, "memory_embed_timeout_seconds", timeout)
+    monkeypatch.setattr(resilience, "_sleep", time.sleep)
+    policy = Policy(
+        max_attempts=attempts,
+        backoff=ExponentialBackoff(base=0.001, factor=1, cap=0.001),
+        jitter_span=0,
+    )
+    with _embedding_server(compressed=True) as (endpoint, requests):
+        monkeypatch.setattr(gemini, "_ENDPOINT", endpoint)
+        started = time.monotonic()
+        with pytest.raises(EmbeddingAPIError, match="exceeded the deadline") as error:
+            gemini._embed(["hello"], "RETRIEVAL_DOCUMENT", policy=policy)
+        elapsed = time.monotonic() - started
+        assert isinstance(error.value.__cause__, httpx.ReadTimeout)
+        assert len(requests) == attempts
+        assert attempts * timeout <= elapsed < attempts * (2 * timeout + 0.2)
+        # All retries must end before the first gzip filename finishes dripping (2.25s).
+        assert elapsed < 2
+
+
+@pytest.mark.parametrize("chunked", [False, True])
+def test_embed_gzip_response_round_trip(monkeypatch: pytest.MonkeyPatch, chunked: bool) -> None:
+    """Post-stream HTTPX decoding preserves gzip, including chunked transfer headers."""
+    with _embedding_server(compressed=True, chunked=chunked, drip=False) as (endpoint, requests):
+        monkeypatch.setattr(gemini, "_ENDPOINT", endpoint)
+        result = _provider().embed_batch(["hello"])
+        np.testing.assert_array_equal(result, np.ones((1, DIM), dtype=np.float32))
+        assert len(requests) == 1
+
+
 def test_embed_stream_status_preserves_retry_after(monkeypatch: pytest.MonkeyPatch) -> None:
     """Status rejection never consumes the body; retry still sees its headers."""
     from shared import resilience
@@ -742,10 +822,10 @@ def test_embed_stream_status_preserves_retry_after(monkeypatch: pytest.MonkeyPat
     sleeps: list[float] = []
 
     class ErrorResponse(_FakeResponse):
-        def iter_bytes(self, chunk_size: int | None = None) -> Iterator[bytes]:
+        def iter_raw(self, chunk_size: int | None = None) -> Iterator[bytes]:
             if self.status_code == 429:
                 raise AssertionError("status failure must not read the body")
-            yield from super().iter_bytes(chunk_size)
+            yield from super().iter_raw(chunk_size)
 
     def stream(*args: Any, **kwargs: Any) -> _FakeResponse:
         if calls:

@@ -36,7 +36,6 @@ construction cost is negligible next to a multi-second network call (task
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 from typing import Any
 
@@ -65,7 +64,7 @@ DIM = 3072
 _ENDPOINT = (
     f"https://generativelanguage.googleapis.com/v1beta/models/{_MODEL_ID}:batchEmbedContents"
 )
-# Per-request ceiling is configurable (AVA_EMBED_TIMEOUT_SECONDS, task #698
+# Per-request timeout is configurable (AVA_EMBED_TIMEOUT_SECONDS, task #698
 # G8). The daemon derives its liveness ceiling from the full document-batch
 # retry budget below, including Retry-After and jitter, so legitimate retries
 # do not trip the healthcheck. The retry policies are module constants (R2-D) —
@@ -101,13 +100,14 @@ _QUERY_EMBED_POLICY = Policy(
 
 
 def worst_case_batch_seconds() -> float:
-    """Upper bound on one embed_batch call under _EMBED_POLICY.
+    """Budget for one embed_batch call under _EMBED_POLICY.
 
-    Each sync attempt enforces the configured deadline between received chunks,
-    allowing one additional read window: at most twice the request timeout.
-    Async attempts enforce the deadline with cancellation. Inter-attempt sleeps
-    allow the greater of the last backoff and the shared Retry-After cap,
-    plus both jitter terms (per-process phase and random span).
+    Sync attempts bound raw body streaming by checking the configured deadline
+    between received raw chunks, allowing one extra read window (<= 2 x timeout).
+    Response-header acquisition keeps HTTPX per-operation semantics; drip-header
+    overruns are not covered (2026-09-20 design ruling, task #4108). Async attempts
+    use cancellation. Inter-attempt sleeps allow the greater of the last backoff
+    and the shared Retry-After cap, plus both jitter terms (phase and random span).
     """
     attempts = _EMBED_POLICY.max_attempts
     request_seconds = attempts * 2 * settings.services.memory_embed_timeout_seconds
@@ -216,13 +216,16 @@ def _embed(texts: list[str], task_type: str, *, policy: Policy = _EMBED_POLICY) 
                     response=response,
                 )
             chunks: list[bytes] = []
-            for chunk in response.iter_bytes():
+            # Observe raw reads before a content decoder can buffer them.
+            for chunk in response.iter_raw():
                 if time.monotonic() > deadline:
-                    raise httpx.ReadTimeout(
-                        f"embed attempt exceeded the total deadline of {timeout_s}s"
-                    )
+                    raise httpx.ReadTimeout(f"embed attempt exceeded the deadline of {timeout_s}s")
                 chunks.append(chunk)
-            return json.loads(b"".join(chunks))
+            # The network stream is complete; decode locally, preserving the
+            # response's content encoding (including gzip).
+            return httpx.Response(
+                response.status_code, headers=response.headers, content=b"".join(chunks)
+            ).json()
 
     try:
         body = retry(policy)(_call)
@@ -269,7 +272,7 @@ async def _embed_async(
                     # The shared HTTP classifier retries transport failures,
                     # not builtin TimeoutError from asyncio's deadline.
                     raise httpx.ReadTimeout(
-                        f"embed attempt exceeded the total deadline of {timeout_s}s"
+                        f"embed attempt exceeded the deadline of {timeout_s}s"
                     ) from exc
 
             body = await aretry(policy)(_call)
