@@ -7,6 +7,7 @@ implementation from ``cli.commands`` so parser building never loads Settings
 from __future__ import annotations
 
 import argparse
+import sys
 
 
 def _h_packages_status(args: argparse.Namespace) -> int:
@@ -33,9 +34,26 @@ def _h_packages_rollback(args: argparse.Namespace) -> int:
     return cmd_packages_rollback(args.name, force=args.force)
 
 
+def _duration(value: str) -> str:
+    """Argparse type for `--check-every`: validate the duration before any command runs."""
+    from cli.commands._packages_refresh import parse_duration
+
+    try:
+        parse_duration(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+    return value
+
+
 def _h_packages_policy(args: argparse.Namespace) -> int:
     from cli.commands import cmd_packages_policy
 
+    if args.update_mode is None and args.check_every is None:
+        print(
+            "ava: pass --update-mode and/or --check-every — a policy needs at least one field",
+            file=sys.stderr,
+        )
+        return 2
     return cmd_packages_policy(
         args.name, update_mode=args.update_mode, check_every=args.check_every
     )
@@ -97,5 +115,7 @@ def _add_packages_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser
     )
     policy_p.add_argument("name")
     policy_p.add_argument("--update-mode", choices=["auto", "notify", "off"], default=None)
-    policy_p.add_argument("--check-every", metavar="DUR", default=None, help="e.g. 30m / 24h / 7d")
+    policy_p.add_argument(
+        "--check-every", metavar="DUR", default=None, type=_duration, help="e.g. 30m / 24h / 7d"
+    )
     policy_p.set_defaults(func=_h_packages_policy)

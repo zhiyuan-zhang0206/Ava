@@ -49,6 +49,12 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
   a `chrome_page_ttl_expired` / `chrome_page_ttl_renewed` event (task #3035).
 
 ### Changed
+- CLI parameter discipline, batch B3 (task #4092): `mcp add` requires exactly
+  one of `--json` / `--command` and validates both at the parse layer (bad or
+  non-object JSON, a `--env` pair without `=`, and `--arg`/`--env` without
+  `--command` are usage errors), `mcp install --env` validates `KEY=VALUE`,
+  and `ava packages policy` requires at least one field with `--check-every`
+  validated at parse time.
 - The Claude Code Monitor relay guidance now reflects per-watch deadlines
   (Claude Code 2.1.271+): arm with `timeout_ms: 1800000` and re-arm on the
   expiry notice — at the deadline the watch and the relay process it runs are
