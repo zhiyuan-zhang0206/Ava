@@ -69,6 +69,25 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         payload=UpdateStragglerReapSettled,
         tier="anomaly",
     ),
+    # managed-writer mode (task #4121): the enable-point decision's transition
+    # markers. `activated`/`deactivated` are registered for the mode
+    # transitions; their emission mechanism is held for review (no pre-existing
+    # surface carries the previously observed mode, so transitions are
+    # reconstructed from the per-rollout telemetry mode field plus the audited
+    # config write). `blocked` emits once per blocked decision (the rollout
+    # still runs the legacy flow).
+    "managed_writer_activated": _audit(
+        "managed_writer_activated",
+        "managed-writer mode decision resolved active (enable flag on, both readiness guards met)",
+    ),
+    "managed_writer_deactivated": _audit(
+        "managed_writer_deactivated",
+        "managed-writer mode decision resolved back to off after an active observation",
+    ),
+    "managed_writer_blocked": _audit(
+        "managed_writer_blocked",
+        "managed-writer mode requested but refused entry: a readiness guard is missing or not True; the rollout ran the legacy flow",
+    ),
     # db resilience
     "db_outage_wait": _telemetry("db_outage_wait", "db outage wait", tier="anomaly"),
     "db_outage_pause": _telemetry("db_outage_pause", "db outage pause", tier="anomaly"),

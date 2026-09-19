@@ -20,6 +20,9 @@ from pathlib import Path
 # the tests' `_up.*` monkeypatch seams, `_cluster_rollback.py` and the detached
 # rollout subprocess — keep resolving. Each name is `X as X` (an explicit
 # re-export) so pyright does not flag it as unused here.
+from cli.commands._managed_writer_mode import (
+    decide_managed_writer_mode as _decide_managed_writer_mode,
+)
 from cli.commands._repo import _repo_root as _repo_root
 from cli.commands._update_agent_runner import (
     _run_agent_runner_self_update as _run_agent_runner_self_update,
@@ -570,6 +573,14 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
 
     pull_recover: tuple[str, set[str], Path | None] | None = None
     try:
+        # The managed-writer enable point (task #4121): one mode decision per
+        # rollout, after Phase 0 and before any effect below. `off` keeps this
+        # path byte-for-byte legacy; `active` lets the managed-writer call
+        # sites run; `blocked` runs legacy with an explicit record (rollout
+        # log line + telemetry field + event + the `ava cluster status` bit).
+        # The decision is made once here -- later sites consume it and nothing
+        # re-reads the switch mid-rollout.
+        _decide_managed_writer_mode()
         try:
             gate = _build_prepare_gate(
                 _prepare_commit,
