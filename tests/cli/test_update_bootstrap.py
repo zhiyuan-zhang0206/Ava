@@ -41,6 +41,7 @@ def _inventory(expected: ExpectedUnitWriters) -> dict[str, object]:
         "version": 1,
         "expected": expected.model_dump(mode="json"),
         "services": [{"session": "ava-ops", "requires_db": True, "gate": None}],
+        "excluded_registrations": [],
         "inventory_digest": expected.unit().inventory_digest,
         "closure": "unknown",
         "unresolved": ["retained"],
