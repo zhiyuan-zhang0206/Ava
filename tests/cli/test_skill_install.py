@@ -262,3 +262,17 @@ def test_install_rejects_a_bad_check_every(
     assert cmd_skill_install(str(src), None, None, check_every="soon") == 1
     assert "duration" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert reg.get("bad-duration") is None
+
+
+def test_check_every_is_validated_at_parse_time(capsys: pytest.CaptureFixture[str]) -> None:
+    """Parse-layer gate (task #4092 B4, B3-QA leftover): a bad duration is a
+    usage error before any command code runs; a good one parses through."""
+    from cli.main import _build_parser
+
+    with pytest.raises(SystemExit) as raised:
+        _build_parser().parse_args(["skill", "install", "./src", "--check-every", "soon"])
+    assert raised.value.code == 2
+    assert "argument --check-every:" in capsys.readouterr().err
+
+    ns = _build_parser().parse_args(["skill", "install", "./src", "--check-every", "2h"])
+    assert ns.check_every == "2h"
