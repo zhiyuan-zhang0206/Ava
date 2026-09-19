@@ -1489,6 +1489,14 @@ final class PanelDelegate: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         var arguments = [tool, "--tier", tierPopup.titleOfSelectedItem ?? args.tier, "--workdir", workdir]
         if check {
             arguments.append("--check")
+        } else {
+            // The fill button click is the user-present attestation: pass the
+            // guard pair the CLI requires (--fill-pending is refused without
+            // --confirm-user-present). Extended-group dialogs follow.
+            // Note: an icloud (FileProviderDomain) prompt writes no
+            // PROMPTING log line -- verify it by screenshot, not logs.
+            arguments.append("--fill-pending")
+            arguments.append("--confirm-user-present")
         }
         task.arguments = arguments
         task.currentDirectoryURL = URL(fileURLWithPath: repo)
