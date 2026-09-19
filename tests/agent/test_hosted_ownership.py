@@ -4,7 +4,7 @@ import asyncio
 import subprocess
 import sys
 from unittest.mock import AsyncMock, Mock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import psutil
 import psycopg
@@ -25,7 +25,7 @@ from agent.hosted_ownership import (
 from shared.db import create_agent, insert_inbound_message
 from shared.incarnation_resources import IncarnationResources, ResourceProcess, decode_resources
 from shared.managed_writer_publication import AdmissionDecision, CurrentAdmission
-from shared.runtime_admission import RuntimeAdmission
+from shared.runtime_admission import PublicationAdmissionDeferredError, RuntimeAdmission
 from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
 from shared.turn_identity import bind_turn_identity
 
@@ -47,6 +47,34 @@ def _agent(conn: psycopg.Connection) -> int:
     return agent_id
 
 
+def _version(conn: psycopg.Connection, agent_id: int) -> int:
+    row = conn.execute(
+        "SELECT runtime_protocol_version FROM agents_meta WHERE id = %s", (agent_id,)
+    ).fetchone()
+    assert row is not None
+    return int(row[0])
+
+
+def _seed_managed_row(conn: psycopg.Connection, agent_id: int, owner: UUID) -> RuntimeIncarnation:
+    """A row with stored resource evidence, as a managed-writer birth leaves it."""
+    generation = uuid4()
+    native = psutil.Process()
+    evidence = IncarnationResources(
+        generation=generation,
+        owner=owner,
+        host_process=ResourceProcess(pid=native.pid, birth=native.create_time()),
+        requests={},
+    )
+    conn.execute(
+        "UPDATE agents_meta SET status='idling', runtime_kind='hosted', runtime_generation=%s, "
+        "runtime_owner=%s, incarnation_resources=%s, "
+        "lease_expires_at=clock_timestamp()+interval '1 minute' WHERE id=%s",
+        (generation, owner, Jsonb(evidence.model_dump(mode="json")), agent_id),
+    )
+    conn.commit()
+    return RuntimeIncarnation(agent_id, generation, owner)
+
+
 async def test_hosted_incarnation_survives_idle_and_next_turn(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -56,7 +84,11 @@ async def test_hosted_incarnation_survives_idle_and_next_turn(
         aops_pool, agent_id, "host-test", owner, expected_from="idling"
     )
     assert first is not None
+    # A legacy admission (no current publication) advertises protocol zero,
+    # and settling neither invents nor clears an advertisement (task #4122).
+    assert _version(db_conn, agent_id) == 0
     assert await settle_hosted_runtime(aops_pool, first)
+    assert _version(db_conn, agent_id) == 0
     second = await admit_hosted_runtime(
         aops_pool, agent_id, "host-test", owner, expected_from="idling"
     )
@@ -318,6 +350,89 @@ async def test_committed_publication_refuses_unknown_null_resources(
     assert successor is None
     row = db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
     assert row is not None and row[0] == "idling"
+
+
+async def test_current_publication_advertises_v1_and_idle_retains_it(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    """The admission write point advertises v1 only under a current publication,
+    and an ordinary settle keeps it (task #4122)."""
+    agent_id, owner = _agent(db_conn), uuid4()
+    seeded = _seed_managed_row(db_conn, agent_id, owner)
+    admitted = await admit_hosted_runtime(
+        aops_pool,
+        agent_id,
+        "host-test",
+        owner,
+        expected_from="idling",
+        publication=_CurrentRuntimeAdmission(None),
+    )
+    assert admitted == seeded
+    assert _version(db_conn, agent_id) == 1
+    assert await settle_hosted_runtime(aops_pool, admitted)
+    assert _version(db_conn, agent_id) == 1
+
+
+async def test_held_continuation_admits_at_protocol_zero(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A deferred publication continuing a held command advertises zero (issue #2159)."""
+    from shared import maintenance
+
+    agent_id, owner = _agent(db_conn), uuid4()
+    db_conn.execute(
+        "UPDATE agents_meta SET runtime_kind='hosted', runtime_generation=%s, "
+        "runtime_owner=%s WHERE id=%s",
+        (uuid4(), owner, agent_id),
+    )
+    db_conn.commit()
+    monkeypatch.setattr(maintenance, "held", lambda: True)
+    monkeypatch.setattr(maintenance, "pending_command", lambda _agent_id: 1)
+
+    class _DeferredRuntimeAdmission(RuntimeAdmission):
+        async def decide_async(self, conn: psycopg.AsyncConnection) -> AdmissionDecision:
+            del conn
+            raise PublicationAdmissionDeferredError("deferred for the test")
+
+    admitted = await admit_hosted_runtime(
+        aops_pool,
+        agent_id,
+        "host-test",
+        owner,
+        expected_from="idling",
+        publication=_DeferredRuntimeAdmission(None),
+    )
+    assert admitted is not None
+    assert _version(db_conn, agent_id) == 0
+
+
+@pytest.mark.parametrize("command", ["restart", "terminate"])
+async def test_lifecycle_apply_releases_the_advertisement(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    command: str,
+) -> None:
+    """A durable lifecycle apply zeroes v1; only settle retains it (task #4122)."""
+    agent_id, owner = _agent(db_conn), uuid4()
+    seeded = _seed_managed_row(db_conn, agent_id, owner)
+    first = await admit_hosted_runtime(
+        aops_pool,
+        agent_id,
+        "host-test",
+        owner,
+        expected_from="idling",
+        publication=_CurrentRuntimeAdmission(None),
+    )
+    assert first == seeded
+    assert _version(db_conn, agent_id) == 1
+    insert_inbound_message(db_conn, agent_id, "", "user", command)
+    with bind_turn_identity(agent_id, incarnation=first):
+        await claim_inbound_batch(aops_pool, agent_id)
+        assert await apply_hosted_lifecycle(aops_pool, first) == command
+    assert _version(db_conn, agent_id) == 0
 
 
 async def test_owner_beat_renews_idle_but_not_other_owner(
