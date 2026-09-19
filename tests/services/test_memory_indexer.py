@@ -926,8 +926,9 @@ def test_reconcile_retry_schedule_backoff_and_reset() -> None:
     assert not retry.pending
     assert not retry.due()
     assert retry.retry_in_s() is None
+    # Each incomplete signal advances the ladder, including an idle drain failure.
     for delay in [2.0, 4.0, 8.0, 9.0, 9.0]:
-        assert retry.record_pass_incomplete() == delay
+        assert retry.record_incomplete() == delay
         assert retry.pending
         assert not retry.due()
         assert retry.retry_in_s() == delay
@@ -941,13 +942,13 @@ def test_reconcile_retry_schedule_backoff_and_reset() -> None:
         assert retry.retry_in_s() == 0.0
     # A quota outage may last indefinitely; the capped backoff must not overflow.
     for _ in range(1100):
-        assert retry.record_pass_incomplete() == 9.0
+        assert retry.record_incomplete() == 9.0
     retry.record_pass_complete()
     assert not retry.pending
     assert not retry.due()
     assert retry.retry_in_s() is None
-    assert retry.ensure_scheduled() == 2.0
-    assert retry.record_pass_incomplete() == 4.0
+    assert retry.ensure_scheduled() == 2.0  # an idle drain failure takes the base rung
+    assert retry.record_incomplete() == 4.0  # its incomplete follow-up takes the next
 
 
 def test_reconcile_health_payload() -> None:
@@ -985,6 +986,10 @@ async def test_reconcile_retry_drain_loop_converges_after_embed_failures(
     milvus_client,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    from unittest.mock import Mock
+
+    reconcile = Mock(wraps=daemon._reconcile)
+    monkeypatch.setattr(daemon, "_reconcile", reconcile)
     # More than one reconcile chunk: recovery must fill the entire original gap.
     files = {tmp_path / f"note-{i:03d}.md" for i in range(70)}
     for note in files:
@@ -995,7 +1000,7 @@ async def test_reconcile_retry_drain_loop_converges_after_embed_failures(
     liveness = Liveness(1.0)
     retry = daemon._ReconcileRetrySchedule(base_s=0.05, cap_s=0.1)
     assert await asyncio.to_thread(daemon._reconcile, backend, provider, liveness) is False
-    retry.record_pass_incomplete()
+    retry.record_incomplete()
     with caplog.at_level(logging.INFO, logger="services.memory_indexer.daemon"):
         task = asyncio.create_task(
             daemon._drain_loop(backend, queue.Queue(), liveness, provider, retry)
@@ -1010,9 +1015,10 @@ async def test_reconcile_retry_drain_loop_converges_after_embed_failures(
             assert set(await asyncio.to_thread(backend.all_meta)) == {str(p) for p in files}
             assert not retry.pending
             assert retry.retry_in_s() is None
-            attempts = provider.attempts
+            passes = reconcile.call_count
+            assert passes == 4  # startup, two incomplete retries, then completion
             await asyncio.sleep(0.15)  # no extra pass after the cap-sized wait elapses
-            assert provider.attempts == attempts
+            assert reconcile.call_count == passes
             assert "gap closed; retries cleared" in caplog.text
             assert "reconcile incomplete; retry scheduled in 0.1s" in caplog.text
         finally:
@@ -1059,6 +1065,92 @@ async def test_reconcile_retry_drain_failure_arms_schedule(
             await task
 
 
+async def test_reconcile_retry_beats_between_failed_pass_and_batch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import Mock
+
+    completed = {"reconcile": 0, "batch": 0}
+
+    def slow_reconcile(*args: Any) -> bool:
+        time.sleep(0.4)
+        completed["reconcile"] += 1
+        return False
+
+    def slow_batch(*args: Any) -> None:
+        time.sleep(0.4)
+        completed["batch"] += 1
+        raise EmbeddingAPIError("429 Too Many Requests")
+
+    monkeypatch.setattr(daemon, "_reconcile", slow_reconcile)
+    monkeypatch.setattr(daemon, "_process_paths", slow_batch)
+    monkeypatch.setattr(daemon, "_LOOP_INTERVAL_S", 0.01)
+    dirty: queue.Queue[Path] = queue.Queue()
+    dirty.put(tmp_path / "note.md")
+    retry = daemon._ReconcileRetrySchedule(base_s=0.01, cap_s=0.1)
+    retry.record_incomplete()
+    # Either operation fits below the ceiling, but their combined tails do not.
+    liveness = Liveness(0.6)
+    task = asyncio.create_task(daemon._drain_loop(Mock(), dirty, liveness, _FakeProvider(), retry))
+    started = time.monotonic()
+    try:
+        while time.monotonic() - started < 1.3:
+            await asyncio.sleep(0.01)
+            assert not task.done()
+            assert liveness.is_alive(), completed
+        assert completed["reconcile"] >= 1
+        assert completed["batch"] == 1
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+
+async def test_run_arms_retry_when_startup_reconcile_incomplete(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from unittest.mock import AsyncMock, Mock
+
+    from services.memory_indexer.backends.probe import ProbeResult
+
+    backend = Mock()
+    backend.name = "fake"
+    provider = _FakeProvider()
+    reconcile = Mock(return_value=False)
+    drain = AsyncMock()
+    monkeypatch.setattr(daemon, "_is_running", lambda: False)
+    monkeypatch.setattr(daemon, "_write_pidfile", lambda: None)
+    monkeypatch.setattr(daemon, "_remove_pidfile", lambda: None)
+    monkeypatch.setattr(daemon, "start_health_server", AsyncMock())
+    monkeypatch.setattr(daemon, "stop_health_server", AsyncMock())
+    monkeypatch.setattr(daemon, "health_port", Mock(return_value=0))
+    monkeypatch.setattr(daemon, "get_provider", lambda: provider)
+    monkeypatch.setattr(daemon, "probe_backend", Mock(return_value=ProbeResult(message=None)))
+    monkeypatch.setattr(daemon, "_connect_backend_with_retry", AsyncMock(return_value=backend))
+    monkeypatch.setattr(daemon, "Observer", Mock())
+    monkeypatch.setattr(daemon, "_reconcile", reconcile)
+    monkeypatch.setattr(daemon, "_drain_loop", drain)
+    monkeypatch.setattr(
+        daemon.settings.services, "memory_indexer_reconcile_retry_backoff_seconds", 7.0
+    )
+
+    with caplog.at_level(logging.WARNING, logger="services.memory_indexer.daemon"):
+        await daemon.run()
+
+    reconcile.assert_called_once()
+    assert reconcile.call_args.args[:2] == (backend, provider)
+    drain.assert_awaited_once()
+    assert drain.await_args is not None
+    retry = drain.await_args.kwargs["retry"]
+    assert isinstance(retry, daemon._ReconcileRetrySchedule)
+    assert retry.pending
+    retry_in = retry.retry_in_s()
+    assert retry_in is not None and 0 < retry_in <= 7.0
+    assert "startup reconcile incomplete; retry scheduled in 7.0s" in caplog.text
+
+
 async def test_reconcile_retry_wait_keeps_liveness_and_cancels_promptly(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1067,7 +1159,7 @@ async def test_reconcile_retry_wait_keeps_liveness_and_cancels_promptly(
     monkeypatch.setattr(daemon, "_LOOP_INTERVAL_S", 0.01)
     # Wait far longer than the heartbeat ceiling while keeping the test bounded.
     retry = daemon._ReconcileRetrySchedule(base_s=2.0, cap_s=2.0)
-    retry.record_pass_incomplete()
+    retry.record_incomplete()
     liveness = Liveness(0.15)
     backend = Mock()
     task = asyncio.create_task(
@@ -1108,7 +1200,7 @@ async def test_reconcile_retry_inflight_pass_cancels_promptly(
     monkeypatch.setattr(daemon, "_reconcile", slow_reconcile)
     monkeypatch.setattr(daemon, "_LOOP_INTERVAL_S", 0.01)
     retry = daemon._ReconcileRetrySchedule(base_s=0.01, cap_s=0.01)
-    retry.record_pass_incomplete()
+    retry.record_incomplete()
     task = asyncio.create_task(
         daemon._drain_loop(Mock(), queue.Queue(), Liveness(1.0), _FakeProvider(), retry)
     )

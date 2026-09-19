@@ -427,11 +427,11 @@ def _kind_limits(rows: list[tuple[float, str, str, int, str]]) -> dict[str, int]
 class _ReconcileRetrySchedule:
     """Bounded-backoff schedule for follow-up reconcile passes.
 
-    The daemon keeps at most one follow-up pass scheduled. A pass that ran and
-    could not finish the dirty set raises the backoff
-    (base_s * 2 ** (n - 1), capped at cap_s); a completed pass resets it. A
-    drain-batch embed failure only makes sure a pass is scheduled (it never
-    moves an already-pending one).
+    The daemon keeps at most one follow-up pass scheduled. Each incomplete
+    signal takes the next rung (base_s * 2 ** (n - 1), capped at cap_s): a
+    reconcile pass that could not finish the dirty set, or a drain-batch embed
+    failure that finds no pending schedule (ensure_scheduled counts it).
+    A completed pass resets the ladder; drain failures never move a pending deadline.
     """
 
     def __init__(
@@ -450,7 +450,7 @@ class _ReconcileRetrySchedule:
     def due(self) -> bool:
         return self._next_at is not None and self._clock() >= self._next_at
 
-    def record_pass_incomplete(self) -> float:
+    def record_incomplete(self) -> float:
         # Doubling the capped delay implements the formula without an exponent
         # that overflows after a long quota outage.
         self._delay = min(self._base_s if self._delay is None else self._delay * 2, self._cap_s)
@@ -462,7 +462,8 @@ class _ReconcileRetrySchedule:
         self._next_at = None
 
     def ensure_scheduled(self) -> float | None:
-        return None if self.pending else self.record_pass_incomplete()
+        """Count an incomplete signal if idle; never move a pending deadline."""
+        return None if self.pending else self.record_incomplete()
 
     def retry_in_s(self) -> float | None:
         return None if self._next_at is None else max(0.0, self._next_at - self._clock())
@@ -613,11 +614,12 @@ async def _drain_loop(
             # Cancellation stays prompt; an in-flight to_thread worker finishes
             # in the background, and asyncio.run joins the executor at exit.
             complete = await asyncio.to_thread(_reconcile, backend, provider, liveness)
+            liveness.beat()  # the pass's tail must not stack with the next operation
             if complete:
                 retry.record_pass_complete()
                 _log.info("[indexer] follow-up reconcile complete: gap closed; retries cleared")
             else:
-                delay = retry.record_pass_incomplete()
+                delay = retry.record_incomplete()
                 _log.warning("[indexer] reconcile incomplete; retry scheduled in %.1fs", delay)
         batch: set[Path] = set()
         # Drain the queue until empty — queue.Empty is the loop terminator.
@@ -633,7 +635,7 @@ async def _drain_loop(
             # Name the blast radius: which/how many paths lost this round.
             _log.error(
                 "[indexer] embed failed for a batch of %d path(s) (%s): %r — "
-                "subsequent fs modify events will retry",
+                "a follow-up reconcile pass will retry",
                 len(batch),
                 ", ".join(str(p) for p in sorted(batch)[:5]) + ("..." if len(batch) > 5 else ""),
                 exc,
@@ -752,7 +754,7 @@ async def run() -> None:
 
     try:
         if not await asyncio.to_thread(_reconcile, backend, provider, liveness):
-            delay = retry.record_pass_incomplete()
+            delay = retry.record_incomplete()
             _log.warning("[indexer] startup reconcile incomplete; retry scheduled in %.1fs", delay)
         await _drain_loop(backend, dirty_queue, liveness, provider, retry=retry)
     finally:
