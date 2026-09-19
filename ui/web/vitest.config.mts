@@ -55,6 +55,14 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "json-summary"],
+      // Write the summary even when tests fail (default: false — the report is
+      // dropped on failure). CI's coverage gate reads coverage-summary.json
+      // unconditionally; with the report gone, one failing test crashes the
+      // gate step (FileNotFoundError) and reds the job regardless of the Trunk
+      // quarantine decision. The gate is meant to evaluate the stable parallel
+      // denominator, and the quarantine gate is this job's only hard-failing
+      // test step (ci.yml).
+      reportOnFailure: true,
       include: ["src/**"],
       // `src/**` sweeps in the *.ava.okf.md docs that live next to the code
       // they describe (their path IS the OKF hierarchy, so they can't be
