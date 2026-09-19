@@ -32,12 +32,13 @@ from shared.proc_tree import stable_create_time
 from shared.resource_admission import admit_resources_async
 from shared.runtime_admission import (
     AdmissionDecision,
+    CurrentAdmission,
     PublicationAdmissionDeferredError,
     RuntimeAdmission,
     process_runtime_admission,
     require_current_for_managed,
 )
-from shared.runtime_incarnation import RuntimeIncarnation
+from shared.runtime_incarnation import RUNTIME_PROTOCOL_V1, RuntimeIncarnation
 
 
 class _HostedAdmissionRefusedError(Exception):
@@ -89,6 +90,9 @@ async def apply_hosted_lifecycle(
         if command is None:
             return None
         lifecycle_kind = command[0]
+        # Protocol zero in both branches is a release, never a downgrade of a
+        # live advertisement: the durable apply ends this incarnation, and the
+        # successor's own admission decides the next advertisement (task #4122).
         if lifecycle_kind == "restart":
             await conn.execute(
                 "UPDATE agents_meta SET status='idling',runtime_generation=NULL,"
@@ -435,6 +439,16 @@ async def admit_hosted_runtime(
                 host_identity,
                 exited_predecessor=exited_predecessor,
             )
+            # Protocol v1 is advertised exactly when this admission is the
+            # current managed publication: decide_async already ran its
+            # activation checks and the resource fence above bound the decision
+            # to this locked row, so re-judging here (a second
+            # require_activation call) would only introduce drift. A held
+            # continuation (decision None, issue #2159) and every legacy or
+            # deferred state advertise zero.
+            advertised_protocol = (
+                RUNTIME_PROTOCOL_V1 if isinstance(publication_decision, CurrentAdmission) else 0
+            )
             # Exact local host death and resource closure are stronger than
             # its remaining lease; the same row lock protects both proofs. A
             # legacy NULL row has no exact process to prove: its re-pinned
@@ -445,7 +459,7 @@ async def admit_hosted_runtime(
                     "runtime_generation = CASE WHEN runtime_owner = %s AND runtime_kind = 'hosted' "
                     "AND runtime_generation IS NOT NULL "
                     "THEN runtime_generation ELSE %s END, runtime_owner = %s, "
-                    "runtime_protocol_version = 0, "
+                    "runtime_protocol_version = %s, "
                     "lease_expires_at = now() + make_interval(secs => %s) "
                     "WHERE id = %s AND machine = %s AND status = %s AND pid IS NULL "
                     "AND status IN ('running','idling') "
@@ -461,6 +475,7 @@ async def admit_hosted_runtime(
                         owner,
                         generation,
                         owner,
+                        advertised_protocol,
                         AGENT_LEASE_TTL_S,
                         agent_id,
                         machine,
@@ -522,6 +537,12 @@ async def settle_hosted_runtime(
 ) -> bool:
     """Settle an ordinary turn; only durable lifecycle apply releases ownership.
 
+    The protocol advertisement is retained: a settled managed runtime stays
+    reachable by the caller gate across ordinary idles until a durable
+    lifecycle apply (restart/terminate) or a cleanup site releases it
+    (task #4122 -- resetting the column here dropped an enabled runtime out
+    of the gate on its first idle).
+
     The corpse marker `last_turn_fatal_at` is deliberately untouched here:
     a completed LLM turn already cleared it atomically (`_persist_last_active`
     writes `last_active_at` and clears the marker in one UPDATE — the only
@@ -535,8 +556,7 @@ async def settle_hosted_runtime(
         return False
     async with async_write_transaction(pool) as conn:
         cur = await conn.execute(
-            "UPDATE agents_meta SET status = 'idling', "
-            "runtime_protocol_version = 0 "
+            "UPDATE agents_meta SET status = 'idling' "
             "WHERE id = %s AND status = 'running' AND runtime_kind = 'hosted' "
             "AND runtime_generation = %s AND runtime_owner = %s",
             (

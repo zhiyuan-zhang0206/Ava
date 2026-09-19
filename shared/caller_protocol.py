@@ -4,7 +4,7 @@ import psycopg
 from psycopg.pq import TransactionStatus
 
 from shared.caller_identity import PREFIXES, CallerIdentity
-from shared.runtime_incarnation import RuntimeIncarnation
+from shared.runtime_incarnation import RUNTIME_PROTOCOL_V1, RuntimeIncarnation
 
 
 class CallerProtocolUnavailableError(ValueError):
@@ -44,8 +44,8 @@ def require_caller_protocol(
         "WHERE id = %s AND status IN ('running', 'idling') "
         "AND runtime_kind IN ('process', 'hosted') "
         "AND runtime_generation IS NOT NULL AND runtime_owner IS NOT NULL "
-        "AND runtime_protocol_version >= 1 AND lease_expires_at > clock_timestamp()",
-        (agent_id,),
+        "AND runtime_protocol_version >= %s AND lease_expires_at > clock_timestamp()",
+        (agent_id, RUNTIME_PROTOCOL_V1),
     ).fetchone()
     if row is None:
         raise CallerProtocolUnavailableError(_refusal_message(conn, agent_id))
@@ -107,11 +107,12 @@ def _refusal_message(conn: psycopg.Connection, agent_id: int) -> str:
             f"target runtime protocol v1: {condition} (a completed admission records both); "
             f"admit or restart the target runtime, then retry; {_NO_SUBSTITUTE}"
         )
-    if version is None or version < 1:
+    if version is None or version < RUNTIME_PROTOCOL_V1:
         return (
             f"target runtime protocol v1: runtime_protocol_version is {_shown(version)} "
-            f"(requires >= 1); the target runtime has not activated protocol v1 yet, so an "
-            f"unchanged retry cannot succeed until the runtime is activated for v1; "
+            f"(requires >= {RUNTIME_PROTOCOL_V1}); the target runtime has not activated "
+            f"protocol v1 yet, so an unchanged retry cannot succeed until the runtime is "
+            f"activated for v1; "
             f"{_NO_SUBSTITUTE}"
         )
     if lease_expires_at is None or lease_expires_at <= now:
