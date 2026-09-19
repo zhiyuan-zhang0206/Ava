@@ -501,7 +501,7 @@
     "/api/agents/{agent_id}/compact": {
       "post": {
         "summary": "Post Compact",
-        "description": "Trigger compact — INSERT kind='compact_request' inbound; the claim\nNode takes over, runs the backend Compaction LLM to generate a summary\nthat replaces messages, and publishes a `compact_done` event to notify\nUI.\n\n`mode` query parameter is preserved for backward compat with old\nfrontends but is ignored — the new design uniformly uses backend LLM\nsummary generation (see\ndecisions/2026-05-02-self-cycling-langgraph.md). Agent-initiated compact still goes through\nava.self.compact() -> kind='compact_summary'; this is a separate signal\nfrom UI-triggered compact_request.\n\nA compact targeting a terminated agent auto-resurrects it (shared with the\nchat path): otherwise the compact_request row would sit pending with no live\nprocess to claim it. The co-batched resurrect wins the claim node's recency\nrouting, so the agent wakes and the requested compaction still runs.",
+        "description": "Trigger compact — INSERT kind='compact_request' inbound; the claim\nNode takes over, runs the backend Compaction LLM to generate a summary\nthat replaces messages, and publishes a `compact_done` event to notify\nUI.\n\nThe new design uniformly uses backend LLM summary generation (see\ndecisions/2026-05-02-self-cycling-langgraph.md). The legacy `mode` query\nparameter old frontends sent is ignored (still accepted — extra query\nparameters never fail the call). Agent-initiated compact still goes through\nava.self.compact() -> kind='compact_summary'; this is a separate signal\nfrom UI-triggered compact_request.\n\nA compact targeting a terminated agent auto-resurrects it (shared with the\nchat path): otherwise the compact_request row would sit pending with no live\nprocess to claim it. The co-batched resurrect wins the claim node's recency\nrouting, so the agent wakes and the requested compaction still runs.",
         "operationId": "post_compact_api_agents__agent_id__compact_post",
         "parameters": [
           {
@@ -511,20 +511,6 @@
             "schema": {
               "type": "integer",
               "title": "Agent Id"
-            }
-          },
-          {
-            "name": "mode",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "enum": [
-                "framework",
-                "agent"
-              ],
-              "type": "string",
-              "default": "framework",
-              "title": "Mode"
             }
           }
         ],
@@ -8953,14 +8939,6 @@
       },
       "CompactEnqueued": {
         "properties": {
-          "mode": {
-            "type": "string",
-            "enum": [
-              "framework",
-              "agent"
-            ],
-            "title": "Mode"
-          },
           "agent_id": {
             "type": "integer",
             "title": "Agent Id"
@@ -8973,7 +8951,6 @@
         },
         "type": "object",
         "required": [
-          "mode",
           "agent_id",
           "status"
         ],

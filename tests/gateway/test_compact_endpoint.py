@@ -54,26 +54,29 @@ def _status(conn: psycopg.Connection, agent_id: int) -> str:
 
 
 def test_compact_endpoint_inserts_compact_request_kind(db_conn: psycopg.Connection) -> None:
-    """New design (Step 2 cleanup): mode no longer branches — framework / agent both INSERT
-    kind='compact_request', claim Node runs backend LLM to generate summary replacement. Mode
-    query parameter kept only for compatibility with old frontend, actually ignored. An alive agent does not trigger
-    auto-resurrect, just leaves a compact_request."""
+    """The endpoint INSERTs kind='compact_request' and returns enqueued; the
+    claim Node runs the backend LLM summary replacement. An alive agent does
+    not trigger auto-resurrect, just leaves a compact_request."""
     tid = _seed_agent(db_conn)
     with TestClient(app) as client:
-        resp = client.post(f"/api/agents/{tid}/compact?mode=framework")
+        resp = client.post(f"/api/agents/{tid}/compact")
     assert resp.status_code == 200
-    assert resp.json() == {"mode": "framework", "agent_id": tid, "status": "enqueued"}
+    assert resp.json() == {"agent_id": tid, "status": "enqueued"}
     assert _pending_rows(db_conn, tid) == [("compact_request", "pending")]
 
 
-def test_compact_endpoint_ignores_mode_param(db_conn: psycopg.Connection) -> None:
-    """mode=agent and mode=framework take the same path — response returns mode field for compat
-    with old frontend, but inbound kind is always compact_request."""
+@pytest.mark.parametrize("legacy_mode", ["framework", "agent"])
+def test_compact_accepts_legacy_mode_query_param(
+    db_conn: psycopg.Connection, legacy_mode: str
+) -> None:
+    """Rolling-update window: an old frontend still sends ?mode=..., which stays
+    accepted (extra query parameters never fail the call) and is ignored — the
+    inbound kind is always compact_request."""
     tid = _seed_agent(db_conn)
     with TestClient(app) as client:
-        resp = client.post(f"/api/agents/{tid}/compact?mode=agent")
+        resp = client.post(f"/api/agents/{tid}/compact?mode={legacy_mode}")
     assert resp.status_code == 200
-    assert resp.json()["status"] == "enqueued"
+    assert resp.json() == {"agent_id": tid, "status": "enqueued"}
     assert _pending_rows(db_conn, tid) == [("compact_request", "pending")]
 
 
@@ -137,7 +140,7 @@ def test_compact_terminated_agent_auto_resurrects(
 def test_404_when_thread_not_exists(db_conn: psycopg.Connection) -> None:
     # conftest already TRUNCATE, no agent 9999
     with TestClient(app) as client:
-        resp = client.post("/api/agents/9999/compact?mode=framework")
+        resp = client.post("/api/agents/9999/compact")
     assert resp.status_code == 404
     assert "not found" in resp.json()["detail"]
     assert _pending_rows(db_conn, 9999) == []
