@@ -769,9 +769,6 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   "display.show_timestamp_weekday": true,
   // Render agent reasoning content as markdown in the timeline; off shows raw text.
   "display.render_reasoning_markdown": true,
-  // (display.collapse_agent_runs was removed from the defaults — it had zero
-  // readers; run-collapse grouping is always on and the Steps header toggle
-  // controls expand/collapse via display.expand_runs_mode.)
   // Width tier of the composer's collapsed context-usage bar (ContextMeter).
   // "comfortable" is one notch above the original fixed size — a bare dot at
   // tens of thousands of tokens was unreadable at the old width.
@@ -798,9 +795,7 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   // recent session (default; the Display settings row offers 0-3).
   "display.compact_history_sessions": 1,
   // Sidebar layout. The homepage split ratio is device-local state owned by
-  // react-resizable-panels; stored display.sidebar_width is a legacy pixel
-  // value and is ignored — kept in the type only so old rows read cleanly.
-  "display.sidebar_width": 240,
+  // react-resizable-panels.
   "display.sidebar_collapsed": false,
   "display.sidebar_view_mode": "flat",
   // Flat-list sort: { key: "id" | "last_active" | "status", dir: "asc" | "desc" }.
@@ -861,7 +856,7 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   // model select. An empty list means all models are visible.
   "models.hidden": [],
   // Force-directed layout knobs for the fleet Graph / Task Graph
-  // (display.graph_force_params / display.task_force_params) are DB-backed too,
+  // (display.graph_force_params / display.task_force_params.v2) are DB-backed too,
   // but their default objects differ per view and live with those views — the
   // useForceParams hook merges settings over the view's passed defaults, so the
   // full ForceParams objects are intentionally not enumerated here.

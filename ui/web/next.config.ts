@@ -39,20 +39,6 @@ const nextConfig: NextConfig = {
     .map((s) => s.trim())
     .filter(Boolean),
 
-  // -- Legacy route redirect --
-  // /settings was renamed to /control (the page outgrew "settings": it carries
-  // live cluster status and operational actions, not just preferences).
-  // Redirect old bookmarks/links; not `permanent` so a browser doesn't cache it
-  // past a future adjustment. URL fragments (#status, #skills, …) are
-  // client-side only and survive the redirect unmodified — no rule needed for
-  // them.
-  async redirects() {
-    return [
-      { source: "/settings", destination: "/control", permanent: false },
-      { source: "/settings/:path*", destination: "/control/:path*", permanent: false },
-    ];
-  },
-
   // -- Security response headers --
   async headers() {
     return [
