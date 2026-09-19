@@ -16,7 +16,11 @@ fail-fast validates the boot-path field index, without importing the 15
 sub-models, `pydantic_settings`, or building the registry. The eager chain
 (`shared/config/_full.py`) is constructed once on the first access the lite
 layer does not cover -- an upgrade that replays pending overlay writes and
-rebinds the facade's `settings` name; pre-upgrade bindings keep working. The
+rebinds the facade's `settings` name; pre-upgrade bindings keep working.
+A read that lands while that build is in flight on another thread waits for
+it instead of failing (bounded; expiry raises the retryable
+`ConfigBuildWaitTimeoutError`), and the building thread's own re-entrant reads
+keep the lite value. The
 gateway, ops daemons and agent host call `shared.config.ensure_eager()` to
 keep full fail-fast at boot; `AVA_CONFIG_BOOT=eager` (process env only) is the
 operator escape hatch, and existing settings-lite `AVA_CONFIG_FETCH=skip`
