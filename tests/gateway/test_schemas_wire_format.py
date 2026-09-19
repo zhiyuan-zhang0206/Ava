@@ -149,12 +149,8 @@ def test_message_enqueued_wire_shape() -> None:
 
 
 def test_compact_enqueued_wire_shape() -> None:
-    m = CompactEnqueued(mode="framework", agent_id=3, status="enqueued")
-    assert json.loads(m.model_dump_json()) == {
-        "mode": "framework",
-        "agent_id": 3,
-        "status": "enqueued",
-    }
+    m = CompactEnqueued(agent_id=3, status="enqueued")
+    assert json.loads(m.model_dump_json()) == {"agent_id": 3, "status": "enqueued"}
 
 
 def test_user_message_in_strips_and_rejects_empty() -> None:

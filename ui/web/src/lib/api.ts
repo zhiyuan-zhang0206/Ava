@@ -34,7 +34,6 @@ import type { NoticesFeed,
   CommandItem,
   ContentBlock,
   CompactEnqueued,
-  CompactMode,
   ConfigView,
   ConfigWriteResult,
   WireFleetGraph,
@@ -411,10 +410,8 @@ export const api = {
     ).then(ok<{ status: string }>);
   },
 
-  compact: (agentId: number, mode: CompactMode): Promise<CompactEnqueued> => {
-    return f(`/api/agents/${agentId}/compact?mode=${mode}`, POST).then(
-      ok<CompactEnqueued>,
-    );
+  compact: (agentId: number): Promise<CompactEnqueued> => {
+    return f(`/api/agents/${agentId}/compact`, POST).then(ok<CompactEnqueued>);
   },
 
   cancel: (agentId: number): Promise<CancelRequested> => {

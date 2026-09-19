@@ -135,7 +135,7 @@ export function useAgentActions(
   });
 
   const compactMutation = useMutation({
-    mutationFn: (id: number) => api.compact(id, "framework"),
+    mutationFn: (id: number) => api.compact(id),
     onSuccess: () => track("compact"),
     onError: (e: unknown) => showError(`Compact failed: ${errMsg(e)}`),
   });

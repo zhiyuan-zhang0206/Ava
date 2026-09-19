@@ -16,10 +16,6 @@ import type { components } from "./types-generated";
 type Schemas = components["schemas"];
 
 export type CompactEnqueued = Schemas["CompactEnqueued"];
-// CompactMode is the CompactEnqueued.mode field — OpenAPI flattens Literal
-// to string + enum, and openapi-typescript turns it into a union literal.
-// Pluck it directly as a top-level type.
-export type CompactMode = CompactEnqueued["mode"];
 export type CancelRequested = Schemas["CancelRequested"];
 
 /** The persisted lifecycle vocabulary carried on the gateway wire. These are
