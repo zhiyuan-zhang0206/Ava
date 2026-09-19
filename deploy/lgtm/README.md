@@ -40,7 +40,7 @@ capability.
 
 | Backend | Delivery | Version / limit | Port | Role |
 |---|---|---|---|---|
-| Loki | native launchd / user systemd | 3.7.6 / `GOMEMLIMIT=2GiB` | 3100 | log backend, filesystem storage, 7-day retention |
+| Loki | native launchd / user systemd | 3.7.6 / `GOMEMLIMIT=2GiB` | 3100 | log backend, filesystem storage, 84h retention |
 | Prometheus | native launchd / user systemd | 3.13.2 / `GOMEMLIMIT=1GiB` | 9090 | metrics and OTLP receiver |
 | Tempo | remote per cluster config | WSL backend; compose copy is the rollback asset | configured by `AVA_TELEMETRY_TEMPO_ENDPOINT` | trace backend |
 | Grafana | native launchd / user systemd | 13.1.3 | 3003 | anonymous read-only UI |
@@ -128,7 +128,7 @@ before they reach Loki, Prometheus, or Tempo.
 ## Resource and retention posture
 
 Loki and Prometheus use explicit Go memory limits rather than container memory
-caps. Loki retains normal streams for seven days, preserves the configured
+caps. Loki retains normal streams for 84 hours, preserves the configured
 archive-stream exception, and keeps bounded query splitting, fan-out, and
 embedded result caches. Prometheus retains data for 15 days or 8GB, whichever
 limit is reached first. Tempo declares its 168-hour block retention. The two
