@@ -44,10 +44,6 @@ export function AgentSidebar(props: Props) {
   const setShowTerminated = (v: boolean) => setSetting("display.show_terminated", v);
   const queryClient = useQueryClient();
 
-  // The one-time migration of legacy localStorage preferences (including
-  // ava.sidebar.showTerminated) into user_settings lives in one place:
-  // lib/settings-migration.ts, mounted by <SettingsMigration/> in providers.
-
   // -- Read UI state from the store --
   const activeId = useStore((s) => s.activeId);
   const setActiveId = useStore((s) => s.setActiveId);

@@ -13,7 +13,6 @@ import { LanguageProvider } from "@/i18n/language-provider";
 import { AuthProvider, notifySessionInvalid } from "@/lib/auth-context";
 import { ApiError } from "@/lib/api";
 import { NonceProvider } from "@/lib/nonce-context";
-import { SettingsMigration } from "@/lib/settings-migration";
 import { EventStreamProvider } from "@/lib/useEventStream";
 import { AlertsProvider } from "@/lib/use-alerts";
 
@@ -101,7 +100,6 @@ export function Providers({ children, nonce }: { children: React.ReactNode; nonc
         <AuthProvider>
           <EventStreamProvider>
             <AlertsProvider>
-              <SettingsMigration />
               <ThemeProvider
                 attribute="class"
                 defaultTheme="system"

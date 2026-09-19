@@ -212,8 +212,7 @@ function TaskHoverCard({
 // 2026-08-10 #1127): it keeps its OWN tuning key, so adjusting one graph
 // never changes the other. (2026-08-05 had both graphs share
 // display.graph_force_params — "one tuning, applied to both canvases" — the
-// 8/10 ruling splits them. The .v2 key was already wired in
-// settings-migration.ts but never populated.) Task nodes also carry a single
+// 8/10 ruling splits them.) Task nodes also carry a single
 // fixed size — TASK_FORCE_GROUPS shows one "Size" slider, no min/max band.
 export const TASK_FORCE_KEY = "display.task_force_params.v2";
 
