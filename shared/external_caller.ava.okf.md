@@ -26,9 +26,9 @@ place secrets, user names, paths, or prompts in the bounded instance field.
 CLI send requires an explicit `--source` at the parse layer and never
 consults the profile: an inherited `AVA_CALLER_IDENTITY` neither fills a
 missing flag nor vetoes the explicit value. Restart, resurrect, terminate
-and kill accept an explicit `--source` and forward the profile when
-configured; for those verbs an explicitly conflicting source is still
-rejected before network access.
+and kill never consult the profile either; an explicit `--source` is
+forwarded unchanged, and omitting it claims no provenance, leaving the
+server default in place.
 SDK source selection prefers real hosted-turn context, then an
 explicit external profile, then its established legacy actor. An external shell
 cannot become its Ava parent merely by inheriting `AVA_AGENT_ID`.

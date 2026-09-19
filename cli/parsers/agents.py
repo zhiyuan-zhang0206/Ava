@@ -8,6 +8,7 @@ never loads Settings (see ``cli.main`` module docstring)."""
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
 
@@ -19,6 +20,17 @@ def _validated_source(value: str) -> str:
         validate_source(value)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(str(exc)) from exc
+    return value
+
+
+def _validated_config_json(value: str) -> str:
+    """Argparse type for `--config`: reject a non-object overlay before any command runs."""
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise argparse.ArgumentTypeError(f"invalid config JSON: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise argparse.ArgumentTypeError("config must be a JSON object")
     return value
 
 
@@ -227,7 +239,10 @@ def _add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     )
     agents_restart_p.add_argument("agent_id", type=int, help="agent id to restart")
     agents_restart_p.add_argument(
-        "--config", default=None, help='config overlay as JSON (e.g. {"llm_model":"gpt-5.6-sol"})'
+        "--config",
+        default=None,
+        type=_validated_config_json,
+        help='config overlay as JSON (e.g. {"llm_model":"gpt-5.6-sol"})',
     )
     agents_restart_p.set_defaults(func=_h_agents_restart)
 
@@ -271,8 +286,7 @@ def _add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
             "--source",
             default=None,
             type=_validated_source,
-            help="explicit provenance (or AVA_CALLER_IDENTITY); 'user' = the human operator; "
-            "never an authorization grant",
+            help="explicit provenance; 'user' = the human operator; never an authorization grant",
         )
 
     notices_p = sub.add_parser(
