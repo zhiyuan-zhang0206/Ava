@@ -137,7 +137,9 @@ def _dispatch(args: argparse.Namespace) -> int:
             print(
                 "Start the claude relay (ava impersonate relay) inside the controller "
                 "session immediately, with AVA_IMPERSONATION_RELAY_TOKEN set to the "
-                "relay token printed above. Preparation fails without its heartbeat.",
+                "relay token printed above; arm it as a Monitor watch with timeout_ms "
+                "1800000 and re-arm on each expiry notice (see the host conventions). "
+                "Preparation fails without its heartbeat.",
                 file=sys.stderr,
             )
         return 0

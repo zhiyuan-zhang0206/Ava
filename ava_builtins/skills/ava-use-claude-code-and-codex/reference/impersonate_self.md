@@ -28,7 +28,8 @@ are not forbidden; this is the recommended default). A workspace that already
 carries a live canonical generation is refused (`--cancel-generation` it
 first). Both launch paths are live: `spawn_claude.py --impersonate-self` takes
 the same inline `--brief`; its executor starts the Claude Monitor relay itself,
-from the briefing and the request output.
+armed with `timeout_ms: 1800000` and re-armed at each expiry notice, from the
+briefing and the request output.
 
 The two states, and nothing else:
 
