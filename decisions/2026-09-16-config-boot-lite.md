@@ -107,3 +107,5 @@ same baseline). The spike's isolated-marginal projections (-10.7 child / -13.2
   `CONFIG_UNCHANGED_SENTINEL`, `ConfigFieldMeta`) serve without the upgrade,
   so settings-lite verbs (`ava config set`) keep repairing a broken `.env`;
   enforced end-to-end by the suite (`tests/cli/test_config_cmd.py`).
+
+<!-- Refined by: decisions/2026-09-19-config-build-inflight-bounded-wait.md (cross-thread window reads now bounded-wait instead of raising). -->

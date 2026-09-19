@@ -11,8 +11,10 @@ of anything outside the boot-path surface, exactly once, by `upgrade()`:
     LITE -- upgrade(reason) --> FULL
 
 The transition is single-shot, single-directional, and serialized by one RLock.
-While a build is in flight (`_state.upgrading`), a re-entrant read serves the lite
-value rather than recursing into the build. Overlay writes that landed before
+While a build is in flight, a read from another thread waits for it (bounded;
+expiry raises the retryable `ConfigBuildWaitTimeoutError`), and a re-entrant read on
+the building thread itself serves the lite value rather than recursing into the
+build. Overlay writes that landed before
 the upgrade (pending) are replayed onto the constructed singleton in insertion
 order, then cleared.
 
@@ -52,7 +54,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from threading import RLock
+from threading import RLock, get_ident
 from typing import Any, cast
 
 from shared.bootstrap import (
@@ -84,6 +86,15 @@ BOOT_MODE_EAGER = "eager"
 _LITE = "lite"
 _FULL = "full"
 
+# Internal invariant (task #3696 exception inventory): bound for a read
+# waiting on another thread's in-flight eager build. Not config: the wait runs
+# before the config chain exists (reading a field would itself trigger the
+# upgrade), and the value is fixed at 3x the bootstrap fetch bound
+# (shared/bootstrap.py _FETCH_TIMEOUT_S = 10s) -- the slowest legitimate
+# segment of a build. A slower build degrades to the retryable
+# ConfigBuildWaitTimeoutError, so no operator knob is warranted.
+_BUILD_WAIT_TIMEOUT_SECONDS = 30.0
+
 # The one upgrade lock: prepare, the build, and the install run under it.
 _lock = RLock()
 
@@ -101,6 +112,7 @@ class _BootState:
         "settings",
         "upgrades",
         "upgrading",
+        "upgrading_thread",
     )
 
     def __init__(self) -> None:
@@ -108,6 +120,7 @@ class _BootState:
         self.reason: str | None = None
         self.upgrades = 0
         self.upgrading = False
+        self.upgrading_thread: int | None = None
         self.prepared = False
         self.profile: ProcessProfile | None = None
         # Overlay writes made in lite mode, in insertion order: name -> raw value.
@@ -315,6 +328,8 @@ def get_field(name: str) -> Any:
         return _state.pending[name]
     if name in LITE_FIELDS:
         return resolve(name)
+    if _state.upgrading and _state.upgrading_thread != get_ident():
+        _wait_for_in_flight_build(f"get_field({name!r})")
     upgrade(f"get_field({name!r})")
     return getattr(getattr(_current_settings(), domain), name)
 
@@ -433,6 +448,23 @@ def _build_window_message(target: str) -> str:
     return f"config boot-lite: {target} is not readable while the eager config build is in flight"
 
 
+class ConfigBuildWaitTimeoutError(AttributeError):
+    """A read waited out the bounded window for another thread's eager build.
+
+    Retryable: the other thread's build keeps running (or a fresh attempt runs
+    after a failed one), and nothing is corrupted by the wait itself. Inherits
+    AttributeError so attribute-read callers keep their previous catch shape
+    for window conditions.
+    """
+
+
+def _build_wait_timeout_message(target: str) -> str:
+    return (
+        f"config boot-lite: {target} is not readable yet: the in-flight eager config "
+        f"build exceeded the {_BUILD_WAIT_TIMEOUT_SECONDS:g}s wait bound; retry shortly"
+    )
+
+
 # ── prepare ────────────────────────────────────────────────────────────────
 
 
@@ -547,6 +579,7 @@ def upgrade(reason: str) -> Any:
             return _state.settings
         prepare()
         _state.upgrading = True
+        _state.upgrading_thread = get_ident()
         try:
             from shared.config._full import build
 
@@ -557,6 +590,7 @@ def upgrade(reason: str) -> Any:
             _state.pending.clear()
         finally:
             _state.upgrading = False
+            _state.upgrading_thread = None
     _log_upgrade(reason)
     return _state.settings
 
@@ -579,13 +613,39 @@ def _install(bundle: Any, reason: str) -> None:
     _state.upgrades += 1
 
 
+def _wait_for_in_flight_build(reason: str) -> None:
+    """Bounded wait for another thread's in-flight eager build.
+
+    The builder holds `_lock` across the whole upgrade (prepare, build,
+    install, overlay replay), so acquiring it IS the wait. On acquisition the
+    chain is installed and the caller can serve the full value; if the
+    in-flight attempt died before installing, this thread runs the build
+    itself so the real error surfaces. On expiry the read raises the
+    retryable ConfigBuildWaitTimeoutError -- the other thread's build keeps running
+    and installs when it finishes, so a retry is the right move."""
+    if not _lock.acquire(timeout=_BUILD_WAIT_TIMEOUT_SECONDS):
+        raise ConfigBuildWaitTimeoutError(_build_wait_timeout_message(reason))
+    try:
+        if _state.mode != _FULL:
+            upgrade(reason)
+    finally:
+        _lock.release()
+
+
 def _maybe_upgrade(reason: str) -> bool:
-    """Upgrade unless a build is already in flight; False means the caller must
-    serve the lite value (or raise) instead of recursing into the build."""
+    """Upgrade unless THIS thread is the one already building.
+
+    A read that arrives while another thread's build is in flight waits for it
+    (bounded) and then serves the full chain. Only a read made by the building
+    thread itself -- which must not wait on its own build -- returns False, and
+    the caller serves the lite value or raises the documented window error."""
     if _state.mode == _FULL:
         return True
     if _state.upgrading:
-        return False
+        if _state.upgrading_thread == get_ident():
+            return False
+        _wait_for_in_flight_build(reason)
+        return True
     upgrade(reason)
     return True
 
