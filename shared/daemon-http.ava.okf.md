@@ -56,7 +56,10 @@ routes are not registered on the test observation socket.
 launchd surfaces without importing Settings or registering jobs. Expected launchd
 identity is the plist Label plus SHA256 of its raw bytes; cron identity is SHA256
 of the exact job line without its newline. Reads are bounded by the outstanding
-challenge and repeated to reject observed drift. Raw definitions and command
+challenge and repeated to reject observed drift: both the definition bytes and the
+loaded verdict must be identical across the two reads, and a verdict that changes
+in any way (including to `None`, which can hide a changed enumeration) refuses
+rather than falling back to the first read. Raw definitions and command
 output are never returned or logged. A definition that is absent is a reported
 fact, not an error — absence is the file's own lstat ENOENT, read twice for
 stability; foreign bytes are summarized by digest only, never parsed.
@@ -78,5 +81,6 @@ CI separately exercises real read-only `crontab -l` and launchctl queries on nat
 runners. Parser fixtures do not prove effective scheduler state. The observer
 still emits `closure=unknown`, and that is permanent semantics rather than a
 placeholder: a positive `old_writers_absent_relaunchers_fenced` literal is
-derived where these observed facts meet the hop ledger, never by the observer
-itself; updater/adoption activation is not implemented.
+derived where these observed facts meet the hop ledger (`shared.managed_writer_closure`,
+an inert tested seat), never by the observer itself; updater/adoption activation is
+not implemented.

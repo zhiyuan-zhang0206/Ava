@@ -232,11 +232,10 @@ def observe_launchd(
     loaded = launchd_loaded_state(label, valid_until)
     second = read_launchd_definition(label)
     after_loaded = launchd_loaded_state(label, valid_until)
-    if (
-        first != second
-        or (loaded is True and after_loaded is not True)
-        or (loaded is False and after_loaded is True)
-    ):
+    # Both facts must be identical across the two reads: a loaded verdict that
+    # differs in any way (including a None that can hide a changed enumeration)
+    # refuses, never falling back to the first read.
+    if first != second or loaded != after_loaded:
         raise NativeReadUnavailableError("launchd state changed during observation")
     if first is None:
         # A positively absent definition still carries the loaded facts the

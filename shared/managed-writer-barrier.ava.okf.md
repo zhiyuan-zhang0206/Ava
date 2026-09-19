@@ -55,6 +55,19 @@ success is not evidence. No credentials or full command environments belong in
 the receipt. This boundary covers registered **managed** writers, not arbitrary
 external processes holding shared database or cluster credentials.
 
+`managed_writer_closure.py` is the inert derivation seat over those facts: per
+prepared launcher, a journaled removed/rebound terminal must meet unchanged facts
+(rebound means the definition now carries exactly the journaled digest; both
+forms require the loaded verdict to be positively false), then the unit assembly
+requires every prepared old-writer process exited, every session absent, and the
+echoed challenge plus observation window matching the operation. Unknown,
+missing, duplicated or drifted facts assemble nothing. A crontab observation never
+proves the loaded verdict here, so its facts fence nothing yet — fail-closed until
+the Linux collector rule is designed. No production caller connects this layer:
+the collector side (network gathering and the platform final re-read after
+candidate readiness) and the hop channels remain future wiring; storage adoption
+stays the only authority.
+
 The transaction order is deployment row lock, inventory table locks, agent
 ownership rows. Fresh database-clock checks occur after lock acquisition,
 including after waiting for inventory writes. Registration changes, missing
