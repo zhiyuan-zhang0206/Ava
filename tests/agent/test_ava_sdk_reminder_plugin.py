@@ -48,7 +48,6 @@ from langchain_core.messages import (
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
-from agent.graph._context import AvaContext
 from agent.messages import inbound_message, tail_has_agent_inbound
 from agent.state import CompactState, build_agent_state, clear_plugin_registrations
 from ava_builtins.plugins.ava_sdk_reminder._state import (
@@ -58,6 +57,7 @@ from ava_builtins.plugins.ava_sdk_reminder._state import (
     hint_for,
     mentions_watcher,
 )
+from shared.context import AvaContext
 
 
 def _pin_compact_budget(

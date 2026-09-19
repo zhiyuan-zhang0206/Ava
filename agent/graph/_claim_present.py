@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from agent.db import list_chat_inbound_anchors
-from agent.graph._context import AvaContext
+from shared.context import AvaContext
 from shared.live_events import InboundCommitted, TimelineSnapshot
 from shared.timeline import build_timeline_items, tail_window, timeline_default_limit
 

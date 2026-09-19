@@ -42,7 +42,6 @@ from langgraph.runtime import Runtime
 from pydantic import BaseModel, Field
 
 import ava
-from agent.graph._context import AvaContext
 from agent.graph._exec import _exec_node_impl
 from agent.messages_guard import MessagesMutationError
 from agent.state import (
@@ -54,6 +53,7 @@ from agent.state import (
     register_plugin_state,
 )
 from shared.config.turn_view import bind_agent_config
+from shared.context import AvaContext
 from shared.plugin_context import PluginContext
 
 assert (

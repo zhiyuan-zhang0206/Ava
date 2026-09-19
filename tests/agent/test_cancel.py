@@ -31,11 +31,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 
-from agent.graph import (
-    exec_node,
-    llm_node,
-)
-from agent.graph._context import AvaContext
+from agent.graph import exec_node, llm_node
 from agent.graph._exec import (
     _ExecCancelled,
     _ExecCrashed,
@@ -44,6 +40,7 @@ from agent.graph._exec import (
     _ExecTimedOut,
 )
 from agent.state import AgentState
+from shared.context import AvaContext
 from shared.live_events import EVENT_ADAPTER, Cancelled
 from tests.agent._fakes import make_fake_ops_pool
 

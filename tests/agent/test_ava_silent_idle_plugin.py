@@ -24,9 +24,9 @@ from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
-from agent.graph._context import AvaContext
 from agent.messages import NoteTag
 from agent.state import build_agent_state, clear_plugin_registrations
+from shared.context import AvaContext
 
 
 @pytest.fixture

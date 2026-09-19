@@ -42,12 +42,12 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent import history_dump
 from agent.graph import claim_node
-from agent.graph._context import AvaContext
 from agent.hooks.compact import auto_compact_before_llm, compose_summary_message
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
 from shared.config import settings
 from shared.config.agent_compaction import AgentCompactionSettings
+from shared.context import AvaContext
 from shared.lm.context_budget import ContextBudget
 from tests.conftest import spawn_agent
 

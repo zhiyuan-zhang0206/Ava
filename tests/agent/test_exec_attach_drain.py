@@ -17,10 +17,10 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
-from agent.graph._context import AvaContext
 from agent.graph._exec import _exec_node_impl
 from agent.graph._exec_result import _ExecDone
 from agent.state import AgentState, AttachState
+from shared.context import AvaContext
 from shared.message_kwargs import AvaMsgType
 from tests.agent._fakes import make_fake_ops_pool
 

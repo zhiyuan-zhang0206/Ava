@@ -17,10 +17,10 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph._context import AvaContext
 from agent.graph._init_context import init_context_node
 from agent.state import AgentState, ContextReset
 from shared.config import settings
+from shared.context import AvaContext
 from shared.db import create_agent
 
 
