@@ -15,7 +15,9 @@ not the same semantic space).
 
 from __future__ import annotations
 
+import logging
 import subprocess
+import time
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -32,6 +34,7 @@ from services.memory_indexer.backends.milvus import (
     _schema_current,
 )
 from services.memory_indexer.embeddings.base import EmbeddingAPIError
+from shared.daemon_health import Liveness
 
 _DIM = 8
 _FP = "test:gemini:dim=8"
@@ -463,7 +466,7 @@ def test_cold_start_reconcile_prunes_foreign_rows(
     backend.upsert(str(watched.resolve()), 1.0, "h", _vec(0), kind="body", chunk_idx=0)
     backend.upsert(str(foreign.resolve()), 1.0, "h", _vec(0), kind="body", chunk_idx=0)
 
-    daemon._cold_start_reconcile(backend, _FakeProvider())
+    daemon._cold_start_reconcile(backend, _FakeProvider(), Liveness(daemon._LIVENESS_TIMEOUT_S))
     meta = _backend(milvus_client).all_meta()
     assert str(foreign.resolve()) not in meta
     assert str(watched.resolve()) in meta
@@ -495,11 +498,92 @@ def test_cold_start_reconcile_reembeds_on_provider_switch(
         fingerprint="other:provider",
         client=milvus_client,  # pyright: ignore[reportUnknownArgumentType]
     )
-    daemon._cold_start_reconcile(switched_backend, switched)
+    daemon._cold_start_reconcile(switched_backend, switched, Liveness(daemon._LIVENESS_TIMEOUT_S))
     # The row was re-embedded with the new fingerprint.
     meta = switched_backend.all_meta()
     assert str(watched.resolve()) in meta
     assert meta[str(watched.resolve())][2] == "other:provider"
+
+
+def test_cold_start_reconcile_beats_liveness_across_chunks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    milvus_client,
+) -> None:
+    """Regression (watchdog kill loop, 2026-09-19): the cold-start rebuild
+    works the dirty set in file-granular chunks, beating liveness between them.
+    Before the fix, a rebuild lasting longer than the liveness ceiling kept
+    /healthz at 'loop: stale', so the watchdog restarted the daemon
+    mid-rebuild and the rebuild restarted from zero every ~3 minutes — it
+    never converged."""
+    root = tmp_path / "watched"
+    root.mkdir()
+    files: list[Path] = []
+    for i in range(7):
+        note = root / f"note-{i}.md"
+        note.write_text(f"content {i}")
+        files.append(note)
+    monkeypatch.setattr(daemon, "_MEMORY_ROOT", root)
+    monkeypatch.setattr(daemon, "_COLD_START_CHUNK_PATHS", 2)  # 7 files -> 4 chunks
+
+    chunk_sizes: list[int] = []
+    visited: list[str] = []
+
+    def slow_process_paths(backend: Any, paths: set[Path], provider: Any) -> None:
+        chunk_sizes.append(len(paths))
+        visited.extend(sorted(p.name for p in paths))
+        time.sleep(0.2)
+
+    monkeypatch.setattr(daemon, "_process_paths", slow_process_paths)
+
+    liveness = Liveness(0.4)
+    started = time.monotonic()
+    daemon._cold_start_reconcile(_backend(milvus_client), _FakeProvider(), liveness)
+    elapsed = time.monotonic() - started
+
+    # Chunked by file: call count and sizes exact, every file visited once.
+    assert chunk_sizes == [2, 2, 2, 1]
+    assert visited == [note.name for note in files]
+    # The rebuild outlived the liveness ceiling (4 chunks ≥ 0.8s > 0.4s)...
+    assert elapsed > 0.4
+    # ...yet the beats between chunks kept /healthz from ever reading stale.
+    assert liveness.is_alive()
+    assert liveness.stale_for() < 0.4
+
+
+def test_cold_start_reconcile_embed_error_keeps_single_call_semantics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    milvus_client,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Error semantics preserved from the pre-chunking reconcile (one
+    try/except): an EmbeddingAPIError skips the remaining chunks and is logged
+    with the existing message — never raised — so the daemon keeps running and
+    the next fs event / restart retries."""
+    root = tmp_path / "watched"
+    root.mkdir()
+    for i in range(6):
+        (root / f"note-{i}.md").write_text(f"content {i}")
+    monkeypatch.setattr(daemon, "_MEMORY_ROOT", root)
+    monkeypatch.setattr(daemon, "_COLD_START_CHUNK_PATHS", 2)  # 6 files -> 3 chunks
+
+    calls: list[int] = []
+
+    def failing_process_paths(backend: Any, paths: set[Path], provider: Any) -> None:
+        calls.append(len(paths))
+        raise EmbeddingAPIError("embed boom")
+
+    monkeypatch.setattr(daemon, "_process_paths", failing_process_paths)
+
+    liveness = Liveness(600.0)
+    with caplog.at_level(logging.ERROR, logger="services.memory_indexer.daemon"):
+        daemon._cold_start_reconcile(_backend(milvus_client), _FakeProvider(), liveness)
+
+    assert calls == [2]  # first chunk failed -> remaining chunks never ran (as before)
+    expected = f"cold-start embed failed: {EmbeddingAPIError('embed boom')!r}"
+    assert expected in caplog.text
+    assert liveness.is_alive()
 
 
 def test_refresh_gateway_checkout_fast_forwards(
