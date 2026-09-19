@@ -8,6 +8,10 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
 ## [Unreleased]
 
 ### Added
+- `ava impersonate send <session_id> --agent <agent_id> --to <target> --content '<text>'`
+  — the attested CLI form of sending to another agent as a leased identity
+  (previously reachable only through the SDK attachment); it delivers source
+  `agent:<id>`, the same borrowed identity the attachment stamps (task #4102).
 - The `impersonation_aborted` telemetry event fires when the native supervisor
   stops a takeover after a core-component death, carrying the agent, lease,
   session, the dead component (executor / relay) and the detail (task #3998).
@@ -49,6 +53,12 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
   a `chrome_page_ttl_expired` / `chrome_page_ttl_renewed` event (task #3035).
 
 ### Changed
+- `ava impersonate request` / `renew` state their time parameters explicitly
+  (task #4102): `request --ttl` and `--batch-window` and `renew --ttl` are
+  required — missing values are usage errors before any command runs — the
+  request's relay shape is validated at the CLI boundary, and the takeover
+  launch message spells out the one-hour recovery deadline and immediate
+  delivery it previously inherited from defaults.
 - The Claude Code Monitor relay guidance now reflects per-watch deadlines
   (Claude Code 2.1.271+): arm with `timeout_ms: 1800000` and re-arm on the
   expiry notice — at the deadline the watch and the relay process it runs are
@@ -65,11 +75,11 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
   last beat before this process start, inside the fresh-start window
   (`AVA_IMPERSONATION_REPROVISION_WINDOW_SECONDS`, default 120 s, 0 disables)
   — is re-provisioned instead of stopped.
-- The impersonation relay delivers routine inbox arrivals immediately by
-  default: the per-lease merge window (`relay_batch_window_seconds` — request
-  `--batch-window`) defaults to 0, with merging still available per lease
-  (0..300 seconds); user chats, cancels and renewal reminders never wait in
-  any case (task #3997).
+- The impersonation relay delivers routine inbox arrivals immediately unless a
+  lease's merge window says otherwise: the per-lease window
+  (`relay_batch_window_seconds`) is stated explicitly at request time
+  (`--batch-window`, 0..300 seconds since task #4102); user chats, cancels and
+  renewal reminders never wait in any case (task #3997).
 - A macOS `ava start` whose own chain runs outside the GUI login session no
   longer brings services up in place (they would inherit the wrong launchd
   domain — the state that wedges the shared browser): an operator-shaped start
