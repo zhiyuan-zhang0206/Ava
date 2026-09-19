@@ -710,15 +710,25 @@ def test_phase_b_payload_carries_target_sha(monkeypatch: pytest.MonkeyPatch) -> 
     assert captured["timeout"] == 120.0
 
 
-def test_orchestration_aborts_when_update_lock_held(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_orchestration_aborts_when_update_lock_held(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """A second gateway update that finds the cluster update lock held by a live
     holder aborts before doing anything — #2 (serialize updates; the 2026-06-01
-    collision was two gateway updates racing). Overrides the autouse stub."""
+    collision was two gateway updates racing). Overrides the autouse stub. The
+    refusal the operator reads is the lock module's own `update_lock_refusal_detail`
+    sentence (which names a durable pending publication instead when that is the
+    real blocker)."""
     monkeypatch.setattr(_up, "acquire_update_lock", lambda _holder, **_kw: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_up, "update_lock_holder", lambda: "cloud:pid999")
+    monkeypatch.setattr(
+        _up,
+        "update_lock_refusal_detail",
+        lambda: "another cluster update is in progress (held by cloud:pid999); aborting",
+    )
     monkeypatch.setattr(
         _cli, "_changed_paths_vs_origin", lambda: pytest.fail("must abort before classify")
     )
     monkeypatch.setattr(_cli, "_list_agent_runners", lambda: pytest.fail("must not pause anything"))
     rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
     assert rc == 1
+    assert "cloud:pid999" in capsys.readouterr().err

@@ -40,6 +40,7 @@ from cli.commands._cluster_hold_watchdog import (
     cmd_hold_watchdog_unregister,
 )
 from cli.commands._cluster_recover import cmd_cluster_recover
+from cli.commands._cluster_recover_pending import cmd_cluster_recover_pending
 from cli.commands._cluster_rollback import cmd_rollback
 from cli.commands._cluster_watchdog_probe import (
     cmd_watchdog_probe,
@@ -343,6 +344,7 @@ __all__ = [
     "cmd_cluster_mark_staging",
     "cmd_cluster_pause",
     "cmd_cluster_recover",
+    "cmd_cluster_recover_pending",
     "cmd_cluster_restart",
     "cmd_cluster_resume",
     "cmd_cluster_status",

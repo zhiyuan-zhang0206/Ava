@@ -351,7 +351,9 @@ def acquire_update_lock(
             )
         else:
             logger.warning(
-                "[cluster-lock] acquire by {holder} REFUSED — a live holder exists", holder=holder
+                "[cluster-lock] acquire by {holder} REFUSED — {reason}",
+                holder=holder,
+                reason=_acquire_refusal_reason(cur),
             )
         return acquired
 
@@ -444,6 +446,68 @@ def _transition_refusal_reason(cur: Any, holder: str) -> str:
                 "(a rollout outran LOCK_TTL_S, or two ran concurrently)"
             )
     return "the guarded row no longer matched at write time"
+
+
+def _acquire_refusal_reason(cur: Any) -> str:
+    """Name why the acquire CAS refused, on the failure path only.
+
+    Two causes share the guard (the sibling of the release/settle diagnostics,
+    task #2683): a live holder, or a durable pending managed-writer publication
+    whose checked recovery must run before any new update can start. The
+    operator-facing refusal must not tell the second story — "a live holder
+    exists" — which sends the operator hunting for a process that is gone.
+    """
+    cur.execute(
+        "SELECT holder, "
+        "COALESCE(managed_writer_evidence->'pending','null'::jsonb) = 'null'::jsonb, "
+        "(holder IS NOT NULL AND expires_at > now()) "
+        "FROM deployment_state WHERE id = 1"
+    )
+    row = cur.fetchone()
+    if row is None:
+        return "the deployment state row is missing"
+    if not bool(row[1]):
+        return (
+            "a durable pending publication requires its checked recovery first "
+            "(`ava cluster recover-pending`)"
+        )
+    if row[2]:
+        return f"a live holder exists ({row[0]})"
+    return "the guarded row no longer matched at write time"
+
+
+def update_lock_refusal_detail() -> str:
+    """The operator sentence for a refused `acquire_update_lock`.
+
+    A refusal has three shapes and each names its own next step: a durable
+    pending managed-writer publication (its checked recovery via `ava cluster
+    recover-pending`; no generic path may clear it), a live holder (wait it out,
+    or `ava cluster recover` once its process is provably gone), or a racing
+    acquire. Read-only companion of `update_lock_holder`, for callers that print
+    the refusal instead of logging it.
+    """
+    with shared.db.connect(autocommit=True) as conn:
+        row = conn.execute(
+            "SELECT holder, "
+            "COALESCE(managed_writer_evidence->'pending','null'::jsonb) = 'null'::jsonb, "
+            "(holder IS NOT NULL AND expires_at > now()) "
+            "FROM deployment_state WHERE id = 1"
+        ).fetchone()
+    if row is None:
+        return "the cluster deploy state row is missing; aborting"
+    holder, pending_absent, lease_live = row
+    if not pending_absent:
+        return (
+            "another cluster update is in progress — a durable pending publication from an "
+            "interrupted rollout requires its checked recovery first "
+            "(`ava cluster recover-pending`); aborting"
+        )
+    if lease_live:
+        return (
+            f"another cluster update is in progress (held by {holder}); aborting "
+            "(the lock auto-expires after its TTL if that holder crashed)"
+        )
+    return "another orchestration just took the cluster update lock; aborting"
 
 
 def release_update_lock(holder: str) -> None:

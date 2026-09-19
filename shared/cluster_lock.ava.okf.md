@@ -21,8 +21,10 @@ This row is the cluster's single **"intentionally mid-transition" signal, not ju
 ### The lease (mutual exclusion with crash-reclaim)
 
 - `acquire_update_lock(holder, *, kind, ttl_s)` — the atomic compare-and-set (CAS) against a free row or an expired holder; on success writes `phase='updating'` + `kind`. Returns False when a *live* holder still holds it or `managed_writer_evidence.pending` requires its own exact publication recovery. Generic recovery has the same pending guard: publication state outlives lease expiry and cannot be stranded by replacing only its holder.
+- `claim_pending_recovery_lease` (`shared/cluster_pending_recovery.py`, split out for the file-size budget) — the pending-publication recovery protocol's own takeover CAS: only an executing rollout whose journaled `pending.operation` still equals the exact subdocument the caller inspected — and whose provably dead lease identity still matches — is replaced; `target_sha` is preserved.
 - `renew_update_lock` / `release_update_lock` — renewal is driven from the Phase-B poll, so `LOCK_TTL_S` (1800 s) bounds only how long a *crashed* holder blocks the next rollout; release returns the row to `phase='stable'` and clears `kind` + settle fields only after checked publication handling has cleared durable `pending`. Settle conversion and settle release carry the same atomic guard, so no generic lease transition can strand retained publication evidence.
 - `read_update_lease` → `DeployLease` (holder / held_for_s / expires_in_s / note / kind) — the row itself, for consumers that must explain the hold or tell an executing rollout apart from a settle hold (`DeployLease.awaits`); `update_lock_holder()` is the bare "is it held".
+- `update_lock_refusal_detail()` (with `_acquire_refusal_reason` behind the acquire warning) — the operator-facing reading of a refused acquire, naming its own next step: a durable pending publication (its checked recovery, `ava cluster recover-pending`), a live holder, or a racing acquire.
 
 ### Phase & kind (the explicit model)
 
@@ -44,7 +46,9 @@ This row is the cluster's single **"intentionally mid-transition" signal, not ju
 
 ## Entry Points
 
-- `acquire_update_lock` / `renew_update_lock` / `release_update_lock` / `settle_update_lock` / `release_settle_hold` / `read_update_lease` / `update_lock_holder` — `shared/cluster_lock.py`
+- `acquire_update_lock` / `renew_update_lock` / `release_update_lock` / `settle_update_lock` / `release_settle_hold` / `read_update_lease` / `update_lock_holder` / `update_lock_refusal_detail` — `shared/cluster_lock.py`
+- `claim_pending_recovery_lease` — `shared/cluster_pending_recovery.py` (the pending-publication takeover CAS)
+- `ops/publication_recovery.py` — the checked recovery seat (`run_pending_publication_recovery` / `pending_publication_recovery_op`; storage-level `claim_abandoned_pending_lease` / `complete_pending_publication_recovery`), operator entrance `ava cluster recover-pending`
 - `shared/last_update.py:begin_update` / `finish_update` / `note_observed_recovery` — the `last_outcome` writers
 - `cli/commands/update.py:_run_gateway_orchestration` — the primary holder (kind = restart|rollout)
 
