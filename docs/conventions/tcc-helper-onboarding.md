@@ -31,6 +31,8 @@ venv and the user present:
 .venv/bin/python scripts/tcc-onboard-helper-grants.py            # interactive: trigger missing grants
 .venv/bin/python scripts/tcc-onboard-helper-grants.py --tier L2  # the machine target tier (design v1)
 .venv/bin/python scripts/tcc-onboard-helper-grants.py --items folders --timeout 180
+.venv/bin/python scripts/tcc-onboard-helper-grants.py --fill-pending --confirm-user-present
+                                                                 # + extended-group fills (experimental)
 ```
 
 - Every trigger is a child process spawned through the helper
@@ -52,6 +54,11 @@ venv and the user present:
 - Screen Recording and Accessibility can not be requested programmatically;
   the tool verifies them from the helper ping and points at System Settings
   when either is missing.
+- Extended groups (`appdata`, `media`, `icloud`, `fda`, `devtools`) have
+  their grant state read by the same preflight probe; `--fill-pending
+  --confirm-user-present` adds best-effort triggers for `appdata` / `media` /
+  `icloud` (experimental -- evidence levels in the trigger-method archive
+  below). `fda` and `devtools` are never attempted, by decision.
 
 ## Tiers (design v1)
 
@@ -67,11 +74,13 @@ Access, and macmini's target is L2.
 | L3 full | L2 + Full Disk Access (the heavy item) + DeveloperTool + future items. |
 
 Groups beyond the triggerable set (`appdata`, `media`, `icloud`, `fda`,
-`devtools`) have their grant state read by the same preflight probe and are
-never attempted: a non-granted state is reported as unresolved with the
-observed values (their trigger method is still pending verification), so an
-L2/L3 run stays honest instead of guessing at a request the tool can not yet
-reproduce.
+`devtools`) always have their grant state read by the same preflight probe;
+without `--fill-pending` they are never attempted, and a non-granted state is
+reported as unresolved with the observed values. `--fill-pending` (guarded by
+its required `--confirm-user-present`) adds a best-effort trigger for
+`appdata` / `media` / `icloud` that still lack their grant -- each method's
+evidence level is in the trigger-method archive below. `fda` and `devtools`
+are never attempted, by decision.
 
 ## Trigger mechanics worth knowing
 
@@ -90,18 +99,12 @@ reproduce.
 - **A helper build without the nursery `spawn` wire method can not be
   onboarded.** Older builds answer `unknown method: spawn`; rebuild the helper
   first (same signing identity), then run this tool.
-- **Full Disk Access is the L3 heavy item.** The 2026-09-12 audit found no
-  evidence it was needed, but the user placed it in the full tier (2026-09-17).
-  Its trigger method is pending verification; it is never attempted before
-  that.
 - **Extended-group states are preflight-readable.** The five beyond-set
   services (SystemPolicyAppData, MediaLibrary + Photos, FileProviderDomain +
   Ubiquity, SystemPolicyAllFiles, DeveloperTool) answer `TCCAccessPreflight`
   silently; the 2026-09-17 validation also showed the readings discriminate
   (bogus service name -> denied; Microphone -> not-determined; FDA -> denied),
-  so a granted reading is meaningful. Only the trigger method for a machine
-  that still lacks the grant remains pending -- the tool reads the state and
-  never attempts these groups.
+  so a granted reading is meaningful; the trigger side is the archive below.
 - **Multiple helper instances on one host share the same TCC identity.** A
   second cluster instance (its own build, launchd service and socket -- e.g. a
   dev/test instance) needs no separate onboarding when its helper is built
@@ -111,11 +114,79 @@ reproduce.
   dev-instance helper came up alongside the main one with no prompts. Only a
   new signing identity requires a fresh onboarding pass.
 
+## Extended-group trigger methods (archive)
+
+`--fill-pending` is EXPERIMENTAL: every method below carries its evidence
+level, and an unresolved group after a fill attempt means "the method needs
+another look on a machine that still lacks the grant", not "the grant is
+impossible". Run it only with the user at the machine (a pending dialog
+blocks synthesized input machine-wide until answered), and read the verdict
+from the preflight re-read, not from the child's own output.
+
+### appdata -- `kTCCServiceSystemPolicyAppData`
+
+- Method: a helper-spawned child makes a bounded scan of
+  `~/Library/Application Support` (listings plus small sample reads, capped in
+  depth and entries). The prompt is raised indirectly: a process reaching into
+  another app's container makes `sandboxd` relay a
+  `TCCAccessRequestIndirectWithOptions` request (the sender is a sandboxd
+  instance, not the touching process).
+- Evidence (macmini, 2026-09-14): mechanism observed end to end -- four
+  prompts, each later attributed to a process scanning the home directory
+  (`find`, `du`, a recursive glob). Prompts DO write `AUTHREQ_PROMPTING` +
+  `AUTHREQ_SUBJECT` (subject = the helper), but no `RESULT` row.
+- Rebuild gotcha: unlike the DR-held rows, this row does NOT survive a
+  same-identity helper rebuild -- it returns to `not-determined` and the next
+  scan re-prompts (observed 2026-09-18: the routine update wave rebuilt the
+  helper, the next scan re-prompted, and the user re-allowed the row the same
+  day). Expect to re-run the fill after every helper rebuild.
+- The fill path replays the evidenced surface; a deliberate fill of a missing
+  row has not yet been exercised (macmini's row reads granted).
+
+### media -- `kTCCServiceMediaLibrary` + `kTCCServicePhotos`
+
+- Method (candidate): a helper-spawned child scans `~/Music` (MediaLibrary)
+  and `~/Pictures/Photos Library.photoslibrary` (Photos); a missing library
+  path is reported as such (a machine where Photos was never opened has no
+  library to touch).
+- Evidence: none yet -- macmini's rows read granted before a first-use test
+  could run (preflight, 2026-09-17), so the first fill against a machine that
+  still lacks the grants is the verification.
+- The group resolves only when both services read granted in the recheck.
+
+### icloud -- `kTCCServiceFileProviderDomain` + `kTCCServiceUbiquity`
+
+- Method (candidate): a helper-spawned child scans
+  `~/Library/Mobile Documents/com~apple~CloudDocs` (the FileProviderDomain
+  surface).
+- Blind spot: FileProviderDomain prompts do NOT write `AUTHREQ_PROMPTING`
+  (observed 2026-09-14) -- log monitoring misses them; verify by screenshot,
+  not logs.
+- Evidence: none yet; same position as media. No distinct trigger surface is
+  known for `kTCCServiceUbiquity`; the group status rechecks both services so
+  a Ubiquity-only gap stays visible as unresolved.
+
+### fda -- `kTCCServiceSystemPolicyAllFiles`
+
+- Never triggered by this tool, by decision: macmini's target tier is L2 (no
+  Full Disk Access), and an experimental prompt would leave a denied row on a
+  machine that does not need the grant. The 2026-09-12 audit found no
+  evidence the grant is needed; the user placed it in the full tier
+  (2026-09-17), and the method is archived for a future L3 machine's first
+  grant instead.
+
+### devtools -- `kTCCServiceDeveloperTool`
+
+- Never triggered by this tool, by decision: no current workflow needs
+  DeveloperTool, and exercising it (debugger-attach class) would accrue a
+  denied row without a use. L3-only; verify on a machine that actually needs
+  it.
+
 ## Per-machine requirements (state as of 2026-09-14; first audit 2026-09-12)
 
 | Machine | Helper | Folder rows | SR / AX | Notes |
 |---|---|---|---|---|
-| macmini | running, spawn wire OK (rebuilt 2026-09-13, same signing identity) | Desktop/Documents/Downloads granted | granted | Onboarded 2026-09-12; spawn backend enabled + verified. Rebuild 2026-09-13 kept every grant (stable identity); re-verified 2026-09-14: spawn-chain PASS, preflight matrix green. Target tier: L2 (user 2026-09-17). Extended states (appdata/media/icloud) read granted 2026-09-17 (preflight, controls-validated). |
+| macmini | running, spawn wire OK (rebuilt 2026-09-13, same signing identity) | Desktop/Documents/Downloads granted | granted | Onboarded 2026-09-12; spawn backend enabled + verified. Rebuild 2026-09-13 kept every grant (stable identity); re-verified 2026-09-14: spawn-chain PASS, preflight matrix green. Target tier: L2 (user 2026-09-17). Extended states (appdata/media/icloud) read granted 2026-09-19 (preflight; the AppData row was reset by the 2026-09-18 rebuild and re-allowed the same day -- see the trigger-method archive). |
 | company-mini | running, build predates `spawn` | to onboard after rebuild | granted | Rebuild first, same signing identity (an identity change silently drops the Accessibility grant) |
 | macbook-air | running, build predates `spawn` | to onboard after rebuild | granted | Same as company-mini |
 | company-air | not installed | all first-time | first-time | Fresh install + sign + first grants in one user-present session |
@@ -132,7 +203,9 @@ Per-machine rebuild/reinstall flow gains one step, inserted before the flip:
    existing grant and the onboarding must be redone).
 2. Run the inventory: `.venv/bin/python scripts/tcc-onboard-helper-grants.py --check`.
 3. Complete the missing grants with the user present: run the tool without
-   `--check`.
+   `--check`; add `--fill-pending --confirm-user-present` to also attempt the
+   extended groups (`appdata` / `media` / `icloud`) that still lack their
+   grant (experimental methods -- see the archive).
 4. Flip the backend: `ava config set permissions_helper_spawn=true --machine
    <host>` (official config API), restart the host's spawn-related services,
    then verify with `scripts/tcc-verify-spawn-chain.sh` (PASS = the probe's

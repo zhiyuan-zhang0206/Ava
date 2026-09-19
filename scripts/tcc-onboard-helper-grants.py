@@ -39,14 +39,22 @@ Usage:
   .venv/bin/python scripts/tcc-onboard-helper-grants.py --tier L2  # target tier (design v1)
   .venv/bin/python scripts/tcc-onboard-helper-grants.py --items folders
   .venv/bin/python scripts/tcc-onboard-helper-grants.py --timeout 180
+  .venv/bin/python scripts/tcc-onboard-helper-grants.py --fill-pending --confirm-user-present
 
 Tiers: --tier names the machine's target authorization set (design v1). L0
 refuses to probe or trigger at all (maintenance windows); L1..L3 grow the
-item set. Groups whose trigger method is still pending verification
-(appdata, media, icloud, fda, devtools) have their grant state read from the
-same preflight matrix and are never attempted: a non-granted state is
-reported unresolved instead of guessing at a request the tool can not yet
-reproduce.
+item set. Extended groups (appdata, media, icloud, fda, devtools) always
+have their grant state read from the same preflight matrix.
+
+--fill-pending adds a best-effort trigger for an appdata / media / icloud
+group that still lacks its grant: a helper-spawned child scans the guarded
+surface directly, and the run waits for the decision and rechecks the
+preflight matrix. The methods are EXPERIMENTAL -- appdata replays the
+surface evidenced on macmini 2026-09-14, media and icloud are first-use
+candidates; the archive in docs/conventions/tcc-helper-onboarding.md is the
+authority on evidence levels. Run only with the user at the machine
+(--confirm-user-present is required: a pending dialog blocks synthesized
+input machine-wide). fda and devtools are never attempted, by decision.
 
 Exit codes: 0 = every requested item is granted/verified; 1 = unresolved
 items remain (details in the report and at the workdir); 2 = setup failure
@@ -74,10 +82,10 @@ DEFAULT_WORKDIR = "/tmp/tcc-onboard-helper-grants"  # noqa: S108 - scratch evide
 IMPLEMENTED_GROUPS = ("folders", "apple-events", "sr-ax")
 """Groups this build can inventory and trigger end to end."""
 
-UNTRIGGERABLE_GROUPS: dict[str, tuple[str, ...]] = {
-    # Extended-tier groups whose grant state is preflight-readable while the
-    # trigger method is still pending verification: the state is read and
-    # reported; an ungranted state is never attempted.
+EXTENDED_GROUPS: dict[str, tuple[str, ...]] = {
+    # Extended-tier groups: their grant state is always preflight-readable.
+    # appdata/media/icloud gain a best-effort trigger under --fill-pending;
+    # fda/devtools are never attempted (see NEVER_TRIGGERED_GROUPS).
     "appdata": ("kTCCServiceSystemPolicyAppData",),
     "media": ("kTCCServiceMediaLibrary", "kTCCServicePhotos"),
     "icloud": ("kTCCServiceFileProviderDomain", "kTCCServiceUbiquity"),
@@ -85,7 +93,31 @@ UNTRIGGERABLE_GROUPS: dict[str, tuple[str, ...]] = {
     "devtools": ("kTCCServiceDeveloperTool",),
 }
 
-ITEM_GROUPS = IMPLEMENTED_GROUPS + tuple(UNTRIGGERABLE_GROUPS)
+FILL_SPECS: dict[str, tuple[tuple[str, str, str], ...]] = {
+    # --fill-pending attempts per fillable extended group: (target id, TCC
+    # service, guarded surface under $HOME). A helper-spawned child scans the
+    # surface directly (the folder rows' spawn-child pattern, extended to a
+    # bounded scan) and the attempt's outcome is rechecked against its
+    # service in the preflight matrix. Evidence levels: the trigger-method
+    # archive in docs/conventions/tcc-helper-onboarding.md.
+    "appdata": (("appdata", "kTCCServiceSystemPolicyAppData", "Library/Application Support"),),
+    "media": (
+        ("media-music", "kTCCServiceMediaLibrary", "Music"),
+        ("media-photos", "kTCCServicePhotos", "Pictures/Photos Library.photoslibrary"),
+    ),
+    "icloud": (
+        (
+            "icloud-clouddocs",
+            "kTCCServiceFileProviderDomain",
+            "Library/Mobile Documents/com~apple~CloudDocs",
+        ),
+    ),
+}
+
+NEVER_TRIGGERED_GROUPS: tuple[str, ...] = ("fda", "devtools")
+"""Extended groups with no trigger method by decision; read-only, always."""
+
+ITEM_GROUPS = IMPLEMENTED_GROUPS + tuple(EXTENDED_GROUPS)
 """Every group name accepted by --items / --tier."""
 
 TIER_GROUPS: dict[str, tuple[str, ...]] = {
@@ -115,7 +147,7 @@ APPLE_EVENT_TARGETS: tuple[tuple[str, str], ...] = (
 PREFLIGHT_SERVICES = (
     [item[1] for item in FOLDER_ITEMS]
     + ["kTCCServiceScreenCapture"]
-    + [service for services in UNTRIGGERABLE_GROUPS.values() for service in services]
+    + [service for services in EXTENDED_GROUPS.values() for service in services]
 )
 
 POLL_S = 2.0
@@ -167,6 +199,50 @@ with open(result_path, "w") as handle:
     handle.write(text)
 '''
 
+_SCAN_CHILD = '''"""Helper-spawned child: bounded scan of a guarded tree (the fill trigger)."""
+import os
+import sys
+
+MAX_DIRS = 64
+MAX_READS = 32
+READ_BYTES = 16
+
+target, result_path = sys.argv[1], sys.argv[2]
+visited = 0
+sampled = 0
+
+
+def scan(path, depth):
+    global visited, sampled
+    if visited >= MAX_DIRS:
+        return
+    visited += 1
+    for name in sorted(os.listdir(path))[:MAX_DIRS]:
+        if visited >= MAX_DIRS:
+            return
+        full = os.path.join(path, name)
+        if os.path.isdir(full):
+            if depth > 1:
+                scan(full, depth - 1)
+        elif sampled < MAX_READS:
+            with open(full, "rb") as handle:
+                handle.read(READ_BYTES)
+            sampled += 1
+
+
+try:
+    scan(target, 2)
+    text = "granted dirs=%d files=%d" % (visited, sampled)
+except FileNotFoundError:
+    text = "missing %s" % target
+except PermissionError as exc:
+    text = "denied %s" % exc
+except OSError as exc:
+    text = "error %s: %s" % (type(exc).__name__, exc)
+with open(result_path, "w") as handle:
+    handle.write(text)
+'''
+
 _APPLE_EVENT_CHILD = '''"""Helper-spawned child: one benign AppleEvent to a target app."""
 import subprocess
 import sys
@@ -194,6 +270,25 @@ def groups_for_tier(tier: str | None) -> tuple[str, ...]:
     if tier is None:
         return IMPLEMENTED_GROUPS
     return TIER_GROUPS[tier]
+
+
+def fill_request_error(
+    *, fill_pending: bool, confirm_user_present: bool, check_only: bool
+) -> str | None:
+    """Refusal message for an incoherent --fill-pending request; None when it may run."""
+    if not fill_pending:
+        return None
+    if check_only:
+        return (
+            "--check is inventory-only and never triggers a dialog;"
+            " --fill-pending asks to trigger -- pass one or the other"
+        )
+    if not confirm_user_present:
+        return (
+            "--fill-pending triggers system dialogs; pass --confirm-user-present"
+            " (user at the machine) to attest they can answer them"
+        )
+    return None
 
 
 def helper_client() -> Any:
@@ -321,7 +416,8 @@ def wait_for_item(
     return "unresolved"
 
 
-def classify_folder(text: str) -> str:
+def classify_touch(text: str) -> str:
+    """Outcome of a direct-touch child (folder rows and fill scans alike)."""
     if text.startswith("granted"):
         return "granted"
     if text.startswith("denied"):
@@ -346,13 +442,22 @@ def count_unresolved(statuses: dict[str, str]) -> int:
     return sum(1 for status in statuses.values() if status not in RESOLVED_STATUSES)
 
 
-def state_status(services: tuple[str, ...], matrix: dict[str, str]) -> str:
-    """Item status for an untriggerable group: granted only when every service is."""
+def state_status(services: tuple[str, ...], matrix: dict[str, str], note: str) -> str:
+    """Item status for an extended group: granted only when every service is."""
     states = {service: matrix.get(service, "unknown") for service in services}
     if all(value == "granted" for value in states.values()):
         return "granted"
     detail = ", ".join(f"{service}={value}" for service, value in sorted(states.items()))
-    return f"unresolved ({detail}; trigger method pending verification)"
+    return f"unresolved ({detail}; {note})"
+
+
+def extended_note(group: str, attempted: set[str]) -> str:
+    """How an extended group's trigger stands -- the unresolved-state suffix."""
+    if group in NEVER_TRIGGERED_GROUPS:
+        return "no trigger method by decision"
+    if group in attempted:
+        return "fill attempted (experimental method)"
+    return "trigger method available via --fill-pending (experimental)"
 
 
 def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item and report live together
@@ -367,6 +472,23 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
         action="store_true",
         help="inventory only: preflight folder + system + extended services, never trigger a dialog",
     )
+    parser.add_argument(
+        "--fill-pending",
+        action="store_true",
+        help=(
+            "experimental: best-effort triggers for appdata/media/icloud groups"
+            " still missing their grant (requires --confirm-user-present;"
+            " methods + evidence levels: docs/conventions/tcc-helper-onboarding.md)"
+        ),
+    )
+    parser.add_argument(
+        "--confirm-user-present",
+        action="store_true",
+        help=(
+            "attest the user is at the machine; required with --fill-pending (a"
+            " pending dialog blocks synthesized input machine-wide until answered)"
+        ),
+    )
     target = parser.add_mutually_exclusive_group()
     target.add_argument(
         "--tier",
@@ -380,9 +502,9 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
         "--items",
         help="comma-separated subset of: "
         + ",".join(IMPLEMENTED_GROUPS)
-        + " (state-read-only extended groups: "
-        + ",".join(UNTRIGGERABLE_GROUPS)
-        + ")",
+        + " (extended groups, state always read from the preflight matrix: "
+        + ",".join(EXTENDED_GROUPS)
+        + "; appdata/media/icloud can additionally be attempted with --fill-pending)",
     )
     parser.add_argument(
         "--timeout",
@@ -401,6 +523,15 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
         # Silent posture: nothing is probed and nothing is triggered.
         print("tier L0 (silent): no inventory probe and no triggers are performed.")
         return 0
+
+    fill_error = fill_request_error(
+        fill_pending=args.fill_pending,
+        confirm_user_present=args.confirm_user_present,
+        check_only=args.check,
+    )
+    if fill_error is not None:
+        print(f"FAIL: {fill_error}")
+        return 2
 
     raw_items = args.items if args.items is not None else ",".join(groups_for_tier(args.tier))
     items = [part.strip() for part in raw_items.split(",") if part.strip()]
@@ -430,15 +561,17 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
     for service in PREFLIGHT_SERVICES:
         print(f"  {service}: {matrix.get(service, 'unknown')}")
 
-    untriggerable = [group for group in items if group in UNTRIGGERABLE_GROUPS]
+    extended = [group for group in items if group in EXTENDED_GROUPS]
     if args.tier is not None:
         print(f"tier {args.tier} -- groups: {', '.join(items)}")
-    if untriggerable:
-        print("extended groups (state read via preflight; trigger method pending verification):")
-        for group in untriggerable:
+    if extended:
+        print(
+            "extended groups (state read via preflight; trigger methods:"
+            " docs/conventions/tcc-helper-onboarding.md):"
+        )
+        for group in extended:
             states = ", ".join(
-                f"{service}={matrix.get(service, 'unknown')}"
-                for service in UNTRIGGERABLE_GROUPS[group]
+                f"{service}={matrix.get(service, 'unknown')}" for service in EXTENDED_GROUPS[group]
             )
             print(f"  {group}: {states}")
 
@@ -467,7 +600,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
                 args.timeout,
                 service,
             )
-            statuses[item_id] = classify_folder(text)
+            statuses[item_id] = classify_touch(text)
             print(f"  [{item_id}] -> {statuses[item_id]}")
 
     if "apple-events" in items and not args.check:
@@ -515,8 +648,46 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
                 " Privacy & Security > Accessibility."
             )
 
-    for group in untriggerable:
-        statuses[group] = state_status(UNTRIGGERABLE_GROUPS[group], matrix)
+    fill_results: dict[str, str] = {}
+    fill_attempted: set[str] = set()
+    if args.fill_pending:
+        if extended:
+            print("\n== fill-pending (experimental methods; user at the machine) ==")
+            for group in extended:
+                if group in NEVER_TRIGGERED_GROUPS:
+                    print(f"  [{group}] never attempted (no trigger method by decision)")
+                    continue
+                for target_id, service, rel in FILL_SPECS[group]:
+                    if matrix.get(service) == "granted":
+                        print(f"  [{target_id}] already granted, skipping")
+                        continue
+                    fill_attempted.add(group)
+                    child = workdir / f"fill-{target_id}.child.py"
+                    child.write_text(_SCAN_CHILD)
+                    result_path = workdir / f"fill-{target_id}-{run_id}.result"
+                    text = wait_for_item(
+                        client,
+                        workdir,
+                        run_id,
+                        f"fill-{target_id}",
+                        [sys.executable, str(child), str(Path.home() / rel), str(result_path)],
+                        result_path,
+                        args.timeout,
+                        service,
+                    )
+                    fill_results[target_id] = text
+                    print(f"  [{target_id}] -> {classify_touch(text)}")
+            matrix = preflight_matrix(client, workdir, f"{run_id}-after-fill")
+            print("grant state after fill attempts (preflight re-read):")
+            for service in PREFLIGHT_SERVICES:
+                print(f"  {service}: {matrix.get(service, 'unknown')}")
+        else:
+            print("\n== fill-pending: no extended groups in this run (nothing to fill) ==")
+
+    for group in extended:
+        statuses[group] = state_status(
+            EXTENDED_GROUPS[group], matrix, extended_note(group, fill_attempted)
+        )
 
     unresolved_count = count_unresolved(statuses)
     unresolved = unresolved_count > 0
@@ -526,10 +697,14 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
         "host": os.uname().nodename,
         "tier": args.tier,
         "groups": items,
-        "untriggerable_groups": untriggerable,
+        "extended_groups": extended,
         "check_only": args.check,
+        "fill_pending": args.fill_pending,
+        "confirm_user_present": args.confirm_user_present,
         "matrix": matrix,
         "statuses": statuses,
+        "fill_attempted": sorted(fill_attempted),
+        "fill_results": fill_results,
         "unresolved": unresolved,
         "unresolved_count": unresolved_count,
     }
@@ -540,10 +715,10 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
         print(f"  {item_id}: {value}")
     if args.check:
         print("note: --check never shows AppleEvents rows (see the docstring).")
-    if untriggerable:
+    if extended:
         print(
-            "extended groups (state read only; trigger method pending verification): "
-            + ", ".join(untriggerable)
+            "extended groups (state read; fill: --fill-pending; methods archive:"
+            " docs/conventions/tcc-helper-onboarding.md): " + ", ".join(extended)
         )
     if unresolved:
         print(
