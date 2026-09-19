@@ -72,12 +72,17 @@ export function findClosestStuckHeaderId(
   const vpRect = viewport.getBoundingClientRect();
   const stickyLine = vpRect.top + topOffset;
   // A candidate is stuck when its block's top has reached or passed its line,
-  // and its bottom has not completely scrolled past it (with header buffer).
+  // and its bottom has not completely scrolled past it — a bare `> line`, no
+  // exit buffer: while ANY part of the block sits below the line, its pinned
+  // header is mid push-out and still masks that tail. Flipping to the
+  // transparent variant earlier (the former +20px buffer, under the ~30px
+  // header) unmasked the block's last text lines while the detaching header
+  // still covered them — two texts in one band (user report 2026-09-19).
   // The +1px top tolerance relies on the ≥2px in-flow gap below a block header
   // (the header's pt-0.5): if that gap disappeared, the first child of an
   // unpinned block — whose line is the header rect's bottom — would read as
   // crossed and get the nested sticky styling early.
-  const crossed = (r: DOMRect, line: number) => r.top <= line + 1 && r.bottom > line + 20;
+  const crossed = (r: DOMRect, line: number) => r.top <= line + 1 && r.bottom > line;
 
   let topId: string | null = null;
   let topTop = -Infinity;

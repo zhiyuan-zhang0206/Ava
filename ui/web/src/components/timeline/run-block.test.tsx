@@ -131,11 +131,27 @@ describe("findClosestStuckHeaderId", () => {
     const block = document.createElement("div");
     block.setAttribute("data-turn-id", "turn-1");
     block.setAttribute("data-turn-expanded", "true");
-    // Block top is at -900, bottom is at 40 (past sticky threshold 44 + 20 = 64)
+    // Block top is at -900, bottom is at 40 — fully above the line (44).
     vi.spyOn(block, "getBoundingClientRect").mockReturnValue(mockRect(-900, 40, 940));
     container.appendChild(block);
 
     expect(findClosestStuckHeaderId(container, 44)).toEqual({ topId: null, childId: null });
+  });
+
+  it("keeps the block stuck while only its push-out tail remains below the line", () => {
+    const container = document.createElement("div");
+    vi.spyOn(container, "getBoundingClientRect").mockReturnValue(mockRect(0, 800, 800));
+
+    const block = document.createElement("div");
+    block.setAttribute("data-turn-id", "turn-1");
+    block.setAttribute("data-turn-expanded", "true");
+    // Bottom at 54: a 10px tail still sits below line 44. The pinned header is
+    // mid push-out and must keep the masking (stuck) variant — the former +20
+    // buffer flipped it transparent here while the tail text was still under it.
+    vi.spyOn(block, "getBoundingClientRect").mockReturnValue(mockRect(-900, 54, 954));
+    container.appendChild(block);
+
+    expect(findClosestStuckHeaderId(container, 44)).toEqual({ topId: "turn-1", childId: null });
   });
 
   it("selects the closest/latest expanded block when multiple blocks cross the top", () => {
@@ -286,6 +302,34 @@ describe("findClosestStuckHeaderId", () => {
     container.appendChild(turn);
 
     expect(findClosestStuckHeaderId(container, 44)).toEqual({ topId: "turn-1", childId: "2.1" });
+  });
+
+  it("keeps a child stuck while its tail still crosses the child line", () => {
+    const container = document.createElement("div");
+    vi.spyOn(container, "getBoundingClientRect").mockReturnValue(mockRect(0, 800, 800));
+
+    const turn = document.createElement("div");
+    turn.setAttribute("data-turn-id", "turn-1");
+    turn.setAttribute("data-turn-expanded", "true");
+    vi.spyOn(turn, "getBoundingClientRect").mockReturnValue(mockRect(10, 700, 690));
+
+    const header = document.createElement("button");
+    header.setAttribute("data-testid", "turn-toggle");
+    // Pinned block header: top 44, bottom 72 ⇒ the child line is 72.
+    vi.spyOn(header, "getBoundingClientRect").mockReturnValue(mockRect(44, 72, 28));
+
+    const child = document.createElement("div");
+    child.setAttribute("data-item-id", "2.0");
+    child.setAttribute("data-card-sticky", "true");
+    child.setAttribute("data-turn-child", "true");
+    // Bottom at 80: an 8px tail still crosses the child line (72) mid push-out.
+    vi.spyOn(child, "getBoundingClientRect").mockReturnValue(mockRect(20, 80, 60));
+
+    turn.appendChild(header);
+    turn.appendChild(child);
+    container.appendChild(turn);
+
+    expect(findClosestStuckHeaderId(container, 44)).toEqual({ topId: "turn-1", childId: "2.0" });
   });
 
   it("reports no child while its work block is still below the lines", () => {
