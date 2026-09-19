@@ -13,6 +13,10 @@ from typing import Any
 
 import httpx
 
+from cli.commands._managed_writer_mode import (
+    ManagedWriterMode,
+    effective_managed_writer_mode,
+)
 from shared.api_contracts.status import MachineStatus
 from shared.last_update import UpdateOutcome
 from shared.machine import format_capabilities
@@ -205,12 +209,14 @@ def cmd_cluster_status() -> int:
         print("(machines table empty — no host has run `ava start` yet)")
         return 0
 
-    for line in _render_roster(roster):
+    for line in _render_roster(roster, managed_writer=effective_managed_writer_mode()):
         print(line)
     return 0
 
 
-def _render_roster(roster: list[MachineStatus]) -> list[str]:
+def _render_roster(
+    roster: list[MachineStatus], *, managed_writer: ManagedWriterMode | None = None
+) -> list[str]:
     """Render the decoded /api/cluster/roster payload into aligned text lines
     (the held-host / last-update / deploy-hold banners above the table, then header +
     separator + one row per machine).
@@ -219,14 +225,17 @@ def _render_roster(roster: list[MachineStatus]) -> list[str]:
     against the MachineStatus wire schema, which carries the three capability
     flags (serve_gateway / serve_agent_runner / serve_observability_station)
     and no single `role` field — the role column is derived via
-    format_capabilities. Assumes a non-empty roster (the caller short-circuits
-    the empty case).
+    format_capabilities. `managed_writer` is the resolved mode bit to render
+    above the table (None omits it, for callers that only want the roster).
+    Assumes a non-empty roster (the caller short-circuits the empty case).
     """
     name_w = max(
         *(len(f"{m.name} (staging)") if m.is_staging else len(m.name) for m in roster),
         len("name"),
     )
     lines = _stranded_hold_banner(roster) + _last_update_banner(roster) + _hold_banner(roster)
+    if managed_writer is not None:
+        lines += _managed_writer_banner(managed_writer)
     lines += [
         f"{'name'.ljust(name_w)}  {'role':<{_ROLE_COL_W}} {'paused':<7} {'status':<10} "
         f"{'pin':<10} {'code':<10} {'hold':<{_HOLD_COL_W}} up since",
@@ -382,6 +391,21 @@ def _hold_banner(roster: list[MachineStatus]) -> list[str]:
         "  rollout exited — not a live verdict; `pin` / `code` are the live per-host ones.",
         "",
     ]
+
+
+def _managed_writer_banner(mode: ManagedWriterMode) -> list[str]:
+    """The managed-writer mode bit: the EFFECTIVE state (config x readiness
+    guards), never the raw config read (task #4121 R4).
+
+    Silent on `off` -- the roster top carries only facts that change what an
+    operator does next, same rule as `_last_update_banner`. The flip ceremony
+    reads the line APPEARING (active / blocked) beside the audited config
+    value; `blocked` names the unmet guard(s) and is never a silent
+    degradation of a requested-on state.
+    """
+    if mode.state == "off":
+        return []
+    return [f"managed-writer: {mode.describe()}", ""]
 
 
 def _hold_cell(settle_waited_on: bool) -> str:  # noqa: FBT001 — one flag per cell, passed positionally by the renderer like the other cells

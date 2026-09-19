@@ -742,13 +742,22 @@ def test_the_seat_has_no_production_callsite() -> None:
     When the rollout Phase-0 and post-Phase-B wiring genuinely connect these
     seats, its own slice must update this pin consciously rather than import
     them quietly.
+
+    One conscious exception (task #4121): the managed-writer enable-point gate
+    (`cli/commands/_managed_writer_mode.py`) reads this module's
+    `MANAGED_WRITER_WIRING_COMPLETE` completion declaration -- the module the
+    declaration proves -- without importing or calling the seats. That
+    declaration is exactly what keeps the seats unwired until the last wiring
+    slice flips it; the wiring slice still must update this pin in turn.
     """
     root = Path(__file__).resolve().parents[2]
+    allowed = {"cli/commands/_managed_writer_mode.py"}
     offenders = sorted(
         str(path.relative_to(root))
         for package in ("ava", "agent", "cli", "gateway", "services", "ops", "shared")
         for path in (root / package).rglob("*.py")
         if path.name != "_update_publication.py"
+        and str(path.relative_to(root)) not in allowed
         and "_update_publication" in path.read_text(encoding="utf-8")
     )
     assert offenders == []

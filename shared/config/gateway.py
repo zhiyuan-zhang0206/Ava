@@ -270,6 +270,30 @@ class GatewaySettings(EnvSettings):
         },
     )
 
+    update_managed_writer: bool = Field(
+        default=False,
+        alias="AVA_UPDATE_MANAGED_WRITER",
+        description=(
+            "Gate the managed-writer activation flow in `ava cluster update` "
+            "(task #4121). false (0): every rollout runs the legacy flow unchanged. "
+            "true: a rollout enters managed-writer mode only when both readiness "
+            "guards exist and are True -- the checked normal-release activation "
+            "(CHECKED_ACTIVATION_READY, task #4117) and the completed rollout wiring "
+            "(MANAGED_WRITER_WIRING_COMPLETE, task #4122); with either guard missing "
+            "it runs the legacy flow and records a visible blocked decision (rollout log, "
+            "rollout telemetry, `managed_writer_blocked` event, `ava cluster "
+            "status`). Flip only in the same ceremony as the checked-activation "
+            "change (tasks #4117/#4121); roll back by setting false again -- the "
+            "next rollout runs legacy."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     pause_lifecycle_wait_seconds: float = Field(
         default=300.0,
         ge=0,

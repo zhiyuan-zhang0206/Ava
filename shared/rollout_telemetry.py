@@ -19,6 +19,7 @@ Two line shapes, both parseable by grep and by a reader:
       [rollout-telemetry] {"bytes": {"snapshot": 4567030217},
                            "details": {"prepare_checks": {"staging_venv_s": 44.0}},
                            "hosts": {"win": {"uv": 40.1, "total_s": 75.8}},
+                           "managed_writer": {"state": "off", "reasons": []},
                            "stages": {"phase0_fetch": 69.2, ...},
                            "gateway_downtime_s": 40.0,
                            "total_s": 368.1}
@@ -75,6 +76,7 @@ class RolloutTelemetry:
         self._bytes: dict[str, int] = {}
         self._details: dict[str, dict[str, float]] = {}
         self._hosts: dict[str, dict[str, object]] = {}
+        self._managed_writer: dict[str, object] | None = None
         self._started = time.monotonic()
 
     def record(self, name: str, dur_s: float) -> None:
@@ -93,6 +95,19 @@ class RolloutTelemetry:
         if stages:
             self._hosts[host] = stages
 
+    def record_managed_writer(self, state: str, reasons: list[str]) -> None:
+        """The rollout's managed-writer mode decision, resolved once at the
+        enable point (`cli.commands._managed_writer_mode`): off / active /
+        blocked, plus the unmet readiness guards when blocked.
+
+        Carried into the aggregate summary as the ``managed_writer`` field: the
+        recorded per-rollout sequence plus the audited config write
+        (``env_write``) is what a mode transition is reconstructed from
+        (task #4121 -- transitions are not event-carried; a blocked decision
+        additionally emits ``managed_writer_blocked``).
+        """
+        self._managed_writer = {"state": state, "reasons": reasons}
+
     def total_s(self) -> float:
         return round(time.monotonic() - self._started, 1)
 
@@ -105,7 +120,7 @@ class RolloutTelemetry:
         )
 
     def summary(self) -> dict[str, object]:
-        return {
+        summary: dict[str, object] = {
             "stages": self._stages,
             "bytes": self._bytes,
             "details": self._details,
@@ -113,6 +128,9 @@ class RolloutTelemetry:
             "gateway_downtime_s": self.gateway_downtime_s(),
             "total_s": self.total_s(),
         }
+        if self._managed_writer is not None:
+            summary["managed_writer"] = self._managed_writer
+        return summary
 
     def print_summary(self) -> None:
         """One machine-readable JSON line naming every phase + the total."""
@@ -151,6 +169,13 @@ def record_host(host: str, stages: dict[str, object]) -> None:
     """Record one host's updater stage times into the ambient collector."""
     if _active.value is not None:
         _active.value.record_host(host, stages)
+
+
+def record_managed_writer(state: str, reasons: list[str]) -> None:
+    """Record the rollout's managed-writer mode into the ambient collector, when
+    one is active -- a plain no-op elsewhere, like the other record_* helpers."""
+    if _active.value is not None:
+        _active.value.record_managed_writer(state, reasons)
 
 
 def settle_ended(*, dur_s: float | None, hosts: list[str]) -> None:
