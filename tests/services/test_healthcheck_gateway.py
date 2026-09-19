@@ -61,9 +61,9 @@ def _own_health_body() -> bytes:
 @pytest.fixture(autouse=True)
 def _reset_gateway_probe_failures() -> Generator[None, None, None]:
     """Keep the watchdog's process-local two-probe threshold test-isolated."""
-    service_respawn._reset_consecutive_probe_failures("gateway")
+    service_respawn._reset_keepalive_state("gateway")
     yield
-    service_respawn._reset_consecutive_probe_failures("gateway")
+    service_respawn._reset_keepalive_state("gateway")
 
 
 def test_probe_alive_when_home_matches(monkeypatch: pytest.MonkeyPatch) -> None:
