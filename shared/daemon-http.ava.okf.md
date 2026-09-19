@@ -57,12 +57,18 @@ launchd surfaces without importing Settings or registering jobs. Expected launch
 identity is the plist Label plus SHA256 of its raw bytes; cron identity is SHA256
 of the exact job line without its newline. Reads are bounded by the outstanding
 challenge and repeated to reject observed drift. Raw definitions and command
-output are never returned or logged.
+output are never returned or logged. A definition that is absent is a reported
+fact, not an error — absence is the file's own lstat ENOENT, read twice for
+stability; foreign bytes are summarized by digest only, never parsed.
 
 Definition/home/prepared-image binding describes the **on-disk declaration**, not
-the scheduler's loaded executable. A successful exact launchctl service lookup
-proves loaded presence only; errors do not prove absence. Effective launchd
-enabled overrides and loaded-image identity remain unknown: Apple documents
+the scheduler's loaded executable. The loaded verdict is three-valued
+(`launchd_loaded_state`): `True` is the exact launchctl lookup answering; `False`
+additionally requires two equal, stable GUI enumerations excluding the label;
+`None` is unknown and must never be read as "not loaded", because launchctl
+errors do not prove absence. A declared non-Aqua `LimitLoadToSessionType` is
+unobservable in the GUI domain and degrades to unknown. Effective launchd enabled
+overrides and loaded-image identity remain unknown: Apple documents
 `launchctl print` output as diagnostic, not an API, and `list -x` is unsupported.
 Linux `enabled` means an exact non-commented cron registration exists, not that
 the cron daemon is live. Missing/unsupported/unreadable/drifting evidence remains
@@ -70,4 +76,7 @@ unknown; Windows is unsupported. Empty input never proves fleet closure.
 
 CI separately exercises real read-only `crontab -l` and launchctl queries on native
 runners. Parser fixtures do not prove effective scheduler state. The observer
-still emits `closure=unknown`; updater/adoption activation is not implemented.
+still emits `closure=unknown`, and that is permanent semantics rather than a
+placeholder: a positive `old_writers_absent_relaunchers_fenced` literal is
+derived where these observed facts meet the hop ledger, never by the observer
+itself; updater/adoption activation is not implemented.

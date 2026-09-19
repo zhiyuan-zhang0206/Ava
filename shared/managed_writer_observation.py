@@ -147,6 +147,13 @@ class ChallengeRequest(EvidenceModel):
 def observe_launcher(
     expected: ExpectedLauncher, unit: ExpectedUnitWriters, valid_until: datetime
 ) -> LauncherObservation:
+    """One launcher's read-only facts; unreadable states are a full unknown.
+
+    A positively absent definition passes through as ``definition="absent"``
+    (the removed-relauncher fact the fence derivation needs), never collapsed
+    to unknown. Native command failure and unreadable/odd definitions are still
+    unknown: launchctl errors do not prove absence.
+    """
     try:
         match expected.kind:
             case "launchd":
@@ -208,11 +215,14 @@ class UnitObserver:
             "observed_at": datetime.now(UTC).isoformat(),
             "processes": [observe_process(item) for item in self.expected.processes],
             "sessions": [observe_session(home, item) for item in self.expected.sessions],
-            # Platform producer/observer integration is mandatory; never treat
-            # an unimplemented job lookup or empty input as complete closure.
             "launchers": [
                 observe_launcher(item, self.expected, self.challenge.valid_until).model_dump()
                 for item in self.expected.launchers
             ],
+            # Platform producer/observer integration is mandatory; never treat
+            # an unimplemented job lookup or empty input as complete closure.
+            # This field is permanent semantics, not a placeholder: the observer
+            # reports facts only — the positive `old_writers_absent_relaunchers_fenced`
+            # literal is derived where those facts meet the hop ledger, never here.
             "closure": "unknown",
         }
