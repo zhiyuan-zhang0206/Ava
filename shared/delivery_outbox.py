@@ -23,7 +23,8 @@ that window on the sending machine:
 - **Escalate (keep it loud).** A delivery that cannot land within the budget,
   or that fails permanently (missing agent, key conflict), is abandoned with a
   WARNING, a `delivery_outbox_abandoned` telemetry event, and the record kept
-  on disk (marked `abandoned`) instead of vanishing. The inspection window is
+  on disk (marked `abandoned`, carrying its stable reason code and the readable
+  failure detail where one exists) instead of vanishing. The inspection window is
   bounded: the flush pass expires abandoned records
   `delivery_outbox_abandoned_retention_days` (30d default) after abandonment.
 
@@ -227,6 +228,7 @@ class OutboxEntry:
     last_flush_at: str | None
     state: Literal["pending", "abandoned"]
     abandon_reason: str | None
+    abandon_detail: str | None
     abandoned_at: str | None
 
     def as_dict(self) -> dict[str, object]:
@@ -245,6 +247,7 @@ class OutboxEntry:
             "last_flush_at": self.last_flush_at,
             "state": self.state,
             "abandon_reason": self.abandon_reason,
+            "abandon_detail": self.abandon_detail,
             "abandoned_at": self.abandoned_at,
         }
 
@@ -313,6 +316,7 @@ def _read(path: Path) -> OutboxEntry | None:
             last_flush_at=cast("str | None", raw.get("last_flush_at")),
             state=state,
             abandon_reason=cast("str | None", raw.get("abandon_reason")),
+            abandon_detail=cast("str | None", raw.get("abandon_detail")),
             abandoned_at=cast("str | None", raw.get("abandoned_at")),
         )
         # Timestamps must parse (and carry a timezone) before anything consumes
@@ -465,6 +469,7 @@ def record_failed_send(
             last_flush_at=None,
             state="pending",
             abandon_reason=None,
+            abandon_detail=None,
             abandoned_at=None,
         )
         path = journal_dir() / _entry_path_name(agent_id, message_fingerprint, moment)
@@ -514,11 +519,17 @@ class FlushReport:
 
 
 class PermanentDeliveryError(Exception):
-    """The record can never be delivered; abandon it with this reason."""
+    """The record can never be delivered; abandon it with this reason.
 
-    def __init__(self, reason: str) -> None:
+    `detail` carries the readable upstream text (the exception that decided the
+    refusal, when one exists), so the abandonment record explains its code
+    instead of only naming it.
+    """
+
+    def __init__(self, reason: str, detail: str | None = None) -> None:
         super().__init__(reason)
         self.reason = reason
+        self.detail = detail
 
 
 def _deliver(pool: FlushPool, entry: OutboxEntry, connect_timeout_s: float) -> int:
@@ -544,9 +555,9 @@ def _deliver(pool: FlushPool, entry: OutboxEntry, connect_timeout_s: float) -> i
                 client_message_id=entry.client_message_id,
             )
     except ClientMessageConflictError as exc:
-        raise PermanentDeliveryError("key_conflict") from exc
+        raise PermanentDeliveryError("key_conflict", detail=str(exc)) from exc
     except CallerProtocolUnavailableError as exc:
-        raise PermanentDeliveryError("caller_protocol") from exc
+        raise PermanentDeliveryError("caller_protocol", detail=str(exc)) from exc
     # A same-key receipt (a previous attempt or flush already committed) can
     # still be pending — heal the wake tail, mirroring `deliver_chat_inbound`.
     if not receipt.inserted and receipt.pending:
@@ -570,23 +581,27 @@ def _emit(event: str, entry: OutboxEntry, attributes: dict[str, object]) -> None
         logger.opt(exception=True).warning("[delivery-outbox] {} emit failed", event)
 
 
-def _abandon(path: Path, entry: OutboxEntry, reason: str, moment: datetime) -> None:
+def _abandon(
+    path: Path, entry: OutboxEntry, reason: str, moment: datetime, detail: str | None = None
+) -> None:
     updated = replace(
         entry,
         state="abandoned",
         abandon_reason=reason,
+        abandon_detail=detail,
         abandoned_at=_iso(moment),
     )
     with suppress(OSError):
         _write_atomic(path, updated)
     logger.warning(
         "[delivery-outbox] abandoned delivery to agent {} (source {!r}, {} send attempt(s), "
-        "{} flush attempt(s), reason {}); record kept at {}",
+        "{} flush attempt(s), reason {}{}); record kept at {}",
         entry.agent_id,
         entry.source,
         entry.attempts,
         entry.flush_attempts,
         reason,
+        f", detail {detail!r}" if detail else "",
         path,
     )
     _emit(
@@ -594,6 +609,7 @@ def _abandon(path: Path, entry: OutboxEntry, reason: str, moment: datetime) -> N
         entry,
         {
             "reason": reason,
+            "detail": detail,
             "attempts": entry.attempts,
             "flush_attempts": entry.flush_attempts,
             "age_s": max(0.0, (moment - _parse_iso(entry.created_at)).total_seconds()),
@@ -679,9 +695,9 @@ def flush(pool: FlushPool, *, now: datetime | None = None) -> FlushReport:
         try:
             inbound_id = _deliver(pool, entry, snapshot.flush_interval_seconds)
         except PermanentDeliveryError as exc:
-            _abandon(path, entry, exc.reason, moment)
+            _abandon(path, entry, exc.reason, moment, detail=exc.detail)
             abandoned += 1
-        except Exception:
+        except Exception as exc:
             logger.opt(exception=True).warning(
                 "[delivery-outbox] flush attempt for agent {} failed; record kept: {}",
                 entry.agent_id,
@@ -692,7 +708,7 @@ def flush(pool: FlushPool, *, now: datetime | None = None) -> FlushReport:
                 # The failed attempt at/after the budget is the terminal one —
                 # abandon it with the attempt already on the record. The
                 # decision falls after the attempt, never before it.
-                _abandon(path, updated, "budget", moment)
+                _abandon(path, updated, "budget", moment, detail=str(exc) or None)
                 abandoned += 1
             else:
                 deferred += 1
