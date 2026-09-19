@@ -107,13 +107,21 @@ def _resume_leg(holder: str, acquired_at: datetime) -> None:
 
 
 def _record(note: str) -> None:
-    """Persist this attempt's outcome; a failed write never changes the verdict."""
-    from shared.host_deploy_state import finish_stranded_recovery
+    """Persist this attempt's outcome; a failed write never changes the verdict.
+
+    Goes through the shared carry-forward (`record_stranded_recovery_note`):
+    with the record out of reach, the note is queued durably for a later
+    DB-capable run instead of dropped (task #4080).
+    """
+    from shared.host_deploy_state import record_stranded_recovery_note
 
     try:
-        finish_stranded_recovery(note)
+        disposition = record_stranded_recovery_note(note)
     except Exception as exc:
-        print(f"[hold-recover] outcome not recorded: {exc!r}")
+        print(f"[hold-recover] outcome not recorded and could not be queued: {exc!r}")
+        return
+    if disposition == "queued":
+        print("[hold-recover] outcome not writable from this context; queued for backfill")
 
 
 def run(holder: str, acquired_at: datetime) -> int:

@@ -362,34 +362,12 @@ def _apply_bootstrap_values(base_url: str, values: dict[str, str]) -> None:
         os.environ[key] = value
 
 
-def inject_config_from_gateway() -> None:
-    """Fetch the cluster's config from the gateway and inject it into os.environ.
+def _gateway_base_url() -> str:
+    """The enrolled gateway to dial, or an actionable failure.
 
-    Runs at Settings construction on a pure agent-runner (see
-    `config_source_is_local`). The fetched values are AUTHORITATIVE: every key
-    the gateway serves overwrites os.environ, including a stale value a
-    pre-cutover `.env` still materializes (`_enforce_cluster_env_authority`
-    forces file values in at `load_ava_env`, and this runs after it) and a
-    forwarded copy from a spawning process. The gateway's `.env` is the single
-    cluster-wide copy.
-
-    P0 #2100 snapshot contract: when the unit's last successful fetch is fresh
-    (`_SNAPSHOT_FRESH_S`), this skips the fetch entirely and applies the
-    snapshot — the exec child an agent process spawns per turn is the main
-    beneficiary, so a gateway outage no longer strands every execute_code call.
-    When the snapshot is stale the fetch runs as before; a transport failure
-    then falls back to the snapshot (whatever its age — no cluster edit can
-    land while the gateway is unreachable) with a logged warning, and a
-    non-transport failure (401/5xx) still fails loud. A successful fetch
-    refreshes the snapshot for the next process.
-
-    The gateway URL is AVA_GATEWAY_URL (enroll wrote it; the deprecated
+    The gateway URL is AVA_GATEWAY_URL (`ava enroll` wrote it; the deprecated
     AVA_PRIMARY_GATEWAY_URL alias is honored too, since this runs before
     Settings resolves it).
-
-    Raises:
-        BootstrapFetchError: no gateway URL, or every fetch attempt failed — the
-            process must not start with no config.
     """
     base_url = os.environ.get("AVA_GATEWAY_URL") or os.environ.get("AVA_PRIMARY_GATEWAY_URL")
     if not base_url:
@@ -400,13 +378,36 @@ def inject_config_from_gateway() -> None:
             "    ava enroll --gateway <url> --machine-name <name> --machine-host "
             "<this-host-addr>"
         )
+    return base_url
+
+
+def resolve_bootstrap_values() -> dict[str, str]:
+    """The cluster config values this process would run on — the boot resolution, read-only.
+
+    The one resolution shared by `inject_config_from_gateway` (which applies
+    the result to os.environ) and callers that must ask "would this host boot
+    against resolvable config right now?" without mutating their process — the
+    hold watchdog's pre-attempt gate (task #4080). The contract is the boot
+    contract, unchanged:
+
+    - a fresh snapshot (`_SNAPSHOT_FRESH_S`) is authoritative and skips the
+      fetch entirely (P0 #2100);
+    - otherwise a live fetch, refreshing the snapshot on success;
+    - a transport failure falls back to the snapshot whatever its age — no
+      cluster edit can have landed while the gateway was unreachable — with a
+      logged warning; a non-transport failure (401/5xx) still fails loud.
+
+    Raises:
+        BootstrapFetchError: no gateway URL, or every fetch attempt failed — the
+            process must not start with no config.
+    """
+    base_url = _gateway_base_url()
     snapshot = _read_config_snapshot(base_url)
     if snapshot is not None and snapshot[1] <= _SNAPSHOT_FRESH_S:
         # Fresh parent snapshot: the authoritative values this unit fetched
         # moments ago. Skip the fetch — a gateway that is down or restarting
         # must not block this process (P0 #2100).
-        _apply_bootstrap_values(base_url, snapshot[0])
-        return
+        return snapshot[0]
     try:
         # A runner process dials as the least-privilege ava_runner role (the
         # gateway projects AVA_DB_URL onto that credential — Task #1236). The
@@ -427,8 +428,7 @@ def inject_config_from_gateway() -> None:
                 exc=type(exc).__name__,
                 age=snapshot[1],
             )
-            _apply_bootstrap_values(base_url, snapshot[0])
-            return
+            return snapshot[0]
         raise BootstrapFetchError(
             f"could not fetch cluster config from the gateway at {base_url} ({exc}).\n"
             "    A pure agent-runner fetches GET /api/bootstrap at every process start "
@@ -445,4 +445,25 @@ def inject_config_from_gateway() -> None:
             "then retry."
         ) from exc
     _write_config_snapshot(base_url, values)
+    return values
+
+
+def inject_config_from_gateway() -> None:
+    """Fetch the cluster's config from the gateway and inject it into os.environ.
+
+    Runs at Settings construction on a pure agent-runner (see
+    `config_source_is_local`). The fetched values are AUTHORITATIVE: every key
+    the gateway serves overwrites os.environ, including a stale value a
+    pre-cutover `.env` still materializes (`_enforce_cluster_env_authority`
+    forces file values in at `load_ava_env`, and this runs after it) and a
+    forwarded copy from a spawning process. The gateway's `.env` is the single
+    cluster-wide copy.
+
+    The values come from `resolve_bootstrap_values` (fresh snapshot / fetch /
+    last-known-snapshot fallback); this wrapper applies them, including the
+    derived `AVA_GATEWAY_HEALTH_URL` for a runner enrolled without an explicit
+    override.
+    """
+    base_url = _gateway_base_url()
+    values = resolve_bootstrap_values()
     _apply_bootstrap_values(base_url, values)

@@ -235,7 +235,13 @@ outlives its age bound (30 minutes by default, `AVA_HOLD_WATCHDOG_MIN_AGE_SECOND
 and only when every ownership signal is decidable and empty: a DEAD recorded
 shepherd, no live updater handoff / orchestration session / updater lock, no
 start or stop in flight, no failed receipts. A hold released while that attempt
-was in flight is recorded as rescued, never as completed. The table above stays
+was in flight is recorded as rescued, never as completed. Before spending its
+attempt the watchdog asks the completion-environment question (task #4080): a
+pure agent-runner's start leg builds its OTLP relay from the gateway's
+published `AVA_GATEWAY_OTLP_ENDPOINT`, so until that is resolvable and valid
+the attempt is deferred unspent (re-asked every run; a spent attempt is still
+never refunded), and an outcome the settings-lite job cannot write to the fleet
+record is queued locally and backfilled by the first DB-capable run. The table above stays
 the manual path — and the fallback when the watchdog is disabled
 (`AVA_STRANDED_HOLD_RECOVERY`) or unregistered (`ava cluster
 hold-watchdog-unregister`), or the hold is younger than its bound or carries

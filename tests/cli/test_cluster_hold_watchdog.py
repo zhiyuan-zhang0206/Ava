@@ -50,12 +50,35 @@ def _no_hold() -> hw.HoldWatchdogVerdict:
 
 @pytest.fixture(autouse=True)
 def _clean_attempt_state() -> Iterator[None]:
-    paths = (hw.attempt_path(), hw.attempt_lock_path())
+    from shared import host_deploy_state as hds
+
+    paths = (
+        hw.attempt_path(),
+        hw.attempt_lock_path(),
+        hds.pending_stranded_recovery_note_path(),
+    )
     for path in paths:
         path.unlink(missing_ok=True)
     yield
     for path in paths:
         path.unlink(missing_ok=True)
+
+
+@pytest.fixture(autouse=True)
+def _ready_completion_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the pre-attempt gate's two seams to a resolvable pure runner.
+
+    The gate (task #4080) reads this unit's capability set and, on a pure
+    runner, the bootstrap values the start leg will boot with — a bare test
+    environment has neither, so without the pins every eligible test would
+    defer. Pinning the seams rather than the gate keeps the real gate logic
+    exercised on every run; the gate tests below re-patch one seam each.
+    """
+    monkeypatch.setattr("cli.commands._repo._roles_or_none", lambda: frozenset({"agent-runner"}))
+    monkeypatch.setattr(
+        "shared.bootstrap.resolve_bootstrap_values",
+        lambda: {"AVA_GATEWAY_OTLP_ENDPOINT": "http://10.0.0.5:4318"},
+    )
 
 
 @pytest.fixture
@@ -330,3 +353,124 @@ def test_an_unexpected_failure_is_reported_not_traced(
     monkeypatch.setattr(hw, "evaluate", _explode)
     assert cw.cmd_hold_watchdog() == 1
     assert "unexpected failure" in capsys.readouterr().err
+
+
+# --- the completion gate (task #4080) ----------------------------------------
+
+
+def test_a_runner_awaiting_the_published_endpoint_defers_without_spending(
+    legs: list[str],
+    db_notes: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The 2026-09-19 migration shape: the gateway has not published the relay
+    ingress, the start leg cannot build it — the attempt must wait, not burn."""
+    monkeypatch.setattr("shared.bootstrap.resolve_bootstrap_values", dict)
+    _verdicts(monkeypatch, _eligible())
+    assert cw.cmd_hold_watchdog() == 0
+    err = capsys.readouterr().err
+    assert "deferred" in err
+    assert "not published" in err
+    assert "spends no attempt" in err
+    assert "ORPHAN HOLD" not in err
+    assert legs == []
+    assert hw.read_attempt() is None, "the gate deferred but the attempt was spent"
+    assert db_notes == []
+
+
+def test_a_runner_whose_config_cannot_resolve_defers(
+    legs: list[str], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from shared.bootstrap import BootstrapFetchError
+
+    def _boom() -> dict[str, str]:
+        raise BootstrapFetchError(
+            "could not fetch cluster config from the gateway at http://10.0.0.1:8000 "
+            "(ConnectError).\n    trailing advice the gate must not echo"
+        )
+
+    monkeypatch.setattr("shared.bootstrap.resolve_bootstrap_values", _boom)
+    _verdicts(monkeypatch, _eligible())
+    assert cw.cmd_hold_watchdog() == 0
+    err = capsys.readouterr().err
+    assert "deferred" in err
+    assert "could not fetch cluster config from the gateway" in err
+    assert "trailing advice" not in err  # one line, not the paragraph
+    assert hw.read_attempt() is None
+
+
+def test_an_invalid_published_endpoint_defers(
+    legs: list[str], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(
+        "shared.bootstrap.resolve_bootstrap_values",
+        lambda: {"AVA_GATEWAY_OTLP_ENDPOINT": "http://127.0.0.1:4318"},
+    )
+    _verdicts(monkeypatch, _eligible())
+    assert cw.cmd_hold_watchdog() == 0
+    assert "non-loopback" in capsys.readouterr().err
+    assert hw.read_attempt() is None
+
+
+def test_the_gate_has_no_question_for_a_gateway_capability_set(
+    legs: list[str], db_notes: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only a pure agent-runner converges the gateway relay; a unit that also
+    serves the gateway completes as before."""
+    monkeypatch.setattr(
+        "cli.commands._repo._roles_or_none", lambda: frozenset({"gateway", "agent-runner"})
+    )
+    _verdicts(monkeypatch, _eligible())
+    assert cw.cmd_hold_watchdog() == 0
+    assert legs == ["start", "resume"]
+
+
+def test_an_unresolvable_capability_set_defers(
+    legs: list[str], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("cli.commands._repo._roles_or_none", lambda: None)
+    _verdicts(monkeypatch, _eligible())
+    assert cw.cmd_hold_watchdog() == 0
+    assert "capability set cannot be resolved" in capsys.readouterr().err
+    assert hw.read_attempt() is None
+
+
+# --- the fleet-record queue (task #4080) -------------------------------------
+
+
+def test_an_unreachable_fleet_record_queues_the_outcome(
+    legs: list[str], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A settings-lite run cannot dial a pure runner's database: the write is
+    carried in the local queue instead — plainly, without the raw guard text."""
+    from shared import host_deploy_state
+    from shared.db_connections import UnanchoredHomeError
+
+    def _boom(_note: str) -> None:
+        raise UnanchoredHomeError(
+            "refusing to open a DB connection: AVA_DB_URL is the never-dialed placeholder."
+        )
+
+    monkeypatch.setattr(host_deploy_state, "finish_stranded_recovery", _boom)
+    _verdicts(monkeypatch, _eligible())
+    assert cw.cmd_hold_watchdog() == 0
+    err = capsys.readouterr().err
+    assert "queued for backfill" in err
+    assert "UnanchoredHomeError" not in err
+    queued = host_deploy_state.pending_stranded_recovery_note()
+    assert queued is not None
+    assert queued.startswith("hold-watchdog: expired-complete")
+
+
+def test_a_queued_note_is_backfilled_on_a_later_run(
+    db_notes: list[str], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from shared import host_deploy_state
+
+    host_deploy_state.queue_stranded_recovery_note("hold-watchdog: old outcome")
+    _verdicts(monkeypatch, _no_hold())
+    assert cw.cmd_hold_watchdog() == 0
+    assert db_notes == ["hold-watchdog: old outcome"]
+    assert host_deploy_state.pending_stranded_recovery_note() is None
+    assert "backfilled" in capsys.readouterr().err

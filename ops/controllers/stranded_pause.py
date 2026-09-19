@@ -573,7 +573,7 @@ def sync_stranded_hold_record(
     exists to remove). A raised read (an unreadable maintenance journal) or a
     failed write aborts this round with a warning; the record stands. Never
     raises: it is a side band beside the recovery decision, and a DB blip must
-    cost a round, not the tick.
+    cost a round, not the tick; it also flushes the OS hold watchdog's queued note (task #4080).
 
     Returns this round's verdict so the caller can act on it (task #3142's
     bounded completion), or None when the read itself failed — a round with no
@@ -581,6 +581,13 @@ def sync_stranded_hold_record(
     """
     from shared.host_deploy_state import clear_stranded_hold, mark_stranded_hold
 
+    try:  # a queued note the flush cannot write stays queued (task #4080)
+        from shared.host_deploy_state import flush_pending_stranded_recovery_note
+
+        if flush_pending_stranded_recovery_note():
+            _log.info("[ops.pause] backfilled a queued stranded-hold note onto the record")
+    except Exception:
+        _log.debug("[ops.pause] stranded-hold note backfill failed", exc_info=True)
     try:
         verdict = stranded_hold_verdict(handoff)
         if verdict.kind == "unknown":

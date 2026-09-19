@@ -14,6 +14,14 @@ one live layer (the platform scheduler), so the job process itself is the
 executor, and the ladder's `ava start` is what brings the rest of the stack —
 database included — back.
 
+Before spending the attempt the command settles the completion-environment
+question (`_completion_environment_problem`, task #4080): only a pure
+agent-runner's start leg builds its OTLP relay from the gateway's published
+`AVA_GATEWAY_OTLP_ENDPOINT`, and the 2026-09-19 gateway-migration window burned
+a generation's single attempt on a relay nothing could have built. A not-ready
+environment stands down with the attempt UNSET; the question is re-asked every
+scheduled run, so the attempt waits for the window that can complete.
+
 The ladder reuses ``cli.commands._hold_recover``'s legs — the same functions
 #3142's bounded completion runs — so both mechanisms execute ONE definition of
 the official stop/start/resume recipe. Each leg re-verifies the hold
@@ -24,6 +32,11 @@ replaced while the attempt was in flight records "aborted (rescued within the
 window)" — never a completion; an attempt that ran because the bound expired
 records "expired-complete". The two wordings are distinct so drill readings
 cannot confuse them.
+
+The outcome reaches the attempt log unconditionally; the fleet record
+(`host_deploy_state`) is written best-effort — a settings-lite context (this
+job on a pure runner) cannot dial the database at all, so a note that cannot
+land is queued durably and backfilled by the first DB-capable run (task #4080).
 
 Output lands on stderr (the channel the OS job captures into
 ``$AVA_HOME/logs/hold-watchdog.log``) and in a per-attempt
@@ -78,6 +91,43 @@ def _log_line(path: Path, message: str) -> None:
             stream.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {message}\n")
     except OSError as exc:
         _report("warning", f"[hold-watchdog] attempt log write failed: {exc!r}")
+
+
+def _completion_environment_problem() -> str | None:
+    """Why the completion environment is not ready, or None when it is.
+
+    The pre-attempt gate (task #4080). Only a PURE agent-runner's converge
+    builds the gateway OTLP relay (`cli.commands._otel_collector._otlp_exporters`),
+    and that build is the precondition the 2026-09-19 migration window failed:
+    `AVA_GATEWAY_OTLP_ENDPOINT` was not yet published, the start leg died at the
+    relay step, and the generation's single attempt was spent in a window
+    nothing could have completed. Every other capability set resolves its
+    telemetry from its own config, so the gate has no question for it (None).
+
+    For the pure runner the endpoint is resolved exactly like the start leg's
+    own boot resolves its config (`shared.bootstrap.resolve_bootstrap_values`:
+    fresh snapshot / live fetch / last-known-snapshot), so the reading matches
+    what the start leg will see. A reading that cannot be made — an unresolved
+    capability set included — defers: the budget must not fail open.
+    """
+    from cli.commands._repo import _roles_or_none
+
+    roles = _roles_or_none()
+    if roles is None:
+        return "this unit's capability set cannot be resolved"
+    if roles != frozenset({"agent-runner"}):
+        return None
+    from cli.commands._otel_collector import gateway_otlp_endpoint_problem
+    from shared.bootstrap import BootstrapFetchError, resolve_bootstrap_values
+
+    try:
+        values = resolve_bootstrap_values()
+    except BootstrapFetchError as exc:
+        return str(exc).splitlines()[0].strip()
+    endpoint = values.get("AVA_GATEWAY_OTLP_ENDPOINT", "")
+    if not endpoint.strip():
+        return "the gateway has not published AVA_GATEWAY_OTLP_ENDPOINT yet"
+    return gateway_otlp_endpoint_problem(endpoint)
 
 
 def _run_ladder(
@@ -137,12 +187,15 @@ def _released_since(holder: str, acquired_at: datetime) -> bool:
 
 
 def _finish(episode: str, note: str, *, attempt_log: Path | None) -> None:
-    """Record the attempt's outcome locally, plus best-effort DB mirroring.
+    """Record the attempt's outcome locally, plus best-effort fleet-record mirroring.
 
-    The local CAS outcome is the durable one (the mechanism must work with
-    the database down); ``host_deploy_state.finish_stranded_recovery`` mirrors
-    it onto the standing stranded-hold record when the ladder's start leg has
-    brought the database back, and is skipped silently when it has not.
+    The local CAS outcome is the durable one (the mechanism must work with the
+    database down). The fleet record goes through
+    ``host_deploy_state.record_stranded_recovery_note``: the write lands when
+    the database is reachable from this process, and is otherwise QUEUED
+    durably (task #4080 — the OS job runs settings-lite, where a pure runner's
+    DB URL is the never-dialed placeholder, so the direct write can only ever
+    fail there; a later DB-capable run backfills the note).
     """
     from shared import hold_watchdog
 
@@ -153,16 +206,45 @@ def _finish(episode: str, note: str, *, attempt_log: Path | None) -> None:
     except Exception as exc:
         _report("warning", f"[hold-watchdog] outcome not recorded in the attempt CAS: {exc!r}")
     try:
-        from shared.host_deploy_state import finish_stranded_recovery
+        from shared.host_deploy_state import record_stranded_recovery_note
 
-        finish_stranded_recovery(f"hold-watchdog: {note}"[:500])
+        disposition = record_stranded_recovery_note(f"hold-watchdog: {note}"[:500])
     except Exception as exc:
-        _report("info", f"[hold-watchdog] stranded-hold record not updated ({exc!r})")
+        _report(
+            "warning",
+            f"[hold-watchdog] stranded-hold note could not be recorded or queued: {exc!r}",
+        )
+        return
+    if disposition == "queued":
+        _report(
+            "info",
+            "[hold-watchdog] fleet record not writable from this context; "
+            "outcome queued for backfill",
+        )
+
+
+def _backfill_queued_note() -> None:
+    """Land a note a previous run had to queue (task #4080); never raises.
+
+    A settings-lite run cannot dial a pure runner's database, so an outcome may
+    sit in the local queue until a DB-capable path runs — this run on a
+    gateway-serving unit, a watchdog round on a pure runner. A failure just
+    keeps the note queued; the queue-time report already carries the narrative.
+    """
+    from shared.host_deploy_state import flush_pending_stranded_recovery_note
+
+    try:
+        backfilled = flush_pending_stranded_recovery_note()
+    except Exception:
+        return
+    if backfilled:
+        _report("info", "[hold-watchdog] backfilled a queued stranded-hold note")
 
 
 def _run_watchdog() -> int:
     from shared import hold_watchdog
 
+    _backfill_queued_note()
     verdict = hold_watchdog.evaluate()
     if verdict.kind is hold_watchdog.VerdictKind.NO_HOLD:
         return 0
@@ -177,6 +259,18 @@ def _run_watchdog() -> int:
         # An eligible verdict always carries a generation; this is a bug guard.
         _report("error", "[hold-watchdog] eligible verdict without a hold generation")
         return 1
+    environment = _completion_environment_problem()
+    if environment is not None:
+        # Not-ready completion environment (task #4080): stand down with the
+        # attempt UNSET — spending it here is how the 2026-09-19 window burned
+        # the generation's only shot at a ladder nothing could have finished.
+        _report(
+            "warning",
+            f"[hold-watchdog] deferred: completion environment not ready ({environment}); "
+            "the ladder is withheld and this run spends no attempt",
+        )
+        return 0
+
     attempt = hold_watchdog.reserve_attempt(
         episode,
         max_attempts=hold_watchdog.MAX_ATTEMPTS,
