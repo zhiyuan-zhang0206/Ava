@@ -38,11 +38,24 @@ _TIMEOUT_S = 15.0
 _BATCH_TIMEOUT_S = 600.0
 
 
+class ProvenanceError(ValueError):
+    """A provenance requirement failed; the CLI reports it instead of a traceback.
+
+    Raised where a ``--source`` value (or the opt-in AVA_CALLER_IDENTITY profile)
+    is missing, malformed, or contradictory. Per-command CLI handlers catch it,
+    print the message, and exit 2; the command layer itself keeps raising so
+    callers and tests see one honest contract.
+    """
+
+
 def _caller_body(source: str | None, *, field: str = "source") -> dict[str, str]:
     """Opt-in provenance; no caller metadata is authentication evidence."""
     from shared.external_caller import explicit_caller_source
 
-    resolved = explicit_caller_source(source)
+    try:
+        resolved = explicit_caller_source(source)
+    except ValueError as exc:
+        raise ProvenanceError(str(exc)) from exc
     return {field: resolved} if resolved is not None else {}
 
 
@@ -96,17 +109,49 @@ def cmd_agents_ls(
 _TAIL_BYTES = 2048
 
 
+_SEND_SOURCE_GUIDE = (
+    "send requires --source (explicit provenance); nothing was sent.\n"
+    "  --source user                  send as the user (the human operator)\n"
+    "  --source shell:N | watcher:N   a machine notice (N = the producing session id)\n"
+    "  --source schedule:N            a gateway schedule\n"
+    "See `ava agents send --help` for the full source set."
+)
+
+
+def _explicit_send_source(source: str | None) -> str:
+    """The send path's provenance: explicit only, never environment-compensated.
+
+    The CLI enforces `--source` at the argparse layer; this guard covers
+    programmatic callers — no path may send without an explicit, valid source
+    (user ruling 2026-09-20: the AVA_CALLER_IDENTITY profile does not
+    compensate a missing parameter on this path).
+    """
+    from shared.envelope import validate_source
+
+    if source is None:
+        raise ProvenanceError(_SEND_SOURCE_GUIDE)
+    try:
+        validate_source(source)
+    except ValueError as exc:
+        raise ProvenanceError(str(exc)) from exc
+    return source
+
+
 def cmd_agents_send(
     agent_id: int, content: str, source: str | None, tail_file: str | None = None
 ) -> int:
     """`ava agents send <id> <content> --source S [--tail-file PATH]` — deliver a
     chat inbound via POST /api/agents/{id}/messages.
 
-    `--source` or AVA_CALLER_IDENTITY is required: every message must carry an honest
-    provenance — machine callers pass `shell:N` / `watcher:N`, a human operator
-    passes `user`. An illegal source is rejected 422 at the gateway boundary
-    (`AgentMessageIn.source` -> `shared.envelope.validate_source`) and the
-    response body is printed so the caller sees the legal set.
+    `--source` is required and validated at the argparse layer: a missing or
+    unknown source is a usage error (exit 2) before any command code runs, and
+    no environment fallback is consulted on this path (user ruling 2026-09-20:
+    explicit parameters only). Machine callers pass `shell:N` / `watcher:N`; a
+    human operator — or an agent acting as one — passes `user`. A source that
+    still reaches the gateway is re-validated there (`AgentMessageIn.source` ->
+    `shared.envelope.validate_source`) and rejected 422 with the legal set
+    printed. A programmatic caller with no source gets this option list as a
+    ProvenanceError, which the CLI handlers report without a traceback.
 
     `--tail-file` appends the last `_TAIL_BYTES` bytes of PATH to the message —
     the background-run / watcher completion notices use it to carry the end of
@@ -130,10 +175,8 @@ def cmd_agents_send(
     from shared.http_dial import post as dial_post
     from shared.machine import gateway_api_base, gateway_auth_headers
 
-    caller = _caller_body(source)
-    if "source" not in caller:
-        raise ValueError("send requires --source or an explicit AVA_CALLER_IDENTITY profile")
-    resolved_source = caller["source"]
+    # argparse enforces --source for the CLI; the guard covers programmatic callers.
+    source = _explicit_send_source(source)
     if tail_file is not None:
         # Delivering the notice is the primary contract; the tail is a rider.
         # An unreadable tail file must not abort the POST — the failure is
@@ -153,9 +196,7 @@ def cmd_agents_send(
     # arms the server's client_message_id receipt for the flush replay.
     key: str | None = None
     try:
-        key = delivery_outbox.logical_key(
-            agent_id=agent_id, source=resolved_source, content=content
-        )
+        key = delivery_outbox.logical_key(agent_id=agent_id, source=source, content=content)
     except Exception:
         # The outbox is a safety net for a failing send, never a reason for
         # one: an unusable outbox degrades to the unkeyed behavior with a
@@ -171,7 +212,7 @@ def cmd_agents_send(
     try:
         resp = dial_post(
             url,
-            json={"content": content, **caller},
+            json={"content": content, "source": source},
             timeout=_TIMEOUT_S,
             headers=headers,
         )
@@ -179,7 +220,7 @@ def cmd_agents_send(
         if key is not None:
             delivery_outbox.record_failed_send(
                 agent_id=agent_id,
-                source=resolved_source,
+                source=source,
                 content=content,
                 client_message_id=key,
             )
@@ -188,13 +229,13 @@ def cmd_agents_send(
         if resp.status_code in delivery_outbox.TRANSIENT_HTTP_STATUSES:
             delivery_outbox.record_failed_send(
                 agent_id=agent_id,
-                source=resolved_source,
+                source=source,
                 content=content,
                 client_message_id=key,
             )
         elif resp.is_success:
             delivery_outbox.note_send_succeeded(
-                agent_id=agent_id, source=resolved_source, content=content, key=key
+                agent_id=agent_id, source=source, content=content, key=key
             )
     if resp.status_code >= 400:
         # Surface the response body before raising: the 422 detail carries the

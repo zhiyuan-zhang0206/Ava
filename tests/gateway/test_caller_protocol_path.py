@@ -5,7 +5,6 @@ Ownership is obtained using the actual hosted admission helper, never invented
 by a mocked lookup. Production admission still advertises protocol zero.
 """
 
-import json
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, LiteralString
@@ -77,7 +76,6 @@ async def test_profile_through_auth_gate_and_real_hosted_claim(
     secret = "caller-path-test-secret"  # noqa: S105 — isolated test credential
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
     monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
-    monkeypatch.setenv("AVA_CALLER_IDENTITY", json.dumps(_CALLER))
     monkeypatch.setenv("AVA_AGENT_ID", "999")
     monkeypatch.setattr("shared.machine.gateway_api_base", Mock(return_value="http://testserver"))
     monkeypatch.setattr(
@@ -90,7 +88,9 @@ async def test_profile_through_auth_gate_and_real_hosted_claim(
             return client.post(url, **kwargs)
 
         monkeypatch.setattr("shared.http_dial.post", post)
-        assert cmd_agents_send(incarnation.agent_id, "caller path proof", None) == 0
+        # Explicit provenance (user ruling 2026-09-20): the send path never consults
+        # AVA_CALLER_IDENTITY; the profile value travels as the explicit source.
+        assert cmd_agents_send(incarnation.agent_id, "caller path proof", _SOURCE) == 0
         # Unauthenticated traffic cannot reach the now-capable target either.
         assert (
             client.post(

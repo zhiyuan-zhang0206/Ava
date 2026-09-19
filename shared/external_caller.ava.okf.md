@@ -23,10 +23,13 @@ A raw 36-character UUID is not supported: choose a distinct short identifier;
 the implementation never truncates and pretends it is the original session ID. Do not
 place secrets, user names, paths, or prompts in the bounded instance field.
 
-CLI send can use that profile without repeating `--source`; an explicitly
-conflicting source is rejected before network access. Restart, resurrect,
-terminate and kill accept an explicit `--source` and forward the profile when
-configured. SDK source selection prefers real hosted-turn context, then an
+CLI send requires an explicit `--source` at the parse layer and never
+consults the profile: an inherited `AVA_CALLER_IDENTITY` neither fills a
+missing flag nor vetoes the explicit value. Restart, resurrect, terminate
+and kill accept an explicit `--source` and forward the profile when
+configured; for those verbs an explicitly conflicting source is still
+rejected before network access.
+SDK source selection prefers real hosted-turn context, then an
 explicit external profile, then its established legacy actor. An external shell
 cannot become its Ava parent merely by inheriting `AVA_AGENT_ID`.
 
