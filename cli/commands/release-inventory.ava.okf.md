@@ -25,6 +25,17 @@ plist bytes must match the label-addressed native reader before hashing. Cron
 uses the same bounded reader as observation. An unavailable domain is an error,
 never an empty inventory or positive shutdown result.
 
+`com.ava.*` launchd registrations are classified from their declared
+environment. This home's `AVA_HOME` declares a unit launcher; `AVA_JOB_SCOPE`
+set to `machine` declares a machine-level registration; and this home's
+permissions-helper keeper is recognized by `AVA_PERMISSIONS_HELPER_SOCKET`
+under `<home>/run/permissions-helper.`. A classified registration that is not
+the unit's launcher is recorded in the receipt as an excluded entry (label,
+definition digest, classification) and never enters the launcher set; the
+loaded-label check counts it. Any other registration (no declaration, another
+home, a foreign or malformed helper socket, conflicting declarations, or an
+unknown scope value) refuses the whole inventory.
+
 The existing `ExpectedUnitWriters` model carries exact process/session/job
 identities. The full secret-free prepare receipt also carries the complete
 service roster and its gates. Its filename is the canonical payload SHA-256;
