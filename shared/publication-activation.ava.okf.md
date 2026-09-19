@@ -60,6 +60,20 @@ compatible migration SET. Old evidence without the new plan/receipt is not
 upgraded into authority. Readers which cannot parse this additive v2 shape must
 not be selected as rollback runtimes; resource-state/schema compatibility is a
 preparation gate, never forced deletion or a hard-coded historical release.
+
+`cli/commands/_update_publication.py` is the P1 journal seat for the existing
+updater's Phase-0 window: `build_pending_publication` assembles the complete
+registered-roster `PendingPublication` from per-unit prepared facts (the sealed
+receipt plus its byte digest, the candidate image digests, and the unit's
+normal-service plan when the release includes one), and
+`open_pending_publication` opens the journal inside the caller's transaction.
+The single observation challenge is minted once per operation: a same-operation
+retry adopts the journaled challenge, because the begin retry check compares the
+whole entry, while a pending entry from another operation is left for that check
+to refuse — recovery stays explicit. The seat is inert until a rollout wiring
+change connects it: no production module imports it, and it performs no
+filesystem or network work.
+
 No production migration, normal service activation or protocol advertisement
 is performed by importing or testing these helpers.
 

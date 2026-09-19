@@ -453,9 +453,11 @@ def _acquire_refusal_reason(cur: Any) -> str:
 
     Two causes share the guard (the sibling of the release/settle diagnostics,
     task #2683): a live holder, or a durable pending managed-writer publication
-    whose checked recovery must run before any new update can start. The
-    operator-facing refusal must not tell the second story — "a live holder
-    exists" — which sends the operator hunting for a process that is gone.
+    whose checked recovery must run before any new update can start. When both
+    are present the live holder leads — a rollout that opened its journal is
+    normally still running, and `recover-pending` would refuse on that live
+    process anyway — with the pending recovery named as the follow-up for the
+    case where that rollout never completes.
     """
     cur.execute(
         "SELECT holder, "
@@ -466,25 +468,34 @@ def _acquire_refusal_reason(cur: Any) -> str:
     row = cur.fetchone()
     if row is None:
         return "the deployment state row is missing"
-    if not bool(row[1]):
+    pending_present = not bool(row[1])
+    if row[2]:
+        if pending_present:
+            return (
+                f"a live holder exists ({row[0]}); a durable pending publication is also "
+                "journaled and will need its checked recovery (`ava cluster recover-pending`) "
+                "if that rollout does not complete"
+            )
+        return f"a live holder exists ({row[0]})"
+    if pending_present:
         return (
             "a durable pending publication requires its checked recovery first "
             "(`ava cluster recover-pending`)"
         )
-    if row[2]:
-        return f"a live holder exists ({row[0]})"
     return "the guarded row no longer matched at write time"
 
 
 def update_lock_refusal_detail() -> str:
     """The operator sentence for a refused `acquire_update_lock`.
 
-    A refusal has three shapes and each names its own next step: a durable
-    pending managed-writer publication (its checked recovery via `ava cluster
-    recover-pending`; no generic path may clear it), a live holder (wait it out,
-    or `ava cluster recover` once its process is provably gone), or a racing
-    acquire. Read-only companion of `update_lock_holder`, for callers that print
-    the refusal instead of logging it.
+    A live holder leads even when a durable pending managed-writer publication
+    is also journaled (wait it out, or `ava cluster recover` once its process is
+    provably gone; `recover-pending` refuses on a live process), with the
+    pending recovery named as the follow-up for the case where that rollout
+    never completes. A pending-only row keeps the recovery sentence, and a row
+    that is already free is a racing acquire. Read-only companion of
+    `update_lock_holder`, for callers that print the refusal instead of logging
+    it.
     """
     with shared.db.connect(autocommit=True) as conn:
         row = conn.execute(
@@ -496,16 +507,22 @@ def update_lock_refusal_detail() -> str:
     if row is None:
         return "the cluster deploy state row is missing; aborting"
     holder, pending_absent, lease_live = row
+    if lease_live:
+        if not pending_absent:
+            return (
+                f"another cluster update is in progress (held by {holder}); a durable pending "
+                "publication is also journaled — if that rollout does not complete it, its "
+                "checked recovery (`ava cluster recover-pending`) must clear it first; aborting"
+            )
+        return (
+            f"another cluster update is in progress (held by {holder}); aborting "
+            "(the lock auto-expires after its TTL if that holder crashed)"
+        )
     if not pending_absent:
         return (
             "another cluster update is in progress — a durable pending publication from an "
             "interrupted rollout requires its checked recovery first "
             "(`ava cluster recover-pending`); aborting"
-        )
-    if lease_live:
-        return (
-            f"another cluster update is in progress (held by {holder}); aborting "
-            "(the lock auto-expires after its TTL if that holder crashed)"
         )
     return "another orchestration just took the cluster update lock; aborting"
 
