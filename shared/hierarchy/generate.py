@@ -216,6 +216,23 @@ def text_hash(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
+def build_generation_llm(model: str, params: GenParams | None = None) -> Any:
+    """Build the generation chat model at the pass's reasoning effort.
+
+    The single source of the generation model's construction: `generate_nodes`
+    builds one through here when the caller supplied none, and the hierarchy
+    callers (the worker's job child, the manual build script) build their
+    one-per-run model through here too — so every path reaches the same
+    provider shape and effort (`GenParams().reasoning_effort`, unless the
+    caller passes params). The caller owns the returned model: close it via
+    `shared.lm.factory.close_chat_model` once the pass is done (task #3915).
+    """
+    from shared.lm.factory import build_chat_model
+
+    p = params or GenParams()
+    return build_chat_model(model, reasoning_effort=p.reasoning_effort)
+
+
 def generate_nodes(
     requests: list[GenRequest],
     *,
@@ -228,10 +245,12 @@ def generate_nodes(
     """Generate every request's text, concurrently; order preserved.
 
     `llm` is normally built by the caller (it owns timeout / provider
-    options); when omitted, one is built from `model` here at
-    `params.reasoning_effort`. A per-node failure (provider error after
-    retries, or budget unfittable) is returned as that node's `error`, never
-    raised — the caller retries those nodes on a later pass.
+    options and the model's lifetime — a caller-supplied model is never
+    closed here); when omitted, one is built from `model` here at
+    `params.reasoning_effort` and closed again when the batch ends. A per-node
+    failure (provider error after retries, or budget unfittable) is returned
+    as that node's `error`, never raised — the caller retries those nodes on
+    a later pass.
 
     Raises:
         ValueError: duplicate nids, unknown kind, or a non-positive
@@ -251,33 +270,40 @@ def generate_nodes(
     if not requests:
         return []
     p = params or GenParams()
-    if llm is None:
-        from shared.lm.factory import build_chat_model
+    self_built = llm is None
+    if self_built:
+        llm = build_generation_llm(model, p)
+    try:
+        from shared.lm.factory import provider_key_of_model
 
-        llm = build_chat_model(model, reasoning_effort=p.reasoning_effort)
-    from shared.lm.factory import provider_key_of_model
+        provider = provider_key_of_model(model)
+        worker = partial(
+            _generate_one,
+            llm,
+            model=model,
+            provider=provider,
+            params=p,
+            retry_attempts=retry_attempts,
+        )
+        with ThreadPoolExecutor(max_workers=max_concurrent) as pool:
+            results = list(pool.map(worker, requests))
+        failed = [r.nid for r in results if not r.ok]
+        logger.info(
+            "hierarchy generation: {ok}/{total} nodes ok, {failed} failed",
+            ok=len(results) - len(failed),
+            total=len(results),
+            failed=len(failed),
+        )
+        if failed:
+            logger.info("hierarchy generation failures: {failed}", failed=failed)
+        return results
+    finally:
+        # Ownership: the batch closes what it built; a caller-supplied model
+        # is the caller's to close (it may outlive the batch).
+        if self_built:
+            from shared.lm.factory import close_chat_model
 
-    provider = provider_key_of_model(model)
-    worker = partial(
-        _generate_one,
-        llm,
-        model=model,
-        provider=provider,
-        params=p,
-        retry_attempts=retry_attempts,
-    )
-    with ThreadPoolExecutor(max_workers=max_concurrent) as pool:
-        results = list(pool.map(worker, requests))
-    failed = [r.nid for r in results if not r.ok]
-    logger.info(
-        "hierarchy generation: {ok}/{total} nodes ok, {failed} failed",
-        ok=len(results) - len(failed),
-        total=len(results),
-        failed=len(failed),
-    )
-    if failed:
-        logger.info("hierarchy generation failures: {failed}", failed=failed)
-    return results
+            close_chat_model(llm)
 
 
 def _generate_one(

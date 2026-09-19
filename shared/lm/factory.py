@@ -70,8 +70,11 @@ entering state guards that metadata is not empty.
 
 from __future__ import annotations
 
+import asyncio
 import importlib
-from typing import TYPE_CHECKING, Protocol
+import inspect
+from collections.abc import Coroutine
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 if TYPE_CHECKING:
     # Annotation-only at module scope (`_LLMFactory`, `build_chat_model`);
@@ -502,3 +505,49 @@ def build_chat_model(
         f"Unknown model {model!r} — add a {model.split('-', maxsplit=1)[0]}-* "
         "provider plugin (shared/lm/provider_api.py)"
     )
+
+
+# The provider-client attribute names today's providers hang their HTTP
+# client(s) off: `root_client` / `root_async_client` (langchain-openai),
+# `_client` / `_async_client` (langchain-anthropic — lazily materialized
+# `cached_property`s), `client` (legacy / other packages).
+_CLIENT_ATTRS = ("root_client", "root_async_client", "_client", "_async_client", "client")
+
+
+def close_chat_model(llm: Any) -> None:
+    """Close the provider clients a chat model holds; never raises.
+
+    LangChain's chat models never close their underlying provider clients, so
+    a process that builds models per job (the hierarchy worker builds one per
+    generation pass) leaves their HTTP connection pools open until the process
+    exits — lingering CLOSE-WAIT sockets toward the provider (task #3915).
+    Whoever owns a model's lifetime closes it here once its calls are done.
+
+    Only clients the instance actually holds are closed: candidates are read
+    off `vars(llm)`, so a lazy client the model never used is neither created
+    nor closed (langchain-anthropic's `_client` / `_async_client` are
+    `cached_property`s — a plain attribute read would materialize one just to
+    tear it down). Each distinct client is closed once. An async `close()` is
+    driven to completion with `asyncio.run` — call this from sync context.
+    Best-effort by contract: a failing close is logged and the remaining
+    clients are still attempted, so teardown can never fail the work that
+    already used the model.
+    """
+    state = getattr(llm, "__dict__", {})
+    seen: set[int] = set()
+    for attr in _CLIENT_ATTRS:
+        client = state.get(attr)
+        if client is None or id(client) in seen:
+            continue
+        seen.add(id(client))
+        close = getattr(client, "close", None)
+        if close is None:
+            continue
+        try:
+            result = close()
+            if inspect.isawaitable(result):
+                # The async client's `close()` is a coroutine; drive it to
+                # completion from this sync teardown context.
+                asyncio.run(cast(Coroutine[Any, Any, None], result))
+        except Exception as exc:
+            logger.warning("close_chat_model: closing {attr} failed: {err}", attr=attr, err=exc)
