@@ -712,7 +712,7 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
                     FLEX
                   )}
                 >
-                  {img.status === "error" ? "Failed" : "…"}
+                  {img.status === "error" ? t("failed") : "…"}
                 </span>
               ) : null}
               <button

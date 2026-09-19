@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, X } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 
 import { ContextMeter, useContextMeterWidthClass } from "@/components/context-meter";
@@ -30,30 +31,28 @@ const CATEGORY_COLOR: Record<string, string> = {
   tool_response: "#ef4444",
 };
 
-const CATEGORY_LABEL: Record<string, string> = {
-  system_prompt: "System prompt",
-  compact_summary: "Compact summary",
-  cluster_memory: "Cluster memory",
-  agent_memory: "Agent memory",
+// API kind → message key (contextBreakdown.categories.*). An unknown kind
+// keeps its raw name at render — fail-visible (the P4-5 review condition).
+const CATEGORY_MESSAGE_KEY: Record<string, string> = {
+  system_prompt: "categories.system_prompt",
+  compact_summary: "categories.compact_summary",
+  cluster_memory: "categories.cluster_memory",
+  agent_memory: "categories.agent_memory",
   // context_note (system-note markers) + automation (machine/framework wakeups)
   // merge into one display row "System notes" (user ruling 2026-08-04) — the API
   // keeps the two kinds; only the legend merges them.
-  system_notes: "System notes",
-  user_input: "User input",
-  agent_messages: "Agent messages",
+  system_notes: "categories.system_notes",
+  user_input: "categories.user_input",
+  agent_messages: "categories.agent_messages",
 
-  reasoning: "Thinking",
-  output: "Text output",
-  tool_call: "Tool calls",
-  tool_response: "Tool responses",
+  reasoning: "categories.reasoning",
+  output: "categories.output",
+  tool_call: "categories.tool_call",
+  tool_response: "categories.tool_response",
 };
 
 function categoryColor(kind: string): string {
   return CATEGORY_COLOR[kind] ?? "#94a3b8";
-}
-
-function categoryLabel(kind: string): string {
-  return CATEGORY_LABEL[kind] ?? kind;
 }
 
 export interface ContextButtonProps {
@@ -95,6 +94,7 @@ export function ContextButton(props: ContextButtonProps) {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const barWidthClassName = useContextMeterWidthClass();
+  const t = useTranslations("contextBreakdown");
 
   // Escape / outside pointer-down collapse the panel. Document-level listeners
   // exist only while open; the closing outside click still lands on its target
@@ -148,7 +148,7 @@ export function ContextButton(props: ContextButtonProps) {
         <div
           ref={panelRef}
           role="region"
-          aria-label="Context breakdown"
+          aria-label={t("title")}
           data-testid="context-breakdown-panel"
           // overflow-x-hidden is load-bearing, not decorative: per the CSS
           // overflow spec, an element with overflow-y other than "visible"
@@ -170,11 +170,11 @@ export function ContextButton(props: ContextButtonProps) {
           className="absolute bottom-full left-0 z-50 mb-2 min-w-80 max-w-[min(28rem,90vw)] max-h-[50vh] overflow-x-hidden overflow-y-auto whitespace-normal rounded-md border border-border bg-popover p-2.5 text-popover-foreground shadow-md"
         >
           <div className={cn("mb-2 items-start justify-between gap-2", FLEX)}>
-            <p className="text-sm font-semibold">Context breakdown</p>
+            <p className="text-sm font-semibold">{t("title")}</p>
             <button
               type="button"
               data-testid="context-breakdown-close"
-              aria-label="Close context breakdown"
+              aria-label={t("close")}
               onClick={() => onOpenChange(false)}
               className="shrink-0 rounded-sm p-0.5 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
@@ -192,13 +192,17 @@ export function ContextButton(props: ContextButtonProps) {
  * inline (run page, task #4023 P4-3), chart-side above the timeline. Demo
  * parity: the pilot-w1 card caps at 520px (`#cbd` in its stylesheet). */
 export function ContextBreakdownCard({ agentId }: { agentId: number }) {
+  const t = useTranslations("contextBreakdown");
   return (
     <section
       data-testid="context-breakdown-card"
-      aria-label="Context breakdown"
+      aria-label={t("title")}
       className="max-w-[520px] rounded border border-border bg-card p-4"
     >
-      <h2 className="mb-2 text-sm font-semibold">Context breakdown</h2>
+      <h2 className="mb-1 text-sm font-semibold">{t("title")}</h2>
+      <p data-testid="context-breakdown-subtitle" className="mb-2 text-muted-foreground text-xs">
+        {t("subtitle")}
+      </p>
       <ContextBreakdownBody agentId={agentId} />
     </section>
   );
@@ -211,6 +215,7 @@ export function ContextBreakdownCard({ agentId }: { agentId: number }) {
  * body carries no live meter props; the collapsed `ContextMeter` keeps its
  * own live values. */
 function ContextBreakdownBody({ agentId }: { agentId: number }) {
+  const t = useTranslations("contextBreakdown");
   const { data, isPending, isError, error, refetch } = useQuery({
     queryKey: ["context-breakdown", agentId] as const,
     queryFn: () => api.getContextBreakdown(agentId),
@@ -223,7 +228,7 @@ function ContextBreakdownBody({ agentId }: { agentId: number }) {
   if (isPending) {
     return (
       <p data-testid="context-breakdown-loading" className="text-muted-foreground text-xs">
-        Loading…
+        {t("loading")}
       </p>
     );
   }
@@ -238,8 +243,8 @@ function ContextBreakdownBody({ agentId }: { agentId: number }) {
       <div className={cn("items-start gap-2", FLEX, FLEX_COL)}>
         <p data-testid="context-breakdown-error" className="text-destructive text-xs">
           {isHttp
-            ? `Failed to load the context breakdown — the server returned an error: ${message}`
-            : `Failed to load the context breakdown — could not reach the gateway: ${message}`}
+            ? t("failedHttp", { message })
+            : t("failedUnreachable", { message })}
         </p>
         <button
           type="button"
@@ -247,7 +252,7 @@ function ContextBreakdownBody({ agentId }: { agentId: number }) {
           onClick={() => void refetch()}
           className="rounded border border-border px-2 py-0.5 text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         >
-          Retry
+          {t("retry")}
         </button>
       </div>
     );
@@ -256,9 +261,17 @@ function ContextBreakdownBody({ agentId }: { agentId: number }) {
 }
 
 function BreakdownContent({ data }: { data: ContextBreakdownResponse }) {
+  const t = useTranslations("contextBreakdown");
   // The anchor the percentages are relative to: the provider truth when a call
   // has run, else the chars/4 estimate.
   const total = data.total_input_tokens > 0 ? data.total_input_tokens : data.estimated_total;
+  // The estimate footnote covers the whole card and only renders while the
+  // anchor is the chars/4 fallback (P4-5 review ruling).
+  const isEstimate = !(data.total_input_tokens > 0);
+  const categoryName = (kind: string) => {
+    const messageKey = CATEGORY_MESSAGE_KEY[kind];
+    return messageKey ? t(messageKey as Parameters<typeof t>[0]) : kind;
+  };
   // The legend's display rows. `context_note` (system-note markers) and
   // `automation` (machine/framework wakeup messages) merge into one "System
   // notes" row (user ruling 2026-08-04 — both are system-injected content and
@@ -291,7 +304,7 @@ function BreakdownContent({ data }: { data: ContextBreakdownResponse }) {
   if (total <= 0 && data.categories.length === 0) {
     return (
       <p data-testid="context-breakdown-empty" className="text-muted-foreground text-xs">
-        No context recorded yet — the breakdown appears after the agent&apos;s first turn.
+        {t("empty")}
       </p>
     );
   }
@@ -302,12 +315,15 @@ function BreakdownContent({ data }: { data: ContextBreakdownResponse }) {
       <p className="text-muted-foreground text-xs tabular-nums" data-testid="context-breakdown-total">
         <span className="block">
           {formatTokens(total)}
-          {data.max_input_tokens > 0 ? ` / ${formatTokens(data.max_input_tokens)}` : ""} tokens
+          {data.max_input_tokens > 0 ? ` / ${formatTokens(data.max_input_tokens)}` : ""}{" "}
+          {t("tokensUnit")}
         </span>
         {hasThresholds ? (
           <span className="block">
-            wind-down {formatTokens(data.soft_compact_tokens)} · auto-compact{" "}
-            {formatTokens(data.hard_compact_tokens)}
+            {t("thresholds", {
+              soft: formatTokens(data.soft_compact_tokens),
+              hard: formatTokens(data.hard_compact_tokens),
+            })}
           </span>
         ) : null}
       </p>
@@ -320,7 +336,7 @@ function BreakdownContent({ data }: { data: ContextBreakdownResponse }) {
               className="size-2.5 shrink-0 rounded-[2px]"
               style={{ backgroundColor: categoryColor(c.key) }}
             />
-            <span className={cn("truncate", FLEX_1)}>{categoryLabel(c.key)}</span>
+            <span className={cn("truncate", FLEX_1)}>{categoryName(c.key)}</span>
             <span className="shrink-0 tabular-nums text-muted-foreground">
               {formatTokens(c.tokens)}
               {total > 0 ? ` · ${((c.tokens / total) * 100).toFixed(2)}%` : ""}
@@ -343,15 +359,27 @@ function BreakdownContent({ data }: { data: ContextBreakdownResponse }) {
               data-testid="context-breakdown-sections-toggle"
               onClick={() => setSectionsOpen((o) => !o)}
               aria-expanded={sectionsOpen}
-              aria-label={`${sectionsOpen ? "Collapse" : "Expand"} System prompt sections`}
+              aria-label={
+              sectionsOpen
+                ? t("collapse", { target: t("sections") })
+                : t("expand", { target: t("sections") })
+            }
               className="rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
               <ChevronRight className={cn("size-3 transition-transform", sectionsOpen && "rotate-90")} />
             </button>
-            System prompt sections
+            {t("sections")}
           </div>
           {sectionsOpen ? <SectionRows nodes={data.sections} depth={0} /> : null}
         </div>
+      ) : null}
+
+      {/* One footnote covers the whole card — only while the anchor is the
+          chars/4 estimate (no provider truth). */}
+      {isEstimate ? (
+        <p className="text-muted-foreground text-xs" data-testid="context-breakdown-estimate-note">
+          {t("estimateNote")}
+        </p>
       ) : null}
     </div>
   );
@@ -378,6 +406,7 @@ function SectionRows({ nodes, depth }: { nodes: ContextSection[]; depth: number 
  * (no spacer). The chevron sits flush against the label (no gap). `min-w-0` +
  * `truncate` keep even deep indentation from forcing horizontal scroll. */
 function SectionRow({ node, depth }: { node: ContextSection; depth: number }) {
+  const t = useTranslations("contextBreakdown");
   const [open, setOpen] = useState(false);
   const children = node.children ?? [];
   const hasChildren = children.length > 0;
@@ -389,7 +418,9 @@ function SectionRow({ node, depth }: { node: ContextSection; depth: number }) {
             type="button"
             onClick={() => setOpen((o) => !o)}
             aria-expanded={open}
-            aria-label={`${open ? "Collapse" : "Expand"} ${node.name}`}
+            aria-label={
+              open ? t("collapse", { target: node.name }) : t("expand", { target: node.name })
+            }
             className="shrink-0 rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           >
             <ChevronRight className={cn("size-3 transition-transform", open && "rotate-90")} />
