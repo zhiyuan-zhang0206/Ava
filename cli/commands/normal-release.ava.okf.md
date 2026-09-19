@@ -6,8 +6,12 @@ description: Pre-stop normal plan validation with activation deliberately disabl
 
 # Pending normal release planning
 
-The normal release module currently builds and validates a sealed per-unit plan;
-it does not activate that plan. A bootstrap request may reference a private
+The normal release module builds and validates a sealed per-unit plan; it does
+not activate that plan. The P3/P4 effect seat (`_run_normal_release_effects`) is
+wired immediately behind the activation gate: migration receipt, selector CAS,
+pinned-order normal start/observe, and the unit readback record into the pending
+journal. The gate refuses first, so no production path reaches the seat until
+checked recovery and exact spawn receipts replace it. A bootstrap request may reference a private
 normal request before its first stop, and standalone preparation can consume an
 existing candidate-ready bootstrap handoff. Both paths bind the exact exited
 predecessor, operation, challenge, verified image, complete preparation receipt,
@@ -41,8 +45,8 @@ development responses remain unchanged. Native frontend/collector probes also
 require native listener ownership, not just an HTTP success.
 
 Every preparation read has the original challenge budget; no retry renews it.
-Future per-unit readbacks belong in the same pending evidence for the all-unit
-coordinator. Current publication, not a local successful launch, remains the
+Per-unit readbacks are recorded by the effect seat into the same pending
+evidence for the all-unit coordinator. Current publication, not a local successful launch, remains the
 terminal condition. This planning permission does not authorize ordinary agent
 admission or service effects.
 
@@ -58,5 +62,6 @@ gaps, not claims awaiting CI.
 Tests cover exact selector serialization, separate receipt/inventory digests,
 unsupported or mutable commands, CLI source isolation, pinned service order,
 retained unfinished recovery, strict journal transitions, and the pre-effect
-activation fence. Actual normal full-roster cold launch and the complete
+activation fence. The P3/P4 seat's call order, refusal propagation,
+gate-before-seat posture, and the continuation/standalone routing are pinned. Actual normal full-roster cold launch and the complete
 distributed transition remain required evidence.

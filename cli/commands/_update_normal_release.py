@@ -3,6 +3,9 @@
 The planner binds the existing per-unit updater, bootstrap evidence, publication
 plan and service identities. Execution refuses before updater ownership or
 effects until checked phase recovery and exact spawn receipts are implemented.
+The P3/P4 effect sequence (migration receipt, selector CAS, normal start/observe,
+unit readback record) is wired immediately behind that gate; it cannot run until
+the prerequisite replaces it.
 """
 
 from __future__ import annotations
@@ -20,11 +23,13 @@ from pydantic import Field
 from cli.commands._release_selector import (
     pending_transaction,
     read_selector,
+    select_pending_release,
     selector_bytes,
 )
 from cli.commands._release_services import (
     PreparedService,
     prepare_normal_services,
+    start_normal_service,
 )
 from cli.commands._update_bootstrap import (
     BootstrapHopRequest,
@@ -39,6 +44,11 @@ from services.agent_ops.bootstrap import (
     validate_operation,
 )
 from shared import updater_handoff
+from shared.managed_writer_activation import (
+    UnitActivationReadback,
+    record_pending_migration,
+    record_pending_unit_readback,
+)
 from shared.managed_writer_barrier import EvidenceModel, lock_rollout
 from shared.managed_writer_observation import ExpectedProcess, observe_process
 from shared.managed_writer_publication import CandidateUnitPlan, PublishedUnit, _locked_publication
@@ -165,7 +175,7 @@ def _candidate_ready_recovery(generation: str) -> BootstrapRecoveryJournal:
 def continue_after_bootstrap(
     hop: PreparedBootstrapHop, plan: PreparedNormalRelease, generation: str
 ) -> Never:
-    """Validate retained identity, then refuse the disabled activation route."""
+    """Validate retained identity, then enter the checked activation entry."""
     journal = _candidate_ready_recovery(generation)
     if (
         journal.request != str(hop.request_path)
@@ -179,7 +189,7 @@ def continue_after_bootstrap(
         or hop.request.normal_release_path != str(plan.request_path)
     ):
         raise ReleaseRejectedError("normal continuation differs from its retained bootstrap")
-    require_checked_normal_activation()
+    return execute_normal_release(plan, generation)
 
 
 def prepare_normal_release(path: Path) -> PreparedNormalRelease:
@@ -259,11 +269,55 @@ def prepare_normal_release(path: Path) -> PreparedNormalRelease:
     return prepared
 
 
+def _run_normal_release_effects(plan: PreparedNormalRelease) -> UnitActivationReadback:
+    """The P3/P4 seat: migration receipt, selector CAS, services, unit readback.
+
+    The migration receipt reads the actual locked ``schema_migrations`` SET, so
+    it can only succeed after the existing migration runner applied the prepared
+    schema — fail-closed before any selector write, and idempotent across units.
+    One autocommit connection carries the short authority transactions; no
+    transaction spans the service OS work.
+    """
+    context = plan.context
+    operation = context.operation
+    challenge = context.challenge.challenge
+    remaining = int((context.challenge.valid_until - datetime.now(UTC)).total_seconds())
+    if remaining < 2:
+        raise ReleaseRejectedError("normal release has no connection budget for its effects")
+    previous = (
+        plan.request.previous_selector.encode()
+        if plan.request.previous_selector is not None
+        else None
+    )
+    with psycopg.connect(
+        plan.projection.db_url.get_secret_value(),
+        autocommit=True,
+        connect_timeout=min(5, remaining),
+    ) as conn:
+        with pending_transaction(conn, context):
+            record_pending_migration(conn, operation, challenge)
+        selector = select_pending_release(conn, context, plan.request.unit, previous)
+        services = tuple(
+            start_normal_service(conn, context, selector, prepared) for prepared in plan.services
+        )
+        readback = UnitActivationReadback(selector=selector, services=services)
+        with pending_transaction(conn, context):
+            record_pending_unit_readback(conn, operation, challenge, readback)
+    return readback
+
+
 def execute_normal_release(_plan: PreparedNormalRelease, _generation: str) -> Never:
-    """Defensive fence for callers that already hold a prepared plan."""
+    """The checked activation entry: refuses until the recovery prerequisites land.
+
+    The P3/P4 effect seat sits immediately past the gate; the prerequisite slice
+    replaces ``require_checked_normal_activation`` with its checks and this call
+    runs.
+    """
     require_checked_normal_activation()
+    return _run_normal_release_effects(_plan)
 
 
 def run_normal_release(path: Path) -> Never:
-    prepare_normal_release(path)
-    require_checked_normal_activation()
+    """Prepare one sealed plan, then enter the checked activation entry."""
+    prepared = prepare_normal_release(path)
+    return execute_normal_release(prepared, prepared.resume_generation)
