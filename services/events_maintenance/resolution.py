@@ -95,7 +95,9 @@ def grouped_count_query(window: str, *, cluster: str | None = None) -> str:
     """One capped series aggregation for the event classes in ``window``.
 
     Do not add category/level/event-name stream-selector labels before
-    ``LEGACY_READ_EXPIRES_AT = 2026-08-30T11:10Z``. Legacy chunks have those
+    ``LEGACY_READ_EXPIRES_AT`` (``INDEX_LABEL_CUTOVER_AT +
+    EVENT_STREAM_RETENTION + LEGACY_READ_MARGIN``; see
+    ``shared/loki_index_labels.py``). Legacy chunks have those
     values only in their JSON body; filtering them in the selector would make
     active dismissals depend on a rollout boundary (#1467).
 

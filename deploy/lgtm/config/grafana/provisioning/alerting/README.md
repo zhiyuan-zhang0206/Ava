@@ -25,8 +25,9 @@ dashboards).
   for the level/category/attributes filters (those fields are NOT stream
   labels).
 - The legacy chunks without index labels expired at `LEGACY_READ_EXPIRES_AT`
-  (2026-08-30T11:10Z); promoting the filters before that expiry would have
-  silently dropped seven days of history.
+  (cutover + retention + margin; derived in `shared/loki_index_labels.py`);
+  promoting the filters before that expiry would have silently dropped the
+  still-retained history.
 - Selector matchers are full-string regexes (unlike pipeline label filters,
   which are substring searches), so multi-alternative `event_name=~"a|b"`
   matches exact event names.
