@@ -553,7 +553,8 @@ async def renew_agent_page(
             agent_id=agent_id,
             attributes={
                 "page_id": page_id,
-                "ttl_s": ttl,
+                # Same-class cast as task #4011 (stable emitted metric kind).
+                "ttl_s": round(ttl),
                 "new_expires_at": new_expires.isoformat(),
             },
         )

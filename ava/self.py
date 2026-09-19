@@ -258,7 +258,8 @@ def pause_heartbeat(duration: float) -> None:
             "heartbeat_paused",
             level="info",
             agent_id=_boot.agent_id(),
-            attributes={"duration_s": duration},
+            # int cast stabilizes the emitted metric kind (task #4011).
+            attributes={"duration_s": round(duration)},
         )
 
 

@@ -457,20 +457,19 @@ _KIND_EXTENSIONS = {
 # (`counter if isinstance(value, int)`), so an int-passing emit site renders a
 # Counter despite a `float` declaration — `_bucket/_count/_sum` never exist for
 # it. Each entry pins the kind actually emitted; keep it in step with the emit
-# site. `None` marks a field whose emit sites pass BOTH ints and floats
-# (first-value-wins per process): both families carry live samples, no fixed
-# name is reliable, and deriving none forces a normalization decision instead
-# of blessing a name half the fleet never emits.
+# site. `None` would mark a field whose emit sites pass BOTH ints and floats
+# (first-value-wins per process); the three fields below are all cast to int at
+# their emit sites (task #4011), so every entry pins a single kind.
 #   delivery_stalled.age_s: `round(age_s)` (services/delivery_watchdog) —
 #     `_bucket` never observed (0/72h).
 #   shell_ttl_renewed.ttl_s: whole-second `ttl` (ava/shell/sessions) —
 #     `_bucket` dead since >72h (32 older samples only).
-#   heartbeat_paused.duration_s: int and float callers both live
-#     (24h: 390 vs 320 samples) — unstable.
+#   heartbeat_paused.duration_s: int/float callers were both live (24h:
+#     390 vs 320) until the emit cast landed (task #4011) — pinned counter.
 _RUNTIME_KIND_FIELDS: dict[tuple[str, str], str | None] = {
     ("delivery_stalled", "age_s"): "counter",
     ("shell_ttl_renewed", "ttl_s"): "counter",
-    ("heartbeat_paused", "duration_s"): None,
+    ("heartbeat_paused", "duration_s"): "counter",
 }
 
 # Escape hatch for rule references the derivation below cannot produce —
@@ -611,11 +610,13 @@ def test_runtime_typed_fields_pin_their_emitted_kind() -> None:
     review): the emit sites pass ints, so the live series is a Counter and
     the histogram family either never existed or is dead. Pinning the counter
     stops a rule from being told a non-existent `_bucket` family is fine —
-    the #4002 silent-NoData shape, mirrored. The unstable field derives
-    nothing on purpose."""
+    the #4002 silent-NoData shape, mirrored. All three cast to int at their
+    emit sites (task #4011), so each derives its counter name."""
     assert _rendered_names("delivery_stalled", "age_s") == {"ava_delivery_stalled_age_s_total"}
     assert _rendered_names("shell_ttl_renewed", "ttl_s") == {"ava_shell_ttl_renewed_ttl_s_total"}
-    assert _rendered_names("heartbeat_paused", "duration_s") == set()
+    assert _rendered_names("heartbeat_paused", "duration_s") == {
+        "ava_heartbeat_paused_duration_s_total"
+    }
 
 
 def test_unlisted_metric_names_have_no_stale_entries() -> None:
