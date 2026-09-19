@@ -22,14 +22,18 @@ from services.agent_ops.bootstrap import ObserverProjection, PreparedObservation
 from shared.daemon_http import start_daemon_http
 from shared.managed_writer_barrier import RolloutIdentity
 from shared.managed_writer_observation import (
+    ExpectedLauncher,
     ExpectedProcess,
     ExpectedSession,
     ExpectedUnitWriters,
+    LauncherObservation,
     ObservationChallenge,
     UnitObserver,
+    observe_launcher,
     observe_process,
     observe_session,
 )
+from shared.native_job_observation import NativeReadUnavailableError
 from shared.session_record import pid_starttime_ticks
 from shared.transport_encryption import TransportEncryptionUndeclared
 
@@ -241,3 +245,36 @@ def test_whole_second_create_time_drift_is_still_the_expected_process() -> None:
         if child.poll() is None:
             child.kill()
             child.wait(timeout=5)
+
+
+def test_observe_launcher_passes_absent_through_and_unknowns_refuse(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An absent definition is a fenced-removal fact, not a lost observation."""
+    from shared import managed_writer_observation as observation
+
+    expected = ExpectedLauncher(kind="launchd", name="com.ava.test", definition_digest="a" * 64)
+    unit = ExpectedUnitWriters(
+        machine="macmini",
+        home="/Users/example/.ava",
+        artifact_digest="b" * 64,
+        manifest_digest="c" * 64,
+        processes=(),
+        sessions=(),
+        launchers=(),
+    )
+    until = datetime.now(UTC) + timedelta(seconds=10)
+
+    absent = LauncherObservation(definition="absent", loaded=False)
+
+    def absent_launchd(*_args: object, **_kwargs: object) -> LauncherObservation:
+        return absent
+
+    monkeypatch.setattr(observation, "observe_launchd", absent_launchd)
+    assert observe_launcher(expected, unit, until) == absent
+
+    def unreadable(*_args: object, **_kwargs: object) -> LauncherObservation:
+        raise NativeReadUnavailableError("launchctl enumeration unreadable")
+
+    monkeypatch.setattr(observation, "observe_launchd", unreadable)
+    assert observe_launcher(expected, unit, until) == LauncherObservation()

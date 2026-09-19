@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 import sys
 from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 from shared.native_job_observation import (
     NativeReadUnavailableError,
     launchd_loaded,
     native_read,
     read_crontab,
+    read_launchd_definition,
     read_launchd_labels,
 )
 
@@ -56,6 +58,15 @@ def main() -> None:
                 break
         if gui_enumeration and labels and not exact_gui_lookup:
             raise RuntimeError("enumerated GUI services had no positive exact lookup")
+        # A definition that was never installed is a stable fact, not an error:
+        # both reads answer None and this probe writes nothing.
+        absent_label = f"com.ava.probe.absent-{uuid4().hex}"
+        absent_reads = (
+            read_launchd_definition(absent_label),
+            read_launchd_definition(absent_label),
+        )
+        if absent_reads != (None, None):
+            raise RuntimeError("absent definition probe unexpectedly found bytes")
         print(
             json.dumps(
                 {
@@ -64,6 +75,7 @@ def main() -> None:
                     "effectiveEnabledProof": False,
                     "guiEnumerationAvailable": gui_enumeration,
                     "exactGuiLookup": exact_gui_lookup,
+                    "absentReadProbe": True,
                     "writes": False,
                     "closure": "unknown",
                 }
