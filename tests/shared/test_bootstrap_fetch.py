@@ -518,3 +518,67 @@ def test_inject_ignores_malformed_snapshot(
     )
     bootstrap.inject_config_from_gateway()
     assert os.environ["AVA_DB_URL"] == "postgresql://fetched/x"
+
+
+# ── resolve_bootstrap_values — the read-only boot resolution (task #4080) ────
+
+
+def test_resolve_returns_values_without_mutating_the_process(
+    monkeypatch: pytest.MonkeyPatch, _snapshot_home: Path
+) -> None:
+    """The watchdog's pre-attempt gate asks the same question `inject_` answers;
+    it must get the values without applying them to os.environ."""
+    values = {"AVA_DB_URL": "postgresql://fetched/x", "DEEPSEEK_API_KEY": "fetched-key"}
+    monkeypatch.setattr(
+        bootstrap,
+        "fetch_bootstrap_config",
+        lambda *_a, **_k: values,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    assert bootstrap.resolve_bootstrap_values() == values
+    assert "AVA_DB_URL" not in os.environ
+    assert "DEEPSEEK_API_KEY" not in os.environ
+
+
+def test_resolve_uses_a_fresh_snapshot_without_fetching(
+    monkeypatch: pytest.MonkeyPatch, _snapshot_home: Path
+) -> None:
+    _write_snapshot(
+        _snapshot_home,
+        base_url="http://gw:8000",
+        age_s=1.0,
+        values={"AVA_DB_URL": "postgresql://snapshot/x"},
+    )
+
+    def _no_fetch(*_a: object, **_k: object) -> dict[str, str]:
+        raise AssertionError("a fresh snapshot must skip the fetch entirely")
+
+    monkeypatch.setattr(bootstrap, "fetch_bootstrap_config", _no_fetch)  # pyright: ignore[reportUnknownArgumentType]
+    assert bootstrap.resolve_bootstrap_values() == {"AVA_DB_URL": "postgresql://snapshot/x"}
+
+
+def test_resolve_falls_back_to_the_stale_snapshot_on_transport_failure(
+    monkeypatch: pytest.MonkeyPatch, _snapshot_home: Path
+) -> None:
+    _write_snapshot(
+        _snapshot_home,
+        base_url="http://gw:8000",
+        age_s=10_000.0,
+        values={"AVA_DB_URL": "postgresql://last-known/x"},
+    )
+
+    def _boom(*_a: object, **_k: object) -> dict[str, str]:
+        raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(bootstrap, "fetch_bootstrap_config", _boom)  # pyright: ignore[reportUnknownArgumentType]
+    assert bootstrap.resolve_bootstrap_values() == {"AVA_DB_URL": "postgresql://last-known/x"}
+
+
+def test_resolve_raises_without_a_snapshot(
+    monkeypatch: pytest.MonkeyPatch, _snapshot_home: Path
+) -> None:
+    def _boom(*_a: object, **_k: object) -> dict[str, str]:
+        raise httpx.ReadTimeout("read timed out")
+
+    monkeypatch.setattr(bootstrap, "fetch_bootstrap_config", _boom)  # pyright: ignore[reportUnknownArgumentType]
+    with pytest.raises(bootstrap.BootstrapFetchError, match="no snapshot"):
+        bootstrap.resolve_bootstrap_values()

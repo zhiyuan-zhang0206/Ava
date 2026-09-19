@@ -568,3 +568,93 @@ def _budget_columns(conn: psycopg.Connection) -> list[str]:
         "stranded_hold_recovery_note",
     }
     return [name for (name,) in rows if str(name) in wanted]
+
+
+# ── the stranded-recovery note queue (task #4080) ────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _clean_pending_note() -> Iterator[None]:
+    path = hds.pending_stranded_recovery_note_path()
+    path.unlink(missing_ok=True)
+    yield
+    path.unlink(missing_ok=True)
+
+
+def test_the_recovery_note_queue_is_single_slot_latest_wins() -> None:
+    assert hds.pending_stranded_recovery_note() is None
+    hds.queue_stranded_recovery_note("first")
+    assert hds.pending_stranded_recovery_note() == "first"
+    hds.queue_stranded_recovery_note("second")
+    assert hds.pending_stranded_recovery_note() == "second"
+    hds.clear_pending_stranded_recovery_note()
+    assert hds.pending_stranded_recovery_note() is None
+
+
+def test_an_unreadable_queued_note_reads_as_absent() -> None:
+    path = hds.pending_stranded_recovery_note_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not json")
+    assert hds.pending_stranded_recovery_note() is None
+
+
+def test_flushing_lands_a_queued_note_on_a_standing_record() -> None:
+    hds.set_posture("paused")
+    hds.mark_stranded_hold("test episode")
+    hds.queue_stranded_recovery_note("hold-watchdog: expired-complete")
+    assert hds.flush_pending_stranded_recovery_note() is True
+    assert hds.pending_stranded_recovery_note() is None
+    state = hds.read()
+    assert state is not None
+    assert state.stranded_hold_recovery_note == "hold-watchdog: expired-complete"
+
+
+def test_flushing_a_moot_note_clears_it() -> None:
+    """The episode closed before the flush: the late finish is the ordinary
+    no-op, and the queue must not strand on it."""
+    hds.queue_stranded_recovery_note("late note with no record")
+    assert hds.flush_pending_stranded_recovery_note() is True
+    assert hds.pending_stranded_recovery_note() is None
+
+
+def test_a_failed_flush_keeps_the_note_queued(monkeypatch: pytest.MonkeyPatch) -> None:
+    from shared.db_connections import UnanchoredHomeError
+
+    def _boom(_note: str) -> None:
+        raise UnanchoredHomeError("never-dialed placeholder")
+
+    monkeypatch.setattr(hds, "finish_stranded_recovery", _boom)
+    hds.queue_stranded_recovery_note("kept")
+    with pytest.raises(UnanchoredHomeError):
+        hds.flush_pending_stranded_recovery_note()
+    assert hds.pending_stranded_recovery_note() == "kept"
+
+
+def test_record_note_records_when_the_record_answers(monkeypatch: pytest.MonkeyPatch) -> None:
+    recorded: list[str] = []
+    monkeypatch.setattr(hds, "finish_stranded_recovery", recorded.append)
+    assert hds.record_stranded_recovery_note("note") == "recorded"
+    assert recorded == ["note"]
+    assert hds.pending_stranded_recovery_note() is None
+
+
+def test_record_note_queues_when_the_record_is_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _boom(_note: str) -> None:
+        raise RuntimeError("record unreachable")
+
+    monkeypatch.setattr(hds, "finish_stranded_recovery", _boom)
+    assert hds.record_stranded_recovery_note("note") == "queued"
+    assert hds.pending_stranded_recovery_note() == "note"
+
+
+def test_record_note_raises_when_even_the_queue_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _boom(_note: str) -> None:
+        raise RuntimeError("record unreachable")
+
+    def _also(_note: str) -> None:
+        raise OSError("state dir unwritable")
+
+    monkeypatch.setattr(hds, "finish_stranded_recovery", _boom)
+    monkeypatch.setattr(hds, "queue_stranded_recovery_note", _also)
+    with pytest.raises(RuntimeError, match="could not be recorded"):
+        hds.record_stranded_recovery_note("note")

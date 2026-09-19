@@ -1212,3 +1212,25 @@ def test_controller_clears_the_record_when_unpaused(
     result = sp.PauseController().reconcile("agent-runner")
     assert result.blocks is BlockScope.NONE
     assert _record_recorder.clears == 1
+
+
+def test_sync_backfills_a_queued_watchdog_note(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A note the OS hold watchdog had to queue (a pure runner's lite job can
+    never dial the record) lands as soon as a DB-capable round runs."""
+    from shared import host_deploy_state
+
+    host_deploy_state.clear_pending_stranded_recovery_note()
+    recorded: list[str] = []
+    monkeypatch.setattr(host_deploy_state, "finish_stranded_recovery", recorded.append)
+    host_deploy_state.queue_stranded_recovery_note("hold-watchdog: expired-complete")
+
+    def _unreadable(_handoff: object = None) -> sp.StrandedHoldVerdict:
+        return sp.StrandedHoldVerdict(
+            kind="unknown", detail="unreadable", paused_for=None, driver="dead"
+        )
+
+    monkeypatch.setattr(sp, "stranded_hold_verdict", _unreadable)
+    verdict = sp.sync_stranded_hold_record()
+    assert verdict is not None and verdict.kind == "unknown"
+    assert recorded == ["hold-watchdog: expired-complete"]
+    assert host_deploy_state.pending_stranded_recovery_note() is None

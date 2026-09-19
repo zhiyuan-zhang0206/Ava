@@ -89,6 +89,17 @@ def test_missing_or_invalid_gateway_projection_fails_closed(
         collector.gateway_otel_ingress_endpoint()
 
 
+def test_a_valid_gateway_projection_carries_no_problem() -> None:
+    assert collector.gateway_otlp_endpoint_problem("http://example.test:54318") is None
+    assert collector.gateway_otlp_endpoint_problem("http://10.0.0.5:4318/") is None
+
+
+def test_an_invalid_gateway_projection_names_its_problem() -> None:
+    problem = collector.gateway_otlp_endpoint_problem("http://127.0.0.1:4318")
+    assert problem is not None
+    assert "non-loopback" in problem
+
+
 def test_local_otlp_config_stays_host_owned() -> None:
     metadata = {row.name: row for row in config.get_config_metadata()}
     for field in ("telemetry_otlp_endpoint", "telemetry_otlp_port"):

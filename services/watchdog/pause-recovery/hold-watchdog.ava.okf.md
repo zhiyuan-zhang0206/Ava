@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Hold watchdog — completing an orphaned maintenance hold out-of-band
-description: The OS-scheduled actor that completes a provably ownerless post-stop hold once, without the database — the condition groups that license the attempt, the one-attempt budget, and the rescued-vs-expired-complete split.
+description: The OS-scheduled actor that completes a provably ownerless post-stop hold once, without the database — the condition groups that license the attempt, the completion-environment gate, the one-attempt budget (with its local note queue), and the rescued-vs-expired-complete split.
 tags: []
 ---
 
@@ -33,3 +33,24 @@ sessions. Semantics stay split per task #6294: a release inside the window
 records "aborted (rescued within the window)"; a bound-driven completion
 records "expired-complete". Output lands in `$AVA_HOME/logs/hold-watchdog.log`
 (job log) and a per-attempt `hold-watchdog-<epoch>.log`.
+
+The attempt is GATED before it is spent (task #4080). Only a PURE
+agent-runner's converge builds the gateway OTLP relay, and in the 2026-09-19
+gateway-migration window the start leg died at exactly that build —
+`AVA_GATEWAY_OTLP_ENDPOINT` was not yet published — burning a generation's
+single attempt in a window nothing could have completed. The job therefore
+resolves the endpoint the way the start leg's own boot resolves its config
+(`shared.bootstrap.resolve_bootstrap_values`: fresh snapshot / live fetch /
+last-known snapshot) and stands down with the attempt UNSET while it is
+missing, invalid, or unresolvable — including an unresolved capability set —
+re-asking the question every scheduled run. The semantics stay single-attempt:
+the budget is spent only once the gate certifies the environment, deferrals
+spend nothing, and a spent attempt is never refunded.
+
+The outcome reaches the attempt CAS unconditionally; the fleet record
+(`shared.host_deploy_state`) is mirrored best-effort. A settings-lite job on a
+pure runner can never dial the database at all (its URL is the never-dialed
+placeholder there), so a note that cannot land is queued durably in
+`$AVA_HOME/state/stranded-recovery-note-pending.json` and backfilled by the
+first DB-capable run — the job itself on a gateway-serving unit, a watchdog
+round otherwise (`stranded_pause.sync_stranded_hold_record` flushes first).
