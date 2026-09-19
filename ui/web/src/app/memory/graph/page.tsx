@@ -154,7 +154,7 @@ export default function MemoryGraphPage() {
 const PANEL_GRAPH = "panel-memory-graph";
 const PANEL_SIDE = "panel-memory-side";
 const MEMORY_GRAPH_SPLIT_LAYOUT_ID = "ava.memory.graph.split";
-const MEMORY_GRAPH_SPLIT_STORAGE = panelLayoutStorage([PANEL_GRAPH, PANEL_SIDE]);
+const MEMORY_GRAPH_SPLIT_STORAGE = panelLayoutStorage();
 
 function MemoryGraphShell({
   graph,

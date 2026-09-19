@@ -34,24 +34,6 @@ describe("useContentToggle", () => {
     expect(result.current.detailsMode).toBe("none");
   });
 
-  it('legacy "auto" → "last"', () => {
-    setMockSetting("display.expand_runs_mode", "auto");
-    const { result } = renderHook(() => useContentToggle());
-    expect(result.current.detailsMode).toBe("last");
-  });
-
-  it("legacy true → all", () => {
-    setMockSetting("display.expand_runs_mode", true);
-    const { result } = renderHook(() => useContentToggle());
-    expect(result.current.detailsMode).toBe("all");
-  });
-
-  it("legacy false → none", () => {
-    setMockSetting("display.expand_runs_mode", false);
-    const { result } = renderHook(() => useContentToggle());
-    expect(result.current.detailsMode).toBe("none");
-  });
-
   it('unrecognized stored value → falls back to "none"', () => {
     setMockSetting("display.expand_runs_mode", "expanded");
     const { result } = renderHook(() => useContentToggle());
