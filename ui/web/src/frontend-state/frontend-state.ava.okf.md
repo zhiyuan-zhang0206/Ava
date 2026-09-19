@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Frontend State Management
-description: TanStack Query for server state, two Zustand stores for volatile UI/SSE, and localStorage for 8 per-device values; selected conversation state.
+description: TanStack Query for server state, two Zustand stores for volatile UI/SSE, and localStorage for 7 per-device values; selected conversation state.
 tags:
 - frontend
 ---
