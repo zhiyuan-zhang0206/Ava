@@ -11,7 +11,9 @@ round trip over an agent with no checkpoint history (zero model calls — the
 empty-history edge is the fixture), and the process-boot sink seam on both
 sides of the worker (task #3868): the host's prepare() and the child's
 job.main() open the log / event-pipeline sinks, so a real child subprocess's
-records reach stderr and the events JSONL mirror.
+records reach stderr and the events JSONL mirror. In-process execute tests run
+against a file-level fake generation model, so the provider environment is
+never read (task #4120).
 """
 
 from __future__ import annotations
@@ -68,6 +70,27 @@ def _job_row(conn: psycopg.Connection, job_id: int) -> tuple[str, int, int]:
     ).fetchone()
     assert row is not None
     return str(row[0]), int(row[1]), int(row[2])
+
+
+@pytest.fixture(autouse=True)
+def _fake_generation_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run every in-process `execute_job` against a fake generation model.
+
+    `execute_job` builds the real provider client up front (task #3915), so
+    without this seam each execute test reads the provider key from the
+    process environment — a shard neighbor's popped key turned them
+    order-dependently red (task #4120, the #4052 family). Tests that pin the
+    model lifecycle install their own spies over these.
+    """
+
+    def fake_build(model: str) -> object:
+        return object()
+
+    def fake_close(_llm: object) -> None:
+        pass
+
+    monkeypatch.setattr(execute_module, "build_generation_llm", fake_build)
+    monkeypatch.setattr(execute_module, "close_chat_model", fake_close)
 
 
 def test_first_sight_baselines_silently(db_conn: psycopg.Connection) -> None:
@@ -340,6 +363,34 @@ def test_execute_records_failures_on_the_row(
     assert row is not None and row[0] == "failed" and "kaput" in str(row[1])
 
 
+def test_execute_needs_no_provider_key_in_process(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression pin (task #4120): with the provider key dropped, the
+    in-process path still runs green — the file-level fake keeps the
+    environment unread, where the real build raised `DEEPSEEK_API_KEY not
+    set` (the #4052 family's order-dependent CI red)."""
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    agent_id = 880_025
+    _state(db_conn, agent_id, cid(1))
+    job_id = _make_running_job(db_conn, agent_id, cid(2))
+
+    def fake_known(*args: object, **kwargs: object) -> dict[str, str]:
+        return {}
+
+    def fake_tree(*args: object, **kwargs: object) -> MaterializedTree:
+        return MaterializedTree(nodes=(), errors=(), pending={}, max_level=1, batches=1)
+
+    def fake_write(*args: object, **kwargs: object) -> int:
+        return 0
+
+    monkeypatch.setattr(execute_module, "load_known_texts", fake_known)
+    monkeypatch.setattr(execute_module, "build_agent_tree", fake_tree)
+    monkeypatch.setattr(execute_module, "write_tree", fake_write)
+
+    assert execute_module.execute_job(job_id) == 0
+
+
 def test_execute_builds_one_model_and_closes_it(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -415,7 +466,9 @@ def test_execute_closes_the_model_even_when_generation_fails(
     assert closed == [sentinel]
 
 
-def test_child_round_trip_on_empty_history(db_conn: psycopg.Connection) -> None:
+def test_child_round_trip_on_empty_history(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A full claim -> child -> done round trip through the real subprocess.
 
     The agent has no checkpoint history, so the build walks an empty tree:
@@ -436,6 +489,11 @@ def test_child_round_trip_on_empty_history(db_conn: psycopg.Connection) -> None:
     # The worker claims on an autocommit connection; commit so the child
     # (a separate connection) sees the row as `running`.
     db_conn.commit()
+    # The child builds the real provider client: carry the suite's inert key
+    # explicitly instead of leaning on the environment it inherits — under a
+    # popped key the test home's .env fallback is what silently supplies it
+    # (task #4120).
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
     runner.run_child(claimed)
 
     row = db_conn.execute(
