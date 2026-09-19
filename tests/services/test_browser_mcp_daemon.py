@@ -1238,7 +1238,9 @@ async def test_list_tools_appends_renew_page() -> None:
 
 
 async def test_renew_page_emits_audit_event(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every renewal is auditable through the event pipeline."""
+    """Every renewal is auditable through the event pipeline, carrying the TTL
+    as a whole-second int (task #4011's cast: a float here would flip the
+    emitted metric family to a histogram)."""
     d, _up = _daemon()
     await d.call_tool_for_agent("new_page", {"url": "x"}, 7)
     emitted: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
@@ -1250,6 +1252,13 @@ async def test_renew_page_emits_audit_event(monkeypatch: pytest.MonkeyPatch) -> 
     assert emitted[0][0][:2] == ("telemetry", "chrome_page_ttl_renewed")
     assert emitted[0][1]["agent_id"] == 7
     assert emitted[0][1]["attributes"]["ttl_s"] == 60
+    assert isinstance(emitted[0][1]["attributes"]["ttl_s"], int)
+
+    # A float caller still lands an int: locks the cast, not just the value.
+    res2 = await d.call_tool_for_agent("renew_page", {"ttl": 90.9}, 7)
+    assert not res2.is_error
+    assert emitted[1][1]["attributes"]["ttl_s"] == 91
+    assert isinstance(emitted[1][1]["attributes"]["ttl_s"], int)
 
 
 async def test_expiry_emits_audit_event(monkeypatch: pytest.MonkeyPatch) -> None:
