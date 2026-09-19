@@ -31,7 +31,7 @@ Ava's web user interface — Next.js 16 (App Router) + React 19 + Tailwind CSS 4
 /login                        Login page
 /memory/graph                 Memory knowledge graph visualization
 /shell/[agentId]/[sessionId]  Terminal session (session backend proxy)
-/control                      Control vertical long page — write/admin surface (renamed from /settings; observation surface split to /insights)
+/control                      Control vertical long page — write/admin surface (observation surface split to /insights)
                               First-level section anchors: guide/config/presets/display/plugins/mcp/skills/schedules/okf-graph (9th section, added 2026-07-24: button opens /api/okf/graph — D3 force-directed .ava.okf.md doc graph, rebuilt from the current doc tree per request)
                               Top header: chat link + title; left two-level anchor nav (ControlNav) + right single scroll container (replaces TabBar)
                               Structure + data queries all ready on first screen (not expanded on scroll); IntersectionObserver only pauses polling after leaving viewport (enabled:visible,_visibility.tsx, saves connection budget)
@@ -45,19 +45,17 @@ Ava's web user interface — Next.js 16 (App Router) + React 19 + Tailwind CSS 4
                               Section components are also bare routes: insights/{status,ops}/page.tsx; insights/alerts/page.tsx redirects to the Alerts anchor
 /insights/run/[agentId]       Run-level tracing view — a direct, shareable linear turn track for one agent, with prioritized event connectors and click-through turn details (time, usage, cost, model, execs, anomalies). It reads the gateway's bounded run session, offers explicit start/end and zoom windows, requests one-hour buckets up front for explicit windows of at least six hours, and switches after a turn response above 400 rows. Insights and the active inspector link here.
 /control#skills               Installed skills read-only table: name/layer origin (core=repo|plugin|machine=user|untracked)/enabled/local drift (GET /api/skills, single-machine gateway local read)
-/settings, /settings/*        Redirect to /control, /control/* (next.config.ts redirects, preserves old bookmarks/links)
 ```
 
 ## Provider composition (`app/layout.tsx` → `components/providers.tsx`)
 
-`<html lang="zh-CN">` → `Providers` (QueryClientProvider → AuthProvider → EventStreamProvider → [fold owner + `SettingsMigration`] → ThemeProvider → `AppConnectionBanner` + `ToastHost` + `OpenTasksNoticeHost`) → `AuthGuard` → page.
+`<html lang="zh-CN">` → `Providers` (QueryClientProvider → AuthProvider → EventStreamProvider → [fold owner] → ThemeProvider → `AppConnectionBanner` + `ToastHost` + `OpenTasksNoticeHost`) → `AuthGuard` → page.
 
 - **QueryClient**: `staleTime` default 5min, `gcTime` 30min, `refetchOnWindowFocus` off (SSE-driven queries set `staleTime: Infinity`; bounded snapshots opt into polling explicitly). Sidebar stats consumers share one QueryClient-level 30s poll coordinator, so responsive/header/footer observers cannot mint independent intervals. A 401 is never retried and globally invalidates the session so `AuthGuard` redirects to `/login` and unmounts polling observers (Task #1326).
 - **EventStreamProvider** sits above the route tree: global `/api/system` broadcast persists across page navigation (one EventSource shared across routes; closed while the tab is hidden, reopened on return).
 - **Fold owner** (`useFoldOwner`, inside `EventStreamProvider`): the SOLE root writer — one subscriber folds every global-broadcast event into the query caches (`["agents", "live"]` + `["agents", "terminated"]` — both scopes always seeded, / `["notices"]` / `["agent-pages"]` / `["tasks"]` / `["fleet-graph"]` families, debounced per family) and runs the central reconnect reconcile. Hooks only read their keys now.
 - **ToastHost**: root-level renderer for the store's toast slot, so error toasts reach the user on every route (not just Home).
 - **OpenTasksNoticeHost** (#3374): root-level renderer for the store's open-tasks notice slot — a terminate response carrying `open_tasks` (wire #2488) raises a dialog (count + up to five rows + "and N more"); dismissal is explicit; lazily imported.
-- **SettingsMigration** (#657): empty-rendering component that runs once after auth, migrates legacy localStorage preferences into DB `user_settings` then deletes the keys.
 - **AppConnectionBanner** (#648): root-mounted; drives cluster health polling (`useClusterHealth`), mirrors SSE status into store (`ConnectionNotice`), stranded-cluster recovery banner (the only root banner, requires operator action); self-gated by `useAuth().status`. All Providers self-gate on auth state—no outer auth guard layer.
 
 ## Core principles

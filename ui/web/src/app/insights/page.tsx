@@ -25,7 +25,6 @@ import { ControlNav } from "@/app/control/_nav";
 import {
   INSIGHTS_SCROLL_ID,
   INSIGHTS_SECTIONS,
-  RETIRED_INSIGHTS_ANCHORS,
 } from "@/app/control/_sections";
 import { ControlSection } from "@/app/control/_section";
 import OpsPage from "@/app/insights/ops/page";
@@ -34,31 +33,18 @@ import StatusPage from "@/app/insights/status/page";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout";
 import { cn } from "@/lib/utils";
 
-// Retired 2026-08-24: Resources moved to Grafana and gateway daemons merged
-// into Gateway. Keep old bookmarks landing on the closest current surface.
-const STATUS_ANCHOR_PREFIX = "status-";
-const RETIRED_STATUS_ANCHOR_TARGETS: Record<string, string> = {
-  [`${STATUS_ANCHOR_PREFIX}resources`]: "status",
-  [`${STATUS_ANCHOR_PREFIX}gateway-daemons`]: "status-gateway",
-};
-
 export default function InsightsPage() {
   const t = useTranslations("insights");
   const runTimelineT = useTranslations("runTimeline");
-  // Honor a #anchor on first load / direct link (including forwards from old
-  // /control#status deep links): resolve the target once, from the URL hash
-  // at mount (later hash changes come from nav clicks, which scroll
-  // themselves). Retired Metrics anchors (#metrics, #metrics-*) land on the
-  // Ops section — the Grafana dashboard link that replaced the Metrics page. The
-  // scroll itself is re-applied by useSettledAnchorScroll until the async
-  // section bodies stop growing, so the deep link lands on the section at its
-  // final position.
+  // Honor a #anchor on first load / direct link: resolve the target once,
+  // from the URL hash at mount (later hash changes come from nav clicks,
+  // which scroll themselves). The scroll itself is re-applied by
+  // useSettledAnchorScroll until the async section bodies stop growing, so
+  // the deep link lands on the section at its final position.
   const [anchorTarget] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
     const id = window.location.hash.slice(1);
-    return id
-      ? (RETIRED_STATUS_ANCHOR_TARGETS[id] ?? (RETIRED_INSIGHTS_ANCHORS.has(id) ? "ops" : id))
-      : null;
+    return id || null;
   });
   useSettledAnchorScroll(INSIGHTS_SCROLL_ID, anchorTarget);
 

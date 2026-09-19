@@ -39,7 +39,7 @@ export interface ForceParams {
 }
 
 // Force params are a DB-backed user setting (display.graph_force_params /
-// display.task_force_params), merged over the view's defaults so only tuned
+// display.task_force_params.v2), merged over the view's defaults so only tuned
 // knobs are stored. Sliders are dragged (high-frequency), so the write is
 // debounced via useDebouncedSetting. Each view passes its own setting key +
 // defaults so their tunings stay independent. The merged object is memoized so

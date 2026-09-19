@@ -6,8 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // The ui/resizable wrapper is mocked: the library's real layout engine needs a
 // measured container, so these tests pin the home frame contract instead —
 // which frames mount, with which panels and defaults, what may persist, and
-// how a v3-stored split carries over. The real persistence path runs through
-// useDefaultLayout (not mocked) + lib/panel-layout-storage.
+// that a legacy v3-stored split falls back to the frame defaults. The real
+// persistence path runs through useDefaultLayout (not mocked) + lib/panel-layout-storage.
 vi.mock("@/components/ui/resizable", () => ({
   ResizablePanelGroup: ({
     children,
@@ -324,7 +324,7 @@ describe("HomeLayout frame contract", () => {
     expect(localStorage.getItem("react-resizable-panels:ava.home.inspector.desktop")).not.toBeNull();
   });
 
-  it("restores a v3-stored split by mapping its layout onto the panel ids", () => {
+  it("falls back to the frame defaults when a legacy v3 record is stored", () => {
     localStorage.setItem(
       "react-resizable-panels:ava.home.columns.desktop",
       JSON.stringify({
@@ -345,10 +345,7 @@ describe("HomeLayout frame contract", () => {
     );
 
     const groups = screen.getAllByTestId("resizable-panel-group");
-    expect(JSON.parse(groups[0].getAttribute("data-default-layout")!)).toEqual({
-      "panel-sidebar": 41,
-      "panel-main": 59,
-    });
+    expect(groups[0].getAttribute("data-default-layout")).toBe("null");
     expect(groups[1].getAttribute("data-default-layout")).toBe("null");
   });
 });
