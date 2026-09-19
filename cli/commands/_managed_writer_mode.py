@@ -30,14 +30,15 @@ consumes one consistent decision and nothing re-reads the switch mid-rollout.
 A new rollout is a new process and re-reads the file-backed config -- that is
 how a flip takes effect on the next update with no extra restart.
 
-Transition events: ``managed_writer_activated`` / ``_deactivated`` are
-registered for the mode transitions, but this slice records transitions
-through the per-rollout mode field plus the audited config write (``env_write``)
--- no existing surface can carry "the previously observed mode" without adding
-state (the events table is a read-only archive since the LGTM cutover; the
-last-update row's ``log_path`` is overwritten by this rollout's ``begin_update``
-before the read point; previous-rollout log forensics is a rotation-prone file
-heuristic). The emission mechanism for the two events is held for review.
+Mode transitions are not event-carried: no existing surface can carry "the
+previously observed mode" without adding state (the events table is a
+read-only archive since the LGTM cutover; the last-update row's ``log_path``
+is overwritten by this rollout's ``begin_update`` before the read point;
+previous-rollout log forensics is a rotation-prone file heuristic). The
+rebuild chain is the audited config write (``env_write``: old and new value
+plus the actor) plus the per-rollout telemetry ``managed_writer`` field (all
+three states, including ``off``); ``managed_writer_blocked`` marks a refusal
+and the ``ava cluster status`` bit shows the effective state.
 """
 
 from __future__ import annotations

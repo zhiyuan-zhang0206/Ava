@@ -103,8 +103,8 @@ class RolloutTelemetry:
         Carried into the aggregate summary as the ``managed_writer`` field: the
         recorded per-rollout sequence plus the audited config write
         (``env_write``) is what a mode transition is reconstructed from
-        (task #4121 -- the two dedicated transition events' emission mechanism
-        is held for review; no pre-existing surface carries the previous mode).
+        (task #4121 -- transitions are not event-carried; a blocked decision
+        additionally emits ``managed_writer_blocked``).
         """
         self._managed_writer = {"state": state, "reasons": reasons}
 

@@ -23,7 +23,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
-| audit (category=audit) | `events` | 30 | events table |
+| audit (category=audit) | `events` | 28 | events table |
 | telemetry (category=telemetry) | `events` | 199 | events table |
 | log (category=log) | `events` | 13 | events table |
 | file-only (destination=file) | file log | 1 | file only (not the events table) |
@@ -55,7 +55,7 @@ spans go through the trace channel (30d).
 
 ---
 
-## 2. Audit events (30 primary category=audit; 30 status_change with extra_categories)
+## 2. Audit events (28 primary category=audit; 28 status_change with extra_categories)
 
 **Meaning convention**: category=audit rows are append-only operation audits, one row
 = one agent operation fact. `source` (who triggered: `agent:N` / `user` / `system` /
@@ -93,8 +93,6 @@ Emit sites and consumers: see the comments at each emit point.
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | events |
 | `managed_writer_recovery_claimed` | recovery claimed the abandoned rollout lease holding a durable pending publication | business | — | events |
 | `managed_writer_recovery_completed` | recovery replaced the abandoned pending publication under a new lease and closure | business | — | events |
-| `managed_writer_activated` | managed-writer mode decision resolved active (enable flag on, both readiness guards met) | business | — | events |
-| `managed_writer_deactivated` | managed-writer mode decision resolved back to off after an active observation | business | — | events |
 | `managed_writer_blocked` | managed-writer mode requested but refused entry: a readiness guard is missing or not True; the rollout ran the legacy flow | business | — | events |
 
 ## 3. Telemetry events (category=telemetry, 199)

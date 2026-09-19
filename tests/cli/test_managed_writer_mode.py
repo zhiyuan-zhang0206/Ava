@@ -208,15 +208,10 @@ def test_no_collector_is_a_no_op(monkeypatch: pytest.MonkeyPatch) -> None:
     mode_mod.decide_managed_writer_mode()  # must not raise without a collector
 
 
-def test_mode_events_are_registered_audit_names() -> None:
+def test_blocked_event_is_a_registered_audit_name() -> None:
     from shared.events.contract import EVENTS
 
-    for name in (
-        "managed_writer_activated",
-        "managed_writer_deactivated",
-        "managed_writer_blocked",
-    ):
-        assert EVENTS[name].category == "audit"
+    assert EVENTS["managed_writer_blocked"].category == "audit"
 
 
 # ── the read point inside the orchestration ──────────────────────────────────
