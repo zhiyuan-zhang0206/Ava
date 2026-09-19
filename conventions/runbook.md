@@ -638,6 +638,12 @@ stop/start/resume legs, in its own process (no spawn channel: `ava start` is
 what brings the database back). One attempt per hold generation (local
 CAS `$AVA_HOME/state/hold-watchdog-attempt`, 900s cooldown); a hold released
 while an attempt is in flight is recorded as rescued, never as completed.
+Before spending the attempt the job asks the completion-environment question
+(task #4080): on a pure agent-runner the start leg builds its OTLP relay from
+the gateway's published `AVA_GATEWAY_OTLP_ENDPOINT`, so until that resolves
+and validates the attempt is deferred unspent; an outcome the settings-lite
+job cannot write to the fleet record is queued locally and backfilled by the
+first DB-capable run.
 Kill-switch: `AVA_STRANDED_HOLD_RECOVERY` (shared with #3142 — the field is
 settings-lite resolvable, so on a gateway host an `.env` edit applies at the
 next job run; on a pure agent-runner the job resolves the process environment

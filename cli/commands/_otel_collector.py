@@ -242,13 +242,18 @@ def _data_plane_receivers(roles: MachineRoles | None) -> tuple[str, str]:
     return "".join(blocks), "".join(f", {receiver}" for receiver in receivers)
 
 
-def gateway_otel_ingress_endpoint() -> str:
-    """The authenticated gateway ingress published by bootstrap, independent of local ports."""
-    from shared.config import settings
+def gateway_otlp_endpoint_problem(endpoint: str) -> str | None:
+    """Why `endpoint` cannot serve as the published gateway OTLP ingress, or None.
+
+    The one validity definition for `AVA_GATEWAY_OTLP_ENDPOINT`: the relay
+    build below raises when it reads a problem, and the hold watchdog's
+    pre-attempt gate (task #4080) reads it BEFORE spending its bounded
+    completion attempt — a gateway that has not published the ingress yet must
+    not burn the attempt.
+    """
     from shared.netutil import is_loopback_host
 
-    endpoint = settings.observability.gateway_otlp_endpoint.strip()
-    parts = urlsplit(endpoint)
+    parts = urlsplit(endpoint.strip())
     host = parts.hostname or ""
     if (
         parts.scheme != "http"
@@ -262,6 +267,19 @@ def gateway_otel_ingress_endpoint() -> str:
         or parts.query
         or parts.fragment
     ):
+        return (
+            "the published AVA_GATEWAY_OTLP_ENDPOINT must be a non-loopback "
+            "http://host:port ingress with no credentials or path"
+        )
+    return None
+
+
+def gateway_otel_ingress_endpoint() -> str:
+    """The authenticated gateway ingress published by bootstrap, independent of local ports."""
+    from shared.config import settings
+
+    endpoint = settings.observability.gateway_otlp_endpoint.strip()
+    if gateway_otlp_endpoint_problem(endpoint) is not None:
         raise RuntimeError(
             "cannot build runner OTLP relay: gateway bootstrap must publish "
             "AVA_GATEWAY_OTLP_ENDPOINT as its non-loopback HTTP ingress with "

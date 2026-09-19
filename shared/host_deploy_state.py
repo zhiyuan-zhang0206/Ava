@@ -35,17 +35,19 @@ import contextlib
 import dataclasses as _dataclasses
 import datetime as _dt
 import errno
+import json
 import logging
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 
 import shared.db
 from shared.db_transaction import write_transaction
 from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S
 from shared.machine import machine_name
-from shared.paths import run_dir
+from shared.paths import ava_home, run_dir
 
 _log = logging.getLogger("shared.host_deploy_state")
 
@@ -456,6 +458,130 @@ def finish_stranded_recovery(note: str) -> None:
             "WHERE machine = %s AND stranded_hold_since IS NOT NULL",
             (note, machine),
         )
+
+
+# --- the stranded-recovery note queue (task #4080) ---------------------------
+#
+# A stranded-recovery outcome must reach the host_deploy_state record, but its
+# writer is the OS-scheduled hold watchdog, which runs settings-lite: on a pure
+# agent-runner (a fetch unit) that context has no dialable DB URL at all
+# (`shared/config/_lite.py` plants the never-dialed sentinel), so the record
+# write can only ever fail there — and a failed write must not lose the note.
+# A note that cannot be written is queued durably beside the unit's other
+# state; the first DB-capable process (the watchdog's next run on a
+# gateway-serving unit, any daemon round on a pure runner) flushes it onto the
+# record. A flush whose episode has already closed is a no-op, like any late
+# finish.
+
+_PENDING_NOTE_NAME = "stranded-recovery-note-pending.json"
+
+
+def pending_stranded_recovery_note_path() -> Path:
+    """The queued note's file: ``$AVA_HOME/state/stranded-recovery-note-pending.json``."""
+    return ava_home() / "state" / _PENDING_NOTE_NAME
+
+
+def queue_stranded_recovery_note(note: str) -> None:
+    """Carry a stranded-recovery note that could not reach the record.
+
+    Single-slot, latest-wins (the record's own column is the latest outcome),
+    written owner-only through an atomic replace — the same discipline as the
+    unit's other private state. Raises on an unwritable state dir; the note is
+    never left partially written.
+    """
+    path = pending_stranded_recovery_note_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps({"note": note, "queued_at": time.time()}, sort_keys=True).encode()
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    fd = -1
+    try:
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        if os.name != "nt":
+            os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as file:
+            fd = -1
+            file.write(payload)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temporary, path)  # noqa: PTH105 — explicit atomic replacement primitive
+    finally:
+        if fd != -1:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+        with contextlib.suppress(OSError):
+            temporary.unlink()
+
+
+def pending_stranded_recovery_note() -> str | None:
+    """The queued note awaiting the record, or None when none is queued/readable.
+
+    An unreadable file reads as absent rather than raising — the note is
+    advisory carry-forward, and the file stays in place for an operator to
+    inspect (the next queue write replaces it).
+    """
+    try:
+        raw = json.loads(pending_stranded_recovery_note_path().read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    payload = cast("dict[str, object]", raw)
+    note = payload.get("note")
+    if not isinstance(note, str) or not note:
+        return None
+    return note
+
+
+def clear_pending_stranded_recovery_note() -> None:
+    """Drop a queued note (it landed, or its episode is over)."""
+    pending_stranded_recovery_note_path().unlink(missing_ok=True)
+
+
+def flush_pending_stranded_recovery_note() -> bool:
+    """Land a queued note on the record; True when one was flushed, False when none waited.
+
+    The note is cleared only after the record write returns: a failed write
+    keeps it queued for the next capable process, and a write whose episode
+    has already closed is the ordinary late-finish no-op.
+    """
+    note = pending_stranded_recovery_note()
+    if note is None:
+        return False
+    finish_stranded_recovery(note)
+    clear_pending_stranded_recovery_note()
+    return True
+
+
+def record_stranded_recovery_note(note: str) -> Literal["recorded", "queued"]:
+    """Record a stranded-recovery note, or queue it when the record is out of reach.
+
+    The write path's carry-forward (task #4080): the OS hold watchdog runs
+    settings-lite — on a pure agent-runner its DB URL is the never-dialed
+    placeholder, so `finish_stranded_recovery` can only raise there even while
+    the cluster is healthy. Any failure queues the note durably instead of
+    dropping it; the first DB-capable process flushes it
+    (`flush_pending_stranded_recovery_note`).
+
+    Returns:
+        "recorded" — the note landed on the record.
+        "queued" — the write failed; the note waits in the local queue.
+
+    Raises:
+        RuntimeError: the write failed AND the note could not be queued either —
+            nothing was recorded anywhere.
+    """
+    try:
+        finish_stranded_recovery(note)
+    except Exception as write_exc:
+        try:
+            queue_stranded_recovery_note(note)
+        except Exception as queue_exc:
+            raise RuntimeError(
+                f"stranded-recovery note could not be recorded ({write_exc!r}) "
+                f"nor queued ({queue_exc!r})"
+            ) from queue_exc
+        return "queued"
+    return "recorded"
 
 
 def updater_lease_live(machine: str | None = None) -> bool:
