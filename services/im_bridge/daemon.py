@@ -226,8 +226,23 @@ async def run() -> None:
         _log.info("[im_bridge] daemon stopped")
 
 
+def _gate_httpx_info_logs() -> None:
+    """Gate httpx's per-request INFO lines in this process.
+
+    httpx logs ``HTTP Request: GET <url>`` at INFO, and the Telegram Bot API
+    carries the bot token inside the URL path (``.../bot<id>:<token>/...``):
+    every long poll therefore persisted the live token into this daemon's
+    structured log in cleartext (task #4067). Raising this one third-party
+    logger to WARNING keeps genuine library warnings/errors while dropping
+    the URL-bearing INFO lines. The adapters separately keep httpx
+    *exceptions* (which can embed the same URL) out of their own log calls.
+    """
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
 def main() -> None:
     init_gateway_process("im_bridge")
+    _gate_httpx_info_logs()
     install_graceful_shutdown("im_bridge")
     try:
         asyncio.run(run())

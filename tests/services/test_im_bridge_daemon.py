@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 from typing import Any
 
 import pytest
@@ -139,3 +140,34 @@ def test_load_adapters_skips_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     assert imported == ["telegram"]
     assert len(loaded) == 1
     assert len(core.registered) == 1
+
+
+def test_httpx_info_logs_gated(caplog: pytest.LogCaptureFixture) -> None:
+    """Telegram's bot token rides in the request URL, so httpx's per-request
+    INFO line must not be emitted at all once the daemon gates it; library
+    warnings still surface (task #4067)."""
+    httpx_logger = logging.getLogger("httpx")
+    previous_level = httpx_logger.level
+    caplog.set_level(logging.INFO)
+    try:
+        # Control: ungated, the URL-bearing INFO line does reach the log —
+        # the pre-fix state this test exists to keep out.
+        httpx_logger.setLevel(logging.NOTSET)
+        caplog.clear()
+        httpx_logger.info(
+            "HTTP Request: GET https://api.telegram.org/bot1234567890:FAKE-TOKEN/getUpdates"
+        )
+        assert "FAKE-TOKEN" in caplog.text
+
+        daemon._gate_httpx_info_logs()
+        assert httpx_logger.getEffectiveLevel() == logging.WARNING
+        caplog.clear()
+        httpx_logger.info(
+            "HTTP Request: GET https://api.telegram.org/bot1234567890:FAKE-TOKEN/getUpdates"
+        )
+        httpx_logger.warning("connection pool is full, discarding connection")
+
+        assert "FAKE-TOKEN" not in caplog.text
+        assert "connection pool is full" in caplog.text
+    finally:
+        httpx_logger.setLevel(previous_level)
