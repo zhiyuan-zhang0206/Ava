@@ -17,10 +17,11 @@ from __future__ import annotations
 import asyncio
 import gzip
 import json
+import socket
 import threading
 import time
-from collections.abc import Generator, Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncGenerator, Generator, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 from typing import Any
@@ -90,9 +91,11 @@ class _AsyncClient:
     async def __aexit__(self, *args: object) -> None:
         return None
 
-    async def post(
-        self, url: str, *, json: dict[str, Any], headers: dict[str, str]
-    ) -> httpx.Response:
+    @asynccontextmanager
+    async def stream(
+        self, method: str, url: str, *, json: dict[str, Any], headers: dict[str, str]
+    ) -> AsyncGenerator[httpx.Response]:
+        assert method == "POST"
         self.call_count += 1
         self.calls.append({"url": url, "json": json, "headers": headers, "timeout": self.timeout})
         if self._raises_remaining > 0:
@@ -103,7 +106,7 @@ class _AsyncClient:
             body["usageMetadata"] = {"promptTokenCount": self._prompt_token_count}
         if self._response_body is not None:
             body = self._response_body
-        return _FakeResponse(body, status_code=self._status_code)
+        yield _FakeResponse(body, status_code=self._status_code)
 
 
 def _patch_client(monkeypatch: pytest.MonkeyPatch, fake: _AsyncClient) -> None:
@@ -459,7 +462,7 @@ def test_embed_4xx_fails_immediately(monkeypatch: pytest.MonkeyPatch) -> None:
 
     fake = _AsyncClient(status_code=400)
     _patch_client(monkeypatch, fake)
-    with pytest.raises(EmbeddingAPIError, match="400 Bad Request"):
+    with pytest.raises(EmbeddingAPIError, match="Gemini embed HTTP 400"):
         _provider().embed_query("hello")
     assert fake.call_count == 1  # 4xx -> permanent -> single attempt
 
@@ -611,6 +614,7 @@ def _embedding_server(
     chunked: bool = False,
     drip: bool = True,
     framing: str | None = None,
+    error_status: int | None = None,
 ) -> Generator[tuple[str, list[float]]]:
     """Drip body or HTTP framing while every read gap stays below the timeout."""
     if framing is not None:
@@ -640,6 +644,20 @@ def _embedding_server(
         def do_POST(self) -> None:
             self.rfile.read(int(self.headers["Content-Length"]))
             started.append(time.monotonic())
+            if error_status is not None and len(started) == 1:
+                self.send_response(error_status)
+                self.send_header("Content-Length", "40")
+                self.send_header("Retry-After", "7")
+                self.end_headers()
+                try:
+                    for _ in range(40):
+                        self.wfile.write(b"e")
+                        self.wfile.flush()
+                        if stop.wait(0.05):
+                            return
+                except (BrokenPipeError, ConnectionResetError):
+                    return  # Header-phase rejection closes the unread error body.
+                return
             self.send_response(200)
             if compressed:
                 self.send_header("Content-Encoding", "gzip")
@@ -814,44 +832,91 @@ def test_embed_gzip_response_round_trip(monkeypatch: pytest.MonkeyPatch, chunked
 
 
 @pytest.mark.parametrize("mode", ["sync", "async"])
-def test_embed_status_preserves_retry_after(monkeypatch: pytest.MonkeyPatch, mode: str) -> None:
-    """Status rejection never decodes the error body; retry still sees its headers."""
+@pytest.mark.parametrize("status", [400, 429])
+def test_embed_slow_error_body_preserves_status(
+    monkeypatch: pytest.MonkeyPatch, mode: str, status: int
+) -> None:
+    """Real HTTPX rejects error headers immediately, preserving classification and delay."""
     from shared import resilience
 
-    calls: list[httpx.Response] = []
     sleeps: list[float] = []
+    classified: list[Exception] = []
 
-    class ErrorResponse(httpx.Response):
-        def json(self, **kwargs: Any) -> Any:
-            pytest.fail("status failure must not decode the body")
-
-        def read(self) -> bytes:
-            pytest.fail("status rejection must not read the body")
-
-    class StatusClient(_AsyncClient):
-        async def post(
-            self, url: str, *, json: dict[str, Any], headers: dict[str, str]
-        ) -> httpx.Response:
-            if calls:
-                return _FakeResponse({"embeddings": [{"values": [1.0] * DIM}]})
-            response = ErrorResponse(
-                429,
-                headers={"Retry-After": "7"},
-                stream=httpx.ByteStream(b"error body"),
-                request=httpx.Request("POST", url),
-            )
-            calls.append(response)
-            return response
+    def classify(exc: Exception) -> bool:
+        classified.append(exc)
+        return resilience.http_classifier(exc)
 
     async def record_sleep(seconds: float) -> None:
         sleeps.append(seconds)
 
-    _patch_client(monkeypatch, StatusClient())
+    policy = Policy(
+        max_attempts=2,
+        backoff=ExponentialBackoff(base=0.001, factor=1, cap=0.001),
+        jitter_span=0,
+        classify=classify,
+    )
+    monkeypatch.setattr(settings.services, "memory_embed_timeout_seconds", 0.3)
     monkeypatch.setattr(resilience, "_sleep", sleeps.append)
     monkeypatch.setattr(resilience, "_asleep", record_sleep)
-    if mode == "sync":
-        result = _provider().embed_query("hello")
-    else:
-        result = asyncio.run(_provider().embed_query_async("hello"))
-    assert result.shape == (DIM,)
-    assert len(sleeps) == 1 and 6 <= sleeps[0] <= 9
+    with _embedding_server(error_status=status, drip=False) as (endpoint, requests):
+        monkeypatch.setattr(gemini, "_ENDPOINT", endpoint)
+
+        def invoke() -> np.ndarray:
+            if mode == "sync":
+                return gemini._embed(["hello"], "RETRIEVAL_DOCUMENT", policy=policy)
+            return asyncio.run(gemini._embed_async(["hello"], "RETRIEVAL_QUERY", policy=policy))
+
+        started = time.monotonic()
+        if status == 400:
+            with pytest.raises(EmbeddingAPIError, match="Gemini embed HTTP 400") as error:
+                invoke()
+            assert isinstance(error.value.__cause__, httpx.HTTPStatusError)
+            assert len(requests) == 1
+            assert sleeps == []
+        else:
+            result = invoke()
+            np.testing.assert_array_equal(result, np.ones((1, DIM), dtype=np.float32))
+            assert len(requests) == 2
+            assert sleeps == [7.0]  # Retry-After wins over the tiny policy backoff.
+        elapsed = time.monotonic() - started
+        assert elapsed < 0.25  # The error body would take 2s; even one timeout is 0.3s.
+        assert len(classified) == 1
+        status_error = classified[0]
+        assert isinstance(status_error, httpx.HTTPStatusError)
+        assert status_error.response.status_code == status
+        assert resilience.extract_retry_after(status_error) == 7.0
+        assert not status_error.response.is_stream_consumed
+
+
+def test_sync_embed_slow_resolver_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The sync caller returns at the deadline while its DNS thread finishes later."""
+    real_getaddrinfo = socket.getaddrinfo
+    finished = threading.Event()
+    resolver_calls: list[object] = []
+
+    def slow_getaddrinfo(host: object, *args: Any, **kwargs: Any) -> Any:
+        resolver_calls.append(host)
+        try:
+            time.sleep(0.5)
+            return real_getaddrinfo("127.0.0.1", *args, **kwargs)
+        finally:
+            finished.set()
+
+    monkeypatch.setenv("NO_PROXY", "*")
+    monkeypatch.setattr(socket, "getaddrinfo", slow_getaddrinfo)
+    monkeypatch.setattr(settings.services, "memory_embed_timeout_seconds", 0.1)
+    with _embedding_server(drip=False) as (endpoint, requests):
+        monkeypatch.setattr(gemini, "_ENDPOINT", endpoint.replace("127.0.0.1", "resolver.test"))
+        started = time.monotonic()
+        try:
+            with pytest.raises(EmbeddingAPIError, match="exceeded the deadline") as error:
+                gemini._embed(["hello"], "RETRIEVAL_DOCUMENT", policy=Policy(max_attempts=1))
+            elapsed = time.monotonic() - started
+            assert isinstance(error.value.__cause__, httpx.ReadTimeout)
+            assert len(resolver_calls) == 1
+            assert not requests  # Cancellation occurs before opening the local socket.
+            assert 0.1 <= elapsed < 0.3
+            assert not finished.is_set()
+        finally:
+            # Join our finite stub before its monkeypatch and server are torn down.
+            assert finished.wait(timeout=2)

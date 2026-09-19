@@ -29,13 +29,18 @@ module runs in the daemon, gateway and per-test loops. The sync path runs its
 own loop per attempt via asyncio.run with a fresh AsyncClient; it requires a
 thread without a running event loop. Async callers use embed_query_async where
 available, or a worker thread for the sync batch API. Both paths share the
-same cancellation deadline for each attempt.
+same cancellation deadline for each attempt, including headers and compressed
+body/framing reads. Sync loop shutdown leaves stalled DNS threads to finish in
+the background. Error statuses are classified at headers, before reading the
+body, preserving permanent failures and Retry-After.
 """
 
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+import json
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, override
 
 import httpx
 import numpy as np
@@ -183,12 +188,34 @@ async def _post_attempt_once(
     """Run one HTTP attempt under the shared cancellation deadline."""
     try:
         async with asyncio.timeout(timeout_s):
-            response = await client.post(_ENDPOINT, json=payload, headers=headers)
-            response.raise_for_status()
-            return response.json()
+            async with client.stream("POST", _ENDPOINT, json=payload, headers=headers) as response:
+                # Classify at headers: a slow error body must not hide the status
+                # or Retry-After behind a retryable timeout.
+                if not response.is_success:
+                    raise httpx.HTTPStatusError(
+                        f"Gemini embed HTTP {response.status_code}",
+                        request=response.request,
+                        response=response,
+                    )
+                return json.loads(await response.aread())
     except TimeoutError as exc:
         # The HTTP classifier retries transport errors, not builtin TimeoutError.
         raise httpx.ReadTimeout(f"embed attempt exceeded the deadline of {timeout_s}s") from exc
+
+
+class _DetachedExecutor(ThreadPoolExecutor):
+    @override
+    def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
+        super().shutdown(wait=False, cancel_futures=cancel_futures)
+
+
+def _attempt_loop() -> asyncio.AbstractEventLoop:
+    # asyncio.run waits for the default executor during shutdown, so a stalled
+    # resolver thread would extend caller-visible sync time beyond the deadline.
+    # The detached executor lets that thread finish in the background.
+    loop = asyncio.new_event_loop()
+    loop.set_default_executor(_DetachedExecutor())
+    return loop
 
 
 def _embed(texts: list[str], task_type: str, *, policy: Policy = _EMBED_POLICY) -> np.ndarray:
@@ -231,7 +258,7 @@ def _embed(texts: list[str], task_type: str, *, policy: Policy = _EMBED_POLICY) 
                 "embed_query_async where available; batch embedding stays sync "
                 "and the indexer calls it via asyncio.to_thread."
             )
-        return asyncio.run(_attempt())
+        return asyncio.run(_attempt(), loop_factory=_attempt_loop)
 
     try:
         body = retry(policy)(_call)
