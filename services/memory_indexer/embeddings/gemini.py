@@ -24,25 +24,37 @@ always-on indexer only after a successful provider call, never at module load.
 API key is read from `GEMINI_API_KEY` env — prod injects it via
 `~/.ava/.env`.
 
-No module-level httpx client (sync or async): the sync path is
-tested by patching `httpx.post`, which a pre-built client would bypass; an
-`httpx.AsyncClient` is bound to the event loop it is first used on, and
-this module runs inside both the daemon process and the gateway (plus
-per-test loops), so a shared client would cross loops and raise. Per-call
-construction cost is negligible next to a multi-second network call (task
-#971 evaluation).
+No module-level httpx client: AsyncClient belongs to its event loop, and this
+module runs in the daemon, gateway and per-test loops. The sync path runs its
+own loop per attempt via asyncio.run with a fresh AsyncClient; it requires a
+thread without a running event loop. Async callers use embed_query_async where
+available, or a worker thread for the sync batch API. Both paths share the
+same cancellation deadline for each attempt, including headers and compressed
+body/framing reads. Sync loop shutdown leaves stalled DNS threads to finish in
+the background. Error statuses are classified at headers, before reading the
+body, preserving permanent failures and Retry-After.
 """
 
 from __future__ import annotations
 
-from typing import Any
+import asyncio
+import json
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, override
 
 import httpx
 import numpy as np
 
 from services.memory_indexer.embeddings.base import EmbeddingAPIError
 from shared.config import settings
-from shared.resilience import ExponentialBackoff, Policy, aretry, http_classifier, retry
+from shared.resilience import (
+    _MAX_RETRY_AFTER_RESPECT_S,
+    ExponentialBackoff,
+    Policy,
+    aretry,
+    http_classifier,
+    retry,
+)
 
 _MODEL_ID = "gemini-embedding-2"
 DIM = 3072
@@ -55,10 +67,10 @@ DIM = 3072
 _ENDPOINT = (
     f"https://generativelanguage.googleapis.com/v1beta/models/{_MODEL_ID}:batchEmbedContents"
 )
-# Per-request ceiling is configurable (AVA_EMBED_TIMEOUT_SECONDS, task #698
-# G8): a 32-file batch is one round-trip and the daemon's liveness timeout
-# (180s) sits well above the default 60s, so a slow-but-legit batch does not
-# trip the healthcheck. The retry policies are module constants (R2-D) —
+# Per-request timeout is configurable (AVA_EMBED_TIMEOUT_SECONDS, task #698
+# G8). The daemon derives its liveness ceiling from the full document-batch
+# retry budget below, including Retry-After and jitter, so legitimate retries
+# do not trip the healthcheck. The retry policies are module constants (R2-D) —
 # two of them, split by call site, see `_EMBED_POLICY` / `_QUERY_EMBED_POLICY`.
 
 
@@ -88,6 +100,23 @@ _QUERY_EMBED_POLICY = Policy(
     backoff=ExponentialBackoff(base=1.0, factor=2.0, cap=2.0),
     classify=http_classifier,
 )
+
+
+def worst_case_batch_seconds() -> float:
+    """Budget for one embed_batch call under _EMBED_POLICY.
+
+    Each sync or async attempt runs under an asyncio cancellation deadline equal
+    to the configured timeout. Inter-attempt sleeps allow the greater of the
+    last backoff and the shared Retry-After cap, plus both jitter terms (phase
+    and random span).
+    """
+    attempts = _EMBED_POLICY.max_attempts
+    request_seconds = attempts * settings.services.memory_embed_timeout_seconds
+    if attempts < 2:
+        return request_seconds
+    last_backoff = _EMBED_POLICY.backoff(attempts - 2)
+    per_sleep = max(_MAX_RETRY_AFTER_RESPECT_S, last_backoff) + 2 * _EMBED_POLICY.jitter_span
+    return request_seconds + (attempts - 1) * per_sleep
 
 
 def _api_key() -> str:
@@ -150,6 +179,45 @@ def _emit_billing(body: dict[str, Any]) -> None:
         return
 
 
+async def _post_attempt_once(
+    client: httpx.AsyncClient,
+    timeout_s: float,
+    headers: dict[str, str],
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Run one HTTP attempt under the shared cancellation deadline."""
+    try:
+        async with asyncio.timeout(timeout_s):
+            async with client.stream("POST", _ENDPOINT, json=payload, headers=headers) as response:
+                # Classify at headers: a slow error body must not hide the status
+                # or Retry-After behind a retryable timeout.
+                if not response.is_success:
+                    raise httpx.HTTPStatusError(
+                        f"Gemini embed HTTP {response.status_code}",
+                        request=response.request,
+                        response=response,
+                    )
+                return json.loads(await response.aread())
+    except TimeoutError as exc:
+        # The HTTP classifier retries transport errors, not builtin TimeoutError.
+        raise httpx.ReadTimeout(f"embed attempt exceeded the deadline of {timeout_s}s") from exc
+
+
+class _DetachedExecutor(ThreadPoolExecutor):
+    @override
+    def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
+        super().shutdown(wait=False, cancel_futures=cancel_futures)
+
+
+def _attempt_loop() -> asyncio.AbstractEventLoop:
+    # asyncio.run waits for the default executor during shutdown, so a stalled
+    # resolver thread would extend caller-visible sync time beyond the deadline.
+    # The detached executor lets that thread finish in the background.
+    loop = asyncio.new_event_loop()
+    loop.set_default_executor(_DetachedExecutor())
+    return loop
+
+
 def _embed(texts: list[str], task_type: str, *, policy: Policy = _EMBED_POLICY) -> np.ndarray:
     """Single batched `batchEmbedContents` call with retry; returns
     (N, DIM) float32. Raises after retries.
@@ -174,10 +242,23 @@ def _embed(texts: list[str], task_type: str, *, policy: Policy = _EMBED_POLICY) 
     payload = _payload(texts, task_type)
     timeout_s = settings.services.memory_embed_timeout_seconds
 
+    async def _attempt() -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            return await _post_attempt_once(client, timeout_s, headers, payload)
+
     def _call() -> dict[str, Any]:
-        response = httpx.post(_ENDPOINT, json=payload, headers=headers, timeout=timeout_s)
-        response.raise_for_status()
-        return response.json()
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass  # fail-fast-ok: no running loop is the required sync calling context.
+        else:
+            raise RuntimeError(
+                "This is the sync embedding provider API; call it from a worker thread "
+                "with asyncio.to_thread or an executor. From async code use "
+                "embed_query_async where available; batch embedding stays sync "
+                "and the indexer calls it via asyncio.to_thread."
+            )
+        return asyncio.run(_attempt(), loop_factory=_attempt_loop)
 
     try:
         body = retry(policy)(_call)
@@ -215,9 +296,7 @@ async def _embed_async(
         async with client:
 
             async def _call() -> dict[str, Any]:
-                response = await client.post(_ENDPOINT, json=payload, headers=headers)
-                response.raise_for_status()
-                return response.json()
+                return await _post_attempt_once(client, timeout_s, headers, payload)
 
             body = await aretry(policy)(_call)
     except EmbeddingAPIError:
