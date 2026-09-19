@@ -158,13 +158,16 @@ def verify_restored_database(db_url: str) -> RestoreReport:
     )
 
 
-_SCRATCH_SPACE_FACTOR = 2.0
+_SCRATCH_SPACE_FACTOR = 3.0
 """Scratch space the drill reserves on the base holding the restored copy, as a
 multiple of the (decrypted) dump's size. A floor for picking the base, not a size
 prediction: the restore holds the dump's content decompressed, and in-dump zstd
-ratios vary with content mix — the 2026-09-14 WSL drill restored >=17 GiB from a
-10.16 GiB artifact (~1.7x), and 2x rounds that up with margin. A base that clears
-it is not guaranteed to fit; one that fails it is almost certainly too small."""
+ratios vary with content mix. Measured on the WSL daily drill: 2026-09-14 restored
+>=17 GiB from a 10.16 GiB artifact (~1.7x); 2026-09-19 restored ~8 GiB from a
+~3.0 GiB artifact (>=2.7x at 60s sampling — it outgrew the 7.8 GiB tmpfs that 2x
+had cleared, task #4033). 3x keeps margin above the observed maximum while
+remaining a floor. A base that clears it is not guaranteed to fit; one that fails
+it is almost certainly too small."""
 
 
 def _scratch_space_requirement(raw_dump: Path) -> int:

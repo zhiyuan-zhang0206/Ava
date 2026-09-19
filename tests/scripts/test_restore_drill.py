@@ -118,12 +118,13 @@ def test_run_drill_restores_an_encrypted_artifact_into_throwaway_postgres(
 
 
 def test_scratch_space_requirement_scales_with_the_dump_size(tmp_path: Path) -> None:
-    """The base is picked against a multiple of the decrypted dump's size: the
-    2026-09-14 restore needed >=17 GiB from a 10.16 GiB artifact (~1.7x), and the
-    drill reserves 2x as the floor for choosing a base."""
+    """The base is picked against a multiple of the decrypted dump's size: measured
+    restores ran ~1.7x (10.16 GiB artifact, 2026-09-14) and >=2.7x (3.0 GiB
+    artifact, 2026-09-19), so the drill reserves 3x as the floor for choosing a
+    base."""
     dump = tmp_path / "backup.dump"
     dump.write_bytes(b"x" * 1000)
-    assert restore_drill._scratch_space_requirement(dump) == 2000
+    assert restore_drill._scratch_space_requirement(dump) == 3000
 
 
 def test_restore_failure_message_names_the_base_and_the_capacity_knob(
