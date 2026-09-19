@@ -226,6 +226,7 @@ def test_delivery_outbox_payloads_name_the_evidence() -> None:
     )
     assert payload_keys("delivery_outbox_abandoned") == (
         "reason",
+        "detail",
         "attempts",
         "flush_attempts",
         "age_s",
