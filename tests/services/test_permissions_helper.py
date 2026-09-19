@@ -831,6 +831,37 @@ def test_panel_locale_catalogs_are_symmetric() -> None:
     assert all(value for value in zh.values())
 
 
+def test_panel_fill_runs_carry_the_cli_user_present_guard() -> None:
+    """The fill button's run appends --fill-pending with its required
+    --confirm-user-present attestation; checks never request a fill."""
+    source = (
+        Path(__file__).parents[2] / "services/permissions_helper/helper/main.swift"
+    ).read_text()
+    run_tool = source.split("private func runTool(check: Bool)", 1)[1].split(
+        "private func runFinished()", 1
+    )[0]
+    code_only = "\n".join(line.split("//", 1)[0] for line in run_tool.splitlines())
+    compact = " ".join(code_only.split())
+
+    # The guard pair rides the non-check branch together -- a check run can
+    # never request a fill (zero dialogs).
+    assert (
+        'if check { arguments.append("--check") } else {'
+        ' arguments.append("--fill-pending")'
+        ' arguments.append("--confirm-user-present") }'
+    ) in compact
+
+    # Zero automatic paths: the one fill call site is the fix button; the
+    # launch-time run and the refresh button stay checks.
+    assert source.count("runTool(check: false)") == 1
+    fix_tapped = source.split("@objc private func fixTapped()", 1)[1].split("}", 1)[0]
+    assert "runTool(check: false)" in fix_tapped
+    launch = source.split("func applicationDidFinishLaunching", 1)[1].split(
+        "func applicationShouldTerminateAfterLastWindowClosed", 1
+    )[0]
+    assert "runTool(check: true)" in launch
+
+
 # --- Signing --------------------------------------------------------------
 # TCC keys the helper's grants on the stable certificate, so an ad-hoc identity
 # is never an acceptable substitute -- and a current bundle is never re-signed.
