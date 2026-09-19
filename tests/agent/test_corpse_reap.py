@@ -6,7 +6,10 @@ re-crashed, at the settle point that witnessed the crash, with the same
 termination shape and events plus the confirmed crash count. These lock the
 row-visible contract: only the crashed incarnation's own marked idling row is
 touched, a row that moved on is refused, and the reap's CAS composes with the
-admission and resurrection transitions without tearing.
+admission and resurrection transitions without tearing. Each termination
+also commits the death's recovery wake — one marked system chat (task
+#4039); the attempt that consumes it is locked in
+`tests/services/test_crash_recovery.py`.
 """
 
 from __future__ import annotations
@@ -19,10 +22,17 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
-from agent.corpse_reap import RECRASH_CONFIRMED_CRASHES, reap_recrashed_corpse
+from agent.corpse_reap import (
+    CRASH_RECOVERY_WAKE_TEXT,
+    RECRASH_CONFIRMED_CRASHES,
+    reap_crash_corpses,
+    reap_recrashed_corpse,
+)
 from agent.hosted_ownership import admit_hosted_runtime, settle_hosted_runtime
 from ops import agent_wake
+from shared.config import settings
 from shared.db import create_agent
+from shared.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
 from shared.runtime_incarnation import RuntimeIncarnation
 
 
@@ -63,6 +73,14 @@ async def _recrashed_row(
     return agent_id, incarnation
 
 
+def _recovery_wakes(db_conn: psycopg.Connection[Any], agent_id: int) -> list[tuple[Any, ...]]:
+    return db_conn.execute(
+        "SELECT id, content, kind, source, status, payload FROM inbound_messages "
+        "WHERE agent_id = %s ORDER BY id",
+        (agent_id,),
+    ).fetchall()
+
+
 @pytest.fixture
 def reap_spies(monkeypatch: pytest.MonkeyPatch) -> tuple[list[dict[str, object]], list[int]]:
     """Capture the reap's durable event and its frontend announce."""
@@ -94,7 +112,8 @@ async def test_prompt_reap_terminates_the_incarnations_marked_idling_row(
     agent_id, incarnation = await _recrashed_row(db_conn, aops_pool)
     published.clear()
 
-    assert await reap_recrashed_corpse(aops_pool, incarnation) == [agent_id]
+    reaped = await reap_recrashed_corpse(aops_pool, incarnation)
+    assert [corpse.agent_id for corpse in reaped] == [agent_id]
 
     row = db_conn.execute(
         "SELECT status, termination_source, lease_expires_at, "
@@ -116,17 +135,25 @@ async def test_prompt_reap_terminates_the_incarnations_marked_idling_row(
     ]
     assert published == [agent_id]
 
-    # The reap itself neither resurrects nor consumes recovery bookkeeping —
-    # the age/budget/suppression boundaries of the recovery paths stay out of
-    # this mechanism's hands.
+    # The reap consumes no recovery bookkeeping — the age/budget/suppression
+    # boundaries of the recovery paths stay out of this mechanism's hands —
+    # but the death's wake is committed with the termination (task #4039):
+    # one marked system chat, named as the trigger by the return value.
     assert db_conn.execute(
         "SELECT wake_suppressed_until, last_resurrect_at FROM agents_meta WHERE id = %s",
         (agent_id,),
     ).fetchone() == (None, None)
-    assert db_conn.execute(
-        "SELECT count(*) FROM inbound_messages WHERE agent_id = %s AND kind = 'resurrect'",
-        (agent_id,),
-    ).fetchone() == (0,)
+    wake_rows = _recovery_wakes(db_conn, agent_id)
+    assert len(wake_rows) == 1
+    wake_id, content, kind, source, status, payload = wake_rows[0]
+    assert (content, kind, source, status) == (
+        CRASH_RECOVERY_WAKE_TEXT,
+        "chat",
+        "system",
+        "pending",
+    )
+    assert payload == {HOSTED_TURN_RECOVERY_MARKER: True}
+    assert [corpse.recovery_wake_id for corpse in reaped] == [wake_id]
     reaped_records = [
         r for r in loguru_records if r["extra"].get("event") == "corpse_reaper_terminated"
     ]
@@ -197,7 +224,7 @@ async def test_prompt_reap_and_admission_resolve_to_one_winner(
             "SELECT status FROM agents_meta WHERE id = %s", (agent_id,)
         ).fetchone()
         if reaped:
-            assert reaped == [agent_id]
+            assert [corpse.agent_id for corpse in reaped] == [agent_id]
             assert admitted is None
             assert status == ("terminated",)
         else:
@@ -206,7 +233,8 @@ async def test_prompt_reap_and_admission_resolve_to_one_winner(
 
     # Serialized both ways: whichever transition runs second refuses.
     agent_id, incarnation = await _recrashed_row(db_conn, aops_pool)
-    assert await reap_recrashed_corpse(aops_pool, incarnation) == [agent_id]
+    reaped = await reap_recrashed_corpse(aops_pool, incarnation)
+    assert [corpse.agent_id for corpse in reaped] == [agent_id]
     assert (
         await admit_hosted_runtime(
             aops_pool, agent_id, "host-test", incarnation.owner, expected_from="idling"
@@ -247,7 +275,8 @@ async def test_prompt_reap_then_resurrect_composes_without_tearing(
     monkeypatch.setattr(agent_wake, "publish_inbound_wake", _wake)
 
     agent_id, incarnation = await _recrashed_row(db_conn, aops_pool)
-    assert await reap_recrashed_corpse(aops_pool, incarnation) == [agent_id]
+    reaped = await reap_recrashed_corpse(aops_pool, incarnation)
+    assert [corpse.agent_id for corpse in reaped] == [agent_id]
 
     second_reap, resurrected = await asyncio.gather(
         reap_recrashed_corpse(aops_pool, incarnation),
@@ -265,3 +294,52 @@ async def test_prompt_reap_then_resurrect_composes_without_tearing(
     # The resurrect's full cleanup landed atomically: no residue that would
     # let the reaper re-terminate the fresh life.
     assert row == ("idling", None, None, None, None)
+
+
+# ── the death's committed recovery wake (task #4039) ─────────────────────────
+
+
+async def test_grace_reap_commits_a_marked_wake_that_passes_the_notice_gate(
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+) -> None:
+    """The grace path queues the same wake as the prompt reap; the marker
+    keeps it out of the system-notice class, so the resurrection channels
+    see real work (not a notification that never resurrects)."""
+    from ops.resurrect_gates import system_notice_source_of_trigger
+
+    agent_id, owner = _agent(db_conn), uuid4()
+    incarnation = await admit_hosted_runtime(
+        aops_pool, agent_id, "host-test", owner, expected_from="idling"
+    )
+    assert incarnation is not None
+    await settle_hosted_runtime(aops_pool, incarnation)
+    db_conn.execute(
+        "UPDATE agents_meta SET status = 'idling', runtime_owner = %s, "
+        "lease_expires_at = NULL, last_turn_fatal_at = now() - interval '16 minutes' "
+        "WHERE id = %s",
+        (owner, agent_id),
+    )
+    db_conn.commit()
+
+    reaped = await reap_crash_corpses(aops_pool, "host-test", owner)
+
+    assert [corpse.agent_id for corpse in reaped] == [agent_id]
+    wake_id = reaped[0].recovery_wake_id
+    assert wake_id is not None
+    assert system_notice_source_of_trigger(agent_id, wake_id) is None
+
+
+async def test_recovery_wake_switch_off_commits_nothing(
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings.daemon, "hosted_crash_recovery_wake_enabled", False)
+    agent_id, incarnation = await _recrashed_row(db_conn, aops_pool)
+
+    reaped = await reap_recrashed_corpse(aops_pool, incarnation)
+
+    assert [corpse.agent_id for corpse in reaped] == [agent_id]
+    assert reaped[0].recovery_wake_id is None
+    assert _recovery_wakes(db_conn, agent_id) == []

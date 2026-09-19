@@ -37,6 +37,7 @@ from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, ConfigDict, Field
 
 import ava._boot
+from agent.corpse_reap import ReapedCorpse
 from agent.hosted_ownership import TurnFatalStamp, TurnSettlement
 from services.agent_host import dispatcher, settlement
 from services.agent_host.dispatcher import TurnScheduler
@@ -878,7 +879,8 @@ class TestTurnLoop:
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Renewal first, reap second: a reap failure must not starve leases.
-        The reap publishes each corpse snapshot itself (agent/corpse_reap)."""
+        The reap publishes each corpse snapshot itself (agent/corpse_reap),
+        and the reaped corpses' recovery attempt rides right after the reap."""
         import services.agent_host.host as host_mod
 
         calls: list[str] = []
@@ -886,17 +888,25 @@ class TestTurnLoop:
         async def _renew(pool: object, machine: str, owner: UUID) -> None:
             calls.append("renew")
 
-        async def _reap(pool: object, machine: str, owner: UUID) -> list[int]:
+        async def _reap(pool: object, machine: str, owner: UUID) -> list[ReapedCorpse]:
             calls.append("reap")
-            return [7, 9]
+            return [ReapedCorpse(7, 101), ReapedCorpse(9, None)]
+
+        recovered: list[list[ReapedCorpse]] = []
+
+        async def _recover(reaped: list[ReapedCorpse]) -> None:
+            calls.append("recover")
+            recovered.append(list(reaped))
 
         monkeypatch.setattr(host_mod, "renew_hosted_owner", _renew)
         monkeypatch.setattr(host_mod, "reap_crash_corpses", _reap)
+        monkeypatch.setattr(host_mod, "recover_reaped_corpses", _recover)
 
         host, _, _ = wired({1: _Row(status="idling")})
         await host.renew_ownership()
 
-        assert calls == ["renew", "reap"]
+        assert calls == ["renew", "reap", "recover"]
+        assert recovered == [[ReapedCorpse(7, 101), ReapedCorpse(9, None)]]
 
     async def test_renew_ownership_survives_a_reap_failure(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch

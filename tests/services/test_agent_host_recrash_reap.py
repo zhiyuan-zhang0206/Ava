@@ -19,7 +19,7 @@ import pytest
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg_pool import AsyncConnectionPool
 
-from agent.corpse_reap import reap_crash_corpses
+from agent.corpse_reap import ReapedCorpse, reap_crash_corpses
 from agent.hosted_ownership import (
     TurnFatalStamp,
     TurnSettlement,
@@ -235,6 +235,12 @@ async def test_settle_boundary_prompt_reaps_the_second_crash_at_once(
         published.append(agent_id)
 
     monkeypatch.setattr("agent.corpse_reap.publish_agent_updated", _publish)
+    attempts: list[list[ReapedCorpse]] = []
+
+    async def _recover(reaped: list[ReapedCorpse]) -> None:
+        attempts.append(list(reaped))
+
+    monkeypatch.setattr(settlement_mod, "recover_reaped_corpses", _recover)
 
     agent_id, owner = _agent(db_conn), uuid4()
     first = await admit_hosted_runtime(
@@ -292,3 +298,11 @@ async def test_settle_boundary_prompt_reaps_the_second_crash_at_once(
         r for r in loguru_records if r["extra"].get("event") == "corpse_reaper_terminated"
     ]
     assert [r["extra"]["crash_count"] for r in reaped_records] == [2]
+    # The prompt reap's committed wake is consumed on the spot: one attempt
+    # carrying the wake id, and the chat row the return value named (#4039).
+    assert [corpse.agent_id for corpse in attempts[0]] == [agent_id]
+    wake_id = attempts[0][0].recovery_wake_id
+    assert wake_id is not None
+    assert db_conn.execute(
+        "SELECT kind, source, payload FROM inbound_messages WHERE id = %s", (wake_id,)
+    ).fetchone() == ("chat", "system", {"hosted_turn_recovery": True})

@@ -59,9 +59,11 @@ SYSTEM_REAPED_CRASH_ROW: LiteralString = (
 # Carve-out: the delivery watchdog's own hosted-turn recovery chat
 # (`HOSTED_TURN_RECOVERY_MARKER` below) is a system-source message that MUST
 # reach both resurrection channels — it is this machinery's durable retry for
-# a wedged hosted turn, not a notification. Any future recovery-class system
-# message must set the same marker or it defaults to "notice, never
-# resurrects". Marker strictness is fail-closed: only the exact JSON boolean
+# a wedged hosted turn, not a notification — and the corpse reaper's
+# crash-recovery wake is the second such message, on the same marker
+# (task #4039). Any future recovery-class system message must set the same
+# marker or it defaults to "notice, never resurrects". Marker strictness is
+# fail-closed: only the exact JSON boolean
 # `true` exempts — a missing key, JSON null, or any other value (even the
 # string "true") stays a notice. The fragment embeds the marker key literally
 # (the parity test catches drift), `->>` is rejected on purpose (it collapses

@@ -188,8 +188,9 @@ def select_terminated_owners_with_pending(
     System notices never resurrect: a system-family chat (`system` /
     `system:<subtype>`) is a framework notification, not a person or peer
     message — it waits for the owner's next resurrect, or the stale threshold
-    closes it. Machine *wakeups* still wake; exempt is the watchdog's own
-    recovery chat (`hosted_turn_recovery` marker): it revives its wedged owner.
+    closes it. Machine *wakeups* still wake; exempt are the recovery-class
+    chats (`hosted_turn_recovery` marker): the watchdog's wedged-turn wake and
+    the corpse reaper's crash-recovery wake (task #4039) revive their owner.
 
     A closed agent (user marked it `terminate --final`; `closed_at` set) is
     never a resurrect candidate — the closure outranks every automatic
