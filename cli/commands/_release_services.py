@@ -26,6 +26,8 @@ from cli.commands._release_selector import pending_transaction, verify_unit_imag
 from cli.commands._session_lifecycle import _service_extra_env
 from ops.spec import ServiceSpec, services_for_capabilities_annotated
 from services.agent_ops.bootstrap import PreparedObservation
+from shared import spawn_receipt
+from shared.config import settings
 from shared.machine import machine_role
 from shared.managed_writer_activation import (
     NormalServiceReadback,
@@ -42,6 +44,7 @@ from shared.runtime_service_identity import NormalRuntimeIdentity
 from shared.session_backend import get_backend
 from shared.session_env import forward_env_dict
 from shared.session_record import SessionRecord, pid_starttime_ticks
+from shared.updater_recovery import SpawnAttempt
 from shared.verified_file import regular_bytes
 
 
@@ -52,6 +55,16 @@ class PreparedService:
     argv: tuple[str, ...]
     cwd: Path
     environment: dict[str, str]  # Private child transport only; never serialize to a receipt.
+
+
+def normal_spawn_command(prepared: PreparedService) -> str:
+    """The single source of the exact command string one service launch uses.
+
+    The journal attempt's ``cmd_digest``, the gated launch, the birth receipt
+    and the session-record cross-check must all describe the same string, so it
+    is computed in exactly one place (design #4117 C1's single spawn exit).
+    """
+    return "exec " + shlex.join(prepared.argv)
 
 
 def _command(  # noqa: PLR0915 — one ordered fail-closed command admission boundary.
@@ -293,40 +306,86 @@ def observe_normal_service(
     )
 
 
-def start_normal_service(
+def _require_attempt(
+    attempt: SpawnAttempt, prepared: PreparedService, home: Path, generation: str
+) -> str:
+    """Bind one journal attempt to its prepared service and compute its command.
+
+    The journal entry is the durable intent; this refuses any attempt whose
+    session, command digest, cwd or gate/receipt paths do not describe exactly
+    this prepared service and generation — an attempt written for anything
+    else must never be executed here.
+    """
+    command = normal_spawn_command(prepared)
+    gate = spawn_receipt.session_lock_path(home, generation, attempt.session)
+    receipt = spawn_receipt.receipt_path(home, generation, attempt.session, attempt.nonce)
+    if (
+        attempt.session != prepared.identity.session
+        or attempt.cmd_digest != hashlib.sha256(command.encode()).hexdigest()
+        or attempt.cwd != str(prepared.cwd)
+        or attempt.spawn_lock_path != gate.relative_to(home).as_posix()
+        or attempt.receipt_path != receipt.relative_to(home).as_posix()
+    ):
+        raise ReleaseRejectedError("normal spawn attempt does not bind its prepared service")
+    return command
+
+
+def adopt_birth_record(
+    home: Path,
+    prepared: PreparedService,
+    receipt: spawn_receipt.SpawnReceipt,
+    *,
+    generation: str,
+) -> SessionRecord:
+    """Cross-check one live birth against its session record (repairing W2 only).
+
+    The record write can be lost between the child's birth receipt and the
+    spawner's record write (the W2 window): a genuinely MISSING record is
+    repaired from the receipt plus the prepared plan — the one privileged
+    repair path (design §4.4). A damaged record is never missing (it raises)
+    and a mismatched record is never overwritten; both refuse.
+    """
+    command = normal_spawn_command(prepared)
+    session = prepared.identity.session
+    try:
+        record = spawn_receipt.read_session_record(home, session)
+        if record is None:
+            record = spawn_receipt.write_recovered_record(
+                home,
+                session,
+                receipt,
+                command=command,
+                cwd=prepared.cwd,
+                generation=generation,
+            )
+        elif not (
+            spawn_receipt.record_matches_receipt(record, receipt)
+            and record.cmd == command
+            and record.cwd == str(prepared.cwd)
+        ):
+            raise ReleaseRejectedError("normal session record does not identify the birth receipt")
+    except (
+        spawn_receipt.SpawnExitedError,
+        spawn_receipt.SpawnEvidenceInvalidError,
+    ) as exc:
+        raise ReleaseRejectedError(f"normal birth adoption failed closed: {exc}") from exc
+    return record
+
+
+def await_normal_service_ready(
     conn: psycopg.Connection,
     context: PreparedObservation,
     selector: SelectorReadback,
     prepared: PreparedService,
+    record: SessionRecord,
 ) -> NormalServiceReadback:
-    """The existing updater's exact service-only start; no agent permission."""
-    with pending_transaction(conn, context):
-        require_pending_candidate_start(
-            conn, context.operation, context.challenge.challenge, selector, prepared.identity
-        )
-    if datetime.now(UTC) >= context.challenge.valid_until:
-        raise ReleaseRejectedError("normal start challenge expired before spawn")
-    backend = get_backend()
-    if backend.has_session(prepared.identity.session):
-        raise ReleaseRejectedError("normal start refuses an existing or unaccounted session")
-    started = time.time()
-    command = "exec " + shlex.join(prepared.argv)
-    if not backend.new_session(
-        prepared.identity.session,
-        command,
-        prepared.cwd,
-        env=prepared.environment,
-        login_shell=False,
-    ):
-        raise ReleaseRejectedError("normal service spawn failed")
-    record = _record(Path(selector.unit.home), prepared.identity.session)
-    if (
-        record.started_at < started
-        or record.started_at > time.time()
-        or record.cwd != str(prepared.cwd)
-        or record.cmd != command
-    ):
-        raise ReleaseRejectedError("session record does not identify this normal spawn attempt")
+    """Observe one exact running service until it is fully ready.
+
+    Every round revalidates the same pending authority before observing; the
+    loop is bounded by the prepared challenge and never renews it. A candidate
+    that exits before readiness refuses — its dead identity is the caller's
+    adjudication input, never a silent retry here.
+    """
     while datetime.now(UTC) < context.challenge.valid_until:
         with pending_transaction(conn, context):
             require_pending_candidate_start(
@@ -356,3 +415,60 @@ def start_normal_service(
             )
         return result
     raise ReleaseRejectedError("normal service did not become ready within its original challenge")
+
+
+def start_normal_service(
+    conn: psycopg.Connection,
+    context: PreparedObservation,
+    selector: SelectorReadback,
+    prepared: PreparedService,
+    *,
+    attempt: SpawnAttempt,
+    generation: str,
+) -> NormalServiceReadback:
+    """The updater's exact gated service start; no agent permission.
+
+    The caller already adjudicated any displaced attempt (I8) and wrote the
+    journal ``starting`` entry carrying ``attempt`` before this call — the
+    journal is the durable intent, and this function is only the effect plus
+    its verification: fresh authority, the per-session gate, the pre-exec
+    birth receipt, the record cross-check, then readiness. Every adjudicated
+    non-alive or ambiguous spawn outcome refuses the release here; it never
+    retries.
+    """
+    home = Path(selector.unit.home)
+    command = _require_attempt(attempt, prepared, home, generation)
+    with pending_transaction(conn, context):
+        require_pending_candidate_start(
+            conn, context.operation, context.challenge.challenge, selector, prepared.identity
+        )
+    if datetime.now(UTC) >= context.challenge.valid_until:
+        raise ReleaseRejectedError("normal start challenge expired before spawn")
+    backend = get_backend()
+    if backend.has_session(prepared.identity.session):
+        raise ReleaseRejectedError("normal start refuses an existing or unaccounted session")
+    remaining = (context.challenge.valid_until - datetime.now(UTC)).total_seconds()
+    wait_budget = min(settings.gateway.update_spawn_ambiguity_wait_seconds, max(0.0, remaining / 2))
+    try:
+        receipt = spawn_receipt.execute_gated_spawn(
+            backend,
+            name=prepared.identity.session,
+            command=command,
+            workdir=prepared.cwd,
+            env=prepared.environment,
+            home=home,
+            generation=generation,
+            machine=selector.unit.machine,
+            nonce=attempt.nonce,
+            wait_budget=wait_budget,
+        )
+        record = adopt_birth_record(home, prepared, receipt, generation=generation)
+    except (
+        spawn_receipt.SpawnRefusedError,
+        spawn_receipt.SpawnNotCompletedError,
+        spawn_receipt.SpawnExitedError,
+        spawn_receipt.SpawnAmbiguousError,
+        spawn_receipt.SpawnEvidenceInvalidError,
+    ) as exc:
+        raise ReleaseRejectedError(f"exact normal service spawn failed closed: {exc}") from exc
+    return await_normal_service_ready(conn, context, selector, prepared, record)
