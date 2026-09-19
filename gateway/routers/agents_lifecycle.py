@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Literal
 
 import psycopg
 from fastapi import APIRouter, Body, HTTPException, Request
@@ -51,17 +50,16 @@ _OPEN_TASKS_SHOWN = 5
 async def post_compact(
     agent_id: int,
     request: Request,
-    mode: Literal["framework", "agent"] = "framework",
 ) -> CompactEnqueued:
     """Trigger compact — INSERT kind='compact_request' inbound; the claim
     Node takes over, runs the backend Compaction LLM to generate a summary
     that replaces messages, and publishes a `compact_done` event to notify
     UI.
 
-    `mode` query parameter is preserved for backward compat with old
-    frontends but is ignored — the new design uniformly uses backend LLM
-    summary generation (see
-    decisions/2026-05-02-self-cycling-langgraph.md). Agent-initiated compact still goes through
+    The new design uniformly uses backend LLM summary generation (see
+    decisions/2026-05-02-self-cycling-langgraph.md). The legacy `mode` query
+    parameter old frontends sent is ignored (still accepted — extra query
+    parameters never fail the call). Agent-initiated compact still goes through
     ava.self.compact() -> kind='compact_summary'; this is a separate signal
     from UI-triggered compact_request.
 
@@ -81,7 +79,7 @@ async def post_compact(
         trigger_inbound_kind="compact_request",
     )
 
-    return CompactEnqueued(mode=mode, agent_id=agent_id, status="enqueued")
+    return CompactEnqueued(agent_id=agent_id, status="enqueued")
 
 
 @router.post("/api/cancel")

@@ -352,10 +352,10 @@ export interface paths {
          *     that replaces messages, and publishes a `compact_done` event to notify
          *     UI.
          *
-         *     `mode` query parameter is preserved for backward compat with old
-         *     frontends but is ignored — the new design uniformly uses backend LLM
-         *     summary generation (see
-         *     decisions/2026-05-02-self-cycling-langgraph.md). Agent-initiated compact still goes through
+         *     The new design uniformly uses backend LLM summary generation (see
+         *     decisions/2026-05-02-self-cycling-langgraph.md). The legacy `mode` query
+         *     parameter old frontends sent is ignored (still accepted — extra query
+         *     parameters never fail the call). Agent-initiated compact still goes through
          *     ava.self.compact() -> kind='compact_summary'; this is a separate signal
          *     from UI-triggered compact_request.
          *
@@ -4791,11 +4791,6 @@ export interface components {
          *     pending insert, does not wait for the kernel loop to finish.
          */
         CompactEnqueued: {
-            /**
-             * Mode
-             * @enum {string}
-             */
-            mode: "framework" | "agent";
             /** Agent Id */
             agent_id: number;
             /**
@@ -9008,9 +9003,7 @@ export interface operations {
     };
     post_compact_api_agents__agent_id__compact_post: {
         parameters: {
-            query?: {
-                mode?: "framework" | "agent";
-            };
+            query?: never;
             header?: never;
             path: {
                 agent_id: number;

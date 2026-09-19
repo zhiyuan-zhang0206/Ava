@@ -43,7 +43,6 @@ class CompactEnqueued(BaseModel):
     """POST /api/agents/{id}/compact response — returns immediately after
     pending insert, does not wait for the kernel loop to finish."""
 
-    mode: Literal["framework", "agent"]
     agent_id: int
     status: Literal["enqueued"]
 

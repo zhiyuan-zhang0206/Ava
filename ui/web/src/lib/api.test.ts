@@ -398,9 +398,9 @@ describe("agent label / messages / cancel", () => {
     expect(JSON.parse(calls[0].init?.body as string)).toEqual({ agent_id: 8 });
   });
 
-  it("compact POSTs /api/agents/{id}/compact?mode=framework", async () => {
-    await api.compact(5, "framework");
-    expect(calls[0].url).toMatch(/\/api\/agents\/5\/compact\?mode=framework$/);
+  it("compact POSTs /api/agents/{id}/compact", async () => {
+    await api.compact(5);
+    expect(calls[0].url).toMatch(/\/api\/agents\/5\/compact$/);
     expect(calls[0].init?.method).toBe("POST");
   });
 });
