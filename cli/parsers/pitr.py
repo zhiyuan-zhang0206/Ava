@@ -5,6 +5,21 @@ from __future__ import annotations
 import argparse
 
 
+def _target_wall_arg(value: str) -> str:
+    """Argparse type for `pitr drill --target-wall`.
+
+    Requires an offset-carrying ISO-8601 timestamp; reuses the drill service's
+    parser so the CLI boundary and the drill agree on one definition.
+    """
+    from services.pitr.restore_drill import DrillError, parse_target_wall
+
+    try:
+        parse_target_wall(value)
+    except DrillError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+    return value
+
+
 def _h_pitr_drill(args: argparse.Namespace) -> int:
     from cli.commands import cmd_pitr_drill
 
@@ -104,12 +119,13 @@ def _add_pitr_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
         "drill",
         help="restore a protected chain to an operator target in an isolated sandbox",
     )
-    drill.add_argument(
+    drill_candidate = drill.add_mutually_exclusive_group(required=True)
+    drill_candidate.add_argument(
         "--chain",
         metavar="CHAIN",
         help="chain id resolved under $AVA_HOME/physical-backup/base-manifests",
     )
-    drill.add_argument(
+    drill_candidate.add_argument(
         "--candidate",
         metavar="PATH",
         help="explicit candidate manifest JSON instead of --chain",
@@ -124,6 +140,7 @@ def _add_pitr_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
         "--target-wall",
         metavar="TIMESTAMP",
         required=True,
+        type=_target_wall_arg,
         help="target wall clock with an explicit UTC offset, e.g. '2026-09-13 13:13:03+08'",
     )
     drill.add_argument(
@@ -132,6 +149,9 @@ def _add_pitr_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
         required=True,
         help="fresh scratch directory; kept as the evidence tree",
     )
+    # task #4092 cli-default inventory: conservative replay bound — the drill
+    # never forces, so a longer default only costs the operator's own wait; the
+    # per-invocation flag tunes it.
     drill.add_argument(
         "--promotion-timeout",
         metavar="SECONDS",

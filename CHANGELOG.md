@@ -53,6 +53,23 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
   a `chrome_page_ttl_expired` / `chrome_page_ttl_renewed` event (task #3035).
 
 ### Changed
+- The ops-facing `ava` CLI moves its remaining argument checks to the parse
+  layer (task #4092 batch B4, user ruling 2026-09-20): `schedules create`
+  requires exactly one of `--script` / `--script-file`; `schedules update`
+  and `presets update` require at least one field; `presets create|update
+  --config` is validated as a JSON object at the boundary; `pitr drill`
+  requires exactly one of `--chain` / `--candidate` and validates
+  `--target-wall` as an offset-carrying ISO timestamp; `maintenance`
+  validates `--operation` / `--acquired-at` up front; and `cluster
+  update`'s `--target` / `--target-sha` combination checks (against
+  `--restart-only` / `--local` / `--force` / `--dry-run` / `--mode force`)
+  move from the command body to the parse layer. All of these are usage
+  errors (exit 2) before any command code runs; the command-level guards
+  stay as the programmatic-caller defense. Retained defaults (monitoring
+  verbs, display bounds, safe-mode switches) now carry their reasons behind
+  a `task #4092 cli-default inventory` marker; the discipline and the
+  inventory entry point are documented in
+  `conventions/cli-argument-discipline.md`.
 - CLI parameter discipline, batch B3 (task #4092): `mcp add` requires exactly
   one of `--json` / `--command` and validates both at the parse layer (bad or
   non-object JSON, a `--env` pair without `=`, and `--arg`/`--env` without

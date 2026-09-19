@@ -126,6 +126,8 @@ def _add_logs_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
         action="store_true",
         help="report which files would rotate without writing",
     )
+    # task #4092 cli-default inventory: rotation threshold — parse-validated
+    # positive at the boundary; the default is the standing log-growth contract.
     rotate_p.add_argument(
         "--size-mib",
         type=_positive_mib,

@@ -9,6 +9,7 @@ Settings (see ``cli.main`` module docstring)."""
 from __future__ import annotations
 
 import argparse
+import sys
 
 
 def _target_sha_arg(value: str) -> str:
@@ -26,6 +27,30 @@ def _h_cluster_update(args: argparse.Namespace) -> int:
         from cli.prepared_update import run_prepared_update
 
         return run_prepared_update(args)
+
+    if args.target is None and args.target_sha is not None:
+        print("ava: --target-sha requires --target", file=sys.stderr)
+        return 2
+    if args.target is not None:
+        conflicts = [
+            flag
+            for flag, present in (
+                ("--restart-only", args.restart_only),
+                ("--local", args.local),
+                ("--force", args.force),
+                ("--dry-run", args.dry_run),
+                ("--mode", args.mode != "smooth"),
+            )
+            if present
+        ]
+        if conflicts:
+            print(
+                "ava: --target triggers a single machine's per-host update and cannot be "
+                f"combined with {', '.join(conflicts)}; drop the flag(s) or drop --target "
+                "for a whole-cluster rollout.",
+                file=sys.stderr,
+            )
+            return 2
 
     from cli.commands import cmd_update
 
@@ -413,6 +438,8 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         help="run prepare checks and report the maintenance-window estimate without snapshotting, "
         "pausing, stopping, or changing the cluster pin",
     )
+    # task #4092 cli-default inventory: "smooth" is the safe default — force
+    # must be asked for explicitly, and ops scripts rely on the default posture.
     cluster_update_p.add_argument(
         "--mode",
         choices=("smooth", "force"),
@@ -505,6 +532,9 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         "health-probe",
         help="[cluster] assess cluster health (exit 0=healthy, 1=unhealthy); designed as a cron job payload",
     )
+    # task #4092 cli-default inventory: monitoring contract — this verb is a
+    # cron payload invoked bare; these defaults (agent-min from
+    # AVA_HEALTH_PROBE_AGENT_MIN, itself 1) are what "healthy" means out of the box.
     cluster_health_probe_p.add_argument(
         "--agent-min",
         type=int,
@@ -573,6 +603,8 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         "rollback",
         help="[cluster] roll the cluster back to a known-good commit (stops agents, rolls back schema, restarts)",
     )
+    # task #4092 cli-default inventory: semantic default — omitted, --to resolves
+    # to the cluster pin's last_known_good_sha, the target the operator already pinned.
     cluster_rollback_p.add_argument(
         "--to",
         default=None,
