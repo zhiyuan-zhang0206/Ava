@@ -65,6 +65,8 @@ _EXPECTED_UIDS = {
     "ava-ops-watchdog-tick-stale",
     "ava-ops-checkpoint-blobs-warning",
     "ava-ops-checkpoint-blobs-error",
+    "ava-ops-checkpoint-blobs-freshness",
+    "ava-ops-checkpoint-blobs-growth",
     "ava-ops-trace-disk-watermark",
     "ava-ops-llm-billing-quota",
     # slow-request layer (task #1399) — user-visible latency, warning-first
@@ -118,7 +120,7 @@ def _load_groups() -> list[dict[str, Any]]:
     assert [group["name"] for group in groups] == ["ava-ops", "ava-ops-slow"]
     assert [group["folder"] for group in groups] == ["Ava", "Ava"]
     assert [group["interval"] for group in groups] == ["1m", "5m"]
-    assert [len(group["rules"]) for group in groups] == [28, 10]
+    assert [len(group["rules"]) for group in groups] == [30, 10]
     return groups
 
 
@@ -436,8 +438,64 @@ def test_checkpoint_blobs_high_water_rules() -> None:
         description = rule["annotations"]["description"]
         assert "repack" in description
         assert "statvfs" in description
-        assert "05:00-08:00" in description
-        assert "force runs" in description
+        assert "hourly" in description
+        assert "vacuum run" in description
+
+
+def test_checkpoint_blobs_freshness_guard() -> None:
+    """The other half of the #4002 silent-NoData class (task #4004): when the
+    emitter stops, the size rules turn NoData and `noDataState: OK` keeps them
+    quiet — this rule is the one that fires on the silence itself. The 2h
+    window clears every daemon-restart gap in the retained history (<= 2h; one
+    8.5h outlier), samples otherwise refresh every export cycle (~15s), and
+    the name-level selector is immune to the per-restart instance label churn.
+    """
+    rules = {r["uid"]: r for r in _load_rules()}
+    rule = rules["ava-ops-checkpoint-blobs-freshness"]
+    exprs = _exprs(rule, "prometheus")
+    assert exprs == ["absent_over_time(ava_checkpoint_table_sizes_blobs_bytes_ratio[2h])"]
+    assert _exprs(rule, "loki") == []
+    assert rule["for"] == "5m"
+    assert rule["noDataState"] == "OK"
+    assert rule["execErrState"] == "OK"
+    assert _threshold_params(rule) == [[0]]
+    assert rule["labels"] == {
+        "severity": "warning",
+        "ruleUID": "ava-ops-checkpoint-blobs-freshness",
+        "metric": "checkpoint_blobs_freshness",
+        "team": "ava-ops",
+    }
+    description = rule["annotations"]["description"]
+    assert "events_maintenance" in description
+    assert "blind" in description
+
+
+def test_checkpoint_blobs_growth_tier() -> None:
+    """The forward-looking tier (task #4005): the trailing-6h delta of the same
+    gauge, calibrated on the 2026-09-13/15 burst (quiet baseline within MB/6h,
+    peak +10.3 GiB/6h). Warn at +1 GiB/6h with a 1h hold; a vacuum/repack
+    shrink is a negative delta and stays resolved."""
+    rules = {r["uid"]: r for r in _load_rules()}
+    rule = rules["ava-ops-checkpoint-blobs-growth"]
+    exprs = _exprs(rule, "prometheus")
+    assert exprs == [
+        "max(ava_checkpoint_table_sizes_blobs_bytes_ratio) - "
+        "max(ava_checkpoint_table_sizes_blobs_bytes_ratio offset 6h)"
+    ]
+    assert _exprs(rule, "loki") == []
+    assert rule["for"] == "1h"
+    assert rule["noDataState"] == "OK"
+    assert rule["execErrState"] == "OK"
+    assert _threshold_params(rule) == [[1073741824]]
+    assert rule["labels"] == {
+        "severity": "warning",
+        "ruleUID": "ava-ops-checkpoint-blobs-growth",
+        "metric": "checkpoint_blobs_growth",
+        "team": "ava-ops",
+    }
+    description = rule["annotations"]["description"]
+    assert "2026-09-13" in description
+    assert "repack" in description
 
 
 # ─── metric-name contract (task #4002) ───────────────────────────────────────

@@ -43,11 +43,11 @@ The contact point posts to the gateway's alert ingest endpoint — loopback
 `127.0.0.1:8000` when the observatory is local, the gateway's reachable
 address when `AVA_OBSERVABILITY_URL` points at a remote station.
 
-## Rules (38)
+## Rules (40)
 
-The rules are split between `ava-ops` (28 rules, evaluated every minute:
-R1-R6, the watchdog-tick and gateway-metrics silence rules, R8-R12, and
-R14-R16) and
+The rules are split between `ava-ops` (30 rules, evaluated every minute:
+R1-R6, the watchdog-tick and gateway-metrics silence rules, the checkpoint
+guards, R8-R12, and R14-R16) and
 `ava-ops-slow` (ten rules, evaluated every five minutes: R7, R13, R17's two
 fast-route tiers, R18, and R19's two slow-route tiers, plus the PITR-storage / Tempo-backend / LLM-rate-limit checks). Each rule retains its
 own `for` window.
@@ -149,9 +149,20 @@ series the rules read are e.g. `ava_checkpoint_table_sizes_blobs_bytes_ratio`:
 |-----|-------|--------|-----------|-------|----------|
 | `ava-ops-checkpoint-blobs-warning` | `ava-ops` | checkpoint_blobs physical size | > 2.5 GiB (Prometheus) | 2h | warning |
 | `ava-ops-checkpoint-blobs-error` | `ava-ops` | checkpoint_blobs physical size | > 4 GiB (Prometheus) | 2h | error |
+| `ava-ops-checkpoint-blobs-freshness` | `ava-ops` | checkpoint_blobs emitter silence | no samples in Prometheus for 2h (absent_over_time) | 5m | warning |
+| `ava-ops-checkpoint-blobs-growth` | `ava-ops` | checkpoint_blobs growth rate | +1 GiB in the trailing 6h (Prometheus) | 1h | warning |
 | `ava-ops-memory-search-rows-warning` | `ava-ops` | memory-search store rows | > 30000 (Prometheus) | 2h | warning |
 | `ava-ops-memory-search-rows-critical` | `ava-ops` | memory-search store rows | > 100000 (Prometheus) | 2h | critical |
 | `ava-ops-pitr-storage-growth` | `ava-ops-slow` | remote PITR storage footprint | ratio vs 7d-ago footprint > 1.25 (Prometheus) | 1h | warning |
+
+The two checkpoint guards came out of the #4002 evaluation items (#4004/#4005).
+The freshness rule fires on the silent-NoData class itself — the absolute tiers
+above go quiet exactly when the series stops, which is how the 24-day miss
+stayed invisible — with the 2h window chosen to clear every restart gap
+observed in the retained data (one 8.5h outlier fires, correctly). The growth
+rule reads the trailing-6h delta of the same gauge (calibrated on the
+2026-09-13 burst: quiet ~ MB/6h, peak +10.3 GiB/6h, warn at +1 GiB/6h), so an
+escalation is visible hours before the next absolute tier moves.
 
 The five slow-request rules (R17-R19) close the user-visible-latency gap:
 R17's fast-route thresholds are calibrated against seven days of route data,
