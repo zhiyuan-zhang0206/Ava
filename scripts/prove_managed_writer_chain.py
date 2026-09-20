@@ -230,9 +230,12 @@ def provision_schema(conn: psycopg.Connection, namespace: str) -> None:
         "CREATE TABLE schema_migrations(name text PRIMARY KEY, applied_at timestamptz DEFAULT now())"
     )
     conn.execute(
+        # The settle columns are real-schema since the initial release; the
+        # activation chain's lease fencing references `settle_hosts` (task #4086 b5).
         "CREATE TABLE deployment_state(id integer PRIMARY KEY, managed_writer_evidence jsonb,"
         " phase text, kind text, note text, holder text, acquired_at timestamptz,"
-        " expires_at timestamptz, target_sha text)"
+        " expires_at timestamptz, target_sha text, settle_hosts text[],"
+        " settle_note text, settle_started_at timestamptz)"
     )
     conn.commit()
 
