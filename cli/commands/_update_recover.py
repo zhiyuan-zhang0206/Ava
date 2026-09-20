@@ -320,11 +320,11 @@ def finalize_rollout(
     entirely: no host is stranded, nothing needs resuming, and every runner may have
     converged — yet a service on the gateway does not exist.
 
-    `publication_refused` selects the third INCOMPLETE shape's report: the
-    managed-writer publication commit refused and its durable pending journal was
-    retained. Nothing is stranded and every host converged there too, so the
-    host-oriented block would name the wrong machine; the journal's checked
-    recovery is the one command that fits.
+    `publication_refused` selects the third INCOMPLETE shape's report: a
+    managed-writer publication step (collection or commit) refused and its
+    durable pending journal was retained. Nothing is stranded and every host
+    converged there too, so the host-oriented block would name the wrong
+    machine; the journal's checked recovery is the one command that fits.
 
     `recovered` is the caller's first-hand answer to the one question `outcome`
     cannot express: an `ABORTED` rollout whose gateway leg rolled itself back to
@@ -426,8 +426,8 @@ def _print_rollout_aftermath(
 
     INCOMPLETE now has three shapes, so the banner distinguishes them: hosts that never
     came back, a local service session that never launched, and a refused managed-writer
-    publication commit whose durable journal was retained. Naming the wrong one sends
-    the operator to the wrong machine — or to the wrong command.
+    publication step (collection or commit) whose durable journal was retained. Naming
+    the wrong one sends the operator to the wrong machine — or to the wrong command.
     """
     rule = "=" * 64
     if outcome is not RolloutOutcome.INCOMPLETE:
