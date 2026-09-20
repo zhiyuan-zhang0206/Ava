@@ -216,3 +216,23 @@ async def test_a_lapsed_lease_without_the_mark_still_crashes(
     host = _host(_raising_graph(), aops_pool)
     with bind_turn_identity(agent_id, incarnation=incarnation), pytest.raises(ImpersonationError):
         await host._invoke_until_done(agent_id, AvaContext(ops_pool=aops_pool))
+
+
+async def test_a_mark_without_the_maintenance_payload_still_crashes(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+) -> None:
+    """The payload key names the reap shape (task #4027): a mark whose restart
+    lacks it — same kind, source, status and un-applied — must not classify."""
+    agent_id = _agent(db_conn)
+    incarnation = await _admit(aops_pool, agent_id)
+    db_conn.execute(
+        "INSERT INTO inbound_messages(agent_id,content,kind,source) "
+        "VALUES (%s,'','restart','system:maintenance')",
+        (agent_id,),
+    )
+    db_conn.commit()
+    _mark_for_reap(db_conn, agent_id)
+
+    host = _host(_raising_graph(), aops_pool)
+    with bind_turn_identity(agent_id, incarnation=incarnation), pytest.raises(ImpersonationError):
+        await host._invoke_until_done(agent_id, AvaContext(ops_pool=aops_pool))

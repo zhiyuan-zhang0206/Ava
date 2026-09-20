@@ -494,4 +494,7 @@ def test_the_reap_readers_carry_the_full_shape() -> None:
     truncation = re.sub(r"\s+", " ", sources["services/agent_host/truncation.py"])
     mark = truncation.find("_MARK_SQL = (")
     assert mark >= 0, "the truncation mark SQL moved"
-    _assert_full_reap_shape(truncation[mark : mark + 520], face="truncation.py _MARK_SQL")
+    tail = "m.id = %s"
+    end = truncation.find(tail, mark)
+    assert end > mark, "the truncation mark SQL tail moved"
+    _assert_full_reap_shape(truncation[mark : end + len(tail)], face="truncation.py _MARK_SQL")
