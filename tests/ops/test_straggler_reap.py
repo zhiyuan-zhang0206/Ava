@@ -271,6 +271,42 @@ def test_settle_leaves_rows_that_are_not_reap_marks_alone(
     ).fetchone() == ("restarting",)
 
 
+def test_next_wave_prepare_is_effective_after_settle(db_conn: psycopg.Connection) -> None:
+    """E1 (task #4027): a stranded mark refuses the next wave's prepare once —
+    with the `ava start` recovery named — and once the settle face clears it,
+    the next wave's prepare completes and parks the restored member."""
+    agent = create_agent(db_conn)
+    db_conn.execute(
+        "INSERT INTO agents_meta(id,status,machine,runtime_kind,runtime_owner,"
+        "runtime_generation) VALUES(%s,'restarting',%s,'hosted',%s,%s)",
+        (agent, machine_name(), uuid4(), uuid4()),
+    )
+    insert_inbound_message(
+        db_conn, agent, "", "system:maintenance", kind="restart", payload=_MAINTENANCE_PAYLOAD
+    )
+    db_conn.commit()
+
+    when = datetime(2026, 9, 20, 3, 0, tzinfo=UTC)
+    holder = "ops:test:4027"
+    before = pause_owner.begin_maintenance(holder, when)
+    assert before.maintenance is not None
+
+    with pytest.raises(RuntimeError, match="stranded update straggler-reap mark"):
+        maintenance_cohort.prepare(
+            db_conn, machine=machine_name(), host_owner=None, holder=holder, acquired_at=when
+        )
+
+    with db_conn.transaction():
+        assert settle_stranded_reaps(db_conn, machine_name()) == [agent]
+
+    hold = maintenance_cohort.prepare(
+        db_conn, machine=machine_name(), host_owner=None, holder=holder, acquired_at=when
+    )
+    assert hold.phase == "draining"
+    assert hold.parked == (agent,)
+    assert hold.commands == {}
+
+
 def test_unpause_settles_stranded_reaps_and_wakes_them(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -422,3 +458,40 @@ def test_restarting_mark_exits_are_enumerated() -> None:
     cold normalization — a new exit must be weighed against the interrupt."""
     cleared = {rel for rel, text in _production_sources().items() if _REAP_CLEAR.search(text)}
     assert cleared == {"shared/straggler_reap.py", "shared/maintenance_cold.py"}
+
+
+_SHAPE_FRAGMENTS = (
+    "applied_at IS NULL",
+    "observed_at IS NULL",
+    r"status IN \(\'pending\', ?\'claimed\'\)",
+    r"payload \? 'maintenance'",
+)
+
+
+def _assert_full_reap_shape(window: str, *, face: str) -> None:
+    for fragment in _SHAPE_FRAGMENTS:
+        assert re.search(fragment, window), f"{face} lost the reap-shape fragment {fragment!r}"
+
+
+def test_the_reap_readers_carry_the_full_shape() -> None:
+    """The faces that recognise the mark read the full shape the stamp writes
+    and the settle selector matches (task #4027): the in-flight interrupt
+    (agent/db.py) and the host's truncation classifier
+    (services/agent_host/truncation.py). A narrowed face misses the truncation;
+    a widened one fires on commands the drain never stamped. `observed_at IS
+    NULL` is schema-implied by `applied_at IS NULL`, carried explicitly so the
+    faces stay one shape."""
+    sources = _production_sources()
+    db = re.sub(r"\s+", " ", sources["agent/db.py"])
+    start = db.find("async def has_pending_interrupt")
+    assert start >= 0
+    leaf = db.find("i.kind='restart'", start)
+    assert leaf >= 0, "the reap branch moved out of has_pending_interrupt"
+    end = db.find("r.status='restarting'", leaf)
+    assert end > leaf
+    _assert_full_reap_shape(db[leaf:end], face="agent/db.py reap branch")
+
+    truncation = re.sub(r"\s+", " ", sources["services/agent_host/truncation.py"])
+    mark = truncation.find("_MARK_SQL = (")
+    assert mark >= 0, "the truncation mark SQL moved"
+    _assert_full_reap_shape(truncation[mark : mark + 520], face="truncation.py _MARK_SQL")

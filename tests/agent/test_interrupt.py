@@ -13,6 +13,7 @@ import asyncio
 
 import psycopg
 import pytest
+from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from agent.db import has_pending_interrupt
@@ -25,13 +26,25 @@ from shared.machine import machine_name
 # they depend on real DB IO timing.
 _TIMEOUT_S = 5.0
 
+# The maintenance restart payload key (`payload ? 'maintenance'`) is part of
+# the reap shape (task #4027): a restart without it is not the drain's signal.
+_MAINTENANCE_PAYLOAD: dict[str, object] = {
+    "maintenance": {"holder": "ops:test:interrupt", "acquired_at": "2026-09-19T00:00:00+00:00"}
+}
 
-def _insert(conn: psycopg.Connection, agent_id: int, kind: str, source: str = "user") -> None:
+
+def _insert(
+    conn: psycopg.Connection,
+    agent_id: int,
+    kind: str,
+    source: str = "user",
+    payload: dict[str, object] | None = None,
+) -> None:
     with conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-            "VALUES (%s, '', %s, %s)",
-            (agent_id, kind, source),
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+            "VALUES (%s, '', %s, %s, %s)",
+            (agent_id, kind, source, Jsonb(payload) if payload is not None else None),
         )
     conn.commit()
 
@@ -82,7 +95,13 @@ class TestHasPendingInterrupt:
         # un-applied maintenance restart is still pending/claimed — that pair
         # IS the durable truncation signal for this agent's in-flight turn.
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-        _insert(db_conn, tid, "restart", source="system:maintenance")  # pyright: ignore[reportUnknownArgumentType]
+        _insert(
+            db_conn,  # pyright: ignore[reportUnknownArgumentType]
+            tid,
+            "restart",
+            source="system:maintenance",
+            payload=_MAINTENANCE_PAYLOAD,
+        )
         db_conn.execute(  # pyright: ignore[reportUnknownMemberType]
             "INSERT INTO agents_meta(id,status,machine,runtime_kind) "
             "VALUES(%s,'restarting',%s,'hosted')",
@@ -97,7 +116,13 @@ class TestHasPendingInterrupt:
         # The pre-#4016 drain waits for the turn boundary: a pending restart
         # alone never aborts in-flight work.
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-        _insert(db_conn, tid, "restart", source="system:maintenance")  # pyright: ignore[reportUnknownArgumentType]
+        _insert(
+            db_conn,  # pyright: ignore[reportUnknownArgumentType]
+            tid,
+            "restart",
+            source="system:maintenance",
+            payload=_MAINTENANCE_PAYLOAD,
+        )
         db_conn.execute(  # pyright: ignore[reportUnknownMemberType]
             "INSERT INTO agents_meta(id,status,machine,runtime_kind) "
             "VALUES(%s,'running',%s,'hosted')",
@@ -112,7 +137,13 @@ class TestHasPendingInterrupt:
         # A mark whose command already applied is not a truncation signal —
         # the turn reached its boundary; the settle face owns such a row.
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-        _insert(db_conn, tid, "restart", source="system:maintenance")  # pyright: ignore[reportUnknownArgumentType]
+        _insert(
+            db_conn,  # pyright: ignore[reportUnknownArgumentType]
+            tid,
+            "restart",
+            source="system:maintenance",
+            payload=_MAINTENANCE_PAYLOAD,
+        )
         from uuid import uuid4
 
         owner, generation = uuid4(), uuid4()
@@ -122,6 +153,21 @@ class TestHasPendingInterrupt:
             "WHERE agent_id=%s AND kind='restart'",
             (generation, owner, tid),
         )
+        db_conn.execute(  # pyright: ignore[reportUnknownMemberType]
+            "INSERT INTO agents_meta(id,status,machine,runtime_kind) "
+            "VALUES(%s,'restarting',%s,'hosted')",
+            (tid, machine_name()),
+        )
+        db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+        assert await has_pending_interrupt(aops_pool, tid) is False
+
+    async def test_false_on_reap_mark_with_a_non_maintenance_restart(
+        self, db_conn, aops_pool: AsyncConnectionPool
+    ):
+        # Only the maintenance restart names the reap shape (task #4027): a
+        # 'restarting' row with any other un-applied restart must not fire.
+        tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+        _insert(db_conn, tid, "restart")  # pyright: ignore[reportUnknownArgumentType]
         db_conn.execute(  # pyright: ignore[reportUnknownMemberType]
             "INSERT INTO agents_meta(id,status,machine,runtime_kind) "
             "VALUES(%s,'restarting',%s,'hosted')",
