@@ -116,6 +116,46 @@ def test_selects_mapped_sources_and_changed_tests_in_sorted_order(tmp_path: Path
     assert result.full_est_seconds == 10.0
 
 
+def test_tree_scan_tests_join_every_selected_subset(tmp_path: Path) -> None:
+    """A repo-wide scan test must run in every SELECTED subset, not only when a
+    changed source happens to import it (task #4183: the #3020 false green)."""
+    repo_root = _selector_repo(tmp_path)
+    _write(repo_root, "tests/unit/test_lint_demo.py", "def test_demo(): pass\n")
+    _write(repo_root, "tests/unit/test_filler.py", "def test_filler(): pass\n")
+    _write(
+        repo_root,
+        ".test_durations",
+        json.dumps(
+            {
+                "tests/unit/test_changed.py::test_changed": 2.0,
+                "tests/unit/test_imports.py::test_imports": 3.0,
+                "tests/unit/test_other.py::test_other": 5.0,
+                "tests/unit/test_filler.py::test_filler": 60.0,
+            }
+        ),
+    )
+
+    result = test_selector.select_tests(["cli/commands.py"], repo_root=repo_root)
+
+    assert result.decision == "SELECTED"
+    assert result.tests == ("tests/unit/test_imports.py", "tests/unit/test_lint_demo.py")
+
+
+def test_tree_scan_pins_cover_the_real_repo_lint_family_and_are_never_stale() -> None:
+    """Guard: every lint-family file on disk is pinned, and every explicit pin
+    exists — a new scan test cannot silently miss the subset."""
+    pinned = test_selector.tree_scan_tests(_REPO_ROOT)
+    lint_files = {
+        path.relative_to(_REPO_ROOT).as_posix()
+        for path in (_REPO_ROOT / "tests").rglob("test_lint_*.py")
+        if not path.relative_to(_REPO_ROOT).as_posix().startswith("tests/e2e/")
+    }
+    assert lint_files, "the lint family must be discoverable"
+    assert lint_files <= pinned
+    for path in test_selector._TREE_SCAN_TESTS:
+        assert path in pinned, f"{path} is stale (missing on disk)"
+
+
 @pytest.mark.parametrize(
     ("changed_path", "reason"),
     [
