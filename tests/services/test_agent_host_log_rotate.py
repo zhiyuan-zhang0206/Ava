@@ -1,4 +1,4 @@
-"""Raw stdout transcript size rotation — `services.agent_host.daemon`.
+"""Raw stdout transcript size rotation — `services.agent_host.stdout_log` (split out of `daemon.py`).
 
 The launcher points the hosted daemon's fd 1/2 straight at
 `$AVA_HOME/logs/ava-agent-host.out.log`, which carries none of the caps the
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from services.agent_host import daemon
+from services.agent_host import stdout_log
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -26,8 +26,8 @@ def test_stdout_log_path_points_into_logs_dir(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """The transcript path derives from logs_dir() and the session name."""
-    monkeypatch.setattr(daemon.paths, "logs_dir", lambda: tmp_path)
-    assert daemon._stdout_log_path() == tmp_path / "ava-agent-host.out.log"
+    monkeypatch.setattr(stdout_log.paths, "logs_dir", lambda: tmp_path)
+    assert stdout_log._stdout_log_path() == tmp_path / "ava-agent-host.out.log"
 
 
 def test_rotate_files_keeps_one_generation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -40,7 +40,7 @@ def test_rotate_files_keeps_one_generation(monkeypatch: pytest.MonkeyPatch, tmp_
     two = tmp_path / "ava-agent-host.out.log.2"
     two.write_bytes(b"ancient-chunk")
 
-    daemon._rotate_stdout_log_files(log)
+    stdout_log._rotate_stdout_log_files(log)
 
     assert not two.exists()
     assert one.read_bytes() == b"current-chunk"
@@ -55,7 +55,7 @@ def test_rotate_files_without_prior_generation(
     log = tmp_path / "ava-agent-host.out.log"
     log.write_bytes(b"first-chunk")
 
-    daemon._rotate_stdout_log_files(log)
+    stdout_log._rotate_stdout_log_files(log)
 
     assert (tmp_path / "ava-agent-host.out.log.1").read_bytes() == b"first-chunk"
     assert not (tmp_path / "ava-agent-host.out.log.2").exists()
@@ -72,13 +72,13 @@ def _child_script(log_path: str) -> str:
 import os, sys
 from pathlib import Path
 sys.path.insert(0, {str(_REPO_ROOT)!r})
-from services.agent_host import daemon
+from services.agent_host import stdout_log
 
 log = Path(sys.argv[1])
-daemon._stdout_log_path = lambda: log
-daemon._STDOUT_LOG_ROTATE_BYTES = 1 << 20  # 1 MiB ceiling for the test
+stdout_log._stdout_log_path = lambda: log
+stdout_log._STDOUT_LOG_ROTATE_BYTES = 1 << 20  # 1 MiB ceiling for the test
 os.write(1, b"x" * (1 << 20))
-rotated = daemon._rotate_stdout_log_if_needed()
+rotated = stdout_log._rotate_stdout_log_if_needed()
 assert rotated == (1 << 20), f"expected rotation at ceiling, got {{rotated}}"
 os.write(1, b"after-rotation")
 # Stream objects (the loguru console sink writes through the same path) must
@@ -135,12 +135,12 @@ def _child_script_noop(log_path: str) -> str:
 import os, sys
 from pathlib import Path
 sys.path.insert(0, {str(_REPO_ROOT)!r})
-from services.agent_host import daemon
+from services.agent_host import stdout_log
 
 log = Path(sys.argv[1])
-daemon._stdout_log_path = lambda: log
-daemon._STDOUT_LOG_ROTATE_BYTES = 1 << 30  # far above the few bytes written
-rotated = daemon._rotate_stdout_log_if_needed()
+stdout_log._stdout_log_path = lambda: log
+stdout_log._STDOUT_LOG_ROTATE_BYTES = 1 << 30  # far above the few bytes written
+rotated = stdout_log._rotate_stdout_log_if_needed()
 assert rotated is None, f"expected no rotation, got {{rotated}}"
 os.write(1, b"tail")
 """
@@ -154,24 +154,24 @@ def _child_script_open_failure(log_path: str) -> str:
 import os, sys
 from pathlib import Path
 sys.path.insert(0, {str(_REPO_ROOT)!r})
-from services.agent_host import daemon
+from services.agent_host import stdout_log
 
 log = Path(sys.argv[1])
-daemon._stdout_log_path = lambda: log
-daemon._STDOUT_LOG_ROTATE_BYTES = 1 << 20  # 1 MiB ceiling for the test
+stdout_log._stdout_log_path = lambda: log
+stdout_log._STDOUT_LOG_ROTATE_BYTES = 1 << 20  # 1 MiB ceiling for the test
 os.write(1, b"x" * (1 << 20))
 
 real_open = os.open
 def boom(_path, _flags, _mode=0o777):
     raise OSError(28, "No space left on device")
 os.open = boom
-rotated = daemon._rotate_stdout_log_if_needed()
+rotated = stdout_log._rotate_stdout_log_if_needed()
 assert rotated is None, f"expected failure, got {{rotated}}"
 os.open = real_open
 assert log.exists(), "transcript must be restored under its original name"
 assert not Path(str(log) + ".1").exists(), "no chunk may be stranded"
 os.write(1, b"after-open-failure")
-rotated = daemon._rotate_stdout_log_if_needed()
+rotated = stdout_log._rotate_stdout_log_if_needed()
 assert rotated == (1 << 20) + len(b"after-open-failure"), f"self-heal failed: {{rotated}}"
 os.write(1, b"after-self-heal")
 """

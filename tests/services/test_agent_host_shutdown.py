@@ -1,4 +1,9 @@
-"""A failed background task cannot skip turn drain or ownership release."""
+"""A failed background task cannot skip turn drain or ownership release.
+
+The sweep's bounded-exit regression (task #4224) rides the shared child-process
+harness: production ``main()`` must exit within a small bound of SIGTERM even
+with a default-executor job mid-flight.
+"""
 
 import asyncio
 import json
@@ -6,9 +11,17 @@ import signal
 import subprocess
 import sys
 from functools import partial
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
+from tests.services.daemon_shutdown_test_support import (
+    EXIT_BOUND_S,
+    KILL_SLACK_S,
+    spawn_child,
+)
 
 
 def _exercise_shutdown(failure: str) -> None:
@@ -151,3 +164,24 @@ def test_failed_background_still_drains_and_releases(failure: str, exception: st
     assert events.index("beat_stopped") < events.index("owner_released")
     if failure == "exception":
         assert events.index("turns_drained") < events.index("beat_stopped")
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="POSIX SIGTERM path; Windows stops route through the private console",
+)
+def test_sigterm_bounded_exit_with_wedged_executor(tmp_path: Path) -> None:
+    """SIGTERM exits within the bound while a wedged default-executor job stands."""
+    # The exit bound only matters relative to the stop budget it protects:
+    # assert the relationship, not just the number.
+    assert EXIT_BOUND_S + KILL_SLACK_S < PAUSE_TIMEOUT_SECONDS / 5
+    child = spawn_child(tmp_path, module="services.agent_host.daemon", label="agent-host")
+    try:
+        child.terminate()
+        child.wait_bounded_exit(what="wedged executor job")
+        assert "[agent-host] interrupted, shutting down" in child.log_tail(), child.log_tail()
+        assert "cleanup-ran" in child.markers(), (
+            "the cancellation drain did not reach run()'s cleanup"
+        )
+    finally:
+        child.close()
