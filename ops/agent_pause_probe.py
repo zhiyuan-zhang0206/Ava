@@ -1,9 +1,11 @@
 """Read the running local host's maintenance capability without trusting disk code."""
 
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
+from urllib.error import URLError
 from urllib.request import ProxyHandler, build_opener
 from uuid import UUID
 
@@ -12,6 +14,8 @@ from shared.daemon_health import health_port
 from shared.paths import ava_home
 
 _ROOT_SOCKET_NAME = "ava-root.sock"  # the K1 control socket under root_run_dir()
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -130,6 +134,27 @@ def host_identity() -> HostIdentity:
     if not isinstance(owner, str):
         raise TypeError("missing agent-host boot owner")
     return HostIdentity(UUID(owner), frozenset(cast(list[int], active)))
+
+
+def host_identity_or_none() -> HostIdentity | None:
+    """`host_identity`, with a refused dial reading as "no live host".
+
+    The stop/repair gates ask this probe one question: does a running host
+    still hold active continuations? A refused loopback dial (nothing is
+    listening) answers it -- no host process is serving, so no continuation
+    is live -- and reads as None. Every other failure (a wedged listener, a
+    pidfile or identity mismatch, a foreign home) leaves the fact unknown
+    and still raises: those callers keep their fail-closed refusal.
+    """
+    try:
+        return host_identity()
+    except URLError as exc:
+        if not isinstance(exc.reason, ConnectionRefusedError):
+            raise
+    except ConnectionRefusedError:
+        pass
+    _log.warning("agent-host health probe refused; reading as no live host")
+    return None
 
 
 def ops_quiescent(timeout: float) -> None:

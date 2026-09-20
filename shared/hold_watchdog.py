@@ -394,11 +394,11 @@ def evaluate(*, now: float | None = None) -> HoldWatchdogVerdict:
             f"hold phase {phase!r} is not a post-stop completion phase",
             **generation,
         )
-    if current.maintenance.failures:
+    unsettled = current.maintenance.unsettled_failures()
+    if unsettled:
         return _back(
             "failures",
-            f"the hold carries {len(current.maintenance.failures)} failed receipt(s); "
-            "repair precedes any completion",
+            f"the hold carries {len(unsettled)} failed receipt(s); repair precedes any completion",
             **generation,
         )
     if not enabled():

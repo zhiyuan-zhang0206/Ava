@@ -65,7 +65,10 @@ issued is truncated and released with the honest `reaped` outcome instead of
 aborting the wave (task #4016; the local stop family — `ava stop`/`pause`/
 `restart` drains — never reaps). Its mark is settled at the next agent-host
 boot or local resume (`ava start` runs the resume path), and its claimed
-work re-delivers on the new code.
+work re-delivers on the new code. A failure recorded while that truncated
+turn unwinds (the member losing its row mid-unwind, task #4150) is settled
+with the mark: a reaped member's failure never gates resume, stop, start or
+repair, and a later failure receipt for a reaped member is not latched.
 
 The existing home-local journal survives a CLI crash, host reboot and an
 offline database. An incomplete drain or stop retains the hold and reports
@@ -179,11 +182,14 @@ the sanctioned repair:
 ava maintenance repair --operation <operation> --acquired-at <timestamp> [--operator "Ava #1234"]
 ```
 
-Repair requires the exact generation capability, refuses while the agent-host
-still has active continuations, and records operator identity (timestamp,
-operator label, OS user/uid/pid, parent process, machine) in the journal —
-both sides of the repair CAS stay visible via `ava maintenance status`. A
-partial release after a successful repair is completed by `resume --cancel`.
+Repair requires the exact generation capability, works on a
+`preparing`/`draining`/`drained` hold (a failure latched after the cohort
+landed has no other exit), refuses while the agent-host still has active
+continuations — an unreachable agent-host (a refused dial: nothing serving)
+reads as none — and records operator identity (timestamp, operator label, OS
+user/uid/pid, parent process, machine) in the journal — both sides of the
+repair CAS stay visible via `ava maintenance status`. A partial release after
+a successful repair is completed by `resume --cancel`.
 
 ## Recovering a stuck maintenance operation
 
@@ -192,7 +198,7 @@ stop retains its journal — which survives a CLI crash, a host reboot and an
 offline database — instead of unwinding. Since task #3270 a **pre-stop** hold
 is no longer unconditionally hand-recovery: the operator-side entries stamp it
 with the shepherding process, and a hold whose shepherd is gone, whose
-failures are empty and which nothing is executing under is declared
+blocking failures are empty and which nothing is executing under is declared
 `abandoned` at the 10-minute notice bound and released by the pause watchdog
 after a 30-minute observation window — `resume --cancel`'s automatic twin,
 loudly audited, disable with `AVA_ABANDONED_HOLD_AUTO_RELEASE=0`. Everything
@@ -248,9 +254,9 @@ hold-watchdog-unregister`), or the hold is younger than its bound or carries
 failed receipts.
 
 `resume --cancel` refuses while blocking failed receipts remain. Fix the root
-cause first, then release the latch with the sanctioned repair — only on a
-`preparing`/`draining` hold, and only while the agent-host has no active
-continuations:
+cause first, then release the latch with the sanctioned repair — on a
+`preparing`/`draining`/`drained` hold, and only while the agent-host has no
+active continuations (an unreachable host reads as none):
 
 ```
 ava maintenance repair --operation <operation> --acquired-at <timestamp> [--operator "Ava #1234"]

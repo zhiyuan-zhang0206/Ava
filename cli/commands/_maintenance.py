@@ -13,7 +13,7 @@ import os
 import sys
 from datetime import UTC, datetime
 
-from cli.commands._maintenance_probe import host_identity, ops_quiescent
+from cli.commands._maintenance_probe import host_identity, host_identity_or_none, ops_quiescent
 from cli.commands._maintenance_stop import (
     deadline_after,
     remaining,
@@ -49,8 +49,10 @@ def _stop(
         raise RuntimeError("stop requires a completed drain for this operation")
     with connect() as conn:
         maintenance_cohort.verify_drained(conn, hold)
-    if "agent-runner" in machine_role() and hold.phase == "drained" and host_identity().active:
-        raise RuntimeError("agent-host still has active continuations")
+    if "agent-runner" in machine_role() and hold.phase == "drained":
+        identity = host_identity_or_none()
+        if identity is not None and identity.active:
+            raise RuntimeError("agent-host still has active continuations")
     # Only now close ordinary API admission. In-flight native actions retained
     # their dependency APIs throughout prepare/drain.
     from shared.host_deploy_state import set_posture
@@ -111,22 +113,26 @@ def _repair(holder: str, at: datetime, *, operator: str | None) -> None:
     record is the sanction; the journal tombstone keeps both sides of the CAS
     (`failures` moved verbatim into `repaired`) visible via
     `ava maintenance status`. Refuses while the agent-host still has active
-    continuations, so no live receipt can be cleared from under a running turn.
+    continuations, so no live receipt can be cleared from under a running
+    turn; an unreachable agent-host (nothing serving) reads as no live
+    continuations, while every other probe failure still refuses. A hold
+    that already drained is repairable: a post-drain failure has no other
+    sanctioned exit.
     """
     from ops.cluster_pause import unpause_local_cluster
 
     hold = _hold(holder, at)
-    if not hold.failures:
+    if not hold.unsettled_failures():
         raise RuntimeError(
             "no failed receipts to repair; resume --cancel abandons a failure-free drain"
         )
-    if hold.phase not in ("preparing", "draining"):
+    if hold.phase not in ("preparing", "draining", "drained"):
         raise RuntimeError(
             "repair cannot bypass a started stop; complete maintenance stop/start/resume"
         )
     if "agent-runner" in machine_role():
-        identity = host_identity()
-        if identity.active:
+        identity = host_identity_or_none()
+        if identity is not None and identity.active:
             raise RuntimeError(
                 "agent-host still has active continuations; wait for quiescence "
                 "before repairing failed receipts"

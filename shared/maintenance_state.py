@@ -42,6 +42,20 @@ class MaintenanceHold:
     # Existing unowned idle intent stays untouched; it is not a restart request.
     parked: tuple[int, ...] = ()
 
+    def unsettled_failures(self) -> dict[int, str]:
+        """The failures still needing an operator: those without a reap release.
+
+        A member the straggler reap released (task #4016) has no continuation
+        left to repair -- the reap is its honest terminal outcome -- and a
+        failure recorded around that release (its interrupted turn unwinding,
+        e.g. losing the row mid-unwind) must not gate the hold. Every gate
+        reads `failures` through here; the raw field stays the journal's audit
+        record.
+        """
+        return {
+            agent: reason for agent, reason in self.failures.items() if agent not in self.reaped
+        }
+
     def encode(self) -> dict[str, object]:
         return {
             "phase": self.phase,
