@@ -64,9 +64,11 @@ class ProcessRef:
     def probe(self) -> Literal["live", "gone", "unreadable"]:
         """Whether the process this ref names is still the same live process.
 
-        `gone` is the unambiguous reading (no such pid, or a recycled pid whose
-        birth does not match); `unreadable` means the question could not be
-        answered and must not be treated as death.
+        `gone` is the unambiguous reading (no such pid — including a /proc
+        entry that vanished between the existence validation and the identity
+        read — or a recycled pid whose birth does not match); `unreadable`
+        means the question could not be answered and must not be treated as
+        death.
         """
         # Method-local (shared/proc.py precedent): the in-process updater's
         # pre-checkout import closure must not reach shared.session_record /
@@ -85,7 +87,13 @@ class ProcessRef:
             if self.starttime is not None:
                 actual = pid_starttime_ticks(self.pid)
                 if actual is None:
-                    return "unreadable"
+                    # No /proc entry after psutil validated the pid: it was
+                    # reaped in between — "no such pid", the unambiguous gone.
+                    # A pid that still exists but could not be read stays
+                    # unreadable, never a death.
+                    if psutil.pid_exists(self.pid):
+                        return "unreadable"
+                    return "gone"
                 if actual != self.starttime:
                     return "gone"
             elif not create_time_matches(stable_create_time(proc), self.birth):

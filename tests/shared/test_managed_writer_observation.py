@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import signal
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
@@ -34,6 +36,7 @@ from shared.managed_writer_observation import (
     observe_session,
 )
 from shared.native_job_observation import NativeReadUnavailableError
+from shared.platform import IS_LINUX
 from shared.session_record import pid_starttime_ticks
 from shared.transport_encryption import TransportEncryptionUndeclared
 
@@ -153,6 +156,59 @@ def test_exact_live_exited_and_reused_identity() -> None:
         if child.poll() is None:
             child.kill()
             child.wait(timeout=5)
+
+
+@pytest.mark.skipif(not IS_LINUX, reason="Linux /proc start-time identity")
+def test_observe_process_reads_a_vanished_entry_as_exited(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The stop-race window in the managed-writer observation: psutil validated
+    the pid, then the raw read found no /proc entry because the process was
+    reaped in between — that is the exit itself, not a lost observation."""
+    from shared import managed_writer_observation as observation
+
+    child = subprocess.Popen([sys.executable, "-I", "-c", "import time; time.sleep(30)"])
+    pid = child.pid
+    expected = ExpectedProcess(
+        pid=pid,
+        create_time=psutil.Process(pid).create_time(),
+        starttime=pid_starttime_ticks(pid),
+    )
+    assert expected.starttime is not None
+    real_read = pid_starttime_ticks
+
+    def reaping_read(reading_pid: int) -> int | None:
+        if reading_pid == pid:
+            os.kill(pid, signal.SIGKILL)
+            child.wait()
+        return real_read(reading_pid)
+
+    monkeypatch.setattr(observation, "pid_starttime_ticks", reaping_read)
+    try:
+        assert observe_process(expected) == "exited"
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait(timeout=5)
+
+
+@pytest.mark.skipif(not IS_LINUX, reason="Linux /proc start-time identity")
+def test_observe_process_keeps_unknown_when_a_present_process_cannot_be_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pid that still exists while its start time cannot be read stays a
+    full unknown — never collapsed into the exit it does not prove."""
+    from shared import managed_writer_observation as observation
+
+    expected = ExpectedProcess(
+        pid=os.getpid(), create_time=psutil.Process().create_time(), starttime=1
+    )
+
+    def unreadable_read(_pid: int) -> int | None:
+        return None
+
+    monkeypatch.setattr(observation, "pid_starttime_ticks", unreadable_read)
+    assert observe_process(expected) == "unknown"
 
 
 def test_session_malformed_or_changed_is_not_absent(tmp_path: Path) -> None:

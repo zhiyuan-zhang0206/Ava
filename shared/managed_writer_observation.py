@@ -87,13 +87,21 @@ ProcessVerdict = Literal["alive", "exited", "identity_mismatch", "unknown"]
 
 
 def observe_process(expected: ExpectedProcess) -> ProcessVerdict:
-    """A reused PID is not the expected process and is not silently accepted."""
+    """A reused PID is not the expected process and is not silently accepted.
+
+    A /proc entry that vanished between psutil's validation and the identity
+    read is the exit itself (the process was reaped in between) — `exited`,
+    not a lost observation; a pid that still exists but could not be read
+    stays `unknown`.
+    """
     try:
         process = psutil.Process(expected.pid)
         if expected.starttime is not None:
             actual = pid_starttime_ticks(expected.pid)
             if actual is None:
-                return "unknown"
+                if psutil.pid_exists(expected.pid):
+                    return "unknown"
+                return "exited"
             if actual != expected.starttime:
                 return "identity_mismatch"
         elif not create_time_matches(stable_create_time(process), expected.create_time):
