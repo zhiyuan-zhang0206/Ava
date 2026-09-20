@@ -84,8 +84,11 @@ the journaled set and publishes exactly the complete readbacks through
 checked recovery's to clear. The seat writes no deployment phase, holder or
 lease: ordinary admission stays deferred until the existing finalizer's release
 settles the phase, and that release's pending guard is exactly what the commit
-clears. It is inert on the same terms: no production module imports it until the
-rollout wiring slice connects the post-Phase-B step.
+clears. The rollout wiring now connects the post-Phase-B step (task #4128 E2-a):
+`cli/commands/_managed_writer_wiring.py` consumes the enable point's recorded
+decision and, only under `active`, runs this seat inside one short transaction
+and one rollout stage -- every other decision skips it untouched, and a seat
+refusal fails the rollout with the pending journal left for checked recovery.
 
 No production migration, normal service activation or protocol advertisement
 is performed by importing or testing these helpers.
