@@ -1050,42 +1050,24 @@ class TestList:
 class TestGetLastMessage:
     def test_any_agent_can_query_unrelated_agent(self, db_conn: psycopg.Connection) -> None:
         """Any agent in the cluster can query — not just spawn-chain ancestors."""
-        from langchain_core.messages import AIMessage
-        from langgraph.checkpoint.base import empty_checkpoint
-        from langgraph.checkpoint.postgres import PostgresSaver
-
-        from shared.config import settings
         from shared.db import create_agent
 
         # Create two unrelated agents (no spawn chain).
-        # create_agent inserts into agents (LangGraph thread); we also need
-        # agents_meta for the endpoint's existence check.
+        # create_agent inserts into agents (LangGraph thread); agents_meta
+        # carries the row the endpoint reads.
         agent_a = create_agent(db_conn)
         agent_b = create_agent(db_conn)
         with db_conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', 'running')",
-                (agent_a,),
+                "INSERT INTO agents_meta (id, spawner, status, last_message_text) "
+                "VALUES (%s, 'test', 'running', %s)",
+                (agent_a, "hello from agent A"),
             )
             cur.execute(
                 "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', 'running')",
                 (agent_b,),
             )
         db_conn.commit()
-
-        # Write a checkpoint for agent_a with an AIMessage
-        msg = AIMessage(content="hello from agent A", id="msg-1")
-        ckpt = empty_checkpoint()
-        ckpt["channel_values"] = {"messages": [msg]}
-        ckpt["channel_versions"] = {"messages": "1", "__start__": "1"}
-        with PostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
-            saver.setup()
-            saver.put(
-                config={"configurable": {"thread_id": str(agent_a), "checkpoint_ns": ""}},
-                checkpoint=ckpt,
-                metadata={"source": "input", "step": 1, "parents": {}},
-                new_versions={"messages": "1"},
-            )
 
         with TestClient(app) as client:
             # Agent B queries Agent A's last message — should succeed
@@ -1199,98 +1181,6 @@ class TestGetLastMessage:
             )
         assert resp.status_code == 200
         assert resp.json()["text"] == "pre-compact message"
-
-    def test_falls_back_to_checkpoint_when_column_null(self, db_conn: psycopg.Connection) -> None:
-        """Backward compat: when last_message_text IS NULL, scan checkpoint."""
-        from langchain_core.messages import AIMessage
-        from langgraph.checkpoint.base import empty_checkpoint
-        from langgraph.checkpoint.postgres import PostgresSaver
-
-        from shared.config import settings
-        from shared.db import create_agent
-
-        agent_id = create_agent(db_conn)
-        with db_conn.cursor() as cur:
-            # last_message_text is left NULL (default)
-            cur.execute(
-                "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', 'running')",
-                (agent_id,),
-            )
-        db_conn.commit()
-
-        # Write a checkpoint with an AIMessage
-        msg = AIMessage(content="from checkpoint", id="msg-1")
-        ckpt = empty_checkpoint()
-        ckpt["channel_values"] = {"messages": [msg]}
-        ckpt["channel_versions"] = {"messages": "1", "__start__": "1"}
-        with PostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
-            saver.setup()
-            saver.put(
-                config={"configurable": {"thread_id": str(agent_id), "checkpoint_ns": ""}},
-                checkpoint=ckpt,
-                metadata={"source": "input", "step": 1, "parents": {}},
-                new_versions={"messages": "1"},
-            )
-
-        with TestClient(app) as client:
-            resp = client.get(
-                f"/api/agents/{agent_id}/last-message",
-                params={"caller": "agent:99999"},
-            )
-        assert resp.status_code == 200
-        assert resp.json()["text"] == "from checkpoint"
-
-    def test_falls_back_to_checkpoint_when_column_missing(
-        self, db_conn: psycopg.Connection
-    ) -> None:
-        """When last_message_text column does not exist (migration not applied),
-        fall back to checkpoint scan instead of returning 500."""
-        from langchain_core.messages import AIMessage
-        from langgraph.checkpoint.base import empty_checkpoint
-        from langgraph.checkpoint.postgres import PostgresSaver
-
-        from shared.config import settings
-        from shared.db import create_agent
-
-        agent_id = create_agent(db_conn)
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', 'running')",
-                (agent_id,),
-            )
-        db_conn.commit()
-
-        # Write a checkpoint with an AIMessage
-        msg = AIMessage(content="from checkpoint fallback", id="msg-1")
-        ckpt = empty_checkpoint()
-        ckpt["channel_values"] = {"messages": [msg]}
-        ckpt["channel_versions"] = {"messages": "1", "__start__": "1"}
-        with PostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
-            saver.setup()
-            saver.put(
-                config={"configurable": {"thread_id": str(agent_id), "checkpoint_ns": ""}},
-                checkpoint=ckpt,
-                metadata={"source": "input", "step": 1, "parents": {}},
-                new_versions={"messages": "1"},
-            )
-
-        # Drop the last_message_text column to simulate migration not applied
-        with db_conn.cursor() as cur:
-            cur.execute("ALTER TABLE agents_meta DROP COLUMN IF EXISTS last_message_text")
-        db_conn.commit()
-
-        with TestClient(app) as client:
-            resp = client.get(
-                f"/api/agents/{agent_id}/last-message",
-                params={"caller": "agent:99999"},
-            )
-        assert resp.status_code == 200
-        assert resp.json()["text"] == "from checkpoint fallback"
-
-        # Restore the column for subsequent tests
-        with db_conn.cursor() as cur:
-            cur.execute("ALTER TABLE agents_meta ADD COLUMN IF NOT EXISTS last_message_text TEXT")
-        db_conn.commit()
 
     def test_404_for_nonexistent_agent(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:
