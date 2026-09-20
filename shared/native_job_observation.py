@@ -31,6 +31,10 @@ class NativeReadUnavailableError(RuntimeError):
 
 class LauncherObservation(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+    # The scheduler family this observation came from: the fence derivation
+    # branches on it and refuses cross-family shapes, so it is filled by the
+    # observing producer itself, never supplied by a caller.
+    kind: Literal["launchd", "crontab", "schtasks"]
     definition: Literal["match", "mismatch", "absent", "unknown"] = "unknown"
     declared_home: Literal["match", "mismatch", "unknown"] = "unknown"
     declared_image: Literal["prepared", "other", "unknown"] = "unknown"
@@ -240,12 +244,14 @@ def observe_launchd(
     if first is None:
         # A positively absent definition still carries the loaded facts the
         # fence derivation pairs with "removed" — never as unknown.
-        return LauncherObservation(definition="absent", loaded=loaded, current_digest=None)
+        return LauncherObservation(
+            kind="launchd", definition="absent", loaded=loaded, current_digest=None
+        )
     actual_digest = hashlib.sha256(first).hexdigest()
     if actual_digest != digest:
         # Summary only: the foreign bytes are reported by digest, never parsed.
         return LauncherObservation(
-            definition="mismatch", loaded=loaded, current_digest=actual_digest
+            kind="launchd", definition="mismatch", loaded=loaded, current_digest=actual_digest
         )
     parsed = plistlib.loads(first)
     if not isinstance(parsed, dict):
@@ -256,7 +262,7 @@ def observe_launchd(
     # A job that cannot load in this Aqua domain is unobservable here: an
     # explicit non-Aqua session limit degrades to unknown, not a match.
     if not _loads_in_aqua(definition.get("LimitLoadToSessionType")):
-        return LauncherObservation()
+        return LauncherObservation(kind="launchd")
     raw_environment = definition.get("EnvironmentVariables")
     if not isinstance(raw_environment, dict):
         raise NativeReadUnavailableError("launchd definition has no explicit environment")
@@ -271,6 +277,7 @@ def observe_launchd(
         raise NativeReadUnavailableError("launchd executable declarations disagree")
     return LauncherObservation.model_validate(
         {
+            "kind": "launchd",
             "definition": "match",
             "loaded": loaded,
             "current_digest": digest,
@@ -293,9 +300,9 @@ def observe_crontab(
     lines = first.decode("utf-8").splitlines()
     matches = [line for line in lines if hashlib.sha256(line.encode()).hexdigest() == name]
     if not matches:
-        return LauncherObservation(definition="absent", enabled=False)
+        return LauncherObservation(kind="crontab", definition="absent", enabled=False)
     if len(matches) != 1 or hashlib.sha256(matches[0].encode()).hexdigest() != digest:
-        return LauncherObservation(definition="mismatch")
+        return LauncherObservation(kind="crontab", definition="mismatch")
     line = matches[0]
     if any(character in line for character in "`$;|&<>\\%(){}"):
         raise NativeReadUnavailableError("crontab shell expression is unsupported")
@@ -306,6 +313,7 @@ def observe_crontab(
         raise NativeReadUnavailableError("crontab lacks explicit command home")
     return LauncherObservation.model_validate(
         {
+            "kind": "crontab",
             "definition": "match",
             "enabled": True,
             **declaration_binding(

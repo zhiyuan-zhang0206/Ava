@@ -321,7 +321,7 @@ def test_observe_launcher_passes_absent_through_and_unknowns_refuse(
     )
     until = datetime.now(UTC) + timedelta(seconds=10)
 
-    absent = LauncherObservation(definition="absent", loaded=False)
+    absent = LauncherObservation(kind="launchd", definition="absent", loaded=False)
 
     def absent_launchd(*_args: object, **_kwargs: object) -> LauncherObservation:
         return absent
@@ -333,4 +333,4 @@ def test_observe_launcher_passes_absent_through_and_unknowns_refuse(
         raise NativeReadUnavailableError("launchctl enumeration unreadable")
 
     monkeypatch.setattr(observation, "observe_launchd", unreadable)
-    assert observe_launcher(expected, unit, until) == LauncherObservation()
+    assert observe_launcher(expected, unit, until) == LauncherObservation(kind="launchd")
