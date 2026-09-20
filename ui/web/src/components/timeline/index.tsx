@@ -70,7 +70,7 @@
 // - `./timestamp` — formatItemTime + ItemTimestamp
 // - `./buttons`   — ForkButton + CopyButton
 // - `./row`       — TimelineRow (memo) + cardConfigFor (per-item config cache)
-// - `./overlays`  — PullToLoadIndicator / LoadOlderButton / ColdLoadSpinner / ScrollToBottomButton
+// - `./overlays`  — LoadOlderSpinner / ColdLoadSpinner / ScrollToBottomButton
 import {
   Fragment,
   useCallback,
@@ -102,7 +102,7 @@ import { ConnectionNotice } from "@/components/connection-notice";
 import { CompactingBlock } from "./compacting-block";
 import { findClosestStuckHeaderId, TurnBlock } from "./run-block";
 import { classifyItem, groupIntoTurns, type TimelineGroup } from "./runs";
-import { CompactHistoryDivider, LoadOlderButton, PullToLoadIndicator, ColdLoadSpinner, ScrollToBottomButton } from "./overlays";
+import { CompactHistoryDivider, LoadOlderSpinner, ColdLoadSpinner, ScrollToBottomButton } from "./overlays";
 import { TimelineRow, cardConfigFor } from "./row";
 
 
@@ -124,9 +124,10 @@ interface Props {
   onFork?: (() => void) | null;
   forkPending?: boolean;
   // Scroll-up history loading: the timeline holds only a tail window; when
-  // the user scrolls near the top and older items remain, onLoadOlder
-  // fetches + prepends the previous window. hasMoreOlder gates the trigger;
-  // loadingOlder shows the in-flight hint and guards re-triggering.
+  // the view settles at the top and older items remain, the previous window
+  // auto-loads (onLoadOlder fetches + prepends — task #4186). hasMoreOlder
+  // gates the trigger; loadingOlder shows the in-flight spinner and guards
+  // re-triggering.
   hasMoreOlder?: boolean;
   loadingOlder?: boolean;
   onLoadOlder?: () => void;
@@ -139,12 +140,6 @@ interface Props {
    *  column itself stays capped and centered inside it. Falsy = full width. */
   maxWidthCss?: string;
 }
-
-// Pull-down-to-load thresholds. Pulling down past top fills the circular
-// progress indicator; releasing once the threshold is met triggers loading the
-// older compact history.
-export const PULL_THRESHOLD_PX = 56;
-export const MAX_PULL_PX = 80;
 
 interface RenderGroup {
   readonly group: TimelineGroup;
@@ -282,16 +277,6 @@ export function TimelineView({
   // change when older items land — only the front real item does.
   const pendingAnchorRef = useRef<{ id: string; frontId: string | null; docTop: number } | null>(null);
 
-  // Pull-down-to-load state and gesture tracking.
-  const [pullDistance, setPullDistance] = useState(0);
-  const pullDistanceRef = useRef(0);
-  const latestPullRef = useRef(0);
-  const isPullingTouchRef = useRef(false);
-  const touchStartYRef = useRef<number | null>(null);
-  const touchStartXRef = useRef<number | null>(null);
-  const wheelPullRef = useRef(0);
-  const wheelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const rafIdRef = useRef<number | null>(null);
   const prevLoadingOlderRef = useRef(loadingOlder);
   // Scroll-to-bottom button visibility. Driven by the *measured* current
   // distance to the bottom (sticky.ts:isAtBottom), NOT by the sticky
@@ -302,13 +287,6 @@ export function TimelineView({
   // A ResizeObserver re-measures on those height changes. Initial true =
   // button hidden until the user scrolls away.
   const [atBottom, setAtBottom] = useState(true);
-  // Settled-at-top flag driving the load-older fallback control (keyboard /
-  // screen-reader / scrollbar users reach the top via scroll-only inputs, so
-  // they need an explicit affordance; the pull gestures below do not fire for
-  // them). Measured in onScroll and in the ResizeObserver callback so a
-  // short thread whose content fits the viewport (scrollTop stays 0, no
-  // scroll event ever fires) still gets the control.
-  const [atTop, setAtTop] = useState(false);
   const stuckRafRef = useRef<number | null>(null);
   // The ids of the pinned headers: one owner for all surfaces — a work block's
   // header or a top-level message card's (level 1, one line under the HeaderBar)
@@ -374,12 +352,6 @@ export function TimelineView({
       ),
     );
   }, [stickyThresholds]);
-
-  const measureAtTop = useCallback(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-    setAtTop(viewport.scrollTop <= 0);
-  }, []);
 
   // Pin the viewport to the bottom and report the performed scroll back to
   // the controller (post-write snapshot, so the browser-clamped actual
@@ -457,24 +429,26 @@ export function TimelineView({
     }
   }, []);
 
-  // rAF-throttled pull-distance render: touchmove/wheel can fire at
-  // 60-120/s; one state update per animation frame keeps the indicator
-  // silky without re-rendering the whole timeline per event.
-  const schedulePullRender = useCallback((pull: number) => {
-    pullDistanceRef.current = pull;
-    latestPullRef.current = pull;
-    if (rafIdRef.current !== null) return; // a frame is already scheduled
-    rafIdRef.current = requestAnimationFrame(() => {
-      rafIdRef.current = null;
-      setPullDistance(latestPullRef.current);
-    });
-  }, []);
-
-  // Click path of the load-older fallback control: same anchor capture as the
-  // gesture paths, so the prepend lands with zero jitter for this input too.
-  const handleLoadOlderClick = useCallback(() => {
+  // Auto-load path (task #4186): reaching the top of the viewport with older
+  // pages remaining fetches the previous window automatically — the reader's
+  // only trigger since the load-earlier control and the pull gesture were
+  // removed. The same anchor capture as before keeps the prepend jitter-free.
+  // Guards: nothing while a load is in flight, while no page remains, or
+  // while a captured anchor still waits for its landing commit (the
+  // pendingAnchorRef gate — captureAnchor sets it, the landing effect clears
+  // it, and the release effect below clears it when a cycle ends without a
+  // landing; an arrival can never double-fire and a failed fetch never
+  // deadlocks the gate). One page per arrival: after a landing the reader
+  // sits above the new content, so continued scroll-up paging arrives again
+  // and keeps loading until has_more clears (adjudicated semantics, QA
+  // #3031).
+  const maybeLoadOlderAtTop = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || viewport.scrollTop > 0) return;
+    if (!hasMoreOlderRef.current || loadingOlderRef.current) return;
+    if (!loadOlderRef.current || pendingAnchorRef.current !== null) return;
     captureAnchor();
-    loadOlderRef.current?.();
+    loadOlderRef.current();
   }, [captureAnchor]);
 
   useLayoutEffect(() => {
@@ -493,12 +467,14 @@ export function TimelineView({
       scrollHeight: viewport.scrollHeight,
       clientHeight: viewport.clientHeight,
     });
-    // Every scroll event goes to the controller. Inertial momentum scroll
-    // to top stops naturally at scrollTop = 0 without auto-triggering loadOlder.
+    // Every scroll event goes to the controller. Reaching the top of the
+    // viewport with older pages remaining auto-loads the previous window
+    // (task #4186) — an inertial momentum run lands on scrollTop = 0 and
+    // triggers it exactly like a slow scroll does.
     const onScroll = () => {
       controller.handleScroll(snapshot());
       measureAtBottom();
-      measureAtTop();
+      maybeLoadOlderAtTop();
       stuckRafRef.current ??= requestAnimationFrame(() => {
         stuckRafRef.current = null;
         updateStuckHeader();
@@ -511,152 +487,23 @@ export function TimelineView({
     // absorb at the bottom. It is no longer the only escape a slow
     // scroll-up has: the controller accumulates small upward scroll moves
     // into a run, which is what a scrollbar drag (no wheel at all) depends
-    // on. Touch devices never fire wheel. The same event also drives the
-    // pull-down-to-load gesture when the viewport is already at the top.
+    // on. Touch devices never fire wheel.
     const onWheel = (e: WheelEvent) => {
       controller.handleWheel(e.deltaY, snapshot());
-      if (hasMoreOlderRef.current && !loadingOlderRef.current && viewport.scrollTop <= 0) {
-        if (e.deltaY < 0) {
-          if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current);
-          wheelPullRef.current = Math.min(
-            MAX_PULL_PX,
-            wheelPullRef.current + Math.abs(e.deltaY) * 0.35,
-          );
-          const currentPull = wheelPullRef.current;
-          schedulePullRender(currentPull);
-          wheelTimerRef.current = setTimeout(() => {
-            const currentPull = wheelPullRef.current;
-            // A slow frame can let the 180ms settle fire before the pull's
-            // rAF render ran — the ring would never display while the load
-            // still fires (#2623 P2). Flush the full fill synchronously so it
-            // always paints once, then reset on the next frame (a new pull
-            // started in between keeps its ring: the reset frame renders
-            // latestPullRef, which a new pull updated).
-            if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
-            rafIdRef.current = requestAnimationFrame(() => {
-              rafIdRef.current = null;
-              setPullDistance(latestPullRef.current);
-            });
-            setPullDistance(currentPull);
-            if (
-              currentPull >= PULL_THRESHOLD_PX &&
-              hasMoreOlderRef.current &&
-              !loadingOlderRef.current
-            ) {
-              captureAnchor();
-              loadOlderRef.current?.();
-            }
-            wheelPullRef.current = 0;
-            pullDistanceRef.current = 0;
-            latestPullRef.current = 0;
-          }, 180);
-        } else if (e.deltaY > 0) {
-          if (wheelPullRef.current > 0) {
-            wheelPullRef.current = 0;
-            pullDistanceRef.current = 0;
-            latestPullRef.current = 0;
-            if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
-            rafIdRef.current = null;
-            setPullDistance(0);
-            if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current);
-          }
-        }
-      }
     };
     viewport.addEventListener("wheel", onWheel, { passive: true });
 
-    // Touch pull-down gesture at the top of the viewport.
-    const onTouchStart = (e: TouchEvent) => {
+    // Touch start/end feed the sticky controller only — the pull-down-to-load
+    // gesture retired with the auto-load change (task #4186).
+    const onTouchStart = () => {
       controller.handleTouchStart();
-      // DOM lib types touches as always-present, but plain Event dispatches
-      // (tests, synthetic events) can carry none — read it as optional.
-      const touches = e.touches as TouchList | undefined;
-      if (
-        touches?.length === 1 &&
-        viewport.scrollTop <= 0 &&
-        hasMoreOlderRef.current &&
-        !loadingOlderRef.current
-      ) {
-        // A hybrid device can arm a wheel pull (its settle timer still
-        // pending) and then start a touch pull; the stale wheel timer would
-        // fire mid-touch and zero the touch pull state, killing the release
-        // trigger. Retire the wheel pull when the touch pull arms.
-        if (wheelTimerRef.current) {
-          clearTimeout(wheelTimerRef.current);
-          wheelTimerRef.current = null;
-        }
-        wheelPullRef.current = 0;
-        touchStartYRef.current = touches[0].clientY;
-        touchStartXRef.current = touches[0].clientX;
-        isPullingTouchRef.current = true;
-      } else {
-        touchStartYRef.current = null;
-        touchStartXRef.current = null;
-        isPullingTouchRef.current = false;
-      }
-    };
-
-    const onTouchMove = (e: TouchEvent) => {
-      const touches = e.touches as TouchList | undefined;
-      if (
-        !isPullingTouchRef.current ||
-        touchStartYRef.current === null ||
-        touchStartXRef.current === null ||
-        !touches?.length
-      ) {
-        return;
-      }
-      if (!hasMoreOlderRef.current || loadingOlderRef.current || viewport.scrollTop > 0) {
-        isPullingTouchRef.current = false;
-        pullDistanceRef.current = 0;
-        latestPullRef.current = 0;
-        if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
-        rafIdRef.current = null;
-        setPullDistance(0);
-        return;
-      }
-      const dy = touches[0].clientY - touchStartYRef.current;
-      const dx = touches[0].clientX - touchStartXRef.current;
-      if (dy > 0 && Math.abs(dy) > Math.abs(dx)) {
-        const pull = Math.min(MAX_PULL_PX, dy * 0.45);
-        schedulePullRender(pull);
-        if (e.cancelable && dy > 5) {
-          e.preventDefault();
-        }
-      } else if (dy <= 0) {
-        pullDistanceRef.current = 0;
-        latestPullRef.current = 0;
-        if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
-        rafIdRef.current = null;
-        setPullDistance(0);
-      }
     };
 
     const onTouchEnd = () => {
       controller.handleTouchEnd(snapshot());
-      if (isPullingTouchRef.current) {
-        isPullingTouchRef.current = false;
-        const currentPull = pullDistanceRef.current;
-        if (
-          currentPull >= PULL_THRESHOLD_PX &&
-          hasMoreOlderRef.current &&
-          !loadingOlderRef.current
-        ) {
-          captureAnchor();
-          loadOlderRef.current?.();
-        }
-        pullDistanceRef.current = 0;
-        latestPullRef.current = 0;
-        if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
-        rafIdRef.current = null;
-        setPullDistance(0);
-      }
-      touchStartYRef.current = null;
-      touchStartXRef.current = null;
     };
 
     viewport.addEventListener("touchstart", onTouchStart, { passive: true });
-    viewport.addEventListener("touchmove", onTouchMove, { passive: false });
     viewport.addEventListener("touchend", onTouchEnd, { passive: true });
     viewport.addEventListener("touchcancel", onTouchEnd, { passive: true });
 
@@ -664,7 +511,7 @@ export function TimelineView({
     const ro = new ResizeObserver(() => {
       if (controller.handleLayoutChange(snapshot())) pinToBottom(viewport);
       measureAtBottom();
-      measureAtTop();
+      maybeLoadOlderAtTop();
     });
     ro.observe(viewport);
     if (contentRef.current) ro.observe(contentRef.current);
@@ -673,14 +520,11 @@ export function TimelineView({
       viewport.removeEventListener("scroll", onScroll);
       viewport.removeEventListener("wheel", onWheel);
       viewport.removeEventListener("touchstart", onTouchStart);
-      viewport.removeEventListener("touchmove", onTouchMove);
       viewport.removeEventListener("touchend", onTouchEnd);
       viewport.removeEventListener("touchcancel", onTouchEnd);
-      if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current);
-      if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
       ro.disconnect();
     };
-  }, [controller, measureAtBottom, measureAtTop, pinToBottom, updateStuckHeader, captureAnchor, schedulePullRender]);
+  }, [controller, measureAtBottom, maybeLoadOlderAtTop, pinToBottom, updateStuckHeader]);
 
   // The SINGLE force-scroll trigger. The store bumps scrollToBottomRequest on
   // exactly the two moments a scroll-to-bottom is unconditional — agent switch
@@ -888,6 +732,23 @@ export function TimelineView({
     scrollByDelta(viewport, delta);
     pendingAnchorRef.current = null;
   }, [items, scrollByDelta]);
+
+  // A load cycle that ends WITHOUT a landing must not leave the capture
+  // pending — a failed fetch (or one that returned nothing) would otherwise
+  // hang the anchor forever, and the pendingAnchorRef gate in
+  // maybeLoadOlderAtTop would block every future auto-load: the reader's
+  // paging would die silently until a thread switch (QA #3031). Ordering is
+  // load-bearing: this effect is declared AFTER the landing effect, so on a
+  // commit carrying a landing the landing runs first (compensating and
+  // clearing the anchor); reaching this with loadingOlder back to false and
+  // the anchor still pending means no landing is coming.
+  const prevLoadingOlderReleaseRef = useRef(loadingOlder);
+  useLayoutEffect(() => {
+    if (prevLoadingOlderReleaseRef.current && !loadingOlder && pendingAnchorRef.current !== null) {
+      pendingAnchorRef.current = null; // fetch ended without a landing — release the gate
+    }
+    prevLoadingOlderReleaseRef.current = loadingOlder;
+  }, [loadingOlder]);
 
   // Single Details mode — governs default expanded state for every block
   // across all message kinds (All / Last / None).
@@ -1098,13 +959,6 @@ export function TimelineView({
   // Reuse its grouping until a snapshot, history page, or live item changes it.
   const groups = useMemo(() => groupTimelineSegments(items), [items]);
 
-  // Task #3932: when the list's TOPMOST row is a compact-history divider and
-  // older pages remain, that divider carries the load-earlier control itself.
-  // The floating button yields to it (one entry at the boundary); deeper
-  // dividers stay pure labels.
-  const topDividerLoadsOlder =
-    (groups[0]?.dividerRank ?? null) !== null && hasMoreOlder;
-
   const handleScrollToBottom = useCallback(() => {
     const viewport =
       viewportRef.current ??
@@ -1124,11 +978,7 @@ export function TimelineView({
 
   return (
     <div ref={wrapperRef} className={cn("relative", FLEX_1, MIN_H_0, OVERFLOW_HIDDEN)}>
-      <PullToLoadIndicator pullDistance={pullDistance} pullThreshold={PULL_THRESHOLD_PX} loadingOlder={loadingOlder} inlineLoadControl={topDividerLoadsOlder} />
-      <LoadOlderButton
-        visible={atTop && hasMoreOlder && !loadingOlder && pullDistance === 0 && !topDividerLoadsOlder}
-        onClick={handleLoadOlderClick}
-      />
+      <LoadOlderSpinner loadingOlder={loadingOlder} />
       <ColdLoadSpinner show={loading && items.length === 0} />
       {/* overflow-anchor: none disables Chrome scroll anchoring on the timeline
           viewport. Scroll anchoring silently adjusts scrollTop to keep the
@@ -1218,15 +1068,7 @@ export function TimelineView({
             return (
               <Fragment key={`segment-group:${groupKey}`}>
                 {entry.dividerRank === null ? null : (
-                  <CompactHistoryDivider
-                    rank={entry.dividerRank}
-                    onLoadOlder={
-                      entry === groups[0] && topDividerLoadsOlder
-                        ? handleLoadOlderClick
-                        : undefined
-                    }
-                    loadingOlder={loadingOlder}
-                  />
+                  <CompactHistoryDivider rank={entry.dividerRank} />
                 )}
                 {renderedGroup}
               </Fragment>

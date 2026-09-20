@@ -9,11 +9,11 @@ landing yanked the viewport back by the distance scrolled in between; with
 the anchor below the viewport it scrolled by the anchor's whole displacement
 — the "whole list jumps after loading older messages" report).
 
-The paging request is triggered by the pull-down-to-load gesture (the old
-auto-trigger band was removed): after settling at the top, continued wheel-up
-past the threshold fills the ring and fires the fetch. The request is slowed
-with a route delay so the user's continued scrolling happens while the fetch
-is in flight, deterministically.
+The paging request is triggered by reaching the top (auto-load, task #4186):
+scrolling up to scrollTop=0 with older pages remaining fires the fetch for
+the previous window — no control, no pull gesture. The request is slowed with
+a route delay so the user's continued scrolling happens while the fetch is
+in flight, deterministically.
 """
 
 from __future__ import annotations
@@ -74,23 +74,6 @@ _SCROLL_UP_JS = """
 }
 """
 
-# Pull-down-to-load at the top: three wheel-up events past the threshold
-# (each accumulates |deltaY| * 0.35; 3 * 120 * 0.35 = 126 >= 56). The settle
-# timer fires 180ms after the last event and triggers the load-older fetch.
-_WHEEL_PULL_JS = """
-() => {
-  const vp = window.__tl.vp;
-  let i = 0;
-  const fire = () => {
-    vp.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true }));
-    i += 1;
-    if (i < 3) setTimeout(fire, 40);
-  };
-  fire();
-  return 'pulling';
-}
-"""
-
 
 def _assert_landing_holds(page: Page, sample_start: int, round_no: int) -> None:
     """The reading position is the first real item's viewport top. Locate the
@@ -146,13 +129,14 @@ def _wait_landing(
 def _run_rounds(
     page: Page, before_requests: list[str], init_n: int, agent_id: int, gateway_url: str
 ) -> int:
-    """Round 1 uses the pull gesture (with the in-flight-scroll scenario);
-    rounds 2+ re-settle at the top and click the load-older fallback button —
-    the QA #2623 repro path. Each round must hold < 3px; the above-anchor
-    stack grows every round, which is exactly where the estimate-based
-    under-compensation lived. Returns the number of rounds completed."""
+    """Round 1 uses the first top arrival (with the in-flight-scroll scenario);
+    rounds 2+ leave the top and re-arrive — reaching the top auto-fires the
+    next window (task #4186; the QA #2623 repro path). Each round must hold
+    < 3px; the above-anchor stack grows every round, which is exactly where
+    the estimate-based under-compensation lived. Returns the number of rounds
+    completed."""
     sample_start = page.evaluate("window.__tl.samples.length")
-    _pull_load_older(page, before_requests)
+    _load_older_at_top(page, before_requests)
     _wait_landing(page, init_n, 1, agent_id, gateway_url, before_requests)
     page.wait_for_timeout(1200)
     _assert_landing_holds(page, sample_start, 1)
@@ -160,51 +144,15 @@ def _run_rounds(
     round_no = 1
     while round_no < 5:
         round_no += 1
-        page.evaluate("window.__tl.vp.scrollTop = 0")
+        # Leave the top, then come back — a fresh arrival fires the next window.
+        page.evaluate("window.__tl.vp.scrollTop = 240")
         page.evaluate("window.__tl.vp.dispatchEvent(new Event('scroll'))")
-        # Let the settled-at-top state render, then snapshot the control state
-        # for the failure diagnostic below.
-        page.wait_for_timeout(300)
-        _dbg = page.evaluate(
-            """() => {
-              const b = document.querySelector('[data-testid="load-older-button"]');
-              const ring = document.querySelector('[data-testid="pull-down-load-indicator"]');
-              const vp = window.__tl.vp;
-              return {
-                present: !!b,
-                ariaHidden: b ? b.getAttribute('aria-hidden') : null,
-                tabindex: b ? b.getAttribute('tabindex') : null,
-                ringLoading: ring ? ring.getAttribute('data-loading') : null,
-                ringFilled: ring ? ring.getAttribute('data-filled') : null,
-                ringProgress: ring ? ring.getAttribute('data-pull-progress') : null,
-                st: vp.scrollTop, sh: vp.scrollHeight, ch: vp.clientHeight,
-                n: vp.querySelectorAll('[data-item-id]').length,
-              };
-            }"""
-        )
-        # (debug dump on failure only; see assert below)
-        try:
-            page.wait_for_selector(
-                '[data-testid="load-older-button"][aria-hidden="false"]',
-                timeout=5_000,
-            )
-        except Exception:
-            # The control legitimately stays hidden once history is exhausted.
-            # Distinguish that (everything already in the DOM) from a real
-            # regression (history remains but the control never showed).
-            rest = httpx.get(
-                f"{gateway_url}/api/agents/{agent_id}/timeline?limit=1000",
-                timeout=30.0,
-            ).json()["items"]
-            if _dbg["n"] < len(rest):
-                raise AssertionError(
-                    f"round {round_no}: fallback control did not appear at the top; "
-                    f"state={_dbg} rest_total={len(rest)}"
-                ) from None
-            break  # history exhausted — no more rounds
+        page.wait_for_timeout(200)
         before_n = page.evaluate("window.__tl.vp.querySelectorAll('[data-item-id]').length")
         sample_start = page.evaluate("window.__tl.samples.length")
-        page.click('[data-testid="load-older-button"]')
+        page.evaluate("window.__tl.vp.scrollTop = 0")
+        page.evaluate("window.__tl.vp.dispatchEvent(new Event('scroll'))")
+
         deadline = time.monotonic() + 30.0
         n = before_n
         while time.monotonic() < deadline:
@@ -213,16 +161,29 @@ def _run_rounds(
                 break
             page.wait_for_timeout(200)
         if n <= before_n:
+            # No landing: either history is exhausted (everything the backend
+            # has is already mounted) or the auto-load failed to fire.
+            rest = httpx.get(
+                f"{gateway_url}/api/agents/{agent_id}/timeline?limit=1000",
+                timeout=30.0,
+            ).json()["items"]
+            if before_n < len(rest):
+                raise AssertionError(
+                    f"round {round_no}: reaching the top did not load more history; "
+                    f"mounted={before_n} rest_total={len(rest)}, "
+                    f"last_samples={page.evaluate('window.__tl.samples')[-6:]}"
+                )
             break  # history exhausted — no more rounds
         page.wait_for_timeout(1200)
         _assert_landing_holds(page, sample_start, round_no)
     return round_no
 
 
-def _pull_load_older(page: Page, before_requests: list[str]) -> None:
-    """Trigger load-older via the new pull gesture (the old auto-trigger band
-    is gone): scroll to the top, wheel-up past the pull threshold, then keep
-    scrolling while the route-delayed fetch is in flight."""
+def _load_older_at_top(page: Page, before_requests: list[str]) -> None:
+    """Trigger load-older by reaching the top (auto-load, task #4186): scroll
+    up to scrollTop=0 — the resulting scroll event fires the fetch for the
+    previous window. Then keep scrolling while the route-delayed fetch is in
+    flight."""
     page.evaluate(_SCROLL_UP_JS)
     deadline = time.monotonic() + 15.0
     while time.monotonic() < deadline:
@@ -232,13 +193,12 @@ def _pull_load_older(page: Page, before_requests: list[str]) -> None:
         page.wait_for_timeout(100)
     assert page.evaluate("window.__tl.vp.scrollTop") == 0, "viewport never reached the top"
 
-    page.evaluate(_WHEEL_PULL_JS)
-    # The settle timer (180ms) fires the load-older request; the route handler
-    # records it before its 2s delay, so its presence proves the trigger.
+    # Reaching the top fires the request; the route handler records it before
+    # its 2s delay, so its presence proves the trigger.
     deadline = time.monotonic() + 5.0
     while time.monotonic() < deadline and not before_requests:
         page.wait_for_timeout(50)
-    assert before_requests, "wheel pull at top never triggered the load-older request"
+    assert before_requests, "reaching the top never triggered the load-older request"
 
     # The user keeps scrolling while the delayed fetch is in flight (the
     # #1272 yank happened exactly when the landing compensated against a
