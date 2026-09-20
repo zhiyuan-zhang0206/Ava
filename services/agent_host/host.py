@@ -90,6 +90,7 @@ from services.agent_host.runtime import (
 )
 from services.agent_host.settlement import close_hosted_turn
 from services.agent_host.stall_guard import run_invocation_with_stall_guard
+from services.agent_host.truncation import reap_truncation_outcome, reap_truncation_stop
 from shared import maintenance
 from shared.config import settings
 from shared.config.turn_view import bind_agent_config, resolve_agent_config_pins
@@ -349,7 +350,8 @@ class AgentHost:
         )
         if incarnation is None:
             return
-        await self._apply_held_controls(agent_id, incarnation)
+        async with reap_truncation_stop(self._control_pool, incarnation):
+            await self._apply_held_controls(agent_id, incarnation)
 
     async def _apply_held_controls(self, agent_id: int, incarnation: RuntimeIncarnation) -> None:
         from agent.db import claim_inbound_batch
@@ -659,7 +661,7 @@ class AgentHost:
         finally:
             await event_publisher.aclose()
 
-    async def _invoke_until_done(self, agent_id: int, ctx: AvaContext) -> TurnOutcome:
+    async def _invoke_until_done(self, agent_id: int, ctx: AvaContext) -> TurnOutcome:  # noqa: PLR0915 — the turn exit boundary
         """Run until a durable lifecycle command or idle state ends this turn.
 
         Normal return flushes before applying lifecycle; restart retains its
@@ -754,6 +756,16 @@ class AgentHost:
                     incarnation=incarnation,
                 )
             except Exception as exc:
+                truncated = await reap_truncation_outcome(exc, self._control_pool, agent_id)
+                if truncated is not None:
+                    # Truncated on purpose by the drain's reap: drop for the cold successor.
+                    self.drop_agent(agent_id)
+                    logger.info(
+                        "hosted turn truncated by the update straggler reap",
+                        event="host_turn_truncated",
+                        agent_id=agent_id,
+                    )
+                    return truncated
                 _emit_error_event(
                     ctx, agent_id, f"{type(exc).__name__}: {exc}", error_class=type(exc).__name__
                 )
