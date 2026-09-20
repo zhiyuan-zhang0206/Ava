@@ -345,7 +345,7 @@ def _alert_stalled(
     age_s: float,
 ) -> None:
     """One WARNING per stalled row: logger line + unified event (feeds the
-    frontend SSE stream / metrics via the events table). emit failure is
+    frontend SSE stream / metrics via the event pipeline). emit failure is
     logged, never raised — the WARNING log line is the primary alert."""
     _log.warning(
         "[delivery] inbound %s to agent %s (%s) still pending after %.0fs — "

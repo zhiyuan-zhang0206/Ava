@@ -269,13 +269,12 @@ def _ensure_redis_url_identity_step(ctx: ConvergeCtx) -> None:
 
 
 def _migrate_host_config_to_env(ctx: ConvergeCtx) -> None:
-    """One-time .env hygiene migrations (host-override file, legacy
-    AVA_OPS_ALERTS_* webhook-token key rename) — idempotent, file-only."""
+    """One-time .env hygiene migration (host-override file) — idempotent,
+    file-only."""
+    del ctx  # signature kept uniform with the other converge steps
     from shared import runtime_config
 
     runtime_config.migrate_host_json_to_env()
-    if changed := runtime_config.migrate_alerts_webhook_token_env_key(ctx.ava_home / ".env"):
-        print(f"  · legacy alerts env keys migrated: {', '.join(changed)}", file=sys.stderr)
 
 
 def _parses_as_int(value: str) -> bool:

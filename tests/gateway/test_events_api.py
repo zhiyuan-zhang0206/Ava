@@ -2,8 +2,8 @@
 
 The route is an adapter over `loki_events.query_events` / `count_events`
 (the PG `events` read was replaced by Loki). This file locks the endpoint
-contract: filter composition (category / event_name — `kind` kept as a
-legacy alias — / agent_id / trace_id / machine / level), the time window
+contract: filter composition (category / event_name / agent_id /
+trace_id / machine / level), the time window
 (`from`/`to` and `hours`), offset paging with the `meta` envelope (opt-in
 exact `total` from the Loki count path / window / lookahead has_more), the
 unified row shape, and the 422s for illegal parameters. The Loki queries are mocked;
@@ -177,21 +177,14 @@ class TestEventsApi:
             client.get("/api/events", params={"tier": "business,anomaly"})
         assert fake_events.calls[0]["tiers"] == ["business", "anomaly"]
 
-    def test_filter_kind_legacy_alias(self, fake_events: _FakeEvents) -> None:
+    def test_kind_param_is_ignored_not_filtered(self, fake_events: _FakeEvents) -> None:
+        """Legacy `kind=` alias removed (2026-09-21): an undeclared query
+        param is ignored by FastAPI, so the request runs unfiltered — pinned
+        deliberately as the post-removal wire semantics."""
         with TestClient(app) as client:
-            client.get("/api/events", params={"kind": "spawn"})
-        assert fake_events.calls[0]["event_names"] == ["spawn"]
-
-    def test_event_name_and_kind_alias_conflict_422(self, fake_events: _FakeEvents) -> None:
-        with TestClient(app) as client:
-            r = client.get("/api/events", params={"event_name": "a", "kind": "b"})
-        assert r.status_code == 422
-        assert fake_events.calls == []
-
-    def test_event_name_and_kind_alias_agree(self, fake_events: _FakeEvents) -> None:
-        with TestClient(app) as client:
-            client.get("/api/events", params={"event_name": "spawn", "kind": "spawn"})
-        assert fake_events.calls[0]["event_names"] == ["spawn"]
+            r = client.get("/api/events", params={"kind": "spawn"})
+        assert r.status_code == 200
+        assert fake_events.calls[0]["event_names"] is None
 
     def test_filter_agent_id(self, fake_events: _FakeEvents) -> None:
         with TestClient(app) as client:

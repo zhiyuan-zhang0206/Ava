@@ -322,19 +322,6 @@ def rename_env_keys(path: Path, renames: dict[str, str]) -> list[str]:
     return changed
 
 
-def migrate_alerts_webhook_token_env_key(env_path: Path) -> list[str]:
-    """One-shot rename of the legacy AVA_OPS_ALERTS_WEBHOOK_TOKEN key in
-    `env_path` to AVA_ALERTS_WEBHOOK_TOKEN (value unchanged — a pure rename).
-
-    The AVA_OPS_ALERTS_* key family was retired; a unit still carrying the old
-    webhook-token name would silently lose its token (the alerts settings no
-    longer read it), so converge renames the line instead. A second run finds
-    no legacy key and is a no-op; when both names exist the new one is
-    authoritative and the legacy line is dropped (`rename_env_keys` rule).
-    """
-    return rename_env_keys(env_path, {"AVA_OPS_ALERTS_WEBHOOK_TOKEN": "AVA_ALERTS_WEBHOOK_TOKEN"})
-
-
 def migrate_host_json_to_env() -> None:
     """One-time: copy this machine's retired host override file into its `.env`.
 

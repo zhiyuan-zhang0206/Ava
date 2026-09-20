@@ -314,8 +314,8 @@ class TraceCheckpointMessagesResponse(BaseModel):
     back. `pruned` distinguishes the two absence shapes:
     - pruned=true, checkpoint_id=None — the trace's checkpoint was dropped by
       compact/checkpoint trim (retention is the latest K checkpoints), so the
-      content is gone; the span metadata in the mirror / events table still
-      exists. The frontend renders this as "trimmed" rather than an error.
+      content is gone; the span metadata in the mirror still exists. The
+      frontend renders this as "trimmed" rather than an error.
     - pruned=false — the checkpoint exists; messages is its `messages` channel
       (the full conversation at that point, system prompt included).
 

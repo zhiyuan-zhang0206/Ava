@@ -75,7 +75,7 @@ class AlertsSettings(EnvSettings):
         alias="AVA_ALERTS_WEBHOOK_TOKEN",
         description=(
             "Shared secret the Grafana alert webhook contact point sends as "
-            "`X-Alerts-Token` (or the legacy `X-Ops-Alerts-Token`) on "
+            "`X-Alerts-Token` on "
             "POST /api/alerts. Empty = the ingest endpoint trusts loopback "
             "callers only (Grafana is co-located); set it when the gateway is "
             "reachable from another host."

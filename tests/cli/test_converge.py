@@ -661,22 +661,6 @@ def test_legacy_disabled_marker_step_is_registered_and_unconditional(home, tmp_p
     assert not step.host_global
 
 
-def test_host_config_step_renames_legacy_alerts_webhook_token(home, tmp_path: Path, capsys):
-    """The one-time .env hygiene step renames the legacy AVA_OPS_ALERTS_*
-    webhook-token key, reporting what it moved."""
-    ava_home = tmp_path / "avahome"
-    ava_home.mkdir()
-    env = ava_home / ".env"
-    env.write_text("AVA_OPS_ALERTS_WEBHOOK_TOKEN=tok-123\n")
-
-    _converge._migrate_host_config_to_env(_ctx(tmp_path, ava_home))
-
-    text = env.read_text()
-    assert "AVA_OPS_ALERTS_WEBHOOK_TOKEN" not in text
-    assert "AVA_ALERTS_WEBHOOK_TOKEN=tok-123" in text
-    assert "migrated" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
-
-
 def _capable_helper_ctx(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """A host the capability probe clears, with an empty .env."""
     from shared.config import settings

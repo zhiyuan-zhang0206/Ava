@@ -109,7 +109,7 @@ _PROBE_TIMEOUT_S = 3.0
 
 # Auth-probe failure categories (audit #1736). The gate's verdict is
 # fail-closed ("down") for every one of them — the category exists so an
-# incident can be reconstructed from the events table instead of a wall of
+# incident can be reconstructed from the event stream instead of a wall of
 # indistinguishable "down" pages. Each category is one value of
 # `gate_auth_probe_failed`'s `category` attribute.
 PROBE_FAIL_AUTH = "auth"  # gateway answered 401/403 — the probe itself was rejected
@@ -222,7 +222,7 @@ class Gate:
         One ``gate_auth_probe_failed`` event per failed probe, carrying the
         classification and the exception shape, so an operator can tell an
         auth rejection, a network outage, a probe timeout, and a gateway
-        application failure apart from the events table alone — previously
+        application failure apart from the event stream alone — previously
         every one of them collapsed into an unobservable "down".
         """
         logger.warning(

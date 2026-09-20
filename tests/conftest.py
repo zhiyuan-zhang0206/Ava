@@ -977,9 +977,9 @@ def _clean_state(
     # Barrier before the TRUNCATE: the telemetry drain thread may hold a batch
     # dequeued during the previous test (events are written by that single
     # thread up to one flush_interval after enqueue). sync() drains the queue
-    # AND waits for the held batch to land, so the events table cannot be
-    # repopulated from a straggler after this truncate (the test_events_api /
-    # test_agent_events_query exact-content flake class). Cheap: a marker
+    # AND waits for the held batch to land, so a straggler batch cannot land
+    # after this truncate (the test_events_api / test_agent_events_query
+    # exact-content flake class). Cheap: a marker
     # round-trip on an idle drain thread. No-op when the pipeline is absent or
     # already stopped.
     from shared import telemetry

@@ -2,16 +2,16 @@
 //
 // Pipeline: track() → in-memory buffer → batched POST to the gateway's
 // /api/frontend-telemetry (sendBeacon when the tab is hiding, fetch +
-// keepalive otherwise) → `frontend_interaction` rows in the events table →
+// keepalive otherwise) → `frontend_interaction` events in the stream →
 // the Grafana core panels (interactions / top elements / page views /
 // settings changes).
 //
-// Volume discipline (task #1092 — the events table must not be flooded):
+// Volume discipline (task #1092 — the event stream must not be flooded):
 //   1. dedupe — the same (page, element, key) at most once per 2 s;
 //   2. rate cap — at most 100 events per minute per tab, excess dropped;
 //   3. buffer cap — 200 pending events, oldest dropped.
 // The gateway backstops with its own per-session limit, so a bug here can
-// only waste this tab's budget, never the table.
+// only waste this tab's budget, never the stream.
 //
 // No free text is ever collected: `element` is a closed union of known
 // interaction points, `page` is the normalized router pathname, and

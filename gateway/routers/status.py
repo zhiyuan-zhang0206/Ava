@@ -86,9 +86,9 @@ def get_stats_dashboard(
     `?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =
     hours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is
     `applied_window_hours`. Zero-data scenario: tokens all 0, cost_usd 0.0, avg_turn_seconds
-    None (frontend shows "—"). Until the unlabeled legacy slice expires on 2026-08-30,
-    the ledger removes the fixed-cost full-window token scans; afterward the
-    indexed Loki tail keeps the same self-healing late-write behavior.
+    None (frontend shows "—"). The ledger-first split avoids the fixed-cost
+    full-window token scans; the indexed Loki tail rereads the newest retained
+    ledger day to absorb late writes without double counting.
 
     A failed recompute (Loki transport error or refused query admission) serves
     the window's last-good response marked `stale` (its `as_of` keeps the
@@ -103,9 +103,9 @@ def get_stats_dashboard(
         return cached
     cluster = cluster_label()
 
-    # The turn / W/E stats read Loki (task #1197): the PG `events` table is a
-    # frozen pre-cutover archive, so a live window queried there flatlines to
-    # zero. Do not hold a pooled DB connection while these network queries wait.
+    # The turn / W/E stats read Loki (task #1197): the PG `events` table was
+    # dropped with the archive cleanup, so a live window cannot be read there.
+    # Do not hold a pooled DB connection while these network queries wait.
     now = datetime.now(UTC)
     window_start = now - applied_window(hours)[1]
     try:

@@ -16,7 +16,7 @@ from shared.events.contract import EventTier
 
 
 class AgentEventRow(BaseModel):
-    """One row from the `events` PG table — admin event log entry (category=telemetry/log).
+    """One row from the unified event stream — admin event log entry (category=telemetry/log).
 
     `agent_id` is None for service-level lines (gateway / scheduler / labeler
     / runner / etc.) and an int for agent process lines. `payload` keeps the
@@ -46,11 +46,11 @@ class AgentEventsResponse(BaseModel):
 
 
 class EventRow(BaseModel):
-    """One row from the unified `events` table — the single event stream.
+    """One row of the unified event stream.
 
     Every signal shares this shape (event-system design doc §1): audit
-    (legacy `event_log`), telemetry and log (formerly `agent_events`) all live
-    here, written through the unified emitter (`shared/telemetry.py`).
+    (legacy `event_log`), telemetry and log (formerly `agent_events`) all land
+    in it, written through the unified emitter (`shared/telemetry.py`).
     `trace_id` is the correlation key — one turn = one trace id, every event
     inside it carries the same value. `agent_id` is None for service-level
     events (gateway / daemons); `machine` is the host dimension. `level` is

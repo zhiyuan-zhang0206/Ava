@@ -43,8 +43,8 @@ async def get_events_stream(agent_id: int, request: Request) -> StreamingRespons
     Client `EventSource` receives `data: {json}\\n\\n` frames, one JSON
     `events.Event` per frame. code_delta chunks pass through immediately,
     native streaming. This is the live tail; `GET /api/agents/{id}/events`
-    (no `/stream`) is the historical REST query over the persisted
-    `events` table.
+    (no `/stream`) is the historical REST query over the persisted unified
+    event stream (Loki).
 
     Does **not** check agent_exists as a precondition: subscribing to a
     non-existent agent is allowed, you just receive no messages. Otherwise

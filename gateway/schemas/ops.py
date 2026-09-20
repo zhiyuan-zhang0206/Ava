@@ -33,7 +33,7 @@ class SseDropBucket(BaseModel):
     bucket: int
     queue_full: int = Field(ge=0)  # agent SSE publisher shed: local queue full
     publish_error: int = Field(ge=0)  # agent SSE publisher shed: redis publish failed/slow
-    event_log_drop: int = Field(ge=0)  # DB log sink shed: queue full
+    event_log_drop: int = Field(ge=0)  # log sink shed: queue full
 
 
 class SseTotals(BaseModel):

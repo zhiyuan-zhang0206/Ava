@@ -9,7 +9,7 @@ instead of the pre-aggregated `ops_metrics` table:
 
 - **sse** — `sse_drop` (agent SSE publisher shed) counted by payload `kind`
   (`queue_full` vs everything else; rows without a kind count toward neither,
-  matching the old FILTER semantics) + `event_log_drop` (the DB log sink
+  matching the old FILTER semantics) + `event_log_drop` (the log sink
   shed), both from Loki.
 - **llm** — calls / tokens / latency sum / p50 / p95 from the Prometheus
   `ava_llm_usage_*` instruments (the OTLP metrics mirror of the `llm_usage`

@@ -598,7 +598,7 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
     # node / process lifecycle
     "node_enter": _telemetry(
         "node_enter",
-        "LangGraph node entered — sink-filtered out of the events table (PR #1758); log files only",
+        "LangGraph node entered — sink-filtered out of the event stream (PR #1758); log files only",
         destination="file",
         tier="noise",
     ),

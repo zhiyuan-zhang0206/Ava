@@ -52,13 +52,13 @@ generated from it and never hand-synced. event_names that violate the naming rul
 
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
-| audit (category=audit) | `events` | {n_audit} | events table |
-| telemetry (category=telemetry) | `events` | {n_telemetry} | events table |
-| log (category=log) | `events` | {n_log} | events table |
-| file-only (destination=file) | file log | {n_file} | file only (not the events table) |
+| audit (category=audit) | `events` | {n_audit} | event stream |
+| telemetry (category=telemetry) | `events` | {n_telemetry} | event stream |
+| log (category=log) | `events` | {n_log} | event stream |
+| file-only (destination=file) | file log | {n_file} | file only (not the stream) |
 | SSE live | Redis → frontend (not persisted) | {n_sse} role | live projection |
 
-All persistent events land in the single `events` table (`category` distinguishes
+All persistent events land in the unified event stream (`category` distinguishes
 audit / telemetry / log). The four legacy mechanisms under the unified event model
 (in one sentence): **audit = the category=audit part of the event river;
 telemetry + log = the category=telemetry + log parts; SSE = a live projection of the

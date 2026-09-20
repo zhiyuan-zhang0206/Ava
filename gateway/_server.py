@@ -130,7 +130,7 @@ def serve_kwargs(*, host: str, app: str = "gateway.app:app") -> dict[str, Any]:
         # the root intercept handler, and uvicorn.access is gated to WARNING in
         # `_install_stdlib_intercept` (per-request INFO is noise). #970: an
         # unhandled ASGI exception used to land only in the session log and die
-        # with the session — now it reaches gateway.log and the events table.
+        # with the session — now it reaches gateway.log and the events pipeline.
         "log_config": None,
         "workers": _GATEWAY_UVICORN_WORKERS,
         "timeout_graceful_shutdown": settings.gateway.gateway_graceful_shutdown_timeout_seconds,
