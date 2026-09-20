@@ -178,7 +178,7 @@ class TestFrontendTelemetryIngest:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:  # type: ignore[no-untyped-def]
         """Over the per-session budget: accepted up to the cap, the rest
-        dropped — the events table cannot be flooded by one tab."""
+        dropped — the event stream cannot be flooded by one tab."""
         ft_router._session_windows.clear()
         session = _session()
         events = [_one(element=f"e{i}") for i in range(ft_router._MAX_EVENTS_PER_MINUTE + 10)]

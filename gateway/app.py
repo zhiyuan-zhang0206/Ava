@@ -549,7 +549,7 @@ _AUTH_BYPASS_PATHS: frozenset[str] = frozenset(
 _AUTH_BYPASS_METHOD_PATHS: frozenset[tuple[str, str]] = frozenset(
     {
         # Ingest webhooks — authenticated by
-        # its own token (X-Alerts-Token / X-Ops-Alerts-Token / cluster-secret
+        # its own token (X-Alerts-Token / cluster-secret
         # Bearer / loopback trust) inside the router, not by the
         # session/bearer middleware. Alert reads still require cluster auth.
         ("POST", "/api/alerts"),

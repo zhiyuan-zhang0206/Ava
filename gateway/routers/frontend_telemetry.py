@@ -4,16 +4,16 @@ The web frontend's user-modeling telemetry (`ui/web/src/lib/telemetry.ts`)
 batches tracked interactions — key-control clicks, page views, user_settings
 changes — and posts them here; this router validates the batch and emits one
 `frontend_interaction` event (category=telemetry, source=user) per accepted
-interaction into the unified event stream (shared/telemetry.py). The events
-table is the store; the Grafana core-metrics panels aggregate it.
+interaction into the unified event stream (shared/telemetry.py). Loki is
+the store; the Grafana core-metrics panels aggregate it.
 
-Two volume guards sit between the browser and the events table:
+Two volume guards sit between the browser and the event stream:
 
 - the client already dedupes (2 s window per page/element) and rate-limits
   itself (100 events/min), so the honest volume is ~1-2k rows/day;
 - this router backstops that with a per-session sliding-window cap
   (120 events/min, in-memory — one gateway process) so a misbehaving tab
-  (infinite loop, retry storm) cannot blow up the table. Excess events are
+  (infinite loop, retry storm) cannot blow up the stream. Excess events are
   dropped and counted in the warning log, never retried.
 
 Content rules: no free text crosses this boundary. `element`/`page` are

@@ -238,7 +238,7 @@ groups:
             Events with event_name ∈ sse_drop / event_log_drop summed payload.n to
             {{ $values.C }} in the last 10 minutes (real drops; each report row
             carries the real drop count n since the previous report). SSE drops =
-            degraded live view; event_log_drop = lost DB write-queue rows. Check
+            degraded live view; event_log_drop = lost log-sink queue rows. Check
             the affected agent's event publisher / log-sink queue.
         data:
           - refId: A

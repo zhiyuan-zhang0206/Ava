@@ -23,13 +23,13 @@ generated from it and never hand-synced. event_names that violate the naming rul
 
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
-| audit (category=audit) | `events` | 29 | events table |
-| telemetry (category=telemetry) | `events` | 204 | events table |
-| log (category=log) | `events` | 13 | events table |
-| file-only (destination=file) | file log | 1 | file only (not the events table) |
+| audit (category=audit) | `events` | 29 | event stream |
+| telemetry (category=telemetry) | `events` | 204 | event stream |
+| log (category=log) | `events` | 13 | event stream |
+| file-only (destination=file) | file log | 1 | file only (not the stream) |
 | SSE live | Redis → frontend (not persisted) | 31 role | live projection |
 
-All persistent events land in the single `events` table (`category` distinguishes
+All persistent events land in the unified event stream (`category` distinguishes
 audit / telemetry / log). The four legacy mechanisms under the unified event model
 (in one sentence): **audit = the category=audit part of the event river;
 telemetry + log = the category=telemetry + log parts; SSE = a live projection of the
@@ -170,7 +170,7 @@ consumers: see the comments at each emit point.
 | `host_admission_wait_exceeded` | a hosted turn has queued at the host admission gate (AVA_HOST_MAX_CONCURRENT_TURNS) for at least AVA_HOST_ADMISSION_WAIT_ALERT_SECONDS — carries the agent, its current wait, the limit and the queue depth; reported once per wait episode. Queueing is the configured memory/runtime trade-off working, not an error; a wait this long means the queue is backing up (raise the limit or inspect the turns holding slots). The wait is exempt from stall cancellation — cancelling it would only re-queue it at the tail | anomaly | — | — | events |
 | `hosted_boot_recovery_stalled` | hosted boot recovery was deferred for the same agent on three consecutive boots — retained exec request evidence is not clearing on its own, so the ordinary per-boot warning is escalated to this counted anomaly event; inspect the named evidence and its disposition commands | anomaly | — | — | events |
 | `host_turn_stall_detected` | the hosted dispatcher's durable scan found an in-flight turn whose turn-progress clock (agent/_turn_progress.py: node enters, completed LLM steps, streamed LLM chunks) has been silent past the wedged budget while NO pending inbound exists — the turn-level fake-alive shape (process alive, turn dead) that pending-row and pid-based detectors cannot see. The turn task is cancelled and the agent rescheduled; a turn that refuses to unwind instead escalates to a daemon restart | anomaly | — | — | events |
-| `node_enter` | LangGraph node entered — sink-filtered out of the events table (PR #1758); log files only | noise | — | — | file |
+| `node_enter` | LangGraph node entered — sink-filtered out of the event stream (PR #1758); log files only | noise | — | — | file |
 | `node_exit` | LangGraph node exited | noise | count, nodes | — | events |
 | `process_exit` | agent process exited | noise | reason, pid | — | events |
 | `service_started` | gateway/daemon started | noise | name, pid | — | events |

@@ -6,8 +6,8 @@ replaced by Loki). One schema and one correlation key (`trace_id`), served
 from `gateway/loki_events.py`; wire shape and filter semantics are unchanged
 from the PG version.
 
-Filters compose (AND): `category` / `event_name` (`kind` kept as a
-legacy alias) / `tier` / `agent_id` / `trace_id` / `machine` / `level`, plus a
+Filters compose (AND): `category` / `event_name` / `tier` / `agent_id` /
+`trace_id` / `machine` / `level`, plus a
 time window given either as `from`/`to`
 (ISO-8601, inclusive) or as `hours` (the last N hours — shorthand for
 `from = now - hours`; the two forms are mutually exclusive). `level` is an
@@ -126,9 +126,6 @@ def _parse_tiers(tier: str | None) -> list[EventTier] | None:
 def get_events(
     category: Annotated[str | None, Query()] = None,
     event_name: Annotated[str | None, Query()] = None,
-    # Legacy alias for `event_name` (pre term-alignment clients). Retired
-    # 2026-09-30 — see the docstring; remove alias + conflict logic then.
-    kind: Annotated[str | None, Query()] = None,
     agent_id: Annotated[int | None, Query()] = None,
     trace_id: Annotated[str | None, Query()] = None,
     machine: Annotated[str | None, Query()] = None,
@@ -151,11 +148,7 @@ def get_events(
       - `category=<audit|telemetry|log>`: retention/alerting class (unknown
         value 422s).
       - `event_name=<name>`: exact event name, e.g. `llm_usage` /
-        `turn_end` / `spawn` / `send_message` (the legacy `kind=` spelling
-        is accepted as an alias; passing both with different values 422s).
-        The `kind=` alias is retired on 2026-09-30 — pre-alignment clients
-        must move to `event_name` before then, after which the alias and its
-        conflict check are removed.
+        `turn_end` / `spawn` / `send_message`.
       - `agent_id=<n>`: events belonging to that agent; service-level events
         (NULL) are excluded when set.
       - `trace_id=<hex>`: one turn's whole call chain — every event that
@@ -206,15 +199,7 @@ def get_events(
         # lower-bound contract as the old PG API; A31).
         window_from = now - timedelta(hours=_DEFAULT_WINDOW_HOURS)
 
-    if event_name is not None and kind is not None and event_name != kind:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "event_name and its legacy alias kind disagree — pass one "
-                f"(event_name={event_name!r}, kind={kind!r})"
-            ),
-        )
-    name = event_name if event_name is not None else kind
+    name = event_name
 
     try:
         total: int | None = None

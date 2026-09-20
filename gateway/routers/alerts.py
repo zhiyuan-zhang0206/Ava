@@ -19,7 +19,7 @@ channel — nothing here touches agent_notices.
 Auth split by consumer:
 - ``POST /api/alerts`` — the Grafana webhook. It bypasses the session/bearer
   middleware (Grafana does not hold the cluster secret) and authenticates
-  itself: ``X-Alerts-Token`` (or the legacy ``X-Ops-Alerts-Token``) matching
+  itself: ``X-Alerts-Token`` matching
   the configured webhook token (constant-time), or the webhook token as a
   ``Bearer`` credential (Grafana 13 webhook contact points only support the
   notifier-native Authorization fields — custom headers are stored in
@@ -96,9 +96,8 @@ _alert_frame_validator = TypeAdapter(AlertRow)
 def _ingest_authorized(request: Request) -> bool:
     """Webhook-token header, else cluster-secret Bearer, else loopback trust.
 
-    Both the new ``X-Alerts-Token`` and the legacy ``X-Ops-Alerts-Token``
-    header are accepted — the Grafana host's launchd env still carries the
-    old header name in its contact point until the provisioning PR lands.
+    ``X-Alerts-Token`` carries the webhook token; the Grafana contact point
+    sends it as a notifier-native Bearer instead (see ``_webhook_auth``).
     Loopback trust only applies when no webhook token is configured — the
     single-box default, where Grafana (127.0.0.1:3003) is the only caller and
     the gateway binds everything anyway. With a token set, loopback is not

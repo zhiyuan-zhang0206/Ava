@@ -23,9 +23,7 @@ def authenticate_webhook(request: Request, *, provider: str) -> WebhookAuthentic
     token = settings.alerts.webhook_token
     token_value = token.get_secret_value() if token is not None else ""
     if token_value:
-        presented = request.headers.get("X-Alerts-Token") or request.headers.get(
-            "X-Ops-Alerts-Token"
-        )
+        presented = request.headers.get("X-Alerts-Token")
         if presented and hmac.compare_digest(presented, token_value):
             return WebhookAuthentication(
                 authorized=True,

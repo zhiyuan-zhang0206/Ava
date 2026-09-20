@@ -693,8 +693,8 @@ def _insert_skill_events(agent: int, skills: list[Skill]) -> bool:
 
     The single write path, so the per-skill call and any future batch caller
     cannot drift in what they record. The unified emitter (`shared.telemetry`)
-    owns persistence: the batch lands in the `events` table with the legacy
-    `event_log` mirror, and the emitter's JSONL mirror is the durable fallback
+    owns persistence: the batch lands in the unified event stream, and the
+    emitter's JSONL mirror is the durable fallback
     — the enqueue is a bounded-queue put, not a DB round-trip per skill.
 
     Best-effort: emit never raises (attribution is telemetry; it must never

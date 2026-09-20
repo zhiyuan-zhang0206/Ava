@@ -5,9 +5,10 @@ skill_invoked, ...) is recorded through these helpers, which enqueue into the
 unified emitter (`shared.telemetry`) — the single write path for every event in
 every process. The emitter's drain thread appends each batch to the day-stamped
 JSONL mirror (the durable local copy) and exports it to the OTLP backend
-(Loki/Prometheus); the Postgres `events` table is a READ-ONLY archive since the
-LGTM cutover (task #1197, user ruling 2026-08-12) — nothing writes it, the read
-side is Loki, and the JSONL mirror is the durable backfill.
+(Loki/Prometheus); the Postgres `events` table was frozen at the LGTM
+cutover (task #1197, user ruling 2026-08-12) and dropped with the archive
+cleanup (task #1281/#1823) — the read side is Loki, and the JSONL mirror is the
+durable backfill.
 
 The former contract — "the INSERT rides in the caller's transaction, no
 separate commit" — is deliberately gone: the design (event-system refactor,
@@ -84,7 +85,7 @@ def insert_event_log(
             'computer_action', 'mcp_tool_call'.
         agent_id: the primary agent this event is about; None for a
             service-level event with no agent (e.g. an MCP tool call from an
-            external client — the events table takes NULL agent_id).
+            external client — service-level events carry a NULL agent_id).
         source: who triggered the event — 'agent:<N>', 'user',
             'system', 'self', etc.
         target_agent_id: for directed operations — the other agent (for

@@ -854,8 +854,8 @@ export interface paths {
          *     Client `EventSource` receives `data: {json}\n\n` frames, one JSON
          *     `events.Event` per frame. code_delta chunks pass through immediately,
          *     native streaming. This is the live tail; `GET /api/agents/{id}/events`
-         *     (no `/stream`) is the historical REST query over the persisted
-         *     `events` table.
+         *     (no `/stream`) is the historical REST query over the persisted unified
+         *     event stream (Loki).
          *
          *     Does **not** check agent_exists as a precondition: subscribing to a
          *     non-existent agent is allowed, you just receive no messages. Otherwise
@@ -2839,11 +2839,7 @@ export interface paths {
          *       - `category=<audit|telemetry|log>`: retention/alerting class (unknown
          *         value 422s).
          *       - `event_name=<name>`: exact event name, e.g. `llm_usage` /
-         *         `turn_end` / `spawn` / `send_message` (the legacy `kind=` spelling
-         *         is accepted as an alias; passing both with different values 422s).
-         *         The `kind=` alias is retired on 2026-09-30 — pre-alignment clients
-         *         must move to `event_name` before then, after which the alias and its
-         *         conflict check are removed.
+         *         `turn_end` / `spawn` / `send_message`.
          *       - `agent_id=<n>`: events belonging to that agent; service-level events
          *         (NULL) are excluded when set.
          *       - `trace_id=<hex>`: one turn's whole call chain — every event that
@@ -3135,9 +3131,9 @@ export interface paths {
          *     `?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =
          *     hours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is
          *     `applied_window_hours`. Zero-data scenario: tokens all 0, cost_usd 0.0, avg_turn_seconds
-         *     None (frontend shows "—"). Until the unlabeled legacy slice expires on 2026-08-30,
-         *     the ledger removes the fixed-cost full-window token scans; afterward the
-         *     indexed Loki tail keeps the same self-healing late-write behavior.
+         *     None (frontend shows "—"). The ledger-first split avoids the fixed-cost
+         *     full-window token scans; the indexed Loki tail rereads the newest retained
+         *     ledger day to absorb late writes without double counting.
          *
          *     A failed recompute (Loki transport error or refused query admission) serves
          *     the window's last-good response marked `stale` (its `as_of` keeps the
@@ -3896,7 +3892,7 @@ export interface components {
         };
         /**
          * AgentEventRow
-         * @description One row from the `events` PG table — admin event log entry (category=telemetry/log).
+         * @description One row from the unified event stream — admin event log entry (category=telemetry/log).
          *
          *     `agent_id` is None for service-level lines (gateway / scheduler / labeler
          *     / runner / etc.) and an int for agent process lines. `payload` keeps the
@@ -5169,11 +5165,11 @@ export interface components {
         };
         /**
          * EventRow
-         * @description One row from the unified `events` table — the single event stream.
+         * @description One row of the unified event stream.
          *
          *     Every signal shares this shape (event-system design doc §1): audit
-         *     (legacy `event_log`), telemetry and log (formerly `agent_events`) all live
-         *     here, written through the unified emitter (`shared/telemetry.py`).
+         *     (legacy `event_log`), telemetry and log (formerly `agent_events`) all land
+         *     in it, written through the unified emitter (`shared/telemetry.py`).
          *     `trace_id` is the correlation key — one turn = one trace id, every event
          *     inside it carries the same value. `agent_id` is None for service-level
          *     events (gateway / daemons); `machine` is the host dimension. `level` is
@@ -8323,8 +8319,8 @@ export interface components {
          *     back. `pruned` distinguishes the two absence shapes:
          *     - pruned=true, checkpoint_id=None — the trace's checkpoint was dropped by
          *       compact/checkpoint trim (retention is the latest K checkpoints), so the
-         *       content is gone; the span metadata in the mirror / events table still
-         *       exists. The frontend renders this as "trimmed" rather than an error.
+         *       content is gone; the span metadata in the mirror still exists. The
+         *       frontend renders this as "trimmed" rather than an error.
          *     - pruned=false — the checkpoint exists; messages is its `messages` channel
          *       (the full conversation at that point, system prompt included).
          *
@@ -11962,7 +11958,6 @@ export interface operations {
             query?: {
                 category?: string | null;
                 event_name?: string | null;
-                kind?: string | null;
                 agent_id?: number | null;
                 trace_id?: string | null;
                 machine?: string | null;

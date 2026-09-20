@@ -3,7 +3,7 @@
 Mental model (event-system design doc §1/§2): Ava has one event stream. An
 event is a named log record (OTel LogRecord semantics: events = logs with
 names, `event.name`); audit, telemetry and log are all events in that stream,
-sharing one schema (`events` table) and one correlation key (`trace_id`). This
+sharing one schema (the `Event` record) and one correlation key (`trace_id`). This
 module is the only writer of the stream.
 
 Pipeline (Layer 1): a bounded queue + drain thread per process. Every `emit()`
@@ -162,7 +162,7 @@ def event_id(line: str, ts_ns: int) -> int:
 @dataclass(frozen=True)
 class Event:
     """One event in the unified stream — OTel LogRecord semantics (events = logs
-    with names), the shape the `events` table stores."""
+    with names), the shape the event stream carries."""
 
     ts: datetime
     trace_id: str | None
@@ -693,8 +693,8 @@ def emit(
     the producer.
 
     An event is a named log record (OTel LogRecord semantics: events = logs
-    with names); `event_name` is that name — the `event.name` column of the
-    `events` table, and the registry key (`EVENTS`).
+    with names); `event_name` is that name — the `event.name` field, and the
+    registry key (`EVENTS`).
 
     `trace_id`/`span_id` are captured from the active OTel span at this point
     (enqueue time — the drain thread runs outside the span context). `agent_id`

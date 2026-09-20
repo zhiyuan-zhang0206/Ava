@@ -353,8 +353,8 @@ def test_auth_middleware_set_roundtrips_through_env(
 
 def test_retired_env_aliases_are_not_read(monkeypatch: pytest.MonkeyPatch) -> None:
     """The retired names are inert: a stale key left in an environment no longer
-    reaches its field (defaults / the None sentinel survive). The alerts token is
-    the one exception with a loss risk, hence its converge migration."""
+    reaches its field (defaults / the None sentinel survive) — the settings
+    never read the old spelling."""
     from shared.config.agent import AgentSettings
     from shared.config.agent_eval import AgentEvalSettings
     from shared.config.alerts import AlertsSettings

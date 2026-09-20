@@ -31,8 +31,8 @@ A new rollout is a new process and re-reads the file-backed config -- that is
 how a flip takes effect on the next update with no extra restart.
 
 Mode transitions are not event-carried: no existing surface can carry "the
-previously observed mode" without adding state (the events table is a
-read-only archive since the LGTM cutover; the last-update row's ``log_path``
+previously observed mode" without adding state (the pre-cutover events archive
+was dropped with the LGTM cleanup — task #1281/#1823; the last-update row's ``log_path``
 is overwritten by this rollout's ``begin_update`` before the read point;
 previous-rollout log forensics is a rotation-prone file heuristic). The
 rebuild chain is the audited config write (``env_write``: old and new value
