@@ -3,12 +3,10 @@ report its bootstrap-recovery journal slot read-only.
 
 The daemon-side half of task #4129 channel C (design
 `managed-writer-dispatch-design-20260920.md` section 3.3): verify the payload's
-request path as canonical private unit state (the stat face
-`cli.commands._update_bootstrap._private_reference` and
-`services.agent_ops.bootstrap.read_prepared_context` share, plus the size bound
-`read_prepared_context` pairs it with), then spawn the detached `ava-updater`
-session that runs the retained candidate image's `--bootstrap-hop` entry
-against it.
+request path as canonical private unit state (the shared
+`ops.unit_local.private_unit_reference` stat face), then spawn the detached
+`ava-updater` session that runs the retained candidate image's `--bootstrap-hop`
+entry against it.
 
 The handler never reads the request's content, never pauses anything and seeds
 no handoff of its own: the request is a request, and the child's own
@@ -28,67 +26,28 @@ before anything is spawned -- the POSIX command spelling in
 from __future__ import annotations
 
 import os
-import stat
 import sys
-from pathlib import Path
 from typing import cast
 
-from ops import updater_entries
+from ops import unit_local, updater_entries
 from ops.rpc_bootstrap_hop import (
     BootstrapHopPayload,
     BootstrapHopResult,
     BootstrapRecoveryReadPayload,
     BootstrapRecoveryReadResult,
 )
-from ops.unit_local import machine_identity
 from shared import updater_handoff
 from shared.config import settings
 from shared.log import logger
 from shared.runtime_release import ReleaseRejectedError
-
-# The request carries whole resolved contexts (observations, operations,
-# challenges, the predecessor's identity); the CI assembler's request measures a
-# few KiB. 64 KiB is the same shape bound `read_prepared_context` enforces on the
-# child side, so a swapped or miswired path refuses here instead of surfacing as
-# a child failure. KEEP (task #3696 exception inventory): a relay-shape guard
-# fixed by the request's shape, not a tuning knob.
-_MAX_REQUEST_BYTES = 64 * 1024
-
-
-def _private_request(text: str, home: Path) -> Path:
-    """The payload's request path, verified as canonical private unit state.
-
-    The same stat face as `_update_bootstrap._private_reference` (absolute,
-    canonical, owned, 0600, inside `{home}/run`) plus the regular-file and size
-    checks `read_prepared_context` pairs it with. Checked before anything is
-    spawned -- a path that fails it is a wiring fault, not a verdict about the
-    hop.
-    """
-    path = Path(text)
-    try:
-        info = path.stat() if path.is_absolute() and path.resolve(strict=True) == path else None
-    except OSError:
-        info = None
-    if (
-        info is None
-        or path.parent != home / "run"
-        or not stat.S_ISREG(info.st_mode)
-        or stat.S_IMODE(info.st_mode) != 0o600
-        or info.st_uid != os.getuid()
-        or info.st_size > _MAX_REQUEST_BYTES
-    ):
-        raise ReleaseRejectedError(
-            "bootstrap hop request must be a canonical private unit reference"
-        )
-    return path
 
 
 def cluster_bootstrap_hop_op(payload: BootstrapHopPayload) -> BootstrapHopResult:
     if sys.platform != "linux":
         raise ReleaseRejectedError("restricted hop has no native proof on this platform")
     home = settings.general.ava_home
-    machine = machine_identity(home)
-    request = _private_request(payload.hop_request, home)
+    machine = unit_local.machine_identity(home)
+    request = unit_local.private_unit_reference(payload.hop_request, home)
     logger.info(
         "[cluster_bootstrap_hop] start pid={pid} image={image} request={request}",
         pid=os.getpid(),
@@ -118,7 +77,7 @@ def cluster_bootstrap_recovery_read_op(
     """
     del payload  # no arguments: the question is about this unit's own slot
     home = settings.general.ava_home
-    machine = machine_identity(home)
+    machine = unit_local.machine_identity(home)
     try:
         envelope = updater_handoff.read_bootstrap_recovery()
     except updater_handoff.BootstrapRecoveryInvalidError:

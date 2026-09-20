@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 
 from ops import cluster as cluster_facade
-from ops import cluster_deploy, cluster_session, ops_bootstrap_hop, updater_entries
+from ops import cluster_deploy, cluster_session, ops_bootstrap_hop, unit_local, updater_entries
 from ops.rpc_bootstrap_hop import (
     BootstrapHopPayload,
     BootstrapHopResult,
@@ -174,7 +174,7 @@ def test_oversized_request_refuses(unit_home: Path, monkeypatch: pytest.MonkeyPa
     _as_linux(monkeypatch)
     recorder = _stub_spawn(monkeypatch)
     oversized = unit_home / "run" / "oversized.json"
-    oversized.write_bytes(b"{" + b" " * (ops_bootstrap_hop._MAX_REQUEST_BYTES + 1) + b"}")
+    oversized.write_bytes(b"{" + b" " * (unit_local._MAX_REQUEST_BYTES + 1) + b"}")
     oversized.chmod(0o600)
 
     _refuse(unit_home, _payload(oversized))
