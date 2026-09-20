@@ -44,10 +44,8 @@ from cli.commands._release_services import (
     start_normal_service,
 )
 from cli.commands._update_bootstrap import (
-    BootstrapHopRequest,
     PreparedBootstrapHop,
     _private_reference,
-    probe_bootstrap,
 )
 from services.agent_ops.bootstrap import (
     ObserverProjection,
@@ -241,83 +239,6 @@ def continue_after_bootstrap(
         raise ReleaseRejectedError("normal continuation differs from its retained bootstrap")
     bootstrap = _read_ops_record(Path(plan.request.unit.home))
     return execute_normal_release(replace(plan, bootstrap=bootstrap), generation)
-
-
-def prepare_normal_release(path: Path) -> PreparedNormalRelease:
-    """Validate all local support/identity inputs while the old observer serves."""
-    request = NormalReleaseRequest.model_validate_json(regular_bytes(path))
-    home = Path(request.unit.home)
-    _private_reference(str(path), home)
-    context = read_prepared_context(_private_reference(request.context_path, home))
-    if (
-        context.expected.machine,
-        context.expected.home,
-        context.expected.artifact_digest,
-        context.expected.manifest_digest,
-    ) != (
-        request.unit.machine,
-        request.unit.home,
-        request.unit.artifact_digest,
-        request.unit.manifest_digest,
-    ):
-        raise ReleaseRejectedError("normal request differs from the prepared observation")
-    if observe_process(request.predecessor) != "exited":
-        raise ReleaseRejectedError("old orchestrator has not positively relinquished this unit")
-    handoff = updater_handoff.read()
-    if (
-        handoff.status != "running"
-        or handoff.generation is None
-        or handoff.owner_pid != request.predecessor.pid
-        or handoff.owner_create_time != request.predecessor.create_time
-        or updater_handoff.owner_is_live(handoff)
-    ):
-        raise ReleaseRejectedError("existing handoff does not identify the exited orchestrator")
-    journal = _candidate_ready_recovery(handoff.generation)
-    bootstrap_path = _private_reference(journal.request, home)
-    bootstrap_request = BootstrapHopRequest.model_validate_json(regular_bytes(bootstrap_path))
-    if (
-        journal.request_digest != hashlib.sha256(regular_bytes(bootstrap_path)).hexdigest()
-        or bootstrap_request.normal_release_path != str(path)
-        or bootstrap_request.predecessor != request.predecessor
-        or bootstrap_request.candidate_context != request.context_path
-        or journal.inventory_digest
-        != hashlib.sha256(
-            regular_bytes(_private_reference(bootstrap_request.inventory_receipt, home))
-        ).hexdigest()
-        or journal.candidate_context_digest
-        != hashlib.sha256(regular_bytes(Path(request.context_path))).hexdigest()
-        or journal.recovery_context_digest
-        != hashlib.sha256(
-            regular_bytes(_private_reference(bootstrap_request.recovery_context, home))
-        ).hexdigest()
-    ):
-        raise ReleaseRejectedError("normal continuation has no exact completed bootstrap handoff")
-    services = prepare_normal_services(request.unit, context.schema_digest)
-    if not any(service.identity.session == "ava-ops" for service in services):
-        raise ReleaseRejectedError("unit has no normal same-endpoint ops service")
-    previous = request.previous_selector.encode() if request.previous_selector is not None else None
-    if read_selector(home) != previous:
-        raise ReleaseRejectedError("normal selector predecessor differs before maintenance")
-    projection = ObserverProjection.from_environment()
-    validate_operation(context, projection)
-    probe_bootstrap(context, projection)
-    bootstrap = SessionRecord(**json.loads(regular_bytes(home / "run/sessions/ava-ops.json")))
-    # probe_bootstrap checks real command, actual self-report and native ownership;
-    # retain that exact record so no later lookup can signal a replacement.
-    if (
-        observe_process(
-            ExpectedProcess(
-                pid=bootstrap.pid, create_time=bootstrap.create_time, starttime=bootstrap.starttime
-            )
-        )
-        != "alive"
-    ):
-        raise ReleaseRejectedError("verified bootstrap process disappeared")
-    prepared = PreparedNormalRelease(
-        path, request, context, projection, services, bootstrap, handoff.generation
-    )
-    _preflight_pending_plan(prepared)
-    return prepared
 
 
 def _read_ops_record(home: Path) -> SessionRecord:
@@ -764,9 +685,3 @@ def execute_normal_release(_plan: PreparedNormalRelease, _generation: str) -> Ne
     """
     require_checked_normal_activation()
     return _drive_checked_normal_release(_plan, _generation)
-
-
-def run_normal_release(path: Path) -> Never:
-    """Prepare one sealed plan, then enter the checked activation entry."""
-    prepared = prepare_normal_release(path)
-    return execute_normal_release(prepared, prepared.resume_generation)

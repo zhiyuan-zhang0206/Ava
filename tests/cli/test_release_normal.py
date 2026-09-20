@@ -182,6 +182,7 @@ def test_continuation_requires_same_actual_ready_handoff(
     from unittest.mock import Mock
 
     from cli.commands import _update_normal_release as normal
+    from cli.commands import _update_normal_release_standalone as standalone
     from cli.commands._update_bootstrap import PreparedBootstrapHop
 
     monkeypatch.setattr(
@@ -216,7 +217,7 @@ def test_continuation_requires_same_actual_ready_handoff(
     def forbidden(*_args: object, **_kwargs: object) -> None:
         pytest.fail("exit code alone must not authorize normal probing or service effects")
 
-    monkeypatch.setattr(normal, "probe_bootstrap", forbidden)
+    monkeypatch.setattr(standalone, "probe_bootstrap", forbidden)
     monkeypatch.setattr(normal, "execute_normal_release", forbidden)
     with pytest.raises(ReleaseRejectedError, match="actual candidate-ready handoff"):
         normal.continue_after_bootstrap(
@@ -1710,21 +1711,3 @@ def test_continuation_resumes_a_retained_normal_journal(
     normal.continue_after_bootstrap(hop, plan, GENERATION)
 
     assert captured == ["execute"]
-
-
-def test_run_normal_release_routes_the_prepared_plan_into_execute(
-    monkeypatch: pytest.MonkeyPatch, unit_home: Path
-) -> None:
-    plan = _prepared_plan(unit_home, ())
-    routed: list[tuple[object, str]] = []
-
-    def spy_execute(routed_plan: object, generation: str) -> None:
-        routed.append((routed_plan, generation))
-
-    def prepare(_path: Path) -> normal.PreparedNormalRelease:
-        return plan
-
-    monkeypatch.setattr(normal, "prepare_normal_release", prepare)
-    monkeypatch.setattr(normal, "execute_normal_release", spy_execute)
-    normal.run_normal_release(unit_home / "normal-request.json")
-    assert routed == [(plan, GENERATION)]

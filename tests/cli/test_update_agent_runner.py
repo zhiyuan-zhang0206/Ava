@@ -59,7 +59,7 @@ def test_help_does_not_attach_cli_sinks(monkeypatch: pytest.MonkeyPatch) -> None
 def test_normal_release_dispatch_has_no_source_or_logging_effect(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from cli.commands import _update_normal_release as normal
+    from cli.commands import _update_normal_release_standalone as normal
     from shared import log
 
     def forbidden(*_args: object, **_kwargs: object) -> None:
