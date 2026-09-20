@@ -76,6 +76,7 @@ from shared.events.registry import _EVENTS_RUNTIME
 from shared.events.registry import _audit as _audit
 from shared.events.registry import _telemetry as _telemetry
 from shared.events.registry import _telemetry_audit as _telemetry_audit
+from shared.events.registry_lifecycle import _EVENTS_LIFECYCLE
 from shared.events.registry_ops import _EVENTS_OPS
 from shared.events.system import AgentBootFailed as AgentBootFailed
 from shared.events.system import AgentRegistry as AgentRegistry
@@ -117,7 +118,7 @@ from shared.events.system import TelemetryReadRecovered as TelemetryReadRecovere
 from shared.events.system import TelemetryReadStale as TelemetryReadStale
 from shared.events.system import WatchdogTick as WatchdogTick
 
-EVENTS: dict[str, EventSpec] = {**_EVENTS_RUNTIME, **_EVENTS_OPS}
+EVENTS: dict[str, EventSpec] = {**_EVENTS_RUNTIME, **_EVENTS_LIFECYCLE, **_EVENTS_OPS}
 
 
 # ── derived views — the only spellings consumers may use ───────────────────

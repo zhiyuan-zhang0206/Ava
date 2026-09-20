@@ -202,9 +202,11 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # reap-truncation close (tasks #4164/#4156: host_turn_truncated +
     # host_held_wake_truncated — the update straggler reap ending a turn or held
     # wake quietly instead of as an unclassified crash) raises the current total
-    # to 201.
+    # to 201; the closure-reopen marker (task #4165: agent_reopened — a closed
+    # agent's never-auto-resurrect marker cleared by an explicit resurrect)
+    # raises the current total to 202.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 201
+    assert len(_TELEMETRY_KINDS) == 202
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:

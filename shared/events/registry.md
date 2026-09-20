@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 28 | events table |
-| telemetry (category=telemetry) | `events` | 201 | events table |
+| telemetry (category=telemetry) | `events` | 202 | events table |
 | log (category=log) | `events` | 13 | events table |
 | file-only (destination=file) | file log | 1 | file only (not the events table) |
 | SSE live | Redis → frontend (not persisted) | 31 role | live projection |
@@ -95,7 +95,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `managed_writer_recovery_completed` | recovery replaced the abandoned pending publication under a new lease and closure | business | — | events |
 | `managed_writer_blocked` | managed-writer mode requested but refused entry: a readiness guard is missing or not True; the rollout ran the legacy flow | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 201)
+## 3. Telemetry events (category=telemetry, 202)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -198,20 +198,6 @@ consumers: see the comments at each emit point.
 | `boot_timing` | boot duration | noise | — | — | events |
 | `dangling_tool_pairing_repaired` | dangling tool pairing repaired | anomaly | — | — | events |
 | `delta_read_compat` | delta-written checkpoint messages reconstructed for a plain reader (task #3180 transition layer) | noise | — | — | events |
-| `agent_spawned` | agent process started | observation | spawner, forked_from | — | events |
-| `agent_resurrected` | agent resurrected | observation | — | — | events |
-| `billing_resurrect_run` | billing batch recovery run finished | observation | — | — | events |
-| `agent_terminated` | agent terminated | observation | — | — | events |
-| `agent_revived` | agent revived | noise | — | — | events |
-| `respawn_phase1` | restart phase 1 | noise | — | — | events |
-| `respawn_phase2_launch` | restart phase 2 launch | noise | — | — | events |
-| `launch_confirm_extended` | launch confirm extended | noise | — | — | events |
-| `launch_confirm_failed` | launch confirm failed | anomaly | — | — | events |
-| `agent_boot_failed` | agent boot failed (process exits; crash-loop budget applies) | anomaly | model, error_type, error | — | events |
-| `launch_confirm_task_crashed` | launch confirm task crashed | anomaly | — | — | events |
-| `launch_force_terminated` | launch force-terminated | anomaly | — | — | events |
-| `launch_force_terminated_skipped` | launch force-terminate skipped | noise | — | — | events |
-| `launch_retry` | launch retried | observation | — | — | events |
 | `sdk_call` | SDK call metering | noise | fn, duration, sample_rate, detail | — | events |
 | `plugin_activation` | a plugin injection surface fired (hook / wrap / prompt section) | noise | plugin, surface, identifier, detail, model | — | events |
 | `sse_drop` | SSE event dropped | anomaly | kind, n | — | events |
@@ -229,6 +215,21 @@ consumers: see the comments at each emit point.
 | `page_restore_failed` | page restore failed | anomaly | — | — | events |
 | `page_restore_closed` | page restore closed | noise | — | — | events |
 | `page_restore_notified` | page restore notified | noise | — | — | events |
+| `agent_spawned` | agent process started | observation | spawner, forked_from | — | events |
+| `agent_resurrected` | agent resurrected | observation | — | — | events |
+| `agent_reopened` | an explicit resurrect cleared a closed agent's durable closure marker (closed_at) — the WARNING-level operator-side marker that the agent is out of the never-auto-resurrect closure (task #4165) | observation | — | — | events |
+| `billing_resurrect_run` | billing batch recovery run finished | observation | — | — | events |
+| `agent_terminated` | agent terminated | observation | — | — | events |
+| `agent_revived` | agent revived | noise | — | — | events |
+| `respawn_phase1` | restart phase 1 | noise | — | — | events |
+| `respawn_phase2_launch` | restart phase 2 launch | noise | — | — | events |
+| `launch_confirm_extended` | launch confirm extended | noise | — | — | events |
+| `launch_confirm_failed` | launch confirm failed | anomaly | — | — | events |
+| `agent_boot_failed` | agent boot failed (process exits; crash-loop budget applies) | anomaly | model, error_type, error | — | events |
+| `launch_confirm_task_crashed` | launch confirm task crashed | anomaly | — | — | events |
+| `launch_force_terminated` | launch force-terminated | anomaly | — | — | events |
+| `launch_force_terminated_skipped` | launch force-terminate skipped | noise | — | — | events |
+| `launch_retry` | launch retried | observation | — | — | events |
 | `pause_lifecycle_wait` | preparation bounded-waited in-flight work it did not author | anomaly | waited_s, outcome, agents | — | events |
 | `update_straggler_reaped` | drain reaped straggler cohort agent(s) past their restart window | anomaly | agents, window_s | — | events |
 | `update_straggler_reap_settled` | successor boundary settled stranded straggler-reap marks | anomaly | agents, site | — | events |
