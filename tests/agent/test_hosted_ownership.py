@@ -22,7 +22,9 @@ from agent.hosted_ownership import (
     settle_hosted_runtime,
     stamp_turn_fatal,
 )
+from agent.impersonation import native_status
 from shared.db import create_agent, insert_inbound_message
+from shared.impersonation import ImpersonationError
 from shared.incarnation_resources import IncarnationResources, ResourceProcess, decode_resources
 from shared.managed_writer_publication import AdmissionDecision, CurrentAdmission
 from shared.runtime_admission import PublicationAdmissionDeferredError, RuntimeAdmission
@@ -461,6 +463,38 @@ async def test_owner_beat_renews_idle_but_not_other_owner(
         "SELECT lease_expires_at > now(), runtime_protocol_version FROM agents_meta WHERE id = %s",
         (agent_id,),
     ).fetchone() == (True, 0)
+
+
+async def test_owner_beat_renews_a_mid_turn_row_and_the_guard_stays_green(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    """A turn's length never expires its lease: the beat renews, not the turn.
+
+    A turn may run for hours with the row 'running' (agent 2697, 2026-09-20:
+    ~375k tokens in flight); the host beat renews the lease the whole time, so
+    the fail-closed guard read stays green however long the turn takes. A
+    genuinely lapsed lease still refuses until a beat lands.
+    """
+    agent_id, owner = _agent(db_conn), uuid4()
+    incarnation = await admit_hosted_runtime(
+        aops_pool, agent_id, "host-test", owner, expected_from="idling"
+    )
+    assert incarnation is not None
+    # Mid-turn, with a stand-in for any renewal silence longer than the TTL.
+    db_conn.execute(
+        "UPDATE agents_meta SET lease_expires_at = now() - interval '5 minutes' WHERE id = %s",
+        (agent_id,),
+    )
+    db_conn.commit()
+    with bind_turn_identity(agent_id, incarnation=incarnation), pytest.raises(ImpersonationError):
+        await native_status(agent_id)
+    await renew_hosted_owner(aops_pool, "host-test", owner)  # one beat
+    assert db_conn.execute(
+        "SELECT lease_expires_at > now() FROM agents_meta WHERE id = %s", (agent_id,)
+    ).fetchone() == (True,)
+    with bind_turn_identity(agent_id, incarnation=incarnation):
+        assert await native_status(agent_id) is None
 
 
 async def test_hosted_incarnation_context_is_task_local_and_copies_to_thread() -> None:
