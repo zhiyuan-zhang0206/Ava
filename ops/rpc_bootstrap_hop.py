@@ -50,3 +50,34 @@ class BootstrapHopResult(BaseModel):
     home: str = Field(min_length=1, max_length=4096)
     session: str = Field(min_length=1, max_length=128)
     log: str = Field(min_length=1, max_length=4096)
+
+
+class BootstrapRecoveryReadPayload(BaseModel):
+    """``cluster_bootstrap_recovery_read`` payload: no arguments.
+
+    The question is about the unit's own journal slot, so the payload carries
+    nothing -- the envelope's target machine is the addressing, and the answer
+    is one read-only unit-local fact.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class BootstrapRecoveryReadResult(BaseModel):
+    """``cluster_bootstrap_recovery_read`` result: this unit's bootstrap-recovery journal slot.
+
+    `journal_present` is the effect marker the exact pre-stop abort requires
+    absent on every unit: the hop child's first durable write is this journal
+    (before it, every action was staged-file writes or read-only checks).
+    `journal_stage` rides along when the journal is readable, for the
+    operator's diagnosis. A present-but-unreadable journal still reports
+    `journal_present=True` (with no stage) -- an effect is reported as the
+    fact it is, never an op failure.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    machine: str = Field(min_length=1, max_length=128)
+    home: str = Field(min_length=1, max_length=4096)
+    journal_present: bool
+    journal_stage: str | None = Field(default=None, max_length=64)

@@ -23,7 +23,12 @@ import pytest
 
 from ops import cluster as cluster_facade
 from ops import cluster_deploy, cluster_session, ops_bootstrap_hop
-from ops.rpc_bootstrap_hop import BootstrapHopPayload, BootstrapHopResult
+from ops.rpc_bootstrap_hop import (
+    BootstrapHopPayload,
+    BootstrapHopResult,
+    BootstrapRecoveryReadPayload,
+    BootstrapRecoveryReadResult,
+)
 from shared.config import settings
 from shared.runtime_release import ReleaseRejectedError
 
@@ -366,6 +371,108 @@ def test_spawn_bootstrap_hop_refuses_an_unretained_image(
         cluster_deploy.spawn_bootstrap_hop(_request_file(unit_home), artifact_digest="9" * 64)
 
     assert spawned == []
+
+
+# ─── the read-only recovery-journal face (task #4129 C-4) ─────────────────────
+
+
+def _recovery_envelope(journal: dict[str, object]) -> dict[str, object]:
+    return {"version": 1, "generation": "bootstrap", "journal": journal}
+
+
+def _bootstrap_journal(stage: str) -> dict[str, object]:
+    """The canonical journal shape (mirrors `tests/shared/test_updater_handoff.py`)."""
+    return {
+        "request": "/unit/run/bootstrap.json",
+        "request_digest": "a" * 64,
+        "inventory_digest": "b" * 64,
+        "candidate_context_digest": "c" * 64,
+        "recovery_context_digest": "d" * 64,
+        "normal_release_planned": False,
+        "stage": stage,
+        "cron": "",
+        "phases": [
+            {
+                "stage": stage,
+                "observed_at": "2026-09-04T00:00:00Z",
+                "monotonic_s": 0.0,
+                "pid": 1,
+                "elapsed_s": None,
+            }
+        ],
+        "normal_release": None,
+    }
+
+
+def test_recovery_read_wire_shapes() -> None:
+    assert BootstrapRecoveryReadPayload().model_dump(mode="json") == {}
+    with pytest.raises(ValueError):
+        BootstrapRecoveryReadPayload.model_validate_json(json.dumps({"payload": 1}))
+    result = BootstrapRecoveryReadResult(
+        machine="runner", home="/unit", journal_present=True, journal_stage="prepared"
+    )
+    wire = result.model_dump(mode="json")
+    assert BootstrapRecoveryReadResult.model_validate_json(json.dumps(wire)) == result
+    absent = BootstrapRecoveryReadResult(machine="runner", home="/unit", journal_present=False)
+    assert absent.journal_stage is None
+
+
+def test_recovery_read_reports_an_absent_journal(unit_home: Path) -> None:
+    result = ops_bootstrap_hop.cluster_bootstrap_recovery_read_op(BootstrapRecoveryReadPayload())
+
+    assert result == BootstrapRecoveryReadResult(
+        machine="runner", home=str(unit_home), journal_present=False
+    )
+
+
+def test_recovery_read_reports_a_readable_journal_stage(unit_home: Path) -> None:
+    journal = _bootstrap_journal("prepared")
+    path = unit_home / "run" / "updater-bootstrap-recovery.json"
+    path.write_text(json.dumps(_recovery_envelope(journal)), encoding="utf-8")
+
+    result = ops_bootstrap_hop.cluster_bootstrap_recovery_read_op(BootstrapRecoveryReadPayload())
+
+    assert result.journal_present is True
+    assert result.journal_stage == "prepared"
+
+
+def test_recovery_read_reports_a_malformed_journal_as_present(unit_home: Path) -> None:
+    path = unit_home / "run" / "updater-bootstrap-recovery.json"
+    path.write_text('{"version": 1}', encoding="utf-8")
+
+    result = ops_bootstrap_hop.cluster_bootstrap_recovery_read_op(BootstrapRecoveryReadPayload())
+
+    assert result.journal_present is True
+    assert result.journal_stage is None
+
+
+def test_daemon_dispatch_accepts_the_recovery_read_payload(
+    unit_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The op envelope crosses the wire as JSON; the dispatch arm must give the
+    handler a JSON-mode-validated no-argument payload."""
+    from services.agent_ops import daemon as ops_daemon
+
+    seen: list[BootstrapRecoveryReadPayload] = []
+
+    def handler(payload: BootstrapRecoveryReadPayload) -> BootstrapRecoveryReadResult:
+        seen.append(payload)
+        return BootstrapRecoveryReadResult(
+            machine="runner", home=str(unit_home), journal_present=False
+        )
+
+    monkeypatch.setattr(ops_bootstrap_hop, "cluster_bootstrap_recovery_read_op", handler)
+
+    status, result = ops_daemon._dispatch_sync("cluster_bootstrap_recovery_read", {})
+
+    assert status == "completed"
+    assert seen == [BootstrapRecoveryReadPayload()]
+    assert result == {
+        "machine": "runner",
+        "home": str(unit_home),
+        "journal_present": False,
+        "journal_stage": None,
+    }
 
 
 def test_unmarked_tests_hold_the_refused_spawn_guard() -> None:

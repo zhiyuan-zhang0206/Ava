@@ -25,7 +25,7 @@ from ops import (
     ops_prepare_facts,
     ops_uploads,
 )
-from ops.rpc_bootstrap_hop import BootstrapHopPayload
+from ops.rpc_bootstrap_hop import BootstrapHopPayload, BootstrapRecoveryReadPayload
 from ops.rpc_prepare_dispatch import PrepareDispatchPayload
 from ops.rpc_prepare_facts import PrepareFactsPayload
 from ops.rpc_schemas import (
@@ -141,6 +141,15 @@ def dispatch_sync(
             # re-verifies every binding from the request bytes itself.
             bh = BootstrapHopPayload.model_validate_json(json.dumps(payload))
             return "completed", ops_bootstrap_hop.cluster_bootstrap_hop_op(bh).model_dump(
+                mode="json"
+            )
+        case "cluster_bootstrap_recovery_read":
+            # Channel C's read-only face: the unit reports its own
+            # bootstrap-recovery journal slot -- the exact pre-stop abort's
+            # per-unit no-effect proof reads exactly this answer. Writes
+            # nothing, stops nothing.
+            rr = BootstrapRecoveryReadPayload.model_validate(payload)
+            return "completed", ops_bootstrap_hop.cluster_bootstrap_recovery_read_op(rr).model_dump(
                 mode="json"
             )
         case "cluster_resume":

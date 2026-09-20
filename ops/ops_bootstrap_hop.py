@@ -1,4 +1,5 @@
-"""`cluster_bootstrap_hop` op handler: start one unit's restricted hop session.
+"""Channel C's unit-side handlers: start one unit's restricted hop session, and
+report its bootstrap-recovery journal slot read-only.
 
 The daemon-side half of task #4129 channel C (design
 `managed-writer-dispatch-design-20260920.md` section 3.3): verify the payload's
@@ -30,10 +31,17 @@ import os
 import stat
 import sys
 from pathlib import Path
+from typing import cast
 
 from ops import cluster_deploy
-from ops.rpc_bootstrap_hop import BootstrapHopPayload, BootstrapHopResult
+from ops.rpc_bootstrap_hop import (
+    BootstrapHopPayload,
+    BootstrapHopResult,
+    BootstrapRecoveryReadPayload,
+    BootstrapRecoveryReadResult,
+)
 from ops.unit_local import machine_identity
+from shared import updater_handoff
 from shared.config import settings
 from shared.log import logger
 from shared.runtime_release import ReleaseRejectedError
@@ -93,4 +101,37 @@ def cluster_bootstrap_hop_op(payload: BootstrapHopPayload) -> BootstrapHopResult
         home=str(home),
         session=spawned["session"],
         log=spawned["log"],
+    )
+
+
+def cluster_bootstrap_recovery_read_op(
+    payload: BootstrapRecoveryReadPayload,
+) -> BootstrapRecoveryReadResult:
+    """Report this unit's bootstrap-recovery journal slot, read-only (C-4).
+
+    The exact pre-stop abort's per-unit no-effect proof: the hop child's first
+    durable write is this journal (before it, every action was a staged-file
+    write or a read-only check), so "absent on every unit" is exactly "no unit
+    has acted". A present journal is reported as the fact it is -- readable or
+    not -- and the coordinator refuses; nothing here writes, stops or starts
+    anything.
+    """
+    del payload  # no arguments: the question is about this unit's own slot
+    home = settings.general.ava_home
+    machine = machine_identity(home)
+    try:
+        envelope = updater_handoff.read_bootstrap_recovery()
+    except updater_handoff.BootstrapRecoveryInvalidError:
+        # Present but unreadable is still a recorded effect.
+        return BootstrapRecoveryReadResult(machine=machine, home=str(home), journal_present=True)
+    if envelope is None:
+        return BootstrapRecoveryReadResult(machine=machine, home=str(home), journal_present=False)
+    stage: str | None = None
+    journal_raw = envelope.get("journal")
+    if isinstance(journal_raw, dict):
+        value = cast("dict[str, object]", journal_raw).get("stage")
+        if isinstance(value, str):
+            stage = value
+    return BootstrapRecoveryReadResult(
+        machine=machine, home=str(home), journal_present=True, journal_stage=stage
     )
