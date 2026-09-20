@@ -216,9 +216,12 @@ async def ledger_response(context: PreparedObservation, body: bytes) -> tuple[in
 # serves one prepared observation, it is not a second daemon.
 _ADMITTED_OPS = frozenset({"cluster_bootstrap_hop", "cluster_normal_continue"})
 
-# One admitted op's child work is one session spawn. 120s bounds a stuck child
-# while sitting above that work and below a coordinator dial's patience: a
-# stuck child must answer as a failed op, not hold the dial.
+# One admitted op's child work is one session spawn (seconds). This bound is
+# the observer's orphan-reclaim limit, not a dial's patience: a coordinator dial
+# carries its own default timeout (30s) and retries with the same idempotency
+# key, so a child still running past that is answered by its own claim races --
+# the sender reads a refusal and the checked recovery re-verifies. 120s just
+# caps how long a wedged child may linger before this observer reaps it.
 _DISPATCH_CHILD_TIMEOUT_S = 120.0
 
 
@@ -269,6 +272,12 @@ def ops_route(home: Path) -> Callable[[bytes], Awaitable[tuple[int, bytes, str]]
     Wire shapes mirror the daemon's `_ops_route` exactly (400 on a bad JSON body
     or envelope; otherwise 200 with `{"status", "result"}`). A kind outside the
     allowlist is answered as a failed op and never reaches a child.
+
+    No concurrency semaphore here, deliberately: deliveries are one effect per
+    kind per restricted window, the `to_thread` hop is bounded by the default
+    executor's worker pool, and duplicate deliveries are settled inside the
+    child by its own `api_idempotency` claim or refused by the op's live-session
+    guard.
     """
 
     async def handle(body: bytes) -> tuple[int, bytes, str]:

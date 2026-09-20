@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from services.agent_ops import bootstrap, daemon, dispatch_child
 from shared.op_envelope import OpEnvelope
@@ -75,13 +76,29 @@ async def test_other_kinds_are_refused_without_a_child(
 
 @pytest.mark.asyncio
 async def test_malformed_bodies_are_400_like_the_daemon(tmp_path: Path) -> None:
+    """Exact-equality pins on both 400 bodies: same text the daemon would send."""
     route = bootstrap.ops_route(tmp_path)
-    status, body, _ = await route(b"{not json")
+    raw = b"{not json"
+    try:
+        json.loads(raw)
+    except json.JSONDecodeError as exc:
+        json_expected = {"error": f"invalid JSON body: {exc}"}
+    else:  # pragma: no cover — the fixture must stay invalid JSON.
+        raise AssertionError("fixture is not invalid JSON")
+    status, body, _ = await route(raw)
     assert status == 400
-    assert "invalid JSON body" in json.loads(body)["error"]
-    status, body, _ = await route(json.dumps({"payload": {}}).encode())
+    assert json.loads(body) == json_expected
+
+    bad = json.dumps({"payload": {}}).encode()
+    try:
+        OpEnvelope.model_validate(json.loads(bad))
+    except ValidationError as exc:
+        envelope_expected = {"error": f"body must be {{kind: str, payload: dict}}: {exc}"}
+    else:  # pragma: no cover — the fixture must stay an invalid envelope.
+        raise AssertionError("fixture is not an invalid envelope")
+    status, body, _ = await route(bad)
     assert status == 400
-    assert "body must be {kind: str, payload: dict}" in json.loads(body)["error"]
+    assert json.loads(body) == envelope_expected
 
 
 # ─── the child runner ────────────────────────────────────────────────────────
