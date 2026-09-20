@@ -163,6 +163,11 @@ _BARCHART_OPTIONS: dict[str, Any] = {
     "tooltip": {"mode": "multi", "sort": "desc"},
     "orientation": "auto",
     "xTickLabelRotation": 0,
+    # Minimum x-axis tick-label spacing (px): on crowded axes the chart skips
+    # labels until neighbors are >= 100px apart. 0 disables the filter and
+    # every bar keeps its label, which overlaps on the half-width Fleet
+    # panels (task #4204).
+    "xTickLabelSpacing": 100,
     "xField": "Time",
 }
 _TABLE_OPTIONS: dict[str, Any] = {

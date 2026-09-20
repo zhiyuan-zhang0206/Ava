@@ -341,6 +341,30 @@ def test_render_invariants(
     assert rows == fixture_rows
 
 
+def test_barchart_panels_keep_the_tick_label_filter_enabled(
+    world: tuple[list[MetricSpec], list[MetricSpec], dict[str, Any]],
+) -> None:
+    """Every barchart panel renders a positive xTickLabelSpacing.
+
+    Spacing 0 disables the chart's tick-label filter: every bar keeps its
+    tick label and a dense axis draws the labels on top of each other
+    (task #4204). Readability is not machine-testable from the render, so
+    the option value is the closest machine-observable proxy."""
+    _, _, dashboard = world
+    panels = cast("list[dict[str, Any]]", dashboard["panels"])
+    charts = [panel for panel in panels if panel["type"] == "barchart"]
+    assert charts, "no barchart panels rendered"
+    offenders = [
+        f"{panel['title']}: xTickLabelSpacing={panel.get('options', {}).get('xTickLabelSpacing')!r}"
+        for panel in charts
+        if not (
+            isinstance(panel.get("options", {}).get("xTickLabelSpacing"), int)
+            and panel.get("options", {}).get("xTickLabelSpacing", 0) > 0
+        )
+    ]
+    assert not offenders, "barchart panels with the tick-label filter off:\n" + "\n".join(offenders)
+
+
 def test_render_rejects_unplaced_core_specs() -> None:
     """A core spec without its placement pins fails loudly rather than
     rendering into an arbitrary section."""
