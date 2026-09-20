@@ -661,6 +661,19 @@ def _rejections() -> list[_Rejection]:
                 ),
             ),
         ),
+        _rejection(
+            world,
+            "not loaded from its prepared image",
+            observation=dict(
+                world.observation,
+                runtime=_runtime(
+                    expected,
+                    module=(
+                        f"{expected.home}/releases/{ARTIFACT}/venv/../../../../outside/bin/python"
+                    ),
+                ).model_dump(mode="json"),
+            ),
+        ),
         _rejection(world, "another read mode", ledger=dict(world.ledger, mode="ledger_x")),
         _rejection(
             world,

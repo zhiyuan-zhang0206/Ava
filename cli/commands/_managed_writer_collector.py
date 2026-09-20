@@ -360,6 +360,9 @@ def accept_unit(  # noqa: PLR0915 — one ordered evidence re-derivation; every 
     if (
         not module.is_absolute()
         or str(module) != runtime.module
+        # Lexical containment alone accepts `venv/../../..`; the local branch's
+        # resolve(strict) refuses it, the remote branch needs this clause (QA N1).
+        or ".." in module.parts
         or not module.is_relative_to(image_root / "venv")
     ):
         raise CollectorRefusal("the observer runtime is not loaded from its prepared image")
