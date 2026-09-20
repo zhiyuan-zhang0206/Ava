@@ -51,8 +51,11 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import os
 import shlex
+import stat
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -132,9 +135,7 @@ def _preset_json_file(path: Path, updates: dict[str, object], *, label: str) -> 
         _backup_before_write(path)
     data.update(updates)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + f".tmp-{time.strftime('%Y%m%d-%H%M%S')}")
-    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    tmp.replace(path)
+    _write_json_atomic(path, data)
     print(f"+ preset: {label}")
 
 
@@ -152,9 +153,34 @@ def _preset_satisfied(current: object, desired: object) -> bool:
 
 
 def _backup_before_write(path: Path) -> Path:
-    backup = path.with_name(path.name + f".bak-{time.strftime('%Y%m%d-%H%M%S')}")
+    """Copy `path` to a uniquely named sibling backup; same-second callers never collide."""
+    fd, raw_backup = tempfile.mkstemp(
+        dir=path.parent, prefix=f"{path.name}.bak-{time.strftime('%Y%m%d-%H%M%S')}-"
+    )
+    os.close(fd)
+    backup = Path(raw_backup)
     backup.write_bytes(path.read_bytes())
     return backup
+
+
+def _write_json_atomic(path: Path, data: dict[str, object]) -> None:
+    """Publish `data` at `path` through a mkstemp-unique tmp file + atomic replace.
+
+    A unique tmp name means two concurrent presets in the same second cannot
+    collide; an existing file keeps its permission bits.
+    """
+    mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else None
+    fd, raw_tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    tmp = Path(raw_tmp)
+    try:
+        if mode is not None and os.name != "nt":
+            os.fchmod(fd, mode)
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+        tmp.replace(path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def _preset_claude_first_run(home: Path | None = None) -> None:

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import stat
 import sys
+import threading
 from pathlib import Path
 from types import ModuleType
 
@@ -105,3 +107,50 @@ def test_unparsable_file_is_backed_up_and_raises(tmp_path: Path, break_settings:
         spawn_claude._preset_claude_first_run(home)
     assert target.read_text() == ("{not json" if break_settings else "[1,2")
     assert list(home.rglob("*.bak-*"))
+
+
+def test_same_second_concurrent_presets_do_not_collide(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """N1 regression (Ava #3242 review): unique tmp/backup names, frozen clock, two threads."""
+    monkeypatch.setattr(spawn_claude.time, "strftime", lambda _fmt: "20260920-204500")
+    failures: list[str] = []
+
+    def worker(home: Path, barrier: threading.Barrier) -> None:
+        try:
+            barrier.wait(timeout=10)
+            spawn_claude._preset_claude_first_run(home)
+        except BaseException as exc:
+            failures.append(f"{type(exc).__name__}: {exc}")
+
+    for round_no in range(24):
+        home = tmp_path / f"home{round_no}"
+        (home / ".claude").mkdir(parents=True)
+        settings = _settings(home)
+        settings.write_text(json.dumps({"env": {"K": "v"}}))
+        _claude_json(home).write_text(json.dumps({"userID": "u"}))
+        barrier = threading.Barrier(2)
+        threads = [threading.Thread(target=worker, args=(home, barrier)) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+        assert not failures, failures
+        merged = json.loads(settings.read_text())
+        assert merged["env"] == {"K": "v"}
+        assert merged["skipDangerousModePermissionPrompt"] is True
+        claude_json = json.loads(_claude_json(home).read_text())
+        assert claude_json["userID"] == "u"
+        assert claude_json["fullscreenUpsellSeenCount"] == 3
+        backups = [p.name for p in home.rglob("*.bak-*")]
+        assert len(backups) == len(set(backups))
+        assert not list(home.rglob("*.tmp"))
+
+
+def test_existing_file_keeps_its_permissions(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    _settings(home).parent.mkdir(parents=True)
+    _settings(home).write_text("{}")
+    _settings(home).chmod(0o640)
+    spawn_claude._preset_claude_first_run(home)
+    assert stat.S_IMODE(_settings(home).stat().st_mode) == 0o640
