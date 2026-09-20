@@ -71,7 +71,8 @@ policy bug, not a preference, so the frontier is actively maintained:
 - A dominance pair is worth stating explicitly, so a later reader does not
   resurrect the dominated name out of habit.
 
-Current frontier state (user ruling 2026-09-10; id updated 2026-09-17):
+Current frontier state (user ruling 2026-09-10; id updated 2026-09-17; the V4
+names retired 2026-09-20):
 
 - `deepseek-flash` **dominates** `deepseek-v4-flash-vision-exp` — same
   price (the catalog carries the same rates), same 1M context, and its
@@ -79,10 +80,11 @@ Current frontier state (user ruling 2026-09-10; id updated 2026-09-17):
   named the vision experimental sibling, use the plain `deepseek-flash`
   id: the policy is flash everywhere, vision work included.
 - `deepseek-v4-flash` is **retired from selection** (user order 2026-09-17,
-  task #3750): the provider renamed the id to `deepseek-flash`, so the old
-  name stays registered with `spawnable=False` and resolves to
-  `deepseek-flash` before provider construction — old configs keep working,
-  but no new choice may name `deepseek-v4-flash`.
+  task #3750; the V4 Flash model is retired at the provider — user report
+  2026-09-20, task #4140): the old name stays registered with `spawnable=False`
+  and resolves to `deepseek-flash` before provider construction, so a
+  pre-rename config keeps working — with a logged fallback warning, the sign
+  of a config to fix — but no new choice may name `deepseek-v4-flash`.
 - `deepseek-v4-pro` is **withdrawn from selection** (2026-09-10 ruling). It
   stays registered with `spawnable=False` so old configs keep working — it
   resolves to `deepseek-flash` — but no new choice may name it.
@@ -90,15 +92,16 @@ Current frontier state (user ruling 2026-09-10; id updated 2026-09-17):
 ## Current cost policy
 
 **One model: `deepseek-flash`** (user ruling 2026-09-10; id renamed from
-`deepseek-v4-flash` on 2026-09-17 — user report, task #3750 — either spelling
-resolves to the same id). Main agent and workers alike — orchestration,
-planning, synthesis, review, extraction, format transforms, scanning — run the
-same id on its V4.1 Flash backend.
+`deepseek-v4-flash` on 2026-09-17 — user report, task #3750; the V4 names are
+retired, name only `deepseek-flash` — user report 2026-09-20). Main agent and
+workers alike — orchestration, planning, synthesis, review, extraction, format
+transforms, scanning — run the same id on its V4.1 Flash backend.
 
 - Complexity is absorbed by **decomposition and verification waves**, not by
   upgrading the model (next section).
 - `deepseek-v4-pro`, `deepseek-v4-flash` and `deepseek-v4-flash-vision-exp`
-  are retired or withdrawn by policy; vision work uses plain `deepseek-flash`.
+  are retired or withdrawn by policy and are never named as a selection;
+  vision work uses plain `deepseek-flash`.
 - Other registered models (`gemini-*`, Claude, GLM, Qwen, …) sit outside the
   default policy: select one only when the user explicitly asks for that
   model, and confirm it is on the roster first (section above).
