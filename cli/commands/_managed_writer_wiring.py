@@ -7,11 +7,12 @@ publication seats (`cli.commands._update_publication`) on the coordinator (task
 
 - `_begin_managed_writer_publication` (E2-b) -- the P1 journal position, after
   the prepare gate and before the first stop effect: under an `active` decision
-  the all-unit prepared plan is journaled so agent births freeze and the current
-  publication is preserved until P5 completes. The plan's channel (prepared
-  dispatch) is not connected yet (task #4129), so the step refuses explicitly
-  today rather than let an `active` rollout stop the fleet without its journal.
-  `off` / `blocked` skip it untouched.
+  the dispatch chain (task #4129, channel B) reads the sealed release context,
+  gathers every registered unit's prepared facts, seals the all-unit prepared
+  plan, journals it through the P1 seat and requires every unit's local
+  validation acknowledgement -- so agent births freeze and the current
+  publication is preserved until P5 completes. Any refusal in that chain aborts
+  the rollout before it stops anything. `off` / `blocked` skip it untouched.
 - `_collect_managed_writer_publication` (E2-c) -- the post-Phase-B, pre-commit
   collection step: under an `active` decision the completed units' post-stop
   facts are gathered across the fleet and adopted into the pending journal
@@ -28,13 +29,14 @@ publication seats (`cli.commands._update_publication`) on the coordinator (task
   journal for checked recovery (`ava cluster recover-pending`).
 
 All three call positions are wired (begin E2-b, collect E2-c, commit E2-a).
-Until the dispatch program (task #4129) connects the prepared-plan and
-collection channels, the begin and collect steps refuse explicitly under an
-`active` decision -- the commit seat is imported and called, but only a rollout
-whose begin and collect succeeded can reach it, so no half-open activation
-window exists in code. The inertness pin
+The prepared-plan chain behind the begin step is connected (task #4129, channel
+B); the collection channel behind the collect step is not yet, so that step
+still refuses explicitly under an `active` decision -- the commit seat is
+imported and called, but only a rollout whose begin and collect succeeded can
+reach it, so no half-open activation window exists in code. The inertness pin
 (`tests/cli/test_update_publication.py::test_the_seat_has_no_unnamed_production_callsite`)
-names this module as a conscious production exception beside the enable point.
+names this module and the dispatch chain as conscious production exceptions
+beside the enable point.
 
 Each step imports its seats lazily, inside the `active` check: nothing reaches
 them unless the rollout actually entered the managed-writer mode.
@@ -47,44 +49,57 @@ import sys
 from shared.rollout_telemetry import stage as _stage_telemetry
 
 
-def _begin_managed_writer_publication() -> int:
+def _begin_managed_writer_publication(target_sha: str | None) -> int:
     """Journal the managed-writer activation (P1 coordinator step).
 
     The rollout's begin position of the managed-writer chain (task #4128,
-    E2-b): under an `active` decision the P1 seat journals the all-unit
-    prepared plan before the rollout stops anything, so agent births freeze
-    and the current publication is preserved until P5 completes. `off` /
-    `blocked` leave the seat untouched, and a call with no recorded decision
-    skips with the same visible beacon as the commit step.
+    E2-b): under an `active` decision the dispatch chain (task #4129, channel
+    B) reads the sealed release context, gathers each registered unit's
+    prepared facts, seals the all-unit prepared plan, opens the P1 journal and
+    requires every unit's local validation acknowledgement before the rollout
+    stops anything -- so agent births freeze and the current publication is
+    preserved until P5 completes. `off` / `blocked` leave the seat untouched,
+    and a call with no recorded decision skips with the same visible beacon as
+    the commit step.
 
-    The plan -- each registered unit's sealed receipt, candidate image digests
-    and normal-service plan, produced inside the candidate images and gathered
-    for the whole registered roster -- is the prepared-dispatch channel's to
-    provide (task #4129), and that channel is not connected yet. Until it is,
-    the step refuses explicitly instead of degrading: an `active` rollout must
-    not reach the stop-the-world without its journal open (fail-closed).
-    Returns the step's exit code: 0 for a clean skip, 1 for the refusal.
+    A refusal anywhere in the chain -- a missing or mismatched release context,
+    a lease this process does not own, a gather or seat refusal, a unit that
+    does not acknowledge its copy of the plan -- is printed and turns into
+    exit code 1; the rollout then aborts before the first stop effect, and a
+    journal already opened stays for checked recovery (`ava cluster
+    recover-pending`). Infrastructure failures propagate unchanged. Returns
+    the step's exit code: 0 for a clean skip or an open journal, 1 for the
+    refusal.
     """
     from cli.commands._managed_writer_mode import managed_writer_mode
 
     mode = managed_writer_mode()
     if mode is None:
         print(
-            "  · managed-writer begin: no mode decision recorded in this "
+            "  \u00b7 managed-writer begin: no mode decision recorded in this "
             "process; skipping the position",
             file=sys.stderr,
         )
         return 0
     if mode.state != "active":
         return 0
-    print(
-        "\n✗ managed-writer begin refused: the all-unit prepared plan "
-        "channel (prepared dispatch, task #4129) is not connected yet, so the "
-        "publication cannot be journaled; the rollout stops before any effect.\n"
-        "  disable the managed-writer switch or wait for the channel",
-        file=sys.stderr,
-    )
-    return 1
+    from cli.commands._managed_writer_dispatch import begin_managed_writer_publication
+    from shared.managed_writer_barrier import ManagedWriterBarrierError
+
+    # The stage is entered only under the active decision: an off/blocked
+    # rollout's log must not grow a managed-writer stage it never ran.
+    with _stage_telemetry("managed_writer_begin"):
+        try:
+            begin_managed_writer_publication(target_sha)
+        except ManagedWriterBarrierError as exc:
+            print(
+                f"\n\u2717 managed-writer begin refused: {exc}\n"
+                "  nothing was stopped; the pending journal, if any, stays for "
+                "`ava cluster recover-pending`",
+                file=sys.stderr,
+            )
+            return 1
+    return 0
 
 
 def _collect_managed_writer_publication() -> int:
