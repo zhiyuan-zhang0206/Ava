@@ -41,8 +41,8 @@ identity before signalling. No K8s runtime or image deployment is involved.
 
 The import boundary is `shared < ops < {gateway, cli}`. Shared RPC contracts
 live in the ops schema modules (`ops/rpc_schemas.py` with the focused
-`ops/rpc_terminate.py` / `ops/rpc_content.py` / `ops/rpc_billing_recovery.py`
-siblings); gateway-only schemas stay in `gateway/schemas/`.
+`ops/rpc_terminate.py` / `ops/rpc_content.py` / `ops/rpc_billing_recovery.py` / `ops/rpc_prepare_facts.py`
+siblings); gateway-only schemas stay in `gateway/schemas/`. A contract that embeds strict evidence models — `cluster_prepare_facts` (task #4129) — validates its JSON wire copies in JSON mode.
 Cluster identity remains the installed home path, resolved before runtime
 configuration construction.
 

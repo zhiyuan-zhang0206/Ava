@@ -118,6 +118,7 @@ _ALLOWED_FILES = frozenset(
         "shared/bootstrap.py",  # fetches config from the gateway and os.environ.update()s it BEFORE Settings is built; importing shared.config here is the import cycle this module exists to break
         "shared/external_caller.py",  # per-invocation external child profile, consumed by SDK identity bootstrap before Settings; caller provenance is not cluster config and must not enter its persisted Settings projection
         "services/agent_ops/bootstrap.py",  # restricted prepared observer consumes an explicit pre-resolved child projection before ordinary Settings can fetch the stopped gateway
+        "cli/prepared_facts.py",  # restricted prepared child of the ops handler: the explicit minimal projection's AVA_DB_URL must be read as given — absent must refuse, not fall back through Settings' merged sources
         "services/page_server/daemon.py",  # spawns the page-server child with a per-launch PAGE_SERVER_TOKEN overlaid on the inherited env — the token is a fresh secrets.token_hex(16) per spawn, a dynamic child-env handoff Settings (boot-time static) cannot model, same class as shared/session_env
         "services/page_server/server.py",  # reads the per-launch PAGE_SERVER_TOKEN its daemon parent set in the child env — the token is minted per spawn by the daemon, Settings (boot-time static) cannot model it
         "scripts/lint_no_os_environ.py",  # this script itself has "os.environ" in strings

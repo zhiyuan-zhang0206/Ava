@@ -452,6 +452,7 @@ OpKind = Literal[
     "inventory_read",
     "inventory_write",
     "cluster_fetch",
+    "cluster_prepare_facts",
     "shell_probe",
     "shell_kill",
     "agent_skill_view",
