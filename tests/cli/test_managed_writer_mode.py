@@ -387,7 +387,7 @@ def test_active_rollout_refuses_at_the_begin_position(monkeypatch: pytest.Monkey
 
 
 def test_restart_only_rollout_skips_the_begin_position(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A bounce publishes nothing: the begin is legacy-skipped (R5 interim)."""
+    """A bounce publishes nothing: restart-only rollouts never enter the begin position by design."""
     _ready_guards(monkeypatch)
     stopped = _stub_orchestration(monkeypatch)
 
@@ -464,7 +464,7 @@ def test_active_rollout_refuses_at_the_collect_position(monkeypatch: pytest.Monk
 
 
 def test_restart_only_rollout_skips_the_collect_position(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A bounce publishes nothing: the collect is legacy-skipped (R5 interim)."""
+    """A bounce publishes nothing: restart-only rollouts never enter the collect position by design."""
     from cli.commands import update as _up
 
     _ready_guards(monkeypatch)

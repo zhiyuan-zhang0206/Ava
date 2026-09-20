@@ -61,6 +61,7 @@ def prove_checkout_absent(  # noqa: PLR0915 — one guarded checkout-retirement 
     exec_owner = _copy_proof(root, checkout, "prove_exec_owner_installed.py")
     bootstrap = _copy_proof(root, checkout, "prove_ops_bootstrap.py")
     updater = _copy_proof(root, checkout, "prove_updater_bootstrap.py")
+    writer_chain = _copy_proof(root, checkout, "prove_managed_writer_chain.py")
     alias = root / "runtime-entry-alias"
     alias.symlink_to(release.root / "venv", target_is_directory=True)
     if (
@@ -275,6 +276,20 @@ def prove_checkout_absent(  # noqa: PLR0915 — one guarded checkout-retirement 
                 # runner's ambient environment. Retain the actual admission error.
                 raise AssertionError(f"wheel/PG admission failed:\n{result.stderr[-8000:]}")
             (root / "migration-proof.json").write_text(result.stdout)
+            writer_chain_result = subprocess.run(  # noqa: S603 — CI-only isolated schema on the native PG, prepared image boundary.
+                [str(release.interpreter), "-I", "-B", str(writer_chain)],
+                cwd=root,
+                env=migration_env,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=600,
+            )
+            if writer_chain_result.returncode:
+                raise AssertionError(
+                    f"managed-writer chain failed:\n{writer_chain_result.stderr[-8000:]}"
+                )
+            (root / "managed-writer-chain-proof.json").write_text(writer_chain_result.stdout)
     finally:
         retired_checkout.rename(checkout)
 
