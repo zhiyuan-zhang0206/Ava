@@ -67,7 +67,9 @@ jobs:
       matrix:
         os: [ubuntu-24.04, macos-14]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    # The ubuntu leg runs the offline prepare plus the full proof suites
+    # (~75 min on round-3 attempt 1's shape); 45 clipped mid-suite.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4

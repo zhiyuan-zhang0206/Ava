@@ -269,9 +269,11 @@ def prove_checkout_absent(  # noqa: PLR0915 — one guarded checkout-retirement 
                     check=True,
                     # Eighteen isolated cases (success + INJ-1..14, where INJ-14
                     # covers both clear crash points) each re-verify the image
-                    # twice; the watchdog stays above their worst-case replay
-                    # without extending any operation's authority.
-                    timeout=1500,
+                    # twice; round-3 attempt 1 measured ~2 min per case, so the
+                    # suite runs ~40 min on a CI runner -- the watchdog stays
+                    # above the full replay without extending any operation's
+                    # authority.
+                    timeout=3600,
                 )
             result = subprocess.run(  # noqa: S603 — CI-only native PG at the prepared image boundary.
                 [

@@ -527,32 +527,25 @@ def apply_injection(  # noqa: PLR0915 -- one flat dispatch per named injection w
         stack.enter_context(patch.object(posixproc, "new_session", blocked_spawn))
         return
     if mode == "inj-8":
-        real_spawn = posixproc.new_session
+        real_gated = spawn_receipt.execute_gated_spawn
 
-        def suppressed_spawn(
-            name: str,
-            cmd: str,
-            cwd: Path,
-            *,
-            env: dict[str, str],
-            stderr_append: Path | None = None,
-            gate_fd: int | None = None,
-            receipt: tuple[Path, str] | None = None,
-        ) -> bool:
+        def suppressed_gated(*args: Any, **kwargs: Any) -> Any:
+            # The record write lives inside the gated spawn (the supervisor
+            # writes it right after the fork); suppress it there, then crash.
+            # The crash must fire OUTSIDE execute_gated_spawn: that call
+            # adjudicates any exception as a helper report ("the receipt
+            # adjudicates; the report is only a hint") and continues, so a
+            # SystemExit raised inside it was swallowed and the release ran
+            # to completion (round 3, attempt 1: exit 0, empty stderr). The
+            # crash leaves the W2 state -- a live child with its birth
+            # receipt and no record -- which the settle's phase-zero adoption
+            # repairs (design 4.4, the one privileged repair path).
             with patch.object(SessionRecord, "write", no_record_write):
-                real_spawn(
-                    name,
-                    cmd,
-                    cwd,
-                    env=env,
-                    stderr_append=stderr_append,
-                    gate_fd=gate_fd,
-                    receipt=receipt,
-                )
+                real_gated(*args, **kwargs)
             fire()
             raise SystemExit(77)
 
-        stack.enter_context(patch.object(posixproc, "new_session", suppressed_spawn))
+        stack.enter_context(patch.object(spawn_receipt, "execute_gated_spawn", suppressed_gated))
         return
     if mode in {"inj-9a", "inj-9b"}:
         if mode == "inj-9a":
@@ -561,6 +554,14 @@ def apply_injection(  # noqa: PLR0915 -- one flat dispatch per named injection w
                 fire()
                 raise SystemExit(77)
 
+            # A freshly spawned service waits inside start_normal_service via
+            # the release_services global; only an already-adopted service
+            # reaches the name imported into the normal module, so patch both
+            # and the crash lands on the first service's first readiness wait
+            # (round 3, attempt 1: patching only the normal name never fired).
+            stack.enter_context(
+                patch.object(release_services, "await_normal_service_ready", await_crash)
+            )
             stack.enter_context(patch.object(normal, "await_normal_service_ready", await_crash))
         else:
             real_observe = release_services.observe_normal_service
@@ -744,8 +745,12 @@ def check_instances(name: str, meta: dict[str, Any], home: Path, *, extra: bool)
                 live == [record.pid],
                 f"[{name}] {session}: live record {record.pid} vs argv scan {live}",
             )
+            # The design's 0/1 rule: a crash window may land mid-startup (the
+            # fixture server not yet bound), so absence is legal here; a
+            # present listener must be the recorded process. The settled check
+            # (extra=True) keeps requiring exactly one.
             require(
-                len(listeners) == 1 and listeners[0]["pid"] == record.pid,
+                not listeners or listeners[0]["pid"] == record.pid,
                 f"[{name}] {session}: listener ownership mismatch {listeners}",
             )
             gate = spawn_receipt.session_lock_path(home, generation, session)
@@ -858,7 +863,15 @@ def check_pass2(name: str, case: dict[str, Any], meta: dict[str, Any]) -> None:
         write_stages(events) == [str(item) for item in case["writes2"]],
         f"[{name}] settle journal writes {write_stages(events)} != {case['writes2']}",
     )
-    require(journal_stage() == "committed", f"[{name}] settle did not reach committed")
+    # The committed stage is already pinned by the journal-write events
+    # above; the envelope itself is gone by design here (the settle's clear
+    # unlinks it), so the post-settle record of the clear half is the
+    # cleared event. (Round 3, attempt 1: reading the stage after clear can
+    # only ever see None -- the two old requirements excluded each other.)
+    require(
+        any(entry.get("event") == "cleared" and entry.get("ok") is True for entry in events),
+        f"[{name}] settle did not record a successful clear",
+    )
     require(
         not updater_handoff.state_path().exists()
         and not updater_handoff.bootstrap_state_path().exists(),
