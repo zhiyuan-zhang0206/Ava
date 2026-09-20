@@ -280,6 +280,11 @@ def take_session_lock(path: Path) -> int:
 
     A gate with no surviving lineage releases itself when the last descriptor
     closes, including when the process crashes.
+
+    Creating is by ``O_CREAT``: taking or probing a gate that does not exist
+    yet creates an empty gate file. An empty gate is inert — it only ever
+    means something paired with its receipt — so the leftover is harmless
+    and documented rather than special-cased.
     """
     import fcntl
 
@@ -301,6 +306,9 @@ def probe_session_lock_free(path: Path) -> bool:
     this process would hold the gate itself afterwards and every later
     adjudication would read "held" against its own probe. An unreadable gate
     path is not free (False) — cannot prove means refuse.
+
+    The probe opens with ``O_CREAT`` like the take, so probing a missing gate
+    leaves an inert empty file behind (see ``take_session_lock``).
     """
     import fcntl
 

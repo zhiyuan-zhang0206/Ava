@@ -728,7 +728,7 @@ def main(argv: list[str] | None = None) -> int:
             or args.mode != "smooth"
         ):
             parser.error("--normal-release cannot use source/bootstrap update flags")
-        from cli.commands._update_normal_release import run_normal_release
+        from cli.commands._update_normal_release_standalone import run_normal_release
 
         return run_normal_release(args.normal_release)
     if args.target_sha is not None:
