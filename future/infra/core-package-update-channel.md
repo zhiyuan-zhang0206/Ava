@@ -167,7 +167,7 @@ class Registry(BaseModel):
     channels: dict[str, ChannelState] = {}
 ```
 
-On load of a v1 file: rows get `update = UpdateState(...)`, and the file is rewritten lazily on the next write. `applied_rev` for legacy rows is inferred at first refresh: the checkout's installed commit for repo-origin content, the recorded `ref` for git packages.
+On load of a v1 file: rows get `update = UpdateState(...)`, and the file is rewritten lazily on the next write (later retired, batch b5 2026-09-20: the reader now demands exactly v2 and refuses v1). `applied_rev` for legacy rows is inferred at first refresh: the checkout's installed commit for repo-origin content, the recorded `ref` for git packages.
 
 Defaults (user ruling 2026-09-11 15:25 — one cadence for everything):
 

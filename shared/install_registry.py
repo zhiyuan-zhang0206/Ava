@@ -234,11 +234,11 @@ class Registry(BaseModel):
 
     `version` is the registry schema version — 2 since the content-channel
     support (per-package `UpdateState` + per-machine `ChannelState`; tasks
-    #2915 / #3267). Legacy files (absent/1) load as v2 in memory — every row
-    gains a default `UpdateState`, `channels` starts empty — and are rewritten
-    as v2 on the next save. Also the migration anchor if the schema evolves
-    further (the sibling `~/.agents/.skill-lock.json` format already carries
-    one; audit round 2, skills-plugins #14)."""
+    #2915 / #3267). The reader accepts exactly this version: a v1 file is
+    refused (the lazy-migration shim is retired; every writer has been v2-only
+    since #2355), and a newer file is refused outright. Also the migration
+    anchor if the schema evolves further (the sibling `~/.agents/.skill-lock.json`
+    format already carries one; audit round 2, skills-plugins #14)."""
 
     version: int = SCHEMA_VERSION
     packages: list[InstalledPackage] = []
@@ -301,16 +301,12 @@ def load() -> Registry:
         registry = Registry.model_validate_json(raw)
     except ValidationError as e:
         raise SchemaInvalid(f"{path} schema invalid: {e}") from e
-    if registry.version > SCHEMA_VERSION:
+    if registry.version != SCHEMA_VERSION:
         raise SchemaInvalid(
             f"{path} carries registry schema v{registry.version}, but this build "
-            f"knows v{SCHEMA_VERSION} — refusing to read a newer file (upgrade this "
-            f"checkout instead)"
+            f"knows v{SCHEMA_VERSION} — refusing to read a different shape "
+            f"(upgrade this checkout for a newer file)"
         )
-    # v1 -> v2 is a pure in-memory fill: pydantic's default_factory gives every
-    # row its `UpdateState` and `channels` starts empty (the design's "lazy
-    # migration" — load() never writes; the next save rewrites the file as v2).
-    registry.version = SCHEMA_VERSION
     dups = _folding_duplicates(registry)
     if dups:
         names = ", ".join(f"{a!r} / {b!r}" for a, b in dups)
@@ -449,17 +445,15 @@ def copy_changed(
     `ava plugins upgrade` / `ava mcp upgrade` must not clobber without
     `--force` (R5 design, task #1013).
 
-    A missing recorded hash (legacy rows written before content hashing) counts
-    as changed: nothing recorded means we cannot prove the copy matches what
-    was last written, so the safe direction is to require an explicit force.
+    A missing recorded hash counts as changed (None never equals a digest):
+    nothing recorded means the copy cannot be proven to match what was last
+    written, so the safe direction is to require an explicit force.
 
     For installed packages (skill/plugin/mcp) pass `entry.installed_hash` —
     converge overwrites `content_hash` on installed-plugin rows with the
     load-dir skills-copy hash, which is not the package-tree hash this
     comparison needs.
     """
-    if content_hash is None:
-        return True
     return tree_hash(dest, skip_subtrees=skip_subtrees) != content_hash
 
 
