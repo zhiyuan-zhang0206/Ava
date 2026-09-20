@@ -23,6 +23,7 @@ from pathlib import Path
 from cli.commands._managed_writer_mode import (
     decide_managed_writer_mode as _decide_managed_writer_mode,
 )
+from cli.commands._managed_writer_wiring import _commit_managed_writer_publication
 from cli.commands._repo import _repo_root as _repo_root
 from cli.commands._update_agent_runner import (
     _run_agent_runner_self_update as _run_agent_runner_self_update,
@@ -743,6 +744,22 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
             # already names the sessions (set right after the local leg) and the
             # aftermath block lists them.
             outcome, rc = RolloutOutcome.INCOMPLETE, 1
+
+        # 9) Managed-writer P5 commit (task #4128, E2-a): the post-Phase-B
+        #    position of the W chain, reached only by a clean, non-restart-only
+        #    rollout. The step itself consumes the enable point's decision --
+        #    an `active` decision publishes the completed activation through
+        #    the P5 seat and records its stage; every other decision skips it
+        #    without touching the publication seats. A refusal fails the
+        #    rollout; the pending journal stays for checked recovery.
+        if outcome is RolloutOutcome.CLEAN and not restart_only:
+            commit_rc = _commit_managed_writer_publication()
+            if commit_rc != 0:
+                failing_step = (
+                    "the managed-writer publication commit refused; the pending "
+                    "journal remains for `ava cluster recover-pending`"
+                )
+                return commit_rc
         return rc
     finally:
         _finalize_orchestration(

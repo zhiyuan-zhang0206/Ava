@@ -4,12 +4,13 @@ Covers the gate's truth table (off / active / blocked), the fail-closed guard
 semantics (absent / not-exactly-True), the read-once cache, the recorded
 evidence (rollout log line + telemetry field + `managed_writer_blocked` event),
 the read point inside the orchestration (a blocked decision still runs the
-legacy flow), the `ava cluster status` bit, and the single-read static pin.
+legacy flow), the `ava cluster status` bit, the single-read static pin, and the
+P5 commit step the orchestration consumes from the decision (task #4128, E2-a).
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -244,11 +245,12 @@ def _stub_orchestration(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     return stopped
 
 
-def _run_inner() -> int:
+def _run_inner(*, restart_only: bool = False) -> int:
     from cli.commands import update as _up
 
     return _up._run_gateway_orchestration_inner(
         Path("/unused"),
+        restart_only=restart_only,
         origin="test-origin",
         deploy_capability={
             "deploy_holder": "test",
@@ -312,6 +314,220 @@ def test_off_rollout_records_no_event_and_no_banner(
     assert stopped == ["stop"]
     assert events == []
     assert "managed-writer mode: off" in capsys.readouterr().out
+
+
+# ── the P5 commit wiring (task #4128, E2-a) ──────────────────────────────────
+
+
+def _fake_write_transaction(monkeypatch: pytest.MonkeyPatch) -> list[object]:
+    """Stand in for the commit step's transaction; no database is dialed."""
+    import contextlib
+
+    borrowed: list[object] = []
+
+    @contextlib.contextmanager
+    def _txn() -> Generator[object, None, None]:
+        borrowed.append(object())
+        yield borrowed[-1]
+
+    monkeypatch.setattr("shared.db_transaction.write_transaction", _txn)
+    return borrowed
+
+
+@pytest.mark.parametrize("state", ["off", "blocked", "none"])
+def test_commit_step_skips_without_an_active_decision(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], state: str
+) -> None:
+    from cli.commands import _managed_writer_wiring as wiring
+    from cli.commands import _update_publication as seats
+
+    _capture_events(monkeypatch)
+    calls: list[object] = []
+    monkeypatch.setattr(seats, "commit_pending_publication", calls.append)
+    borrowed = _fake_write_transaction(monkeypatch)
+    if state == "off":
+        _disable(monkeypatch)
+        mode_mod.decide_managed_writer_mode()
+    elif state == "blocked":
+        _enable(monkeypatch)
+        _clear_guard(monkeypatch, _CHECKED)
+        _clear_guard(monkeypatch, _WIRING)
+        mode_mod.decide_managed_writer_mode()
+
+    assert wiring._commit_managed_writer_publication() == 0
+    assert calls == []
+    assert borrowed == []
+    assert "managed_writer_commit" not in capsys.readouterr().out
+
+
+def test_commit_step_publishes_on_an_active_decision(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from uuid import uuid4
+
+    from cli.commands import _managed_writer_wiring as wiring
+    from cli.commands import _update_publication as seats
+
+    publication_id = uuid4()
+    seen: list[object] = []
+
+    def _commit(conn: object) -> object:
+        seen.append(conn)
+        return publication_id
+
+    monkeypatch.setattr(seats, "commit_pending_publication", _commit)
+    borrowed = _fake_write_transaction(monkeypatch)
+    _ready_guards(monkeypatch)
+    mode_mod.decide_managed_writer_mode()
+
+    assert wiring._commit_managed_writer_publication() == 0
+    assert seen == borrowed and len(borrowed) == 1
+    out = capsys.readouterr().out
+    assert str(publication_id) in out
+    assert "stage=managed_writer_commit" in out
+
+
+def test_commit_step_is_a_clean_skip_without_a_pending(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from cli.commands import _managed_writer_wiring as wiring
+    from cli.commands import _update_publication as seats
+
+    monkeypatch.setattr(seats, "commit_pending_publication", lambda _conn: None)  # pyright: ignore[reportUnknownArgumentType]
+    _fake_write_transaction(monkeypatch)
+    _ready_guards(monkeypatch)
+    mode_mod.decide_managed_writer_mode()
+
+    assert wiring._commit_managed_writer_publication() == 0
+    assert "committed" not in capsys.readouterr().out
+
+
+def test_commit_step_refusal_names_checked_recovery(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from cli.commands import _managed_writer_wiring as wiring
+    from cli.commands import _update_publication as seats
+    from shared.managed_writer_barrier import ManagedWriterBarrierError
+
+    def _refuse(conn: object) -> object:
+        del conn
+        raise ManagedWriterBarrierError("pending publication is not ready to commit")
+
+    monkeypatch.setattr(seats, "commit_pending_publication", _refuse)
+    _fake_write_transaction(monkeypatch)
+    _ready_guards(monkeypatch)
+    mode_mod.decide_managed_writer_mode()
+
+    assert wiring._commit_managed_writer_publication() == 1
+    err = capsys.readouterr().err
+    assert "managed-writer commit refused" in err
+    assert "ava cluster recover-pending" in err
+
+
+def _stub_orchestration_to_phase_b(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Extend `_stub_orchestration` to reach the post-Phase-B commit window."""
+    from cli import commands as _cli
+    from cli.commands import update as _up
+
+    _stub_orchestration(monkeypatch)
+    monkeypatch.setattr(_cli, "_resolve_fanout_targets", lambda **_kw: [("host-b", None)])  # pyright: ignore[reportUnknownArgumentType]
+    # The stale-marker reconcile dials the live roster; only the commit step
+    # under test may borrow the fake transaction.
+    monkeypatch.setattr(_up, "_clear_stale_stop_marker", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_up, "_phase_b_targets", list)
+    monkeypatch.setattr(_up, "_gateway_ready_or_incomplete", lambda *_a, **_k: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _up,
+        "_phase_b_outcome",
+        lambda *_a, **_k: (0, _up.RolloutOutcome.CLEAN, []),  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+
+def _stub_commit_landing(monkeypatch: pytest.MonkeyPatch) -> tuple[list[object], list[object]]:
+    """Point the real commit step's seat at a recorded landing, not a database."""
+    from cli.commands import _update_publication as seats
+
+    committed: list[object] = []
+
+    def _commit(conn: object) -> object:
+        committed.append(conn)
+        return None
+
+    monkeypatch.setattr(seats, "commit_pending_publication", _commit)
+    borrowed = _fake_write_transaction(monkeypatch)
+    return borrowed, committed
+
+
+def test_active_rollout_commits_through_the_seat(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The real step + seat landing: one transaction, one commit, one stage."""
+    _ready_guards(monkeypatch)
+    _stub_orchestration_to_phase_b(monkeypatch)
+    borrowed, committed = _stub_commit_landing(monkeypatch)
+
+    assert _run_inner() == 0
+    assert committed == borrowed and len(committed) == 1
+    assert "stage=managed_writer_commit" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("state", ["off", "blocked"])
+def test_inactive_rollout_leaves_the_commit_landing_untouched(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], state: str
+) -> None:
+    """A rollout outside the active decision never borrows or commits."""
+    _capture_events(monkeypatch)
+    if state == "off":
+        _disable(monkeypatch)
+    else:
+        _enable(monkeypatch)
+        _clear_guard(monkeypatch, _CHECKED)
+        _clear_guard(monkeypatch, _WIRING)
+    _stub_orchestration_to_phase_b(monkeypatch)
+    borrowed, committed = _stub_commit_landing(monkeypatch)
+
+    assert _run_inner() == 0
+    assert committed == [] and borrowed == []
+    assert "managed_writer_commit" not in capsys.readouterr().out
+
+
+def test_commit_step_never_runs_on_a_non_clean_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
+    from cli.commands import update as _up
+
+    _ready_guards(monkeypatch)
+    _stub_orchestration_to_phase_b(monkeypatch)
+    monkeypatch.setattr(
+        _up,
+        "_phase_b_outcome",
+        lambda *_a, **_k: (1, _up.RolloutOutcome.INCOMPLETE, []),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    calls: list[None] = []
+    monkeypatch.setattr(_up, "_commit_managed_writer_publication", lambda: calls.append(None) or 0)  # pyright: ignore[reportUnknownArgumentType]
+
+    assert _run_inner() == 1
+    assert calls == []
+
+
+def test_commit_refusal_fails_the_rollout(monkeypatch: pytest.MonkeyPatch) -> None:
+    from cli.commands import update as _up
+
+    _ready_guards(monkeypatch)
+    _stub_orchestration_to_phase_b(monkeypatch)
+    monkeypatch.setattr(_up, "_commit_managed_writer_publication", lambda: 1)  # pyright: ignore[reportUnknownArgumentType]
+
+    assert _run_inner() == 1
+
+
+def test_restart_only_rollout_skips_the_commit_step(monkeypatch: pytest.MonkeyPatch) -> None:
+    from cli.commands import update as _up
+
+    _ready_guards(monkeypatch)
+    _stub_orchestration_to_phase_b(monkeypatch)
+    calls: list[None] = []
+    monkeypatch.setattr(_up, "_commit_managed_writer_publication", lambda: calls.append(None) or 0)  # pyright: ignore[reportUnknownArgumentType]
+
+    assert _run_inner(restart_only=True) == 0
+    assert calls == []
 
 
 # ── the status bit ───────────────────────────────────────────────────────────
