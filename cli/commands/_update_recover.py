@@ -297,6 +297,7 @@ def finalize_rollout(
     failing_step: str | None = None,
     recovered: bool = False,
     local_launch_failures: list[str] | None = None,
+    publication_refused: bool = False,
 ) -> None:
     """`finally`-clause tail of the gateway orchestration: record how the rollout
     ended, best-effort resume every potentially paused host, then — unless the rollout was
@@ -318,6 +319,12 @@ def finalize_rollout(
     because it is the one failure the host-oriented aftermath would otherwise miss
     entirely: no host is stranded, nothing needs resuming, and every runner may have
     converged — yet a service on the gateway does not exist.
+
+    `publication_refused` selects the third INCOMPLETE shape's report: the
+    managed-writer publication commit refused and its durable pending journal was
+    retained. Nothing is stranded and every host converged there too, so the
+    host-oriented block would name the wrong machine; the journal's checked
+    recovery is the one command that fits.
 
     `recovered` is the caller's first-hand answer to the one question `outcome`
     cannot express: an `ABORTED` rollout whose gateway leg rolled itself back to
@@ -364,6 +371,7 @@ def finalize_rollout(
         pin_advanced=pin_advanced,
         outcome=outcome,
         local_launch_failures=local_launch_failures or [],
+        publication_refused=publication_refused,
     )
 
 
@@ -403,6 +411,7 @@ def _print_rollout_aftermath(
     pin_advanced: bool,
     outcome: RolloutOutcome,
     local_launch_failures: list[str],
+    publication_refused: bool = False,
 ) -> None:
     """Print the residual-state + recovery block after a rollout that did not finish
     clean, so an operator does not have to reverse-engineer the cluster's state from a
@@ -415,13 +424,19 @@ def _print_rollout_aftermath(
     2026-07-29 collision, and the correct move is to wait out (or look at) the hosts
     the settle hold names.
 
-    INCOMPLETE now has two shapes, so the banner distinguishes them: hosts that never
-    came back, and a local service session that never launched. Naming the wrong one
-    sends the operator to the wrong machine.
+    INCOMPLETE now has three shapes, so the banner distinguishes them: hosts that never
+    came back, a local service session that never launched, and a refused managed-writer
+    publication commit whose durable journal was retained. Naming the wrong one sends
+    the operator to the wrong machine — or to the wrong command.
     """
     rule = "=" * 64
     if outcome is not RolloutOutcome.INCOMPLETE:
         banner = "ROLLOUT ABORTED — cluster residual state + recovery"
+    elif publication_refused:
+        banner = (
+            "ROLLOUT INCOMPLETE — the code landed, but the managed-writer "
+            "activation did not publish"
+        )
     elif unreached or not local_launch_failures:
         banner = "ROLLOUT INCOMPLETE — the gateway landed; some agent-runners did not"
     else:
@@ -460,6 +475,12 @@ def _print_rollout_aftermath(
             "converge via Phase B / their watchdog self-heal"
         )
     out.append("  manual recovery:")
+    if publication_refused:
+        out.append(
+            "    · clear the retained publication journal: `ava cluster recover-pending` on "
+            "the gateway. The journal is durable by design — every new deploy, agent birth "
+            "and generic release stays refused until the checked protocol clears it."
+        )
     if local_launch_failures:
         out.append(
             "    · on THIS host: `ava start` (idempotent; relaunches only what is missing). "
@@ -479,7 +500,12 @@ def _print_rollout_aftermath(
     # defect is a local session that would not launch has none — every runner
     # converged — so pointing the operator at updater logs and `ava cluster recover`
     # would send them hunting a host that is fine.
-    if outcome is RolloutOutcome.INCOMPLETE and (reached or unreached):
+    if publication_refused:
+        out.append(
+            "    · do NOT re-run `ava cluster update` yet: the durable pending journal "
+            "refuses a new deploy until its checked recovery completes."
+        )
+    elif outcome is RolloutOutcome.INCOMPLETE and (reached or unreached):
         out.append(
             "    · do NOT re-run `ava cluster update` yet: this rollout already migrated and "
             "advanced the pin, and a second deploy into a half-transitioned cluster is "

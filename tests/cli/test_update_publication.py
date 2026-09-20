@@ -12,9 +12,10 @@ imports the module until the rollout wiring lands.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -736,22 +737,63 @@ def test_commit_seat_leaves_the_release_and_phase_to_the_existing_finalizer(
     conn.rollback()
 
 
-def test_the_seat_has_no_production_callsite() -> None:
-    """Slices 1b/1e stay inert: only tests import the seats until the wiring lands.
+def test_commit_step_publishes_the_complete_chain_through_the_coordinator(
+    publication_db: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The E2-a post-Phase-B step: an active decision publishes through the seat."""
+    from cli.commands import _managed_writer_mode as mode_mod
+    from cli.commands import _managed_writer_wiring as wiring
 
-    When the rollout Phase-0 and post-Phase-B wiring genuinely connect these
-    seats, its own slice must update this pin consciously rather than import
-    them quietly.
+    conn = publication_db
+    _seed_current(conn)
+    pending = _commit_ready_pending(conn)
+    conn.commit()
 
-    One conscious exception (task #4121): the managed-writer enable-point gate
-    (`cli/commands/_managed_writer_mode.py`) reads this module's
-    `MANAGED_WRITER_WIRING_COMPLETE` completion declaration -- the module the
-    declaration proves -- without importing or calling the seats. That
-    declaration is exactly what keeps the seats unwired until the last wiring
-    slice flips it; the wiring slice still must update this pin in turn.
+    @contextlib.contextmanager
+    def _txn() -> Generator[psycopg.Connection, None, None]:
+        with conn.transaction():
+            yield conn
+
+    monkeypatch.setattr("shared.db_transaction.write_transaction", _txn)
+    monkeypatch.setattr(
+        mode_mod, "managed_writer_mode", lambda: mode_mod.ManagedWriterMode("active")
+    )
+
+    assert wiring._commit_managed_writer_publication() == 0
+    stored = _stored_publication(conn)
+    assert stored.pending is None
+    assert stored.current is not None
+    assert stored.current.activation_challenge == pending.challenge
+    assert "committed" in capsys.readouterr().out
+    conn.rollback()
+
+
+def test_the_seat_has_no_unnamed_production_callsite() -> None:
+    """The seats' importers are named here: tests, plus the modules below.
+
+    Slices 1b/1e landed the seats inert; each managed-writer wiring slice
+    connects its seat in its own reviewed change and updates this pin
+    consciously rather than importing quietly.
+
+    Two conscious exceptions, both task #4128's managed-writer wiring:
+
+    - the enable-point gate (`cli/commands/_managed_writer_mode.py`) reads this
+      module's `MANAGED_WRITER_WIRING_COMPLETE` completion declaration -- the
+      module the declaration proves -- without importing or calling the seats;
+    - the coordinator wiring (`cli/commands/_managed_writer_wiring.py`) imports
+      the P5 commit seat from its post-Phase-B step and calls it under the
+      enable point's recorded `active` decision (E2-a).
+
+    The declaration stays False until the last wiring slice flips it; each
+    remaining slice (E2-b begin, E2-c collect+adopt) extends this pin in turn.
     """
     root = Path(__file__).resolve().parents[2]
-    allowed = {"cli/commands/_managed_writer_mode.py"}
+    allowed = {
+        "cli/commands/_managed_writer_mode.py",
+        "cli/commands/_managed_writer_wiring.py",
+    }
     offenders = sorted(
         str(path.relative_to(root))
         for package in ("ava", "agent", "cli", "gateway", "services", "ops", "shared")
