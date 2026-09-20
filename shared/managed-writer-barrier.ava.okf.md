@@ -55,18 +55,24 @@ success is not evidence. No credentials or full command environments belong in
 the receipt. This boundary covers registered **managed** writers, not arbitrary
 external processes holding shared database or cluster credentials.
 
-`managed_writer_closure.py` is the inert derivation seat over those facts: per
-prepared launcher, a journaled removed/rebound terminal must meet unchanged facts
-(rebound means the definition now carries exactly the journaled digest; both
-forms require the loaded verdict to be positively false), then the unit assembly
-requires every prepared old-writer process exited, every session absent, and the
-echoed challenge plus observation window matching the operation. Unknown,
-missing, duplicated or drifted facts assemble nothing. A crontab observation never
-proves the loaded verdict here, so its facts fence nothing yet — fail-closed until
-the Linux collector rule is designed. No production caller connects this layer:
-the collector side (network gathering and the platform final re-read after
-candidate readiness) and the hop channels remain future wiring; storage adoption
-stays the only authority.
+`managed_writer_closure.py` is the derivation seat over those facts (no
+production caller yet): the fence branches on the observation's own scheduler
+kind, filled by the observing producer and never supplied by a caller. launchd
+requires a journaled removed/rebound terminal to meet unchanged facts (rebound
+means the definition now carries exactly the journaled digest; both forms
+require the loaded verdict to be positively false). crontab has no separate
+loaded state — the user table is cron's complete input — so only a removed
+terminal can be met, by a double-read-stable positively-absent, not-enabled
+definition; a rebound crontab claim refuses. The unit assembly then requires
+every prepared old-writer process exited, every session absent, the observed
+scheduler kind matching the prepared launcher, and the echoed challenge plus
+observation window matching the operation. Unknown, missing, duplicated or
+drifted facts assemble nothing. Each closure unit is stamped with the full
+prepared-receipt digest the journal binds; the observer-tuple digest stays the
+facts attribution, and both classes are frozen into the observation digest. No
+production caller connects this layer yet: the collector side (network
+gathering and the platform final re-read after candidate readiness) and the hop
+channels remain future wiring; storage adoption stays the only authority.
 
 The transaction order is deployment row lock, inventory table locks, agent
 ownership rows. Fresh database-clock checks occur after lock acquisition,
