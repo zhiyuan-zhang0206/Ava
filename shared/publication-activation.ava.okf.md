@@ -79,6 +79,12 @@ P3/P4 call positions (migration receipt, selector CAS, normal start/observe,
 `record_pending_unit_readback`) immediately behind the checked-activation gate;
 the gate remains the only blocker, and no production path reaches them yet.
 
+A restart-only bounce never enters the begin or collection positions: the chain is a
+code-release protocol, so a plan-less bounce has nothing to journal and
+publishes nothing -- skipping it is the terminal design (restart-only
+semantics ruled 2026-09-20, task #4128), and the existing skip tests are its
+pins.
+
 The P5 completion seat, `commit_pending_publication`, lives in the same module:
 once the units recorded their normal-service readbacks, the coordinator reads
 the journaled set and publishes exactly the complete readbacks through
