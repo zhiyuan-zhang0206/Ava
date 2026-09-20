@@ -357,7 +357,13 @@ def test_commit_step_skips_without_an_active_decision(
     assert wiring._commit_managed_writer_publication() == 0
     assert calls == []
     assert borrowed == []
-    assert "managed_writer_commit" not in capsys.readouterr().out
+    captured = capsys.readouterr()
+    assert "managed_writer_commit" not in captured.out
+    if state == "none":
+        # A call outside the rollout's read point is beaconed, never silent.
+        assert "no mode decision recorded" in captured.err
+    else:
+        assert captured.err == ""
 
 
 def test_commit_step_publishes_on_an_active_decision(

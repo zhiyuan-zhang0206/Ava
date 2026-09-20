@@ -7,10 +7,11 @@ publication seats (`cli.commands._update_publication`) on the coordinator (task
 
 - `_commit_managed_writer_publication` (E2-a) -- the post-Phase-B step: under an
   `active` decision, publish the completed pending publication through the P5
-  commit seat. Every other decision (`off` / `blocked` / no decision) skips it
-  untouched, so the pre-wiring rollout behavior is unchanged. A set that cannot
-  be published refuses fail-closed, leaving the pending journal for checked
-  recovery (`ava cluster recover-pending`).
+  commit seat. `off` / `blocked` skip it untouched, so the pre-wiring rollout
+  behavior is unchanged; a call with no recorded decision skips with a visible
+  beacon (it can only mean the position ran outside the rollout's read point).
+  A set that cannot be published refuses fail-closed, leaving the pending
+  journal for checked recovery (`ava cluster recover-pending`).
 
 The remaining call positions (E2-b begin, E2-c collect+adopt) land here in turn;
 until they do, their seats stay unwired, and the inertness pin
@@ -34,18 +35,30 @@ def _commit_managed_writer_publication() -> int:
     The rollout's post-Phase-B step of the managed-writer chain: when the enable
     point resolved `active`, the units' normal-release continuations have
     recorded their readbacks in the durable pending journal, and this step
-    publishes exactly that complete set through the P5 commit seat. Every other
-    decision (`off` / `blocked` / no decision) leaves the seat untouched, so the
-    pre-wiring rollout behavior is unchanged. A set that cannot be published
-    refuses fail-closed: the journaled pending stays for checked recovery (`ava
-    cluster recover-pending`), never silently dropped or cleared. Returns the
-    step's exit code: 0 for a commit / clean skip / no pending entry, 1 for a
-    refusal.
+    publishes exactly that complete set through the P5 commit seat. `off` /
+    `blocked` leave the seat untouched, so the pre-wiring rollout behavior is
+    unchanged. A set that cannot be published refuses fail-closed: the
+    journaled pending stays for checked recovery (`ava cluster
+    recover-pending`), never silently dropped or cleared. Returns the step's
+    exit code: 0 for a commit / clean skip / no pending entry, 1 for a refusal.
+
+    A call with no recorded decision is an invariant breach, not a mode: the
+    rollout's read point always runs before this position, so no decision can
+    only mean the position was reached outside the orchestration. It skips --
+    but with a visible beacon, because a silently-skipped invariant breach
+    would mask the next refactor accident.
     """
     from cli.commands._managed_writer_mode import managed_writer_mode
 
     mode = managed_writer_mode()
-    if mode is None or mode.state != "active":
+    if mode is None:
+        print(
+            "  \u00b7 managed-writer commit: no mode decision recorded in this "
+            "process; skipping the position",
+            file=sys.stderr,
+        )
+        return 0
+    if mode.state != "active":
         return 0
     from cli.commands._update_publication import commit_pending_publication
     from shared.db_transaction import write_transaction
