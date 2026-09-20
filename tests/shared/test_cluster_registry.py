@@ -25,10 +25,10 @@ def test_load_registry_rekeys_legacy_name_keyed_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
     """A registry written pre-path-only is keyed by cluster NAME and carries
-    `name` / `db_name` (which path-only KEEPS as compat passthrough) plus
-    truly-retired fields (`redis_db_index` / `redis_prefix`, dropped).
-    load_registry re-keys rows in memory by their own gateway_home while
-    preserving the compat fields instead of crashing on ClusterRecord(**v)."""
+    retired fields (`name` / `db_name` / `redis_db_index` / `redis_prefix`).
+    load_registry re-keys rows in memory by their own gateway_home and drops
+    the fields the dataclass no longer declares, instead of crashing on
+    ClusterRecord(**v)."""
     import json
 
     reg = tmp_path / "clusters.json"
@@ -52,150 +52,9 @@ def test_load_registry_rekeys_legacy_name_keyed_file(
     assert rec is not None
     assert rec.gateway_home == "/home/x/.ava"
     assert rec.ports["postgres"] == 5433
-    # Compat fields are PRESERVED (a box-shared pre-cutover reader needs them).
-    assert rec.name == "main"
-    assert rec.db_name == "ava_main"
-    # Truly-retired fields the dataclass never declared are still dropped.
+    # Retired fields (never declared by the current dataclass) are dropped.
+    assert not hasattr(rec, "name")
     assert not hasattr(rec, "redis_db_index")
-
-
-def test_migrate_registry_keys_keeps_backward_compatible_form(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
-    """The converge migration normalizes to the migration-window form: the file
-    stays NAME-keyed and every record carries name/db_name (a box-shared
-    pre-cutover reader looks records up by name and REQUIRES those fields).
-    Home-keying + dropping them is the future contract step, NOT this."""
-    import json
-
-    reg = tmp_path / "clusters.json"
-    reg.write_text(
-        json.dumps(
-            {
-                "t1": {
-                    "name": "t1",
-                    "db_name": "ava_t1",
-                    "redis_prefix": "ava",  # truly-retired: dropped
-                    "ports": {"gateway": 18000},
-                    "gateway_home": "/home/x/.ava-t1",
-                    "created_at": "2026-06-01T00:00:00Z",
-                }
-            }
-        )
-    )
-    monkeypatch.setattr(cluster, "registry_path", lambda: reg)
-    assert cluster.migrate_registry_keys() is True  # drops redis_prefix
-    on_disk = json.loads(reg.read_text())
-    # Still name-keyed, NOT home-keyed.
-    assert set(on_disk) == {"t1"}
-    assert on_disk["t1"]["name"] == "t1"
-    assert on_disk["t1"]["db_name"] == "ava_t1"
-    assert on_disk["t1"]["gateway_home"] == "/home/x/.ava-t1"
-    assert "redis_prefix" not in on_disk["t1"]
-    assert cluster.migrate_registry_keys() is False  # second run: already normalized
-
-
-def test_migrate_repairs_home_keyed_file_missing_compat_fields(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
-    """The incident: a buggy path-only build rewrote the shared file to HOME keys
-    and DROPPED name/db_name. A box-shared pre-cutover reader then crashes with
-    `TypeError: missing name/db_name`. migrate must REPAIR it — back to name keys
-    with the compat fields backfilled (synthesized for the nameless record)."""
-    import json
-
-    reg = tmp_path / "clusters.json"
-    reg.write_text(
-        json.dumps(
-            {
-                "/home/x/.ava-t1": {  # home-keyed, no name/db_name — the corruption
-                    "ports": {"gateway": 18000},
-                    "gateway_home": "/home/x/.ava-t1",
-                    "created_at": "2026-06-01T00:00:00Z",
-                }
-            }
-        )
-    )
-    monkeypatch.setattr(cluster, "registry_path", lambda: reg)
-    assert cluster.migrate_registry_keys() is True
-    on_disk = json.loads(reg.read_text())
-    # Re-keyed to the synthesized name (home slug), compat fields present.
-    (key,) = on_disk
-    assert key != "/home/x/.ava-t1"  # no longer home-keyed
-    row = on_disk[key]
-    assert row["name"] == key and row["name"]  # non-empty synthesized name
-    assert row["db_name"] == cluster.DATA_PLANE_IDENTITY
-    assert row["gateway_home"] == "/home/x/.ava-t1"
-
-
-def test_load_save_round_trip_preserves_compat_fields(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
-    """A path-only load→save round-trip must NOT lose name/db_name — otherwise
-    every save silently re-corrupts the shared file for a pre-cutover reader."""
-    import json
-
-    reg = tmp_path / "clusters.json"
-    reg.write_text(
-        json.dumps(
-            {
-                "main": {
-                    "name": "main",
-                    "db_name": "ava_main",
-                    "ports": {"gateway": 8000},
-                    "gateway_home": "/home/x/.ava",
-                    "created_at": "2026-06-01T00:00:00Z",
-                }
-            }
-        )
-    )
-    monkeypatch.setattr(cluster, "registry_path", lambda: reg)
-    loaded = cluster.get_record(Path("/home/x/.ava"))
-    assert loaded is not None
-    cluster.save_record(loaded)  # round-trip
-    on_disk = json.loads(reg.read_text())
-    assert on_disk["main"]["name"] == "main"
-    assert on_disk["main"]["db_name"] == "ava_main"
-
-
-def test_pre_cutover_reader_can_still_parse_the_persisted_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
-    """Minimal replica of the pre-cutover load logic (ClusterRecord REQUIRES
-    name + db_name, looked up BY name) — it must construct every record from the
-    file path-only code writes, without a TypeError."""
-    import json
-    from dataclasses import dataclass
-
-    @dataclass(frozen=True)
-    class LegacyRecord:  # the pre-path-only required shape
-        name: str
-        db_name: str
-        ports: dict
-        gateway_home: str
-        created_at: str
-
-    reg = tmp_path / "clusters.json"
-    monkeypatch.setattr(cluster, "registry_path", lambda: reg)
-    # A path-only birth (no name given) + a preserved legacy record, both saved
-    # by path-only code, then read back by the legacy loader.
-    cluster.save_record(
-        cluster.ClusterRecord(
-            ports=cast("cluster.ClusterPorts", {"gateway": 18000}),
-            gateway_home="/home/x/.ava-t1",
-            created_at="t",
-        )
-    )
-    raw = json.loads(reg.read_text())
-    legacy_known = {"name", "db_name", "ports", "gateway_home", "created_at"}
-    legacy = {
-        k: LegacyRecord(**{kk: vv for kk, vv in v.items() if kk in legacy_known})
-        for k, v in raw.items()
-    }
-    (name,) = legacy  # keyed by name, as the pre-cutover reader expects
-    assert legacy[name].name == name
-    assert legacy[name].db_name  # non-empty (synthesized)
-    assert legacy[name].gateway_home == "/home/x/.ava-t1"
 
 
 def test_delete_record_by_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
@@ -302,12 +161,58 @@ def test_load_registry_empty_when_no_file(monkeypatch: pytest.MonkeyPatch, tmp_p
 # --- port preflight helpers (issue: ava start port preflight) ---
 
 
-def test_expected_cluster_ports_derives_full_block_from_record(
+def test_expected_cluster_ports_reads_the_full_block_from_record(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
-    """A record saved before later slots existed still resolves the full 16-port
-    block: stored keys win, missing keys derive as base+offset (the record's
-    gateway port is the block base) for an allocated cluster."""
+    """A record carrying the full block resolves the full service->port map:
+    the record IS the block for an allocated cluster (stored keys win)."""
+    home = tmp_path / ".ava-t1"
+    rec = cluster.ClusterRecord(
+        ports=cast(
+            "cluster.ClusterPorts",
+            {
+                "gateway": 18032,
+                "frontend": 18033,
+                "heartbeat": 18034,
+                "restarter": 18035,
+                "labeler": 18036,
+                "task_maintenance": 18037,
+                "memory_indexer": 18038,
+                "ops": 18039,
+                "milvus": 18040,
+                "browser": 18041,
+                "permissions_helper": 18042,
+                "postgres": 18043,
+                "redis": 18044,
+                "pgbouncer": 18045,
+                "events_maintenance": 18046,
+                "app": 18047,
+                "delivery_watchdog": 18048,
+                "im_bridge": 18049,
+                "page_server": 18050,
+                "agent_host": 18051,
+                "pg_backup": 18053,
+                "pitr_uploader": 18054,
+                "pitr_base_backup": 18055,
+                "memory_search": 18056,
+                "gateway_watchdog": 18057,
+                "agent_runner_watchdog": 18058,
+            },
+        ),
+        gateway_home=str(home),
+        created_at="2026-07-01T00:00:00Z",
+    )
+    monkeypatch.setattr(port_preflight, "get_record", lambda _home: rec)  # pyright: ignore[reportUnknownArgumentType]
+
+    ports = dict(port_preflight.expected_cluster_ports(home))
+    assert ports["gateway"] == 18032 and ports["app"] == 18047
+    assert ports["agent_host"] == 18051 and ports["agent_runner_watchdog"] == 18058
+
+
+def test_expected_cluster_ports_missing_key_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """An allocated record missing a block key is corrupt — the expected-port
+    map refuses to guess a neighbour's port (records are born with the full
+    block; only the default home may fall back)."""
     home = tmp_path / ".ava-t1"
     rec = cluster.ClusterRecord(
         ports=cast("cluster.ClusterPorts", {"gateway": 18032, "frontend": 18033}),
@@ -315,17 +220,8 @@ def test_expected_cluster_ports_derives_full_block_from_record(
         created_at="2026-07-01T00:00:00Z",
     )
     monkeypatch.setattr(port_preflight, "get_record", lambda _home: rec)  # pyright: ignore[reportUnknownArgumentType]
-
-    ports = dict(port_preflight.expected_cluster_ports(home))
-    assert ports["gateway"] == 18032 and ports["frontend"] == 18033
-    assert ports["heartbeat"] == 18034 and ports["restarter"] == 18035
-    assert ports["labeler"] == 18036 and ports["task_maintenance"] == 18037
-    assert ports["memory_indexer"] == 18038 and ports["ops"] == 18039
-    assert ports["milvus"] == 18040 and ports["browser"] == 18041
-    assert ports["permissions_helper"] == 18042
-    assert ports["postgres"] == 18043 and ports["redis"] == 18044
-    assert ports["pgbouncer"] == 18045 and ports["events_maintenance"] == 18046
-    assert ports["app"] == 18047
+    with pytest.raises(KeyError):
+        port_preflight.expected_cluster_ports(home)
 
 
 def test_expected_cluster_ports_falls_back_to_legacy_without_record(
@@ -380,6 +276,7 @@ def test_env_port_drift_reports_mismatched_keys_only(
                 "app": 3001,
                 "milvus": 19530,
                 "browser": 9222,
+                "permissions_helper": 9223,
                 "pgbouncer": 6433,
                 "postgres": 5433,
                 "redis": 6380,
@@ -433,42 +330,25 @@ def test_env_port_drift_pooled_url_expects_pooler_port(
     assert pp.env_port_drift(home, rec) == ["AVA_DB_URL: url port=5432 vs registry=6433"]
 
 
-def test_registry_disk_form_refuses_duplicate_names(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
-    """F-s4-8: the on-disk registry is NAME-keyed during the migration window, so
-    two records sharing a compat name would silently overwrite one another —
-    freeing a port block that may still be in use. The write must refuse, not
-    last-win: identity is the home path, and a name collision is a legacy-name
-    clash the operator resolves by hand."""
+def test_registry_disk_form_is_home_keyed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """The on-disk registry is keyed by home path — the record identity — so
+    two records can never collide on a name key."""
     reg = tmp_path / "clusters.json"
     monkeypatch.setattr(cluster, "registry_path", lambda: reg)
-
-    def rec(home: str, name: str) -> cluster.ClusterRecord:
-        return cluster.ClusterRecord(
-            ports=cast("cluster.ClusterPorts", {"gateway": 18000, "frontend": 18001}),
-            gateway_home=home,
-            created_at="2026-06-01T00:00:00Z",
-            name=name,
-        )
-
-    # distinct names serialize fine (in-memory keys are the homes)
     reg_map = {
-        "/home/x/.ava-t1": rec("/home/x/.ava-t1", "t1"),
-        "/home/x/.ava-t2": rec("/home/x/.ava-t2", "t2"),
+        "/home/x/.ava-t1": cluster.ClusterRecord(
+            ports=cast("cluster.ClusterPorts", {"gateway": 18000, "frontend": 18001}),
+            gateway_home="/home/x/.ava-t1",
+            created_at="2026-06-01T00:00:00Z",
+        ),
+        "/home/x/.ava-t2": cluster.ClusterRecord(
+            ports=cast("cluster.ClusterPorts", {"gateway": 18032, "frontend": 18033}),
+            gateway_home="/home/x/.ava-t2",
+            created_at="2026-06-01T00:00:00Z",
+        ),
     }
     disk = cluster._registry_disk_form(reg_map)
-    assert set(disk) == {"t1", "t2"}
-
-    # same name, two homes -> refuse (a dict comprehension would last-win)
-    import pytest
-
-    reg_map = {
-        "/home/x/.ava-t1": rec("/home/x/.ava-t1", "preview"),
-        "/home/x/.ava-t2": rec("/home/x/.ava-t2", "preview"),
-    }
-    with pytest.raises(RuntimeError, match="share the compat name"):
-        cluster._registry_disk_form(reg_map)
+    assert set(disk) == {"/home/x/.ava-t1", "/home/x/.ava-t2"}
 
 
 def test_unit_port_map_overlays_health_ports(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):

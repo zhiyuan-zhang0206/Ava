@@ -59,7 +59,7 @@ A cluster's identity **is** its home path, so every verb that names one takes
   per-host probe readings (checkout vs the cluster pin; the commit the answering
   process froze at). `hold` is not a probe at all: it is transcribed from the live
   `cluster_update_lock` lease — a banner above the table naming the lease, and
-  `waited-on` on each host a settle hold's note records as still converging. So it
+  `waited-on` on each host a settle hold's recorded waiting set names as still converging. So it
   explains a refused deploy without claiming to know convergence: `waited-on` is
   what the hold *says* it waits for, a blank cell is "not named by this hold" (a
   host that never acked never is), and a blank column is not proof no deploy runs —

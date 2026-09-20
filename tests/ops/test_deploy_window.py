@@ -24,20 +24,19 @@ from typing import Any
 import pytest
 
 from ops import deploy_window as dw
-from shared.cluster_lock import DeployLease, settle_hosts, settle_note
+from shared.cluster_lock import DeployLease, settle_note
 from shared.host_deploy_state import HostDeployState
 
 _PIN = "abc1234abc1234"
 _OLD = "0ld0ld0ld0ld0l"
 
-_EXECUTING = DeployLease(
-    holder="gateway-host:pid81319", held_for_s=60.0, expires_in_s=1740.0, note=None
-)
+_EXECUTING = DeployLease(holder="gateway-host:pid81319", held_for_s=60.0, expires_in_s=1740.0)
 _SETTLING = DeployLease(
     holder="gateway-host:pid81319",
     held_for_s=300.0,
     expires_in_s=600.0,
-    note=settle_note(["win"]),
+    settle_hosts=["win"],
+    settle_note=settle_note(["win"]),
 )
 
 
@@ -332,14 +331,15 @@ def test_settle_release_prints_the_hold_duration(
     """The settle phase's one telemetry record (C3, task #2189) is printed at the
     early release — the only moment a process is executing at the hold's end. The
     duration is the server-side elapsed the lease read carried; the host set is
-    read back from the note just released."""
+    read back from the lease just released."""
     import json
 
     settling = DeployLease(
         holder="gateway-host:pid81319",
         held_for_s=600.0,
         expires_in_s=300.0,
-        note=settle_note(["win"]),
+        settle_hosts=["win"],
+        settle_note=settle_note(["win"]),
         settle_started_at=None,  # a real DB read supplies the elapsed directly
         settle_elapsed_s=600.0,
     )
@@ -430,24 +430,14 @@ def test_a_held_host_that_vanished_never_releases(monkeypatch: pytest.MonkeyPatc
     assert dw.deploy_in_flight().active is True
 
 
-def test_an_unparseable_note_never_releases(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A note someone later reworded is not evidence of convergence. The format is an
-    owned contract precisely so this cannot happen silently — but if it does, the
-    hold falls back to its TTL rather than releasing."""
-    reworded = DeployLease(
-        holder="gateway-host:pid1", held_for_s=1.0, expires_in_s=600.0, note="still settling"
+def test_a_hold_that_names_nobody_never_releases(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An empty recorded set is not evidence of convergence: there is no host to
+    re-probe, so the hold falls back to its TTL rather than releasing."""
+    empty = DeployLease(
+        holder="gateway-host:pid1", held_for_s=1.0, expires_in_s=600.0, settle_hosts=[]
     )
-    monkeypatch.setattr("shared.cluster_lock.read_update_lease", lambda: reworded)
-    assert settle_hosts(reworded.note) == []
+    monkeypatch.setattr("shared.cluster_lock.read_update_lease", lambda: empty)
     assert dw.deploy_in_flight().active is True
-
-
-def test_settle_note_round_trips() -> None:
-    """The builder and the parser are one contract; the release breaks the moment they
-    disagree."""
-    assert settle_hosts(settle_note(["win", "laptop-host"])) == ["laptop-host", "win"]
-    assert settle_hosts(settle_note([])) == []
-    assert settle_hosts(None) == []
 
 
 def test_an_unreadable_pin_never_releases_a_hold(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -460,7 +450,7 @@ def test_an_unreadable_pin_never_releases_a_hold(monkeypatch: pytest.MonkeyPatch
 def test_an_executing_lease_is_never_convergence_released(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Only a settle hold (note set) is re-examined. Releasing a lease an
+    """Only a settle hold (settle fields set) is re-examined. Releasing a lease an
     orchestration is executing under would unlock a live rollout."""
     monkeypatch.setattr("shared.cluster_lock.read_update_lease", lambda: _EXECUTING)
 

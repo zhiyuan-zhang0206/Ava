@@ -185,7 +185,7 @@ def current_orchestration(
 
     R1 old-signal sweep (PR5): this is a DB read now, not a session probe —
     the deployment-state lease's `kind` while an orchestration executes (a
-    settle hold has a note and reads as idle), and `update` while this host's
+    settle hold reads as idle), and `update` while this host's
     updater lease is live (the lease-less watchdog-spawned updater, which the
     lease's kind cannot see). A stale `converging` row with an expired lease
     reads as None — the same way a dead session did — so heal paths that
@@ -206,7 +206,7 @@ def current_orchestration(
         if (
             resolved_lease is not None
             and resolved_lease.kind is not None
-            and resolved_lease.note is None
+            and not resolved_lease.is_settle_hold
         ):
             return resolved_lease.kind
         if state is _UNSET:

@@ -340,14 +340,14 @@ def test_acked_but_unconverged_hosts_are_what_settle(monkeypatch: pytest.MonkeyP
 
 
 def test_release_settle_hold_never_touches_an_executing_lease() -> None:
-    """`note IS NOT NULL` in the WHERE clause is what stops a convergence check from
-    unlocking a rollout that is actively executing."""
+    """`settle_hosts IS NOT NULL` in the WHERE clause is what stops a convergence
+    check from unlocking a rollout that is actively executing."""
     import inspect
 
     from shared import cluster_lock
 
     sql = inspect.getsource(cluster_lock.release_settle_hold)
-    assert "note IS NOT NULL" in sql
+    assert "settle_hosts IS NOT NULL" in sql
     assert "holder = %s" in sql
 
 
@@ -355,7 +355,7 @@ def test_settle_hold_leaves_the_holder_string_parseable() -> None:
     """`ops.ops_cluster._lock_holder_is_live` parses the holder as `<machine>:pid<N>`.
     A holder decorated with the reason would fail that parse, read as live, and make
     `ava cluster recover` refuse to break a hold whose owner is provably dead — which
-    is why the reason lives in `note`."""
+    is why the reason lives in `settle_note`."""
     import inspect
 
     from shared import cluster_lock

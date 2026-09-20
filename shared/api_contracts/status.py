@@ -134,7 +134,7 @@ class MachineStatus(BaseModel):
     stranded_hold_since: datetime | None = None
     stranded_hold_reason: str | None = None
     # This row's name appears in the live settle hold's recorded waiting-for set
-    # (`shared.cluster_lock.settle_hosts` over the lease note) — the hosts that acked
+    # (`shared.cluster_lock.DeployLease.settle_hosts`) — the hosts that acked
     # their self-update and were still converging when the rollout's Phase B poll gave
     # up.
     #

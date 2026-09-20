@@ -256,7 +256,7 @@ _BLOCK_ENV = (
     "AVA_DB_URL=postgresql://ava:s@localhost:18123/ava\n"
     "AVA_REDIS_URL=redis://ava:s@localhost:18124/0\n"
 )
-_BLOCK_PORTS = {"gateway": 18112, "postgres": 18123, "redis": 18124}
+_BLOCK_PORTS = {"gateway": 18112, "postgres": 18123, "pgbouncer": 18125, "redis": 18124}
 
 
 def test_gate_passes_when_env_ports_match_the_record(

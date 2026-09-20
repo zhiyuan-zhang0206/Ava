@@ -190,8 +190,8 @@ Two producers of the same fact, pinned against each other, feel like a test of
 something nobody would get wrong. `tests/shared/test_cluster_env.py:test_health_port_env_matches_derive_env_for_the_same_base`
 pins `derive_env` (install-time) against `health_port_env` (enroll-time) for one
 base — and what it caught was not the original bug but the FIX for it: adding
-`agent_host` to `_LATE_HEALTH_SLOTS` made the two producers disagree, and the
-guard said so immediately.
+`agent_host` to the late-health-slot set made the two producers disagree, and
+the guard said so immediately.
 
 Two lessons, and the second is the load-bearing one:
 

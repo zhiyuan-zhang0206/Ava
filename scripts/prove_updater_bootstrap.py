@@ -406,8 +406,11 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
         conn.execute("CREATE TABLE machine_units(machine_name text,home text)")
         conn.execute("INSERT INTO machine_units VALUES ('runtime-proof',%s)", (str(home),))
         conn.execute(
+            # The settle columns are real-schema since the initial release; the
+            # updater's lease fencing references `settle_hosts` (task #4086 b5).
             "CREATE TABLE deployment_state(id int,phase text,kind text,note text,holder text,"
-            "acquired_at timestamptz,expires_at timestamptz,target_sha text)"
+            "acquired_at timestamptz,expires_at timestamptz,target_sha text,"
+            "settle_hosts text[],settle_note text,settle_started_at timestamptz)"
         )
         conn.execute(
             "INSERT INTO deployment_state(id,phase,kind,target_sha) VALUES (1,'updating','rollout',%s)",

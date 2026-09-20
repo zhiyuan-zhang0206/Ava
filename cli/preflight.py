@@ -28,7 +28,7 @@ from urllib.parse import urlsplit
 
 from dotenv import dotenv_values
 
-from shared.port_block import LEGACY_AVA_PORTS, PORT_OFFSETS
+from shared.port_block import LEGACY_AVA_PORTS
 
 _TRUE = frozenset({"1", "true", "yes", "on"})
 _FALSE = frozenset({"0", "false", "no", "off"})
@@ -106,20 +106,16 @@ def _record_pgbouncer_port(rec: dict[str, object], rec_ports: dict[str, object])
 
     Mirror of `shared.cluster.record_pgbouncer_port` (the gate must not import
     shared.cluster — it loads Settings): the saved `pgbouncer` key wins; a
-    record saved before the slot existed derives the fixed legacy 6433 for the
-    default home, else its block base + the pgbouncer offset. The pooler port
-    is part of this cluster's OWN block, so AVA_DB_URL legitimately carries it
-    whenever pooling is enabled (the one-URL design)."""
+    record for the default home may fall back to the fixed legacy 6433. The
+    pooler port is part of this cluster's OWN block, so AVA_DB_URL legitimately
+    carries it whenever pooling is enabled (the one-URL design)."""
     pgb = rec_ports.get("pgbouncer")
     if isinstance(pgb, int):
         return pgb
-    gw = rec_ports.get("gateway")
-    if not isinstance(gw, int):
-        return None
     home = str(Path(str(rec.get("gateway_home", ""))).expanduser())
     if home == str((Path.home() / ".ava").expanduser()):
         return LEGACY_AVA_PORTS["pgbouncer"]
-    return gw + PORT_OFFSETS["pgbouncer"]
+    return None
 
 
 def _port_block_conflicts(rec: dict[str, object], env_vals: dict[str, str | None]) -> list[str]:

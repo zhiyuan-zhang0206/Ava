@@ -1,5 +1,5 @@
-"""`record_app_port` — derive the Next.js app port for records born before the
-`app` slot existed (same pattern as `record_pgbouncer_port`)."""
+"""`record_app_port` — read the Next.js app port off a registry record (the
+default home keeps its fixed legacy value)."""
 
 from __future__ import annotations
 
@@ -18,15 +18,18 @@ def test_app_port_present_is_returned_verbatim() -> None:
     assert record_app_port(rec) == 18099
 
 
-def test_app_port_derived_for_default_home() -> None:
-    """The prod default home's saved record predates the slot -> the fixed legacy 3001."""
+def test_app_port_falls_back_for_default_home() -> None:
+    """The prod default home keeps its fixed legacy 3001 even without the key."""
     rec = _rec(str(cluster.default_home()), {"gateway": 8000, "frontend": 3000})
     assert record_app_port(rec) == cluster.LEGACY_AVA_PORTS["app"] == 3001
 
 
-def test_app_port_derived_for_block_home() -> None:
-    """An allocated cluster without the slot -> block base + app offset, always
-    inside the cluster's own reserved block (never a collision with a
-    neighbouring cluster)."""
+def test_app_port_missing_on_allocated_record_raises() -> None:
+    """An allocated record without the slot is corrupt — the read fails loudly
+    rather than guessing a neighbour's port (records are born with the full
+    block; only the default home may fall back)."""
+    import pytest
+
     rec = _rec("/x/.ava-dev", {"gateway": 18032, "frontend": 18033})
-    assert record_app_port(rec) == 18032 + cluster.PORT_OFFSETS["app"]
+    with pytest.raises(KeyError):
+        record_app_port(rec)

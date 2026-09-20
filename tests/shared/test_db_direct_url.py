@@ -16,13 +16,13 @@ from shared import db as db_module
 from shared.cluster import (
     ClusterPorts,
     ClusterRecord,
+    record_memory_search_port,
     record_pgbouncer_port,
     record_postgres_port,
     record_redis_port,
 )
 from shared.config.data_plane import DataPlaneSettings
 from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
-from shared.port_block import PORT_OFFSETS
 
 _POOLED = "postgresql://ava_main:sek@127.0.0.1:6433/ava_main"
 _DIRECT = "postgresql://ava_main:sek@127.0.0.1:5433/ava_main"
@@ -97,7 +97,10 @@ def test_direct_db_url_leaves_operator_standin_untouched(monkeypatch: pytest.Mon
 
 def test_direct_db_url_allocated_cluster_uses_block_ports(monkeypatch: pytest.MonkeyPatch) -> None:
     """An allocated cluster: pooler = base+13, pg = base+11."""
-    rec = _rec("/x/.ava-dev", {"gateway": 18000, "postgres": 18011, "redis": 18012})
+    rec = _rec(
+        "/x/.ava-dev",
+        {"gateway": 18000, "postgres": 18011, "redis": 18012, "pgbouncer": 18013},
+    )
     _set(
         monkeypatch,
         db_url="postgresql://ava:sek@127.0.0.1:18013/ava",
@@ -114,7 +117,10 @@ def test_direct_db_url_swaps_any_local_record_pooler(monkeypatch: pytest.MonkeyP
     worktree pointing at a sibling cluster) — the admin plane must dial THAT
     cluster's real Postgres, so the swap uses the record that owns the port,
     not this home's record."""
-    other = _rec("/x/.ava-other", {"gateway": 19000, "postgres": 19011, "redis": 19012})
+    other = _rec(
+        "/x/.ava-other",
+        {"gateway": 19000, "postgres": 19011, "redis": 19012, "pgbouncer": 19013},
+    )
     _set(
         monkeypatch,
         db_url="postgresql://ava:sek@127.0.0.1:19013/ava",
@@ -205,10 +211,12 @@ def test_record_pgbouncer_port_derived_for_default_home() -> None:
     assert record_pgbouncer_port(rec) == cluster.LEGACY_AVA_PORTS["pgbouncer"] == 6433
 
 
-def test_record_pgbouncer_port_derived_for_allocated_cluster() -> None:
-    # An allocated cluster derives base(gateway) + offset, inside its own 16-block.
+def test_record_pgbouncer_port_missing_on_allocated_record_raises() -> None:
+    # An allocated record is born with the full block; a missing key is a
+    # corrupt record and fails loudly, never a guessed neighbour's port.
     rec = _rec("/x/.ava-dev", {"gateway": 18000, "postgres": 18011, "redis": 18012})
-    assert record_pgbouncer_port(rec) == 18000 + PORT_OFFSETS["pgbouncer"] == 18013
+    with pytest.raises(KeyError):
+        record_pgbouncer_port(rec)
 
 
 def test_record_postgres_port_derived_for_default_home() -> None:
@@ -218,9 +226,10 @@ def test_record_postgres_port_derived_for_default_home() -> None:
     assert record_postgres_port(rec) == 5433
 
 
-def test_record_postgres_port_derived_for_allocated_cluster() -> None:
+def test_record_postgres_port_missing_on_allocated_record_raises() -> None:
     rec = _rec("/x/.ava-dev", {"gateway": 18000})
-    assert record_postgres_port(rec) == 18000 + PORT_OFFSETS["postgres"] == 18011
+    with pytest.raises(KeyError):
+        record_postgres_port(rec)
 
 
 def test_record_redis_port_is_a_registry_fact() -> None:
@@ -228,3 +237,17 @@ def test_record_redis_port_is_a_registry_fact() -> None:
     use this host's reachable address while Redis remains loopback-only."""
     rec = _rec("/x/.ava-dev", {"gateway": 18000, "redis": 18042})
     assert record_redis_port(rec) == 18042
+
+
+def test_record_redis_port_missing_on_allocated_record_raises() -> None:
+    """The explicit strict decision: an allocated record lacking the slot is
+    corrupt — fail loudly rather than guess (only the default home falls back)."""
+    rec = _rec("/x/.ava-dev", {"gateway": 18000})
+    with pytest.raises(KeyError):
+        record_redis_port(rec)
+
+
+def test_record_memory_search_port_missing_on_allocated_record_raises() -> None:
+    rec = _rec("/x/.ava-dev", {"gateway": 18000})
+    with pytest.raises(KeyError):
+        record_memory_search_port(rec)

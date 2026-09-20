@@ -8,9 +8,10 @@ blacks out the entry: users see the static updating page and land back on the
 app when the rollout finishes.
 
 This step:
-  1. backfills the cluster record's `app` slot (records born before the slot
-     existed lack it) and materializes `AVA_APP_PORT` into the unit `.env`
-     (`derive_env` only runs at install time),
+  1. materializes `AVA_APP_PORT` into the unit `.env` from the record's
+     `app` slot (`derive_env` only runs at install time) — an allocated record
+     missing the slot fails the step instead of the gate guessing a port; only
+     the default home's fixed legacy value is persisted back when absent,
   2. registers the gate under the platform supervisor — a launchd KeepAlive
      LaunchAgent on macOS, a user-systemd unit on Linux, and a detached process
      only on other POSIX systems.
@@ -175,14 +176,17 @@ def _plist_content(home: Path, repo: Path) -> str:
 
 
 def _ensure_app_port(home: Path) -> int:
-    """Backfill the record's `app` slot + materialize AVA_APP_PORT in the .env.
+    """Resolve the record's `app` slot into the unit `.env` as `AVA_APP_PORT`.
 
     Idempotent at the byte level (task #3637): an `.env` already carrying the
     value is left untouched — no write, no snapshot, no audit record — so the
     repeated converge (every `ava start`, every boot-retry attempt) stays silent.
 
-    Returns the app port. Raises when the home has no registry record — the
-    gate cannot derive ports for a cluster that was never born.
+    Returns the app port. Raises when the home has no registry record — the gate
+    cannot derive ports for a cluster that was never born — or when an allocated
+    record lacks the slot: a record missing a block key is corrupt, and the gate
+    never guesses a port. Only the default home's fixed legacy value is written
+    back into a slot-less record.
     """
     from shared.cluster import (
         load_registry,
@@ -201,6 +205,8 @@ def _ensure_app_port(home: Path) -> int:
             raise RuntimeError(f"no registry record for {home} — cannot derive the gate's app port")
         app_port = record_app_port(rec)
         if rec.ports.get("app") is None:
+            # Reachable only for the default home (an allocated record missing the
+            # key raised above): its fixed legacy value becomes explicit.
             rec.ports["app"] = app_port
             save_record_locked(rec)
             logger.info("backfilled app port %d into %s's registry record", app_port, home)

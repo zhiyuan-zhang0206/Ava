@@ -148,6 +148,15 @@ def test_pre_schema_fence_does_not_read_new_column(barrier_db: psycopg.Connectio
     assert lock_rollout(barrier_db, collection.operation) >= collection.collected_at
 
 
+def test_fence_does_not_read_the_retired_note_column(barrier_db: psycopg.Connection) -> None:
+    """Batch-6 drops `deployment_state.note`; the fence must already stand on the
+    canonical `settle_hosts` predicate. Asserted the same way as the pre-schema
+    guard above — drop the column, the lock still passes (red on any `note` reader)."""
+    collection = _collection(barrier_db)
+    barrier_db.execute("ALTER TABLE deployment_state DROP COLUMN note")
+    assert lock_rollout(barrier_db, collection.operation) >= collection.collected_at
+
+
 def test_delta_matches_baseline_and_down_refuses_evidence(barrier_db: psycopg.Connection) -> None:
     directory = Path(__file__).resolve().parents[2] / "migrations"
     name = "20260902T201145_managed-writer-evidence"

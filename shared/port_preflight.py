@@ -48,11 +48,10 @@ from shared.port_block import PORT_OFFSETS
 def expected_cluster_ports(home: Path) -> ClusterPorts:
     """The full service->port map this cluster expects to own on THIS host.
 
-    The registry record's block when the cluster has one — missing keys derived
-    exactly as `record_health_port` derives them (a record saved before a slot
-    existed still resolves deterministically) — else the fixed legacy block: the
-    pre-registry default home's ports ARE its record, and a home with no record
-    binds them.
+    The registry record's block when the cluster has one — read through the
+    registered record helpers (`record_health_port`, which keeps the default
+    home's fixed legacy values) — else the fixed legacy block: the pre-registry
+    default home's ports ARE its record, and a home with no record binds them.
 
     The start preflight bind-checks every port in this map and warns on foreign
     occupants; `record_health_port` is the single derivation rule so the check

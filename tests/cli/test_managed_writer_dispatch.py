@@ -622,7 +622,6 @@ def _lease() -> Any:
         holder="gateway:pid77",
         held_for_s=0,
         expires_in_s=600,
-        note=None,
         kind="rollout",
         acquired_at=datetime(2026, 9, 20, tzinfo=UTC),
     )

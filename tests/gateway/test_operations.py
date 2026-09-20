@@ -442,7 +442,6 @@ def test_cluster_stop_op_invokes_pause(monkeypatch: pytest.MonkeyPatch) -> None:
             holder="gateway:pid1",
             held_for_s=1,
             expires_in_s=600,
-            note=None,
             kind="rollout",
             acquired_at=acquired,
         ),
@@ -473,7 +472,6 @@ def test_cluster_stop_accepts_every_executing_lease_including_legacy_and_rollbac
             holder="gateway:pid1",
             held_for_s=1,
             expires_in_s=600,
-            note=None,
             kind=kind,  # type: ignore[arg-type]
             acquired_at=acquired,
         ),
@@ -502,7 +500,8 @@ def test_cluster_stop_refuses_a_settle_hold_without_pausing(
             holder="gateway:pid1",
             held_for_s=1,
             expires_in_s=600,
-            note="settling, waiting for: win",
+            settle_hosts=["win"],
+            settle_note="settling, waiting for: win",
             kind="rollout",
             acquired_at=acquired,
         ),
@@ -533,8 +532,8 @@ def test_cluster_stop_clears_its_journal_if_lease_changes_before_pause(
     acquired = datetime(2026, 8, 25, tzinfo=UTC)
     reads = iter(
         [
-            DeployLease("A", 1, 600, None, "rollout", acquired),
-            DeployLease("B", 0, 600, None, "rollout", acquired),
+            DeployLease("A", 1, 600, "rollout", acquired),
+            DeployLease("B", 0, 600, "rollout", acquired),
         ]
     )
     cleared: list[tuple[object, ...]] = []
@@ -561,7 +560,7 @@ def test_cluster_stop_records_only_a_successful_pause_compensation(
     from shared.cluster_lock import DeployLease
 
     acquired = datetime(2026, 8, 25, tzinfo=UTC)
-    lease = DeployLease("A", 1, 600, None, "rollout", acquired)
+    lease = DeployLease("A", 1, 600, "rollout", acquired)
     resumed: list[tuple[object, ...]] = []
     monkeypatch.setattr(ops_cluster, "read_update_lease", lambda: lease)
     monkeypatch.setattr(ops_cluster.pause_owner, "mark_paused", lambda *_a: None)
