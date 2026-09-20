@@ -645,6 +645,16 @@ def test_exact_generation_clear_cannot_remove_a_replacement() -> None:
     assert handoff.read().generation == "new"
 
 
+def test_clear_completes_across_a_half_completed_unlink() -> None:
+    """INJ-14: a crash between the two unlinks must not strand the state file."""
+    _retained_bootstrap("candidate_ready", normal_release_planned=True)
+    _write_normal_through("committed")
+    handoff.bootstrap_state_path().unlink()
+    assert handoff.clear("bootstrap")
+    assert not handoff.state_path().exists()
+    assert not handoff.clear("bootstrap")
+
+
 def test_atomic_write_json_and_parent_warning(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:

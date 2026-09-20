@@ -1,8 +1,8 @@
 """Normal updater producer contracts; actual cold launch remains a CI gate.
 
-The checked chain (#4117 S3) is driven directly here while the activation fence
-is still up: these tests call ``_drive_checked_normal_release`` and
-``start_normal_service`` the way the prove scripts will. Journal writes go
+The checked chain (#4117 S3) is driven directly here: these tests call
+``_drive_checked_normal_release`` and ``start_normal_service`` the way the
+prove scripts will. Journal writes go
 through the real ``updater_handoff`` writer against a unit-local ``$AVA_HOME``,
 so the ownership, monotonic-transition and I8 ``replaces`` checks are exercised
 for real instead of mocked.
@@ -157,15 +157,19 @@ def test_malformed_service_commands_are_controlled_refusals(
         _command(spec, image)
 
 
-def test_normal_activation_is_disabled_before_the_chain(
+def test_normal_activation_enters_the_checked_chain(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def forbidden(*_args: object, **_kwargs: object) -> None:
-        pytest.fail("the checked chain must not run while the gate refuses")
+    """The flip removed the fence: the entry drives the checked chain directly."""
+    driven: list[tuple[object, str]] = []
 
-    monkeypatch.setattr(normal, "_drive_checked_normal_release", forbidden)
-    with pytest.raises(ReleaseRejectedError, match="checked crash recovery"):
-        normal.execute_normal_release(Mock(spec=normal.PreparedNormalRelease), "generation")
+    def drive(plan: object, generation: str) -> None:
+        driven.append((plan, generation))
+
+    monkeypatch.setattr(normal, "_drive_checked_normal_release", drive)
+    plan = Mock(spec=normal.PreparedNormalRelease)
+    normal.execute_normal_release(plan, "generation")
+    assert driven == [(plan, "generation")]
 
 
 @pytest.mark.parametrize(
@@ -878,6 +882,28 @@ def test_checked_chain_resumes_from_a_retained_stage(
         assert "stop-bootstrap" not in rig.calls
     assert rig.landed == [result]
     assert result.services == (readbacks["ava-frontend"], readbacks["ava-ops"])
+
+
+def test_checked_chain_reenters_from_waiting_behind_a_written_selector(
+    monkeypatch: pytest.MonkeyPatch, unit_home: Path
+) -> None:
+    """INJ-3 window: the selector CAS landed but the journal still reads waiting.
+
+    Re-entry re-proves the selector idempotently (the CAS replay) and still
+    converges to the same readback without duplicate effects.
+    """
+    plan, readbacks, selector = _two_service_setup(unit_home)
+    journal = _journal_for(plan, "waiting")
+    _seed_environment(unit_home, normal_release=journal.model_dump(mode="json"))
+    rig = _ChainRig(monkeypatch, unit_home, plan, selector=selector, readbacks=readbacks)
+
+    result = rig.drive()
+
+    assert rig.calls[0] == "migration-receipt"
+    assert "selector-cas" in rig.calls
+    assert "stop-bootstrap" in rig.calls
+    assert result.services == (readbacks["ava-frontend"], readbacks["ava-ops"])
+    assert rig.landed == [result]
 
 
 def test_checked_chain_requires_the_unit_session_namespace(

@@ -128,6 +128,14 @@ def test_guard_reader_treats_import_error_as_not_ready() -> None:
     assert mode_mod._guard_ready("no.such.module_anywhere", "X") is False
 
 
+def test_checked_activation_declaration_is_present_in_the_real_module() -> None:
+    """The flip (#4117 S5) declares the guard in the module whose state it proves."""
+    assert (
+        mode_mod._guard_ready("cli.commands._update_normal_release", "CHECKED_ACTIVATION_READY")
+        is True
+    )
+
+
 # ── read-once semantics ──────────────────────────────────────────────────────
 
 

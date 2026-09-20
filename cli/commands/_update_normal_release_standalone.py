@@ -3,10 +3,9 @@
 A unit whose old orchestrator died mid-handoff re-enters here: the standalone
 preparation validates the retained local identities (exited predecessor, the
 retained handoff, the candidate-ready bootstrap envelope, and the selector
-predecessor or its prepared pointer), then ``run_normal_release`` enforces the
-activation fence before any ownership change, takes host mutual exclusion,
-re-claims the exact generation (only after positive owner-death evidence), and
-hands the plan to the checked activation entry in
+predecessor or its prepared pointer), then ``run_normal_release`` takes host
+mutual exclusion, re-claims the exact generation (only after positive
+owner-death evidence), and hands the plan to the checked activation entry in
 ``cli.commands._update_normal_release``.
 """
 
@@ -16,7 +15,6 @@ import contextlib
 import hashlib
 import os
 from pathlib import Path
-from typing import Never
 
 from cli.commands._release_selector import read_selector, selector_bytes
 from cli.commands._release_services import prepare_normal_services
@@ -28,7 +26,6 @@ from cli.commands._update_normal_release import (
     _preflight_pending_plan,
     _read_ops_record,
     execute_normal_release,
-    require_checked_normal_activation,
 )
 from services.agent_ops.bootstrap import (
     ObserverProjection,
@@ -149,17 +146,15 @@ def prepare_normal_release(path: Path) -> PreparedNormalRelease:
     return prepared
 
 
-def run_normal_release(path: Path) -> Never:
+def run_normal_release(path: Path) -> int:
     """The standalone death-continuation entry.
 
-    Prepare one sealed plan; while the fence is up, refuse before any updater
-    ownership change. Then mutual exclusion first, re-take the exact retained
+    Prepare one sealed plan; mutual exclusion first, re-take the exact retained
     generation (only after proving its owner dead), and enter the checked
     activation entry. ``clear`` runs only when the claim succeeded, and it
     CAS-checks its own preconditions before dropping retained state.
     """
     plan = prepare_normal_release(path)
-    require_checked_normal_activation()
     if not try_acquire_updater_lock():
         raise ReleaseRejectedError("another updater holds this unit")
     generation: str | None = None

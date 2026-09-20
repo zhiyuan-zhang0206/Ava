@@ -155,15 +155,16 @@ def test_normal_preflight_refusal_precedes_updater_lock_and_stop(
         )
 
 
-def test_disabled_normal_activation_precedes_updater_lock_and_bootstrap_stop(
+def test_normal_continuation_reaches_updater_lock_after_the_flip(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    """The removed fence no longer refuses before ownership; the lock decides."""
     from unittest.mock import Mock
 
     from cli.commands import _update_bootstrap as bootstrap
     from cli.commands import _update_normal_release as normal
     from shared import host_deploy_state
-    from shared.runtime_release import ReleaseRejectedError
+    from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
 
     prepared = Mock(spec=bootstrap.PreparedBootstrapHop)
     prepared.request = Mock(normal_release_path=str(tmp_path / "normal.json"))
@@ -176,18 +177,24 @@ def test_disabled_normal_activation_precedes_updater_lock_and_bootstrap_stop(
     ) -> normal.PreparedNormalRelease:
         return Mock(spec=normal.PreparedNormalRelease)
 
-    monkeypatch.setattr(bootstrap, "prepare_bootstrap_hop", prepare_hop)
-    monkeypatch.setattr(normal, "prepare_after_bootstrap", prepare_normal)
+    calls: list[str] = []
+
+    def decline_lock() -> bool:
+        calls.append("lock")
+        return False
 
     def forbidden(*_args: object, **_kwargs: object) -> None:
-        pytest.fail("disabled normal activation must precede updater ownership and effects")
+        pytest.fail("a declined updater lock must precede bootstrap effects")
 
-    monkeypatch.setattr(host_deploy_state, "try_acquire_updater_lock", forbidden)
+    monkeypatch.setattr(bootstrap, "prepare_bootstrap_hop", prepare_hop)
+    monkeypatch.setattr(normal, "prepare_after_bootstrap", prepare_normal)
+    monkeypatch.setattr(host_deploy_state, "try_acquire_updater_lock", decline_lock)
     monkeypatch.setattr(bootstrap, "execute_bootstrap_hop", forbidden)
-    with pytest.raises(ReleaseRejectedError, match="checked crash recovery"):
-        updater._run_agent_runner_self_update(
-            tmp_path, bootstrap_request=tmp_path / "bootstrap.json"
-        )
+    result = updater._run_agent_runner_self_update(
+        tmp_path, bootstrap_request=tmp_path / "bootstrap.json"
+    )
+    assert result == RESTART_DECLINED_EXIT_CODE
+    assert calls == ["lock"]
 
 
 def test_short_target_sha_is_refused_before_any_update_work() -> None:

@@ -413,7 +413,7 @@ def test_prepare_refuses_a_foreign_handoff_owner(
 def test_run_normal_release_claims_before_entering_execute(
     monkeypatch: pytest.MonkeyPatch, unit_home: Path
 ) -> None:
-    """Simulates the flip: prepare -> fence -> lock -> claim -> execute -> clear."""
+    """The flipped entry: prepare -> lock -> claim -> execute -> clear."""
     plan = _prepared_plan(unit_home, ())
     order: list[str] = []
     routed: list[tuple[object, str]] = []
@@ -421,9 +421,6 @@ def test_run_normal_release_claims_before_entering_execute(
     def prepare(_path: Path) -> normal.PreparedNormalRelease:
         order.append("prepare")
         return plan
-
-    def lifted() -> None:
-        order.append("fence")
 
     def acquire() -> bool:
         order.append("lock")
@@ -445,7 +442,6 @@ def test_run_normal_release_claims_before_entering_execute(
         routed.append((routed_plan, generation))
 
     monkeypatch.setattr(standalone, "prepare_normal_release", prepare)
-    monkeypatch.setattr(standalone, "require_checked_normal_activation", lifted)
     monkeypatch.setattr(standalone, "try_acquire_updater_lock", acquire)
     monkeypatch.setattr(standalone, "release_updater_lock", release)
     monkeypatch.setattr(updater_handoff, "resume_bootstrap", resume)
@@ -458,37 +454,12 @@ def test_run_normal_release_claims_before_entering_execute(
     assert routed == [(plan, GENERATION)]
     assert order == [
         "prepare",
-        "fence",
         "lock",
         f"resume:{GENERATION}:direct-updater:pid{os.getpid()}",
         "execute",
         f"clear:{GENERATION}",
         "release",
     ]
-
-
-def test_run_normal_release_refuses_before_any_ownership_change(
-    monkeypatch: pytest.MonkeyPatch, unit_home: Path
-) -> None:
-    """While the fence is up the entry fails before updater ownership moves."""
-    plan = _prepared_plan(unit_home, ())
-    calls: list[str] = []
-
-    def prepare(_path: Path) -> normal.PreparedNormalRelease:
-        calls.append("prepare")
-        return plan
-
-    def forbidden(*_args: object, **_kwargs: object) -> None:
-        calls.append("ownership")
-
-    monkeypatch.setattr(standalone, "prepare_normal_release", prepare)
-    monkeypatch.setattr(standalone, "try_acquire_updater_lock", forbidden)
-    monkeypatch.setattr(standalone, "release_updater_lock", forbidden)
-    monkeypatch.setattr(standalone, "execute_normal_release", forbidden)
-
-    with pytest.raises(ReleaseRejectedError, match="checked crash recovery"):
-        standalone.run_normal_release(unit_home / "normal-request.json")
-    assert calls == ["prepare"]
 
 
 def test_run_normal_release_declines_when_another_updater_holds_the_lock(
@@ -500,9 +471,6 @@ def test_run_normal_release_declines_when_another_updater_holds_the_lock(
     def prepare(_path: Path) -> normal.PreparedNormalRelease:
         return plan
 
-    def lifted() -> None:
-        return None
-
     def decline() -> bool:
         calls.append("lock")
         return False
@@ -511,7 +479,6 @@ def test_run_normal_release_declines_when_another_updater_holds_the_lock(
         calls.append("side-effect")
 
     monkeypatch.setattr(standalone, "prepare_normal_release", prepare)
-    monkeypatch.setattr(standalone, "require_checked_normal_activation", lifted)
     monkeypatch.setattr(standalone, "try_acquire_updater_lock", decline)
     monkeypatch.setattr(standalone, "release_updater_lock", forbidden)
     monkeypatch.setattr(standalone, "execute_normal_release", forbidden)
@@ -520,6 +487,51 @@ def test_run_normal_release_declines_when_another_updater_holds_the_lock(
     with pytest.raises(ReleaseRejectedError, match="another updater holds this unit"):
         standalone.run_normal_release(unit_home / "normal-request.json")
     assert calls == ["lock"]
+
+
+def test_run_normal_release_does_not_clear_after_a_declined_claim(
+    monkeypatch: pytest.MonkeyPatch, unit_home: Path
+) -> None:
+    """A declined claim must not drop retained state that was never taken over.
+
+    The ``claimed`` guard is the only thing between a failed re-claim and a
+    destructive clear of another owner's retained bootstrap state; the entry
+    must fall straight from the declined resume to releasing the host lock.
+    """
+    plan = _prepared_plan(unit_home, ())
+    calls: list[str] = []
+
+    def prepare(_path: Path) -> normal.PreparedNormalRelease:
+        return plan
+
+    def acquire() -> bool:
+        calls.append("lock")
+        return True
+
+    def release() -> None:
+        calls.append("release")
+
+    def decline(generation: str, *, expected_session: str) -> bool:
+        calls.append("resume")
+        return False
+
+    def forbidden_clear(*_args: object, **_kwargs: object) -> None:
+        calls.append("clear")
+
+    def forbidden_execute(*_args: object, **_kwargs: object) -> None:
+        calls.append("execute")
+
+    monkeypatch.setattr(standalone, "prepare_normal_release", prepare)
+    monkeypatch.setattr(standalone, "try_acquire_updater_lock", acquire)
+    monkeypatch.setattr(standalone, "release_updater_lock", release)
+    monkeypatch.setattr(updater_handoff, "resume_bootstrap", decline)
+    monkeypatch.setattr(updater_handoff, "clear", forbidden_clear)
+    monkeypatch.setattr(ui_update_state, "lifecycle_lock", nullcontext)
+    monkeypatch.setattr(standalone, "execute_normal_release", forbidden_execute)
+
+    with pytest.raises(ReleaseRejectedError, match="could not claim its existing handoff"):
+        standalone.run_normal_release(unit_home / "normal-request.json")
+    assert calls == ["lock", "resume", "release"]
 
 
 def test_claim_allows_the_first_journal_cas_for_a_dead_owner(
