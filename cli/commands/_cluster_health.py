@@ -311,10 +311,10 @@ def _crash_loop_detection(max_restarts: int, window_minutes: int) -> bool:
     repeatedly in a short window — the signature of a bad prompt / skill /
     code change that the update flow did not catch.
 
-    Reads the Loki event stream directly (task #1197): the PG events copy is
-    a read-only archive, so the audit `resurrect` events come from Loki. The
-    CLI never imports gateway code (layering) — this is a straight instant
-    LogQL query."""
+    Reads the Loki event stream directly (task #1197): the PG events copy was
+    dropped with the archive cleanup, so the audit `resurrect` events come from
+    Loki. The CLI never imports gateway code (layering) — this is a straight
+    instant LogQL query."""
     import httpx
 
     from shared.config import settings

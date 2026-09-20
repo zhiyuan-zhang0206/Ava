@@ -183,7 +183,7 @@ first and ask "what changed that made it worth doing".
 
 - ~~**Add observability columns to `agents` table (terminated_at / total_turns / token usage etc.)**~~:
   done by event sourcing path (2026-05-07). No new observability columns; new observability dimensions =
-  add new `kind=` values + `attributes` fields to the unified `events` table, schema unchanged.
+  add new `event_name` values + `attributes` fields to the unified event stream, schema unchanged.
 
 - **Bespoke spawn-wrapping endpoint per "AI does X for you" affordance**: a dedicated route whose
   only job is to assemble a prompt and forward it to spawn — `/api/presets/draft` was this, folded

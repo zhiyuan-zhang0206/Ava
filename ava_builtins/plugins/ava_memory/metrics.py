@@ -2,9 +2,9 @@
 
 Plugin loading imports this module inside a ``PluginContext`` to collect the
 registrations below; the plugin name comes from the context. Query templates target the unified event stream in Loki
-(task #180: the PG ``events`` table is a frozen archive since the LGTM
-cutover — every metric reads the event stream through LogQL, the same read
-the core panels use, task #1280).
+(task #180: the PG ``events`` table was frozen at the LGTM cutover and
+dropped with the archive cleanup — every metric reads the event stream
+through LogQL, the same read the core panels use, task #1280).
 
 Query dialect (task #1280): each template selects
 ``{service_name="unknown_service"}`` (the unified emitter's OTLP resource),

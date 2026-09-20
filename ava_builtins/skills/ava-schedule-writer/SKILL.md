@@ -61,14 +61,16 @@ nxt = next_fire("0 3 * * *", after=datetime.now(UTC), timezone=settings.general.
 ```
 
 **Event / threshold** — read the cluster's own state. All events live in the
-unified `events` table (`ts / trace_id / agent_id / machine / process /
-category / kind / level / source / attributes`; `category` = audit |
-telemetry | log). The legacy `agent_events` / `event_log` tables are write
-mirrors — never query them:
-- tokens: `events` `event_name='llm_usage'`, sum `attributes->>'in_total' + out_total`.
-- agents spawned: `events` `category='audit' AND event_name='spawn'` count.
+unified event stream (Loki after the LGTM cutover; schema: `ts / trace_id /
+agent_id / machine / cluster / process / category / event_name / level /
+source / target_agent_id / attributes`; `category` = audit | telemetry |
+log). The legacy `agent_events` / `event_log` tables and the PG `events`
+archive are gone — do not query Postgres for events:
+- tokens: `llm_usage` events — sum `in_total + out_total`.
+- agents spawned: count of `spawn` events (`category='audit'`).
 - memory growth: `ava.shell.run("cd ~/.ava/memory && git diff --numstat | awk '{s+=$1+$2} END{print s+0}'")`.
-- Query the DB with `ava.DB` (works from a schedule — no agent identity needed).
+- Read events via the gateway's `/api/events` endpoint or `gateway.loki_events`
+  helpers — works from a schedule, no agent identity needed.
 
 **Compound** is just `if a or b:`. **Skip** is `if should_skip(): continue`.
 

@@ -537,8 +537,8 @@ async def auto_compact_before_llm(
     )
     pool = runtime.context.ops_pool
 
-    # Record the compact in event_log (best-effort: a failure only loses the
-    # audit row, never the summary itself).
+    # Record the compact as an audit event (best-effort: a failure only loses
+    # the audit record, never the summary itself).
     if pool is not None:
         try:
             await insert_event_log_async(
@@ -552,7 +552,7 @@ async def auto_compact_before_llm(
                 "[{label}] {body}",
                 label="auto-compact",
                 event="auto_compact",
-                body=f"failed to insert event_log: {exc!r}",
+                body=f"failed to record the compact audit event: {exc!r}",
             )
 
     if publisher is not None:

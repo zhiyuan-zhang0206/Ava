@@ -91,7 +91,7 @@ Notifications are executed **after the transaction commits**, not inside the dat
 
 ```python
 with ava.DB.transaction(), ava.DB.cursor() as cur:
-    # ... SELECT FOR UPDATE, UPDATE, event_log ...
+    # ... SELECT FOR UPDATE, UPDATE ...
 
 # ← Transaction commits here
 if owner_changing and old_owner != new_owner:

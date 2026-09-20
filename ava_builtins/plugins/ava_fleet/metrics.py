@@ -13,7 +13,8 @@ dashboard (``ava lgtm render``, task #3697). Two metrics:
   the registry JSON but never becomes a Grafana panel.
 
 Query dialect (task #1280 / #180): every metric reads the event stream from
-Loki (the PG ``events`` table is a frozen archive since the LGTM cutover) —
+Loki (the PG ``events`` table was frozen at the LGTM cutover and later
+dropped) —
 ``{service_name="unknown_service"} | json`` then label filters on the
 flattened event fields; the same read the core panels and the alert rules
 use. Stat panels run as instant queries over ``[$__range]`` (the whole panel

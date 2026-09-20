@@ -14,16 +14,11 @@ Regenerates the raw material behind shared/events/registry.md:
   3. `insert_event_log*` event_type values (event_log event names, category=audit).
   4. SSE role discriminators in shared/live_events.py (real-time channel,
      not persisted).
-  5. Optional: historical distribution from the PG archive (pass --db-url;
-     read-only SELECT queries). ARCHIVE ONLY since the LGTM cutover (task
-     #1197): `event_log` is frozen and the `agent_events` mirrors were removed
-     (2026-08-06) — against a live cluster the DB scan errors or returns
-     pre-cutover data; the live distribution lives in Loki (LogQL).
 
 Usage:
-    python shared/events/scan_kinds.py [--db-url postgresql://...] [--repo ~/Ava]
+    python shared/events/scan_kinds.py [--repo ~/Ava]
 
-Stdlib-only unless --db-url is given (needs psycopg). Output is a
+Stdlib-only. Output is a
 de-duplicated event-name inventory grouped by mechanism. shared/events/registry.md
 is generated from the EVENTS registry (scripts/gen_event_registry.py), not from
 this output; this tool remains useful to audit the event= literal distribution
@@ -275,40 +270,8 @@ def scan_label_only_calls(repo: Path) -> list[LabelOnlyCall]:
     return sorted(findings, key=lambda f: (f.path, f.lineno))
 
 
-def scan_db(db_url: str) -> None:
-    # Archive-only (task #1197): event_log is frozen and the agent_events
-    # mirrors were removed — this path reads pre-cutover history or errors.
-    import psycopg
-
-    conn = psycopg.connect(db_url)
-    cur = conn.cursor()
-    print("\n===== event_log.event_type distribution (all-time) =====")
-    cur.execute("SELECT event_type, COUNT(*) FROM event_log GROUP BY event_type ORDER BY 2 DESC")
-    for ev, n in cur.fetchall():
-        print(f"  {n:8d}  {ev}")
-    print("\n===== agent_events.event by count (current month) =====")
-    cur.execute(
-        "SELECT event, COUNT(*) FROM agent_events "
-        "WHERE ts >= date_trunc('month', now() AT TIME ZONE 'UTC') "
-        "GROUP BY event ORDER BY 2 DESC"
-    )
-    for ev, n in cur.fetchall():
-        print(f"  {n:8d}  {ev}")
-    print("\n===== bare-log share (all-time) =====")
-    cur.execute("SELECT COUNT(*) FROM agent_events")
-    total_row = cur.fetchone()
-    cur.execute("SELECT COUNT(*) FROM agent_events WHERE event = 'log'")
-    bare_row = cur.fetchone()
-    # COUNT(*) always returns one row with a single int column.
-    total = total_row[0] if total_row is not None else 0
-    bare = bare_row[0] if bare_row is not None else 0
-    print(f"  total={total}  bare log={bare}  ({100.0 * bare / total:.1f}%)")
-    conn.close()
-
-
 def main() -> int:
     ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
-    ap.add_argument("--db-url", help="optional prod DB URL for live distribution")
     ap.add_argument("--repo", default=str(Path.home() / "Ava"))
     args = ap.parse_args()
 
@@ -327,8 +290,6 @@ def main() -> int:
     for k in sorted(sse_roles):
         print(f"  {k}")
 
-    if args.db_url:
-        scan_db(args.db_url)
     return 0
 
 

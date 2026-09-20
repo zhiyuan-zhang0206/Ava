@@ -120,8 +120,9 @@ otherwise. Each entry: symptom → how it reads in a diff → evidence anchor.
   data owned by dead entities is never reclaimed. (36 GB of checkpoints,
   95% from terminated agents; DB was 26 GB and backups ~13 GB.)
 - **F2 Append-only tables without retention.** New tables accumulate
-  forever; the events table has partitions + TTL, everything else is
-  unbounded.
+  forever; the `events` table had month partitions but its retention DROP
+  never shipped before the archive cleanup dropped it whole — everything
+  else is unbounded.
 - **F3 Cartesian / N+1 queries.** A list endpoint that joins a detail table
   without limit — 2760 agents x inbound rows = 50k intermediate rows, 1.7 s
   per call.

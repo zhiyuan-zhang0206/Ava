@@ -130,10 +130,9 @@ Bearer `AVA_CLUSTER_SECRET` when the cluster has one; gateway is on port 8000.
 `pruned: true` is the trimmed-checkpoint shape, not an error; 404 means the
 agent is gone. `scripts/read_trace.py --with-content` calls this for you.
 
-## The Postgres `events` table is a frozen archive
+## The Postgres `events` archive is gone
 
-Nothing has written it since the LGTM cutover (2026-08-12). It still holds
-pre-cutover history — `events(ts, trace_id, span_id, agent_id, machine, process,
-category, event_name, level, source, target_agent_id, attributes)`, partitioned
-by month, so always bound `ts`. For anything current, read Loki
-([event-stream](event-stream.md)).
+The `events` table was frozen at the LGTM cutover (2026-08-12, task #1197) and
+dropped with the archive cleanup (task #1281/#1823). Historical reads go to the
+Loki archive stream ([event-stream](event-stream.md)); the cold pg_dump archive
+(task #1823) holds the pre-drop copy.

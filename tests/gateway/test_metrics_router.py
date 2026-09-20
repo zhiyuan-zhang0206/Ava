@@ -65,7 +65,7 @@ def _insert_event(
 def test_metrics_empty_db_returns_envelope_with_all_units(
     db_conn: psycopg.Connection, loki_fake: FakeLoki
 ) -> None:
-    """Empty events table -> meta zeros, all four metric units present."""
+    """Empty event stream -> meta zeros, all four metric units present."""
     db_conn.commit()
     with TestClient(app) as client:
         resp = client.get("/api/metrics")
@@ -237,7 +237,7 @@ def test_metrics_since_compact_param(db_conn: psycopg.Connection, loki_fake: Fak
 
 
 def test_metrics_agents_empty(db_conn: psycopg.Connection, loki_fake: FakeLoki) -> None:
-    """Empty events table -> empty agents list, meta zeros."""
+    """Empty event stream -> empty agents list, meta zeros."""
     db_conn.commit()
     with TestClient(app) as client:
         body = client.get("/api/metrics/agents?days=1").json()

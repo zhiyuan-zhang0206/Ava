@@ -28,7 +28,7 @@ export interface FleetGraphResult {
 }
 
 /**
- * The backend emits the raw event_log value `send_message` for message ties —
+ * The backend emits the raw event value `send_message` for message ties —
  * map it to the graph's `message` vocabulary so the view can key on `message`
  * (lineage types pass through). This is the ONLY wire normalization left: the
  * edge fields already travel under the generated contract names (from_agent /

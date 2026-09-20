@@ -249,7 +249,7 @@ verified mean — invalid replays are reported separately.
 ## Data source
 
 Events come from **Loki** via the gateway `/api/events` endpoint — PG `events`
-is a frozen archive since 2026-08-12 (Task #1197 LGTM cutover); `collect.py`
+was frozen at the 2026-08-12 LGTM cutover (Task #1197) and later dropped; `collect.py`
 is the Loki read path, and a 0-run dataset is an ALERT (exit 2), never
 "nothing to act on" — except a TEST- only window (QA review of PR #698), which exits 0.
 

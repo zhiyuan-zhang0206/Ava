@@ -5,8 +5,9 @@ design: skill attribution is telemetry and must never take an agent down. That
 makes a mistake here invisible in production AND invisible to the skills
 tests, which stub the write path at the seam. So the write itself is
 exercised against the real emitter: the batch lands in the JSONL mirror (the
-durable local copy of the unified stream — the PG `events` table is a
-read-only archive since the LGTM cutover, task #1197 close-C) with
+durable local copy of the unified stream — the PG `events` copy was retired
+at the LGTM cutover, task #1197 close-C, and dropped with the archive
+cleanup, task #1281/#1823) with
 category=audit, the same rows the per-row writer produces, in one
 round-trip.
 """

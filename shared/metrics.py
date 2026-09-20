@@ -1,4 +1,4 @@
-"""Render helpers for the metrics report over the unified `events` table.
+"""Render helpers for the metrics report over the unified event stream.
 
 This module is the shared rendering layer for the SQL-aggregated metrics path
 (`shared.metrics_aggregate`): it owns the ASCII text blocks and the machine

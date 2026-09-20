@@ -423,7 +423,7 @@ def test_category_for_kind() -> None:
 
 
 def test_node_enter_is_file_destination() -> None:
-    """node_enter is sink-filtered out of the events table (PR #1758) — the
+    """node_enter is sink-filtered out of the event stream (PR #1758) — the
     registry carries the destination so readers know where to look."""
     assert EVENTS["node_enter"].destination == "file"
 

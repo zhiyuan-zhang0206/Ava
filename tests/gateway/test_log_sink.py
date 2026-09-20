@@ -5,8 +5,9 @@ of the unified event stream).
 The loguru handler enqueues into the unified emitter (`shared.telemetry`),
 whose drain thread batch-writes; `_last_event` flushes the queue first so
 assertions see the written lines without sleeps. The Postgres `events` copy
-was retired with the LGTM cutover (task #1197 close-C): the PG table is a
-read-only archive, so these assertions read the day-stamped JSONL mirror
+was retired with the LGTM cutover (task #1197 close-C) and dropped with the
+archive cleanup (task #1281/#1823); these assertions read the day-stamped
+JSONL mirror
 (`logs_dir()/events-YYYYMMDD.jsonl`) instead — same row shape, one JSON
 object per line.
 """
@@ -135,8 +136,9 @@ def test_sink_agent_id_numeric_string_converts_to_int(
 
 def test_stdlib_intercept_routes_through_sink(sink_logger) -> None:
     """stdlib `logging.getLogger(...).info(...)` goes through _StdlibInterceptHandler →
-    loguru sink → agent_events INSERT. Verifies that service modules (e.g. `services/agent_ops/daemon.py`
-    that use stdlib logging) have their logs go to DB after upgrade, without needing to rewrite callsites line by line."""
+    loguru sink → the unified event stream. Verifies that service modules (e.g.
+    `services/agent_ops/daemon.py` that use stdlib logging) have their logs reach
+    the event stream after the upgrade, without needing to rewrite callsites line by line."""
     import logging
 
     from shared.log import _install_stdlib_intercept

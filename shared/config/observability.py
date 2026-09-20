@@ -172,7 +172,8 @@ class ObservabilitySettings(EnvSettings):
             "at the last data. The mirror prevents data loss, but visibility stops. "
             "`ava trace ship` refuses while off (one kill switch for the whole OTLP "
             "surface). There is no Postgres fallback: the PG events copy was retired "
-            "with the LGTM cutover (task #1197) and is a read-only archive. Applies "
+            "with the LGTM cutover (task #1197) and dropped with the archive cleanup "
+            "(task #1281/#1823). Applies "
             "on the next process start."
         ),
         json_schema_extra={

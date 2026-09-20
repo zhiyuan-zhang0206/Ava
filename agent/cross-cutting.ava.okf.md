@@ -13,7 +13,7 @@ Ava's **cross-cutting concerns**—shared mechanisms that span all subsystems. T
 
 ## Sub-concepts
 
-- **Logging** — Structured logging system: event-driven logfmt format, unified event pipeline (emitter → `events` table), node_enter/node_exit lifecycle events
+- **Logging** — Structured logging system: event-driven logfmt format, unified event pipeline (emitter → JSONL mirror + OTLP), node_enter/node_exit lifecycle events
 - **Sessions** — session lifecycle: naming conventions, environment variable forwarding, records + logs
 - **Startup Sequence** — agent process startup sequence: schema gate → 'running' claim → heavy imports → run loop
 - **Environment Variables** — Key environment variables and their propagation chain: AVA_AGENT_ID, AVA_CLUSTER_SECRET, AVA_HOME, etc.

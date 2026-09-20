@@ -237,9 +237,9 @@ def _subprocess_call_count(events: list[tuple]) -> int:
 
 
 # ─────── Loki paging constants ─────────────────────────────────────────────
-# Task #1197 (2026-08-12): PG `events` is a frozen archive; live events ship
-# as OTLP logs and are read back through the gateway's Loki-backed
-# /api/events endpoint. collect.py was a missed migration consumer
+# Task #1197 (2026-08-12): PG `events` was frozen at the cutover and later
+# dropped; live events ship as OTLP logs and are read back through the
+# gateway's Loki-backed /api/events endpoint. collect.py was a missed migration consumer
 # (2026-08-14: the daily scan produced empty datasets for 36 hours).
 #
 # Paging discipline: every request is offset=0, limit=_PAGE; slices whose
@@ -516,7 +516,8 @@ def collect(
     now - days -> now, UTC).
 
     Events come from Loki via the gateway /api/events endpoint (PG `events`
-    is a frozen archive since 2026-08-12, Task #1197); inbounds and lifecycle
+    was frozen at the 2026-08-12 LGTM cutover and later dropped, Task #1197);
+    inbounds and lifecycle
     metadata still come from PG. Category 'log' is not fetched — it carries
     only exec stdout payloads, which build_record never reads, and every
     agent that logs stdout also emits telemetry events, so agent discovery
