@@ -268,11 +268,11 @@ def _query_instant(logql: str, at: datetime) -> list[tuple[dict[str, str], float
     return out
 
 
-def _day_source_count(day: date, *, now: datetime) -> int | None:
+def _day_source_count(day: date) -> int | None:
     """Count all event families feeding one day's rollup; None means probe failure."""
     day_start = datetime.combine(day, datetime_time.min, tzinfo=UTC)
     day_end = datetime.combine(day + timedelta(days=1), datetime_time.min, tzinfo=UTC)
-    slices = split_index_label_window(day_start, day_end, now=now)
+    slices = split_index_label_window(day_start, day_end)
     source_count = 0
     try:
         for slice_ in slices:
@@ -294,7 +294,7 @@ def _day_source_count(day: date, *, now: datetime) -> int | None:
     return source_count
 
 
-def _day_aggregates(day: date, *, now: datetime) -> tuple[list[TokensRow], list[MetricsRow]] | None:
+def _day_aggregates(day: date) -> tuple[list[TokensRow], list[MetricsRow]] | None:
     """Aggregate one UTC day, or return None for a zero-row indexed slice."""
     day_start = datetime.combine(day, datetime_time.min, tzinfo=UTC)
     day_end = datetime.combine(day + timedelta(days=1), datetime_time.min, tzinfo=UTC)
@@ -302,7 +302,7 @@ def _day_aggregates(day: date, *, now: datetime) -> tuple[list[TokensRow], list[
     tok: dict[tuple[int, str], dict[str, float]] = {}
     met: dict[int, dict[str, float]] = {}
     hist: dict[int, dict[int, int]] = {}
-    slices = split_index_label_window(day_start, day_end, now=now)
+    slices = split_index_label_window(day_start, day_end)
     for slice_ in slices:
         slice_row_count = 0
         duration_s = max(1, int((slice_.end - slice_.start).total_seconds()))
@@ -469,7 +469,6 @@ def _prepare_dirty_days(
     states: dict[date, _RollupDayState],
     candidates: list[date],
     *,
-    now: datetime,
     yesterday: date,
     lookback_days: int,
     pass_started: float,
@@ -494,7 +493,7 @@ def _prepare_dirty_days(
         if deadline_reached():
             warn_deadline(candidates[index:])
             break
-        probe_count = _day_source_count(day, now=now)
+        probe_count = _day_source_count(day)
         state = states.get(day)
         dirty = (
             state is None
@@ -514,7 +513,7 @@ def _prepare_dirty_days(
             warn_deadline(candidates[index:])
             break
         attempted_days.append(day)
-        aggregates = _day_aggregates(day, now=now)
+        aggregates = _day_aggregates(day)
         if aggregates is None:
             error = "indexed slice returned zero rows"
             logger.warning(
@@ -649,7 +648,6 @@ def compute_rollup(
     per_day, state_updates, attempted_days = _prepare_dirty_days(
         states,
         candidates,
-        now=now,
         yesterday=yesterday,
         lookback_days=lookback_days,
         pass_started=pass_started,

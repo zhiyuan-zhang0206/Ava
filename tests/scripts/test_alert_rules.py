@@ -215,8 +215,8 @@ def test_loki_rules_match_event_labels_in_the_selector() -> None:
     promoted stream label: event-scoped rules must match it inside the stream
     selector, BEFORE the `| json` stage — the pipeline stage stays for the
     level/category/attributes filters only. (Legacy chunks without the index
-    labels expired at LEGACY_READ_EXPIRES_AT, so a pipeline-form event filter
-    would silently match nothing.)"""
+    labels expired after the cutover's grace (2026-08-26), so a pipeline-form
+    event filter would silently match nothing.)"""
     for rule in _load_rules():
         for expr in _exprs(rule, "loki"):
             assert "| json" in expr, f"{rule['uid']}: no | json stage:\n{expr}"

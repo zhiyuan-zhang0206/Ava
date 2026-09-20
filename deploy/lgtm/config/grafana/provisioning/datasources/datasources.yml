@@ -30,14 +30,14 @@ datasources:
     access: proxy
     url: $__env{AVA_TELEMETRY_PROMETHEUS_URL}
 
-  # Read-only Postgres — the remaining SQL panels (core_live_agents reads the
-  # live agents_meta table; the plugin panels query the retired events table,
-  # which returns no rows). Task #1280 decision (405 2026-08-14): agents_meta
-  # is the authoritative live source, so the panel stays SQL instead of an
-  # event-stream approximation. The role is grafana_ro — a dedicated read-only
-  # role (SELECT on agents_meta/events only, no writes), password injected via
-  # the container env ($GRAFANA_PG_PASSWORD from deploy/lgtm/.env,
-  # gitignored — never in this repo).
+  # Read-only Postgres — the one remaining SQL panel is core_live_agents
+  # (reads the live agents_meta table). Task #1280 decision (405 2026-08-14):
+  # agents_meta is the authoritative live source, so the panel stays SQL
+  # instead of an event-stream approximation; the event panels read Loki and
+  # the retired events table was dropped entirely on 2026-08-29. The role is
+  # grafana_ro — a dedicated read-only role (SELECT-only grants, no writes),
+  # password injected via the container env ($GRAFANA_PG_PASSWORD from
+  # deploy/lgtm/.env, gitignored — never in this repo).
   #
   # ⚠️ PG is the most typical bomb in observatory cutovers (#3606): it is the
   # CLUSTER's OWN database (grafana_ro/ava_main), not an observatory service.
