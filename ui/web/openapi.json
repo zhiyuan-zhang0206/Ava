@@ -15955,6 +15955,17 @@
                 "type": "null"
               }
             ]
+          },
+          "closed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed"
           }
         },
         "type": "object",
@@ -15962,7 +15973,7 @@
           "status"
         ],
         "title": "TerminateAgentResponse",
-        "description": "POST /api/agents/{id}/terminate response.\n\n`enqueued`: termination accepted, including hosted force. Actual work may\n    still be draining; this result does not prove exit.\n`already_terminated`: agent was already dead. Graceful termination is a\n    no-op. Hosted force instead returns enqueued until its exact original\n    host can prove quiescence; metadata status alone is not exit evidence.\n\n`open_tasks`: the still-open tasks the agent owned as it went down — an\n    advisory hint, null when it owned none or the hint read failed."
+        "description": "POST /api/agents/{id}/terminate response.\n\n`enqueued`: termination accepted, including hosted force. Actual work may\n    still be draining; this result does not prove exit.\n`already_terminated`: agent was already dead. Graceful termination is a\n    no-op. Hosted force instead returns enqueued until its exact original\n    host can prove quiescence; metadata status alone is not exit evidence.\n\n`open_tasks`: the still-open tasks the agent owned as it went down — an\n    advisory hint, null when it owned none or the hint read failed.\n\n`closed`: the agent's closure state after this request — True when `final`\n    was requested (the marker is stamped in the same transaction as the\n    termination intent; the already-terminated backfill marks idempotently)\n    or when the marker was already set; False otherwise; None only when the\n    reporting runner predates the field (version skew). Makes\n    `terminate --final` — including its already-terminated backfill form —\n    verifiable from the response alone."
       },
       "TextContentBlock": {
         "properties": {

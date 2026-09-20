@@ -29,6 +29,7 @@ from pydantic import ValidationError
 from cli.parsers import build_parser as _build_parser
 from cli.parsers.agents import (
     _h_agents_cancel,
+    _h_agents_compact,
     _h_agents_kill,
     _h_agents_ls,
     _h_agents_restart,
@@ -162,6 +163,7 @@ from cli.parsers.pty import _h_pty_freeze, _h_pty_resume, _h_pty_status
 
 __all__ = [
     "_h_agents_cancel",
+    "_h_agents_compact",
     "_h_agents_kill",
     "_h_agents_ls",
     "_h_agents_restart",

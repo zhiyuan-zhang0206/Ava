@@ -282,12 +282,18 @@ async def test_terminate_agent_op_terminated_short_circuits(
     from shared.agents import AgentStatus
 
     monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
+
+    async def _closed_state(_aid: int, *, final: bool, db_pool: object) -> bool:
+        return final
+
+    monkeypatch.setattr(ops_lifecycle, "_closure_state", _closed_state)
     resp = await ops_lifecycle.terminate_agent_op(
         9,
         TerminateAgentRequest(),
         stub_pool,  # type: ignore[arg-type]
     )
     assert resp.status == "already_terminated"
+    assert resp.closed is False
 
 
 @pytest.mark.asyncio
@@ -1495,12 +1501,18 @@ async def test_force_terminate_hosted_skips_process_kill_and_cancels_turn(
 
     monkeypatch.setattr(ops_lifecycle, "publish_page_closed", _fake_page_closed)
 
+    async def _closed_state(_aid: int, *, final: bool, db_pool: object) -> bool:
+        return final
+
+    monkeypatch.setattr(ops_lifecycle, "_closure_state", _closed_state)
+
     resp = await ops_lifecycle.terminate_agent_op(
         9,
         TerminateAgentRequest(force=True),
         stub_pool,  # type: ignore[arg-type]
     )
     assert resp.status == "enqueued"
+    assert resp.closed is False
     assert captured == {"agent_id": 9}
     assert cancelled == [(9, 91)]
 

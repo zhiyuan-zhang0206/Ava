@@ -64,6 +64,12 @@ def _h_agents_cancel(args: argparse.Namespace) -> int:
     return cmd_agents_cancel(args.agent_id)
 
 
+def _h_agents_compact(args: argparse.Namespace) -> int:
+    from cli.commands.agents import cmd_agents_compact
+
+    return cmd_agents_compact(args.agent_id)
+
+
 def _h_agents_restart(args: argparse.Namespace) -> int:
     from cli.commands.agents import ProvenanceError, cmd_agents_restart
 
@@ -162,6 +168,53 @@ def _add_list_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
     agents_ls_p.set_defaults(func=_h_agents_ls)
 
 
+def _add_send_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    from cli.main import _h_agents_send
+
+    agents_send_p = sub.add_parser(
+        "send", help="deliver a chat message to an agent (auto-resurrects a terminated target)"
+    )
+    agents_send_p.add_argument("agent_id", type=int, help="target agent id")
+    agents_send_p.add_argument("content", help="message text")
+    agents_send_p.add_argument(
+        "--source",
+        default=None,
+        required=True,
+        type=_validated_source,
+        help="provenance of the message (required). 'user' sends as the human operator; "
+        "'shell:N' / 'watcher:N' mark a machine notice; 'schedule:N' a gateway schedule",
+    )
+    agents_send_p.add_argument(
+        "--tail-file",
+        default=None,
+        help="append the tail of this file to the message (completion notices "
+        "carry the end of the command's output this way)",
+    )
+    agents_send_p.set_defaults(func=_h_agents_send)
+
+
+def _add_source_argument(*parsers: argparse.ArgumentParser) -> None:
+    """One explicit-provenance `--source` flag for each lifecycle verb."""
+    for lifecycle_parser in parsers:
+        lifecycle_parser.add_argument(
+            "--source",
+            default=None,
+            type=_validated_source,
+            help="explicit provenance; 'user' = the human operator; never an authorization grant",
+        )
+
+
+def _add_compact_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    from cli.main import _h_agents_compact
+
+    agents_compact_p = sub.add_parser(
+        "compact",
+        help="request conversation compaction (durable; consumed on the agent's next claim)",
+    )
+    agents_compact_p.add_argument("agent_id", type=int, help="agent id to compact")
+    agents_compact_p.set_defaults(func=_h_agents_compact)
+
+
 def _add_resurrect_billing_parser(
     sub: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
@@ -186,7 +239,6 @@ def _add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
         _h_agents_kill,
         _h_agents_restart,
         _h_agents_resurrect,
-        _h_agents_send,
         _h_agents_terminate,
         _h_notices_clear,
         _h_notices_list,
@@ -199,7 +251,7 @@ def _add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     # by escalating force (cancel < restart < terminate < kill) plus ls.
     agents_p = sub.add_parser(
         "agents",
-        help="observe + control agents: ls / cancel / restart / terminate / kill",
+        help="observe + control agents: ls / cancel / compact / restart / terminate / kill",
     )
     agents_sub = agents_p.add_subparsers(dest="agents_cmd", required=True)
 
@@ -207,32 +259,15 @@ def _add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
 
     _add_timeline_parser(agents_sub)
 
-    agents_send_p = agents_sub.add_parser(
-        "send", help="deliver a chat message to an agent (auto-resurrects a terminated target)"
-    )
-    agents_send_p.add_argument("agent_id", type=int, help="target agent id")
-    agents_send_p.add_argument("content", help="message text")
-    agents_send_p.add_argument(
-        "--source",
-        default=None,
-        required=True,
-        type=_validated_source,
-        help="provenance of the message (required). 'user' sends as the human operator; "
-        "'shell:N' / 'watcher:N' mark a machine notice; 'schedule:N' a gateway schedule",
-    )
-    agents_send_p.add_argument(
-        "--tail-file",
-        default=None,
-        help="append the tail of this file to the message (completion notices "
-        "carry the end of the command's output this way)",
-    )
-    agents_send_p.set_defaults(func=_h_agents_send)
+    _add_send_parser(agents_sub)
 
     agents_cancel_p = agents_sub.add_parser(
         "cancel", help="halt the agent's current action; it stays alive (resumable)"
     )
     agents_cancel_p.add_argument("agent_id", type=int, help="agent id to cancel")
     agents_cancel_p.set_defaults(func=_h_agents_cancel)
+
+    _add_compact_parser(agents_sub)
 
     agents_restart_p = agents_sub.add_parser(
         "restart", help="restart the agent in place (history preserved)"
@@ -276,18 +311,12 @@ def _add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     )
     agents_kill_p.set_defaults(func=_h_agents_kill)
 
-    for lifecycle_parser in (
+    _add_source_argument(
         agents_restart_p,
         agents_resurrect_p,
         agents_terminate_p,
         agents_kill_p,
-    ):
-        lifecycle_parser.add_argument(
-            "--source",
-            default=None,
-            type=_validated_source,
-            help="explicit provenance; 'user' = the human operator; never an authorization grant",
-        )
+    )
 
     notices_p = sub.add_parser(
         "notices",

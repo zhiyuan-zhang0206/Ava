@@ -473,6 +473,24 @@ async def has_pending_inbound_after(
         return await cur.fetchone() is not None
 
 
+async def is_agent_closed(pool: AsyncConnectionPool, agent_id: int) -> bool:
+    """Whether the agent carries the closure marker (`agents_meta.closed_at` set).
+
+    The claim-side terminate veto consults this: a closed agent's death is not
+    vetoable — the closure contract (`terminate --final`: never auto-resurrect,
+    queued work dead-letters on the existing gates) outranks "the world moved",
+    so newer pending work cannot keep the agent alive. A read failure
+    propagates: it must not silently degrade into the veto that keeps a closed
+    agent running.
+    """
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT closed_at IS NOT NULL FROM agents_meta WHERE id = %s", (agent_id,)
+        )
+        row = await cur.fetchone()
+    return row is not None and row[0] is True
+
+
 async def has_pending_interrupt(pool: AsyncConnectionPool, agent_id: int) -> bool:
     """Whether an external in-flight abort signal is queued for this agent.
 

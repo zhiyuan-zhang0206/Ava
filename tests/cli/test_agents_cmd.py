@@ -492,3 +492,43 @@ def test_agents_send_degrades_to_unkeyed_when_outbox_fails(
     headers = seen["headers"]
     assert isinstance(headers, dict)
     assert "Idempotency-Key" not in headers
+
+
+def test_agents_terminate_renders_the_closure_state(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`closed` from the runner is rendered; absence (older runner) stays silent."""
+    _patch_post(monkeypatch, {"status": "already_terminated", "closed": True})
+    assert _agents.cmd_agents_terminate(7, final=True) == 0
+    assert "— closed" in capsys.readouterr().out
+
+    _patch_post(monkeypatch, {"status": "enqueued", "closed": False})
+    assert _agents.cmd_agents_terminate(7) == 0
+    assert "— not closed" in capsys.readouterr().out
+
+    _patch_post(monkeypatch, {"status": "enqueued"})  # older runner: absent
+    assert _agents.cmd_agents_terminate(7) == 0
+    assert "closed" not in capsys.readouterr().out
+
+
+def test_agents_compact_posts_to_the_compact_route(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen = _patch_post(monkeypatch, {"agent_id": 7, "status": "enqueued"})
+    assert _agents.cmd_agents_compact(7) == 0
+    assert seen["url"] == "http://gw:8000/api/agents/7/compact"
+    assert seen["json"] is None  # the endpoint takes no body
+    out = capsys.readouterr().out
+    assert "compact" in out and "enqueued" in out
+
+
+def test_agents_compact_parser_dispatches() -> None:
+    import argparse
+
+    from cli.parsers.agents import _add_agents_parser
+
+    parser = argparse.ArgumentParser()
+    _add_agents_parser(parser.add_subparsers())
+    args = parser.parse_args(["agents", "compact", "7"])
+    assert args.agent_id == 7
+    assert args.func.__name__ == "_h_agents_compact"
