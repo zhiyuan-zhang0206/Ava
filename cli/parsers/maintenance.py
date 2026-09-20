@@ -87,7 +87,9 @@ def _add_maintenance_parser(sub: argparse._SubParsersAction[argparse.ArgumentPar
             command.add_argument(
                 "--cancel",
                 action="store_true",
-                help="explicitly abandon an unfinished drain and restore ordinary lifecycle recovery",
+                help="explicitly abandon an unfinished drain and restore ordinary lifecycle "
+                "recovery; restarts already issued are not retracted and still complete "
+                "on next admission",
             )
         if verb == "repair":
             command.add_argument(
