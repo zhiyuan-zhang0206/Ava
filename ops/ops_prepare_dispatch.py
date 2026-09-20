@@ -34,6 +34,7 @@ from ops.rpc_prepare_dispatch import (
     PrepareDispatchResult,
     prepared_plan_name,
 )
+from ops.unit_local import candidate_interpreter, machine_identity
 from shared.config import settings
 from shared.log import logger
 from shared.private_storage import write_private_bytes
@@ -60,21 +61,6 @@ _MAX_PLAN_BYTES = 256 * 1024
 _MAX_ACK_BYTES = 4 * 1024
 
 
-def _candidate_interpreter(home: Path, artifact_digest: str) -> Path:
-    root = home / "releases" / artifact_digest
-    try:
-        if root.resolve(strict=True) != root:
-            raise ReleaseRejectedError("announced candidate image is not canonical")
-        interpreter = (root / "venv" / "bin" / "python").resolve(strict=True)
-    except OSError as exc:
-        raise ReleaseRejectedError(
-            "announced candidate image is not retained on this unit"
-        ) from exc
-    if not interpreter.is_relative_to(root / "venv"):
-        raise ReleaseRejectedError("candidate interpreter escapes its retained image")
-    return interpreter
-
-
 def _child_environment(home: Path) -> dict[str, str]:
     # No database projection: the entry's validation is local and read-only.
     return {
@@ -99,16 +85,9 @@ def _child_argv(interpreter: Path, plan_path: Path) -> list[str]:
     ]
 
 
-def _unit_identity(home: Path) -> str:
-    machine = (home / "machine_name").read_text(encoding="utf-8").strip()
-    if not machine:
-        raise ReleaseRejectedError("installed unit machine identity is empty")
-    return machine
-
-
 def cluster_prepare_dispatch_op(payload: PrepareDispatchPayload) -> PrepareDispatchResult:
     home = settings.general.ava_home
-    machine = _unit_identity(home)
+    machine = machine_identity(home)
     if not payload.plan_json.isascii():
         raise ReleaseRejectedError("dispatched plan is not ASCII JSON text")
     raw = payload.plan_json.encode("ascii")
@@ -121,7 +100,7 @@ def cluster_prepare_dispatch_op(payload: PrepareDispatchPayload) -> PrepareDispa
     plan_digest = hashlib.sha256(raw).hexdigest()
     plan_path = home / "run" / prepared_plan_name(plan_digest)
     write_private_bytes(plan_path, raw)
-    interpreter = _candidate_interpreter(home, payload.artifact_digest)
+    interpreter = candidate_interpreter(home, payload.artifact_digest)
     started = time.monotonic()
     logger.info(
         "[cluster_prepare_dispatch] start pid={pid} image={image}",
