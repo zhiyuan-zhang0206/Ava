@@ -237,6 +237,18 @@ def _validate_spec(
             f"pin one in its ModelTuning ('' provider-default is not displayable "
             f"in the spawn picker)"
         )
+    # The spawn picker renders one rung per effort_levels entry and
+    # pre-selects the default — a default outside the ladder would render no
+    # selected rung while a different effort goes on the wire, the same
+    # what-you-see != what-is-sent class as the missing-default guard above.
+    levels = spec.effort_levels or ()
+    if spec.tuning.reasoning_effort not in levels:
+        raise RuntimeError(
+            f"spawnable model {model_id!r} has reasoning_effort default "
+            f"{spec.tuning.reasoning_effort!r} outside its effort_levels {levels!r} — "
+            f"pin the default to one of the model's own rungs (the spawn picker "
+            f"cannot render it otherwise)"
+        )
     if anthropic_protocol and spec.max_output_tokens is None:
         raise RuntimeError(
             f"spawnable model {model_id!r} needs max_output_tokens — "

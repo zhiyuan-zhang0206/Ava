@@ -674,6 +674,21 @@ def test_attach_modalities_declaration_must_stay_within_media_types() -> None:
     reg._validate_spec("gemini-2.5-flash", narrower, anthropic_protocol=False)
 
 
+def test_reasoning_effort_default_must_stay_within_effort_levels() -> None:
+    """A spawnable model whose pinned default is not one of its effort_levels
+    would render no selected rung in the spawn picker while a different effort
+    goes on the wire — the same what-you-see != what-is-sent class as a
+    missing default."""
+    from dataclasses import replace
+
+    from shared.lm import registry as reg
+
+    spec = MODELS["glm-5.3-flash"]
+    bad = replace(spec, tuning=replace(spec.tuning, reasoning_effort="ultra"))
+    with pytest.raises(RuntimeError, match="outside its effort_levels"):
+        reg._validate_spec("glm-5.3-flash", bad, anthropic_protocol=False)
+
+
 def test_resolve_is_self_sufficient_in_a_fresh_process() -> None:
     """File-level isolation (task #3212): a process whose FIRST registry use is
     the resolve must see plugin-declared withdrawals — the provider loader is
