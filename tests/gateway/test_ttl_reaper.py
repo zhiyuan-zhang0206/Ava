@@ -12,6 +12,7 @@ interrupted a running job; an idle or already-absent shell's reaping is silent.
 from __future__ import annotations
 
 import asyncio
+import itertools
 import time
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -63,6 +64,12 @@ def _empty_web_session_reap(_pool: ConnectionPool) -> int:
     return 0
 
 
+# One distinct port per row: an open (host, port) pair is unique since
+# agent_pages_unique_live_port (20260920) — the reaper never cares about the
+# port value, and a shared fixed port now collides between pages.
+_PAGE_PORTS = itertools.count(8001)
+
+
 def _open_page(
     conn: psycopg.Connection,
     agent_id: int,
@@ -73,8 +80,8 @@ def _open_page(
     with conn.cursor() as cur:
         cur.execute(
             "INSERT INTO agent_pages (agent_id, name, port, host, expires_at) "
-            "VALUES (%s, %s, 8001, '127.0.0.1', %s) RETURNING id",
-            (agent_id, name, expires_at),
+            "VALUES (%s, %s, %s, '127.0.0.1', %s) RETURNING id",
+            (agent_id, name, next(_PAGE_PORTS), expires_at),
         )
         row = cur.fetchone()
     conn.commit()
