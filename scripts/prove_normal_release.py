@@ -1258,10 +1258,13 @@ def create_namespace(conn: psycopg.Connection, namespace: str, home: Path) -> No
     conn.execute("INSERT INTO machine_units VALUES (%s, %s)", (_MACHINE, str(home)))
     conn.execute("CREATE TABLE machines(name text)")
     conn.execute("INSERT INTO machines VALUES (%s)", (_MACHINE,))
+    # `lock_rollout` predicates `settle_hosts IS NULL` and the lease read selects
+    # the settle trio; the real schema has carried it since the initial release.
     conn.execute(
         "CREATE TABLE deployment_state(id int, phase text, kind text, note text, holder text,"
         " acquired_at timestamptz, expires_at timestamptz, target_sha text,"
-        " managed_writer_evidence jsonb)"
+        " managed_writer_evidence jsonb, settle_hosts text[], settle_note text,"
+        " settle_started_at timestamptz)"
     )
     conn.execute(
         "INSERT INTO deployment_state(id, phase, kind, note, holder, acquired_at, expires_at,"

@@ -38,6 +38,7 @@ from ops.rpc_terminate import OpenTasksHint as OpenTasksHint
 from ops.rpc_terminate import TerminateAgentRequest as TerminateAgentRequest
 from ops.rpc_terminate import TerminateAgentResponse as TerminateAgentResponse
 from shared.envelope import reject_unnegotiated_caller, validate_source, validate_writable_source
+from shared.op_envelope import OpEnvelope as OpEnvelope
 
 
 class TextContentBlock(BaseModel):
@@ -464,22 +465,10 @@ OpKind = Literal[
 ]
 
 
-class OpEnvelope(BaseModel):
-    """`POST /ops` request envelope. `kind` stays a bare str (not the OpKind
-    Literal) so an unknown kind from a version-skewed peer becomes a 'failed' op
-    result — the dispatch switch owns the kind vocabulary — rather than an
-    envelope-parse rejection.
-
-    `idempotency_key` is the caller-supplied dedup key for non-idempotent ops
-    (spawn / cluster_update / lifecycle): every retry of one logical op carries
-    the SAME key, and the ops server replays the first run's stored outcome
-    instead of re-executing (services/agent_ops/daemon.py:_dispatch_idempotent),
-    so a lost response cannot duplicate the effect. Absent (None) for
-    idempotent ops and for version-skewed old callers — no dedup then."""
-
-    kind: str
-    payload: dict[str, Any] = Field(default_factory=dict)
-    idempotency_key: str | None = Field(default=None, max_length=128)
+# `OpEnvelope` moved to shared/op_envelope.py (re-exported in the import block
+# above) so the restricted bootstrap observer can validate the same envelope
+# without importing this module -- which pulls shared.config transitively. The
+# name stays importable from here for every existing importer.
 
 
 class OpResponse(BaseModel):
