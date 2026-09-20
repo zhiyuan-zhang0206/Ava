@@ -52,6 +52,7 @@ def prepare(
 
     A failure leaves the hold in place. Repeating preparation resumes the
     same cohort and finds already committed commands by the exact operation.
+    A captured cohort is returned unchanged when no unsettled failures remain.
     Terminated agents never enter the cohort. A previous lifecycle operation,
     stale/unknown runtime requires separate resolution.
 
@@ -63,8 +64,8 @@ def prepare(
     current = maintenance.require_operation(holder, acquired_at)
     hold = current.maintenance
     assert hold is not None  # noqa: S101
-    if hold.failures:
-        raise RuntimeError(f"maintenance has failed continuations: {sorted(hold.failures)}")
+    if unsettled := hold.unsettled_failures():
+        raise RuntimeError(f"maintenance has failed continuations: {sorted(unsettled)}")
     if hold.phase != "preparing":
         return hold
     if conn.info.transaction_status != TransactionStatus.IDLE:
@@ -384,9 +385,11 @@ def verify_drained(conn: psycopg.Connection, hold: MaintenanceHold) -> None:
 
     Reaped members (task #4016) have no flush/apply receipt by construction:
     their certification checks the honest reap state instead -- the row still
-    CAS-marked 'restarting' and its command never applied or observed.
+    CAS-marked 'restarting' and its command never applied or observed. A
+    failure recorded around that release (the interrupted turn unwinding) is
+    settled too: the reap left nothing to repair, so it is not read here.
     """
-    if hold.failures or set(hold.drained) | set(hold.reaped) != set(hold.commands):
+    if hold.unsettled_failures() or set(hold.drained) | set(hold.reaped) != set(hold.commands):
         raise RuntimeError("maintenance still has unfinished or failed continuations")
     if hold.parked:
         rows = conn.execute(

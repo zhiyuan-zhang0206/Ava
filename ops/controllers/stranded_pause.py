@@ -494,7 +494,7 @@ def stranded_hold_verdict(
     failed_detail = _failed_outcome_detail(reading)
     update_armed = bool(failed_detail)
     phase = current.maintenance.phase
-    failures = bool(current.maintenance.failures)
+    failures = bool(current.maintenance.unsettled_failures())
     pre_stop = phase in strand_hold.PRE_STOP_PHASES
     if failures:
         return StrandedHoldVerdict(

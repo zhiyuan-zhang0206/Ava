@@ -148,12 +148,19 @@ def _liveness(value: object) -> str:
     return value
 
 
-def _failure_count(value: object) -> int:
+def _failure_count(value: object, reaped: object = None) -> int:
+    """Mirror MaintenanceHold.unsettled_failures on the raw journal shape."""
     if value is None:
         return 0
     if not isinstance(value, dict):
         raise TypeError("maintenance.failures must be an object")
-    return len(cast("dict[object, object]", value))
+    failures = cast("dict[object, object]", value)
+    if reaped is None:
+        return len(failures)
+    if not isinstance(reaped, dict):
+        raise TypeError("maintenance.reaped must be an object")
+    certified = cast("dict[object, object]", reaped)
+    return sum(agent not in certified for agent in failures)
 
 
 def _whitelisted(value: object, pattern: re.Pattern[str]) -> str | None:
@@ -286,7 +293,7 @@ def classify_status(payload: Payload, *, host: str, now: float | None = None) ->
     if maintenance is not None:
         hold = _mapping(maintenance, "maintenance")
         phase = _phase(hold["phase"])
-        failures = _failure_count(hold["failures"])
+        failures = _failure_count(hold["failures"], hold.get("reaped"))
     driver_value = payload["driver"]
     driver = (
         "missing"
@@ -346,7 +353,7 @@ def classify_journal(payload: Payload, *, host: str, now: float | None = None) -
     if maintenance is not None:
         hold = _mapping(maintenance, "maintenance")
         phase = _phase(hold["phase"])
-        failures = _failure_count(hold["failures"])
+        failures = _failure_count(hold["failures"], hold.get("reaped"))
     operation = _whitelisted(payload.get("holder"), _OPERATION_PATTERN)
     acquired_at = _whitelisted(payload.get("acquired_at"), _TIMESTAMP_PATTERN)
     return Triage(

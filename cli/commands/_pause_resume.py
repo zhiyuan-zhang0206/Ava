@@ -36,7 +36,7 @@ def resume_after_start[**P](start: Callable[P, int | StartDelegation]) -> Callab
         current = maintenance.snapshot()
         if current is None:
             return start(*args, **kwargs)
-        if current.maintenance is not None and current.maintenance.failures:
+        if current.maintenance is not None and current.maintenance.unsettled_failures():
             raise RuntimeError(
                 "start cannot release failed continuation/flush receipts; hold retained"
             )

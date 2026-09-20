@@ -136,7 +136,7 @@ def _hold_refusal(current: PauseOwnerSnapshot) -> str | None:
     resume may proceed. One source for both the pre-check a caller runs before
     attempting and the text the attempt itself raises, so they cannot disagree."""
     assert current.holder is not None and current.acquired_at is not None  # noqa: S101
-    if current.maintenance is not None and current.maintenance.failures:
+    if current.maintenance is not None and current.maintenance.unsettled_failures():
         return (
             "cannot resume failed continuation/flush receipts; fix the root cause, "
             f"then ava maintenance repair --operation {current.holder} "
