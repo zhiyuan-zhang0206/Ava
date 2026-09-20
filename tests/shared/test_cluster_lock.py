@@ -33,7 +33,6 @@ from shared.cluster_lock import (
     release_update_lock,
     renew_update_lock,
     self_holder,
-    settle_hosts,
     settle_update_lock,
     update_lock_holder,
     update_lock_refusal_detail,
@@ -54,7 +53,7 @@ def _free_lock(db_conn: psycopg.Connection) -> Iterator[None]:
         with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE deployment_state SET holder=NULL, acquired_at=NULL, expires_at=NULL, "
-                "note=NULL, settle_hosts=NULL, settle_note=NULL, settle_started_at=NULL, "
+                "settle_hosts=NULL, settle_note=NULL, settle_started_at=NULL, "
                 "phase='stable', kind=NULL, target_sha=NULL, managed_writer_evidence=NULL "
                 "WHERE id=1"
             )
@@ -143,7 +142,7 @@ def test_expired_lock_with_pending_publication_requires_publication_recovery(
         release_update_lock("gateway:pid123")
         assert settle_update_lock("gateway:pid123", hosts=["runner"]) is False
         row = db_conn.execute(
-            "SELECT holder, phase, note FROM deployment_state WHERE id=1"
+            "SELECT holder, phase, settle_hosts FROM deployment_state WHERE id=1"
         ).fetchone()
         assert row == ("gateway:pid123", "updating", None)
 
@@ -161,28 +160,28 @@ def test_expired_lock_with_pending_publication_requires_publication_recovery(
 
         with db_conn.cursor() as cur:
             cur.execute(
-                "UPDATE deployment_state SET phase='settling', note='waiting for runner', "
+                "UPDATE deployment_state SET phase='settling', "
                 "settle_note='waiting for runner', settle_hosts=ARRAY['runner'], "
                 "settle_started_at=now() WHERE id=1"
             )
         db_conn.commit()
         before = db_conn.execute(
-            "SELECT holder, phase, note, settle_note, settle_hosts, "
-            "settle_started_at, managed_writer_evidence->'pending' "
+            "SELECT holder, phase, settle_note, settle_hosts, "
+            "settle_started_at IS NOT NULL, managed_writer_evidence->'pending' "
             "FROM deployment_state WHERE id=1"
         ).fetchone()
         assert before is not None
-        assert before[:5] == (
+        assert before[:4] == (
             "gateway:pid123",
             "settling",
             "waiting for runner",
-            "waiting for runner",
             ["runner"],
         )
+        assert before[4] is True
         assert release_settle_hold("gateway:pid123") is False
         after = db_conn.execute(
-            "SELECT holder, phase, note, settle_note, settle_hosts, "
-            "settle_started_at, managed_writer_evidence->'pending' "
+            "SELECT holder, phase, settle_note, settle_hosts, "
+            "settle_started_at IS NOT NULL, managed_writer_evidence->'pending' "
             "FROM deployment_state WHERE id=1"
         ).fetchone()
         assert after == before
@@ -251,13 +250,13 @@ def _seed_pending_rollout(
     *,
     phase: str = "updating",
     kind: str | None = "rollout",
-    note: str | None = None,
+    settle_hosts: list[str] | None = None,
     expired: bool = True,
 ) -> None:
     """An executing-rollout row carrying `operation` as its durable pending publication."""
     with db_conn.cursor() as cur:
         cur.execute(
-            "UPDATE deployment_state SET phase=%s, kind=%s, holder=%s, note=%s, "
+            "UPDATE deployment_state SET phase=%s, kind=%s, holder=%s, settle_hosts=%s, "
             "acquired_at=clock_timestamp() - interval '2 minutes', "
             "expires_at=clock_timestamp() + make_interval(secs => %s), "
             "target_sha=%s, managed_writer_evidence=%s WHERE id=1",
@@ -265,7 +264,7 @@ def _seed_pending_rollout(
                 phase,
                 kind,
                 operation["holder"],
-                note,
+                settle_hosts,
                 -60.0 if expired else 600.0,
                 operation["target_sha"],
                 Jsonb({"version": 2, "current": None, "pending": {"operation": operation}}),
@@ -337,7 +336,7 @@ def test_pending_recovery_claim_is_pinned_to_the_observed_dead_identity(
 def test_pending_recovery_claim_refuses_a_settle_hold(db_conn: psycopg.Connection) -> None:
     """Only an executing rollout qualifies: a settle hold's row is never touched."""
     operation = _pending_operation()
-    _seed_pending_rollout(db_conn, operation, phase="settling", note="settling, waiting for: win")
+    _seed_pending_rollout(db_conn, operation, phase="settling", settle_hosts=["win"])
 
     claim = claim_pending_recovery_lease("recovery", expected_operation=operation, observed=None)
 
@@ -427,7 +426,7 @@ def test_lease_describes_a_live_holder() -> None:
     assert lease.holder == "gateway-host:pid81319"
     assert 0 <= lease.held_for_s < 60  # just taken
     assert 1700 < lease.expires_in_s <= 1800
-    assert lease.note is None  # an ordinary in-flight rollout has nothing extra to say
+    assert lease.settle_hosts is None  # an ordinary in-flight rollout carries no settle fact
     assert "gateway-host:pid81319" in lease.describe()
 
 
@@ -441,17 +440,16 @@ def test_expired_lease_reads_as_free() -> None:
 def test_settle_hold_keeps_the_lease_past_the_holders_exit() -> None:
     """A rollout that ends with a host still converging keeps the cluster held on a
     shorter TTL instead of releasing — the 2026-07-29 gap a second `ava cluster update` walked
-    into. The reason rides in `note`, and the lease stays un-acquirable."""
+    into. The reason rides in the structured settle fields, and the lease stays un-acquirable."""
     assert acquire_update_lock("gateway-host:pid81319", ttl_s=1800.0) is True
     assert settle_update_lock("gateway-host:pid81319", hosts=["wsl"], ttl_s=900.0) is True
 
     lease = read_update_lease()
     assert lease is not None
     assert lease.holder == "gateway-host:pid81319"  # holder untouched — see below
-    # The note is the machine-readable record of WHICH hosts the hold waits for —
-    # the release path re-probes exactly that set, so it round-trips rather than
-    # being prose.
-    assert settle_hosts(lease.note) == ["wsl"]
+    # The `settle_hosts` array is the machine-readable record of WHICH hosts the
+    # hold waits for — the release path re-probes exactly that set.
+    assert lease.settle_hosts == ["wsl"]
     assert lease.expires_in_s <= 900  # TTL shortened to the settle window
     assert "wsl" in lease.describe()  # the human still sees which host it waits for
     # The settle start is recorded server-side (C3, task #2189): the hold outlives
@@ -467,14 +465,14 @@ def test_a_settle_hold_is_read_as_awaiting_exactly_the_hosts_it_names() -> None:
     could not give it: an *executing* rollout means stand back, a settle hold naming
     this host means this host's convergence is the remaining work (issue #1020).
 
-    Scoped three ways, all asserted here — a lease with no note is never permitted
-    however the caller asks; a hold names only the hosts it names; and a note nothing
-    can parse yields no permission at all, matching `settle_hosts`' rule that an
-    unreadable note must never be read as convergence."""
+    Scoped three ways, all asserted here — a lease carrying no settle fact is never
+    permitted however the caller asks; a hold names only the hosts it names; and a hold
+    whose recorded set is empty yields no permission at all: a hold that names nobody
+    must never read as permission."""
     assert acquire_update_lock("gateway-host:pid81319") is True
     executing = read_update_lease()
     assert executing is not None
-    assert executing.note is None
+    assert executing.settle_hosts is None
     assert executing.awaits("wsl") is False, "a rollout executing right now permits nobody"
 
     assert settle_update_lock("gateway-host:pid81319", hosts=["wsl", "laptop-host"]) is True
@@ -484,10 +482,10 @@ def test_a_settle_hold_is_read_as_awaiting_exactly_the_hosts_it_names() -> None:
     assert hold.awaits("wsl") is True
     assert hold.awaits("win") is False, "the permission does not generalise to other hosts"
 
-    unparseable = DeployLease(
-        holder="gateway-host:pid1", held_for_s=1.0, expires_in_s=1.0, note="paused for maintenance"
+    empty = DeployLease(
+        holder="gateway-host:pid1", held_for_s=1.0, expires_in_s=1.0, settle_hosts=[]
     )
-    assert unparseable.awaits("laptop-host") is False
+    assert empty.awaits("laptop-host") is False
 
 
 def test_settle_hold_leaves_the_holder_string_parseable() -> None:
@@ -516,30 +514,35 @@ def test_settle_hold_by_a_non_holder_is_refused(
     assert acquire_update_lock("A") is True
     assert settle_update_lock("B", hosts=["wsl"]) is False
     lease = read_update_lease()
-    assert lease is not None and lease.note is None
+    assert lease is not None and lease.settle_hosts is None
     assert any(
         "settle hold by B did not land" in r["message"] and "reclaimed past TTL" in r["message"]
         for r in loguru_records
     )
 
 
-def test_acquire_clears_a_previous_settle_note() -> None:
-    """A fresh deploy must not inherit the last one's explanation."""
+def test_acquire_clears_a_previous_settle_fact() -> None:
+    """A fresh deploy must not inherit the last one's settle fact."""
     assert acquire_update_lock("A", ttl_s=-1.0) is True
     settle_update_lock("A", hosts=["wsl"], ttl_s=-1.0)  # expired settle hold
     assert acquire_update_lock("B") is True  # reclaims the lapsed lease
     lease = read_update_lease()
-    assert lease is not None and lease.holder == "B" and lease.note is None
+    assert (
+        lease is not None
+        and lease.holder == "B"
+        and lease.settle_hosts is None
+        and lease.settle_note is None
+    )
 
 
-def test_release_clears_the_note() -> None:
+def test_release_clears_the_settle_fact() -> None:
     assert acquire_update_lock("A") is True
     settle_update_lock("A", hosts=["wsl"])
     release_update_lock("A")
     assert read_update_lease() is None
     assert acquire_update_lock("B") is True
     lease = read_update_lease()
-    assert lease is not None and lease.note is None
+    assert lease is not None and lease.settle_hosts is None and lease.settle_note is None
 
 
 def test_holder_persists_across_connections() -> None:
@@ -575,14 +578,14 @@ def test_renewal_by_a_non_holder_is_refused() -> None:
 
 
 def test_renewal_never_re_arms_a_settle_hold() -> None:
-    """`note IS NOT NULL` is the stronger guard. A settle hold's whole value is that it
+    """`settle_hosts IS NOT NULL` is the stronger guard. A settle hold's whole value is that it
     ENDS — on convergence or on SETTLE_TTL_S — so a stray renewal from a straggler
     would convert a stated waiting period into an unbounded hold on the cluster."""
     assert acquire_update_lock("A") is True
     assert settle_update_lock("A", hosts=["win"]) is True
     assert renew_update_lock("A", ttl_s=99999.0) is False
     lease = read_update_lease()
-    assert lease is not None and lease.note is not None
+    assert lease is not None and lease.settle_hosts is not None
     assert lease.expires_in_s < SETTLE_TTL_S + 1.0  # the settle window, not the renewal
 
 
@@ -663,19 +666,20 @@ def test_acquire_without_kind_leaves_kind_null() -> None:
 
 
 def test_settle_enters_settling_with_structured_hosts() -> None:
-    """A settle hold lands phase='settling' with the waiting hosts structured (array)
-    and human-readable (note/settle_note) — one fact, three renderings."""
+    """A settle hold lands phase='settling' with the waiting hosts in the structured
+    `settle_hosts` array and a human-readable `settle_note` sentence — one fact, two
+    renderings."""
     assert acquire_update_lock("A") is True
     assert settle_update_lock("A", hosts=["wsl", "mac"]) is True
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT phase, settle_hosts, settle_note, note, settle_started_at "
+            "SELECT phase, settle_hosts, settle_note, settle_started_at "
             "FROM deployment_state WHERE id=1"
         )
-        phase, hosts, settle_note, note, settle_started_at = cur.fetchone()  # type: ignore[misc]
+        phase, hosts, settle_note, settle_started_at = cur.fetchone()  # type: ignore[misc]
         assert phase == "settling"
         assert hosts == ["mac", "wsl"]  # sorted by settle_note()
-        assert settle_note == note == "settling, waiting for: mac, wsl"
+        assert settle_note == "settling, waiting for: mac, wsl"
         assert settle_started_at is not None  # the telemetry anchor (C3, task #2189)
 
 
@@ -702,6 +706,23 @@ def test_release_settle_hold_returns_to_stable() -> None:
         assert phase == "stable"
         assert hosts is None
         assert settle_started_at is None  # the telemetry anchor clears with the hold
+
+
+def test_release_settle_hold_refuses_a_plain_executing_lease() -> None:
+    """Behavioral pin for the `settle_hosts IS NOT NULL` scope (the 6479 battery's
+    C1 mutant — the source-substring guard in tests/cli/test_deploy_mutex.py cannot
+    bite a predicate change). A plain lease is an orchestration actively executing:
+    the early release must not unlock it, and the row must stay as acquired."""
+    assert acquire_update_lock("A", kind="rollout") is True
+
+    assert release_settle_hold("A") is False
+
+    lease = read_update_lease()
+    assert lease is not None
+    assert lease.holder == "A"
+    assert lease.kind == "rollout"
+    assert lease.settle_hosts is None
+    assert update_lock_holder() == "A"
 
 
 def test_read_lease_carries_kind() -> None:

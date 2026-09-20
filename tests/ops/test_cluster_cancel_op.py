@@ -30,9 +30,11 @@ def _lease(
     holder: str,
     *,
     kind: _Kind | None = "rollout",
-    note: str | None = None,
+    settle_hosts: list[str] | None = None,
 ) -> DeployLease:
-    return DeployLease(holder=holder, held_for_s=0.0, expires_in_s=600.0, note=note, kind=kind)
+    return DeployLease(
+        holder=holder, held_for_s=0.0, expires_in_s=600.0, settle_hosts=settle_hosts, kind=kind
+    )
 
 
 @pytest.fixture
@@ -107,7 +109,7 @@ def test_cancel_refuses_a_settle_hold(
 ) -> None:
     """A settle hold is a stated waiting period with nothing executing — nothing to
     cancel; `ava cluster recover` is the tool that breaks it."""
-    _set_lease(monkeypatch, _lease("m1:pid1", note="settling, waiting for: win"))
+    _set_lease(monkeypatch, _lease("m1:pid1", settle_hosts=["win"]))
     with pytest.raises(ClusterUpdateInProgress, match="settle hold"):
         _ops.cluster_cancel_op()
     assert cancel_env["signals"] == []
@@ -236,7 +238,6 @@ def test_cancel_unwind_settles_the_lease_and_clears_the_maintenance_marker(
             holder=holder,
             held_for_s=0.0,
             expires_in_s=600.0,
-            note=None,
             kind="rollout",
             acquired_at=datetime.now(UTC),
         ),

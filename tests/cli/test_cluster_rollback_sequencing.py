@@ -69,7 +69,6 @@ def _seams(monkeypatch: pytest.MonkeyPatch) -> tuple[list[str], list[dict[str, o
             holder=f"test-host:pid{os.getpid()}",
             held_for_s=0,
             expires_in_s=60,
-            note=None,
             acquired_at=datetime(2026, 8, 25, tzinfo=UTC),
         ),
     )

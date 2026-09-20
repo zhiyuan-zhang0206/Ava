@@ -2446,7 +2446,6 @@ def test_rollout_child_start_does_not_finalize_the_pause_journal(
             holder="rollout:42",
             held_for_s=10,
             expires_in_s=900,
-            note=None,
             kind="rollout",
             acquired_at=datetime(2026, 8, 26, 14, 14, 42, tzinfo=UTC),
         ),
@@ -2498,7 +2497,6 @@ def test_rollout_child_keeps_converging_before_parent_readiness(
             holder="old-parent:42",
             held_for_s=10,
             expires_in_s=900,
-            note=None,
             kind="rollout",
         ),
     )
@@ -2591,7 +2589,6 @@ def test_phase_b_pure_runner_restores_idle_posture_and_agent_host(
             holder="gateway-rollout:42",
             held_for_s=10,
             expires_in_s=900,
-            note=None,
             kind="rollout",
         ),
     )
@@ -2623,7 +2620,6 @@ def test_operator_start_refuses_executing_rollout_before_migrations(
             holder="rollout:42",
             held_for_s=10,
             expires_in_s=900,
-            note=None,
             kind="rollout",
         ),
     )
@@ -3760,8 +3756,9 @@ def test_cmd_cluster_status_renders_hold_column_and_banner(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A live settle hold shows up twice: the banner naming the lease (the answer to
-    "why was my deploy refused"), and `waited-on` on exactly the hosts the hold's note
-    recorded — every other host reads `—`, which is "not named", not "converged"."""
+    "why was my deploy refused"), and `waited-on` on exactly the hosts the hold's
+    recorded set names — every other host reads `—`, which is "not named", not
+    "converged"."""
     roster = [
         _machine_row(
             name="test-host",

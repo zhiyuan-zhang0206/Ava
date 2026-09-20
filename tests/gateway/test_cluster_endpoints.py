@@ -1165,9 +1165,7 @@ class TestCurrentOrchestration:
     executes, and `update` while this host's updater lease is live)."""
 
     def _lease(self, kind: Literal["rollout", "restart", "update"]) -> DeployLease:
-        return DeployLease(
-            holder="m:pid1", held_for_s=60.0, expires_in_s=1740.0, note=None, kind=kind
-        )
+        return DeployLease(holder="m:pid1", held_for_s=60.0, expires_in_s=1740.0, kind=kind)
 
     def test_none_when_idle(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("shared.cluster_lock.read_update_lease", lambda: None)
@@ -1191,7 +1189,8 @@ class TestCurrentOrchestration:
                 holder="m:pid1",
                 held_for_s=60.0,
                 expires_in_s=1740.0,
-                note="settling, waiting for: win",
+                settle_hosts=["win"],
+                settle_note="settling, waiting for: win",
                 kind="rollout",  # type: ignore[arg-type]
             ),
         )
@@ -1387,7 +1386,6 @@ class TestClusterRecoverEndpoint:
             holder=holder,
             held_for_s=60.0,
             expires_in_s=600.0,
-            note=None,
             kind=kind,  # pyright: ignore[reportArgumentType] — test builds the literal
         )
 

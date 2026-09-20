@@ -197,11 +197,11 @@ def _validate_secrets() -> dict[str, str]:
 
 def _read_pg_state() -> dict[str, str]:
     from cli.commands._cluster_instance import pg_admin_url
-    from shared.cluster import get_record, record_postgres_port
+    from shared.cluster import db_identity, get_record, record_postgres_port
 
-    record = get_record(ava_home())
-    if record is None:
+    if (record := get_record(ava_home())) is None:
         raise RuntimeError("cluster registry record is missing")
+    expected_db = db_identity()
 
     def scalar(conn: psycopg.Connection[tuple[object, ...]], query: LiteralString) -> object:
         row = conn.execute(query).fetchone()
@@ -223,11 +223,11 @@ def _read_pg_state() -> dict[str, str]:
         current["postmaster_started_at"] = str(
             scalar(conn, "SELECT pg_postmaster_start_time()::text")
         )
-    direct_url = make_conninfo(pg_admin_url(record_postgres_port(record)), dbname=record.db_name)
+    direct_url = make_conninfo(pg_admin_url(record_postgres_port(record)), dbname=expected_db)
     with psycopg.connect(direct_url, autocommit=True) as conn:
         current["dbname"] = str(scalar(conn, "SELECT current_database()"))
         direct_system_id = str(scalar(conn, "SELECT system_identifier FROM pg_control_system()"))
-    if current["dbname"] != record.db_name or direct_system_id != system_id:
+    if current["dbname"] != expected_db or direct_system_id != system_id:
         raise RuntimeError("direct dump target differs from the verified cluster database")
     current["direct_db_url"] = direct_url
     if server_version // 10000 != 17:

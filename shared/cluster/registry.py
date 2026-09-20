@@ -1,11 +1,9 @@
 """Cluster registry — the host-level `~/.ava/clusters.json` record store.
 
-The home-keyed registry: `ClusterRecord` (the on-disk record shape, carrying
-the compat name/db_name a box-shared pre-cutover reader needs), load/save/delete
-under `registry_lock()`, and `migrate_registry_keys()` — the converge-time repair
-that rewrites a buggy home-keyed file back to the migration-window name-keyed
-form. Cluster identity IS the home path; the registry is the box-level map from
-home to record. See the package docstring for the identity model.
+The home-keyed registry: `ClusterRecord` (the on-disk record shape), load/
+save/delete under `registry_lock()`. Cluster identity IS the home path; the
+registry is the box-level map from home to record. See the package docstring
+for the identity model.
 """
 
 from __future__ import annotations
@@ -27,17 +25,6 @@ class ClusterRecord:
     ports: cluster.ClusterPorts
     gateway_home: str
     created_at: str
-    # Backward-compat passthrough (path-only migration window). The host registry
-    # `~/.ava/clusters.json` is box-level SHARED, so a pre-cutover reader on the
-    # same box (prod main, preview) still loads it — and that code's ClusterRecord
-    # REQUIRES `name` + `db_name` and looks records up BY name. So the on-disk file
-    # stays name-keyed and every record carries both fields for the whole window.
-    # Path-only code never reads them for logic (identity is the home path / the
-    # .env URL); they are synthesized for a nameless birth (`name` = home slug,
-    # `db_name` = the fixed data-plane identity) and are dropped only by a future
-    # CONTRACT release, once no pre-cutover reader shares this box's registry.
-    name: str = ""
-    db_name: str = ""
     # The host this cluster's data-plane URLs are DERIVED at (install birth);
     # empty = loopback (127.0.0.1), the single-box posture. Stored on the record
     # because derivation happens at birth, before the home's `.env` exists; the
@@ -47,27 +34,17 @@ class ClusterRecord:
     # Task #1752.
     data_plane_host: str = ""
 
-    def __post_init__(self) -> None:
-        # Frozen dataclass: fill the compat fields in place when a path-only birth
-        # constructed the record without them, so load/save round-trips are stable.
-        if not self.name and self.gateway_home:
-            object.__setattr__(self, "name", cluster.home_slug(Path(self.gateway_home)))
-        if not self.db_name:
-            object.__setattr__(self, "db_name", cluster.DATA_PLANE_IDENTITY)
-
 
 def registry_path() -> Path:
     return Path(settings.general.cluster_registry).expanduser()
 
 
 def load_registry() -> dict[str, ClusterRecord]:
-    """The registry, keyed IN MEMORY by gateway_home path. Tolerates both on-disk
-    shapes: a file keyed by cluster NAME (the pre-cutover / migration-window form)
-    is re-keyed on load from each record's own `gateway_home`, and truly-retired
-    fields the dataclass no longer declares (`redis_db_index` / `redis_prefix`)
-    are dropped. The compat `name` / `db_name` ARE kept on the record (a
-    box-shared pre-cutover reader still needs them on disk — see ClusterRecord).
-    So the in-memory key is always the home; the on-disk key stays the name."""
+    """The registry, keyed IN MEMORY by gateway_home path. The record's own
+    `gateway_home` is the only identity — a file key written by an older
+    (name-keyed) build still loads because every row is re-keyed from its
+    `gateway_home` — and truly-retired fields the dataclass no longer declares
+    (`redis_db_index` / `redis_prefix`) are dropped."""
     p = cluster.registry_path()
     if not p.exists():
         return {}
@@ -97,30 +74,9 @@ def load_registry() -> dict[str, ClusterRecord]:
 
 
 def _registry_disk_form(reg: dict[str, ClusterRecord]) -> dict[str, dict[str, Any]]:
-    """The on-disk JSON: keyed by NAME (not the in-memory home key), each record
-    carrying the compat name/db_name via asdict. Name-keyed because a box-shared
-    pre-cutover reader looks the shared registry up by name; home-keying + field
-    drop is the future CONTRACT step (see ClusterRecord). `name` is unique per
-    record (a preserved legacy name, or a home-slug synthesized in __post_init__).
-
-    The comprehension below deliberately REFUSES a duplicate name (F-s4-8):
-    the on-disk form is name-keyed, so a collision would silently overwrite
-    one record and free its port block — exactly the identifier-collision the
-    "identity IS the path" concept exists to rule out. Two same-name records
-    are legal in memory (keyed by home); the operator resolves the name clash
-    before the next save."""
-    out: dict[str, dict[str, Any]] = {}
-    for rec in reg.values():
-        if rec.name in out:
-            raise RuntimeError(
-                f"registry records for homes {out[rec.name]['gateway_home']!r} and "
-                f"{rec.gateway_home!r} share the compat name {rec.name!r} — the on-disk "
-                f"registry is name-keyed during the migration window and one would "
-                f"silently overwrite the other; rename or remove a record in "
-                f"{cluster.registry_path()}"
-            )
-        out[rec.name] = asdict(rec)
-    return out
+    """The on-disk JSON: keyed by home path — the record identity — one entry
+    per record (`asdict` over the declared fields)."""
+    return {home: asdict(rec) for home, rec in reg.items()}
 
 
 def _dump_registry(reg: dict[str, ClusterRecord]) -> None:
@@ -172,30 +128,6 @@ def delete_record_locked(home: Path) -> bool:
 
 def get_record(home: Path) -> ClusterRecord | None:
     return load_registry().get(str(Path(home).expanduser()))
-
-
-def migrate_registry_keys() -> bool:
-    """Idempotently normalize `clusters.json` to the migration-window form:
-    name-keyed, every record carrying the compat name/db_name a box-shared
-    pre-cutover reader requires, retired unknown fields (redis_db_index /
-    redis_prefix) dropped. `load_registry` re-keys by home on read, so path-only
-    code never needs this — its real job is to REPAIR a file a buggy path-only
-    build already rewrote to home keys WITHOUT the compat fields (which crashes a
-    pre-cutover reader with `TypeError: missing name/db_name`), backfilling the
-    synthesized fields. Home-keying + dropping name/db_name is the future
-    CONTRACT step. Returns True when the file was rewritten. Run by converge on
-    every start."""
-    p = cluster.registry_path()
-    if not p.exists():
-        return False
-    with registry_lock():
-        raw = json.loads(p.read_text())
-        reg = load_registry()
-        canonical = _registry_disk_form(reg)
-        if raw == canonical:
-            return False
-        _dump_registry(reg)
-    return True
 
 
 @contextlib.contextmanager

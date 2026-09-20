@@ -378,7 +378,7 @@ def _run_gateway_orchestration(  # noqa: PLR0915 — one transaction-shaped life
                 lease is None
                 or lease.holder != holder
                 or lease.acquired_at is None
-                or lease.note is not None
+                or lease.is_settle_hold
             ):
                 print(
                     "\n✗ orchestration could not capture its exact deploy lease "
@@ -413,12 +413,12 @@ def _run_gateway_orchestration(  # noqa: PLR0915 — one transaction-shaped life
         try:
             if unconverged:
                 # The hosts go in structurally, not as prose: the release path re-probes
-                # exactly this set, read back out of the lease's note.
+                # exactly this set, read back out of the lease's `settle_hosts`.
                 settle_update_lock(holder, hosts=unconverged)
-                note = f"waiting for {', '.join(sorted(unconverged))} to reach the pin"
+                settle_msg = f"waiting for {', '.join(sorted(unconverged))} to reach the pin"
                 print(
                     f"\n⚠ holding the cluster deploy lease for up to a "
-                    f"{SETTLE_TTL_S / 60:.0f}m settle window: {note}. No new deploy can start "
+                    f"{SETTLE_TTL_S / 60:.0f}m settle window: {settle_msg}. No new deploy can start "
                     f"until those hosts reach the pin or the window lapses; `ava cluster status` "
                     f"to watch, `ava cluster recover` to break the hold.",
                     file=sys.stderr,

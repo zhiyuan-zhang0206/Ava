@@ -48,11 +48,11 @@ the orchestration exits — while that host is still swapping its processes. Rel
 there is what let a second `ava cluster update` start into a half-transitioned cluster on
 2026-07-29, force-terminating two agents that had done nothing wrong. So an
 orchestration that ends with hosts still converging calls `settle_update_lock`
-instead of releasing: the lease stays held, on its own TTL, with `note` recording who
-it is waiting for. See `SETTLE_TTL_S`.
+instead of releasing: the lease stays held, on its own TTL, with the settle fields
+recording who it is waiting for. See `SETTLE_TTL_S`.
 
 **A settle hold is not the same instruction to a healer as a running rollout, and the
-`note` is what tells them apart.** "A deploy is mutating the cluster" means stand
+settle fields are what tell them apart.** "A deploy is mutating the cluster" means stand
 back; "this hold is waiting for host X to converge" means X's own convergence is the
 remaining work. A healer on X that reads only "is it held" defers to a hold whose
 entire content is that it is waiting for the thing the healer would do — the mutual
@@ -93,27 +93,18 @@ LOCK_TTL_S = 1800.0
 SETTLE_TTL_S = NO_PROGRESS_TIMEOUT_S
 
 
-# A settle hold's `note` is both the sentence a human reads and the machine-readable
-# record of WHICH hosts the hold is waiting for. The release path has to re-probe
-# exactly that set — the same acked population the hold was taken over — so the
-# format is an owned contract with one builder and one parser rather than free text
-# a later edit could reword. `settle_hosts` returning [] (absent / reworded note) is
-# read by the caller as "cannot tell", which falls back to the TTL rather than
-# releasing: a note we cannot parse must never look like convergence.
+# A settle hold carries its waiting set as data: the `settle_hosts` array column
+# is the machine-readable record of WHICH hosts the hold waits for — the release
+# path re-probes exactly that set, the same acked population the hold was taken
+# over — and `settle_note` is the one human-readable sentence built from it.
+# One builder and no parser: the sentence is a record for humans, never read back
+# as data.
 _SETTLE_NOTE_PREFIX = "settling, waiting for: "
 
 
 def settle_note(hosts: list[str]) -> str:
-    """The `note` a settle hold carries, naming the hosts it waits for."""
+    """The human-readable `settle_note` sentence a settle hold carries."""
     return _SETTLE_NOTE_PREFIX + ", ".join(sorted(hosts))
-
-
-def settle_hosts(note: str | None) -> list[str]:
-    """The hosts a settle note names; empty when the note is absent or not one."""
-    if note is None or not note.startswith(_SETTLE_NOTE_PREFIX):
-        return []
-    body = note[len(_SETTLE_NOTE_PREFIX) :].strip()
-    return [h for h in (part.strip() for part in body.split(",")) if h]
 
 
 @dataclass(frozen=True)
@@ -130,12 +121,9 @@ class DeployLease:
     holder: str
     held_for_s: float
     expires_in_s: float
-    # Why it is held, when the holder wanted to say more than its name — currently
-    # set only by `settle_update_lock`. None for an ordinary in-flight rollout.
-    note: str | None
     # What kind of orchestration holds the lease (rollout/restart/update), the
     # explicit replacement for session-name probing. None for a kind-less holder
-    # (a rollback) and for legacy rows.
+    # (a rollback or a recovery claim).
     kind: Literal["rollout", "restart", "update"] | None = None
     # Exact DB identity used only by operator recovery's compare-and-set claim.
     # Optional keeps legacy/test-constructed snapshots readable; a real DB read
@@ -144,10 +132,23 @@ class DeployLease:
     # When the settle hold started (server-side now() at settle_update_lock), and
     # how long it has already been held, computed server-side like `held_for_s` so
     # cross-host clock skew never distorts the number (C3, task #2189). Both None
-    # on a non-settle lease, and on a settle hold that predates the column — the
-    # duration of those is unknowable and is reported as such, never guessed.
+    # on a lease carrying no settle fact.
     settle_started_at: datetime | None = None
     settle_elapsed_s: float | None = None
+    # The settle hold's structured waiting set — the machine-readable record of
+    # WHICH hosts the hold waits for. None on a lease carrying no settle fact (an
+    # executing orchestration); `settle_update_lock` writes it together with
+    # `settle_note` and `settle_started_at` in one statement.
+    settle_hosts: list[str] | None = None
+    # The hold's one human-readable sentence ("settling, waiting for: h1, h2"),
+    # built by `settle_note`. None when there is no settle fact.
+    settle_note: str | None = None
+
+    @property
+    def is_settle_hold(self) -> bool:
+        """True when this lease is a **settle hold** — the structured settle fact
+        (`settle_hosts`) is present, exactly as `settle_update_lock` writes it."""
+        return self.settle_hosts is not None
 
     def awaits(self, machine: str) -> bool:
         """True when this lease is a **settle hold whose recorded waiting set names
@@ -167,19 +168,19 @@ class DeployLease:
         `ava cluster update` gets. It also answers only the question the *lease* can answer.
         A caller that consults a second signal — `ops.cluster.current_orchestration`,
         which sees the watchdog-spawned updater that takes no lease — must still
-        consult it: a True here is not a verdict that nothing is running on this host. `note is None` — a lease an orchestration is executing under
-        — is never permitted, which is the same line `release_settle_hold` and
-        `renew_update_lock` are already scoped on. An absent or unparseable note yields
-        an empty host set and therefore a deferral, matching `settle_hosts`' rule that
-        a note we cannot parse must never be read as permission.
+        consult it: a True here is not a verdict that nothing is running on this host.
+        A lease carrying no settle fact — an orchestration executing right now — is
+        never permitted, the same line `release_settle_hold` and `renew_update_lock`
+        are scoped on, and the recorded set must actually name the machine: a hold
+        that names nobody must never read as permission.
         """
-        return machine in settle_hosts(self.note)
+        return machine in (self.settle_hosts or ())
 
     def describe(self) -> str:
         """One line naming the holder, how long it has been held, and when it lapses
         — the "a deploy started by X at T is in progress" a refused second operator
         must see instead of discovering the conflict from the wreckage."""
-        detail = f" — {self.note}" if self.note else ""
+        detail = f" — {self.settle_note}" if self.settle_note else ""
         return (
             f"{self.holder} (held {self.held_for_s / 60:.0f}m, "
             f"lease expires in {self.expires_in_s / 60:.0f}m){detail}"
@@ -324,18 +325,17 @@ def acquire_update_lock(
     hold still reads as "a deploy is in progress" to every consumer). The row
     enters `phase='updating'` on acquire.
 
-    **`note = NULL` here is load-bearing, not hygiene.** `release_settle_hold` is
-    scoped `note IS NOT NULL` precisely so it can only ever clear a *settle* hold and
-    never a lease an orchestration is executing under. An empty note is therefore
-    what marks "a rollout is running"; giving a run lease a note for diagnostics
-    would silently make live rollouts eligible for convergence-release. If a run
-    lease ever needs to say something, it needs a different column, not this one.
+    **`settle_hosts = NULL` here is load-bearing, not hygiene.** `release_settle_hold`
+    is scoped `settle_hosts IS NOT NULL` precisely so it can only ever clear a *settle*
+    hold and never a lease an orchestration is executing under. An absent settle fact
+    is therefore what marks "a rollout is running"; giving a run lease one for
+    diagnostics would silently make live rollouts eligible for convergence-release.
     """
     with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE deployment_state "
             "SET holder = %s, acquired_at = now(), expires_at = now() + make_interval(secs => %s), "
-            "    note = NULL, settle_hosts = NULL, settle_note = NULL, settle_started_at = NULL, "
+            "    settle_hosts = NULL, settle_note = NULL, settle_started_at = NULL, "
             "    phase = 'updating', kind = %s "
             "WHERE id = 1 AND (holder IS NULL OR expires_at < now()) "
             "AND COALESCE(managed_writer_evidence->'pending','null'::jsonb) = 'null'::jsonb",
@@ -375,7 +375,7 @@ def renew_update_lock(holder: str, *, ttl_s: float = LOCK_TTL_S) -> bool:
 
     - `holder = %s` — a lease already reclaimed past its TTL by a new owner must not
       be re-armed under the old holder's name.
-    - `note IS NULL` — renewal may only extend a lease an orchestration is
+    - `settle_hosts IS NULL` — renewal may only extend a lease an orchestration is
       *executing* under, never re-arm a **settle hold**. A settle hold is a stated
       waiting period whose whole value is that it ends (`SETTLE_TTL_S`, or early on
       convergence); a stray renewal would turn it into an unbounded one.
@@ -394,7 +394,7 @@ def renew_update_lock(holder: str, *, ttl_s: float = LOCK_TTL_S) -> bool:
             "renewed AS "
             "(UPDATE deployment_state "
             " SET expires_at = now() + make_interval(secs => %s) "
-            " WHERE id = 1 AND holder = %s AND note IS NULL "
+            " WHERE id = 1 AND holder = %s AND settle_hosts IS NULL "
             " RETURNING 1) "
             "SELECT (SELECT count(*) FROM renewed), (SELECT lapsed FROM prev)",
             (ttl_s, holder),
@@ -540,7 +540,7 @@ def release_update_lock(holder: str) -> None:
     with write_transaction(direct=True) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE deployment_state SET holder = NULL, acquired_at = NULL, expires_at = NULL, "
-            "    note = NULL, settle_hosts = NULL, settle_note = NULL, settle_started_at = NULL, "
+            "    settle_hosts = NULL, settle_note = NULL, settle_started_at = NULL, "
             "    phase = 'stable', kind = NULL "
             "WHERE id = 1 AND holder = %s "
             "AND COALESCE(managed_writer_evidence->'pending','null'::jsonb) = 'null'::jsonb",
@@ -605,7 +605,7 @@ def claim_recovery_lock(
             "  ) FOR UPDATE"
             "), claimed AS ("
             "  UPDATE deployment_state SET holder = %s, acquired_at = now(), "
-            "    expires_at = now() + make_interval(secs => %s), note = NULL, "
+            "    expires_at = now() + make_interval(secs => %s), "
             "    settle_hosts = NULL, settle_note = NULL, settle_started_at = NULL, phase = 'updating', kind = NULL "
             "  WHERE id = 1 AND EXISTS (SELECT 1 FROM prev) RETURNING 1"
             ") SELECT (SELECT count(*) FROM claimed), (SELECT holder FROM prev)",
@@ -656,34 +656,33 @@ def settle_update_lock(holder: str, *, hosts: list[str], ttl_s: float = SETTLE_T
     dead-holder probe in `ops.ops_cluster._lock_holder_is_live` parses it as
     `<machine>:pid<N>`, and a decorated holder would fail that parse and be read as
     live, which would make `ava cluster recover` refuse to break a hold whose owner
-    is definitively gone. The reason goes in `note`, which is what `describe()`
+    is definitively gone. The reason goes in `settle_note`, which is what `describe()`
     renders.
     """
-    note = settle_note(hosts)
-    sorted_hosts = sorted(hosts)  # one order in all three renderings
+    sentence = settle_note(hosts)
+    sorted_hosts = sorted(hosts)  # one order in the sentence and the array
     # direct=True: same post-stop durability as `release_update_lock` — the
     # settle conversion also runs in the rollout tail (issue #2307).
     with write_transaction(direct=True) as conn, conn.cursor() as cur:
-        # The settle fact lands three ways: the structured `settle_hosts` array
-        # (the new truth), `settle_note` (human-readable), and the legacy `note`
-        # column every current reader parses. All three are written together and
-        # the legacy one retires with the old-signal sweep; until then `note`
-        # staying non-NULL is what keeps `renew`/`release_settle_hold` scoped.
+        # The settle fact lands as structured columns only — the `settle_hosts`
+        # array (the truth every reader branches on), `settle_note` (the
+        # human-readable sentence), and `settle_started_at` (the C3 telemetry
+        # anchor).
         cur.execute(
             "UPDATE deployment_state "
-            "SET expires_at = now() + make_interval(secs => %s), note = %s, "
+            "SET expires_at = now() + make_interval(secs => %s), "
             "    settle_note = %s, settle_hosts = %s, settle_started_at = now(), phase = 'settling' "
             "WHERE id = 1 AND holder = %s "
             "AND COALESCE(managed_writer_evidence->'pending','null'::jsonb) = 'null'::jsonb",
-            (ttl_s, note, note, sorted_hosts, holder),
+            (ttl_s, sentence, sorted_hosts, holder),
         )
         held = cur.rowcount == 1
         if held:
             logger.warning(
-                "[cluster-lock] HELD past {holder}'s exit for a {ttl:.0f}s settle window: {note}",
+                "[cluster-lock] HELD past {holder}'s exit for a {ttl:.0f}s settle window: {settle_note}",
                 holder=holder,
                 ttl=ttl_s,
-                note=note,
+                settle_note=sentence,
             )
         else:
             logger.warning(
@@ -701,8 +700,9 @@ def release_settle_hold(holder: str) -> bool:
 
     Scoped two ways, and both matter. `holder = %s` is the same guard
     `release_update_lock` uses: a hold reclaimed past its TTL by a new owner must not
-    be cleared by a straggler. `note IS NOT NULL` is the stronger one — it releases
-    only a *settle* hold, never a lease an orchestration is actively executing under.
+    be cleared by a straggler. `settle_hosts IS NOT NULL` is the stronger one — it
+    releases only a *settle* hold, never a lease an orchestration is actively
+    executing under.
     Without it a convergence check that ran at the wrong moment could unlock a live
     rollout, which is the failure this whole module exists to prevent.
 
@@ -717,9 +717,9 @@ def release_settle_hold(holder: str) -> bool:
     with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE deployment_state SET holder = NULL, acquired_at = NULL, "
-            "    expires_at = NULL, note = NULL, settle_hosts = NULL, settle_note = NULL, settle_started_at = NULL, "
+            "    expires_at = NULL, settle_hosts = NULL, settle_note = NULL, settle_started_at = NULL, "
             "    phase = 'stable', kind = NULL "
-            "WHERE id = 1 AND holder = %s AND note IS NOT NULL "
+            "WHERE id = 1 AND holder = %s AND settle_hosts IS NOT NULL "
             "AND COALESCE(managed_writer_evidence->'pending','null'::jsonb) = 'null'::jsonb",
             (holder,),
         )
@@ -737,8 +737,9 @@ def _read_update_lease_with_conn(conn: Any) -> DeployLease | None:
     with conn.cursor() as cur:
         cur.execute(
             "SELECT holder, extract(epoch FROM now() - acquired_at), "
-            "       extract(epoch FROM expires_at - now()), note, kind, acquired_at, "
-            "       settle_started_at, extract(epoch FROM now() - settle_started_at) "
+            "       extract(epoch FROM expires_at - now()), kind, acquired_at, "
+            "       settle_started_at, extract(epoch FROM now() - settle_started_at), "
+            "       settle_hosts, settle_note "
             "FROM deployment_state WHERE id = 1 AND expires_at > now()"
         )
         row = cur.fetchone()
@@ -748,11 +749,12 @@ def _read_update_lease_with_conn(conn: Any) -> DeployLease | None:
         holder=row[0],
         held_for_s=float(row[1] or 0.0),
         expires_in_s=float(row[2] or 0.0),
-        note=row[3],
-        kind=row[4],
-        acquired_at=row[5],
-        settle_started_at=row[6],
-        settle_elapsed_s=float(row[7]) if row[7] is not None else None,
+        kind=row[3],
+        acquired_at=row[4],
+        settle_started_at=row[5],
+        settle_elapsed_s=float(row[6]) if row[6] is not None else None,
+        settle_hosts=row[7],
+        settle_note=row[8],
     )
 
 

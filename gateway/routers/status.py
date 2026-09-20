@@ -606,7 +606,7 @@ async def gather_cluster_status(
 
     `deploy_lease` (the live lease, likewise read once by the caller) is the other
     cluster-global fact stamped per row: its `describe()` onto `deploy_hold`, and
-    membership in the settle note's host list onto each row's `settle_waited_on`.
+    membership in the live lease's `settle_hosts` list onto each row's `settle_waited_on`.
     Both are transcribed from the lease row — the fan-out's own probes do not inform
     them, and nothing here re-derives whether a deploy is in flight.
 

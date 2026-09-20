@@ -392,7 +392,6 @@ def test_begin_step_refuses_under_active_when_the_context_is_missing(
             holder=dispatch_mod.self_holder(),
             held_for_s=0,
             expires_in_s=60,
-            note=None,
             kind="rollout",
             acquired_at=datetime(2026, 9, 20, tzinfo=UTC),
         ),

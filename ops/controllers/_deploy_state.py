@@ -75,7 +75,7 @@ class LeaseVerdict:
     - ``unreadable`` — the lease could not be read; conservative defer.
     - ``executing`` — a rollout is mutating the cluster right now; defer.
     - ``settle_hold`` — a stated waiting period with nobody executing under it
-      (``note`` set). Whether it defers depends on ``settle_hold_mode``:
+      (the structured settle fact set). Whether it defers depends on ``settle_hold_mode``:
       ``narrow`` passes only when ``waits_for_this_host`` (the hold names this
       host — issue #1020), ``pass`` lets every settle hold through.
 
@@ -109,7 +109,7 @@ def read_lease_state(*, settle_hold_mode: Literal["narrow", "pass"]) -> LeaseVer
         return LeaseVerdict(kind="unreadable", holder=None, waits_for_this_host=None)
     if lease is None:
         return LeaseVerdict(kind="free", holder=None, waits_for_this_host=None)
-    if lease.note is None:
+    if not lease.is_settle_hold:
         return LeaseVerdict(kind="executing", holder=lease.holder, waits_for_this_host=None)
     if settle_hold_mode == "pass":
         return LeaseVerdict(kind="settle_hold", holder=lease.holder, waits_for_this_host=None)

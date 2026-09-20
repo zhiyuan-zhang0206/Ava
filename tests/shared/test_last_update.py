@@ -39,7 +39,7 @@ def _clear_record(db_conn: psycopg.Connection) -> Iterator[None]:
             )
             cur.execute(
                 "UPDATE deployment_state SET holder=NULL, acquired_at=NULL, "
-                "expires_at=NULL, note=NULL, settle_hosts=NULL, settle_note=NULL, "
+                "expires_at=NULL, settle_hosts=NULL, settle_note=NULL, "
                 "phase='stable', kind=NULL WHERE id=1"
             )
         db_conn.commit()

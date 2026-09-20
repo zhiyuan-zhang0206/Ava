@@ -842,41 +842,6 @@ def test_reap_legacy_sessions_kills_renamed_away_only(monkeypatch: pytest.Monkey
     assert sorted(killed) == ["ava-runner", "ava-watchdog"]
 
 
-def test_migrate_registry_keys_step_reports(
-    monkeypatch: pytest.MonkeyPatch, capsys, tmp_path: Path
-):
-    """The converge step normalizes the registry to the backward-compatible
-    window form (name-keyed, compat db_name backfilled) and stays quiet when the
-    file is already normalized."""
-    import json
-
-    from shared import cluster as cl
-
-    reg = tmp_path / "clusters.json"
-    reg.write_text(
-        json.dumps(
-            {
-                "t1": {
-                    "name": "t1",
-                    "ports": {"gateway": 18000},
-                    "gateway_home": "/h/.ava-t1",
-                    "created_at": "t",
-                }
-            }
-        )
-    )
-    monkeypatch.setattr(cl, "registry_path", lambda: reg)
-    _converge._migrate_registry_keys_step(_ctx(tmp_path, tmp_path))
-    assert "normalized clusters.json" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
-    # Stays name-keyed (a box-shared pre-cutover reader looks up by name), with
-    # the compat db_name backfilled.
-    on_disk = json.loads(reg.read_text())
-    assert set(on_disk) == {"t1"}
-    assert on_disk["t1"]["db_name"] == cl.DATA_PLANE_IDENTITY
-    _converge._migrate_registry_keys_step(_ctx(tmp_path, tmp_path))
-    assert "normalized" not in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
-
-
 def test_frontend_env_override_guard_passes_clean(tmp_path: Path):
     repo = tmp_path / "repo"
     (repo / "ui" / "web").mkdir(parents=True)

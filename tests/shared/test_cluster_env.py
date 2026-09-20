@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import cast
 
 import pytest
 
@@ -23,7 +22,9 @@ def _rec(tmp_path: Path):
             "permissions_helper": 18010,
             "postgres": 18011,
             "redis": 18012,
+            "pgbouncer": 18013,
             "events_maintenance": 18014,
+            "app": 18015,
             # Post-S4-slot birth shape: every PORT_OFFSETS service carries a key.
             "delivery_watchdog": 18016,
             "im_bridge": 18017,
@@ -31,30 +32,11 @@ def _rec(tmp_path: Path):
             "pg_backup": 18021,
             "pitr_uploader": 18022,
             "pitr_base_backup": 18023,
+            "memory_search": 18024,
             "gateway_watchdog": 18025,
             "agent_runner_watchdog": 18026,
+            "page_server": 18018,
         },
-        gateway_home=str(tmp_path / ".ava-t1"),
-        created_at="x",
-    )
-
-
-def _old_rec(tmp_path: Path):
-    """A record born before the im_bridge/delivery_watchdog/agent_host slots
-    existed — the shape EVERY existing registry record has until re-birth. Such
-    a unit's .env also predates the keys, so its daemons bind the legacy
-    fallback, not a block offset (record_health_port's late-slot rule)."""
-    ports = dict(_rec(tmp_path).ports)
-    del ports["delivery_watchdog"]
-    del ports["im_bridge"]
-    del ports["agent_host"]
-    del ports["pg_backup"]
-    del ports["pitr_uploader"]
-    del ports["pitr_base_backup"]
-    del ports["gateway_watchdog"]
-    del ports["agent_runner_watchdog"]
-    return cluster.ClusterRecord(
-        ports=cast("cluster.ClusterPorts", ports),
         gateway_home=str(tmp_path / ".ava-t1"),
         created_at="x",
     )
@@ -346,94 +328,14 @@ def test_health_port_tables_in_sync():
     assert set(env_registry.health_port_env_aliases().values()) <= env_registry.derived_env_keys()
 
 
-def test_derive_env_old_record_health_ports_fall_back_to_legacy(tmp_path: Path):
-    """A record born before the im_bridge/delivery_watchdog slots (EVERY
-    existing record) derives the legacy ports for them — the unit's .env also
-    predates the keys, so its daemons bind the shared default, never a block
-    offset. derive_env must write what the daemon will actually bind, or the
-    .env and the record disagree on day one."""
-    installed = cluster.derive_env(
-        _old_rec(tmp_path),
-        base_db_url="postgresql://ava:p@localhost:5432/ava",
-        base_redis_url="redis://localhost:6379/0",
-        cluster_secret="sekret",  # noqa: S106 — test fixture, not a real secret
-    )
-    from shared.port_block import LEGACY_AVA_PORTS
-
-    assert installed["AVA_DELIVERY_WATCHDOG_HEALTH_PORT"] == str(
-        LEGACY_AVA_PORTS["delivery_watchdog"]
-    )
-    assert installed["AVA_IM_BRIDGE_HEALTH_PORT"] == str(LEGACY_AVA_PORTS["im_bridge"])
-    assert installed["AVA_PG_BACKUP_HEALTH_PORT"] == str(LEGACY_AVA_PORTS["pg_backup"])
-    # Active original daemons keep their recorded block offsets.
-    assert installed["AVA_LABELER_HEALTH_PORT"] == "18004"
-    assert "AVA_RESTARTER_HEALTH_PORT" not in installed
-
-
-def test_record_health_port_late_slot_legacy_for_old_record(tmp_path: Path):
-    """record_health_port: a missing im_bridge/delivery_watchdog key derives the
-    legacy value (matching the runtime fallback), while a post-slot record
-    returns its own key — the preflight map can never name a port nothing binds."""
-    from shared.port_block import LEGACY_AVA_PORTS
-
-    assert (
-        cluster.record_health_port(_old_rec(tmp_path), "im_bridge") == LEGACY_AVA_PORTS["im_bridge"]
-    )
-    assert (
-        cluster.record_health_port(_old_rec(tmp_path), "delivery_watchdog")
-        == (LEGACY_AVA_PORTS["delivery_watchdog"])
-    )
-    assert (
-        cluster.record_health_port(_old_rec(tmp_path), "pg_backup") == LEGACY_AVA_PORTS["pg_backup"]
-    )
-    assert (
-        cluster.record_health_port(_old_rec(tmp_path), "gateway_watchdog")
-        == LEGACY_AVA_PORTS["gateway_watchdog"]
-    )
-    assert (
-        cluster.record_health_port(_old_rec(tmp_path), "agent_runner_watchdog")
-        == LEGACY_AVA_PORTS["agent_runner_watchdog"]
-    )
-    assert cluster.record_health_port(_rec(tmp_path), "im_bridge") == 18017
-    assert cluster.record_health_port(_rec(tmp_path), "pg_backup") == 18021
-    assert cluster.record_health_port(_rec(tmp_path), "gateway_watchdog") == 18025
-    assert cluster.record_health_port(_rec(tmp_path), "agent_runner_watchdog") == 18026
-    # pre-existing slots keep the base+offset derive for old records
-    assert cluster.record_health_port(_old_rec(tmp_path), "heartbeat") == 18002
-
-
-def test_record_health_port_agent_host_never_reaches_past_the_allocated_block(tmp_path: Path):
-    """The hosted agent-runner's offset (19) is the first one that lands OUTSIDE
-    the block an existing record owns: those records were allocated at
-    BLOCK_SIZE 19, so they hold base..base+18, and `base + 19` is the FIRST PORT
-    OF THE NEXT CLUSTER'S BLOCK. Growing the block must not make an existing
-    cluster's own derive point at a neighbour, so `agent_host` derives its
-    legacy value — which is also what `health_port()` binds at runtime for a
-    unit whose `.env` predates the key.
-
-    A cluster BORN after this change allocates a 20-port block and carries the
-    key, so it reads its own port back — the contrast the second half pins."""
-    from shared.port_block import LEGACY_AVA_PORTS
-
-    old = _old_rec(tmp_path)
-    derived = cluster.record_health_port(old, "agent_host")
-    assert derived == LEGACY_AVA_PORTS["agent_host"]
-    # The number the block-offset derive would have produced, and the reason it
-    # is wrong: it is the first port of whoever holds the next block.
-    assert derived != old.ports["gateway"] + 19
-    # A fresh birth carries the key and reads it back — inside its own block.
-    assert cluster.record_health_port(_rec(tmp_path), "agent_host") == 18019
-
-
-def test_allocate_ports_skips_blocks_overlapping_legacy_16_port_records(
+def test_allocate_ports_skips_blocks_overlapping_existing_records(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """BLOCK_SIZE has grown repeatedly through 24, but every
-    pre-existing record still occupies a 16-port block at 18000+16k — and a
-    candidate inside such a block would overlap it. allocate_ports must skip
-    overlapping blocks, not just exact bases, or a DOWN cluster's block gets
-    re-allocated while its record still owns it (silent collision when both
-    start).
+    """A pre-existing record may occupy a block from any birth-era BLOCK_SIZE
+    (e.g. a 16-port block at 18016) — and a candidate inside such a block
+    would overlap it. allocate_ports must skip overlapping blocks, not just
+    exact bases, or a DOWN cluster's block gets re-allocated while its record
+    still owns it (silent collision when both start).
 
     The expected base below is concrete on purpose and MOVES whenever
     BLOCK_SIZE does: growing the block changes which candidates clear a legacy
@@ -453,3 +355,9 @@ def test_allocate_ports_skips_blocks_overlapping_legacy_16_port_records(
     assert cl.allocate_ports(set())["gateway"] == BLOCK_START
     # an exact-base record is of course skipped too
     assert cl.allocate_ports({BLOCK_START})["gateway"] == BLOCK_START + BLOCK_SIZE
+    # A record whose base sits in the (base-26, base-15) gap is reached only by
+    # the conservative ±(BLOCK_SIZE-1) window: at 18010 the old ±15 lookback
+    # took 18027 (a 16-wide block [18010,18025] does not reach it), while the
+    # ±26 window skips 18027 — the record could be a 27-wide block
+    # [18010,18036] — and lands on 18054. Pins the window, not just the skip.
+    assert cl.allocate_ports({18010})["gateway"] == 18054

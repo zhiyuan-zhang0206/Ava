@@ -101,7 +101,7 @@ question, which is what makes the same weak evidence usable for both.
 
 `ava cluster status` shows the hold (a banner + the `hold` column beside `pin` /
 `code`) so a refused operator can see it from the roster instead of the cron log.
-That display reads the lease row directly (`read_update_lease` + `settle_hosts`) and
+That display reads the lease row directly (`read_update_lease`'s settle fields) and
 must keep doing so — calling `deploy_in_flight()` from a status GET would probe every
 machine and, on a converged cluster, *release* the hold as a side effect of someone
 looking at it. It also means the roster shows signal 1 only, which is why the column
@@ -334,7 +334,7 @@ def settle_hosts_converged(hosts: list[str]) -> bool:
     over the hosts that *acked* Phase B and had not come back when the poll ended —
     whether still converging or provably stalled
     (`cli/commands/update.py:_still_converging`) — and the release re-probes exactly
-    those, read back from the lease's note. Asking a wider question is not a
+    those, read back from the lease's recorded waiting set. Asking a wider question is not a
     conservative choice, it is a broken one: `shared.machines.list_all()` is every row
     that ever registered — no `stopped_at`, capability or liveness filter — so one
     intentionally-stopped host, one decommissioned row, or one gateway-only unit (which
@@ -361,7 +361,7 @@ def settle_hosts_converged(hosts: list[str]) -> bool:
     commit is the `code` controller's dimension, not this one.
     """
     if not hosts:
-        return False  # an unparseable / absent note is not evidence of convergence
+        return False  # an empty recorded set is not evidence of convergence
     try:
         from shared.cluster_pin import get_cluster_target_sha
 
@@ -394,7 +394,7 @@ def settle_hosts_converged(hosts: list[str]) -> bool:
 def _lease_hold() -> DeployWindow | None:
     """A live deploy lease — signal 1, the floor.
 
-    A **settle hold** (a lease carrying a note, kept after the orchestration stopped
+    A **settle hold** (a lease carrying a settle fact, kept after the orchestration stopped
     executing) is re-examined here rather than simply honoured: if the cluster has
     since converged, it is released now instead of idling out its TTL. That is the
     difference between a hold that represents a condition and one that merely
@@ -413,31 +413,29 @@ def _lease_hold() -> DeployWindow | None:
         return None
     if lease is None:
         return None
-    if lease.note is None:
+    if not lease.is_settle_hold:
         # An orchestration is executing right now — nothing to re-examine.
         return DeployWindow(
             active=True, detail=f"a cluster deploy is in progress — {lease.describe()}"
         )
-    from shared.cluster_lock import settle_hosts
-
-    if settle_hosts_converged(settle_hosts(lease.note)):
+    if settle_hosts_converged(lease.settle_hosts or []):
         from shared.cluster_lock import release_settle_hold
 
         if release_settle_hold(lease.holder):
             logger.info(
                 "[deploy-window] settle hold released early: every agent-runner is on the pin "
-                "(was {holder}, {note})",
+                "(was {holder}, {settle_note})",
                 holder=lease.holder,
-                note=lease.note,
+                settle_note=lease.settle_note,
             )
             # The settle phase's one telemetry record (C3, task #2189): the hold
             # started in the orchestration process that has already exited and
             # ends HERE, so this is the only place its duration can be printed.
             # Server-side elapsed (`settle_elapsed_s`) — no cross-host clock
-            # skew — and the held host set read back from the note just released.
+            # skew — and the held host set read back from the lease just released.
             from shared.rollout_telemetry import settle_ended
 
-            settle_ended(dur_s=lease.settle_elapsed_s, hosts=settle_hosts(lease.note))
+            settle_ended(dur_s=lease.settle_elapsed_s, hosts=lease.settle_hosts or [])
             return None
         # Another actor moved the lease between the read and the release; whatever it
         # holds now is not ours to reason about, so report the hold we saw.

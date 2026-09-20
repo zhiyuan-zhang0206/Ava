@@ -71,19 +71,20 @@ def fake_pause(monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
 
 
 def _executing_lease() -> DeployLease:
-    """A rollout mutating the cluster right now: `note is None` is what marks it, and
-    `acquire_update_lock` NULLs the column for exactly that reason."""
-    return DeployLease(holder="cloud:pid123", held_for_s=120.0, expires_in_s=1680.0, note=None)
+    """A rollout mutating the cluster right now: no settle fact is what marks it, and
+    `acquire_update_lock` NULLs the settle columns for exactly that reason."""
+    return DeployLease(holder="cloud:pid123", held_for_s=120.0, expires_in_s=1680.0)
 
 
 def _settle_hold(*hosts: str) -> DeployLease:
     """The lease a rollout leaves behind when it exits with hosts still unconverged —
-    nothing executing, `note` naming who it waits for."""
+    nothing executing, the recorded waiting set naming who it waits for."""
     return DeployLease(
         holder="cloud:pid123",
         held_for_s=300.0,
         expires_in_s=600.0,
-        note=settle_note(list(hosts)),
+        settle_hosts=list(hosts),
+        settle_note=settle_note(list(hosts)),
     )
 
 
@@ -488,16 +489,16 @@ def test_a_settle_hold_naming_this_host_still_serves_the_unowned_bound(
     assert unpaused == []
 
 
-def test_a_note_that_does_not_parse_owns_the_pause(
+def test_a_settle_hold_that_names_nobody_owns_the_pause(
     fake_pause: Callable[[float | None], None], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`settle_hosts`' rule, inherited: a note we cannot read yields an empty host set
-    and therefore a deferral. A reworded note must never widen into permission."""
+    """A settle hold whose recorded set is empty names nobody and therefore defers.
+    A hold that names nobody must never widen into permission."""
     fake_pause(sp.STRANDED_PAUSE_TIMEOUT_S + 60)
-    reworded = DeployLease(
-        holder="cloud:pid123", held_for_s=300.0, expires_in_s=600.0, note="settling for a bit"
+    empty = DeployLease(
+        holder="cloud:pid123", held_for_s=300.0, expires_in_s=600.0, settle_hosts=[]
     )
-    monkeypatch.setattr(sp, "read_update_lease", lambda: reworded)
+    monkeypatch.setattr(sp, "read_update_lease", lambda: empty)
     unpaused: list[bool] = []
     monkeypatch.setattr(sp, "unpause_local_cluster", lambda: unpaused.append(True))
     assert sp.recover_stranded_pause() is False

@@ -97,7 +97,7 @@ def _rollout_child_window(
     A v1 marker is proof from the surviving parent. An executing DB lease is the
     compatibility signal for a child launched by older code: internal starts
     converge but must defer credential mutation; operator starts are refused.
-    Settle holds carry a note and have no active orchestrator.
+    Settle holds carry the structured settle fact and have no active orchestrator.
     """
     # Only the gateway local leg survives a checkout in a parent and owns the
     # credential/admission boundary.  A pure agent-runner's Phase-B updater
@@ -110,7 +110,7 @@ def _rollout_child_window(
     from shared.cluster_lock import read_update_lease
 
     lease = read_update_lease()
-    if lease is None or lease.note is not None:
+    if lease is None or lease.is_settle_hold:
         return False
     if persist_services:
         raise RuntimeError(lease.refusal("ava start"))

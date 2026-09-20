@@ -56,7 +56,7 @@ def claim_pending_recovery_lease(
 
     `claim_recovery_lock` may never strand durable publication evidence; this is
     that evidence's own takeover, so the row must be an executing rollout
-    (``phase='updating'``, ``kind='rollout'``, ``note IS NULL``) whose
+    (``phase='updating'``, ``kind='rollout'``, ``settle_hosts IS NULL``) whose
     ``managed_writer_evidence.pending.operation`` still equals
     ``expected_operation`` — the exact JSONB subdocument the caller inspected.
     The caller has already proven the previous holder's process gone; the
@@ -79,7 +79,7 @@ def claim_pending_recovery_lease(
         cur.execute(
             "WITH prev AS MATERIALIZED ("
             "  SELECT holder, target_sha FROM deployment_state WHERE id = 1 "
-            "  AND phase = 'updating' AND kind = 'rollout' AND note IS NULL "
+            "  AND phase = 'updating' AND kind = 'rollout' AND settle_hosts IS NULL "
             "  AND target_sha IS NOT NULL "
             "  AND managed_writer_evidence->'pending'->'operation' = %s "
             "  AND ("
@@ -88,7 +88,7 @@ def claim_pending_recovery_lease(
             "  ) FOR UPDATE"
             "), claimed AS ("
             "  UPDATE deployment_state SET holder = %s, acquired_at = now(), "
-            "    expires_at = now() + make_interval(secs => %s), note = NULL, "
+            "    expires_at = now() + make_interval(secs => %s), "
             "    settle_hosts = NULL, settle_note = NULL, settle_started_at = NULL, "
             "    phase = 'updating', kind = 'rollout' "
             "  WHERE id = 1 AND EXISTS (SELECT 1 FROM prev) "
@@ -161,11 +161,11 @@ def abandon_pending_publication_lease(
     with conn.cursor() as cur:
         cur.execute(
             "UPDATE deployment_state SET holder = NULL, acquired_at = NULL, expires_at = NULL, "
-            "    note = NULL, settle_hosts = NULL, settle_note = NULL, settle_started_at = NULL, "
+            "    settle_hosts = NULL, settle_note = NULL, settle_started_at = NULL, "
             "    phase = 'stable', kind = NULL, "
             "    managed_writer_evidence = jsonb_set("
             "        managed_writer_evidence, '{pending}', 'null'::jsonb) "
-            "WHERE id = 1 AND phase = 'updating' AND kind = 'rollout' AND note IS NULL "
+            "WHERE id = 1 AND phase = 'updating' AND kind = 'rollout' AND settle_hosts IS NULL "
             "AND target_sha IS NOT NULL "
             "AND managed_writer_evidence->'pending'->'operation' = %s "
             "AND managed_writer_evidence->'pending'->'collection' = 'null'::jsonb "

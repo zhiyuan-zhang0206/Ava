@@ -132,7 +132,7 @@ def _deploy_already_running() -> tuple[BlockScope, str] | None:
     updater — the spawn half of a flap whose other half was the pin controller pulling
     HEAD back).
 
-    Two signals, deliberately not one. An **executing lease** (`note IS NULL`) is a
+    Two signals, deliberately not one. An **executing lease** (`settle_hosts IS NULL`) is a
     gateway orchestration mutating the cluster; scope `DB_DEPENDENT`, because nothing
     was spawned *here* and the finding is still only "this code is behind the migrated
     DB". A **local orchestration session** is the updater this host spawned for itself,
@@ -142,7 +142,7 @@ def _deploy_already_running() -> tuple[BlockScope, str] | None:
 
     A **settle hold** is deliberately not a deferral: nobody executes under one, and
     the convergence it waits for is exactly what this heal produces. That is issue
-    #1020's argument, applied here as `note IS NULL` defers and every settle hold
+    #1020's argument, applied here as `settle_hosts IS NULL` defers and every settle hold
     passes through — and #1020 has since landed, so the choice is now a standing one
     rather than a merge-order hedge. Pin and code narrowed to
     `DeployLease.awaits(machine_name())`, which defers under a hold naming *another*
@@ -303,7 +303,7 @@ def schema_reconcile() -> tuple[BlockScope, str | None]:
         # already running, so it could spawn an `ava cluster update` into the middle of one —
         # the other half of the flap, and a way to collide with a rollout's Phase B on
         # any host. Two signals, the same pair pin and code consult: an EXECUTING lease
-        # (`note IS NULL`; a settle hold is a stated waiting period with nobody
+        # (`settle_hosts IS NULL`; a settle hold is a stated waiting period with nobody
         # executing, and issue #1020 is about not deferring to those), and a local
         # orchestration session, which a watchdog-spawned updater has instead of a lease.
         if (deferral := _deploy_already_running()) is not None:

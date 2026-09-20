@@ -1196,10 +1196,9 @@ CREATE TABLE deployment_state (
     settle_note  TEXT,
     settle_started_at TIMESTAMPTZ,
     -- The settle note in its legacy single-column format ("settling, waiting
-    -- for: h1, h2" — shared.cluster_lock.settle_note / settle_hosts). Written
-    -- alongside settle_hosts/settle_note by the same transition and retired
-    -- with the old-signal sweep; until then `note IS NOT NULL` is what keeps
-    -- renew/release_settle_hold scoped to settle holds (shared/cluster_lock.py).
+    -- for: h1, h2") — superseded by settle_hosts/settle_note and no longer
+    -- written or read by shared/cluster_lock.py; kept only until the CONTRACT
+    -- migration that drops it. The settle scoping lives on `settle_hosts`.
     note         TEXT,
     -- last_outcome: the most recent orchestration result — a RECORD, never a
     -- phase (a failure is a fact in here; the enumeration is the same six

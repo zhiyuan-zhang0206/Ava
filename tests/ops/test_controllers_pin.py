@@ -39,12 +39,16 @@ def _relation(value: str):
     return _r
 
 
-def _lease(*, note: str | None) -> DeployLease:
-    """A live lease as `read_update_lease` returns it. `note=None` is a rollout
-    executing right now; a settle note is a stated waiting period with nobody
+def _lease(*, settle_hosts: list[str] | None = None) -> DeployLease:
+    """A live lease as `read_update_lease` returns it. No settle fact is a rollout
+    executing right now; `settle_hosts` set makes it a settle hold with nobody
     executing under it."""
     return DeployLease(
-        holder="gateway-host:pid65237", held_for_s=120.0, expires_in_s=900.0, note=note
+        holder="gateway-host:pid65237",
+        held_for_s=120.0,
+        expires_in_s=900.0,
+        settle_hosts=settle_hosts,
+        settle_note=settle_note(settle_hosts) if settle_hosts is not None else None,
     )
 
 
@@ -95,7 +99,7 @@ def test_defers_while_update_lock_held(
     monkeypatch: pytest.MonkeyPatch, pin_drift_env: list
 ) -> None:
     """A not-yet-paused host must not self-heal while a cluster update holds the lock."""
-    monkeypatch.setattr("shared.cluster_lock.read_update_lease", lambda: _lease(note=None))
+    monkeypatch.setattr("shared.cluster_lock.read_update_lease", lambda: _lease(settle_hosts=None))
     monkeypatch.setattr(pin, "get_cluster_target_sha", lambda: "abc1234")
     monkeypatch.setattr(pin, "prod_source_head_sha", lambda: "def5678")
     assert pin.check_pin_drift() is False
@@ -425,7 +429,7 @@ def test_heals_under_a_settle_hold_that_names_this_host(
     monkeypatch.setattr(pin, "prod_source_head_sha", lambda: "def5678")
     monkeypatch.setattr(
         "shared.cluster_lock.read_update_lease",
-        lambda: _lease(note=settle_note([_THIS_HOST, "other-box"])),
+        lambda: _lease(settle_hosts=[_THIS_HOST, "other-box"]),
     )
     with caplog.at_level("WARNING"):
         assert pin.check_pin_drift() is True
@@ -440,22 +444,20 @@ def test_defers_under_a_settle_hold_that_names_another_host(
     monkeypatch.setattr(pin, "get_cluster_target_sha", lambda: "abc1234")
     monkeypatch.setattr(pin, "prod_source_head_sha", lambda: "def5678")
     monkeypatch.setattr(
-        "shared.cluster_lock.read_update_lease", lambda: _lease(note=settle_note(["other-box"]))
+        "shared.cluster_lock.read_update_lease", lambda: _lease(settle_hosts=["other-box"])
     )
     assert pin.check_pin_drift() is False
     assert pin_drift_env == []
 
 
-def test_defers_under_a_hold_whose_note_cannot_be_parsed(
+def test_defers_under_a_settle_hold_that_names_nobody(
     monkeypatch: pytest.MonkeyPatch, pin_drift_env: list
 ) -> None:
-    """An unreadable note yields an empty host set and therefore a deferral — the same
-    direction `settle_hosts` already takes on the release path."""
+    """A settle hold whose recorded set is empty names nobody and therefore defers —
+    a hold that names nobody must never read as permission."""
     monkeypatch.setattr(pin, "get_cluster_target_sha", lambda: "abc1234")
     monkeypatch.setattr(pin, "prod_source_head_sha", lambda: "def5678")
-    monkeypatch.setattr(
-        "shared.cluster_lock.read_update_lease", lambda: _lease(note="paused for maintenance")
-    )
+    monkeypatch.setattr("shared.cluster_lock.read_update_lease", lambda: _lease(settle_hosts=[]))
     assert pin.check_pin_drift() is False
     assert pin_drift_env == []
 
@@ -472,7 +474,7 @@ def test_a_settle_hold_naming_this_host_does_not_bypass_the_in_flight_guard(
     monkeypatch.setattr(pin, "get_cluster_target_sha", lambda: "abc1234")
     monkeypatch.setattr(pin, "prod_source_head_sha", lambda: "def5678")
     monkeypatch.setattr(
-        "shared.cluster_lock.read_update_lease", lambda: _lease(note=settle_note([_THIS_HOST]))
+        "shared.cluster_lock.read_update_lease", lambda: _lease(settle_hosts=[_THIS_HOST])
     )
     monkeypatch.setattr("ops.cluster.current_orchestration", lambda: "update")
     with caplog.at_level("INFO"):

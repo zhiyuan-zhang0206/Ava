@@ -14,7 +14,7 @@ import logging
 from datetime import datetime
 
 from shared.api_contracts.status import MachineStatus
-from shared.cluster_lock import DeployLease, settle_hosts
+from shared.cluster_lock import DeployLease
 from shared.last_update import LastUpdate
 
 _log = logging.getLogger("gateway.routers._roster_rows")
@@ -135,13 +135,15 @@ def stamp_cluster_globals(
 ) -> list[MachineStatus]:
     """Apply the cluster-global facts to every assembled row; return them sorted.
 
-    The hold's OWN population is read back from its note — never the machine
+    The hold's OWN population is read back from its recorded waiting set — never the machine
     table; a row absent from it is "not named by this hold", not "converged".
     `stranded_holds` is the one per-host entry here (task #3132); every other
     fact stamps every row identically.
     """
     hold_detail = deploy_lease.describe() if deploy_lease is not None else None
-    waited_on = frozenset(settle_hosts(deploy_lease.note) if deploy_lease is not None else [])
+    waited_on: frozenset[str] = (
+        frozenset(deploy_lease.settle_hosts or []) if deploy_lease is not None else frozenset()
+    )
     held = stranded_holds or {}
     stamped: list[MachineStatus] = []
     for m in machines:

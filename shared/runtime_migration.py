@@ -73,7 +73,7 @@ class ReleaseMigrationContext:
             or lease.holder != self.holder
             or lease.acquired_at != self.acquired_at
             or lease.kind != "rollout"
-            or lease.note is not None
+            or lease.is_settle_hold
         ):
             raise ReleaseRejectedError("release migration receipt does not own the current rollout")
         if re.fullmatch(r"[0-9a-f]{40}", self.target_sha) is None:

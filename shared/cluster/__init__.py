@@ -107,9 +107,6 @@ from shared.cluster.derive import (
     wake_key as wake_key,
 )
 from shared.cluster.ports import (
-    _LATE_HEALTH_SLOTS as _LATE_HEALTH_SLOTS,
-)
-from shared.cluster.ports import (
     ClusterPorts as ClusterPorts,
 )
 from shared.cluster.ports import (
@@ -192,9 +189,6 @@ from shared.cluster.registry import (
 )
 from shared.cluster.registry import (
     load_registry as load_registry,
-)
-from shared.cluster.registry import (
-    migrate_registry_keys as migrate_registry_keys,
 )
 from shared.cluster.registry import (
     registry_lock as registry_lock,

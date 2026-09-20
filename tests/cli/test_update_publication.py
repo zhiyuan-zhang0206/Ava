@@ -146,7 +146,7 @@ def _reset_deployment(conn: psycopg.Connection) -> None:
     with conn.cursor() as cur:
         cur.execute(
             "UPDATE deployment_state SET holder=NULL, acquired_at=NULL, expires_at=NULL, "
-            "note=NULL, settle_hosts=NULL, settle_note=NULL, settle_started_at=NULL, "
+            "settle_hosts=NULL, settle_note=NULL, settle_started_at=NULL, "
             "phase='stable', kind=NULL, target_sha=NULL, managed_writer_evidence=NULL WHERE id=1"
         )
         cur.execute("DELETE FROM machine_units")
@@ -177,7 +177,7 @@ def _acquire_rollout(
     row = conn.execute(
         "UPDATE deployment_state SET phase='updating', kind='rollout', holder=%s, "
         "acquired_at=clock_timestamp(), expires_at=clock_timestamp() + make_interval(secs => %s), "
-        "note=NULL, target_sha=%s WHERE id=1 RETURNING acquired_at",
+        "target_sha=%s WHERE id=1 RETURNING acquired_at",
         (holder, ttl_s, TARGET_SHA),
     ).fetchone()
     assert row is not None

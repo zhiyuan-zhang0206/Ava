@@ -40,7 +40,7 @@ def _clear_update_lock(db_conn: psycopg.Connection) -> None:
     with db_conn.cursor() as cur:
         cur.execute(
             "UPDATE deployment_state SET holder=NULL, acquired_at=NULL, expires_at=NULL, "
-            "note=NULL, settle_hosts=NULL, settle_note=NULL, settle_started_at=NULL, "
+            "settle_hosts=NULL, settle_note=NULL, settle_started_at=NULL, "
             "phase='stable', kind=NULL WHERE id=1"
         )
     db_conn.commit()
