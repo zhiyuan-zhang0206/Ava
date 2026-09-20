@@ -15,7 +15,10 @@ operation. Anything unknown, missing, duplicated or drifted assembles nothing �
 
 The storage gate is unchanged and remains the only adoption authority
 (``shared.managed_writer_publication.adopt_pending_collection`` revalidates the
-whole collection under the locked rollout). The collector side (network
+whole collection under the locked rollout). One closure unit is stamped with the
+full prepared-receipt digest that gate binds; the observer-tuple digest stays
+the facts attribution, and both classes are frozen into ``observation_digest``
+together. The collector side (network
 gathering, the platform final re-read after the candidate is ready) and the
 platform hop channels connect this layer later; this seat is inert until then
 (no production caller).
@@ -72,21 +75,40 @@ class LauncherTerminal(EvidenceModel):
 def launcher_fenced(facts: LauncherObservation, terminal: LauncherTerminal) -> bool:
     """Whether one launcher's facts meet its journaled terminal.
 
-    Both D(l) (the definition is gone, or rebound to the terminal's exact
-    bytes) and L(l) (the scheduler positively does not have it loaded) must
-    hold. Crontab observations never set ``loaded``, so they fence nothing
-    here — fail-closed until the Linux collector rule is designed.
+    The branch follows the observation's own ``kind`` (filled by the observing
+    producer, never supplied by a caller):
+
+    - launchd: both D(l) (the definition is gone, or rebound to the terminal's
+      exact bytes) and L(l) (the scheduler positively does not have it loaded)
+      must hold.
+    - crontab: the user table is cron's complete input — no separate loaded
+      state exists — so a double-read-stable positively-absent definition is
+      the whole fact domain. Only a "removed" terminal can be met; a
+      "rebound" crontab claim has no observation route and refuses.
+    - anything else refuses.
     """
-    if facts.loaded is not False:
-        return False
-    match terminal.kind:
-        case "removed":
-            return facts.definition == "absent" and facts.current_digest is None
-        case "rebound":
+    match facts.kind:
+        case "launchd":
+            if facts.loaded is not False:
+                return False
+            match terminal.kind:
+                case "removed":
+                    return facts.definition == "absent" and facts.current_digest is None
+                case "rebound":
+                    return (
+                        facts.definition == "mismatch"
+                        and facts.current_digest is not None
+                        and facts.current_digest == terminal.new_digest
+                    )
+                case _:
+                    return False
+        case "crontab":
             return (
-                facts.definition == "mismatch"
-                and facts.current_digest is not None
-                and facts.current_digest == terminal.new_digest
+                terminal.kind == "removed"
+                and facts.loaded is None
+                and facts.definition == "absent"
+                and facts.current_digest is None
+                and facts.enabled is False
             )
         case _:
             return False
@@ -105,6 +127,7 @@ def assemble_unit_closure(
     boot_id: UUID,
     observer_instance: UUID,
     observed_unit: ManagedUnit,
+    prepared_receipt_digest: Digest,
     observed_at: AwareDatetime,
     valid_until: AwareDatetime,
     processes: tuple[ProcessVerdict, ...],
@@ -118,6 +141,13 @@ def assemble_unit_closure(
     bytes, membership, old writers) after the candidate was ready and passes
     those exact final facts here; this function judges them only. Facts are
     positional against ``expected`` (the observer reports in prepared order).
+
+    Digest classes stay distinct and both are frozen into
+    ``observation_digest``: ``observed_unit`` is the facts attribution and must
+    equal ``expected.unit()`` (the observer-tuple identity);
+    ``prepared_receipt_digest`` is the full sealed-receipt digest the journal
+    and the adoption gate bind, and it becomes the closure unit's
+    ``inventory_digest``.
     """
     if observed_unit != expected.unit():
         return None
@@ -139,11 +169,12 @@ def assemble_unit_closure(
     }:
         return None
     for entry, facts in zip(expected.launchers, launchers, strict=True):
-        if not launcher_fenced(facts, by_label[entry.name]):
+        if facts.kind != entry.kind or not launcher_fenced(facts, by_label[entry.name]):
             return None
     payload = {
         "operation": operation.model_dump(mode="json"),
         "unit": observed_unit.model_dump(mode="json"),
+        "prepared_receipt_digest": prepared_receipt_digest,
         "boot_id": str(boot_id),
         "observer_instance": str(observer_instance),
         "challenge": str(echoed_challenge),
@@ -157,7 +188,11 @@ def assemble_unit_closure(
         ],
     }
     return ManagedUnitClosure(
-        unit=observed_unit,
+        unit=ManagedUnit(
+            machine=observed_unit.machine,
+            home=observed_unit.home,
+            inventory_digest=prepared_receipt_digest,
+        ),
         boot_id=boot_id,
         observer_instance=observer_instance,
         observation_digest=hashlib.sha256(_canonical(payload).encode()).hexdigest(),

@@ -42,6 +42,7 @@ on:
       - 'shared/managed_writer_publication.py'
       - 'shared/managed_writer_activation.py'
       - 'shared/managed_writer_closure.py'
+      - 'shared/native_job_observation.py'
       - 'cli/commands/_update_publication.py'
       - 'scripts/prove_managed_writer_chain.py'
       - 'scripts/prove_runtime_migration.py'

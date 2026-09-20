@@ -21,14 +21,12 @@ Fixture boundaries (deliberate; ruled on task #4128 slice E2-d):
 
 - Facts are fixture-constructed: the sealed per-unit receipt and its producers
   (release inventory, the candidate image) are out of scope at this layer.
-  ``prepared_receipt_digest`` is bound to the unit's observer-tuple digest
-  (``expected.unit()``) because the adoption gate compares the closure unit
-  digest against the journaled ``prepared_receipt_digest`` while the derivation
-  layer stamps the observer-tuple digest. Production keeps the two digest
-  classes distinct (substitution is refused by
+  The digest classes are bound as production binds them (task #4129 Q1): the
+  closure unit carries ``prepared_receipt_digest`` — a distinct fixture digest,
+  never the observer-tuple digest — while the observer tuple stays the facts
+  attribution; substitution is refused by
   tests/shared/test_managed_writer_publication.py::
-  test_adoption_rejects_observer_digest_in_place_of_full_prepare_receipt); the
-  collector landing (task #4129) owns their production binding.
+  test_adoption_rejects_observer_digest_in_place_of_full_prepare_receipt.
 - The isolated schema mirrors tests/shared/test_managed_writer_publication.py
   ::publication_db (deployment_state / machines / machine_units /
   schema_migrations); keep the two in sync.
@@ -177,9 +175,9 @@ def unit_facts(home: str) -> PreparedUnitPublication:
     facts = PreparedUnitPublication(
         receipt=sealed,
         # Fixture binding (module docstring): production binds the sealed
-        # receipt bytes here; this proof binds the observer-tuple digest so the
-        # real derivation and adoption digests meet.
-        prepared_receipt_digest=sealed.expected.unit().inventory_digest,
+        # receipt bytes here; this proof binds a distinct digest so the real
+        # derivation and adoption digest classes meet through the binding.
+        prepared_receipt_digest=hashlib.sha256(f"receipt:{home}".encode()).hexdigest(),
         artifact_digest=sealed.expected.artifact_digest,
         manifest_digest=sealed.expected.manifest_digest,
         candidate=None,
@@ -321,6 +319,7 @@ def run_chain(  # noqa: PLR0915 — one guarded chain lifetime with ordered gate
                 boot_id=uuid4(),
                 observer_instance=uuid4(),
                 observed_unit=expected.unit(),
+                prepared_receipt_digest=entry.prepared_receipt_digest,
                 observed_at=window,
                 valid_until=window + timedelta(seconds=60),
                 processes=(),

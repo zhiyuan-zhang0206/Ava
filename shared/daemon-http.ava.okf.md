@@ -74,8 +74,13 @@ unobservable in the GUI domain and degrades to unknown. Effective launchd enable
 overrides and loaded-image identity remain unknown: Apple documents
 `launchctl print` output as diagnostic, not an API, and `list -x` is unsupported.
 Linux `enabled` means an exact non-commented cron registration exists, not that
-the cron daemon is live. Missing/unsupported/unreadable/drifting evidence remains
-unknown; Windows is unsupported. Empty input never proves fleet closure.
+the cron daemon is live; cron facts never carry a loaded verdict (no separate
+scheduler state exists), and the closure fence treats the double-read table
+fact as complete for removals while refusing crontab rebound claims. Every
+observation names its scheduler family (`kind`, filled by the producing
+observer itself); the fence branches on it and refuses cross-family shapes.
+Missing/unsupported/unreadable/drifting evidence remains unknown; Windows is
+unsupported. Empty input never proves fleet closure.
 
 CI separately exercises real read-only `crontab -l` and launchctl queries on native
 runners. Parser fixtures do not prove effective scheduler state. The observer
