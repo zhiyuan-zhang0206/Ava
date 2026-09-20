@@ -1,11 +1,10 @@
 """Event-stream index-label rollout boundary and LogQL selector construction.
 
-``INDEX_LABEL_CUTOVER_AT`` must be set to the UTC whole-hour boundary of the
-collector rollout. Ship code with a future value first so every read remains on
-the legacy selector; after the collector promotes the two resource attributes,
-set this one constant to the rollout instant. The short legacy grace is the
-only retention arithmetic in the codebase: once it expires, no normal event
-stream row can lack the indexed labels.
+``INDEX_LABEL_CUTOVER_AT`` marks the collector rollout that promoted the two
+resource attributes to stream labels (2026-08-23 11:00Z). The legacy-read
+grace that followed it closed on 2026-08-26T23:10Z: every live-stream row
+readable after that carries the indexed labels, so a window reads as one
+indexed slice (``split_index_label_window``).
 """
 
 from __future__ import annotations
@@ -21,8 +20,8 @@ from shared.events.contract import lineage_event_names
 
 EVENT_STREAM_SERVICE_NAME = "unknown_service"
 
-# Operator-set deployment boundary. Keep this value in the future until the
-# collector transform and Loki mapping are live cluster-wide.
+# The collector rollout instant that promoted the two resource attributes to
+# stream labels; the index-labeled live tail starts at this boundary.
 INDEX_LABEL_CUTOVER_AT = datetime(2026, 8, 23, 11, 0, tzinfo=UTC)
 
 # The PG `events` archive's time span (task #1281): the archive stream in Loki
@@ -68,8 +67,6 @@ LINEAGE_RETENTION_PERIOD = "876000h"
 # `event_name` alternation over registry names (charset `[a-z0-9_]` per the
 # registry naming rules, so no LogQL regex metacharacter can appear inside).
 _LINEAGE_RETENTION_SELECTOR = re.compile(r'^\{event_name=~"([a-z0-9_|]+)"\}$')
-LEGACY_READ_MARGIN = timedelta(minutes=10)
-LEGACY_READ_EXPIRES_AT = INDEX_LABEL_CUTOVER_AT + EVENT_STREAM_RETENTION + LEGACY_READ_MARGIN
 _LOGQL_REGEX_META = frozenset(".\\*+?()|[]{}^$")
 
 
@@ -242,29 +239,18 @@ def escape_logql_label(value: object) -> str:
     )
 
 
-def split_index_label_window(
-    start: datetime, end: datetime, *, now: datetime | None = None
-) -> tuple[LokiReadSlice, ...]:
-    """Partition ``(start, end]`` between legacy and indexed event streams.
+def split_index_label_window(start: datetime, end: datetime) -> tuple[LokiReadSlice, ...]:
+    """Return the live-stream read slice covering ``(start, end]``.
 
-    An exact boundary event belongs to the legacy slice. Once the fixed
-    retention period plus grace has elapsed, legacy code is unreachable even
-    when callers retain an older lower bound.
+    The legacy/index-label transition finished on 2026-08-26 (the cutover
+    plus its retention grace): every live-stream row still readable carries
+    the promoted labels, so a window no longer splits by label presence and
+    every read is one indexed slice.
     """
 
     if start >= end:
         return ()
-    current = now if now is not None else datetime.now(UTC)
-    if current >= LEGACY_READ_EXPIRES_AT:
-        return (LokiReadSlice(LokiReadEra.INDEXED, start, end),)
-    if end <= INDEX_LABEL_CUTOVER_AT:
-        return (LokiReadSlice(LokiReadEra.LEGACY, start, end),)
-    if start >= INDEX_LABEL_CUTOVER_AT:
-        return (LokiReadSlice(LokiReadEra.INDEXED, start, end),)
-    return (
-        LokiReadSlice(LokiReadEra.LEGACY, start, INDEX_LABEL_CUTOVER_AT),
-        LokiReadSlice(LokiReadEra.INDEXED, INDEX_LABEL_CUTOVER_AT, end),
-    )
+    return (LokiReadSlice(LokiReadEra.INDEXED, start, end),)
 
 
 def archive_stream_selector() -> str:

@@ -24,10 +24,9 @@ dashboards).
   (`{service_name="unknown_service", event_name=...}`) and keep `| json` only
   for the level/category/attributes filters (those fields are NOT stream
   labels).
-- The legacy chunks without index labels expired at `LEGACY_READ_EXPIRES_AT`
-  (cutover + retention + margin; derived in `shared/loki_index_labels.py`);
-  promoting the filters before that expiry would have silently dropped the
-  still-retained history.
+- The legacy chunks without index labels expired after the cutover's
+  retention grace (2026-08-26); promoting the filters before that expiry
+  would have silently dropped the still-retained history.
 - Selector matchers are full-string regexes (unlike pipeline label filters,
   which are substring searches), so multi-alternative `event_name=~"a|b"`
   matches exact event names.
