@@ -4,7 +4,9 @@ The begin position's second half: the sealed release context is read exactly
 once, the all-unit plan is assembled and canonicalized byte-identically, the
 candidate digest has its single derivation point (Q3, with an example-vector
 pin), and the dispatch gate opens only when every unit acknowledges the exact
-sealed digests. Everything here runs outside a database.
+sealed digests. Everything here runs outside a database: the only database
+touch the begin chain has is the journal registration read, stubbed in the
+chain world below (task #4129 I5).
 """
 
 from __future__ import annotations
@@ -20,9 +22,10 @@ from uuid import UUID
 
 import pytest
 
+from cli.commands._managed_writer_collector import JournaledRegistration
 from cli.commands._managed_writer_dispatch import (
     _ack_bindings,
-    assemble_hop_plans,
+    assemble_phase_inputs,
     begin_valid_until,
     build_targets,
     derive_candidate_digest,
@@ -66,6 +69,8 @@ RECOVERY_SCHEMA = "f" * 64
 TARGET_SHA = "0" * 40
 VALID_UNTIL = datetime(2026, 9, 20, 18, 0, tzinfo=UTC)
 JOURNAL_CHALLENGE = UUID(int=4242)
+CANDIDATE_DIGEST = hashlib.sha256(b"candidate-digest-fixture").hexdigest()
+JOURNALED_V = datetime(2026, 9, 20, 3, 0, tzinfo=UTC)
 
 
 def _digest(label: str) -> str:
@@ -629,9 +634,22 @@ def _chain_world(
     *,
     lease: Any = None,
     gather: Any = None,
+    registration: JournaledRegistration | None = None,
 ) -> dict[str, Any]:
-    """The begin chain's collaborating stubs around one real context file."""
+    """The begin chain's collaborating stubs around one real context file.
+
+    `registration` is the journal registration the begin's N3 read adopts, or
+    None for the first run's empty registration (no database is dialed).
+    """
+    from cli.commands import _managed_writer_collector as collector_mod
     from cli.commands import _managed_writer_dispatch as dispatch_mod
+
+    def read_registration(_operation: RolloutIdentity) -> JournaledRegistration:
+        if registration is not None:
+            return registration
+        return JournaledRegistration(valid_until=None, plan_digest=None)
+
+    monkeypatch.setattr(collector_mod, "read_journaled_registration", read_registration)
 
     home = tmp_path.resolve()
     context = _context(("runner-a", str(home)), ("runner-b", "/ava-b"))
@@ -704,7 +722,7 @@ def test_begin_chain_reads_the_context_opens_the_journal_and_dispatches(
     world = _chain_world(monkeypatch, tmp_path)
     before = datetime.now(UTC)
 
-    plans = world["module"].begin_managed_writer_publication(TARGET_SHA)
+    phase_input = world["module"].begin_managed_writer_publication(TARGET_SHA)
 
     facts, registered = world["facts"], world["registered"]
     gathered, recorded, dispatched = world["gathered"], world["recorded"], world["dispatched"]
@@ -727,12 +745,53 @@ def test_begin_chain_reads_the_context_opens_the_journal_and_dispatches(
     assert sealed.plan.valid_until <= datetime.now(UTC) + timedelta(seconds=600)
     # Channel C rides the same execution: the returned hop plans are the ones
     # whose projections were staged by the dispatch.
+    plans = list(phase_input.hop_plans)
     assert [plan.machine for plan in plans] == ["runner-a", "runner-b"]
     assert dispatched[0]["projections"] == {plan.machine: plan.projections for plan in plans}
+    # Channel D rides it too: the collector input carries the exact staged/shipped
+    # bytes and the sealed identities, in the same sealed order.
+    collector = phase_input.collector
+    assert collector.operation == recorded[0]["operation"]
+    assert collector.challenge == JOURNAL_CHALLENGE
+    assert collector.valid_until == sealed.plan.valid_until
+    assert collector.candidate_digest == sealed.candidate_digest
+    assert [unit.machine for unit in collector.units] == ["runner-a", "runner-b"]
+    unit = collector.units[0]
+    candidate_projection, request_projection = plans[0].projections
+    assert (unit.machine, unit.home, unit.ops_url) == ("runner-a", plans[0].home, plans[0].ops_url)
+    assert unit.candidate_context == candidate_projection.content.encode("ascii")
+    assert unit.request == request_projection.content.encode("ascii")
+    assert unit.recovery_context == facts[0].hop_material.recovery_context.encode("ascii")
+    assert unit.prepared_receipt_digest == facts[0].publication.prepared_receipt_digest
     out = capsys.readouterr().out
     assert "(read once)" in out
     assert "journal open; all 2 units" in out
     assert str(JOURNAL_CHALLENGE) in out
+    assert "adopts the journaled window" not in out, "a first run registers its own window"
+
+
+def test_begin_chain_adopts_the_journaled_window_on_a_retry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """N3: a same-operation retry re-seals the journaled V, and says so."""
+    from cli.commands._managed_writer_collector import JournaledRegistration
+
+    world = _chain_world(
+        monkeypatch,
+        tmp_path,
+        registration=JournaledRegistration(valid_until=JOURNALED_V, plan_digest="f" * 64),
+    )
+
+    phase_input = world["module"].begin_managed_writer_publication(TARGET_SHA)
+
+    sealed = world["dispatched"][0]["sealed"]
+    assert sealed.plan.valid_until == JOURNALED_V
+    assert phase_input.collector.valid_until == JOURNALED_V
+    assert world["recorded"][0]["valid_until"] == JOURNALED_V
+    out = capsys.readouterr().out
+    assert "adopts the journaled window" in out
+    assert JOURNALED_V.isoformat() in out
+    assert "cannot slide" in out
 
 
 def test_begin_chain_binds_the_policy_window_as_the_smaller_bound(
@@ -843,7 +902,7 @@ def test_registered_units_with_urls_reads_the_roster_and_urls_once(
     assert "gateway_url" in conn.statements[0]
 
 
-# ── the hop plan assembly (channel C, task #4129 I4) ────────────────────────
+# ── the phase-input assembly (channels C+D, task #4129 I4/I5) ──────────────
 
 
 def _hop_world() -> tuple[list[PreparedUnitFacts], list[PreparedFactTarget], RolloutIdentity]:
@@ -853,19 +912,21 @@ def _hop_world() -> tuple[list[PreparedUnitFacts], list[PreparedFactTarget], Rol
     return facts, targets, _operation()
 
 
-def test_assemble_hop_plans_binds_each_projection_to_its_content_name() -> None:
+def test_assemble_phase_inputs_binds_each_projection_to_its_content_name() -> None:
     facts, targets, operation = _hop_world()
     challenge = UUID(int=11)
 
-    plans = assemble_hop_plans(
+    phase_input = assemble_phase_inputs(
         facts,
         targets,
         operation=operation,
         valid_until=VALID_UNTIL,
         challenge=challenge,
         schema_digest=SCHEMA,
+        candidate_digest=CANDIDATE_DIGEST,
     )
 
+    plans = list(phase_input.hop_plans)
     assert [plan.machine for plan in plans] == ["runner-a", "runner-b"]
     plan = plans[0]
     assert (plan.home, plan.ops_url, plan.artifact_digest) == ("/ava-a", None, ARTIFACT)
@@ -891,6 +952,21 @@ def test_assemble_hop_plans_binds_each_projection_to_its_content_name() -> None:
     )
     assert request.predecessor == facts[0].hop_material.predecessor
     assert request.normal_release_path is None
+
+    # The collector input is derived in the same loop: exact bytes, sealed
+    # identities, and the same (machine, home) order as the plans.
+    collector = phase_input.collector
+    assert collector.operation == operation
+    assert collector.challenge == challenge
+    assert collector.valid_until == VALID_UNTIL
+    assert collector.candidate_digest == CANDIDATE_DIGEST
+    assert [unit.machine for unit in collector.units] == ["runner-a", "runner-b"]
+    unit = collector.units[0]
+    assert (unit.machine, unit.home, unit.ops_url) == ("runner-a", "/ava-a", None)
+    assert unit.candidate_context == candidate_projection.content.encode("ascii")
+    assert unit.request == request_projection.content.encode("ascii")
+    assert unit.recovery_context == facts[0].hop_material.recovery_context.encode("ascii")
+    assert unit.prepared_receipt_digest == facts[0].publication.prepared_receipt_digest
 
 
 def test_dispatch_carries_each_units_projections_only(monkeypatch: pytest.MonkeyPatch) -> None:

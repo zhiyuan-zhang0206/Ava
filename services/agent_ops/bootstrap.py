@@ -18,11 +18,13 @@ from pathlib import Path
 
 import psutil
 import psycopg
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, ValidationError, field_validator
 
 from shared.daemon_http import start_daemon_http
+from shared.hop_ledger import build_ledger_payload
 from shared.managed_writer_barrier import Digest, EvidenceModel, RolloutIdentity, lock_rollout
 from shared.managed_writer_observation import (
+    ChallengeRequest,
     ExpectedProcess,
     ExpectedUnitWriters,
     ObservationChallenge,
@@ -180,12 +182,35 @@ async def observe_response(
         return (409, b'{"error":"bootstrap operation is unavailable or stale"}', "application/json")
 
 
+async def ledger_response(context: PreparedObservation, body: bytes) -> tuple[int, bytes, str]:
+    """Challenge-gated read of the hop ledger; a damaged slot stays a 200 read."""
+    try:
+        request = ChallengeRequest.model_validate_json(body)
+    except ValidationError:
+        return 400, b'{"error":"invalid challenge request"}', "application/json"
+    if (
+        request.challenge != context.challenge.challenge
+        or datetime.now(UTC) >= context.challenge.valid_until
+    ):
+        return 409, b'{"error":"unknown or expired challenge"}', "application/json"
+    payload = await asyncio.to_thread(
+        build_ledger_payload, Path(context.expected.home), context.challenge.challenge
+    )
+    # The read may block on the OS; expiry applies after collection too.
+    if datetime.now(UTC) >= context.challenge.valid_until:
+        return 409, b'{"error":"challenge expired during ledger read"}', "application/json"
+    return 200, json.dumps(payload).encode(), "application/json"
+
+
 async def serve(context: PreparedObservation, projection: ObserverProjection) -> None:
     await asyncio.to_thread(validate_entry, context, projection)
     observer = UnitObserver(context.expected, context.challenge)
 
     async def observe(body: bytes) -> tuple[int, bytes, str]:
         return await observe_response(context, projection, observer, body)
+
+    async def ledger(body: bytes) -> tuple[int, bytes, str]:
+        return await ledger_response(context, body)
 
     secret = projection.cluster_secret.get_secret_value()
     bind_host = "0.0.0.0" if secret else "127.0.0.1"  # noqa: S104 — guarded below
@@ -202,7 +227,10 @@ async def serve(context: PreparedObservation, projection: ObserverProjection) ->
             503,
             json.dumps({"mode": "bootstrap_observation", "full_ready": False}).encode(),
         ),
-        extra_routes={("POST", "/ops/bootstrap-observation"): observe},
+        extra_routes={
+            ("POST", "/ops/bootstrap-observation"): observe,
+            ("POST", "/ops/bootstrap-hop-ledger"): ledger,
+        },
     )
     async with server:
         await server.serve_forever()

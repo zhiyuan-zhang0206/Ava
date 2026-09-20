@@ -178,6 +178,7 @@ def test_journal_round_trips_the_strict_phase_tuple_as_json(
     recovery = tmp_path / "recovery.json"
     for path in (request, receipt, candidate, recovery):
         path.write_text("{}")
+    launcher = "e" * 64
     plan = SimpleNamespace(
         request_path=request,
         request=SimpleNamespace(
@@ -185,6 +186,13 @@ def test_journal_round_trips_the_strict_phase_tuple_as_json(
             candidate_context=str(candidate),
             recovery_context=str(recovery),
             normal_release_path=str(tmp_path / "normal.json"),
+        ),
+        candidate=SimpleNamespace(
+            expected=SimpleNamespace(
+                launchers=(
+                    ExpectedLauncher(kind="crontab", name=launcher, definition_digest=launcher),
+                )
+            )
         ),
         validation_seconds=0.0,
     )
@@ -201,13 +209,58 @@ def test_journal_round_trips_the_strict_phase_tuple_as_json(
     monkeypatch.setattr(bootstrap.updater_handoff, "write_bootstrap_recovery", write)
 
     bootstrap._journal(cast("bootstrap.PreparedBootstrapHop", plan), "g", "prepared", b"")
-    bootstrap._journal(cast("bootstrap.PreparedBootstrapHop", plan), "g", "cron_quiesced", b"")
-
     assert envelope is not None
     journal = cast("dict[str, object]", envelope["journal"])
+    assert journal["launcher_terminals"] == []
+
+    bootstrap._journal(cast("bootstrap.PreparedBootstrapHop", plan), "g", "cron_quiesced", b"")
+    journal = cast("dict[str, object]", envelope["journal"])
+    assert journal["launcher_terminals"] == [
+        {"label": launcher, "kind": "removed", "new_digest": None}
+    ]
+
+    bootstrap._journal(cast("bootstrap.PreparedBootstrapHop", plan), "g", "candidate_started", b"")
+    journal = cast("dict[str, object]", envelope["journal"])
+    assert journal["launcher_terminals"] == [
+        {"label": launcher, "kind": "removed", "new_digest": None}
+    ]
+
     assert journal["normal_release_planned"] is True
     phases = cast("list[dict[str, object]]", journal["phases"])
-    assert [phase["stage"] for phase in phases] == ["prepared", "cron_quiesced"]
+    assert [phase["stage"] for phase in phases] == [
+        "prepared",
+        "cron_quiesced",
+        "candidate_started",
+    ]
+
+
+def test_journal_launcher_terminals_are_optional_and_validated() -> None:
+    phase = bootstrap.BootstrapPhase(
+        stage="prepared", observed_at=datetime.now(UTC), monotonic_s=1.0, pid=1, elapsed_s=None
+    )
+    base = {
+        "request": "/unit/run/request",
+        "request_digest": "a" * 64,
+        "inventory_digest": "b" * 64,
+        "candidate_context_digest": "c" * 64,
+        "recovery_context_digest": "d" * 64,
+        "stage": "prepared",
+        "cron": "",
+        "phases": (phase,),
+    }
+    legacy = bootstrap.BootstrapJournal.model_validate(base)
+    assert legacy.launcher_terminals == ()
+
+    carried = bootstrap.BootstrapJournal.model_validate(
+        {**base, "launcher_terminals": ({"label": "e" * 64, "kind": "removed"},)}
+    )
+    assert carried.launcher_terminals[0].label == "e" * 64
+    assert carried.launcher_terminals[0].new_digest is None
+
+    with pytest.raises(ValidationError):
+        bootstrap.BootstrapJournal.model_validate(
+            {**base, "launcher_terminals": ({"label": "e" * 64, "kind": "rebound"},)}
+        )
 
 
 def test_child_projection_preserves_transport_encryption() -> None:

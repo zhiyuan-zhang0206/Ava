@@ -70,9 +70,10 @@ observation window matching the operation. Unknown, missing, duplicated or
 drifted facts assemble nothing. Each closure unit is stamped with the full
 prepared-receipt digest the journal binds; the observer-tuple digest stays the
 facts attribution, and both classes are frozen into the observation digest. No
-production caller connects this layer yet: the collector side (network
-gathering and the platform final re-read after candidate readiness) and the hop
-channels remain future wiring; storage adoption stays the only authority.
+production caller is the channel-D collector (task #4129 I5): it re-derives
+each unit's closure from the served observer facts and hop ledger, gathers the
+fleet's collection and hands it to storage adoption -- the only authority --
+through the locked revalidation.
 
 The transaction order is deployment row lock, inventory table locks, agent
 ownership rows. Fresh database-clock checks occur after lock acquisition,

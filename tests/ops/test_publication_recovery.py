@@ -687,6 +687,29 @@ def test_pre_stop_abort_pins_an_unexpired_dead_holder(
     assert row == (None, "stable", None, None)
 
 
+def test_abandon_refuses_a_settled_row_shape(recovery_db: psycopg.Connection) -> None:
+    """The guarded write's row-shape clause has independent teeth (QA #3053 N2):
+    a settled row carrying a pending journal is not the abort's to clear, even
+    with the exact operation and lease pin."""
+    publication = _abandoned_rollout(recovery_db)
+    pending = publication.pending
+    assert pending is not None
+    recovery_db.execute("UPDATE deployment_state SET phase='stable' WHERE id=1")
+    recovery_db.commit()
+    before = _journal_snapshot(recovery_db)
+    observed = (pending.operation.holder, pending.operation.acquired_at)
+
+    with recovery_db.transaction():
+        cleared = _pr.abandon_pending_publication_lease(
+            recovery_db,
+            expected_operation=pending.operation.model_dump(mode="json"),
+            observed=observed,
+        )
+
+    assert cleared is False
+    assert _journal_snapshot(recovery_db) == before
+
+
 def test_pre_stop_abort_refuses_a_live_holder_process(
     recovery_db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:

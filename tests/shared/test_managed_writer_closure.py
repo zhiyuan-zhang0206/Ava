@@ -230,6 +230,22 @@ def test_pin06_window_refusals() -> None:
     )  # before operation acquisition
 
 
+def test_crontab_fallback_facts_refuse_the_fence() -> None:
+    """The native-read failure fallback (`LauncherObservation(kind=...)`) admits
+    nothing (i1 QA N1): a crontab-expected unit whose facts are the unknown
+    fallback refuses the fence and the unit closure."""
+    expected = _expected(
+        launchers=(ExpectedLauncher(kind="crontab", name=LABEL, definition_digest=DIGEST),)
+    )
+    fallback = LauncherObservation(kind="crontab")
+
+    assert not launcher_fenced(fallback, _removed_terminal())
+    assert (
+        _assemble(expected=expected, launchers=(fallback,), terminals=(_removed_terminal(),))
+        is None
+    )
+
+
 def test_pin07_unknown_facts_refuse() -> None:
     assert (
         _assemble(

@@ -3,7 +3,7 @@
 The hop phase starts every unit's restricted updater hop. The begin chain
 assembles one `HopUnitPlan` per unit -- its private projections, their
 content-named paths, and the retained candidate image whose interpreter runs
-the hop (`_managed_writer_dispatch.assemble_hop_plans`); this module fans the
+the hop (`_managed_writer_dispatch.assemble_phase_inputs`); this module fans the
 plan out to each unit's `cluster_bootstrap_hop` op and gates the phase on the
 full roster of acknowledgements. The op itself writes nothing: it starts the
 detached `ava-updater` session on the candidate image's `--bootstrap-hop`
@@ -19,8 +19,11 @@ instead, and `ops.cluster_rpc` is imported lazily inside the fan-out -- the
 The hop phase adds no resume semantics in this slice (frozen): `phase_b_hops`
 returns an empty `hosts_to_resume`, so a hop verdict never compensating-resumes
 hosts. After the hop gate the fallback is checked recovery (`ava cluster
-recover-pending`); waiting and the ledger-driven continuation arrive with task
-#4129 I5/I6.
+recover-pending`); the begin chain hands the closing section its
+`ManagedWriterPhaseInput` -- the hop plans above plus the collection phase's
+`CollectorInput` (task #4129 I5) -- so the hop wait and the ledger-driven
+collection reach this phase without this module importing the collector, whose
+chain is heavy and must stay behind method-local imports.
 """
 
 from __future__ import annotations
@@ -30,14 +33,16 @@ import json
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import PurePosixPath
+from uuid import UUID
 
 from cli.commands._update_recover import RolloutOutcome
 from ops.cluster_session import _UPDATER_SERVICE
 from ops.rpc_bootstrap_hop import BootstrapHopResult
 from ops.rpc_prepare_dispatch import ProjectionFile
 from shared.cluster.derive import session_name
-from shared.managed_writer_barrier import Digest
+from shared.managed_writer_barrier import Digest, RolloutIdentity
 
 
 @dataclass(frozen=True)
@@ -56,6 +61,56 @@ class HopUnitPlan:
     artifact_digest: Digest
     request_path: str
     projections: tuple[ProjectionFile, ...]
+
+
+@dataclass(frozen=True)
+class CollectorUnitInput:
+    """One unit's collection inputs: the exact bytes its closure must re-derive from.
+
+    `candidate_context` / `request` are the canonical bytes the begin dispatch
+    staged under their content names (the unit's restricted hop replays them,
+    and the ledger's digests bind the files it read); `recovery_context` is the
+    shipped restricted-A context's exact bytes. `prepared_receipt_digest` is the
+    sealed receipt digest the collection's adoption gate binds.
+    """
+
+    machine: str
+    home: str
+    ops_url: str | None
+    candidate_context: bytes
+    request: bytes
+    recovery_context: bytes
+    prepared_receipt_digest: Digest
+
+
+@dataclass(frozen=True)
+class CollectorInput:
+    """Everything the collection phase needs to gather one operation's closure.
+
+    `challenge` is the journal's single observation challenge (every unit echo
+    must match it); `valid_until` is the begin execution's sealed window V; the
+    units are in the sealed (machine, home) order, so an assembled collection
+    starts out sorted by construction.
+    """
+
+    operation: RolloutIdentity
+    challenge: UUID
+    valid_until: datetime
+    candidate_digest: Digest
+    units: tuple[CollectorUnitInput, ...]
+
+
+@dataclass(frozen=True)
+class ManagedWriterPhaseInput:
+    """The begin chain's full hand-off: the hop plans plus the collector input.
+
+    One container so the eagerly-loaded wiring / verdict positions carry the hop
+    phase and the collection phase as a single value; the collector module
+    itself stays behind method-local imports.
+    """
+
+    hop_plans: tuple[HopUnitPlan, ...]
+    collector: CollectorInput
 
 
 @dataclass(frozen=True)

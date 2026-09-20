@@ -10,6 +10,7 @@ from uuid import UUID
 from pydantic import AwareDatetime, Field, field_validator, model_validator
 
 from shared.managed_writer_barrier import Digest, EvidenceModel, RolloutIdentity
+from shared.managed_writer_closure import LauncherTerminal
 from shared.managed_writer_observation import ExpectedUnitWriters, ObservationChallenge
 from shared.managed_writer_publication import PublishedUnit, UnitActivationReadback
 
@@ -195,6 +196,11 @@ class BootstrapRecoveryJournal(EvidenceModel):
     stage: BootstrapRecoveryStage
     cron: str = Field(max_length=65536)
     phases: tuple[BootstrapRecoveryPhase, ...] = Field(min_length=1, max_length=64)
+    # The hop ledger's launcher facts: one terminal per prepared launcher,
+    # written once at ``cron_quiesced`` (the proven quiesce) and carried
+    # unchanged afterwards; empty before that write and in journals written
+    # before this field existed. The collector consumes these directly.
+    launcher_terminals: tuple[LauncherTerminal, ...] = ()
     normal_release: NormalReleaseRecoveryJournal | None = None
 
     @model_validator(mode="after")

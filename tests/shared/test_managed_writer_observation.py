@@ -334,3 +334,22 @@ def test_observe_launcher_passes_absent_through_and_unknowns_refuse(
 
     monkeypatch.setattr(observation, "observe_launchd", unreadable)
     assert observe_launcher(expected, unit, until) == LauncherObservation(kind="launchd")
+
+    # The crontab arm rides the same fallback: a pass-through absent fact, and
+    # the unknown kind default when the table cannot be read (i1 QA N1).
+    crontab = ExpectedLauncher(kind="crontab", name="bootstrap", definition_digest="d" * 64)
+    absent_crontab = LauncherObservation(
+        kind="crontab", definition="absent", loaded=None, enabled=False
+    )
+
+    def absent_crontab_read(*_args: object, **_kwargs: object) -> LauncherObservation:
+        return absent_crontab
+
+    monkeypatch.setattr(observation, "observe_crontab", absent_crontab_read)
+    assert observe_launcher(crontab, unit, until) == absent_crontab
+
+    def unreadable_crontab(*_args: object, **_kwargs: object) -> LauncherObservation:
+        raise NativeReadUnavailableError("crontab table unreadable")
+
+    monkeypatch.setattr(observation, "observe_crontab", unreadable_crontab)
+    assert observe_launcher(crontab, unit, until) == LauncherObservation(kind="crontab")
