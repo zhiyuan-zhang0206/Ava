@@ -64,7 +64,9 @@ def _render_ava_ops_dashboard(dest: Path, hashes_path: Path, key: str) -> None:
     if dest.exists() and dest.read_text(encoding="utf-8") == rendered:
         _record_rendered_hash(hashes_path, key, digest)
         return
-    warning = write_rendered_guarded(dest, rendered, hashes_path, key, writer=_atomic_write)
+    warning = write_rendered_guarded(
+        dest, rendered, hashes_path, key, surface="lgtm-dashboard", writer=_atomic_write
+    )
     if warning is not None:
         print(f"  ! lgtm native: {warning}", file=sys.stderr)
 
@@ -118,7 +120,12 @@ def _render_provisioning(repo: Path, native_dir: Path) -> None:
         rendered_relative.add(rel.as_posix())
         content = source.read_text(encoding="utf-8")
         warning = write_rendered_guarded(
-            dest_dir / rel, content, hashes_path, rel.as_posix(), writer=_atomic_write
+            dest_dir / rel,
+            content,
+            hashes_path,
+            rel.as_posix(),
+            surface="lgtm-provisioning",
+            writer=_atomic_write,
         )
         if warning is not None:
             print(f"  ! lgtm native: {warning}", file=sys.stderr)

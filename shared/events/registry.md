@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 29 | event stream |
-| telemetry (category=telemetry) | `events` | 204 | event stream |
+| telemetry (category=telemetry) | `events` | 205 | event stream |
 | log (category=log) | `events` | 13 | event stream |
 | file-only (destination=file) | file log | 1 | file only (not the stream) |
 | SSE live | Redis → frontend (not persisted) | 31 role | live projection |
@@ -96,7 +96,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `managed_writer_pre_stop_aborted` | the exact pre-stop abort cleared a never-effective pending publication and its lease | business | — | events |
 | `managed_writer_blocked` | managed-writer mode requested but refused entry: a readiness guard is missing or not True; the rollout ran the legacy flow | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 204)
+## 3. Telemetry events (category=telemetry, 205)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -251,6 +251,7 @@ consumers: see the comments at each emit point.
 | `exec_editable_install_poisoned` | poisoned editable install repaired before an exec child spawn | anomaly | — | — | events |
 | `source_tree_reset` | prod source checkout reset to the installed commit / cleaned of untracked files | anomaly | — | — | events |
 | `lgtm_dashboard_render_failed` | ava-ops dashboard render failed during converge; the previous provisioning file was kept | anomaly | — | — | events |
+| `converge_file_preserved` | converge kept a locally modified destination instead of overwriting — the current content no longer matches the recorded render; repeats every converge until resolved | anomaly | path, key, surface | — | events |
 | `label_generated` | label auto-generated | noise | — | — | events |
 | `label_generate_failed` | label generation failed | anomaly | — | — | events |
 | `label_generate_skipped` | label generation skipped | noise | — | — | events |

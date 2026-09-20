@@ -43,6 +43,7 @@ def materialize_cluster_extensions() -> None:
     up.
     """
     from shared import db, extension_materialize, paths
+    from shared.converge_preserve_report import report_converge_preserve
 
     try:
         # The pool opens eagerly and owns worker threads; close it here rather
@@ -60,6 +61,9 @@ def materialize_cluster_extensions() -> None:
         if names:
             print(f"    {kind}: {', '.join(names)}")
     for name in result.kept_local_edits:
+        report_converge_preserve(
+            path=str(paths.skills_dir() / name), key=name, surface="extensions"
+        )
         print(f"  ! extensions: kept local edits to {name} (not overwritten)", file=sys.stderr)
     for name in result.missing_blob:
         print(f"  ! extensions: {name} has no stored content — reinstall it", file=sys.stderr)

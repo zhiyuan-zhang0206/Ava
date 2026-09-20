@@ -475,6 +475,21 @@ class PluginLoadFailed(TypedDict):
     error: str
 
 
+class ConvergeFilePreserved(TypedDict):
+    """`converge_file_preserved` payload — shared/converge_preserve_report.py.
+
+    One row per converge-managed destination preserved because its current
+    content no longer matches the recorded render — someone hand-edited it
+    since the last write. The renderer warns and preserves (never overwrites);
+    this event makes the interception visible without reading converge output
+    (task #3871, after the LGTM dashboard evaded three consecutive rollouts).
+    """
+
+    path: str
+    key: str
+    surface: str
+
+
 class LogPayload(TypedDict):
     """`log` payload — bare-log fallback; `msg` rides every loguru-sourced row."""
 

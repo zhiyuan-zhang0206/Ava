@@ -4,7 +4,9 @@ Precedent: the web-sources converge protection (cli/commands/_converge_skills.py
 — a converge-managed copy whose destination hash no longer matches the recorded
 hash was hand-edited by the user, so converge warns and preserves it instead of
 overwriting. Used by the LGTM provisioning renderer and the otel-collector
-config renderer (task #1791, A3).
+config renderer (task #1791, A3). A preserve hit additionally reports one
+`converge_file_preserved` telemetry event through
+shared/converge_preserve_report.py (task #3871).
 """
 
 from __future__ import annotations
@@ -14,6 +16,8 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
+from shared.converge_preserve_report import report_converge_preserve
+
 
 def write_rendered_guarded(
     path: Path,
@@ -21,6 +25,7 @@ def write_rendered_guarded(
     hashes_path: Path,
     key: str,
     *,
+    surface: str,
     writer: Callable[[Path, str], None] | None = None,
 ) -> str | None:
     """Write converge-rendered ``content`` to ``path`` unless the file was
@@ -38,6 +43,11 @@ def write_rendered_guarded(
     owner-only write for secret-bearing configs); the default is a plain
     ``write_text``.
 
+    ``surface`` names the renderer (e.g. ``lgtm-dashboard``,
+    ``otel-collector``); a preserve hit reports it through
+    shared/converge_preserve_report.py as one ``converge_file_preserved``
+    telemetry event.
+
     Returns the warning string when the file was preserved, else None.
     """
     recorded: dict[str, str] = {}
@@ -46,6 +56,7 @@ def write_rendered_guarded(
     if path.exists() and key in recorded:
         current = hashlib.sha256(path.read_bytes()).hexdigest()
         if current != recorded[key]:
+            report_converge_preserve(path=str(path), key=key, surface=surface)
             return (
                 f"{path} was modified locally; not overwritten "
                 f"(remove it and re-run converge to restore from the rendered output)"
