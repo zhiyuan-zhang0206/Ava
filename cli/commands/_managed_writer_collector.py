@@ -33,6 +33,8 @@ import httpx
 from pydantic import AwareDatetime
 
 from cli.commands._managed_writer_hop import CollectorInput, CollectorUnitInput
+from cli.commands._update_bootstrap import BootstrapHopRequest
+from ops.rpc_prepare_dispatch import prepared_hop_name
 from services.agent_ops.bootstrap import BootstrapRuntimeIdentity, PreparedObservation
 from shared import http_dial, machines
 from shared.cluster_auth import bearer_header
@@ -411,8 +413,23 @@ def accept_unit(  # noqa: PLR0915 — one ordered evidence re-derivation; every 
         raise CollectorRefusal("the hop journal does not parse as its schema") from exc
     if journal.stage != "candidate_ready":
         raise CollectorRefusal("the hop journal is not at candidate-ready")
-    if journal.normal_release_planned:
-        raise CollectorRefusal("the hop journal plans a normal release")
+    # The normal plan (task #4129 I6): the journal's one-bit claim must agree
+    # with the sealed dispatch in both directions, and the sealed request must
+    # name the sealed normal projection by its content name. The projection
+    # bytes ride unclaimed beyond that -- the continuation entry re-validates
+    # them locally before any effect.
+    if journal.normal_release_planned != (unit.normal_request is not None):
+        raise CollectorRefusal("the hop journal's normal plan does not match the sealed dispatch")
+    if unit.normal_request is not None:
+        try:
+            sealed_request = BootstrapHopRequest.model_validate_json(unit.request)
+        except ValueError as exc:
+            raise CollectorRefusal("the sealed hop request is not its wire shape") from exc
+        expected_normal_path = (
+            f"{unit.home}/run/{prepared_hop_name('normal-request', unit.normal_request)}"
+        )
+        if sealed_request.normal_release_path != expected_normal_path:
+            raise CollectorRefusal("the sealed request does not name its normal projection")
     if journal.request_digest != hashlib.sha256(unit.request).hexdigest():
         raise CollectorRefusal("the journal's hop request does not match the dispatched bytes")
     if journal.candidate_context_digest != hashlib.sha256(unit.candidate_context).hexdigest():

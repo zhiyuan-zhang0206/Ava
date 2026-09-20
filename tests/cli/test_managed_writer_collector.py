@@ -36,6 +36,7 @@ from cli.commands._managed_writer_collector import (
     wait_for_candidate_ready,
 )
 from cli.commands._managed_writer_hop import CollectorInput, CollectorUnitInput
+from ops.rpc_prepare_dispatch import prepared_hop_name
 from services.agent_ops.bootstrap import BootstrapRuntimeIdentity, PreparedObservation
 from shared.hop_ledger import envelope_bytes
 from shared.managed_writer_barrier import (
@@ -113,13 +114,14 @@ def _unit_input(
     *,
     ops_url: str | None = "http://runner-a:9",
     normal_request: bytes | None = None,
+    request: bytes | None = None,
 ) -> CollectorUnitInput:
     return CollectorUnitInput(
         machine=machine,
         home=home,
         ops_url=ops_url,
         candidate_context=_context_bytes(_expected(machine, home)),
-        request=b'{"hop":"request"}\n',
+        request=request if request is not None else b'{"hop":"request"}\n',
         recovery_context=b'{"recovery":"context"}\n',
         normal_request=normal_request,
         prepared_receipt_digest=RECEIPT_DIGEST,
@@ -744,7 +746,7 @@ def _rejections() -> list[_Rejection]:
         ),
         _rejection(
             world,
-            "plans a normal release",
+            "normal plan does not match the sealed dispatch",
             ledger=_ledger_dict(unit, _journal_dict(unit, planned=True)),
         ),
         _rejection(world, "hop request does not match", ledger=_ledger_dict(unit, bad_journal)),
@@ -772,6 +774,62 @@ def test_accept_refuses_every_binding_drift() -> None:
         world = _World(_unit_input(), _expected(), rejection.observation, rejection.ledger)
         with pytest.raises(CollectorRefusal, match=rejection.expected):
             _accept(world)
+
+
+NORMAL_BYTES = b'{"fixture":"normal-release"}\n'
+
+
+def _hop_request_bytes(normal_path: str | None) -> bytes:
+    body = json.dumps(
+        {
+            "candidate_context": "/ava-a/run/candidate.json",
+            "recovery_context": "/ava-a/run/recovery.json",
+            "inventory_receipt": "/ava-a/run/release-inventory.json",
+            "predecessor": {"pid": 111, "create_time": 1700000000.0},
+            "normal_release_path": normal_path,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return (body + "\n").encode()
+
+
+def _normal_pair_world(unit: CollectorUnitInput, *, planned: bool) -> _World:
+    expected = _expected()
+    return _World(
+        unit,
+        expected,
+        _observation_dict(expected),
+        _ledger_dict(unit, _journal_dict(unit, planned=planned)),
+    )
+
+
+def test_accept_checks_the_normal_plan_against_the_sealed_dispatch() -> None:
+    """I6: the journal's one-bit claim and the sealed bytes must agree, both ways."""
+    unit = _unit_input(normal_request=NORMAL_BYTES)
+    world = _normal_pair_world(unit, planned=False)
+
+    with pytest.raises(CollectorRefusal, match="normal plan does not match the sealed dispatch"):
+        _accept(world)
+
+
+def test_accept_refuses_a_request_that_does_not_name_its_normal_projection() -> None:
+    unit = _unit_input(normal_request=NORMAL_BYTES, request=_hop_request_bytes(None))
+    world = _normal_pair_world(unit, planned=True)
+
+    with pytest.raises(CollectorRefusal, match="does not name its normal projection"):
+        _accept(world)
+
+
+def test_accept_takes_the_sealed_normal_pairing() -> None:
+    name = prepared_hop_name("normal-request", NORMAL_BYTES)
+    unit = _unit_input(
+        normal_request=NORMAL_BYTES, request=_hop_request_bytes(f"/ava-a/run/{name}")
+    )
+    world = _normal_pair_world(unit, planned=True)
+
+    closure = _accept(world)
+    assert closure.unit.home == "/ava-a"
 
 
 def test_accept_runs_the_local_identity_checks_for_the_coordinators_unit(
