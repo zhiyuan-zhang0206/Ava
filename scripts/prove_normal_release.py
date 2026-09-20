@@ -194,6 +194,29 @@ def scoped_db_url(namespace: str) -> str:
     return make_conninfo(os.environ["AVA_DB_URL"], options=f"-csearch_path={namespace}")
 
 
+def scoped_unit_env(original: bytes, namespace: str) -> bytes:
+    """Rewrite the unit .env's AVA_DB_URL to this proof's scoped URL.
+
+    The checked-chain drives load shared.config, and the boot env-authority
+    pass makes the unit's .env the authoritative source for AVA_DB_URL: an
+    ambient scoped override is clobbered back to the unit's raw URL, so every
+    drive loses this proof's search_path namespace and dies on its first table
+    lookup ("relation deployment_state does not exist"). The file IS the
+    unit's database projection, so for this proof's lifetime it carries the
+    scoped URL; main() restores the original bytes in its finally. The quoted
+    keyword-value conninfo survives the dotenv parse byte-for-byte, and
+    psycopg parses it unchanged.
+    """
+    lines = original.decode("utf-8").splitlines()
+    for index, line in enumerate(lines):
+        if line.startswith("AVA_DB_URL="):
+            lines[index] = f'AVA_DB_URL="{scoped_db_url(namespace)}"'
+            break
+    else:
+        raise AssertionError("unit .env does not declare AVA_DB_URL")
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
 def case_env(home: Path, namespace: str, ops_port: int) -> dict[str, str]:
     return {
         "PATH": "/usr/bin:/bin",
@@ -1242,10 +1265,15 @@ CASES: tuple[dict[str, Any], ...] = (
         "case": "inj-2b",
         "mode": "inj-2b",
         "services": 1,
+        # Crash lands at the selector write after real readiness: release
+        # verification plus roster readiness cost ~1-2 min per case on CI
+        # runners, so the budget must outlast pass1 while still expiring
+        # before settle (the harness sleeps out the remainder). 20s refused
+        # the observer itself on its exhausted budget (round 2).
+        "challenge": 300,
         "writes1": ["waiting"],
         "writes2": [],
         "stage1": "waiting",
-        "challenge": 20,
         "settle": "refuse",
         "settle_refuse": True,
     },
@@ -1418,6 +1446,9 @@ def main() -> None:
     require(not original_cron.strip(), "proof refuses to replace another CI job")
     install_cron(f"@reboot AVA_HOME={home} /bin/true # ava-normal-release-proof\n".encode())
     namespace = "normal_" + uuid4().hex
+    unit_env_path = home / ".env"
+    require(unit_env_path.exists(), "unit .env is missing; runtime-prepare must have written it")
+    unit_env_original = unit_env_path.read_bytes()
     conn = psycopg.connect(
         make_conninfo(os.environ["AVA_DB_URL"], options=f"-csearch_path={namespace}"),
         autocommit=True,
@@ -1425,6 +1456,10 @@ def main() -> None:
     violations: list[str] = []
     summary: dict[str, Any] = {}
     try:
+        # Scoped for the whole run: config-loading entries (the drives) let the
+        # unit's .env win over ambient cluster-scope values (env authority), so
+        # the file must carry this proof's namespace; restored in the finally.
+        unit_env_path.write_bytes(scoped_unit_env(unit_env_original, namespace))
         create_namespace(conn, namespace, home)
         for case in CASES:
             name = str(case["case"])
@@ -1459,6 +1494,7 @@ def main() -> None:
             raise AssertionError("normal release proof violations: " + "; ".join(violations))
     finally:
         install_cron(original_cron)
+        unit_env_path.write_bytes(unit_env_original)
         conn.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(namespace)))
         conn.close()
 
