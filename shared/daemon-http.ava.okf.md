@@ -48,7 +48,10 @@ The current observer returns `closure: unknown` unconditionally: native job
 declaration reads do not establish complete launcher closure, and actual updater
 replacement and complete inventory production are not yet connected. An empty
 test inventory is not evidence of complete unit or fleet closure. Normal ops
-routes are not registered on the test observation socket.
+routes are not registered on the test observation socket; a restricted `/ops`
+admits only two effect deliveries (`cluster_bootstrap_hop`,
+`cluster_normal_continue`), each executed by a one-shot child process, and
+refuses every other kind without dispatch.
 
 ## Native launcher observation
 
