@@ -574,8 +574,9 @@ export const api = {
   },
 
   // --- ops monitor (Insights Ops tab) ---
-  // Time-bucketed ops series over agent_events — SSE/event-log backlog, LLM
-  // latency + TPS, process restart counts — one round trip per window.
+  // Time-bucketed ops series from the LGTM stack (Loki + Prometheus) —
+  // SSE/event-log backlog, LLM latency + TPS, process restart counts — one
+  // round trip per window.
   // Polled at 60s while the Ops section is visible (useSectionVisible).
 
   // --- alerts (the system→human alert store, Task #1224) ---

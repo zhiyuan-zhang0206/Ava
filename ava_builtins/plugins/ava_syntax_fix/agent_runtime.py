@@ -74,7 +74,7 @@ def _emit_syntax_fix_event(
       stored alongside `before` (which is the deterministic-fixed source the
       LLM actually saw).
 
-    Payload shape (loguru extra -> agent_events.payload jsonb):
+    Payload shape (loguru extra -> the event's `attributes`):
     {fix_type, fixes, before, after?, msg}. Volume is linear in the code
     block size (KB-scale), which is the design point: long retention, no
     information loss.

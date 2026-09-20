@@ -136,7 +136,7 @@ __all__ = [
 # own batch processors ALSO have a bounded queue (2048) and their emit() blocks
 # when full — so this barrier must be no larger than the SDK's, and it is what
 # turns "OTLP exporter thread stuck on a hung endpoint" into counted shedding
-# instead of a stalled PG write.
+# instead of a stalled drain thread.
 _QUEUE_MAXSIZE = 2048
 
 # A failed collector probe costs up to 1.5 seconds. Retry on the drain thread

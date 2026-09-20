@@ -83,15 +83,15 @@ def test_normal_release_rejects_source_flags(flag: str) -> None:
 
 
 def test_main_survives_log_init_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """A DB-unreachable postgres sink (real on the recovery path) must not
-    abort the updater — stderr/file sinks attach before the postgres sink."""
+    """A failing sink setup (the event pipeline opens during init) must not
+    abort the updater — stderr/file sinks attach before the events pipeline."""
     from shared import log
 
     attempted: list[bool] = []
 
     def boom(**kw: object) -> None:
         attempted.append(True)
-        raise RuntimeError("db unreachable")
+        raise RuntimeError("pipeline init failed")
 
     monkeypatch.setattr(log, "init_cli_process", boom)
     monkeypatch.setattr(updater, "_repo_root", lambda: tmp_path)
