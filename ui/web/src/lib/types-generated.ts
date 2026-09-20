@@ -704,12 +704,12 @@ export interface paths {
          *     eval-isolated caller is denied before this result can become a replay leak.
          *
          *     Returns ``text=None`` when the agent has no AI message with text
-         *     content yet (no checkpoint / no AIMessage / content is not a string).
+         *     content yet.
          *
-         *     Reads from ``agents_meta.last_message_text`` first — a column that
-         *     survives compact (which replaces the entire checkpoint). Falls back
-         *     to scanning the checkpoint when the column is NULL (backward compat
-         *     with agents that have not yet written to it).
+         *     Reads ``agents_meta.last_message_text`` — a column the agent process
+         *     writes after each LLM turn that produced text and that survives compact
+         *     (which replaces the entire checkpoint), so this read never touches the
+         *     checkpoint.
          */
         get: operations["get_last_message_api_agents__agent_id__last_message_get"];
         put?: never;
