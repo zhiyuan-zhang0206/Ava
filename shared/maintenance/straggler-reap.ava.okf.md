@@ -52,3 +52,16 @@ Rows under an external takeover (`agent_impersonations` requested / accepted /
 live-active) are never reaped; W is decoupled from `exec_timeout_seconds`; and
 a reaped turn blocked where asyncio cannot interrupt it is bounded by the
 wave's own stop leg — the drain never waits on it.
+
+One low-probability boundary is accepted rather than guarded (task #4027/B1):
+a stranded mark whose row first goes cold can be consumed by the cold
+normalization itself — with the host absent, a `host_absent` prepare runs and
+the row's checkpoint happens to meet the persisted cold-END gates of
+`shared.maintenance_cold.normalize_retired_intent(restarting=True)`, whose
+UPDATE moves the row to `idling`. The settle selector (which requires
+`restarting`) then no longer matches and the un-applied maintenance restart
+remains; that residue settles through the ordinary lifecycle path — at worst
+one late restart, never a silent loss. Accepted at the 2026-09-19 review; the
+clear-exit enumeration guard
+(`tests/ops/test_straggler_reap.py::test_restarting_mark_exits_are_enumerated`)
+already names `shared.maintenance_cold.py` as the second exit.
