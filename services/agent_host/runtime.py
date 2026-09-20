@@ -205,11 +205,21 @@ class TurnOutcome:
     returned, so the checkpoint is durable and the settle boundary may
     reconcile the abort's claimed inbounds. Unclassified exceptions end
     `crashed` without it — their checkpoint was never settled.
+
+    `truncated` marks the update straggler-reap end (task #4016): the drain
+    CAS-marked the row 'restarting' mid-turn, so the turn's fail-closed guard
+    read refused and `services.agent_host.truncation` classified that mark as
+    the deliberate truncation it is. `crashed` stays False — no corpse marker
+    is stamped — and the settle boundary skips the abort reconcile: the
+    successor boundary that settles the reap mark owns the claimed rows.
     """
 
-    __slots__ = ("aborted", "crashed", "exited")
+    __slots__ = ("aborted", "crashed", "exited", "truncated")
 
-    def __init__(self, *, exited: bool, crashed: bool, aborted: bool = False) -> None:
+    def __init__(
+        self, *, exited: bool, crashed: bool, aborted: bool = False, truncated: bool = False
+    ) -> None:
         self.exited = exited
         self.crashed = crashed
         self.aborted = aborted
+        self.truncated = truncated

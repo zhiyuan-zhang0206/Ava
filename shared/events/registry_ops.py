@@ -69,6 +69,24 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         payload=UpdateStragglerReapSettled,
         tier="anomaly",
     ),
+    # The reap's quiet close (tasks #4164/#4156): the truncated turn/wake stops
+    # through the classification instead of the crash path — the mark is a
+    # deliberate truncation, not an ownership loss.
+    "host_turn_truncated": _telemetry(
+        "host_turn_truncated",
+        "the update drain's straggler reap ended this hosted turn on purpose — the "
+        "row was CAS-marked 'restarting' mid-turn and the turn's fail-closed guard "
+        "read refused; no corpse marker, no error event, no failure receipt. The "
+        "successor boundary settles the mark and re-delivers the claimed work",
+        tier="observation",
+    ),
+    "host_held_wake_truncated": _telemetry(
+        "host_held_wake_truncated",
+        "a held-controls wake stopped quietly because the update straggler reap had "
+        "marked its row 'restarting' — the successor boundary owns the row and its "
+        "un-applied restart, so the wake had nothing left to do; not a failure",
+        tier="observation",
+    ),
     # managed-writer mode (task #4121): the enable-point decision's refusal
     # marker. `blocked` emits once per blocked decision (the rollout still runs
     # the legacy flow). Mode transitions are not event-carried -- they are
