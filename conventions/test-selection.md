@@ -37,6 +37,16 @@ SELECTED replaces the backend pytest fan-out, and only in enforce mode.
 | 9 | Candidate estimated time exceeds 80% of the full backend estimate | FULL (subset-too-close) |
 | 10 | None of the above | SELECTED |
 
+Tree-scan tests join the candidate subset before rules 8-10 run: every
+`test_lint_*.py` under `tests/` (any depth, non-e2e) and the repo-level
+CI/governance checks pinned in `scripts/test_selector.py`
+(`_TREE_SCAN_TESTS`). The direct-import map cannot reach a repo-wide scan
+test from a changed source file, and a green subset must not miss a
+tree-wide gate (task #4183: PR #3020's subset passed while the full
+population was red on tests/test_lint_event_kinds.py). Name a new scan test
+`test_lint_*.py` to join automatically, or extend `_TREE_SCAN_TESTS`;
+tests/scripts/test_test_selector.py guards completeness and staleness.
+
 The documentation predicate reuses shared.repo_change.is_doc_path. Files under
 scripts/, schedules/, and tests/ are deliberately not treated as documentation
 by the selector even when their name ends in Markdown: operational schedule and

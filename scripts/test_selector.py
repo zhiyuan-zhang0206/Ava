@@ -47,6 +47,26 @@ _QUEUE_PREFIXES = ("trunk-merge/", "trunk-temp/")
 _NON_DOCUMENTATION_PREFIXES = ("scripts/", "schedules/", "tests/")
 _TEST_FILE_PATTERN = re.compile(r"(?:test_.*|.*_test)\.py$")
 
+# Tree-scan tests: their subject is the checked-out repository (the lint
+# family and the repo-level CI/governance checks), so a changed source file
+# can never reach them through the direct-import reverse map. They are pinned
+# into every SELECTED candidate set — a green subset must not miss a tree-wide
+# gate (task #4183: PR #3020's subset passed while the full population was red
+# on tests/test_lint_event_kinds.py).
+_TREE_SCAN_FILE_PATTERN = re.compile(r"test_lint_.*\.py$")
+_TREE_SCAN_TESTS = frozenset(
+    {
+        "tests/test_ci_job_rerun.py",
+        "tests/test_ci_rerun_workflow.py",
+        "tests/test_ci_utils.py",
+        "tests/test_db_check_enum_sync.py",
+        "tests/test_pool_keepalives.py",
+        "tests/test_qa_approved_gate_workflow.py",
+        "tests/test_qa_gate.py",
+        "tests/test_env_guard_canary.py",
+    }
+)
+
 
 @dataclass(frozen=True)
 class SelectionResult:
@@ -101,6 +121,22 @@ def collectable_test_paths(repo_root: Path) -> set[str]:
         path.relative_to(repo_root).as_posix()
         for path in tests_root.rglob("*.py")
         if _is_collectable_test_path(path.relative_to(repo_root).as_posix())
+    }
+
+
+def tree_scan_tests(repo_root: Path) -> set[str]:
+    """Repository-wide scan tests that every SELECTED subset must include.
+
+    Membership is the ``test_lint_*.py`` family (by name, so a new lint test
+    joins automatically) plus the explicit repo-level CI/governance checks in
+    ``_TREE_SCAN_TESTS``; both resolve against the collectable universe.
+    """
+    collectable = collectable_test_paths(repo_root)
+    return {
+        path
+        for path in collectable
+        if _TREE_SCAN_FILE_PATTERN.fullmatch(Path(path).name) is not None
+        or path in _TREE_SCAN_TESTS
     }
 
 
@@ -184,6 +220,9 @@ def select_tests(
     selected = {path for path in changed if path in collectable}
     for source_path in changed:
         selected.update(reverse_map.get(source_path, set()))
+    # Tree-scan tests are unreachable through the direct map; pin them so a
+    # SELECTED run keeps the repo-wide gates (task #4183).
+    selected.update(tree_scan_tests(repo_root))
     tests = tuple(sorted(selected & collectable))
     estimate = _estimate_seconds(tests, durations, reference_paths=collectable)
     if not tests:
