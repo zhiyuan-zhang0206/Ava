@@ -61,8 +61,9 @@ async def close_hosted_turn(
     if outcome.aborted:
         await reconcile_inbounds_after_abort(pool, checkpointer, incarnation)
     elif not outcome.crashed and not outcome.truncated:
-        # A truncated turn (the update straggler reap) skips the pass too: the
-        # successor boundary that settles the mark owns its claimed rows.
+        # A truncated turn (the update straggler reap, or an applied force
+        # terminate of its incarnation) skips the pass too: the successor
+        # boundary that settles the mark owns its claimed rows.
         await reconcile_inbounds_after_turn(pool, checkpointer, incarnation)
     if outcome.crashed:
         await prompt_reap_after_recrash(control_pool, incarnation, settlement)

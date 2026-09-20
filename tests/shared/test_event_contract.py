@@ -204,9 +204,12 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # wake quietly instead of as an unclassified crash) raises the current total
     # to 201; the closure-reopen marker (task #4165: agent_reopened — a closed
     # agent's never-auto-resurrect marker cleared by an explicit resurrect)
-    # raises the current total to 202.
+    # raises the current total to 202; the commanded force-terminate close
+    # (task #4180: host_turn_force_terminated + host_held_wake_force_terminated —
+    # an applied force terminate of the turn's own incarnation ending it quietly
+    # instead of as an unclassified crash) raises the current total to 204.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 202
+    assert len(_TELEMETRY_KINDS) == 204
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:
