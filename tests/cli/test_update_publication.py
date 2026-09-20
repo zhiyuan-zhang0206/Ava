@@ -784,10 +784,13 @@ def test_the_seat_has_no_unnamed_production_callsite() -> None:
       module the declaration proves -- without importing or calling the seats;
     - the coordinator wiring (`cli/commands/_managed_writer_wiring.py`) imports
       the P5 commit seat from its post-Phase-B step and calls it under the
-      enable point's recorded `active` decision (E2-a).
+      enable point's recorded `active` decision (E2-a); its begin (E2-b) and
+      collect+adopt (E2-c) positions refuse under `active` before reaching any
+      seat import, so this stays the one seat-importing production module.
 
-    The declaration stays False until the last wiring slice flips it; each
-    remaining slice (E2-b begin, E2-c collect+adopt) extends this pin in turn.
+    The declaration stays False until the last wiring slice flips it; the
+    begin/collect refusals persist until the dispatch program (task #4129)
+    connects their channels.
     """
     root = Path(__file__).resolve().parents[2]
     allowed = {

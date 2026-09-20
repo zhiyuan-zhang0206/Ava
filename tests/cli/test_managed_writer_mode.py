@@ -5,7 +5,8 @@ semantics (absent / not-exactly-True), the read-once cache, the recorded
 evidence (rollout log line + telemetry field + `managed_writer_blocked` event),
 the read point inside the orchestration (a blocked decision still runs the
 legacy flow), the `ava cluster status` bit, the single-read static pin, and the
-P5 commit step the orchestration consumes from the decision (task #4128, E2-a).
+begin / collect+adopt / commit steps the orchestration consumes from the
+decision (task #4128 E2-b/E2-c/E2-a).
 """
 
 from __future__ import annotations
@@ -394,6 +395,112 @@ def test_restart_only_rollout_skips_the_begin_position(monkeypatch: pytest.Monke
     assert stopped == ["stop"]
 
 
+# ── the P2 collect wiring (task #4128, E2-c) ─────────────────────────────────
+
+
+@pytest.mark.parametrize("state", ["off", "blocked", "none"])
+def test_collect_step_skips_without_an_active_decision(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], state: str
+) -> None:
+    from cli.commands import _managed_writer_wiring as wiring
+
+    _capture_events(monkeypatch)
+    if state == "off":
+        _disable(monkeypatch)
+        mode_mod.decide_managed_writer_mode()
+    elif state == "blocked":
+        _enable(monkeypatch)
+        _clear_guard(monkeypatch, _CHECKED)
+        _clear_guard(monkeypatch, _WIRING)
+        mode_mod.decide_managed_writer_mode()
+
+    assert wiring._collect_managed_writer_publication() == 0
+    captured = capsys.readouterr()
+    assert "managed-writer collect" not in captured.out
+    if state == "none":
+        # A call outside the rollout's read point is beaconed, never silent.
+        assert "no mode decision recorded" in captured.err
+    else:
+        assert captured.err == ""
+
+
+def test_collect_step_refuses_under_active_until_the_channel_lands(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from cli.commands import _managed_writer_wiring as wiring
+
+    _ready_guards(monkeypatch)
+    mode_mod.decide_managed_writer_mode()
+
+    assert wiring._collect_managed_writer_publication() == 1
+    err = capsys.readouterr().err
+    assert "managed-writer collect refused" in err
+    assert "task #4129" in err
+    assert "disable the managed-writer switch" in err
+
+
+def test_active_rollout_refuses_at_the_collect_position(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail-closed: a completed rollout must not publish an uncollected set."""
+    from cli.commands import update as _up
+
+    _ready_guards(monkeypatch)
+    _stub_orchestration_to_phase_b(monkeypatch, stub_collect=False)
+    commit_calls: list[None] = []
+    monkeypatch.setattr(
+        _up, "_commit_managed_writer_publication", lambda: commit_calls.append(None) or 0
+    )  # pyright: ignore[reportUnknownArgumentType]
+    recorded: dict[str, object] = {}
+
+    def _capture(_hosts: object, _fan_out: object, _timeout: object, **kwargs: object) -> None:
+        recorded.update(kwargs)
+
+    monkeypatch.setattr(_up, "finalize_rollout", _capture)
+
+    assert _run_inner() == 1
+    assert commit_calls == [], "the commit must not run when the collection refused"
+    assert recorded["outcome"] is _up.RolloutOutcome.INCOMPLETE
+    assert "the managed-writer collection refused" in str(recorded["failing_step"])
+    assert recorded["publication_refused"] is True
+
+
+def test_restart_only_rollout_skips_the_collect_position(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A bounce publishes nothing: the collect is legacy-skipped (R5 interim)."""
+    from cli.commands import update as _up
+
+    _ready_guards(monkeypatch)
+    _stub_orchestration_to_phase_b(monkeypatch)
+    calls: list[None] = []
+    monkeypatch.setattr(_up, "_collect_managed_writer_publication", lambda: calls.append(None) or 0)  # pyright: ignore[reportUnknownArgumentType]
+    commit_calls: list[None] = []
+    monkeypatch.setattr(
+        _up, "_commit_managed_writer_publication", lambda: commit_calls.append(None) or 0
+    )  # pyright: ignore[reportUnknownArgumentType]
+
+    assert _run_inner(restart_only=True) == 0
+    assert calls == [] and commit_calls == []
+
+
+def test_collect_never_runs_on_a_non_clean_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
+    from cli.commands import update as _up
+
+    _ready_guards(monkeypatch)
+    _stub_orchestration_to_phase_b(monkeypatch)
+    monkeypatch.setattr(
+        _up,
+        "_phase_b_outcome",
+        lambda *_a, **_k: (1, _up.RolloutOutcome.INCOMPLETE, []),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    calls: list[None] = []
+    monkeypatch.setattr(_up, "_collect_managed_writer_publication", lambda: calls.append(None) or 0)  # pyright: ignore[reportUnknownArgumentType]
+    commit_calls: list[None] = []
+    monkeypatch.setattr(
+        _up, "_commit_managed_writer_publication", lambda: commit_calls.append(None) or 0
+    )  # pyright: ignore[reportUnknownArgumentType]
+
+    assert _run_inner() == 1
+    assert calls == [] and commit_calls == []
+
+
 # ── the P5 commit wiring (task #4128, E2-a) ──────────────────────────────────
 
 
@@ -508,16 +615,22 @@ def test_commit_step_refusal_names_checked_recovery(
     assert "ava cluster recover-pending" in err
 
 
-def _stub_orchestration_to_phase_b(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Extend `_stub_orchestration` to reach the post-Phase-B commit window."""
+def _stub_orchestration_to_phase_b(
+    monkeypatch: pytest.MonkeyPatch, *, stub_collect: bool = True
+) -> None:
+    """Extend `_stub_orchestration` to reach the post-Phase-B publication window."""
     from cli import commands as _cli
     from cli.commands import update as _up
 
     _stub_orchestration(monkeypatch)
-    # The commit window lies downstream of the E2-b begin position: an active
-    # rollout refuses there until the dispatch channel lands, so these tests
-    # stub the begin -- a different position than the one under test.
+    # The publication window lies downstream of two refusing positions: an
+    # active rollout refuses at the E2-b begin and at the E2-c collect until
+    # their dispatch channels land, so these tests stub both -- the positions
+    # under test are elsewhere. `stub_collect=False` leaves the real collect
+    # step in place for its own refusal test.
     monkeypatch.setattr(_up, "_begin_managed_writer_publication", lambda: 0)  # pyright: ignore[reportUnknownArgumentType]
+    if stub_collect:
+        monkeypatch.setattr(_up, "_collect_managed_writer_publication", lambda: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cli, "_resolve_fanout_targets", lambda **_kw: [("host-b", None)])  # pyright: ignore[reportUnknownArgumentType]
     # The stale-marker reconcile dials the live roster; only the commit step
     # under test may borrow the fake transaction.
