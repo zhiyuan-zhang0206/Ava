@@ -51,6 +51,7 @@ def _bootstrap_journal(stage: str, *, normal_release_planned: bool = False) -> d
                 "elapsed_s": None,
             }
         ],
+        "launcher_terminals": [],
         "normal_release": None,
     }
 
@@ -348,6 +349,44 @@ def test_bootstrap_writer_cannot_discard_retained_normal_recovery() -> None:
             "bootstrap", _bootstrap_journal("candidate_ready", normal_release_planned=True)
         )
     assert handoff.bootstrap_state_path().read_bytes() == before
+
+
+def test_legacy_bootstrap_journal_without_terminals_still_reads() -> None:
+    _retained_bootstrap("prepared")
+    path = handoff.bootstrap_state_path()
+    envelope = json.loads(path.read_text())
+    del envelope["journal"]["launcher_terminals"]
+    path.write_text(json.dumps(envelope))
+
+    raw = handoff.read_bootstrap_recovery()
+    assert raw is not None
+    assert cast("dict[str, object]", raw["journal"])["launcher_terminals"] == []
+
+
+def test_bootstrap_writer_carries_launcher_terminals() -> None:
+    _retained_bootstrap("prepared")
+    quiesced = _bootstrap_journal("cron_quiesced")
+    prepared_phases = _bootstrap_journal("prepared")["phases"]
+    assert isinstance(prepared_phases, list)
+    quiesced["phases"] = [
+        *prepared_phases,
+        {
+            "stage": "cron_quiesced",
+            "observed_at": dt.datetime.now(dt.UTC).isoformat(),
+            "monotonic_s": 1.0,
+            "pid": os.getpid(),
+            "elapsed_s": None,
+        },
+    ]
+    quiesced["launcher_terminals"] = [{"label": "e" * 64, "kind": "removed"}]
+
+    handoff.write_bootstrap_recovery("bootstrap", quiesced)
+
+    retained = handoff.read_bootstrap_recovery()
+    assert retained is not None
+    assert cast("dict[str, object]", retained["journal"])["launcher_terminals"] == [
+        {"label": "e" * 64, "kind": "removed", "new_digest": None}
+    ]
 
 
 def test_bootstrap_writer_preserves_plan_identity_and_appends_phase() -> None:

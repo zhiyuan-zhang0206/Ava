@@ -40,6 +40,7 @@ from services.agent_ops.bootstrap import (
 from shared import updater_handoff
 from shared.log import logger
 from shared.managed_writer_barrier import EvidenceModel
+from shared.managed_writer_closure import LauncherTerminal
 from shared.managed_writer_observation import (
     ExpectedProcess,
     ExpectedSession,
@@ -366,6 +367,29 @@ def _cron_tables(plan: PreparedBootstrapHop) -> tuple[bytes, bytes]:
     return original, b"".join(retained)
 
 
+def _launcher_terminals(
+    plan: PreparedBootstrapHop,
+    stage: BootstrapRecoveryStage,
+    earlier: BootstrapJournal | None,
+) -> tuple[LauncherTerminal, ...]:
+    """The hop ledger's launcher fence facts for one journal write.
+
+    ``cron_quiesced`` is written only after ``_replace_cron`` read the exact
+    quiesced table back, so that write is where every inventoried launcher
+    becomes journaled as positively removed; the earlier ``prepared`` write
+    carries nothing, and every later write carries the previous journal's
+    terminals unchanged.
+    """
+    if stage == "prepared":
+        return ()
+    if stage == "cron_quiesced":
+        return tuple(
+            LauncherTerminal(label=item.name, kind="removed")
+            for item in plan.candidate.expected.launchers
+        )
+    return earlier.launcher_terminals if earlier is not None else ()
+
+
 def _journal(
     plan: PreparedBootstrapHop,
     generation: str,
@@ -374,11 +398,12 @@ def _journal(
 ) -> None:
     """Replace one bounded versioned recovery envelope under exact ownership."""
     recovery = updater_handoff.read_bootstrap_recovery()
-    previous = (
-        BootstrapJournal.model_validate_json(json.dumps(recovery["journal"])).phases
+    earlier = (
+        BootstrapJournal.model_validate_json(json.dumps(recovery["journal"]))
         if recovery is not None
-        else ()
+        else None
     )
+    previous = earlier.phases if earlier is not None else ()
     now = time.monotonic()
     elapsed = (
         now - previous[-1].monotonic_s if previous and previous[-1].pid == os.getpid() else None
@@ -408,6 +433,7 @@ def _journal(
             # Only the validated secret-free restricted-A command shape reaches here.
             "cron": cron.decode("utf-8"),
             "phases": (*previous, phase),
+            "launcher_terminals": _launcher_terminals(plan, stage, earlier),
         }
     )
     updater_handoff.write_bootstrap_recovery(generation, journal.model_dump(mode="json"))
