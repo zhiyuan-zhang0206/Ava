@@ -16,10 +16,10 @@ tags:
 
 ## Core API (core SDK: page serving)
 
-Each agent has a default port reserved for itself (derived from agent id), used if `port` is omitted; only one active page is allowed at a time (opening a new one auto-closes the old).
+Only one active page is allowed at a time (opening a new one auto-closes the old). Ports are explicit: `serve`/`show` require `port` (1024-65535) — there is no per-agent reserved or default port — and the platform refuses a port another live page already holds. The conflict check runs before the auto-close, so a refused registration leaves the agent's current page untouched. `serve` additionally fails before anything is registered when the port is held by a process that is not a page server (the daemon never displaces a foreign occupant).
 
-- `serve(dir, name, port=None, title=None) → Page` — One-step: start directory HTTP server + register with UI, poll `/health` until listening. If `port` omitted, use default reserved port. A relative `dir` resolves against the agent's working directory (`ava.cwd`), consistent with the `ava.files` API.
-- `show(name, port=None, title=None) → Page` — Register an already running HTTP server (does not verify port occupation).
+- `serve(dir, name, port, title=None) → Page` — One-step: start directory HTTP server + register with UI, poll `/health` until listening. A relative `dir` resolves against the agent's working directory (`ava.cwd`), consistent with the `ava.files` API.
+- `show(name, port, title=None) → Page` — Register an already running HTTP server (does not probe whether anything is listening; the registry still refuses a port another live page holds).
 - `close(name)` — Deregister page and kill the server started by `serve()`.
 
 `name` must match `^[a-zA-Z0-9_-]+$` (1-64 chars). Returned `Page`: id, name, port, title, url.

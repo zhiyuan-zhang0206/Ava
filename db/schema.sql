@@ -869,6 +869,15 @@ CREATE UNIQUE INDEX agent_pages_unique_open
     ON agent_pages (agent_id, name)
     WHERE closed_at IS NULL;
 
+-- One live page per (host, port): a page server binds its row's socket
+-- exclusively. Registration refuses a port another live page holds
+-- (ops.pages.assert_port_free) and this index enforces the same rule against
+-- concurrent registrations. Expired rows are excluded — they no longer serve
+-- and must not block a fresh registration.
+CREATE UNIQUE INDEX agent_pages_unique_live_port
+    ON agent_pages (host, port)
+    WHERE closed_at IS NULL AND expired_at IS NULL;
+
 CREATE INDEX agent_pages_per_agent_open
     ON agent_pages (agent_id, created_at)
     WHERE closed_at IS NULL;
