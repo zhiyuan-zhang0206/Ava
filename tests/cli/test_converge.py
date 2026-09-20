@@ -673,7 +673,9 @@ def test_host_config_step_is_registered(home, tmp_path: Path):
     assert not step.host_global
 
 
-def test_host_config_step_migrates_the_host_override_file(home, tmp_path: Path, monkeypatch):
+def test_host_config_step_migrates_the_host_override_file(
+    home, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     """Step-level: the retired host override file lands in .env and is archived."""
     from shared import runtime_config as rt
 
