@@ -14,10 +14,11 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 from cli.commands._release_selector import read_selector, selector_bytes
-from cli.commands._release_services import prepare_normal_services
+from cli.commands._release_services import PreparedService, prepare_normal_services
 from cli.commands._update_bootstrap import BootstrapHopRequest, _private_reference, probe_bootstrap
 from cli.commands._update_normal_release import (
     NormalReleaseRequest,
@@ -25,6 +26,7 @@ from cli.commands._update_normal_release import (
     _candidate_ready_recovery,
     _preflight_pending_plan,
     _read_ops_record,
+    commit_normal_release_after_publication,
     execute_normal_release,
 )
 from services.agent_ops.bootstrap import (
@@ -36,6 +38,7 @@ from shared import ui_update_state, updater_handoff
 from shared.host_deploy_state import release_updater_lock, try_acquire_updater_lock
 from shared.managed_writer_observation import ExpectedProcess, observe_process
 from shared.runtime_release import ReleaseRejectedError
+from shared.session_record import SessionRecord
 from shared.verified_file import regular_bytes
 
 
@@ -65,8 +68,15 @@ def _handoff_owner_is_dead_lineage(
     )
 
 
-def prepare_normal_release(path: Path) -> PreparedNormalRelease:
-    """Validate all local support/identity inputs while the old observer serves."""
+def prepare_normal_release(path: Path, *, for_commit: bool = False) -> PreparedNormalRelease:
+    """Validate all local support/identity inputs while the old observer serves.
+
+    ``for_commit`` drops the stop-stage faces -- the service-roster preparation,
+    the live-bootstrap probe and the pending-plan preflight -- because the
+    commit tail runs after the all-unit publication: the pending journal is
+    consumed and the unit serves its normal services (`ava-ops` is no longer
+    the candidate observer). Every other check re-derives identically.
+    """
     request = NormalReleaseRequest.model_validate_json(regular_bytes(path))
     home = Path(request.unit.home)
     _private_reference(str(path), home)
@@ -113,9 +123,11 @@ def prepare_normal_release(path: Path) -> PreparedNormalRelease:
         ).hexdigest()
     ):
         raise ReleaseRejectedError("normal continuation has no exact completed bootstrap handoff")
-    services = prepare_normal_services(request.unit, context.schema_digest)
-    if not any(service.identity.session == "ava-ops" for service in services):
-        raise ReleaseRejectedError("unit has no normal same-endpoint ops service")
+    services: tuple[PreparedService, ...] = ()
+    if not for_commit:
+        services = prepare_normal_services(request.unit, context.schema_digest)
+        if not any(service.identity.session == "ava-ops" for service in services):
+            raise ReleaseRejectedError("unit has no normal same-endpoint ops service")
     previous = request.previous_selector.encode() if request.previous_selector is not None else None
     # Late-stage recovery may find the pointer already committed to the
     # prepared release; the checked chain re-selects idempotently, so both the
@@ -126,35 +138,41 @@ def prepare_normal_release(path: Path) -> PreparedNormalRelease:
         )
     projection = ObserverProjection.from_environment()
     validate_operation(context, projection)
-    bootstrap = _read_ops_record(home)
-    # probe_bootstrap challenges the *live* process (real command, actual
-    # self-report, native ownership). A bootstrap that is already gone is a
-    # deep-crash recovery state, not a refusal: the stop stage re-reads this
-    # exact retained record and adjudicates — exited/identity_mismatch count as
-    # already stopped, and anything unobservable refuses there.
-    verdict = observe_process(
-        ExpectedProcess(
-            pid=bootstrap.pid, create_time=bootstrap.create_time, starttime=bootstrap.starttime
+    bootstrap: SessionRecord | None = None
+    if not for_commit:
+        bootstrap = _read_ops_record(home)
+        # probe_bootstrap challenges the *live* process (real command, actual
+        # self-report, native ownership). A bootstrap that is already gone is a
+        # deep-crash recovery state, not a refusal: the stop stage re-reads this
+        # exact retained record and adjudicates — exited/identity_mismatch count
+        # as already stopped, and anything unobservable refuses there.
+        verdict = observe_process(
+            ExpectedProcess(
+                pid=bootstrap.pid,
+                create_time=bootstrap.create_time,
+                starttime=bootstrap.starttime,
+            )
         )
-    )
-    if verdict == "alive":
-        probe_bootstrap(context, projection)
+        if verdict == "alive":
+            probe_bootstrap(context, projection)
     prepared = PreparedNormalRelease(
         path, request, context, projection, services, bootstrap, handoff.generation
     )
-    _preflight_pending_plan(prepared)
+    if not for_commit:
+        _preflight_pending_plan(prepared)
     return prepared
 
 
-def run_normal_release(path: Path) -> int:
-    """The standalone death-continuation entry.
+def _reclaim_generation_and_enter(
+    plan: PreparedNormalRelease, enter: Callable[[PreparedNormalRelease, str], object]
+) -> None:
+    """Claim the retained handoff (only after owner death), enter, dispose.
 
-    Prepare one sealed plan; mutual exclusion first, re-take the exact retained
-    generation (only after proving its owner dead), and enter the checked
-    activation entry. ``clear`` runs only when the claim succeeded, and it
-    CAS-checks its own preconditions before dropping retained state.
+    Mutual exclusion first; the exact generation is re-taken by
+    ``resume_bootstrap``, which itself refuses a live owner. ``clear`` runs
+    only when the claim succeeded, and it CAS-checks its own preconditions
+    before dropping retained state.
     """
-    plan = prepare_normal_release(path)
     if not try_acquire_updater_lock():
         raise ReleaseRejectedError("another updater holds this unit")
     generation: str | None = None
@@ -166,9 +184,41 @@ def run_normal_release(path: Path) -> int:
             if not updater_handoff.resume_bootstrap(generation, expected_session=expected):
                 raise ReleaseRejectedError("normal updater could not claim its existing handoff")
             claimed = True
-        return execute_normal_release(plan, generation)
+        enter(plan, generation)
     finally:
         if generation is not None and claimed:
             with contextlib.suppress(Exception), ui_update_state.lifecycle_lock():
                 updater_handoff.clear(generation)
         release_updater_lock()
+
+
+def run_normal_release(path: Path) -> int:
+    """The drive entry: the coordinator's per-unit continuation dispatch.
+
+    Also the death-recovery re-entry for a unit whose old orchestrator died
+    mid-handoff: the preparation validates the retained local identities, the
+    claim re-takes the exact generation, and the checked activation entry
+    drives the stage machine (task #4129 I6: the coordinator dispatches this
+    entry; it never continues in-process from the hop).
+    """
+    plan = prepare_normal_release(path)
+    _reclaim_generation_and_enter(plan, execute_normal_release)
+    return 0
+
+
+def run_normal_commit(path: Path) -> int:
+    """The commit-tail entry: record ``committed`` after the all-unit commit.
+
+    Dispatched per unit by the coordinator after the publication commit (task
+    #4129 I6). The commit-variant preparation skips the stop-stage faces (the
+    roster, the live-bootstrap probe, the pending-plan preflight): the
+    publication has already consumed the pending journal. No activation fence
+    here: the entry is structurally downstream-only --
+    ``commit_normal_release_after_publication`` refuses unless the retained
+    journal sits at ``observed``, which only the checked drive chain (under its
+    own gates) produces. At the committed stage the retained bootstrap envelope
+    becomes clearable, so this exit disposes it.
+    """
+    plan = prepare_normal_release(path, for_commit=True)
+    _reclaim_generation_and_enter(plan, commit_normal_release_after_publication)
+    return 0

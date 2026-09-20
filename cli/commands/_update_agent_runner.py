@@ -73,7 +73,6 @@ def _run_agent_runner_self_update(  # noqa: PLR0915 — one existing lock/handof
     detached pane so a mid-flow `ava stop` does not take itself out.
     """
     prepared = None
-    normal_continuation = None
     if bootstrap_request is not None:
         from cli.commands._update_bootstrap import prepare_bootstrap_hop
 
@@ -88,9 +87,14 @@ def _run_agent_runner_self_update(  # noqa: PLR0915 — one existing lock/handof
             raise ValueError("prepared bootstrap hop cannot use source-update flags")
         prepared = prepare_bootstrap_hop(bootstrap_request)
         if prepared.request.normal_release_path is not None:
+            # Pre-stop fail-fast read (design section 3.3 C-1): the unit's
+            # normal material must be locally admissible before the hop stops
+            # A. Nothing is retained here -- the coordinator-dispatched
+            # continuation re-runs the same preparation as its authority at
+            # effect time (task #4129 I6).
             from cli.commands._update_normal_release import prepare_after_bootstrap
 
-            normal_continuation = prepare_after_bootstrap(prepared)
+            prepare_after_bootstrap(prepared)
 
     from shared import ui_update_state, updater_handoff
     from shared.host_deploy_state import (
@@ -196,12 +200,10 @@ def _run_agent_runner_self_update(  # noqa: PLR0915 — one existing lock/handof
 
                 if owned_generation is None:
                     raise RuntimeError("bootstrap updater has no owned handoff generation")
-                result = execute_bootstrap_hop(prepared, owned_generation)
-                if normal_continuation is not None and result == RESTART_DECLINED_EXIT_CODE:
-                    from cli.commands._update_normal_release import continue_after_bootstrap
-
-                    return continue_after_bootstrap(prepared, normal_continuation, owned_generation)
-                return result
+                # The hop's restart-declined exit is terminal: the coordinator
+                # drives the normal continuation from candidate-ready through
+                # the standalone entry (task #4129 I6), never this process.
+                return execute_bootstrap_hop(prepared, owned_generation)
             try:
                 result = _run_agent_runner_self_update_inner(
                     repo,
@@ -696,6 +698,11 @@ def main(argv: list[str] | None = None) -> int:
         help="internal pending-authorized normal continuation; no source fallback",
     )
     parser.add_argument(
+        "--normal-commit",
+        type=Path,
+        help="internal post-publication per-unit commit tail; no source fallback",
+    )
+    parser.add_argument(
         "--target-sha",
         default=None,
         help="pinned rollout commit (default: resolve the track ref itself)",
@@ -734,7 +741,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.normal_release is not None:
         if (
-            args.bootstrap_hop
+            args.normal_commit
+            or args.bootstrap_hop
             or args.target_sha
             or args.restart_only
             or args.force_reap
@@ -747,6 +755,22 @@ def main(argv: list[str] | None = None) -> int:
         from cli.commands._update_normal_release_standalone import run_normal_release
 
         return run_normal_release(args.normal_release)
+    if args.normal_commit is not None:
+        if (
+            args.normal_release
+            or args.bootstrap_hop
+            or args.target_sha
+            or args.restart_only
+            or args.force_reap
+            or args.handoff_generation
+            or args.post_checkout
+            or args.from_sha
+            or args.mode != "smooth"
+        ):
+            parser.error("--normal-commit cannot use source/bootstrap update flags")
+        from cli.commands._update_normal_release_standalone import run_normal_commit
+
+        return run_normal_commit(args.normal_commit)
     if args.target_sha is not None:
         from shared.git_sha import require_full_sha
 

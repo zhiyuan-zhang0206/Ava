@@ -82,6 +82,42 @@ def test_normal_release_rejects_source_flags(flag: str) -> None:
     assert error.value.code == 2
 
 
+def test_normal_commit_dispatch_has_no_source_or_logging_effect(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from cli.commands import _update_normal_release_standalone as normal
+    from shared import log
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("prepared commit dispatch must not use source or logging initialization")
+
+    def run(path: Path) -> int:
+        assert path == tmp_path / "request.json"
+        return 17
+
+    monkeypatch.setattr(log, "init_cli_process", forbidden)
+    monkeypatch.setattr(updater, "_repo_root", forbidden)
+    monkeypatch.setattr(normal, "run_normal_commit", run)
+    assert updater.main(["--normal-commit", str(tmp_path / "request.json")]) == 17
+
+
+@pytest.mark.parametrize("flag", ["--restart-only", "--force-reap", "--post-checkout"])
+def test_normal_commit_rejects_source_flags(flag: str) -> None:
+    with pytest.raises(SystemExit) as error:
+        updater.main(["--normal-commit", "/not-read.json", flag])
+    assert error.value.code == 2
+
+
+def test_normal_release_and_commit_are_mutually_exclusive() -> None:
+    for argv in (
+        ["--normal-release", "/a.json", "--normal-commit", "/b.json"],
+        ["--normal-commit", "/b.json", "--normal-release", "/a.json"],
+    ):
+        with pytest.raises(SystemExit) as error:
+            updater.main(argv)
+        assert error.value.code == 2
+
+
 def test_main_survives_log_init_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A failing sink setup (the event pipeline opens during init) must not
     abort the updater — stderr/file sinks attach before the events pipeline."""
@@ -119,6 +155,58 @@ def test_bootstrap_dispatch_does_not_attach_normal_sinks(
     monkeypatch.setattr(log, "init_cli_process", forbidden)
     monkeypatch.setattr(updater, "_run_agent_runner_self_update", dispatch)
     assert updater.main(["--bootstrap-hop", str(tmp_path / "request.json")]) == 3
+
+
+def test_hop_declines_without_an_in_process_continuation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """I6: the restart-declined hop exit is terminal -- the coordinator drives."""
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from cli.commands import _update_bootstrap as bootstrap
+    from cli.commands import _update_normal_release as normal
+    from cli.commands import _update_normal_release_standalone as standalone
+    from shared import host_deploy_state, ui_update_state, updater_handoff
+    from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
+
+    prepared = Mock(spec=bootstrap.PreparedBootstrapHop)
+    prepared.request = Mock(normal_release_path=str(tmp_path / "normal.json"))
+    prepared.resume_generation = None
+    prepared.predecessor_handoff = object()
+
+    def prepared_hop(_path: Path) -> bootstrap.PreparedBootstrapHop:
+        return prepared
+
+    def prepare_normal(_prepared: bootstrap.PreparedBootstrapHop) -> normal.PreparedNormalRelease:
+        return Mock(spec=normal.PreparedNormalRelease)
+
+    def hop(_plan: object, _generation: str) -> int:
+        return RESTART_DECLINED_EXIT_CODE
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("the hop's restart-declined exit is terminal -- the coordinator drives")
+
+    monkeypatch.setattr(bootstrap, "prepare_bootstrap_hop", prepared_hop)
+    monkeypatch.setattr(normal, "prepare_after_bootstrap", prepare_normal)
+    monkeypatch.setattr(bootstrap, "execute_bootstrap_hop", hop)
+    monkeypatch.setattr(standalone, "run_normal_release", forbidden)
+    monkeypatch.setattr(standalone, "run_normal_commit", forbidden)
+    monkeypatch.setattr(host_deploy_state, "try_acquire_updater_lock", lambda: True)
+    monkeypatch.setattr(host_deploy_state, "release_updater_lock", lambda: None)
+    monkeypatch.setattr(updater_handoff, "clear", lambda _generation: True)
+    monkeypatch.setattr(
+        updater_handoff,
+        "begin_bootstrap_after_dead_owner",
+        lambda *_args, **_kwargs: SimpleNamespace(generation="gen-1"),
+    )
+    monkeypatch.setattr(ui_update_state, "lifecycle_lock", nullcontext)
+
+    result = updater._run_agent_runner_self_update(
+        tmp_path, bootstrap_request=tmp_path / "bootstrap.json"
+    )
+    assert result == RESTART_DECLINED_EXIT_CODE
 
 
 def test_normal_preflight_refusal_precedes_updater_lock_and_stop(
