@@ -70,9 +70,11 @@ class BootstrapRecoveryReadResult(BaseModel):
     absent on every unit: the hop child's first durable write is this journal
     (before it, every action was staged-file writes or read-only checks).
     `journal_stage` rides along when the journal is readable, for the
-    operator's diagnosis. A present-but-unreadable journal still reports
-    `journal_present=True` (with no stage) -- an effect is reported as the
-    fact it is, never an op failure.
+    operator's diagnosis; `normal_release_stage` is the nested normal-release
+    continuation's stage (None until that continuation has written one), which
+    the coordinator's commit-tail wait reads (task #4129 I6). A
+    present-but-unreadable journal still reports `journal_present=True` (with
+    no stage) -- an effect is reported as the fact it is, never an op failure.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -81,3 +83,4 @@ class BootstrapRecoveryReadResult(BaseModel):
     home: str = Field(min_length=1, max_length=4096)
     journal_present: bool
     journal_stage: str | None = Field(default=None, max_length=64)
+    normal_release_stage: str | None = Field(default=None, max_length=64)

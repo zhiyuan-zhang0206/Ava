@@ -86,11 +86,22 @@ def cluster_bootstrap_recovery_read_op(
     if envelope is None:
         return BootstrapRecoveryReadResult(machine=machine, home=str(home), journal_present=False)
     stage: str | None = None
+    normal_stage: str | None = None
     journal_raw = envelope.get("journal")
     if isinstance(journal_raw, dict):
-        value = cast("dict[str, object]", journal_raw).get("stage")
+        body = cast("dict[str, object]", journal_raw)
+        value = body.get("stage")
         if isinstance(value, str):
             stage = value
+        normal_raw = body.get("normal_release")
+        if isinstance(normal_raw, dict):
+            normal_value = cast("dict[str, object]", normal_raw).get("stage")
+            if isinstance(normal_value, str):
+                normal_stage = normal_value
     return BootstrapRecoveryReadResult(
-        machine=machine, home=str(home), journal_present=True, journal_stage=stage
+        machine=machine,
+        home=str(home),
+        journal_present=True,
+        journal_stage=stage,
+        normal_release_stage=normal_stage,
     )

@@ -410,12 +410,18 @@ def test_recovery_read_wire_shapes() -> None:
     with pytest.raises(ValueError):
         BootstrapRecoveryReadPayload.model_validate_json(json.dumps({"payload": 1}))
     result = BootstrapRecoveryReadResult(
-        machine="runner", home="/unit", journal_present=True, journal_stage="prepared"
+        machine="runner",
+        home="/unit",
+        journal_present=True,
+        journal_stage="candidate_ready",
+        normal_release_stage="committed",
     )
     wire = result.model_dump(mode="json")
+    assert wire["normal_release_stage"] == "committed"
     assert BootstrapRecoveryReadResult.model_validate_json(json.dumps(wire)) == result
     absent = BootstrapRecoveryReadResult(machine="runner", home="/unit", journal_present=False)
     assert absent.journal_stage is None
+    assert absent.normal_release_stage is None
 
 
 def test_recovery_read_reports_an_absent_journal(unit_home: Path) -> None:
@@ -435,6 +441,30 @@ def test_recovery_read_reports_a_readable_journal_stage(unit_home: Path) -> None
 
     assert result.journal_present is True
     assert result.journal_stage == "prepared"
+    assert result.normal_release_stage is None
+
+
+def test_recovery_read_reports_the_nested_normal_release_stage(
+    unit_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The nested continuation stage rides along (task #4129 I6): the
+    commit-tail wait reads it, so the extraction must not lose it."""
+    from shared import updater_handoff
+
+    journal = _bootstrap_journal("candidate_ready")
+    journal["normal_release_planned"] = True
+    journal["normal_release"] = {"stage": "committed"}
+    monkeypatch.setattr(
+        updater_handoff,
+        "read_bootstrap_recovery",
+        lambda: _recovery_envelope(journal),
+    )
+
+    result = ops_bootstrap_hop.cluster_bootstrap_recovery_read_op(BootstrapRecoveryReadPayload())
+
+    assert result.journal_present is True
+    assert result.journal_stage == "candidate_ready"
+    assert result.normal_release_stage == "committed"
 
 
 def test_recovery_read_reports_a_malformed_journal_as_present(unit_home: Path) -> None:
@@ -473,6 +503,7 @@ def test_daemon_dispatch_accepts_the_recovery_read_payload(
         "home": str(unit_home),
         "journal_present": False,
         "journal_stage": None,
+        "normal_release_stage": None,
     }
 
 
