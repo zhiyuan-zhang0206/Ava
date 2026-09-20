@@ -647,8 +647,20 @@ def drive(mode: str, meta_path: Path) -> int:
     plan = rebuild_plan(meta, home)
     if mode == "settle":
         if not updater_handoff.resume_bootstrap(generation, expected_session=_SESSION_LABEL):
-            events.write({"event": "resume-refused"})
-            return 4
+            # The mid-clear crash (inj-14) can leave a dead handoff whose
+            # bootstrap envelope is already unlinked: nothing is left to
+            # resume. Production converges exactly this leftover through the
+            # generic recovery (ops update recover): prove the dead lineage
+            # allows generic recovery, then clear the generation. Mirror that
+            # entry -- clear itself CAS-checks the generation and clearability.
+            handoff = updater_handoff.read()
+            if not updater_handoff.allows_generic_recovery(handoff):
+                events.write({"event": "resume-refused"})
+                return 4
+            events.write({"event": "resume-refused", "reason": "bootstrap envelope unlinked"})
+            cleared = updater_handoff.clear(generation)
+            events.write({"event": "cleared", "ok": cleared, "via": "generic-recovery"})
+            return 0 if cleared else 5
         events.write({"event": "resumed", "owner_pid": os.getpid()})
     else:
         updater_handoff.begin(expected_session=_SESSION_LABEL, generation=generation)
@@ -753,20 +765,29 @@ def check_instances(name: str, meta: dict[str, Any], home: Path, *, extra: bool)
                 not listeners or listeners[0]["pid"] == record.pid,
                 f"[{name}] {session}: listener ownership mismatch {listeners}",
             )
-            gate = spawn_receipt.session_lock_path(home, generation, session)
-            require(
-                spawn_receipt.probe_session_lock_free(gate) is False,
-                f"[{name}] {session}: live service but the session gate is free",
-            )
-            births = [
-                item for item in receipts_for(home, generation, session) if item.kind == "birth"
-            ]
-            require(bool(births), f"[{name}] {session}: live service without a birth receipt")
-            latest = births[-1]
-            require(
-                latest.pid == record.pid and latest.starttime == record.starttime,
-                f"[{name}] {session}: birth vs record identity mismatch",
-            )
+            # The clear-time GC retires receipts and gates by removing their
+            # directory (design 4.5/5), so once the settled clear -- or a
+            # mid-clear crash -- has run, a live record's gate can only probe a
+            # fresh inert file. When the directory is gone the record, argv and
+            # listener checks above are the surviving evidence (the GC itself is
+            # pinned by check_pass2 and the inj-14 pair); while it still exists,
+            # the live record must bind its gate and birth receipt. (Round 4:
+            # the unconditional gate probe read every settled case as "free".)
+            if spawn_receipt.spawn_attempt_dir(home, generation).exists():
+                gate = spawn_receipt.session_lock_path(home, generation, session)
+                require(
+                    spawn_receipt.probe_session_lock_free(gate) is False,
+                    f"[{name}] {session}: live service but the session gate is free",
+                )
+                births = [
+                    item for item in receipts_for(home, generation, session) if item.kind == "birth"
+                ]
+                require(bool(births), f"[{name}] {session}: live service without a birth receipt")
+                latest = births[-1]
+                require(
+                    latest.pid == record.pid and latest.starttime == record.starttime,
+                    f"[{name}] {session}: birth vs record identity mismatch",
+                )
         if extra:
             record_pid = record.pid if record is not None else None
             require(
@@ -784,9 +805,10 @@ def check_pass1(name: str, case: dict[str, Any], meta: dict[str, Any], home: Pat
         write_stages(events) == [str(item) for item in case["writes1"]],
         f"[{name}] pass1 journal writes {write_stages(events)} != {case['writes1']}",
     )
+    expected_stage = case["stage1"]
     require(
-        journal_stage() == str(case["stage1"]),
-        f"[{name}] pass1 journal stage {journal_stage()!r} != {case['stage1']!r}",
+        journal_stage() == expected_stage,
+        f"[{name}] pass1 journal stage {journal_stage()!r} != {expected_stage!r}",
     )
     if name in {"inj-2a", "inj-2b"}:
         require(selector_writes(events) == 0, f"[{name}] injected selector write landed")
@@ -872,6 +894,17 @@ def check_pass2(name: str, case: dict[str, Any], meta: dict[str, Any]) -> None:
         any(entry.get("event") == "cleared" and entry.get("ok") is True for entry in events),
         f"[{name}] settle did not record a successful clear",
     )
+    if name == "inj-14":
+        # The mid-clear crash left no envelope to resume: the settle must have
+        # refused the resume and converged through the generic recovery.
+        require(
+            any(entry.get("event") == "resume-refused" for entry in events)
+            and any(
+                entry.get("event") == "cleared" and entry.get("via") == "generic-recovery"
+                for entry in events
+            ),
+            f"[{name}] settle did not converge through the generic recovery",
+        )
     require(
         not updater_handoff.state_path().exists()
         and not updater_handoff.bootstrap_state_path().exists(),
@@ -1409,7 +1442,9 @@ CASES: tuple[dict[str, Any], ...] = (
             "committed",
         ],
         "writes2": [],
-        "stage1": "committed",
+        # The crash lands after the bootstrap envelope's unlink (the second
+        # clear crash point): no readable stage remains by design.
+        "stage1": None,
     },
     {
         "case": "inj-14b",
