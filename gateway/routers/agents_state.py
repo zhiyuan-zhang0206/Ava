@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any, cast
+from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from psycopg_pool import ConnectionPool
@@ -521,80 +521,22 @@ def get_last_message(
     eval-isolated caller is denied before this result can become a replay leak.
 
     Returns ``text=None`` when the agent has no AI message with text
-    content yet (no checkpoint / no AIMessage / content is not a string).
+    content yet.
 
-    Reads from ``agents_meta.last_message_text`` first — a column that
-    survives compact (which replaces the entire checkpoint). Falls back
-    to scanning the checkpoint when the column is NULL (backward compat
-    with agents that have not yet written to it).
+    Reads ``agents_meta.last_message_text`` — a column the agent process
+    writes after each LLM turn that produced text and that survives compact
+    (which replaces the entire checkpoint), so this read never touches the
+    checkpoint.
     """
     # Keep the documented, required marker contract. The shared dependency
     # reads the raw query parameter so every guarded route uses one policy.
     del caller
-    # --- agent existence check + last_message_text read ---
-    # Read last_message_text first as an optimization — it survives compact.
-    # When the column is missing (migration not applied), fall through to the
-    # checkpoint scan below rather than returning 500.
-    last_message_text: str | None = None
     with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
-        cur.execute("SELECT 1 FROM agents_meta WHERE id = %s", (agent_id,))
-        if cur.fetchone() is None:
-            raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
-    try:
-        with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
-            cur.execute("SELECT last_message_text FROM agents_meta WHERE id = %s", (agent_id,))
-            row = cur.fetchone()
-            if row and row[0]:
-                last_message_text = row[0]
-    except Exception:
-        _log.warning(
-            "last-message: last_message_text column read failed for agent %s, "
-            "falling back to checkpoint scan",
-            agent_id,
-            exc_info=True,
-        )
-    if last_message_text:
-        return LastMessageResponse(text=last_message_text)
-    # --- fall back to checkpoint scan (backward compat) ---
-    try:
-        messages = load_checkpoint_messages(agent_id)
-    except CheckpointReadError as exc:
-        _log.warning("last-message: checkpoint read failed for agent %s: %r", agent_id, exc)
-        raise HTTPException(
-            status_code=503, detail="checkpoint read failed; retry or check store health"
-        ) from exc
-    for msg in reversed(messages):
-        text = _extract_message_text(msg)
-        if text is not None:
-            return LastMessageResponse(text=text)
-    return LastMessageResponse(text=None)
-
-
-def _extract_message_text(msg: "AIMessage") -> str | None:  # noqa: F821, UP037  # pyright: ignore[reportUndefinedVariable]
-    """Extract the text content from an AIMessage.
-
-    AIMessage.content can be a plain string or a list of content blocks
-    (e.g. ``[{"type": "text", "text": "hello"}]``). For list content,
-    concatenate text-type blocks. Returns None when there is no text.
-    """
-    from langchain_core.messages import AIMessage
-
-    from shared.lm.content import content_blocks
-
-    if not isinstance(msg, AIMessage):
-        return None
-    content: Any = msg.content  # pyright: ignore[reportUnknownMemberType]
-    if isinstance(content, str):
-        return content if content else None
-    if isinstance(content, list):
-        parts: list[str] = []
-        for block in content_blocks(cast(list[Any], content)):
-            if isinstance(block, dict) and cast(dict[str, Any], block).get("type") == "text":
-                text = cast(dict[str, Any], block).get("text", "")
-                if text:
-                    parts.append(text)
-        return "\n".join(parts) if parts else None
-    return None
+        cur.execute("SELECT last_message_text FROM agents_meta WHERE id = %s", (agent_id,))
+        row = cur.fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
+    return LastMessageResponse(text=row[0] or None)
 
 
 @router.get("/api/agents/{agent_id}/pending", dependencies=[Depends(deny_isolated_result_read)])
