@@ -19,6 +19,8 @@ from typing import Any
 import pytest
 
 from cli.commands import _managed_writer_mode as mode_mod
+from cli.commands._managed_writer_hop import HopUnitPlan
+from ops.rpc_prepare_dispatch import ProjectionFile, prepared_hop_name
 from shared import rollout_telemetry
 
 _CHECKED = "cli.commands._update_normal_release.CHECKED_ACTIVATION_READY"
@@ -306,7 +308,7 @@ def test_active_rollout_runs_the_flow_and_keeps_the_decision(
     # This test is about the decision's lifetime; the begin position is stubbed
     # (its chain needs a sealed release context and a live lease, and it has its
     # own tests below).
-    monkeypatch.setattr(_up, "_begin_managed_writer_publication", lambda _sha: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_up, "_begin_managed_writer_publication", lambda _sha: (0, None))  # pyright: ignore[reportUnknownArgumentType]
     assert _run_inner() == 0
     assert stopped == ["stop"]
     assert mode_mod.managed_writer_mode() == mode_mod.ManagedWriterMode("active")
@@ -343,7 +345,7 @@ def test_begin_step_skips_without_an_active_decision(
         _clear_guard(monkeypatch, _WIRING)
         mode_mod.decide_managed_writer_mode()
 
-    assert wiring._begin_managed_writer_publication("0" * 40) == 0
+    assert wiring._begin_managed_writer_publication("0" * 40) == (0, None)
     captured = capsys.readouterr()
     assert "managed-writer begin" not in captured.out
     if state == "none":
@@ -391,7 +393,7 @@ def test_begin_step_refuses_under_active_when_the_context_is_missing(
     )
     monkeypatch.setattr(dispatch_mod.settings.general, "ava_home", tmp_path.resolve())
 
-    assert wiring._begin_managed_writer_publication("0" * 40) == 1
+    assert wiring._begin_managed_writer_publication("0" * 40) == (1, None)
     err = capsys.readouterr().err
     assert "managed-writer begin refused" in err
     assert "no sealed release context" in err
@@ -427,6 +429,63 @@ def test_restart_only_rollout_skips_the_begin_position(monkeypatch: pytest.Monke
 
     assert _run_inner(restart_only=True) == 0
     assert stopped == ["stop"]
+
+
+def _hop_plan() -> HopUnitPlan:
+    content = '{"fixture":1}\n'
+    name = prepared_hop_name("request", content)
+    return HopUnitPlan(
+        machine="host-b",
+        home="/ava-b",
+        ops_url=None,
+        artifact_digest="a" * 64,
+        request_path=f"/ava-b/run/{name}",
+        projections=(ProjectionFile(name=name, content=content),),
+    )
+
+
+def test_begin_step_returns_the_hop_plans_under_active(monkeypatch: pytest.MonkeyPatch) -> None:
+    from cli.commands import _managed_writer_dispatch as dispatch_mod
+    from cli.commands import _managed_writer_wiring as wiring
+
+    _ready_guards(monkeypatch)
+    mode_mod.decide_managed_writer_mode()
+    plan = _hop_plan()
+    monkeypatch.setattr(dispatch_mod, "begin_managed_writer_publication", lambda _sha: [plan])  # pyright: ignore[reportUnknownArgumentType]
+
+    assert wiring._begin_managed_writer_publication("0" * 40) == (0, [plan])
+
+
+def test_active_rollout_runs_the_hop_phase_instead_of_the_legacy_poll(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The plans returned by the begin reach the closing section and replace the
+    Phase-B poll -- never join it (task #4129 I4, channel C)."""
+    from cli.commands import _update_verdict as verdict_mod
+    from cli.commands import update as _up
+
+    _ready_guards(monkeypatch)
+    plan = _hop_plan()
+    _stub_orchestration_to_phase_b(monkeypatch, hop_plans=[plan])
+    seen: list[list[HopUnitPlan]] = []
+
+    def _hop(
+        plans: list[HopUnitPlan],
+    ) -> tuple[int, _up.RolloutOutcome, list[tuple[str, str | None]], str | None]:
+        seen.append(list(plans))
+        return 0, _up.RolloutOutcome.CLEAN, [], None
+
+    monkeypatch.setattr(verdict_mod, "phase_b_hops", _hop)
+    legacy: list[None] = []
+    monkeypatch.setattr(
+        _up,
+        "_phase_b_outcome",
+        lambda *_a, **_k: legacy.append(None) or (0, _up.RolloutOutcome.CLEAN, []),  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    assert _run_inner() == 0
+    assert seen == [[plan]]
+    assert legacy == [], "the hop branch replaces the Phase-B poll"
 
 
 # ── the P2 collect wiring (task #4128, E2-c) ─────────────────────────────────
@@ -650,7 +709,10 @@ def test_commit_step_refusal_names_checked_recovery(
 
 
 def _stub_orchestration_to_phase_b(
-    monkeypatch: pytest.MonkeyPatch, *, stub_collect: bool = True
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    stub_collect: bool = True,
+    hop_plans: list[HopUnitPlan] | None = None,
 ) -> None:
     """Extend `_stub_orchestration` to reach the post-Phase-B publication window."""
     from cli import commands as _cli
@@ -661,8 +723,10 @@ def _stub_orchestration_to_phase_b(
     # needs a sealed release context and a live lease) and the E2-c collect
     # (which still refuses until its own channel lands), so these tests stub
     # both -- the positions under test are elsewhere. `stub_collect=False`
-    # leaves the real collect step in place for its own refusal test.
-    monkeypatch.setattr(_up, "_begin_managed_writer_publication", lambda _sha: 0)  # pyright: ignore[reportUnknownArgumentType]
+    # leaves the real collect step in place for its own refusal test, and
+    # `hop_plans` makes the stubbed begin hand the closing section a
+    # managed-writer hop phase (task #4129 I4).
+    monkeypatch.setattr(_up, "_begin_managed_writer_publication", lambda _sha: (0, hop_plans))  # pyright: ignore[reportUnknownArgumentType]
     if stub_collect:
         monkeypatch.setattr(_up, "_collect_managed_writer_publication", lambda: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cli, "_resolve_fanout_targets", lambda **_kw: [("host-b", None)])  # pyright: ignore[reportUnknownArgumentType]

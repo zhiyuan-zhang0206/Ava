@@ -189,6 +189,15 @@ class PendingPublication(EvidenceModel):
     normal_start_plan: NormalStartPlan | None = None
     migration: PendingMigrationReceipt | None = None
     unit_readbacks: tuple[UnitActivationReadback, ...] = ()
+    # The begin execution's durable registration (task #4129 I4, F1): V -- the
+    # observation window `begin_valid_until` sealed into the plan -- and the
+    # sealed plan's digest, written by the seat that opens the journal
+    # (`open_pending_publication`). Both optional: a journal written before the
+    # registration existed parses with them unset, and a replacement opened by
+    # checked recovery carries none -- its premise is its fresh closure, not a
+    # sealed-plan execution.
+    valid_until: AwareDatetime | None = None
+    plan_digest: Digest | None = None
 
 
 class WriterPublication(EvidenceModel):

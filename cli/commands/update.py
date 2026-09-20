@@ -20,6 +20,7 @@ from pathlib import Path
 # the tests' `_up.*` monkeypatch seams, `_cluster_rollback.py` and the detached
 # rollout subprocess — keep resolving. Each name is `X as X` (an explicit
 # re-export) so pyright does not flag it as unused here.
+from cli.commands._managed_writer_hop import HopUnitPlan
 from cli.commands._managed_writer_mode import (
     decide_managed_writer_mode as _decide_managed_writer_mode,
 )
@@ -625,9 +626,12 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
         # prepared-plan chain (task #4129, channel B) reads the sealed release
         # context, gathers the fleet's prepared facts, opens the journal and
         # requires every unit's local validation acknowledgement; any refusal
-        # aborts the rollout here, before any unit effect.
+        # aborts the rollout here, before any unit effect. The same chain
+        # returns the units' hop plans (channel C) for the closing section's
+        # hop phase; a restart-only bounce never begins and passes None.
+        hop_plans: list[HopUnitPlan] | None = None
         if not restart_only:
-            begin_rc = _begin_managed_writer_publication(target_sha)
+            begin_rc, hop_plans = _begin_managed_writer_publication(target_sha)
             if begin_rc != 0:
                 failing_step = "the managed-writer begin refused; nothing was stopped"
                 return begin_rc
@@ -739,6 +743,7 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
             poll_outcome=_phase_b_outcome,
             collect=_collect_managed_writer_publication,
             commit=_commit_managed_writer_publication,
+            hop_plans=hop_plans,
         )
         rc, outcome = phase_b.rc, phase_b.outcome
         hosts_to_resume = phase_b.hosts_to_resume

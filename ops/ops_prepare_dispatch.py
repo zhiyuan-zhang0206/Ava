@@ -2,11 +2,13 @@
 
 The daemon-side half of task #4129 channel B (design
 `managed-writer-dispatch-design-20260920.md` section 3.2): write the dispatched
-sealed plan into the unit's private `run/` directory under its content name,
-spawn the retained candidate image's `cli.prepared_plan` entry against it, and
-answer with the unit's acknowledgement. The payload's `artifact_digest` only
-locates the interpreter that runs the validation; the entry re-derives every
-binding from the plan bytes itself.
+sealed plan -- and the unit's staged hop projections (channel C) -- into the
+unit's private `run/` directory under their content names, spawn the retained
+candidate image's `cli.prepared_plan` entry against the plan, and answer with
+the unit's acknowledgement. The payload's `artifact_digest` only locates the
+interpreter that runs the validation; the entry re-derives every binding from
+the plan bytes itself, and the hop projections are staged exactly as named --
+the consuming hop entry re-reads them, so nothing here is authority.
 
 Read-only, never a stop: a validation refusal travels back as the
 acknowledgement's `refusal` field -- the coordinator's gate prints the whole
@@ -24,16 +26,19 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
 
 from ops.rpc_prepare_dispatch import (
+    PREPARED_HOP_PREFIX,
     DispatchValidation,
     PrepareDispatchPayload,
     PrepareDispatchResult,
     prepared_plan_name,
 )
+from ops.unit_local import candidate_interpreter, machine_identity
 from shared.config import settings
 from shared.log import logger
 from shared.private_storage import write_private_bytes
@@ -59,20 +64,18 @@ _MAX_PLAN_BYTES = 256 * 1024
 # (task #3696 exception inventory): fixed by the acknowledgement's shape.
 _MAX_ACK_BYTES = 4 * 1024
 
+# A hop projection measures a few KiB (a prepared observation context or the
+# request referencing it); 64 KiB is the same shape bound the consuming entries
+# enforce (`read_prepared_context`, `_update_bootstrap._private_reference`), so
+# an oversized projection refuses here instead of surfacing as a child fault.
+# KEEP (task #3696 exception inventory): a relay-shape guard fixed by the
+# projections' shape, not a tuning knob.
+_MAX_PROJECTION_BYTES = 64 * 1024
 
-def _candidate_interpreter(home: Path, artifact_digest: str) -> Path:
-    root = home / "releases" / artifact_digest
-    try:
-        if root.resolve(strict=True) != root:
-            raise ReleaseRejectedError("announced candidate image is not canonical")
-        interpreter = (root / "venv" / "bin" / "python").resolve(strict=True)
-    except OSError as exc:
-        raise ReleaseRejectedError(
-            "announced candidate image is not retained on this unit"
-        ) from exc
-    if not interpreter.is_relative_to(root / "venv"):
-        raise ReleaseRejectedError("candidate interpreter escapes its retained image")
-    return interpreter
+# The projection kinds are lowercase kebab tokens (`candidate-context`,
+# `request`); a shape guard, not a vocabulary -- the name's digest binds the
+# bytes either way.
+_HOP_PROJECTION_KIND = re.compile(r"^[a-z][a-z0-9-]*$")
 
 
 def _child_environment(home: Path) -> dict[str, str]:
@@ -99,16 +102,37 @@ def _child_argv(interpreter: Path, plan_path: Path) -> list[str]:
     ]
 
 
-def _unit_identity(home: Path) -> str:
-    machine = (home / "machine_name").read_text(encoding="utf-8").strip()
-    if not machine:
-        raise ReleaseRejectedError("installed unit machine identity is empty")
-    return machine
+def _hop_projection_path(name: str, content: str, home: Path) -> Path:
+    """Verify one dispatched projection is exactly what its name claims.
+
+    The name must be `prepared-hop-<kind>-<sha256(content)>.json`: content
+    addressed, so a mismatched pair -- bytes the consuming hop entry could
+    never have been waiting for -- refuses before anything lands. ASCII keeps
+    the staged bytes inside every consuming entry's own read face.
+    """
+    if not name.startswith(PREPARED_HOP_PREFIX) or not name.endswith(".json"):
+        raise ReleaseRejectedError("dispatched projection lacks its prepared-hop name")
+    body = name[len(PREPARED_HOP_PREFIX) : -len(".json")]
+    if len(body) <= 65 or body[-65] != "-":
+        raise ReleaseRejectedError("dispatched projection lacks its prepared-hop name")
+    kind, digest = body[:-65], body[-64:]
+    if not _HOP_PROJECTION_KIND.fullmatch(kind) or not content.isascii():
+        raise ReleaseRejectedError("dispatched projection is not a canonical hop projection")
+    raw = content.encode("ascii")
+    if len(raw) > _MAX_PROJECTION_BYTES:
+        raise ReleaseRejectedError("dispatched projection exceeds its relay bound")
+    if hashlib.sha256(raw).hexdigest() != digest:
+        raise ReleaseRejectedError("dispatched projection name does not match its bytes")
+    try:
+        json.loads(content)
+    except ValueError as exc:
+        raise ReleaseRejectedError("dispatched projection is not one JSON document") from exc
+    return home / "run" / name
 
 
 def cluster_prepare_dispatch_op(payload: PrepareDispatchPayload) -> PrepareDispatchResult:
     home = settings.general.ava_home
-    machine = _unit_identity(home)
+    machine = machine_identity(home)
     if not payload.plan_json.isascii():
         raise ReleaseRejectedError("dispatched plan is not ASCII JSON text")
     raw = payload.plan_json.encode("ascii")
@@ -120,8 +144,17 @@ def cluster_prepare_dispatch_op(payload: PrepareDispatchPayload) -> PrepareDispa
         raise ReleaseRejectedError("dispatched plan is not one JSON document") from exc
     plan_digest = hashlib.sha256(raw).hexdigest()
     plan_path = home / "run" / prepared_plan_name(plan_digest)
+    # Validate every projection before the first write lands: a malformed
+    # payload must leave no partial staging behind. Plan bytes first, then the
+    # content-named projections the hop entry will read.
+    staged = [
+        (_hop_projection_path(projection.name, projection.content, home), projection.content)
+        for projection in payload.projections
+    ]
     write_private_bytes(plan_path, raw)
-    interpreter = _candidate_interpreter(home, payload.artifact_digest)
+    for projection_path, projection_text in staged:
+        write_private_bytes(projection_path, projection_text.encode("ascii"))
+    interpreter = candidate_interpreter(home, payload.artifact_digest)
     started = time.monotonic()
     logger.info(
         "[cluster_prepare_dispatch] start pid={pid} image={image}",

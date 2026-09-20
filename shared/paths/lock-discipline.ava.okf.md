@@ -25,7 +25,7 @@ tags:
   deliberately lock-free for the same reason: it is called from inside them.
 - The lock file is a SIBLING because `file_lock`'s POSIX branch opens its path with
   `"w"`, which truncates — pointed at `.env` it would empty the secrets it guards.
-  In-process thread safety is separate (`services/agent_ops/daemon.py:_state_write_lock`);
+  In-process thread safety is separate (`services/agent_ops/dispatch_sync.py:_state_write_lock`);
   neither substitutes for the other.
 
 - **`installed.json` rewrites are serialized the same way**, on the sibling

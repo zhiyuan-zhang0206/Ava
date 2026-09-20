@@ -1,12 +1,13 @@
 """`ops.ops_prepare_dispatch.cluster_prepare_dispatch_op` -- the seal-and-validate relay contract.
 
-The handler writes the dispatched sealed plan into the unit's private `run/`
-directory under its content name, runs exactly one bounded child of the
-candidate's `cli.prepared_plan` entry with the explicit minimal projection (no
-database), and answers with the unit's acknowledgement. A validation refusal
-is an answer -- the acknowledgement's `refusal` field -- while dispatch faults
-(payload shape, missing image, timeout, unintelligible child) stay op failures.
-The entry's own authority checks are deliberately not duplicated here.
+The handler writes the dispatched sealed plan -- and the unit's staged hop
+projections (task #4129 channel C) -- into the unit's private `run/` directory
+under their content names, runs exactly one bounded child of the candidate's
+`cli.prepared_plan` entry with the explicit minimal projection (no database),
+and answers with the unit's acknowledgement. A validation refusal is an answer
+-- the acknowledgement's `refusal` field -- while dispatch faults (payload
+shape, missing image, timeout, unintelligible child) stay op failures. The
+entry's own authority checks are deliberately not duplicated here.
 """
 
 from __future__ import annotations
@@ -25,6 +26,8 @@ from ops.rpc_prepare_dispatch import (
     DispatchValidation,
     PrepareDispatchPayload,
     PrepareDispatchResult,
+    ProjectionFile,
+    prepared_hop_name,
     prepared_plan_name,
 )
 from shared.config import settings
@@ -48,8 +51,19 @@ def unit_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     return home
 
 
-def _payload(artifact_digest: str = ARTIFACT, plan_json: str = PLAN) -> PrepareDispatchPayload:
-    return PrepareDispatchPayload(plan_json=plan_json, artifact_digest=artifact_digest)
+def _payload(
+    artifact_digest: str = ARTIFACT,
+    plan_json: str = PLAN,
+    projections: tuple[ProjectionFile, ...] = (),
+) -> PrepareDispatchPayload:
+    return PrepareDispatchPayload(
+        plan_json=plan_json, artifact_digest=artifact_digest, projections=projections
+    )
+
+
+def _projection(kind: str, payload: object) -> ProjectionFile:
+    content = json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n"
+    return ProjectionFile(name=prepared_hop_name(kind, content), content=content)
 
 
 class _ChildRecorder:
@@ -80,6 +94,12 @@ def test_payload_models_roundtrip_on_the_wire_shape() -> None:
     assert PrepareDispatchPayload.model_validate_json(json.dumps(wire)) == _payload()
     with pytest.raises(ValueError):
         PrepareDispatchPayload.model_validate_json(json.dumps({**wire, "extra": 1}))
+
+    carried = _payload(projections=(_projection("request", {"a": 1}),))
+    assert (
+        PrepareDispatchPayload.model_validate_json(json.dumps(carried.model_dump(mode="json")))
+        == carried
+    )
 
 
 def test_passing_acknowledgement_requires_its_receipt() -> None:
@@ -263,3 +283,133 @@ def test_daemon_dispatch_accepts_the_json_shaped_payload(
     assert status == "completed"
     assert seen == [_payload()]
     assert result["plan_digest"] == DIGEST
+
+
+# ── the staged hop projections (task #4129, channel C) ───────────────────────
+
+
+def test_projections_land_private_under_their_content_names(
+    unit_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each projection is written verbatim, 0600, under the name that binds its bytes."""
+    child = _ChildRecorder(stdout=_ack())
+    monkeypatch.setattr(ops_prepare_dispatch, "run_bounded", child)
+    context = _projection("candidate-context", {"expected": {"machine": "runner"}})
+    request = _projection("request", {"candidate_context": context.name})
+
+    result = ops_prepare_dispatch.cluster_prepare_dispatch_op(
+        _payload(projections=(context, request))
+    )
+
+    assert result.plan_digest == DIGEST
+    for projection in (context, request):
+        path = unit_home / "run" / projection.name
+        assert path.read_bytes() == projection.content.encode("ascii")
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert len(child.calls) == 1
+
+
+def test_projection_name_that_does_not_match_its_bytes_refuses(
+    unit_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    child = _ChildRecorder(stdout=_ack())
+    monkeypatch.setattr(ops_prepare_dispatch, "run_bounded", child)
+    mismatched = ProjectionFile(name=prepared_hop_name("request", "one"), content="two")
+
+    with pytest.raises(ReleaseRejectedError, match="does not match its bytes"):
+        ops_prepare_dispatch.cluster_prepare_dispatch_op(_payload(projections=(mismatched,)))
+
+    assert child.calls == []
+    assert not (unit_home / "run" / prepared_plan_name(DIGEST)).exists()
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        prepared_plan_name(DIGEST),
+        "prepared-hop-REQUEST-" + "0" * 64 + ".json",
+        "prepared-hop-request.json",
+        "prepared-hop-request-" + "0" * 63 + ".json",
+    ],
+)
+def test_projection_name_shape_refuses(
+    unit_home: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    child = _ChildRecorder(stdout=_ack())
+    monkeypatch.setattr(ops_prepare_dispatch, "run_bounded", child)
+
+    with pytest.raises(ReleaseRejectedError, match=r"prepared-hop name|canonical hop projection"):
+        ops_prepare_dispatch.cluster_prepare_dispatch_op(
+            _payload(projections=(ProjectionFile(name=name, content="{}\n"),))
+        )
+
+    assert child.calls == []
+
+
+def test_non_ascii_projection_refuses(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A name bound to a crafted non-ASCII payload still refuses: the written bytes
+    must stay inside every consuming entry's ASCII read face."""
+    child = _ChildRecorder(stdout=_ack())
+    monkeypatch.setattr(ops_prepare_dispatch, "run_bounded", child)
+    content = '{"machine": "caf\u00e9"}\n'
+    name = "prepared-hop-request-" + hashlib.sha256(content.encode("utf-8")).hexdigest() + ".json"
+    projection = ProjectionFile(name=name, content=content)
+
+    with pytest.raises(ReleaseRejectedError, match="canonical hop projection"):
+        ops_prepare_dispatch.cluster_prepare_dispatch_op(_payload(projections=(projection,)))
+
+    assert child.calls == []
+
+
+def test_projection_beyond_its_relay_bound_refuses(
+    unit_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    child = _ChildRecorder(stdout=_ack())
+    monkeypatch.setattr(ops_prepare_dispatch, "run_bounded", child)
+    oversized = "x" * (ops_prepare_dispatch._MAX_PROJECTION_BYTES + 1)
+    projection = ProjectionFile(name=prepared_hop_name("request", oversized), content=oversized)
+
+    with pytest.raises(ReleaseRejectedError, match="relay bound"):
+        ops_prepare_dispatch.cluster_prepare_dispatch_op(_payload(projections=(projection,)))
+
+    assert child.calls == []
+
+
+def test_non_json_projection_refuses(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    child = _ChildRecorder(stdout=_ack())
+    monkeypatch.setattr(ops_prepare_dispatch, "run_bounded", child)
+    projection = ProjectionFile(
+        name=prepared_hop_name("request", "not one json document"),
+        content="not one json document",
+    )
+
+    with pytest.raises(ReleaseRejectedError, match="not one JSON document"):
+        ops_prepare_dispatch.cluster_prepare_dispatch_op(_payload(projections=(projection,)))
+
+    assert child.calls == []
+
+
+def test_a_bad_projection_leaves_no_partial_staging(
+    unit_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Everything validates before the first write: a malformed payload stages nothing."""
+    child = _ChildRecorder(stdout=_ack())
+    monkeypatch.setattr(ops_prepare_dispatch, "run_bounded", child)
+    good = _projection("candidate-context", {"kept": True})
+    bad = ProjectionFile(name="prepared-hop-wrong-" + "0" * 64 + ".json", content="{}\n")
+
+    with pytest.raises(ReleaseRejectedError, match="does not match its bytes"):
+        ops_prepare_dispatch.cluster_prepare_dispatch_op(_payload(projections=(good, bad)))
+
+    run_dir = unit_home / "run"
+    assert not (run_dir / good.name).exists()
+    assert not (run_dir / prepared_plan_name(DIGEST)).exists()
+    assert child.calls == []
+
+
+def test_prepared_hop_name_binds_kind_and_bytes() -> None:
+    raw = b'{"a":1}\n'
+    assert prepared_hop_name("request", raw) == (
+        "prepared-hop-request-" + hashlib.sha256(raw).hexdigest() + ".json"
+    )
+    assert prepared_hop_name("request", raw) != prepared_hop_name("candidate-context", raw)

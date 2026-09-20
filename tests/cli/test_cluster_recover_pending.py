@@ -119,3 +119,88 @@ def test_a_completed_recovery_reports_the_new_holder(
     captured = capsys.readouterr()
     assert "macmini:pid7" in captured.out
     assert "agent births stay frozen" in captured.out
+
+
+def test_the_pre_stop_abort_reports_the_cleared_window(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(_pr, "read_pending_recovery_state", lambda: _state(pending=True))
+    monkeypatch.setattr(
+        _pr,
+        "pre_stop_abort_pending_publication_op",
+        lambda: {
+            "aborted": True,
+            "abandoned_holder": "gateway:pid123",
+            "target_sha": "e" * 40,
+            "units": 1,
+        },
+    )
+
+    assert _entry.cmd_cluster_recover_pending(pre_stop=True) == 0
+
+    captured = capsys.readouterr()
+    assert "pre-stop abort" in captured.out
+    assert "proven effect-free" in captured.out
+    assert captured.err == ""
+
+
+def test_a_refused_pre_stop_abort_exits_nonzero_and_names_the_refusal(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    refusal = "unit runner reports a bootstrap recovery journal"
+    monkeypatch.setattr(_pr, "read_pending_recovery_state", lambda: _state(pending=True))
+
+    def _refuse() -> dict[str, object]:
+        raise ClusterUpdateInProgress(refusal)
+
+    monkeypatch.setattr(_pr, "pre_stop_abort_pending_publication_op", _refuse)
+
+    assert _entry.cmd_cluster_recover_pending(pre_stop=True) == 1
+
+    captured = capsys.readouterr()
+    assert "✗" in captured.err and refusal in captured.err
+    # The operator still sees what is stranded before the verdict.
+    assert "gateway:pid123" in captured.out
+
+
+def test_a_clean_pre_stop_window_exits_zero(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(_pr, "read_pending_recovery_state", lambda: _state(pending=False))
+    monkeypatch.setattr(
+        _pr,
+        "pre_stop_abort_pending_publication_op",
+        lambda: {"aborted": False, "detail": "no pending publication is journaled"},
+    )
+
+    assert _entry.cmd_cluster_recover_pending(pre_stop=True) == 0
+
+    captured = capsys.readouterr()
+    assert "no pending publication is journaled" in captured.out
+    assert captured.err == ""
+
+
+def test_the_pre_stop_flag_parses_and_reaches_the_handler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cli import commands
+    from cli.main import _build_parser
+
+    calls: list[bool] = []
+
+    def _fake(*, pre_stop: bool = False) -> int:
+        calls.append(pre_stop)
+        return 0
+
+    monkeypatch.setattr(commands, "cmd_cluster_recover_pending", _fake)
+
+    flagged = _build_parser().parse_args(["cluster", "recover-pending", "--pre-stop"])
+    assert flagged.func.__name__ == "_h_cluster_recover_pending"
+    assert flagged.pre_stop is True
+    assert flagged.func(flagged) == 0
+
+    plain = _build_parser().parse_args(["cluster", "recover-pending"])
+    assert plain.pre_stop is False
+    assert plain.func(plain) == 0
+
+    assert calls == [True, False]

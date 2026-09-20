@@ -454,6 +454,8 @@ OpKind = Literal[
     "cluster_fetch",
     "cluster_prepare_facts",
     "cluster_prepare_dispatch",
+    "cluster_bootstrap_hop",
+    "cluster_bootstrap_recovery_read",
     "shell_probe",
     "shell_kill",
     "agent_skill_view",

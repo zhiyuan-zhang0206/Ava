@@ -21,7 +21,12 @@ import json
 from dataclasses import dataclass
 
 from cli.commands._update_publication import PreparedUnitPublication
-from ops.rpc_prepare_facts import ImageRef, PrepareFactsPayload, PrepareFactsResult
+from ops.rpc_prepare_facts import (
+    ImageRef,
+    PrepareFactsPayload,
+    PrepareFactsResult,
+    RestrictedHopMaterial,
+)
 from shared.managed_writer_barrier import ManagedWriterBarrierError, RolloutIdentity
 from shared.managed_writer_publication import PublishedUnit
 from shared.runtime_publication_input import PreparationReceipt, _receipt_expected
@@ -34,6 +39,7 @@ class PreparedUnitFacts:
     publication: PreparedUnitPublication
     previous_selector: str | None
     recovery: ImageRef
+    hop_material: RestrictedHopMaterial
 
 
 @dataclass(frozen=True)
@@ -50,6 +56,53 @@ class PreparedFactTarget:
     ops_url: str | None
     candidate: ImageRef
     recovery: ImageRef
+
+
+def _validated_hop_material(
+    material: RestrictedHopMaterial, *, unit: PublishedUnit
+) -> RestrictedHopMaterial:
+    """Shape-and-consistency checks on the shipped hop material (read-once evidence).
+
+    The material's authority is re-derived on the unit by the hop itself (the
+    ``ava-ops`` command line compared argument by argument, the observer's
+    challenge response); the coordinator refuses here only the shapes the
+    begin chain must not turn into a dispatched hop request -- that would be
+    caught by the updater, but after the gate and off the unit that shipped it.
+    """
+    from pathlib import PurePosixPath
+
+    from services.agent_ops.bootstrap import PreparedObservation
+
+    if not material.recovery_context.isascii():
+        raise ManagedWriterBarrierError("restricted-A context shipment is not ASCII text")
+    raw = material.recovery_context.encode("ascii")
+    if len(raw) > 64 * 1024:
+        raise ManagedWriterBarrierError("restricted-A context shipment exceeds its bound")
+    try:
+        context = PreparedObservation.model_validate_json(raw)
+    except ValueError as exc:
+        raise ManagedWriterBarrierError(
+            "restricted-A context shipment is not a prepared observation"
+        ) from exc
+    if (
+        context.expected.machine != unit.machine
+        or context.expected.home != unit.home
+        or context.expected.artifact_digest == unit.artifact_digest
+    ):
+        raise ManagedWriterBarrierError(
+            "restricted-A context shipment does not describe the unit's predecessor image"
+        )
+    path = PurePosixPath(material.recovery_context_path)
+    if (
+        not path.is_absolute()
+        or ".." in path.parts
+        or str(path) != material.recovery_context_path
+        or path.parent != PurePosixPath(unit.home) / "run"
+    ):
+        raise ManagedWriterBarrierError(
+            "restricted-A context path is not a canonical private unit reference"
+        )
+    return material
 
 
 def validate_prepared_facts(
@@ -114,6 +167,7 @@ def validate_prepared_facts(
         target.candidate.manifest_digest,
     ) or result.recovery != target.recovery:
         raise ManagedWriterBarrierError("prepared facts echo images that were not dispatched")
+    material = _validated_hop_material(result.hop_material, unit=unit)
     return PreparedUnitFacts(
         publication=PreparedUnitPublication(
             receipt=receipt,
@@ -124,6 +178,7 @@ def validate_prepared_facts(
         ),
         previous_selector=result.previous_selector,
         recovery=result.recovery,
+        hop_material=material,
     )
 
 
