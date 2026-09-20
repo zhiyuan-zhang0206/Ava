@@ -156,7 +156,8 @@ def _prepare_resurrect_attempt(
     """Commit resurrection and its optional prompt before waking the host.
 
     Returns whether this call reopened a closed agent (the explicit branch
-    cleared `closed_at`), so the caller can record it on the resurrect event.
+    cleared `closed_at`), so the caller can record it on the resurrect event
+    and the `agent_reopened` warning line.
 
     `billing_recovery=True` (the versioned `resurrect-billing-v1` action, task
     #3919) re-checks the billing-victim contract under the same row lock: a
@@ -267,8 +268,10 @@ def resurrect_agent(
     trigger additionally requires clear automatic wakes (no suppression window,
     `RECOVERY_BREAKER_CLEAR`) and an open agent (no closure marker); explicit
     manual resurrection passes no trigger and keeps its unconditional
-    contract — it reopens a closed agent (clearing `closed_at`) and the audit
-    event carries `"reopened": true`. The versioned billing batch-recovery
+    contract — it reopens a closed agent (clearing `closed_at`), the audit
+    event carries `"reopened": true`, and a WARNING-level `agent_reopened` log
+    line marks the reopen for operator-side visibility. The versioned billing
+    batch-recovery
     action (`billing_recovery=True`) is the one explicit caller that must not
     reopen: it refuses a closed row and any non-billing-class halt
     (`ResurrectRefused`), and marks the resurrect event payload with
@@ -288,6 +291,15 @@ def resurrect_agent(
     payload: dict[str, object] = {"prompt": prompt} if prompt else {}
     if reopened:
         payload["reopened"] = True
+        # LOUD operator-side audit: clearing the durable closure marker must be
+        # findable without reading the resurrect event's payload — one distinct
+        # WARNING line rides the existing log/event pipelines (no new surface).
+        logger.warning(
+            "closed agent {agent_id} reopened by explicit resurrect ({resurrected_by})",
+            event="agent_reopened",
+            agent_id=agent_id,
+            resurrected_by=resurrected_by,
+        )
     if billing_recovery:
         payload["via"] = "billing_recovery"
     insert_event_log(

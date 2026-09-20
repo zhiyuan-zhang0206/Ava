@@ -86,7 +86,16 @@ class TerminateAgentResponse(BaseModel):
 
     `open_tasks`: the still-open tasks the agent owned as it went down — an
         advisory hint, null when it owned none or the hint read failed.
+
+    `closed`: the agent's closure state after this request — True when `final`
+        was requested (the marker is stamped in the same transaction as the
+        termination intent; the already-terminated backfill marks idempotently)
+        or when the marker was already set; False otherwise; None only when the
+        reporting runner predates the field (version skew). Makes
+        `terminate --final` — including its already-terminated backfill form —
+        verifiable from the response alone.
     """
 
     status: Literal["enqueued", "already_terminated"]
     open_tasks: OpenTasksHint | None = None
+    closed: bool | None = None

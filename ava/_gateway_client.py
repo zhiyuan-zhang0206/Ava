@@ -374,7 +374,8 @@ def terminate(
     """POST /api/agents/{id}/terminate → response dict.
 
     `status` is "enqueued" / "already_terminated"; `open_tasks` carries what
-    the agent still owned as it went down, if anything.
+    the agent still owned as it went down, if anything; `closed` carries the
+    agent's closure state after the request (absent on older versions).
 
     source defaults to f"agent:{ava.self.AGENT_ID}" so the lifecycle marker
     tells the peer who terminated it. Pass source=None to use the gateway

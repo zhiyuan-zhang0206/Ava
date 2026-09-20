@@ -336,6 +336,56 @@ class TestFinalTerminationClosureMarker:
             agent_id, TerminateAgentRequest(final=True), db_pool
         )
         assert resp.status == "already_terminated"
+        assert resp.closed is True
         assert db_conn.execute(
             "SELECT closed_at IS NOT NULL FROM agents_meta WHERE id=%s", (agent_id,)
+        ).fetchone() == (True,)
+
+    @pytest.mark.asyncio
+    async def test_terminate_op_reports_closed_false_for_an_unclosed_dead_row(
+        self, db_conn: psycopg.Connection, db_pool: ConnectionPool
+    ) -> None:
+        """A dead row without the marker reports closed false and stays open —
+        a plain terminate never closes; only `--final` (or the backfill mark) does."""
+        from ops import ops_lifecycle
+
+        agent_id = create_agent(db_conn)
+        db_conn.execute(
+            "INSERT INTO agents_meta (id,status,machine,termination_source) "
+            "VALUES (%s,'terminated','test-machine','exit')",
+            (agent_id,),
+        )
+        db_conn.commit()
+
+        resp = await ops_lifecycle.terminate_agent_op(agent_id, TerminateAgentRequest(), db_pool)
+        assert resp.status == "already_terminated"
+        assert resp.closed is False
+        assert db_conn.execute(
+            "SELECT closed_at FROM agents_meta WHERE id=%s", (agent_id,)
+        ).fetchone() == (None,)
+
+    @pytest.mark.asyncio
+    async def test_terminate_op_reports_closed_on_an_alive_row(
+        self, db_conn: psycopg.Connection, db_pool: ConnectionPool, running_agent_id: int
+    ) -> None:
+        """Alive rows: a plain terminate reports closed false and stamps nothing;
+        `--final` reports closed true (its stamp rides the same transaction)."""
+        from ops import ops_lifecycle
+
+        plain = await ops_lifecycle.terminate_agent_op(
+            running_agent_id, TerminateAgentRequest(), db_pool
+        )
+        assert plain.status == "enqueued"
+        assert plain.closed is False
+        assert db_conn.execute(
+            "SELECT closed_at FROM agents_meta WHERE id=%s", (running_agent_id,)
+        ).fetchone() == (None,)
+
+        final = await ops_lifecycle.terminate_agent_op(
+            running_agent_id, TerminateAgentRequest(final=True), db_pool
+        )
+        assert final.status == "enqueued"
+        assert final.closed is True
+        assert db_conn.execute(
+            "SELECT closed_at IS NOT NULL FROM agents_meta WHERE id=%s", (running_agent_id,)
         ).fetchone() == (True,)

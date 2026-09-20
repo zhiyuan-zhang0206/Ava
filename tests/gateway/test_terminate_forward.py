@@ -99,7 +99,7 @@ class TestTerminateRouting:
                 json={"message": "retain this note"},
             )
         assert resp.status_code == 200
-        assert resp.json() == {"status": "enqueued", "open_tasks": None}
+        assert resp.json() == {"status": "enqueued", "open_tasks": None, "closed": None}
         assert captured["agent_id"] == agent_id
         assert captured["path"] == f"/api/agents/{agent_id}/terminate"
         assert captured["json_body"]["message"] == "retain this note"
@@ -126,7 +126,7 @@ class TestTerminateRouting:
                 json={"force": True, "source": "user"},
             )
         assert resp.status_code == 200
-        assert resp.json() == {"status": "enqueued", "open_tasks": None}
+        assert resp.json() == {"status": "enqueued", "open_tasks": None, "closed": None}
         assert captured["json_body"]["force"] is True
         assert captured["json_body"]["source"] == "user"
 
@@ -191,7 +191,7 @@ def test_remote_home_machine_is_forwarded(
         monkeypatch.setattr(forward_module, "_enqueue_lifecycle", _capture_enqueue)  # pyright: ignore[reportUnknownArgumentType]
         resp = client.post(f"/api/agents/{agent_id}/terminate")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "enqueued", "open_tasks": None}
+    assert resp.json() == {"status": "enqueued", "open_tasks": None, "closed": None}
     assert captured["target"] == "stale-wsl"
 
 
@@ -227,7 +227,7 @@ class TestTerminateOpenTasksHint:
             _set_agent_machine(db_conn, agent_id, "local-test")
             resp = client.post(f"/api/agents/{agent_id}/terminate")
         assert resp.status_code == 200
-        assert resp.json() == {"status": "enqueued", "open_tasks": None}
+        assert resp.json() == {"status": "enqueued", "open_tasks": None, "closed": False}
 
     def test_open_tasks_reported_newest_first(
         self, _force_local_machine: str, db_conn: psycopg.Connection
@@ -297,4 +297,45 @@ class TestTerminateOpenTasksHint:
             _set_agent_machine(db_conn, agent_id, "local-test")
             resp = client.post(f"/api/agents/{agent_id}/terminate")
         assert resp.status_code == 200
-        assert resp.json() == {"status": "enqueued", "open_tasks": None}
+        assert resp.json() == {"status": "enqueued", "open_tasks": None, "closed": False}
+
+
+class TestTerminateClosedState:
+    """`closed` rides the forward response verbatim: the closure post-state the
+    home runner computed for this request (True when `final` was requested or
+    the marker was already set; False otherwise; None when an older runner
+    does not report it)."""
+
+    def test_reports_the_home_runner_closure_state(
+        self,
+        _force_local_machine: str,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        async def _capture_forward(agent_id: int, path: str, json_body: dict) -> dict:
+            return {"status": "already_terminated", "closed": True}
+
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            _set_agent_machine(db_conn, agent_id, "remote-mac")
+            monkeypatch.setattr(lifecycle_module, "_forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
+            resp = client.post(f"/api/agents/{agent_id}/terminate", json={"final": True})
+        assert resp.status_code == 200
+        assert resp.json()["closed"] is True
+
+    def test_closed_false_for_an_open_agent(
+        self,
+        _force_local_machine: str,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        async def _capture_forward(agent_id: int, path: str, json_body: dict) -> dict:
+            return {"status": "enqueued", "closed": False}
+
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            _set_agent_machine(db_conn, agent_id, "remote-mac")
+            monkeypatch.setattr(lifecycle_module, "_forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
+            resp = client.post(f"/api/agents/{agent_id}/terminate")
+        assert resp.status_code == 200
+        assert resp.json()["closed"] is False
