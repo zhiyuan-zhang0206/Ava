@@ -47,6 +47,24 @@ class ObservabilitySettings(EnvSettings):
         },
     )
 
+    push_budget_target: int = Field(
+        default=30,
+        ge=0,
+        alias="AVA_PUSH_BUDGET_TARGET",
+        description=(
+            "Observation target for direct pushes delivered to the human per day "
+            "(user ruling 2026-09-20: at most 30/day, observed over a three-week "
+            "window). Record-only — the measurement side records against it; it "
+            "never enforces or intercepts a push."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     trace_tags: str = Field(
         default="",
         alias="AVA_TRACE_TAGS",

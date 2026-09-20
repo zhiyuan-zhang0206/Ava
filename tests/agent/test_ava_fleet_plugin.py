@@ -178,6 +178,65 @@ def test_prompt_section_queue_delivery_mandate(
     assert "reduce-context-switch" not in section
 
 
+def test_prompt_section_reduce_context_switch_gating(
+    _load_activity_plugin: None, monkeypatch: pytest.MonkeyPatch
+):
+    """The platform reduce-context-switch default renders only while the
+    settings.agent.reduce_context_switch toggle is on; off is the escape hatch
+    back to the pre-platform behavior (empty section)."""
+    from ava_builtins.plugins.ava_fleet.agent_runtime import (
+        _reduce_context_switch_section,
+    )
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.agent, "reduce_context_switch", True)
+    assert "Queue, never push" in _reduce_context_switch_section()
+
+    monkeypatch.setattr(settings.agent, "reduce_context_switch", False)
+    assert _reduce_context_switch_section() == ""
+
+
+def test_prompt_section_reduce_context_switch_content(
+    _load_activity_plugin: None, monkeypatch: pytest.MonkeyPatch
+):
+    """The section carries the reduction discipline semantically: queue-never-push
+    with the emergency-only push exception, one notice per manager updated in
+    place, milestone cadence, and the decision/progress bisection (user ruling
+    2026-09-20)."""
+    from ava_builtins.plugins.ava_fleet.agent_runtime import (
+        _reduce_context_switch_section,
+    )
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.agent, "reduce_context_switch", True)
+    section = _reduce_context_switch_section()
+
+    assert "Queue, never push" in section
+    assert "irreversible risk in motion" in section
+    assert "everything else queues" in section
+    assert "One notice per manager, updated in place" in section
+    assert "never accumulates a manager's history" in section
+    assert "Milestones, not motion" in section
+    assert "never routine progress" in section
+    assert "A decision only the human can make" in section
+    assert "With no manager, deliver directly" in section
+
+
+def test_reduce_context_switch_reaches_the_prompt(
+    _load_activity_plugin: None, monkeypatch: pytest.MonkeyPatch
+):
+    """End to end: the toggle gates the section's presence in the assembled
+    system prompt."""
+    from agent.graph._system_prompt import build_system_prompt
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.agent, "reduce_context_switch", True)
+    assert "## Reduce context switch for the human" in build_system_prompt()
+
+    monkeypatch.setattr(settings.agent, "reduce_context_switch", False)
+    assert "## Reduce context switch for the human" not in build_system_prompt()
+
+
 def test_prompt_section_task_conversion_contract(_load_activity_plugin: None):
     """The fleet section turns a future signal into an owned, deduplicated
     task without inventing registry routing behavior."""
