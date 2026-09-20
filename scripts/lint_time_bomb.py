@@ -34,11 +34,13 @@ lints):
    parameter is live: every call in its body to a callee that
    (transitively) reaches a fixed-instant constant module and uses the real
    clock must either thread the callee's clock parameter or sit inside the
-   caller's `param is None -> real now` fallback. Calling
-   `split_index_label_window(start, end)` (no `now=`) from inside
-   `compute_rollup(now_utc=...)` is exactly the 2026-08-30 rollup bomb's
-   seedling: the parameter is a promise the code does not keep, so the test
-   that "pins" `now_utc` is still asserting against the real clock.
+   caller's `param is None -> real now` fallback. Calling a window helper
+   that folds a fixed instant against the real clock from inside
+   `compute_rollup(now_utc=...)` without threading the clock is exactly the
+   2026-08-30 rollup bomb's seedling: the parameter is a promise the code
+   does not keep, so the test that "pins" `now_utc` is still asserting
+   against the real clock. (The original seam — the label-window split
+   accepting `now=` — has since been removed; the rule stays general.)
 
 2. **Exact equality on a fixed instant with an unpinned real-now
    derivation (test).** In a test function, an exact `==`/`!=` comparison

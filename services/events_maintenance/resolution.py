@@ -94,12 +94,11 @@ _last_auto_dismiss_day: list[date | None] = [None]
 def grouped_count_query(window: str, *, cluster: str | None = None) -> str:
     """One capped series aggregation for the event classes in ``window``.
 
-    Do not add category/level/event-name stream-selector labels before
-    ``LEGACY_READ_EXPIRES_AT`` (``INDEX_LABEL_CUTOVER_AT +
-    EVENT_STREAM_RETENTION + LEGACY_READ_MARGIN``; see
-    ``shared/loki_index_labels.py``). Legacy chunks have those
-    values only in their JSON body; filtering them in the selector would make
-    active dismissals depend on a rollout boundary (#1467).
+    Category/level/event-name stream-selector labels stayed out of the
+    selector until the label rollout's grace closed (2026-08-26): the legacy
+    chunks carried those values only in their JSON body, so filtering them in
+    the selector would have made active dismissals depend on a rollout
+    boundary (#1467).
 
     ``cluster`` is an optional pipeline stage (``| cluster="X" or cluster=""``,
     the same unlabeled-row acceptance the gateway's aggregate pipelines use)

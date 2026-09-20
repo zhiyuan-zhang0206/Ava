@@ -8,8 +8,9 @@ each ejecting the merge-queue batch). The lint has two halves:
 
 - source: a function that accepts a clock parameter must thread it into the
   fixed-instant window boundary instead of letting the callee fall back to
-  the real clock (`compute_rollup(now_utc=...)` -> `split_index_label_window`
-  without `now=` — the rollup bomb's seedling);
+  the real clock (the 2026-08-30 rollup bomb: `compute_rollup(now_utc=...)`
+  reaching the label-window split without `now=`; that seam has since been
+  removed);
 - test: exact `==` on a fixed-instant-derived expression inside a function
   whose derivation reaches an unpinned real-now path (the inspect bomb:
   `client.get(...)` + `== INDEX_LABEL_CUTOVER_AT`), and a fixed calendar

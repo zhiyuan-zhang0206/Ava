@@ -162,7 +162,7 @@ def replay_loki(
                             indexed_labeled=s.era.value == "indexed",
                         ),
                     )
-                    for s in split_index_label_window(start, stop, now=now)
+                    for s in split_index_label_window(start, stop)
                 ]
             for lo, hi, selector in pipelines:
                 # Extract only the event name; full json extraction explodes
