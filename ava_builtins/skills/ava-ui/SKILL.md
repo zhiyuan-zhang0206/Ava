@@ -9,13 +9,15 @@ Provides **frontend boilerplate** for the agent to spin up a page for the user t
 **No Python writing**, no Python API. Everything is HTML / JS / TSX / starter
 projects; the agent uses the file tools `read` / `cp` to fetch them, assemble and edit them, then start a server.
 
-`ava.ui.serve(dir, name, port=None)` is the one-call path for static files: it starts
+`ava.ui.serve(dir, name, port)` is the one-call path for static files: it starts
 a `ThreadingTCPServer` on `0.0.0.0:<port>` with a `/health` endpoint, polls until
 listening, and registers the page — the whole session-start + poll + show dance
 in one call. The server handles concurrent requests and includes basic error
-recovery for dropped connections. `port` defaults to a port reserved for your agent;
-pass one to override. If the port is already in use by another process, serve
-**raises** instead of killing the occupant — see Troubleshooting for the re-serve recipe.
+recovery for dropped connections. `port` is required — pick an explicit free port
+(1024-65535); nothing reserves a port for your agent. serve **fails loudly**
+instead of killing the occupant when the port is not free: another open page
+holding it is refused by the platform, a process that is not a page server fails
+the call before anything is registered — see Troubleshooting for the re-serve recipe.
 
 `serve()` is a **static file server** — it hands the browser the file bytes as-is,
 it does not render anything. A `.md` file therefore opens as **raw Markdown
@@ -41,9 +43,10 @@ with the [markdown widget](widgets/markdown/README.md):
 The widget renders client-side with vendored marked.js, DOMPurify, KaTeX, and
 highlight.js; no CDN or server-side Markdown renderer is involved.
 
-`ava.ui.show(name, port=None)` is the underlying transport: you start an HTTP server
-yourself (bound on `0.0.0.0`) and register it with the gateway (`port` defaults to
-the one reserved for your agent; show does not check whether it is free). Use this when you
+`ava.ui.show(name, port)` is the underlying transport: you start an HTTP server
+yourself (bound on `0.0.0.0`) and register it with the gateway (`port` is required;
+show does not probe whether the server answers, but the registry refuses a port
+another open page holds). Use this when you
 need a non-`http.server` process — e.g. `npm run dev`, a custom Python server, or
 a server you already started. The registered URL is the **direct**
 `http://<host>:<port>/` the user opens in a new tab over the shared trusted
@@ -245,5 +248,6 @@ don't need any of this.)
   does not block others. If the server process is stuck, call `ava.ui.close(name)` then
   re-`serve()`. serve does **not** kill whatever holds the port — if an old server is still
   bound (e.g. it was started in a shell session that outlived the process, so `close` no
-  longer tracks it), serve raises. Stop that session first: `ava.shell.sessions.list()`,
-  then `ava.shell.sessions.kill(id)` — or re-serve on a different `port`.
+  longer tracks it), serve fails before registering anything. Stop that session first:
+  `ava.shell.sessions.list()`, then `ava.shell.sessions.kill(id)` — or re-serve on a
+  different `port`.

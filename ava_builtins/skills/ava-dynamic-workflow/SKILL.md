@@ -191,7 +191,7 @@ page_dir.mkdir(exist_ok=True)
     f"<li>{hotel['name']}: ${hotel['price_per_night_usd']}/night</li>"
     f"</ul><p>Total: ${total}</p></body></html>"
 )
-ava.ui.serve(str(page_dir), name="travel-itinerary")
+ava.ui.serve(str(page_dir), name="travel-itinerary", port=<free port>)
 ```
 
 ### 5. Clean up

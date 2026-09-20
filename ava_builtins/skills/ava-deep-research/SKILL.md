@@ -191,7 +191,8 @@ citation-sourcing holes, not semantic truth; say so in the report's limitations.
 2. Every significant claim carries an inline numbered citation `[n]` resolving
    to the source list (format: `references/citation-discipline.md`).
 3. Deliver by rendering the report to a self-contained HTML page with the
-   ava-ui markdown widget and serving it with `ava.ui.serve(<directory>, name="<slug>")`.
+   ava-ui markdown widget and serving it with `ava.ui.serve(<directory>, name="<slug>", port=<port>)`
+   (the port is required and must be free — pick one explicitly).
    **Offer format choice in the
    delivery message**: A. the served HTML page link (default), B. the Markdown
    source path, C. any other format the user names (user ruling 2026-08-09:

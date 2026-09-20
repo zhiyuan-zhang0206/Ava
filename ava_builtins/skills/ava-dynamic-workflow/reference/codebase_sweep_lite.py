@@ -305,7 +305,7 @@ Read all results:
 Integrate all findings and review opinions, then generate the final Markdown report.
 
 Render the report to self-contained HTML, then serve it with
-ava.ui.serve(page_dir, name="codebase-sweep-lite", title="Codebase Sweep Report").
+ava.ui.serve(page_dir, name="codebase-sweep-lite", title="Codebase Sweep Report", port=<free port>).
 
 After completion, message no one.
 """,

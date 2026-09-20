@@ -267,7 +267,7 @@ Read all result files:
 Generate the final Markdown report, integrating all findings and review comments.
 
 Render the report to self-contained HTML, then serve it with
-ava.ui.serve(page_dir, name="deep-research-lite", title="AI Coding Agent 2026 Competitive Landscape").
+ava.ui.serve(page_dir, name="deep-research-lite", title="AI Coding Agent 2026 Competitive Landscape", port=<free port>).
 
 After completion, message no one.
 """,

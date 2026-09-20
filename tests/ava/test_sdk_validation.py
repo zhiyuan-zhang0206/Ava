@@ -385,16 +385,16 @@ class TestUiEntries:
             ),
         )  # pyright: ignore[reportUnknownArgumentType]
 
-        _ui.show(("mypage",), title=("My Page",))  # pyright: ignore[reportArgumentType]
+        _ui.show(("mypage",), 9999, title=("My Page",))  # pyright: ignore[reportArgumentType]
         assert seen["name"] == "mypage"
         assert seen["title"] == "My Page"
+        assert seen["port"] == 9999
 
     def test_serve_unwraps_dir_and_name(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         seen: dict[str, Any] = {}
-        monkeypatch.setattr(_ui, "_agent_page_port", lambda: 9999)
-        monkeypatch.setattr(_ui, "_close_existing", lambda: None)
+        monkeypatch.setattr(_ui, "_reject_foreign_port_occupant", lambda _port: None)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(_ui, "_wait_until_serving", lambda *_a, **_k: True)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(
             _ui,
@@ -405,8 +405,9 @@ class TestUiEntries:
             ),
         )  # pyright: ignore[reportUnknownArgumentType]
 
-        _ui.serve((str(tmp_path),), ("served",))  # pyright: ignore[reportArgumentType]
+        _ui.serve((str(tmp_path),), ("served",), 9998)  # pyright: ignore[reportArgumentType]
         assert seen["name"] == "served"
+        assert seen["port"] == 9998
         assert seen["serve_dir"] == str(Path(str(tmp_path)).resolve())
 
     def test_close_unwraps_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -423,10 +424,14 @@ class TestUiEntries:
     @pytest.mark.parametrize(
         ("call", "match"),
         [
-            pytest.param(lambda: _ui.show(("a", "b")), "name must be a string", id="show-multi"),  # pyright: ignore[reportArgumentType]
+            pytest.param(
+                lambda: _ui.show(("a", "b"), 9999),  # pyright: ignore[reportArgumentType]
+                "name must be a string",
+                id="show-multi",
+            ),
             pytest.param(lambda: _ui.show("x", port=("80",)), "port must be int", id="show-port"),  # pyright: ignore[reportArgumentType]
             pytest.param(
-                lambda: _ui.serve(("a", "b"), "n"),  # pyright: ignore[reportArgumentType]
+                lambda: _ui.serve(("a", "b"), "n", 9999),  # pyright: ignore[reportArgumentType]
                 "dir must be a string",
                 id="serve-multi",  # pyright: ignore[reportArgumentType]
             ),  # pyright: ignore[reportArgumentType]
