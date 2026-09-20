@@ -9,7 +9,10 @@ then consume the enable point's decision at the managed-writer collection
 
 The five orchestration seams arrive as injected callables, resolved at the
 call site from `update.py`'s namespace so the `cli.commands.update.*`
-monkeypatch seams keep resolving for tests:
+monkeypatch seams keep resolving for tests. An `active` managed-writer rollout
+additionally passes its per-unit hop plans: the hop gate then replaces the
+Phase-B poll (and the collect/commit window is not entered -- the
+restricted-only slice publishes nothing; task #4129 I4):
 
 - `targets` -- `_phase_b_targets` (the fan-out set, this host excluded),
 - `readiness` -- `_gateway_ready_or_incomplete` (Phase B's precondition),
@@ -26,6 +29,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import NamedTuple
 
+from cli.commands._managed_writer_hop import HopUnitPlan, phase_b_hops
 from cli.commands._update_recover import RolloutOutcome
 from shared.rollout_telemetry import record_host as _record_host_telemetry
 from shared.rollout_telemetry import stage as _stage_telemetry
@@ -64,6 +68,7 @@ def _phase_b_and_commit(
     poll_outcome: Callable[..., tuple[int, RolloutOutcome, list[tuple[str, str | None]]]],
     collect: Callable[[], int],
     commit: Callable[[], int],
+    hop_plans: list[HopUnitPlan] | None = None,
 ) -> PhaseBVerdict:
     """Steps 6.4 through 9 of the rollout: fan-out set, readiness gate, Phase-B
     poll + verdict, managed-writer collection + commit -- returning the verdict
@@ -94,6 +99,26 @@ def _phase_b_and_commit(
             outcome=RolloutOutcome.INCOMPLETE,
             hosts_to_resume=hosts_to_resume,
             failing_step="the gateway was not serving, so Phase B never fanned out",
+            publication_refused=False,
+        )
+
+    if hop_plans is not None:
+        # The managed-writer hop phase (task #4129 I4, channel C): the begin
+        # chain returned the units' hop plans, so the Phase-B poll is replaced
+        # by the hop dispatch gate -- the units take the restricted updater hop
+        # instead of the normal self-update. The collection and commit
+        # positions (8.5-9) are not entered: the restricted-only slice
+        # publishes nothing, and the continuation arrives with task #4129
+        # I5/I6. `hosts_to_resume` is the gate's frozen empty list: after the
+        # hop gate the fallback is checked recovery, never an ad-hoc
+        # compensating resume.
+        with _stage_telemetry("managed_writer_hop"):
+            hop_rc, hop_outcome, hop_hosts, hop_failing = phase_b_hops(hop_plans)
+        return PhaseBVerdict(
+            rc=hop_rc,
+            outcome=hop_outcome,
+            hosts_to_resume=hop_hosts,
+            failing_step=hop_failing,
             publication_refused=False,
         )
 

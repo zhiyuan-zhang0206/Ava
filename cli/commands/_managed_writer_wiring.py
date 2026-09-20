@@ -11,8 +11,11 @@ publication seats (`cli.commands._update_publication`) on the coordinator (task
   gathers every registered unit's prepared facts, seals the all-unit prepared
   plan, journals it through the P1 seat and requires every unit's local
   validation acknowledgement -- so agent births freeze and the current
-  publication is preserved until P5 completes. Any refusal in that chain aborts
-  the rollout before it stops anything. `off` / `blocked` skip it untouched.
+  publication is preserved until P5 completes. The same chain assembles the
+  units' hop projections against the journal's challenge and returns the
+  per-unit hop plans (channel C) for the rollout's hop phase. Any refusal in
+  that chain aborts the rollout before it stops anything. `off` / `blocked`
+  skip it untouched.
 - `_collect_managed_writer_publication` (E2-c) -- the post-Phase-B, pre-commit
   collection step: under an `active` decision the completed units' post-stop
   facts are gathered across the fleet and adopted into the pending journal
@@ -46,10 +49,13 @@ from __future__ import annotations
 
 import sys
 
+from cli.commands._managed_writer_hop import HopUnitPlan
 from shared.rollout_telemetry import stage as _stage_telemetry
 
 
-def _begin_managed_writer_publication(target_sha: str | None) -> int:
+def _begin_managed_writer_publication(
+    target_sha: str | None,
+) -> tuple[int, list[HopUnitPlan] | None]:
     """Journal the managed-writer activation (P1 coordinator step).
 
     The rollout's begin position of the managed-writer chain (task #4128,
@@ -68,7 +74,8 @@ def _begin_managed_writer_publication(target_sha: str | None) -> int:
     exit code 1; the rollout then aborts before the first stop effect, and a
     journal already opened stays for checked recovery (`ava cluster
     recover-pending`). Infrastructure failures propagate unchanged. Returns
-    the step's exit code: 0 for a clean skip or an open journal, 1 for the
+    `(exit_code, hop_plans)`: 0 with the per-unit hop plans for an open journal
+    (the hop phase's input), 0 with None for a clean skip, 1 with None for the
     refusal.
     """
     from cli.commands._managed_writer_mode import managed_writer_mode
@@ -80,9 +87,9 @@ def _begin_managed_writer_publication(target_sha: str | None) -> int:
             "process; skipping the position",
             file=sys.stderr,
         )
-        return 0
+        return 0, None
     if mode.state != "active":
-        return 0
+        return 0, None
     from cli.commands._managed_writer_dispatch import begin_managed_writer_publication
     from shared.managed_writer_barrier import ManagedWriterBarrierError
 
@@ -90,7 +97,7 @@ def _begin_managed_writer_publication(target_sha: str | None) -> int:
     # rollout's log must not grow a managed-writer stage it never ran.
     with _stage_telemetry("managed_writer_begin"):
         try:
-            begin_managed_writer_publication(target_sha)
+            hop_plans = begin_managed_writer_publication(target_sha)
         except ManagedWriterBarrierError as exc:
             print(
                 f"\n\u2717 managed-writer begin refused: {exc}\n"
@@ -98,8 +105,8 @@ def _begin_managed_writer_publication(target_sha: str | None) -> int:
                 "`ava cluster recover-pending`",
                 file=sys.stderr,
             )
-            return 1
-    return 0
+            return 1, None
+    return 0, hop_plans
 
 
 def _collect_managed_writer_publication() -> int:

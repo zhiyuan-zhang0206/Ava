@@ -70,10 +70,12 @@ normal-service plan when the release includes one), and
 The single observation challenge is minted once per operation: a same-operation
 retry adopts the journaled challenge, because the begin retry check compares the
 whole entry, while a pending entry from another operation is left for that check
-to refuse — recovery stays explicit. The rollout's begin position now exists
-(task #4128 E2-b) but refuses before reaching this seat until the all-unit
-prepared-plan channel lands (prepared dispatch, task #4129): the seat itself
-stays unimported and unwired, and it performs no filesystem or network work.
+to refuse — recovery stays explicit. The rollout's begin position (task #4128 E2-b) now reaches this seat: under an
+`active` decision the dispatch chain (task #4129 channels B/C) opens the
+journal through `open_pending_publication`, assembles each unit's hop
+projections against the journaled single challenge, and fans the sealed plan
+out -- every other decision skips the position untouched, and the seat itself
+performs no filesystem or network work.
 `cli/commands/_update_normal_release.py` carries the
 P3/P4 call positions (migration receipt, selector CAS, normal start/observe,
 `record_pending_unit_readback`) immediately behind the checked-activation gate;

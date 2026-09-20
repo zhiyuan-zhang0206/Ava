@@ -22,6 +22,7 @@ import pytest
 
 from cli.commands._managed_writer_dispatch import (
     _ack_bindings,
+    assemble_hop_plans,
     begin_valid_until,
     build_targets,
     derive_candidate_digest,
@@ -36,9 +37,14 @@ from cli.commands._release_context import (
     release_context_bytes,
     release_context_path,
 )
-from cli.commands._update_publication import PreparedUnitPublication, published_unit
+from cli.commands._update_bootstrap import BootstrapHopRequest
+from cli.commands._update_publication import (
+    PreparedUnitPublication,
+    build_pending_publication,
+    published_unit,
+)
 from ops.cluster_rpc import ClusterOpFailed, ClusterOpUnreachable
-from ops.rpc_prepare_dispatch import PrepareDispatchResult
+from ops.rpc_prepare_dispatch import PrepareDispatchResult, ProjectionFile, prepared_hop_name
 from ops.rpc_prepare_facts import ImageRef, RestrictedHopMaterial
 from services.agent_ops.bootstrap import PreparedObservation
 from shared.managed_writer_barrier import ManagedWriterBarrierError, RolloutIdentity
@@ -59,6 +65,7 @@ RECOVERY_MANIFEST = "e" * 64
 RECOVERY_SCHEMA = "f" * 64
 TARGET_SHA = "0" * 40
 VALID_UNTIL = datetime(2026, 9, 20, 18, 0, tzinfo=UTC)
+JOURNAL_CHALLENGE = UUID(int=4242)
 
 
 def _digest(label: str) -> str:
@@ -650,15 +657,33 @@ def _chain_world(
     monkeypatch.setattr(dispatch_mod, "gather_prepared_facts", gather or default_gather)
     recorded: list[dict[str, Any]] = []
 
-    def open_pending(conn: Any, publications: Any, **kwargs: Any) -> None:
+    def open_pending(conn: Any, publications: Any, **kwargs: Any) -> Any:
         recorded.append({"conn": conn, "publications": publications, **kwargs})
+        return build_pending_publication(
+            list(publications),
+            operation=kwargs["operation"],
+            predecessor=None,
+            candidate_digest=kwargs["candidate_digest"],
+            challenge=JOURNAL_CHALLENGE,
+            schema_digest=kwargs["schema_digest"],
+            applied_names=kwargs["applied_names"],
+        )
 
     monkeypatch.setattr(dispatch_mod, "open_pending_publication", open_pending)
     monkeypatch.setattr(dispatch_mod, "write_transaction", _FakeTransaction)
     dispatched: list[dict[str, Any]] = []
 
-    def dispatch_sealed(sealed: Any, targets: Any, *, expected: Any) -> None:
-        dispatched.append({"sealed": sealed, "targets": targets, "expected": expected})
+    def dispatch_sealed(
+        sealed: Any, targets: Any, *, expected: Any, projections: Any = None
+    ) -> None:
+        dispatched.append(
+            {
+                "sealed": sealed,
+                "targets": targets,
+                "expected": expected,
+                "projections": projections,
+            }
+        )
 
     monkeypatch.setattr(dispatch_mod, "dispatch_prepared_plan", dispatch_sealed)
     return {
@@ -677,7 +702,7 @@ def test_begin_chain_reads_the_context_opens_the_journal_and_dispatches(
     world = _chain_world(monkeypatch, tmp_path)
     before = datetime.now(UTC)
 
-    world["module"].begin_managed_writer_publication(TARGET_SHA)
+    plans = world["module"].begin_managed_writer_publication(TARGET_SHA)
 
     facts, registered = world["facts"], world["registered"]
     gathered, recorded, dispatched = world["gathered"], world["recorded"], world["dispatched"]
@@ -695,9 +720,14 @@ def test_begin_chain_reads_the_context_opens_the_journal_and_dispatches(
     assert dispatched[0]["expected"] == _ack_bindings(facts)
     assert before + timedelta(seconds=600) <= sealed.plan.valid_until
     assert sealed.plan.valid_until <= datetime.now(UTC) + timedelta(seconds=600)
+    # Channel C rides the same execution: the returned hop plans are the ones
+    # whose projections were staged by the dispatch.
+    assert [plan.machine for plan in plans] == ["runner-a", "runner-b"]
+    assert dispatched[0]["projections"] == {plan.machine: plan.projections for plan in plans}
     out = capsys.readouterr().out
     assert "(read once)" in out
     assert "journal open; all 2 units" in out
+    assert str(JOURNAL_CHALLENGE) in out
 
 
 def test_begin_chain_binds_the_policy_window_as_the_smaller_bound(
@@ -806,3 +836,70 @@ def test_registered_units_with_urls_reads_the_roster_and_urls_once(
     assert len(conn.statements) == 1
     assert "machines" in conn.statements[0]
     assert "gateway_url" in conn.statements[0]
+
+
+# ── the hop plan assembly (channel C, task #4129 I4) ────────────────────────
+
+
+def _hop_world() -> tuple[list[PreparedUnitFacts], list[PreparedFactTarget], RolloutIdentity]:
+    facts = [_facts("runner-a", "/ava-a"), _facts("runner-b", "/ava-b")]
+    context = _context(("runner-a", "/ava-a"), ("runner-b", "/ava-b"))
+    targets = build_targets({("runner-a", "/ava-a"), ("runner-b", "/ava-b")}, {}, context)
+    return facts, targets, _operation()
+
+
+def test_assemble_hop_plans_binds_each_projection_to_its_content_name() -> None:
+    facts, targets, operation = _hop_world()
+    challenge = UUID(int=11)
+
+    plans = assemble_hop_plans(
+        facts,
+        targets,
+        operation=operation,
+        valid_until=VALID_UNTIL,
+        challenge=challenge,
+        schema_digest=SCHEMA,
+    )
+
+    assert [plan.machine for plan in plans] == ["runner-a", "runner-b"]
+    plan = plans[0]
+    assert (plan.home, plan.ops_url, plan.artifact_digest) == ("/ava-a", None, ARTIFACT)
+    candidate_projection, request_projection = plan.projections
+    assert candidate_projection.name == prepared_hop_name(
+        "candidate-context", candidate_projection.content
+    )
+    assert request_projection.name == prepared_hop_name("request", request_projection.content)
+    assert plan.request_path == f"/ava-a/run/{request_projection.name}"
+
+    context = PreparedObservation.model_validate_json(candidate_projection.content)
+    assert context.operation == operation
+    assert context.challenge.challenge == challenge
+    assert context.challenge.valid_until == VALID_UNTIL
+    assert context.schema_digest == SCHEMA
+    assert context.expected == facts[0].publication.receipt.expected
+
+    request = BootstrapHopRequest.model_validate_json(request_projection.content)
+    assert request.candidate_context == f"/ava-a/run/{candidate_projection.name}"
+    assert request.recovery_context == facts[0].hop_material.recovery_context_path
+    assert request.inventory_receipt == (
+        f"/ava-a/run/release-inventory-{facts[0].publication.prepared_receipt_digest}.json"
+    )
+    assert request.predecessor == facts[0].hop_material.predecessor
+    assert request.normal_release_path is None
+
+
+def test_dispatch_carries_each_units_projections_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    sealed, targets, expected = _world()
+    answers = {
+        machine: _ack(machine, home, plan_digest=sealed.digest, receipt_digest=receipt)
+        for machine, (home, receipt) in expected.items()
+    }
+    calls = _stub_dispatch(monkeypatch, answers)
+    projection = ProjectionFile(name=prepared_hop_name("request", "{}\n"), content="{}\n")
+
+    dispatch_prepared_plan(
+        sealed, targets, expected=expected, projections={"runner-a": (projection,)}
+    )
+
+    assert calls[0]["payload"]["projections"] == [projection.model_dump(mode="json")]
+    assert "projections" not in calls[1]["payload"]
