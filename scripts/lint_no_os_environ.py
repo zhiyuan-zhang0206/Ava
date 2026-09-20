@@ -127,6 +127,7 @@ _ALLOWED_FILES = frozenset(
         "scripts/prove_runtime_otel.py",  # CI-only scratch/home guard; never production collector configuration.
         "scripts/prove_runtime_plugins.py",  # CI-only private home and CI guard, not runtime plugin settings.
         "scripts/prove_exec_owner_installed.py",  # CI-only scratch child projection for source-absent proof.
+        "scripts/prove_normal_release.py",  # CI-only scratch/DB guards and explicit private child projection; never runtime configuration.
         "scripts/prove_ops_bootstrap.py",  # CI-only scratch/DB guards and sanitized pre-Settings child projection.
         "scripts/prove_release_inventory.py",  # CI-only native PG and private unit projection for source-absent proof.
         "scripts/prove_updater_bootstrap.py",  # CI-only native unit guard and explicit private child projection; never runtime configuration.
