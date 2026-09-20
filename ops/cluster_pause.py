@@ -184,6 +184,10 @@ def release_pre_stop_hold(*, reason: str) -> None:
     cancelled, failed receipts need repair first, and on an agent-runner the
     live agent-host and a reachable data plane must still answer -- and the
     release itself runs through the same authorized-start + unpause sequence.
+    A provably absent agent-host (no process; `host_running()` false) does not
+    block: with no process there is no continuation to protect, so the identity
+    probe is skipped and the downgrade is audited loudly. A live host that
+    cannot be identified still refuses (task #4168).
     `reason` goes into the audit line so the ops log names the actor (watchdog
     release vs updater self-release).
 
@@ -210,9 +214,20 @@ def release_pre_stop_hold(*, reason: str) -> None:
     if (refusal := _hold_refusal(current)) is not None:
         raise RuntimeError(refusal)
     if "agent-runner" in machine_role():
-        from ops.agent_pause_probe import host_identity
+        from ops.agent_pause_probe import host_identity_or_none
 
-        host_identity()
+        if host_identity_or_none() is None:
+            # No agent-host process exists, so no continuation can be in
+            # flight; the skipped probe and its process-level absence proof
+            # are audited loudly with the reason (task #4168).
+            _log.error(
+                "[cluster] pre-stop release downgrade: agent-host provably absent "
+                "(host_running()=false; no process => no continuations possible); "
+                "identity probe skipped (reason=%s, holder=%s, acquired_at=%s)",
+                reason,
+                current.holder,
+                current.acquired_at.isoformat(),
+            )
     with connect() as conn:
         conn.execute("SELECT 1")
     with maintenance.authorized_start(current.holder, current.acquired_at):

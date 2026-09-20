@@ -203,9 +203,13 @@ with the shepherding process, and a hold whose shepherd is gone, whose
 blocking failures are empty and which nothing is executing under is declared
 `abandoned` at the 10-minute notice bound and released by the pause watchdog
 after a 30-minute observation window — `resume --cancel`'s automatic twin,
-loudly audited, disable with `AVA_ABANDONED_HOLD_AUTO_RELEASE=0`. Everything
-else stays loud and manual: failed receipts, a started stop, legacy journals
-without a recorded shepherd, unreadable probes, and a still-live ladder. When
+loudly audited, disable with `AVA_ABANDONED_HOLD_AUTO_RELEASE=0`. The release
+(and `resume --cancel` on the same chain) requires the runner's live agent-host
+to answer — or be provably absent (no agent-host process; `host_running()`
+false; the skipped probe and its proof are audited loudly, task #4168).
+Everything else stays loud and manual: failed receipts, a started stop, legacy
+journals without a recorded shepherd, unreadable probes, and a still-live
+ladder. When
 such a host is found mid-maintenance — services stopped or admission held, and
 nothing left running that owns the pause — recover it by hand.
 
@@ -268,6 +272,32 @@ The repair moves the failed receipts to `repaired` (both sides stay visible in
 `maintenance status`), records operator identity in the journal, and releases
 the hold in the same command; if that release is interrupted (a partial
 release), `resume --cancel` completes it.
+
+### Known limits while a hold stands
+
+The hold deliberately suspends supervision, and the paused window takes the
+unit out of every reconciliation loop: while the posture reads `paused` — the
+stop window the maintenance stop sets, through `stopped`/`starting`/`ready`,
+and any `ava start` that runs under a hold — the pause controller blocks the
+whole roster (`BlockScope.ALL`): the round short-circuits and no service
+healthcheck runs. A service that dies in that window (an agent-host SIGTERM,
+say) is not revived until the hold is released — a pre-stop hold through
+`resume --cancel` or the abandoned release, a post-stop hold through
+`ava start` or the hold watchdog's one bounded attempt. No supervision is
+added there on purpose: nothing on the roster may be revived while the window
+belongs to a stop/start handoff.
+
+- **Record-only states.** Only an ownerless PRE-stop hold with no blocking
+  failures auto-releases, and only a post-stop hold with fully decidable empty
+  ownership signals gets the watchdog's bounded attempt. Failure-carrying
+  holds, started stops without updater evidence, legacy journals without a
+  recorded shepherd, and unreadable probes/journals stay loud and manual.
+- **Orphaned runtime ownership is reclaimed outside the hold.** Agent rows
+  still owned by a dead host instance are reconciled when the host next boots
+  (`agent.hosted_ownership.settle_stale_running_rows`) or when a successor's
+  admission replaces a proven-dead predecessor — after service returns. The
+  release itself reclaims nothing; it returns the unit to service so those
+  paths can run.
 
 ## Stop-class drills and operations: executor-cancellation insurance and hold handover
 

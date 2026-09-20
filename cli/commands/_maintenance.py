@@ -13,7 +13,7 @@ import os
 import sys
 from datetime import UTC, datetime
 
-from cli.commands._maintenance_probe import host_identity, host_identity_or_none, ops_quiescent
+from cli.commands._maintenance_probe import host_identity_or_none, ops_quiescent
 from cli.commands._maintenance_stop import (
     deadline_after,
     remaining,
@@ -95,8 +95,13 @@ def _resume(holder: str, at: datetime, *, cancel: bool) -> None:
         )
     if not cancel and hold.phase != "ready":
         raise RuntimeError("resume requires maintenance start; use --cancel to abandon a drain")
-    if "agent-runner" in machine_role():
-        host_identity()
+    if "agent-runner" in machine_role() and host_identity_or_none() is None:
+        print(
+            "  ! agent-host is provably absent (host_running()=false; no process): "
+            "proceeding without its identity probe (a refused health dial alone "
+            "would not qualify)",
+            file=sys.stderr,
+        )
     with connect() as conn:
         conn.execute("SELECT 1")
     # Preserve the hold if dependency/posture restoration fails. A crash after

@@ -228,12 +228,58 @@ def test_release_proves_the_runner_host_first(monkeypatch: pytest.MonkeyPatch) -
     unpaused = _release_env(
         monkeypatch, snapshot=_snapshot("drained"), role=frozenset({"agent-runner"})
     )
+    monkeypatch.setattr("ops.agent_pause_probe.host_running", lambda: True)
 
     def _refuse() -> object:
         raise RuntimeError("agent-host does not support maintenance for this home")
 
     monkeypatch.setattr("ops.agent_pause_probe.host_identity", _refuse)
     with pytest.raises(RuntimeError, match="does not support maintenance"):
+        cluster_pause.release_pre_stop_hold(reason="test")
+    assert unpaused == []
+
+
+def test_release_degrades_when_the_runner_host_is_provably_absent(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """No process means no continuations and no listener to protect: the
+    release proceeds on the independent absence proof and audits loudly."""
+    from ops import cluster_pause
+
+    unpaused = _release_env(
+        monkeypatch, snapshot=_snapshot("drained"), role=frozenset({"agent-runner"})
+    )
+    monkeypatch.setattr("ops.agent_pause_probe.host_running", lambda: False)
+
+    def _refuse() -> object:
+        raise RuntimeError("a refused dial must not be consulted")
+
+    monkeypatch.setattr("ops.agent_pause_probe.host_identity", _refuse)
+    with caplog.at_level("ERROR"):
+        cluster_pause.release_pre_stop_hold(reason="watchdog test")
+    assert unpaused == [True]
+    assert any(
+        "provably absent" in record.message and "watchdog test" in record.message
+        for record in caplog.records
+    )
+
+
+def test_release_still_refuses_an_unreadable_host_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A running host must answer; unreadable identity evidence is not absence."""
+    from ops import cluster_pause
+
+    unpaused = _release_env(
+        monkeypatch, snapshot=_snapshot("drained"), role=frozenset({"agent-runner"})
+    )
+    monkeypatch.setattr("ops.agent_pause_probe.host_running", lambda: True)
+
+    def _wedged() -> object:
+        raise TimeoutError("agent-host health did not answer")
+
+    monkeypatch.setattr("ops.agent_pause_probe.host_identity", _wedged)
+    with pytest.raises(TimeoutError, match="did not answer"):
         cluster_pause.release_pre_stop_hold(reason="test")
     assert unpaused == []
 
