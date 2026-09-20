@@ -195,7 +195,10 @@ class PendingPublication(EvidenceModel):
     # (`open_pending_publication`). Both optional: a journal written before the
     # registration existed parses with them unset, and a replacement opened by
     # checked recovery carries none -- its premise is its fresh closure, not a
-    # sealed-plan execution.
+    # sealed-plan execution. The plan digest is audit evidence (the collection
+    # reports it; nothing validates against it), and a same-operation retry
+    # never replaces either value: the registered window cannot slide under a
+    # later execution (design N3).
     valid_until: AwareDatetime | None = None
     plan_digest: Digest | None = None
 

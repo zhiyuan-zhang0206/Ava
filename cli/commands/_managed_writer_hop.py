@@ -3,7 +3,7 @@
 The hop phase starts every unit's restricted updater hop. The begin chain
 assembles one `HopUnitPlan` per unit -- its private projections, their
 content-named paths, and the retained candidate image whose interpreter runs
-the hop (`_managed_writer_dispatch.assemble_hop_plans`); this module fans the
+the hop (`_managed_writer_dispatch.assemble_phase_inputs`); this module fans the
 plan out to each unit's `cluster_bootstrap_hop` op and gates the phase on the
 full roster of acknowledgements. The op itself writes nothing: it starts the
 detached `ava-updater` session on the candidate image's `--bootstrap-hop`

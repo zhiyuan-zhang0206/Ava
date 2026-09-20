@@ -855,8 +855,9 @@ def test_the_seat_has_no_unnamed_production_callsite() -> None:
     - the coordinator wiring (`cli/commands/_managed_writer_wiring.py`) imports
       the P5 commit seat from its post-Phase-B step and calls it under the
       enable point's recorded `active` decision (E2-a), and calls the dispatch
-      chain below from its begin position (E2-b); its collect position still
-      refuses under `active` before reaching any seat import;
+      chain below from its begin position (E2-b); its collect position calls
+      the channel-D collector (task #4129 I5) under the same decision, which
+      in turn reaches no seat until the fleet's facts are adopted;
     - the dispatch gather (`cli/commands/_managed_writer_gather.py`) imports
       the `PreparedUnitPublication` datum type -- the begin seat's exact
       input -- while verifying each unit's prepared-facts shipment

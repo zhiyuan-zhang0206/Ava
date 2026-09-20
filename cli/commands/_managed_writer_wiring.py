@@ -18,11 +18,12 @@ publication seats (`cli.commands._update_publication`) on the coordinator (task
   skip it untouched.
 - `_collect_managed_writer_publication` (E2-c) -- the post-Phase-B, pre-commit
   collection step: under an `active` decision the completed units' post-stop
-  facts are gathered across the fleet and adopted into the pending journal
-  before P5 publishes. The gathering channel (the collector) is not connected
-  yet (task #4129), so the step refuses explicitly today rather than let an
-  `active` rollout publish without its collection. `off` / `blocked` skip it
-  untouched.
+  facts are gathered across the fleet by the channel-D collector and adopted
+  into the pending journal before P5 publishes (task #4129 I5 connects the
+  channel; the hop phase's verdict branch waits for every unit's
+  candidate-ready journal before this step runs). An `active` decision with no
+  phase input refuses explicitly rather than let a rollout assembled outside
+  its orchestration publish uncollected. `off` / `blocked` skip it untouched.
 - `_commit_managed_writer_publication` (E2-a) -- the post-Phase-B step: under an
   `active` decision, publish the completed pending publication through the P5
   commit seat. `off` / `blocked` skip it untouched, so the pre-wiring rollout
@@ -33,10 +34,12 @@ publication seats (`cli.commands._update_publication`) on the coordinator (task
 
 All three call positions are wired (begin E2-b, collect E2-c, commit E2-a).
 The prepared-plan chain behind the begin step is connected (task #4129, channel
-B); the collection channel behind the collect step is not yet, so that step
-still refuses explicitly under an `active` decision -- the commit seat is
-imported and called, but only a rollout whose begin and collect succeeded can
-reach it, so no half-open activation window exists in code. The inertness pin
+B) with its hop phase (channel C), and the collection channel is connected too
+(channel D, task #4129 I5): the closing section's hop verdict waits for every
+unit's candidate-ready journal and then adopts the fleet's collected closure
+through this step. The commit seat is imported and called, but only a rollout
+whose begin and collect succeeded can reach it, so no half-open activation
+window exists in code. The inertness pin
 (`tests/cli/test_update_publication.py::test_the_seat_has_no_unnamed_production_callsite`)
 names this module and the dispatch chain as conscious production exceptions
 beside the enable point.
@@ -49,13 +52,13 @@ from __future__ import annotations
 
 import sys
 
-from cli.commands._managed_writer_hop import HopUnitPlan
+from cli.commands._managed_writer_hop import ManagedWriterPhaseInput
 from shared.rollout_telemetry import stage as _stage_telemetry
 
 
 def _begin_managed_writer_publication(
     target_sha: str | None,
-) -> tuple[int, list[HopUnitPlan] | None]:
+) -> tuple[int, ManagedWriterPhaseInput | None]:
     """Journal the managed-writer activation (P1 coordinator step).
 
     The rollout's begin position of the managed-writer chain (task #4128,
@@ -74,9 +77,9 @@ def _begin_managed_writer_publication(
     exit code 1; the rollout then aborts before the first stop effect, and a
     journal already opened stays for checked recovery (`ava cluster
     recover-pending`). Infrastructure failures propagate unchanged. Returns
-    `(exit_code, hop_plans)`: 0 with the per-unit hop plans for an open journal
-    (the hop phase's input), 0 with None for a clean skip, 1 with None for the
-    refusal.
+    `(exit_code, phase_input)`: 0 with the phase input for an open journal (the
+    hop phase's plans plus the collector's inputs, channels C+D), 0 with None
+    for a clean skip, 1 with None for the refusal.
     """
     from cli.commands._managed_writer_mode import managed_writer_mode
 
@@ -97,7 +100,7 @@ def _begin_managed_writer_publication(
     # rollout's log must not grow a managed-writer stage it never ran.
     with _stage_telemetry("managed_writer_begin"):
         try:
-            hop_plans = begin_managed_writer_publication(target_sha)
+            phase_input = begin_managed_writer_publication(target_sha)
         except ManagedWriterBarrierError as exc:
             print(
                 f"\n\u2717 managed-writer begin refused: {exc}\n"
@@ -106,25 +109,28 @@ def _begin_managed_writer_publication(
                 file=sys.stderr,
             )
             return 1, None
-    return 0, hop_plans
+    return 0, phase_input
 
 
-def _collect_managed_writer_publication() -> int:
+def _collect_managed_writer_publication(phase_input: ManagedWriterPhaseInput | None) -> int:
     """Adopt the completed units' post-stop facts (P2 coordinator step).
 
     The rollout's collection position of the managed-writer chain (task #4128,
-    E2-c), reached after Phase B converged every unit and before the P5 commit
-    publishes: under an `active` decision the units' post-stop facts -- the
-    observed writer closure and the platform final re-read after the candidate
-    is ready, gathered across the fleet -- are adopted into the durable pending
-    journal. `off` / `blocked` leave the seat untouched, and a call with no
-    recorded decision skips with the same visible beacon as the other steps.
+    E2-c; the gathering channel is task #4129 channel D): under an `active`
+    decision the units' post-stop facts -- the observed writer closure and the
+    platform final re-read after the candidate is ready, gathered across the
+    fleet by `cli.commands._managed_writer_collector` -- are adopted into the
+    durable pending journal. The hop phase hands the collector's inputs
+    (`phase_input`) here; `off` / `blocked` leave the seat untouched, and a
+    call with no recorded decision skips with the same visible beacon as the
+    other steps.
 
-    The gathering channel (the collector) is the dispatch program's to provide
-    (task #4129), and that channel is not connected yet. Until it is, the step
-    refuses explicitly instead of degrading: an `active` rollout must not
-    proceed to publish with no collection adopted (fail-closed). Returns the
-    step's exit code: 0 for a clean skip, 1 for the refusal.
+    An `active` decision with no phase input refuses explicitly instead of
+    degrading: the begin position runs under the same decision before any unit
+    effect, so a missing phase input means the rollout was assembled outside
+    its orchestration -- and an uncollected set must never publish
+    (fail-closed). Returns the step's exit code: 0 for a clean skip or a
+    successful adoption, 1 for the refusal.
     """
     from cli.commands._managed_writer_mode import managed_writer_mode
 
@@ -138,15 +144,24 @@ def _collect_managed_writer_publication() -> int:
         return 0
     if mode.state != "active":
         return 0
-    print(
-        "\n\u2717 managed-writer collect refused: the per-unit facts channel "
-        "(collector gathering, task #4129) is not connected yet, so the "
-        "completed units' facts cannot be adopted and the publication cannot "
-        "proceed.\n"
-        "  disable the managed-writer switch or wait for the channel",
-        file=sys.stderr,
-    )
-    return 1
+    if phase_input is None:
+        print(
+            "\n\u2717 managed-writer collect refused: this rollout reached the "
+            "collection position without the begin position's phase input, so "
+            "the completed units' facts cannot be adopted and the publication "
+            "cannot proceed.\n"
+            "  the begin position runs under the same active decision before any "
+            "unit effect; a missing phase input means the rollout was assembled "
+            "outside its orchestration",
+            file=sys.stderr,
+        )
+        return 1
+    from cli.commands._managed_writer_collector import collect_and_adopt
+
+    # The stage is entered only under the active decision: an off/blocked
+    # rollout's log must not grow a managed-writer stage it never ran.
+    with _stage_telemetry("managed_writer_collect"):
+        return collect_and_adopt(phase_input.collector)
 
 
 def _commit_managed_writer_publication() -> int:

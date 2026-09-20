@@ -105,9 +105,14 @@ wiring module's `_collect_managed_writer_publication` consumes the recorded
 decision and, only under `active`, adopts the completed units' post-stop writer
 closure -- the observed facts gathered across the fleet, with the platform
 final re-read after the candidate is ready -- into the pending journal before
-P5 publishes. Its gathering channel (the collector, task #4129) is not
-connected yet, so the step refuses explicitly today; `adopt_pending_collection`
-stays unimported on every production path.
+P5 publishes. Its gathering channel is connected by task #4129 I5: the closing
+section's hop verdict waits for every unit's candidate-ready journal, then hands
+the phase input to the collector (`cli/commands/_managed_writer_collector.py`),
+which re-derives each unit's closure from its served facts and calls
+`collect_and_adopt`; the adoption seat (`adopt_pending_collection`) revalidates
+the whole collection under the locked rollout before storing it. An `active`
+decision with no phase input still refuses explicitly (a rollout assembled
+outside its orchestration must not publish uncollected).
 
 No production migration, normal service activation or protocol advertisement
 is performed by importing or testing these helpers.

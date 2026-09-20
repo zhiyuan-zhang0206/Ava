@@ -13,6 +13,16 @@ and its raw-byte ``payload_digest`` (the last four only when readable),
 ``boot_id``, and the ops session record's process summary. ``envelope_bytes``
 is the canonical serialization the writer stores, so for every legal slot
 ``sha256(envelope_bytes(version, generation, journal)) == payload_digest``.
+
+The collector's contract with a unit (there is no synchronous write
+acknowledgement; design C-3): the served fields bind to the slot's bytes by the
+**same envelope's generation** -- ``envelope_bytes`` recomputes the digest over
+``version`` + ``generation`` + ``journal`` together, so a response carrying
+fields from different writes cannot reproduce ``payload_digest`` -- and the
+journal's four digests (``request_digest``, ``inventory_digest``,
+``candidate_context_digest``, ``recovery_context_digest``) are recomputed from
+the exact bytes the coordinator dispatched and shipped. Response == file bytes,
+file bytes == dispatched bytes: nothing in between is trusted as a claim.
 """
 
 from __future__ import annotations

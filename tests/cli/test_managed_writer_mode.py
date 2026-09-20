@@ -19,9 +19,14 @@ from typing import Any
 import pytest
 
 from cli.commands import _managed_writer_mode as mode_mod
-from cli.commands._managed_writer_hop import HopUnitPlan
+from cli.commands._managed_writer_hop import (
+    CollectorInput,
+    HopUnitPlan,
+    ManagedWriterPhaseInput,
+)
 from ops.rpc_prepare_dispatch import ProjectionFile, prepared_hop_name
 from shared import rollout_telemetry
+from shared.managed_writer_barrier import RolloutIdentity
 
 _CHECKED = "cli.commands._update_normal_release.CHECKED_ACTIVATION_READY"
 _WIRING = "cli.commands._update_publication.MANAGED_WRITER_WIRING_COMPLETE"
@@ -393,13 +398,13 @@ def test_begin_step_refuses_under_active_when_the_context_is_missing(
         ),
     )
     monkeypatch.setattr(dispatch_mod.settings.general, "ava_home", tmp_path.resolve())
+
     # The begin's N3 registration read (task #4129 I5) is a database touch; the
     # test's subject is the missing sealed context, so the read stands in empty.
-    monkeypatch.setattr(
-        collector_mod,
-        "read_journaled_registration",
-        lambda _operation: collector_mod.JournaledRegistration(valid_until=None, plan_digest=None),
-    )
+    def read_registration(_operation: object) -> collector_mod.JournaledRegistration:
+        return collector_mod.JournaledRegistration(valid_until=None, plan_digest=None)
+
+    monkeypatch.setattr(collector_mod, "read_journaled_registration", read_registration)
 
     assert wiring._begin_managed_writer_publication("0" * 40) == (1, None)
     err = capsys.readouterr().err
@@ -452,29 +457,52 @@ def _hop_plan() -> HopUnitPlan:
     )
 
 
-def test_begin_step_returns_the_hop_plans_under_active(monkeypatch: pytest.MonkeyPatch) -> None:
+def _phase_input() -> ManagedWriterPhaseInput:
+    """One light phase input: the fixture plan plus an empty collector roster."""
+    from datetime import UTC, datetime
+    from uuid import UUID
+
+    return ManagedWriterPhaseInput(
+        hop_plans=(_hop_plan(),),
+        collector=CollectorInput(
+            operation=RolloutIdentity(
+                holder="gateway:pid77",
+                acquired_at=datetime(2026, 9, 20, tzinfo=UTC),
+                target_sha="0" * 40,
+            ),
+            challenge=UUID(int=5),
+            valid_until=datetime(2026, 9, 20, 1, tzinfo=UTC),
+            candidate_digest="e" * 64,
+            units=(),
+        ),
+    )
+
+
+def test_begin_step_returns_the_phase_input_under_active(monkeypatch: pytest.MonkeyPatch) -> None:
     from cli.commands import _managed_writer_dispatch as dispatch_mod
     from cli.commands import _managed_writer_wiring as wiring
 
     _ready_guards(monkeypatch)
     mode_mod.decide_managed_writer_mode()
-    plan = _hop_plan()
-    monkeypatch.setattr(dispatch_mod, "begin_managed_writer_publication", lambda _sha: [plan])  # pyright: ignore[reportUnknownArgumentType]
+    phase_input = _phase_input()
+    monkeypatch.setattr(dispatch_mod, "begin_managed_writer_publication", lambda _sha: phase_input)  # pyright: ignore[reportUnknownArgumentType]
 
-    assert wiring._begin_managed_writer_publication("0" * 40) == (0, [plan])
+    assert wiring._begin_managed_writer_publication("0" * 40) == (0, phase_input)
 
 
 def test_active_rollout_runs_the_hop_phase_instead_of_the_legacy_poll(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The plans returned by the begin reach the closing section and replace the
-    Phase-B poll -- never join it (task #4129 I4, channel C)."""
+    """The phase input returned by the begin reaches the closing section: the hop
+    gate replaces the Phase-B poll -- never joins it -- and its CLEAN continuation
+    hands the same phase input to the collection (task #4129 I4/I5, channels C+D)."""
+    from cli.commands import _managed_writer_collector as collector_mod
     from cli.commands import _update_verdict as verdict_mod
     from cli.commands import update as _up
 
     _ready_guards(monkeypatch)
-    plan = _hop_plan()
-    _stub_orchestration_to_phase_b(monkeypatch, hop_plans=[plan])
+    phase_input = _phase_input()
+    _stub_orchestration_to_phase_b(monkeypatch, phase_input=phase_input)
     seen: list[list[HopUnitPlan]] = []
 
     def _hop(
@@ -484,15 +512,31 @@ def test_active_rollout_runs_the_hop_phase_instead_of_the_legacy_poll(
         return 0, _up.RolloutOutcome.CLEAN, [], None
 
     monkeypatch.setattr(verdict_mod, "phase_b_hops", _hop)
+    waited: list[object] = []
+
+    def _wait(collector: object) -> str | None:
+        waited.append(collector)
+        return None
+
+    monkeypatch.setattr(collector_mod, "wait_for_candidate_ready", _wait)
     legacy: list[None] = []
     monkeypatch.setattr(
         _up,
         "_phase_b_outcome",
         lambda *_a, **_k: legacy.append(None) or (0, _up.RolloutOutcome.CLEAN, []),  # pyright: ignore[reportUnknownArgumentType]
     )
+    collected: list[object] = []
+    monkeypatch.setattr(
+        _up,
+        "_collect_managed_writer_publication",
+        lambda window_input: collected.append(window_input) or 0,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(_up, "_commit_managed_writer_publication", lambda: 0)  # pyright: ignore[reportUnknownArgumentType]
 
     assert _run_inner() == 0
-    assert seen == [[plan]]
+    assert seen == [list(phase_input.hop_plans)]
+    assert waited == [phase_input.collector], "the CLEAN gate waits on the same collector"
+    assert collected == [phase_input], "the window collects through the same phase input"
     assert legacy == [], "the hop branch replaces the Phase-B poll"
 
 
@@ -515,7 +559,7 @@ def test_collect_step_skips_without_an_active_decision(
         _clear_guard(monkeypatch, _WIRING)
         mode_mod.decide_managed_writer_mode()
 
-    assert wiring._collect_managed_writer_publication() == 0
+    assert wiring._collect_managed_writer_publication(None) == 0
     captured = capsys.readouterr()
     assert "managed-writer collect" not in captured.out
     if state == "none":
@@ -525,19 +569,21 @@ def test_collect_step_skips_without_an_active_decision(
         assert captured.err == ""
 
 
-def test_collect_step_refuses_under_active_until_the_channel_lands(
+def test_collect_step_refuses_without_the_phase_input_under_active(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    """An `active` decision with no phase input is an invariant breach, refused
+    fail-closed: only the begin position's chain may feed this step."""
     from cli.commands import _managed_writer_wiring as wiring
 
     _ready_guards(monkeypatch)
     mode_mod.decide_managed_writer_mode()
 
-    assert wiring._collect_managed_writer_publication() == 1
+    assert wiring._collect_managed_writer_publication(None) == 1
     err = capsys.readouterr().err
     assert "managed-writer collect refused" in err
-    assert "task #4129" in err
-    assert "disable the managed-writer switch" in err
+    assert "without the begin position's phase input" in err
+    assert "assembled outside its orchestration" in err
 
 
 def test_active_rollout_refuses_at_the_collect_position(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -571,7 +617,11 @@ def test_restart_only_rollout_skips_the_collect_position(monkeypatch: pytest.Mon
     _ready_guards(monkeypatch)
     _stub_orchestration_to_phase_b(monkeypatch)
     calls: list[None] = []
-    monkeypatch.setattr(_up, "_collect_managed_writer_publication", lambda: calls.append(None) or 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _up,
+        "_collect_managed_writer_publication",
+        lambda _phase_input: calls.append(None) or 0,  # pyright: ignore[reportUnknownArgumentType]
+    )
     commit_calls: list[None] = []
     monkeypatch.setattr(
         _up, "_commit_managed_writer_publication", lambda: commit_calls.append(None) or 0
@@ -592,7 +642,11 @@ def test_collect_never_runs_on_a_non_clean_outcome(monkeypatch: pytest.MonkeyPat
         lambda *_a, **_k: (1, _up.RolloutOutcome.INCOMPLETE, []),  # pyright: ignore[reportUnknownArgumentType]
     )
     calls: list[None] = []
-    monkeypatch.setattr(_up, "_collect_managed_writer_publication", lambda: calls.append(None) or 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _up,
+        "_collect_managed_writer_publication",
+        lambda _phase_input: calls.append(None) or 0,  # pyright: ignore[reportUnknownArgumentType]
+    )
     commit_calls: list[None] = []
     monkeypatch.setattr(
         _up, "_commit_managed_writer_publication", lambda: commit_calls.append(None) or 0
@@ -720,7 +774,7 @@ def _stub_orchestration_to_phase_b(
     monkeypatch: pytest.MonkeyPatch,
     *,
     stub_collect: bool = True,
-    hop_plans: list[HopUnitPlan] | None = None,
+    phase_input: ManagedWriterPhaseInput | None = None,
 ) -> None:
     """Extend `_stub_orchestration` to reach the post-Phase-B publication window."""
     from cli import commands as _cli
@@ -729,14 +783,14 @@ def _stub_orchestration_to_phase_b(
     _stub_orchestration(monkeypatch)
     # The publication window lies downstream of the E2-b begin (whose chain
     # needs a sealed release context and a live lease) and the E2-c collect
-    # (which still refuses until its own channel lands), so these tests stub
-    # both -- the positions under test are elsewhere. `stub_collect=False`
-    # leaves the real collect step in place for its own refusal test, and
-    # `hop_plans` makes the stubbed begin hand the closing section a
-    # managed-writer hop phase (task #4129 I4).
-    monkeypatch.setattr(_up, "_begin_managed_writer_publication", lambda _sha: (0, hop_plans))  # pyright: ignore[reportUnknownArgumentType]
+    # (whose channel is the collector), so these tests stub both -- the
+    # positions under test are elsewhere. `stub_collect=False` leaves the real
+    # collect step in place for its own refusal test, and `phase_input` makes
+    # the stubbed begin hand the closing section a managed-writer phase input
+    # (task #4129 I4/I5).
+    monkeypatch.setattr(_up, "_begin_managed_writer_publication", lambda _sha: (0, phase_input))  # pyright: ignore[reportUnknownArgumentType]
     if stub_collect:
-        monkeypatch.setattr(_up, "_collect_managed_writer_publication", lambda: 0)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(_up, "_collect_managed_writer_publication", lambda _phase_input: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cli, "_resolve_fanout_targets", lambda **_kw: [("host-b", None)])  # pyright: ignore[reportUnknownArgumentType]
     # The stale-marker reconcile dials the live roster; only the commit step
     # under test may borrow the fake transaction.
