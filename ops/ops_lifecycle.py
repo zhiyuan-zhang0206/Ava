@@ -162,6 +162,9 @@ async def terminate_agent_op(
     termination left to apply, so `final` there is the metadata-only mark
     (`ops_exit.mark_agent_closed`), which doubles as the backfill route for
     agents closed before the marker existed.
+
+    Every response reports the post-call closure state in `closed` (see
+    `_closure_state`), so the close is verifiable from the response alone.
     """
     if body.force:
         _old_status, pid, killed_page_names, command_id = await asyncio.to_thread(
@@ -177,7 +180,10 @@ async def terminate_agent_op(
             pid,
         )
         # Neither HTTP delivery nor Task.cancel proves resource quiescence.
-        return TerminateAgentResponse(status="enqueued")
+        return TerminateAgentResponse(
+            status="enqueued",
+            closed=await _closure_state(agent_id, final=body.final, db_pool=db_pool),
+        )
 
     s = await asyncio.to_thread(get_agent_status, agent_id)
     if s is AgentStatus.TERMINATED:
@@ -191,7 +197,10 @@ async def terminate_agent_op(
                     agent_id,
                     body.source,
                 )
-        return TerminateAgentResponse(status="already_terminated")
+        return TerminateAgentResponse(
+            status="already_terminated",
+            closed=await _closure_state(agent_id, final=body.final, db_pool=db_pool),
+        )
 
     status, iid, zombie_closed_page_names = await asyncio.to_thread(
         _terminate_graceful_blocking, agent_id, body, db_pool
@@ -199,10 +208,37 @@ async def terminate_agent_op(
     if status == "already_terminated":
         for page_name in zombie_closed_page_names:
             await publish_page_closed(agent_id, page_name)
-        return TerminateAgentResponse(status="already_terminated")
+        return TerminateAgentResponse(
+            status="already_terminated",
+            closed=await _closure_state(agent_id, final=body.final, db_pool=db_pool),
+        )
     assert iid is not None  # status == "enqueued" implies the inbound was inserted  # noqa: S101
     await publish_inbound_arrived(agent_id, iid, "terminate", body.source, "")
-    return TerminateAgentResponse(status="enqueued")
+    return TerminateAgentResponse(
+        status="enqueued",
+        closed=await _closure_state(agent_id, final=body.final, db_pool=db_pool),
+    )
+
+
+async def _closure_state(agent_id: int, *, final: bool, db_pool: ConnectionPool) -> bool:
+    """Closure post-state of one terminate request, for the response's `closed`.
+
+    `final=True` is truth by construction: the marker is stamped in the same
+    transaction as the termination intent (graceful enqueue / force), or marked
+    idempotently on the already-terminated backfill path. Otherwise read the
+    row — the caller may be terminating an agent an earlier `--final` closed.
+    """
+
+    def _read() -> bool:
+        with db_pool.connection() as conn:
+            row = conn.execute(
+                "SELECT closed_at IS NOT NULL FROM agents_meta WHERE id = %s", (agent_id,)
+            ).fetchone()
+        return row is not None and row[0] is True
+
+    if final:
+        return True
+    return await asyncio.to_thread(_read)
 
 
 async def _cancel_hosted_turn_best_effort(agent_id: int, command_id: int) -> None:

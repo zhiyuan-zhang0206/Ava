@@ -487,7 +487,7 @@ async def test_dispatch_lifecycle_calls_lifecycle_op(monkeypatch: pytest.MonkeyP
     )
     assert status == "completed"
     # _dispatch serializes the lifecycle response model to a JSON dict for the wire.
-    assert result == {"status": "enqueued", "open_tasks": None}
+    assert result == {"status": "enqueued", "open_tasks": None, "closed": None}
     assert captured["path"] == "/api/agents/42/resurrect-if-pending-work-v2"
     assert captured["body"] == {"resurrected_by": "system"}
     assert captured["trigger_inbound_id"] == 123
