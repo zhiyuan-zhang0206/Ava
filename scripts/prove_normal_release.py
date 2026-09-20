@@ -50,7 +50,7 @@ import socket
 import subprocess
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
@@ -65,6 +65,7 @@ from psycopg import sql
 from psycopg.conninfo import make_conninfo
 from psycopg.types.json import Jsonb
 
+from cli.commands import _release_services as release_services
 from cli.commands import _update_normal_release as normal
 from cli.commands._release_inventory import prepare_unit_inventory
 from cli.commands._release_selector import pending_transaction, selector_bytes
@@ -136,6 +137,13 @@ FIXTURE_SOURCE = (
 )
 
 
+def require_present[T](value: T | None, message: str) -> T:
+    """Fail the proof when `value` is None, and narrow the Optional for pyright."""
+    if value is None:
+        raise AssertionError(message)
+    return value
+
+
 def require(condition: bool, message: str) -> None:  # noqa: FBT001 -- CI assertion predicate.
     if not condition:
         raise AssertionError(message)
@@ -199,6 +207,11 @@ def record_identity(record: SessionRecord) -> ExpectedProcess:
     return ExpectedProcess(
         pid=record.pid, create_time=record.create_time, starttime=record.starttime
     )
+
+
+def no_record_write(_self: SessionRecord, _path: Path) -> None:
+    """INJ-8: suppress the record write so the crash lands in the W2 window
+    (a live child without its record) that recovery must reconcile."""
 
 
 def poll_until(predicate: Any, what: str, timeout: float = 30.0) -> None:
@@ -351,7 +364,7 @@ def run_flow(
 
 
 @contextmanager
-def instrumentation(events: Events, mode: str, case_dir: Path) -> Iterator[None]:
+def instrumentation(events: Events, mode: str, case_dir: Path) -> Generator[None, None, None]:
     """Base spies (journal writes, spawn calls, stop signals, selector CAS) plus
     this mode's fault injection, entered after the spies so injections wrap them."""
     backend = get_backend()
@@ -493,7 +506,7 @@ def apply_injection(  # noqa: PLR0915 -- one flat dispatch per named injection w
             gate_fd: int | None = None,
             receipt: tuple[Path, str] | None = None,
         ) -> bool:
-            with patch.object(SessionRecord, "write", lambda _self, _path: None):
+            with patch.object(SessionRecord, "write", no_record_write):
                 real_spawn(
                     name,
                     cmd,
@@ -517,17 +530,19 @@ def apply_injection(  # noqa: PLR0915 -- one flat dispatch per named injection w
 
             stack.enter_context(patch.object(normal, "await_normal_service_ready", await_crash))
         else:
-            real_observe = normal.observe_normal_service
+            real_observe = release_services.observe_normal_service
             rounds = {"n": 0}
 
-            def observe_crash(*args: object, **kwargs: object) -> Any:
+            def observe_crash(*args: Any, **kwargs: Any) -> Any:
                 rounds["n"] += 1
                 if rounds["n"] >= 4:
                     fire()
                     raise SystemExit(77)
                 return real_observe(*args, **kwargs)
 
-            stack.enter_context(patch.object(normal, "observe_normal_service", observe_crash))
+            stack.enter_context(
+                patch.object(release_services, "observe_normal_service", observe_crash)
+            )
         return
     if mode == "inj-11":
 
@@ -683,7 +698,7 @@ def check_instances(name: str, meta: dict[str, Any], home: Path, *, extra: bool)
         require(len(listeners) <= 1, f"[{name}] {session}: {len(listeners)} listeners")
         record = session_record(home, session)
         record_live = record is not None and observe_process(record_identity(record)) == "alive"
-        if record_live:
+        if record is not None and record_live:
             require(
                 live == [record.pid],
                 f"[{name}] {session}: live record {record.pid} vs argv scan {live}",
@@ -700,15 +715,19 @@ def check_instances(name: str, meta: dict[str, Any], home: Path, *, extra: bool)
             births = [
                 item for item in receipts_for(home, generation, session) if item.kind == "birth"
             ]
-            require(births, f"[{name}] {session}: live service without a birth receipt")
+            require(bool(births), f"[{name}] {session}: live service without a birth receipt")
             latest = births[-1]
             require(
                 latest.pid == record.pid and latest.starttime == record.starttime,
                 f"[{name}] {session}: birth vs record identity mismatch",
             )
         if extra:
+            record_pid = record.pid if record is not None else None
             require(
-                record_live and live == [record.pid] and len(listeners) == 1,
+                record_live
+                and record_pid is not None
+                and live == [record_pid]
+                and len(listeners) == 1,
                 f"[{name}] {session}: settled service is not exactly one live instance",
             )
 
@@ -823,14 +842,18 @@ def run_case(  # noqa: PLR0915 -- one bounded fixture lifecycle per case.
     outcome: dict[str, Any] = {"case": name, "ok": False}
     try:
         holder = f"normal-proof-{name}"
-        row = conn.execute(
-            "UPDATE deployment_state SET holder=%s, acquired_at=clock_timestamp(),"
-            " expires_at=clock_timestamp() + make_interval(secs => %s), target_sha=%s,"
-            " managed_writer_evidence=NULL WHERE id=1 RETURNING acquired_at",
-            (holder, float(challenge_seconds), _TARGET_SHA),
-        ).fetchone()
-        require(row is not None, "deployment fixture row is missing")
-        operation = RolloutIdentity(holder=holder, acquired_at=row[0], target_sha=_TARGET_SHA)
+        row = require_present(
+            conn.execute(
+                "UPDATE deployment_state SET holder=%s, acquired_at=clock_timestamp(),"
+                " expires_at=clock_timestamp() + make_interval(secs => %s), target_sha=%s,"
+                " managed_writer_evidence=NULL WHERE id=1 RETURNING acquired_at",
+                (holder, float(challenge_seconds), _TARGET_SHA),
+            ).fetchone(),
+            "deployment fixture row is missing",
+        )
+        operation = RolloutIdentity(
+            holder=holder, acquired_at=cast("datetime", row[0]), target_sha=_TARGET_SHA
+        )
         now = datetime.now(UTC)
         if now <= operation.acquired_at:
             time.sleep(0.05)
@@ -873,9 +896,11 @@ def run_case(  # noqa: PLR0915 -- one bounded fixture lifecycle per case.
                 "bootstrap observer never served: " + observer_tail(),
             )
             time.sleep(0.05)
-        record = session_record(home, "ava-ops")
+        record = require_present(
+            session_record(home, "ava-ops"), "bootstrap observer record is missing"
+        )
         require(
-            record is not None and observe_process(record_identity(record)) == "alive",
+            observe_process(record_identity(record)) == "alive",
             "bootstrap observer vanished after serving",
         )
         bootstrap = asdict(record)
@@ -1046,7 +1071,7 @@ def run_case(  # noqa: PLR0915 -- one bounded fixture lifecycle per case.
 
 def observer_tail(limit: int = 4000) -> str:
     path = posixproc.session_log_path("ava-ops")
-    if path is None or not path.exists():
+    if not path.exists():
         return "(no observer log)"
     return path.read_text(encoding="utf-8", errors="replace")[-limit:]
 
