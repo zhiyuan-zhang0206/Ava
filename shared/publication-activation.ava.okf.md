@@ -80,14 +80,13 @@ out -- every other decision skips the position untouched, and the seat itself
 performs no filesystem or network work.
 `cli/commands/_update_normal_release.py` carries the
 P3/P4 call positions (migration receipt, selector CAS, normal start/observe,
-`record_pending_unit_readback`) immediately behind the checked-activation gate;
-the gate remains the only blocker, and no production path reaches them yet.
+`record_pending_unit_readback`): the checked activation entry drives them, and
+the coordinator's per-unit continuation dispatch reaches them (task #4129 I6).
 
 A restart-only bounce never enters the begin or collection positions: the chain is a
 code-release protocol, so a plan-less bounce has nothing to journal and
-publishes nothing -- skipping it is the terminal design (restart-only
-semantics ruled 2026-09-20, task #4128), and the existing skip tests are its
-pins.
+publishes nothing -- the terminal design (restart-only semantics ruled
+2026-09-20, task #4128); existing skip tests are its pins.
 
 The P5 completion seat, `commit_pending_publication`, lives in the same module:
 once the units recorded their normal-service readbacks, the coordinator reads
@@ -96,7 +95,7 @@ the journaled set and publishes exactly the complete readbacks through
 checked recovery's to clear. The seat writes no deployment phase, holder or
 lease: ordinary admission stays deferred until the existing finalizer's release
 settles the phase, and that release's pending guard is exactly what the commit
-clears. The rollout wiring now connects the post-Phase-B step (task #4128 E2-a):
+clears. The rollout wiring connects the post-Phase-B step (task #4128 E2-a):
 `cli/commands/_managed_writer_wiring.py` consumes the enable point's recorded
 decision and, only under `active`, runs this seat inside one short transaction
 and one rollout stage -- every other decision skips it untouched, and a seat
@@ -114,7 +113,10 @@ which re-derives each unit's closure from its served facts and calls
 `collect_and_adopt`; the adoption seat (`adopt_pending_collection`) revalidates
 the whole collection under the locked rollout before storing it. An `active`
 decision with no phase input still refuses explicitly (a rollout assembled
-outside its orchestration must not publish uncollected).
+outside its orchestration must not publish uncollected). The continuation
+channel (task #4129 I6) then gates the publish on the drive's full readback
+roster and closes it with each unit's commit tail; a drive refusal retains the
+journal, a tail failure keeps only the commit paid.
 
 No production migration, normal service activation or protocol advertisement
 is performed by importing or testing these helpers.

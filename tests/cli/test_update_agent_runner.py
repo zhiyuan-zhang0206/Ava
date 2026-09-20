@@ -243,10 +243,11 @@ def test_normal_preflight_refusal_precedes_updater_lock_and_stop(
         )
 
 
-def test_normal_continuation_reaches_updater_lock_after_the_flip(
+def test_normal_preflight_reaches_updater_lock_after_the_flip(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The removed fence no longer refuses before ownership; the lock decides."""
+    """The removed fence no longer refuses before ownership, and the preflight
+    read no longer self-drives: the updater lock decides (task #4129 I6)."""
     from unittest.mock import Mock
 
     from cli.commands import _update_bootstrap as bootstrap

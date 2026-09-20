@@ -20,7 +20,13 @@ bootstrap handoff from a deep-crash state: a bootstrap that is already stopped
 is deferred to the stop stage's exact-identity adjudication (a live one is
 still challenged), the selector may equal the predecessor or the prepared
 pointer, and the retained handoff's dead owner may be the predecessor or a
-recovery-lineage claim (live or foreign owners refuse). Both paths bind the
+recovery-lineage claim (live or foreign owners refuse). These standalone
+entries are the coordinator's per-unit dispatch targets (task #4129 I6):
+`run_normal_release` is the nominal drive entry (`--normal-release`), and
+`run_normal_commit` (`--normal-commit`) records the committed stage after the
+all-unit publication and disposes the retained envelope; its preparation skips
+the stop-stage faces because the publication already consumed the pending
+journal, and the restricted hop never self-drives. Both paths bind the
 exact exited predecessor, operation, challenge, verified image, complete
 preparation receipt and pending all-unit plan. Unsupported readiness transports
 refuse during preparation while bootstrap still serves. Source update flags and
@@ -60,8 +66,11 @@ admission or service effects.
 
 ## Incomplete callers and support
 
-This planner does not yet implement normal/source first handoff, complete
-non-session/job quiesce, or all-unit collection/migration orchestration. The
+This planner does not yet implement normal/source first handoff or complete
+non-session/job quiesce. The all-unit collection and continuation orchestration
+is connected (tasks #4129 I5/I6): the closing section collects the fleet's
+closure, drives each unit's normal release, publishes the complete readback set
+and runs each commit tail. The
 preparation receipt's unknown closure is not promoted to a positive permit. Unix-only/native services without
 a verified readiness adapter remain pre-stop refusals. These are implementation
 gaps, not claims awaiting CI.
@@ -72,6 +81,6 @@ retained unfinished recovery, strict journal transitions, the flip's
 module-level readiness declaration, and the late-stage standalone preparation
 (stopped bootstrap, advanced selector, dead lineage owners) with its claim
 order — the claim test runs the real handoff writer. The chain's stage order,
-refusal propagation, activation-entry order, and the continuation/standalone
-routing are pinned. Actual normal full-roster cold launch and the complete
+refusal propagation, activation-entry order, and the drive/commit-tail/
+standalone routing are pinned. Actual normal full-roster cold launch and the complete
 distributed transition remain required evidence.
