@@ -1,4 +1,4 @@
-"""`ops.ops_bootstrap_hop` + `ops.cluster_deploy.spawn_bootstrap_hop` -- channel C.
+"""`ops.ops_bootstrap_hop` + `ops.updater_entries.spawn_bootstrap_hop` -- channel C.
 
 The handler verifies the payload's request path as canonical private unit state
 (absolute, canonical, owned, 0600, regular, inside `{home}/run`, <=64 KiB), then
@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 
 from ops import cluster as cluster_facade
-from ops import cluster_deploy, cluster_session, ops_bootstrap_hop
+from ops import cluster_deploy, cluster_session, ops_bootstrap_hop, updater_entries
 from ops.rpc_bootstrap_hop import (
     BootstrapHopPayload,
     BootstrapHopResult,
@@ -76,7 +76,7 @@ class _SpawnRecorder:
 
 def _stub_spawn(monkeypatch: pytest.MonkeyPatch) -> _SpawnRecorder:
     recorder = _SpawnRecorder()
-    monkeypatch.setattr(cluster_deploy, "spawn_bootstrap_hop", recorder)
+    monkeypatch.setattr(updater_entries, "spawn_bootstrap_hop", recorder)
     return recorder
 
 
@@ -275,7 +275,7 @@ def test_spawn_bootstrap_hop_runs_the_candidate_image_entry(
     monkeypatch.setattr(cluster_session, "_spawn_detached_session", _capture)
     request = _request_file(unit_home)
 
-    result = cluster_deploy.spawn_bootstrap_hop(request, artifact_digest=ARTIFACT)
+    result = updater_entries.spawn_bootstrap_hop(request, artifact_digest=ARTIFACT)
 
     assert result["session"] == "ava-test-updater"
     assert Path(result["log"]).parent == unit_home / "logs"
@@ -313,7 +313,7 @@ def test_spawn_bootstrap_hop_refuses_with_a_live_orchestration_session(
     monkeypatch.setattr(cluster_session, "_spawn_detached_session", _capture)
 
     with pytest.raises(cluster_deploy.ClusterUpdateInProgress, match="already exists"):
-        cluster_deploy.spawn_bootstrap_hop(_request_file(unit_home), artifact_digest=ARTIFACT)
+        updater_entries.spawn_bootstrap_hop(_request_file(unit_home), artifact_digest=ARTIFACT)
 
     assert spawned == []
 
@@ -344,7 +344,7 @@ def test_spawn_bootstrap_hop_refuses_a_session_inside_the_lock(
     monkeypatch.setattr(cluster_session, "_spawn_detached_session", _capture)
 
     with pytest.raises(cluster_deploy.ClusterUpdateInProgress, match="already exists"):
-        cluster_deploy.spawn_bootstrap_hop(_request_file(unit_home), artifact_digest=ARTIFACT)
+        updater_entries.spawn_bootstrap_hop(_request_file(unit_home), artifact_digest=ARTIFACT)
 
     assert spawned == []
 
@@ -369,7 +369,7 @@ def test_spawn_bootstrap_hop_refuses_an_unretained_image(
     monkeypatch.setattr(cluster_session, "_spawn_detached_session", _capture)
 
     with pytest.raises(ReleaseRejectedError, match="not retained"):
-        cluster_deploy.spawn_bootstrap_hop(_request_file(unit_home), artifact_digest="9" * 64)
+        updater_entries.spawn_bootstrap_hop(_request_file(unit_home), artifact_digest="9" * 64)
 
     assert spawned == []
 

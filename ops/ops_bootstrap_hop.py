@@ -33,7 +33,7 @@ import sys
 from pathlib import Path
 from typing import cast
 
-from ops import cluster_deploy
+from ops import updater_entries
 from ops.rpc_bootstrap_hop import (
     BootstrapHopPayload,
     BootstrapHopResult,
@@ -95,7 +95,7 @@ def cluster_bootstrap_hop_op(payload: BootstrapHopPayload) -> BootstrapHopResult
         image=payload.artifact_digest,
         request=request.name,
     )
-    spawned = cluster_deploy.spawn_bootstrap_hop(request, artifact_digest=payload.artifact_digest)
+    spawned = updater_entries.spawn_bootstrap_hop(request, artifact_digest=payload.artifact_digest)
     return BootstrapHopResult(
         machine=machine,
         home=str(home),
