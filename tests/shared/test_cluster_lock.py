@@ -708,6 +708,23 @@ def test_release_settle_hold_returns_to_stable() -> None:
         assert settle_started_at is None  # the telemetry anchor clears with the hold
 
 
+def test_release_settle_hold_refuses_a_plain_executing_lease() -> None:
+    """Behavioral pin for the `settle_hosts IS NOT NULL` scope (the 6479 battery's
+    C1 mutant — the source-substring guard in tests/cli/test_deploy_mutex.py cannot
+    bite a predicate change). A plain lease is an orchestration actively executing:
+    the early release must not unlock it, and the row must stay as acquired."""
+    assert acquire_update_lock("A", kind="rollout") is True
+
+    assert release_settle_hold("A") is False
+
+    lease = read_update_lease()
+    assert lease is not None
+    assert lease.holder == "A"
+    assert lease.kind == "rollout"
+    assert lease.settle_hosts is None
+    assert update_lock_holder() == "A"
+
+
 def test_read_lease_carries_kind() -> None:
     """DeployLease exposes kind so consumers can say WHAT is running, not just that
     something is."""

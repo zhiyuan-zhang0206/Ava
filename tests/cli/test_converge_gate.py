@@ -64,6 +64,35 @@ def test_ensure_app_port_raises_when_slot_is_missing(
     assert "AVA_APP_PORT" not in env_path.read_text()
 
 
+def test_ensure_app_port_persists_the_default_home_legacy_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The one backfill left: a slot-less record on the *default* home uses its
+    fixed legacy value, and the gate persists it so the slot becomes explicit
+    (an allocated record without the slot raises — see above)."""
+    home = tmp_path / "ava-dev"
+    rec = ClusterRecord(
+        ports=cast("ClusterPorts", {"gateway": 18000, "frontend": 3000}),
+        gateway_home=str(home),
+        created_at="t",
+    )
+    _write_registry(monkeypatch, tmp_path, rec)
+    env_path = home / ".env"
+    env_path.parent.mkdir(parents=True)
+    env_path.write_text("AVA_GATEWAY_PORT=18000\n")
+
+    from shared import cluster
+
+    monkeypatch.setattr(cluster, "is_default_home", lambda _home: True)
+
+    assert cg._ensure_app_port(home) == cluster.LEGACY_AVA_PORTS["app"]
+
+    from shared.cluster import load_registry
+
+    assert load_registry()[str(home)].ports.get("app") == cluster.LEGACY_AVA_PORTS["app"]
+    assert "AVA_APP_PORT=3001" in env_path.read_text()
+
+
 def test_ensure_app_port_keeps_existing_slot_and_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

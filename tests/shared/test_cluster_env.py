@@ -355,3 +355,9 @@ def test_allocate_ports_skips_blocks_overlapping_existing_records(
     assert cl.allocate_ports(set())["gateway"] == BLOCK_START
     # an exact-base record is of course skipped too
     assert cl.allocate_ports({BLOCK_START})["gateway"] == BLOCK_START + BLOCK_SIZE
+    # A record whose base sits in the (base-26, base-15) gap is reached only by
+    # the conservative ±(BLOCK_SIZE-1) window: at 18010 the old ±15 lookback
+    # took 18027 (a 16-wide block [18010,18025] does not reach it), while the
+    # ±26 window skips 18027 — the record could be a 27-wide block
+    # [18010,18036] — and lands on 18054. Pins the window, not just the skip.
+    assert cl.allocate_ports({18010})["gateway"] == 18054

@@ -16,6 +16,7 @@ from shared import db as db_module
 from shared.cluster import (
     ClusterPorts,
     ClusterRecord,
+    record_memory_search_port,
     record_pgbouncer_port,
     record_postgres_port,
     record_redis_port,
@@ -236,3 +237,17 @@ def test_record_redis_port_is_a_registry_fact() -> None:
     use this host's reachable address while Redis remains loopback-only."""
     rec = _rec("/x/.ava-dev", {"gateway": 18000, "redis": 18042})
     assert record_redis_port(rec) == 18042
+
+
+def test_record_redis_port_missing_on_allocated_record_raises() -> None:
+    """The explicit strict decision: an allocated record lacking the slot is
+    corrupt — fail loudly rather than guess (only the default home falls back)."""
+    rec = _rec("/x/.ava-dev", {"gateway": 18000})
+    with pytest.raises(KeyError):
+        record_redis_port(rec)
+
+
+def test_record_memory_search_port_missing_on_allocated_record_raises() -> None:
+    rec = _rec("/x/.ava-dev", {"gateway": 18000})
+    with pytest.raises(KeyError):
+        record_memory_search_port(rec)

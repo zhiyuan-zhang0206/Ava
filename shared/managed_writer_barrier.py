@@ -96,7 +96,7 @@ def lock_rollout(conn: psycopg.Connection, operation: RolloutIdentity) -> dateti
             raise ManagedWriterBarrierError("deployment operation is missing")
         cur.execute(
             "SELECT clock_timestamp() FROM deployment_state WHERE id=1 "
-            "AND phase='updating' AND kind='rollout' AND note IS NULL "
+            "AND phase='updating' AND kind='rollout' AND settle_hosts IS NULL "
             "AND holder=%s AND acquired_at=%s AND target_sha=%s "
             "AND expires_at > clock_timestamp()",
             (operation.holder, operation.acquired_at, operation.target_sha),

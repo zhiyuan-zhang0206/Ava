@@ -199,8 +199,7 @@ def _read_pg_state() -> dict[str, str]:
     from cli.commands._cluster_instance import pg_admin_url
     from shared.cluster import db_identity, get_record, record_postgres_port
 
-    record = get_record(ava_home())
-    if record is None:
+    if (record := get_record(ava_home())) is None:
         raise RuntimeError("cluster registry record is missing")
     expected_db = db_identity()
 
