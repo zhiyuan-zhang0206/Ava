@@ -224,11 +224,12 @@ async def test_empty_resume_payload_fails_closed(
     """The legacy empty-resume bridge is retired; an empty payload is malformed."""
     monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
     called: list[bool] = []
-    monkeypatch.setattr(
-        daemon.ops_cluster,
-        "cluster_resume_op",
-        lambda *_a, **_kw: called.append(True) or {"resumed": True},
-    )
+
+    def _record_resume(*_args: object, **_kwargs: object) -> dict[str, bool]:
+        called.append(True)
+        return {"resumed": True}
+
+    monkeypatch.setattr(daemon.ops_cluster, "cluster_resume_op", _record_resume)
 
     status, result = await daemon._dispatch("cluster_resume", {})
     assert status == "failed"
