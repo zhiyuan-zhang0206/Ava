@@ -115,7 +115,7 @@ consumers: see the comments at each emit point.
 | `compact_turn_aborted` | turn aborted because compaction failed | anomaly | — | — | events |
 | `llm_provider_error` | LLM provider failure | anomaly | error_class, provider, status, error_type, fatal, billing, vendor, model | LLM_ERROR | events |
 | `stream_stalled_retry` | stream stalled, retried (vendor/model/stage/elapsed_s carry the provider-health dimension; elapsed_s also maps to an OTLP histogram) | anomaly | vendor, model, stage, elapsed_s | LLM_ERROR | events |
-| `stream_stall_pair_terminated` | two adjacent stream stalls (stream segment + non-streaming fallback) terminated the call early; retried on the delayed stall schedule | anomaly | — | — | events |
+| `stream_stall_pair_terminated` | two adjacent stream stalls (stream segment + non-streaming fallback) terminated the call early; retried on the delayed stall schedule | anomaly | vendor, model, stage, timeout_s | — | events |
 | `stream_overloaded_retry` | stream overloaded, retried | anomaly | — | LLM_ERROR | events |
 | `thinking_block_sanitized` | thinking block sanitized | noise | — | — | events |
 | `multiple_tool_calls_merged` | concurrent tool calls merged | observation | — | — | events |

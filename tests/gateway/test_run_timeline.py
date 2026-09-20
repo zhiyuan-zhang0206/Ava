@@ -7,6 +7,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from gateway.routers.run_timeline import (
+    _ANOMALY_EVENTS,
+    _TURN_EVENTS,
     _inbounds_for_window,
     _narrative_for_window,
     aggregate_turn_timeline,
@@ -169,6 +171,36 @@ def test_aggregate_turn_timeline_preserves_legacy_exec_failure_events() -> None:
     assert timeline.meta.n_exec_failed == 1
     assert timeline.rows[0].execs[0].ok is False
     assert "exec(timeout)" in timeline.rows[0].anomalies
+
+
+def test_stall_pair_termination_is_fetched_and_badged() -> None:
+    """Task #3908: the pair event rides the run-timeline query and earns a row
+    badge, like its stall siblings."""
+    assert "stream_stall_pair_terminated" in _TURN_EVENTS
+    assert "stream_stall_pair_terminated" in _ANOMALY_EVENTS
+
+
+def test_aggregate_turn_timeline_badges_the_stall_pair_termination() -> None:
+    start = datetime(2026, 9, 20, 8, tzinfo=UTC)
+    timeline = aggregate_turn_timeline(
+        [
+            _event(
+                "stream_stall_pair_terminated",
+                start,
+                attributes={"vendor": "deepseek", "model": "deepseek-v4-flash", "stage": "ttft"},
+            ),
+            _event(
+                "turn_end",
+                start + timedelta(seconds=2),
+                trace_id="trace-1",
+                attributes={"duration_seconds": 2, "ok": True},
+            ),
+        ],
+        start,
+        start + timedelta(seconds=3),
+    )
+
+    assert timeline.rows[0].anomalies == ["stream_stall_pair_terminated"]
 
 
 def test_aggregate_turn_timeline_assigns_each_exec_to_its_time_window() -> None:

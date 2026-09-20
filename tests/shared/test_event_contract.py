@@ -387,8 +387,15 @@ def test_pitr_remote_inventory_payload_and_metric_disposition() -> None:
 def test_stall_wave_mitigation_event_contract() -> None:
     """Task #3884: the stall-retry event carries the provider-health payload
     (vendor/model/stage/elapsed_s) and pair terminations register as an
-    anomaly-tier telemetry event of their own."""
+    anomaly-tier telemetry event of their own; task #3908 declares the pair's
+    typed payload too (vendor/model/stage/timeout_s)."""
     assert payload_keys("stream_stalled_retry") == ("vendor", "model", "stage", "elapsed_s")
+    assert payload_keys("stream_stall_pair_terminated") == (
+        "vendor",
+        "model",
+        "stage",
+        "timeout_s",
+    )
     assert tier_for("stream_stall_pair_terminated", "telemetry", "warning") == "anomaly"
 
 
