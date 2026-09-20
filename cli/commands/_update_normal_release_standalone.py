@@ -1,12 +1,18 @@
-"""The standalone death-continuation entry for the checked normal release.
+"""The standalone entries for the checked normal release: the drive and the tail.
 
-A unit whose old orchestrator died mid-handoff re-enters here: the standalone
-preparation validates the retained local identities (exited predecessor, the
-retained handoff, the candidate-ready bootstrap envelope, and the selector
-predecessor or its prepared pointer), then ``run_normal_release`` takes host
-mutual exclusion, re-claims the exact generation (only after positive
-owner-death evidence), and hands the plan to the checked activation entry in
-``cli.commands._update_normal_release``.
+``run_normal_release`` is the drive entry -- also the death-recovery re-entry
+for a unit whose old orchestrator died mid-handoff: the preparation validates
+the retained local identities (exited predecessor, the retained handoff, the
+candidate-ready bootstrap envelope, and the selector predecessor or its
+prepared pointer), then it takes host mutual exclusion, re-claims the exact
+generation (only after positive owner-death evidence), and hands the plan to
+the checked activation entry in ``cli.commands._update_normal_release``.
+
+``run_normal_commit`` is the commit-tail entry the coordinator dispatches per
+unit after the publication commit: its ``for_commit`` preparation skips the
+stop-stage faces (the roster, the live-bootstrap probe, the pending-plan
+preflight) and the seat records ``committed``; the retained bootstrap
+envelope becomes clearable there and is disposed on the way out.
 """
 
 from __future__ import annotations

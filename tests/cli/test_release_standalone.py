@@ -474,6 +474,65 @@ def test_run_normal_release_claims_before_entering_execute(
     ]
 
 
+def test_run_normal_commit_claims_before_entering_the_seat(
+    monkeypatch: pytest.MonkeyPatch, unit_home: Path
+) -> None:
+    """The commit tail: prepare(for_commit) -> lock -> claim -> seat -> clear."""
+    plan = _prepared_plan(unit_home, ())
+    order: list[str] = []
+    routed: list[tuple[object, str]] = []
+    seen: list[bool] = []
+
+    def prepare(_path: Path, *, for_commit: bool) -> normal.PreparedNormalRelease:
+        order.append("prepare")
+        seen.append(for_commit)
+        return plan
+
+    def acquire() -> bool:
+        order.append("lock")
+        return True
+
+    def release() -> None:
+        order.append("release")
+
+    def resume(generation: str, *, expected_session: str) -> bool:
+        order.append(f"resume:{generation}:{expected_session}")
+        return True
+
+    def clear(generation: str) -> bool:
+        order.append(f"clear:{generation}")
+        return False
+
+    def spy_seat(routed_plan: object, generation: str) -> None:
+        order.append("seat")
+        routed.append((routed_plan, generation))
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("the commit tail never enters the checked drive")
+
+    monkeypatch.setattr(standalone, "prepare_normal_release", prepare)
+    monkeypatch.setattr(standalone, "try_acquire_updater_lock", acquire)
+    monkeypatch.setattr(standalone, "release_updater_lock", release)
+    monkeypatch.setattr(updater_handoff, "resume_bootstrap", resume)
+    monkeypatch.setattr(updater_handoff, "clear", clear)
+    monkeypatch.setattr(ui_update_state, "lifecycle_lock", nullcontext)
+    monkeypatch.setattr(standalone, "commit_normal_release_after_publication", spy_seat)
+    monkeypatch.setattr(standalone, "execute_normal_release", forbidden)
+
+    standalone.run_normal_commit(unit_home / "normal-request.json")
+
+    assert seen == [True]
+    assert routed == [(plan, GENERATION)]
+    assert order == [
+        "prepare",
+        "lock",
+        f"resume:{GENERATION}:direct-updater:pid{os.getpid()}",
+        "seat",
+        f"clear:{GENERATION}",
+        "release",
+    ]
+
+
 def test_run_normal_release_declines_when_another_updater_holds_the_lock(
     monkeypatch: pytest.MonkeyPatch, unit_home: Path
 ) -> None:
