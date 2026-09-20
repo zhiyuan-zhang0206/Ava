@@ -16,7 +16,12 @@ Kept alive by the watchdog via `services.memory_search.healthcheck`
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import logging
+import os
+import signal
 import sys
+from typing import NoReturn
 
 import uvicorn
 
@@ -31,6 +36,8 @@ from shared.log import init_gateway_process
 _PIDFILE = settings.services.memory_search_pidfile
 _DATA_FILE = settings.services.memory_search_data_dir / "vectors.npz"
 _PORT = settings.services.memory_search_port
+
+_log = logging.getLogger("services.memory_search.daemon")
 
 
 def _is_running() -> bool:
@@ -60,6 +67,33 @@ async def run() -> None:
     await server.serve()
 
 
+def _hard_exit(code: int) -> NoReturn:
+    """End the process now, skipping interpreter teardown. Never returns.
+
+    Teardown is precisely what hangs: the store load runs on the default
+    executor (``asyncio.to_thread``) — an npz load with no small bound, exactly
+    what a stop can land on during a slow boot — and ``asyncio.Runner.close``
+    joins that executor behind CPython's ``THREAD_JOIN_TIMEOUT`` cap (300 s),
+    the stop flow's entire budget (`PAUSE_TIMEOUT_SECONDS`); a load still in
+    flight at SIGTERM then keeps interpreter teardown waiting with no bound at
+    all (measured: a ``shutdown(wait=False)`` worker is still joined at exit,
+    task #3940). Nothing after ``run()`` needs it — the pidfile is removed
+    below and a half-loaded store dies with the process. Logs are flushed
+    first: they are the one thing a skipped teardown would lose. Same shape as
+    services/agent_ops/daemon.py and services/pitr/uploader_daemon.py.
+    """
+    with contextlib.suppress(Exception):
+        from loguru import logger as _loguru
+
+        _loguru.remove()  # closes (and so flushes) every sink
+    with contextlib.suppress(Exception):
+        logging.shutdown()
+    for stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(Exception):
+            stream.flush()
+    os._exit(code)
+
+
 def main() -> None:
     """Entry point: pidfile -> log init -> serve -> cleanup."""
     if _is_running():
@@ -68,10 +102,41 @@ def main() -> None:
         sys.exit(1)
     init_gateway_process(name="memory_search")
     install_graceful_shutdown("memory_search")
+    code = 0
+    # `asyncio.Runner`, not `asyncio.run`: `run` closes in a `finally` that
+    # awaits `shutdown_default_executor`, joining the default executor's
+    # workers — the store load among them — and a stop signal must never wait
+    # on those (see `_hard_exit`). The runner is therefore never closed: after
+    # the explicit drain below, teardown is skipped by the hard exit. During
+    # serving, SIGTERM first drives uvicorn's own graceful stop; on the way
+    # out `capture_signals` restores this daemon's handler and re-raises the
+    # signal (uvicorn/server.py, 0.52.4), so it still lands in this
+    # KeyboardInterrupt branch — not a normal return from `run()`.
+    runner = asyncio.Runner()
     try:
-        asyncio.run(run())
+        runner.run(run())
+    except KeyboardInterrupt:
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
+        _log.info("[memory-search] interrupted, shutting down")
+        # The signal path skips Runner's own cancellation, so drain the loop's
+        # tasks explicitly: uvicorn's serve coroutine unwinds through the
+        # re-raised signal; the pidfile is removed by the finally below either
+        # way. The executor is deliberately NOT drained.
+        loop = runner.get_loop()
+        tasks = asyncio.all_tasks(loop)
+        for task in tasks:
+            task.cancel()
+        results = loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+        failures = [result for result in results if isinstance(result, Exception)]
+        if failures:
+            _log.error("[memory-search] async shutdown failed: %r", failures)
+            code = 1
+    except Exception:
+        _log.exception("[memory-search] daemon crashed — uncaught exception escaped run()")
+        code = 1
     finally:
         remove_pidfile(_PIDFILE)
+    _hard_exit(code)
 
 
 if __name__ == "__main__":

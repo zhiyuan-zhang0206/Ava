@@ -60,13 +60,17 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import importlib
 import logging
+import os
+import signal
 import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NoReturn
 
 from ops.controllers.base import BlockScope
 from ops.manager import ControllerManager
@@ -639,6 +643,34 @@ async def run(role: MachineRole) -> None:
         _log.info("[watchdog] %s daemon stopped", role)
 
 
+def _hard_exit(code: int) -> NoReturn:
+    """End the process now, skipping interpreter teardown. Never returns.
+
+    Teardown is precisely what hangs: every healthcheck this daemon runs is a
+    thread off the default executor (``_run_check``'s ``asyncio.to_thread``),
+    and healthchecks are sync subprocess work with no small bound — a revive
+    still running at SIGTERM is exactly when a stop lands. ``asyncio.Runner.close``
+    joins that executor behind CPython's ``THREAD_JOIN_TIMEOUT`` cap (300 s) —
+    the stop flow's entire budget (`PAUSE_TIMEOUT_SECONDS`) — and a check still
+    in flight at SIGTERM then keeps interpreter teardown waiting with no bound
+    at all (measured: a ``shutdown(wait=False)`` worker is still joined at
+    exit, task #3940). Nothing after ``run()`` needs that check: each round is
+    independent and the next process re-derives it. Logs are flushed first:
+    they are the one thing a skipped teardown would lose. Same shape as
+    services/agent_ops/daemon.py and services/pitr/uploader_daemon.py.
+    """
+    with contextlib.suppress(Exception):
+        from loguru import logger as _loguru
+
+        _loguru.remove()  # closes (and so flushes) every sink
+    with contextlib.suppress(Exception):
+        logging.shutdown()
+    for stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(Exception):
+            stream.flush()
+    os._exit(code)
+
+
 def main() -> None:
     """Entry point: parse --role, init logger + run asyncio loop.
 
@@ -661,13 +693,35 @@ def main() -> None:
     # watchdogs do not interleave (gateway-watchdog.log / agent-runner-watchdog.log).
     init_gateway_process(name=f"{role}-watchdog")
     install_graceful_shutdown(f"{role}-watchdog")
+    code = 0
+    # `asyncio.Runner`, not `asyncio.run`: `run` closes in a `finally` that
+    # awaits `shutdown_default_executor`, joining the default executor's
+    # workers — an in-flight healthcheck among them — and a stop signal must
+    # never wait on those (see `_hard_exit`). The runner is therefore never
+    # closed: after the explicit drain below, teardown is skipped by the hard
+    # exit.
+    runner = asyncio.Runner()
     try:
-        asyncio.run(run(role))
+        runner.run(run(role))
     except KeyboardInterrupt:
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[watchdog] interrupted, shutting down")
+        # The signal path skips Runner's own cancellation, so drain the loop's
+        # tasks explicitly: run()'s finally still stops the health server and
+        # removes the pidfile. The executor is deliberately NOT drained.
+        loop = runner.get_loop()
+        tasks = asyncio.all_tasks(loop)
+        for task in tasks:
+            task.cancel()
+        results = loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+        failures = [result for result in results if isinstance(result, Exception)]
+        if failures:
+            _log.error("[watchdog] async shutdown failed: %r", failures)
+            code = 1
     except Exception:
         _log.exception("[watchdog] daemon crashed — uncaught exception escaped run()")
-        raise
+        code = 1
+    _hard_exit(code)
 
 
 if __name__ == "__main__":

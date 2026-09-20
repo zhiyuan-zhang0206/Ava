@@ -25,8 +25,10 @@ import contextlib
 import logging
 import math
 import os
+import signal
 import sys
 import time
+from typing import NoReturn
 
 import psycopg
 from psycopg_pool import ConnectionPool
@@ -599,6 +601,33 @@ async def run() -> None:
         _log.info("[heartbeat] daemon stopped")
 
 
+def _hard_exit(code: int) -> NoReturn:
+    """End the process now, skipping interpreter teardown. Never returns.
+
+    Teardown is precisely what hangs: the stranded-hold grading pass runs on
+    the default executor (``asyncio.to_thread``) because its IM fan-out can
+    block on HTTP with no small bound. ``asyncio.Runner.close`` joins that
+    executor behind CPython's ``THREAD_JOIN_TIMEOUT`` cap (300 s) — the stop
+    flow's entire budget (`PAUSE_TIMEOUT_SECONDS`) — and a pass still in
+    flight at SIGTERM then keeps interpreter teardown waiting with no bound at
+    all (measured: a ``shutdown(wait=False)`` worker is still joined at exit,
+    task #3940). Nothing after ``run()`` needs that pass: the next process's
+    pass re-derives it. Logs are flushed first: they are the one thing a
+    skipped teardown would lose. Same shape as services/agent_ops/daemon.py
+    and services/pitr/uploader_daemon.py.
+    """
+    with contextlib.suppress(Exception):
+        from loguru import logger as _loguru
+
+        _loguru.remove()  # closes (and so flushes) every sink
+    with contextlib.suppress(Exception):
+        logging.shutdown()
+    for stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(Exception):
+            stream.flush()
+    os._exit(code)
+
+
 def main() -> None:
     """Entry point: init logger + run asyncio loop.
 
@@ -612,15 +641,38 @@ def main() -> None:
     assert_schema_current(settings.data_plane.db_url)
     init_gateway_process(name="heartbeat")
     install_graceful_shutdown("heartbeat")
+    code = 0
+    # `asyncio.Runner`, not `asyncio.run`: `run` closes in a `finally` that
+    # awaits `shutdown_default_executor`, joining the default executor's
+    # workers — a stranded-hold grading pass among them — and a stop signal
+    # must never wait on those (see `_hard_exit`). The runner is therefore
+    # never closed: after the explicit drain below, teardown is skipped by the
+    # hard exit.
+    runner = asyncio.Runner()
     try:
-        asyncio.run(run())
+        runner.run(run())
     except KeyboardInterrupt:
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[heartbeat] interrupted, shutting down")
+        # The signal path skips Runner's own cancellation, so drain the loop's
+        # tasks explicitly: run()'s finally still cancels the liveness loop,
+        # closes the pool and stops the health server. The executor is
+        # deliberately NOT drained.
+        loop = runner.get_loop()
+        tasks = asyncio.all_tasks(loop)
+        for task in tasks:
+            task.cancel()
+        results = loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+        failures = [result for result in results if isinstance(result, Exception)]
+        if failures:
+            _log.error("[heartbeat] async shutdown failed: %r", failures)
+            code = 1
     except Exception:
         _log.exception("[heartbeat] daemon crashed — uncaught exception escaped run()")
-        raise
+        code = 1
     finally:
         _remove_pidfile()
+    _hard_exit(code)
 
 
 if __name__ == "__main__":
