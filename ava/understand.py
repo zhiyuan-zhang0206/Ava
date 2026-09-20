@@ -13,7 +13,7 @@ The module is also the importable home of the SDK entry point — the import
 statement resolves without changing the attribute surface.
 
 Provider split by modality: text (literal strings and text files) runs on the
-text model (`settings.lm.understand_text_model`, default DeepSeek V4 Flash); binary
+text model (`settings.lm.understand_text_model`, default `deepseek-flash`); binary
 media (image / video / audio / PDF) runs on the media model
 (`settings.lm.understand_media_model`, default Gemini 3.5 Flash, which natively
 decodes those bytes). The media model's provider is picked by the model prefix

@@ -82,7 +82,8 @@ from ._llm import llm_node
 # DeepSeek streaming drift reference: deepseek-ai/DeepSeek-V3#1244 (V4-Pro
 # tool_call intermittently stuffs wrong field, ~11% probability, mode-lock at
 # prefill phase, larger context = higher trigger probability, DeepSeek team
-# Open and won't fix).
+# Open and won't fix). "V4-Pro" is upstream's naming at report time; the id is
+# retired in our registry (resolved to `deepseek-flash`).
 #
 # exec doesn't touch network; claim only does on the compact_request arm
 # (one-shot Compaction LLM call, deliberately no retry policy — a failure
