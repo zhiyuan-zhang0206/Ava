@@ -83,7 +83,10 @@ def test_ensure_app_port_persists_the_default_home_legacy_fallback(
 
     from shared import cluster
 
-    monkeypatch.setattr(cluster, "is_default_home", lambda _home: True)
+    def _is_default_home(_home: Path) -> bool:
+        return True
+
+    monkeypatch.setattr(cluster, "is_default_home", _is_default_home)
 
     assert cg._ensure_app_port(home) == cluster.LEGACY_AVA_PORTS["app"]
 
