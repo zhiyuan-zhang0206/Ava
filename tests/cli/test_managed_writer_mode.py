@@ -297,8 +297,14 @@ def test_decision_precedes_prepare(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_active_rollout_runs_the_flow_and_keeps_the_decision(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from cli.commands import update as _up
+
     _ready_guards(monkeypatch)
     stopped = _stub_orchestration(monkeypatch)
+    # This test is about the decision's lifetime; the begin position is stubbed
+    # (it refuses under `active` until the dispatch channel lands, and has its
+    # own tests below).
+    monkeypatch.setattr(_up, "_begin_managed_writer_publication", lambda: 0)  # pyright: ignore[reportUnknownArgumentType]
     assert _run_inner() == 0
     assert stopped == ["stop"]
     assert mode_mod.managed_writer_mode() == mode_mod.ManagedWriterMode("active")
@@ -314,6 +320,78 @@ def test_off_rollout_records_no_event_and_no_banner(
     assert stopped == ["stop"]
     assert events == []
     assert "managed-writer mode: off" in capsys.readouterr().out
+
+
+# ── the P1 begin wiring (task #4128, E2-b) ───────────────────────────────────
+
+
+@pytest.mark.parametrize("state", ["off", "blocked", "none"])
+def test_begin_step_skips_without_an_active_decision(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], state: str
+) -> None:
+    from cli.commands import _managed_writer_wiring as wiring
+
+    _capture_events(monkeypatch)
+    if state == "off":
+        _disable(monkeypatch)
+        mode_mod.decide_managed_writer_mode()
+    elif state == "blocked":
+        _enable(monkeypatch)
+        _clear_guard(monkeypatch, _CHECKED)
+        _clear_guard(monkeypatch, _WIRING)
+        mode_mod.decide_managed_writer_mode()
+
+    assert wiring._begin_managed_writer_publication() == 0
+    captured = capsys.readouterr()
+    assert "managed-writer begin" not in captured.out
+    if state == "none":
+        # A call outside the rollout's read point is beaconed, never silent.
+        assert "no mode decision recorded" in captured.err
+    else:
+        assert captured.err == ""
+
+
+def test_begin_step_refuses_under_active_until_the_channel_lands(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from cli.commands import _managed_writer_wiring as wiring
+
+    _ready_guards(monkeypatch)
+    mode_mod.decide_managed_writer_mode()
+
+    assert wiring._begin_managed_writer_publication() == 1
+    err = capsys.readouterr().err
+    assert "managed-writer begin refused" in err
+    assert "task #4129" in err
+    assert "disable the managed-writer switch" in err
+
+
+def test_active_rollout_refuses_at_the_begin_position(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail-closed: an `active` rollout must not reach the stop with no journal."""
+    from cli.commands import update as _up
+
+    _ready_guards(monkeypatch)
+    stopped = _stub_orchestration(monkeypatch)
+    recorded: dict[str, object] = {}
+
+    def _capture(_hosts: object, _fan_out: object, _timeout: object, **kwargs: object) -> None:
+        recorded.update(kwargs)
+
+    monkeypatch.setattr(_up, "finalize_rollout", _capture)
+
+    assert _run_inner() == 1
+    assert stopped == [], "nothing may be stopped without the journal open"
+    assert recorded["outcome"] is _up.RolloutOutcome.ABORTED
+    assert "managed-writer begin refused" in str(recorded["failing_step"])
+
+
+def test_restart_only_rollout_skips_the_begin_position(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A bounce publishes nothing: the begin is legacy-skipped (R5 interim)."""
+    _ready_guards(monkeypatch)
+    stopped = _stub_orchestration(monkeypatch)
+
+    assert _run_inner(restart_only=True) == 0
+    assert stopped == ["stop"]
 
 
 # ── the P5 commit wiring (task #4128, E2-a) ──────────────────────────────────
@@ -436,6 +514,10 @@ def _stub_orchestration_to_phase_b(monkeypatch: pytest.MonkeyPatch) -> None:
     from cli.commands import update as _up
 
     _stub_orchestration(monkeypatch)
+    # The commit window lies downstream of the E2-b begin position: an active
+    # rollout refuses there until the dispatch channel lands, so these tests
+    # stub the begin -- a different position than the one under test.
+    monkeypatch.setattr(_up, "_begin_managed_writer_publication", lambda: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cli, "_resolve_fanout_targets", lambda **_kw: [("host-b", None)])  # pyright: ignore[reportUnknownArgumentType]
     # The stale-marker reconcile dials the live roster; only the commit step
     # under test may borrow the fake transaction.

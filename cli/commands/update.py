@@ -23,7 +23,10 @@ from pathlib import Path
 from cli.commands._managed_writer_mode import (
     decide_managed_writer_mode as _decide_managed_writer_mode,
 )
-from cli.commands._managed_writer_wiring import _commit_managed_writer_publication
+from cli.commands._managed_writer_wiring import (
+    _begin_managed_writer_publication,
+    _commit_managed_writer_publication,
+)
 from cli.commands._repo import _repo_root as _repo_root
 from cli.commands._update_agent_runner import (
     _run_agent_runner_self_update as _run_agent_runner_self_update,
@@ -247,6 +250,9 @@ from cli.commands._update_report import (
 from cli.commands._update_report import (
     _print_local_launch_failure_block as _print_local_launch_failure_block,
 )
+from cli.commands._update_verdict import (
+    _phase_b_and_commit,
+)
 from cli.commands.stop import _do_stop as _do_stop
 from shared import launch_failures, ui_update_state
 from shared.cluster import get_record as get_record
@@ -272,7 +278,6 @@ from shared.repo_change import (
     classify_change as _classify_change,  # noqa: F401 # pyright: ignore[reportUnusedImport]  # re-export (accessed as cli.commands._classify_change)
 )
 from shared.rollout_telemetry import activate as _activate_telemetry
-from shared.rollout_telemetry import record_host as _record_host_telemetry
 from shared.rollout_telemetry import stage as _stage_telemetry
 
 
@@ -610,6 +615,22 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
             return refusal
         pull_recover = gate.prepared.pull_recover
 
+        # The managed-writer P1 begin position (task #4128, E2-b): under an
+        # `active` decision the journal must open before the first stop effect,
+        # but only for a rollout publishing a new release (a restart-only
+        # bounce has none) and only once the prepare gate has passed -- a
+        # mundane prepare refusal must not strand an open journal. Until the
+        # all-unit prepared-plan channel lands (task #4129) the step refuses
+        # explicitly rather than stop the fleet without its journal.
+        if not restart_only:
+            begin_rc = _begin_managed_writer_publication()
+            if begin_rc != 0:
+                failing_step = (
+                    "the managed-writer begin refused: the all-unit prepared "
+                    "plan channel (prepared dispatch, task #4129) is not connected"
+                )
+                return begin_rc
+
         # The prepare reconciliation is deliberately read-only. Its vetted
         # candidates become mutable only at this commit boundary, immediately
         # before the stop-the-world operation consumes the same set.
@@ -697,79 +718,30 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
             outcome = RolloutOutcome.INCOMPLETE if local_launch_failures else RolloutOutcome.CLEAN
             return 1 if local_launch_failures else 0
 
-        # 6.4) Who Phase B actually fans out to: every rollout target except THIS
-        #      host. A co-located gateway,agent-runner box was updated by the local
-        #      leg above, and its redundant self-update would kill the gateway the
-        #      readiness gate is about to bless — see `_phase_b_targets`. Phases 0
-        #      and A keep the full list on purpose: their ops are idempotent with
-        #      the local work, Phase B's is not.
-        fanout_targets = _phase_b_targets(agent_runners)
-
-        # 6.5) Phase B's precondition, checked instead of assumed (see
-        #      `_gateway_ready_or_incomplete`). A non-SERVING gateway skips the fan-out
-        #      entirely and reports INCOMPLETE rather than letting every runner decline.
-        #      Still asked when this host is the only target: the local leg's `ava start`
-        #      runs with `--no-readiness-gate`, so skipping here would leave a single-box
-        #      rollout with the readiness question asked nowhere at all.
-        with _stage_telemetry("readiness"):
-            gateway_serving = _gateway_ready_or_incomplete(
-                fanout_targets, paused_names, unconverged
-            )
-        if not gateway_serving:
-            outcome = RolloutOutcome.INCOMPLETE
-            failing_step = "the gateway was not serving, so Phase B never fanned out"
-            return 1
-
-        # 7-8) Phase B + poll + verdict; hosts still mid-transition keep the lease
-        #      as a settle hold. outcome / hosts_to_resume are re-assigned here so
-        #      the `finally` reports the true aftermath, not the ABORTED default.
-        # Per-host updater stage times, gathered by the Phase-B poll from the
-        # `last_updater_outcome` each status probe carried; a converged host is
-        # re-probed once (the fresh-idle read in `ops.updater_outcome` serves
-        # its completed breakdown, `start` included). Land in the telemetry
-        # summary so one rollout log shows every host's checkout/uv/stop/start.
-        host_outcomes: dict[str, dict[str, object]] = {}
-        with _stage_telemetry("phase_b"):
-            rc, outcome, hosts_to_resume = _phase_b_outcome(
-                fanout_targets,
-                target_sha=target_sha,
-                restart_only=restart_only,
-                runner_urls=runner_urls,
-                unconverged=unconverged,
-                force_reap=force_reap,
-                host_outcomes=host_outcomes,
-            )
-        for _host, _stages in host_outcomes.items():
-            _record_host_telemetry(_host, _stages)
-        if outcome is not RolloutOutcome.CLEAN:
-            failing_step = "the Phase-B poll: acked agent-runners never reported back"
-        elif local_launch_failures:
-            # Every agent-runner converged, so Phase B has nothing to report — but
-            # this host is short a service and the rollout is not clean. `failing_step`
-            # already names the sessions (set right after the local leg) and the
-            # aftermath block lists them.
-            outcome, rc = RolloutOutcome.INCOMPLETE, 1
-
-        # 9) Managed-writer P5 commit (task #4128, E2-a): the post-Phase-B
-        #    position of the W chain, reached only by a clean, non-restart-only
-        #    rollout. The step itself consumes the enable point's decision --
-        #    an `active` decision publishes the completed activation through
-        #    the P5 seat and records its stage; every other decision skips it
-        #    without touching the publication seats. A refusal fails the
-        #    rollout; the pending journal stays for checked recovery.
-        if outcome is RolloutOutcome.CLEAN and not restart_only:
-            commit_rc = _commit_managed_writer_publication()
-            if commit_rc != 0:
-                failing_step = (
-                    "the managed-writer publication commit refused; the pending "
-                    "journal remains for `ava cluster recover-pending`"
-                )
-                # The gateway landed and the pin advanced, but the activation did
-                # not publish: the record and the aftermath must read INCOMPLETE,
-                # never the CLEAN this rollout still carried one step ago.
-                outcome, rc = RolloutOutcome.INCOMPLETE, commit_rc
-                publication_refused = True
-                return rc
+        # The rollout's closing section (6.4 through 9) lives in
+        # `_update_verdict` (file-size budget). Its four seams are injected from
+        # this module's namespace so the `_up.*` monkeypatch seams keep
+        # resolving; the verdict carries the outcome / hosts_to_resume the
+        # `finally` reports.
+        phase_b = _phase_b_and_commit(
+            agent_runners,
+            paused_names=paused_names,
+            unconverged=unconverged,
+            target_sha=target_sha,
+            restart_only=restart_only,
+            runner_urls=runner_urls,
+            force_reap=force_reap,
+            local_launch_failures=local_launch_failures,
+            hosts_to_resume=hosts_to_resume,
+            targets=_phase_b_targets,
+            readiness=_gateway_ready_or_incomplete,
+            poll_outcome=_phase_b_outcome,
+            commit=_commit_managed_writer_publication,
+        )
+        rc, outcome = phase_b.rc, phase_b.outcome
+        hosts_to_resume = phase_b.hosts_to_resume
+        failing_step = phase_b.failing_step or failing_step
+        publication_refused = publication_refused or phase_b.publication_refused
         return rc
     finally:
         _finalize_orchestration(
