@@ -36,8 +36,9 @@ still defers until phase stable; the one
 continuation exempt from that freeze is a held maintenance command the
 same boot already owns (`admit_hosted_runtime`), because a rollout's own
 pause must not defer the drain it requires — otherwise every held wake
-returns without a receipt and the hold is retained 300s later (#2159). Exact commit replay returns the original UUID;
-different evidence does not replace it. Database clock checks occur after locks.
+returns without a receipt and the hold is retained 300s later (#2159). Exact
+commit replay returns the original UUID; different evidence does not replace
+it. Database clock checks occur after locks.
 
 Detached unit updaters use `record_pending_unit_readback` to persist their exact
 native/health/selector observation in that same pending field. Equal retries do
@@ -70,8 +71,9 @@ normal-service plan when the release includes one), and
 The single observation challenge is minted once per operation: a same-operation
 retry adopts the journaled challenge, because the begin retry check compares the
 whole entry, while a pending entry from another operation is left for that check
-to refuse — recovery stays explicit. The rollout's begin position (task #4128 E2-b) now reaches this seat: under an
-`active` decision the dispatch chain (task #4129 channels B/C) opens the
+to refuse — recovery stays explicit. The rollout's begin position (task #4128
+E2-b) now reaches this seat: under an `active` decision the dispatch chain
+(task #4129 channels B/C) opens the
 journal through `open_pending_publication`, assembles each unit's hop
 projections against the journaled single challenge, and fans the sealed plan
 out -- every other decision skips the position untouched, and the seat itself

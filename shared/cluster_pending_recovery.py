@@ -145,6 +145,16 @@ def abandon_pending_publication_lease(
 
     Returns True when the row was cleared; False means the journal or the lease
     changed since the caller's inspection and nothing was touched.
+
+    Boundary (recorded at the #3053 QA review, rider folded in I5): this
+    release and a hop child's own effect fence are not one atomic gate. A
+    child that passed its own `validate_operation` read just before the release
+    can land at most one crontab quiesce before its next re-check fails, and
+    its compensation path may then be refused by the same release that cut it
+    off. That sits inside the design's boundary — a hop whose read observed the
+    live world counts as "started", and this path clears only the
+    not-yet-started — and it is unreachable until the restricted receive face
+    lands.
     """
     observed_holder = observed[0] if observed is not None else None
     observed_acquired_at = observed[1] if observed is not None else None
