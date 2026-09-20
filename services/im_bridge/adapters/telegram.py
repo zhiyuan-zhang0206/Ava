@@ -376,6 +376,16 @@ class TelegramAdapter(IMAdapter):
             raise _MarkupRejectedError  # bad entities — caller retries without parse_mode
         if resp.status_code != 200:
             raise RuntimeError(f"telegram send failed: HTTP {resp.status_code} - {resp.text[:200]}")
+        # Delivery-count surface (task #4250): one line per API-confirmed
+        # chunk, never carrying the token. Guarded so a malformed response
+        # body cannot fail a send that already landed.
+        message_id: Any = ""
+        with contextlib.suppress(Exception):
+            body: Any = resp.json()
+            result: Any = body.get("result")
+            if result is not None:
+                message_id = result.get("message_id", "")
+        logger.info("telegram send ok chat_id={} message_id={}", chat_id, message_id)
 
     # -- offset persistence ----------------------------------------------
 

@@ -16,6 +16,7 @@ from typing import Any
 import httpx
 import pytest
 
+import services.im_bridge.adapters.telegram as telegram_module
 from services.im_bridge.adapters.telegram import InboundMessage, TelegramAdapter
 from shared.config import settings
 
@@ -92,6 +93,16 @@ async def _wait_until(predicate: Callable[[], bool], timeout: float = 2.0) -> No
 
 def _offset_file(tmp_path: Any) -> Any:
     return tmp_path / "state" / "im_bridge" / "telegram_offset"
+
+
+class _LogRecorder:
+    """Captures info() calls so tests can assert delivery-count lines."""
+
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+
+    def info(self, message: str, *args: Any) -> None:
+        self.messages.append(message.format(*args) if args else message)
 
 
 async def test_poll_loop_forwards_owner_text(env: None, tmp_path: Any) -> None:
@@ -192,6 +203,65 @@ async def test_send_splits_long_text(env: None) -> None:
     assert [b["text"] for b in bodies] == ["x" * 4096, "x" * 4096, "x" * 808]
     assert all(b["chat_id"] == "42" for b in bodies)
     assert all("sendMessage" in str(r.url) for r in captured)
+
+
+async def test_send_logs_one_delivery_line_per_chunk(
+    env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each API-confirmed chunk appends one 'telegram send ok' line — the
+    delivery-count surface (task #4250)."""
+    transport, _captured = _transport(
+        [
+            httpx.Response(200, json={"ok": True, "result": {"message_id": 7}}),
+            httpx.Response(200, json={"ok": True, "result": {"message_id": 8}}),
+        ]
+    )
+    recorder = _LogRecorder()
+    monkeypatch.setattr(telegram_module, "logger", recorder)
+    async with httpx.AsyncClient(transport=transport) as client:
+        adapter = TelegramAdapter(FakeCore(), client=client)
+        await adapter.send("42", "x" * 5000)
+
+    assert recorder.messages == [
+        "telegram send ok chat_id=42 message_id=7",
+        "telegram send ok chat_id=42 message_id=8",
+    ]
+
+
+async def test_failed_chunk_logs_no_delivery_line(
+    env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A chunk that fails is never counted: the send raises and only the
+    confirmed first chunk left a line."""
+    transport, _captured = _transport(
+        [
+            httpx.Response(200, json={"ok": True, "result": {"message_id": 7}}),
+            httpx.Response(500, json={"ok": False}),
+        ]
+    )
+    recorder = _LogRecorder()
+    monkeypatch.setattr(telegram_module, "logger", recorder)
+    async with httpx.AsyncClient(transport=transport) as client:
+        adapter = TelegramAdapter(FakeCore(), client=client)
+        with pytest.raises(RuntimeError, match="HTTP 500"):
+            await adapter.send("42", "x" * 5000)
+
+    assert recorder.messages == ["telegram send ok chat_id=42 message_id=7"]
+
+
+async def test_delivery_line_survives_malformed_response_body(
+    env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A 200 with an unparseable body still lands (no raise) and logs the
+    line with an empty message_id — the counting code never fails a send."""
+    transport, _captured = _transport([httpx.Response(200, text="not json")])
+    recorder = _LogRecorder()
+    monkeypatch.setattr(telegram_module, "logger", recorder)
+    async with httpx.AsyncClient(transport=transport) as client:
+        adapter = TelegramAdapter(FakeCore(), client=client)
+        await adapter.send("42", "hi")
+
+    assert recorder.messages == ["telegram send ok chat_id=42 message_id="]
 
 
 async def test_send_sanitizes_http_error(env: None) -> None:
