@@ -48,7 +48,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, NoReturn
 
 import psycopg
 from psycopg_pool import ConnectionPool
@@ -747,7 +747,7 @@ def _shutdown_op_pool() -> None:
         _op_executor = None
 
 
-def _hard_exit(code: int) -> int:
+def _hard_exit(code: int) -> NoReturn:
     """Exit after async service cleanup, without joining stuck worker threads.
     ``main`` cancels and awaits loop tasks before reaching this point. Skipping
     interpreter teardown avoids its unbounded default/op-executor joins; logs
