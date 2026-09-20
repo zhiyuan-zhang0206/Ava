@@ -12,10 +12,11 @@ from pydantic import Field, HttpUrl, field_validator
 from pydantic_settings import NoDecode
 
 from shared.config._base import EnvSettings
+from shared.config.managed_writer_fields import ManagedWriterFields
 from shared.config.update_spawn_fields import UpdateSpawnFields
 
 
-class GatewaySettings(UpdateSpawnFields, EnvSettings):
+class GatewaySettings(UpdateSpawnFields, ManagedWriterFields, EnvSettings):
     gateway_client_max_retries: int = Field(
         default=3,
         alias="AVA_GATEWAY_MAX_RETRIES",

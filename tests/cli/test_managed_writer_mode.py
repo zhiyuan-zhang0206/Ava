@@ -11,6 +11,7 @@ decision (task #4128 E2-b/E2-c/E2-a).
 
 from __future__ import annotations
 
+import re
 from collections.abc import Generator, Iterator
 from pathlib import Path
 from typing import Any
@@ -303,9 +304,9 @@ def test_active_rollout_runs_the_flow_and_keeps_the_decision(
     _ready_guards(monkeypatch)
     stopped = _stub_orchestration(monkeypatch)
     # This test is about the decision's lifetime; the begin position is stubbed
-    # (it refuses under `active` until the dispatch channel lands, and has its
+    # (its chain needs a sealed release context and a live lease, and it has its
     # own tests below).
-    monkeypatch.setattr(_up, "_begin_managed_writer_publication", lambda: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_up, "_begin_managed_writer_publication", lambda _sha: 0)  # pyright: ignore[reportUnknownArgumentType]
     assert _run_inner() == 0
     assert stopped == ["stop"]
     assert mode_mod.managed_writer_mode() == mode_mod.ManagedWriterMode("active")
@@ -342,7 +343,7 @@ def test_begin_step_skips_without_an_active_decision(
         _clear_guard(monkeypatch, _WIRING)
         mode_mod.decide_managed_writer_mode()
 
-    assert wiring._begin_managed_writer_publication() == 0
+    assert wiring._begin_managed_writer_publication("0" * 40) == 0
     captured = capsys.readouterr()
     assert "managed-writer begin" not in captured.out
     if state == "none":
@@ -352,27 +353,48 @@ def test_begin_step_skips_without_an_active_decision(
         assert captured.err == ""
 
 
-def test_begin_step_refuses_under_active_until_the_channel_lands(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_begin_step_refuses_under_active_when_the_context_is_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    """The wiring translates the chain's refusal into the step's exit code and a
+    named stderr line; the connected chain refuses with no sealed context yet."""
+    from datetime import UTC, datetime
+
+    from cli.commands import _managed_writer_dispatch as dispatch_mod
     from cli.commands import _managed_writer_wiring as wiring
+    from shared.cluster_lock import DeployLease
 
     _ready_guards(monkeypatch)
     mode_mod.decide_managed_writer_mode()
+    monkeypatch.setattr(
+        dispatch_mod,
+        "read_update_lease",
+        lambda: DeployLease(
+            holder=dispatch_mod.self_holder(),
+            held_for_s=0,
+            expires_in_s=60,
+            note=None,
+            kind="rollout",
+            acquired_at=datetime(2026, 9, 20, tzinfo=UTC),
+        ),
+    )
+    monkeypatch.setattr(dispatch_mod.settings.general, "ava_home", tmp_path.resolve())
 
-    assert wiring._begin_managed_writer_publication() == 1
+    assert wiring._begin_managed_writer_publication("0" * 40) == 1
     err = capsys.readouterr().err
     assert "managed-writer begin refused" in err
-    assert "task #4129" in err
-    assert "disable the managed-writer switch" in err
+    assert "no sealed release context" in err
 
 
 def test_active_rollout_refuses_at_the_begin_position(monkeypatch: pytest.MonkeyPatch) -> None:
     """Fail-closed: an `active` rollout must not reach the stop with no journal."""
+    from cli.commands import _managed_writer_dispatch as dispatch_mod
     from cli.commands import update as _up
 
     _ready_guards(monkeypatch)
     stopped = _stub_orchestration(monkeypatch)
+    # No live rollout lease: the begin chain refuses before it stops anything.
+    monkeypatch.setattr(dispatch_mod, "read_update_lease", lambda: None)
     recorded: dict[str, object] = {}
 
     def _capture(_hosts: object, _fan_out: object, _timeout: object, **kwargs: object) -> None:
@@ -384,6 +406,7 @@ def test_active_rollout_refuses_at_the_begin_position(monkeypatch: pytest.Monkey
     assert stopped == [], "nothing may be stopped without the journal open"
     assert recorded["outcome"] is _up.RolloutOutcome.ABORTED
     assert "managed-writer begin refused" in str(recorded["failing_step"])
+    assert "nothing was stopped" in str(recorded["failing_step"])
 
 
 def test_restart_only_rollout_skips_the_begin_position(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -623,12 +646,12 @@ def _stub_orchestration_to_phase_b(
     from cli.commands import update as _up
 
     _stub_orchestration(monkeypatch)
-    # The publication window lies downstream of two refusing positions: an
-    # active rollout refuses at the E2-b begin and at the E2-c collect until
-    # their dispatch channels land, so these tests stub both -- the positions
-    # under test are elsewhere. `stub_collect=False` leaves the real collect
-    # step in place for its own refusal test.
-    monkeypatch.setattr(_up, "_begin_managed_writer_publication", lambda: 0)  # pyright: ignore[reportUnknownArgumentType]
+    # The publication window lies downstream of the E2-b begin (whose chain
+    # needs a sealed release context and a live lease) and the E2-c collect
+    # (which still refuses until its own channel lands), so these tests stub
+    # both -- the positions under test are elsewhere. `stub_collect=False`
+    # leaves the real collect step in place for its own refusal test.
+    monkeypatch.setattr(_up, "_begin_managed_writer_publication", lambda _sha: 0)  # pyright: ignore[reportUnknownArgumentType]
     if stub_collect:
         monkeypatch.setattr(_up, "_collect_managed_writer_publication", lambda: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cli, "_resolve_fanout_targets", lambda **_kw: [("host-b", None)])  # pyright: ignore[reportUnknownArgumentType]
@@ -832,10 +855,17 @@ _CANONICAL_READERS = {
     "cli/commands/_managed_writer_mode.py",
     "shared/config/gateway.py",
 }
+# The word boundary pins the switch itself: the activation-window field
+# (`update_managed_writer_window_seconds`, task #4129) shares the prefix but is
+# a different knob with its own consumers, and a bare substring match would
+# read its every mention as a switch read.
+_SWITCH_READ = re.compile(r"\bupdate_managed_writer\b")
 
 
 def test_switch_is_read_only_in_the_gate_module() -> None:
     """Exactly one production read site; any other reader is a read-point bypass."""
+    assert _SWITCH_READ.search("settings.gateway.update_managed_writer") is not None
+    assert _SWITCH_READ.search("gateway.update_managed_writer_window_seconds") is None
     root = Path(__file__).resolve().parents[2]
     offenders: dict[str, list[int]] = {}
     for source_root in _SOURCE_ROOTS:
@@ -844,7 +874,7 @@ def test_switch_is_read_only_in_the_gate_module() -> None:
             if rel in _CANONICAL_READERS:
                 continue
             for lineno, line in enumerate(path.read_text().splitlines(), start=1):
-                if "update_managed_writer" in line:
+                if _SWITCH_READ.search(line):
                     offenders.setdefault(rel, []).append(lineno)
     assert offenders == {}, (
         f"update_managed_writer is read outside the enable point: {offenders} -- "
