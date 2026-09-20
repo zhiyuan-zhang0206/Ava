@@ -354,16 +354,27 @@ def test_begin_step_skips_without_an_active_decision(
 
 
 def test_begin_step_refuses_under_active_when_the_context_is_missing(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    set_machine_identity,
 ) -> None:
     """The wiring translates the chain's refusal into the step's exit code and a
-    named stderr line; the connected chain refuses with no sealed context yet."""
+    named stderr line; the connected chain refuses with no sealed context yet.
+
+    The machine identity is injected at the source: the lease's holder is this
+    process's own `self_holder()`, and resolving that name for real would walk
+    into the bare tmp home this test points `ava_home` at. It previously only
+    passed because another test had already primed the process-global identity
+    cache in the same xdist worker -- a worker-placement flake that turned red
+    on the Trunk runner (2026-09-20)."""
     from datetime import UTC, datetime
 
     from cli.commands import _managed_writer_dispatch as dispatch_mod
     from cli.commands import _managed_writer_wiring as wiring
     from shared.cluster_lock import DeployLease
 
+    set_machine_identity(role="agent-runner", name="test-runner")
     _ready_guards(monkeypatch)
     mode_mod.decide_managed_writer_mode()
     monkeypatch.setattr(
