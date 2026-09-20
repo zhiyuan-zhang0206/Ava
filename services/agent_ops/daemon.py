@@ -481,6 +481,37 @@ async def _dispatch_idempotent_pass(
     }
 
 
+def dispatch_once(
+    kind: str, payload: dict[str, Any], *, idempotency_key: str | None
+) -> tuple[str, dict[str, object]]:
+    """Run one dispatch in a fresh process — the restricted observer's child entry.
+
+    `services/agent_ops/dispatch_child.py` calls this for one allowlisted op that
+    arrived at the restricted observer's `/ops`: the same routing as `_ops_route`
+    (a keyed envelope through `_dispatch_idempotent`, everything else through
+    `_dispatch`, both under `maintenance_activity.admission`), with a
+    process-local pool because there is no daemon to share one. The child exits
+    after the single call, so the module globals this sets are its own, and a
+    crash past this point cannot reach any other process.
+    """
+    global _db_pool  # noqa: PLW0603 — one-shot child: the pool lives and dies with this call.
+    _db_pool = _open_db_pool()
+    try:
+        try:
+            with maintenance_activity.admission(kind):
+                if idempotency_key is not None:
+                    return asyncio.run(
+                        _dispatch_idempotent(kind, payload, idempotency_key, _db_pool)
+                    )
+                return asyncio.run(_dispatch(kind, payload))
+        except Exception as exc:  # the same catch-all `_ops_route` applies to a dispatch.
+            _log.exception("one-shot dispatch refused or crashed for kind=%s", kind)
+            return "failed", {"error": f"{type(exc).__name__}: {exc}"}
+    finally:
+        _db_pool.close()
+        _db_pool = None
+
+
 async def _ops_route(body: bytes) -> tuple[int, bytes, str]:
     """POST /ops route handler — parse {kind, payload}, dispatch, return result.
 
