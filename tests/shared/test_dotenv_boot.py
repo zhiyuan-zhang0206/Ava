@@ -48,14 +48,10 @@ def _restore_authority_env() -> Iterator[None]:
         | env_authority_drop_set("agent")
         | env_keep_set("gateway")
         | env_keep_set("agent")
-        # load_dotenv also installs legacy names from the file. They are not
-        # registered aliases, but a later load translates any leaked value.
-        | {alias for pair in dotenv_boot._LEGACY_INVERTED_BOOL_ALIASES for alias in pair}
     )
     # Snapshot EVERY touched key (absent = None, restored as a pop): the
-    # authority pass and the legacy-alias translation can ADD a touched key
-    # (e.g. _translate_legacy_skip_aliases writes the canonical key), and a
-    # key added by a test must not leak into the next one.
+    # authority pass can rewrite a touched key's value, and a key added by a
+    # test must not leak into the next one.
     snapshot = {k: os.environ.get(k) for k in touched}
     yield
     for key, val in snapshot.items():
@@ -438,12 +434,11 @@ def test_spawned_child_reads_forwarded_timezone_without_env_key(
 def test_enforce_keeps_gateway_url_supplied_by_env_alone(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The host-scoped gateway URL keys stay exempt from the identity drop: a
+    """The host-scoped gateway URL key stays exempt from the identity drop: a
     not-yet-enrolled runner (and the test suites) supply AVA_GATEWAY_URL from
     the environment alone, and popping it would silently un-configure the
     bootstrap fetch (should_fetch_from_gateway goes False)."""
     monkeypatch.setitem(os.environ, "AVA_GATEWAY_URL", "http://gw:8000")
-    monkeypatch.setitem(os.environ, "AVA_PRIMARY_GATEWAY_URL", "http://legacy-gw:8000")
     # Hand-built env file WITHOUT the gateway-URL lines: `_point_env_at`'s suite
     # merge declares AVA_GATEWAY_URL, which would take the DERIVED force branch
     # and hide what this test pins (the URL keys survive undeclared).
@@ -460,7 +455,6 @@ def test_enforce_keeps_gateway_url_supplied_by_env_alone(
     monkeypatch.setattr(dotenv_boot, "AVA_MIRROR_ENV_PATH", tmp_path / "absent-mirror.env")
     dotenv_boot._enforce_cluster_env_authority()
     assert os.environ["AVA_GATEWAY_URL"] == "http://gw:8000"
-    assert os.environ["AVA_PRIMARY_GATEWAY_URL"] == "http://legacy-gw:8000"
 
 
 # ── _enforce_cluster_env_authority: undeclared DERIVED keys are dropped ──
@@ -848,46 +842,3 @@ def test_agent_profile_keeps_launcher_runner_url_and_drops_admin_passwords(
     assert "AVA_DB_ADMIN_PASSWORD" not in os.environ
     assert "AVA_REDIS_ADMIN_PASSWORD" not in os.environ
     assert "AVA_REDIS_PASSWORD" not in os.environ
-
-
-# ─── legacy inverted AVA_SKIP_* alias translation ───
-
-
-def test_translate_legacy_skip_aliases_inverts(monkeypatch: pytest.MonkeyPatch) -> None:
-    """AVA_SKIP_AUTH=true meant "skip auth" — the canonical key must receive the
-    INVERTED value; when the canonical key is present it wins and nothing moves."""
-    monkeypatch.delitem(os.environ, "AVA_AUTH_MIDDLEWARE_ENABLED", raising=False)
-    monkeypatch.setitem(os.environ, "AVA_SKIP_AUTH", "true")
-    monkeypatch.delitem(os.environ, "AVA_SECURITY_SCAN_ENABLED", raising=False)
-    monkeypatch.setitem(os.environ, "AVA_SKIP_SECURITY_SCAN", "false")
-
-    dotenv_boot._translate_legacy_skip_aliases()
-
-    assert os.environ["AVA_AUTH_MIDDLEWARE_ENABLED"] == "false"
-    assert os.environ["AVA_SECURITY_SCAN_ENABLED"] == "true"
-
-    # Canonical present -> no translation, canonical survives verbatim. Raw
-    # assignment, not monkeypatch.setitem: setitem would record the
-    # translation-written "false" as the "original" and re-add it at teardown
-    # AFTER the module's restore fixture popped it (leak into later tests).
-    os.environ["AVA_AUTH_MIDDLEWARE_ENABLED"] = "true"
-    dotenv_boot._translate_legacy_skip_aliases()
-    assert os.environ["AVA_AUTH_MIDDLEWARE_ENABLED"] == "true"
-
-
-def test_load_ava_env_translates_legacy_skip_aliases(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """End to end: a .env carrying the legacy keys yields the translated canonical
-    keys in os.environ after load_ava_env (the authority pass drops the
-    undeclared canonical cluster alias first, then the translation fills it in)."""
-    monkeypatch.delitem(os.environ, "AVA_AUTH_MIDDLEWARE_ENABLED", raising=False)
-    monkeypatch.delitem(os.environ, "AVA_SECURITY_SCAN_ENABLED", raising=False)
-    monkeypatch.delitem(os.environ, "AVA_SKIP_AUTH", raising=False)
-    monkeypatch.delitem(os.environ, "AVA_SKIP_SECURITY_SCAN", raising=False)
-    env_file = tmp_path / ".env"
-    env_file.write_text("AVA_SKIP_AUTH=true\nAVA_SKIP_SECURITY_SCAN=false\n")
-    _point_env_at(monkeypatch, env_file, tmp_path)
-    dotenv_boot.load_ava_env()
-    assert os.environ["AVA_AUTH_MIDDLEWARE_ENABLED"] == "false"
-    assert os.environ["AVA_SECURITY_SCAN_ENABLED"] == "true"

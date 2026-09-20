@@ -255,11 +255,7 @@ env `AVA_AGENT_COMMUNICATION_STYLE`, one of `off` (**the default**) / `oriented`
 output, text content, and `ava.ui.notify` actually reaches the user is a fact about
 the system, not a preference — and differ only in how much the agent says while
 working. `off` is the exception: it is a true on/off gate, not a wording choice —
-the whole section, channel map included, is omitted from the prompt. The retired
-boolean `AVA_SYSTEM_PROMPT_PROGRESS` is still read as an alias: `false` → `silent`,
-`true` → `oriented`; its literal `off` spelling is deliberately excluded from that
-translation and instead reaches the enum's own `off` member unchanged, now the
-stronger of the two meanings (see `AgentSettings._legacy_progress_bool_as_style`).
+the whole section, channel map included, is omitted from the prompt.
 
 Intent: Ava already emits assistant text content alongside the `execute_code`
 tool call, so it is naturally suited to interleave short "here's what I'm doing"

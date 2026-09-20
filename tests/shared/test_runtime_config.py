@@ -136,88 +136,6 @@ class TestHostJsonMigration:
         assert rt.read_env_aliases()["AVA_OPS_CONCURRENCY"] == "4"
 
 
-# ─── migrate_skip_alias_env_keys (inverted-semantics legacy AVA_SKIP_* keys) ───
-
-
-def test_skip_migration_renames_with_inverted_value(fake_ava_home: Path) -> None:
-    """AVA_SKIP_AUTH=true meant "skip auth", i.e. auth DISABLED — the renamed
-    key must carry the inverted value."""
-    _seed_env(
-        fake_ava_home,
-        {
-            "AVA_SKIP_AUTH": "true",
-            "AVA_SKIP_SECURITY_SCAN": "false",
-            "KEEP": "1",
-        },
-    )
-    changed = rt.migrate_skip_alias_env_keys(fake_ava_home / ".env")
-    assert changed == [
-        "AVA_SKIP_AUTH=true -> AVA_AUTH_MIDDLEWARE_ENABLED=false",
-        "AVA_SKIP_SECURITY_SCAN=false -> AVA_SECURITY_SCAN_ENABLED=true",
-    ]
-    text = (fake_ava_home / ".env").read_text()
-    assert "AVA_AUTH_MIDDLEWARE_ENABLED=false" in text
-    assert "AVA_SECURITY_SCAN_ENABLED=true" in text
-    assert "AVA_SKIP_AUTH" not in text
-    assert "KEEP=1" in text
-
-
-def test_skip_migration_boolean_spellings(fake_ava_home: Path) -> None:
-    _seed_env(fake_ava_home, {"AVA_SKIP_AUTH": "yes", "AVA_SKIP_SECURITY_SCAN": "0"})
-    rt.migrate_skip_alias_env_keys(fake_ava_home / ".env")
-    text = (fake_ava_home / ".env").read_text()
-    assert "AVA_AUTH_MIDDLEWARE_ENABLED=false" in text
-    assert "AVA_SECURITY_SCAN_ENABLED=true" in text
-
-
-def test_skip_migration_canonical_wins_when_both_present(fake_ava_home: Path) -> None:
-    """Both names present -> the canonical name is authoritative, legacy dropped."""
-    _seed_env(
-        fake_ava_home,
-        {"AVA_SKIP_AUTH": "true", "AVA_AUTH_MIDDLEWARE_ENABLED": "false"},
-    )
-    changed = rt.migrate_skip_alias_env_keys(fake_ava_home / ".env")
-    assert changed == ["AVA_SKIP_AUTH dropped (AVA_AUTH_MIDDLEWARE_ENABLED authoritative)"]
-    text = (fake_ava_home / ".env").read_text()
-    assert "AVA_AUTH_MIDDLEWARE_ENABLED=false" in text
-    assert "AVA_SKIP_AUTH" not in text
-
-
-def test_skip_migration_idempotent_and_absent_file(fake_ava_home: Path) -> None:
-    _seed_env(fake_ava_home, {"AVA_SKIP_AUTH": "true"})
-    rt.migrate_skip_alias_env_keys(fake_ava_home / ".env")
-    assert rt.migrate_skip_alias_env_keys(fake_ava_home / ".env") == []
-    assert rt.migrate_skip_alias_env_keys(fake_ava_home / "missing.env") == []
-
-
-def test_skip_migration_leaves_unparseable_value(fake_ava_home: Path) -> None:
-    """A value pydantic itself cannot parse stays verbatim — Settings fails fast
-    at construction instead of being guessed at."""
-    _seed_env(fake_ava_home, {"AVA_SKIP_AUTH": "banana"})
-    assert rt.migrate_skip_alias_env_keys(fake_ava_home / ".env") == []
-    assert "AVA_SKIP_AUTH=banana" in (fake_ava_home / ".env").read_text()
-
-
-def test_skip_migration_reads_an_export_prefixed_quoted_value(fake_ava_home: Path) -> None:
-    """An export-prefixed, quoted legacy value decodes as the boolean it denotes:
-    it migrates (inverted, prefix kept) instead of silently staying behind."""
-    env_path = fake_ava_home / ".env"
-    env_path.write_text('export AVA_SKIP_AUTH="true"\n')
-    assert rt.migrate_skip_alias_env_keys(env_path) == [
-        "AVA_SKIP_AUTH=true -> AVA_AUTH_MIDDLEWARE_ENABLED=false"
-    ]
-    assert env_path.read_text() == "export AVA_AUTH_MIDDLEWARE_ENABLED=false\n"
-
-
-def test_skip_migration_keeps_the_following_line_on_its_own_line(fake_ava_home: Path) -> None:
-    """The rewritten line keeps its ending: the next key must not concatenate
-    onto it (a dropped newline folded `...=falseKEEP=1` into one line)."""
-    env_path = fake_ava_home / ".env"
-    env_path.write_text("AVA_SKIP_AUTH=true\nKEEP=1\n")
-    rt.migrate_skip_alias_env_keys(env_path)
-    assert env_path.read_text() == "AVA_AUTH_MIDDLEWARE_ENABLED=false\nKEEP=1\n"
-
-
 def test_rename_env_keys_finds_and_keeps_an_export_prefixed_line(fake_ava_home: Path) -> None:
     """A legacy key behind the export prefix is the same key to the parser: the
     rename finds it, keeps the prefix, and leaves lookalikes alone (#2981)."""
@@ -227,34 +145,21 @@ def test_rename_env_keys_finds_and_keeps_an_export_prefixed_line(fake_ava_home: 
     assert env_path.read_text() == "export NEW_KEY=v1\nKEEP=1\nexportED_OLD_KEY=v2\n"
 
 
-# ─── migrate_primary_gateway_url_key (deprecated alias rename) ───
+# ─── migrate_alerts_webhook_token_env_key (legacy alerts key rename) ───
 
 
-def test_gateway_url_migration_renames_key(fake_ava_home: Path) -> None:
-    """AVA_PRIMARY_GATEWAY_URL -> AVA_GATEWAY_URL, value unchanged."""
-    _seed_env(fake_ava_home, {"AVA_PRIMARY_GATEWAY_URL": "http://gw:8000", "KEEP": "1"})
-    changed = rt.migrate_primary_gateway_url_key(fake_ava_home / ".env")
-    assert changed == ["AVA_PRIMARY_GATEWAY_URL -> AVA_GATEWAY_URL"]
+def test_alerts_webhook_token_migration_renames_key(fake_ava_home: Path) -> None:
+    """AVA_OPS_ALERTS_WEBHOOK_TOKEN -> AVA_ALERTS_WEBHOOK_TOKEN, value unchanged."""
+    _seed_env(fake_ava_home, {"AVA_OPS_ALERTS_WEBHOOK_TOKEN": "tok-123", "KEEP": "1"})
+    changed = rt.migrate_alerts_webhook_token_env_key(fake_ava_home / ".env")
+    assert changed == ["AVA_OPS_ALERTS_WEBHOOK_TOKEN -> AVA_ALERTS_WEBHOOK_TOKEN"]
     text = (fake_ava_home / ".env").read_text()
-    assert "AVA_GATEWAY_URL=http://gw:8000" in text
-    assert "AVA_PRIMARY_GATEWAY_URL" not in text
+    assert "AVA_ALERTS_WEBHOOK_TOKEN=tok-123" in text
+    assert "AVA_OPS_ALERTS_WEBHOOK_TOKEN" not in text
     assert "KEEP=1" in text
 
 
-def test_gateway_url_migration_canonical_wins_when_both_present(fake_ava_home: Path) -> None:
-    _seed_env(
-        fake_ava_home,
-        {"AVA_PRIMARY_GATEWAY_URL": "http://old:8000", "AVA_GATEWAY_URL": "http://new:8000"},
-    )
-    changed = rt.migrate_primary_gateway_url_key(fake_ava_home / ".env")
-    assert changed == ["AVA_PRIMARY_GATEWAY_URL dropped (AVA_GATEWAY_URL authoritative)"]
-    text = (fake_ava_home / ".env").read_text()
-    assert "AVA_GATEWAY_URL=http://new:8000" in text
-    assert "AVA_PRIMARY_GATEWAY_URL" not in text
-
-
-def test_gateway_url_migration_idempotent_and_absent(fake_ava_home: Path) -> None:
-    _seed_env(fake_ava_home, {"AVA_PRIMARY_GATEWAY_URL": "http://gw:8000"})
-    rt.migrate_primary_gateway_url_key(fake_ava_home / ".env")
-    assert rt.migrate_primary_gateway_url_key(fake_ava_home / ".env") == []
-    assert rt.migrate_primary_gateway_url_key(fake_ava_home / "missing.env") == []
+def test_alerts_webhook_token_migration_idempotent_and_absent(fake_ava_home: Path) -> None:
+    _seed_env(fake_ava_home, {"AVA_ALERTS_WEBHOOK_TOKEN": "tok-123"})
+    assert rt.migrate_alerts_webhook_token_env_key(fake_ava_home / ".env") == []
+    assert rt.migrate_alerts_webhook_token_env_key(fake_ava_home / "missing.env") == []

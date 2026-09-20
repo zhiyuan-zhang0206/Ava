@@ -68,8 +68,7 @@ zero time (`0001-01-01T00:00:00Z`) in `endsAt` is stored as NULL.
 Auth — the webhook cannot hold the cluster secret, so the ingest path
 bypasses the session/bearer middleware and authenticates itself:
 `X-Alerts-Token` (or the legacy `X-Ops-Alerts-Token`) == the webhook token
-(`AVA_ALERTS_WEBHOOK_TOKEN`, legacy `AVA_OPS_ALERTS_WEBHOOK_TOKEN` accepted
-— constant-time), or cluster-secret Bearer, or — only when no token is
+(`AVA_ALERTS_WEBHOOK_TOKEN` — constant-time), or cluster-secret Bearer, or — only when no token is
 configured — loopback trust (the single-box default: Grafana is co-located).
 
 Response: `{processed, inserted, updated, notified}`.

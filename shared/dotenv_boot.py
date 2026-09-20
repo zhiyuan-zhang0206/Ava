@@ -80,46 +80,6 @@ _HOME_POINTER = ".ava_home"
 _HOME_OVERRIDE = "AVA_HOME_OVERRIDE"
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
 
-# The 2026-07-06 affirmative-naming refactor (#315) renamed skip_auth_middleware
-# -> auth_middleware_enabled and skip_security_scan -> security_scan_enabled with
-# the default INVERTED (False->True). The legacy AVA_SKIP_* keys still resolve
-# via AliasChoices, but their values mean the opposite of the new fields — a raw
-# pass-through would silently turn "skip the scan" into "scan enabled". The
-# boot-time translation below rewrites the legacy value into the canonical key
-# (inverted) whenever the legacy key is the active source, so Settings never
-# sees an untranslated legacy value. The same bool spellings pydantic itself
-# accepts for a bool field; anything else falls through and fails fast at
-# Settings construction exactly as before. (legacy key, canonical key)
-_LEGACY_INVERTED_BOOL_ALIASES = (
-    ("AVA_SKIP_AUTH", "AVA_AUTH_MIDDLEWARE_ENABLED"),
-    ("AVA_SKIP_SECURITY_SCAN", "AVA_SECURITY_SCAN_ENABLED"),
-)
-_BOOL_TRUE = _TRUTHY | {"t", "y"}
-_BOOL_FALSE = frozenset({"0", "false", "no", "off", "f", "n"})
-
-
-def _translate_legacy_skip_aliases() -> None:
-    """Translate an inverted-semantics legacy AVA_SKIP_* alias into its canonical
-    key in os.environ, value inverted, when the legacy key is the active source.
-
-    Runs after `_enforce_cluster_env_authority`: the authority pass drops
-    cluster-scope aliases the unit's .env does not declare (AVA_AUTH_MIDDLEWARE_
-    ENABLED / AVA_SECURITY_SCAN_ENABLED are cluster-pinned), so translating
-    before it would have the translation popped; the legacy keys themselves are
-    not registered aliases and survive the pass. When both names are present the
-    canonical one wins (AliasChoices order) and no translation happens. An
-    unparseable legacy value is left untouched — pydantic raises its usual
-    ValidationError at Settings build rather than being guessed at.
-    """
-    for legacy, canonical in _LEGACY_INVERTED_BOOL_ALIASES:
-        if legacy not in os.environ or canonical in os.environ:
-            continue
-        token = os.environ[legacy].strip().lower()
-        if token in _BOOL_TRUE:
-            os.environ[canonical] = "false"
-        elif token in _BOOL_FALSE:
-            os.environ[canonical] = "true"
-
 
 class AvaHomeContradictionError(RuntimeError):
     """AVA_HOME names one cluster's home while the executing checkout claims another.
@@ -318,7 +278,6 @@ def load_ava_env() -> None:
     _load_dotenv_layer(AVA_ENV_PATH)
     _load_dotenv_layer(AVA_MIRROR_ENV_PATH)
     _enforce_cluster_env_authority()
-    _translate_legacy_skip_aliases()
 
 
 def _identity_env_only() -> frozenset[str]:
@@ -329,7 +288,7 @@ def _identity_env_only() -> frozenset[str]:
     A small helper (not a module constant) so the exemption set cannot drift
     from its only consumer.
     """
-    return frozenset({"AVA_GATEWAY_URL", "AVA_PRIMARY_GATEWAY_URL"})
+    return frozenset({"AVA_GATEWAY_URL"})
 
 
 def _enforce_cluster_env_authority() -> None:
@@ -389,12 +348,11 @@ def _enforce_cluster_env_authority() -> None:
     AVA_DB_URL / AVA_REDIS_URL missing (Settings: Field required). Dropping the
     undeclared flag makes the child fall through to its own files / False, the
     config source stays local-bare, and the leaked flag can never reach an agent
-    runner or agent process again. The host-scoped gateway URL keys
-    (AVA_GATEWAY_URL / its deprecated alias AVA_PRIMARY_GATEWAY_URL) stay exempt
-    for the same reason as the host-scope keys above: enroll writes them
-    to `.env`, but a not-yet-enrolled runner and the test suites supply them
-    from the environment alone, and dropping that would silently un-configure
-    the fetch.
+    runner or agent process again. The host-scoped gateway URL key
+    (AVA_GATEWAY_URL) stays exempt for the same reason as the host-scope keys
+    above: enroll writes it to `.env`, but a not-yet-enrolled runner and the
+    test suites supply it from the environment alone, and dropping that would
+    silently un-configure the fetch.
     """
     # The force/drop data comes from the env registry's projections
     # (shared/env_registry.py — R2 convergence point A): the cluster-scope and

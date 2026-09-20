@@ -485,13 +485,14 @@ def local_env_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     return tmp_path
 
 
-@pytest.mark.parametrize("key", ("AVA_GATEWAY_URL", "AVA_PRIMARY_GATEWAY_URL"))
 def test_gateway_base_reads_local_env_without_settings(
-    local_env_home: Path, monkeypatch: pytest.MonkeyPatch, key: str
+    local_env_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.delenv("AVA_GATEWAY_URL", raising=False)
-    monkeypatch.delenv("AVA_PRIMARY_GATEWAY_URL", raising=False)
-    (local_env_home / ".env").write_text(f"{key}=http://gateway.test:8000\n")
+    # delitem/setitem, not delenv/setenv: the lint bans env mutation on
+    # Settings aliases (the singleton never re-reads env), but `_gateway_base`
+    # is the settings-free repair path — it reads the RAW env/.env by design.
+    monkeypatch.delitem(os.environ, "AVA_GATEWAY_URL", raising=False)
+    (local_env_home / ".env").write_text("AVA_GATEWAY_URL=http://gateway.test:8000\n")
 
     assert cfg._gateway_base() == "http://gateway.test:8000"
 
@@ -502,8 +503,7 @@ def test_gateway_base_prefers_anchored_home_gateway_url_file_over_aliases(
     """The checkout-anchored home's persisted `gateway_url` identity wins over
     the alias file — the 2026-09-07 worktree incident wrote prod config because
     the alias fallback outranked the home identity."""
-    monkeypatch.delenv("AVA_GATEWAY_URL", raising=False)
-    monkeypatch.delenv("AVA_PRIMARY_GATEWAY_URL", raising=False)
+    monkeypatch.delitem(os.environ, "AVA_GATEWAY_URL", raising=False)
     home = local_env_home / "anchored-home"
     home.mkdir()
     (home / "gateway_url").write_text("http://own-cluster.test:8000\n")
@@ -518,8 +518,7 @@ def test_gateway_base_refuses_unanchored_checkout(
 ) -> None:
     """A bare worktree (no `.ava_home` pointer) must not silently resolve to
     the default home's gateway — refusal with guidance instead."""
-    monkeypatch.delenv("AVA_GATEWAY_URL", raising=False)
-    monkeypatch.delenv("AVA_PRIMARY_GATEWAY_URL", raising=False)
+    monkeypatch.delitem(os.environ, "AVA_GATEWAY_URL", raising=False)
     monkeypatch.setattr("shared.dotenv_boot.checkout_anchored", lambda: False)
     (local_env_home / ".env").write_text("AVA_GATEWAY_URL=http://prod.test:8000\n")
 
@@ -532,7 +531,7 @@ def test_put_config_refuses_unanchored_checkout_even_with_env_override(
 ) -> None:
     """An unanchored checkout may read through an explicit env override but
     never write gateway config — no HTTP call happens."""
-    monkeypatch.setenv("AVA_GATEWAY_URL", "http://elsewhere.test:8000")
+    monkeypatch.setitem(os.environ, "AVA_GATEWAY_URL", "http://elsewhere.test:8000")
     monkeypatch.setattr("shared.dotenv_boot.checkout_anchored", lambda: False)
 
     with pytest.raises(cfg._ConfigError, match="refusing to write gateway config"):
@@ -548,7 +547,7 @@ def test_put_config_refuses_env_override_mismatching_home_identity(
     home.mkdir()
     (home / "gateway_url").write_text("http://own-cluster.test:8000\n")
     monkeypatch.setattr("shared.dotenv_boot.AVA_ENV_PATH", home / ".env")
-    monkeypatch.setenv("AVA_GATEWAY_URL", "http://other-cluster.test:9000")
+    monkeypatch.setitem(os.environ, "AVA_GATEWAY_URL", "http://other-cluster.test:9000")
 
     with pytest.raises(cfg._ConfigError, match="does not match this home's gateway"):
         cfg._put_config({"x": "y"}, machine=None)

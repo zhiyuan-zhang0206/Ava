@@ -99,10 +99,7 @@ class _ServiceRuntimeSettings(EnvSettings):
 
     permissions_helper_enabled: bool = Field(
         default=True,
-        validation_alias=AliasChoices(
-            "AVA_PERMISSIONS_HELPER_ENABLED", "AVA_NATIVE_HELPER_ENABLED"
-        ),
-        serialization_alias="AVA_PERMISSIONS_HELPER_ENABLED",
+        alias="AVA_PERMISSIONS_HELPER_ENABLED",
         description="Run the signed macOS permissions helper on this agent-runner. Auto-skips when the host isn't a capable macOS box.",
         json_schema_extra={
             "capability": "agent-runner",
@@ -156,8 +153,7 @@ class _ServiceRuntimeSettings(EnvSettings):
 
     permissions_helper_port: int = Field(
         default=9223,
-        validation_alias=AliasChoices("AVA_PERMISSIONS_HELPER_PORT", "AVA_NATIVE_HELPER_PORT"),
-        serialization_alias="AVA_PERMISSIONS_HELPER_PORT",
+        alias="AVA_PERMISSIONS_HELPER_PORT",
         description="Port key for the macOS permissions helper's Unix socket. Per-cluster so co-hosted clusters get distinct sockets.",
         json_schema_extra={
             "capability": "agent-runner",

@@ -166,7 +166,7 @@ def should_fetch_from_gateway() -> bool:
     exist on disk.
     """
     return _serve_flag("AVA_MACHINE_SERVE_AGENT_RUNNER", "machine_serve_agent_runner") and bool(
-        os.environ.get("AVA_GATEWAY_URL") or os.environ.get("AVA_PRIMARY_GATEWAY_URL")
+        os.environ.get("AVA_GATEWAY_URL")
     )
 
 
@@ -365,11 +365,10 @@ def _apply_bootstrap_values(base_url: str, values: dict[str, str]) -> None:
 def _gateway_base_url() -> str:
     """The enrolled gateway to dial, or an actionable failure.
 
-    The gateway URL is AVA_GATEWAY_URL (`ava enroll` wrote it; the deprecated
-    AVA_PRIMARY_GATEWAY_URL alias is honored too, since this runs before
-    Settings resolves it).
+    The gateway URL is AVA_GATEWAY_URL (`ava enroll` wrote it to `.env`; this
+    runs before Settings, so it is read from the environment directly).
     """
-    base_url = os.environ.get("AVA_GATEWAY_URL") or os.environ.get("AVA_PRIMARY_GATEWAY_URL")
+    base_url = os.environ.get("AVA_GATEWAY_URL") or ""
     if not base_url:
         raise BootstrapFetchError(
             "this host is a pure agent-runner but has no AVA_GATEWAY_URL — its cluster "

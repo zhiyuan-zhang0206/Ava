@@ -16,15 +16,6 @@ from pydantic_settings import NoDecode
 
 from shared.config._base import EnvSettings
 
-# Boolean spellings pydantic accepted for the retired AVA_SYSTEM_PROMPT_PROGRESS
-# toggle, kept so an existing `.env` keeps meaning what it meant. See
-# AgentPromptSettings._legacy_progress_bool_as_style. "off" is deliberately absent from
-# the false set: it is now the enum's own 'off' member (omit the section
-# entirely) rather than a boolean spelling, and that meaning is stronger than
-# the 'silent' this alias used to produce for it.
-_LEGACY_PROGRESS_TRUE = frozenset({"true", "1", "yes", "on", "t", "y"})
-_LEGACY_PROGRESS_FALSE = frozenset({"false", "0", "no", "f", "n"})
-
 
 class AgentPromptSettings(EnvSettings):
     sdk_disable: Annotated[list[str], NoDecode] = Field(
@@ -253,18 +244,12 @@ class AgentPromptSettings(EnvSettings):
     agent_communication_style: Literal["oriented", "silent", "concise", "off"] | None = Field(
         default=None,
         alias="AVA_AGENT_COMMUNICATION_STYLE",
-        validation_alias=AliasChoices(
-            "AVA_AGENT_COMMUNICATION_STYLE",
-            "AVA_SYSTEM_PROMPT_PROGRESS",
-            "AVA_PROMPT_PROGRESS",
-        ),
         description=(
             "How much the agent narrates while it works. 'oriented': brief "
             "interleaved updates. 'concise': speak only at real milestones. 'silent': "
             "one report at the end. 'off': the section is omitted entirely. Unset "
             "resolves the per-model default (shared/lm/registry.py; shared floor "
-            "'off'). The retired AVA_SYSTEM_PROMPT_PROGRESS boolean still maps "
-            "in (false -> 'silent', true -> 'oriented'); this var wins."
+            "'off')."
         ),
         json_schema_extra={
             "restart_required": "agent",
@@ -550,30 +535,4 @@ class AgentPromptSettings(EnvSettings):
     def _split_comma_list(cls, v: object) -> object:
         if isinstance(v, str):
             return [part.strip() for part in v.split(",") if part.strip()]
-        return v
-
-    @field_validator("agent_communication_style", mode="before")
-    @classmethod
-    def _legacy_progress_bool_as_style(cls, v: object) -> object:
-        """Read the retired AVA_SYSTEM_PROMPT_PROGRESS boolean as a style name.
-
-        The field still accepts that alias, so a value coming from a `.env`
-        written before the enum existed is a boolean literal, not a style: the
-        old off-state (no narration) becomes 'silent', the old default becomes
-        'oriented'. Only the boolean spellings pydantic itself accepted are
-        translated — anything else falls through to Literal validation and
-        fails fast rather than being guessed at. That includes the string
-        'off': it is the enum's own 'off' member now (see
-        agent_communication_style), not a boolean spelling, so it passes
-        through unchanged and lands on the section-omitting member rather
-        than the old 'silent' translation.
-        """
-        if isinstance(v, bool):
-            return "oriented" if v else "silent"
-        if isinstance(v, str):
-            token = v.strip().lower()
-            if token in _LEGACY_PROGRESS_TRUE:
-                return "oriented"
-            if token in _LEGACY_PROGRESS_FALSE:
-                return "silent"
         return v

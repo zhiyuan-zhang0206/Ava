@@ -661,84 +661,24 @@ def test_legacy_disabled_marker_step_is_registered_and_unconditional(home, tmp_p
     assert not step.host_global
 
 
-def test_permissions_helper_env_key_migration_renames_legacy_keys(home, tmp_path: Path, capsys):
-    """The one-shot migration renames the pre-rename AVA_NATIVE_HELPER_* keys to
-    the new names in the given .env, and reports what it moved."""
-    from shared.runtime_config import migrate_permissions_helper_env_keys
-
+def test_host_config_step_renames_legacy_alerts_webhook_token(home, tmp_path: Path, capsys):
+    """The one-time .env hygiene step renames the legacy AVA_OPS_ALERTS_*
+    webhook-token key, reporting what it moved."""
     ava_home = tmp_path / "avahome"
     ava_home.mkdir()
     env = ava_home / ".env"
-    env.write_text(
-        "AVA_CLUSTER_SECRET=sekret\nAVA_NATIVE_HELPER_ENABLED=false\nAVA_NATIVE_HELPER_PORT=18010\n"
-    )
+    env.write_text("AVA_OPS_ALERTS_WEBHOOK_TOKEN=tok-123\n")
 
-    changed = migrate_permissions_helper_env_keys(env)
+    _converge._migrate_host_config_to_env(_ctx(tmp_path, ava_home))
 
     text = env.read_text()
-    assert "AVA_NATIVE_HELPER_ENABLED" not in text
-    assert "AVA_NATIVE_HELPER_PORT" not in text
-    assert "AVA_PERMISSIONS_HELPER_ENABLED=false" in text
-    assert "AVA_PERMISSIONS_HELPER_PORT=18010" in text
-    assert "AVA_CLUSTER_SECRET=sekret" in text
-    assert any("AVA_NATIVE_HELPER_PORT -> AVA_PERMISSIONS_HELPER_PORT" in c for c in changed)
-
-
-def test_permissions_helper_env_key_migration_is_idempotent(home, tmp_path: Path):
-    """A second run has no legacy keys left, so it is a no-op."""
-    from shared.runtime_config import migrate_permissions_helper_env_keys
-
-    ava_home = tmp_path / "avahome"
-    ava_home.mkdir()
-    env = ava_home / ".env"
-    env.write_text("AVA_PERMISSIONS_HELPER_PORT=18010\n")
-
-    assert migrate_permissions_helper_env_keys(env) == []
-    assert env.read_text() == "AVA_PERMISSIONS_HELPER_PORT=18010\n"
-
-
-def test_permissions_helper_env_key_migration_new_key_wins(home, tmp_path: Path):
-    """Both keys present: the new key is authoritative, the legacy line is dropped."""
-    from shared.runtime_config import migrate_permissions_helper_env_keys
-
-    ava_home = tmp_path / "avahome"
-    ava_home.mkdir()
-    env = ava_home / ".env"
-    env.write_text("AVA_NATIVE_HELPER_PORT=11111\nAVA_PERMISSIONS_HELPER_PORT=18010\n")
-
-    changed = migrate_permissions_helper_env_keys(env)
-
-    text = env.read_text()
-    assert "AVA_NATIVE_HELPER_PORT" not in text
-    assert "AVA_PERMISSIONS_HELPER_PORT=18010" in text
-    assert any("dropped" in c for c in changed)
-
-
-def test_permissions_helper_step_migrates_env_before_bringup(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
-):
-    """The helper bring-up step renames legacy env keys first, so the .env is
-    canonical before the socket/plist are derived from it."""
-    from shared.config import settings
-
-    ava_home = tmp_path / "avahome"
-    ava_home.mkdir()
-    env = ava_home / ".env"
-    env.write_text("AVA_NATIVE_HELPER_PORT=18010\n")
-    monkeypatch.setattr(
-        "shared.platform_probes.permissions_helper_incapability", lambda: "not macOS"
-    )
-    monkeypatch.setattr(settings.services, "permissions_helper_enabled", True)
-
-    _converge._ensure_permissions_helper(_ctx(tmp_path, ava_home))
-
-    assert "AVA_NATIVE_HELPER_PORT" not in env.read_text()
-    assert "AVA_PERMISSIONS_HELPER_PORT=18010" in env.read_text()
+    assert "AVA_OPS_ALERTS_WEBHOOK_TOKEN" not in text
+    assert "AVA_ALERTS_WEBHOOK_TOKEN=tok-123" in text
     assert "migrated" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
 
 
 def _capable_helper_ctx(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    """A host the capability probe clears, with an .env the step can migrate."""
+    """A host the capability probe clears, with an empty .env."""
     from shared.config import settings
 
     ava_home = tmp_path / "avahome"

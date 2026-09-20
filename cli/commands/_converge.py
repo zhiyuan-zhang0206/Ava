@@ -81,7 +81,6 @@ from shared.config import settings
 from shared.machine import MachineRoles
 from shared.platform_backend import get_backend
 from shared.platform_probes import browser_incapability
-from shared.runtime_config import migrate_permissions_helper_env_keys
 from shared.screen_capture import clear_status, write_status
 
 __all__ = [
@@ -151,17 +150,14 @@ def _ensure_browser(ctx: ConvergeCtx) -> None:
     ensure_browser_profile(interactive=sys.stdin.isatty() and sys.stdout.isatty())
 
 
-def _ensure_permissions_helper(ctx: ConvergeCtx) -> None:
+def _ensure_permissions_helper(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     """Build, sign, and launchd-load the macOS permissions helper.
 
     Idempotent bring-up (stable cert, compile + sign, load the LaunchAgent);
     an incapable host warns and skips, and so does a process that cannot reach
     the signing key, while a failure that is neither propagates (fail-fast).
     Desktop permissions stay a one-time manual operator step.
-    Renames pre-rename env keys first so this unit's .env stays canonical.
     """
-    if changed := migrate_permissions_helper_env_keys(ctx.ava_home / ".env"):
-        print(f"  · permissions-helper env keys migrated: {', '.join(changed)}", file=sys.stderr)
     if not settings.services.permissions_helper_enabled:
         return
     from shared.platform_probes import permissions_helper_incapability

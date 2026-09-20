@@ -1,9 +1,4 @@
-"""warn_deprecated_env_aliases nudges operators off the legacy gateway-url name.
-
-AVA_PRIMARY_GATEWAY_URL was renamed AVA_GATEWAY_URL; the old name
-still resolves but is scheduled for removal. The startup warning must fire only
-when the old name is the active source (old set, new unset).
-"""
+"""Settings field contracts: alias/scope declarations and env decode round-trips."""
 
 from __future__ import annotations
 
@@ -29,69 +24,10 @@ class _RecordingLogger:
 
 def _patch_logger(monkeypatch: pytest.MonkeyPatch) -> _RecordingLogger:
     rec = _RecordingLogger()
-    # warn_deprecated_env_aliases does `from shared.log import logger` at call
-    # time, so patching the module attribute is enough.
+    # The warning call sites do `from shared.log import logger` at call time,
+    # so patching the module attribute is enough.
     monkeypatch.setattr(shared.log, "logger", rec)
     return rec
-
-
-def test_warns_when_only_deprecated_name_set(monkeypatch: pytest.MonkeyPatch):
-    rec = _patch_logger(monkeypatch)
-    monkeypatch.setenv("AVA_PRIMARY_GATEWAY_URL", "https://gw.example")
-    monkeypatch.delenv("AVA_GATEWAY_URL", raising=False)
-
-    config.warn_deprecated_env_aliases()
-
-    assert len(rec.warnings) == 1
-    assert "AVA_PRIMARY_GATEWAY_URL" in rec.warnings[0]
-    assert "2026-09-01" in rec.warnings[0]
-
-
-def test_silent_when_canonical_name_set(monkeypatch: pytest.MonkeyPatch):
-    rec = _patch_logger(monkeypatch)
-    monkeypatch.setenv("AVA_PRIMARY_GATEWAY_URL", "https://gw.example")
-    monkeypatch.setenv("AVA_GATEWAY_URL", "https://gw.example")
-
-    config.warn_deprecated_env_aliases()
-
-    assert rec.warnings == []
-
-
-def test_silent_when_neither_set(monkeypatch: pytest.MonkeyPatch):
-    rec = _patch_logger(monkeypatch)
-    monkeypatch.delenv("AVA_PRIMARY_GATEWAY_URL", raising=False)
-    monkeypatch.delenv("AVA_GATEWAY_URL", raising=False)
-
-    config.warn_deprecated_env_aliases()
-
-    assert rec.warnings == []
-
-
-def test_warns_when_only_skip_auth_alias_set(monkeypatch: pytest.MonkeyPatch):
-    """AVA_SKIP_AUTH / AVA_SKIP_SECURITY_SCAN are deprecated with INVERTED
-    semantics — the warning must fire when the legacy key is the active source."""
-    rec = _patch_logger(monkeypatch)
-    monkeypatch.setenv("AVA_SKIP_AUTH", "true")
-    # delitem, not delenv: the lint bans delenv on Settings aliases (the
-    # singleton never re-reads env), but this function inspects the RAW env.
-    monkeypatch.delitem(os.environ, "AVA_AUTH_MIDDLEWARE_ENABLED", raising=False)
-
-    config.warn_deprecated_env_aliases()
-
-    assert len(rec.warnings) == 1
-    assert "AVA_SKIP_AUTH" in rec.warnings[0]
-    assert "INVERTED" in rec.warnings[0]
-
-
-def test_silent_when_skip_canonical_alias_set(monkeypatch: pytest.MonkeyPatch):
-    rec = _patch_logger(monkeypatch)
-    monkeypatch.setenv("AVA_SKIP_AUTH", "true")
-    # setitem, not setenv: see test_warns_when_only_skip_auth_alias_set.
-    monkeypatch.setitem(os.environ, "AVA_AUTH_MIDDLEWARE_ENABLED", "true")
-
-    config.warn_deprecated_env_aliases()
-
-    assert rec.warnings == []
 
 
 def test_openai_api_key_field_exists_and_is_per_secret():
@@ -794,13 +730,9 @@ def test_llm_model_code_default_is_deepseek_flash() -> None:
     assert LmSettings.model_fields["llm_model"].default == "deepseek-flash"
 
 
-# --- agent_communication_style: enum + legacy-boolean alias ---
+# --- agent_communication_style: enum ---
 
-_STYLE_ENV = (
-    "AVA_AGENT_COMMUNICATION_STYLE",
-    "AVA_SYSTEM_PROMPT_PROGRESS",
-    "AVA_PROMPT_PROGRESS",
-)
+_STYLE_ENV = ("AVA_AGENT_COMMUNICATION_STYLE",)
 
 
 def _style_from_env(monkeypatch: pytest.MonkeyPatch, **env: str) -> str | None:
@@ -834,56 +766,10 @@ def test_communication_style_accepts_each_member(monkeypatch: pytest.MonkeyPatch
     assert _style_from_env(monkeypatch, AVA_AGENT_COMMUNICATION_STYLE=style) == style  # pyright: ignore[reportUnknownArgumentType]
 
 
-@pytest.mark.parametrize(
-    ("legacy", "expected"),
-    [
-        ("false", "silent"),
-        ("0", "silent"),
-        ("no", "silent"),
-        ("FALSE", "silent"),
-        ("true", "oriented"),
-        ("1", "oriented"),
-        ("on", "oriented"),
-    ],
-)
-def test_legacy_progress_boolean_maps_to_a_style(
-    monkeypatch: pytest.MonkeyPatch,
-    legacy,
-    expected,
-) -> None:
-    """A `.env` written before the enum existed keeps meaning what it meant:
-    the old off-state (no narration section) is `silent`, the old default is
-    `oriented`. Both legacy spellings of the alias are honored."""
-    assert _style_from_env(monkeypatch, AVA_SYSTEM_PROMPT_PROGRESS=legacy) == expected  # pyright: ignore[reportUnknownArgumentType]
-    assert _style_from_env(monkeypatch, AVA_PROMPT_PROGRESS=legacy) == expected  # pyright: ignore[reportUnknownArgumentType]
-
-
-def test_legacy_progress_alias_off_reaches_the_new_off_member(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """'off' is excluded from the legacy false-spellings set: it is now the
-    enum's own 'off' member (omit the section entirely), a stronger meaning
-    than the 'silent' this alias used to produce for it. Even coming in
-    through the retired alias, it passes through unchanged."""
-    assert _style_from_env(monkeypatch, AVA_SYSTEM_PROMPT_PROGRESS="off") == "off"
-    assert _style_from_env(monkeypatch, AVA_PROMPT_PROGRESS="off") == "off"
-
-
-def test_new_env_var_wins_over_legacy_boolean(monkeypatch: pytest.MonkeyPatch) -> None:
-    """AliasChoices order: the enum name is checked first, so a stale legacy
-    boolean left in `.env` cannot override an explicit style."""
-    style = _style_from_env(
-        monkeypatch,
-        AVA_AGENT_COMMUNICATION_STYLE="silent",
-        AVA_SYSTEM_PROMPT_PROGRESS="true",
-    )
-    assert style == "silent"
-
-
 @pytest.mark.parametrize("bad", ["loud", "", "verbose", "2"])
 def test_unknown_communication_style_fails_fast(monkeypatch: pytest.MonkeyPatch, bad) -> None:
-    """Only the documented boolean spellings are translated; anything else
-    reaches Literal validation and raises rather than being guessed at."""
+    """A value outside the documented members reaches Literal validation and
+    raises rather than being coerced."""
     from pydantic import ValidationError
 
     with pytest.raises(ValidationError):
@@ -905,25 +791,22 @@ def test_communication_style_is_a_per_agent_enum() -> None:
     assert config.field_alias_map()["agent_communication_style"] == "AVA_AGENT_COMMUNICATION_STYLE"
 
 
-_HELPER_ENV = (
-    "AVA_PERMISSIONS_HELPER_PORT",
-    "AVA_NATIVE_HELPER_PORT",
-    "AVA_PERMISSIONS_HELPER_ENABLED",
-    "AVA_NATIVE_HELPER_ENABLED",
-)
+_HELPER_ENV = ("AVA_PERMISSIONS_HELPER_PORT",)
 
 
 def _helper_port_from_env(monkeypatch: pytest.MonkeyPatch, **env: str) -> int:
     """Resolve permissions_helper_port from a clean env plus `env` (same pattern
     as `_style_from_env`: the settings singleton is built at import, so a later
-    setenv never reaches it; every alias is cleared first so an ambient .env
-    cannot decide the outcome)."""
+    env change never reaches it; every alias is cleared first so an ambient .env
+    cannot decide the outcome). delitem/setitem, not delenv/setenv: the lint
+    bans env mutation on Settings aliases; this constructs a fresh sub-model,
+    which reads the RAW env by design."""
     from shared.config.services import ServiceSettings
 
     for key in _HELPER_ENV:
-        monkeypatch.delenv(key, raising=False)
+        monkeypatch.delitem(os.environ, key, raising=False)
     for key, value in env.items():
-        monkeypatch.setenv(key, value)
+        monkeypatch.setitem(os.environ, key, value)
     return ServiceSettings().permissions_helper_port
 
 
@@ -933,21 +816,6 @@ def test_permissions_helper_port_defaults_to_9223(monkeypatch: pytest.MonkeyPatc
 
 def test_permissions_helper_port_reads_new_key(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _helper_port_from_env(monkeypatch, AVA_PERMISSIONS_HELPER_PORT="18010") == 18010
-
-
-def test_permissions_helper_port_falls_back_to_legacy_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A cluster born before the rename carries AVA_NATIVE_HELPER_PORT in its
-    .env; the new field must still resolve its allocated port from it."""
-    assert _helper_port_from_env(monkeypatch, AVA_NATIVE_HELPER_PORT="18010") == 18010
-
-
-def test_permissions_helper_port_new_key_wins_over_legacy(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert (
-        _helper_port_from_env(
-            monkeypatch, AVA_PERMISSIONS_HELPER_PORT="18010", AVA_NATIVE_HELPER_PORT="11111"
-        )
-        == 18010
-    )
 
 
 def test_permissions_helper_serialization_alias_is_the_new_key() -> None:
@@ -1320,66 +1188,6 @@ def test_timeline_compact_history_config_contract() -> None:
     )
 
 
-def test_skip_auth_alias_inverts_value(monkeypatch: pytest.MonkeyPatch) -> None:
-    """AVA_SKIP_AUTH means "skip auth" — true must resolve to auth DISABLED.
-
-    The inversion happens in dotenv_boot's boot-time translation (the single
-    .env load entry every process imports); the test drives the same chain:
-    translate env -> construct Settings."""
-    from shared.config.gateway import GatewaySettings
-    from shared.dotenv_boot import _translate_legacy_skip_aliases
-
-    monkeypatch.setitem(os.environ, "AVA_SKIP_AUTH", "true")
-    monkeypatch.setitem(os.environ, "AVA_AUTH_MIDDLEWARE_ENABLED", "true")
-    monkeypatch.delitem(os.environ, "AVA_AUTH_MIDDLEWARE_ENABLED", raising=False)
-    _translate_legacy_skip_aliases()
-    assert GatewaySettings().auth_middleware_enabled is False
-
-    # Second phase: drop the translated canonical key (a real boot has only one
-    # value), then translate the other legacy spelling.
-    monkeypatch.setitem(os.environ, "AVA_SKIP_AUTH", "false")
-    monkeypatch.delitem(os.environ, "AVA_AUTH_MIDDLEWARE_ENABLED", raising=False)
-    _translate_legacy_skip_aliases()
-    assert GatewaySettings().auth_middleware_enabled is True
-
-
-def test_skip_security_scan_alias_inverts_value(monkeypatch: pytest.MonkeyPatch) -> None:
-    """AVA_SKIP_SECURITY_SCAN means "skip the scan" — true must resolve to scan
-    DISABLED (translation chain as above)."""
-    from shared.config.agent_eval import AgentEvalSettings
-    from shared.dotenv_boot import _translate_legacy_skip_aliases
-
-    monkeypatch.setitem(os.environ, "AVA_SKIP_SECURITY_SCAN", "true")
-    monkeypatch.setitem(os.environ, "AVA_SECURITY_SCAN_ENABLED", "true")
-    monkeypatch.delitem(os.environ, "AVA_SECURITY_SCAN_ENABLED", raising=False)
-    _translate_legacy_skip_aliases()
-    assert AgentEvalSettings().security_scan_enabled is False
-
-    monkeypatch.setitem(os.environ, "AVA_SKIP_SECURITY_SCAN", "false")
-    monkeypatch.delitem(os.environ, "AVA_SECURITY_SCAN_ENABLED", raising=False)
-    _translate_legacy_skip_aliases()
-    assert AgentEvalSettings().security_scan_enabled is True
-
-
-@pytest.mark.parametrize("initial", [None, "true"])
-@pytest.mark.parametrize("family", ["auth", "scan"])
-def test_skip_alias_test_restores_canonical_environment(
-    monkeypatch: pytest.MonkeyPatch, initial: str | None, family: str
-) -> None:
-    """A translator's direct env writes must not escape either test phase."""
-    key = "AVA_AUTH_MIDDLEWARE_ENABLED" if family == "auth" else "AVA_SECURITY_SCAN_ENABLED"
-    if initial is None:
-        monkeypatch.delenv(key, raising=False)
-    else:
-        monkeypatch.setenv(key, initial)
-    with pytest.MonkeyPatch.context() as isolated:
-        if family == "auth":
-            test_skip_auth_alias_inverts_value(isolated)
-        else:
-            test_skip_security_scan_alias_inverts_value(isolated)
-    assert os.environ.get(key) == initial
-
-
 def test_eval_isolation_env_aliases_parse(tmp_path: Path) -> None:
     """The child process receives the aliases before its Settings singleton loads."""
     proc = subprocess.run(  # noqa: S603 -- fixed argv, sys.executable is trusted
@@ -1408,31 +1216,6 @@ def test_eval_isolation_env_aliases_parse(tmp_path: Path) -> None:
 
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip() == "ok"
-
-
-def test_skip_aliases_canonical_wins_over_legacy(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Both keys present -> the canonical key is authoritative (AliasChoices
-    order), never the translated legacy value."""
-    from shared.config.gateway import GatewaySettings
-    from shared.dotenv_boot import _translate_legacy_skip_aliases
-
-    monkeypatch.setitem(os.environ, "AVA_SKIP_AUTH", "true")
-    monkeypatch.setitem(os.environ, "AVA_AUTH_MIDDLEWARE_ENABLED", "true")
-    _translate_legacy_skip_aliases()
-    assert GatewaySettings().auth_middleware_enabled is True
-
-
-def test_skip_translation_leaves_unparseable_value(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A legacy value pydantic cannot parse is left untouched — the translation
-    never guesses; Settings raises its usual ValidationError."""
-    import os
-
-    from shared.dotenv_boot import _translate_legacy_skip_aliases
-
-    monkeypatch.setenv("AVA_SKIP_AUTH", "banana")
-    monkeypatch.delitem(os.environ, "AVA_AUTH_MIDDLEWARE_ENABLED", raising=False)
-    _translate_legacy_skip_aliases()
-    assert "AVA_AUTH_MIDDLEWARE_ENABLED" not in os.environ
 
 
 # ─── current_field_values warns on an undecodable .env value ───

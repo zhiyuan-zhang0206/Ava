@@ -269,14 +269,13 @@ def _ensure_redis_url_identity_step(ctx: ConvergeCtx) -> None:
 
 
 def _migrate_host_config_to_env(ctx: ConvergeCtx) -> None:
-    """One-time .env hygiene migrations (host-override file, inverted legacy
-    AVA_SKIP_* keys, AVA_PRIMARY_GATEWAY_URL rename) — idempotent, file-only."""
+    """One-time .env hygiene migrations (host-override file, legacy
+    AVA_OPS_ALERTS_* webhook-token key rename) — idempotent, file-only."""
     from shared import runtime_config
 
     runtime_config.migrate_host_json_to_env()
-    if changed := runtime_config.migrate_skip_alias_env_keys(ctx.ava_home / ".env"):
-        print(f"  · legacy AVA_SKIP_* env keys migrated: {', '.join(changed)}", file=sys.stderr)
-    runtime_config.migrate_primary_gateway_url_key(ctx.ava_home / ".env")
+    if changed := runtime_config.migrate_alerts_webhook_token_env_key(ctx.ava_home / ".env"):
+        print(f"  · legacy alerts env keys migrated: {', '.join(changed)}", file=sys.stderr)
 
 
 def _parses_as_int(value: str) -> bool:

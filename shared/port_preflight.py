@@ -109,7 +109,6 @@ def env_port_drift(home: Path, rec: ClusterRecord) -> list[str]:
         "AVA_APP_PORT": record_app_port(rec),
         "AVA_MILVUS_PORT": record_health_port(rec, "milvus"),
         "AVA_BROWSER_CDP_PORT": record_health_port(rec, "browser"),
-        "AVA_NATIVE_HELPER_PORT": record_health_port(rec, "permissions_helper"),
         "AVA_PERMISSIONS_HELPER_PORT": record_health_port(rec, "permissions_helper"),
     }
     out: list[str] = []
