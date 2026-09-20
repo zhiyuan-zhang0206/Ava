@@ -540,8 +540,9 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
     local_launch_failures: list[str] = []
     # The finalizer may compensate only after this rollout has entered Phase A.
     phase_a_started = False
-    # Whether a managed-writer publication step (collection or commit) refused
-    # and the durable pending journal was retained for checked recovery. It rides
+    # Whether a managed-writer publication failed -- a failed candidate-ready
+    # wait, or a collection/commit refusal -- and the durable pending journal
+    # was retained for checked recovery. It rides
     # the finally so the aftermath names the one recovery command that fits, and
     # the record reads INCOMPLETE -- not the CLEAN the pre-refusal outcome still
     # carried.
