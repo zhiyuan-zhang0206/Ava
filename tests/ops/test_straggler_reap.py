@@ -99,6 +99,46 @@ def test_drain_reaps_a_straggler_past_its_window(
     ).fetchone() == ("restart", "pending", None)
 
 
+@pytest.mark.parametrize("failure_first", [False, True])
+def test_drain_accepts_the_reaped_turns_failure_with_a_fresh_lease(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, failure_first: bool
+) -> None:
+    """The status fence alone raises; either receipt arrival order must drain."""
+    from shared.impersonation import ImpersonationError, native_status
+    from shared.runtime_incarnation import RuntimeIncarnation
+
+    agent, owner, generation = _running_agent(db_conn)
+    incarnation = RuntimeIncarnation(agent, generation, owner)
+    assert native_status(agent, incarnation) is None
+    _fake_host(monkeypatch, owner, {agent})
+    _reap_window(monkeypatch, 0.001)
+    monkeypatch.setattr("shared.config.settings.gateway.update_quiesce_timeout_seconds", 10.0)
+    record_reaped = maintenance.record_reaped
+
+    def receipt(agent_id: int, reason: str) -> None:
+        assert db_conn.execute(
+            "SELECT status,lease_expires_at>clock_timestamp() FROM agents_meta WHERE id=%s",
+            (agent_id,),
+        ).fetchone() == ("restarting", True)
+        with pytest.raises(ImpersonationError, match="no longer owns"):
+            native_status(agent_id, incarnation)
+        if failure_first:
+            maintenance.record_failure(agent_id, "ImpersonationError")
+        record_reaped(agent_id, reason)
+        if not failure_first:
+            maintenance.record_failure(agent_id, "ImpersonationError")
+
+    monkeypatch.setattr(maintenance, "record_reaped", receipt)
+    cluster_pause.pause_local_cluster()
+
+    current = pause_owner.read()
+    assert current.maintenance is not None
+    assert current.maintenance.phase == "drained"
+    assert current.maintenance.unsettled_failures() == {}
+    assert current.maintenance.reaped == {agent: REAP_LIFECYCLE_REASON}
+    maintenance_cohort.verify_drained(db_conn, current.maintenance)
+
+
 def test_drain_with_a_zero_window_keeps_the_abort_behavior(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:

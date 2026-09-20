@@ -16,6 +16,7 @@ from dataclasses import replace
 from datetime import datetime
 
 from shared import pause_owner
+from shared.log import logger
 from shared.maintenance_state import MaintenanceHold
 
 _authorized_start: ContextVar[tuple[str, datetime] | None] = ContextVar(
@@ -163,6 +164,16 @@ def record_drained(agent_id: int, command_id: int, *, failure: str | None = None
             raise RuntimeError("failed continuation cannot certify a maintenance drain")
         if failure is None and agent_id in hold.drained:
             return
+        if failure is not None and agent_id in hold.reaped:
+            # The reap already released this member without a receipt; a
+            # failure from its interrupted turn unwinding is expected and
+            # must not latch a blocking gate (MaintenanceHold.unsettled_failures).
+            logger.info(
+                "failure receipt for reaped agent not latched",
+                agent_id=agent_id,
+                category=failure,
+            )
+            return
         updated = (
             replace(hold, drained=tuple(sorted((*hold.drained, agent_id))))
             if failure is None
@@ -195,6 +206,10 @@ def record_reaped(agent_id: int, reason: str) -> None:
     latch -- it releases the drain for this agent and nothing more. The mark
     is settled at the successor boundary; certification of this member checks
     the honest reap state instead (maintenance_cohort.verify_drained).
+
+    A failure may race between the committed reap mark and this journal CAS.
+    Keep that receipt for audit, but let the certified reap supersede it via
+    `unsettled_failures()`; rejecting it would strand a mark already applied.
     """
     while True:
         current = snapshot()
@@ -203,8 +218,6 @@ def record_reaped(agent_id: int, reason: str) -> None:
         hold = current.maintenance
         if hold.commands.get(agent_id) is None:
             raise RuntimeError("reaped agent does not belong to this maintenance cohort")
-        if agent_id in hold.failures:
-            raise RuntimeError("failed continuation cannot be reaped in the same hold")
         if agent_id in hold.reaped:
             return
         updated = replace(hold, reaped={**hold.reaped, agent_id: reason})
@@ -270,6 +283,9 @@ def repair(
     The operator fixed the root cause; this moves `failures` verbatim into
     `repaired` (the CAS "before" side) together with the operator-identity
     `record`, leaving the hold resumable through the ordinary release path.
+    Only unsettled failures can be repaired: a member the reap already
+    released is settled. A hold that already drained is repairable too -- a
+    failure latched after the cohort landed has no other sanctioned exit.
     Undelivered receipts are never cleared — they never block. The caller is
     responsible for the host-quiescence and reachability proofs.
     """
@@ -279,11 +295,11 @@ def repair(
     current = require_operation(holder, acquired_at)
     assert current.maintenance is not None  # noqa: S101
     hold = current.maintenance
-    if not hold.failures:
+    if not hold.unsettled_failures():
         raise RuntimeError(
             "no failed receipts to repair; resume --cancel abandons a failure-free drain"
         )
-    if hold.phase not in ("preparing", "draining"):
+    if hold.phase not in ("preparing", "draining", "drained"):
         raise RuntimeError(
             "repair cannot bypass a started stop; complete maintenance stop/start/resume"
         )
@@ -310,7 +326,7 @@ def set_phase(holder: str, acquired_at: datetime, phase: str) -> pause_owner.Pau
     if phase != allowed.get(hold.phase):
         raise RuntimeError(f"invalid maintenance transition: {hold.phase} -> {phase}")
     if phase == "drained" and (
-        hold.failures or set(hold.drained) | set(hold.reaped) != set(hold.commands)
+        hold.unsettled_failures() or set(hold.drained) | set(hold.reaped) != set(hold.commands)
     ):
         raise RuntimeError("resume cohort has not fully drained")
     updated = MaintenanceHold.decode({**hold.encode(), "phase": phase})

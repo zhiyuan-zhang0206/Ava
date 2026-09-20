@@ -132,6 +132,17 @@ def host_identity() -> HostIdentity:
     return HostIdentity(UUID(owner), frozenset(cast(list[int], active)))
 
 
+def host_identity_or_none() -> HostIdentity | None:
+    """Prove host absence independently before skipping the identity probe.
+
+    A refused health connection does not prove that the host process or its
+    continuations have exited. Existing service, pidfile and home-scoped
+    process checks must establish absence; any live host must answer the
+    identity probe, and unreadable evidence remains an error.
+    """
+    return host_identity() if host_running() else None
+
+
 def ops_quiescent(timeout: float) -> None:
     """Wait for admitted HTTP requests and actual executor work, after closing admission.
 

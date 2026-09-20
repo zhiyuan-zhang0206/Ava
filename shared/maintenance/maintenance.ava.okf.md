@@ -60,8 +60,8 @@ a crash. Every DB channel hang surfaces as one of these, so the bare
 as an ordinary blocking failure. Those land in `undelivered`, never
 `failures`; they never block. They are re-driven through the held-control
 path (no failure fence), and certification still requires the applied
-restart, so a drain never certifies an un-flushed tail. Any other exception
-latches into `failures`.
+restart, so a drain never certifies an un-flushed tail. Other failures block
+unless reap-certified.
 
 Phases are `preparing → draining → drained → stopping → stopped → starting →
 ready`. Failed prepare/drain/stop/start keeps the hold. Ordinary `ava start`

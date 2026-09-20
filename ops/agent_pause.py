@@ -325,9 +325,9 @@ def _drain(holder: str, at: datetime, timeout: float, *, reap: bool = False) -> 
             raise RuntimeError(
                 "preparation is incomplete; repeat prepare or explicitly resume --cancel"
             )
-        if hold.failures:
+        if unsettled := hold.unsettled_failures():
             raise RuntimeError(
-                f"continuations failed; hold retained: {sorted(hold.failures)} — "
+                f"continuations failed; hold retained: {sorted(unsettled)} — "
                 "fix the root cause, then ava maintenance repair --operation "
                 f"{holder} --acquired-at {at.isoformat()}"
             )
@@ -507,7 +507,7 @@ def resume_agents() -> None:
         return
     assert current.maintenance is not None  # noqa: S101
     assert current.holder is not None and current.acquired_at is not None  # noqa: S101
-    if current.maintenance.failures:
+    if current.maintenance.unsettled_failures():
         raise RuntimeError(
             "cannot resume failed continuation/flush receipts; fix the root cause, "
             "then ava maintenance repair --operation "
