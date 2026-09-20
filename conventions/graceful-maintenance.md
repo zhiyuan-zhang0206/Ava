@@ -169,6 +169,11 @@ same recovery and resume after its readiness gate. `resume --cancel` is for
 abandoning preparation/drain while services are usable, not for bypassing a
 partial stop or a failed startup.
 
+`resume --cancel` releases the hold; it does not retract restarts already
+issued (durable per-agent intents). Members not yet at their boundary still
+complete that restart, with its cold recovery, on next admission; budget the
+pass (~2 minutes per unit).
+
 A drain aborted by failed receipts keeps the hold, and `resume --cancel`
 refuses while blocked failures remain. Receipts whose turn raised a
 database-outage exception (`psycopg.OperationalError`, `PoolTimeout` — the
