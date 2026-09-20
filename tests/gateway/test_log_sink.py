@@ -215,7 +215,7 @@ def test_sink_exception_includes_traceback_in_payload(
     sink_logger,
 ) -> None:
     """When logger.opt(exception=True), payload should carry traceback / exception_type /
-    exception_value fields — for diagnosing exception turns in the events table (turn_end ok=False
+    exception_value fields — for diagnosing exception turns in the event stream (turn_end ok=False
     / process_exit reason='exception:X' scenarios)."""
     try:
         raise RuntimeError("simulated LLM timeout")  # noqa: TRY301 — set sys.exc_info()
@@ -265,7 +265,7 @@ def test_sink_opt_exception_without_active_exc_skips_garbage_payload(
 # User ruling 2026-08-04: while a cluster deploy holds the update lease, the
 # rollout's predictable side effects (ops manager rounds blocked by
 # pause/schema/pin, slow pool acquires, DB-outage pauses, query cancellations)
-# must not alarm at WARNING in the events table. The downgrade lives in
+# must not alarm at WARNING in the event stream. The downgrade lives in
 # `_message_to_params` (the one place both sink paths derive rows), gated on
 # `_deploy_in_progress()` — monkeypatched here to keep the tests hermetic (no
 # real lease reads against the test DB).

@@ -628,7 +628,7 @@ def initialize_tracing() -> None:
     usage = _disk_usage()
     if usage is not None and usage[0] > settings.observability.trace_disk_watermark:
         # Auto-degrade: skip recording so the mirror can never fill the disk.
-        # The loguru events sink lands this in the unified events table
+        # The loguru events sink lands this in the unified event stream
         # (event_name='trace', action='recording_disabled_disk_watermark') —
         # visible to ops, never crashes. The warning carries the measured
         # numbers so triage does not need a second command.
@@ -749,7 +749,7 @@ def claim_idle_wait_span() -> Generator[None, None, None]:
     so no double-end warning; the node span is exported at the moment the
     wait begins. The handler's post-end `gen_ai.task.status` write is dropped
     by the SDK (one "Setting attribute on ended span." log line per park —
-    information-free, kept in the log files, filtered out of the events table
+    information-free, kept in the log files, filtered out of the event stream
     by `shared/log.py:_event_pipeline_filter`).
 
     No-op when trace_enabled=False or initialize_tracing hasn't run yet, and —

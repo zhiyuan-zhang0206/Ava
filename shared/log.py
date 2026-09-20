@@ -50,9 +50,8 @@ stderr (human-readable, aligned with terminal scrollback habits), a JSONL
 file sink under `logs_dir()` (rotated — see `_add_file_sink`), and the
 unified event pipeline: every INFO+ record is derived to an event and
 enqueued into `shared.telemetry` — the unified emitter — which batches
-it into the `events` table (the unified emitter; the legacy
-`agent_events` mirror was removed with the migration window — see
-`shared/telemetry.py`).
+it into the unified event stream (see `shared/telemetry.py`); the legacy
+`agent_events` mirror was removed with the migration window.
 
 Subprocesses call `init_subprocess_logger` — file sink **only**, no
 stderr: a subprocess's stderr is captured by the parent and injected
@@ -156,9 +155,9 @@ logger.configure(extra={"agent_id": TURN_SCOPED_AGENT_ID})
 #
 # User ruling 2026-08-04 (task #731): a cluster rollout is an *announced*
 # operation, so its predictable side effects must not alarm at WARNING in the
-# events table. While the deploy lease is held (rollout executing, or a settle
+# event stream. While the deploy lease is held (rollout executing, or a settle
 # hold waiting for stragglers — `shared.cluster_lock`), these categories are
-# downgraded WARNING/ERROR → INFO in the events row; the JSONL file sink
+# downgraded WARNING/ERROR → INFO in the emitted event; the JSONL file sink
 # keeps the true level for forensics, and outside a rollout window they keep
 # their original level unchanged.
 #
@@ -229,7 +228,7 @@ def _refresh_deploy_cache() -> None:
     # A failed read keeps the previous answer for the TTL — DB unreachable
     # (mid-rollout blip) is the normal state of an outage this cache exists to
     # ride out, and a WARNING per minute per process would itself flood the
-    # events table. Deliberately quiet.
+    # event stream. Deliberately quiet.
     with contextlib.suppress(Exception):
         _deploy_cached = _read_deploy_lease()
     _deploy_cached_at = time.monotonic()
@@ -287,10 +286,10 @@ def _message_to_params(
     the turn that wrote it.
 
     `source` comes from record.extra["source"] (default "system") —
-    the unified events table's source column; callers that represent
+    the unified event stream's `source` field; callers that represent
     an external origin (user / self / agent:N) pass it explicitly.
     A record with ``transport_source`` instead keeps its ``source`` extra in
-    the payload and uses ``transport_source`` for the table column.
+    the payload and uses ``transport_source`` for the field.
 
     `payload` (dict, serialized to jsonb by the emitter) = record.extra
     minus dedicated columns, plus `msg` (`record.message` formatted
@@ -375,8 +374,8 @@ def _postgres_sink(message: loguru.Message) -> None:
 
     This is the loguru-side adapter: field derivation lives in
     `_message_to_params`, and the event itself is enqueued to
-    `shared.telemetry` — the emitter batches it into the `events` table (see
-    `shared/telemetry.py`). The enqueue is non-blocking (bounded queue; shed
+    `shared.telemetry` — the emitter batches it into the unified event stream
+    (see `shared/telemetry.py`). The enqueue is non-blocking (bounded queue; shed
     records are counted and reported as `event_log_drop`), so even the
     synchronous `enqueue=False` registration costs the producer nothing.
 
@@ -413,10 +412,10 @@ def _event_pipeline_filter(record: loguru.Record) -> bool:
         marker, see `shared/telemetry.py`): a DB-down process would otherwise
         loop failure → warning → emit → failure forever;
       - `node_enter` (agent/graph/_node_log.py): a pure write-amplification
-        event — zero consumers in the events table (agent_inspect reads
+        event — zero consumers in the event stream (agent_inspect reads
         `node_exit` only; death analysis reads the node_enter trail from the
         log files), yet ~15% of the stream's rows. Kept in the log files, out
-        of the table.
+        of the stream.
       - bare INFO `log` records: one in `_LOG_INFO_SAMPLE_EVERY` passes; WARNING+ pass.
     """
     extra = record["extra"]
@@ -440,20 +439,19 @@ def _event_pipeline_filter(record: loguru.Record) -> bool:
 
 def _add_postgres_sink(process: str = "unknown", *, agent_id: int | None = None) -> int:
     """Eagerly open the unified event pipeline + register the loguru adapter.
-    Pipeline open failure (DB unreachable / table missing etc.) raises during
-    init_*; agent / gateway startup fails loud, never becomes "sink silently
+    Pipeline open failure raises during init_* (it no longer touches the DB);
+    agent / gateway startup fails loud, never becomes "sink silently
     does not work" silent degrade.
 
     The pipeline lives in `shared.telemetry` (bounded queue + drain thread —
     the same batching/backpressure shape the former `_ThreadedPostgresSink`
-    had, now owning the `events` table too). `process` names this process in
+    had, now the single write path for every sink). `process` names this process in
     every event row (agent-kernel / gateway / watchdog / ...); `agent_id`
     binds the default agent dimension.
 
-    At runtime, when DB temporarily goes down (one INSERT raises), the drain
-    thread drops that batch; loguru's `catch=True` on the handler ensures the
-    drop doesn't surface to the caller. The JSONL file sink is the durable
-    backfill source."""
+    At runtime, sink failures are contained on the drain thread; loguru's
+    `catch=True` on the handler ensures they don't surface to the caller. The
+    JSONL file sink is the durable backfill source."""
     from shared import telemetry
 
     telemetry.init_telemetry(process=process, agent_id=agent_id)
@@ -494,7 +492,7 @@ _init_done = False
 def init_agent_process(*, agent_id: int) -> None:
     """Called once at Agent kernel process startup. Binds agent_id,
     adds stderr (human) + file (`agent-{N}.log`) + the unified event
-    pipeline (events table) sinks.
+    pipeline sinks.
 
     Attribution is turn-scoped: the bound `TurnScopedAgentId` resolves to the
     turn's agent when one is bound, else to `agent_id` — identical to a fixed
@@ -567,7 +565,7 @@ def init_gateway_process(name: str = "gateway") -> None:
     """Called once at a gateway-style process startup — the gateway itself
     and every long-running service daemon (agent-host / watchdog / labeler /
     memory_indexer / heartbeat / task_maintenance / ops). stderr (human) +
-    file (`<name>.log`) + unified event pipeline (events table). Rows have
+    file (`<name>.log`) + unified event pipeline. Rows have
     agent_id NULL (extra agent_id sentinel `-`).
 
     `name` picks the per-daemon log file AND the process dimension of every
@@ -632,7 +630,7 @@ def init_cli_process(*, name: str) -> None:
 
     Skipped for interactive CLI use (``ava status`` from a TTY etc.) —
     interactive output already lands on the caller's terminal and the
-    extra sinks would clutter ``~/.ava/logs/`` and the ``events`` table
+    extra sinks would clutter ``~/.ava/logs/`` and the event stream
     with one row per command. The detection contract is "called only
     when the caller exports ``AVA_CLI_LOG_NAME``", and the caller
     decides the name (e.g. ``cli-spawn-update-<ts>``).

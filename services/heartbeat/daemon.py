@@ -242,9 +242,9 @@ def _send_heartbeat_checkin(pool: ConnectionPool, agent_id: int, idle_minutes: f
         # committed, a consumed no-LLM heartbeat still has a durable cadence
         # floor even after a daemon restart loses its in-memory backoff state.
         cur.execute("UPDATE agents_meta SET last_heartbeat_at = now() WHERE id = %s", (agent_id,))
-        # The event name 'heartbeat_nudged' is stored row data in the events
-        # table — renaming it would strand the existing history. Emit through
-        # the unified pipeline (the events table).
+        # The event name 'heartbeat_nudged' is stored row data — renaming it
+        # would strand the existing history. Emit through the unified pipeline
+        # (`shared/telemetry.py`).
         #
         # ts time-source note: the emitter stamps datetime.now(UTC) at ENQUEUE
         # time (process clock, one time source for the whole stream) — the old
