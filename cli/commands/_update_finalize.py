@@ -116,9 +116,9 @@ def finalize_orchestration(
     failing_step: str | None,
     recovered: bool,
     local_launch_failures: list[str],
-    # Set when a managed-writer publication step (collection or commit) refused
-    # and retained its pending journal: the aftermath must name that one
-    # recovery command.
+    # Set when a managed-writer publication failed (a failed candidate-ready
+    # wait, or a collection/commit refusal) and retained its pending journal:
+    # the aftermath must name that one recovery command.
     publication_refused: bool = False,
     telemetry: RolloutTelemetry,
     refresh_settings: Callable[[], None],

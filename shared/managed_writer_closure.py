@@ -76,15 +76,21 @@ def launcher_fenced(facts: LauncherObservation, terminal: LauncherTerminal) -> b
     """Whether one launcher's facts meet its journaled terminal.
 
     The branch follows the observation's own ``kind`` (filled by the observing
-    producer, never supplied by a caller):
+    producer, never supplied by a caller), and the terminal's own kind selects
+    which definition disposition is admitted — "fenced" is never one fixed
+    shape:
 
-    - launchd: both D(l) (the definition is gone, or rebound to the terminal's
-      exact bytes) and L(l) (the scheduler positively does not have it loaded)
-      must hold.
+    - launchd, ``removed``: the definition must be positively absent
+      (``definition="absent"``, no current digest); a merely mismatched,
+      unknown or unreadable definition is not absence.
+    - launchd, ``rebound``: the definition must have been rewritten in place —
+      present but differing, with ``current_digest`` exactly the terminal's
+      ``new_digest`` — and the scheduler must positively not have it loaded
+      (that loaded-false requirement holds for both launchd kinds).
     - crontab: the user table is cron's complete input — no separate loaded
-      state exists — so a double-read-stable positively-absent definition is
-      the whole fact domain. Only a "removed" terminal can be met; a
-      "rebound" crontab claim has no observation route and refuses.
+      state exists — so only a ``removed`` terminal can be met, by a
+      double-read-stable positively-absent definition; a "rebound" crontab
+      claim has no observation route and refuses.
     - anything else refuses.
     """
     match facts.kind:

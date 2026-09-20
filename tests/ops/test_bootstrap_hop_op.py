@@ -163,6 +163,7 @@ def test_directory_request_refuses(unit_home: Path, monkeypatch: pytest.MonkeyPa
     recorder = _stub_spawn(monkeypatch)
     directory = unit_home / "run" / "request.json"
     directory.mkdir()
+    directory.chmod(0o600)  # so the S_ISREG refusal has independent teeth (QA N4)
 
     _refuse(unit_home, _payload(directory))
 

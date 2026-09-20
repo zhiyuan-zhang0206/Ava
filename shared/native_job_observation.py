@@ -4,6 +4,13 @@ Raw definitions remain private inputs, never response/log fields. Native command
 failure is not absence — the one positive absence route is the definition file's
 own lstat ENOENT plus a stable GUI enumeration. launchctl diagnostic text is
 deliberately not parsed.
+
+Both scheduler families the prepared inventory admits are served: launchd
+(definition file plus ``launchctl`` membership) and crontab (the user table is
+cron's complete input, so a double-read-stable missing definition is the whole
+positive absence and no separate loaded state exists). Windows ``schtasks``
+stays an unimplemented read — the observer reports the kind with unknown facts,
+never absent.
 """
 
 from __future__ import annotations

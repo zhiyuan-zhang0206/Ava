@@ -20,7 +20,7 @@ from pathlib import Path
 # the tests' `_up.*` monkeypatch seams, `_cluster_rollback.py` and the detached
 # rollout subprocess — keep resolving. Each name is `X as X` (an explicit
 # re-export) so pyright does not flag it as unused here.
-from cli.commands._managed_writer_hop import HopUnitPlan
+from cli.commands._managed_writer_hop import ManagedWriterPhaseInput
 from cli.commands._managed_writer_mode import (
     decide_managed_writer_mode as _decide_managed_writer_mode,
 )
@@ -540,8 +540,9 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
     local_launch_failures: list[str] = []
     # The finalizer may compensate only after this rollout has entered Phase A.
     phase_a_started = False
-    # Whether a managed-writer publication step (collection or commit) refused
-    # and the durable pending journal was retained for checked recovery. It rides
+    # Whether a managed-writer publication failed -- a failed candidate-ready
+    # wait, or a collection/commit refusal -- and the durable pending journal
+    # was retained for checked recovery. It rides
     # the finally so the aftermath names the one recovery command that fits, and
     # the record reads INCOMPLETE -- not the CLEAN the pre-refusal outcome still
     # carried.
@@ -627,11 +628,12 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
         # context, gathers the fleet's prepared facts, opens the journal and
         # requires every unit's local validation acknowledgement; any refusal
         # aborts the rollout here, before any unit effect. The same chain
-        # returns the units' hop plans (channel C) for the closing section's
-        # hop phase; a restart-only bounce never begins and passes None.
-        hop_plans: list[HopUnitPlan] | None = None
+        # returns the closing section's phase input -- the units' hop plans
+        # (channel C) plus the collector's inputs (channel D, task #4129 I5);
+        # a restart-only bounce never begins and passes None.
+        phase_input: ManagedWriterPhaseInput | None = None
         if not restart_only:
-            begin_rc, hop_plans = _begin_managed_writer_publication(target_sha)
+            begin_rc, phase_input = _begin_managed_writer_publication(target_sha)
             if begin_rc != 0:
                 failing_step = "the managed-writer begin refused; nothing was stopped"
                 return begin_rc
@@ -743,7 +745,7 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
             poll_outcome=_phase_b_outcome,
             collect=_collect_managed_writer_publication,
             commit=_commit_managed_writer_publication,
-            hop_plans=hop_plans,
+            phase_input=phase_input,
         )
         rc, outcome = phase_b.rc, phase_b.outcome
         hosts_to_resume = phase_b.hosts_to_resume

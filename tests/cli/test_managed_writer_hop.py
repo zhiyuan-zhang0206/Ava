@@ -5,9 +5,10 @@ positions import it, so nothing pulling `shared.session_backend` /
 `shared.session_record` (the session-kill chain the updater's own import-timing
 test guards) may be reachable from here at module scope.
 
-The verdict's hop branch (the `hop_plans` replacement of the Phase-B poll) is
+The verdict's hop branch (the phase-input replacement of the Phase-B poll) is
 exercised at the bottom: the branch must replace -- never join -- the legacy
-poll and the collect/commit window.
+poll, wait for the units' candidate-ready journals on a CLEAN gate, and only
+then fall into the shared collect/commit window (task #4129 I5).
 """
 
 from __future__ import annotations
@@ -17,16 +18,25 @@ import os
 import subprocess
 import sys
 import textwrap
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
+from uuid import UUID
 
 import pytest
 
-from cli.commands._managed_writer_hop import HopUnitPlan, dispatch_bootstrap_hops, phase_b_hops
+from cli.commands._managed_writer_hop import (
+    CollectorInput,
+    HopUnitPlan,
+    ManagedWriterPhaseInput,
+    dispatch_bootstrap_hops,
+    phase_b_hops,
+)
 from cli.commands._update_recover import RolloutOutcome
 from ops.cluster_rpc import ClusterOpFailed, ClusterOpUnreachable
 from ops.rpc_bootstrap_hop import BootstrapHopResult
 from ops.rpc_prepare_dispatch import ProjectionFile, prepared_hop_name
+from shared.managed_writer_barrier import RolloutIdentity
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -229,7 +239,7 @@ class _HopStub:
         self.calls: list[list[HopUnitPlan]] = []
 
     def __call__(
-        self, plans: list[HopUnitPlan]
+        self, plans: tuple[HopUnitPlan, ...]
     ) -> tuple[int, RolloutOutcome, list[tuple[str, str | None]], str | None]:
         self.calls.append(list(plans))
         return self.result
@@ -257,12 +267,37 @@ def _never_poll(
     raise AssertionError("the legacy Phase-B poll must not run on the hop branch")
 
 
-def _never_collect() -> int:
-    raise AssertionError("the collect position must not run on the hop branch")
+def _clean_poll(
+    *_args: object, **_kwargs: object
+) -> tuple[int, RolloutOutcome, list[tuple[str, str | None]]]:
+    return 0, RolloutOutcome.CLEAN, []
 
 
-def _never_commit() -> int:
-    raise AssertionError("the commit position must not run on the hop branch")
+def _managed_phase_input() -> ManagedWriterPhaseInput:
+    """One light phase input for the verdict seams."""
+    return ManagedWriterPhaseInput(
+        hop_plans=(_plan(),),
+        collector=CollectorInput(
+            operation=RolloutIdentity(
+                holder="gateway:pid1",
+                acquired_at=datetime(2026, 9, 20, tzinfo=UTC),
+                target_sha="0" * 40,
+            ),
+            challenge=UUID(int=3),
+            valid_until=datetime(2026, 9, 20, 1, tzinfo=UTC),
+            candidate_digest="9" * 64,
+            units=(),
+        ),
+    )
+
+
+class _VerdictRun(NamedTuple):
+    verdict: Any
+    hop: _HopStub
+    phase_input: ManagedWriterPhaseInput | None
+    waited: list[CollectorInput]
+    collected: list[ManagedWriterPhaseInput | None]
+    committed: list[None]
 
 
 def _verdict_call(
@@ -270,13 +305,35 @@ def _verdict_call(
     *,
     hop_result: tuple[int, RolloutOutcome, list[tuple[str, str | None]], str | None],
     readiness: Any = _seam_readiness,
-    hop_plans: list[HopUnitPlan] | None = None,
-) -> tuple[Any, _HopStub]:
+    wait_result: str | None = None,
+    use_phase_input: bool = True,
+    poll: Any = _never_poll,
+) -> _VerdictRun:
+    from cli.commands import _managed_writer_collector as collector_mod
     from cli.commands import _update_verdict as verdict_mod
 
     stub = _HopStub(hop_result)
     monkeypatch.setattr(verdict_mod, "phase_b_hops", stub)
-    plan = _plan()
+    container = _managed_phase_input() if use_phase_input else None
+    waited: list[CollectorInput] = []
+
+    def wait(collector: CollectorInput) -> str | None:
+        waited.append(collector)
+        return wait_result
+
+    monkeypatch.setattr(collector_mod, "wait_for_candidate_ready", wait)
+    collected: list[ManagedWriterPhaseInput | None] = []
+
+    def collect(window_input: ManagedWriterPhaseInput | None) -> int:
+        collected.append(window_input)
+        return 0
+
+    committed: list[None] = []
+
+    def commit() -> int:
+        committed.append(None)
+        return 0
+
     verdict = verdict_mod._phase_b_and_commit(
         [("host-b", None)],
         paused_names=set[str](),
@@ -289,47 +346,90 @@ def _verdict_call(
         hosts_to_resume=[("host-b", None)],
         targets=_seam_targets,
         readiness=readiness,
-        poll_outcome=_never_poll,
-        collect=_never_collect,
-        commit=_never_commit,
-        hop_plans=[plan] if hop_plans is None else hop_plans,
+        poll_outcome=poll,
+        collect=collect,
+        commit=commit,
+        phase_input=container,
     )
-    return verdict, stub
+    return _VerdictRun(verdict, stub, container, waited, collected, committed)
 
 
 def test_verdict_takes_the_hop_branch_and_keeps_the_frozen_resume_list(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    verdict, stub = _verdict_call(monkeypatch, hop_result=(0, RolloutOutcome.CLEAN, [], None))
+    run = _verdict_call(monkeypatch, hop_result=(0, RolloutOutcome.CLEAN, [], None))
 
-    assert (verdict.rc, verdict.outcome) == (0, RolloutOutcome.CLEAN)
-    assert verdict.hosts_to_resume == []
-    assert verdict.failing_step is None
-    assert verdict.publication_refused is False
-    assert [plan.machine for call in stub.calls for plan in call] == ["runner-a"]
+    assert (run.verdict.rc, run.verdict.outcome) == (0, RolloutOutcome.CLEAN)
+    assert run.verdict.hosts_to_resume == []
+    assert run.verdict.failing_step is None
+    assert run.verdict.publication_refused is False
+    assert [plan.machine for call in run.hop.calls for plan in call] == ["runner-a"]
+    assert run.phase_input is not None
+    assert run.waited == [run.phase_input.collector], "a CLEAN gate waits before collecting"
+    assert run.collected == [run.phase_input], "the window collects through the phase input"
+    assert run.committed == [None], "a collected window commits"
+
+
+def test_verdict_reports_a_wait_failure_as_a_refused_publication(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The code landed but the activation did not publish: INCOMPLETE + refused."""
+    detail = "the hop wait hit the sealed window with units not candidate-ready: runner-a=absent"
+    run = _verdict_call(
+        monkeypatch, hop_result=(0, RolloutOutcome.CLEAN, [], None), wait_result=detail
+    )
+
+    assert (run.verdict.rc, run.verdict.outcome) == (1, RolloutOutcome.INCOMPLETE)
+    assert run.verdict.hosts_to_resume == []
+    assert run.verdict.failing_step == detail
+    assert run.verdict.publication_refused is True
+    container = run.phase_input
+    assert container is not None
+    assert run.waited == [container.collector]
+    assert run.collected == [], "a failed wait must not collect"
+    assert run.committed == [], "a failed wait must not commit"
 
 
 def test_verdict_reports_the_hop_gate_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
     failing = "the hop gate refused: 1 of 2 units did not acknowledge"
-    verdict, _stub = _verdict_call(
-        monkeypatch, hop_result=(1, RolloutOutcome.INCOMPLETE, [], failing)
-    )
+    run = _verdict_call(monkeypatch, hop_result=(1, RolloutOutcome.INCOMPLETE, [], failing))
 
-    assert (verdict.rc, verdict.outcome) == (1, RolloutOutcome.INCOMPLETE)
-    assert verdict.hosts_to_resume == []
-    assert verdict.failing_step == failing
-    assert verdict.publication_refused is False
+    assert (run.verdict.rc, run.verdict.outcome) == (1, RolloutOutcome.INCOMPLETE)
+    assert run.verdict.hosts_to_resume == []
+    assert run.verdict.failing_step == failing
+    assert run.verdict.publication_refused is False
+    assert run.waited == [], "a refused gate must not wait"
+    assert run.collected == [] and run.committed == []
 
 
 def test_verdict_keeps_the_readiness_gate_before_the_hop_phase(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    verdict, stub = _verdict_call(
+    run = _verdict_call(
         monkeypatch,
         hop_result=(0, RolloutOutcome.CLEAN, [], None),
         readiness=_seam_readiness_refusing,
     )
 
-    assert (verdict.rc, verdict.outcome) == (1, RolloutOutcome.INCOMPLETE)
-    assert verdict.failing_step == "the gateway was not serving, so Phase B never fanned out"
-    assert stub.calls == [], "the hop phase must not start when the gateway is not serving"
+    assert (run.verdict.rc, run.verdict.outcome) == (1, RolloutOutcome.INCOMPLETE)
+    assert run.verdict.failing_step == "the gateway was not serving, so Phase B never fanned out"
+    assert run.hop.calls == [], "the hop phase must not start when the gateway is not serving"
+    assert run.waited == [] and run.collected == []
+
+
+def test_verdict_poll_path_hands_the_collection_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without a phase input the legacy poll drives, and the window's collect call
+    still happens -- with None, so the wiring's active check can refuse a rollout
+    assembled outside its orchestration (fail-closed, never a silent publish)."""
+    run = _verdict_call(
+        monkeypatch,
+        hop_result=(0, RolloutOutcome.CLEAN, [], None),
+        use_phase_input=False,
+        poll=_clean_poll,
+    )
+
+    assert (run.verdict.rc, run.verdict.outcome) == (0, RolloutOutcome.CLEAN)
+    assert run.hop.calls == []
+    assert run.waited == []
+    assert run.collected == [None]
+    assert run.committed == [None]

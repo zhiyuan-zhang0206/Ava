@@ -10,14 +10,17 @@ then consume the enable point's decision at the managed-writer collection
 The five orchestration seams arrive as injected callables, resolved at the
 call site from `update.py`'s namespace so the `cli.commands.update.*`
 monkeypatch seams keep resolving for tests. An `active` managed-writer rollout
-additionally passes its per-unit hop plans: the hop gate then replaces the
-Phase-B poll (and the collect/commit window is not entered -- the
-restricted-only slice publishes nothing; task #4129 I4):
+additionally passes its phase input (`ManagedWriterPhaseInput`: the per-unit
+hop plans plus the collector's inputs): the hop gate then replaces the Phase-B
+poll, a CLEAN gate waits for every unit's candidate-ready journal inside the
+sealed window, and on success the shared collect/commit window below runs
+exactly as the poll path's does (task #4129 I4/I5):
 
 - `targets` -- `_phase_b_targets` (the fan-out set, this host excluded),
 - `readiness` -- `_gateway_ready_or_incomplete` (Phase B's precondition),
 - `poll_outcome` -- `_phase_b_outcome` (the poll + verdict),
-- `collect` -- `_collect_managed_writer_publication` (the P2 collection),
+- `collect` -- `_collect_managed_writer_publication` (the P2 collection;
+  receives the window's `phase_input`, None on the poll path),
 - `commit` -- `_commit_managed_writer_publication` (the P5 commit).
 
 Every exit is a `PhaseBVerdict` rather than a bare rc: the caller still reports
@@ -29,7 +32,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import NamedTuple
 
-from cli.commands._managed_writer_hop import HopUnitPlan, phase_b_hops
+from cli.commands._managed_writer_hop import ManagedWriterPhaseInput, phase_b_hops
 from cli.commands._update_recover import RolloutOutcome
 from shared.rollout_telemetry import record_host as _record_host_telemetry
 from shared.rollout_telemetry import stage as _stage_telemetry
@@ -40,9 +43,9 @@ class PhaseBVerdict(NamedTuple):
 
     `failing_step` is an override only: None means nothing inside this section
     failed and the caller keeps its own (the local leg's defect, set before the
-    call). `publication_refused` marks a managed-writer publication refusal
-    (collection or commit) whose pending journal was retained for checked
-    recovery.
+    call). `publication_refused` marks a managed-writer publication failure
+    (a failed candidate-ready wait, or a collection/commit refusal) whose
+    pending journal was retained for checked recovery.
     """
 
     rc: int
@@ -66,9 +69,9 @@ def _phase_b_and_commit(
     targets: Callable[[list[tuple[str, str | None]]], list[tuple[str, str | None]]],
     readiness: Callable[[list[tuple[str, str | None]], set[str], list[str] | None], bool],
     poll_outcome: Callable[..., tuple[int, RolloutOutcome, list[tuple[str, str | None]]]],
-    collect: Callable[[], int],
+    collect: Callable[[ManagedWriterPhaseInput | None], int],
     commit: Callable[[], int],
-    hop_plans: list[HopUnitPlan] | None = None,
+    phase_input: ManagedWriterPhaseInput | None = None,
 ) -> PhaseBVerdict:
     """Steps 6.4 through 9 of the rollout: fan-out set, readiness gate, Phase-B
     poll + verdict, managed-writer collection + commit -- returning the verdict
@@ -102,58 +105,78 @@ def _phase_b_and_commit(
             publication_refused=False,
         )
 
-    if hop_plans is not None:
-        # The managed-writer hop phase (task #4129 I4, channel C): the begin
-        # chain returned the units' hop plans, so the Phase-B poll is replaced
-        # by the hop dispatch gate -- the units take the restricted updater hop
-        # instead of the normal self-update. The collection and commit
-        # positions (8.5-9) are not entered: the restricted-only slice
-        # publishes nothing, and the continuation arrives with task #4129
-        # I5/I6. `hosts_to_resume` is the gate's frozen empty list: after the
-        # hop gate the fallback is checked recovery, never an ad-hoc
-        # compensating resume.
+    if phase_input is not None:
+        # The managed-writer hop phase (task #4129 I4, channel C) and its
+        # ledger-driven continuation (task #4129 I5, channel D): the begin
+        # chain returned the phase input, so the Phase-B poll is replaced by
+        # the hop dispatch gate -- the units take the restricted updater hop
+        # instead of the normal self-update. A CLEAN gate then waits for every
+        # unit's hop journal to read candidate-ready inside the sealed window
+        # (the wait belongs to the hop stage: one telemetry window covers the
+        # gate and its continuation). A wait failure is the publication's
+        # INCOMPLETE -- the code landed, the activation did not publish -- and
+        # marks `publication_refused` so the aftermath names checked recovery;
+        # the pending journal stays. On success the flow falls into the shared
+        # 8.5-9 window below (collection + commit). `hosts_to_resume` is the
+        # gate's frozen empty list: after the hop gate the fallback is checked
+        # recovery, never an ad-hoc compensating resume.
         with _stage_telemetry("managed_writer_hop"):
-            hop_rc, hop_outcome, hop_hosts, hop_failing = phase_b_hops(hop_plans)
-        return PhaseBVerdict(
-            rc=hop_rc,
-            outcome=hop_outcome,
-            hosts_to_resume=hop_hosts,
-            failing_step=hop_failing,
-            publication_refused=False,
-        )
+            hop_rc, hop_outcome, hop_hosts, hop_failing = phase_b_hops(phase_input.hop_plans)
+            if hop_outcome is not RolloutOutcome.CLEAN or hop_rc != 0:
+                return PhaseBVerdict(
+                    rc=hop_rc,
+                    outcome=hop_outcome,
+                    hosts_to_resume=hop_hosts,
+                    failing_step=hop_failing,
+                    publication_refused=False,
+                )
+            from cli.commands._managed_writer_collector import wait_for_candidate_ready
 
-    # 7-8) Phase B + poll + verdict; hosts still mid-transition keep the lease
-    #      as a settle hold. outcome / hosts_to_resume ride the verdict back to
-    #      the caller so its `finally` reports the true aftermath, not the
-    #      ABORTED default.
-    # Per-host updater stage times, gathered by the Phase-B poll from the
-    # `last_updater_outcome` each status probe carried; a converged host is
-    # re-probed once (the fresh-idle read in `ops.updater_outcome` serves
-    # its completed breakdown, `start` included). Land in the telemetry
-    # summary so one rollout log shows every host's checkout/uv/stop/start.
-    host_outcomes: dict[str, dict[str, object]] = {}
-    # An override only; None keeps the caller's own failing_step.
-    failing_step: str | None = None
-    with _stage_telemetry("phase_b"):
-        rc, outcome, hosts_to_resume = poll_outcome(
-            fanout_targets,
-            target_sha=target_sha,
-            restart_only=restart_only,
-            runner_urls=runner_urls,
-            unconverged=unconverged,
-            force_reap=force_reap,
-            host_outcomes=host_outcomes,
-        )
-    for _host, _stages in host_outcomes.items():
-        _record_host_telemetry(_host, _stages)
-    if outcome is not RolloutOutcome.CLEAN:
-        failing_step = "the Phase-B poll: acked agent-runners never reported back"
-    elif local_launch_failures:
-        # Every agent-runner converged, so Phase B has nothing to report — but
-        # this host is short a service and the rollout is not clean. `failing_step`
-        # already names the sessions (set right after the local leg; None here
-        # keeps it) and the aftermath block lists them.
-        outcome, rc = RolloutOutcome.INCOMPLETE, 1
+            wait_detail = wait_for_candidate_ready(phase_input.collector)
+        if wait_detail is not None:
+            return PhaseBVerdict(
+                rc=1,
+                outcome=RolloutOutcome.INCOMPLETE,
+                hosts_to_resume=[],
+                failing_step=wait_detail,
+                publication_refused=True,
+            )
+        rc, outcome, hosts_to_resume = hop_rc, hop_outcome, hop_hosts
+        failing_step = hop_failing
+
+    else:
+        # 7-8) Phase B + poll + verdict; hosts still mid-transition keep the lease
+        #      as a settle hold. outcome / hosts_to_resume ride the verdict back to
+        #      the caller so its `finally` reports the true aftermath, not the
+        #      ABORTED default.
+        # Per-host updater stage times, gathered by the Phase-B poll from the
+        # `last_updater_outcome` each status probe carried; a converged host is
+        # re-probed once (the fresh-idle read in `ops.updater_outcome` serves
+        # its completed breakdown, `start` included). Land in the telemetry
+        # summary so one rollout log shows every host's checkout/uv/stop/start.
+        host_outcomes: dict[str, dict[str, object]] = {}
+        # An override only; None keeps the caller's own failing_step.
+        failing_step: str | None = None
+        with _stage_telemetry("phase_b"):
+            rc, outcome, hosts_to_resume = poll_outcome(
+                fanout_targets,
+                target_sha=target_sha,
+                restart_only=restart_only,
+                runner_urls=runner_urls,
+                unconverged=unconverged,
+                force_reap=force_reap,
+                host_outcomes=host_outcomes,
+            )
+        for _host, _stages in host_outcomes.items():
+            _record_host_telemetry(_host, _stages)
+        if outcome is not RolloutOutcome.CLEAN:
+            failing_step = "the Phase-B poll: acked agent-runners never reported back"
+        elif local_launch_failures:
+            # Every agent-runner converged, so Phase B has nothing to report — but
+            # this host is short a service and the rollout is not clean. `failing_step`
+            # already names the sessions (set right after the local leg; None here
+            # keeps it) and the aftermath block lists them.
+            outcome, rc = RolloutOutcome.INCOMPLETE, 1
 
     # 8.5-9) The managed-writer publication window (task #4128), reached only
     #    by a clean, non-restart-only rollout. The steps themselves consume
@@ -163,7 +186,7 @@ def _phase_b_and_commit(
     #    skips the window without touching the publication seats. A refusal
     #    fails the rollout; the pending journal stays for checked recovery.
     if outcome is RolloutOutcome.CLEAN and not restart_only:
-        collect_rc = collect()
+        collect_rc = collect(phase_input)
         if collect_rc != 0:
             failing_step = (
                 "the managed-writer collection refused; the pending journal "
