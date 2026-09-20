@@ -270,6 +270,7 @@ def test_prepare_accepts_a_stopped_bootstrap_and_skips_probing(
     plan = standalone.prepare_normal_release(request_path)
 
     assert probes == []
+    assert plan.bootstrap is not None
     assert plan.bootstrap.pid == _BOOTSTRAP_PID
     assert plan.resume_generation == GENERATION
 

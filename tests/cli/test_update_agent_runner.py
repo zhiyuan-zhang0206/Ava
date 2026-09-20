@@ -162,7 +162,6 @@ def test_hop_declines_without_an_in_process_continuation(
 ) -> None:
     """I6: the restart-declined hop exit is terminal -- the coordinator drives."""
     from contextlib import nullcontext
-    from types import SimpleNamespace
     from unittest.mock import Mock
 
     from cli.commands import _update_bootstrap as bootstrap
@@ -195,11 +194,20 @@ def test_hop_declines_without_an_in_process_continuation(
     monkeypatch.setattr(standalone, "run_normal_commit", forbidden)
     monkeypatch.setattr(host_deploy_state, "try_acquire_updater_lock", lambda: True)
     monkeypatch.setattr(host_deploy_state, "release_updater_lock", lambda: None)
-    monkeypatch.setattr(updater_handoff, "clear", lambda _generation: True)
+
+    def clear(_generation: str) -> bool:
+        return True
+
+    def begin_bootstrap(
+        _predecessor: object, *, expected_session: str
+    ) -> updater_handoff.UpdaterHandoffSnapshot:
+        return updater_handoff.UpdaterHandoffSnapshot(status="pending", generation="gen-1")
+
+    monkeypatch.setattr(updater_handoff, "clear", clear)
     monkeypatch.setattr(
         updater_handoff,
         "begin_bootstrap_after_dead_owner",
-        lambda *_args, **_kwargs: SimpleNamespace(generation="gen-1"),
+        begin_bootstrap,
     )
     monkeypatch.setattr(ui_update_state, "lifecycle_lock", nullcontext)
 

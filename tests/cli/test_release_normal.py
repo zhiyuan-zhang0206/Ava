@@ -1149,6 +1149,7 @@ def test_stop_bootstrap_signals_only_the_exact_retained_identity(
 ) -> None:
     plan = _prepared_plan(unit_home, ())
     record = plan.bootstrap
+    assert record is not None
     _write_ops_record(unit_home, record)
     calls: list[object] = []
     backend = Mock()
@@ -1179,6 +1180,7 @@ def test_stop_bootstrap_is_complete_without_a_signal_when_the_process_is_gone(
     monkeypatch: pytest.MonkeyPatch, unit_home: Path, verdict: ProcessVerdict
 ) -> None:
     plan = _prepared_plan(unit_home, ())
+    assert plan.bootstrap is not None
     _write_ops_record(unit_home, plan.bootstrap)
     monkeypatch.setattr(normal, "observe_process", _observe_as(verdict))
 
@@ -1194,6 +1196,7 @@ def test_stop_bootstrap_refuses_unknown_or_changed_identities(
     monkeypatch: pytest.MonkeyPatch, unit_home: Path
 ) -> None:
     plan = _prepared_plan(unit_home, ())
+    assert plan.bootstrap is not None
     with pytest.raises(ReleaseRejectedError, match="no ava-ops session record"):
         normal._stop_bootstrap_checked(plan)
     _write_ops_record(unit_home, plan.bootstrap)
