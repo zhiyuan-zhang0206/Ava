@@ -71,7 +71,7 @@ def _require_executing_deploy(
     lease = read_update_lease()
     if (
         lease is None
-        or lease.note is not None
+        or lease.is_settle_hold
         or lease.acquired_at is None
         or lease.holder != deploy_holder
         or lease.acquired_at != deploy_acquired_at
@@ -323,7 +323,7 @@ def cluster_cancel_op() -> dict[str, object]:
 
     Refuses (`ClusterUpdateInProgress`, each refusal naming its own next step)
     unless: a live orchestration session exists, the deploy lease is an
-    *executing* one (note NULL — a settle hold has nothing running), the holder
+    *executing* one (settle_hosts NULL — a settle hold has nothing running), the holder
     names THIS machine, and the pid is alive. The pid-liveness probe is the same
     `holder_pid_if_local` the stalled-rollout controller uses, so a cancel and an
     unattended reclaim can never disagree about who is signalable.
@@ -364,7 +364,7 @@ def cluster_cancel_op() -> dict[str, object]:
             "is gone."
         )
     lease = read_update_lease()
-    if lease is not None and lease.note is not None:
+    if lease is not None and lease.is_settle_hold:
         raise ClusterUpdateInProgress(
             f"the deploy lease is a settle hold, not an executing orchestration — "
             f"{lease.describe()}. Nothing is running to cancel; `ava cluster recover` "

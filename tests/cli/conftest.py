@@ -34,7 +34,6 @@ def stub_deploy_lease_identity(monkeypatch: pytest.MonkeyPatch) -> None:
             holder=_up.self_holder(),
             held_for_s=0,
             expires_in_s=60,
-            note=None,
             kind="rollout",
             acquired_at=datetime(2026, 8, 25, tzinfo=UTC),
         ),

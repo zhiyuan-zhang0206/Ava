@@ -650,9 +650,7 @@ def test_defers_the_heal_while_a_rollout_is_executing(monkeypatch: pytest.Monkey
     _ask_the_real_deploy_question(monkeypatch)
     monkeypatch.setattr(
         "shared.cluster_lock.read_update_lease",
-        lambda: _DeployLease(
-            holder="gateway-host:pid1", held_for_s=1.0, expires_in_s=900.0, note=None
-        ),
+        lambda: _DeployLease(holder="gateway-host:pid1", held_for_s=1.0, expires_in_s=900.0),
     )
     monkeypatch.setattr("ops.cluster.current_orchestration", lambda: None)
 
@@ -684,7 +682,7 @@ def test_defers_the_heal_while_a_local_updater_runs_and_owns_the_whole_host(
 def test_a_settle_hold_does_not_block_the_heal(monkeypatch: pytest.MonkeyPatch) -> None:
     """Nobody executes under a settle hold, and the convergence it waits for is exactly
     what this heal produces — issue #1020's argument, in its narrowest form here:
-    `note IS NULL` defers, every settle hold passes through. Chosen deliberately over
+    `settle_hosts IS NULL` defers, every settle hold passes through. Chosen deliberately over
     `DeployLease.awaits` so the two PRs cannot deadlock in either merge order."""
     spawn_calls: list[bool] = []
     _code_behind(monkeypatch, spawn_calls)
@@ -695,7 +693,7 @@ def test_a_settle_hold_does_not_block_the_heal(monkeypatch: pytest.MonkeyPatch) 
             holder="gateway-host:pid1",
             held_for_s=1.0,
             expires_in_s=900.0,
-            note="settling, waiting for: wsl",
+            settle_hosts=["wsl"],
         ),
     )
     monkeypatch.setattr("ops.cluster.current_orchestration", lambda: None)

@@ -31,12 +31,16 @@ from shared.host_deploy_state import HostDeployState
 _THIS_HOST = "laptop-host"
 
 
-def _lease(*, note: str | None) -> DeployLease:
-    """A live lease as `read_update_lease` returns it. `note=None` is a rollout
-    executing right now; a settle note is a stated waiting period with nobody
+def _lease(*, settle_hosts: list[str] | None = None) -> DeployLease:
+    """A live lease as `read_update_lease` returns it. No settle fact is a rollout
+    executing right now; `settle_hosts` set makes it a settle hold with nobody
     executing under it."""
     return DeployLease(
-        holder="gateway-host:pid65237", held_for_s=120.0, expires_in_s=900.0, note=note
+        holder="gateway-host:pid65237",
+        held_for_s=120.0,
+        expires_in_s=900.0,
+        settle_hosts=settle_hosts,
+        settle_note=settle_note(settle_hosts) if settle_hosts is not None else None,
     )
 
 
@@ -81,7 +85,9 @@ class TestReadLeaseState:
     def test_executing_lease_in_both_modes(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """An executing rollout defers in every mode — a settle hold is the ONLY
         kind of lease a healer may pass."""
-        monkeypatch.setattr("shared.cluster_lock.read_update_lease", lambda: _lease(note=None))
+        monkeypatch.setattr(
+            "shared.cluster_lock.read_update_lease", lambda: _lease(settle_hosts=None)
+        )
         for mode in ("narrow", "pass"):
             verdict = read_lease_state(settle_hold_mode=mode)  # type: ignore[arg-type]
             assert verdict.kind == "executing"
@@ -94,7 +100,7 @@ class TestReadLeaseState:
         this host has not converged is passed by the narrow mode."""
         monkeypatch.setattr(
             "shared.cluster_lock.read_update_lease",
-            lambda: _lease(note=settle_note([_THIS_HOST, "other-box"])),
+            lambda: _lease(settle_hosts=[_THIS_HOST, "other-box"]),
         )
         verdict = read_lease_state(settle_hold_mode="narrow")
         assert verdict.kind == "settle_hold"
@@ -107,19 +113,17 @@ class TestReadLeaseState:
         """The permission is scoped to the named host; a hold waiting for someone
         else says nothing about this host's right to heal itself."""
         monkeypatch.setattr(
-            "shared.cluster_lock.read_update_lease", lambda: _lease(note=settle_note(["other-box"]))
+            "shared.cluster_lock.read_update_lease", lambda: _lease(settle_hosts=["other-box"])
         )
         verdict = read_lease_state(settle_hold_mode="narrow")
         assert verdict.kind == "settle_hold"
         assert verdict.waits_for_this_host is False
 
-    def test_settle_hold_unparseable_note_defers_narrow(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """An unreadable note yields an empty host set and therefore a deferral —
-        a note we cannot parse must never be read as permission."""
+    def test_settle_hold_naming_nobody_defers_narrow(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A settle hold whose recorded set is empty names nobody and therefore
+        defers — a hold that names nobody must never read as permission."""
         monkeypatch.setattr(
-            "shared.cluster_lock.read_update_lease", lambda: _lease(note="paused for maintenance")
+            "shared.cluster_lock.read_update_lease", lambda: _lease(settle_hosts=[])
         )
         verdict = read_lease_state(settle_hold_mode="narrow")
         assert verdict.kind == "settle_hold"
@@ -132,7 +136,7 @@ class TestReadLeaseState:
         condition, so no settle hold defers it — narrowing to ``awaits`` would
         import the mutual wait #1020 exists to remove."""
         monkeypatch.setattr(
-            "shared.cluster_lock.read_update_lease", lambda: _lease(note=settle_note(["other-box"]))
+            "shared.cluster_lock.read_update_lease", lambda: _lease(settle_hosts=["other-box"])
         )
         verdict = read_lease_state(settle_hold_mode="pass")
         assert verdict.kind == "settle_hold"
@@ -180,7 +184,6 @@ class TestCurrentOrchestrationPreRead:
             holder="gateway:pid1",
             held_for_s=10.0,
             expires_in_s=100.0,
-            note=None,
             kind="rollout",
         )
 

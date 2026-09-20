@@ -59,7 +59,6 @@ def snapshot_dependencies(
         holder="gateway:pid1",
         held_for_s=30.0,
         expires_in_s=300.0,
-        note=None,
         kind="rollout",
     )
 

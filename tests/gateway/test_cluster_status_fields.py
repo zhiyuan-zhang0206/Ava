@@ -470,7 +470,7 @@ def _hold_rows() -> list[
 def test_gather_stamps_settle_hold_only_on_the_hosts_the_note_names(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """A settle hold's note is the population: the hosts it names get
+    """A settle hold's recorded set is the population: the hosts it names get
     settle_waited_on=True, every other row False — and the lease sentence is stamped
     on ALL rows, being cluster-global (same treatment as the pin verdict)."""
     from shared.cluster_lock import DeployLease, settle_note
@@ -478,7 +478,11 @@ def test_gather_stamps_settle_hold_only_on_the_hosts_the_note_names(
     monkeypatch.setattr(status_mod, "cluster_is_paused", lambda: False)
     monkeypatch.setattr(status_mod, "prod_source_head_sha", lambda: "abc123")
     lease = DeployLease(
-        holder="gateway-host:pid42", held_for_s=300.0, expires_in_s=600.0, note=settle_note(["m2"])
+        holder="gateway-host:pid42",
+        held_for_s=300.0,
+        expires_in_s=600.0,
+        settle_hosts=["m2"],
+        settle_note=settle_note(["m2"]),
     )
 
     machines = asyncio.run(status_mod.gather_cluster_status(_hold_rows(), "m1", deploy_lease=lease))
@@ -494,16 +498,14 @@ def test_gather_stamps_settle_hold_only_on_the_hosts_the_note_names(
 def test_gather_stamps_hold_with_no_waited_on_hosts_for_an_executing_rollout(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """A lease with no note is a rollout *executing*, not a settle hold: the sentence
+    """A lease with no settle fact is a rollout *executing*, not a settle hold: the sentence
     is stamped so the roster can explain the refusal, but no row is marked waited-on —
     there is no recorded waiting set to speak for."""
     from shared.cluster_lock import DeployLease
 
     monkeypatch.setattr(status_mod, "cluster_is_paused", lambda: False)
     monkeypatch.setattr(status_mod, "prod_source_head_sha", lambda: "abc123")
-    lease = DeployLease(
-        holder="gateway-host:pid42", held_for_s=60.0, expires_in_s=1740.0, note=None
-    )
+    lease = DeployLease(holder="gateway-host:pid42", held_for_s=60.0, expires_in_s=1740.0)
 
     machines = asyncio.run(status_mod.gather_cluster_status(_hold_rows(), "m1", deploy_lease=lease))
 

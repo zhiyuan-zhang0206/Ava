@@ -23,16 +23,18 @@ _THIS_HOST = "m1"
 
 
 def _lease(
-    holder: str = "m1:pid123", *, note: str | None = None, held_for_s: float = 100.0
+    holder: str = "m1:pid123", *, settle_hosts: list[str] | None = None, held_for_s: float = 100.0
 ) -> DeployLease:
-    return DeployLease(holder=holder, held_for_s=held_for_s, expires_in_s=600.0, note=note)
+    return DeployLease(
+        holder=holder, held_for_s=held_for_s, expires_in_s=600.0, settle_hosts=settle_hosts
+    )
 
 
 def _lease_and_reader(
-    *, holder: str = "m1:pid123", note: str | None = None
+    *, holder: str = "m1:pid123", settle_hosts: list[str] | None = None
 ) -> tuple[DeployLease, Callable[[], DeployLease]]:
     """A lease plus a reader returning that SAME instance (tests assert identity)."""
-    lease = _lease(holder, note=note)
+    lease = _lease(holder, settle_hosts=settle_hosts)
 
     def _read() -> DeployLease:
         return lease
@@ -104,7 +106,7 @@ def test_reclaims_a_plain_lease_whose_holder_is_provably_gone(
 def test_settle_hold_is_never_reclaimed(monkeypatch: pytest.MonkeyPatch, _wired: _Writes) -> None:
     """A settle hold's whole purpose is to outlive its writer — even a provably
     dead holder does not license touching it (convergence or its TTL releases)."""
-    _, read = _lease_and_reader(note="settling, waiting for: win")
+    _, read = _lease_and_reader(settle_hosts=["win"])
     monkeypatch.setattr(sl, "read_update_lease", read)
     monkeypatch.setattr("shared.proc.process_alive", _pid_probe(False))
 

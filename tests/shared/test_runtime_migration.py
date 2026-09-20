@@ -104,7 +104,6 @@ def test_release_receipt_rejects_another_acquisition() -> None:
         holder="host:pid1",
         held_for_s=1,
         expires_in_s=30,
-        note=None,
         kind="rollout",
         acquired_at=datetime(2026, 9, 4, tzinfo=UTC),
     )
@@ -193,7 +192,7 @@ def test_verified_inventory_applies_without_git_and_rolls_back(
             acquired_row = connection.execute(
                 "UPDATE deployment_state SET holder='runtime-proof:pid1',acquired_at=now(), "
                 "expires_at=now()+interval '5 minutes',kind='rollout',phase='updating', "
-                "note=NULL,target_sha=%s WHERE id=1 RETURNING acquired_at",
+                "target_sha=%s WHERE id=1 RETURNING acquired_at",
                 ("c" * 40,),
             ).fetchone()
             assert acquired_row is not None

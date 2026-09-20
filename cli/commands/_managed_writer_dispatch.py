@@ -448,7 +448,7 @@ def begin_managed_writer_publication(target_sha: str | None) -> list[HopUnitPlan
     if (
         lease is None
         or lease.holder != self_holder()
-        or lease.note is not None
+        or lease.is_settle_hold
         or lease.kind != "rollout"
     ):
         raise ManagedWriterBarrierError("the begin position does not own the live rollout lease")

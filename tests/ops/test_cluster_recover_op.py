@@ -26,14 +26,18 @@ def _lease(
     holder: str,
     *,
     kind: _Kind | None = "rollout",
-    note: str | None = None,
+    settle_hosts: list[str] | None = None,
     held_for_s: float = 0.0,
 ) -> DeployLease:
     # held_for_s=0.0 ("acquired just now") keeps the pid-recycling bound inert for
     # tests that pin the liveness verdict alone: every live process predates
     # now + slack. The recycling tests pass a large age explicitly.
     return DeployLease(
-        holder=holder, held_for_s=held_for_s, expires_in_s=600.0, note=note, kind=kind
+        holder=holder,
+        held_for_s=held_for_s,
+        expires_in_s=600.0,
+        settle_hosts=settle_hosts,
+        kind=kind,
     )
 
 
@@ -174,7 +178,7 @@ def test_settle_hold_of_a_dead_holder_is_broken(
 ) -> None:
     """`ava cluster recover` remains the documented way to break a settle hold —
     the exited orchestration's pid is dead, so the hold clears."""
-    _set_lease(monkeypatch, _lease("m1:pid123", note="settling, waiting for: win"))
+    _set_lease(monkeypatch, _lease("m1:pid123", settle_hosts=["win"]))
     _set_alive(monkeypatch, lambda _pid: False)
 
     result = _ops.cluster_recover_op()

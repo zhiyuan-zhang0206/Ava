@@ -222,8 +222,8 @@ def _pause_owner(
     the orchestration's own record that this pause lost its owner (module docstring).
     It is therefore not an owner, and the pause falls through to the local-session
     check — which still runs, unchanged. That scoping is the whole of it: a lease with
-    no note (a rollout executing right now) and a hold naming somebody else both still
-    own this pause, and a settle hold never licenses an unpause by itself, only a
+    no settle fact (a rollout executing right now) and a hold naming somebody else both
+    still own this pause, and a settle hold never licenses an unpause by itself, only a
     reading of the *other* signal.
 
     Returns None only when both say no, which is the one reading that licenses an

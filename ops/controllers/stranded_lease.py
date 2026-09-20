@@ -14,7 +14,7 @@ round reclaims the row once the holder is PROVABLY gone.
 
 Narrow by construction:
 
-- **Only a plain executing lease** (`note is None`). A settle hold's entire
+- **Only a plain executing lease** (`settle_hosts IS NULL`). A settle hold's entire
   purpose is to outlive its writer — it is a stated waiting period, released by
   convergence or its own `SETTLE_TTL_S` — so it is never touched here.
 - **Only positive death evidence** (`shared.cluster_lock.holder_process_gone`):
@@ -68,7 +68,9 @@ _log = logging.getLogger("ops.controllers.stranded_lease")
 
 def dead_deploy_lease(lease: DeployLease) -> bool:
     """Whether `lease` is a plain executing lease whose holder is provably gone."""
-    return lease.note is None and holder_process_gone(lease.holder, held_for_s=lease.held_for_s)
+    return not lease.is_settle_hold and holder_process_gone(
+        lease.holder, held_for_s=lease.held_for_s
+    )
 
 
 def reclaim_dead_deploy_lease() -> str | None:

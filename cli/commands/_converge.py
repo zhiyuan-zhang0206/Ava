@@ -301,18 +301,6 @@ def _reap_legacy_sessions_step(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     _reap_legacy_sessions()
 
 
-def _migrate_registry_keys_step(ctx: ConvergeCtx) -> None:  # noqa: ARG001
-    """Idempotently normalize `clusters.json` to the migration-window form
-    (name-keyed, compat name/db_name preserved). Reads already re-key by home;
-    this repairs a file a buggy path-only build rewrote without the compat
-    fields (which would crash a box-shared pre-cutover reader). See
-    shared.cluster.migrate_registry_keys."""
-    from shared.cluster import migrate_registry_keys
-
-    if migrate_registry_keys():
-        print("  · normalized clusters.json to the backward-compatible window form")
-
-
 def _migrate_legacy_disabled_marker(ctx: ConvergeCtx) -> None:
     """Carry a pre-rename `$AVA_HOME/skipped_services` over to the name the
     current code reads (`disabled_services`), so an operator's durable
@@ -586,7 +574,6 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     # may share the same macOS host; drift is detected, never repaired here.
     ConvergeStep("Homebrew formula pins", ensure_brew_pin),
     ConvergeStep("reap legacy-named sessions", _reap_legacy_sessions_step),
-    ConvergeStep("registry home-path keys", _migrate_registry_keys_step),
     # Pure file work under this cluster's home, so it needs no unit config and no
     # capability: both roles read the marker (the watchdog runs on either), and a
     # standalone `ava converge` on a not-yet-configured host must still repair it.

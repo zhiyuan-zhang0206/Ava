@@ -78,7 +78,8 @@ def stranded_host(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, 
             holder="gateway-host:pid65237",
             held_for_s=300.0,
             expires_in_s=600.0,
-            note=settle_note([_THIS_HOST]),
+            settle_hosts=[_THIS_HOST],
+            settle_note=settle_note([_THIS_HOST]),
         ),
     )
     unpaused: list[bool] = []

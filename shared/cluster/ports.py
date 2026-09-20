@@ -1,13 +1,13 @@
-"""Port-block allocation + per-record port derives.
+"""Port-block allocation + per-record port reads.
 
 Allocates a free contiguous block from `shared.port_block` at cluster birth
 (`allocate_ports` — overlap-aware against every registered record's block,
-live-bind-checked), and derives the service ports a record does not carry
-(`record_app_port` / `record_pgbouncer_port` / `record_postgres_port` / `record_redis_port` /
-`record_health_port`): a saved record's `ports` is never rewritten, so old
-records lack late-added slots and every read derives them deterministically
-— the default home's fixed legacy values, or the cluster's own block base
-plus the service offset, always inside its reserved block.
+live-bind-checked), and reads the service ports back off a record
+(`record_app_port` / `record_pgbouncer_port` / `record_postgres_port` /
+`record_redis_port` / `record_health_port`): every record born today carries
+the full block; only the default home may fall back to its fixed legacy
+values (`is_default_home`), because its ports are the pre-registry design,
+not a block allocation.
 """
 
 from __future__ import annotations
@@ -32,11 +32,10 @@ class ClusterPorts(TypedDict):
     host registry's on-disk JSON shape is byte-for-byte unchanged (only the keys a
     record actually holds are serialized).
 
-    `pgbouncer`, `heartbeat`, `task_maintenance`, `events_maintenance`,
-    `delivery_watchdog`, and `im_bridge` are NotRequired: records saved before
-    those slots existed lack the key, so a read goes through the derived
+    Late-added slots are typed NotRequired because registry records born
+    before a slot existed lack the key; reads for those go through the
     helpers (`record_pgbouncer_port` / `record_health_port`), never a bare
-    `ports[key]`."""
+    `ports[key]`. Records born today carry the full block."""
 
     gateway: int
     frontend: int
@@ -54,23 +53,28 @@ class ClusterPorts(TypedDict):
     redis: int
     pgbouncer: NotRequired[int]
     events_maintenance: NotRequired[int]
-    # Added 2026-08 (S4 isolation): records saved before these slots existed
-    # lack the key — reads go through record_health_port, whose late-slot
-    # fallback yields the legacy value (the unit's .env predates the key too).
     delivery_watchdog: NotRequired[int]
     im_bridge: NotRequired[int]
-    # Added 2026-08 (the hosted agent-runner). Every record that exists today
-    # lacks it, and unlike the two above its offset falls outside those records'
-    # allocated block — see `_LATE_HEALTH_SLOTS`.
+    page_server: NotRequired[int]
     agent_host: NotRequired[int]
-    # Added after the prior block growth; legacy records derive its fixed port.
     pg_backup: NotRequired[int]
     pitr_uploader: NotRequired[int]
     pitr_base_backup: NotRequired[int]
-    # Added after the prior block growth; old records' units bind the legacy
-    # fallback until their next birth, so the record derive must agree.
+    memory_search: NotRequired[int]
     gateway_watchdog: NotRequired[int]
     agent_runner_watchdog: NotRequired[int]
+
+
+def _record_port(rec: cluster.ClusterRecord, key: str) -> int:
+    """The record's port for `key`.
+
+    A record missing a block key is corrupt — raise, never guess a neighbour's
+    port (records are born with the full block; only the default home has a
+    fixed legacy fallback, handled by the callers)."""
+    port = cast("int | None", rec.ports.get(key))  # type: ignore[literal-required]
+    if port is None:
+        raise KeyError(f"registry record {rec.gateway_home!r} lacks the {key!r} port")
+    return port
 
 
 def _port_free(port: int) -> bool:
@@ -88,15 +92,15 @@ def allocate_ports(existing_bases: set[int]) -> ClusterPorts:
     claimed by a registry record and not bound on the host. Return the
     service->port map for that base."""
     for base in range(BLOCK_START, BLOCK_MAX, BLOCK_SIZE):
-        # Skip any candidate whose block OVERLAPS an existing record's block —
-        # not just an exact base match. Pre-BLOCK_SIZE-19 records occupy
-        # 16-port blocks at 18000+16k, and 19-step candidates land inside them
-        # for every k (19k mod 16 cycles all residues), so an exact-base check
-        # would let a DOWN cluster's block be re-allocated while its record
-        # still owns it —
-        # a silent collision the moment both start. Overlap is the honest test:
-        # candidate [base, base+BLOCK_SIZE-1] vs legacy record [eb, eb+15].
-        if any(base - 15 <= eb <= base + (BLOCK_SIZE - 1) for eb in existing_bases):
+        # Skip any candidate whose block would OVERLAP an existing record's
+        # block — not just an exact base match. A record's true block size is
+        # its birth-era BLOCK_SIZE (the block has grown over time), which the
+        # file does not carry; assume the largest (current) size so the check
+        # can only over-skip a candidate, never miss a collision — an
+        # exact-base check would let a DOWN cluster's block be re-allocated
+        # while its record still owns it, a silent collision the moment both
+        # start. Overlap is the honest test.
+        if any(base - (BLOCK_SIZE - 1) <= eb <= base + (BLOCK_SIZE - 1) for eb in existing_bases):
             continue
         if all(cluster._port_free(base + off) for off in PORT_OFFSETS.values()):
             # PORT_OFFSETS' keys ARE the ClusterPorts service names; the dynamic
@@ -106,117 +110,57 @@ def allocate_ports(existing_bases: set[int]) -> ClusterPorts:
 
 
 def record_app_port(rec: cluster.ClusterRecord) -> int:
-    """This cluster's Next.js app port (the gate's upstream), deriving it for
-    records saved before the `app` slot existed.
+    """This cluster's Next.js app port (the gate's upstream).
 
-    Same pattern as `record_pgbouncer_port`: a saved record's `ports` is never
-    rewritten, so old records lack the key. The default home uses its fixed
-    legacy value (frontend+1); an allocated cluster uses its own block base
-    plus the app offset — always inside the cluster's own reserved block,
-    so nothing else on the host holds it.
-    """
-    port = rec.ports.get("app")
-    if port is not None:
-        return port
+    The default home keeps its fixed legacy value (frontend+1); every other
+    record carries the port. A missing key on an allocated record is a corrupt
+    record — KeyError, never a guessed neighbor's port."""
     if cluster.is_default_home(Path(rec.gateway_home)):
-        # The full legacy literal always carries app; `.get` only because the
-        # key is NotRequired on the shared ClusterPorts type (older records lack it).
-        return cast("int", LEGACY_AVA_PORTS.get("app"))
-    return rec.ports["gateway"] + PORT_OFFSETS["app"]
+        return rec.ports.get("app", cast("int", LEGACY_AVA_PORTS.get("app")))
+    return _record_port(rec, "app")
 
 
 def record_memory_search_port(rec: cluster.ClusterRecord) -> int:
-    """This cluster's memory search service port (offset 24), deriving it for
-    records saved before the slot existed.
-
-    Records born before offset 24 own smaller blocks (16..24 ports), so
-    `base + 24` would land inside the NEXT cluster's block — the same reason
-    agent_host derives its legacy value for old records. Records lacking the
-    key therefore always fall back to the legacy 19531 (the port the unit's
-    .env predating the key also binds); fresh births carry the key and read it
-    back."""
-    port = rec.ports.get("memory_search")
-    if port is not None:
-        return port
-    return LEGACY_AVA_PORTS["memory_search"]
+    """This cluster's memory search service port (offset 24)."""
+    return _record_port(rec, "memory_search")
 
 
 def record_pgbouncer_port(rec: cluster.ClusterRecord) -> int:
-    """This cluster's PgBouncer listener port, deriving it for records saved before
-    the `pgbouncer` slot existed (the prod default home + any pre-existing cluster).
+    """This cluster's PgBouncer listener port.
 
-    A saved record's `ports` is never rewritten, so `rec.ports` may lack the key.
-    Derive it deterministically: the default home uses its fixed legacy 6433; an
-    allocated cluster its block base plus the pgbouncer offset — always inside
-    the cluster's own port block. A REGISTRY fact only (data-plane bring-up +
-    admin plane); since F8b it is not materialized into `.env`."""
-    port = rec.ports.get("pgbouncer")
-    if port is not None:
-        return port
+    The default home keeps its fixed legacy 6433; every other record carries
+    the port. A REGISTRY fact only (data-plane bring-up + admin plane); since
+    F8b it is not materialized into `.env`."""
     if cluster.is_default_home(Path(rec.gateway_home)):
-        # The full legacy literal always carries pgbouncer; `.get` only because the
-        # key is NotRequired on the shared ClusterPorts type (older records lack it).
-        return cast("int", LEGACY_AVA_PORTS.get("pgbouncer"))
-    return rec.ports["gateway"] + PORT_OFFSETS["pgbouncer"]
+        return rec.ports.get("pgbouncer", cast("int", LEGACY_AVA_PORTS.get("pgbouncer")))
+    return _record_port(rec, "pgbouncer")
 
 
 def record_postgres_port(rec: cluster.ClusterRecord) -> int:
-    """This cluster's direct Postgres port (defensive derive; every real record
-    carries it). Same pattern as `record_pgbouncer_port`: default home = legacy
-    5433, allocated cluster = base + offset. The admin plane's dial when
-    AVA_DB_URL names the pooler."""
-    # `.get` on the REQUIRED key types as int; widen for the defensive read.
-    port = cast("int | None", rec.ports.get("postgres"))
-    if port is not None:
-        return port
+    """This cluster's direct Postgres port.
+
+    The default home keeps its fixed legacy 5433; every other record carries
+    the port. The admin plane's dial when AVA_DB_URL names the pooler."""
     if cluster.is_default_home(Path(rec.gateway_home)):
-        return cast("int", LEGACY_AVA_PORTS.get("postgres"))
-    return rec.ports["gateway"] + PORT_OFFSETS["postgres"]
+        return rec.ports.get("postgres", cast("int", LEGACY_AVA_PORTS.get("postgres")))
+    return _record_port(rec, "postgres")
 
 
 def record_redis_port(rec: cluster.ClusterRecord) -> int:
-    """This cluster's Redis port (defensive derive; every real record carries it).
+    """This cluster's Redis port.
 
-    Same pattern as ``record_postgres_port``: the default home gets its legacy
-    port, while an allocated cluster derives the Redis offset inside its own
-    block. Healthchecks use this registry fact rather than inferring a port from
-    a URL, which may name a reachable host rather than Redis's loopback listener.
-    """
-    port = cast("int | None", rec.ports.get("redis"))
-    if port is not None:
-        return port
+    The default home keeps its fixed legacy 6380; every other record carries
+    the port. Healthchecks use this registry fact rather than inferring a port
+    from a URL, which may name a reachable host rather than Redis's loopback
+    listener."""
     if cluster.is_default_home(Path(rec.gateway_home)):
-        return cast("int", LEGACY_AVA_PORTS.get("redis"))
-    return rec.ports["gateway"] + PORT_OFFSETS["redis"]
-
-
-# Health-port slots added after every currently-existing registry record was
-# born (the S4 isolation pass, 2026-08). A record lacking such a key belongs
-# to a unit whose `.env` also lacks it, so the daemon binds the legacy
-# fallback at runtime — the derive must agree with that, or the port-preflight
-# map would name a port nothing binds.
-#
-# `agent_host` and `pg_backup` are here for a second, sharper reason: their
-# offsets land outside blocks records allocated before those slots actually own.
-# Deriving the legacy value keeps every answer inside the ports the record was
-# born with, so growing the block can never rename a running neighbour's port.
-_LATE_HEALTH_SLOTS = frozenset(
-    {
-        "im_bridge",
-        "delivery_watchdog",
-        "agent_host",
-        "pg_backup",
-        "pitr_uploader",
-        "pitr_base_backup",
-        "gateway_watchdog",
-        "agent_runner_watchdog",
-    }
-)
+        return rec.ports.get("redis", cast("int", LEGACY_AVA_PORTS.get("redis")))
+    return _record_port(rec, "redis")
 
 
 def record_health_port(rec: cluster.ClusterRecord, svc: str) -> int:
-    """Derive the health port a cluster's OWN install writes into its OWN `.env`
-    for daemon `svc` (one of the PORT_OFFSETS keys whose health servers share the
+    """The health port a cluster's OWN install writes into its OWN `.env` for
+    daemon `svc` (one of the PORT_OFFSETS keys whose health servers share the
     daemon name).
 
     This is the install-time producer only. A health port is a per-UNIT fact
@@ -224,27 +168,9 @@ def record_health_port(rec: cluster.ClusterRecord, svc: str) -> int:
     unit — a second unit sharing the machine's localhost namespace states its own
     base instead (`ava enroll --health-port-base`).
 
-    Records saved before the slot existed may lack the key, same pattern as
-    `record_pgbouncer_port`: derive it deterministically — the default home
-    uses its fixed legacy value; an allocated cluster uses its block base
-    plus the service's offset, always inside the cluster's port block.
-
-    One exception: slots that did not exist at ANY existing record's birth —
-    the S4 isolation pass (`im_bridge` / `delivery_watchdog`), hosted
-    agent-runner (`agent_host`), pg-backup scheduler (`pg_backup`), and PITR
-    uploader (`pitr_uploader`), and capability watchdogs. Their
-    missing-key derive is the legacy value, never a block offset — see
-    `_LATE_HEALTH_SLOTS`."""
-    port = rec.ports.get(svc)  # type: ignore[literal-required]
-    if port is not None:
-        return port
+    The default home keeps its fixed legacy value; every other record carries
+    the port. A missing key on an allocated record is a corrupt record —
+    KeyError, never a guessed neighbor's offset."""
     if cluster.is_default_home(Path(rec.gateway_home)):
-        return cast("int", LEGACY_AVA_PORTS.get(svc))
-    if svc in _LATE_HEALTH_SLOTS:
-        # A slot added AFTER this record's birth: the unit's `.env` predates the
-        # key, so the daemon resolves the legacy fallback at runtime
-        # (`daemon_health.DEFAULT_PORTS`), never a block offset. Derive the same
-        # number here or preflight would expect a port nothing binds. Records
-        # that carry the key (post-slot births) returned above.
-        return cast("int", LEGACY_AVA_PORTS.get(svc))
-    return rec.ports["gateway"] + PORT_OFFSETS[svc]
+        return rec.ports.get(svc, cast("int", LEGACY_AVA_PORTS.get(svc)))  # type: ignore[literal-required]
+    return _record_port(rec, svc)

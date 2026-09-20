@@ -27,12 +27,16 @@ _OLD = "0ld0ld0ld0ld0l"
 _THIS_HOST = "laptop-host"
 
 
-def _lease(*, note: str | None) -> DeployLease:
-    """A live lease as `read_update_lease` returns it. `note=None` is a rollout
-    executing right now; a settle note is a stated waiting period with nobody
+def _lease(*, settle_hosts: list[str] | None = None) -> DeployLease:
+    """A live lease as `read_update_lease` returns it. No settle fact is a rollout
+    executing right now; `settle_hosts` set makes it a settle hold with nobody
     executing under it."""
     return DeployLease(
-        holder="gateway-host:pid65237", held_for_s=120.0, expires_in_s=900.0, note=note
+        holder="gateway-host:pid65237",
+        held_for_s=120.0,
+        expires_in_s=900.0,
+        settle_hosts=settle_hosts,
+        settle_note=settle_note(settle_hosts) if settle_hosts is not None else None,
     )
 
 
@@ -134,7 +138,7 @@ def test_defers_while_a_cluster_update_holds_the_lock(
 ) -> None:
     """Mid-rollout, "checkout ahead of the processes" is the normal transient — the
     rollout is what replaces them, so a heal here would fight Phase B."""
-    monkeypatch.setattr("shared.cluster_lock.read_update_lease", lambda: _lease(note=None))
+    monkeypatch.setattr("shared.cluster_lock.read_update_lease", lambda: _lease(settle_hosts=None))
     assert code.check_code_drift() is False
     spawned, _ = stale_code_env
     assert spawned == []
@@ -154,7 +158,7 @@ def test_heals_under_a_settle_hold_that_names_this_host(
     ~16-minute TTL lapsed — and a renewed settle window would never have released."""
     monkeypatch.setattr(
         "shared.cluster_lock.read_update_lease",
-        lambda: _lease(note=settle_note([_THIS_HOST, "other-box"])),
+        lambda: _lease(settle_hosts=[_THIS_HOST, "other-box"]),
     )
     with caplog.at_level("WARNING"):
         assert code.check_code_drift() is True
@@ -169,21 +173,19 @@ def test_defers_under_a_settle_hold_that_names_another_host(
     """The permission is scoped to the named host. A hold waiting for someone else
     says nothing about this host's right to restart itself mid-window."""
     monkeypatch.setattr(
-        "shared.cluster_lock.read_update_lease", lambda: _lease(note=settle_note(["other-box"]))
+        "shared.cluster_lock.read_update_lease", lambda: _lease(settle_hosts=["other-box"])
     )
     assert code.check_code_drift() is False
     spawned, _ = stale_code_env
     assert spawned == []
 
 
-def test_defers_under_a_hold_whose_note_cannot_be_parsed(
+def test_defers_under_a_settle_hold_that_names_nobody(
     monkeypatch: pytest.MonkeyPatch, stale_code_env: tuple[list[bool], list[int]]
 ) -> None:
-    """`settle_hosts` reads an unrecognised note as an empty set, and the deferral
-    follows it: a note we cannot parse must never be read as permission."""
-    monkeypatch.setattr(
-        "shared.cluster_lock.read_update_lease", lambda: _lease(note="paused for maintenance")
-    )
+    """A settle hold whose recorded set is empty names nobody, and the deferral
+    follows it: a hold that names nobody must never read as permission."""
+    monkeypatch.setattr("shared.cluster_lock.read_update_lease", lambda: _lease(settle_hosts=[]))
     assert code.check_code_drift() is False
     spawned, _ = stale_code_env
     assert spawned == []
@@ -196,7 +198,7 @@ def test_a_settle_hold_naming_this_host_still_defers_to_a_local_orchestration(
     still the deploy that is going to replace these processes, and the stalled-updater
     controller ahead of this one is what clears a dead one."""
     monkeypatch.setattr(
-        "shared.cluster_lock.read_update_lease", lambda: _lease(note=settle_note([_THIS_HOST]))
+        "shared.cluster_lock.read_update_lease", lambda: _lease(settle_hosts=[_THIS_HOST])
     )
     monkeypatch.setattr("ops.cluster.current_orchestration", lambda: "update")
     assert code.check_code_drift() is False
@@ -210,7 +212,7 @@ def test_a_settle_hold_naming_this_host_still_respects_the_backoff(
     """A restart that keeps declining must not become a loop just because a hold
     names this host — the settle window is bounded but a renewed one is not."""
     monkeypatch.setattr(
-        "shared.cluster_lock.read_update_lease", lambda: _lease(note=settle_note([_THIS_HOST]))
+        "shared.cluster_lock.read_update_lease", lambda: _lease(settle_hosts=[_THIS_HOST])
     )
     assert code.check_code_drift() is True
     update_trigger.reset_cooldown()

@@ -20,7 +20,7 @@ blocking, on both capabilities.
 
 ## The bounds it accepts
 
-- **A plain executing lease only** (`note is None`). A settle hold's whole
+- **A plain executing lease only** (`settle_hosts IS NULL`). A settle hold's whole
   purpose is to outlive its writer — it is released by convergence or its own
   TTL, and is never touched here.
 - **Positive local-death evidence only** (`shared.cluster_lock.

@@ -69,7 +69,7 @@ def _reset_deploy_row(db_conn: psycopg.Connection) -> None:
     with db_conn.cursor() as cur:
         cur.execute(
             "UPDATE deployment_state SET holder=NULL, acquired_at=NULL, expires_at=NULL, "
-            "note=NULL, settle_hosts=NULL, settle_note=NULL, settle_started_at=NULL, "
+            "settle_hosts=NULL, settle_note=NULL, settle_started_at=NULL, "
             "phase='stable', kind=NULL, target_sha=NULL, managed_writer_evidence=NULL "
             "WHERE id=1"
         )

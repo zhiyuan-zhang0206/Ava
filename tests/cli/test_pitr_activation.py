@@ -1209,7 +1209,7 @@ def test_alter_system_accepts_only_literal_values_on_real_pg17(
         monkeypatch.setattr(
             activation_config,
             "get_record",
-            lambda _home: SimpleNamespace(ports={"postgres": port}, db_name="ava"),
+            lambda _home: SimpleNamespace(ports={"postgres": port}, gateway_home=str(tmp_path)),
         )
         monkeypatch.setattr(
             activation_config,
@@ -1306,7 +1306,7 @@ def test_frozen_pg_state_contract_with_real_reader(
         monkeypatch.setattr(activation, "ava_home", lambda: tmp_path)
         monkeypatch.setattr(
             "shared.cluster.get_record",
-            lambda _home: SimpleNamespace(ports={"postgres": port}, db_name="ava"),
+            lambda _home: SimpleNamespace(ports={"postgres": port}, gateway_home=str(tmp_path)),
         )
         monkeypatch.setattr(
             "cli.commands._cluster_instance.pg_admin_url",

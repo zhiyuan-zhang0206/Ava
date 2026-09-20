@@ -185,7 +185,7 @@ def _run_in_process(
     repo = _up_mod._repo_root()
     home = _up_mod.ava_home()
     record = _up_mod.get_record(home)
-    registry = f", registry: {record.name}" if record else ", registry: (unregistered)"
+    registry = "" if record else ", registry: (unregistered)"
     print(
         f"[ava cluster update] cwd = {repo}, cluster home = {home}{registry}"
         f"{' (restart-only)' if restart_only else ''}"
