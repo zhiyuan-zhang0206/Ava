@@ -495,6 +495,8 @@ def begin_managed_writer_publication(target_sha: str | None) -> list[HopUnitPlan
             candidate_digest=sealed.candidate_digest,
             schema_digest=context.schema_digest,
             applied_names=context.applied_names,
+            valid_until=valid_until,
+            plan_digest=sealed.digest,
         )
     hop_plans = assemble_hop_plans(
         facts,

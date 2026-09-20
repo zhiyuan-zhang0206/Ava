@@ -667,6 +667,8 @@ def _chain_world(
             challenge=JOURNAL_CHALLENGE,
             schema_digest=kwargs["schema_digest"],
             applied_names=kwargs["applied_names"],
+            valid_until=kwargs["valid_until"],
+            plan_digest=kwargs["plan_digest"],
         )
 
     monkeypatch.setattr(dispatch_mod, "open_pending_publication", open_pending)
@@ -716,6 +718,9 @@ def test_begin_chain_reads_the_context_opens_the_journal_and_dispatches(
     assert recorded[0]["applied_names"] == ("one", "two")
     sealed = dispatched[0]["sealed"]
     assert recorded[0]["candidate_digest"] == sealed.candidate_digest
+    # F1: the journal registers the begin execution's V and the sealed digest.
+    assert recorded[0]["valid_until"] == sealed.plan.valid_until
+    assert recorded[0]["plan_digest"] == sealed.digest
     assert [target.machine for target in dispatched[0]["targets"]] == ["runner-a", "runner-b"]
     assert dispatched[0]["expected"] == _ack_bindings(facts)
     assert before + timedelta(seconds=600) <= sealed.plan.valid_until

@@ -276,6 +276,32 @@ def test_open_without_current_has_no_predecessor(publication_db: psycopg.Connect
     assert stored.pending.predecessor is None
 
 
+def test_open_registers_the_begin_execution_v_and_plan_digest(
+    publication_db: psycopg.Connection,
+) -> None:
+    """F1: the journal durably registers V and the sealed plan's digest."""
+    conn = publication_db
+    operation = _acquire_rollout(conn)
+    valid_until = datetime(2026, 9, 21, tzinfo=UTC)
+    plan_digest = _digest("sealed-plan")
+
+    pending = open_pending_publication(
+        conn,
+        (_facts(HOME), _facts(STOPPED_HOME)),
+        operation=operation,
+        candidate_digest=CANDIDATE_DIGEST,
+        valid_until=valid_until,
+        plan_digest=plan_digest,
+    )
+    conn.commit()
+
+    stored = _stored_publication(conn)
+    assert stored.pending == pending
+    assert stored.pending is not None
+    assert stored.pending.valid_until == valid_until
+    assert stored.pending.plan_digest == plan_digest
+
+
 def test_open_journals_the_normal_start_plan_for_every_unit(
     publication_db: psycopg.Connection,
 ) -> None:
@@ -311,18 +337,61 @@ def test_retry_adopts_the_journaled_challenge_byte_stably(
     facts = (_facts(HOME), _facts(STOPPED_HOME))
 
     first = open_pending_publication(
-        conn, facts, operation=operation, candidate_digest=CANDIDATE_DIGEST
+        conn,
+        facts,
+        operation=operation,
+        candidate_digest=CANDIDATE_DIGEST,
+        valid_until=datetime(2026, 9, 21, tzinfo=UTC),
+        plan_digest=_digest("first-plan"),
     )
     conn.commit()
     before = _evidence(conn)
 
     second = open_pending_publication(
-        conn, facts, operation=operation, candidate_digest=CANDIDATE_DIGEST
+        conn,
+        facts,
+        operation=operation,
+        candidate_digest=CANDIDATE_DIGEST,
+        valid_until=datetime(2026, 9, 22, tzinfo=UTC),
+        plan_digest=_digest("second-plan"),
     )
     conn.commit()
 
     assert second.challenge == first.challenge
+    assert second.valid_until == first.valid_until
+    assert second.plan_digest == first.plan_digest
     assert _evidence(conn) == before
+
+
+def test_a_pre_registration_journal_stays_readable(
+    publication_db: psycopg.Connection,
+) -> None:
+    """F1 compatibility: stored v2 journals without the two fields still parse."""
+    conn = publication_db
+    operation = _acquire_rollout(conn)
+    pending = open_pending_publication(
+        conn,
+        (_facts(HOME), _facts(STOPPED_HOME)),
+        operation=operation,
+        candidate_digest=CANDIDATE_DIGEST,
+        valid_until=datetime(2026, 9, 21, tzinfo=UTC),
+        plan_digest=_digest("sealed-plan"),
+    )
+    conn.commit()
+    evidence = WriterPublication(pending=pending).model_dump(mode="json")
+    del evidence["pending"]["valid_until"]
+    del evidence["pending"]["plan_digest"]
+    conn.execute(
+        "UPDATE deployment_state SET managed_writer_evidence=%s WHERE id=1",
+        (Jsonb(evidence),),
+    )
+    conn.commit()
+
+    stored = _stored_publication(conn)
+
+    assert stored.pending is not None
+    assert stored.pending.valid_until is None
+    assert stored.pending.plan_digest is None
 
 
 def test_open_refuses_a_plan_that_omits_a_registered_unit(

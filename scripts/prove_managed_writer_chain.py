@@ -89,6 +89,7 @@ COORDINATOR = "managed-writer-chain-proof"
 TARGET_SHA = "e" * 40
 CANDIDATE_DIGEST = hashlib.sha256(b"managed-writer-chain-candidate").hexdigest()
 SCHEMA_DIGEST = hashlib.sha256(b"managed-writer-chain-schema").hexdigest()
+PLAN_DIGEST = hashlib.sha256(b"managed-writer-chain-plan").hexdigest()
 
 
 def require(condition: bool, message: str) -> None:  # noqa: FBT001 — proof predicate.
@@ -288,10 +289,16 @@ def run_chain(  # noqa: PLR0915 — one guarded chain lifetime with ordered gate
             candidate_digest=CANDIDATE_DIGEST,
             schema_digest=SCHEMA_DIGEST,
             applied_names=applied_names,
+            valid_until=clock(conn) + timedelta(seconds=300),
+            plan_digest=PLAN_DIGEST,
         )
         require(
             pending.predecessor == previous.publication_id,
             "journal did not bind the previous current publication",
+        )
+        require(
+            pending.plan_digest == PLAN_DIGEST and pending.valid_until is not None,
+            "journal did not register the begin execution's V and plan digest",
         )
         require(
             pending_stage(conn, operation, pending.challenge) == "waiting_collection",

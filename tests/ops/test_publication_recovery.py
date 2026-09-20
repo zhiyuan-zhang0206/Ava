@@ -107,6 +107,8 @@ def _abandoned_rollout(
     holder: str = "m1:pid9001",
     with_current: bool = False,
     expired: bool = True,
+    valid_until: datetime | None = None,
+    plan_digest: str | None = None,
 ) -> WriterPublication:
     """An executing-rollout row carrying a durable pending publication."""
     row = db_conn.execute(
@@ -141,6 +143,8 @@ def _abandoned_rollout(
             candidate_digest=CANDIDATE_DIGEST,
             challenge=uuid4(),
             units=(_unit(),),
+            valid_until=valid_until,
+            plan_digest=plan_digest,
         ),
     )
     db_conn.execute(
@@ -386,6 +390,24 @@ def test_run_replaces_the_abandoned_operation_under_a_fresh_closure(
     assert completed[0]["new_holder"] == new_holder
     assert completed[0]["challenge"] == result["challenge"]
     assert completed[0]["units"] == 1
+
+
+def test_recovery_does_not_carry_the_abandoned_plan_registration(
+    recovery_db: psycopg.Connection,
+) -> None:
+    """A replacement's premise is its fresh closure, never the abandoned sealed plan."""
+    _abandoned_rollout(
+        recovery_db, valid_until=datetime(2026, 9, 21, tzinfo=UTC), plan_digest="f" * 64
+    )
+
+    result = _pr.run_pending_publication_recovery(collect=_collector)
+
+    assert result["recovered"] is True
+    row = recovery_db.execute(
+        "SELECT managed_writer_evidence->'pending'->'valid_until', "
+        "managed_writer_evidence->'pending'->'plan_digest' FROM deployment_state WHERE id=1"
+    ).fetchone()
+    assert row == (None, None)
 
 
 def test_a_dead_holder_with_an_unexpired_lease_is_still_replaced(
