@@ -169,6 +169,16 @@ Capabilities rather than standing as its own section.
     debugging mindset, opt-in by adding `ava_code_workflow` to
     `settings.agent.system_prompt_extra` (env `AVA_SYSTEM_PROMPT_EXTRA`).
     Coding-specific, so it is owned by the plugin rather than the core prompt.
+- **Reduce context switch for the human** —
+  `ava_builtins/plugins/ava_fleet/agent_runtime.py:_reduce_context_switch_section`,
+  on by default via `settings.agent.reduce_context_switch` (env
+  `AVA_REDUCE_CONTEXT_SWITCH`; user ruling 2026-09-20): the human-attention default
+  every fleet agent carries — queue-never-push (out-of-band push only for a true
+  emergency), one notice per manager updated in place, milestone cadence, decisions
+  direct and progress rolled up. Plugin-owned: a deployment that disables the fleet
+  surface (no human supervision) drops it with the rest of that surface. The
+  `reduce-context-switch-for-human` skill stays as the deep playbook and no longer
+  carries the whole mechanism by itself.
 
 Everything else (git/PR protocol, scope discipline, doc discipline) is loaded at
 runtime from the project's `AGENTS.md`, not baked into the framework prompt.
@@ -236,6 +246,7 @@ using that plugin's store, task surface, or hook.
 |---|---|---|---|
 | `# Invest in the future` | framework | `AVA_SYSTEM_PROMPT_INVEST_FUTURE` (default on) | The ONE cross-domain future-signal rule: trigger, three closing actions, over-capture bias, and closing presentation. |
 | `# Remembering across sessions` | `ava_memory` plugin | `AVA_SYSTEM_PROMPT_MEMORY` | Durable-knowledge domain instance: dual stores, fix stale, format, and verification; no generic rule restatement. |
+| `## Reduce context switch for the human` | `ava_fleet` plugin | `AVA_REDUCE_CONTEXT_SWITCH` (default on) | Human-attention default: queue-never-push + emergency-only push, one notice per manager updated in place, milestone cadence, decision/progress bisection. |
 | Fleet task-interaction instance (PR2) | `ava_fleet` plugin | plugin enabled | Lands separately with task-specific interaction guidance. |
 
 Review every section with these questions:

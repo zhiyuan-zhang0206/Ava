@@ -188,6 +188,38 @@ def test_delivery_outbox_backoff_accepts_json_or_comma_list(raw: str) -> None:
     assert configured.delivery_outbox_retry_backoff_steps_s == [1.0, 2.5]
 
 
+def test_reduce_context_switch_defaults_ship_as_current_behavior() -> None:
+    """Task #4137: the platform switch and its policy keys land with
+    behavior-preserving defaults — the off-fallback, the wiring points, and the
+    night-silence window are follow-ups."""
+    from shared.config.agent_prompt import AgentPromptSettings
+    from shared.config.alerts import AlertsSettings
+    from shared.config.observability import ObservabilitySettings
+    from shared.config.services import ServiceSettings
+
+    assert AgentPromptSettings().reduce_context_switch is True
+    assert AgentPromptSettings().pilot_scope == ["all"]
+    assert ServiceSettings().mirror_granularity == "full"
+    assert AlertsSettings().alert_digest is False
+    assert ObservabilitySettings().push_budget_target == 30
+
+
+def test_reduce_context_switch_env_aliases() -> None:
+    from shared.config.agent_prompt import AgentPromptSettings
+    from shared.config.services import ServiceSettings
+
+    configured = AgentPromptSettings.model_validate({"AVA_REDUCE_CONTEXT_SWITCH": "false"})
+    assert configured.reduce_context_switch is False
+
+    scoped = AgentPromptSettings.model_validate(
+        {"AVA_REDUCE_CONTEXT_SWITCH_PILOT_SCOPE": "405,5251"}
+    )
+    assert scoped.pilot_scope == ["405", "5251"]
+
+    mirrored = ServiceSettings.model_validate({"AVA_IM_MIRROR_GRANULARITY": "final_only"})
+    assert mirrored.mirror_granularity == "final_only"
+
+
 @pytest.mark.parametrize("raw", ["", "[0]", "[-1, 2]"])
 def test_delivery_outbox_backoff_rejects_empty_or_nonpositive_steps(raw: str) -> None:
     import pydantic

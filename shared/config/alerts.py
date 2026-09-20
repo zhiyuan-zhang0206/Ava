@@ -135,6 +135,25 @@ class AlertsSettings(EnvSettings):
         },
     )
 
+    alert_digest: bool = Field(
+        default=False,
+        alias="AVA_ALERTS_DIGEST",
+        description=(
+            "Merge non-critical alerts into one daily digest instead of notifying "
+            "each on arrival; critical alerts still notify immediately. False "
+            "(default) keeps today's behavior — every severity notifies on "
+            "arrival (2026-08-12 user design, no severity gate). Documented key for "
+            "now: the gateway alert fan-out reads it in a follow-up, and flipping "
+            "the default is a pending user decision."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     provider_guard_balance_enabled: bool = Field(
         default=True,
         alias="AVA_PROVIDER_GUARD_BALANCE_ENABLED",

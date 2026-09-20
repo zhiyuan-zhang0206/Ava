@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Annotated, Any, cast
+from typing import Annotated, Any, Literal, cast
 
 from pydantic import Field, field_validator
 from pydantic_settings import NoDecode
@@ -428,6 +428,25 @@ class ServiceSettings(ServiceHealthPortFields, _ServiceRuntimeSettings):
             "direct-DB read and the HTTP fallback both pass it). Each listed "
             "notice is pushed as its own chat message, so 50 bounds the "
             "worst-case burst a single queue command can send."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    mirror_granularity: Literal["full", "final_only", "final_only_night_silence"] = Field(
+        default="full",
+        alias="AVA_IM_MIRROR_GRANULARITY",
+        description=(
+            "How much of an agent's output the IM bridge mirrors to the human's "
+            "chat channels (user ruling 2026-09-20): 'full' (default) mirrors every "
+            "item as today; 'final_only' mirrors only final-level deliveries; "
+            "'final_only_night_silence' adds a silence window (23:00-08:00, the "
+            "cluster's configured timezone). Documented key for now — the "
+            "im_bridge subscription push reads it in a follow-up."
         ),
         json_schema_extra={
             "restart_required": "gateway",
