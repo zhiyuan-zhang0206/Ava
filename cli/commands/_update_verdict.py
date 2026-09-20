@@ -4,16 +4,17 @@ Split out of `cli/commands/update.py` (file-size budget) -- the largest single
 contiguous block of `_run_gateway_orchestration_inner`. It runs after the
 gateway local leg and decides the rollout's return: pick the Phase-B fan-out
 set (6.4), ask the readiness gate (6.5), run the Phase-B poll + verdict (7-8),
-then consume the enable point's decision at the managed-writer P5 commit (9,
-task #4128 E2-a).
+then consume the enable point's decision at the managed-writer collection
+(8.5, task #4128 E2-c) and P5 commit (9, task #4128 E2-a).
 
-The four orchestration seams arrive as injected callables, resolved at the
+The five orchestration seams arrive as injected callables, resolved at the
 call site from `update.py`'s namespace so the `cli.commands.update.*`
 monkeypatch seams keep resolving for tests:
 
 - `targets` -- `_phase_b_targets` (the fan-out set, this host excluded),
 - `readiness` -- `_gateway_ready_or_incomplete` (Phase B's precondition),
 - `poll_outcome` -- `_phase_b_outcome` (the poll + verdict),
+- `collect` -- `_collect_managed_writer_publication` (the P2 collection),
 - `commit` -- `_commit_managed_writer_publication` (the P5 commit).
 
 Every exit is a `PhaseBVerdict` rather than a bare rc: the caller still reports
@@ -35,8 +36,9 @@ class PhaseBVerdict(NamedTuple):
 
     `failing_step` is an override only: None means nothing inside this section
     failed and the caller keeps its own (the local leg's defect, set before the
-    call). `publication_refused` marks the managed-writer commit refusal whose
-    pending journal was retained for checked recovery.
+    call). `publication_refused` marks a managed-writer publication refusal
+    (collection or commit) whose pending journal was retained for checked
+    recovery.
     """
 
     rc: int
@@ -60,12 +62,14 @@ def _phase_b_and_commit(
     targets: Callable[[list[tuple[str, str | None]]], list[tuple[str, str | None]]],
     readiness: Callable[[list[tuple[str, str | None]], set[str], list[str] | None], bool],
     poll_outcome: Callable[..., tuple[int, RolloutOutcome, list[tuple[str, str | None]]]],
+    collect: Callable[[], int],
     commit: Callable[[], int],
 ) -> PhaseBVerdict:
     """Steps 6.4 through 9 of the rollout: fan-out set, readiness gate, Phase-B
-    poll + verdict, managed-writer commit -- returning the verdict to report.
+    poll + verdict, managed-writer collection + commit -- returning the verdict
+    to report.
 
-    The four injected seams are the real functions in production; tests patch
+    The five injected seams are the real functions in production; tests patch
     them on `update.py`, and the call site resolves each name there.
     """
     # 6.4) Who Phase B actually fans out to: every rollout target except THIS
@@ -126,14 +130,32 @@ def _phase_b_and_commit(
         # keeps it) and the aftermath block lists them.
         outcome, rc = RolloutOutcome.INCOMPLETE, 1
 
-    # 9) Managed-writer P5 commit (task #4128, E2-a): the post-Phase-B
-    #    position of the W chain, reached only by a clean, non-restart-only
-    #    rollout. The step itself consumes the enable point's decision --
-    #    an `active` decision publishes the completed activation through
-    #    the P5 seat and records its stage; every other decision skips it
-    #    without touching the publication seats. A refusal fails the
-    #    rollout; the pending journal stays for checked recovery.
+    # 8.5-9) The managed-writer publication window (task #4128), reached only
+    #    by a clean, non-restart-only rollout. The steps themselves consume
+    #    the enable point's decision: under `active`, the collection (E2-c)
+    #    first adopts the completed units' post-stop facts and the P5 commit
+    #    (E2-a) then publishes them through their seats; every other decision
+    #    skips the window without touching the publication seats. A refusal
+    #    fails the rollout; the pending journal stays for checked recovery.
     if outcome is RolloutOutcome.CLEAN and not restart_only:
+        collect_rc = collect()
+        if collect_rc != 0:
+            failing_step = (
+                "the managed-writer collection refused; the pending journal "
+                "remains for `ava cluster recover-pending`"
+            )
+            # The units converged and the pin advanced, but the collection
+            # was never adopted: the record and the aftermath must read
+            # INCOMPLETE, never the CLEAN this rollout still carried.
+            outcome, rc = RolloutOutcome.INCOMPLETE, collect_rc
+            return PhaseBVerdict(
+                rc=rc,
+                outcome=outcome,
+                hosts_to_resume=hosts_to_resume,
+                failing_step=failing_step,
+                publication_refused=True,
+            )
+
         commit_rc = commit()
         if commit_rc != 0:
             failing_step = (

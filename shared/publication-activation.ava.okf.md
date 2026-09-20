@@ -92,6 +92,15 @@ decision and, only under `active`, runs this seat inside one short transaction
 and one rollout stage -- every other decision skips it untouched, and a seat
 refusal fails the rollout with the pending journal left for checked recovery.
 
+The P2 collection position (task #4128 E2-c) sits in the same window: the
+wiring module's `_collect_managed_writer_publication` consumes the recorded
+decision and, only under `active`, adopts the completed units' post-stop writer
+closure -- the observed facts gathered across the fleet, with the platform
+final re-read after the candidate is ready -- into the pending journal before
+P5 publishes. Its gathering channel (the collector, task #4129) is not
+connected yet, so the step refuses explicitly today; `adopt_pending_collection`
+stays unimported on every production path.
+
 No production migration, normal service activation or protocol advertisement
 is performed by importing or testing these helpers.
 

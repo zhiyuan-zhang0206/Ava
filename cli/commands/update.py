@@ -25,6 +25,7 @@ from cli.commands._managed_writer_mode import (
 )
 from cli.commands._managed_writer_wiring import (
     _begin_managed_writer_publication,
+    _collect_managed_writer_publication,
     _commit_managed_writer_publication,
 )
 from cli.commands._repo import _repo_root as _repo_root
@@ -538,10 +539,11 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
     local_launch_failures: list[str] = []
     # The finalizer may compensate only after this rollout has entered Phase A.
     phase_a_started = False
-    # Whether the managed-writer publication commit refused and the durable pending
-    # journal was retained for checked recovery. It rides the finally so the
-    # aftermath names the one recovery command that fits, and the record reads
-    # INCOMPLETE -- not the CLEAN the pre-refusal outcome still carried.
+    # Whether a managed-writer publication step (collection or commit) refused
+    # and the durable pending journal was retained for checked recovery. It rides
+    # the finally so the aftermath names the one recovery command that fits, and
+    # the record reads INCOMPLETE -- not the CLEAN the pre-refusal outcome still
+    # carried.
     publication_refused = False
 
     # ── Phase 0: pre-flight git fetch on every agent-runner ──────────────────
@@ -719,7 +721,7 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
             return 1 if local_launch_failures else 0
 
         # The rollout's closing section (6.4 through 9) lives in
-        # `_update_verdict` (file-size budget). Its four seams are injected from
+        # `_update_verdict` (file-size budget). Its five seams are injected from
         # this module's namespace so the `_up.*` monkeypatch seams keep
         # resolving; the verdict carries the outcome / hosts_to_resume the
         # `finally` reports.
@@ -736,6 +738,7 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
             targets=_phase_b_targets,
             readiness=_gateway_ready_or_incomplete,
             poll_outcome=_phase_b_outcome,
+            collect=_collect_managed_writer_publication,
             commit=_commit_managed_writer_publication,
         )
         rc, outcome = phase_b.rc, phase_b.outcome
