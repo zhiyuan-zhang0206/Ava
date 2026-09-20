@@ -96,7 +96,7 @@ def _note_probe_reachable(name: str) -> None:
     _probe_failures.pop(name, None)
 
 
-def _probe_budget_s(name: str) -> float:
+def _probe_budget_s(name: str, *, full_budget_s: float | None = None) -> float:
     """The status_probe budget for `name`'s next dial.
 
     A machine that already carries reachability failures gets the fast-fail
@@ -109,4 +109,8 @@ def _probe_budget_s(name: str) -> float:
     """
     if name in _probe_failures:
         return settings.gateway.status_probe_fastfail_timeout_seconds
+    if full_budget_s is not None:
+        # A heavier op than a status probe (the inventory aggregate) brings its
+        # own wider first-contact budget; the fast-fail side stays shared.
+        return full_budget_s
     return settings.gateway.status_probe_timeout_seconds
