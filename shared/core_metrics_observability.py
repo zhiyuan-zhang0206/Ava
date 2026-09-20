@@ -62,12 +62,10 @@ from shared import core_metrics
 from shared.events.contract import (
     FRONTEND_INTERACTION_KEYS,
     HALT_KEYS,
-    LLM_ERROR_FAMILY,
     LLM_USAGE_KEYS,
     SDK_CALL_KEYS,
     SYNTAX_FIX_KEYS,
     TURN_END_KEYS,
-    family_events,
 )
 from shared.plugin_metrics import MetricSpec
 
@@ -81,10 +79,6 @@ _HALT_ATTR = {k: f"attributes_{k}" for k in HALT_KEYS}
 _FIX_ATTR = {k: f"attributes_{k}" for k in SYNTAX_FIX_KEYS}
 _FRONTEND_ATTR = {k: f"attributes_{k}" for k in FRONTEND_INTERACTION_KEYS}
 _SDK_ATTR = {k: f"attributes_{k}" for k in SDK_CALL_KEYS}
-
-# The 4 LLM failure events (the SQL version's FILTER columns) — one regex for
-# the whole error panel; the event_name field stays nominal spec metadata.
-_LLM_ERRORS = "|".join(family_events(LLM_ERROR_FAMILY))
 
 # The event-stream base selector. event_name/agent_id are promoted stream
 # labels (2026-08-23 cutover), so event-scoped queries match them inside the
