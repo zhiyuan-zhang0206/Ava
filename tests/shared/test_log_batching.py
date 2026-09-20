@@ -296,7 +296,7 @@ def test_event_pipeline_filter_drops_no_emitter_and_node_enter() -> None:
     """The pipeline filter admits ordinary records but drops two families:
     the emitter's own failure reports (`_no_emitter` marker — a DB-down
     process must not loop failure → warning → emit) and `node_enter` (zero
-    events-table consumers; the row would be pure write amplification — the
+    event-stream consumers; the row would be pure write amplification — the
     log-file line is the death-analysis source). Anything else — including
     `node_exit`, which agent_inspect reads — passes."""
 

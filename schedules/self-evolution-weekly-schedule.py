@@ -55,8 +55,8 @@ HIGH_WEEKLY_EVENTS = 200000
 
 def count_events(since: datetime) -> int:
     """Count events since `since` (UTC) via the Loki-backed /api/events count
-    path. PG `events` is a frozen archive since 2026-08-12 (Task #1197 LGTM
-    cutover) — the weekly trigger must count the live stream or it silently
+    path. PG `events` was frozen at the 2026-08-12 LGTM cutover (Task #1197)
+    and later dropped — the weekly trigger must count the live stream or it silently
     skips every week (2026-08-14 missed-consumer audit).
 
     When the gateway refuses the read with the no-observability code (a

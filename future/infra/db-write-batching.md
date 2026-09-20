@@ -6,10 +6,12 @@ Client: #405
 
 > **Superseded (2026-08-04, event-system W1):** the loguru Postgres sink it
 > audits was replaced by the unified event emitter (`shared/telemetry.py`) —
-> one bounded queue + drain thread now batch-writes the `events` table and the
-> legacy `agent_events`/`event_log` mirrors. The audit's conclusions (batch,
-> bound the queue, shed-and-count) carried over verbatim; its per-symbol
-> references (`_postgres_sink`, `_ThreadedPostgresSink`) are historical.
+> one bounded queue + drain thread now batch-writes the day JSONL mirrors and
+> exports to OTLP (the `events` table and the legacy `agent_events`/`event_log`
+> mirrors it once wrote were retired at the LGTM cutover, task #1197). The
+> audit's conclusions (batch, bound the queue, shed-and-count) carried over
+> verbatim; its per-symbol references (`_postgres_sink`, `_ThreadedPostgresSink`)
+> are historical.
 
 ## Audit Scope
 

@@ -659,7 +659,7 @@ export type CommandItem = Schemas["CommandItem"];
 // health, and snapshot time) stays pinned to the generated wire contract.
 
 // Lineage ties (spawn / fork / resurrect) + the message tie. The backend emits
-// the raw event_log value `send_message`; normalizeGraph maps it to `message`
+// the raw event value `send_message`; normalizeGraph maps it to `message`
 // (the graph's vocabulary), so the view keys on `message` here.
 export type GraphEventType = "spawn" | "fork" | "resurrect" | "message";
 

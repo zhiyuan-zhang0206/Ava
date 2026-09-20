@@ -496,7 +496,7 @@ class EventSpec:
 
     ``tier``: the default human-facing event tier. ``tier_for`` may override
     it for an anomaly level or an audit row. ``destination``: ``"events"``
-    (default — lands in the ``events`` table) or
+    (default — carried on the event stream) or
     ``"file"`` (log-file only, e.g. ``node_enter`` after PR #1758's sink
     filter). ``family`` groups events the ops panels / rollups treat as one
     family (e.g. LLM_ERROR). ``doc`` is the one-line registry.md description.

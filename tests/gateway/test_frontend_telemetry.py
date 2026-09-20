@@ -8,8 +8,8 @@ instead of letting a misbehaving tab blow up the table.
 
 Runs on ava_test: POST a batch through TestClient, then assert the JSONL
 mirror lines (telemetry.sync() before reading — the emitter's drain thread
-writes asynchronously). The PG `events` copy is a read-only archive since the
-LGTM cutover (task #1197 close-C).
+writes asynchronously). The PG `events` copy was retired at the LGTM cutover
+(task #1197 close-C) and dropped with the archive cleanup (task #1281/#1823).
 """
 
 from __future__ import annotations

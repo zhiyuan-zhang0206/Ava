@@ -23,7 +23,7 @@ Registration mirrors the plugin state/config pattern: the plugin calls
 The registry is process-local.
 
 SQL safety (enforced at register time, task #180 PR C): a metric query must
-be a static single SELECT over ``events`` (the frozen archive) or
+be a static single SELECT over ``events`` (the retired archive) or
 ``agents_meta`` (live), built from a whitelist of keywords, aggregate
 functions, operators and literals — no DML/DDL, no information/``pg_*``
 functions, no comments, no multi-statement, no Grafana macros, no
@@ -243,7 +243,7 @@ def validate_metric_sql(sql: str) -> None:
     read through LogQL (task #1280), so Grafana time macros and the
     ``{event_name}`` / ``{category}`` / ``{{{{agent_id}}}}`` placeholders are
     rejected outright. What remains is the static-read guardrail: a single
-    SELECT over ``events`` (the frozen archive — deliberate archive reads
+    SELECT over ``events`` (the retired archive — deliberate archive reads
     only) or ``agents_meta`` (live), whitelisted functions / columns /
     operators, no comments / multi-statement / DML / information functions.
 

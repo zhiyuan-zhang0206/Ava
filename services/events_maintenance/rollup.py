@@ -1,8 +1,8 @@
 """Incremental Since-Birth rollup — day-grain aggregates sourced from Loki.
 
 The unified event stream lives in Loki since the LGTM cutover (the PG
-`events` copy is a frozen archive; its last-ever code read was the
-llm-cost-rollup-columns migration backfill). Each maintenance pass rolls
+`events` copy was frozen at the cutover and later dropped; its last-ever code
+read was the llm-cost-rollup-columns migration backfill). Each maintenance pass rolls
 whole UTC days up to yesterday into:
 
 - ``agent_model_tokens_daily`` — per (agent, day, model): calls, token sums,

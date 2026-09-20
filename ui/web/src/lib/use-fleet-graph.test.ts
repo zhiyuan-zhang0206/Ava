@@ -117,7 +117,7 @@ describe("useFleetGraph", () => {
 
   it("normalizes the raw backend shape: from_agent/to_agent + send_message->message", async () => {
     // The real endpoint returns Pydantic field names (from_agent/to_agent) and the
-    // raw event_log value `send_message`; normalizeGraph maps them. Lineage types
+    // raw event value `send_message`; normalizeGraph maps them. Lineage types
     // (spawn/fork/resurrect) pass through unchanged.
     const raw = {
       nodes: [],

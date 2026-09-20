@@ -430,13 +430,13 @@ def create_agent_row(
             )
         conn.commit()
         # --- lifecycle event ---
-        # Emitted AFTER the commit above: the emitter's drain thread writes on
-        # its own connection (READ COMMITTED) and cannot see an uncommitted
-        # agents row. Emitting before commit made the fresh agent_id look
-        # dangling — the guard cleared the reference and the event_log mirror
-        # row (agent_id NOT NULL) was silently skipped, losing the FleetView
-        # parent/child edge for every spawn. After commit the row is visible
-        # and the mirror row lands.
+        # Emitted AFTER the commit above: the event is keyed by the fresh
+        # agent_id, and readers join events against the live agents set — an
+        # unknown reference is dropped, so a pre-commit emit could lose the
+        # FleetView parent/child edge for the spawn. The retired PG writer was
+        # stricter still: the drain thread read through its own READ COMMITTED
+        # connection, so a pre-commit emit made the fresh id look dangling and
+        # the row was silently skipped (every spawn's edge lost).
         # Lineage direction (user ruling 2026-08-28, task #1879): the event's
         # target_agent_id is the lineage PARENT — the spawner for a plain
         # spawn, the FORK SOURCE for a fork (one agent may fork another from a

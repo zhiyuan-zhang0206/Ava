@@ -45,7 +45,7 @@ from shared.events.contract import EventTier, tier_for
 
 router = APIRouter()
 
-# The events table stores these lowercase (design doc §1); unknown values are
+# These are stored lowercase (design doc §1); unknown values are
 # rejected with 422 rather than silently matching nothing (fail fast).
 _CATEGORIES = frozenset({"audit", "telemetry", "log"})
 _LEVELS = frozenset({"debug", "info", "warning", "error", "critical"})

@@ -16,8 +16,8 @@ is still its own sidecar.
 Three signals:
 
 - **logs** — every ``Event`` becomes one OTLP LogRecord (Loki). The body is the
-  full event as JSON (the same shape the JSONL mirror stores, so Loki holds the
-  same content class as the ``events`` table); the indexed dimensions
+  full event as JSON (the same shape the JSONL mirror stores, so the mirror and
+  Loki hold the same content class); the indexed dimensions
   (event_name / category / level / machine / process / source / agent ids) ride
   as attributes; event_name and agent_id also select each record's resource so
   Loki can index them without mixing event types in one resource batch;
