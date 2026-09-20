@@ -53,7 +53,7 @@ body:
     id: model
     attributes:
       label: Model
-      placeholder: e.g. deepseek-v4-pro
+      placeholder: e.g. deepseek-flash
   - type: textarea
     id: logs
     attributes:
