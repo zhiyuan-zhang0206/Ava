@@ -1,7 +1,11 @@
 # Claude Code (`claude`)
 
 For an interactive (persistent) session, use the spawn script instead of
-launching by hand — it pre-trusts the directory and sends the contract message:
+launching by hand — it pre-trusts the directory, presets Claude Code's
+first-run dialogs (bypass-permissions confirmation + fullscreen upsell;
+persisted into `~/.claude/settings.json` / `~/.claude.json`, backed up and
+idempotent) so an unattended spawn cannot park on one, and sends the
+contract message:
 
 ```bash
 .venv/bin/python reference/spawn_claude.py <workspace-dir>
