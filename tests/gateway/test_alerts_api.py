@@ -621,9 +621,16 @@ def test_ingest_publishes_sse_frames(
 
 
 def test_ingest_requires_webhook_token(client: TestClient) -> None:
-    """No/wrong token -> 401; correct token -> 200."""
+    """No/wrong token -> 401; correct token -> 200; the legacy header name
+    no longer authenticates (removed with task #1173)."""
     payload = _webhook()
     assert client.post("/api/alerts", json=payload).status_code == 401
+    assert (
+        client.post(
+            "/api/alerts", json=payload, headers={"X-Ops-Alerts-Token": "test-token"}
+        ).status_code
+        == 401
+    )
     assert (
         client.post("/api/alerts", json=payload, headers={"X-Alerts-Token": "wrong"}).status_code
         == 401

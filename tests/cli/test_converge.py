@@ -661,6 +661,33 @@ def test_legacy_disabled_marker_step_is_registered_and_unconditional(home, tmp_p
     assert not step.host_global
 
 
+def test_host_config_step_is_registered(home, tmp_path: Path):
+    """The one-time .env hygiene step stays in the real step list: it repairs
+    the retired host override file on any configured host. (Task #1173 deleted
+    the alerts-key rename this step used to carry; the step itself stays.)"""
+    step = next(
+        s for s in _converge.CONVERGE_STEPS if s.apply is _converge._migrate_host_config_to_env
+    )
+    assert step.roles == _converge.ALL_ROLES
+    assert step.requires_unit_config
+    assert not step.host_global
+
+
+def test_host_config_step_migrates_the_host_override_file(home, tmp_path: Path, monkeypatch):
+    """Step-level: the retired host override file lands in .env and is archived."""
+    from shared import runtime_config as rt
+
+    ava_home = tmp_path / "avahome"
+    ava_home.mkdir()
+    monkeypatch.setattr(rt, "_ava_home", lambda: ava_home)
+    (ava_home / "runtime_config.json").write_text(json.dumps({"ops_concurrency": 4}))
+
+    _converge._migrate_host_config_to_env(_ctx(tmp_path, ava_home))
+
+    assert rt.read_env_aliases()["AVA_OPS_CONCURRENCY"] == "4"
+    assert (ava_home / "runtime_config.json.migrated").exists()
+
+
 def _capable_helper_ctx(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """A host the capability probe clears, with an empty .env."""
     from shared.config import settings
