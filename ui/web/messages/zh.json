@@ -510,8 +510,7 @@
     "turnPlural": "轮",
     "agentResponding": "Agent 正在回复。",
     "agentResponseComplete": "Agent 回复已完成。",
-    "copied": "已复制",
-    "loadEarlier": "加载更早的消息"
+    "copied": "已复制"
   },
   "markers": {
     "terminated": "已终止",
