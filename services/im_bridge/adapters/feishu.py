@@ -701,6 +701,12 @@ class FeishuAdapter(IMAdapter):
         chat_id_resolved = getattr(data, "chat_id", "") if data is not None else ""
         if chat_id_resolved:
             self._sent_chat_ids[chat_id] = chat_id_resolved
+        # Delivery-count surface (task #4250): one line per API-confirmed send.
+        logger.info(
+            "feishu send ok chat_id={} message_id={}",
+            chat_id,
+            getattr(data, "message_id", "") if data is not None else "",
+        )
 
     def _send_one(self, client: Any, chat_id: str, text: str) -> str:
         """Send one text segment; returns the p2p chat id from the response
@@ -731,6 +737,12 @@ class FeishuAdapter(IMAdapter):
         chat_id_resolved = getattr(data, "chat_id", "") if data is not None else ""
         if chat_id_resolved:
             self._sent_chat_ids[chat_id] = chat_id_resolved
+        # Delivery-count surface (task #4250): one line per API-confirmed send.
+        logger.info(
+            "feishu send ok chat_id={} message_id={}",
+            chat_id,
+            getattr(data, "message_id", "") if data is not None else "",
+        )
         return chat_id_resolved
 
 

@@ -17,6 +17,7 @@ from typing import Any
 
 import pytest
 
+import services.im_bridge.adapters.feishu as feishu_module
 from services.im_bridge.adapters.feishu import (
     MAX_SEGMENT_CHARS,
     FeishuAdapter,
@@ -129,6 +130,16 @@ class PatchingAdapter(FeishuAdapter):
 
     def _build_ws_client(self) -> Any:
         return self._ws_client_impl
+
+
+class _LogRecorder:
+    """Captures info() calls so tests can assert delivery-count lines."""
+
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+
+    def info(self, message: str, *args: Any) -> None:
+        self.messages.append(message.format(*args) if args else message)
 
 
 @pytest.fixture
@@ -404,6 +415,52 @@ async def test_send_segments_long_text(adapter: FeishuAdapter) -> None:
         assert request.request_body.receive_id == "ou_user_1"
         assert request.request_body.msg_type == "text"
         assert json.loads(request.request_body.content)["text"] == expected
+
+
+async def test_send_logs_one_delivery_line_per_segment(
+    adapter: FeishuAdapter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each API-confirmed segment appends one 'feishu send ok' line (the
+    delivery-count surface, task #4250); the poller-registration line is not
+    part of that count."""
+    adapter._app_id = "cli_x"
+    adapter._app_secret = "secret_x"  # noqa: S105
+    thread = BlockingThread()
+    thread.start()
+    adapter._ws_thread = thread
+    rest = FakeRestClient()
+    adapter._rest_client = rest
+    recorder = _LogRecorder()
+    monkeypatch.setattr(feishu_module, "logger", recorder)
+    try:
+        await adapter.send("ou_user_1", "a" * (MAX_SEGMENT_CHARS * 2 + 123))
+    finally:
+        thread.release()
+        thread.join(timeout=2)
+    oks = [message for message in recorder.messages if "send ok" in message]
+    assert oks == ["feishu send ok chat_id=ou_user_1 message_id=om_sent_1"] * 3
+
+
+async def test_card_send_logs_delivery_line(
+    adapter: FeishuAdapter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The interactive-card path logs its own 'feishu send ok' line."""
+    adapter._app_id = "cli_x"
+    adapter._app_secret = "secret_x"  # noqa: S105
+    thread = BlockingThread()
+    thread.start()
+    adapter._ws_thread = thread
+    rest = FakeRestClient()
+    adapter._rest_client = rest
+    recorder = _LogRecorder()
+    monkeypatch.setattr(feishu_module, "logger", recorder)
+    try:
+        await adapter.send("ou_user_1", "hi", buttons=[("List", "/list")])
+    finally:
+        thread.release()
+        thread.join(timeout=2)
+    oks = [message for message in recorder.messages if "send ok" in message]
+    assert oks == ["feishu send ok chat_id=ou_user_1 message_id=om_sent_1"]
 
 
 async def test_send_short_text_single_call(adapter: FeishuAdapter) -> None:
