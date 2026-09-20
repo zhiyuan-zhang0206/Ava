@@ -321,11 +321,11 @@ Rules:
 Each phase is independently landable and reversible; nothing in P0/P1 changes code-update behavior.
 
 ### P0 — schema and read-only surface (no behavior change) — **landed: PR #2355**
-- Registry schema v2: `UpdateState` / `ChannelState` fields, lazy migration, defaults resolution from settings (`shared/config/packages.py`: per-class default mode/interval, base tick, master switch).
+- Registry schema v2: `UpdateState` / `ChannelState` fields, lazy migration (retired, batch b5 2026-09-20: a v1 file is refused), defaults resolution from settings (`shared/config/packages.py`: per-class default mode/interval, base tick, master switch).
 - `ava packages status` (read-only) + `--json` — including the host version and each package's declared range (§5.5).
 - Version plumbing: optional manifest support for skill packages; the core-content CI check (declared ranges must include the repo's current version); the derived host-version policy recorded in [`conventions/host-versioning.md`](../../conventions/host-versioning.md) (no bump discipline; `[project].version` remains only as the wheel-mode fallback).
 - Docs: the ruling entry + this elaboration (landed together); update `okf/skills/load-directory-sync.ava.okf.md`, `cli/commands/packages/packages.ava.okf.md`, and the `ava-modification-layers` / `develop-a-plugin` skill phrasing ('kernel-shipped base set, changed via L4') when P1/P2 land.
-- Acceptance: v1 file loads, migrates on next write, defaults visible in status; no behavior change elsewhere (test lock: registry round-trip + migration).
+- Acceptance at landing: v1 file loads, migrates on next write, defaults visible in status; no behavior change elsewhere (test lock: registry round-trip + migration) — the v1 leg later retired, batch b5 2026-09-20: v1 files are refused.
 
 ### P1 — skills fast lane (the POC; the deliverable the user can feel)
 - `ava packages refresh` implementing §5.3 for `skill` packages, `core` channel first (fetch from the checkout's remote, per-package diff, archive-extract, gates, staged swap, records) and `git` channel second (reusing `acquire_source` / `cmd_skill_upgrade` semantics).
