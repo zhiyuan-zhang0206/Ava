@@ -17,11 +17,16 @@ roster read runs outside database transactions (no filesystem or network work
 under a lock), and every refusal is fail-closed: the fleet never half-activates.
 
 The same execution assembles the units' hop projections (channel C,
-`assemble_hop_plans`): the journal's single observation challenge and the
+`assemble_phase_inputs`): the journal's single observation challenge and the
 sealed schema are baked into each unit's candidate context, the request
 references the shipped recovery context and the unit's own receipt, and the
 projections ride the plan dispatch -- so the hop phase that consumes the
-returned plans never re-derives anything the begin seal already fixed.
+returned plans never re-derives anything the begin seal already fixed. The
+same assembly carries the collection phase's inputs (task #4129 I5): the exact
+dispatched/shipped bytes and the sealed identities, handed to the closing
+section as one `ManagedWriterPhaseInput`. A same-operation retry adopts the
+journal's registered window V before re-sealing (`read_journaled_registration`),
+so the sealed window cannot slide under a later execution (design N3).
 """
 
 from __future__ import annotations
@@ -41,7 +46,12 @@ from cli.commands._managed_writer_gather import (
     PreparedUnitFacts,
     gather_prepared_facts,
 )
-from cli.commands._managed_writer_hop import HopUnitPlan
+from cli.commands._managed_writer_hop import (
+    CollectorInput,
+    CollectorUnitInput,
+    HopUnitPlan,
+    ManagedWriterPhaseInput,
+)
 from cli.commands._release_context import ReleaseContext, read_release_context
 from cli.commands._update_bootstrap import BootstrapHopRequest
 from cli.commands._update_publication import open_pending_publication, published_unit
@@ -104,7 +114,10 @@ def begin_valid_until(
     """V, taken once at the begin position: min(lease remaining, policy window).
 
     The sealed plan carries the value and later phases project it, so lease
-    renewals and same-operation retries cannot slide the observation window.
+    renewals cannot slide the observation window. A same-operation retry does
+    not recompute it here: the begin adopts the pending journal's registered V
+    (`read_journaled_registration`) before sealing, so this value is the first
+    registration only (design N3).
     """
     return now + timedelta(seconds=min(lease_expires_in_s, window_seconds))
 
@@ -346,7 +359,7 @@ def dispatch_prepared_plan(
         )
 
 
-def assemble_hop_plans(
+def assemble_phase_inputs(
     facts: Sequence[PreparedUnitFacts],
     targets: Sequence[PreparedFactTarget],
     *,
@@ -354,8 +367,9 @@ def assemble_hop_plans(
     valid_until: datetime,
     challenge: UUID,
     schema_digest: Digest,
-) -> list[HopUnitPlan]:
-    """Assemble every unit's hop projections and the paths its op payload names (C-1).
+    candidate_digest: Digest,
+) -> ManagedWriterPhaseInput:
+    """Assemble every unit's hop projections and the collection phase's inputs (C-1).
 
     Per unit: the candidate observation context (the receipt's expected writers
     plus the operation, the journal's single challenge bound to the begin's V,
@@ -364,10 +378,15 @@ def assemble_hop_plans(
     with `normal_release_path` still None (restricted-only, task #4129 I4; the
     normal projection arrives with I6). The projections are content-named, so
     each consuming path exists before any unit has seen a byte; the units'
-    `cluster_prepare_dispatch` op is the only writer.
+    `cluster_prepare_dispatch` op is the only writer. The same loop carries the
+    collection phase's `CollectorInput` (task #4129 I5): the exact canonical
+    bytes this execution stages (the closure is re-derived from them later,
+    never from a re-derivation here) and the sealed identities, in the same
+    (machine, home) order as the plans.
     """
     urls = {target.machine: target.ops_url for target in targets}
     plans: list[HopUnitPlan] = []
+    units: list[CollectorUnitInput] = []
     for item in sorted(
         facts,
         key=lambda entry: (
@@ -410,7 +429,27 @@ def assemble_hop_plans(
                 ),
             )
         )
-    return plans
+        units.append(
+            CollectorUnitInput(
+                machine=expected.machine,
+                home=home,
+                ops_url=urls[expected.machine],
+                candidate_context=candidate_bytes,
+                request=request_bytes,
+                recovery_context=item.hop_material.recovery_context.encode("ascii"),
+                prepared_receipt_digest=item.publication.prepared_receipt_digest,
+            )
+        )
+    return ManagedWriterPhaseInput(
+        hop_plans=tuple(plans),
+        collector=CollectorInput(
+            operation=operation,
+            challenge=challenge,
+            valid_until=valid_until,
+            candidate_digest=candidate_digest,
+            units=tuple(units),
+        ),
+    )
 
 
 def _registered_units_with_urls() -> tuple[set[tuple[str, str]], dict[str, str | None]]:
@@ -427,15 +466,24 @@ def _registered_units_with_urls() -> tuple[set[tuple[str, str]], dict[str, str |
     return registered, {row[0]: row[1] for row in rows}
 
 
-def begin_managed_writer_publication(target_sha: str | None) -> list[HopUnitPlan]:
+def begin_managed_writer_publication(target_sha: str | None) -> ManagedWriterPhaseInput:
     """Run the begin position's full chain; every refusal is a barrier error.
 
     Raises `ManagedWriterBarrierError` for a refused context/roster/gather/
     seal/dispatch; infrastructure failures (database, an op failure outside the
     ladder) propagate unchanged. On a refusal after the journal opened, the
     pending entry persists for checked recovery -- the exact pre-stop clear is
-    the abort step's, not this position's. Returns the per-unit hop plans the
-    rollout's hop phase consumes (channel C).
+    the abort step's, not this position's. Returns the phase input the
+    rollout's closing section consumes: the per-unit hop plans (channel C) plus
+    the collection phase's inputs (channel D, task #4129 I5).
+
+    A same-operation retry adopts the pending journal's registered window V
+    (design N3) before re-sealing, so the sealed plan, the staged candidate
+    contexts and the collection all bind the window that was registered first
+    -- the sealed window cannot slide under a later execution; the adoption is
+    printed as the observable audit line. The registration's `plan_digest`
+    stays audit evidence (reported by the collection), never a validation
+    input.
     """
     from ops import cluster_rpc
 
@@ -457,11 +505,25 @@ def begin_managed_writer_publication(target_sha: str | None) -> list[HopUnitPlan
     operation = RolloutIdentity(
         holder=lease.holder, acquired_at=lease.acquired_at, target_sha=target_sha
     )
-    valid_until = begin_valid_until(
-        lease_expires_in_s=lease.expires_in_s,
-        window_seconds=settings.gateway.update_managed_writer_window_seconds,
-        now=datetime.now(UTC),
-    )
+    # Lazy import (this module is itself method-local in the eager closure, and
+    # the collector is heavy): the journal read is the only collection-phase
+    # piece the begin position needs, and it must not join the upstream import
+    # closure of the rollout machinery.
+    from cli.commands._managed_writer_collector import read_journaled_registration
+
+    registration = read_journaled_registration(operation)
+    if registration.valid_until is not None:
+        valid_until = registration.valid_until
+        print(
+            "  \u00b7 managed-writer begin: same-operation retry adopts the "
+            f"journaled window V={valid_until.isoformat()} (the sealed window cannot slide)"
+        )
+    else:
+        valid_until = begin_valid_until(
+            lease_expires_in_s=lease.expires_in_s,
+            window_seconds=settings.gateway.update_managed_writer_window_seconds,
+            now=datetime.now(UTC),
+        )
     try:
         context, context_digest = read_release_context(home, target_sha)
     except ReleaseRejectedError as exc:
@@ -498,26 +560,27 @@ def begin_managed_writer_publication(target_sha: str | None) -> list[HopUnitPlan
             valid_until=valid_until,
             plan_digest=sealed.digest,
         )
-    hop_plans = assemble_hop_plans(
+    phase_input = assemble_phase_inputs(
         facts,
         targets,
         operation=operation,
         valid_until=valid_until,
         challenge=pending.challenge,
         schema_digest=context.schema_digest,
+        candidate_digest=sealed.candidate_digest,
     )
     print(
-        f"  \u00b7 managed-writer begin: hop projections assembled for {len(hop_plans)} units "
-        f"(challenge {pending.challenge})"
+        f"  \u00b7 managed-writer begin: hop projections assembled for "
+        f"{len(phase_input.hop_plans)} units (challenge {pending.challenge})"
     )
     dispatch_prepared_plan(
         sealed,
         targets,
         expected=_ack_bindings(facts),
-        projections={plan.machine: plan.projections for plan in hop_plans},
+        projections={plan.machine: plan.projections for plan in phase_input.hop_plans},
     )
     print(
         f"  \u2713 managed-writer begin: journal open; all {len(targets)} units "
         "acknowledged the sealed plan"
     )
-    return hop_plans
+    return phase_input

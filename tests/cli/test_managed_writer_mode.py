@@ -372,6 +372,7 @@ def test_begin_step_refuses_under_active_when_the_context_is_missing(
     on the Trunk runner (2026-09-20)."""
     from datetime import UTC, datetime
 
+    from cli.commands import _managed_writer_collector as collector_mod
     from cli.commands import _managed_writer_dispatch as dispatch_mod
     from cli.commands import _managed_writer_wiring as wiring
     from shared.cluster_lock import DeployLease
@@ -392,6 +393,13 @@ def test_begin_step_refuses_under_active_when_the_context_is_missing(
         ),
     )
     monkeypatch.setattr(dispatch_mod.settings.general, "ava_home", tmp_path.resolve())
+    # The begin's N3 registration read (task #4129 I5) is a database touch; the
+    # test's subject is the missing sealed context, so the read stands in empty.
+    monkeypatch.setattr(
+        collector_mod,
+        "read_journaled_registration",
+        lambda _operation: collector_mod.JournaledRegistration(valid_until=None, plan_digest=None),
+    )
 
     assert wiring._begin_managed_writer_publication("0" * 40) == (1, None)
     err = capsys.readouterr().err
