@@ -78,6 +78,7 @@ _TURN_EVENTS = (
     "heartbeat_paused",
     "llm_provider_error",
     "stream_stalled_retry",
+    "stream_stall_pair_terminated",
     "stream_overloaded_retry",
     "llm_turn_aborted",
 )
@@ -120,6 +121,7 @@ _ANOMALY_EVENTS = frozenset(
         "exec_thread_stuck",
         "llm_provider_error",
         "stream_stalled_retry",
+        "stream_stall_pair_terminated",
         "stream_overloaded_retry",
         "llm_turn_aborted",
     }
