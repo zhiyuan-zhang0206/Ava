@@ -510,8 +510,7 @@
     "turnPlural": "turns",
     "agentResponding": "Agent is responding.",
     "agentResponseComplete": "Agent response complete.",
-    "copied": "Copied",
-    "loadEarlier": "Load earlier messages"
+    "copied": "Copied"
   },
   "markers": {
     "terminated": "Terminated",

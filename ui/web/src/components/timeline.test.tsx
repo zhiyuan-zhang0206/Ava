@@ -312,107 +312,97 @@ describe("compact history segment dividers", () => {
     ).toEqual(["1", "0"]);
   });
 
-  it("merges the load-earlier control into the topmost divider while older pages remain (task #3932)", () => {
+  it("renders compact-history dividers as pure labels — no load-earlier control anywhere (task #4186)", () => {
     const items = [
       makeItem({ item_id: "s1.old-boundary.0.0", kind: "agent_chat", payload: "old" }),
       makeItem({ item_id: "1.0", kind: "agent_chat", payload: "current" }),
     ];
-    const onLoadOlder = vi.fn();
-    render(<TimelineView items={items} hasMoreOlder onLoadOlder={onLoadOlder} />);
-
-    // The topmost row (rank 1) is itself the control; the descriptive copy it
-    // replaces is not rendered beside it — one entry, not two.
-    const control = screen.getByTestId("load-older-divider");
-    expect(control.textContent).toContain("Load earlier messages");
-    expect(screen.queryByText("Original history before compact")).toBeNull();
-    const dividers = screen.getAllByTestId("compact-history-divider");
-    expect(dividers[0].getAttribute("data-load-control")).toBe("true");
-    expect(dividers[0].dataset.segmentRank).toBe("1");
-    // Deeper dividers stay pure labels — the merge is positional, not global.
-    expect(dividers[1].getAttribute("data-load-control")).toBeNull();
-    expect(dividers[1].textContent).toContain("Context compacted");
-
-    // The floating variant yields to the in-row control at the same spot.
-    const floating = screen.getByTestId("load-older-button");
-    expect(floating.closest("div")?.className).toContain("opacity-0");
-
-    fireEvent.click(control);
-    expect(onLoadOlder).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps the floating control when the topmost row is not a divider (contrast)", () => {
-    const items = [makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })];
     render(<TimelineView items={items} hasMoreOlder onLoadOlder={vi.fn()} />);
-    const viewport = screen.getByTestId("scroll-viewport");
-    act(() => {
-      viewport.scrollTop = 0;
-      viewport.dispatchEvent(new Event("scroll"));
-    });
+    // The control and its copy are gone; the dividers keep their descriptive
+    // scroll-back labels as plain rows.
     expect(screen.queryByTestId("load-older-divider")).toBeNull();
-    const wrapper = screen.getByTestId("load-older-button").closest("div");
-    expect(wrapper?.className).toContain("opacity-100");
-  });
-
-  it("shows the in-flight state on the merged control, then restores the label once exhausted", () => {
-    const items = [
-      makeItem({ item_id: "s1.old-boundary.0.0", kind: "agent_chat", payload: "old" }),
-      makeItem({ item_id: "1.0", kind: "agent_chat", payload: "current" }),
-    ];
-    const { rerender } = render(
-      <TimelineView items={items} hasMoreOlder loadingOlder onLoadOlder={vi.fn()} />,
-    );
-    const control = screen.getByTestId<HTMLButtonElement>("load-older-divider");
-    expect(control.disabled).toBe(true);
-    expect(control.querySelector("svg")?.getAttribute("class")).toContain("animate-spin");
-
-    rerender(<TimelineView items={items} onLoadOlder={vi.fn()} />);
-    expect(screen.queryByTestId("load-older-divider")).toBeNull();
+    expect(screen.queryByTestId("load-older-button")).toBeNull();
+    expect(screen.queryByText("Load earlier messages")).toBeNull();
+    expect(screen.getByText("Original history before compact")).toBeTruthy();
+    expect(screen.getByText("Context compacted")).toBeTruthy();
     const dividers = screen.getAllByTestId("compact-history-divider");
     expect(dividers[0].getAttribute("data-load-control")).toBeNull();
-    expect(screen.getByText("Original history before compact")).toBeTruthy();
   });
 
-  it("hides the pull ring's loader while the inline control carries the loading state (task #3932)", () => {
-    const items = [
-      makeItem({ item_id: "s1.old-boundary.0.0", kind: "agent_chat", payload: "old" }),
-      makeItem({ item_id: "1.0", kind: "agent_chat", payload: "current" }),
-    ];
-    render(<TimelineView items={items} hasMoreOlder loadingOlder onLoadOlder={vi.fn()} />);
-    // One loading feedback, not two: the row's pill spins, while the ring
-    // stays a pull-gesture indicator (shown only while pullDistance > 0).
-    const ring = screen.getByTestId("pull-down-load-indicator");
-    expect(ring.getAttribute("aria-hidden")).toBe("true");
-    expect(ring.className).toContain("opacity-0");
-    expect(
-      screen.getByTestId("load-older-divider").querySelector("svg")?.getAttribute("class"),
-    ).toContain("animate-spin");
+  it("auto-loads when the view reaches the top; repeat scroll events do not double-fire (task #4186)", () => {
+    const loadOlder = vi.fn();
+    const items = [makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })];
+    render(<TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />);
+    const viewport = screen.getByTestId("scroll-viewport");
+
+    // Not at the top yet — no trigger.
+    viewport.scrollTop = 100;
+    act(() => {
+      viewport.dispatchEvent(new Event("scroll"));
+    });
+    expect(loadOlder).not.toHaveBeenCalled();
+
+    // Reaching the top triggers the load.
+    viewport.scrollTop = 0;
+    act(() => {
+      viewport.dispatchEvent(new Event("scroll"));
+    });
+    expect(loadOlder).toHaveBeenCalledTimes(1);
+
+    // Still at the top: the pending anchor gates a second fire.
+    act(() => {
+      viewport.dispatchEvent(new Event("scroll"));
+    });
+    expect(loadOlder).toHaveBeenCalledTimes(1);
   });
 
-  it("clears the inline control's row with the pull ring's band (task #3934)", () => {
-    const items = [
-      makeItem({ item_id: "s1.old-boundary.0.0", kind: "agent_chat", payload: "old" }),
-      makeItem({ item_id: "1.0", kind: "agent_chat", payload: "current" }),
-    ];
-    const { rerender } = render(<TimelineView items={items} hasMoreOlder onLoadOlder={vi.fn()} />);
-    expect(screen.getByTestId("load-older-divider")).toBeTruthy();
-    // The inline control's row hosts the pill in the top-14 band; the ring
-    // clears that row by starting below its bottom edge instead.
-    const ring = screen.getByTestId("pull-down-load-indicator");
-    expect(ring.className).toContain("top-22");
-    expect(ring.className).not.toContain("top-14");
+  it("does not auto-load without older pages, and not while a load is already in flight (task #4186)", () => {
+    const loadOlder = vi.fn();
+    const items = [makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })];
+    const { rerender } = render(<TimelineView items={items} onLoadOlder={loadOlder} />);
+    const viewport = screen.getByTestId("scroll-viewport");
+    viewport.scrollTop = 0;
+    act(() => {
+      viewport.dispatchEvent(new Event("scroll"));
+    });
+    expect(loadOlder).not.toHaveBeenCalled(); // hasMoreOlder=false
 
-    // No inline control: the ring keeps its default top-14 band.
-    rerender(
-      <TimelineView
-        items={[makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })]}
-        hasMoreOlder
-        onLoadOlder={vi.fn()}
-      />,
-    );
-    expect(screen.queryByTestId("load-older-divider")).toBeNull();
-    const plainRing = screen.getByTestId("pull-down-load-indicator");
-    expect(plainRing.className).toContain("top-14");
-    expect(plainRing.className).not.toContain("top-22");
+    rerender(<TimelineView items={items} hasMoreOlder loadingOlder onLoadOlder={loadOlder} />);
+    act(() => {
+      viewport.dispatchEvent(new Event("scroll"));
+    });
+    expect(loadOlder).not.toHaveBeenCalled(); // load already in flight
+  });
+
+  it("a load cycle that ends without a landing releases the anchor — the next top arrival retries (QA #3031)", () => {
+    const loadOlder = vi.fn();
+    const items = [makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })];
+    const { rerender } = render(<TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />);
+    const viewport = screen.getByTestId("scroll-viewport");
+
+    // First arrival: fires and captures the anchor.
+    viewport.scrollTop = 0;
+    act(() => {
+      viewport.dispatchEvent(new Event("scroll"));
+    });
+    expect(loadOlder).toHaveBeenCalledTimes(1);
+
+    // The fetch goes in flight, then FAILS — items unchanged, loadingOlder
+    // falls back to false without a landing commit.
+    rerender(<TimelineView items={items} hasMoreOlder loadingOlder onLoadOlder={loadOlder} />);
+    rerender(<TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />);
+
+    // The failed cycle must not hang the gate: leave the top and return —
+    // the reader's next arrival retries.
+    viewport.scrollTop = 240;
+    act(() => {
+      viewport.dispatchEvent(new Event("scroll"));
+    });
+    viewport.scrollTop = 0;
+    act(() => {
+      viewport.dispatchEvent(new Event("scroll"));
+    });
+    expect(loadOlder).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -1441,17 +1431,9 @@ describe("load-older spinner (pinned top overlay)", () => {
 // compensation must add exactly that 250 to scrollTop. The 0.0 node's rect
 // stays PUT (real-layout behavior) — the test proves the anchor skips it.
 // ---------------------------------------------------------------------------
-describe("load-older prepend anchor & pull-down gesture (#659, #817, #1272)", () => {
+describe("load-older prepend anchor (#659, #817, #1272; auto-load #4186)", () => {
   const rect = (top: number): DOMRect =>
     ({ top, bottom: top, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) });
-
-  const makeTouch = (clientY: number, clientX: number): Touch =>
-    new Touch({
-      identifier: 0,
-      target: document.body,
-      clientX,
-      clientY,
-    });
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -1462,41 +1444,15 @@ describe("load-older prepend anchor & pull-down gesture (#659, #817, #1272)", ()
     vi.useRealTimers();
   });
 
-  const triggerWheelPull = (viewport: HTMLElement, deltaY = -160) => {
+  // The auto-load trigger (task #4186): reaching the top fires the fetch.
+  const triggerAtTop = (viewport: HTMLElement) => {
     viewport.scrollTop = 0;
     act(() => {
-      viewport.dispatchEvent(new WheelEvent("wheel", { deltaY, bubbles: true }));
-    });
-    act(() => {
-      vi.advanceTimersByTime(200);
+      viewport.dispatchEvent(new Event("scroll"));
     });
   };
 
-  const triggerTouchPull = (viewport: HTMLElement, dy = 160) => {
-    viewport.scrollTop = 0;
-    act(() => {
-      viewport.dispatchEvent(
-        new TouchEvent("touchstart", {
-          touches: [makeTouch(100, 100)],
-          bubbles: true,
-        }),
-      );
-    });
-    act(() => {
-      viewport.dispatchEvent(
-        new TouchEvent("touchmove", {
-          touches: [makeTouch(100 + dy, 100)],
-          cancelable: true,
-          bubbles: true,
-        }),
-      );
-    });
-    act(() => {
-      viewport.dispatchEvent(new TouchEvent("touchend", { bubbles: true }));
-    });
-  };
-
-  it("natural momentum scroll to top stops at top without auto-triggering loadOlder", () => {
+  it("reaching the top fires loadOlder exactly once (auto-load, task #4186)", () => {
     const loadOlder = vi.fn();
     const items = [
       makeItem({ item_id: "0.0", kind: "system_prompt", payload: "prompt", created_at: null }),
@@ -1505,93 +1461,18 @@ describe("load-older prepend anchor & pull-down gesture (#659, #817, #1272)", ()
     render(<TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />);
     const viewport = screen.getByTestId("scroll-viewport");
 
-    // Scrolling up into top zone: does NOT auto-trigger loadOlder
+    // Scrolling up inside the list: no trigger yet.
     viewport.scrollTop = 50;
     viewport.dispatchEvent(new Event("scroll"));
+    expect(loadOlder).not.toHaveBeenCalled();
+    // A momentum run lands on scrollTop = 0 — the auto-load fires (and only
+    // once; the pending anchor gates further fires until a landing).
     viewport.scrollTop = 0;
     viewport.dispatchEvent(new Event("scroll"));
-    expect(loadOlder).not.toHaveBeenCalled();
-  });
-
-  it("pull-down gesture updates circular indicator progress and fills on threshold", () => {
-    const loadOlder = vi.fn();
-    const items = [makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })];
-    render(<TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />);
-    const viewport = screen.getByTestId("scroll-viewport");
-    const indicator = screen.getByTestId("pull-down-load-indicator");
-
-    viewport.scrollTop = 0;
-    act(() => {
-      viewport.dispatchEvent(
-        new TouchEvent("touchstart", {
-          touches: [makeTouch(100, 100)],
-          bubbles: true,
-        }),
-      );
-    });
-    // Partial pull (rAF-throttled render — advance one frame)
-    act(() => {
-      viewport.dispatchEvent(
-        new TouchEvent("touchmove", {
-          touches: [makeTouch(150, 100)],
-          cancelable: true,
-          bubbles: true,
-        }),
-      );
-      vi.advanceTimersByTime(16);
-    });
-    expect(Number(indicator.getAttribute("data-pull-progress"))).toBeGreaterThan(0);
-    expect(Number(indicator.getAttribute("data-pull-progress"))).toBeLessThan(1);
-
-    // Full pull reaching threshold
-    act(() => {
-      viewport.dispatchEvent(
-        new TouchEvent("touchmove", {
-          touches: [makeTouch(260, 100)],
-          cancelable: true,
-          bubbles: true,
-        }),
-      );
-      vi.advanceTimersByTime(16);
-    });
-    expect(indicator.getAttribute("data-filled")).toBe("true");
-    expect(Number(indicator.getAttribute("data-pull-progress"))).toBe(1);
-
-    // Release triggers load
-    act(() => {
-      viewport.dispatchEvent(new TouchEvent("touchend", { bubbles: true }));
-    });
     expect(loadOlder).toHaveBeenCalledTimes(1);
-  });
-
-  it("releasing before threshold resets without triggering loadOlder", () => {
-    const loadOlder = vi.fn();
-    const items = [makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })];
-    render(<TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />);
-    const viewport = screen.getByTestId("scroll-viewport");
-
     viewport.scrollTop = 0;
-    act(() => {
-      viewport.dispatchEvent(
-        new TouchEvent("touchstart", {
-          touches: [makeTouch(100, 100)],
-          bubbles: true,
-        }),
-      );
-    });
-    act(() => {
-      viewport.dispatchEvent(
-        new TouchEvent("touchmove", {
-          touches: [makeTouch(120, 100)],
-          cancelable: true,
-          bubbles: true,
-        }),
-      );
-    });
-    act(() => {
-      viewport.dispatchEvent(new TouchEvent("touchend", { bubbles: true }));
-    });
-    expect(loadOlder).not.toHaveBeenCalled();
+    viewport.dispatchEvent(new Event("scroll"));
+    expect(loadOlder).toHaveBeenCalledTimes(1);
   });
 
   it("anchors to the first REAL content node, not the system prompt (0.0) — zero height jitter (#817)", () => {
@@ -1612,7 +1493,7 @@ describe("load-older prepend anchor & pull-down gesture (#659, #817, #1272)", ()
       <TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />,
     );
     const viewport = screen.getByTestId("scroll-viewport");
-    triggerWheelPull(viewport);
+    triggerAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledTimes(1);
 
     // Tail growth does not move viewport
@@ -1664,7 +1545,7 @@ describe("load-older prepend anchor & pull-down gesture (#659, #817, #1272)", ()
       <TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />,
     );
     const viewport = screen.getByTestId("scroll-viewport");
-    triggerWheelPull(viewport);
+    triggerAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledTimes(1);
 
     moved = true;
@@ -1702,7 +1583,7 @@ describe("load-older prepend anchor & pull-down gesture (#659, #817, #1272)", ()
       <TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />,
     );
     const viewport = screen.getByTestId("scroll-viewport");
-    triggerTouchPull(viewport);
+    triggerAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledTimes(1);
 
     moved = true;
@@ -1741,7 +1622,7 @@ describe("load-older prepend anchor & pull-down gesture (#659, #817, #1272)", ()
       <TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />,
     );
     const viewport = screen.getByTestId("scroll-viewport");
-    triggerWheelPull(viewport);
+    triggerAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledTimes(1);
 
     moved = true;
@@ -1777,7 +1658,7 @@ describe("load-older prepend anchor & pull-down gesture (#659, #817, #1272)", ()
       <TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />,
     );
     const viewport = screen.getByTestId("scroll-viewport");
-    triggerWheelPull(viewport);
+    triggerAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledTimes(1);
 
     moved = true;
@@ -1812,7 +1693,7 @@ describe("load-older prepend anchor & pull-down gesture (#659, #817, #1272)", ()
       <TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />,
     );
     const viewport = screen.getByTestId("scroll-viewport");
-    triggerWheelPull(viewport);
+    triggerAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledTimes(1);
 
     moved = true;
@@ -1846,7 +1727,7 @@ describe("load-older prepend anchor & pull-down gesture (#659, #817, #1272)", ()
       <TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />,
     );
     const viewport = screen.getByTestId("scroll-viewport");
-    triggerWheelPull(viewport);
+    triggerAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledTimes(1);
 
     // Reset replaces content above with smaller content (delta = -20)
@@ -1882,7 +1763,7 @@ describe("load-older prepend anchor & pull-down gesture (#659, #817, #1272)", ()
       <TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />,
     );
     const viewport = screen.getByTestId("scroll-viewport");
-    triggerWheelPull(viewport);
+    triggerAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledTimes(1);
 
     rerender(
@@ -1897,145 +1778,6 @@ describe("load-older prepend anchor & pull-down gesture (#659, #817, #1272)", ()
       />,
     );
     expect(viewport.scrollTop).toBe(0);
-  });
-
-  it("shows the load-older fallback control when settled at top with more history; click loads with anchor capture", () => {
-    const loadOlder = vi.fn();
-    const items = [
-      makeItem({ item_id: "0.0", kind: "system_prompt", payload: "prompt", created_at: null }),
-      makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" }),
-    ];
-    render(<TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />);
-    const viewport = screen.getByTestId("scroll-viewport");
-    const button = screen.getByTestId("load-older-button");
-
-    // Not at top yet — control hidden and unfocusable.
-    viewport.scrollTop = 100;
-    act(() => {
-      viewport.dispatchEvent(new Event("scroll"));
-    });
-    expect(button.getAttribute("aria-hidden")).toBe("true");
-    expect(button.getAttribute("tabindex")).toBe("-1");
-
-    // Settled at top — control appears, focusable, exposed to assistive tech.
-    viewport.scrollTop = 0;
-    act(() => {
-      viewport.dispatchEvent(new Event("scroll"));
-    });
-    expect(button.getAttribute("aria-hidden")).toBe("false");
-    expect(button.getAttribute("tabindex")).toBe("0");
-
-    // Keyboard activation (button click semantics) loads older history.
-    fireEvent.click(button);
-    expect(loadOlder).toHaveBeenCalledTimes(1);
-  });
-
-  it("hides the fallback control when there is no more history, while loading, or mid-pull", () => {
-    const loadOlder = vi.fn();
-    const items = [makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })];
-    const { rerender } = render(
-      <TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />,
-    );
-    const viewport = screen.getByTestId("scroll-viewport");
-    const button = screen.getByTestId("load-older-button");
-    viewport.scrollTop = 0;
-    act(() => {
-      viewport.dispatchEvent(new Event("scroll"));
-    });
-    expect(button.getAttribute("aria-hidden")).toBe("false");
-
-    // hasMoreOlder=false → hidden.
-    rerender(<TimelineView items={items} onLoadOlder={loadOlder} />);
-    expect(button.getAttribute("aria-hidden")).toBe("true");
-
-    // hasMoreOlder + loadingOlder → hidden (spinner shows instead).
-    rerender(<TimelineView items={items} hasMoreOlder loadingOlder onLoadOlder={loadOlder} />);
-    expect(button.getAttribute("aria-hidden")).toBe("true");
-
-    // Mid-pull → hidden (the ring shows instead).
-    rerender(<TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />);
-    act(() => {
-      viewport.dispatchEvent(new Event("scroll"));
-    });
-    act(() => {
-      viewport.dispatchEvent(
-        new TouchEvent("touchstart", {
-          touches: [makeTouch(100, 100)],
-          bubbles: true,
-        }),
-      );
-      viewport.dispatchEvent(
-        new TouchEvent("touchmove", {
-          touches: [makeTouch(140, 100)],
-          cancelable: true,
-          bubbles: true,
-        }),
-      );
-      vi.advanceTimersByTime(16);
-    });
-    expect(button.getAttribute("aria-hidden")).toBe("true");
-  });
-
-  it("blurs the fallback control when it hides while focused (no invisible-focus activation)", () => {
-    const loadOlder = vi.fn();
-    const items = [makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })];
-    const { rerender } = render(
-      <TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />,
-    );
-    const viewport = screen.getByTestId("scroll-viewport");
-    const button = screen.getByTestId("load-older-button");
-    viewport.scrollTop = 0;
-    act(() => {
-      viewport.dispatchEvent(new Event("scroll"));
-    });
-    expect(button.getAttribute("aria-hidden")).toBe("false");
-    button.focus();
-    expect(document.activeElement).toBe(button);
-
-    // The control hides (history exhausted) — focus must be released so an
-    // invisible button can never be activated by Enter/Space.
-    rerender(<TimelineView items={items} onLoadOlder={loadOlder} />);
-    expect(button.getAttribute("aria-hidden")).toBe("true");
-    expect(document.activeElement).not.toBe(button);
-  });
-
-  it("hybrid device: an armed wheel-pull timer does not kill an in-flight touch pull", () => {
-    const loadOlder = vi.fn();
-    const items = [makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })];
-    render(<TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />);
-    const viewport = screen.getByTestId("scroll-viewport");
-
-    // Wheel pull below threshold arms the 180ms settle timer.
-    viewport.scrollTop = 0;
-    act(() => {
-      viewport.dispatchEvent(new WheelEvent("wheel", { deltaY: -80, bubbles: true }));
-    });
-
-    // A touch pull starts while the wheel timer is still pending, and passes
-    // the threshold; the stale wheel timer must not zero it.
-    act(() => {
-      viewport.dispatchEvent(
-        new TouchEvent("touchstart", {
-          touches: [makeTouch(100, 100)],
-          bubbles: true,
-        }),
-      );
-      viewport.dispatchEvent(
-        new TouchEvent("touchmove", {
-          touches: [makeTouch(260, 100)],
-          cancelable: true,
-          bubbles: true,
-        }),
-      );
-      viewport.dispatchEvent(new TouchEvent("touchend", { bubbles: true }));
-    });
-    expect(loadOlder).toHaveBeenCalledTimes(1);
-
-    // Let the (now-cleared) wheel timer window elapse — no double trigger.
-    act(() => {
-      vi.advanceTimersByTime(200);
-    });
-    expect(loadOlder).toHaveBeenCalledTimes(1);
   });
 
   it("large-window prepend: fixpoint cv-forcing compensates the full real growth (no estimate-based under-compensation, #2623)", () => {
@@ -2087,7 +1829,7 @@ describe("load-older prepend anchor & pull-down gesture (#659, #817, #1272)", ()
       <TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />,
     );
     const viewport = screen.getByTestId("scroll-viewport");
-    triggerWheelPull(viewport);
+    triggerAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledTimes(1);
 
     // The older window lands: two tall rows (500/400 real vs 80 estimates)
@@ -2110,43 +1852,6 @@ describe("load-older prepend anchor & pull-down gesture (#659, #817, #1272)", ()
       />,
     );
     expect(viewport.scrollTop).toBe(900);
-  });
-
-  it("wheel settle on a slow frame still flushes the filled ring before resetting (#2623 P2)", () => {
-    // Slow frames: the pull's rAF render never runs before the 180ms settle.
-    // The settle timer must flush the filled ring synchronously (one painted
-    // frame), fire the load, then reset on the next frame.
-    const rafCallbacks: FrameRequestCallback[] = [];
-    vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
-      rafCallbacks.push(cb);
-      return rafCallbacks.length;
-    });
-    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
-
-    const loadOlder = vi.fn();
-    const items = [makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })];
-    render(<TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />);
-    const viewport = screen.getByTestId("scroll-viewport");
-    const indicator = screen.getByTestId("pull-down-load-indicator");
-
-    viewport.scrollTop = 0;
-    act(() => {
-      viewport.dispatchEvent(new WheelEvent("wheel", { deltaY: -160, bubbles: true }));
-    });
-    // The pull's rAF (frame 1) never runs — slow frame. The settle timer
-    // fires: the ring must flush at full fill, and the load fires.
-    act(() => {
-      vi.advanceTimersByTime(180);
-    });
-    expect(loadOlder).toHaveBeenCalledTimes(1);
-    expect(indicator.getAttribute("data-filled")).toBe("true");
-
-    // The reset frame runs next — the ring resets to 0.
-    act(() => {
-      rafCallbacks.forEach((cb) => cb(performance.now()));
-      rafCallbacks.length = 0;
-    });
-    expect(Number(indicator.getAttribute("data-pull-progress"))).toBe(0);
   });
 
   it("preserves the reading position when the user scrolled during the fetch (document-space delta, not the trigger-time viewport top)", () => {
@@ -2179,7 +1884,7 @@ describe("load-older prepend anchor & pull-down gesture (#659, #817, #1272)", ()
       <TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />,
     );
     const viewport = screen.getByTestId("scroll-viewport");
-    triggerWheelPull(viewport); // trigger — capture at viewport top (doc 200)
+    triggerAtTop(viewport); // trigger — capture at viewport top (doc 200)
     expect(loadOlder).toHaveBeenCalledTimes(1);
 
     // The fetch goes in flight.
