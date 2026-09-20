@@ -6,6 +6,9 @@ Covers:
 - close: open→closed CAS + already-closed → 404
 - list: only returns open
 - agent terminated: register returns 409
+- port conflicts: one live page per (host, port) — refused with 409 (naming the
+  occupying page) before the auto-close; the live-port unique index backs the
+  same rule against raced registrations
 - DB trigger: agent termination cascade-closes agent-owned show() pages while
   leaving daemon-supervised serve() pages open
 
@@ -643,3 +646,135 @@ def test_register_page_rejects_privileged_port(db_conn: psycopg.Connection) -> N
         )
     assert resp.status_code == 400
     assert "privileged" in resp.json()["detail"]
+
+
+# ── live-port conflicts (one socket, one page) ───────────────────────────────
+
+
+def test_register_page_rejects_port_held_by_another_live_page(
+    db_conn: psycopg.Connection,
+) -> None:
+    """A second live registration on the same (host, port) is refused with 409
+    naming the occupying page — and the refusal leaves both agents' state
+    untouched (the owner keeps its page; the caller gets none)."""
+    owner = create_agent(db_conn)
+    other = create_agent(db_conn)
+    with TestClient(app) as client:
+        first = client.post(
+            f"/api/agents/{owner}/pages", json={"name": "holder", "port": 8771, "host": _HOST}
+        )
+        assert first.status_code == 201
+        resp = client.post(
+            f"/api/agents/{other}/pages", json={"name": "clash", "port": 8771, "host": _HOST}
+        )
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert f"page 'holder' of agent {owner}" in detail
+    assert "8771" in detail
+    db_conn.rollback()
+    assert [(r[0], r[1], r[5]) for r in _page_rows(db_conn, owner)] == [("holder", 8771, None)]
+    assert _page_rows(db_conn, other) == []
+
+
+def test_register_page_own_port_is_not_a_conflict(db_conn: psycopg.Connection) -> None:
+    """Re-registering on the agent's own port replaces its page (auto-close);
+    the conflict rule is about *another* live page, not the caller's own."""
+    aid = create_agent(db_conn)
+    with TestClient(app) as client:
+        first = client.post(
+            f"/api/agents/{aid}/pages", json={"name": "one", "port": 8772, "host": _HOST}
+        )
+        assert first.status_code == 201
+        resp = client.post(
+            f"/api/agents/{aid}/pages", json={"name": "two", "port": 8772, "host": _HOST}
+        )
+    assert resp.status_code == 201, resp.text
+    db_conn.rollback()
+    closed = {r[0]: r[5] for r in _page_rows(db_conn, aid)}
+    assert closed["two"] is None  # open
+    assert closed["one"] is not None  # auto-closed by the replacement
+
+
+def test_register_page_port_conflict_is_host_scoped(db_conn: psycopg.Connection) -> None:
+    """The same port on a different host is not a conflict — the rule is per socket."""
+    loopback_agent = create_agent(db_conn)
+    machine_agent = _agent_with_machine(db_conn, "port-scope-mc")
+    with TestClient(app) as client:
+        first = client.post(
+            f"/api/agents/{loopback_agent}/pages",
+            json={"name": "loop", "port": 8773, "host": _HOST},
+        )
+        assert first.status_code == 201
+        resp = client.post(
+            f"/api/agents/{machine_agent}/pages",
+            json={"name": "machine", "port": 8773, "host": "port-scope-mc"},
+        )
+    assert resp.status_code == 201, resp.text
+
+
+def test_register_page_reuses_port_freed_by_expiry(db_conn: psycopg.Connection) -> None:
+    """An expired row no longer holds its socket: another agent may register
+    the port (the daemon has reclaimed the expired row's server)."""
+    owner = create_agent(db_conn)
+    other = create_agent(db_conn)
+    with TestClient(app) as client:
+        first = client.post(
+            f"/api/agents/{owner}/pages", json={"name": "old", "port": 8774, "host": _HOST}
+        )
+        assert first.status_code == 201
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agent_pages SET expired_at = now() WHERE agent_id = %s AND name = 'old'",
+            (owner,),
+        )
+    db_conn.commit()
+    with TestClient(app) as client:
+        resp = client.post(
+            f"/api/agents/{other}/pages", json={"name": "fresh", "port": 8774, "host": _HOST}
+        )
+    assert resp.status_code == 201, resp.text
+
+
+def test_live_port_unique_index_guards_raced_registrations(
+    db_conn: psycopg.Connection,
+) -> None:
+    """DB-level pin of migration page-live-port-unique: two rows cannot both be
+    live on one (host, port), while an expired row is no obstacle."""
+    first = create_agent(db_conn)
+    second = create_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_pages (agent_id, name, port, host) VALUES (%s, 'x', 8775, %s)",
+            (first, _HOST),
+        )
+    db_conn.commit()
+    with pytest.raises(psycopg.errors.UniqueViolation), db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_pages (agent_id, name, port, host) VALUES (%s, 'y', 8775, %s)",
+            (second, _HOST),
+        )
+    db_conn.rollback()
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agent_pages SET expired_at = now() WHERE agent_id = %s AND name = 'x'",
+            (first,),
+        )
+        cur.execute(
+            "INSERT INTO agent_pages (agent_id, name, port, host) VALUES (%s, 'z', 8775, %s)",
+            (second, _HOST),
+        )
+    db_conn.commit()
+
+
+def test_register_page_raced_conflict_raises_domain_error(
+    db_conn: psycopg.Connection,
+) -> None:
+    """ops.register_page (the path behind the router's pre-check) refuses a
+    port a live row holds and names the occupant — the index backstop."""
+    from ops.pages import PagePortConflictError, register_page
+
+    owner = create_agent(db_conn)
+    other = create_agent(db_conn)
+    register_page(db_conn, owner, "holder", 8776, _HOST, None)
+    with pytest.raises(PagePortConflictError, match="'holder'"):
+        register_page(db_conn, other, "clash", 8776, _HOST, None)

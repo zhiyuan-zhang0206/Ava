@@ -17,6 +17,11 @@ updates host + port (agent restarted the server on a different port /
 name reuse), without colliding on the UNIQUE index. close is a CAS
 UPDATE; 0 rows returns None so the caller can distinguish not-found vs
 already-closed.
+
+Port rule: a live (open, unexpired) row exclusively holds its (host, port).
+assert_port_free reports the occupying row before the auto-close, and the
+`agent_pages_unique_live_port` partial unique index enforces the same rule
+against a registration that races the check.
 """
 
 from __future__ import annotations
@@ -76,6 +81,66 @@ def _row_to_record(row: tuple[Any, ...]) -> PageRow:
     )
 
 
+_LIVE_PORT_INDEX = "agent_pages_unique_live_port"
+
+
+class PagePortConflictError(Exception):
+    """(host, port) is already held by another live page row.
+
+    Raised by ``assert_port_free`` (the pre-check) and by ``register_page``
+    when the live-port unique index rejects a registration that raced the
+    pre-check. The message names the occupying page when it is visible; the
+    gateway router maps this to HTTP 409.
+    """
+
+
+def _port_conflict_message(host: str, port: int, owner: tuple[int, str] | None) -> str:
+    """The one conflict-message shape, for both the pre-check and the raced path."""
+    if owner is None:
+        return (
+            f"port {port} on {host} was taken by another page registration just now"
+            " — choose a different port"
+        )
+    owner_id, owner_name = owner
+    return (
+        f"port {port} on {host} is already used by page {owner_name!r} of agent {owner_id}"
+        " — close that page or choose a different port"
+    )
+
+
+def find_live_page_on_port(
+    db: psycopg.Connection, host: str, port: int, *, exclude_agent_id: int
+) -> tuple[int, str] | None:
+    """(agent_id, name) of another live page holding (host, port), or None.
+
+    Live = open and unexpired: the same predicate the page-server daemon and
+    the reverse proxy use, and the predicate of the live-port unique index.
+    Rows of ``exclude_agent_id`` are ignored — registration replaces the
+    registering agent's own page, so its own row is not a conflict.
+    """
+    with db.cursor() as cur:
+        cur.execute(
+            "SELECT agent_id, name FROM agent_pages "
+            "WHERE closed_at IS NULL AND expired_at IS NULL "
+            "AND host = %s AND port = %s AND agent_id <> %s "
+            "ORDER BY id LIMIT 1",
+            (host, port, exclude_agent_id),
+        )
+        row = cur.fetchone()
+    return (int(row[0]), str(row[1])) if row is not None else None
+
+
+def assert_port_free(db: psycopg.Connection, agent_id: int, host: str, port: int) -> None:
+    """Raise PagePortConflictError when another live page holds (host, port).
+
+    Runs before the registering agent's own pages are auto-closed, so a
+    rejected registration leaves the agent's current page untouched.
+    """
+    owner = find_live_page_on_port(db, host, port, exclude_agent_id=agent_id)
+    if owner is not None:
+        raise PagePortConflictError(_port_conflict_message(host, port, owner))
+
+
 def register_page(
     db: psycopg.Connection,
     agent_id: int,
@@ -100,24 +165,39 @@ def register_page(
     """
     ttl = ttl_seconds if ttl_seconds is not None else settings.daemon.page_default_ttl_seconds
     expires_at = datetime.now(UTC) + timedelta(seconds=ttl)
-    with db.cursor() as cur:
-        cur.execute(
-            "UPDATE agent_pages SET port = %s, host = %s, title = %s, serve_dir = %s, "  # noqa: S608
-            "expires_at = %s, expired_at = NULL "
-            "WHERE agent_id = %s AND name = %s AND closed_at IS NULL "
-            "RETURNING " + _SELECT_COLUMNS,
-            (port, host, title, serve_dir, expires_at, agent_id, name),
-        )
-        row = cur.fetchone()
-        if row is None:
+    try:
+        with db.cursor() as cur:
             cur.execute(
-                "INSERT INTO agent_pages "
-                "(agent_id, name, port, host, title, serve_dir, expires_at) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s) "
+                "UPDATE agent_pages SET port = %s, host = %s, title = %s, serve_dir = %s, "  # noqa: S608
+                "expires_at = %s, expired_at = NULL "
+                "WHERE agent_id = %s AND name = %s AND closed_at IS NULL "
                 "RETURNING " + _SELECT_COLUMNS,
-                (agent_id, name, port, host, title, serve_dir, expires_at),
+                (port, host, title, serve_dir, expires_at, agent_id, name),
             )
-            row = fetch_one(cur, f"insert page agent={agent_id} name={name!r}")
+            row = cur.fetchone()
+            if row is None:
+                cur.execute(
+                    "INSERT INTO agent_pages "
+                    "(agent_id, name, port, host, title, serve_dir, expires_at) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s) "
+                    "RETURNING " + _SELECT_COLUMNS,
+                    (agent_id, name, port, host, title, serve_dir, expires_at),
+                )
+                row = fetch_one(cur, f"insert page agent={agent_id} name={name!r}")
+    except psycopg.errors.UniqueViolation as exc:
+        # The live-port index is the authority; the router's pre-check can be
+        # raced by a concurrent registration. Discard the failed write, then
+        # name the occupant when a fresh read still sees it (its transaction
+        # committed). Other unique violations (the (agent_id, name) index)
+        # are not this function's rule — re-raise.
+        db.rollback()
+        if exc.diag.constraint_name != _LIVE_PORT_INDEX:
+            raise
+        raise PagePortConflictError(
+            _port_conflict_message(
+                host, port, find_live_page_on_port(db, host, port, exclude_agent_id=agent_id)
+            )
+        ) from exc
     db.commit()
     return _row_to_record(row)
 
