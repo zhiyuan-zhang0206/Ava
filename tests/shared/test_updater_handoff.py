@@ -658,3 +658,40 @@ def test_normal_writer_tolerates_whole_second_owner_create_time_drift(
         handoff.BootstrapRecoveryInvalidError, match="normal writer lost exact handoff ownership"
     ):
         handoff.write_normal_release_recovery("bootstrap", _normal_journal("waiting"))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_attempts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the clear-time spawn-attempt GC (I6) inside the test home.
+
+    A second isolated-path fixture (not folded into ``_isolated``) keeps this
+    addition additive at the file tail.
+    """
+    monkeypatch.setattr(
+        handoff, "spawn_attempts_dir", lambda generation: tmp_path / "updater-spawn" / generation
+    )
+
+
+def test_clear_gcs_the_generation_spawn_attempts() -> None:
+    """I6: a successful clear removes this generation's spawn-attempt evidence."""
+    _retained_bootstrap("candidate_ready", normal_release_planned=True)
+    _write_normal_through("committed")
+    attempts = handoff.spawn_attempts_dir("bootstrap")
+    attempts.mkdir(parents=True, exist_ok=True)
+    (attempts / "ava-ops.gate").write_text("held", encoding="utf-8")
+    (attempts / "ava-ops.7.receipt.json").write_text("{}", encoding="utf-8")
+    assert handoff.clear("bootstrap")
+    assert not attempts.exists()
+
+
+def test_refused_clear_keeps_the_generation_spawn_attempts() -> None:
+    """I6: a refused clear never touches the attempt evidence (non-terminal)."""
+    _retained_bootstrap("candidate_started")
+    attempts = handoff.spawn_attempts_dir("bootstrap")
+    attempts.mkdir(parents=True, exist_ok=True)
+    (attempts / "ava-ops.gate").write_text("held", encoding="utf-8")
+    (attempts / "ava-ops.7.receipt.json").write_text("{}", encoding="utf-8")
+    assert not handoff.clear("bootstrap")
+    assert (attempts / "ava-ops.gate").read_text(encoding="utf-8") == "held"
+    assert (attempts / "ava-ops.7.receipt.json").read_text(encoding="utf-8") == "{}"
+    assert handoff.state_path().exists()
