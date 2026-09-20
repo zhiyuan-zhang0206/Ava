@@ -20,6 +20,7 @@ import datetime as dt
 import json
 import logging
 import os
+import shutil
 import stat
 import tempfile
 import uuid
@@ -30,6 +31,7 @@ from typing import Literal, Never, cast
 import psutil
 
 import shared.paths
+from shared import spawn_receipt
 from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S
 from shared.platform import file_lock
 from shared.proc_tree import create_time_matches, stable_create_time
@@ -103,6 +105,16 @@ def bootstrap_state_path() -> Path:
 
 def lock_path() -> Path:
     return shared.paths.run_dir() / "updater-handoff.lock"
+
+
+def spawn_attempts_dir(generation: str) -> Path:
+    """This unit's per-generation spawn-attempt evidence directory (I6 GC scope).
+
+    The layout and the name check live in ``shared.spawn_receipt``, the module
+    that owns the evidence -- this accessor only binds them to the unit home so
+    the clear-time GC can never be steered outside that directory.
+    """
+    return spawn_receipt.spawn_attempt_dir(shared.paths.ava_home(), generation)
 
 
 def _timestamp(value: object, field: str) -> dt.datetime:
@@ -538,6 +550,24 @@ def allows_generic_recovery(snapshot: UpdaterHandoffSnapshot) -> bool:
         return _bootstrap_clearable_unlocked(snapshot.generation)
 
 
+def _gc_spawn_attempts(generation: str) -> None:
+    """I6: delete this generation's spawn-attempt evidence -- the ONLY path.
+
+    Clear-time is the single deletion point for receipts and gates (design
+    §4.5/§5): the directory is removed BEFORE the state-file unlinks, so every
+    crash point replays to convergence -- while a state file still names the
+    generation, the next clear re-enters, re-GCs (a no-op) and finishes. A
+    failed removal is logged and kept: retaining evidence is the conservative
+    side, and clear's verdict is about the handoff state, not the directory.
+    """
+    try:
+        shutil.rmtree(spawn_attempts_dir(generation))
+    except FileNotFoundError:
+        return
+    except (OSError, ValueError) as exc:
+        _log.warning("[updater-handoff] spawn-attempt GC left evidence in place: %s", exc)
+
+
 def clear(generation: str) -> bool:
     """CAS-clear only the handoff generation the caller owns."""
     path = state_path()
@@ -547,6 +577,7 @@ def clear(generation: str) -> bool:
             return False
         if not _bootstrap_clearable_unlocked(generation):
             return False
+        _gc_spawn_attempts(generation)
         if bootstrap_state_path().exists():
             bootstrap_state_path().unlink(missing_ok=True)
         path.unlink(missing_ok=True)
