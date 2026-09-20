@@ -52,6 +52,11 @@ async def reap_truncation_outcome(
     incarnation = current_incarnation(agent_id)
     if incarnation is None or not await _is_truncation(exc, pool, incarnation):
         return None
+    logger.info(
+        "hosted turn truncated by the update straggler reap",
+        event="host_turn_truncated",
+        agent_id=agent_id,
+    )
     return TurnOutcome(exited=False, crashed=False, truncated=True)
 
 

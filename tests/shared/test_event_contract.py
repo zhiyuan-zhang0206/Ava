@@ -206,7 +206,7 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # agent's never-auto-resurrect marker cleared by an explicit resurrect)
     # raises the current total to 202.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 202
+    assert len(_TELEMETRY_KINDS) == 204
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:
