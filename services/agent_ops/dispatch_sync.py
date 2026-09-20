@@ -153,8 +153,6 @@ def dispatch_sync(
                 mode="json"
             )
         case "cluster_resume":
-            if not payload:
-                return "completed", ops_cluster.cluster_resume_legacy_op()
             transition = ClusterTransitionPayload.model_validate(payload)
             return "completed", ops_cluster.cluster_resume_op(
                 transition.deploy_holder,

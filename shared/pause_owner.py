@@ -33,7 +33,7 @@ def _invalid(message: str) -> Never:
 
 @dataclass(frozen=True)
 class PauseOwnerSnapshot:
-    status: Literal["inactive", "paused", "resumed", "legacy-resumed", "invalid"]
+    status: Literal["inactive", "paused", "resumed", "invalid"]
     holder: str | None = None
     acquired_at: dt.datetime | None = None
     maintenance: MaintenanceHold | None = None
@@ -85,8 +85,6 @@ def _read_unlocked(path: Path) -> PauseOwnerSnapshot:
             _invalid("root must be an object")
         raw = cast("dict[str, object]", raw)
         state = raw["state"]
-        if state == "legacy-resumed":
-            return PauseOwnerSnapshot(status="legacy-resumed")
         holder = raw["holder"]
         acquired_raw = raw["acquired_at"]
         if state not in ("paused", "resumed"):
@@ -199,17 +197,6 @@ def mark_resumed(holder: str, acquired_at: dt.datetime) -> bool:
         return True
 
 
-def mark_legacy_resumed() -> PauseOwnerSnapshot:
-    """Record the one-rollout tokenless resume as an idempotent tombstone."""
-    path = state_path()
-    with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
-        current = _read_unlocked(path)
-        if current.status not in ("inactive", "legacy-resumed"):
-            raise RuntimeError("an exact or invalid pause owner replaced the legacy resume")
-        _write_atomic(path, {"state": "legacy-resumed"})
-        return _read_unlocked(path)
-
-
 def finalize_natural_resume() -> bool:
     """Generation-scoped successful-finalize when a host returns to serving on
     its own, without a `cluster/resume` op.
@@ -224,8 +211,8 @@ def finalize_natural_resume() -> bool:
 
     Generation-scoped by construction, never a force-clear: only a ``paused``
     journal is transitioned, and only to its own generation — this never
-    creates, mints or clears a record, and an absent / legacy /
-    already-``resumed`` / ``invalid`` journal is left untouched (an invalid one
+    creates, mints or clears a record, and an absent / already-``resumed`` /
+    ``invalid`` journal is left untouched (an invalid one
     may be cleared only by recovery's no-live-owner proof). A newer pause
     replaces the journal before a delayed finalize can reach it.
 
