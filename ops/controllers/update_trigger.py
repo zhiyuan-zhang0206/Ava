@@ -38,7 +38,8 @@ _last_update_spawn: float = 0.0
 
 # Consecutive failure counter. After _ESCALATE_AFTER_N failures (~10 min at
 # 120s cooldown), escalate from WARNING to ERROR so the failure becomes visible
-# in agent_events (shared/log.py routes ERROR there). Reset on any success.
+# in the cluster event stream (shared/log.py routes ERROR events through the
+# unified emitter). Reset on any success.
 _consecutive_failures: int = 0
 _ESCALATE_AFTER_N = 5
 

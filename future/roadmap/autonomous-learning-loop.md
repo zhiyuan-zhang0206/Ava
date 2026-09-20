@@ -1,5 +1,11 @@
 # Autonomous learning loop (generation 1 of the evolution machine)
 
+> **Premise retired (2026-09-21):** the telemetry-mining section below assumes
+> the unified `events` table read via `ava.DB`; that table was frozen at the
+> LGTM cutover (task #1197) and dropped with the archive cleanup (task
+> #1281/#1823). The cluster event stream is now Loki (with the emitter's JSONL
+> mirror as the local source) — point the Curator's mining job there.
+
 The agent works with one eye on the future, not just the task in front of it.
 As it works it **notices** things worth carrying forward — a reusable procedure,
 a durable fact, a flaw in its own prompt / tools / skills — and jots them; once a

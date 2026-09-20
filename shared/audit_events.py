@@ -69,13 +69,14 @@ def insert_event_log(
     """Record one audit event (category=audit) through the unified emitter.
 
     The emitter enqueues immediately (non-blocking; a broken sink never
-    raises into the caller) and the drain thread batch-writes the `events`
-    row. The one exception is a contract violation: an event_type with no
-    EventSpec in the registry raises ValueError (fail-fast, R2-C), so
-    callers must keep event_type inside the registry. The dangling-target guard: a
-    target_agent_id that no longer exists is cleared rather than failing the
-    write (tests and just-terminated agents produce such references; the event
-    is still valid, the source string carries the origin).
+    raises into the caller) and the drain thread appends the batch to the
+    day-stamped JSONL mirror and exports it to the OTLP backend. The one
+    exception is a contract violation: an event_type with no EventSpec in the
+    registry raises ValueError (fail-fast, R2-C), so callers must keep
+    event_type inside the registry. Dangling target references are recorded
+    as-is: readers join events against the live agents set and drop unknown
+    target_agent_id values (tests and just-terminated agents produce such
+    references; the event is still valid, the source string carries the origin).
 
     Args:
         event_type: one of 'spawn', 'send_message', 'terminate', 'resurrect',

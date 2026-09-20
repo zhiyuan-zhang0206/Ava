@@ -75,5 +75,5 @@ aggregates alive across the retirement.
 ## Key Dependencies
 
 - [[db.ava.okf.md]] — Postgres connection pool (the `events` archive is dropped)
-- [[metrics.ava.okf.md]] — computes system-level metrics on top of `events`
+- [[metrics.ava.okf.md]] — computes system-level metrics on top of the event stream
 - `shared/telemetry.py` — the unified emitter (queue + drain + batch writer)

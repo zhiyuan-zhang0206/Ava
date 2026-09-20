@@ -653,14 +653,13 @@ def main(argv: list[str] | None = None) -> int:
     # "watchdog-probe registration failed on Windows" (#885, #1117) — was
     # silently dropped. Attach the CLI sink set (stderr + <name>.log + events
     # pipeline) so a failed self-update's last steps are visible in the updater
-    # log and on the cluster admin events surface without ssh. The postgres
-    # sink raises when the DB is unreachable — a real scenario on the recovery
-    # path this process exists for (gateway mid-restart) — so tolerate that:
-    # the stderr + file sinks attach before it, and stderr is captured into the
+    # log and on the cluster admin events surface without ssh. Sink setup can
+    # fail (the event pipeline opens during init) — so tolerate that: the
+    # stderr + file sinks attach before it, and stderr is captured into the
     # updater log by the spawn wrapper, so the details still land somewhere.
-    # Silence is deliberate: the stderr + file sinks attach before the postgres
-    # sink, so an init failure still leaves the stderr sink live (captured into
-    # the updater log by the spawn wrapper) — nothing diagnosable is lost.
+    # Silence is deliberate: the stderr + file sinks attach before the events
+    # pipeline, so an init failure still leaves the stderr sink live (captured
+    # into the updater log by the spawn wrapper) — nothing diagnosable is lost.
     import argparse
 
     import shared.log as _log

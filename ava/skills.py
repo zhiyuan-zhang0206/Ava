@@ -702,8 +702,8 @@ def _insert_skill_events(agent: int, skills: list[Skill]) -> bool:
 
     Honest contract: `True` means "enqueued", not "persisted" — the write is
     async (drain thread), drained at process exit via the emitter's atexit
-    hook (exec subprocesses included); a SIGKILL still loses the DB copy
-    (JSONL mirror + file sinks hold the line). Dedup marks "enqueued".
+    hook (exec subprocesses included); a SIGKILL still loses the undrained
+    batch (JSONL mirror + file sinks hold the line). Dedup marks "enqueued".
     """
     if not skills:
         return True

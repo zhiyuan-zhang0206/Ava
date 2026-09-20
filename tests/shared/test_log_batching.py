@@ -294,7 +294,7 @@ def test_add_postgres_sink_registers_at_most_once() -> None:
 
 def test_event_pipeline_filter_drops_no_emitter_and_node_enter() -> None:
     """The pipeline filter admits ordinary records but drops two families:
-    the emitter's own failure reports (`_no_emitter` marker — a DB-down
+    the emitter's own failure reports (`_no_emitter` marker — a mirror-down
     process must not loop failure → warning → emit) and `node_enter` (zero
     event-stream consumers; the row would be pure write amplification — the
     log-file line is the death-analysis source). Anything else — including
@@ -379,11 +379,11 @@ def test_shed_records_report_one_event_log_drop() -> None:
 
 def test_jsonl_mirror_failure_is_reported_not_silent(monkeypatch: pytest.MonkeyPatch) -> None:
     """A JSONL mirror write failure must be REPORTED (first + every 50th), not
-    swallowed: the mirror is the durable fallback for the DB copy, and a
-    disk-full / permission error would otherwise degrade both copies without
-    a trace. The report carries the `_no_emitter` marker so it never re-enters
-    the pipeline (a mirror-down process would otherwise loop failure -> warn
-    -> emit -> failure)."""
+    swallowed: the mirror is the durable local copy, and a disk-full /
+    permission error would otherwise degrade it without a trace. The report
+    carries the `_no_emitter` marker so it never re-enters the pipeline
+    (a mirror-down process would otherwise loop failure -> warn -> emit ->
+    failure)."""
     from loguru import logger
 
     captured: list[str] = []
