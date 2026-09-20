@@ -16,6 +16,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 import pytest
 
@@ -38,9 +39,14 @@ from cli.commands._release_context import (
 from cli.commands._update_publication import PreparedUnitPublication, published_unit
 from ops.cluster_rpc import ClusterOpFailed, ClusterOpUnreachable
 from ops.rpc_prepare_dispatch import PrepareDispatchResult
-from ops.rpc_prepare_facts import ImageRef
+from ops.rpc_prepare_facts import ImageRef, RestrictedHopMaterial
+from services.agent_ops.bootstrap import PreparedObservation
 from shared.managed_writer_barrier import ManagedWriterBarrierError, RolloutIdentity
-from shared.managed_writer_observation import ExpectedUnitWriters
+from shared.managed_writer_observation import (
+    ExpectedProcess,
+    ExpectedUnitWriters,
+    ObservationChallenge,
+)
 from shared.managed_writer_publication import CandidateUnitPlan, NormalService, PublishedUnit
 from shared.runtime_publication_input import PreparationReceipt, PreparedService
 from shared.runtime_release import ReleaseRejectedError
@@ -121,6 +127,34 @@ def _candidate(unit: PublishedUnit) -> CandidateUnitPlan:
     )
 
 
+def _hop_material(machine: str, home: str) -> RestrictedHopMaterial:
+    context = PreparedObservation(
+        expected=ExpectedUnitWriters(
+            machine=machine,
+            home=home,
+            artifact_digest=RECOVERY_ARTIFACT,
+            manifest_digest=RECOVERY_MANIFEST,
+            processes=(),
+            sessions=(),
+            launchers=(),
+        ),
+        operation=RolloutIdentity(
+            holder="gateway:pid1",
+            acquired_at=datetime(2026, 9, 20, tzinfo=UTC),
+            target_sha=TARGET_SHA,
+        ),
+        challenge=ObservationChallenge(
+            challenge=UUID(int=1), valid_until=datetime(2026, 9, 20, 1, tzinfo=UTC)
+        ),
+        schema_digest=RECOVERY_SCHEMA,
+    )
+    return RestrictedHopMaterial(
+        predecessor=ExpectedProcess(pid=424242, create_time=1700000000.0),
+        recovery_context_path=f"{home}/run/hop-recovery-fixture.json",
+        recovery_context=context.model_dump_json(),
+    )
+
+
 def _facts(machine: str, home: str, *, candidate: bool = True) -> PreparedUnitFacts:
     unit = _published(machine, home)
     return PreparedUnitFacts(
@@ -137,6 +171,7 @@ def _facts(machine: str, home: str, *, candidate: bool = True) -> PreparedUnitFa
             manifest_digest=RECOVERY_MANIFEST,
             schema_digest=RECOVERY_SCHEMA,
         ),
+        hop_material=_hop_material(machine, home),
     )
 
 

@@ -16,14 +16,25 @@ import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 import pytest
 
 from ops import ops_prepare_facts
-from ops.rpc_prepare_facts import ImageRef, PrepareFactsPayload, PrepareFactsResult
+from ops.rpc_prepare_facts import (
+    ImageRef,
+    PrepareFactsPayload,
+    PrepareFactsResult,
+    RestrictedHopMaterial,
+)
+from services.agent_ops.bootstrap import PreparedObservation
 from shared.config import settings
 from shared.managed_writer_barrier import RolloutIdentity
-from shared.managed_writer_observation import ExpectedUnitWriters
+from shared.managed_writer_observation import (
+    ExpectedProcess,
+    ExpectedUnitWriters,
+    ObservationChallenge,
+)
 from shared.managed_writer_publication import CandidateUnitPlan, NormalService, PublishedUnit
 from shared.runtime_publication_input import PreparationReceipt, PreparedService
 from shared.runtime_release import ReleaseRejectedError
@@ -56,6 +67,35 @@ def _payload(artifact_digest: str = ARTIFACT) -> PrepareFactsPayload:
             manifest_digest=RECOVERY_MANIFEST,
             schema_digest=RECOVERY_SCHEMA,
         ),
+    )
+
+
+def _hop_material(home: Path) -> RestrictedHopMaterial:
+    """One internally consistent restricted-hop material block (task #4129 I4)."""
+    context = PreparedObservation(
+        expected=ExpectedUnitWriters(
+            machine="runner",
+            home=str(home),
+            artifact_digest=RECOVERY_ARTIFACT,
+            manifest_digest=RECOVERY_MANIFEST,
+            processes=(),
+            sessions=(),
+            launchers=(),
+        ),
+        operation=RolloutIdentity(
+            holder="gateway:pid1",
+            acquired_at=datetime(2026, 9, 20, tzinfo=UTC),
+            target_sha="0" * 40,
+        ),
+        challenge=ObservationChallenge(
+            challenge=UUID(int=1), valid_until=datetime(2026, 9, 20, 1, tzinfo=UTC)
+        ),
+        schema_digest=RECOVERY_SCHEMA,
+    )
+    return RestrictedHopMaterial(
+        predecessor=ExpectedProcess(pid=424242, create_time=1700000000.0),
+        recovery_context_path=f"{home}/run/hop-recovery-fixture.json",
+        recovery_context=context.model_dump_json(),
     )
 
 
@@ -121,6 +161,7 @@ def _shipment(home: Path) -> PrepareFactsResult:
             schema_digest=RECOVERY_SCHEMA,
         ),
         previous_selector=None,
+        hop_material=_hop_material(home),
     )
 
 
