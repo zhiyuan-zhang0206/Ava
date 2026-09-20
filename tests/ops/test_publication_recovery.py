@@ -17,8 +17,8 @@ events are captured through the module's `insert_event_log` seam.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from datetime import timedelta
+from collections.abc import Callable, Iterator
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -27,6 +27,7 @@ import pytest
 from psycopg.types.json import Jsonb
 
 import ops.publication_recovery as _pr
+from ops import cluster_rpc
 from ops.cluster import ClusterUpdateInProgress
 from shared import updater_handoff as _handoff
 from shared.cluster_lock import self_holder
@@ -36,10 +37,16 @@ from shared.managed_writer_barrier import (
     ManagedWriterCollection,
     RolloutIdentity,
 )
+from shared.managed_writer_observation import ExpectedProcess
 from shared.managed_writer_publication import (
     CommittedPublication,
+    NormalService,
+    NormalServiceReadback,
+    PendingMigrationReceipt,
     PendingPublication,
     PublishedUnit,
+    SelectorReadback,
+    UnitActivationReadback,
     WriterPublication,
 )
 
@@ -100,6 +107,8 @@ def _abandoned_rollout(
     holder: str = "m1:pid9001",
     with_current: bool = False,
     expired: bool = True,
+    valid_until: datetime | None = None,
+    plan_digest: str | None = None,
 ) -> WriterPublication:
     """An executing-rollout row carrying a durable pending publication."""
     row = db_conn.execute(
@@ -134,6 +143,8 @@ def _abandoned_rollout(
             candidate_digest=CANDIDATE_DIGEST,
             challenge=uuid4(),
             units=(_unit(),),
+            valid_until=valid_until,
+            plan_digest=plan_digest,
         ),
     )
     db_conn.execute(
@@ -381,6 +392,24 @@ def test_run_replaces_the_abandoned_operation_under_a_fresh_closure(
     assert completed[0]["units"] == 1
 
 
+def test_recovery_does_not_carry_the_abandoned_plan_registration(
+    recovery_db: psycopg.Connection,
+) -> None:
+    """A replacement's premise is its fresh closure, never the abandoned sealed plan."""
+    _abandoned_rollout(
+        recovery_db, valid_until=datetime(2026, 9, 21, tzinfo=UTC), plan_digest="f" * 64
+    )
+
+    result = _pr.run_pending_publication_recovery(collect=_collector)
+
+    assert result["recovered"] is True
+    row = recovery_db.execute(
+        "SELECT managed_writer_evidence->'pending'->'valid_until', "
+        "managed_writer_evidence->'pending'->'plan_digest' FROM deployment_state WHERE id=1"
+    ).fetchone()
+    assert row == (None, None)
+
+
 def test_a_dead_holder_with_an_unexpired_lease_is_still_replaced(
     recovery_db: psycopg.Connection,
 ) -> None:
@@ -464,6 +493,350 @@ def test_completion_refuses_a_replayed_or_incomplete_closure(
         _pr.complete_pending_publication_recovery(claim, _collector(claim))
 
 
+# ─── the exact pre-stop abort (task #4129 C-4) ────────────────────────────────
+
+
+_ReadAnswer = dict[str, object] | BaseException | Callable[[], dict[str, object] | BaseException]
+
+
+def _clean_read(machine: str = "runner", home: str = "/ava") -> dict[str, object]:
+    return {"machine": machine, "home": home, "journal_present": False, "journal_stage": None}
+
+
+def _stub_unit_reads(
+    monkeypatch: pytest.MonkeyPatch, answers: list[_ReadAnswer]
+) -> list[tuple[str, dict[str, object]]]:
+    """Stub the per-unit journal probe (`ops.cluster_rpc.dispatch_to_machine`).
+
+    Each answer is a result dict to return, an exception to raise, or a
+    zero-arg callable performing a side effect and returning either.
+    """
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def _read(
+        *, target_machine: str, kind: str, payload: dict[str, object], ops_url: str | None = None
+    ) -> dict[str, object]:
+        calls.append((target_machine, {"kind": kind, "payload": payload, "ops_url": ops_url}))
+        entry = answers.pop(0)
+        answer = entry() if callable(entry) else entry
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _read)
+    return calls
+
+
+def _store_pending(
+    db_conn: psycopg.Connection, publication: WriterPublication, **updates: object
+) -> None:
+    pending = publication.pending
+    assert pending is not None
+    moved = publication.model_copy(update={"pending": pending.model_copy(update=updates)})
+    db_conn.execute(
+        "UPDATE deployment_state SET managed_writer_evidence=%s WHERE id=1",
+        (Jsonb(moved.model_dump(mode="json")),),
+    )
+    db_conn.commit()
+
+
+def _collection_for(publication: WriterPublication) -> ManagedWriterCollection:
+    pending = publication.pending
+    assert pending is not None
+    return ManagedWriterCollection(
+        operation=pending.operation,
+        candidate_digest=pending.candidate_digest,
+        challenge=pending.challenge,
+        collected_at=pending.operation.acquired_at,
+        valid_until=pending.operation.acquired_at + timedelta(seconds=120),
+        units=tuple(
+            ManagedUnitClosure(
+                unit=ManagedUnit(
+                    machine=unit.machine,
+                    home=unit.home,
+                    inventory_digest=unit.prepared_receipt_digest,
+                ),
+                boot_id=uuid4(),
+                observer_instance=uuid4(),
+                observation_digest="9" * 64,
+                outcome="old_writers_absent_relaunchers_fenced",
+            )
+            for unit in pending.units
+        ),
+    )
+
+
+def _migration_for(publication: WriterPublication) -> PendingMigrationReceipt:
+    pending = publication.pending
+    assert pending is not None
+    return PendingMigrationReceipt(
+        operation=pending.operation,
+        challenge=pending.challenge,
+        schema_digest="a" * 64,
+        applied_names=(),
+        verified_at=datetime.now(UTC),
+    )
+
+
+def _readback_for(publication: WriterPublication) -> UnitActivationReadback:
+    pending = publication.pending
+    assert pending is not None
+    now = datetime.now(UTC)
+    executable = f"/ava/releases/{'b' * 64}/venv/bin/python"
+    service = NormalService(
+        session="ava-ops",
+        module=None,
+        executable=executable,
+        entrypoint=executable,
+        command_digest="a" * 64,
+    )
+    return UnitActivationReadback(
+        selector=SelectorReadback(
+            unit=_unit(),
+            challenge=pending.challenge,
+            previous_digest=None,
+            current_digest="c" * 64,
+            observed_at=now,
+            valid_until=now + timedelta(seconds=30),
+        ),
+        services=(
+            NormalServiceReadback(
+                service=service,
+                supervisor=ExpectedProcess(pid=11, create_time=1.0),
+                child=ExpectedProcess(pid=12, create_time=2.0),
+                loaded_module=None,
+                executable=executable,
+                entrypoint=executable,
+                artifact_digest="b" * 64,
+                manifest_digest="c" * 64,
+                readiness="normal",
+                challenge=pending.challenge,
+                observed_at=now,
+                valid_until=now + timedelta(seconds=30),
+                observation_digest="3" * 64,
+            ),
+        ),
+    )
+
+
+def test_pre_stop_abort_reports_nothing_to_abort(recovery_db: psycopg.Connection) -> None:
+    assert _pr.pre_stop_abort_pending_publication_op() == {
+        "aborted": False,
+        "detail": "no pending publication is journaled",
+    }
+
+
+def test_pre_stop_abort_clears_a_never_effective_window(
+    recovery_db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The expired-lease arm: every journaled unit answers clean, the row clears."""
+    publication = _abandoned_rollout(recovery_db, with_current=True)
+    events = _capture_events(monkeypatch)
+    calls = _stub_unit_reads(monkeypatch, [_clean_read()])
+
+    result = _pr.pre_stop_abort_pending_publication_op()
+
+    assert result == {
+        "aborted": True,
+        "abandoned_holder": "m1:pid9001",
+        "target_sha": TARGET_SHA,
+        "units": 1,
+    }
+    assert calls == [
+        ("runner", {"kind": "cluster_bootstrap_recovery_read", "payload": {}, "ops_url": None})
+    ]
+
+    row = recovery_db.execute(
+        "SELECT holder, acquired_at, expires_at, note, phase, kind, target_sha, "
+        "managed_writer_evidence->'pending', managed_writer_evidence->'current' "
+        "FROM deployment_state WHERE id=1"
+    ).fetchone()
+    assert row is not None
+    holder, acquired_at, expires_at, note, phase, kind, target_sha, pending, current = row
+    assert (holder, acquired_at, expires_at, note) == (None, None, None, None)
+    assert (phase, kind) == ("stable", None)
+    # The target field is not this write's to clear; the release statement keeps it.
+    assert target_sha == TARGET_SHA
+    assert pending is None
+    assert publication.current is not None
+    assert current == publication.current.model_dump(mode="json")
+
+    assert [event_type for event_type, _ in events] == ["managed_writer_pre_stop_aborted"]
+    payload = events[0][1]
+    assert payload["abandoned_holder"] == "m1:pid9001"
+    assert payload["abandoned_target_sha"] == TARGET_SHA
+    assert payload["units"] == 1
+    assert payload["candidate_digest"] == CANDIDATE_DIGEST
+
+
+def test_pre_stop_abort_pins_an_unexpired_dead_holder(
+    recovery_db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TTL expiry is not the exit evidence; the proven-dead lease identity is pinned."""
+    _abandoned_rollout(recovery_db, expired=False)
+    _capture_events(monkeypatch)
+    _stub_unit_reads(monkeypatch, [_clean_read()])
+
+    result = _pr.pre_stop_abort_pending_publication_op()
+
+    assert result["aborted"] is True
+    row = recovery_db.execute(
+        "SELECT holder, phase, kind, managed_writer_evidence->'pending' "
+        "FROM deployment_state WHERE id=1"
+    ).fetchone()
+    assert row == (None, "stable", None, None)
+
+
+def test_pre_stop_abort_refuses_a_live_holder_process(
+    recovery_db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _abandoned_rollout(recovery_db, expired=False)
+    before = _journal_snapshot(recovery_db)
+    monkeypatch.setattr(_pr, "holder_process_gone", _holder_alive)
+
+    with pytest.raises(ClusterUpdateInProgress, match="live process"):
+        _pr.pre_stop_abort_pending_publication_op()
+
+    assert _journal_snapshot(recovery_db) == before
+
+
+def test_pre_stop_abort_refuses_a_unit_that_still_reports_a_journal(
+    recovery_db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _abandoned_rollout(recovery_db)
+    before = _journal_snapshot(recovery_db)
+    _stub_unit_reads(
+        monkeypatch,
+        [
+            {
+                "machine": "runner",
+                "home": "/ava",
+                "journal_present": True,
+                "journal_stage": "prepared",
+            }
+        ],
+    )
+
+    with pytest.raises(ClusterUpdateInProgress, match="reports a bootstrap recovery journal"):
+        _pr.pre_stop_abort_pending_publication_op()
+
+    assert _journal_snapshot(recovery_db) == before
+
+
+def test_pre_stop_abort_refuses_an_unreachable_unit(
+    recovery_db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _abandoned_rollout(recovery_db)
+    before = _journal_snapshot(recovery_db)
+    _stub_unit_reads(monkeypatch, [cluster_rpc.ClusterOpUnreachable("connect timed out")])
+
+    with pytest.raises(
+        ClusterUpdateInProgress, match="could not prove a journaled unit effect-free"
+    ):
+        _pr.pre_stop_abort_pending_publication_op()
+
+    assert _journal_snapshot(recovery_db) == before
+
+
+def test_pre_stop_abort_refuses_a_failed_read(
+    recovery_db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _abandoned_rollout(recovery_db)
+    before = _journal_snapshot(recovery_db)
+    _stub_unit_reads(monkeypatch, [cluster_rpc.ClusterOpFailed({"error": "route refused"})])
+
+    with pytest.raises(ClusterUpdateInProgress, match="a bootstrap-recovery read failed"):
+        _pr.pre_stop_abort_pending_publication_op()
+
+    assert _journal_snapshot(recovery_db) == before
+
+
+def test_pre_stop_abort_refuses_an_answer_from_another_unit(
+    recovery_db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _abandoned_rollout(recovery_db)
+    before = _journal_snapshot(recovery_db)
+    _stub_unit_reads(monkeypatch, [_clean_read(machine="elsewhere")])
+
+    with pytest.raises(ClusterUpdateInProgress, match="belongs to another unit"):
+        _pr.pre_stop_abort_pending_publication_op()
+
+    assert _journal_snapshot(recovery_db) == before
+
+
+def test_pre_stop_abort_refuses_when_the_journal_moved_mid_proof(
+    recovery_db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _abandoned_rollout(recovery_db)
+
+    def _move_operation() -> dict[str, object]:
+        recovery_db.execute(
+            "UPDATE deployment_state SET managed_writer_evidence=jsonb_set("
+            "managed_writer_evidence, '{pending,operation,target_sha}', to_jsonb(%s::text)) "
+            "WHERE id=1",
+            ("2" * 40,),
+        )
+        recovery_db.commit()
+        return _clean_read()
+
+    _stub_unit_reads(monkeypatch, [_move_operation])
+
+    with pytest.raises(ClusterUpdateInProgress, match="pending operation changed"):
+        _pr.pre_stop_abort_pending_publication_op()
+
+    row = recovery_db.execute(
+        "SELECT holder, phase, kind, "
+        "managed_writer_evidence->'pending'->'operation'->>'target_sha' "
+        "FROM deployment_state WHERE id=1"
+    ).fetchone()
+    assert row == ("m1:pid9001", "updating", "rollout", "2" * 40)
+
+
+def test_pre_stop_abort_refuses_when_the_lease_moved_mid_proof(
+    recovery_db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _abandoned_rollout(recovery_db)
+
+    def _move_lease() -> dict[str, object]:
+        recovery_db.execute(
+            "UPDATE deployment_state SET holder='elsewhere:pid1', "
+            "acquired_at=clock_timestamp(), "
+            "expires_at=clock_timestamp()+make_interval(secs=>600) WHERE id=1"
+        )
+        recovery_db.commit()
+        return _clean_read()
+
+    _stub_unit_reads(monkeypatch, [_move_lease])
+
+    with pytest.raises(ClusterUpdateInProgress, match="journal or lease changed"):
+        _pr.pre_stop_abort_pending_publication_op()
+
+    row = recovery_db.execute(
+        "SELECT holder, expires_at > clock_timestamp(), phase FROM deployment_state WHERE id=1"
+    ).fetchone()
+    assert row == ("elsewhere:pid1", True, "updating")
+
+
+@pytest.mark.parametrize("face", ["collection", "migration", "readbacks"])
+def test_pre_stop_abort_refuses_a_journal_that_records_effects(
+    recovery_db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, face: str
+) -> None:
+    publication = _abandoned_rollout(recovery_db, with_current=True)
+    if face == "collection":
+        _store_pending(recovery_db, publication, collection=_collection_for(publication))
+    elif face == "migration":
+        _store_pending(recovery_db, publication, migration=_migration_for(publication))
+    else:
+        _store_pending(recovery_db, publication, unit_readbacks=(_readback_for(publication),))
+    _stub_unit_reads(monkeypatch, [_clean_read()])
+    before = _journal_snapshot(recovery_db)
+
+    with pytest.raises(ClusterUpdateInProgress, match="already records effects"):
+        _pr.pre_stop_abort_pending_publication_op()
+
+    assert _journal_snapshot(recovery_db) == before
+
+
 # ─── the emitted audit events exist in the registry ───────────────────────────
 
 
@@ -472,3 +845,4 @@ def test_recovery_events_are_registered() -> None:
 
     assert "managed_writer_recovery_claimed" in EVENTS
     assert "managed_writer_recovery_completed" in EVENTS
+    assert "managed_writer_pre_stop_aborted" in EVENTS

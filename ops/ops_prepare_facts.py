@@ -19,6 +19,7 @@ import time
 from pathlib import Path
 
 from ops.rpc_prepare_facts import PrepareFactsPayload, PrepareFactsResult
+from ops.unit_local import candidate_interpreter
 from shared.config import settings
 from shared.log import logger
 from shared.proc import run_bounded
@@ -40,21 +41,6 @@ _PREPARE_FACTS_TIMEOUT_S = 120.0
 # entry's own budgets. KEEP (task #3696 exception inventory): a self-imposed
 # relay guard fixed by the shipment's shape, not a tunable limit.
 _MAX_SHIPMENT_BYTES = 256 * 1024
-
-
-def _candidate_interpreter(home: Path, artifact_digest: str) -> Path:
-    root = home / "releases" / artifact_digest
-    try:
-        if root.resolve(strict=True) != root:
-            raise ReleaseRejectedError("announced candidate image is not canonical")
-        interpreter = (root / "venv" / "bin" / "python").resolve(strict=True)
-    except OSError as exc:
-        raise ReleaseRejectedError(
-            "announced candidate image is not retained on this unit"
-        ) from exc
-    if not interpreter.is_relative_to(root / "venv"):
-        raise ReleaseRejectedError("candidate interpreter escapes its retained image")
-    return interpreter
 
 
 def _child_environment(home: Path) -> dict[str, str]:
@@ -100,7 +86,7 @@ def _child_argv(interpreter: Path, payload: PrepareFactsPayload) -> list[str]:
 
 def cluster_prepare_facts_op(payload: PrepareFactsPayload) -> PrepareFactsResult:
     home = settings.general.ava_home
-    interpreter = _candidate_interpreter(home, payload.candidate.artifact_digest)
+    interpreter = candidate_interpreter(home, payload.candidate.artifact_digest)
     started = time.monotonic()
     logger.info(
         "[cluster_prepare_facts] start pid={pid} image={image}",

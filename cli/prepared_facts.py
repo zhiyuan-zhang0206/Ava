@@ -32,6 +32,7 @@ import hashlib
 import json
 import os
 import platform
+import shlex
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -41,9 +42,10 @@ import psycopg
 from cli.commands._release_inventory import prepare_unit_inventory
 from cli.commands._release_selector import read_selector, selector_bytes
 from cli.commands._release_services import prepare_normal_services
-from ops.rpc_prepare_facts import ImageRef
+from ops.rpc_prepare_facts import ImageRef, RestrictedHopMaterial
 from shared.machine import MachineRoleMissing
 from shared.managed_writer_barrier import ManagedWriterBarrierError, RolloutIdentity, lock_rollout
+from shared.managed_writer_observation import ExpectedProcess
 from shared.managed_writer_publication import CandidateUnitPlan, PublishedUnit
 from shared.native_job_observation import NativeReadUnavailableError
 from shared.runtime_interpreter import WHEEL_RUNTIME, runtime_venv
@@ -106,6 +108,76 @@ def _verify_release(ref: ImageRef, store: Path) -> VerifiedRelease:
         manifest_digest=ref.manifest_digest,
         platform_tag=platform.platform(),
         schema_digest=ref.schema_digest,
+    )
+
+
+def _restricted_hop_material(home: Path, unit: PublishedUnit) -> RestrictedHopMaterial:
+    """Read once: the imported dead predecessor and the live restricted-A context.
+
+    Both identities are unit-local state -- the updater handoff owner and the
+    ``ava-ops`` observer's launch context. This entry surfaces them read-only
+    for the coordinator's single-point hop-request assembly, and refuses the
+    whole preparation when either is absent or unusable: a hop request the
+    updater must refuse is never worth shipping. The hop re-derives every
+    binding locally (command line, challenge response), so these bytes are
+    evidence, never authority (task #4129 I4).
+    """
+    from services.agent_ops.bootstrap import read_prepared_context
+    from shared import updater_handoff
+    from shared.cluster import session_name
+
+    snapshot = updater_handoff.read()
+    if (
+        snapshot.status != "running"
+        or snapshot.owner_pid is None
+        or snapshot.owner_create_time is None
+        or updater_handoff.owner_is_live(snapshot)
+    ):
+        raise ReleaseRejectedError(
+            "restricted hop requires an imported dead predecessor updater handoff"
+        )
+    predecessor = ExpectedProcess(pid=snapshot.owner_pid, create_time=snapshot.owner_create_time)
+    record_path = home / "run" / "sessions" / f"{session_name('ops')}.json"
+    try:
+        record = json.loads(regular_bytes(record_path))
+        argv = shlex.split(record["cmd"])
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise ReleaseRejectedError("restricted-A observer session record is unreadable") from exc
+    if argv and argv[0] == "exec":
+        argv = argv[1:]
+    if (
+        len(argv) < 3
+        or argv[-2] != "--bootstrap-observation"
+        or argv.count("--bootstrap-observation") != 1
+    ):
+        raise ReleaseRejectedError(
+            "restricted-A observer session record names no exact launch context"
+        )
+    context_path = Path(argv[-1])
+    try:
+        canonical = context_path.resolve(strict=True) == context_path
+    except OSError as exc:
+        raise ReleaseRejectedError("restricted-A launch context is unreadable") from exc
+    if not context_path.is_absolute() or not canonical or context_path.parent != home / "run":
+        raise ReleaseRejectedError(
+            "restricted-A launch context is not a canonical private unit reference"
+        )
+    context = read_prepared_context(context_path)
+    context_bytes = regular_bytes(context_path)
+    if not context_bytes.isascii():
+        raise ReleaseRejectedError("restricted-A launch context is not ASCII JSON text")
+    if (
+        context.expected.machine != unit.machine
+        or context.expected.home != unit.home
+        or context.expected.artifact_digest == unit.artifact_digest
+    ):
+        raise ReleaseRejectedError(
+            "restricted-A launch context does not describe the prepared unit's predecessor image"
+        )
+    return RestrictedHopMaterial(
+        predecessor=predecessor,
+        recovery_context_path=str(context_path),
+        recovery_context=context_bytes.decode("ascii"),
     )
 
 
@@ -208,12 +280,15 @@ def produce_facts(args: argparse.Namespace) -> dict[str, object]:
         ),
         selector_digest=hashlib.sha256(selector_bytes(unit)).hexdigest(),
     )
+    material = _restricted_hop_material(home, unit)
     return {
+        "version": 2,
         "unit": unit.model_dump(mode="json"),
         "receipt_json": receipt_bytes.decode("ascii"),
         "candidate": candidate.model_dump(mode="json"),
         "recovery": recovery_ref.model_dump(mode="json"),
         "previous_selector": current.decode("ascii") if current is not None else None,
+        "hop_material": material.model_dump(mode="json"),
     }
 
 

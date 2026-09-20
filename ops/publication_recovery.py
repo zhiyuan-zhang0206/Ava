@@ -17,6 +17,16 @@ This module is the explicit recovery's operator seat:
     (new identity + challenge) -> produce fresh per-unit writer closure ->
     `recover_pending_publication` with the replacement.
 
+The exact pre-stop abort (`pre_stop_abort_pending_publication_op`, task #4129
+C-4) is the window's other, simpler exit: while every journaled unit reports
+no bootstrap-recovery journal -- no hop child has begun, and the pending
+journal records no collection, migration or readbacks -- it clears the
+never-effective pending journal and releases the abandoned lease in one
+guarded write. Any doubt refuses (a unit that cannot answer, a journal that
+exists, a journal that already records effects), and the write that cuts the
+window off is also what stops a hop child starting after the proof: its own
+admission re-reads the live lease and refuses.
+
 `claim_abandoned_pending_lease` and `complete_pending_publication_recovery` are
 the seat's two storage-level steps; `run_pending_publication_recovery` composes
 them around a caller-supplied closure collector (the trusted producer is the
@@ -27,6 +37,7 @@ operator-supplied or fabricated evidence).
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -39,6 +50,7 @@ from pydantic import ValidationError
 import shared.db
 from ops import cluster_session
 from ops.cluster import ClusterUpdateInProgress
+from ops.rpc_bootstrap_hop import BootstrapRecoveryReadResult
 from shared import ui_update_state, updater_handoff
 from shared.audit_events import insert_event_log
 from shared.cluster_lock import (
@@ -47,7 +59,10 @@ from shared.cluster_lock import (
     read_update_lease,
     self_holder,
 )
-from shared.cluster_pending_recovery import claim_pending_recovery_lease
+from shared.cluster_pending_recovery import (
+    abandon_pending_publication_lease,
+    claim_pending_recovery_lease,
+)
 from shared.db_transaction import write_transaction
 from shared.host_deploy_state import updater_lease_live
 from shared.managed_writer_barrier import (
@@ -395,4 +410,137 @@ def complete_pending_publication_recovery(
         "new_holder": claim.operation.holder,
         "challenge": str(claim.challenge),
         "units": len(replacement.units),
+    }
+
+
+# ── the exact pre-stop abort (task #4129 C-4) ───────────────────────────────
+
+
+def _machine_ops_urls() -> dict[str, str | None]:
+    """Each machine's pre-resolved ops base URL, one read (the begin's roster shape)."""
+    with shared.db.connect(autocommit=True) as conn:
+        rows = conn.execute("SELECT name, gateway_url FROM machines ORDER BY name").fetchall()
+    return {row[0]: row[1] for row in rows}
+
+
+async def _read_unit_journals(
+    units: tuple[PublishedUnit, ...], urls: dict[str, str | None]
+) -> list[BootstrapRecoveryReadResult]:
+    # Lazy import: the ops RPC client stays behind the seat's own caller.
+    from ops import cluster_rpc
+
+    async def one(unit: PublishedUnit) -> BootstrapRecoveryReadResult:
+        result = await cluster_rpc.dispatch_to_machine(
+            target_machine=unit.machine,
+            kind="cluster_bootstrap_recovery_read",
+            payload={},
+            ops_url=urls.get(unit.machine),
+        )
+        return BootstrapRecoveryReadResult.model_validate_json(json.dumps(result))
+
+    return list(await asyncio.gather(*(one(unit) for unit in units)))
+
+
+def _prove_no_unit_started_a_hop(units: tuple[PublishedUnit, ...]) -> None:
+    """Ask every journaled unit for its bootstrap-recovery journal slot; any doubt refuses (C-4).
+
+    Read-only fan-out over the units' ops faces -- the same bearer channel the
+    rollout itself uses. An unreachable unit, a failed read, or an answer that
+    names another unit refuses: "cannot prove no effect" is never "no effect".
+    Runs outside every database transaction (the deployment row lock never
+    covers network work); the lease release that follows cuts late starters off.
+    """
+    from ops import cluster_rpc
+
+    urls = _machine_ops_urls()
+    try:
+        answers = asyncio.run(_read_unit_journals(units, urls))
+    except cluster_rpc.ClusterOpUnreachable as exc:
+        raise ClusterUpdateInProgress(
+            f"could not prove a journaled unit effect-free ({exc}) -- abort refused"
+        ) from exc
+    except cluster_rpc.ClusterOpFailed as exc:
+        raise ClusterUpdateInProgress(
+            f"a bootstrap-recovery read failed ({exc.result!r}) -- abort refused"
+        ) from exc
+    for unit, answer in zip(units, answers, strict=True):
+        if (answer.machine, answer.home) != (unit.machine, unit.home):
+            raise ClusterUpdateInProgress(
+                "a bootstrap-recovery answer belongs to another unit -- abort refused"
+            )
+        if answer.journal_present:
+            stage = f" (stage {answer.journal_stage})" if answer.journal_stage else ""
+            raise ClusterUpdateInProgress(
+                f"unit {unit.machine} reports a bootstrap recovery journal{stage}; the exact "
+                "pre-stop abort is not usable -- run `ava cluster recover-pending`"
+            )
+
+
+def pre_stop_abort_pending_publication_op() -> dict[str, object]:
+    """Clear a never-effective pending journal and release its lease (the exact pre-stop abort).
+
+    Returns {"aborted": False, "detail": ...} when nothing is journaled; raises
+    ClusterUpdateInProgress on every refusal. Fail-closed throughout: the
+    abandoned holder must be provably gone, every journaled unit must answer
+    (and answer "no journal"), and the journal's own record must still be the
+    inspected operation with no collection/migration/readbacks -- re-checked
+    inside the clearing transaction, whose guarded write is the exactness
+    mechanism (the lease release is what refuses any hop child that starts
+    after the proof).
+    """
+    state = read_pending_recovery_state()
+    if not state.pending:
+        return {"aborted": False, "detail": "no pending publication is journaled"}
+    if state.abandoned is None or state.abandoned_operation_json is None:
+        raise ClusterUpdateInProgress(
+            "the pending publication has no readable operation -- abort refused"
+        )
+    with ui_update_state.lifecycle_lock():
+        _require_no_live_deploy()
+        observed = _prove_abandoned_holder_gone(state)
+        _prove_no_unit_started_a_hop(state.abandoned_units)
+        with write_transaction(direct=True) as conn:
+            publication = _locked_publication(conn)
+            pending = publication.pending
+            if pending is None or pending.operation != state.abandoned:
+                raise ClusterUpdateInProgress(
+                    "the pending operation changed while the no-effect proof ran -- "
+                    "nothing was cleared; re-run"
+                )
+            if (
+                pending.collection is not None
+                or pending.migration is not None
+                or pending.unit_readbacks
+            ):
+                raise ClusterUpdateInProgress(
+                    "the pending journal already records effects "
+                    "(collection/migration/readbacks); the pre-stop abort is not usable -- "
+                    "run `ava cluster recover-pending`"
+                )
+            cleared = abandon_pending_publication_lease(
+                conn,
+                expected_operation=state.abandoned_operation_json,
+                observed=observed,
+            )
+            if not cleared:
+                raise ClusterUpdateInProgress(
+                    "the journal or lease changed while the no-effect proof ran -- "
+                    "nothing was cleared; re-run"
+                )
+    insert_event_log(
+        event_type="managed_writer_pre_stop_aborted",
+        agent_id=None,
+        source="system",
+        payload={
+            "abandoned_holder": state.abandoned.holder,
+            "abandoned_target_sha": state.abandoned.target_sha,
+            "units": len(state.abandoned_units),
+            "candidate_digest": state.candidate_digest,
+        },
+    )
+    return {
+        "aborted": True,
+        "abandoned_holder": state.abandoned.holder,
+        "target_sha": state.abandoned.target_sha,
+        "units": len(state.abandoned_units),
     }

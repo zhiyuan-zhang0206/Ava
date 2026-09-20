@@ -192,6 +192,10 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         "managed_writer_recovery_completed",
         "recovery replaced the abandoned pending publication under a new lease and closure",
     ),
+    "managed_writer_pre_stop_aborted": _audit(
+        "managed_writer_pre_stop_aborted",
+        "the exact pre-stop abort cleared a never-effective pending publication and its lease",
+    ),
     # ── telemetry (category=telemetry) — registry.md §3 ──
     # frontend user modeling
     "frontend_interaction": _telemetry(

@@ -20,9 +20,12 @@ strings/lists require.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict
 
 from shared.managed_writer_barrier import Digest, RolloutIdentity
+from shared.managed_writer_observation import ExpectedProcess
 from shared.managed_writer_publication import CandidateUnitPlan, PublishedUnit
 
 
@@ -34,6 +37,26 @@ class ImageRef(BaseModel):
     artifact_digest: Digest
     manifest_digest: Digest
     schema_digest: Digest
+
+
+class RestrictedHopMaterial(BaseModel):
+    """Read-once restricted-hop material for one unit (task #4129 I4).
+
+    The imported dead predecessor orchestrator's identity (the unit's updater
+    handoff owner) and the restricted-A observer's live launch context (its
+    canonical private path plus its exact bytes). Expected evidence only --
+    the hop re-derives every binding locally (the ``ava-ops`` command line is
+    compared argument by argument and the running observer must echo the
+    context's challenge), so nothing here is authority; the coordinator needs
+    the pair only to assemble the hop request at its single seal point.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    version: Literal[1] = 1
+    predecessor: ExpectedProcess
+    recovery_context_path: str
+    recovery_context: str
 
 
 class PrepareFactsPayload(BaseModel):
@@ -59,12 +82,18 @@ class PrepareFactsResult(BaseModel):
     are ASCII JSON); the coordinator re-hashes it and binds
     ``unit.prepared_receipt_digest`` to it. ``previous_selector`` is the
     current selector's exact text, or None when no selector exists yet.
+    Version 2 adds ``hop_material``: the restricted-hop identities read once
+    at preparation (task #4129 I4) -- shipping them here keeps the coordinator
+    the single assembly point for the hop request, and a unit that cannot
+    surface them refuses its whole shipment rather than degrade.
     """
 
     model_config = ConfigDict(extra="forbid")
 
+    version: Literal[2] = 2
     unit: PublishedUnit
     receipt_json: str
     candidate: CandidateUnitPlan
     recovery: ImageRef
     previous_selector: str | None
+    hop_material: RestrictedHopMaterial

@@ -14,6 +14,7 @@ import hashlib
 import json
 from datetime import UTC, datetime
 from typing import Any
+from uuid import UUID
 
 import pytest
 
@@ -23,9 +24,14 @@ from cli.commands._managed_writer_gather import (
     validate_prepared_facts,
 )
 from ops.cluster_rpc import ClusterOpFailed, ClusterOpUnreachable
-from ops.rpc_prepare_facts import ImageRef, PrepareFactsResult
+from ops.rpc_prepare_facts import ImageRef, PrepareFactsResult, RestrictedHopMaterial
+from services.agent_ops.bootstrap import PreparedObservation
 from shared.managed_writer_barrier import ManagedWriterBarrierError, RolloutIdentity
-from shared.managed_writer_observation import ExpectedUnitWriters
+from shared.managed_writer_observation import (
+    ExpectedProcess,
+    ExpectedUnitWriters,
+    ObservationChallenge,
+)
 from shared.managed_writer_publication import CandidateUnitPlan, NormalService, PublishedUnit
 from shared.runtime_publication_input import PreparationReceipt, PreparedService
 
@@ -39,6 +45,35 @@ TARGET_SHA = "0" * 40
 
 def _digest(label: str) -> str:
     return hashlib.sha256(label.encode()).hexdigest()
+
+
+def _hop_material(machine: str = "runner", home: str = "/ava") -> RestrictedHopMaterial:
+    """One internally consistent restricted-hop material block (task #4129 I4)."""
+    context = PreparedObservation(
+        expected=ExpectedUnitWriters(
+            machine=machine,
+            home=home,
+            artifact_digest=RECOVERY_ARTIFACT,
+            manifest_digest=RECOVERY_MANIFEST,
+            processes=(),
+            sessions=(),
+            launchers=(),
+        ),
+        operation=RolloutIdentity(
+            holder="gateway:pid1",
+            acquired_at=datetime(2026, 9, 20, tzinfo=UTC),
+            target_sha=TARGET_SHA,
+        ),
+        challenge=ObservationChallenge(
+            challenge=UUID(int=1), valid_until=datetime(2026, 9, 20, 1, tzinfo=UTC)
+        ),
+        schema_digest=RECOVERY_SCHEMA,
+    )
+    return RestrictedHopMaterial(
+        predecessor=ExpectedProcess(pid=424242, create_time=1700000000.0),
+        recovery_context_path=f"{home}/run/hop-recovery-fixture.json",
+        recovery_context=context.model_dump_json(),
+    )
 
 
 def _receipt(
@@ -117,6 +152,7 @@ def _shipment(
             schema_digest=RECOVERY_SCHEMA,
         ),
         previous_selector=previous.decode("ascii") if previous is not None else None,
+        hop_material=_hop_material(machine, home),
     )
 
 
@@ -130,6 +166,8 @@ def test_validate_rebinds_every_shipment_fact_from_bytes() -> None:
     assert facts.publication.candidate == _shipment().candidate
     assert facts.previous_selector is None
     assert facts.recovery.artifact_digest == RECOVERY_ARTIFACT
+    assert facts.hop_material.predecessor.pid == 424242
+    assert facts.hop_material.recovery_context_path == "/ava/run/hop-recovery-fixture.json"
 
 
 def test_validate_passes_the_predecessor_selector_through() -> None:
@@ -240,6 +278,64 @@ def test_validate_refuses_a_recovery_echo_that_was_not_dispatched() -> None:
 
     with pytest.raises(ManagedWriterBarrierError, match="not dispatched"):
         validate_prepared_facts(tampered, target=_target("runner"), registered={("runner", "/ava")})
+
+
+def test_hop_material_tampered_context_bytes_refuse() -> None:
+    shipment = _shipment()
+    tampered = shipment.model_copy(
+        update={"hop_material": shipment.hop_material.model_copy(update={"recovery_context": "{}"})}
+    )
+
+    with pytest.raises(ManagedWriterBarrierError, match="not a prepared observation"):
+        validate_prepared_facts(tampered, target=_target("runner"), registered={("runner", "/ava")})
+
+
+def test_hop_material_wrong_path_refuses() -> None:
+    shipment = _shipment()
+    tampered = shipment.model_copy(
+        update={
+            "hop_material": shipment.hop_material.model_copy(
+                update={"recovery_context_path": "/etc/ava-recovery.json"}
+            )
+        }
+    )
+
+    with pytest.raises(ManagedWriterBarrierError, match="canonical private unit reference"):
+        validate_prepared_facts(tampered, target=_target("runner"), registered={("runner", "/ava")})
+
+
+def test_hop_material_for_another_unit_refuses() -> None:
+    shipment = _shipment()
+    tampered = shipment.model_copy(update={"hop_material": _hop_material("runner", "/elsewhere")})
+
+    with pytest.raises(ManagedWriterBarrierError, match="predecessor image"):
+        validate_prepared_facts(tampered, target=_target("runner"), registered={("runner", "/ava")})
+
+
+def test_hop_material_claiming_the_candidate_image_refuses() -> None:
+    shipment = _shipment()
+    context = PreparedObservation.model_validate_json(shipment.hop_material.recovery_context)
+    claimed = context.model_copy(
+        update={"expected": context.expected.model_copy(update={"artifact_digest": ARTIFACT})}
+    )
+    tampered = shipment.model_copy(
+        update={
+            "hop_material": shipment.hop_material.model_copy(
+                update={"recovery_context": claimed.model_dump_json()}
+            )
+        }
+    )
+
+    with pytest.raises(ManagedWriterBarrierError, match="predecessor image"):
+        validate_prepared_facts(tampered, target=_target("runner"), registered={("runner", "/ava")})
+
+
+def test_shipment_without_hop_material_refuses() -> None:
+    wire = _shipment().model_dump(mode="json")
+    del wire["hop_material"]
+
+    with pytest.raises(ValueError):
+        PrepareFactsResult.model_validate_json(json.dumps(wire))
 
 
 def _stub_dispatch(

@@ -103,10 +103,10 @@ def _h_cluster_recover(_args: argparse.Namespace) -> int:
     return cmd_cluster_recover()
 
 
-def _h_cluster_recover_pending(_args: argparse.Namespace) -> int:
+def _h_cluster_recover_pending(args: argparse.Namespace) -> int:
     from cli.commands import cmd_cluster_recover_pending
 
-    return cmd_cluster_recover_pending()
+    return cmd_cluster_recover_pending(pre_stop=bool(args.pre_stop))
 
 
 def _h_cluster_cancel(_args: argparse.Namespace) -> int:
@@ -494,6 +494,14 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         help="[cluster] run the checked recovery for a durable pending managed-writer "
         "publication left by an interrupted rollout (agent births stay frozen until it "
         "completes); refuses while a live deploy owns the cluster",
+    )
+    cluster_recover_pending_p.add_argument(
+        "--pre-stop",
+        action="store_true",
+        help="[cluster] exact pre-stop abort instead of checked recovery: prove every "
+        "journaled unit is effect-free (no bootstrap-recovery journal anywhere) and then "
+        "clear the never-effective pending journal + release the abandoned lease; refuses "
+        "on any doubt",
     )
     cluster_recover_pending_p.set_defaults(func=_h_cluster_recover_pending)
 

@@ -27,6 +27,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from typing import cast
 from uuid import UUID, uuid4
 
@@ -107,6 +108,8 @@ def build_pending_publication(
     challenge: UUID,
     schema_digest: Digest | None = None,
     applied_names: Sequence[str] = (),
+    valid_until: datetime | None = None,
+    plan_digest: Digest | None = None,
 ) -> PendingPublication:
     """Assemble the complete-roster journal entry; pure, no database, no effects.
 
@@ -116,6 +119,9 @@ def build_pending_publication(
     and it must carry the applied migration SET the updater will later verify.
     ``challenge`` is supplied by the caller because a pure builder cannot know
     whether a same-operation retry must reuse the journaled challenge.
+    ``valid_until`` / ``plan_digest`` are the begin execution's durable
+    registration (F1): V and the sealed plan's digest as written on open; both
+    optional so journals written before the registration existed stay readable.
     """
     if not facts:
         raise ManagedWriterBarrierError("a pending publication requires a prepared unit")
@@ -154,6 +160,8 @@ def build_pending_publication(
         challenge=challenge,
         units=units,
         normal_start_plan=plan,
+        valid_until=valid_until,
+        plan_digest=plan_digest,
     )
 
 
@@ -165,13 +173,18 @@ def open_pending_publication(
     candidate_digest: Digest,
     schema_digest: Digest | None = None,
     applied_names: Sequence[str] = (),
+    valid_until: datetime | None = None,
+    plan_digest: Digest | None = None,
 ) -> PendingPublication:
     """Open the pending journal for ``operation`` in the caller's transaction.
 
     The journal's single observation challenge is minted once: a same-operation
     retry adopts the journaled challenge, because
     ``begin_pending_publication``'s retry check compares the whole entry (a
-    fresh challenge would read as a different publication). A pending entry
+    fresh challenge would read as a different publication). The begin
+    execution's registration (``valid_until`` V, ``plan_digest``) is written on
+    open and adopted on a same-operation retry exactly like the challenge, so
+    the journal keeps its first registration. A pending entry
     from another operation is left for that same check to refuse — recovery is
     explicit, never implicit replacement. The live-lease fence, full registered
     unit coverage, and delivery (the caller's commit) stay with
@@ -179,9 +192,15 @@ def open_pending_publication(
     """
     state = _locked_publication(conn)
     existing = state.pending
-    challenge = (
-        existing.challenge if existing is not None and existing.operation == operation else uuid4()
-    )
+    if existing is not None and existing.operation == operation:
+        # A retry adopts the journal's registration the same way it adopts the
+        # challenge: the entry compare sees the identical publication, and the
+        # first registered V / plan digest cannot slide under a later execution.
+        challenge = existing.challenge
+        valid_until = existing.valid_until
+        plan_digest = existing.plan_digest
+    else:
+        challenge = uuid4()
     pending = build_pending_publication(
         facts,
         operation=operation,
@@ -190,6 +209,8 @@ def open_pending_publication(
         challenge=challenge,
         schema_digest=schema_digest,
         applied_names=applied_names,
+        valid_until=valid_until,
+        plan_digest=plan_digest,
     )
     begin_pending_publication(conn, pending)
     return pending

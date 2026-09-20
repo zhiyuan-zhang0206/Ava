@@ -13,18 +13,28 @@ unpinned at this unit layer; they ride the process-level prove family
 from __future__ import annotations
 
 import hashlib
+import json
 import os
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
+from uuid import UUID
 
 import pytest
 
 from cli import prepared_facts
+from ops.rpc_prepare_facts import RestrictedHopMaterial
+from shared import updater_handoff
 from shared.machine import MachineRoleMissing
-from shared.managed_writer_barrier import ManagedWriterBarrierError
-from shared.managed_writer_observation import ExpectedUnitWriters
-from shared.managed_writer_publication import NormalService
+from shared.managed_writer_barrier import ManagedWriterBarrierError, RolloutIdentity
+from shared.managed_writer_observation import (
+    ExpectedProcess,
+    ExpectedUnitWriters,
+    ObservationChallenge,
+)
+from shared.managed_writer_publication import NormalService, PublishedUnit
 from shared.native_job_observation import NativeReadUnavailableError
 from shared.runtime_publication_input import PreparationReceipt, PreparedService
 from shared.runtime_release import ReleaseRejectedError, VerifiedRelease
@@ -140,7 +150,20 @@ class _FakeConnection:
         return False
 
 
-def test_collection_runs_outside_the_deployment_lock_transaction(
+def _stub_hop_material_for(home: Path) -> Callable[[Path, object], RestrictedHopMaterial]:
+    """A fixed restricted-hop material for tests that only need its presence."""
+
+    def stub(_home: Path, _unit: object) -> RestrictedHopMaterial:
+        return RestrictedHopMaterial(
+            predecessor=ExpectedProcess(pid=424242, create_time=1700000000.0),
+            recovery_context_path=f"{home}/run/hop-recovery-fixture.json",
+            recovery_context="{}",
+        )
+
+    return stub
+
+
+def test_collection_runs_outside_the_deployment_lock_transaction(  # noqa: PLR0915 — one transaction-shaped collection proof; each step is one seam statement.
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """F1: the row lock fences lease + registration only; image hashing and the
@@ -238,6 +261,8 @@ def test_collection_runs_outside_the_deployment_lock_transaction(
 
     monkeypatch.setattr(prepared_facts, "prepare_normal_services", normal_services)
     monkeypatch.setattr(prepared_facts, "read_selector", no_selector)
+
+    monkeypatch.setattr(prepared_facts, "_restricted_hop_material", _stub_hop_material_for(home))
     # The entry reads its database projection live from the environment (the
     # restricted-child contract), so the environment is the real seam here —
     # not the module-load Settings singleton.
@@ -251,3 +276,196 @@ def test_collection_runs_outside_the_deployment_lock_transaction(
     assert events == ["lock", "collect"]
     assert unit["machine"] == "runner"
     assert services[0]["session"] == "ava-ops"
+    hop_material = cast("dict[str, Any]", result["hop_material"])
+    assert hop_material["predecessor"]["pid"] == 424242
+
+
+def _prepared_context(machine: str, home: Path, *, artifact: str = RECOVERY_ARTIFACT) -> str:
+    """One restricted-A launch context as the observer's private file carries it."""
+    from services.agent_ops.bootstrap import PreparedObservation
+
+    context = PreparedObservation(
+        expected=ExpectedUnitWriters(
+            machine=machine,
+            home=str(home),
+            artifact_digest=artifact,
+            manifest_digest=RECOVERY_MANIFEST,
+            processes=(),
+            sessions=(),
+            launchers=(),
+        ),
+        operation=RolloutIdentity(
+            holder="gateway:pid1",
+            acquired_at=datetime(2026, 9, 20, tzinfo=UTC),
+            target_sha="0" * 40,
+        ),
+        challenge=ObservationChallenge(
+            challenge=UUID(int=7), valid_until=datetime(2026, 9, 20, 1, tzinfo=UTC)
+        ),
+        schema_digest=RECOVERY_SCHEMA,
+    )
+    return context.model_dump_json()
+
+
+def _hop_unit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, PublishedUnit]:
+    """A unit home shaped like the prepared restricted-A handoff state (read-only)."""
+    home = (tmp_path / "unit").resolve()
+    (home / "run" / "sessions").mkdir(parents=True)
+    handoff_path = home / "run" / "updater-handoff.json"
+    handoff_path.write_text(
+        json.dumps(
+            {
+                "phase": "running",
+                "generation": "gen-1",
+                "expected_session": "ava-updater",
+                "created_at": "2026-09-20T00:00:00+00:00",
+                "expires_at": "2026-09-20T03:00:00+00:00",
+                "owner_pid": 424242,
+                "owner_create_time": 1700000000.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def _state_path() -> Path:
+        return handoff_path
+
+    def _dead(_snapshot: updater_handoff.UpdaterHandoffSnapshot) -> bool:
+        return False
+
+    monkeypatch.setattr(updater_handoff, "state_path", _state_path)
+    monkeypatch.setattr(updater_handoff, "owner_is_live", _dead)
+    context_path = home / "run" / "hop-recovery.json"
+    context_path.write_text(_prepared_context("runner", home), encoding="utf-8")
+    context_path.chmod(0o600)
+    (home / "run" / "sessions" / "ava-ops.json").write_text(
+        json.dumps(
+            {
+                "cmd": "exec /x/venv/bin/python -I -B -m services.agent_ops.daemon "
+                f"--bootstrap-observation {context_path}"
+            }
+        ),
+        encoding="utf-8",
+    )
+    unit = PublishedUnit(
+        machine="runner",
+        home=str(home),
+        inventory_digest="1" * 64,
+        prepared_receipt_digest="2" * 64,
+        artifact_digest=ARTIFACT,
+        manifest_digest=MANIFEST,
+    )
+    return home, unit
+
+
+def test_restricted_hop_material_reads_the_imported_dead_predecessor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home, unit = _hop_unit(tmp_path, monkeypatch)
+
+    material = prepared_facts._restricted_hop_material(home, unit)
+
+    assert material.predecessor.pid == 424242
+    assert material.predecessor.create_time == 1700000000.0
+    assert material.recovery_context_path == str(home / "run" / "hop-recovery.json")
+    assert material.recovery_context == (home / "run" / "hop-recovery.json").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_restricted_hop_material_requires_a_dead_predecessor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home, unit = _hop_unit(tmp_path, monkeypatch)
+
+    def _live(_snapshot: updater_handoff.UpdaterHandoffSnapshot) -> bool:
+        return True
+
+    monkeypatch.setattr(updater_handoff, "owner_is_live", _live)
+
+    with pytest.raises(ReleaseRejectedError, match="dead predecessor"):
+        prepared_facts._restricted_hop_material(home, unit)
+
+    (home / "run" / "updater-handoff.json").unlink()
+    with pytest.raises(ReleaseRejectedError, match="dead predecessor"):
+        prepared_facts._restricted_hop_material(home, unit)
+
+
+def test_restricted_hop_material_rejects_a_foreign_context_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home, unit = _hop_unit(tmp_path, monkeypatch)
+    stray = home / "hop-recovery.json"
+    stray.write_text(_prepared_context("runner", home), encoding="utf-8")
+    stray.chmod(0o600)
+    (home / "run" / "sessions" / "ava-ops.json").write_text(
+        json.dumps(
+            {
+                "cmd": "exec /x/venv/bin/python -I -B -m services.agent_ops.daemon "
+                f"--bootstrap-observation {stray}"
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ReleaseRejectedError, match="canonical private unit reference"):
+        prepared_facts._restricted_hop_material(home, unit)
+
+
+def test_restricted_hop_material_rejects_a_missing_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home, unit = _hop_unit(tmp_path, monkeypatch)
+    (home / "run" / "hop-recovery.json").unlink()
+
+    with pytest.raises(ReleaseRejectedError, match="unreadable"):
+        prepared_facts._restricted_hop_material(home, unit)
+
+
+def test_restricted_hop_material_rejects_tampered_context_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home, unit = _hop_unit(tmp_path, monkeypatch)
+    context_path = home / "run" / "hop-recovery.json"
+    context_path.write_text("{}", encoding="utf-8")
+    context_path.chmod(0o600)
+
+    with pytest.raises(ValueError):
+        prepared_facts._restricted_hop_material(home, unit)
+
+
+def test_restricted_hop_material_rejects_a_context_for_another_unit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home, unit = _hop_unit(tmp_path, monkeypatch)
+    context_path = home / "run" / "hop-recovery.json"
+    context_path.write_text(_prepared_context("other", home), encoding="utf-8")
+    context_path.chmod(0o600)
+
+    with pytest.raises(ReleaseRejectedError, match="predecessor image"):
+        prepared_facts._restricted_hop_material(home, unit)
+
+
+def test_restricted_hop_material_rejects_a_candidate_artifact_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home, unit = _hop_unit(tmp_path, monkeypatch)
+    context_path = home / "run" / "hop-recovery.json"
+    context_path.write_text(_prepared_context("runner", home, artifact=ARTIFACT), encoding="utf-8")
+    context_path.chmod(0o600)
+
+    with pytest.raises(ReleaseRejectedError, match="predecessor image"):
+        prepared_facts._restricted_hop_material(home, unit)
+
+
+def test_restricted_hop_material_rejects_a_record_without_the_context_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home, unit = _hop_unit(tmp_path, monkeypatch)
+    (home / "run" / "sessions" / "ava-ops.json").write_text(
+        json.dumps({"cmd": "exec /x/venv/bin/python -m services.agent_ops.daemon"}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ReleaseRejectedError, match="no exact launch context"):
+        prepared_facts._restricted_hop_material(home, unit)

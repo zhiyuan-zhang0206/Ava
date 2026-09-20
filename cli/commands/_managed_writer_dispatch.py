@@ -15,6 +15,13 @@ recomputes V, and registering V durably with the pending journal is the
 collection phase's (task #4129 I4). Everything except the seat call and the
 roster read runs outside database transactions (no filesystem or network work
 under a lock), and every refusal is fail-closed: the fleet never half-activates.
+
+The same execution assembles the units' hop projections (channel C,
+`assemble_hop_plans`): the journal's single observation challenge and the
+sealed schema are baked into each unit's candidate context, the request
+references the shipped recovery context and the unit's own receipt, and the
+projections ride the plan dispatch -- so the hop phase that consumes the
+returned plans never re-derives anything the begin seal already fixed.
 """
 
 from __future__ import annotations
@@ -23,31 +30,36 @@ import asyncio
 import hashlib
 import json
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from cli.commands._managed_writer_gather import (
     PreparedFactTarget,
     PreparedUnitFacts,
     gather_prepared_facts,
 )
+from cli.commands._managed_writer_hop import HopUnitPlan
 from cli.commands._release_context import ReleaseContext, read_release_context
+from cli.commands._update_bootstrap import BootstrapHopRequest
 from cli.commands._update_publication import open_pending_publication, published_unit
 from cli.prepared_update import PreparedOperatorPlan, PreparedOperatorUnit
-from ops.rpc_prepare_dispatch import PrepareDispatchResult
+from ops.rpc_prepare_dispatch import PrepareDispatchResult, ProjectionFile, prepared_hop_name
 from ops.rpc_prepare_facts import ImageRef
+from services.agent_ops.bootstrap import PreparedObservation
 from shared.cluster_lock import read_update_lease, self_holder
 from shared.config import settings
 from shared.db_transaction import write_transaction
 from shared.machine import machine_name
 from shared.managed_writer_barrier import (
+    Digest,
     ManagedWriterBarrierError,
     RolloutIdentity,
     lock_registered_units,
 )
+from shared.managed_writer_observation import ObservationChallenge
 from shared.managed_writer_publication import CandidateUnitPlan, NormalStartPlan, PublishedUnit
 from shared.runtime_release import ReleaseRejectedError
 
@@ -262,6 +274,7 @@ async def _dispatch_plan_async(
     sealed: SealedPlan,
     targets: Sequence[PreparedFactTarget],
     expected: dict[str, tuple[str, str]],
+    projections: Mapping[str, Sequence[ProjectionFile]],
     timeout_s: float | None,
 ) -> list[DispatchOutcome]:
     # Lazy import (the `_update_fanout` discipline): cli/commands modules load
@@ -269,14 +282,21 @@ async def _dispatch_plan_async(
     from ops import cluster_rpc
 
     async def one(target: PreparedFactTarget) -> DispatchOutcome:
+        payload: dict[str, Any] = {
+            "plan_json": sealed.payload.decode("ascii"),
+            "artifact_digest": target.candidate.artifact_digest,
+        }
+        unit_projections = projections.get(target.machine, ())
+        if unit_projections:
+            # The hop projections ride the same dispatch: the unit stages them
+            # beside the plan and the hop phase names them later. Omitted when
+            # none -- the payload stays identical to the pre-hop wire shape.
+            payload["projections"] = [item.model_dump(mode="json") for item in unit_projections]
         try:
             result = await cluster_rpc.dispatch_to_machine(
                 target_machine=target.machine,
                 kind="cluster_prepare_dispatch",
-                payload={
-                    "plan_json": sealed.payload.decode("ascii"),
-                    "artifact_digest": target.candidate.artifact_digest,
-                },
+                payload=payload,
                 timeout_s=timeout_s,
                 ops_url=target.ops_url,
             )
@@ -296,6 +316,7 @@ def dispatch_prepared_plan(
     targets: Sequence[PreparedFactTarget],
     *,
     expected: dict[str, tuple[str, str]],
+    projections: Mapping[str, Sequence[ProjectionFile]] | None = None,
     timeout_s: float | None = None,
 ) -> None:
     """Fan the sealed plan out and enforce the all-unit acknowledgement gate (B-2).
@@ -303,10 +324,14 @@ def dispatch_prepared_plan(
     A unit refuses by acknowledgement, not by exception: every answer (ok or
     refusal) prints one line, and any non-ok answer raises the summary refusal
     after all units have answered, so the operator sees the whole roster's
-    verdict at once. On refusal the pending journal stays: the exact pre-stop
-    clear is the abort step's (a later slice), never this position's.
+    verdict at once. `projections` carries each unit's hop projections to stage
+    beside the plan (task #4129 channel C; empty leaves the wire shape
+    unchanged). On refusal the pending journal stays: the exact pre-stop clear
+    is the abort step's (a later slice), never this position's.
     """
-    outcomes = asyncio.run(_dispatch_plan_async(sealed, targets, expected, timeout_s))
+    outcomes = asyncio.run(
+        _dispatch_plan_async(sealed, targets, expected, projections or {}, timeout_s)
+    )
     refused: list[str] = []
     for outcome in outcomes:
         if outcome.ok:
@@ -319,6 +344,73 @@ def dispatch_prepared_plan(
             "the prepared-plan dispatch gate refused: "
             f"{len(refused)} of {len(targets)} units did not acknowledge"
         )
+
+
+def assemble_hop_plans(
+    facts: Sequence[PreparedUnitFacts],
+    targets: Sequence[PreparedFactTarget],
+    *,
+    operation: RolloutIdentity,
+    valid_until: datetime,
+    challenge: UUID,
+    schema_digest: Digest,
+) -> list[HopUnitPlan]:
+    """Assemble every unit's hop projections and the paths its op payload names (C-1).
+
+    Per unit: the candidate observation context (the receipt's expected writers
+    plus the operation, the journal's single challenge bound to the begin's V,
+    and the sealed schema digest) and the hop request that references it, the
+    shipped recovery context, and the unit's own sealed inventory receipt --
+    with `normal_release_path` still None (restricted-only, task #4129 I4; the
+    normal projection arrives with I6). The projections are content-named, so
+    each consuming path exists before any unit has seen a byte; the units'
+    `cluster_prepare_dispatch` op is the only writer.
+    """
+    urls = {target.machine: target.ops_url for target in targets}
+    plans: list[HopUnitPlan] = []
+    for item in sorted(
+        facts,
+        key=lambda entry: (
+            entry.publication.receipt.expected.machine,
+            entry.publication.receipt.expected.home,
+        ),
+    ):
+        receipt = item.publication.receipt
+        expected = receipt.expected
+        home = expected.home
+        candidate_context = PreparedObservation(
+            expected=expected,
+            operation=operation,
+            challenge=ObservationChallenge(challenge=challenge, valid_until=valid_until),
+            schema_digest=schema_digest,
+        )
+        candidate_bytes = _canonical_bytes(candidate_context.model_dump(mode="json"))
+        candidate_name = prepared_hop_name("candidate-context", candidate_bytes)
+        request = BootstrapHopRequest(
+            candidate_context=f"{home}/run/{candidate_name}",
+            recovery_context=item.hop_material.recovery_context_path,
+            inventory_receipt=(
+                f"{home}/run/release-inventory-{item.publication.prepared_receipt_digest}.json"
+            ),
+            predecessor=item.hop_material.predecessor,
+            normal_release_path=None,
+        )
+        request_bytes = _canonical_bytes(request.model_dump(mode="json"))
+        request_name = prepared_hop_name("request", request_bytes)
+        plans.append(
+            HopUnitPlan(
+                machine=expected.machine,
+                home=home,
+                ops_url=urls[expected.machine],
+                artifact_digest=item.publication.artifact_digest,
+                request_path=f"{home}/run/{request_name}",
+                projections=(
+                    ProjectionFile(name=candidate_name, content=candidate_bytes.decode("ascii")),
+                    ProjectionFile(name=request_name, content=request_bytes.decode("ascii")),
+                ),
+            )
+        )
+    return plans
 
 
 def _registered_units_with_urls() -> tuple[set[tuple[str, str]], dict[str, str | None]]:
@@ -335,14 +427,15 @@ def _registered_units_with_urls() -> tuple[set[tuple[str, str]], dict[str, str |
     return registered, {row[0]: row[1] for row in rows}
 
 
-def begin_managed_writer_publication(target_sha: str | None) -> None:
+def begin_managed_writer_publication(target_sha: str | None) -> list[HopUnitPlan]:
     """Run the begin position's full chain; every refusal is a barrier error.
 
     Raises `ManagedWriterBarrierError` for a refused context/roster/gather/
     seal/dispatch; infrastructure failures (database, an op failure outside the
     ladder) propagate unchanged. On a refusal after the journal opened, the
     pending entry persists for checked recovery -- the exact pre-stop clear is
-    the abort step's, not this position's.
+    the abort step's, not this position's. Returns the per-unit hop plans the
+    rollout's hop phase consumes (channel C).
     """
     from ops import cluster_rpc
 
@@ -395,16 +488,36 @@ def begin_managed_writer_publication(target_sha: str | None) -> None:
         f"  \u00b7 managed-writer begin: sealed plan {sealed.digest[:12]} over {len(facts)} units"
     )
     with write_transaction() as conn:
-        open_pending_publication(
+        pending = open_pending_publication(
             conn,
             [item.publication for item in facts],
             operation=operation,
             candidate_digest=sealed.candidate_digest,
             schema_digest=context.schema_digest,
             applied_names=context.applied_names,
+            valid_until=valid_until,
+            plan_digest=sealed.digest,
         )
-    dispatch_prepared_plan(sealed, targets, expected=_ack_bindings(facts))
+    hop_plans = assemble_hop_plans(
+        facts,
+        targets,
+        operation=operation,
+        valid_until=valid_until,
+        challenge=pending.challenge,
+        schema_digest=context.schema_digest,
+    )
+    print(
+        f"  \u00b7 managed-writer begin: hop projections assembled for {len(hop_plans)} units "
+        f"(challenge {pending.challenge})"
+    )
+    dispatch_prepared_plan(
+        sealed,
+        targets,
+        expected=_ack_bindings(facts),
+        projections={plan.machine: plan.projections for plan in hop_plans},
+    )
     print(
         f"  \u2713 managed-writer begin: journal open; all {len(targets)} units "
         "acknowledged the sealed plan"
     )
+    return hop_plans
