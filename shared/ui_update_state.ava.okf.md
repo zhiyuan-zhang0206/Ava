@@ -15,8 +15,8 @@ tags:
 `shared/ui_update_state.py` owns `$AVA_HOME/deploy-state.json`, the durable
 fact that a whole-cluster rollout/restart currently owns the fleet UI. While
 active the file contains one schema-v2 generation, kind, stable RFC3339
-`started_at`, diagnostic `updated_at`/phase/origin, and legacy
-`posture="paused"`; normal completion removes it.
+`started_at`, and diagnostic `updated_at`/phase/origin; normal completion
+removes it.
 
 This is deliberately separate from host posture. `host_deploy_state` remains
 the online control-plane authority for pause/converge/updater liveness, while
@@ -38,18 +38,18 @@ the UI marker.
   bootstrap/normal recovery envelope is terminal-clearable; successful unpause
   then force-clears this UI marker.
 
-The marker does not cover `cluster rollback` yet. A rollback deliberately boots
-an older target whose host-posture writer can overwrite this shared compatibility
-path with legacy v1 `idle`; a future cross-version-safe rollback protocol needs
-a separate file/restamp contract. This PR must not claim that unsafe ownership.
+A rollback to pre-v2 code is outside the supported contract: rollback targets
+are recent known-good releases, and a pre-v2 `{posture, updated_at}` file now
+projects invalid (fail-safe) rather than being adopted — no host runs a pre-v2
+writer (fleet verified 2026-09-20).
 
 ## Projection semantics
 
 - Missing marker: inactive.
 - Valid v2 marker: updating until its exact owner or recovery clears it. Age
   never changes the classification or invents a progress diagnosis.
-- Legacy `{posture, updated_at}`: paused/converging is updating with
-  `updated_at` as the one-rollout compatibility start; idle is inactive.
+- Pre-v2 `{posture, updated_at}` shapes: retired — they project invalid (no
+  pre-v2 writer remains; fleet verified 2026-09-20).
 - Malformed/unknown marker: invalid → Gate renders Service unavailable and
   emits a rate-limited warning; it never guesses that an update exists.
 
@@ -63,8 +63,6 @@ and a lightweight same-origin `GET /__ava/deploy-state` poll share one reload
 latch and only ask Gate to re-project the current URL. The endpoint returns
 `{status,generation}` with `no-store` before any gateway/app probe.
 
-The rollout that introduces this code is necessarily started by the old
-in-memory orchestrator and v1 posture writer. The new Gate can parse that v1
-marker, but stable v2 generation/`started_at` ownership is guaranteed only for
-a later rollout or restart whose lock-winning child runs this code. A rollback
-to older code likewise falls back to the legacy contract.
+Stable v2 generation/`started_at` ownership is guaranteed by the lock-winning
+child that runs this code, from the introducing rollout onward; every host runs
+a v2 writer (fleet verified 2026-09-20).

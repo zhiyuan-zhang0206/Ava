@@ -30,10 +30,10 @@ def _isolated_home(
     )
 
 
-def test_new_child_adopts_the_introducing_rollouts_legacy_v1_marker(
+def test_pre_v2_marker_is_refused_not_adopted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An old in-memory parent can launch the new-on-disk child mid-rollout."""
+    """A pre-v2 marker projects invalid (no v1 writer remains); the child refuses."""
     ui_update_state.state_path().write_text(
         '{"posture":"paused","updated_at":"2026-08-24T12:34:56+00:00"}'
     )
@@ -41,8 +41,7 @@ def test_new_child_adopts_the_introducing_rollouts_legacy_v1_marker(
     monkeypatch.setattr(update, "release_update_lock", lambda _holder: None)
     monkeypatch.setattr(update, "_run_gateway_orchestration_inner", lambda *_a, **_kw: 0)
 
-    assert update._run_gateway_orchestration(Path("/unused"), origin="old-caller") == 0
-    assert ui_update_state.read().status == "inactive"
+    assert update._run_gateway_orchestration(Path("/unused"), origin="late-child") == 1
 
 
 def test_late_child_finally_cannot_clear_a_new_generation(

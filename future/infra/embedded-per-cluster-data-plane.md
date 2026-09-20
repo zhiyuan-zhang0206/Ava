@@ -67,9 +67,9 @@ clusters apart *inside one instance* is unnecessary. The bulk is in
   (`redis_admin_secret`, `RedisAdminSecretMissing`). The physical-instance model
   keeps one runtime ACL user per cluster, but its `requirepass` is now the
   gateway-local Redis-admin credential and its runtime password is independent.
-- **Per-cluster role inside a shared instance + the legacy-role reassignment**
-  (`ensure_cluster_role`'s "reassign ownership from the legacy `ava` role" path,
-  the bootstrap-superuser-provisions-every-cluster's-role model). Each instance
+- **Per-cluster role inside a shared instance** (the bootstrap-superuser-
+  provisions-every-cluster's-role model; the legacy-role reassignment this model
+  carried was retired 2026-09-20). Each instance
   `initdb`s its own superuser; a slim role + db owned by it uses the independent
   gateway-local DB-owner password for the scram TCP connection.
 - **Shared-instance foreign/neighbour probes** — `_shared_infra_running`,

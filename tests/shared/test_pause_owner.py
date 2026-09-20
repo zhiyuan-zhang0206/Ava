@@ -59,7 +59,7 @@ def test_finalize_natural_resume_records_the_journaled_generation_as_resumed() -
 
 def test_finalize_natural_resume_is_generation_scoped_and_never_force_clears() -> None:
     """The finalize must only ever transition a `paused` journal, and only to
-    its own generation — an absent / legacy / resumed / invalid journal is left
+    its own generation — an absent / resumed / invalid journal is left
     untouched (no generation-less force clearing), and a newer pause replaces
     the journal before a delayed finalize could touch it."""
     # inactive
@@ -70,23 +70,11 @@ def test_finalize_natural_resume_is_generation_scoped_and_never_force_clears() -
     )
     assert pause_owner.finalize_natural_resume() is False
     assert pause_owner.read().status == "invalid"
-    # legacy tombstone: untouched
-    pause_owner.force_clear()
-    pause_owner.mark_legacy_resumed()
-    assert pause_owner.finalize_natural_resume() is False
-    assert pause_owner.read().status == "legacy-resumed"
     # a newer pause wins over a delayed finalize
     pause_owner.mark_paused("A", _when())
     pause_owner.mark_paused("B", _when(1))
     assert pause_owner.finalize_natural_resume() is True
     assert pause_owner.read().matches("B", _when(1))
-
-
-def test_legacy_resume_tombstone_is_idempotent_and_exact_stop_replaces_it() -> None:
-    assert pause_owner.mark_legacy_resumed().status == "legacy-resumed"
-    assert pause_owner.mark_legacy_resumed().status == "legacy-resumed"
-    pause_owner.mark_paused("B", _when())
-    assert pause_owner.read().matches("B", _when())
 
 
 def test_begin_maintenance_records_and_refresh_re_stamps_the_shepherd() -> None:

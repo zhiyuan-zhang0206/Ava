@@ -744,64 +744,6 @@ def test_retried_completed_resume_is_idempotent_during_a_later_local_update(
     assert ops_cluster.cluster_resume_op("deploy-A", acquired) == {}
 
 
-def test_first_adoption_legacy_resume_is_idempotent_without_an_exact_journal(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from shared.pause_owner import PauseOwnerSnapshot
-
-    owners = iter(
-        [PauseOwnerSnapshot(status="inactive"), PauseOwnerSnapshot(status="legacy-resumed")]
-    )
-    unpaused: list[bool] = []
-    marked: list[bool] = []
-    monkeypatch.setattr(ops_cluster.pause_owner, "read", lambda: next(owners))
-    monkeypatch.setattr(
-        ops_cluster.updater_handoff,
-        "read",
-        lambda: ops_cluster.updater_handoff.UpdaterHandoffSnapshot(status="inactive"),
-    )
-    monkeypatch.setattr(ops_cluster, "unpause_local_cluster", lambda: unpaused.append(True))
-    monkeypatch.setattr(
-        ops_cluster.pause_owner,
-        "mark_legacy_resumed",
-        lambda: marked.append(True) or PauseOwnerSnapshot(status="legacy-resumed"),
-    )
-
-    assert ops_cluster.cluster_resume_legacy_op() == {}
-    assert ops_cluster.cluster_resume_legacy_op() == {}
-    assert unpaused == [True]
-    assert marked == [True]
-
-
-@pytest.mark.parametrize("owner_status", ["paused", "resumed", "invalid"])
-def test_legacy_resume_never_bypasses_an_exact_or_invalid_journal(
-    owner_status: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from datetime import UTC, datetime
-
-    from ops.cluster import ClusterUpdateInProgress
-    from shared.pause_owner import PauseOwnerSnapshot
-
-    exact = owner_status in ("paused", "resumed")
-    monkeypatch.setattr(
-        ops_cluster.pause_owner,
-        "read",
-        lambda: PauseOwnerSnapshot(
-            status=owner_status,  # type: ignore[arg-type]
-            holder="B" if exact else None,
-            acquired_at=datetime(2026, 8, 25, tzinfo=UTC) if exact else None,
-        ),
-    )
-    monkeypatch.setattr(
-        ops_cluster,
-        "unpause_local_cluster",
-        lambda: pytest.fail("legacy compatibility must not unpause exact B"),
-    )
-
-    with pytest.raises(ClusterUpdateInProgress, match="exact or unreadable"):
-        ops_cluster.cluster_resume_legacy_op()
-
-
 def test_cluster_update_op_returns_session_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
     expected = {"session": "ava-updater", "log": "/var/log/updater-123.log"}
     monkeypatch.setattr(ops_cluster, "spawn_update", lambda **_kw: expected)

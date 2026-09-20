@@ -344,11 +344,6 @@ def _run_gateway_orchestration(  # noqa: PLR0915 — one transaction-shaped life
             if marker.status == "inactive":
                 marker = ui_update_state.begin(kind=expected_kind, origin=origin)
                 owned_generation = marker.generation
-            elif marker.status == "updating" and marker.legacy:
-                # Introducing-rollout compatibility: an old in-memory parent
-                # can launch the new-on-disk child after writing v1 posture.
-                # The authoritative DB lease makes this child the safe adopter.
-                owned_generation = marker.generation
             else:
                 print(
                     "\n✗ orchestration refused: a persistent maintenance "
@@ -364,7 +359,7 @@ def _run_gateway_orchestration(  # noqa: PLR0915 — one transaction-shaped life
                 )
                 release_update_lock(holder)
                 return 1
-            if not ui_update_state.set_phase(owned_generation, "orchestrating", origin=origin):
+            if not ui_update_state.set_phase(owned_generation, "orchestrating"):
                 print(
                     "\n✗ orchestration lost UI generation ownership before pausing "
                     "the cluster; aborting",

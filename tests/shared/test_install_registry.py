@@ -235,9 +235,8 @@ def test_mutate_is_not_reentrant_within_one_process(
 # ── schema v2: migration + update-policy resolution ─────────────────────
 
 
-def test_v1_file_migrates_in_memory_and_rewrites_on_save(unit_home: Path) -> None:
-    """A legacy v1 file loads as v2 (rows gain a default `UpdateState`,
-    `channels` starts empty) WITHOUT a write; the next save rewrites it as v2."""
+def test_v1_file_is_refused(unit_home: Path) -> None:
+    """The lazy v1 migration is retired: a v1 file fails fast, never loads."""
     import json
 
     path = install_registry_path()
@@ -257,14 +256,9 @@ def test_v1_file_migrates_in_memory_and_rewrites_on_save(unit_home: Path) -> Non
         ),
         encoding="utf-8",
     )
-    loaded = reg.load()
-    assert loaded.version == reg.SCHEMA_VERSION == 2
-    assert loaded.channels == {}
-    assert loaded.packages[0].update.mode is None  # unresolved until first sight
-    assert json.loads(path.read_text(encoding="utf-8"))["version"] == 1  # load() never writes
 
-    reg.register(_pkg("beta"))
-    assert json.loads(path.read_text(encoding="utf-8"))["version"] == 2
+    with pytest.raises(reg.SchemaInvalid, match="different shape"):
+        reg.load()
 
 
 def test_newer_schema_version_is_refused(unit_home: Path) -> None:

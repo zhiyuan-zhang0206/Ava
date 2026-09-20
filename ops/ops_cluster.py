@@ -154,28 +154,6 @@ def cluster_resume_op(
     return {}
 
 
-def cluster_resume_legacy_op() -> dict[str, object]:
-    """One-rollout bridge for an old orchestrator resuming a newly updated host.
-
-    An old Phase-A receiver writes no exact pause-owner journal. After that host
-    updates onto this code, the still-old in-memory orchestrator sends an empty
-    resume payload. Only an absent or already-completed legacy journal may take
-    this path; any exact or malformed owner fails closed.
-    """
-    with ui_update_state.lifecycle_lock():
-        owner = pause_owner.read()
-        if owner.status == "legacy-resumed":
-            return {}
-        if owner.status != "inactive":
-            raise ClusterUpdateInProgress(
-                "legacy cluster resume refused: an exact or unreadable pause owner exists"
-            )
-        _refuse_live_local_updater()
-        unpause_local_cluster()
-        pause_owner.mark_legacy_resumed()
-    return {}
-
-
 def _lock_holder_is_live(holder: str, *, held_for_s: float | None = None) -> bool:
     """Whether `holder` (the update-lock owner string `<machine>:pid<N>`, minted by
     cli/commands/update.py:_run_gateway_orchestration) names a process that is
