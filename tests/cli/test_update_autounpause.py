@@ -505,6 +505,40 @@ def test_finalize_rollout_names_the_retained_publication_when_the_commit_refused
     assert "do NOT re-run `ava cluster update` yet" in err
 
 
+def test_finalize_rollout_names_the_pending_commit_tail(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The fourth INCOMPLETE shape (task #4129 I6): the publication commit was
+    PAID and some units' commit tails did not finish. Nothing is retained and no
+    host is stranded, so the host banner and the journal-recovery advice would
+    both misname it — the report points at the tail's idempotent re-dispatch."""
+    calls: list[tuple[str, list[str]]] = []
+    _rec.finalize_rollout(
+        [],
+        _record_fan_out(calls),  # pyright: ignore[reportUnknownArgumentType]
+        10.0,
+        deploy_capability={"deploy_holder": "g", "deploy_acquired_at": "2026-08-25T00:00:00Z"},
+        outcome=_rec.RolloutOutcome.INCOMPLETE,
+        pin_advanced=True,
+        failing_step=(
+            "the managed-writer commit tail did not complete; the publication "
+            "commit is already paid \u2014 re-dispatch the commit tail (it is idempotent)"
+        ),
+        tails_pending=True,
+    )
+    err = capsys.readouterr().err
+    assert "the publication is committed; some units' commit tails did not complete" in err
+    assert "some agent-runners did not" not in err
+    assert "a service on this host did not come up" not in err
+    assert "updater log" not in err, "no host is mid-transition; do not send anyone hunting one"
+    assert "re-dispatch the per-unit commit tail for the units named above" in err
+    assert "ava cluster recover-pending" not in err, (
+        "nothing was retained; recovery is the wrong command"
+    )
+    assert "do NOT re-run `ava cluster update` for this shape" in err
+    assert "ROLLOUT ABORTED" not in err
+
+
 def test_the_pin_line_does_not_promise_a_self_heal_to_a_still_paused_host(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

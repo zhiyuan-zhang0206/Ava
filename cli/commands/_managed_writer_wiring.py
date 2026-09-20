@@ -31,8 +31,21 @@ publication seats (`cli.commands._update_publication`) on the coordinator (task
   beacon (it can only mean the position ran outside the rollout's read point).
   A set that cannot be published refuses fail-closed, leaving the pending
   journal for checked recovery (`ava cluster recover-pending`).
+- `_drive_managed_writer_continuation` (channel E) -- the post-collection,
+  pre-commit continuation step: under an `active` decision the units' normal
+  drives are fanned out and the pending journal is waited until the FULL
+  readback roster is recorded (the commit seat accepts nothing less). `off` /
+  `blocked` skip it untouched; a call with no recorded decision beacons like
+  the other positions.
+- `_commit_managed_writer_tails` (channel E) -- the post-commit step: under an
+  `active` decision the per-unit commit tails are fanned out and each unit's
+  recovery slot is waited until it reads committed (or has been disposed). The
+  publication commit is already paid when this runs, and the tail re-runs
+  idempotently -- so a refusal here fails the rollout with nothing retained and
+  the tail's re-dispatch as the recovery.
 
-All three call positions are wired (begin E2-b, collect E2-c, commit E2-a).
+All five call positions are wired (begin E2-b, collect E2-c, continue + tails
+channel E, commit E2-a).
 The prepared-plan chain behind the begin step is connected (task #4129, channel
 B) with its hop phase (channel C), and the collection channel is connected too
 (channel D, task #4129 I5): the closing section's hop verdict waits for every
@@ -215,3 +228,93 @@ def _commit_managed_writer_publication() -> int:
     if publication is not None:
         print(f"  \u2713 managed-writer publication committed -> {publication}")
     return 0
+
+
+def _drive_managed_writer_continuation(phase_input: ManagedWriterPhaseInput | None) -> int:
+    """Run every unit's normal-release drive and wait for the full readback roster.
+
+    The rollout's post-collection, pre-commit position of the managed-writer
+    chain (task #4129, channel E): under an `active` decision the units'
+    normal drives -- the restricted updater sessions carrying each sealed
+    `NormalReleaseRequest` into that unit's checked activation chain -- are
+    fanned out, and the durable pending journal is waited until every unit's
+    readback is recorded. The commit seat accepts nothing less, so a refusal
+    here fails the rollout with the pending journal retained for checked
+    recovery. `off` / `blocked` leave the chain untouched; a call with no
+    recorded decision beacons like the other positions.
+
+    The phase input is defensive only: the collection position runs under the
+    same decision before this one and refuses without the begin chain's phase
+    input, so `active` with no phase input can only be a rollout assembled
+    outside its orchestration. It skips with a visible beacon rather than
+    refuse, and the commit seat's own all-unit gate still refuses to publish a
+    set this step never drove. Returns the step's exit code.
+    """
+    from cli.commands._managed_writer_mode import managed_writer_mode
+
+    mode = managed_writer_mode()
+    if mode is None:
+        print(
+            "  \u00b7 managed-writer continue: no mode decision recorded in this "
+            "process; skipping the position",
+            file=sys.stderr,
+        )
+        return 0
+    if mode.state != "active":
+        return 0
+    if phase_input is None:
+        print(
+            "  \u00b7 managed-writer continue: the position was reached without the "
+            "begin position's phase input; skipping (the collection position refuses "
+            "this shape first)",
+            file=sys.stderr,
+        )
+        return 0
+    from cli.commands._managed_writer_continue import drive_continuation
+
+    # The stage is entered only under the active decision: an off/blocked
+    # rollout's log must not grow a managed-writer stage it never ran.
+    with _stage_telemetry("managed_writer_continue"):
+        return drive_continuation(phase_input)
+
+
+def _commit_managed_writer_tails(phase_input: ManagedWriterPhaseInput | None) -> int:
+    """Run every unit's post-publication commit tail and wait for its slot.
+
+    The rollout's post-commit position of the managed-writer chain (task
+    #4129, channel E): under an `active` decision the per-unit commit tails --
+    each records the unit's committed stage and disposes its retained
+    compensation -- are fanned out, and each unit's recovery slot is waited
+    until it reads committed (or has been disposed). The publication commit is
+    already paid when this runs and the tail re-runs idempotently, so a
+    refusal here fails the rollout with nothing retained and the tail's
+    re-dispatch as the recovery. `off` / `blocked` leave the chain untouched;
+    a call with no recorded decision or no phase input beacons like the drive
+    step above. Returns the step's exit code.
+    """
+    from cli.commands._managed_writer_mode import managed_writer_mode
+
+    mode = managed_writer_mode()
+    if mode is None:
+        print(
+            "  \u00b7 managed-writer tails: no mode decision recorded in this "
+            "process; skipping the position",
+            file=sys.stderr,
+        )
+        return 0
+    if mode.state != "active":
+        return 0
+    if phase_input is None:
+        print(
+            "  \u00b7 managed-writer tails: the position was reached without the "
+            "begin position's phase input; skipping (the collection position refuses "
+            "this shape first)",
+            file=sys.stderr,
+        )
+        return 0
+    from cli.commands._managed_writer_continue import commit_tails
+
+    # The stage is entered only under the active decision: an off/blocked
+    # rollout's log must not grow a managed-writer stage it never ran.
+    with _stage_telemetry("managed_writer_tails"):
+        return commit_tails(phase_input)

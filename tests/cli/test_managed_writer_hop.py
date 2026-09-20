@@ -298,7 +298,9 @@ class _VerdictRun(NamedTuple):
     phase_input: ManagedWriterPhaseInput | None
     waited: list[CollectorInput]
     collected: list[ManagedWriterPhaseInput | None]
+    drove: list[ManagedWriterPhaseInput | None]
     committed: list[None]
+    tailed: list[ManagedWriterPhaseInput | None]
 
 
 def _verdict_call(
@@ -309,6 +311,8 @@ def _verdict_call(
     wait_result: str | None = None,
     use_phase_input: bool = True,
     poll: Any = _never_poll,
+    drive_result: int = 0,
+    tails_result: int = 0,
 ) -> _VerdictRun:
     from cli.commands import _managed_writer_collector as collector_mod
     from cli.commands import _update_verdict as verdict_mod
@@ -329,11 +333,23 @@ def _verdict_call(
         collected.append(window_input)
         return 0
 
+    drove: list[ManagedWriterPhaseInput | None] = []
+
+    def continue_drive(window_input: ManagedWriterPhaseInput | None) -> int:
+        drove.append(window_input)
+        return drive_result
+
     committed: list[None] = []
 
     def commit() -> int:
         committed.append(None)
         return 0
+
+    tailed: list[ManagedWriterPhaseInput | None] = []
+
+    def tails(window_input: ManagedWriterPhaseInput | None) -> int:
+        tailed.append(window_input)
+        return tails_result
 
     verdict = verdict_mod._phase_b_and_commit(
         [("host-b", None)],
@@ -349,10 +365,12 @@ def _verdict_call(
         readiness=readiness,
         poll_outcome=poll,
         collect=collect,
+        continue_drive=continue_drive,
         commit=commit,
+        tails=tails,
         phase_input=container,
     )
-    return _VerdictRun(verdict, stub, container, waited, collected, committed)
+    return _VerdictRun(verdict, stub, container, waited, collected, drove, committed, tailed)
 
 
 def test_verdict_takes_the_hop_branch_and_keeps_the_frozen_resume_list(
@@ -364,11 +382,14 @@ def test_verdict_takes_the_hop_branch_and_keeps_the_frozen_resume_list(
     assert run.verdict.hosts_to_resume == []
     assert run.verdict.failing_step is None
     assert run.verdict.publication_refused is False
+    assert run.verdict.tails_pending is False
     assert [plan.machine for call in run.hop.calls for plan in call] == ["runner-a"]
     assert run.phase_input is not None
     assert run.waited == [run.phase_input.collector], "a CLEAN gate waits before collecting"
     assert run.collected == [run.phase_input], "the window collects through the phase input"
-    assert run.committed == [None], "a collected window commits"
+    assert run.drove == [run.phase_input], "a collected window drives the continuation"
+    assert run.committed == [None], "a driven window commits"
+    assert run.tailed == [run.phase_input], "a committed window runs the commit tails"
 
 
 def test_verdict_reports_a_wait_failure_as_a_refused_publication(
@@ -384,11 +405,14 @@ def test_verdict_reports_a_wait_failure_as_a_refused_publication(
     assert run.verdict.hosts_to_resume == []
     assert run.verdict.failing_step == detail
     assert run.verdict.publication_refused is True
+    assert run.verdict.tails_pending is False
     container = run.phase_input
     assert container is not None
     assert run.waited == [container.collector]
     assert run.collected == [], "a failed wait must not collect"
-    assert run.committed == [], "a failed wait must not commit"
+    assert run.drove == [] and run.committed == [] and run.tailed == [], (
+        "a failed wait must not drive, commit or tail"
+    )
 
 
 def test_verdict_reports_the_hop_gate_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -400,7 +424,8 @@ def test_verdict_reports_the_hop_gate_refusal(monkeypatch: pytest.MonkeyPatch) -
     assert run.verdict.failing_step == failing
     assert run.verdict.publication_refused is False
     assert run.waited == [], "a refused gate must not wait"
-    assert run.collected == [] and run.committed == []
+    assert run.collected == [] and run.drove == [] and run.committed == []
+    assert run.tailed == []
 
 
 def test_verdict_keeps_the_readiness_gate_before_the_hop_phase(
@@ -415,7 +440,8 @@ def test_verdict_keeps_the_readiness_gate_before_the_hop_phase(
     assert (run.verdict.rc, run.verdict.outcome) == (1, RolloutOutcome.INCOMPLETE)
     assert run.verdict.failing_step == "the gateway was not serving, so Phase B never fanned out"
     assert run.hop.calls == [], "the hop phase must not start when the gateway is not serving"
-    assert run.waited == [] and run.collected == []
+    assert run.waited == [] and run.collected == [] and run.drove == []
+    assert run.committed == [] and run.tailed == []
 
 
 def test_verdict_poll_path_hands_the_collection_none(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -433,4 +459,49 @@ def test_verdict_poll_path_hands_the_collection_none(monkeypatch: pytest.MonkeyP
     assert run.hop.calls == []
     assert run.waited == []
     assert run.collected == [None]
+    assert run.drove == [None], "the continuation call still happens -- with None"
     assert run.committed == [None]
+    assert run.tailed == [None], "the tails call still happens -- with None"
+
+
+def test_verdict_drive_failure_keeps_the_pending_journal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """8.7: the drive refused after the collection was adopted -- the rollout is
+    INCOMPLETE with the journal retained, and the commit must never be asked to
+    publish a set whose readbacks never landed."""
+    run = _verdict_call(monkeypatch, hop_result=(0, RolloutOutcome.CLEAN, [], None), drive_result=1)
+
+    assert (run.verdict.rc, run.verdict.outcome) == (1, RolloutOutcome.INCOMPLETE)
+    assert run.verdict.publication_refused is True
+    assert run.verdict.tails_pending is False
+    assert run.verdict.failing_step == (
+        "the managed-writer continuation drive refused; the pending journal "
+        "remains for `ava cluster recover-pending`"
+    )
+    assert run.collected == [run.phase_input]
+    assert run.drove == [run.phase_input]
+    assert run.committed == [], "a refused drive must not commit"
+    assert run.tailed == [], "a refused drive must not run the tails"
+
+
+def test_verdict_tails_failure_keeps_the_commit_paid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """9.5: the commit is PAID and the tails did not finish -- the verdict must
+    read INCOMPLETE with nothing retained (publication_refused False) and the
+    tail's idempotent re-dispatch named, never checked recovery."""
+    run = _verdict_call(monkeypatch, hop_result=(0, RolloutOutcome.CLEAN, [], None), tails_result=1)
+
+    assert (run.verdict.rc, run.verdict.outcome) == (1, RolloutOutcome.INCOMPLETE)
+    assert run.verdict.publication_refused is False
+    assert run.verdict.tails_pending is True
+    failing = run.verdict.failing_step
+    assert failing is not None
+    assert "commit tail did not complete" in failing
+    assert "already paid" in failing
+    assert "re-dispatch the commit tail (it is idempotent)" in failing
+    assert run.collected == [run.phase_input]
+    assert run.drove == [run.phase_input]
+    assert run.committed == [None], "the commit was paid before the tails ran"
+    assert run.tailed == [run.phase_input]
