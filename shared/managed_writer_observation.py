@@ -181,9 +181,9 @@ def observe_launcher(
                     valid_until,
                 )
             case "schtasks":
-                return LauncherObservation()
+                return LauncherObservation(kind="schtasks")
     except (NativeReadUnavailableError, OSError, ValueError, TypeError, ExpatError):
-        return LauncherObservation()
+        return LauncherObservation(kind=expected.kind)
 
 
 class UnitObserver:
