@@ -23,7 +23,6 @@ from tests.agent.test_maintenance import isolate as isolate
 @pytest.fixture(autouse=True)
 def cli_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(command, "machine_role", lambda: frozenset({"agent-runner"}))
-    monkeypatch.setattr(command, "host_identity", lambda: HostIdentity(uuid4(), frozenset()))
     monkeypatch.setattr(
         command, "host_identity_or_none", lambda: HostIdentity(uuid4(), frozenset())
     )
@@ -114,6 +113,42 @@ def test_failed_dependency_resume_never_releases_hold(monkeypatch: pytest.Monkey
     with pytest.raises(ConnectionError):
         command._resume("local", WHEN, cancel=True)
     assert command._hold("local", WHEN).phase == "preparing"
+
+
+def test_resume_proceeds_with_absent_agent_host(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An independently proven absent host cannot have continuations; the
+    cancel half proceeds and says the downgrade loudly."""
+    phase("draining")
+    unpause = MagicMock()
+    monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", unpause)
+    monkeypatch.setattr(command, "host_identity_or_none", real_host_identity_or_none)
+    monkeypatch.setattr("ops.agent_pause_probe.host_running", lambda: False)
+    monkeypatch.setattr("ops.agent_pause_probe.host_identity", _refused_probe)
+
+    command._resume("local", WHEN, cancel=True)
+
+    unpause.assert_called_once()
+    assert "provably absent" in capsys.readouterr().err
+
+
+def test_resume_still_refuses_an_unreadable_host_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A running host must answer; unreadable evidence is not absence."""
+    phase("draining")
+    monkeypatch.setattr(command, "host_identity_or_none", real_host_identity_or_none)
+    monkeypatch.setattr("ops.agent_pause_probe.host_running", lambda: True)
+
+    def _wedged() -> None:
+        raise URLError(TimeoutError("timed out"))
+
+    monkeypatch.setattr("ops.agent_pause_probe.host_identity", _wedged)
+
+    with pytest.raises(URLError):
+        command._resume("local", WHEN, cancel=True)
+    assert pause_owner.read().status == "paused"
 
 
 def test_failed_start_remains_retryable_under_hold(monkeypatch: pytest.MonkeyPatch) -> None:
