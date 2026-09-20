@@ -38,9 +38,12 @@ def _write_registry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, rec: Cluste
     monkeypatch.setattr(cg.settings.general, "cluster_registry", reg_path)
 
 
-def test_ensure_app_port_backfills_record_and_env(
+def test_ensure_app_port_raises_when_slot_is_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """An allocated record without the `app` slot is corrupt: the step fails
+    (KeyError) instead of guessing a port — and fails before touching either
+    the record or the `.env`."""
     home = tmp_path / "ava-dev"
     rec = ClusterRecord(
         ports=cast("ClusterPorts", {"gateway": 18032, "frontend": 18033}),
@@ -52,15 +55,13 @@ def test_ensure_app_port_backfills_record_and_env(
     env_path.parent.mkdir(parents=True)
     env_path.write_text("AVA_GATEWAY_PORT=18032\n")
 
-    assert cg._ensure_app_port(home) == 18032 + 15
+    with pytest.raises(KeyError, match="lacks the 'app' port"):
+        cg._ensure_app_port(home)
 
-    # record gained the slot
     from shared.cluster import load_registry
 
-    saved = load_registry()[str(home)]
-    assert saved.ports.get("app") == 18032 + 15
-    # .env gained the line
-    assert "AVA_APP_PORT=18047" in env_path.read_text()
+    assert load_registry()[str(home)].ports.get("app") is None
+    assert "AVA_APP_PORT" not in env_path.read_text()
 
 
 def test_ensure_app_port_keeps_existing_slot_and_env(
@@ -92,7 +93,7 @@ def test_ensure_app_port_second_run_is_a_byte_level_noop(
     another audit record (task #3637: the WSL converge noise)."""
     home = tmp_path / "ava-dev"
     rec = ClusterRecord(
-        ports=cast("ClusterPorts", {"gateway": 18032, "frontend": 18033}),
+        ports=cast("ClusterPorts", {"gateway": 18032, "frontend": 18033, "app": 18047}),
         gateway_home=str(home),
         created_at="t",
     )
@@ -101,14 +102,14 @@ def test_ensure_app_port_second_run_is_a_byte_level_noop(
     env_path.parent.mkdir(parents=True)
     env_path.write_text("AVA_GATEWAY_PORT=18032\n")
 
-    assert cg._ensure_app_port(home) == 18032 + 15
+    assert cg._ensure_app_port(home) == 18047
     after_first = env_path.read_bytes()
     audit_path = home / ".env.audit.jsonl"
     records = audit_path.read_text().splitlines()
     assert len(records) == 1
     assert '"converge_gateway_port"' in records[0]
 
-    assert cg._ensure_app_port(home) == 18032 + 15
+    assert cg._ensure_app_port(home) == 18047
 
     assert env_path.read_bytes() == after_first
     assert audit_path.read_text().splitlines() == records
