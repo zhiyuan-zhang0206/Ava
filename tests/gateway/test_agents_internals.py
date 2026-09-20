@@ -495,11 +495,14 @@ class TestResurrectAgent:
         assert _inbound_rows(db_conn, agent_id) == [("wake despite closure?", "chat", "user")]
 
     def test_manual_resurrect_reopens_closed_agent(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+        self,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+        loguru_records: list[dict[str, Any]],
     ) -> None:
         """The explicit manual resurrect is the one channel that may reopen a
-        closed agent: the CAS clears the marker and the resurrect audit event
-        carries `reopened`."""
+        closed agent: the CAS clears the marker, the resurrect audit event
+        carries `reopened`, and a WARNING line marks the reopen for operators."""
         agent_id = _spawn_agent()
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
@@ -527,6 +530,13 @@ class TestResurrectAgent:
         ).fetchone() == (None,)
         assert events[-1]["event_type"] == "resurrect"
         assert events[-1]["payload"] == {"reopened": True}
+        reopened_records = [
+            r for r in loguru_records if r["extra"].get("event") == "agent_reopened"
+        ]
+        assert len(reopened_records) == 1
+        assert reopened_records[0]["level"].name == "WARNING"
+        assert reopened_records[0]["extra"]["agent_id"] == agent_id
+        assert reopened_records[0]["extra"]["resurrected_by"] == "user"
 
     def test_guarded_compact_rejects_kind_mismatch_and_claimed_trigger(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch

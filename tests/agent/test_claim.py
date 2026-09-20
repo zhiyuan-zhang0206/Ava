@@ -1423,6 +1423,111 @@ async def test_claim_terminate_vetoed_by_pending_inbound_after_claim(
         assert term_row[0] == "done"
 
 
+async def test_claim_closed_terminate_not_vetoed_by_pending_inbound_after_claim(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+):
+    """A closed agent's death is not vetoed by a message landing after the
+    claim: the closure marker outranks the post-claim recheck, the terminate
+    applies (END + marker), and the newer chat stays queued for the
+    dead-letter gates — instead of keeping the agent alive."""
+    from agent.db import ClaimedInbound
+
+    tid = spawn_agent()
+    with db_conn.cursor() as cur:
+        cur.execute("UPDATE agents_meta SET closed_at = now() WHERE id = %s", (tid,))
+    db_conn.commit()
+    terminate_id = _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
+    chat_id = insert_inbound_message(db_conn, tid, "message after the claim", source="user")
+    await _await_inbound_visible(aops_pool, chat_id)
+
+    async def fake_claim(_pool, _agent_id, *, lifecycle_only=False):
+        assert not lifecycle_only
+        # Faithful to claim_inbound_batch: the grab marks lifecycle rows 'done'.
+        async with _pool.connection() as conn, conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+            await cur.execute(  # pyright: ignore[reportUnknownMemberType]
+                "UPDATE inbound_messages SET status = 'done' WHERE id = %s", (terminate_id,)
+            )
+        return [
+            ClaimedInbound(
+                id=terminate_id, agent_id=tid, content="", kind="terminate", source="user"
+            )
+        ]
+
+    monkeypatch.setattr("agent.graph._claim.claim_inbound_batch", fake_claim)  # pyright: ignore[reportUnknownArgumentType]
+
+    cmd = await claim_node(
+        AgentState(messages=[SystemMessage(content="sys")]),
+        _make_runtime(ops_pool=aops_pool),
+        _config(
+            tid,
+        ),
+    )
+
+    assert cmd.goto == END
+    msgs = cmd.update["messages"]  # type: ignore[index]
+    assert any("Termination was accepted from user" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
+    # The newer chat was not vetoed into dispatch — it stays pending for the
+    # dead-letter gates (nothing pulls the closed agent back).
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE id = %s", (chat_id,)
+    ).fetchone() == ("pending",)
+
+
+@pytest.mark.parametrize("closed, dies", [(False, False), (True, True)])
+async def test_claim_same_batch_chat_veto_respects_the_closure(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    closed: bool,
+    dies: bool,
+):
+    """Veto half 1 (a same-batch chat newer than the terminate) yields to the
+    closure marker: a closed agent's terminate still applies, while an open
+    agent's is vetoed exactly as before."""
+    from agent.db import ClaimedInbound
+
+    tid = spawn_agent()
+    if closed:
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE agents_meta SET closed_at = now() WHERE id = %s", (tid,))
+        db_conn.commit()
+    terminate_id = _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
+    chat_id = insert_inbound_message(db_conn, tid, "message in the batch", source="user")
+    await _await_inbound_visible(aops_pool, chat_id)
+
+    async def fake_claim(_pool, _agent_id, *, lifecycle_only=False):
+        assert not lifecycle_only
+        return [
+            ClaimedInbound(
+                id=terminate_id, agent_id=tid, content="", kind="terminate", source="user"
+            ),
+            ClaimedInbound(
+                id=chat_id,
+                agent_id=tid,
+                content="message in the batch",
+                kind="chat",
+                source="user",
+            ),
+        ]
+
+    monkeypatch.setattr("agent.graph._claim.claim_inbound_batch", fake_claim)  # pyright: ignore[reportUnknownArgumentType]
+
+    cmd = await claim_node(
+        AgentState(messages=[SystemMessage(content="sys")]),
+        _make_runtime(ops_pool=aops_pool),
+        _config(
+            tid,
+        ),
+    )
+
+    if dies:
+        assert cmd.goto == END
+        msgs = cmd.update["messages"]  # type: ignore[index]
+        assert any("Termination was accepted from user" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
+    else:
+        assert cmd.goto != END
+
+
 async def test_claim_restart_kind_hosted_ends_turn_and_stays_runnable(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ):

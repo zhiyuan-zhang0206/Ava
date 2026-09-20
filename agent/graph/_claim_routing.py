@@ -25,7 +25,11 @@ Routing semantics (preserved verbatim from the original claim module):
   latest intent), or any pending inbound newer than the whole claimed batch
   (the world moved before the process could die). The vetoed terminate is a
   consumed no-op — the agent stays alive and processes the message (see the
-  veto handling in decide / _claim_node_impl).
+  veto handling in decide / _claim_node_impl). A closed agent
+  (`agents_meta.closed_at` set, `terminate --final`) is exempt from both veto
+  halves: the closure contract outranks "the world moved", so newer work
+  cannot keep a closed agent alive — it stays queued and dead-letters on the
+  existing gates; only an explicit resurrect reopens the agent.
 - restart_completed / fork / compact never decide routing: their markers are
   appended and content carried regardless of who wins. Under an exit winner
   compact_request is dropped (its LLM call could raise before the exit arm
@@ -37,7 +41,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from agent.db import ClaimedInbound, has_pending_inbound_after
+from agent.db import ClaimedInbound, has_pending_inbound_after, is_agent_closed
 from shared.context import AvaContext
 from shared.inbound import InboundKind
 
@@ -111,8 +115,9 @@ async def resolve_routing(
 ) -> _Routing:
     """Resolve the single batch winner: max-id exit vs revive, plus veto logic.
 
-    All DB I/O is injected via *ctx* so the function is testable with a mock
-    ``has_pending_inbound_after``.  No other side-effects.
+    All DB I/O is injected via *ctx* so the function is testable with mocks
+    for ``has_pending_inbound_after`` / ``is_agent_closed``.  No other
+    side-effects.
     """
     assert ctx.ops_pool is not None, "resolve_routing requires ctx.ops_pool"  # noqa: S101
     if any(item.durable_lifecycle for item in batch):
@@ -151,22 +156,26 @@ async def resolve_routing(
         assert latest_exit is not None, (  # noqa: S101
             "exit_kind == TERMINATE implies the exit row is a terminate"
         )
-        latest_chat = max(
-            (it for it in batch if it.kind == InboundKind.CHAT),
-            key=lambda it: it.id,
-            default=None,
-        )
-        # Veto half 1: same-batch chat the terminate decision did not see.
-        if latest_chat is not None and (
-            latest_exit.source == "self" or latest_chat.id > latest_exit.id
-        ):
-            exit_kind = None
-        # Veto half 2: post-claim arrival newer than the whole batch.
-        elif await has_pending_inbound_after(
-            ctx.ops_pool, agent_id, after_id=max(it.id for it in batch)
-        ):
-            exit_kind = None
-            terminate_vetoed_by_pending = True
+        # A closed agent's death is not vetoable (fail-closed): the closure
+        # marker outranks the newer-intent rule — newer work stays queued for
+        # the dead-letter gates instead of keeping the agent alive.
+        if not await is_agent_closed(ctx.ops_pool, agent_id):
+            latest_chat = max(
+                (it for it in batch if it.kind == InboundKind.CHAT),
+                key=lambda it: it.id,
+                default=None,
+            )
+            # Veto half 1: same-batch chat the terminate decision did not see.
+            if latest_chat is not None and (
+                latest_exit.source == "self" or latest_chat.id > latest_exit.id
+            ):
+                exit_kind = None
+            # Veto half 2: post-claim arrival newer than the whole batch.
+            elif await has_pending_inbound_after(
+                ctx.ops_pool, agent_id, after_id=max(it.id for it in batch)
+            ):
+                exit_kind = None
+                terminate_vetoed_by_pending = True
 
     return _Routing(
         exit_kind=exit_kind,

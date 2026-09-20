@@ -8,6 +8,7 @@ fast (`raise_for_status()`) on any HTTP error. Ordered by escalating force:
   ls              GET  /api/agents                       read one directory page
   send <id> <txt> POST /api/agents/{id}/messages         deliver a chat inbound (source required)
   cancel <id>     POST /api/cancel                       halt the current action -> idle, stays alive
+  compact <id>    POST /api/agents/{id}/compact          request conversation compaction (durable)
   restart <id>    POST /api/agents/{id}/restart          bounce the process, state preserved
   terminate <id>  POST /api/agents/{id}/terminate        graceful stop + exit
   kill <id>       POST /api/agents/{id}/terminate(force) hard-stop a stuck agent
@@ -430,7 +431,13 @@ def _terminate(
         headers=gateway_auth_headers(),
     )
     resp.raise_for_status()
-    print(f"  ✓ agent {agent_id} {verb}: {resp.json().get('status')}")
+    data = resp.json()
+    # `closed` rides only when the runner reports it (absent on older runners):
+    # print the closure state when present, so an already-terminated `--final`
+    # close is verifiable from the output alone.
+    closed = data.get("closed")
+    suffix = "" if closed is None else (" — closed" if closed else " — not closed")
+    print(f"  ✓ agent {agent_id} {verb}: {data.get('status')}{suffix}")
     return 0
 
 
@@ -441,7 +448,8 @@ def cmd_agents_terminate(agent_id: int, *, source: str | None = None, final: boo
     closed: never auto-resurrected (its queued work dead-letters on the existing
     thresholds); `ava agents resurrect <id>` reopens it. On an
     already-terminated agent `--final` is the metadata-only mark (the backfill
-    route for agents closed before the marker existed)."""
+    route for agents closed before the marker existed); the output reports the
+    resulting closure state."""
     return _terminate(agent_id, force=False, source=source, final=final)
 
 
@@ -451,3 +459,22 @@ def cmd_agents_kill(agent_id: int, *, source: str | None = None, final: bool = F
     The response acknowledges the host lifecycle request; completion is asynchronous.
     `--final` also closes the agent (see `terminate --final`)."""
     return _terminate(agent_id, force=True, source=source, final=final)
+
+
+def cmd_agents_compact(agent_id: int) -> int:
+    """`ava agents compact <id>` — request conversation compaction through the
+    gateway's durable `compact_request` inbound (the same surface the web UI
+    triggers).
+
+    Returns immediately: the agent consumes the request on its next claim pass.
+    A terminated target is auto-resurrected first (except a closed one); a
+    wedged target consumes it once recovered (turn-liveness restart, or an
+    operator kill + resurrect) — the request is durable and waits."""
+    from shared.http_dial import post as dial_post
+    from shared.machine import gateway_api_base, gateway_auth_headers
+
+    url = f"{gateway_api_base()}/api/agents/{agent_id}/compact"
+    resp = dial_post(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers())
+    resp.raise_for_status()
+    print(f"  ✓ agent {agent_id} compact: {resp.json().get('status')}")
+    return 0

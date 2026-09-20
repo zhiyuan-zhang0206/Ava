@@ -40,7 +40,9 @@ Overview of the Agent subsystem.
     correcting "who I am".
   - **terminate / force-kill** — graceful exit (deliver `kind='terminate'`, graph goes to END, process exits naturally)
     or a four-step kill ladder when stuck (`force=true`, not available on `ava.self.terminate()`). With `final` the
-    termination also closes the agent for good: never auto-resurrected. Only an explicit resurrect reopens it.
+    termination also closes the agent for good: never auto-resurrected, its claimed terminate exempt from the
+    claim-time newer-work veto, and the response carries the resulting closure state (`closed`). Only an explicit
+    resurrect reopens it.
   - **heartbeat** — check-in for an idle agent; claim appends a system note unless a permanent-provider circuit breaker is open, in which case the heartbeat is consumed without growing the LLM context.
 
 ## Sub-concepts

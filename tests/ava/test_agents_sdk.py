@@ -396,6 +396,20 @@ class TestTerminate:
         assert result == TerminateResult.ALREADY_TERMINATED
         assert result.status is TerminateResult.ALREADY_TERMINATED
         assert result.open_tasks is None
+        # An older runner does not report the closure state: None, not a guess.
+        assert result.closed is None
+
+    def test_terminate_reports_closure_state_when_present(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`closed` rides the result when the runner reports it."""
+
+        def _terminate(*_args: object, **_kwargs: object) -> dict[str, Any]:
+            return {"status": "already_terminated", "open_tasks": None, "closed": True}
+
+        monkeypatch.setattr(ava.agents._client, "terminate", _terminate)
+        result = ava.agents.terminate(7, final=True)
+        assert result.closed is True
 
     def test_rejects_non_string_message_before_gateway_call(
         self, monkeypatch: pytest.MonkeyPatch

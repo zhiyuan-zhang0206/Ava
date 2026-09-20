@@ -191,24 +191,35 @@ class OpenTasksHint:
 class TerminateOutcome(str):
     """What a terminate call returned: the acceptance status as a string —
     compare it directly ("enqueued" / "already_terminated") — plus `status` as
-    the enum, and `open_tasks`: the tasks the agent still owned as it went
-    down, or None."""
+    the enum, `open_tasks`: the tasks the agent still owned as it went down, or
+    None, and `closed`: the agent's closure state after the request (True when
+    `final` was requested or the marker was already set; None when the
+    reporting version predates the field)."""
 
-    __slots__ = ("open_tasks", "status")
+    __slots__ = ("closed", "open_tasks", "status")
 
     status: TerminateResult
     open_tasks: OpenTasksHint | None
+    closed: bool | None
 
     def __new__(
-        cls, status: TerminateResult, open_tasks: OpenTasksHint | None = None
+        cls,
+        status: TerminateResult,
+        open_tasks: OpenTasksHint | None = None,
+        *,
+        closed: bool | None = None,
     ) -> TerminateOutcome:
         self = super().__new__(cls, status.value)
         self.status = status
         self.open_tasks = open_tasks
+        self.closed = closed
         return self
 
     def __repr__(self) -> str:
-        return f"TerminateOutcome(status={self.status.value!r}, open_tasks={self.open_tasks!r})"
+        return (
+            f"TerminateOutcome(status={self.status.value!r}, "
+            f"open_tasks={self.open_tasks!r}, closed={self.closed!r})"
+        )
 
 
 def get_neighbors(
@@ -444,7 +455,12 @@ def terminate(
 
     The result compares as the status string (`== "enqueued"` works as before)
     and carries `open_tasks`: the tasks the agent still owns as it goes down
-    (at most five, most recently updated first), or None when it leaves none."""
+    (at most five, most recently updated first), or None when it leaves none.
+    It also carries `closed`: the agent's closure state after the call — True
+    when `final` was requested (or the marker was already set), False
+    otherwise, None when an older version did not report it — so `terminate
+    --final`, including its already-terminated backfill form, is verifiable
+    from the result alone."""
     agent_id = coerce_typed(agent_id, "agent_id", int)
     message = coerce_str(message, "message", allow_none=True)
     force = coerce_typed(force, "force", bool)
@@ -453,6 +469,7 @@ def terminate(
     return TerminateOutcome(
         TerminateResult(data["status"]),
         _open_tasks_from_dict(data["open_tasks"]),
+        closed=data.get("closed"),
     )
 
 
