@@ -16,6 +16,7 @@ from shared.events.system import (
     ArchiveFetchDegraded,
     Auth401Rejected,
     CheckpointTableSizes,
+    ConvergeFilePreserved,
     EventClassReopened,
     EventSpec,
     FleetGraphStale,
@@ -161,6 +162,13 @@ _EVENTS_OPS: dict[str, EventSpec] = {
     "lgtm_dashboard_render_failed": _telemetry(
         "lgtm_dashboard_render_failed",
         "ava-ops dashboard render failed during converge; the previous provisioning file was kept",
+        tier="anomaly",
+    ),
+    "converge_file_preserved": _telemetry(
+        "converge_file_preserved",
+        "converge kept a locally modified destination instead of overwriting — the current "
+        "content no longer matches the recorded render; repeats every converge until resolved",
+        payload=ConvergeFilePreserved,
         tier="anomaly",
     ),
     # labeler / trace housekeeping

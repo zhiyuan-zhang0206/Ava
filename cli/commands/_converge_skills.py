@@ -46,6 +46,7 @@ from pathlib import Path
 from cli.commands._skill_package import contains_skill_md
 from shared import install_registry, paths
 from shared.cluster import is_default_home
+from shared.converge_preserve_report import report_converge_preserve
 from shared.install_registry import (
     IGNORED_NAMES,
     InstalledPackage,
@@ -92,6 +93,15 @@ def assert_repo_source_bound(repo: Path, ava_home: Path) -> None:
             f"must not replace prod's load dir (run `ava` from the prod checkout, "
             f"or set AVA_CONVERGE_ALLOW_WORKTREE=1 to override)"
         )
+
+
+def _warn_preserved(result: SkillsConvergeResult, s: _Source, dest: Path) -> None:
+    """Warn about one managed copy that drifted locally, and report it (task #3871)."""
+    report_converge_preserve(path=str(dest), key=s.name, surface="skills")
+    result.warnings.append(
+        f"'{s.name}': {dest} was modified locally; not overwritten "
+        f"(remove the dir and re-run converge to restore from {s.src})"
+    )
 
 
 def _copy_tree(src: Path, dest: Path) -> None:
@@ -340,10 +350,7 @@ def _sync_one(
         result.warnings.append(_untracked_warning(s, dest))
         return
     if entry.content_hash is not None and dest_hash != entry.content_hash:
-        result.warnings.append(
-            f"'{s.name}': {dest} was modified locally; not overwritten "
-            f"(remove the dir and re-run converge to restore from {s.src})"
-        )
+        _warn_preserved(result, s, dest)
         return
     entry.origin = s.origin
     entry.origin_path = str(s.src)

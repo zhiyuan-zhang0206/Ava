@@ -608,6 +608,7 @@ def _write_config(path: Path, rendered: str) -> None:
         rendered,
         hashes_path,
         path.name,
+        surface="otel-collector",
         writer=_atomic_write,
     )
     if warning is not None:

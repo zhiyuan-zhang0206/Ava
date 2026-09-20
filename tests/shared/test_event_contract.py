@@ -207,9 +207,12 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # raises the current total to 202; the commanded force-terminate close
     # (task #4180: host_turn_force_terminated + host_held_wake_force_terminated —
     # an applied force terminate of the turn's own incarnation ending it quietly
-    # instead of as an unclassified crash) raises the current total to 204.
+    # instead of as an unclassified crash) raises the current total to 204; the
+    # converge-preserve signal (task #3871's converge_file_preserved — a locally
+    # modified rendered destination preserved instead of overwritten) raises the
+    # current total to 205.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 204
+    assert len(_TELEMETRY_KINDS) == 205
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:
