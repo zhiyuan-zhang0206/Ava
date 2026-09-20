@@ -80,11 +80,24 @@ class OwnedProcess:
         return create_time_matches(stable_create_time(process), self.birth)
 
     def live(self) -> bool:
+        """Whether the pid still is this recorded process.
+
+        A tracked process exiting and being reaped exactly between psutil's
+        eager validation and the raw start-time read leaves that read without a
+        /proc entry — that IS the exit, not an unverifiable identity: existence
+        is re-asked, and a vanished pid converges as gone (the 2026-09-20
+        wave-2 window raised out of a stop this way and aborted the cluster
+        update with the tracked daemon already exiting). Only a pid that still
+        exists while its start time cannot be read keeps the loud error.
+        """
         try:
             process = psutil.Process(self.pid)
             if self.starttime is not None:
                 actual = pid_starttime_ticks(self.pid)
                 if actual is None:
+                    if not psutil.pid_exists(self.pid):
+                        # Reaped in the validation -> read window: exited.
+                        return False
                     raise RuntimeError(f"cannot verify process identity for PID {self.pid}")
                 if actual != self.starttime:
                     return False

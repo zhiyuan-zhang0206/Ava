@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import importlib
 import os
+import signal
+import subprocess
 import sys
 
 import psutil
 import pytest
 
+from shared import proc_tree
+from shared.platform import IS_LINUX
 from shared.proc_tree import OwnedProcess, create_time_matches, stable_create_time
+from shared.session_record import pid_starttime_ticks
 
 
 def _identity_with_drift(offset: float) -> OwnedProcess:
@@ -40,6 +45,59 @@ def test_birth_matches_exposes_the_same_rule() -> None:
     process = psutil.Process()
     assert OwnedProcess(process.pid, process.create_time() + 1.0, None).birth_matches(process)
     assert not OwnedProcess(process.pid, process.create_time() + 60.0, None).birth_matches(process)
+
+
+@pytest.mark.skipif(not IS_LINUX, reason="Linux /proc start-time identity")
+def test_live_converges_when_the_proc_entry_vanishes_mid_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """psutil validated the pid, then the raw read found no /proc entry: the
+    tracked process was reaped in between, and that IS the exit.
+
+    2026-09-20 wave-2: this window raised `cannot verify process identity` out
+    of the stop wait and aborted the whole cluster update with the tracked
+    daemon already exiting. The reap is timed by the patched read so the
+    interleave is deterministic; the read itself, psutil and pid_exists stay
+    real.
+    """
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    pid = child.pid
+    starttime = pid_starttime_ticks(pid)
+    assert starttime is not None
+    real_read = pid_starttime_ticks
+
+    def reaping_read(reading_pid: int) -> int | None:
+        if reading_pid == pid:
+            os.kill(pid, signal.SIGKILL)
+            child.wait()
+        return real_read(reading_pid)
+
+    monkeypatch.setattr(proc_tree, "pid_starttime_ticks", reaping_read)
+    try:
+        assert OwnedProcess(pid, 0.5, starttime).live() is False
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+
+
+@pytest.mark.skipif(not IS_LINUX, reason="Linux /proc start-time identity")
+def test_live_keeps_the_error_when_a_present_process_cannot_be_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pid that still exists while its start time cannot be read is not
+    converged: the identity question genuinely went unanswered, and the loud
+    error is the safety answer."""
+    process = psutil.Process()
+    identity = OwnedProcess(process.pid, process.create_time(), pid_starttime_ticks(process.pid))
+    assert identity.starttime is not None
+
+    def unreadable_read(_pid: int) -> int | None:
+        return None
+
+    monkeypatch.setattr(proc_tree, "pid_starttime_ticks", unreadable_read)
+    with pytest.raises(RuntimeError, match="cannot verify process identity"):
+        identity.live()
 
 
 def test_create_time_matches_accepts_whole_second_moves() -> None:
