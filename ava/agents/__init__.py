@@ -469,7 +469,7 @@ def terminate(
     return TerminateOutcome(
         TerminateResult(data["status"]),
         _open_tasks_from_dict(data["open_tasks"]),
-        data.get("closed"),
+        closed=data.get("closed"),
     )
 
 
