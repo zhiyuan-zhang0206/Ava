@@ -100,6 +100,7 @@ from shared.managed_writer_publication import (
     PublishedUnit,
     WriterPublication,
 )
+from shared.native_job_observation import read_crontab
 from shared.runtime_release import ReleaseRejectedError, verify_release
 from shared.session_backend import get_backend
 from shared.session_record import SessionRecord
@@ -147,6 +148,15 @@ def require_present[T](value: T | None, message: str) -> T:
 def require(condition: bool, message: str) -> None:  # noqa: FBT001 -- CI assertion predicate.
     if not condition:
         raise AssertionError(message)
+
+
+def install_cron(value: bytes) -> None:
+    """Install the CI user's crontab -- the unit's real launcher inventory source."""
+    subprocess.run(["/usr/bin/crontab", "-"], input=value, check=True, timeout=5)
+    require(
+        read_crontab(datetime.now(UTC) + timedelta(seconds=30)) == value,
+        "native crontab write was not observed",
+    )
 
 
 def private_json(path: Path, value: str) -> None:
@@ -839,7 +849,7 @@ def run_case(  # noqa: PLR0915 -- one bounded fixture lifecycle per case.
     challenge_seconds = int(case.get("challenge", 600))
     ops_port = free_port()
     env = case_env(home, namespace, ops_port)
-    outcome: dict[str, Any] = {"case": name, "ok": False}
+    outcome: dict[str, Any] = {"case": name, "ok": False, "opsPort": ops_port}
     try:
         holder = f"normal-proof-{name}"
         row = require_present(
@@ -1062,10 +1072,17 @@ def run_case(  # noqa: PLR0915 -- one bounded fixture lifecycle per case.
             }
         )
     finally:
+        exc = sys.exc_info()[1]
+        if exc is not None:  # a failing case still leaves its CI artifact trail
+            outcome["error"] = f"{type(exc).__name__}: {exc}"
+            outcome["observerTail"] = observer_tail(2000)
+            record = session_record(home, "ava-ops")
+            outcome["observerRecord"] = asdict(record) if record is not None else None
+            outcome["opsListeners"] = port_listeners(ops_port)
+        (home.parent / f"normal-release-observation-{name}.json").write_text(
+            json.dumps(outcome, indent=2), encoding="utf-8"
+        )
         retire_case(home, generation, session_names)
-    (home.parent / f"normal-release-observation-{name}.json").write_text(
-        json.dumps(outcome, indent=2), encoding="utf-8"
-    )
     return outcome
 
 
@@ -1355,6 +1372,12 @@ def main() -> None:
     updater_handoff.state_path().unlink(missing_ok=True)
     updater_handoff.bootstrap_state_path().unlink(missing_ok=True)
     (home / "releases" / "current-release").unlink(missing_ok=True)
+    # The unit's launcher inventory must be non-empty ("complete coverage");
+    # install the one real CI-scratch registration, the same way the updater hop
+    # proof does, and restore the previous table at the end of the run.
+    original_cron = read_crontab(datetime.now(UTC) + timedelta(seconds=30))
+    require(not original_cron.strip(), "proof refuses to replace another CI job")
+    install_cron(f"@reboot AVA_HOME={home} /bin/true # ava-normal-release-proof\n".encode())
     namespace = "normal_" + uuid4().hex
     conn = psycopg.connect(
         make_conninfo(os.environ["AVA_DB_URL"], options=f"-csearch_path={namespace}"),
@@ -1366,11 +1389,17 @@ def main() -> None:
         create_namespace(conn, namespace, home)
         for case in CASES:
             name = str(case["case"])
+            print(f"[normal-release] case {name}: driving", flush=True)
             try:
                 summary[name] = run_case(case, conn, namespace, home, image, schema_digest)
+                print(f"[normal-release] case {name}: ok", flush=True)
             except Exception as exc:  # collect per-case, finish the run.
                 violations.append(f"{name}: {type(exc).__name__}: {exc}")
                 summary[name] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+                print(
+                    f"[normal-release] case {name}: FAILED {type(exc).__name__}: {exc}",
+                    flush=True,
+                )
         (home.parent / "normal-release-proof.json").write_text(
             json.dumps(
                 {
@@ -1390,6 +1419,7 @@ def main() -> None:
         if violations:
             raise AssertionError("normal release proof violations: " + "; ".join(violations))
     finally:
+        install_cron(original_cron)
         conn.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(namespace)))
         conn.close()
 

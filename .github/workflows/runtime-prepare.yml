@@ -191,6 +191,7 @@ jobs:
           path: |
             ${{ runner.temp }}/prepare/normal-release-observation-*.json
             ${{ runner.temp }}/prepare/normal-release-cases/**
+            ${{ runner.temp }}/prepare/unit/logs/**
           if-no-files-found: ignore
       - name: Stop isolated native PG
         if: always() && runner.os == 'Linux'
