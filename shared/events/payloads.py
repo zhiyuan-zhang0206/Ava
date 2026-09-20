@@ -150,6 +150,22 @@ class StreamStalledRetry(TypedDict):
     elapsed_s: float
 
 
+class StreamStallPairTerminated(TypedDict):
+    """`stream_stall_pair_terminated` payload — agent/graph/_llm_stream.py.
+
+    The call-terminating stall pair (the stream segment and its non-streaming
+    fallback both expired) carries the same provider identity as the
+    ``stream_stalled_retry`` it co-emits with, so the pair joins back to the
+    stall that opened it; ``timeout_s`` is the shared
+    ``llm_stream_ttft_timeout_seconds`` bound both segments ran under.
+    """
+
+    vendor: str | None
+    model: str
+    stage: str
+    timeout_s: float
+
+
 class LlmProviderError(TypedDict):
     """`llm_provider_error` payload — shared/lm/errors.py.
 
