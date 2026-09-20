@@ -13,6 +13,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import NoReturn
 
 from services._pidfile import acquire_pidfile, remove_pidfile
 from services.pitr.object_store import PermanentObjectStoreError, TransientObjectStoreError
@@ -371,7 +372,7 @@ async def run() -> None:
         await stop_health_server(server)
 
 
-def _hard_exit(code: int) -> int:
+def _hard_exit(code: int) -> NoReturn:
     """End the process now, skipping interpreter teardown. Never returns.
 
     Teardown is precisely what hangs: the interpreter's atexit handler joins

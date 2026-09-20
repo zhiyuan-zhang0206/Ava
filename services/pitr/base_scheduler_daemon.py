@@ -16,7 +16,7 @@ from contextlib import ExitStack
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import cast
+from typing import NoReturn, cast
 from zoneinfo import ZoneInfo
 
 from services._pidfile import acquire_pidfile, remove_pidfile
@@ -526,7 +526,7 @@ async def run() -> None:
         remove_pidfile(pidfile)
 
 
-def _hard_exit(code: int) -> int:
+def _hard_exit(code: int) -> NoReturn:
     """End the process now, skipping interpreter teardown. Never returns.
 
     Teardown is precisely what hangs. The default executor here hosts the

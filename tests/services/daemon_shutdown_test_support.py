@@ -13,6 +13,10 @@ The shape was proven in ``tests/services/test_pitr_base_scheduler_shutdown.py``
 (task #4218, PR #3045); this module reuses it for the sweep-B daemons. The
 child stubs ``main()``'s boot gates that would need a live cluster (the schema
 version check); everything from signal wiring down is production code.
+
+Reusers must keep both assertions — the ``interrupted`` log line and the
+``cleanup-ran`` marker: a bounded exit alone would pass even if the drain
+silently stopped reaching ``run()``'s cleanup.
 """
 
 from __future__ import annotations
