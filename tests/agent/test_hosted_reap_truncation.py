@@ -17,6 +17,7 @@ from uuid import uuid4
 
 import psycopg
 import pytest
+from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from agent.impersonation import claim_gate
@@ -27,9 +28,12 @@ from shared.context import AvaContext
 from shared.impersonation import ImpersonationError
 from shared.turn_identity import bind_turn_identity
 from tests.agent.test_inbound_ownership import _admit, _agent
-from tests.agent.test_lifecycle_intent import _command
 
 _REAP_ERROR = "Native runtime no longer owns this agent"
+
+_MAINTENANCE_PAYLOAD: dict[str, object] = {
+    "maintenance": {"holder": "ops:test:truncation", "acquired_at": "2026-09-20T00:00:00+00:00"}
+}
 
 
 def _host(graph: Mock, pool: AsyncConnectionPool) -> AgentHost:
@@ -40,6 +44,18 @@ def _raising_graph() -> Mock:
     graph = Mock()
     graph.ainvoke = AsyncMock(side_effect=ImpersonationError(_REAP_ERROR))
     return graph
+
+
+def _reap_command(conn: psycopg.Connection, agent_id: int) -> int:
+    """The member's un-applied maintenance restart: the mark's other half."""
+    row = conn.execute(
+        "INSERT INTO inbound_messages(agent_id,content,kind,source,payload) "
+        "VALUES (%s,'','restart','system:maintenance',%s) RETURNING id",
+        (agent_id, Jsonb(_MAINTENANCE_PAYLOAD)),
+    ).fetchone()
+    conn.commit()
+    assert row is not None
+    return row[0]
 
 
 def _mark_for_reap(conn: psycopg.Connection, agent_id: int) -> None:
@@ -54,7 +70,7 @@ async def test_the_mark_mid_invocation_truncates_instead_of_crashing(
     """The graph's guards (hook fence / claim gate) refuse under the mark."""
     agent_id = _agent(db_conn)
     incarnation = await _admit(aops_pool, agent_id)
-    command = _command(db_conn, agent_id, "restart")
+    command = _reap_command(db_conn, agent_id)
     publisher = Mock()
 
     async def graph_return(*args: object, **kwargs: object) -> dict[str, object]:
@@ -97,7 +113,7 @@ async def test_the_loop_top_settle_probe_truncates_quietly(
     """Site host.py:678 — the turn starts already under the mark."""
     agent_id = _agent(db_conn)
     incarnation = await _admit(aops_pool, agent_id)
-    _command(db_conn, agent_id, "restart")
+    _reap_command(db_conn, agent_id)
     _mark_for_reap(db_conn, agent_id)
     graph = _raising_graph()
     host = _host(graph, aops_pool)
@@ -114,7 +130,7 @@ async def test_the_turn_idle_settle_probe_truncates_quietly(
     """Site host.py:744 — the mark lands after the invocation returns."""
     agent_id = _agent(db_conn)
     incarnation = await _admit(aops_pool, agent_id)
-    _command(db_conn, agent_id, "restart")
+    _reap_command(db_conn, agent_id)
     graph = Mock()
 
     async def graph_return(*args: object, **kwargs: object) -> dict[str, object]:
@@ -136,7 +152,7 @@ async def test_the_claim_gate_refusal_is_the_classified_truncation(
     """Site agent.impersonation.claim_gate — the raise the host classifies."""
     agent_id = _agent(db_conn)
     incarnation = await _admit(aops_pool, agent_id)
-    _command(db_conn, agent_id, "restart")
+    _reap_command(db_conn, agent_id)
     _mark_for_reap(db_conn, agent_id)
     with bind_turn_identity(agent_id, incarnation=incarnation):
         with pytest.raises(ImpersonationError) as raised:
@@ -158,7 +174,7 @@ async def test_a_held_wake_stops_quietly_under_the_mark(
     """
     agent_id = _agent(db_conn)
     incarnation = await _admit(aops_pool, agent_id)
-    _command(db_conn, agent_id, "restart")
+    _reap_command(db_conn, agent_id)
     _mark_for_reap(db_conn, agent_id)
     monkeypatch.setattr(
         "services.agent_host.host.admit_hosted_runtime", AsyncMock(return_value=incarnation)
@@ -173,7 +189,7 @@ async def test_a_replaced_row_under_the_mark_still_crashes(
     """The mark is a truncation only for the incarnation that owns it."""
     agent_id = _agent(db_conn)
     incarnation = await _admit(aops_pool, agent_id)
-    _command(db_conn, agent_id, "restart")
+    _reap_command(db_conn, agent_id)
     db_conn.execute(
         "UPDATE agents_meta SET status='restarting', runtime_owner=%s WHERE id=%s",
         (uuid4(), agent_id),
@@ -196,6 +212,26 @@ async def test_a_lapsed_lease_without_the_mark_still_crashes(
         (agent_id,),
     )
     db_conn.commit()
+
+    host = _host(_raising_graph(), aops_pool)
+    with bind_turn_identity(agent_id, incarnation=incarnation), pytest.raises(ImpersonationError):
+        await host._invoke_until_done(agent_id, AvaContext(ops_pool=aops_pool))
+
+
+async def test_a_mark_without_the_maintenance_payload_still_crashes(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+) -> None:
+    """The payload key names the reap shape (task #4027): a mark whose restart
+    lacks it — same kind, source, status and un-applied — must not classify."""
+    agent_id = _agent(db_conn)
+    incarnation = await _admit(aops_pool, agent_id)
+    db_conn.execute(
+        "INSERT INTO inbound_messages(agent_id,content,kind,source) "
+        "VALUES (%s,'','restart','system:maintenance')",
+        (agent_id,),
+    )
+    db_conn.commit()
+    _mark_for_reap(db_conn, agent_id)
 
     host = _host(_raising_graph(), aops_pool)
     with bind_turn_identity(agent_id, incarnation=incarnation), pytest.raises(ImpersonationError):

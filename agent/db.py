@@ -505,6 +505,16 @@ async def has_pending_interrupt(pool: AsyncConnectionPool, agent_id: int) -> boo
     truncation signal for exactly this agent — the in-flight exec/LLM aborts and
     the dying turn's own fences (status predicates) end it without applying.
 
+    The branch reads the mark's full shape — the same predicate the stamp
+    writes (`ops.agent_pause._reap_agent`) and the settle selector matches
+    (`shared.straggler_reap._MARKED_ROWS`): `applied_at IS NULL AND
+    observed_at IS NULL AND status IN ('pending','claimed') AND payload ?
+    'maintenance'`. `observed_at IS NULL` is implied by `applied_at IS NULL`
+    (schema `inbound_lifecycle_target_check`) and kept explicit so every face
+    of the shape stays one shape; the payload key tells a maintenance restart
+    from any other, so a command the drain never stamped cannot fire the
+    abort.
+
     Self-initiated lifecycle (`source='self'`, i.e. `ava.self.terminate()` /
     restart from inside the agent's own exec) is EXCLUDED: that path already
     raises `_LifecycleExit` inside the exec child, which the exec node handles
@@ -523,7 +533,8 @@ async def has_pending_interrupt(pool: AsyncConnectionPool, agent_id: int) -> boo
             "SELECT 1 FROM agents_meta m WHERE m.id=i.agent_id "
             "AND m.lifecycle_command_id=i.id AND m.runtime_kind='hosted' "
             "AND m.runtime_generation=i.target_generation AND m.runtime_owner=i.target_owner)))) "
-            "OR (i.kind='restart' AND i.applied_at IS NULL AND i.status IN ('pending','claimed') "
+            "OR (i.kind='restart' AND i.applied_at IS NULL AND i.observed_at IS NULL "
+            "AND i.status IN ('pending','claimed') AND i.payload ? 'maintenance' "
             "AND EXISTS (SELECT 1 FROM agents_meta r "
             "WHERE r.id=i.agent_id AND r.status='restarting'))"
             ") LIMIT 1",
