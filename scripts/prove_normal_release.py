@@ -1483,10 +1483,16 @@ def main() -> None:
         schema_digest=schema_digest,
     )
     # CI scratch: retire any handoff left by an earlier proof in this private home
-    # (a retained failure envelope must not block this suite).
+    # (a retained failure envelope must not block this suite). The serving pointer
+    # is borrowed state: prove_runtime_prepare writes a sentinel there and reads it
+    # back at two later points (its preparation checks), and the sibling proofs
+    # leave it as they find it -- so the suite snapshots the exact bytes here and
+    # restores them in the finally.
+    selector_path = home / "releases" / "current-release"
+    selector_original = selector_path.read_bytes() if selector_path.exists() else None
     updater_handoff.state_path().unlink(missing_ok=True)
     updater_handoff.bootstrap_state_path().unlink(missing_ok=True)
-    (home / "releases" / "current-release").unlink(missing_ok=True)
+    selector_path.unlink(missing_ok=True)
     # The unit's launcher inventory must be non-empty ("complete coverage");
     # install the one real CI-scratch registration, the same way the updater hop
     # proof does, and restore the previous table at the end of the run.
@@ -1543,6 +1549,10 @@ def main() -> None:
     finally:
         install_cron(original_cron)
         unit_env_path.write_bytes(unit_env_original)
+        if selector_original is None:
+            selector_path.unlink(missing_ok=True)
+        else:
+            selector_path.write_bytes(selector_original)
         conn.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(namespace)))
         conn.close()
 
