@@ -107,9 +107,11 @@ def main() -> None:
     # awaits `shutdown_default_executor`, joining the default executor's
     # workers — the store load among them — and a stop signal must never wait
     # on those (see `_hard_exit`). The runner is therefore never closed: after
-    # the explicit drain below, teardown is skipped by the hard exit. While
-    # uvicorn is serving, SIGTERM is uvicorn's own graceful exit and `run()`
-    # returns normally into the same hard exit.
+    # the explicit drain below, teardown is skipped by the hard exit. During
+    # serving, SIGTERM first drives uvicorn's own graceful stop; on the way
+    # out `capture_signals` restores this daemon's handler and re-raises the
+    # signal (uvicorn/server.py, 0.52.4), so it still lands in this
+    # KeyboardInterrupt branch — not a normal return from `run()`.
     runner = asyncio.Runner()
     try:
         runner.run(run())
@@ -117,9 +119,9 @@ def main() -> None:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[memory-search] interrupted, shutting down")
         # The signal path skips Runner's own cancellation, so drain the loop's
-        # tasks explicitly: uvicorn's serve task unwinds; the pidfile is
-        # removed by the finally below either way. The executor is
-        # deliberately NOT drained.
+        # tasks explicitly: uvicorn's serve coroutine unwinds through the
+        # re-raised signal; the pidfile is removed by the finally below either
+        # way. The executor is deliberately NOT drained.
         loop = runner.get_loop()
         tasks = asyncio.all_tasks(loop)
         for task in tasks:
