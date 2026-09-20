@@ -16,11 +16,11 @@ During streaming each line is memoized `TimelineRow` + `React.memo` PythonCode/C
 
 ## Segments and dividers
 
-Historical ranks group separately; localized dividers never enter items or anchor counts — the rank-0 dashed divider labels the live boundary into the current post-compact segment ("Context compacted", task #3698), while the other historical ranks carry the scroll-back label (original history before compact); the rule carries long dashes at a 1:1 ratio and a demoted tone, and a plain label carries no arrow glyph (user feedback 2026-09-17, task #3870). The dividers are pure labels — no load-earlier control exists: reaching the top of the viewport auto-loads the previous page (a small top spinner shows while the fetch is in flight; no button, no pull gesture — task #4186).
+Historical ranks group separately; localized dividers never enter items or anchor counts — the rank-0 dashed divider labels the live boundary into the current post-compact segment ("Context compacted", task #3698), while the other historical ranks carry the scroll-back label (original history before compact); the rule carries long dashes at a 1:1 ratio and a demoted tone, and a plain label carries no arrow glyph (user feedback 2026-09-17, task #3870). The dividers are pure labels — no load-earlier control exists (paging is driven by reaching the top; task #4186).
 
 ## Cross-compact paging
 
-The active view retains the full loaded list: scroll-up paging follows backend `has_more` until the configured `AVA_TIMELINE_COMPACT_HISTORY` depth is exhausted. Loaded history and mounted DOM remain proportional to the history opened; CSS containment does not virtualize either. After a compact the retained-history segments re-attach automatically above the new summary — the store edge and retention hook live in [[ui/web/src/frontend-state/timeline-cache.ava.okf.md|Per-Thread Timeline Cache]].
+The active view retains the full loaded list: scroll-up paging follows backend `has_more` until the configured `AVA_TIMELINE_COMPACT_HISTORY` depth is exhausted. Reaching the top auto-loads the previous window (a small spinner shows while the fetch is in flight); each top arrival loads one window, and continued scroll-up paging — short threads fill page by page — keeps loading until `has_more` clears (no page cap, no leave-the-top re-arm; task #4186). Loaded history and mounted DOM remain proportional to the history opened; CSS containment does not virtualize either. After a compact the retained-history segments re-attach automatically above the new summary — the store edge and retention hook live in [[ui/web/src/frontend-state/timeline-cache.ava.okf.md|Per-Thread Timeline Cache]].
 
 ## Deep collapse
 

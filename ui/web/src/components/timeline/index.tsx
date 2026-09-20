@@ -436,7 +436,12 @@ export function TimelineView({
   // Guards: nothing while a load is in flight, while no page remains, or
   // while a captured anchor still waits for its landing commit (the
   // pendingAnchorRef gate — captureAnchor sets it, the landing effect clears
-  // it, so an arrival can never double-fire).
+  // it, and the release effect below clears it when a cycle ends without a
+  // landing; an arrival can never double-fire and a failed fetch never
+  // deadlocks the gate). One page per arrival: after a landing the reader
+  // sits above the new content, so continued scroll-up paging arrives again
+  // and keeps loading until has_more clears (adjudicated semantics, QA
+  // #3031).
   const maybeLoadOlderAtTop = useCallback(() => {
     const viewport = viewportRef.current;
     if (!viewport || viewport.scrollTop > 0) return;
@@ -727,6 +732,23 @@ export function TimelineView({
     scrollByDelta(viewport, delta);
     pendingAnchorRef.current = null;
   }, [items, scrollByDelta]);
+
+  // A load cycle that ends WITHOUT a landing must not leave the capture
+  // pending — a failed fetch (or one that returned nothing) would otherwise
+  // hang the anchor forever, and the pendingAnchorRef gate in
+  // maybeLoadOlderAtTop would block every future auto-load: the reader's
+  // paging would die silently until a thread switch (QA #3031). Ordering is
+  // load-bearing: this effect is declared AFTER the landing effect, so on a
+  // commit carrying a landing the landing runs first (compensating and
+  // clearing the anchor); reaching this with loadingOlder back to false and
+  // the anchor still pending means no landing is coming.
+  const prevLoadingOlderReleaseRef = useRef(loadingOlder);
+  useLayoutEffect(() => {
+    if (prevLoadingOlderReleaseRef.current && !loadingOlder && pendingAnchorRef.current !== null) {
+      pendingAnchorRef.current = null; // fetch ended without a landing — release the gate
+    }
+    prevLoadingOlderReleaseRef.current = loadingOlder;
+  }, [loadingOlder]);
 
   // Single Details mode — governs default expanded state for every block
   // across all message kinds (All / Last / None).

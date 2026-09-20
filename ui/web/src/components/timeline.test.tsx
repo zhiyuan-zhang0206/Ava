@@ -373,6 +373,37 @@ describe("compact history segment dividers", () => {
     });
     expect(loadOlder).not.toHaveBeenCalled(); // load already in flight
   });
+
+  it("a load cycle that ends without a landing releases the anchor — the next top arrival retries (QA #3031)", () => {
+    const loadOlder = vi.fn();
+    const items = [makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })];
+    const { rerender } = render(<TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />);
+    const viewport = screen.getByTestId("scroll-viewport");
+
+    // First arrival: fires and captures the anchor.
+    viewport.scrollTop = 0;
+    act(() => {
+      viewport.dispatchEvent(new Event("scroll"));
+    });
+    expect(loadOlder).toHaveBeenCalledTimes(1);
+
+    // The fetch goes in flight, then FAILS — items unchanged, loadingOlder
+    // falls back to false without a landing commit.
+    rerender(<TimelineView items={items} hasMoreOlder loadingOlder onLoadOlder={loadOlder} />);
+    rerender(<TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />);
+
+    // The failed cycle must not hang the gate: leave the top and return —
+    // the reader's next arrival retries.
+    viewport.scrollTop = 240;
+    act(() => {
+      viewport.dispatchEvent(new Event("scroll"));
+    });
+    viewport.scrollTop = 0;
+    act(() => {
+      viewport.dispatchEvent(new Event("scroll"));
+    });
+    expect(loadOlder).toHaveBeenCalledTimes(2);
+  });
 });
 
 // Inter-agent / system inbound / compaction / framework-note markers default

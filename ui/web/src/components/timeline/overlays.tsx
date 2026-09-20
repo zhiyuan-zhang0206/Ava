@@ -11,8 +11,8 @@ import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 import { FLEX, FLEX_1 } from "@/lib/layout";
 
-// Load-older spinner — shown while an automatic scroll-up paging fetch (the
-// view settled at the top and older pages remain) is in flight. Always
+// Load-older spinner — shown while an automatic scroll-up paging fetch
+// (reaching the top with older pages remaining) is in flight. Always
 // mounted (opacity-only visibility) and an absolutely-positioned overlay
 // outside the scrolled content, so it never shifts scrollHeight or disturbs
 // the prepend anchor; pointer-events-none in every state so it can never
@@ -22,7 +22,6 @@ export function LoadOlderSpinner({ loadingOlder }: { loadingOlder: boolean }) {
   return (
     <div
       role="status"
-      aria-label={t("loadingEarlier")}
       aria-hidden={!loadingOlder}
       data-testid="load-older-spinner"
       className={cn(
