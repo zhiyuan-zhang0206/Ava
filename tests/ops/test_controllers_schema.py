@@ -577,7 +577,7 @@ def test_escalates_instead_of_spawning_when_the_pin_is_behind_the_schema(
 ) -> None:
     """HEAD is the cluster pin AND this checkout lacks the DB's migrations, so the PIN
     lacks them. Spawning an update here is what the pin controller undoes; refuse it,
-    log ERROR (which `shared.log` routes to agent_events) and name both remedies."""
+    log ERROR (which `shared.log` routes to the event stream) and name both remedies."""
     spawn_calls: list[bool] = []
     _code_behind(monkeypatch, spawn_calls)
     monkeypatch.setattr(schema, "pin_is_the_blocker", lambda: "1a90f95d33a145d1")

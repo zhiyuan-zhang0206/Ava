@@ -181,8 +181,9 @@ class TestScanOnce:
         scan_once(pool, _THRESHOLD_S, set())
         # The emitter drains asynchronously (0.5s cadence) — flush() can race
         # the drain thread for the queue, so poll briefly for the line. The
-        # event lives in the JSONL mirror (the PG events copy is a read-only
-        # archive since the LGTM cutover, task #1197 close-C).
+        # event lives in the JSONL mirror (the PG events copy was retired at
+        # the LGTM cutover, task #1197 close-C, and dropped with the archive
+        # cleanup, task #1281/#1823).
         import json as _json
         from datetime import UTC as _UTC
         from datetime import datetime as _dt

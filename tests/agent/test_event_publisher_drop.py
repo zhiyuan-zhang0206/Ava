@@ -1,9 +1,10 @@
-"""`AgentEventPublisher` sheds → one structured `sse_drop` agent_event.
+"""`AgentEventPublisher` sheds → one structured `sse_drop` event.
 
-The ops monitor panel's SSE-backlog metric reads `sse_drop` rows from
-agent_events; this locks the emit contract (event name, kind values, payload
-fields) without a live Redis — emit() is synchronous and the drop report is
-rate-limited but fires on the first drop (monotonic clock is far past 0).
+The ops monitor panel's SSE-backlog metric reads `sse_drop` events from the
+Loki-backed ops series; this locks the emit contract (event name, kind values,
+payload fields) without a live Redis — emit() is synchronous and the drop
+report is rate-limited but fires on the first drop (monotonic clock is far
+past 0).
 """
 
 from __future__ import annotations

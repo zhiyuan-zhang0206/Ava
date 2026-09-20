@@ -20,6 +20,10 @@
 > is about 849 MiB and 6.3 minutes; `_DUMP_TIMEOUT_S` remains 60 minutes of
 > headroom. Checkpoint retention is owned separately by the checkpoint reaper.
 >
+> **Update 2026-09-21:** the `events` table's frozen archive was dropped with
+> the archive cleanup (task #1281/#1823) — event history reads from Loki, and
+> the emitter's JSONL mirror is the local backfill source.
+>
 > **Update 2026-08-19: the two clocks are pinned.** `BACKUP_HOUR = 3` is read
 > on the **cluster** wall clock (`AVA_TIMEZONE`), and dumps are named in UTC
 > (`<db>-YYYYMMDDTHHMMSSZ.dump`). Reading the host's clock had made a machine

@@ -321,11 +321,11 @@ def _append_jsonl(events: list[Event]) -> None:
 
     Best-effort — the mirror is a fallback, not a critical path; a write
     failure must never break the batch. But it must not be SILENT either:
-    the mirror is the durable fallback for the DB copy, so a sustained
-    mirror failure is reported (first + every 50th, same cadence as DB write
-    failures) — a disk-full / permission error would otherwise degrade both
-    copies without a trace. Single write() per line with O_APPEND semantics
-    (opened in append mode) keeps concurrent processes from interleaving."""
+    the mirror is the durable local copy, so a sustained mirror failure is
+    reported (first + every 50th) — a disk-full / permission error would
+    otherwise degrade it without a trace. Single write() per line with
+    O_APPEND semantics (opened in append mode) keeps concurrent processes
+    from interleaving."""
     day = datetime.now(UTC).strftime("%Y%m%d")
     if _state["jsonl_day"] != day:
         _state["jsonl_day"] = day
@@ -363,8 +363,8 @@ def _append_jsonl(events: list[Event]) -> None:
         if _jsonl_failures == 1 or _jsonl_failures % 50 == 0:
             _report_no_pipeline(
                 "[event-emitter] JSONL mirror write failed ({n} consecutive) — "
-                "the mirror is the durable fallback; with the DB copy also "
-                "down the batch is lost entirely: {err}",
+                "the mirror is the durable local copy; a sustained failure "
+                "means batches are not landing in it: {err}",
                 n=_jsonl_failures,
                 err=repr(exc),
             )
@@ -373,11 +373,11 @@ def _append_jsonl(events: list[Event]) -> None:
 def _export_otlp(events: list[Event]) -> None:
     """Best-effort dual-write of a batch to the OTLP backend (logs + metrics).
 
-    Runs on the drain thread right after the JSONL mirror write, before the DB
-    transaction. The OTLP side is fully failure-isolated (bounded queue, drop
-    semantics, SDK-owned export threads — see `shared.telemetry_otlp`), and
-    this call is suppressed end to end, so even a programming error there must
-    not cost the batch its PG copy or raise into the drain thread."""
+    Runs on the drain thread right after the JSONL mirror write. The OTLP
+    side is fully failure-isolated (bounded queue, drop semantics, SDK-owned
+    export threads — see `shared.telemetry_otlp`), and this call is
+    suppressed end to end, so even a programming error there must not cost
+    the batch its mirror copy or raise into the drain thread."""
     with contextlib.suppress(Exception):
         from shared import telemetry_otlp  # deferred — heavy OTel imports
 
@@ -396,7 +396,7 @@ _jsonl_failures = 0
 # Loguru extra key marking the emitter's own diagnostics. Records carrying it
 # are filtered OUT of the emitter adapter's sink (see
 # `shared.log._add_postgres_sink`) so they reach stderr / JSONL file sinks only
-# and never re-enter this pipeline — a DB-down process would otherwise loop
+# and never re-enter this pipeline — a mirror-down process would otherwise loop
 # failure → warning → emit → failure forever.
 _NO_EMITTER = "_no_emitter"
 
@@ -431,7 +431,7 @@ def _write_batch(events: list[Event]) -> None:
 
 
 class _EventPipeline:
-    """Bounded queue + drain thread owning all event DB writes for the process.
+    """Bounded queue + drain thread owning all event persistence for the process.
 
     Same shape as the former loguru Postgres sink (which this replaces): the
     queue bound is the backpressure, the drain thread batches, and shed records
@@ -647,7 +647,8 @@ def _ambient_agent_id() -> int | None:
 
 def _ensure_pipeline() -> _EventPipeline | None:
     """Lazy-init fallback for emit-before-init callers. Best-effort: a process
-    with no DB available degrades to dropping (never raises, never blocks)."""
+    whose pipeline init fails degrades to dropping (never raises, never
+    blocks)."""
     if _state["pipeline"] is None:
         with contextlib.suppress(Exception):
             init_telemetry()

@@ -409,8 +409,8 @@ def _event_pipeline_filter(record: loguru.Record) -> bool:
     JSONL file sinks, but never or rarely become `events` rows):
 
       - the emitter's own failure reports (records carrying the `_no_emitter`
-        marker, see `shared/telemetry.py`): a DB-down process would otherwise
-        loop failure → warning → emit → failure forever;
+        marker, see `shared/telemetry.py`): a mirror-down process would
+        otherwise loop failure → warning → emit → failure forever;
       - `node_enter` (agent/graph/_node_log.py): a pure write-amplification
         event — zero consumers in the event stream (agent_inspect reads
         `node_exit` only; death analysis reads the node_enter trail from the

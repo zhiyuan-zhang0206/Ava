@@ -1544,7 +1544,7 @@ class TestSyntaxFixEvents:
     """The before/after retention events: rough fix stores before only (after
     is replayable), lm fix stores before AND after (LLM rewrites are not
     replayable). Both go out as event="syntax_fix" loguru records whose extra
-    lands in agent_events.payload."""
+    lands in the event's `attributes`."""
 
     @staticmethod
     def _runtime():
@@ -1594,8 +1594,8 @@ class TestSyntaxFixEvents:
 
     async def test_rough_fix_event_logger_payload_shape(self, monkeypatch: pytest.MonkeyPatch):
         """The real emit path: a loguru record with event='syntax_fix' whose
-        extra carries fix_type / before / fixes — the shape agent_events.payload
-        stores."""
+        extra carries fix_type / before / fixes — the shape the event's
+        `attributes` stores."""
         from ava_builtins.plugins.ava_syntax_fix import agent_runtime as _plugin
 
         captured: dict = {}
