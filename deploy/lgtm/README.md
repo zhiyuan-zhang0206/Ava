@@ -42,7 +42,7 @@ capability.
 |---|---|---|---|---|
 | Loki | native launchd / user systemd | 3.7.6 / `GOMEMLIMIT=2GiB` | 3100 | log backend, filesystem storage, 84h retention |
 | Prometheus | native launchd / user systemd | 3.13.2 / `GOMEMLIMIT=1GiB` | 9090 | metrics and OTLP receiver |
-| Tempo | remote per cluster config | WSL backend; compose copy is the rollback asset | configured by `AVA_TELEMETRY_TEMPO_ENDPOINT` | trace backend |
+| Tempo | remote per cluster config | native backend on the station host; compose copy is the rollback asset | configured by `AVA_TELEMETRY_TEMPO_ENDPOINT` | trace backend |
 | Grafana | native launchd / user systemd | 13.1.3 | 3003 | anonymous read-only UI |
 
 The pinned release assets and SHA256 values live in
@@ -88,7 +88,7 @@ includes the full home path's hash. Only those exact three units are enabled,
 started, restarted, disabled, or removed; other homes and Docker services are
 not enumerated or retired. Services recover with `Restart=on-failure`, use a
 30-second stop timeout and `KillMode=control-group`, and append logs under
-`$AVA_HOME/lgtm/native/logs`. User lingering / WSL boot orchestration is a host
+`$AVA_HOME/lgtm/native/logs`. User lingering / boot orchestration is a host
 prerequisite, not something `ava lgtm on` silently configures.
 
 Host-scoped ports default to the existing values:
