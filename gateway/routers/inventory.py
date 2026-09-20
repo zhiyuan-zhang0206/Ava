@@ -10,6 +10,9 @@ ops server (which executes it in-process).
 - GET without `machine` -> the cross-machine AGGREGATE: fan out an inventory_read
   to every registered agent-runner concurrently, collapse into a per-item matrix;
   a host that times out / fails lands in `unreachable`, not in any item's cells.
+  A host already known down — intentionally stopped, or inside the roster
+  probe's failure backoff — is never dialed: it reports straight into
+  `unreachable` (a dial could only hang; task #4127).
 - GET with `machine` -> that one host's plugins + MCP servers (404 unknown /
   non-agent-runner machine, 503 offline / timed out).
 - PUT writes toggles to `machine` (required; must be an agent-runner).
@@ -24,6 +27,7 @@ from collections.abc import Callable
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from gateway.routers import _roster_probe
 from gateway.schemas import (
     InventoryAggregate,
     InventoryItem,
@@ -39,8 +43,10 @@ from ops.rpc_schemas import InventoryReadItem, InventoryReadResult, InventoryWri
 router = APIRouter()
 _log = logging.getLogger(__name__)
 
-# Bounded per-host wait for a remote inventory_read in the aggregate fan-out, so
-# one offline host doesn't stall the whole matrix on the default deadline.
+# First-contact per-host budget for a remote inventory_read in the aggregate
+# fan-out, so one offline host doesn't stall the whole matrix on the default
+# deadline. A host that already carries reachability failures gets the roster's
+# fast-fail budget instead (_dial_inventory_read, task #4127).
 _AGGREGATE_READ_TIMEOUT_S = 15.0
 
 
@@ -62,7 +68,7 @@ def _assert_inventory_target(target: str) -> None:
 
 
 async def _dispatch_inventory_read(
-    target: str, *, timeout_s: float | None = None
+    target: str, *, timeout_s: float | None = None, retries: int | None = None
 ) -> InventoryReadResult:
     """Run inventory_read on agent-runner `target` by POSTing to its ops server.
 
@@ -74,7 +80,9 @@ async def _dispatch_inventory_read(
     Does NOT convert the remote failure into an HTTPException: the aggregate
     catches the raw ClusterOpUnreachable/ClusterOpFailed per host (to bucket it
     into `unreachable`), and the single-machine GET converts it to 503 at its
-    own call site.
+    own call site. `retries` is forwarded to the cluster RPC retry cap — the
+    aggregate passes 1 (one fast retry inside its budget), the single-machine
+    view leaves the cluster default.
     """
     return InventoryReadResult.model_validate(
         await _cluster_rpc.dispatch_to_machine(
@@ -82,6 +90,7 @@ async def _dispatch_inventory_read(
             kind="inventory_read",
             payload={},
             timeout_s=timeout_s,
+            retries=retries,
         )
     )
 
@@ -157,41 +166,88 @@ def _collapse(
     )
 
 
-def _agent_runner_names() -> list[str]:
-    """Agent-runner machine names — the aggregate's column set.
+def _agent_runner_rows() -> list[tuple[str, bool]]:
+    """Agent-runner rows — the aggregate's column set plus each row's
+    intentionally-stopped latch.
 
     The gateway this gateway runs on is excluded by the role filter even
     though it is the local machine: inventory is agent-runner-only. An agent-runner
     that has not finished its startup UPSERT simply doesn't appear until it
-    registers.
+    registers. `stopped_at` marks an intentional `ava stop`; a stopped host
+    stays a column but is reported unreachable without a dial (task #4127).
     """
     from gateway.app import app
 
     with app.state.db_pool.connection() as conn, conn.cursor() as cur:
-        cur.execute("SELECT name FROM machines WHERE 'agent-runner' = ANY(role) ORDER BY name")
-        return [row[0] for row in cur.fetchall()]
+        cur.execute(
+            "SELECT name, stopped_at IS NOT NULL FROM machines "
+            "WHERE 'agent-runner' = ANY(role) ORDER BY name"
+        )
+        return [(row[0], row[1]) for row in cur.fetchall()]
+
+
+async def _dial_inventory_read(target: str) -> InventoryReadResult:
+    """Dial one host under the roster's bounded transport policy.
+
+    A host that already carries reachability failures gets the fast-fail budget
+    (`_roster_probe._probe_budget_s`), and the whole dial — one fast retry
+    included — is capped by that budget, mirroring
+    `_roster_probe.dispatch_status_probe`. Without the cap, a blackholed host's
+    re-dial burns the full budget across the cluster RPC retry chain and drags
+    the aggregate tail to tens of seconds (task #4127).
+    """
+    budget = _roster_probe._probe_budget_s(target, full_budget_s=_AGGREGATE_READ_TIMEOUT_S)
+    try:
+        async with asyncio.timeout(budget):
+            return await _dispatch_inventory_read(target, timeout_s=budget, retries=1)
+    except TimeoutError as exc:
+        raise _cluster_rpc.ClusterOpUnreachable(
+            f"inventory_read for machine={target!r} exceeded its {budget:.1f}s total budget"
+        ) from exc
 
 
 async def _aggregate() -> InventoryAggregate:
     """Fan out inventory_read to every agent-runner concurrently and collapse the
-    results; a host whose read raised goes in `unreachable`."""
-    machines = _agent_runner_names()
+    results; a host whose read raised goes in `unreachable`.
+
+    Hosts already known down are never dialed: an intentionally stopped row and
+    a host inside the roster probe's failure backoff report `unreachable`
+    directly (a dial could only hang; task #4127). Dialed hosts run under the
+    roster's bounded transport policy, and their outcome feeds the same shared
+    backoff state — the roster and this aggregate keep one liveness view."""
+    rows = _agent_runner_rows()
+    machines = [name for name, _stopped in rows]
+    skipped = {name for name, stopped in rows if stopped}
+    skipped |= {m for m in machines if _roster_probe._probe_in_backoff(m)}
+    to_dial = [m for m in machines if m not in skipped]
+    if skipped:
+        _log.debug("inventory aggregate: not dialing known-down host(s) %s", sorted(skipped))
+
     results = await asyncio.gather(
-        *(_dispatch_inventory_read(m, timeout_s=_AGGREGATE_READ_TIMEOUT_S) for m in machines),
+        *(_dial_inventory_read(m) for m in to_dial),
         return_exceptions=True,
     )
     reads: dict[str, InventoryReadResult] = {}
-    unreachable: list[str] = []
-    for m, res in zip(machines, results, strict=True):
-        if isinstance(res, (_cluster_rpc.ClusterOpUnreachable, _cluster_rpc.ClusterOpFailed)):
-            # Genuine "host couldn't serve its inventory" — bucket it.
+    unreachable: list[str] = sorted(skipped)
+    for m, res in zip(to_dial, results, strict=True):
+        if isinstance(res, _cluster_rpc.ClusterOpUnreachable):
+            # Genuine "host couldn't serve its inventory" — bucket it, and widen
+            # the shared backoff so it stops being dialed every poll.
             _log.warning("inventory_read on %s failed: %s", m, res)
+            _roster_probe._note_probe_unreachable(m)
+            unreachable.append(m)
+        elif isinstance(res, _cluster_rpc.ClusterOpFailed):
+            # The host answered — its op failed. Not a reachability failure:
+            # keep the shared backoff cleared.
+            _log.warning("inventory_read on %s failed: %s", m, res)
+            _roster_probe._note_probe_reachable(m)
             unreachable.append(m)
         elif isinstance(res, BaseException):
             # An unexpected exception (a bug in the dispatch helper, a
             # CancelledError) — do NOT relabel it as infrastructure flakiness.
             raise res
         else:
+            _roster_probe._note_probe_reachable(m)
             reads[m] = res
     return _collapse(reads, machines, unreachable)
 

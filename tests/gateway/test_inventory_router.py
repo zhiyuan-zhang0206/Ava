@@ -13,6 +13,7 @@ flat view; an unknown / non-agent-runner name 404s before any dispatch.
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import psycopg
@@ -20,6 +21,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
+from gateway.routers import _roster_probe
 from gateway.routers import inventory as inventory_router
 from ops import cluster_rpc as _cluster_rpc
 from ops.rpc_schemas import FieldWriteResult, InventoryReadResult, InventoryWriteOpResult
@@ -125,9 +127,13 @@ REMOTE = "remote-host"
 def test_aggregate_collapse_across_two_machines(monkeypatch: pytest.MonkeyPatch) -> None:
     """GET /api/inventory (no machine): two machines, A has plugin X enabled, B
     lacks X -> X row has hosts[A].present True+enabled, hosts[B].present False."""
-    monkeypatch.setattr(inventory_router, "_agent_runner_names", lambda: ["A", "B"])
+    monkeypatch.setattr(
+        inventory_router, "_agent_runner_rows", lambda: [("A", False), ("B", False)]
+    )
 
-    async def fake_read(target: str, *, timeout_s: float = 0.0) -> InventoryReadResult:
+    async def fake_read(
+        target: str, *, timeout_s: float = 0.0, retries: int | None = None
+    ) -> InventoryReadResult:
         if target == "A":
             return _read({"X": _plugin(enabled=True, description="plugin X")}, {}, "A")
         return _read({}, {}, "B")
@@ -149,13 +155,18 @@ def test_aggregate_collapse_across_two_machines(monkeypatch: pytest.MonkeyPatch)
 def test_aggregate_buckets_unreachable_machine(monkeypatch: pytest.MonkeyPatch) -> None:
     """A machine whose inventory_read raises ClusterOpUnreachable -> in `unreachable`,
     excluded from every item's `hosts`."""
-    monkeypatch.setattr(inventory_router, "_agent_runner_names", lambda: ["A", "B"])
+    monkeypatch.setattr(
+        inventory_router, "_agent_runner_rows", lambda: [("A", False), ("B", False)]
+    )
 
-    async def fake_read(target: str, *, timeout_s: float = 0.0) -> InventoryReadResult:
+    async def fake_read(
+        target: str, *, timeout_s: float = 0.0, retries: int | None = None
+    ) -> InventoryReadResult:
         if target == "A":
             return _read({"X": _plugin(enabled=True)}, {}, "A")
         raise _cluster_rpc.ClusterOpUnreachable("no ack")
 
+    monkeypatch.setattr(_roster_probe, "_probe_failures", {})
     monkeypatch.setattr(inventory_router, "_dispatch_inventory_read", fake_read)
 
     with TestClient(app) as client:
@@ -168,6 +179,71 @@ def test_aggregate_buckets_unreachable_machine(monkeypatch: pytest.MonkeyPatch) 
     assert set(x["hosts"]) == {"A"}
 
 
+def test_aggregate_skips_stopped_and_backoff_hosts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A host already known down is never dialed: an intentionally stopped row
+    (`stopped_at`) and a host inside the roster probe's failure backoff land in
+    `unreachable` directly; the columns stay (task #4127)."""
+    monkeypatch.setattr(
+        inventory_router,
+        "_agent_runner_rows",
+        lambda: [("A", False), ("B", True), ("C", False)],
+    )
+    monkeypatch.setattr(_roster_probe, "_probe_failures", {})
+    _roster_probe._note_probe_unreachable("C")  # C now sits inside its backoff window
+
+    dialed: list[str] = []
+
+    async def fake_read(
+        target: str, *, timeout_s: float = 0.0, retries: int | None = None
+    ) -> InventoryReadResult:
+        dialed.append(target)
+        return _read({"X": _plugin(enabled=True)}, {}, target)
+
+    monkeypatch.setattr(inventory_router, "_dispatch_inventory_read", fake_read)
+
+    with TestClient(app) as client:
+        resp = client.get("/api/inventory")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert dialed == ["A"]
+    assert body["machines"] == ["A", "B", "C"]
+    assert body["unreachable"] == ["B", "C"]
+
+
+def test_aggregate_dial_outcome_feeds_shared_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A dial that comes back unreachable widens the shared roster backoff, a
+    success clears it, and a known-failed host is dialed under the fast-fail
+    budget with one fast retry — roster and aggregate keep one liveness view."""
+    monkeypatch.setattr(
+        inventory_router, "_agent_runner_rows", lambda: [("A", False), ("B", False)]
+    )
+    monkeypatch.setattr(_roster_probe, "_probe_failures", {})
+    # A is known-failed but its backoff window has long elapsed: still dialed,
+    # under the fast-fail budget.
+    _roster_probe._probe_failures["A"] = (1, time.monotonic() - 3600.0)
+
+    seen: dict[str, tuple[float, int | None]] = {}
+
+    async def fake_read(
+        target: str, *, timeout_s: float = 0.0, retries: int | None = None
+    ) -> InventoryReadResult:
+        seen[target] = (timeout_s, retries)
+        if target == "A":
+            return _read({"X": _plugin(enabled=True)}, {}, "A")
+        raise _cluster_rpc.ClusterOpUnreachable("no ack")
+
+    monkeypatch.setattr(inventory_router, "_dispatch_inventory_read", fake_read)
+
+    with TestClient(app) as client:
+        resp = client.get("/api/inventory")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["unreachable"] == ["B"]
+    fast = settings.gateway.status_probe_fastfail_timeout_seconds
+    assert seen["A"] == (fast, 1)
+    assert "A" not in _roster_probe._probe_failures  # a success cleared it
+    assert "B" in _roster_probe._probe_failures  # an unreachable widened it
+
+
 # ── GET single machine ──
 
 
@@ -175,7 +251,9 @@ def test_get_single_machine_view(monkeypatch: pytest.MonkeyPatch) -> None:
     """GET ?machine=<remote>: the op's plugin/MCP dicts become sorted flat lists."""
     _seed_machine(REMOTE)
 
-    async def fake_read(target: str, *, timeout_s: float = 0.0) -> InventoryReadResult:
+    async def fake_read(
+        target: str, *, timeout_s: float = 0.0, retries: int | None = None
+    ) -> InventoryReadResult:
         return _read(
             {"b_plug": _plugin(enabled=True), "a_plug": _plugin(enabled=False)},
             {"srv": _mcp(enabled=True, can_enable=True, reason=None)},
@@ -220,7 +298,9 @@ def test_aggregate_excludes_gateway_column(monkeypatch: pytest.MonkeyPatch) -> N
     _seed_machine(REMOTE, role="agent-runner")
     _seed_machine("gw-host", role="gateway")
 
-    async def fake_read(target: str, *, timeout_s: float = 0.0) -> InventoryReadResult:
+    async def fake_read(
+        target: str, *, timeout_s: float = 0.0, retries: int | None = None
+    ) -> InventoryReadResult:
         assert target == REMOTE  # the gateway must never be dispatched to
         return _read({"X": _plugin(enabled=True)}, {}, REMOTE)
 
@@ -236,7 +316,9 @@ def test_get_single_machine_offline_503(monkeypatch: pytest.MonkeyPatch) -> None
     """GET ?machine=<known>: the inventory_read times out -> 503."""
     _seed_machine(REMOTE)
 
-    async def fake_read(target: str, *, timeout_s: float = 0.0) -> InventoryReadResult:
+    async def fake_read(
+        target: str, *, timeout_s: float = 0.0, retries: int | None = None
+    ) -> InventoryReadResult:
         raise _cluster_rpc.ClusterOpUnreachable("no ack")
 
     monkeypatch.setattr(inventory_router, "_dispatch_inventory_read", fake_read)
