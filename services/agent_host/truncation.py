@@ -34,13 +34,19 @@ __all__ = ["reap_truncation_outcome", "reap_truncation_stop"]
 
 # The reap mark bound to this turn's own incarnation: the row CAS-marked
 # 'restarting' — `ops.agent_pause._reap_agent` is its only writer — with its
-# un-applied, non-self restart still pending/claimed.
+# un-applied, never-observed maintenance restart still pending/claimed. This
+# is the same full shape `agent.db.has_pending_interrupt` reads (task #4027):
+# `observed_at IS NULL` is implied by `applied_at IS NULL` (the schema's
+# lifecycle target check) and kept explicit so every face of the shape stays
+# one shape; the payload key names a maintenance restart, so a command the
+# drain never stamped cannot classify a real ownership loss as a truncation.
 _MARK_SQL = (
     "SELECT m.status = 'restarting' AND m.runtime_kind = 'hosted' "
     "AND m.runtime_generation = %s AND m.runtime_owner = %s "
     "AND EXISTS (SELECT 1 FROM inbound_messages i WHERE i.agent_id = m.id "
     "AND i.source <> 'self' AND i.kind = 'restart' AND i.applied_at IS NULL "
-    "AND i.status IN ('pending', 'claimed')) "
+    "AND i.observed_at IS NULL AND i.status IN ('pending', 'claimed') "
+    "AND i.payload ? 'maintenance') "
     "FROM agents_meta m WHERE m.id = %s"
 )
 

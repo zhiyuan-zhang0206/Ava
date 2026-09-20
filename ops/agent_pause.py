@@ -247,6 +247,13 @@ def _reap_agent(agent: int, command_id: int) -> str:
             (agent, owner, generation),
         ).rowcount
         if changed != 1:
+            # Belt-and-braces: the row is FOR UPDATE-locked here, so this
+            # re-check cannot lose the CAS — it re-tests exactly what this
+            # transaction just read. If it ever does fire, the row moved
+            # underneath in a way we cannot classify (most likely it already
+            # landed — a `moved` shape). Refuse rather than guess a `reaped`:
+            # the caller aborts the drain with the hold retained (fail-loud,
+            # task #4027).
             return "refused:cas-lost"
     return "reaped"
 
