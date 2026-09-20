@@ -41,6 +41,7 @@ from cli.commands._release_context import (
     release_context_path,
 )
 from cli.commands._update_bootstrap import BootstrapHopRequest
+from cli.commands._update_normal_release import NormalReleaseRequest
 from cli.commands._update_publication import (
     PreparedUnitPublication,
     build_pending_publication,
@@ -756,11 +757,12 @@ def test_begin_chain_reads_the_context_opens_the_journal_and_dispatches(
     assert collector.candidate_digest == sealed.candidate_digest
     assert [unit.machine for unit in collector.units] == ["runner-a", "runner-b"]
     unit = collector.units[0]
-    candidate_projection, request_projection = plans[0].projections
+    candidate_projection, request_projection, normal_projection = plans[0].projections
     assert (unit.machine, unit.home, unit.ops_url) == ("runner-a", plans[0].home, plans[0].ops_url)
     assert unit.candidate_context == candidate_projection.content.encode("ascii")
     assert unit.request == request_projection.content.encode("ascii")
     assert unit.recovery_context == facts[0].hop_material.recovery_context.encode("ascii")
+    assert unit.normal_request == normal_projection.content.encode("ascii")
     assert unit.prepared_receipt_digest == facts[0].publication.prepared_receipt_digest
     out = capsys.readouterr().out
     assert "(read once)" in out
@@ -913,6 +915,7 @@ def _hop_world() -> tuple[list[PreparedUnitFacts], list[PreparedFactTarget], Rol
 
 def test_assemble_phase_inputs_binds_each_projection_to_its_content_name() -> None:
     facts, targets, operation = _hop_world()
+    facts = [replace(facts[0], previous_selector='{"selector":1}\n'), facts[1]]
     challenge = UUID(int=11)
 
     phase_input = assemble_phase_inputs(
@@ -929,7 +932,7 @@ def test_assemble_phase_inputs_binds_each_projection_to_its_content_name() -> No
     assert [plan.machine for plan in plans] == ["runner-a", "runner-b"]
     plan = plans[0]
     assert (plan.home, plan.ops_url, plan.artifact_digest) == ("/ava-a", None, ARTIFACT)
-    candidate_projection, request_projection = plan.projections
+    candidate_projection, request_projection, normal_projection = plan.projections
     assert candidate_projection.name == prepared_hop_name(
         "candidate-context", candidate_projection.content
     )
@@ -950,7 +953,13 @@ def test_assemble_phase_inputs_binds_each_projection_to_its_content_name() -> No
         f"/ava-a/run/release-inventory-{facts[0].publication.prepared_receipt_digest}.json"
     )
     assert request.predecessor == facts[0].hop_material.predecessor
-    assert request.normal_release_path is None
+    assert normal_projection.name == prepared_hop_name("normal-request", normal_projection.content)
+    assert request.normal_release_path == f"/ava-a/run/{normal_projection.name}"
+    normal = NormalReleaseRequest.model_validate_json(normal_projection.content)
+    assert normal.context_path == f"/ava-a/run/{candidate_projection.name}"
+    assert normal.unit == _published("runner-a", "/ava-a")
+    assert normal.previous_selector == facts[0].previous_selector
+    assert normal.predecessor == facts[0].hop_material.predecessor
 
     # The collector input is derived in the same loop: exact bytes, sealed
     # identities, and the same (machine, home) order as the plans.
@@ -965,7 +974,19 @@ def test_assemble_phase_inputs_binds_each_projection_to_its_content_name() -> No
     assert unit.candidate_context == candidate_projection.content.encode("ascii")
     assert unit.request == request_projection.content.encode("ascii")
     assert unit.recovery_context == facts[0].hop_material.recovery_context.encode("ascii")
+    assert unit.normal_request == normal_projection.content.encode("ascii")
     assert unit.prepared_receipt_digest == facts[0].publication.prepared_receipt_digest
+
+    # The continuation phase's inputs ride the same loop: the content-named
+    # normal entry per unit, in the same (machine, home) order.
+    continuation = phase_input.continue_units
+    assert [item.machine for item in continuation] == ["runner-a", "runner-b"]
+    assert continuation[0].request_path == f"/ava-a/run/{normal_projection.name}"
+    assert (continuation[0].home, continuation[0].ops_url, continuation[0].artifact_digest) == (
+        "/ava-a",
+        None,
+        ARTIFACT,
+    )
 
 
 def test_dispatch_carries_each_units_projections_only(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -473,6 +473,7 @@ def _phase_input() -> ManagedWriterPhaseInput:
             candidate_digest="e" * 64,
             units=(),
         ),
+        continue_units=(),
     )
 
 

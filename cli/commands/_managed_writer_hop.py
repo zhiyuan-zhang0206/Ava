@@ -70,8 +70,11 @@ class CollectorUnitInput:
     `candidate_context` / `request` are the canonical bytes the begin dispatch
     staged under their content names (the unit's restricted hop replays them,
     and the ledger's digests bind the files it read); `recovery_context` is the
-    shipped restricted-A context's exact bytes. `prepared_receipt_digest` is the
-    sealed receipt digest the collection's adoption gate binds.
+    shipped restricted-A context's exact bytes. `normal_request` is the sealed
+    `NormalReleaseRequest` projection's exact bytes -- the journal's
+    `normal_release_planned` claim is checked against its presence, and the
+    sealed request must name it (task #4129 I6). `prepared_receipt_digest` is
+    the sealed receipt digest the collection's adoption gate binds.
     """
 
     machine: str
@@ -80,6 +83,7 @@ class CollectorUnitInput:
     candidate_context: bytes
     request: bytes
     recovery_context: bytes
+    normal_request: bytes | None
     prepared_receipt_digest: Digest
 
 
@@ -101,16 +105,35 @@ class CollectorInput:
 
 
 @dataclass(frozen=True)
+class ContinueUnitInput:
+    """One unit's continuation dispatch: the sealed normal entry to start (channel E).
+
+    `request_path` is the content-named `NormalReleaseRequest` projection the
+    begin chain staged beside the hop request; `artifact_digest` selects the
+    candidate image whose interpreter runs the continuation entry. The
+    coordinator's fan-out consumes these (task #4129 I6); the entry re-derives
+    every binding from the staged bytes itself.
+    """
+
+    machine: str
+    home: str
+    ops_url: str | None
+    artifact_digest: Digest
+    request_path: str
+
+
+@dataclass(frozen=True)
 class ManagedWriterPhaseInput:
     """The begin chain's full hand-off: the hop plans plus the collector input.
 
     One container so the eagerly-loaded wiring / verdict positions carry the hop
-    phase and the collection phase as a single value; the collector module
-    itself stays behind method-local imports.
+    phase, the collection phase and the continuation phase as a single value;
+    the collector module itself stays behind method-local imports.
     """
 
     hop_plans: tuple[HopUnitPlan, ...]
     collector: CollectorInput
+    continue_units: tuple[ContinueUnitInput, ...]
 
 
 @dataclass(frozen=True)

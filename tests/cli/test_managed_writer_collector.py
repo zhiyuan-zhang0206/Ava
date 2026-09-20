@@ -112,6 +112,7 @@ def _unit_input(
     home: str = "/ava-a",
     *,
     ops_url: str | None = "http://runner-a:9",
+    normal_request: bytes | None = None,
 ) -> CollectorUnitInput:
     return CollectorUnitInput(
         machine=machine,
@@ -120,6 +121,7 @@ def _unit_input(
         candidate_context=_context_bytes(_expected(machine, home)),
         request=b'{"hop":"request"}\n',
         recovery_context=b'{"recovery":"context"}\n',
+        normal_request=normal_request,
         prepared_receipt_digest=RECEIPT_DIGEST,
     )
 
@@ -915,6 +917,7 @@ def test_collect_refuses_without_a_window_source(
                     candidate_context=b"not a context",
                     request=b"{}",
                     recovery_context=b"{}",
+                    normal_request=None,
                     prepared_receipt_digest=RECEIPT_DIGEST,
                 )
             )
