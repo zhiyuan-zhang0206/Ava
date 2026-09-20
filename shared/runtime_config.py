@@ -150,7 +150,7 @@ def write_fields(
     # and the earlier one's keys are gone — silently, in the only on-disk copy of
     # a cluster's secrets. The writers are separate PROCESSES (a CLI converge, the
     # gateway's config PUT, the ops daemon's `config_write` arm), so no in-process
-    # lock can order them; `services/agent_ops/daemon.py:_state_write_lock` is the
+    # lock can order them; `services/agent_ops/dispatch_sync.py:_state_write_lock` is the
     # same guarantee for the threads inside one of them, and neither substitutes
     # for the other.
     #
