@@ -1857,6 +1857,7 @@
     },
     "orientation": "auto",
     "xTickLabelRotation": 0,
+    "xTickLabelSpacing": 100,
     "xField": "Time"
    },
    "title": "LLM calls / minute",
@@ -3337,6 +3338,7 @@
     },
     "orientation": "auto",
     "xTickLabelRotation": 0,
+    "xTickLabelSpacing": 100,
     "xField": "Time"
    },
    "title": "Agent spawns / minute (by source)",
@@ -3411,6 +3413,7 @@
     },
     "orientation": "auto",
     "xTickLabelRotation": 0,
+    "xTickLabelSpacing": 100,
     "xField": "Time"
    },
    "title": "Agent lifecycle / minute",
@@ -3609,6 +3612,7 @@
     },
     "orientation": "auto",
     "xTickLabelRotation": 0,
+    "xTickLabelSpacing": 100,
     "xField": "Time"
    },
    "title": "SSE backlog \u2014 delivery_stalled (by stall seconds)",
@@ -5490,7 +5494,8 @@
      "sort": "none"
     },
     "xField": "Time",
-    "xTickLabelRotation": 0
+    "xTickLabelRotation": 0,
+    "xTickLabelSpacing": 100
    },
    "title": "LLM cost / minute",
    "type": "barchart",
