@@ -33,7 +33,7 @@ Every push costs a human a context switch. This skill (`plugins/ava_fleet/skills
 
 ## Push Posture: Only Push for Truly Urgent Matters
 
-Out-of-band pushes are only allowed for truly urgent matters: irreversible risk en route / entirely blocked on user / user explicitly asked to be woken. Everything else stays in the queue. This is a hardcoded discipline in the skill text, **not enforced by the framework**. push = deliver to where the human actually is, channel chosen by agent — the skill determines *when*, not *how*.
+Out-of-band pushes are only allowed for truly urgent matters: irreversible risk en route / entirely blocked on user / user explicitly asked to be woken. Everything else stays in the queue. Since 2026-09-20 the core rules are a **platform default**: the system prompt carries them to every agent (section gated by `settings.agent.reduce_context_switch`, env `AVA_REDUCE_CONTEXT_SWITCH`, default on) — the switch gates the guidance; push timing itself stays the agent's judgment, not framework enforcement. push = deliver to where the human actually is, channel chosen by agent — the skill determines *when*, not *how*.
 
 ## Key Dependencies
 

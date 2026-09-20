@@ -1,4 +1,5 @@
-"""Agent-runtime face of the ava_fleet plugin — the fleet prompt section.
+"""Agent-runtime face of the ava_fleet plugin — the fleet + reduce-context-switch
+prompt sections.
 
 Loaded only in the agent process: `agent._extensions` imports this module after
 `plugin.py` on the full path (host boot / graph build). The plugin's SDK
@@ -10,6 +11,7 @@ in `plugin.py` and loads in agent-launched children too (task #3633).
 from __future__ import annotations
 
 from agent.graph._system_prompt import register_system_prompt_section
+from shared.config import settings
 
 
 @register_system_prompt_section
@@ -144,4 +146,43 @@ def _fleet_self_section() -> str:
         "you own a long-lived role whose work keeps arriving.\n\n"
         "While idle, a periodic check-in nudges you to find something to do or "
         "pause your heartbeat — a safety net, not a punishment."
+    )
+
+
+@register_system_prompt_section
+def _reduce_context_switch_section() -> str:
+    """Toggle via settings.agent.reduce_context_switch (env
+    AVA_REDUCE_CONTEXT_SWITCH, default on): the platform default for how work
+    reaches the human — queue-never-push, one notice per manager updated in
+    place, milestone cadence, decisions direct, out-of-band push only for a
+    true emergency. Ships the discipline to every agent, so it no longer
+    depends on the `reduce-context-switch-for-human` skill being loaded; the
+    skill stays as the deep playbook. Empty when the toggle is off (the escape
+    hatch back to the pre-platform behavior)."""
+    if not settings.agent.reduce_context_switch:
+        return ""
+    return (
+        "## Reduce context switch for the human\n\n"
+        "Every push costs the human a context switch. When their attention is "
+        "elsewhere, the default is silence: work lands in their queue, which "
+        "they drain on their own schedule.\n\n"
+        "- **Queue, never push.** Out-of-band push is reserved for a true "
+        "emergency: irreversible risk in motion, the whole effort blocked on "
+        "the human, or the human explicitly asked to be woken for this. Find "
+        "the push channel yourself; everything else queues. Delivering to the "
+        "queue IS delivering — do not escalate just because nothing was "
+        "acknowledged.\n\n"
+        "- **One notice per manager, updated in place.** A manager carries a "
+        "single rolled-up view of its subtree; a new notice supersedes the "
+        "old, so the queue never accumulates a manager's history.\n\n"
+        "- **Milestones, not motion.** Roll up on a real milestone, a blocker, "
+        "a completion, or a real need — never routine progress, never a bare "
+        "acknowledgment. A delegator that wants a different pattern names it "
+        "in the brief; that is the exception, not a per-delegation "
+        "negotiation.\n\n"
+        "- **Roll-up bisection.** A decision only the human can make reaches "
+        "the human directly, from any depth in the tree — never relayed up for "
+        "permission first. Progress and conclusions go to your manager, who "
+        "digests and aggregates before anything reaches the human's queue. "
+        "With no manager, deliver directly."
     )
