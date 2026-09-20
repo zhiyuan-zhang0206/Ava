@@ -184,7 +184,15 @@ def test_child_runs_bounded_with_the_explicit_projection(
     assert len(child.calls) == 1
     call = child.calls[0]
     interpreter = str(unit_home / "releases" / ARTIFACT / "venv" / "bin" / "python")
-    assert call["argv"][:5] == [interpreter, "-I", "-B", "-m", "cli.prepared_facts"]
+    assert call["argv"][:7] == [
+        interpreter,
+        "-I",
+        "-B",
+        "-X",
+        "utf8",
+        "-m",
+        "cli.prepared_facts",
+    ]
     assert call["timeout"] == ops_prepare_facts._PREPARE_FACTS_TIMEOUT_S
     assert call["capture_output"] is True
     assert call["text"] is True
@@ -205,6 +213,18 @@ def test_child_refusal_surfaces_its_stderr_tail(
     monkeypatch.setattr(ops_prepare_facts, "run_bounded", child)
 
     with pytest.raises(ReleaseRejectedError, match="unit is not registered"):
+        ops_prepare_facts.cluster_prepare_facts_op(_payload())
+
+
+def test_child_timeout_translates_to_a_refusal(
+    unit_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def timeout(_argv: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired("child", ops_prepare_facts._PREPARE_FACTS_TIMEOUT_S)
+
+    monkeypatch.setattr(ops_prepare_facts, "run_bounded", timeout)
+
+    with pytest.raises(ReleaseRejectedError, match="timed out"):
         ops_prepare_facts.cluster_prepare_facts_op(_payload())
 
 

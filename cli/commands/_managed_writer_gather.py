@@ -5,7 +5,9 @@ unit, re-verify each shipment from its bytes — never trusting a shipment
 claim — and return the begin seat's exact input plus the hop-projection
 material. The transport wrapper follows `cli.commands._update_fanout`'s shape
 (a sync CLI-callable wrapper over one `asyncio.gather`), so a slow unit cannot
-serialize the gather behind its neighbours.
+serialize the gather behind its neighbours — but unlike the fanout's per-target
+containment (`(name, status, detail)` for every host), this gather is fail-fast:
+a refusal or an unreachable host propagates to the caller's refusal ladder.
 
 Every refusal is a `ManagedWriterBarrierError`; nothing is written here, and
 nothing derived here is authority — the seats revalidate under their locks.
@@ -51,9 +53,15 @@ class PreparedFactTarget:
 
 
 def validate_prepared_facts(
-    result: PrepareFactsResult, *, registered: set[tuple[str, str]]
+    result: PrepareFactsResult, *, target: PreparedFactTarget, registered: set[tuple[str, str]]
 ) -> PreparedUnitFacts:
-    """Re-derive every shipment binding from the bytes; refuse on any drift."""
+    """Re-derive every shipment binding from the bytes; refuse on any drift.
+
+    `target` is the sealed dispatch this response must answer: internally
+    consistent bytes can still belong to an image the coordinator never sent,
+    so the echoed candidate/recovery references are compared against the
+    target's, not accepted as the response's own claim (design A-2 item 3).
+    """
     unit = result.unit
     if (unit.machine, unit.home) not in registered:
         raise ManagedWriterBarrierError("prepared facts belong to an unregistered unit")
@@ -101,6 +109,11 @@ def validate_prepared_facts(
         raise ManagedWriterBarrierError(
             "selector predecessor bytes do not match the candidate plan digest"
         )
+    if (unit.artifact_digest, unit.manifest_digest) != (
+        target.candidate.artifact_digest,
+        target.candidate.manifest_digest,
+    ) or result.recovery != target.recovery:
+        raise ManagedWriterBarrierError("prepared facts echo images that were not dispatched")
     return PreparedUnitFacts(
         publication=PreparedUnitPublication(
             receipt=receipt,
@@ -139,7 +152,9 @@ async def _gather_prepared_facts_async(
         # The result crossed the wire as JSON; JSON mode validates the
         # shipment's strict evidence models (lists to tuples, RFC3339 datetimes).
         return validate_prepared_facts(
-            PrepareFactsResult.model_validate_json(json.dumps(result)), registered=registered
+            PrepareFactsResult.model_validate_json(json.dumps(result)),
+            target=target,
+            registered=registered,
         )
 
     gathered = list(await asyncio.gather(*(one(target) for target in targets)))

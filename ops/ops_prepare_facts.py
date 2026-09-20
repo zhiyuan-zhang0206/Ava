@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import time
 from pathlib import Path
 
@@ -28,12 +29,16 @@ from shared.runtime_release import ReleaseRejectedError
 # retained images and reads the registration; 120s covers a cold chain with a
 # wide margin while keeping the op inside the rollout's preparation window
 # (the op is a no-effect precondition step; a refusal must surface long before
-# the rollout's own stop ladder starts).
+# the rollout's own stop ladder starts). KEEP (task #3696 exception inventory):
+# this kills a runaway child, it is not a tuning knob — the parent RPC's own
+# per-attempt budget (`gateway.cluster_rpc_timeout_seconds`) governs the
+# success path, so no larger value makes a slow op succeed.
 _PREPARE_FACTS_TIMEOUT_S = 120.0
 
 # The relay bound: a receipt + candidate plan shipment measures ~10 KiB; 256
 # KiB is a shape guard against a runaway child, not a tightening of the
-# entry's own budgets.
+# entry's own budgets. KEEP (task #3696 exception inventory): a self-imposed
+# relay guard fixed by the shipment's shape, not a tunable limit.
 _MAX_SHIPMENT_BYTES = 256 * 1024
 
 
@@ -68,6 +73,8 @@ def _child_argv(interpreter: Path, payload: PrepareFactsPayload) -> list[str]:
         str(interpreter),
         "-I",
         "-B",
+        "-X",
+        "utf8",
         "-m",
         "cli.prepared_facts",
         "--operation-holder",
@@ -100,14 +107,17 @@ def cluster_prepare_facts_op(payload: PrepareFactsPayload) -> PrepareFactsResult
         pid=os.getpid(),
         image=payload.candidate.artifact_digest,
     )
-    result = run_bounded(
-        _child_argv(interpreter, payload),
-        timeout=_PREPARE_FACTS_TIMEOUT_S,
-        capture_output=True,
-        text=True,
-        env=_child_environment(home),
-        cwd=str(home),
-    )
+    try:
+        result = run_bounded(
+            _child_argv(interpreter, payload),
+            timeout=_PREPARE_FACTS_TIMEOUT_S,
+            capture_output=True,
+            text=True,
+            env=_child_environment(home),
+            cwd=str(home),
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ReleaseRejectedError("candidate prepared-facts entry timed out") from exc
     if result.returncode != 0:
         tail = (result.stderr or "")[-2000:].strip() or "(no stderr)"
         raise ReleaseRejectedError(f"candidate prepared-facts entry refused: {tail}")

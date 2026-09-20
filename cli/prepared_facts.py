@@ -42,8 +42,10 @@ from cli.commands._release_inventory import prepare_unit_inventory
 from cli.commands._release_selector import read_selector, selector_bytes
 from cli.commands._release_services import prepare_normal_services
 from ops.rpc_prepare_facts import ImageRef
-from shared.managed_writer_barrier import RolloutIdentity, lock_rollout
+from shared.machine import MachineRoleMissing
+from shared.managed_writer_barrier import ManagedWriterBarrierError, RolloutIdentity, lock_rollout
 from shared.managed_writer_publication import CandidateUnitPlan, PublishedUnit
+from shared.native_job_observation import NativeReadUnavailableError
 from shared.runtime_interpreter import WHEEL_RUNTIME, runtime_venv
 from shared.runtime_publication_input import _receipt_expected
 from shared.runtime_release import (
@@ -130,6 +132,10 @@ def produce_facts(args: argparse.Namespace) -> dict[str, object]:
         schema_digest=args.recovery_schema_digest,
     )
     store = root.parent
+    # verify_release re-runs at each layer (here, inside collect_inventory and
+    # in the service plan) by design: every layer self-checks its own input
+    # instead of trusting the caller's earlier read. The cost is one bounded
+    # image-tree hash per layer, paid once per prepare.
     image = _verify_release(candidate_ref, store)
     if image.root != root:
         raise ReleaseRejectedError("verified candidate image differs from the loaded runtime")
@@ -150,14 +156,25 @@ def produce_facts(args: argparse.Namespace) -> dict[str, object]:
     url = os.environ.get("AVA_DB_URL")
     if not url:
         raise ReleaseRejectedError("prepared facts require an explicit database projection")
-    with psycopg.connect(url, connect_timeout=5) as conn, conn.transaction():
-        lock_rollout(conn, operation)
-        row = conn.execute(
-            "SELECT home FROM machine_units WHERE machine_name=%s AND home=%s",
-            (machine, str(home)),
-        ).fetchone()
-        if row != (str(home),):
-            raise ReleaseRejectedError("prepared facts unit is not registered")
+    # The deployment row lock fences lease liveness and registration only; the
+    # collection and sealing below run outside it. Holding the shared
+    # deployment_state row across image hashing would serialize the whole
+    # roster behind one unit's filesystem walk and block lease renewals while
+    # it runs (`shared/managed_writer_barrier.py`: no filesystem work under the
+    # lock; gathered facts are evidence, never authority, so nothing here
+    # needs the lock held).
+    with psycopg.connect(url, connect_timeout=5) as conn:
+        with conn.transaction():
+            lock_rollout(conn, operation)
+            row = conn.execute(
+                "SELECT home FROM machine_units WHERE machine_name=%s AND home=%s",
+                (machine, str(home)),
+            ).fetchone()
+            if row != (str(home),):
+                raise ReleaseRejectedError("prepared facts unit is not registered")
+        # The collection's registration re-reads stay lock-free single
+        # statements: no transaction spans the walk or the receipt write.
+        conn.autocommit = True
         receipt_path = prepare_unit_inventory(
             conn, image, home, machine, schema_digest=args.schema_digest
         )
@@ -208,7 +225,14 @@ def main(argv: list[str] | None = None) -> int:
         # Never expose credential-bearing connection diagnostics.
         sys.stderr.write(f"prepared facts refused ({type(exc).__name__})\n")
         return 2
-    except (OSError, ValueError, ReleaseRejectedError) as exc:
+    except (
+        OSError,
+        ValueError,
+        ReleaseRejectedError,
+        ManagedWriterBarrierError,
+        NativeReadUnavailableError,
+        MachineRoleMissing,
+    ) as exc:
         sys.stderr.write(f"prepared facts refused: {exc}\n")
         return 2
     sys.stdout.write(_canonical(shipment) + "\n")

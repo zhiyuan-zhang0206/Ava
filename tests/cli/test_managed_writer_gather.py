@@ -22,7 +22,7 @@ from cli.commands._managed_writer_gather import (
     gather_prepared_facts,
     validate_prepared_facts,
 )
-from ops.cluster_rpc import ClusterOpFailed
+from ops.cluster_rpc import ClusterOpFailed, ClusterOpUnreachable
 from ops.rpc_prepare_facts import ImageRef, PrepareFactsResult
 from shared.managed_writer_barrier import ManagedWriterBarrierError, RolloutIdentity
 from shared.managed_writer_observation import ExpectedUnitWriters
@@ -41,12 +41,14 @@ def _digest(label: str) -> str:
     return hashlib.sha256(label.encode()).hexdigest()
 
 
-def _receipt(machine: str = "runner", home: str = "/ava") -> PreparationReceipt:
+def _receipt(
+    machine: str = "runner", home: str = "/ava", *, manifest: str = MANIFEST
+) -> PreparationReceipt:
     expected = ExpectedUnitWriters(
         machine=machine,
         home=home,
         artifact_digest=ARTIFACT,
-        manifest_digest=MANIFEST,
+        manifest_digest=manifest,
         processes=(),
         sessions=(),
         launchers=(),
@@ -63,9 +65,13 @@ def _receipt(machine: str = "runner", home: str = "/ava") -> PreparationReceipt:
 
 
 def _shipment(
-    machine: str = "runner", home: str = "/ava", *, previous: bytes | None = None
+    machine: str = "runner",
+    home: str = "/ava",
+    *,
+    manifest: str = MANIFEST,
+    previous: bytes | None = None,
 ) -> PrepareFactsResult:
-    receipt = _receipt(machine, home)
+    receipt = _receipt(machine, home, manifest=manifest)
     body = receipt.model_dump_json().encode("ascii")
     expected = receipt.expected
     unit = PublishedUnit(
@@ -74,13 +80,13 @@ def _shipment(
         inventory_digest=expected.unit().inventory_digest,
         prepared_receipt_digest=hashlib.sha256(body).hexdigest(),
         artifact_digest=ARTIFACT,
-        manifest_digest=MANIFEST,
+        manifest_digest=manifest,
     )
     image = f"{home}/releases/{ARTIFACT}"
     selector = {
         "version": 2,
         "artifact_digest": ARTIFACT,
-        "manifest_digest": MANIFEST,
+        "manifest_digest": manifest,
         "prepared_receipt_digest": unit.prepared_receipt_digest,
     }
     candidate = CandidateUnitPlan(
@@ -115,7 +121,9 @@ def _shipment(
 
 
 def test_validate_rebinds_every_shipment_fact_from_bytes() -> None:
-    facts = validate_prepared_facts(_shipment(), registered={("runner", "/ava")})
+    facts = validate_prepared_facts(
+        _shipment(), target=_target("runner"), registered={("runner", "/ava")}
+    )
 
     assert facts.publication.receipt == _receipt()
     assert facts.publication.prepared_receipt_digest == _shipment().unit.prepared_receipt_digest
@@ -126,14 +134,18 @@ def test_validate_rebinds_every_shipment_fact_from_bytes() -> None:
 
 def test_validate_passes_the_predecessor_selector_through() -> None:
     previous = b'{"artifact_digest":"' + b"c" * 64 + b'"}\n'
-    facts = validate_prepared_facts(_shipment(previous=previous), registered={("runner", "/ava")})
+    facts = validate_prepared_facts(
+        _shipment(previous=previous), target=_target("runner"), registered={("runner", "/ava")}
+    )
 
     assert facts.previous_selector == previous.decode("ascii")
 
 
 def test_unregistered_unit_refuses() -> None:
     with pytest.raises(ManagedWriterBarrierError, match="unregistered"):
-        validate_prepared_facts(_shipment(), registered={("other", "/ava")})
+        validate_prepared_facts(
+            _shipment(), target=_target("other"), registered={("other", "/ava")}
+        )
 
 
 def test_non_ascii_receipt_refuses() -> None:
@@ -141,7 +153,7 @@ def test_non_ascii_receipt_refuses() -> None:
     tampered = shipment.model_copy(update={"receipt_json": "caf\u00e9"})
 
     with pytest.raises(ManagedWriterBarrierError, match="not ASCII text"):
-        validate_prepared_facts(tampered, registered={("runner", "/ava")})
+        validate_prepared_facts(tampered, target=_target("runner"), registered={("runner", "/ava")})
 
 
 def test_receipt_digest_drift_refuses() -> None:
@@ -149,7 +161,7 @@ def test_receipt_digest_drift_refuses() -> None:
     tampered = shipment.model_copy(update={"receipt_json": shipment.receipt_json + " "})
 
     with pytest.raises(ManagedWriterBarrierError, match="do not match their announced digest"):
-        validate_prepared_facts(tampered, registered={("runner", "/ava")})
+        validate_prepared_facts(tampered, target=_target("runner"), registered={("runner", "/ava")})
 
 
 def test_shipment_unit_diverging_from_receipt_refuses() -> None:
@@ -159,7 +171,7 @@ def test_shipment_unit_diverging_from_receipt_refuses() -> None:
     )
 
     with pytest.raises(ManagedWriterBarrierError, match="receipt and shipment unit differ"):
-        validate_prepared_facts(tampered, registered={("other", "/ava")})
+        validate_prepared_facts(tampered, target=_target("other"), registered={("other", "/ava")})
 
 
 def test_candidate_plan_for_a_different_unit_refuses() -> None:
@@ -170,7 +182,7 @@ def test_candidate_plan_for_a_different_unit_refuses() -> None:
     )
 
     with pytest.raises(ManagedWriterBarrierError, match="different prepared unit"):
-        validate_prepared_facts(tampered, registered={("runner", "/ava")})
+        validate_prepared_facts(tampered, target=_target("runner"), registered={("runner", "/ava")})
 
 
 def test_recovery_image_must_differ_from_the_candidate() -> None:
@@ -180,7 +192,7 @@ def test_recovery_image_must_differ_from_the_candidate() -> None:
     )
 
     with pytest.raises(ManagedWriterBarrierError, match="recovery image must differ"):
-        validate_prepared_facts(tampered, registered={("runner", "/ava")})
+        validate_prepared_facts(tampered, target=_target("runner"), registered={("runner", "/ava")})
 
 
 def test_predecessor_selector_binding_drift_refuses() -> None:
@@ -191,13 +203,13 @@ def test_predecessor_selector_binding_drift_refuses() -> None:
         update={"candidate": bound.candidate.model_copy(update={"previous_selector_digest": None})}
     )
     with pytest.raises(ManagedWriterBarrierError, match="predecessor"):
-        validate_prepared_facts(cleared, registered=registered)
+        validate_prepared_facts(cleared, target=_target("runner"), registered=registered)
 
     swapped = bound.model_copy(
         update={"previous_selector": '{"artifact_digest":"' + "d" * 64 + '"}\n'}
     )
     with pytest.raises(ManagedWriterBarrierError, match="predecessor"):
-        validate_prepared_facts(swapped, registered=registered)
+        validate_prepared_facts(swapped, target=_target("runner"), registered=registered)
 
     clean = _shipment()
     claimed = clean.model_copy(
@@ -208,7 +220,26 @@ def test_predecessor_selector_binding_drift_refuses() -> None:
         }
     )
     with pytest.raises(ManagedWriterBarrierError, match="predecessor"):
-        validate_prepared_facts(claimed, registered=registered)
+        validate_prepared_facts(claimed, target=_target("runner"), registered=registered)
+
+
+def test_validate_refuses_a_candidate_image_that_was_not_dispatched() -> None:
+    """Internally consistent bytes can still echo an image never sent; the
+    response must match the target's sealed candidate reference."""
+    shipment = _shipment(manifest="9" * 64)
+
+    with pytest.raises(ManagedWriterBarrierError, match="not dispatched"):
+        validate_prepared_facts(shipment, target=_target("runner"), registered={("runner", "/ava")})
+
+
+def test_validate_refuses_a_recovery_echo_that_was_not_dispatched() -> None:
+    shipment = _shipment()
+    tampered = shipment.model_copy(
+        update={"recovery": shipment.recovery.model_copy(update={"schema_digest": "8" * 64})}
+    )
+
+    with pytest.raises(ManagedWriterBarrierError, match="not dispatched"):
+        validate_prepared_facts(tampered, target=_target("runner"), registered={("runner", "/ava")})
 
 
 def _stub_dispatch(
@@ -253,7 +284,7 @@ def test_gather_dispatches_the_op_and_covers_the_roster_exactly(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     first = _shipment("runner-a", "/ava-a")
-    second = _shipment("runner-b", "/ava-b")
+    second = _shipment("runner-b", "/ava-b", manifest="1" * 64)
     calls = _stub_dispatch(monkeypatch, {"runner-a": first, "runner-b": second})
 
     facts = gather_prepared_facts(
@@ -311,6 +342,22 @@ def test_gather_propagates_business_failures(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr("ops.cluster_rpc.dispatch_to_machine", dispatch)
 
     with pytest.raises(ClusterOpFailed):
+        gather_prepared_facts(
+            [_target("runner-a")],
+            operation=_operation(),
+            registered={("runner-a", "/ava-a")},
+        )
+
+
+def test_gather_propagates_unreachable_hosts(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def dispatch(
+        target_machine: str, kind: str, payload: dict[str, Any], **kwargs: Any
+    ) -> dict[str, Any]:
+        raise ClusterOpUnreachable("offline")
+
+    monkeypatch.setattr("ops.cluster_rpc.dispatch_to_machine", dispatch)
+
+    with pytest.raises(ClusterOpUnreachable):
         gather_prepared_facts(
             [_target("runner-a")],
             operation=_operation(),
