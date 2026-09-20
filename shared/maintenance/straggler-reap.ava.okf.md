@@ -21,8 +21,12 @@ still-un-applied maintenance restart as an in-flight abort signal, so the
 running exec/LLM node truncates within its existing poll cadence and the exec
 subsystem settles its child tree. The mark's status predicates fence every
 old-incarnation write path (claim acceptance, lifecycle apply, settle, corpse
-stamp), so a dying turn can only end cleanly — it can never clobber the reap
-or latch a blocking drain failure.
+stamp), so a dying turn cannot clobber the reap. Its status fence can still
+raise an ownership exception while the lease is fresh. A failure recorded
+between the committed mark and the reap receipt remains audit evidence;
+`MaintenanceHold.unsettled_failures()` excludes reap-certified members in
+either receipt order, including when the raw journal is read by out-of-band
+triage. The reap receipt must not refuse that already-committed mark.
 
 Receipts are honest end to end. The member lands in `MaintenanceHold.reaped`
 (a receipt deliberately not `drained`, never a fabricated flush/apply);

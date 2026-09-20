@@ -114,8 +114,8 @@ def _repair(holder: str, at: datetime, *, operator: str | None) -> None:
     (`failures` moved verbatim into `repaired`) visible via
     `ava maintenance status`. Refuses while the agent-host still has active
     continuations, so no live receipt can be cleared from under a running
-    turn; an unreachable agent-host (nothing serving) reads as no live
-    continuations, while every other probe failure still refuses. A hold
+    turn. Only independently proven process absence skips the identity probe;
+    a refused health connection alone still refuses. A hold
     that already drained is repairable: a post-drain failure has no other
     sanctioned exit.
     """

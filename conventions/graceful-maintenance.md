@@ -68,7 +68,8 @@ boot or local resume (`ava start` runs the resume path), and its claimed
 work re-delivers on the new code. A failure recorded while that truncated
 turn unwinds (the member losing its row mid-unwind, task #4150) is settled
 with the mark: a reaped member's failure never gates resume, stop, start or
-repair, and a later failure receipt for a reaped member is not latched.
+repair. A later failure receipt for a reaped member is not latched; a failure
+that races before the reap receipt remains audit evidence but does not block.
 
 The existing home-local journal survives a CLI crash, host reboot and an
 offline database. An incomplete drain or stop retains the hold and reports
@@ -185,9 +186,10 @@ ava maintenance repair --operation <operation> --acquired-at <timestamp> [--oper
 Repair requires the exact generation capability, works on a
 `preparing`/`draining`/`drained` hold (a failure latched after the cohort
 landed has no other exit), refuses while the agent-host still has active
-continuations — an unreachable agent-host (a refused dial: nothing serving)
-reads as none — and records operator identity (timestamp, operator label, OS
-user/uid/pid, parent process, machine) in the journal — both sides of the
+continuations. Only independent service, PID and home-scoped process checks
+can establish host absence and skip its identity probe; a refused health
+connection alone is insufficient. Repair records operator identity (timestamp,
+operator label, OS user/uid/pid, parent process, machine) in the journal — both sides of the
 repair CAS stay visible via `ava maintenance status`. A partial release after
 a successful repair is completed by `resume --cancel`.
 
@@ -256,7 +258,7 @@ failed receipts.
 `resume --cancel` refuses while blocking failed receipts remain. Fix the root
 cause first, then release the latch with the sanctioned repair — on a
 `preparing`/`draining`/`drained` hold, and only while the agent-host has no
-active continuations (an unreachable host reads as none):
+active continuations or is independently proven absent:
 
 ```
 ava maintenance repair --operation <operation> --acquired-at <timestamp> [--operator "Ava #1234"]

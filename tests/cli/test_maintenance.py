@@ -330,13 +330,14 @@ def _refused_probe() -> None:
     raise URLError(ConnectionRefusedError(111, "Connection refused"))
 
 
-def test_repair_from_drained_with_unreachable_agent_host_proceeds(
+def test_repair_from_drained_with_absent_agent_host_proceeds(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Nothing serving cannot hold live continuations; a drained hold repairs."""
+    """An independently absent host has no continuations; a drained hold repairs."""
     failed_hold(7, phase_value="drained")
     monkeypatch.setattr(command, "host_identity_or_none", real_host_identity_or_none)
     monkeypatch.setattr("ops.agent_pause_probe.host_identity", _refused_probe)
+    monkeypatch.setattr("ops.agent_pause_probe.host_running", lambda: False)
     unpause = MagicMock()
     monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", unpause)
 
@@ -353,7 +354,7 @@ def test_repair_from_drained_with_unreachable_agent_host_proceeds(
 def test_repair_still_refuses_an_unreadable_agent_host_probe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Only a refused dial degrades; an unknown fact keeps the fail-closed refusal."""
+    """A running host with unreadable identity evidence must refuse."""
     failed_hold(7, phase_value="drained")
 
     def wedged() -> None:
@@ -361,6 +362,7 @@ def test_repair_still_refuses_an_unreadable_agent_host_probe(
 
     monkeypatch.setattr(command, "host_identity_or_none", real_host_identity_or_none)
     monkeypatch.setattr("ops.agent_pause_probe.host_identity", wedged)
+    monkeypatch.setattr("ops.agent_pause_probe.host_running", lambda: True)
 
     with pytest.raises(URLError):
         command._repair("local", WHEN, operator=None)
@@ -369,12 +371,13 @@ def test_repair_still_refuses_an_unreadable_agent_host_probe(
     assert current.maintenance.failures == {7: "RuntimeError"}
 
 
-def test_stop_proceeds_with_unreachable_agent_host(
+def test_stop_proceeds_with_absent_agent_host(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     phase("drained")
     monkeypatch.setattr(command, "host_identity_or_none", real_host_identity_or_none)
     monkeypatch.setattr("ops.agent_pause_probe.host_identity", _refused_probe)
+    monkeypatch.setattr("ops.agent_pause_probe.host_running", lambda: False)
     stop = MagicMock(return_value=[])
     monkeypatch.setattr(command, "stop_services", stop)
 
@@ -382,6 +385,34 @@ def test_stop_proceeds_with_unreachable_agent_host(
 
     stop.assert_called_once()
     assert command._hold("local", WHEN).phase == "stopped"
+
+
+@pytest.mark.parametrize("verb", ["stop", "repair"])
+def test_refused_health_listener_cannot_prove_host_quiescence(
+    monkeypatch: pytest.MonkeyPatch, verb: str
+) -> None:
+    if verb == "repair":
+        failed_hold(7, phase_value="drained")
+    else:
+        phase("drained")
+    before = pause_owner.read()
+    monkeypatch.setattr(command, "host_identity_or_none", real_host_identity_or_none)
+    monkeypatch.setattr("ops.agent_pause_probe.host_running", lambda: True)
+    monkeypatch.setattr("ops.agent_pause_probe.host_identity", _refused_probe)
+    stop = MagicMock(return_value=[])
+    unpause = MagicMock()
+    monkeypatch.setattr(command, "stop_services", stop)
+    monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", unpause)
+
+    with pytest.raises(URLError):
+        if verb == "stop":
+            command._stop("local", WHEN, 2, gateway_last=False)
+        else:
+            command._repair("local", WHEN, operator=None)
+
+    assert pause_owner.read() == before
+    stop.assert_not_called()
+    unpause.assert_not_called()
 
 
 def test_stop_still_refuses_live_continuations(monkeypatch: pytest.MonkeyPatch) -> None:

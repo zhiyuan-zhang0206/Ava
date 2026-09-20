@@ -206,6 +206,10 @@ def record_reaped(agent_id: int, reason: str) -> None:
     latch -- it releases the drain for this agent and nothing more. The mark
     is settled at the successor boundary; certification of this member checks
     the honest reap state instead (maintenance_cohort.verify_drained).
+
+    A failure may race between the committed reap mark and this journal CAS.
+    Keep that receipt for audit, but let the certified reap supersede it via
+    `unsettled_failures()`; rejecting it would strand a mark already applied.
     """
     while True:
         current = snapshot()
@@ -214,8 +218,6 @@ def record_reaped(agent_id: int, reason: str) -> None:
         hold = current.maintenance
         if hold.commands.get(agent_id) is None:
             raise RuntimeError("reaped agent does not belong to this maintenance cohort")
-        if agent_id in hold.unsettled_failures():
-            raise RuntimeError("failed continuation cannot be reaped in the same hold")
         if agent_id in hold.reaped:
             return
         updated = replace(hold, reaped={**hold.reaped, agent_id: reason})

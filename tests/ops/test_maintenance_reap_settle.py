@@ -254,37 +254,51 @@ def test_start_path_still_refuses_unreaped_failures() -> None:
         start()
 
 
-def test_post_reap_failures_never_latch_and_reap_stays_guarded() -> None:
-    """The symmetric writer guard: the reap release wins; the mirror keeps guarding reaps."""
+def test_reap_receipt_supersedes_a_racing_failure() -> None:
+    """The same committed reap is accepted in either receipt arrival order."""
     _publish(MaintenanceHold("draining", {1: 11, 2: 22}, reaped={1: REAP}))
 
-    maintenance.record_failure(1, "ImpersonationError")  # reaped member: dropped
-    maintenance.record_failure(2, "RuntimeError")  # live member: latched
+    maintenance.record_failure(1, "ImpersonationError")
+    maintenance.record_failure(2, "ImpersonationError")
+    assert _current().unsettled_failures() == {2: "ImpersonationError"}
 
-    assert _current().failures == {2: "RuntimeError"}
-    maintenance.record_reaped(1, REAP)  # legacy both-state re-mark: idempotent, no raise
-    with pytest.raises(RuntimeError, match="failed continuation cannot be reaped"):
-        maintenance.record_reaped(2, REAP)
+    maintenance.record_reaped(1, REAP)
+    maintenance.record_reaped(2, REAP)
+
+    assert _current().reaped == {1: REAP, 2: REAP}
+    assert _current().failures == {2: "ImpersonationError"}
+    assert _current().unsettled_failures() == {}
 
 
-def test_host_identity_or_none_degrades_only_on_a_refused_dial(
+def test_host_identity_or_none_requires_independent_absence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def refused() -> HostIdentity:
-        raise URLError(ConnectionRefusedError(111, "Connection refused"))
-
-    monkeypatch.setattr("ops.agent_pause_probe.host_identity", refused)
+    identity = MagicMock(side_effect=URLError(ConnectionRefusedError(111, "Connection refused")))
+    monkeypatch.setattr("ops.agent_pause_probe.host_identity", identity)
+    monkeypatch.setattr("ops.agent_pause_probe.host_running", lambda: False)
     assert host_identity_or_none() is None
+    identity.assert_not_called()
 
-    def direct_refusal() -> HostIdentity:
-        raise ConnectionRefusedError(111, "Connection refused")
-
-    monkeypatch.setattr("ops.agent_pause_probe.host_identity", direct_refusal)
-    assert host_identity_or_none() is None
-
-    def wedged() -> HostIdentity:
-        raise URLError(TimeoutError("timed out"))
-
-    monkeypatch.setattr("ops.agent_pause_probe.host_identity", wedged)
+    monkeypatch.setattr("ops.agent_pause_probe.host_running", lambda: True)
     with pytest.raises(URLError):
         host_identity_or_none()
+
+    identity.side_effect = ConnectionRefusedError(111, "Connection refused")
+    with pytest.raises(ConnectionRefusedError):
+        host_identity_or_none()
+
+    identity.side_effect = None
+    identity.return_value = HostIdentity(uuid4(), frozenset({7}))
+    assert host_identity_or_none() == identity.return_value
+
+
+def test_unknown_host_process_evidence_still_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
+    def unknown() -> bool:
+        raise RuntimeError("cannot identify an unrecorded agent-host home")
+
+    identity = MagicMock()
+    monkeypatch.setattr("ops.agent_pause_probe.host_running", unknown)
+    monkeypatch.setattr("ops.agent_pause_probe.host_identity", identity)
+    with pytest.raises(RuntimeError, match="cannot identify"):
+        host_identity_or_none()
+    identity.assert_not_called()

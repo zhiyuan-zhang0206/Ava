@@ -155,6 +155,30 @@ def test_failed_receipts_read_stranded_not_orphaned() -> None:
     assert result.failures == 1
 
 
+@pytest.mark.parametrize("source", ["status", "journal"])
+@pytest.mark.parametrize("uncertified", [False, True])
+def test_reap_superseded_failures_do_not_classify_as_stranded(
+    source: str, uncertified: bool
+) -> None:
+    module = _triage_module()
+    failures = {"6288": "ImpersonationError"}
+    if uncertified:
+        failures["6289"] = "RuntimeError"
+    build = _status_payload if source == "status" else _journal_payload
+    payload = build(phase="drained", failures=failures)
+    hold = cast("dict[str, object]", payload["maintenance"])
+    hold["reaped"] = {"6288": "update_straggler_reap"}
+    classify = module.classify_status if source == "status" else module.classify_journal
+
+    result = classify(payload, host="wsl")
+
+    assert result.failures == int(uncertified)
+    if source == "status":
+        assert (result.classification == "stranded") == uncertified
+    else:
+        assert result.classification == "undetermined"
+
+
 def test_missing_shepherd_is_undetermined_not_orphaned() -> None:
     module = _triage_module()
     result = module.classify_status(_status_payload(liveness=None), host="wsl")
