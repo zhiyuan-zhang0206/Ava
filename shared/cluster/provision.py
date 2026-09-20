@@ -55,8 +55,8 @@ def ensure_cluster_role(identity: str, *, base_admin_url: str, db_admin_password
     role is the initdb bootstrap superuser, which Postgres refuses to downgrade
     — it stays SUPERUSER on its own single-tenant instance. The instance is the cluster's own, so
     this can never touch another cluster's role. When the database already
-    exists (an existing cluster, or the legacy single-`ava`-role layout),
-    ownership is adopted so the role can run migrations against it.
+    exists (an existing cluster), ownership is adopted so the role can run
+    migrations against it.
 
     base_admin_url must connect as a Postgres superuser — the loopback-`trust`
     bootstrap superuser — to a maintenance db (e.g. `postgres`) on the same instance.
@@ -95,10 +95,11 @@ def ensure_cluster_role(identity: str, *, base_admin_url: str, db_admin_password
 
 
 def _adopt_database(base_admin_url: str, target: str, owner: str) -> None:
-    """Make `owner` own database `target` and every object in it — the migration
-    from the legacy single shared `ava` role to a per-cluster owner. Idempotent:
-    re-running once the legacy `ava` role owns nothing in `target` is a no-op (and
-    a no-op entirely when the legacy role never existed, e.g. a fresh install)."""
+    """Make `owner` own database `target`. Idempotent — safe on every bring-up.
+
+    The legacy single shared `ava` role's REASSIGN OWNED migration is retired
+    (2026-09-20, batch b5): no live instance still needs it, and the fleet's
+    target databases carry no `ava`-owned objects (verified per host)."""
     import psycopg
     from psycopg import sql as pgsql
 
@@ -108,21 +109,6 @@ def _adopt_database(base_admin_url: str, target: str, owner: str) -> None:
                 pgsql.Identifier(target), pgsql.Identifier(owner)
             )
         )
-    with psycopg.connect(_swap_db(base_admin_url, target), autocommit=True) as conn:
-        # Reassign the legacy `ava` role's objects in `target` to the new owner.
-        # Only when `ava` exists AND is NOT the bootstrap superuser (oid 10): the
-        # bootstrap owns pinned system catalogs that REASSIGN OWNED cannot touch
-        # ("required by the database system"), and it is never the legacy app role
-        # we are migrating from (that `ava` was a separately-created superuser).
-        # REASSIGN OWNED operates on the current database only, so it never reaches
-        # another cluster's db. Skipped when owner == 'ava' (a fresh path-only
-        # cluster: the role already owns its objects; reassigning to itself is
-        # meaningless).
-        legacy = conn.execute(
-            "SELECT 1 FROM pg_roles WHERE rolname = 'ava' AND oid <> 10"
-        ).fetchone()
-        if legacy and owner != "ava":
-            conn.execute(pgsql.SQL("REASSIGN OWNED BY ava TO {}").format(pgsql.Identifier(owner)))
 
 
 def provision_database(identity: str, *, base_admin_url: str, db_admin_password: str) -> bool:

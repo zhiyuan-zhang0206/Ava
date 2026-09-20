@@ -3,8 +3,6 @@
 
 from __future__ import annotations
 
-import datetime as dt
-import json
 from pathlib import Path
 
 import pytest
@@ -34,9 +32,6 @@ def test_begin_and_phase_keep_one_generation_and_started_at(isolated: Path) -> N
     assert advanced.updated_at is not None
     assert advanced.updated_at >= opened.updated_at  # type: ignore[operator]
     assert advanced.phase == "phase-b"
-
-    raw = json.loads(isolated.read_text())
-    assert raw["posture"] == "paused", "old gates must read a v2 writer as updating"
 
 
 def test_late_generation_cannot_overwrite_or_clear_the_new_owner(isolated: Path) -> None:
@@ -96,18 +91,7 @@ def test_clear_removes_marker_and_host_transitions_do_not_recreate_it(
     assert "_write_mirror" not in source
 
 
-@pytest.mark.parametrize("posture", ["paused", "converging"])
-def test_new_reader_accepts_introducing_rollouts_v1_marker(isolated: Path, posture: str) -> None:
-    isolated.write_text(json.dumps({"posture": posture, "updated_at": "2026-08-24T12:34:56+00:00"}))
-    snap = state.read()
-    assert snap.status == "updating"
-    assert snap.legacy is True
-    assert snap.started_at == dt.datetime(2026, 8, 24, 12, 34, 56, tzinfo=dt.UTC)
-
-
-def test_legacy_idle_and_missing_are_inactive(isolated: Path) -> None:
-    assert state.read().status == "inactive"
-    isolated.write_text('{"posture":"idle","updated_at":"2026-08-24T12:34:56+00:00"}')
+def test_missing_marker_is_inactive(isolated: Path) -> None:
     assert state.read().status == "inactive"
 
 
@@ -118,6 +102,9 @@ def test_legacy_idle_and_missing_are_inactive(isolated: Path) -> None:
         '{"schema_version":99,"state":"updating"}',
         '{"schema_version":2,"state":"updating","generation":"g"}',
         '{"posture":"mystery","updated_at":"2026-08-24T12:34:56+00:00"}',
+        # Retired v1 shapes fail fast: no pre-v2 writer remains on any host.
+        '{"posture":"paused","updated_at":"2026-08-24T12:34:56+00:00"}',
+        '{"posture":"idle","updated_at":"2026-08-24T12:34:56+00:00"}',
     ],
 )
 def test_corrupt_or_unknown_marker_is_explicitly_invalid(isolated: Path, raw: str) -> None:

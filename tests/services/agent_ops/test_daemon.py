@@ -218,27 +218,23 @@ async def test_dispatch_routes_cluster_resume(monkeypatch: pytest.MonkeyPatch) -
 
 
 @pytest.mark.asyncio
-async def test_first_adoption_empty_resume_uses_only_the_legacy_bridge(
+async def test_empty_resume_payload_fails_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An old in-memory sender can resume a host it just updated to new code."""
+    """The legacy empty-resume bridge is retired; an empty payload is malformed."""
     monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
     called: list[bool] = []
-    monkeypatch.setattr(
-        daemon.ops_cluster,
-        "cluster_resume_legacy_op",
-        lambda: called.append(True) or {"resumed": True},
-    )
 
-    def _refuse_exact(_holder: str, _acquired: datetime) -> None:
-        pytest.fail("empty legacy payload cannot enter exact resume")
+    def _record_resume(*_args: object, **_kwargs: object) -> dict[str, bool]:
+        called.append(True)
+        return {"resumed": True}
 
-    monkeypatch.setattr(daemon.ops_cluster, "cluster_resume_op", _refuse_exact)
+    monkeypatch.setattr(daemon.ops_cluster, "cluster_resume_op", _record_resume)
 
     status, result = await daemon._dispatch("cluster_resume", {})
-    assert status == "completed"
-    assert result == {"resumed": True}
-    assert called == [True]
+    assert status == "failed"
+    assert "error" in result
+    assert called == []
 
 
 @pytest.mark.asyncio

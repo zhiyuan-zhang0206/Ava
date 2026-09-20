@@ -183,8 +183,7 @@ def servers(tmp_path: Path) -> Iterator[_Servers]:
     gw = ThreadingHTTPServer(("127.0.0.1", 0), _FakeGateway)
     app = ThreadingHTTPServer(("127.0.0.1", 0), _FakeApp)
     gate_server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
-    # The Gate-owned marker is controllable here. A v1 marker exercises the
-    # rollout introducing the v2 writer: paused means updating; absent means down.
+    # The Gate-owned marker is controllable here; absent means down.
     marker = tmp_path / "deploy-state.json"
     gate = Gate(
         gateway_base=f"http://127.0.0.1:{gw.server_port}",
@@ -373,10 +372,6 @@ def _request(
         return exc.code, exc.read().decode(), dict(exc.headers.items())
 
 
-def _write_v1(path: Path, posture: str) -> None:
-    path.write_text(json.dumps({"posture": posture, "updated_at": "2026-08-24T12:34:56+00:00"}))
-
-
 def _write_v2(path: Path, *, kind: str = "rollout") -> None:
     started_at = "2026-08-24T12:34:56+00:00"
     path.write_text(
@@ -386,7 +381,6 @@ def _write_v2(path: Path, *, kind: str = "rollout") -> None:
                 "generation": f"{kind}-generation",
                 "state": "updating",
                 "kind": kind,
-                "posture": "paused",
                 "started_at": started_at,
                 "updated_at": started_at,
                 "phase": "phase-b",
@@ -588,7 +582,7 @@ def test_gateway_503_serves_updating_page_when_flag_set(servers) -> None:
     see the updating page, not a dead-app error."""
     _FakeGateway.authenticated = True
     _FakeGateway.down = True
-    _write_v1(servers["flag"], "paused")  # pyright: ignore[reportUnknownArgumentType]
+    _write_v2(servers["flag"])  # pyright: ignore[reportUnknownArgumentType]
     status, body = _get(servers["gate"] + "/")  # pyright: ignore[reportUnknownArgumentType]
     assert status == 503
     assert "System updating" in body
@@ -699,7 +693,6 @@ def test_updating_page_uses_the_flags_stable_started_at(
                 "generation": started_at,
                 "state": "updating",
                 "kind": "rollout",
-                "posture": "paused",
                 "started_at": started_at,
                 "updated_at": started_at,
                 "phase": "phase-b",
@@ -722,7 +715,7 @@ def test_gateway_refused_serves_updating_page_when_flag_set(servers) -> None:
     the rollout marked the flag — updating page."""
     _FakeGateway.authenticated = True
     _FakeGateway.down = False
-    _write_v1(servers["flag"], "paused")  # pyright: ignore[reportUnknownArgumentType]
+    _write_v2(servers["flag"])  # pyright: ignore[reportUnknownArgumentType]
     servers["gw"].shutdown()  # pyright: ignore[reportUnknownMemberType]
     status, body = _get(servers["gate"] + "/")  # pyright: ignore[reportUnknownArgumentType]
     assert status == 503
@@ -758,7 +751,7 @@ def test_each_failed_request_uses_the_current_persisted_snapshot(servers) -> Non
     a transport phase never invents a second state."""
     _FakeGateway.authenticated = True
     _FakeGateway.down = True
-    _write_v1(servers["flag"], "paused")  # pyright: ignore[reportUnknownArgumentType]
+    _write_v2(servers["flag"])  # pyright: ignore[reportUnknownArgumentType]
     _, body = _get(servers["gate"] + "/")  # pyright: ignore[reportUnknownArgumentType]
     assert "System updating" in body
     servers["flag"].unlink()  # pyright: ignore[reportUnknownMemberType]
@@ -790,6 +783,7 @@ def test_app_transport_failure_without_active_marker_is_service_unavailable(serv
         "{not-json",
         '{"schema_version":2,"state":"mystery","started_at":null}',
         '{"schema_version":2,"state":"updating","started_at":"not-a-time"}',
+        '{"posture":"paused","updated_at":"2026-08-24T12:34:56+00:00"}',
     ],
 )
 def test_malformed_or_unknown_flag_fails_to_service_unavailable(

@@ -79,7 +79,7 @@ _START_PHASES = ("stopping", "stopped", "starting")
 # shared.maintenance_state; an unknown value is a structural surprise and the
 # caller falls through to the next source.
 _PHASES = ("preparing", "draining", "drained", "stopping", "stopped", "starting", "ready")
-_STATES = ("paused", "resumed", "legacy-resumed")
+_STATES = ("paused", "resumed")
 _LIVENESS = ("alive", "dead", "missing", "unreadable")
 
 # The desensitization whitelist (spec part 2 v1.1.1 B5): only strings matching

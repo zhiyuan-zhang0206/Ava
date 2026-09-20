@@ -74,11 +74,7 @@ def wait_for_ui_owner(
     deadline = time.monotonic() + ORCHESTRATION_OWNER_WAIT_S
     while time.monotonic() < deadline:
         snapshot = shared.ui_update_state.read()
-        if (
-            snapshot.status == "updating"
-            and snapshot.kind == kind
-            and (snapshot.legacy or snapshot.origin == origin)
-        ):
+        if snapshot.status == "updating" and snapshot.kind == kind and snapshot.origin == origin:
             return
         if not cluster_session._has_orchestration_session(session):
             raise cluster_session.OrchestrationSpawnFailed(

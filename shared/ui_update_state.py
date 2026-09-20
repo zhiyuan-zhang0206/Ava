@@ -56,7 +56,7 @@ class UiUpdateAlreadyActive(RuntimeError):  # noqa: N818 — active state verdic
 class UiUpdateSnapshot:
     """One exhaustive projection of the marker file.
 
-    ``status`` is deliberately three-valued.  Missing/legacy-idle is inactive;
+    ``status`` is deliberately three-valued.  Missing is inactive;
     a fully valid active marker is updating; corrupt or unknown content is
     invalid.  Invalid is never guessed to mean updating.
     """
@@ -69,7 +69,6 @@ class UiUpdateSnapshot:
     updated_at: dt.datetime | None = None
     phase: str | None = None
     origin: str | None = None
-    legacy: bool = False
     error: str | None = None
 
 
@@ -127,29 +126,6 @@ def _parse(data: object) -> UiUpdateSnapshot:
     if not isinstance(data, dict):
         _invalid("marker root must be an object")
     raw = cast("dict[str, object]", data)
-
-    # v1 compatibility for the rollout that introduces this module: the old
-    # writer emits only posture+updated_at, while the new gate can already be
-    # installed during that same run.  This fallback retires after the fleet no
-    # longer has a pre-v2 writer.
-    if "schema_version" not in raw:
-        posture = raw.get("posture")
-        if posture == "idle":
-            return UiUpdateSnapshot(status="inactive", legacy=True)
-        if posture not in ("paused", "converging"):
-            raise ValueError(f"unknown legacy posture {posture!r}")
-        started = _timestamp(raw.get("updated_at"), "updated_at")
-        stamp = started.isoformat()
-        return UiUpdateSnapshot(
-            status="updating",
-            schema_version=1,
-            generation=f"legacy:{stamp}",
-            kind="rollout",
-            started_at=started,
-            updated_at=started,
-            phase=str(posture),
-            legacy=True,
-        )
 
     version = raw.get("schema_version")
     if version != SCHEMA_VERSION:
@@ -219,9 +195,6 @@ def _payload(
         "updated_at": updated_at.isoformat(),
         "phase": phase,
         "origin": origin,
-        # A pre-v2 gate classifies only posture.  Keeping this one field means a
-        # new writer is safe before every gate process has adopted v2 parsing.
-        "posture": "paused",
     }
 
 
@@ -298,7 +271,7 @@ def begin(
         return _parse(payload)
 
 
-def set_phase(generation: str, phase: str, *, origin: str | None = None) -> bool:
+def set_phase(generation: str, phase: str) -> bool:
     """CAS-update diagnostics without changing a generation's start."""
     if not phase:
         raise ValueError("phase must be non-empty")
@@ -307,7 +280,7 @@ def set_phase(generation: str, phase: str, *, origin: str | None = None) -> bool
         current = _read_unlocked(path)
         if current.status != "updating" or current.generation != generation:
             return False
-        if current.kind is None or current.started_at is None:
+        if current.kind is None or current.started_at is None or current.origin is None:
             return False
         now = dt.datetime.now(dt.UTC)
         _write_atomic(
@@ -318,11 +291,7 @@ def set_phase(generation: str, phase: str, *, origin: str | None = None) -> bool
                 started_at=current.started_at,
                 updated_at=now,
                 phase=phase,
-                # A new child can inherit a v1 marker from the rollout that
-                # introduces this schema.  That marker had no origin field;
-                # the already-present CLI origin supplies it while converting
-                # the same stable generation to v2 under the lock.
-                origin=current.origin if current.origin is not None else (origin or "legacy"),
+                origin=current.origin,
             ),
         )
         return True

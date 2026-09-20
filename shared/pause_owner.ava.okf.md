@@ -30,19 +30,16 @@ while the host serves — the 2026-08-26 residue. The finalize is generation-
 scoped by construction and never a force-clear: only a `paused` journal is
 transitioned, and only to its own generation.
 
-During the rollout that first adopts this protocol, the old receiver handled
-stop and therefore wrote no exact journal, while the still-old orchestrator may
-resume the newly updated receiver with an empty payload. Only an absent journal
-may take this compatibility path; it writes a `legacy-resumed` tombstone for
-idempotency. Exact or malformed owners and live local updater handoffs refuse it,
-and any later exact stop overwrites the tombstone.
+The first-adoption bridge is retired: an empty resume payload no longer routes
+to a legacy path — every resume carries the exact transition payload, and an
+empty payload fails closed (no pre-protocol orchestrator remains; fleet
+verified 2026-09-20).
 
 The control-plane stop/resume payload requires both fields and a timezone-aware
 RFC3339 timestamp. Missing, naive, or mismatched capabilities fail closed. Old
-receivers ignore the new payload; a new receiver accepts an old tokenless
-resume only through the one-rollout inactive-journal bridge above. Full
-delayed-request protection begins after stop-side protocol adoption on every
-node and degrades when rolling back to an older target.
+receivers ignore the new payload; a new receiver refuses an old tokenless
+resume. Full delayed-request protection begins after stop-side protocol
+adoption on every node.
 
 
 An explicit [maintenance hold](maintenance/maintenance.ava.okf.md) uses the same journal
