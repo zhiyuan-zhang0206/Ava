@@ -1182,6 +1182,27 @@ class TestGetLastMessage:
         assert resp.status_code == 200
         assert resp.json()["text"] == "pre-compact message"
 
+    def test_empty_text_reads_as_none(self, db_conn: psycopg.Connection) -> None:
+        """An empty-string column value reads as None — no empty message."""
+        from shared.db import create_agent
+
+        agent_id = create_agent(db_conn)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO agents_meta (id, spawner, status, last_message_text) "
+                "VALUES (%s, 'test', 'running', '')",
+                (agent_id,),
+            )
+        db_conn.commit()
+
+        with TestClient(app) as client:
+            resp = client.get(
+                f"/api/agents/{agent_id}/last-message",
+                params={"caller": "agent:99999"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["text"] is None
+
     def test_404_for_nonexistent_agent(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:
             resp = client.get(
