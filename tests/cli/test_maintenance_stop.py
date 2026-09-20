@@ -419,6 +419,39 @@ def test_linux_ticks_win_over_changed_epoch_birth(
         identity.live()
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux /proc start-time identity")
+def test_wait_for_exit_converges_when_a_tracked_entry_vanishes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tracked process exiting (reaped) mid-wait converges the wait instead
+    of aborting the stop — the 2026-09-20 wave-2 failure: the identity read
+    found no /proc entry after psutil had validated the pid."""
+    import shared.proc_tree
+
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    pid = child.pid
+    starttime = pid_starttime_ticks(pid)
+    assert starttime is not None
+    identity = stop.OwnedProcess(pid, 0.5, starttime)
+    real_read = pid_starttime_ticks
+
+    def reaping_read(reading_pid: int) -> int | None:
+        # The reap lands exactly where the kernel race puts it: after psutil
+        # validated the pid, before the raw read completes.
+        if reading_pid == pid:
+            os.kill(pid, signal.SIGKILL)
+            child.wait()
+        return real_read(reading_pid)
+
+    monkeypatch.setattr(shared.proc_tree, "pid_starttime_ticks", reaping_read)
+    try:
+        stop.wait_for_exit({identity}, stop.deadline_after(5))
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+
+
 @pytest.fixture
 def local_plane(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://test@127.0.0.1:12345/test")

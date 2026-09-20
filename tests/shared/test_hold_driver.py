@@ -24,6 +24,7 @@ import psutil
 import pytest
 
 from shared.hold_driver import HoldDriver, ProcessRef, liveness, mint_driver
+from shared.platform import IS_LINUX
 
 _REPO = Path(__file__).resolve().parents[2]
 
@@ -239,3 +240,52 @@ def test_missing_and_dead_read_as_such() -> None:
     assert liveness(HoldDriver()) == "missing"
     ghost = ProcessRef(pid=99999, birth=0.0, starttime=1, argv="ghost")
     assert liveness(HoldDriver(root=ghost)) == "dead"
+
+
+@pytest.mark.skipif(not IS_LINUX, reason="Linux /proc start-time identity")
+def test_probe_reads_a_vanished_entry_after_validation_as_gone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The stop-race window in the hold probe: psutil validated the pid, then
+    the raw read found no /proc entry because the process was reaped in
+    between — "no such pid", the unambiguous gone (the 2026-09-20 wave-2
+    class), never a release deferred as unreadable."""
+    from shared import session_record
+
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    pid = child.pid
+    starttime = session_record.pid_starttime_ticks(pid)
+    assert starttime is not None
+    ref = ProcessRef(pid=pid, birth=0.5, starttime=starttime, argv="")
+    real_read = session_record.pid_starttime_ticks
+
+    def reaping_read(reading_pid: int) -> int | None:
+        if reading_pid == pid:
+            os.kill(pid, signal.SIGKILL)
+            child.wait()
+        return real_read(reading_pid)
+
+    monkeypatch.setattr(session_record, "pid_starttime_ticks", reaping_read)
+    try:
+        assert ref.probe() == "gone"
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+
+
+@pytest.mark.skipif(not IS_LINUX, reason="Linux /proc start-time identity")
+def test_probe_keeps_unreadable_when_a_present_process_cannot_be_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pid that still exists while its start time cannot be read is never a
+    death license."""
+    from shared import session_record
+
+    ref = ProcessRef(pid=os.getpid(), birth=0.5, starttime=1, argv="")
+
+    def unreadable_read(_pid: int) -> int | None:
+        return None
+
+    monkeypatch.setattr(session_record, "pid_starttime_ticks", unreadable_read)
+    assert ref.probe() == "unreadable"
