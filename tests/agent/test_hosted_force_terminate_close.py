@@ -118,7 +118,12 @@ async def test_the_applied_force_mid_invocation_closes_quietly(
 async def test_the_force_still_classifies_after_the_resurrect_nulls_the_row(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> None:
-    """The command's stored target binds it across the resurrect epoch."""
+    """The predicate reads the command, not the row (state-independence pin).
+
+    The resurrect fence (`observe_applied_termination` in the wake path)
+    normally prevents this ordering; the classification stays correct across
+    the race rather than claiming the ordering is routine.
+    """
     agent_id = _agent(db_conn)
     incarnation = await _admit(aops_pool, agent_id)
     _apply_force(db_conn, agent_id)
@@ -132,7 +137,7 @@ async def test_the_force_still_classifies_after_the_resurrect_nulls_the_row(
 async def test_the_turn_starting_under_the_force_closes_quietly(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> None:
-    """Site host.py:678 — the turn starts already under the applied force."""
+    """Site host.py:683 — the turn starts already under the applied force."""
     agent_id = _agent(db_conn)
     incarnation = await _admit(aops_pool, agent_id)
     _apply_force(db_conn, agent_id)
@@ -162,7 +167,7 @@ async def test_the_held_wake_force_guard_stops_quietly(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Site host.py:366 (held-controls probe) — the wake must not crash."""
+    """Site host.py:371 (held-controls probe) — the wake must not crash."""
     agent_id = _agent(db_conn)
     incarnation = await _admit(aops_pool, agent_id)
     _apply_force(db_conn, agent_id)
@@ -231,4 +236,32 @@ async def test_a_non_impersonation_exception_still_crashes(
     graph.ainvoke = AsyncMock(side_effect=graph_return)
     host = _host(graph, aops_pool)
     with bind_turn_identity(agent_id, incarnation=incarnation), pytest.raises(RuntimeError):
+        await host._invoke_until_done(agent_id, AvaContext(ops_pool=aops_pool))
+
+
+async def test_a_superseded_older_force_cannot_classify(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+) -> None:
+    """The pointer anchors the decision (N4 pin).
+
+    A newer termination command has taken `lifecycle_command_id` while it is
+    still unapplied: the older applied-but-unobserved force must not be
+    borrowed to classify — the fail-closed direction of the force-supersede
+    shape.
+    """
+    agent_id = _agent(db_conn)
+    incarnation = await _admit(aops_pool, agent_id)
+    _apply_force(db_conn, agent_id)  # applied + unobserved, pointer -> this force
+    row = db_conn.execute(
+        "INSERT INTO inbound_messages(agent_id,content,kind,source) "
+        "VALUES(%s,'','terminate','user') RETURNING id",
+        (agent_id,),
+    ).fetchone()
+    assert row is not None
+    db_conn.execute(
+        "UPDATE agents_meta SET lifecycle_command_id=%s WHERE id=%s", (row[0], agent_id)
+    )
+    db_conn.commit()
+    host = _host(_raising_graph(), aops_pool)
+    with bind_turn_identity(agent_id, incarnation=incarnation), pytest.raises(ImpersonationError):
         await host._invoke_until_done(agent_id, AvaContext(ops_pool=aops_pool))

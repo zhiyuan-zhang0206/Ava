@@ -32,11 +32,21 @@ straggler-reap truncation (tasks #4164/#4156).
 
 ## Why the command's target, not the row
 
-The wedge recovery's window has two states: (a) the row is `terminated` with
-the force unobserved; (b) the resurrection already ran — the final CAS has
-NULLed the row's `runtime_generation`/`runtime_owner` — while the command and
-the live pointer survive. Binding to the command's stored `target_*` covers
-both; a row-based predicate would classify only the first.
+Binding to the command's stored `target_*` keeps the decision independent of
+the row's incarnation fields while the turn unwinds: the classification races
+the pump's own observation and the resurrection, so a row-based predicate
+would be both racier and weaker. Between the force transaction and its
+observation the row reads `terminated`; a classification running that late
+(field order 2026-09-20 07:33Z: guard refusal, observation 07:33:49.722Z,
+crash record 07:33:49.865Z, resurrect 07:33:52.5Z — classification strictly
+before the observation) sees exactly that. If the observation has already
+cleared the pointer, the predicate finds no anchor and stays fail-closed
+(raises) — narrow on purpose, never broadened by row state. The "resurrected
+with the force still live" ordering is additionally fenced in current code:
+the resurrection defers until the applied termination is observed
+(`observe_applied_termination` via `ops/agent_wake.py`; pin
+`tests/agent/test_resurrect_lifecycle_fence.py`), so it is not a second
+routinely reachable window.
 
 ## Why no source whitelist
 
