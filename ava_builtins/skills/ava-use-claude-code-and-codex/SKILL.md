@@ -88,9 +88,10 @@ nudge.
 
 ### Bootstrap the session
 
-Use the spawn script — it creates the two files if absent, launches the tool in
-a persistent shell session with a task-adapted TTL, and sends the contract
-message. Before launching Codex, read its
+Use the spawn script — it creates the two files if absent, pre-trusts the
+workspace and presets Claude Code's first-run dialogs so an unattended spawn
+cannot park on them, launches the tool in a persistent shell session with a
+task-adapted TTL, and sends the contract message. Before launching Codex, read its
 [`canonical-owner reference`](reference/canonical_codex_owner.md). Run from the
 skill's directory:
 
