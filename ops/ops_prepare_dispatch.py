@@ -43,8 +43,9 @@ from shared.runtime_release import ReleaseRejectedError
 # One synchronous bounded child. The entry verifies two retained images and the
 # local receipt chain; 120s covers a cold chain with a wide margin (the sibling
 # `cluster_prepare_facts` bound; the parent RPC's own per-attempt budget governs
-# the success path, so no larger value makes a slow op succeed). KEEP (task
-# #3696 exception inventory): this kills a runaway child, it is not a tuning knob.
+# the success path, so no larger value makes a slow op succeed).
+# KEEP (task #3696 exception inventory): this kills a runaway child, it is not a
+# tuning knob.
 _VALIDATE_TIMEOUT_S = 120.0
 
 # The relay bound on the dispatched plan: the sealed plan measures a few KiB;

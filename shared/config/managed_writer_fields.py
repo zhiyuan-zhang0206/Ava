@@ -23,10 +23,12 @@ class ManagedWriterFields:
         alias="AVA_UPDATE_MANAGED_WRITER_WINDOW_SECONDS",
         description=(
             "Ceiling (seconds) on the managed-writer activation window V = min(the "
-            "live deploy lease's remaining time, this). V is taken once at the begin "
-            "position, carried by the sealed prepared plan and projected into every "
-            "later phase, so lease renewals and same-operation retries never slide "
-            "it; past V the sealed pre-stop evidence (prepared receipts and the "
+            "live deploy lease's remaining time, this). V is taken once per begin "
+            "execution, carried by the sealed prepared plan and projected into every "
+            "later phase, so a lease renewal during the rollout never slides it (a "
+            "re-run begin recomputes V against the then-current lease; registering V "
+            "durably with the pending journal is the collection phase's, task #4129 "
+            "I4); past V the sealed pre-stop evidence (prepared receipts and the "
             "operator plan, produced before the stop) is stale and the activation "
             "must be re-prepared rather than reused -- that staleness bound is why a "
             "ceiling exists at all. 2h = 4x the 30m deploy-lease TTL (LOCK_TTL_S): a "

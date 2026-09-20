@@ -255,6 +255,20 @@ def test_context_outside_its_private_run_file_refuses(tmp_path: Path) -> None:
         read_release_context(home, TARGET_SHA)
 
 
+def test_non_canonical_context_bytes_refuse(tmp_path: Path) -> None:
+    home = tmp_path.resolve()
+    context = _context(("runner-a", "/ava-a"))
+    path = release_context_path(home, TARGET_SHA)
+    path.parent.mkdir(parents=True)
+    raw = release_context_bytes(context).replace(b",", b", ", 1)
+    assert json.loads(raw)  # parses fine; the agreed canonical form is the gate
+    path.write_bytes(raw)
+    path.chmod(0o600)
+
+    with pytest.raises(ReleaseRejectedError, match="canonical form"):
+        read_release_context(home, TARGET_SHA)
+
+
 # ── the candidate digest: one derivation point (Q3) ─────────────────────────
 
 
@@ -567,9 +581,14 @@ def _lease() -> Any:
     )
 
 
-def test_begin_chain_reads_the_context_opens_the_journal_and_dispatches(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def _chain_world(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    lease: Any = None,
+    gather: Any = None,
+) -> dict[str, Any]:
+    """The begin chain's collaborating stubs around one real context file."""
     from cli.commands import _managed_writer_dispatch as dispatch_mod
 
     home = tmp_path.resolve()
@@ -578,7 +597,7 @@ def test_begin_chain_reads_the_context_opens_the_journal_and_dispatches(
     facts = [_facts("runner-a", str(home)), _facts("runner-b", "/ava-b")]
     registered = {("runner-a", str(home)), ("runner-b", "/ava-b")}
 
-    monkeypatch.setattr(dispatch_mod, "read_update_lease", _lease)
+    monkeypatch.setattr(dispatch_mod, "read_update_lease", lease or _lease)
     monkeypatch.setattr(dispatch_mod, "self_holder", lambda: "gateway:pid77")
     monkeypatch.setattr(dispatch_mod.settings.general, "ava_home", home)
     monkeypatch.setattr(dispatch_mod, "machine_name", lambda: "runner-a")
@@ -589,11 +608,11 @@ def test_begin_chain_reads_the_context_opens_the_journal_and_dispatches(
     )
     gathered: list[dict[str, Any]] = []
 
-    def gather(targets: Any, *, operation: Any, registered: Any) -> Any:
+    def default_gather(targets: Any, *, operation: Any, registered: Any) -> Any:
         gathered.append({"targets": targets, "operation": operation, "registered": registered})
         return facts
 
-    monkeypatch.setattr(dispatch_mod, "gather_prepared_facts", gather)
+    monkeypatch.setattr(dispatch_mod, "gather_prepared_facts", gather or default_gather)
     recorded: list[dict[str, Any]] = []
 
     def open_pending(conn: Any, publications: Any, **kwargs: Any) -> None:
@@ -603,14 +622,30 @@ def test_begin_chain_reads_the_context_opens_the_journal_and_dispatches(
     monkeypatch.setattr(dispatch_mod, "write_transaction", _FakeTransaction)
     dispatched: list[dict[str, Any]] = []
 
-    def dispatch(sealed: Any, targets: Any, *, expected: Any) -> None:
+    def dispatch_sealed(sealed: Any, targets: Any, *, expected: Any) -> None:
         dispatched.append({"sealed": sealed, "targets": targets, "expected": expected})
 
-    monkeypatch.setattr(dispatch_mod, "dispatch_prepared_plan", dispatch)
+    monkeypatch.setattr(dispatch_mod, "dispatch_prepared_plan", dispatch_sealed)
+    return {
+        "module": dispatch_mod,
+        "facts": facts,
+        "registered": registered,
+        "gathered": gathered,
+        "recorded": recorded,
+        "dispatched": dispatched,
+    }
+
+
+def test_begin_chain_reads_the_context_opens_the_journal_and_dispatches(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    world = _chain_world(monkeypatch, tmp_path)
     before = datetime.now(UTC)
 
-    dispatch_mod.begin_managed_writer_publication(TARGET_SHA)
+    world["module"].begin_managed_writer_publication(TARGET_SHA)
 
+    facts, registered = world["facts"], world["registered"]
+    gathered, recorded, dispatched = world["gathered"], world["recorded"], world["dispatched"]
     assert gathered[0]["operation"].target_sha == TARGET_SHA
     assert gathered[0]["operation"].holder == "gateway:pid77"
     assert gathered[0]["registered"] == registered
@@ -630,6 +665,21 @@ def test_begin_chain_reads_the_context_opens_the_journal_and_dispatches(
     assert "journal open; all 2 units" in out
 
 
+def test_begin_chain_binds_the_policy_window_as_the_smaller_bound(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The chain reads the configured window: a long lease does not pass its cap."""
+    long_lease = replace(_lease(), expires_in_s=9000)
+    world = _chain_world(monkeypatch, tmp_path, lease=lambda: long_lease)
+    before = datetime.now(UTC)
+
+    world["module"].begin_managed_writer_publication(TARGET_SHA)
+
+    sealed = world["dispatched"][0]["sealed"]
+    assert before + timedelta(seconds=7200) <= sealed.plan.valid_until
+    assert sealed.plan.valid_until <= datetime.now(UTC) + timedelta(seconds=7200)
+
+
 def test_begin_chain_refuses_a_lease_the_process_does_not_own(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -643,6 +693,18 @@ def test_begin_chain_refuses_a_lease_the_process_does_not_own(
         dispatch_mod.begin_managed_writer_publication(TARGET_SHA)
 
 
+def test_begin_chain_refuses_a_lease_of_another_kind(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only a rollout lease may open the managed-writer journal (the seat's own rule)."""
+    from cli.commands import _managed_writer_dispatch as dispatch_mod
+
+    restart = replace(_lease(), kind="restart")
+    monkeypatch.setattr(dispatch_mod, "read_update_lease", lambda: restart)
+    monkeypatch.setattr(dispatch_mod, "self_holder", lambda: "gateway:pid77")
+
+    with pytest.raises(ManagedWriterBarrierError, match="does not own the live rollout lease"):
+        dispatch_mod.begin_managed_writer_publication(TARGET_SHA)
+
+
 def test_begin_chain_requires_the_pinned_target(monkeypatch: pytest.MonkeyPatch) -> None:
     from cli.commands import _managed_writer_dispatch as dispatch_mod
 
@@ -650,29 +712,62 @@ def test_begin_chain_requires_the_pinned_target(monkeypatch: pytest.MonkeyPatch)
         dispatch_mod.begin_managed_writer_publication(None)
 
 
+@pytest.mark.parametrize(
+    "error",
+    [
+        ClusterOpFailed({"error": "prepared facts refused"}),
+        ClusterOpUnreachable("offline"),
+    ],
+)
 def test_begin_chain_wraps_a_gather_refusal(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, error: Exception
 ) -> None:
-    from cli.commands import _managed_writer_dispatch as dispatch_mod
-
-    home = tmp_path.resolve()
-    context = _context(("runner-a", str(home)), ("runner-b", "/ava-b"))
-    _write_context(home, context)
-    registered = {("runner-a", str(home)), ("runner-b", "/ava-b")}
-
-    monkeypatch.setattr(dispatch_mod, "read_update_lease", _lease)
-    monkeypatch.setattr(dispatch_mod, "self_holder", lambda: "gateway:pid77")
-    monkeypatch.setattr(dispatch_mod.settings.general, "ava_home", home)
-    monkeypatch.setattr(
-        dispatch_mod,
-        "_registered_units_with_urls",
-        lambda: (registered, {"runner-a": None, "runner-b": None}),
-    )
-
     def gather(*_args: Any, **_kwargs: Any) -> Any:
-        raise ClusterOpFailed({"error": "prepared facts refused"})
+        raise error
 
-    monkeypatch.setattr(dispatch_mod, "gather_prepared_facts", gather)
+    world = _chain_world(monkeypatch, tmp_path, gather=gather)
 
     with pytest.raises(ManagedWriterBarrierError, match="gather refused"):
-        dispatch_mod.begin_managed_writer_publication(TARGET_SHA)
+        world["module"].begin_managed_writer_publication(TARGET_SHA)
+
+
+def test_registered_units_with_urls_reads_the_roster_and_urls_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The roster read is one short transaction: locked registered units plus one
+    machines scan; a missing URL row still yields the target (the dial refuses)."""
+    from cli.commands import _managed_writer_dispatch as dispatch_mod
+
+    class _Cursor:
+        def fetchall(self) -> list[tuple[str, str | None]]:
+            return [("runner-a", "http://a"), ("runner-b", None)]
+
+    class _Connection:
+        def __init__(self) -> None:
+            self.statements: list[str] = []
+
+        def execute(self, sql: str) -> _Cursor:
+            self.statements.append(sql)
+            return _Cursor()
+
+    class _Transaction:
+        def __enter__(self) -> _Connection:
+            return conn
+
+        def __exit__(self, *_exc: object) -> bool:
+            return False
+
+    def _lock(_conn: Any) -> set[tuple[str, str]]:
+        return {("runner-a", "/ava-a")}
+
+    conn = _Connection()
+    monkeypatch.setattr(dispatch_mod, "write_transaction", _Transaction)
+    monkeypatch.setattr(dispatch_mod, "lock_registered_units", _lock)
+
+    registered, urls = dispatch_mod._registered_units_with_urls()
+
+    assert registered == {("runner-a", "/ava-a")}
+    assert urls == {"runner-a": "http://a", "runner-b": None}
+    assert len(conn.statements) == 1
+    assert "machines" in conn.statements[0]
+    assert "gateway_url" in conn.statements[0]

@@ -116,6 +116,8 @@ def read_release_context(home: Path, target_sha: str) -> tuple[ReleaseContext, s
         raise ReleaseRejectedError(
             "the sealed release context does not validate as version 1"
         ) from exc
+    if release_context_bytes(context) != raw:
+        raise ReleaseRejectedError("the sealed release context is not in its canonical form")
     if context.target_sha != target_sha:
         raise ReleaseRejectedError("the release context belongs to a different rollout target")
     return context, hashlib.sha256(raw).hexdigest()

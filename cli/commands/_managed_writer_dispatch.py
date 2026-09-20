@@ -8,9 +8,11 @@ journal through the existing seat, and fans the plan out to every unit's
 `cluster_prepare_dispatch` op -- requiring a local-validation acknowledgement
 from each before the rollout may enter the hop phase.
 
-The window V is taken once here (min of the live lease's remaining time and the
-configured policy window) and carried by the sealed plan, so lease renewals and
-same-operation retries cannot slide it. Everything except the seat call and the
+The window V is taken once per begin execution here (min of the live lease's
+remaining time and the configured policy window) and carried by the sealed plan,
+so a lease renewal during the rollout cannot slide it -- a re-run begin
+recomputes V, and registering V durably with the pending journal is the
+collection phase's (task #4129 I4). Everything except the seat call and the
 roster read runs outside database transactions (no filesystem or network work
 under a lock), and every refusal is fail-closed: the fleet never half-activates.
 """
@@ -350,7 +352,12 @@ def begin_managed_writer_publication(target_sha: str | None) -> None:
         )
     home = settings.general.ava_home
     lease = read_update_lease()
-    if lease is None or lease.holder != self_holder() or lease.note is not None:
+    if (
+        lease is None
+        or lease.holder != self_holder()
+        or lease.note is not None
+        or lease.kind != "rollout"
+    ):
         raise ManagedWriterBarrierError("the begin position does not own the live rollout lease")
     if lease.acquired_at is None:
         raise ManagedWriterBarrierError("the live rollout lease has no acquired-at identity")
