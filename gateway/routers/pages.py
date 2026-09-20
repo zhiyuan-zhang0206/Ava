@@ -33,6 +33,8 @@ from starlette.background import BackgroundTask
 
 from gateway.schemas import PageRegisterRequest
 from ops.pages import (
+    PagePortConflictError,
+    assert_port_free,
     close_all_agent_pages,
     close_page,
     get_open_page_target,
@@ -173,14 +175,17 @@ async def _publish_page_event(event: PageOpened | PageClosed) -> None:
 
 @router.post("/api/agents/{agent_id}/pages", status_code=201, response_model=PageRow)
 async def post_page_register(agent_id: int, body: PageRegisterRequest, request: Request) -> PageRow:
-    """ava.ui.show register / update a page — SDK main entry.
+    """ava.ui.show / .serve register / update a page — SDK main entry.
 
     Each agent can have at most one open page. Before registering the new
     page, any existing open pages for this agent are auto-closed (one
     agent, one page). The closed pages get individual PageClosed events
     so the frontend removes them from the popover.
 
-    Returns 409 when agent is terminated — dead agents do not show UI.
+    Returns 409 when the agent is terminated (dead agents do not show UI), or
+    when another live page already holds (host, port) — in the port-conflict
+    case the agent's current page is left open and the response detail names
+    the occupying page.
     """
     record, closed_names = await asyncio.to_thread(
         _register_page_blocking,
@@ -526,8 +531,14 @@ def _register_page_blocking(
     pool: ConnectionPool, agent_id: int, body: PageRegisterRequest
 ) -> tuple[PageRow, list[str]]:
     """Sync page-register transaction — via to_thread: agent-exists + status
-    guard, auto-close of prior pages, registry INSERT. Returns (record,
-    closed_names)."""
+    guard, live-port conflict check, auto-close of prior pages, registry
+    INSERT. Returns (record, closed_names).
+
+    Order matters: the live-port check runs BEFORE the auto-close, so a
+    registration refused because another page holds the port leaves the
+    agent's current page untouched. register_page enforces the same rule
+    under the live-port unique index for a registration that races the check.
+    """
     _validate_page_dial_target(pool, agent_id, body.host, body.port)
     with pool.connection() as conn:
         if not agent_exists(conn, agent_id):
@@ -540,18 +551,22 @@ def _register_page_blocking(
                 status_code=409,
                 detail=f"agent {agent_id} is terminated, cannot register page",
             )
-        # Close any existing open pages for this agent before registering a new one.
-        closed_names = close_all_agent_pages(conn, agent_id)
-        record = register_page(
-            conn,
-            agent_id,
-            body.name,
-            body.port,
-            body.host,
-            body.title,
-            body.serve_dir,
-            body.ttl_seconds,
-        )
+        try:
+            assert_port_free(conn, agent_id, body.host, body.port)
+            # Close any existing open pages for this agent before registering a new one.
+            closed_names = close_all_agent_pages(conn, agent_id)
+            record = register_page(
+                conn,
+                agent_id,
+                body.name,
+                body.port,
+                body.host,
+                body.title,
+                body.serve_dir,
+                body.ttl_seconds,
+            )
+        except PagePortConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
     return record, closed_names
 
 

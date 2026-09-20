@@ -1269,14 +1269,17 @@ export interface paths {
         put?: never;
         /**
          * Post Page Register
-         * @description ava.ui.show register / update a page — SDK main entry.
+         * @description ava.ui.show / .serve register / update a page — SDK main entry.
          *
          *     Each agent can have at most one open page. Before registering the new
          *     page, any existing open pages for this agent are auto-closed (one
          *     agent, one page). The closed pages get individual PageClosed events
          *     so the frontend removes them from the popover.
          *
-         *     Returns 409 when agent is terminated — dead agents do not show UI.
+         *     Returns 409 when the agent is terminated (dead agents do not show UI), or
+         *     when another live page already holds (host, port) — in the port-conflict
+         *     case the agent's current page is left open and the response detail names
+         *     the occupying page.
          */
         post: operations["post_page_register_api_agents__agent_id__pages_post"];
         delete?: never;

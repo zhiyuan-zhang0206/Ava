@@ -6,6 +6,11 @@ the page's name in your session list; an open page normally occupies one entry.
 You can have at most one open page at a time — opening a new one
 auto-closes the old one.
 
+Ports are explicit: serve() and show() require the caller to name the port
+— there is no per-agent reserved or default port to fall back to — and the
+platform refuses a port another live page holds, as well as a port held by a
+process that is not a page server.
+
 The page server binds the machine's own address (loopback on a single
 machine) — it is never exposed on the network, and the page is reached
 through the platform's authenticated link, not by dialing the server
@@ -19,6 +24,7 @@ __all_for_ava__ = ["Page", "close", "serve", "show"]
 import math as _math
 import os as _os
 import re as _re
+import socket as _socket
 import time as _time
 import urllib.request as _urlopen
 from dataclasses import dataclass
@@ -32,9 +38,12 @@ from shared.machine import reachable_host
 
 _NAME_RE = _re.compile(r"^[a-zA-Z0-9_-]+$")
 
-# Default page port: derived from the agent id so each agent reuses one stable
-# port across serves. Callers may override serve()/show() with an explicit port.
-_PAGE_BASE_PORT = 10000
+# Page servers bind unprivileged ports (mirrors the gateway's dial-target
+# guard — a page server is a user-space server, never a system service); the
+# upper bound is the TCP port ceiling. Out-of-range ports fail at the call
+# boundary so the gateway's 400 is never the first signal.
+_PAGE_PORT_MIN = 1024
+_PAGE_PORT_MAX = 65535
 
 # How long serve() waits for the page_server daemon to bring the server up
 # before failing. The daemon's fast path adopts a new row within one poll
@@ -65,11 +74,6 @@ class Page:
     url: str
 
 
-def _agent_page_port() -> int:
-    """Return this agent's default page port."""
-    return _PAGE_BASE_PORT + ava._boot.agent_id()
-
-
 def _row_to_page(row: dict) -> Page:
     return Page(
         id=int(row["id"]),
@@ -94,14 +98,112 @@ def _validate_ttl(ttl: float | None) -> float | None:
     return ttl
 
 
+def _coerce_page_port(port: object) -> int:
+    """Validate the required `port` argument (1024-65535).
+
+    An explicit port is the only allocation mechanism — there is no per-agent
+    reserved port — so a missing port is rejected with the rule spelled out
+    instead of falling back to a computed value.
+    """
+    if port is None:
+        raise TypeError(
+            "port is required — pass the port the page server should listen on "
+            f"({_PAGE_PORT_MIN}-{_PAGE_PORT_MAX}); ava.ui never allocates or reserves a port"
+        )
+    checked = coerce_typed(port, "port", int)
+    if not _PAGE_PORT_MIN <= checked <= _PAGE_PORT_MAX:
+        raise ValueError(
+            f"port {checked} out of range — page servers bind unprivileged ports "
+            f"({_PAGE_PORT_MIN}-{_PAGE_PORT_MAX})"
+        )
+    return checked
+
+
+def _probe_page_health(host: str, port: int) -> str | None:
+    """The body of (host, port)'s /health, or None when nothing answers 200."""
+    try:
+        with _urlopen.urlopen(f"http://{host}:{port}/health", timeout=1.0) as resp:
+            if resp.status != 200:
+                return None
+            return resp.read().decode(errors="replace")
+    except OSError:
+        return None
+
+
 def _page_is_serving(host: str, port: int) -> bool:
     """Whether an HTTP server answers on (host, port) — the daemon's server
     (any token; identity is the daemon's concern, not the caller's)."""
+    return _probe_page_health(host, port) is not None
+
+
+def _port_is_bindable(host: str, port: int) -> bool:
+    """Whether a page server could bind (host, port) right now.
+
+    A throwaway bind probe with SO_REUSEADDR set, mirroring the page server
+    itself (services/page_server/server.py) — a TIME_WAIT remnant of an
+    exited server must not read as occupied.
+    """
+    with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as probe:
+        probe.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind((host, port))
+        except OSError:
+            return False
+    return True
+
+
+def _answers_as_page_server(host: str, port: int) -> bool:
+    """Whether (host, port) answers /health like this platform's page servers.
+
+    A page server answers `ok:<token>` (services/page_server/server.py); any
+    other occupant — a dev server, a database, a foreign HTTP service —
+    answers differently or not at all.
+    """
+    body = _probe_page_health(host, port)
+    return body is not None and body.startswith("ok:")
+
+
+def _own_open_page_on_port(port: int) -> bool:
+    """Whether this agent's current page row claims `port`.
+
+    Best-effort read used only by the occupied-port guard: the agent's own
+    page (whose server may still be exiting, or slow to answer) is replaced
+    by registration, so it must not read as a foreign occupant. A gateway
+    failure degrades to False — the registration call right after is the
+    authority on conflicts.
+    """
     try:
-        with _urlopen.urlopen(f"http://{host}:{port}/health", timeout=1.0) as resp:
-            return resp.status == 200
-    except OSError:
+        pages = _gateway_client.list_open_pages(ava._boot.agent_id())
+    except Exception:
         return False
+    return any(int(page["port"]) == port for page in pages)
+
+
+def _reject_foreign_port_occupant(port: int) -> None:
+    """Fail fast when the port is held by a process that is not a page server.
+
+    serve() is about to have the page-server daemon bind this port; a foreign
+    process can never be displaced (the daemon backs off and retries
+    forever), so letting it through means a silent `_SERVE_READY_TIMEOUT_S`
+    wait followed by a misleading "daemon down" error. Page-server occupants
+    — this agent's own page being replaced, or another agent's page — pass
+    through to the gateway's live-port conflict check, the only party that
+    knows which page owns the port.
+
+    Raises:
+        PageError: the port is occupied by a non-page-server process.
+    """
+    host = reachable_host()
+    if _port_is_bindable(host, port):
+        return
+    if _answers_as_page_server(host, port):
+        return
+    if _own_open_page_on_port(port):
+        return
+    raise PageError(
+        f"port {port} is already in use on {host} by a process that is not a page "
+        "server — choose a different free port (ava.ui.serve never allocates one)"
+    )
 
 
 def _wait_until_serving(host: str, port: int, *, timeout: float) -> bool:
@@ -116,7 +218,7 @@ def _wait_until_serving(host: str, port: int, *, timeout: float) -> bool:
 
 def _register_page(
     name: str,
-    port: int | None,
+    port: int,
     title: str | None,
     serve_dir: str | None,
     *,
@@ -124,39 +226,68 @@ def _register_page(
 ) -> Page:
     """Gateway registration shared by show() and serve().
 
-    Closes any existing page first (one agent, one page), then writes the
-    new row. `serve_dir` is the served directory the page_server daemon
-    reads — only serve() sets it.
+    The gateway owns replacement (one page per agent — any existing page is
+    closed as part of registering the new one) and the port rules: a port
+    another live page holds is refused with 409, and the refusal leaves this
+    agent's current page untouched. `serve_dir` is the served directory the
+    page_server daemon reads — only serve() sets it.
     """
     _validate_name(name)
-    _close_existing()
-    if port is None:
-        port = _agent_page_port()
-    if ttl is None:
-        row = _gateway_client.register_page(
-            ava._boot.agent_id(),
-            name=name,
-            port=port,
-            host=reachable_host(),
-            title=title,
-            serve_dir=serve_dir,
-        )
-    else:
-        row = _gateway_client.register_page(
-            ava._boot.agent_id(),
-            name=name,
-            port=port,
-            host=reachable_host(),
-            title=title,
-            serve_dir=serve_dir,
-            ttl_seconds=int(ttl),
-        )
+    try:
+        if ttl is None:
+            row = _gateway_client.register_page(
+                ava._boot.agent_id(),
+                name=name,
+                port=port,
+                host=reachable_host(),
+                title=title,
+                serve_dir=serve_dir,
+            )
+        else:
+            row = _gateway_client.register_page(
+                ava._boot.agent_id(),
+                name=name,
+                port=port,
+                host=reachable_host(),
+                title=title,
+                serve_dir=serve_dir,
+                ttl_seconds=int(ttl),
+            )
+    except Exception as exc:
+        # 409 is the gateway's refusal: the agent is terminated, or another
+        # live page holds (host, port). The wire body's `detail` names the
+        # reason — raise it as the SDK's own error instead of a raw HTTP error.
+        response = getattr(exc, "response", None)
+        detail = _error_detail(exc) if getattr(response, "status_code", None) == 409 else None
+        if detail is not None:
+            raise PageError(detail) from exc
+        raise
     return _row_to_page(row)
+
+
+def _error_detail(exc: Exception) -> str | None:
+    """The gateway error body's `detail` string, or None when there is none.
+
+    Shape-based (a `response` attribute carrying the JSON body), not
+    class-based: prod HTTP raises httpx's HTTPStatusError while the in-process
+    TestClient raises httpx2's — the JSON wire body is the stable contract.
+    """
+    response = getattr(exc, "response", None)
+    if response is None:
+        return None
+    try:
+        parsed = response.json()
+    except Exception:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    detail = parsed.get("detail")
+    return detail if isinstance(detail, str) else None
 
 
 def show(
     name: str,
-    port: int | None = None,
+    port: int,
     title: str | None = None,
     *,
     ttl: float | None = None,
@@ -169,10 +300,14 @@ def show(
     only the page registration is managed by the platform, and expiry
     unregisters the page without stopping your server.
 
+    The declaration is taken as given — show() does not probe whether the
+    server answers — but the platform refuses a port another open page
+    already holds.
+
     Args:
         name: `^[a-zA-Z0-9_-]+$`, 1-64 chars.
-        port: the port your server listens on; omit to use the port
-            reserved for you.
+        port: the port your server listens on (1024-65535). Explicit and
+            required — the platform reserves no port per agent.
         title: defaults to `name`.
         ttl: optional page lifetime in seconds; when omitted, the platform
             default applies. Expiry only unregisters the page (the link
@@ -181,7 +316,7 @@ def show(
             expiry notice reminds you.
     """
     name = coerce_str(name, "name")
-    port = coerce_typed(port, "port", int, allow_none=True)
+    port = _coerce_page_port(port)
     title = coerce_str(title, "title", allow_none=True)
     ttl = coerce_typed(ttl, "ttl", (int, float), allow_none=True)
     return _register_page(name, port, title, serve_dir=None, ttl=_validate_ttl(ttl))
@@ -190,7 +325,7 @@ def show(
 def serve(
     dir: str,
     name: str,
-    port: int | None = None,
+    port: int,
     title: str | None = None,
     *,
     ttl: float | None = None,
@@ -210,28 +345,31 @@ def serve(
     required; for Markdown, render it to self-contained HTML first with
     the ava-ui markdown widget, then serve that directory.
 
+    The port is the caller's explicit choice and must be free: one held by
+    another live page is refused by the platform, and one held by a process
+    that is not a page server fails the call before anything is registered —
+    the page-server daemon never displaces a foreign occupant.
+
     Args:
         dir: the directory to serve. A relative path is resolved against
             your working directory (`ava.cwd`), consistent with the
             `ava.files` API; `~` is expanded and an absolute path is used
             as-is.
         name: `^[a-zA-Z0-9_-]+$`, 1-64 chars.
-        port: omit to use the port reserved for you.
+        port: the port the page server listens on (1024-65535). Explicit and
+            required — ava.ui never allocates or reserves a port.
         title: defaults to `name`.
         ttl: optional page lifetime in seconds; when omitted, the platform default applies.
     """
     dir = coerce_str(dir, "dir", allow_types=(_os.PathLike,))
     name = coerce_str(name, "name")
-    port = coerce_typed(port, "port", int, allow_none=True)
+    port = _coerce_page_port(port)
     title = coerce_str(title, "title", allow_none=True)
     ttl = coerce_typed(ttl, "ttl", (int, float), allow_none=True)
     ttl = _validate_ttl(ttl)
     _validate_name(name)
 
-    if port is None:
-        port = _agent_page_port()
-
-    _close_existing()
+    _reject_foreign_port_occupant(port)
 
     page = _register_page(name, port, title, serve_dir=str(Path(dir).resolve()), ttl=ttl)
 
@@ -243,27 +381,6 @@ def serve(
             "(the page row is registered; the daemon will keep retrying)"
         )
     return page
-
-
-def _close_existing() -> None:
-    """Close the agent's currently active page, if any.
-
-    Called before registering a new page so each agent has at most one
-    open page at a time. Best-effort: if the existing page's server is
-    already dead, still unregister it from the gateway. The DB row is the
-    truth source — there is no in-process tracking anymore.
-    """
-    try:
-        open_pages = _gateway_client.list_open_pages(ava._boot.agent_id())
-    except Exception:
-        return
-    if not open_pages:
-        return
-    import contextlib as _cl
-
-    name = open_pages[-1]["name"]  # most recent open page
-    with _cl.suppress(Exception):
-        close(name)  # fail-fast-ok: best-effort close; new page replaces it
 
 
 def close(name: str) -> None:

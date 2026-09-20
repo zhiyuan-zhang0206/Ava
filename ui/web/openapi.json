@@ -2019,7 +2019,7 @@
     "/api/agents/{agent_id}/pages": {
       "post": {
         "summary": "Post Page Register",
-        "description": "ava.ui.show register / update a page — SDK main entry.\n\nEach agent can have at most one open page. Before registering the new\npage, any existing open pages for this agent are auto-closed (one\nagent, one page). The closed pages get individual PageClosed events\nso the frontend removes them from the popover.\n\nReturns 409 when agent is terminated — dead agents do not show UI.",
+        "description": "ava.ui.show / .serve register / update a page — SDK main entry.\n\nEach agent can have at most one open page. Before registering the new\npage, any existing open pages for this agent are auto-closed (one\nagent, one page). The closed pages get individual PageClosed events\nso the frontend removes them from the popover.\n\nReturns 409 when the agent is terminated (dead agents do not show UI), or\nwhen another live page already holds (host, port) — in the port-conflict\ncase the agent's current page is left open and the response detail names\nthe occupying page.",
         "operationId": "post_page_register_api_agents__agent_id__pages_post",
         "parameters": [
           {
