@@ -351,6 +351,40 @@ def test_auth_middleware_set_roundtrips_through_env(
     assert config.current_field_values()["auth_middleware_enabled"] is False
 
 
+def test_retired_env_aliases_are_not_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The retired names are inert: a stale key left in an environment no longer
+    reaches its field (defaults / the None sentinel survive). The alerts token is
+    the one exception with a loss risk, hence its converge migration."""
+    from shared.config.agent import AgentSettings
+    from shared.config.agent_eval import AgentEvalSettings
+    from shared.config.alerts import AlertsSettings
+    from shared.config.gateway import GatewaySettings
+    from shared.config.services import ServiceSettings
+
+    for key in (
+        "AVA_GATEWAY_URL",
+        "AVA_AUTH_MIDDLEWARE_ENABLED",
+        "AVA_SECURITY_SCAN_ENABLED",
+        "AVA_PERMISSIONS_HELPER_PORT",
+        "AVA_AGENT_COMMUNICATION_STYLE",
+        "AVA_ALERTS_WEBHOOK_TOKEN",
+    ):
+        monkeypatch.delitem(os.environ, key, raising=False)
+    monkeypatch.setitem(os.environ, "AVA_PRIMARY_GATEWAY_URL", "http://legacy-gw")
+    monkeypatch.setitem(os.environ, "AVA_SKIP_AUTH", "true")
+    monkeypatch.setitem(os.environ, "AVA_SKIP_SECURITY_SCAN", "true")
+    monkeypatch.setitem(os.environ, "AVA_NATIVE_HELPER_PORT", "11111")
+    monkeypatch.setitem(os.environ, "AVA_SYSTEM_PROMPT_PROGRESS", "true")
+    monkeypatch.setitem(os.environ, "AVA_OPS_ALERTS_WEBHOOK_TOKEN", "tok-legacy")
+
+    assert GatewaySettings().gateway_url == ""
+    assert GatewaySettings().auth_middleware_enabled is True
+    assert AgentEvalSettings().security_scan_enabled is True
+    assert ServiceSettings().permissions_helper_port == 9223
+    assert AgentSettings().agent_communication_style is None
+    assert AlertsSettings().webhook_token is None
+
+
 def test_every_field_declares_valid_scope() -> None:
     """Every Settings field must declare an ownership scope in json_schema_extra."""
     from shared.config import FIELD_INFOS
