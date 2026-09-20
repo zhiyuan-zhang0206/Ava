@@ -232,7 +232,16 @@ def main() -> None:  # noqa: PLR0915 — one bounded CI process/DB lifetime with
                     status == 503 and health["full_ready"] is False, "bootstrap claims full health"
                 )
                 payload = json.dumps({"challenge": str(context.challenge.challenge)}).encode()
-                require(request("/ops", token, b"{}")[0] == 404, "ordinary ops exposed")
+                require(request("/ops", token, b"{}")[0] == 400, "malformed ops body not refused")
+                status, refused = request(
+                    "/ops", token, json.dumps({"kind": "cluster_update"}).encode()
+                )
+                require(
+                    status == 200
+                    and refused["status"] == "failed"
+                    and "not admitted" in refused["result"]["error"],
+                    "ordinary ops not refused by the restricted allowlist",
+                )
                 require(
                     request("/ops/bootstrap-observation", "wrong", payload)[0] == 401, "auth bypass"
                 )

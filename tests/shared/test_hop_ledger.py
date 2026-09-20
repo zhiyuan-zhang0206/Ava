@@ -365,6 +365,8 @@ async def test_serve_mounts_the_ledger_route_with_the_observation_route(
     assert set(routes) == {
         ("POST", "/ops/bootstrap-observation"),
         ("POST", "/ops/bootstrap-hop-ledger"),
+        # The restricted /ops effect delivery (allowlisted kinds only).
+        ("POST", "/ops"),
     }
     body = json.dumps({"challenge": str(context.challenge.challenge)}).encode()
     status, served, _content_type = await routes[("POST", "/ops/bootstrap-hop-ledger")](body)
