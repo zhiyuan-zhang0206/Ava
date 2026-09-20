@@ -19,7 +19,6 @@ pattern as `shared/runtime_config.py`.
 
 from __future__ import annotations
 
-import os
 from functools import lru_cache
 from typing import Any
 from urllib.parse import urlsplit
@@ -31,7 +30,6 @@ __all__ = [
     "_service_field_value",
     "bootstrap_config_values",
     "current_field_values",
-    "warn_deprecated_env_aliases",
 ]
 
 
@@ -102,43 +100,6 @@ def _serve_reachable_data_plane_hosts(out: dict[str, str]) -> None:
         host = urlsplit(value).hostname or ""
         if host and is_loopback_host(host):
             out[alias] = url_with_host(value, reachable)
-
-
-def warn_deprecated_env_aliases() -> None:
-    """Emit a deprecation warning when a legacy env var alias is the active source.
-
-    AVA_PRIMARY_GATEWAY_URL was renamed AVA_GATEWAY_URL (scheduled for removal
-    2026-09-01 — the original 2026-07-01 deadline lapsed; converge renames the
-    key in every unit's .env, see migrate_primary_gateway_url_key);
-    AVA_SKIP_AUTH / AVA_SKIP_SECURITY_SCAN were renamed
-    AVA_AUTH_MIDDLEWARE_ENABLED / AVA_SECURITY_SCAN_ENABLED with the meaning
-    INVERTED (a value of "true" used to mean "skip", so it now means
-    "disabled"). The old names still resolve via AliasChoices — boot-time
-    translation (dotenv_boot) and the converge .env migration keep them
-    correct — but each warns here so operators rename before the drop-day. Call
-    once at process startup (gateway lifespan) so operators see the nudge while
-    the alias still works, rather than discovering it broke on the drop-day.
-    Logger import is deferred: shared.log imports settings from this package, so a
-    top-level import would be circular.
-    """
-    from shared.log import logger
-
-    if "AVA_PRIMARY_GATEWAY_URL" in os.environ and "AVA_GATEWAY_URL" not in os.environ:
-        logger.warning(
-            "AVA_PRIMARY_GATEWAY_URL is deprecated and scheduled for removal "
-            "2026-09-01; rename it to AVA_GATEWAY_URL in your .env (a converge "
-            "migration does this automatically)."
-        )
-    for legacy, canonical in (
-        ("AVA_SKIP_AUTH", "AVA_AUTH_MIDDLEWARE_ENABLED"),
-        ("AVA_SKIP_SECURITY_SCAN", "AVA_SECURITY_SCAN_ENABLED"),
-    ):
-        if legacy in os.environ and canonical not in os.environ:
-            logger.warning(
-                f"{legacy} is deprecated with INVERTED semantics — {legacy}=true now "
-                f"means the renamed {canonical}=false. Rename it to {canonical} "
-                f"in your .env (a converge migration does this automatically)."
-            )
 
 
 @lru_cache(maxsize=1)

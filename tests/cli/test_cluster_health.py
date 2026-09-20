@@ -992,9 +992,9 @@ def test_notify_owner_skips_when_im_notify_disabled(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
 ) -> None:
-    """`AVA_OPS_ALERTS_IM_NOTIFY_ENABLED=false` silences the probe's owner
-    alerts too — one master switch for every IM notification (the same flag
-    the gateway's ops-alerts ingest honours). No HTTP call is made."""
+    """`AVA_ALERTS_IM_NOTIFY_ENABLED=false` silences the probe's owner alerts
+    too — one master switch for every IM notification (the same flag the
+    gateway's ops-alerts ingest honours). No HTTP call is made."""
 
     import httpx
 

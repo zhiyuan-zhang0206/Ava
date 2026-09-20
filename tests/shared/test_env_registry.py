@@ -172,8 +172,8 @@ class TestConsumptionMatrixDeclarations:
             "AVA_REDIS_BIN_DIR",
         }
         # memory_remote is cluster-pinned (a remote is cluster config) but still
-        # machine identity; AVA_PRIMARY_GATEWAY_URL is the deprecated alias row.
-        expected |= {"AVA_MEMORY_REMOTE", "AVA_PRIMARY_GATEWAY_URL"}
+        # machine identity.
+        expected |= {"AVA_MEMORY_REMOTE"}
         assert env_identity_keys() == expected
         assert "AVA_HOME" not in env_identity_keys()
 
@@ -283,7 +283,6 @@ class TestRegistryInvariants:
             "AVA_AGENT_CONFIG_OVERLAY",
             "AVA_AGENT_BIRTH_CONFIG",
             "AVA_REDIS_PASSWORD",
-            "AVA_PRIMARY_GATEWAY_URL",
             "PATH",
             "VIRTUAL_ENV",
             "TMPDIR",

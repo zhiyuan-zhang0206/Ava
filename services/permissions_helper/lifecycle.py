@@ -652,25 +652,13 @@ def _is_loaded() -> bool:
 def _stale_plists() -> list[Path]:
     """LaunchAgent plists bound to this cluster's socket under a foreign label.
 
-    A job whose plist pins this cluster's socket (current or pre-rename name)
-    but carries a label other than the current one is a leftover racing this
-    cluster's own job for the same socket; which one a client reaches then
-    depends on the last bind. Two generations match: the old-layout fixed
-    ``com.ava.permissions-helper.main`` era (and the pre-rename
-    ``com.ava.native-helper.*`` labels, whose plists pin the old socket file
-    name + env key -- same port, derived above). Other clusters' jobs are left
-    alone -- they pin their own sockets."""
+    A job whose plist pins this cluster's socket but carries a label other than
+    the current one is a leftover racing this cluster's own job for the same
+    socket; which one a client reaches then depends on the last bind. Other
+    clusters' jobs are left alone -- they pin their own sockets."""
     sock = str(permissions_helper_socket())
-    # The pre-rename job bound this cluster's socket under the OLD socket file
-    # name (`native-helper.<port>.sock`) and env key; same port, so it is
-    # derivable and matched the same way.
-    from shared.paths import run_dir
-
-    legacy_sock = str(run_dir() / f"native-helper.{settings.services.permissions_helper_port}.sock")
     stale: list[Path] = []
-    for plist in list(_agents_dir().glob(f"{_BUNDLE_ID}.*.plist")) + list(
-        _agents_dir().glob("com.ava.native-helper.*.plist")
-    ):
+    for plist in _agents_dir().glob(f"{_BUNDLE_ID}.*.plist"):
         try:
             data = plistlib.loads(plist.read_bytes())
         except (plistlib.InvalidFileException, OSError):
@@ -678,10 +666,7 @@ def _stale_plists() -> list[Path]:
         if data.get("Label") == _label():
             continue
         env: dict[str, object] = data.get("EnvironmentVariables") or {}
-        if (
-            env.get("AVA_PERMISSIONS_HELPER_SOCKET") == sock
-            or env.get("AVA_NATIVE_HELPER_SOCKET") == legacy_sock
-        ):
+        if env.get("AVA_PERMISSIONS_HELPER_SOCKET") == sock:
             stale.append(plist)
     return stale
 
@@ -699,13 +684,6 @@ def _retire_stale_jobs() -> None:
             continue
         _probe(["launchctl", "bootout", f"{domain}/{label}"])
         plist.unlink(missing_ok=True)
-    # A booted-out job leaves its socket file behind; drop the pre-rename name so
-    # a stale dead socket never shadows the live one.
-    from shared.paths import run_dir
-
-    Path(run_dir() / f"native-helper.{settings.services.permissions_helper_port}.sock").unlink(
-        missing_ok=True
-    )
 
 
 def repair_unresponsive_helper() -> bool:

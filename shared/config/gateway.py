@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from pydantic import AliasChoices, Field, HttpUrl, field_validator
+from pydantic import Field, HttpUrl, field_validator
 from pydantic_settings import NoDecode
 
 from shared.config._base import EnvSettings
@@ -525,16 +525,7 @@ class GatewaySettings(UpdateSpawnFields, EnvSettings):
 
     gateway_url: str = Field(
         default="",
-        validation_alias=AliasChoices(
-            "AVA_GATEWAY_URL",
-            # Deprecated alias, scheduled for removal 2026-09-01 (the original
-            # 2026-07-01 deadline lapsed; converge now renames the key in every
-            # unit's .env, see migrate_primary_gateway_url_key). Until then it
-            # still resolves; warn_deprecated_env_aliases() logs a startup nudge
-            # when it is the active source so operators rename before the drop-day.
-            "AVA_PRIMARY_GATEWAY_URL",
-        ),
-        serialization_alias="AVA_GATEWAY_URL",
+        alias="AVA_GATEWAY_URL",
         description="Gateway base URL on the cluster's private network. Set on "
         "every unit: an agent-runner reaches the gateway here, and on the gateway "
         "it is this host's own URL.",
@@ -629,15 +620,12 @@ class GatewaySettings(UpdateSpawnFields, EnvSettings):
     auth_middleware_enabled: bool = Field(
         default=True,
         alias="AVA_AUTH_MIDDLEWARE_ENABLED",
-        validation_alias=AliasChoices("AVA_AUTH_MIDDLEWARE_ENABLED", "AVA_SKIP_AUTH"),
         description=(
             "Enable the gateway's HTTP API auth middleware. Set false for e2e "
             "tests (every request passes without auth while the cluster keeps its "
             "secret). An EMPTY AVA_CLUSTER_SECRET also serves the API without "
             "auth — that is the single-box no-secret posture, distinct from this "
-            "test knob. The legacy AVA_SKIP_AUTH alias has INVERTED semantics "
-            "(AVA_SKIP_AUTH=true means this is false); dotenv_boot translates it "
-            "at load and converge renames it."
+            "test knob."
         ),
         json_schema_extra={
             "restart_required": "all",

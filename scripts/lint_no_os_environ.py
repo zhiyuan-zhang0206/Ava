@@ -114,8 +114,7 @@ _ALLOWED_FILES = frozenset(
         "shared/config/data_plane.py",  # _self_machine_host reads AVA_MACHINE_HOST/AVA_HOME at sub-model construction time — the settings singleton does not exist yet, sibling sub-models are unreachable, and shared.machine imports settings (circular)
         "shared/dotenv_boot.py",  # load_dotenv ~/.ava/.env, must run before Settings import
         "shared/runtime_config.py",  # path bootstrap; cannot import Settings (circular dep)
-        "shared/config/service_read.py",  # warn_deprecated_env_aliases inspects the RAW env for the legacy AVA_PRIMARY_GATEWAY_URL alias — Settings' AliasChoices resolution would mask which name was actually set
-        "cli/commands/config.py",  # the settings-free repair path (ava config --local) reads AVA_GATEWAY_URL / AVA_CLUSTER_SECRET from the raw env/.env WITHOUT constructing Settings — a broken .env is exactly the scenario it repairs, and constructing Settings would fail first; same raw-env class as shared/config/service_read.py
+        "cli/commands/config.py",  # the settings-free repair path (ava config --local) reads AVA_GATEWAY_URL / AVA_CLUSTER_SECRET from the raw env/.env WITHOUT constructing Settings — a broken .env is exactly the scenario it repairs, and constructing Settings would fail first
         "shared/bootstrap.py",  # fetches config from the gateway and os.environ.update()s it BEFORE Settings is built; importing shared.config here is the import cycle this module exists to break
         "shared/external_caller.py",  # per-invocation external child profile, consumed by SDK identity bootstrap before Settings; caller provenance is not cluster config and must not enter its persisted Settings projection
         "services/agent_ops/bootstrap.py",  # restricted prepared observer consumes an explicit pre-resolved child projection before ordinary Settings can fetch the stopped gateway

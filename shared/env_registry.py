@@ -193,11 +193,6 @@ _GUIDE_PASSTHROUGH_KEYS = frozenset(
     {"SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", AGENT_CONFIG_OVERLAY_ENV, AGENT_BIRTH_CONFIG_ENV}
 )
 
-# Deprecated alias of AVA_GATEWAY_URL (still resolved via AliasChoices until its
-# scheduled removal): the env-authority pass must strip a leaked prod value of
-# EITHER spelling, so the alias is a registered row even though it is not a
-# field alias.
-AVA_PRIMARY_GATEWAY_URL = "AVA_PRIMARY_GATEWAY_URL"
 
 # OS-canonical keys the delivery builders apply by mechanism, declared once for
 # the A1 inventory: PATH + VIRTUAL_ENV are REBUILT by the venv activation at the
@@ -213,10 +208,7 @@ _PASSTHROUGH_ROWS = (
     _HOST_PASSTHROUGH_ROWS
     + _WINDOWS_SYSTEM_ROWS
     + _NETWORK_PROXY_ROWS
-    + tuple(
-        EnvField(key)
-        for key in _GUIDE_PASSTHROUGH_KEYS | {AVA_PRIMARY_GATEWAY_URL, REDIS_PASSWORD_ENV}
-    )
+    + tuple(EnvField(key) for key in _GUIDE_PASSTHROUGH_KEYS | {REDIS_PASSWORD_ENV})
     + tuple(EnvField(key) for key in _OS_CANONICAL_KEYS | _TEMP_DIR_KEYS)
 )
 
@@ -464,8 +456,8 @@ def env_identity_keys() -> frozenset[str]:
     enforced by shared.dotenv_boot._enforce_cluster_env_authority in EVERY
     process that loads a unit's .env: a key the unit's .env declares is forced
     from the file, an inherited one is dropped (the host-scoped gateway URL
-    keys stay env-suppliable — dotenv_boot's `_identity_env_only`)."""
-    return frozenset(FIELD_ALIASES[n] for n in _IDENTITY_FIELDS) | {AVA_PRIMARY_GATEWAY_URL}
+    key stays env-suppliable — dotenv_boot's `_identity_env_only`)."""
+    return frozenset(FIELD_ALIASES[n] for n in _IDENTITY_FIELDS)
 
 
 @lru_cache(maxsize=1)

@@ -7,7 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import AliasChoices, Field, field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import NoDecode
 
 from shared.config._base import EnvSettings
@@ -75,13 +75,9 @@ class AgentEvalSettings(EnvSettings):
     security_scan_enabled: bool = Field(
         default=True,
         alias="AVA_SECURITY_SCAN_ENABLED",
-        validation_alias=AliasChoices("AVA_SECURITY_SCAN_ENABLED", "AVA_SKIP_SECURITY_SCAN"),
         description=(
             "Enable prompt-injection security scan on inbound chat. "
-            "Set false for benchmark / hermetic environments where all input is trusted. "
-            "The legacy AVA_SKIP_SECURITY_SCAN alias has INVERTED semantics "
-            "(AVA_SKIP_SECURITY_SCAN=true means this is false); dotenv_boot "
-            "translates it at load and converge renames it."
+            "Set false for benchmark / hermetic environments where all input is trusted."
         ),
         json_schema_extra={
             "restart_required": "agent",

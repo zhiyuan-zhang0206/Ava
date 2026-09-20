@@ -176,7 +176,6 @@ def _daemon_env(home: Path, bin_dir: Path, chrome: _ChromeFake, mode: str) -> di
         "AVA_RUNNER_MODE",
         "AVA_CONFIG_FETCH",
         "AVA_GATEWAY_URL",
-        "AVA_PRIMARY_GATEWAY_URL",
         "AVA_CLUSTER",
     ):
         env.pop(key, None)

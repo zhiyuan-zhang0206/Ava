@@ -1928,14 +1928,11 @@ def test_unloaded_helper_bootstraps_and_must_answer_ping(
 # Labels used to be the fixed `com.ava.permissions-helper.main`; after
 # per-cluster home-slug labels arrived, converge wrote the slugged job but never
 # retired a `main` job already loaded, so two KeepAlive jobs raced the same
-# socket. The rename to permissions-helper added a second generation of
-# leftovers: pre-rename `com.ava.native-helper.*` jobs pin the OLD socket file
-# name (`native-helper.<port>.sock`) and the old env key, same port — they must
-# be retired the same way.
+# socket.
 
 
 def _write_agent_plist(
-    agents: Path, label: str, sock: str, env_key: str = "AVA_NATIVE_HELPER_SOCKET"
+    agents: Path, label: str, sock: str, env_key: str = "AVA_PERMISSIONS_HELPER_SOCKET"
 ) -> Path:
     p = agents / f"{label}.plist"
     p.write_bytes(
@@ -1951,8 +1948,8 @@ def _write_agent_plist(
 
 
 def _retire_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, port: int = 9223) -> Path:
-    """Point the retire machinery at a fake home: current socket, legacy socket
-    derivation (run_dir + port), agents dir, launchd domain."""
+    """Point the retire machinery at a fake home: current socket, agents dir,
+    launchd domain."""
     from services.permissions_helper import lifecycle
 
     agents = tmp_path / "LaunchAgents"
@@ -1964,8 +1961,6 @@ def _retire_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, port: int = 
     monkeypatch.setattr(
         lifecycle, "permissions_helper_socket", lambda: run / f"permissions-helper.{port}.sock"
     )
-    monkeypatch.setattr("shared.paths.run_dir", lambda: run)
-    monkeypatch.setattr(lifecycle.settings.services, "permissions_helper_port", port)
     return agents
 
 
@@ -1976,16 +1971,15 @@ def test_old_main_job_bound_to_our_socket_is_retired(
 
     agents = _retire_env(monkeypatch, tmp_path)
     sock = str(tmp_path / "run" / "permissions-helper.9223.sock")
-    legacy_sock = str(tmp_path / "run" / "native-helper.9223.sock")
 
     mine = lifecycle._label()
-    old_main = _write_agent_plist(agents, "com.ava.permissions-helper.main", legacy_sock)
+    old_main = _write_agent_plist(agents, "com.ava.permissions-helper.main", sock)
     other_cluster = _write_agent_plist(
         agents,
         "com.ava.permissions-helper.ava-other-abcdef12",
         str(tmp_path / ".." / "x") + "/.ava-other/run/permissions-helper.18010.sock",
     )
-    own = _write_agent_plist(agents, mine, sock, env_key="AVA_PERMISSIONS_HELPER_SOCKET")
+    own = _write_agent_plist(agents, mine, sock)
     recorded: list[list[str]] = []
 
     def fake_run(cmd, **kwargs):
@@ -2006,50 +2000,15 @@ def test_old_main_job_bound_to_our_socket_is_retired(
     assert own.exists()
 
 
-def test_pre_rename_native_helper_job_is_retired(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """A job written before the rename pins the OLD socket name + env key on the
-    SAME port; after the rename it races nothing (its socket is dead) but it is
-    a stale launchd job that must be booted out and deleted."""
-    from services.permissions_helper import lifecycle
-
-    agents = _retire_env(monkeypatch, tmp_path)
-    legacy_sock = str(tmp_path / "run" / "native-helper.9223.sock")
-
-    pre_rename = _write_agent_plist(agents, "com.ava.native-helper.ava-demo-1234abcd", legacy_sock)
-    other = _write_agent_plist(
-        agents,
-        "com.ava.native-helper.ava-other-abcdef12",
-        str(tmp_path / ".." / "y") + "/.ava-other/run/native-helper.18010.sock",
-    )
-    recorded: list[list[str]] = []
-
-    def fake_run(cmd, **kwargs):
-        recorded.append(list(cmd))  # pyright: ignore[reportUnknownArgumentType]
-        import subprocess
-
-        return subprocess.CompletedProcess(cmd, 0, b"", b"")  # pyright: ignore[reportUnknownArgumentType]
-
-    monkeypatch.setattr(lifecycle, "run_bounded", fake_run)  # pyright: ignore[reportUnknownArgumentType]
-
-    lifecycle._retire_stale_jobs()
-
-    assert not pre_rename.exists()
-    assert recorded == [["launchctl", "bootout", "gui/501/com.ava.native-helper.ava-demo-1234abcd"]]
-    # Another cluster's pre-rename job pins ITS OWN socket — untouched.
-    assert other.exists()
-
-
 def test_retire_is_idempotent_when_job_already_gone(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     from services.permissions_helper import lifecycle
 
     agents = _retire_env(monkeypatch, tmp_path)
-    legacy_sock = str(tmp_path / "run" / "native-helper.9223.sock")
+    sock = str(tmp_path / "run" / "permissions-helper.9223.sock")
 
-    _write_agent_plist(agents, "com.ava.permissions-helper.main", legacy_sock)
+    _write_agent_plist(agents, "com.ava.permissions-helper.main", sock)
     monkeypatch.setattr(
         lifecycle,
         "run_bounded",
@@ -2060,25 +2019,6 @@ def test_retire_is_idempotent_when_job_already_gone(
 
     lifecycle._retire_stale_jobs()  # must not raise on bootout failure
     assert not (agents / "com.ava.permissions-helper.main.plist").exists()
-
-
-def test_retire_removes_the_legacy_socket_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """A booted-out job leaves its socket file behind; the retire step drops the
-    pre-rename name so a stale dead socket never shadows the live one."""
-    from services.permissions_helper import lifecycle
-
-    _retire_env(monkeypatch, tmp_path)
-    legacy_sock = tmp_path / "run" / "native-helper.9223.sock"
-    legacy_sock.write_bytes(b"")
-    monkeypatch.setattr(
-        lifecycle,
-        "run_bounded",
-        lambda cmd, **_kw: __import__("subprocess").CompletedProcess(cmd, 0, b"", b""),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    lifecycle._retire_stale_jobs()
-    assert not legacy_sock.exists()
 
 
 def test_unrelated_cluster_plists_are_left_alone(
