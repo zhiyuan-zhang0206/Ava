@@ -777,16 +777,22 @@ def test_the_seat_has_no_unnamed_production_callsite() -> None:
     connects its seat in its own reviewed change and updates this pin
     consciously rather than importing quietly.
 
-    Two conscious exceptions, both task #4128's managed-writer wiring:
+    Three conscious exceptions, each added by its own reviewed change:
 
     - the enable-point gate (`cli/commands/_managed_writer_mode.py`) reads this
       module's `MANAGED_WRITER_WIRING_COMPLETE` completion declaration -- the
-      module the declaration proves -- without importing or calling the seats;
+      module the declaration proves -- without importing or calling the seats
+      (task #4128's managed-writer wiring);
     - the coordinator wiring (`cli/commands/_managed_writer_wiring.py`) imports
       the P5 commit seat from its post-Phase-B step and calls it under the
       enable point's recorded `active` decision (E2-a); its begin (E2-b) and
       collect+adopt (E2-c) positions refuse under `active` before reaching any
-      seat import, so this stays the one seat-importing production module.
+      seat import, so it stays the one production module that calls a seat;
+    - the dispatch gather (`cli/commands/_managed_writer_gather.py`) imports
+      the `PreparedUnitPublication` datum type -- the begin seat's exact
+      input -- while verifying each unit's prepared-facts shipment
+      (task #4129 I2); it imports no seat function and performs no effect,
+      and no production path calls it yet.
 
     The declaration stays False until the last wiring slice flips it; the
     begin/collect refusals persist until the dispatch program (task #4129)
@@ -796,6 +802,7 @@ def test_the_seat_has_no_unnamed_production_callsite() -> None:
     allowed = {
         "cli/commands/_managed_writer_mode.py",
         "cli/commands/_managed_writer_wiring.py",
+        "cli/commands/_managed_writer_gather.py",
     }
     offenders = sorted(
         str(path.relative_to(root))

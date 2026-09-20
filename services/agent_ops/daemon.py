@@ -59,9 +59,11 @@ from ops import (
     ops_config,
     ops_inventory,
     ops_lifecycle,
+    ops_prepare_facts,
     ops_uploads,
 )
 from ops.cluster_status import ShellNotFoundError
+from ops.rpc_prepare_facts import PrepareFactsPayload
 from ops.rpc_schemas import (
     AgentSkillViewPayload,
     ClusterSpawnSession,
@@ -307,6 +309,13 @@ def _dispatch_sync(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, o
             return "completed", session.model_dump(mode="json")
         case "cluster_fetch":
             return "completed", ops_cluster.cluster_fetch_op()
+        case "cluster_prepare_facts":
+            # The payload crossed the wire as JSON; JSON mode validates the
+            # strict nested evidence model (RolloutIdentity's RFC3339 datetimes).
+            pf = PrepareFactsPayload.model_validate_json(json.dumps(payload))
+            return "completed", ops_prepare_facts.cluster_prepare_facts_op(pf).model_dump(
+                mode="json"
+            )
         case "cluster_resume":
             if not payload:
                 return "completed", ops_cluster.cluster_resume_legacy_op()
