@@ -3085,8 +3085,8 @@ groups:
           metric: tempo_up
           team: ava-ops
         annotations:
-          summary: 'Tempo trace backend unreachable - up{job="tempo"}=0 for 1h (remote trace store down)'
-          description: 'The wsl Prometheus scrape target for the remote Tempo backend (win Docker Desktop container lgtm-tempo-1, served over the private network on 14318) has been down for over an hour. Tempo is the cluster remote trace store (the compose copy is the rollback asset); its failure is deliberately outside the station healthcheck repair loop, so this rule IS the signal - 2026-09-07..14 it stayed down 7 days unnoticed (task #3330). Triage: on the Windows host verify Docker Desktop is running (docker ps shows lgtm-tempo-1); start it and docker compose up -d tempo when needed. Verify here: up{job="tempo"}=1 and 14318 answers (404 is normal for the OTLP receiver).'
+          summary: 'Tempo trace backend unreachable - up{job="tempo"}=0 for 1h (trace store down)'
+          description: 'The Prometheus scrape target for the Tempo trace store (the native systemd user unit com.ava.tempo.ava-578ca0ec.service on the observability station host ubuntu - 127.0.0.1:3200 queries, 127.0.0.1:14318 OTLP) has been down for over an hour. Its failure is deliberately outside the station healthcheck repair loop, so this rule IS the signal - a silent 7-day outage happened before this alert existed (2026-09-07..14, task #3330). Triage: on the station host (ubuntu) run systemctl --user status com.ava.tempo.ava-578ca0ec.service and restart it when needed with systemctl --user restart com.ava.tempo.ava-578ca0ec.service. Verify here: up{job="tempo"}=1 and 127.0.0.1:14318 answers (404 on a bare GET is normal for the OTLP receiver).'
         data:
           - refId: A
             datasourceUid: prometheus
