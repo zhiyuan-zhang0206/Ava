@@ -52,6 +52,7 @@ def prepare(
 
     A failure leaves the hold in place. Repeating preparation resumes the
     same cohort and finds already committed commands by the exact operation.
+    A captured cohort is returned unchanged when no unsettled failures remain.
     Terminated agents never enter the cohort. A previous lifecycle operation,
     stale/unknown runtime requires separate resolution.
 
@@ -63,8 +64,8 @@ def prepare(
     current = maintenance.require_operation(holder, acquired_at)
     hold = current.maintenance
     assert hold is not None  # noqa: S101
-    if hold.failures:
-        raise RuntimeError(f"maintenance has failed continuations: {sorted(hold.failures)}")
+    if unsettled := hold.unsettled_failures():
+        raise RuntimeError(f"maintenance has failed continuations: {sorted(unsettled)}")
     if hold.phase != "preparing":
         return hold
     if conn.info.transaction_status != TransactionStatus.IDLE:

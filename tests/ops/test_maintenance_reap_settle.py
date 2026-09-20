@@ -107,6 +107,33 @@ def _incident_hold(
     )
 
 
+@pytest.mark.parametrize("phase", ["draining", "drained"])
+@pytest.mark.parametrize("unreaped", [False, True])
+def test_prepare_retry_uses_only_unsettled_failures(
+    phase: MaintenancePhase, unreaped: bool
+) -> None:
+    failures = {1: "ImpersonationError"}
+    if unreaped:
+        failures[2] = "RuntimeError"
+    hold = MaintenanceHold(phase, {1: 11, 2: 22}, drained=(2,), reaped={1: REAP}, failures=failures)
+    _publish(hold)
+    before = pause_owner.read()
+    conn = MagicMock()
+
+    def retry() -> MaintenanceHold:
+        return maintenance_cohort.prepare(
+            conn, machine="test", host_owner=None, holder=HOLDER, acquired_at=WHEN
+        )
+
+    if unreaped:
+        with pytest.raises(RuntimeError, match="maintenance has failed continuations"):
+            retry()
+    else:
+        assert retry() == hold
+    assert pause_owner.read() == before
+    assert conn.mock_calls == []
+
+
 def test_verify_drained_settles_a_failure_recorded_around_the_reap(
     db_conn: psycopg.Connection,
 ) -> None:
