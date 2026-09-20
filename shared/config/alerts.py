@@ -16,7 +16,7 @@ alert-policy family, same channel.
 
 from __future__ import annotations
 
-from pydantic import AliasChoices, Field, SecretStr
+from pydantic import Field, SecretStr
 
 from shared.config._base import EnvSettings
 
@@ -72,15 +72,7 @@ class AlertsSettings(EnvSettings):
 
     webhook_token: SecretStr | None = Field(
         default=None,
-        validation_alias=AliasChoices(
-            "AVA_ALERTS_WEBHOOK_TOKEN",
-            # Legacy name, kept as a fallback so the Grafana host's existing
-            # .env + launchctl env keep working across the cutover without an
-            # operator step; the header side accepts both header names too
-            # (gateway/routers/alerts.py).
-            "AVA_OPS_ALERTS_WEBHOOK_TOKEN",
-        ),
-        serialization_alias="AVA_ALERTS_WEBHOOK_TOKEN",
+        alias="AVA_ALERTS_WEBHOOK_TOKEN",
         description=(
             "Shared secret the Grafana alert webhook contact point sends as "
             "`X-Alerts-Token` (or the legacy `X-Ops-Alerts-Token`) on "
@@ -117,11 +109,7 @@ class AlertsSettings(EnvSettings):
 
     im_notify_enabled: bool = Field(
         default=True,
-        validation_alias=AliasChoices(
-            "AVA_ALERTS_IM_NOTIFY_ENABLED",
-            "AVA_OPS_ALERTS_IM_NOTIFY_ENABLED",
-        ),
-        serialization_alias="AVA_ALERTS_IM_NOTIFY_ENABLED",
+        alias="AVA_ALERTS_IM_NOTIFY_ENABLED",
         description=(
             "Send firing/resolved alert notifications to the user's connected "
             "IM channels (Telegram / WeChat / Feishu via the im_bridge daemon). "

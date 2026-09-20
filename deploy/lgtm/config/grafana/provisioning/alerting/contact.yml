@@ -36,7 +36,7 @@
 #   reference: provisioning expands it, and the schema layer migrates the
 #   value into encrypted secureSettings in the DB, which the notifier DOES
 #   read (verified end-to-end: header on the wire, gateway 200).
-# - The value comes from the container env (OPS_ALERTS_WEBHOOK_TOKEN,
+# - The value comes from the container env (AVA_ALERTS_WEBHOOK_TOKEN,
 #   injected via docker-compose from deploy/lgtm/.env — gitignored).
 #   It must match the gateway's webhook token (AVA_ALERTS_WEBHOOK_TOKEN);
 #   the gateway accepts it both as X-Alerts-Token and as a Bearer
@@ -58,7 +58,7 @@ contactPoints:
           url: $__env{AVA_ALERTS_WEBHOOK_URL}
           httpMethod: POST
           authorization_scheme: Bearer
-          authorization_credentials: $__env{OPS_ALERTS_WEBHOOK_TOKEN}
+          authorization_credentials: $__env{AVA_ALERTS_WEBHOOK_TOKEN}
 
 # Root notification policy: everything -> the webhook. group_by: [] batches
 # all firing instances into one POST (the ingest dedups by fingerprint x

@@ -148,7 +148,6 @@ def test_inject_without_gateway_url_fails_fast(
     # A pure runner with no AVA_GATEWAY_URL (never enrolled) must not start with
     # no config — the error names the remedy.
     monkeypatch.delitem(os.environ, "AVA_GATEWAY_URL", raising=False)
-    monkeypatch.delitem(os.environ, "AVA_PRIMARY_GATEWAY_URL", raising=False)
     monkeypatch.delitem(os.environ, "AVA_GATEWAY_PORT", raising=False)
     called: list[object] = []
     monkeypatch.setattr(
@@ -188,25 +187,6 @@ def test_inject_treats_blank_as_absent(
     )
     bootstrap.inject_config_from_gateway()
     assert os.environ["DEEPSEEK_API_KEY"] == "real-fetched-key"
-
-
-def test_inject_uses_deprecated_gateway_url_alias(
-    monkeypatch: pytest.MonkeyPatch, _snapshot_home: Path
-) -> None:
-    # AVA_PRIMARY_GATEWAY_URL is honored pre-Settings (Settings' AliasChoices
-    # hasn't run yet at fetch time).
-    monkeypatch.delitem(os.environ, "AVA_GATEWAY_URL", raising=False)
-    monkeypatch.delitem(os.environ, "AVA_GATEWAY_PORT", raising=False)
-    monkeypatch.setitem(os.environ, "AVA_PRIMARY_GATEWAY_URL", "http://legacy-gw")
-    captured: dict[str, str] = {}
-
-    def fake_fetch(base_url, **_k):
-        captured["url"] = base_url
-        return {}
-
-    monkeypatch.setattr(bootstrap, "fetch_bootstrap_config", fake_fetch)  # pyright: ignore[reportUnknownArgumentType]
-    bootstrap.inject_config_from_gateway()
-    assert captured["url"] == "http://legacy-gw"
 
 
 def test_fetch_retries_transient_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:

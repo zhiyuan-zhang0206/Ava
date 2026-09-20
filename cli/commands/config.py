@@ -33,7 +33,7 @@ from shared.api_contracts.config import (
 _HTTP_TIMEOUT_S = 15.0
 
 
-_GATEWAY_URL_KEYS = ("AVA_GATEWAY_URL", "AVA_PRIMARY_GATEWAY_URL")
+_GATEWAY_URL_KEYS = ("AVA_GATEWAY_URL",)
 
 
 def _anchored_gateway_base() -> str | None:

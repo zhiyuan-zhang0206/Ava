@@ -40,7 +40,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-from io import StringIO
 from pathlib import Path
 from typing import Any, cast, get_origin
 
@@ -323,115 +322,17 @@ def rename_env_keys(path: Path, renames: dict[str, str]) -> list[str]:
     return changed
 
 
-def migrate_permissions_helper_env_keys(env_path: Path) -> list[str]:
-    """One-shot rename of the pre-rename AVA_NATIVE_HELPER_* keys in `env_path`.
+def migrate_alerts_webhook_token_env_key(env_path: Path) -> list[str]:
+    """One-shot rename of the legacy AVA_OPS_ALERTS_WEBHOOK_TOKEN key in
+    `env_path` to AVA_ALERTS_WEBHOOK_TOKEN (value unchanged — a pure rename).
 
-    The desktop-automation daemon was renamed native-helper ->
-    permissions-helper; clusters born before the rename carry the old keys.
-    Settings still reads them as a fallback, so this is a hygiene migration to
-    a single canonical name (see `rename_env_keys` for the both-present rule).
+    The AVA_OPS_ALERTS_* key family was retired; a unit still carrying the old
+    webhook-token name would silently lose its token (the alerts settings no
+    longer read it), so converge renames the line instead. A second run finds
+    no legacy key and is a no-op; when both names exist the new one is
+    authoritative and the legacy line is dropped (`rename_env_keys` rule).
     """
-    return rename_env_keys(
-        env_path,
-        {
-            "AVA_NATIVE_HELPER_ENABLED": "AVA_PERMISSIONS_HELPER_ENABLED",
-            "AVA_NATIVE_HELPER_PORT": "AVA_PERMISSIONS_HELPER_PORT",
-        },
-    )
-
-
-# The inverted-semantics legacy keys (see shared/dotenv_boot for the boot-time
-# translation): legacy key -> canonical key. The value must be INVERTED on the
-# rename — the old "skip X" boolean means the opposite of the new "X enabled".
-_SKIP_ALIAS_RENAMES = {
-    "AVA_SKIP_AUTH": "AVA_AUTH_MIDDLEWARE_ENABLED",
-    "AVA_SKIP_SECURITY_SCAN": "AVA_SECURITY_SCAN_ENABLED",
-}
-_SKIP_ALIAS_TRUE = frozenset({"1", "true", "yes", "on", "t", "y"})
-_SKIP_ALIAS_FALSE = frozenset({"0", "false", "no", "off", "f", "n"})
-
-
-def migrate_skip_alias_env_keys(env_path: Path) -> list[str]:
-    """One-shot rename of the inverted-semantics legacy AVA_SKIP_* keys in
-    `env_path`, inverting each value.
-
-    The 2026-07-06 affirmative-naming refactor (#315) renamed
-    skip_auth_middleware -> auth_middleware_enabled and skip_security_scan ->
-    security_scan_enabled with the default INVERTED. Keys are matched and values
-    read through the dotenv parser (`export` prefix included; a quoted boolean
-    decodes as itself), so those forms migrate instead of silently staying
-    behind (#2981, #2704-class). Settings keeps reading the
-    legacy keys (translated at boot), but the canonical name must win ON DISK:
-    the config panel writes the canonical alias, and a legacy key left in the
-    file is a silent second source that outranks it (AliasChoices resolves the
-    legacy key first when the canonical AVA_-prefixed name is absent). Rewrite
-    here once, inverting the value; a second run finds no legacy keys and is a
-    no-op. When both names exist the new one is authoritative and the legacy
-    line is dropped (mirrors `rename_env_keys`). An unparseable legacy value is
-    left in place unchanged (fail fast at Settings build, never guessed at).
-    """
-    if not env_path.exists():
-        return []
-    with file_lock(env_lock_path(env_path), timeout_s=ENV_LOCK_TIMEOUT_S):
-        raw = dotenv_values(env_path)
-        changed: list[str] = []
-        keys_written: set[str] = set()
-        keys_removed: set[str] = set()
-        lines = env_path.read_text().splitlines(keepends=True)
-        out: list[str] = []
-        for line in lines:
-            key = env_line_key(line)
-            if key not in _SKIP_ALIAS_RENAMES:
-                out.append(line)
-                continue
-            new_key = _SKIP_ALIAS_RENAMES[key]
-            if new_key in raw and raw[new_key] is not None:
-                # New key already present and set — the legacy line is stale.
-                changed.append(f"{key} dropped ({new_key} authoritative)")
-                keys_removed.add(key)
-                continue
-            decoded = dotenv_values(stream=StringIO(line), interpolate=False).get(key)
-            token = (decoded or "").strip().lower()
-            prefix = env_line_export_prefix(line)
-            # The rewritten line keeps its original ending: dropping it folded the
-            # NEXT key onto this line (`...=falseKEEP=1`), corrupting the unit env.
-            line_end = line[len(line.rstrip("\r\n")) :]
-            if token in _SKIP_ALIAS_TRUE:
-                out.append(f"{prefix}{new_key}=false{line_end}")
-                changed.append(f"{key}=true -> {new_key}=false")
-                keys_removed.add(key)
-                keys_written.add(new_key)
-            elif token in _SKIP_ALIAS_FALSE:
-                out.append(f"{prefix}{new_key}=true{line_end}")
-                changed.append(f"{key}=false -> {new_key}=true")
-                keys_removed.add(key)
-                keys_written.add(new_key)
-            else:
-                # Unparseable — keep the line verbatim; Settings will fail fast.
-                out.append(line)
-        if changed:
-            env_path.write_text("".join(out))
-            from shared.env_audit import record_env_write
-
-            record_env_write(
-                env_path, keys_written, keys_removed, site="migrate_skip_alias_env_keys"
-            )
-    return changed
-
-
-def migrate_primary_gateway_url_key(env_path: Path) -> list[str]:
-    """One-shot rename of the deprecated AVA_PRIMARY_GATEWAY_URL key in
-    `env_path` to AVA_GATEWAY_URL (value unchanged — a pure rename).
-
-    The old name was scheduled for removal 2026-07-01 (gateway.py) but the
-    deadline passed with the alias still resolving; instead of breaking
-    un-converged .env files, every unit's file is renamed here (converge), and
-    the alias keeps resolving for a grace period with an updated deadline. A
-    second run finds no legacy key and is a no-op; when both names exist the
-    new one is authoritative and the legacy line is dropped (rename_env_keys
-    rule).
-    """
-    return rename_env_keys(env_path, {"AVA_PRIMARY_GATEWAY_URL": "AVA_GATEWAY_URL"})
+    return rename_env_keys(env_path, {"AVA_OPS_ALERTS_WEBHOOK_TOKEN": "AVA_ALERTS_WEBHOOK_TOKEN"})
 
 
 def migrate_host_json_to_env() -> None:

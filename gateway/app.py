@@ -233,7 +233,7 @@ from shared.cluster_auth import (
     cookie_name,
     verify_bearer,
 )
-from shared.config import settings, warn_deprecated_env_aliases
+from shared.config import settings
 from shared.context import AvaContext
 from shared.lm._plugin_providers import ensure_provider_plugins_loaded
 from shared.machine import machine_name
@@ -351,8 +351,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             _log.info("provisioned built-in schedules: %s", ", ".join(created))
     except Exception:
         _log.warning("built-in schedule provisioning failed", exc_info=True)
-
-    warn_deprecated_env_aliases()
 
     # Config migrations (the retired override layers -> .env) run in the converge
     # phase before the gateway process starts, so by the time this Settings is

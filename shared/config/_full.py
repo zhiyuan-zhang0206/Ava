@@ -183,7 +183,6 @@ def _facade_exports() -> dict[str, Any]:
         # through the latch; its lite-era home is shared.config._lite.
         "_plant_lite_placeholders": _plant_placeholders,
         "_self_machine_host": _self_machine_host,
-        "warn_deprecated_env_aliases": _service_read.warn_deprecated_env_aliases,
         "get_config_metadata": _metadata.get_config_metadata,
         "env_override_values": _metadata.env_override_values,
         "ConfigFieldMeta": _metadata.ConfigFieldMeta,
