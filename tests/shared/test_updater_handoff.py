@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime as dt
 import importlib
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -695,3 +696,37 @@ def test_refused_clear_keeps_the_generation_spawn_attempts() -> None:
     assert (attempts / "ava-ops.gate").read_text(encoding="utf-8") == "held"
     assert (attempts / "ava-ops.7.receipt.json").read_text(encoding="utf-8") == "{}"
     assert handoff.state_path().exists()
+
+
+@pytest.mark.parametrize(
+    "exc", [OSError("device busy"), ValueError("embedded null byte")], ids=["oserror", "valueerror"]
+)
+def test_failed_gc_keeps_the_generation_spawn_attempts(
+    exc: OSError | ValueError,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """I6 failure branch: a failed removal is logged and the evidence is kept.
+
+    Clear still returns its verdict (about the handoff state, not the
+    directory): the warning is the record, the retained files are the
+    conservative side.
+    """
+    _retained_bootstrap("candidate_ready", normal_release_planned=True)
+    _write_normal_through("committed")
+    attempts = handoff.spawn_attempts_dir("bootstrap")
+    attempts.mkdir(parents=True, exist_ok=True)
+    (attempts / "ava-ops.gate").write_text("held", encoding="utf-8")
+    (attempts / "ava-ops.7.receipt.json").write_text("{}", encoding="utf-8")
+
+    def _refuse_removal(*args: object, **kwargs: object) -> None:
+        raise exc
+
+    monkeypatch.setattr(handoff.shutil, "rmtree", _refuse_removal)
+    with caplog.at_level(logging.WARNING, logger="shared.updater_handoff"):
+        assert handoff.clear("bootstrap")
+    assert "spawn-attempt GC left evidence in place" in caplog.text
+    assert (attempts / "ava-ops.gate").read_text(encoding="utf-8") == "held"
+    assert (attempts / "ava-ops.7.receipt.json").read_text(encoding="utf-8") == "{}"
+    assert not handoff.state_path().exists()
+    assert not handoff.bootstrap_state_path().exists()
