@@ -53,13 +53,15 @@ deadline makes `/healthz` return 503 for watchdog recovery.
 """
 
 import asyncio
+import contextlib
 import logging
 import os
+import signal
 import sys
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import cast
+from typing import NoReturn, cast
 
 import psycopg
 from psycopg_pool import ConnectionPool
@@ -450,6 +452,34 @@ async def run() -> None:
         _log.info("[events-maintenance] daemon stopped")
 
 
+def _hard_exit(code: int) -> NoReturn:
+    """End the process now, skipping interpreter teardown. Never returns.
+
+    Teardown is precisely what hangs: every maintenance pass runs on the
+    default executor (``_maintenance_with_liveness``'s ``asyncio.to_thread``)
+    and is DB work that can run for minutes — an in-flight rollup, trim or
+    resolution slice is exactly what a stop can land on. ``asyncio.Runner.close``
+    joins that executor behind CPython's ``THREAD_JOIN_TIMEOUT`` cap (300 s) —
+    the stop flow's entire budget (`PAUSE_TIMEOUT_SECONDS`) — and a pass still
+    in flight at SIGTERM then keeps interpreter teardown waiting with no bound
+    at all (measured: a ``shutdown(wait=False)`` worker is still joined at
+    exit, task #3940). Nothing after ``run()`` needs that pass: every pass is
+    idempotent and self-catching-up, re-derived by the next process. Logs are
+    flushed first: they are the one thing a skipped teardown would lose. Same
+    shape as services/agent_ops/daemon.py and services/pitr/uploader_daemon.py.
+    """
+    with contextlib.suppress(Exception):
+        from loguru import logger as _loguru
+
+        _loguru.remove()  # closes (and so flushes) every sink
+    with contextlib.suppress(Exception):
+        logging.shutdown()
+    for stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(Exception):
+            stream.flush()
+    os._exit(code)
+
+
 def main() -> None:
     """Entry point: init logger + run asyncio loop.
 
@@ -463,15 +493,38 @@ def main() -> None:
     assert_schema_current(settings.data_plane.db_url)
     init_gateway_process(name="events_maintenance")
     install_graceful_shutdown("events_maintenance")
+    code = 0
+    # `asyncio.Runner`, not `asyncio.run`: `run` closes in a `finally` that
+    # awaits `shutdown_default_executor`, joining the default executor's
+    # workers — an in-flight maintenance pass among them — and a stop signal
+    # must never wait on those (see `_hard_exit`). The runner is therefore
+    # never closed: after the explicit drain below, teardown is skipped by the
+    # hard exit.
+    runner = asyncio.Runner()
     try:
-        asyncio.run(run())
+        runner.run(run())
     except KeyboardInterrupt:
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[events-maintenance] interrupted, shutting down")
+        # The signal path skips Runner's own cancellation, so drain the loop's
+        # tasks explicitly: run()'s finally still closes the pool, stops the
+        # health server and removes the pidfile. The executor is deliberately
+        # NOT drained.
+        loop = runner.get_loop()
+        tasks = asyncio.all_tasks(loop)
+        for task in tasks:
+            task.cancel()
+        results = loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+        failures = [result for result in results if isinstance(result, Exception)]
+        if failures:
+            _log.error("[events-maintenance] async shutdown failed: %r", failures)
+            code = 1
     except Exception:
         _log.exception("[events-maintenance] daemon crashed — uncaught exception escaped run()")
-        raise
+        code = 1
     finally:
         _remove_pidfile()
+    _hard_exit(code)
 
 
 if __name__ == "__main__":
