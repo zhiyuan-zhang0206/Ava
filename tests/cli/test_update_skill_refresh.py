@@ -19,6 +19,7 @@ import pytest
 import cli.commands as _cli
 from cli.commands import _update_agent_runner as _runner
 from cli.commands import _update_local as _local
+from cli.commands import update as _up
 from shared import host_deploy_state
 from shared.deploy_timing import UV_SYNC_TIMEOUT_S
 
@@ -35,7 +36,10 @@ def test_gateway_leg_refreshes_on_pull_path(monkeypatch: pytest.MonkeyPatch, rep
     monkeypatch.setattr(_local, "_checkout_and_sync", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_local, "_boot_gateway_fresh", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_local, "_refresh_builtin_skills", refresh_calls.append)
-    monkeypatch.setattr(_cli, "_do_stop", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    # `_update_local` resolves `_up_mod._do_stop` (the `update` module), not the
+    # `cli.commands` package -- a package-namespace stub never reaches this call
+    # (the same silent miss documented in test_start_readiness_gate).
+    monkeypatch.setattr(_up, "_do_stop", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
 
     assert (
         _local._run_gateway_local_update(
@@ -52,7 +56,7 @@ def test_gateway_leg_skips_refresh_on_restart_only(
     refresh_calls: list[Path] = []
     monkeypatch.setattr(_local, "_boot_gateway_fresh", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_local, "_refresh_builtin_skills", refresh_calls.append)
-    monkeypatch.setattr(_cli, "_do_stop", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_up, "_do_stop", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
 
     assert _local._run_gateway_local_update(repo, pull=False) == 0
     assert refresh_calls == []
