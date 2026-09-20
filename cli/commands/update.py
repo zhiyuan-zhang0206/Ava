@@ -621,16 +621,15 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
         # `active` decision the journal must open before the first stop effect,
         # but only for a rollout publishing a new release (a restart-only
         # bounce has none) and only once the prepare gate has passed -- a
-        # mundane prepare refusal must not strand an open journal. Until the
-        # all-unit prepared-plan channel lands (task #4129) the step refuses
-        # explicitly rather than stop the fleet without its journal.
+        # mundane prepare refusal must not strand an open journal. The
+        # prepared-plan chain (task #4129, channel B) reads the sealed release
+        # context, gathers the fleet's prepared facts, opens the journal and
+        # requires every unit's local validation acknowledgement; any refusal
+        # aborts the rollout here, before any unit effect.
         if not restart_only:
-            begin_rc = _begin_managed_writer_publication()
+            begin_rc = _begin_managed_writer_publication(target_sha)
             if begin_rc != 0:
-                failing_step = (
-                    "the managed-writer begin refused: the all-unit prepared "
-                    "plan channel (prepared dispatch, task #4129) is not connected"
-                )
+                failing_step = "the managed-writer begin refused; nothing was stopped"
                 return begin_rc
 
         # The prepare reconciliation is deliberately read-only. Its vetted
