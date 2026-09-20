@@ -1783,7 +1783,7 @@ resources. It fans out:
   `http://127.0.0.1:14318`; prod sets a host-scope override to the remote WSL
   Tempo) + local JSONL mirror
   (`$AVA_HOME/traces/spans.jsonl`, rotated `spans-<ISO>.jsonl`).
-- **logs** — every unified event (the `events` table write path) dual-writes to
+- **logs** — every unified event (the emitter's write path) dual-writes to
   OTLP logs (Loki) via `shared/telemetry_otlp.py` → sidecar → Loki
   (`AVA_TELEMETRY_LOKI_URL` base, `/otlp` appended). The emitter makes
   `event_name`, `cluster` and, when present, `agent_id` resource dimensions per
@@ -1883,7 +1883,7 @@ any other `python3.12` on the box.
 The whole OTLP surface (exporter + trace recording + ship) is gated by
 `AVA_TELEMETRY_OTLP_ENABLED` (default **on**); off leaves the JSONL mirror only
 and freezes Loki, Prometheus, and their read surfaces at the last exported
-data. There is no Postgres fallback: `events` is a read-only archive. This is
+data. There is no Postgres fallback: the `events` archive was dropped (task #1281/#1823). This is
 one startup-applied kill switch, so a change requires a process restart. The
 home/role producer gate additionally prevents an unmarked gateway from using
 the default loopback endpoint; explicitly setting `AVA_TELEMETRY_OTLP_ENDPOINT`
@@ -2013,8 +2013,8 @@ when the turn's work is done. All child spans (LLM calls, tool execs,
 retries) share that root's trace_id + parent; without the wrap each LLM call
 is an orphan. Positioning: traces are a **drill-down tool for bounded units**
 — a finished turn rendered as a waterfall. The primary observation surface
-for long-running agents is the unified event river (the `events` table + its
-Loki dual-write above), not Tempo.
+for long-running agents is the unified event river (Loki, via the dual-write
+above), not Tempo.
 
 ### The operator's SRE loop
 

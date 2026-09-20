@@ -10,9 +10,9 @@ search 500's gateway-side traceback was unforensicable.
 
 Fix: `uvicorn.run(..., log_config=None)` leaves the logging system alone, so
 `uvicorn.error` propagates to the root intercept handler and reaches the
-loguru sinks (gateway.log + events table). `_install_stdlib_intercept` gates
+loguru sinks (gateway.log + the event stream). `_install_stdlib_intercept` gates
 `uvicorn.access` to WARNING — per-request INFO would otherwise flood the file
-sink and the events table.
+sink and the event stream.
 """
 
 import ast
@@ -109,7 +109,7 @@ def test_uvicorn_error_startup_info_reaches_loguru(loguru_records: list[dict]) -
 def test_uvicorn_access_info_gated_away(loguru_records: list[dict]) -> None:
     """Per-request INFO on `uvicorn.access` is gated to WARNING — a busy
     gateway would otherwise emit thousands of access lines into the file
-    sink and the events table every day."""
+    sink and the event stream every day."""
     _install_stdlib_intercept()
     logging.getLogger("uvicorn.access").info('GET /api/health HTTP/1.1" 200')
     assert not any(

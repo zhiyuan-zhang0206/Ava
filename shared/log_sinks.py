@@ -14,14 +14,14 @@ from loguru import logger
 
 class _StdlibInterceptHandler(logging.Handler):
     """Route stdlib logging through loguru so every `_log = logging.getLogger(...)`
-    callsite in the codebase lands in the loguru sinks (stderr / file / PG)
+    callsite in the codebase lands in the loguru sinks (stderr / file / the unified stream)
     without per-file rewrites.
 
     Many services (`services/agent_ops/daemon.py`, `gateway/app.py`, etc.) use
     stdlib `logging.getLogger(__name__)` for historical reasons. Without
     this handler their INFO/WARNING/ERROR lines reach stderr only and never
-    hit the unified `events` table that loguru's `_postgres_sink` writes
-    to. The handler is installed by every `init_*` entry point below; the
+    reach the unified event stream that loguru's `_postgres_sink` feeds. The
+    handler is installed by every `init_*` entry point below; the
     intercepted records carry whatever `extra` (e.g. agent_id) the calling
     process has bound on the loguru singleton via `logger.configure(...)`.
 
@@ -97,7 +97,7 @@ _FIRST_PARTY_LOGGER_NAMES = (
 # They fire again on every later conversion of a history containing such a
 # message, so one benign substitution becomes a per-turn flood — a single
 # long-context agent wrote 2,072 of these records into the file sink and the
-# events table in one day (2026-09-13, #3317).
+# event stream in one day (2026-09-13, #3317).
 _GENAI_LOGGER_NAME = "langchain_google_genai"
 _GENAI_EMPTY_PARTS_MARKER = "converted to no Gemini parts"
 
@@ -159,7 +159,7 @@ def _install_stdlib_intercept() -> None:
 
     # psycopg_pool logs benign connection-recycling churn ("discarding closed
     # connection" / "closing returned connection") at WARNING on every pool
-    # maintenance pass — pure noise that floods the events table. Gate the pool
+    # maintenance pass — pure noise that floods the event stream. Gate the pool
     # logger to ERROR so only real pool faults survive.
     logging.getLogger("psycopg.pool").setLevel(logging.ERROR)
 
@@ -177,7 +177,7 @@ def _install_stdlib_intercept() -> None:
 
     # uvicorn.access logs one INFO line per HTTP request — with the gateway's
     # uvicorn.run(log_config=None) those would flood the file sink and the
-    # events table (a busy gateway emits thousands/day). Gate to WARNING:
+    # event stream (a busy gateway emits thousands/day). Gate to WARNING:
     # only abnormal access records survive. uvicorn.error inherits the root
     # INFO floor — that logger carries startup
     # lines AND the unhandled-ASGI-exception tracebacks #970 exists to

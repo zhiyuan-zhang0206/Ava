@@ -523,7 +523,7 @@ class _EventPipeline:
 
         flush() drains the queue on the calling thread, but a batch the
         drain thread already dequeued can still be written up to one
-        flush_interval later — a TRUNCATE of the events table in between
+        flush_interval later — a TRUNCATE or a mirror read in between
         loses that race (the test_events_api straggler flake class,
         testing/ci-flakes-pr1686-20260807.md). sync() closes the window:
         it flushes the queue, pokes the drain thread to write its held
@@ -538,7 +538,7 @@ class _EventPipeline:
             _report_no_pipeline(
                 "[event-emitter] sync() timed out after {t}s — the drain "
                 "thread's held batch may not have landed; a subsequent "
-                "TRUNCATE of `events` could lose it",
+                "TRUNCATE or mirror read could lose it",
                 t=timeout,
             )
 
@@ -753,8 +753,8 @@ def flush() -> None:
 
 def sync() -> None:
     """Drain the queue AND wait for the drain thread's held batch to land —
-    the barrier to call before TRUNCATE-ing `events` when the test asserts
-    its exact contents afterwards (see _EventPipeline.sync)."""
+    the barrier to call before a TRUNCATE (or a mirror read) when the test
+    asserts exact contents afterwards (see _EventPipeline.sync)."""
     pipeline = _state["pipeline"]
     if pipeline is not None:
         pipeline.sync()

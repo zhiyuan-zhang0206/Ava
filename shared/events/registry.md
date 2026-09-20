@@ -491,10 +491,7 @@ event_name and category; `_TELEMETRY_KINDS` in
    production Python code (excluding tests/worktrees/node_modules) for `event=`,
    `label=`, `event_type=`, SSE roles, emits four inventories, and cross-checks them
    bidirectionally against the registry (`tests/test_lint_event_kinds.py`).
-3. **DB-measured distribution** (optional): `python shared/events/scan_kinds.py --db-url "$AVA_DB_URL"`
-   — appends the events table's event_name distribution and bare-log share (all
-   read-only SELECTs).
-4. **Coverage statement**: this document covers every registered event_name (audit +
+3. **Coverage statement**: this document covers every registered event_name (audit +
    telemetry + log + destination=file + SSE role). Not covered: test-fixture
    self-made names like `evt`/`my_event`/`some_warning` (non-production events).
 

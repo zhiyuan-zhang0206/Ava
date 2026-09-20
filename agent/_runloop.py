@@ -347,8 +347,8 @@ async def _handle_fatal_llm_error(
             reason=reason,
             status=exc.status,
         )
-        # Record the breaker-open event in event_log (best-effort: a failure
-        # only loses the audit row, never the breaker state itself).
+        # Record the breaker-open event as an audit event (best-effort: a failure
+        # only loses the audit record, never the breaker state itself).
         if emit_reports and ctx.ops_pool is not None:
             try:
                 await insert_event_log_async(

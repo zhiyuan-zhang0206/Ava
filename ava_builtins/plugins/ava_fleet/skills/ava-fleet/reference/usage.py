@@ -10,8 +10,8 @@ carries.
 
 This fleet report retains the historical ledger and retained-log sources that the
 fleet dashboard's cost path uses since the LGTM cutover (task #1197: the PG
-`events` table is a frozen archive, task #180, and this script no longer reads
-it):
+`events` table was frozen at the LGTM cutover and later dropped, task #180 —
+this script no longer reads it):
 
 - a windowed request (`--since` / `--hours`) aggregates **pure Loki** over the
   window;

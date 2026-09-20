@@ -4,7 +4,7 @@ Bug: `_parse_chat_history` logs one WARNING for every AI message whose content
 converts to no Gemini parts, and it logs it again on every later conversion of a
 history that contains such a message — so a long agent conversation turns one
 benign substitution into a permanent flood. A single long-context agent wrote
-2,072 of these records into the file sink and the events table in one day
+2,072 of these records into the file sink and the event stream in one day
 (2026-09-13).
 
 Fix: `_install_stdlib_intercept` attaches `_GenaiEmptyPartsWarningFilter` to the

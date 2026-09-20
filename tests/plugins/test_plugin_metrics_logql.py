@@ -1,5 +1,5 @@
 """Lock the plugin-metric LogQL cutover (task #180): every shipped plugin
-metric reads the live Loki event stream, not the frozen PG `events` table.
+metric reads the live Loki event stream, not the retired PG `events` table.
 
 The dashboard JSON (`deploy/lgtm/config/grafana/provisioning/dashboards/
 ava-ops-main.json`) is hand-maintained since the generator did not survive the
@@ -63,7 +63,7 @@ def test_shipped_plugin_metrics_are_logql() -> None:
     } <= names
     for spec in specs:
         assert spec.query_type == "logql", (
-            f"{spec.name} must read Loki, not the frozen events table"
+            f"{spec.name} must read Loki, not the retired events table"
         )
 
 
@@ -75,7 +75,9 @@ def test_rendered_queries_target_the_event_stream() -> None:
                 f"{spec.name} lost the event-stream selector"
             )
             assert "| json" in template, f"{spec.name} lost the | json pipeline"
-            assert "FROM events" not in template, f"{spec.name} still reads the frozen events table"
+            assert "FROM events" not in template, (
+                f"{spec.name} still reads the retired events table"
+            )
             # event_name is a promoted stream label (2026-08-23 cutover): the
             # matcher must sit in the stream selector ({... event_name=...}),
             # never as a `| event_name` pipeline filter. The {{agent_id}}

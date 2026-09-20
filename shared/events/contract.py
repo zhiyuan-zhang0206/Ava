@@ -2,8 +2,8 @@
 
 Design: design-r2/design-concept.md §4.3 + okf/design/r2-single-source-of-truth (C).
 
-``EVENTS`` is one ``EventSpec`` per event name (the ``events`` table's
-``event_name`` column, OTel LogRecord semantics): writers add one entry;
+``EVENTS`` is one ``EventSpec`` per event name (the stream's
+``event_name`` field, OTel LogRecord semantics): writers add one entry;
 producers emit through ``shared.telemetry.emit`` (fail-fast on unregistered
 names); readers consume payload keys through the derived SQL fragment
 constants (a hand-written ``attributes->>'...'`` literal elsewhere fails the

@@ -490,8 +490,9 @@ async def admit_hosted_runtime(
                 _refuse_hosted_admission()
             if legacy_adoption_used and legacy_adoption is not None:
                 # The adoption audit: who was replaced, on what evidence, and
-                # how stale the predecessor's ownership beat was. Recorded in
-                # the same transaction that performed the takeover.
+                # how stale the predecessor's ownership beat was. Enqueued
+                # best-effort beside the takeover — the emitter owns the write,
+                # so a failure only loses the audit event, never the admission.
                 await insert_event_log_async(
                     event_type="hosted_legacy_adoption",
                     agent_id=agent_id,

@@ -240,8 +240,9 @@ class TestPauseHeartbeat:
         assert window_row is not None
         assert window_row[0] == pytest.approx(1800, abs=5)  # pyright: ignore[reportUnknownMemberType]
         assert [float(row[0]) for row in trail_rows] == [1800.0]
-        # The event row lives in the JSONL mirror (the PG events copy is a
-        # read-only archive since the LGTM cutover, task #1197 close-C).
+        # The event row lives in the JSONL mirror (the PG events copy was retired at
+        # the LGTM cutover, task #1197 close-C, and dropped with the archive
+        # cleanup, task #1281/#1823).
         import json as _json
         from datetime import UTC as _UTC
         from datetime import datetime as _dt

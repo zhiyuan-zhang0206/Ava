@@ -337,8 +337,8 @@ class TestSendHeartbeatCheckin:
         _send_heartbeat_checkin(pool, aid, 7.0)
         # The emitter drains asynchronously (0.5s cadence) — flush() can
         # race the drain thread for the queue, so poll briefly for the line.
-        # The PG events copy is a read-only archive since the LGTM cutover
-        # (task #1197 close-C): the durable local copy is the JSONL mirror.
+        # The PG events copy was retired at the LGTM cutover (task #1197 close-C)
+        # and later dropped; the durable local copy is the JSONL mirror.
         ev = None
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline:

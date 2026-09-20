@@ -38,8 +38,8 @@ Currently 6: `syntax_fix`, `exec`, `llm_turns`, `agent_activity`, `sdk_usage`, `
 
 ## Key Dependencies
 
-- [[db.ava.okf.md]] — `events` table (the unified event stream)
-- [[log.ava.okf.md]] — `events` is written by the unified emitter (`shared/telemetry.py`), fed by `shared/log.py`
+- [[db.ava.okf.md]] — Postgres pool (the `events` archive is dropped; the stream lives in Loki / the JSONL mirror)
+- [[log.ava.okf.md]] — the event stream is written by the unified emitter (`shared/telemetry.py`), fed by `shared/log.py`
 
 ## SDK event collection
 
