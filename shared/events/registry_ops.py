@@ -87,6 +87,28 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         "un-applied restart, so the wake had nothing left to do; not a failure",
         tier="observation",
     ),
+    # The force-termination quiet close (task #4180): an externally commanded
+    # force terminate (delivery-watchdog wedge recovery / CLI force / machine
+    # pause) of the turn's own incarnation stops through the classification
+    # instead of the crash path — the applied command awaits its observation
+    # by the pump's own boundary; no corpse marker, no error event, no
+    # failure receipt.
+    "host_turn_force_terminated": _telemetry(
+        "host_turn_force_terminated",
+        "this hosted turn ended on its own incarnation's applied force terminate "
+        "(e.g. the delivery watchdog's hosted-turn wedge recovery): the terminate "
+        "command was applied but not yet observed, the turn's fail-closed guard "
+        "read refused, and the pump's own boundary observes the command; not a "
+        "failure",
+        tier="observation",
+    ),
+    "host_held_wake_force_terminated": _telemetry(
+        "host_held_wake_force_terminated",
+        "a held-controls wake stopped quietly because its incarnation's applied "
+        "force terminate landed — the pump's boundary owns the command's "
+        "observation, so the wake had nothing left to do; not a failure",
+        tier="observation",
+    ),
     # managed-writer mode (task #4121): the enable-point decision's refusal
     # marker. `blocked` emits once per blocked decision (the rollout still runs
     # the legacy flow). Mode transitions are not event-carried -- they are

@@ -79,6 +79,7 @@ from services.agent_host.admission import TurnAdmission
 from services.agent_host.crash_recovery import recover_reaped_corpses
 from services.agent_host.db_recovery import database_phase, recover_database
 from services.agent_host.dispatcher import PendingInboundWake
+from services.agent_host.force_termination import force_termination_outcome, force_termination_stop
 from services.agent_host.runtime import (
     HostStats,
     TurnOutcome,
@@ -350,7 +351,9 @@ class AgentHost:
         )
         if incarnation is None:
             return
-        async with reap_truncation_stop(self._control_pool, incarnation):
+        reap_stop = reap_truncation_stop(self._control_pool, incarnation)
+        force_stop = force_termination_stop(self._control_pool, incarnation)
+        async with reap_stop, force_stop:
             await self._apply_held_controls(agent_id, incarnation)
 
     async def _apply_held_controls(self, agent_id: int, incarnation: RuntimeIncarnation) -> None:
@@ -756,16 +759,12 @@ class AgentHost:
                     incarnation=incarnation,
                 )
             except Exception as exc:
-                truncated = await reap_truncation_outcome(exc, self._control_pool, agent_id)
-                if truncated is not None:
-                    # Truncated on purpose by the drain's reap: drop for the cold successor.
+                ended = await reap_truncation_outcome(exc, self._control_pool, agent_id)
+                if ended is None:
+                    ended = await force_termination_outcome(exc, self._control_pool, agent_id)
+                if ended is not None:
                     self.drop_agent(agent_id)
-                    logger.info(
-                        "hosted turn truncated by the update straggler reap",
-                        event="host_turn_truncated",
-                        agent_id=agent_id,
-                    )
-                    return truncated
+                    return ended
                 _emit_error_event(
                     ctx, agent_id, f"{type(exc).__name__}: {exc}", error_class=type(exc).__name__
                 )
