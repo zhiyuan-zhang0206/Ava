@@ -476,6 +476,36 @@ def test_finalize_rollout_incomplete_is_not_reported_as_aborted(
     assert "advanced" in err
 
 
+def test_finalize_rollout_names_the_retained_publication_when_the_commit_refused(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The managed-writer refusal is INCOMPLETE's third shape: the code landed and
+    every host converged, so the host banner would send the operator to the wrong
+    machine. The one command that fits is the retained journal's checked recovery."""
+    calls: list[tuple[str, list[str]]] = []
+    _rec.finalize_rollout(
+        [("a", "http://a:8106")],
+        _record_fan_out(calls),  # pyright: ignore[reportUnknownArgumentType]
+        10.0,
+        deploy_capability={"deploy_holder": "g", "deploy_acquired_at": "2026-08-25T00:00:00Z"},
+        outcome=_rec.RolloutOutcome.INCOMPLETE,
+        pin_advanced=True,
+        failing_step=(
+            "the managed-writer publication commit refused; the pending journal "
+            "remains for `ava cluster recover-pending`"
+        ),
+        publication_refused=True,
+    )
+    err = capsys.readouterr().err
+    assert "the managed-writer activation did not publish" in err
+    assert "some agent-runners did not" not in err
+    assert "a service on this host did not come up" not in err
+    assert "updater log" not in err, "no host is mid-transition; do not send anyone hunting one"
+    assert "releases the moment they reach the pin" not in err
+    assert "ava cluster recover-pending" in err
+    assert "do NOT re-run `ava cluster update` yet" in err
+
+
 def test_the_pin_line_does_not_promise_a_self_heal_to_a_still_paused_host(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

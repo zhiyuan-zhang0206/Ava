@@ -533,6 +533,11 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
     local_launch_failures: list[str] = []
     # The finalizer may compensate only after this rollout has entered Phase A.
     phase_a_started = False
+    # Whether the managed-writer publication commit refused and the durable pending
+    # journal was retained for checked recovery. It rides the finally so the
+    # aftermath names the one recovery command that fits, and the record reads
+    # INCOMPLETE -- not the CLEAN the pre-refusal outcome still carried.
+    publication_refused = False
 
     # ── Phase 0: pre-flight git fetch on every agent-runner ──────────────────
     # Every selected runner must confirm fetch. Missing acknowledgements abort
@@ -759,7 +764,12 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
                     "the managed-writer publication commit refused; the pending "
                     "journal remains for `ava cluster recover-pending`"
                 )
-                return commit_rc
+                # The gateway landed and the pin advanced, but the activation did
+                # not publish: the record and the aftermath must read INCOMPLETE,
+                # never the CLEAN this rollout still carried one step ago.
+                outcome, rc = RolloutOutcome.INCOMPLETE, commit_rc
+                publication_refused = True
+                return rc
         return rc
     finally:
         _finalize_orchestration(
@@ -773,6 +783,7 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
             failing_step=failing_step,
             recovered=recovered,
             local_launch_failures=local_launch_failures,
+            publication_refused=publication_refused,
             telemetry=telemetry,
             refresh_settings=refresh_data_plane_settings,
             finalize_rollout_runner=finalize_rollout,

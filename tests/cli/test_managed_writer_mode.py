@@ -515,13 +515,24 @@ def test_commit_step_never_runs_on_a_non_clean_outcome(monkeypatch: pytest.Monke
 
 
 def test_commit_refusal_fails_the_rollout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The refusal must reach the record face as INCOMPLETE + the retained-journal
+    flag: an rc-only assertion would let the record still claim CLEAN."""
     from cli.commands import update as _up
 
     _ready_guards(monkeypatch)
     _stub_orchestration_to_phase_b(monkeypatch)
     monkeypatch.setattr(_up, "_commit_managed_writer_publication", lambda: 1)  # pyright: ignore[reportUnknownArgumentType]
+    recorded: dict[str, object] = {}
+
+    def _capture(_hosts: object, _fan_out: object, _timeout: object, **kwargs: object) -> None:
+        recorded.update(kwargs)
+
+    monkeypatch.setattr(_up, "finalize_rollout", _capture)
 
     assert _run_inner() == 1
+    assert recorded["outcome"] is _up.RolloutOutcome.INCOMPLETE
+    assert "managed-writer publication commit refused" in str(recorded["failing_step"])
+    assert recorded["publication_refused"] is True
 
 
 def test_restart_only_rollout_skips_the_commit_step(monkeypatch: pytest.MonkeyPatch) -> None:
