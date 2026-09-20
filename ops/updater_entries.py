@@ -1,14 +1,19 @@
-"""The detached retained-image entry spawns: one unit's restricted hop.
+"""The detached retained-image entry spawns: one unit's restricted hop, and a
+normal-continuation step.
 
 Split out of `ops/cluster_deploy.py` at the file-size budget (the
-`ops/updater_reap.py` pattern) so the normal-continuation spawn (task #4129
-channel E) can land beside it: the deploy module sat fifteen lines under the
-800-line ceiling, and the hop spawn is the deploy family's only non-deploy
-trigger -- it pauses nothing, seeds no handoff, and refuses rather than acts
-while the coordinator's exact pre-stop abort (task #4129 C-4) still holds.
+`ops/updater_reap.py` pattern): the deploy module sat fifteen lines under the
+800-line ceiling when the normal-continuation spawn arrived (task #4129 channel
+E). The hop spawn is the deploy family's only non-deploy trigger -- it pauses
+nothing, seeds no handoff, and refuses rather than acts while the coordinator's
+exact pre-stop abort (task #4129 C-4) still holds -- and the
+normal-continuation steps share that discipline: the drive and the commit tail
+each re-derive every binding from the request bytes and never act on a live or
+unproven owner.
 
-`ops.cluster` re-exports `spawn_bootstrap_hop` from here for its existing
-importers, on the same eager re-export terms as its siblings.
+`ops.cluster` re-exports `spawn_bootstrap_hop` and `spawn_normal_continue` from
+here for its existing importers, on the same eager re-export terms as its
+siblings.
 """
 
 from __future__ import annotations
@@ -52,6 +57,39 @@ def spawn_bootstrap_hop(request_path: Path, *, artifact_digest: str) -> dict[str
     )
 
 
+# The two normal-continuation steps, mapped to the entry flag each runs.
+_NORMAL_CONTINUE_CLI_FLAGS = {"drive": "--normal-release", "commit": "--normal-commit"}
+
+
+def spawn_normal_continue(request_path: Path, *, step: str, artifact_digest: str) -> dict[str, str]:
+    """Trigger one normal-continuation step via a detached `ava-updater` session.
+
+    The restricted hop's sibling (task #4129 channel E): `step="drive"` runs the
+    retained candidate image's `--normal-release` entry -- the unit's publication
+    drive -- and `step="commit"` its `--normal-commit` twin, the post-publication
+    commit tail. Every launch mechanic -- the live-session refusal pair, the log
+    allocation, the POSIX-only spelling -- is shared with `spawn_bootstrap_hop`
+    through `_spawn_updater_entry` below.
+
+    Returns {"session": "ava-updater", "log": <path>}.
+
+    Raises:
+        ValueError: `step` is neither "drive" nor "commit".
+        ClusterUpdateInProgress: an orchestration session is already live.
+        OrchestrationSpawnFailed: the session backend declined to start.
+        ReleaseRejectedError: the announced digest names no retained image on
+            this unit.
+    """
+    if step not in _NORMAL_CONTINUE_CLI_FLAGS:
+        raise ValueError(f"unknown normal-continuation step: {step!r}")
+    return _spawn_updater_entry(
+        request_path,
+        cli_flag=_NORMAL_CONTINUE_CLI_FLAGS[step],
+        entry_label="continuation",
+        artifact_digest=artifact_digest,
+    )
+
+
 def _spawn_updater_entry(
     request_path: Path,
     *,
@@ -61,8 +99,8 @@ def _spawn_updater_entry(
 ) -> dict[str, str]:
     """Spawn a detached `ava-updater` session that runs one retained-image entry.
 
-    The shared body of the entry triggers (`spawn_bootstrap_hop`; the
-    normal-continuation spawn lands beside it): the session runs the *retained
+    The shared body of the entry triggers (`spawn_bootstrap_hop`,
+    `spawn_normal_continue`): the session runs the *retained
     candidate image's* interpreter (`unit_local.candidate_interpreter` --
     strictly resolved under this unit's `releases/`) on
     `-m cli.commands._update_agent_runner <cli_flag> <request>`. The announced

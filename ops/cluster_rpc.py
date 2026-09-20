@@ -87,11 +87,19 @@ _RETRY_MAX_DELAY_S = 4.0
 
 # Ops that retain transport dedupe. The legacy spawn-launch inserts a prompt;
 # v2 only publishes a repeatable wake but still replays one recorded outcome
-# within an attempt. Updates and lifecycle ops have non-repeatable effects.
+# within an attempt. Updates — cluster_update, cluster_bootstrap_hop or
+# cluster_normal_continue — and lifecycle ops have non-repeatable effects.
 # These are retried only under an idempotency key generated once per dispatch call unless
 # the caller supplies one; retries replay the first stored outcome.
 _NON_IDEMPOTENT_KINDS = frozenset(
-    {"spawn-launch", "spawn-launch-v2", "cluster_update", "cluster_bootstrap_hop", "lifecycle"}
+    {
+        "spawn-launch",
+        "spawn-launch-v2",
+        "cluster_update",
+        "cluster_bootstrap_hop",
+        "cluster_normal_continue",
+        "lifecycle",
+    }
 )
 # A stable cross-dispatch key is only safe for an agent launch: a caller
 # repeating a lifecycle reconciliation or a failed update needs the runner to

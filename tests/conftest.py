@@ -1559,7 +1559,13 @@ def _guard_cluster_spawn(
     import ops.cluster
 
     if not request.node.get_closest_marker("real_cluster_spawn"):
-        for name in ("spawn_update", "spawn_rollout", "spawn_restart", "spawn_bootstrap_hop"):
+        for name in (
+            "spawn_update",
+            "spawn_rollout",
+            "spawn_restart",
+            "spawn_bootstrap_hop",
+            "spawn_normal_continue",
+        ):
             _stub_everywhere(monkeypatch, ops.cluster, name, _refuse_spawn(name))
         # The one guarded entry point that DESTROYS rather than spawns: it runs on
         # every agent-runner watchdog round, so any test that drives the default

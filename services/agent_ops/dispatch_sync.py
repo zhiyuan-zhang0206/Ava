@@ -21,11 +21,13 @@ from ops import (
     ops_cluster,
     ops_config,
     ops_inventory,
+    ops_normal_continue,
     ops_prepare_dispatch,
     ops_prepare_facts,
     ops_uploads,
 )
 from ops.rpc_bootstrap_hop import BootstrapHopPayload, BootstrapRecoveryReadPayload
+from ops.rpc_normal_continue import NormalContinuePayload
 from ops.rpc_prepare_dispatch import PrepareDispatchPayload
 from ops.rpc_prepare_facts import PrepareFactsPayload
 from ops.rpc_schemas import (
@@ -150,6 +152,15 @@ def dispatch_sync(
             # nothing, stops nothing.
             rr = BootstrapRecoveryReadPayload.model_validate(payload)
             return "completed", ops_bootstrap_hop.cluster_bootstrap_recovery_read_op(rr).model_dump(
+                mode="json"
+            )
+        case "cluster_normal_continue":
+            # Channel E: the request path crosses as JSON text; the handler
+            # re-checks it as canonical private unit state and starts the
+            # detached continuation session -- the payload is a request, and
+            # the child re-derives every binding from the request bytes itself.
+            nc = NormalContinuePayload.model_validate_json(json.dumps(payload))
+            return "completed", ops_normal_continue.cluster_normal_continue_op(nc).model_dump(
                 mode="json"
             )
         case "cluster_resume":

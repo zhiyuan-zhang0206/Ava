@@ -169,6 +169,9 @@ from ops.update_check import (
 from ops.updater_entries import (
     spawn_bootstrap_hop as spawn_bootstrap_hop,
 )
+from ops.updater_entries import (
+    spawn_normal_continue as spawn_normal_continue,
+)
 from ops.updater_reap import (
     _UPDATER_STALL_TIMEOUT_S as _UPDATER_STALL_TIMEOUT_S,
 )
@@ -199,6 +202,7 @@ __all__ = [
     "pause_local_cluster",
     "reap_stalled_updater_if_hung",
     "spawn_bootstrap_hop",
+    "spawn_normal_continue",
     "spawn_restart",
     "spawn_rollout",
     "spawn_update",

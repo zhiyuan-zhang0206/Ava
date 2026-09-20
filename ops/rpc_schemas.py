@@ -371,9 +371,8 @@ class SessionInfo(BaseModel):
 # request envelope carries one OpKind + its payload; the response envelope
 # carries the op outcome + the per-kind result (or an OpFailure on failure).
 
-# The op vocabulary — the discriminator the daemon's `_dispatch` switches on.
-# Lives here (not cluster_rpc.py) so it sits beside the wire models it keys;
-# `ops.cluster_rpc` re-exports it for its existing importers.
+# The op vocabulary — the discriminator the daemon's `_dispatch` switches on;
+# lives here (not cluster_rpc.py) beside its models; `ops.cluster_rpc` re-exports it.
 OpKind = Literal[
     "spawn-launch",
     "spawn-launch-v2",
@@ -392,6 +391,7 @@ OpKind = Literal[
     "cluster_prepare_dispatch",
     "cluster_bootstrap_hop",
     "cluster_bootstrap_recovery_read",
+    "cluster_normal_continue",
     "shell_probe",
     "shell_kill",
     "agent_skill_view",
