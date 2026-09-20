@@ -109,11 +109,15 @@ def test_unparsable_file_is_backed_up_and_raises(tmp_path: Path, break_settings:
     assert list(home.rglob("*.bak-*"))
 
 
+def _frozen_strftime(_format: str) -> str:
+    return "20260920-204500"
+
+
 def test_same_second_concurrent_presets_do_not_collide(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """N1 regression (Ava #3242 review): unique tmp/backup names, frozen clock, two threads."""
-    monkeypatch.setattr(spawn_claude.time, "strftime", lambda _fmt: "20260920-204500")
+    monkeypatch.setattr(spawn_claude.time, "strftime", _frozen_strftime)
     failures: list[str] = []
 
     def worker(home: Path, barrier: threading.Barrier) -> None:
