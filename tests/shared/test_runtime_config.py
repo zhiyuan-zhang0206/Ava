@@ -159,6 +159,23 @@ def test_alerts_webhook_token_migration_renames_key(fake_ava_home: Path) -> None
     assert "KEEP=1" in text
 
 
+def test_alerts_webhook_token_migration_canonical_wins_when_both_present(
+    fake_ava_home: Path,
+) -> None:
+    """Both names present -> the canonical name is authoritative, legacy dropped."""
+    _seed_env(
+        fake_ava_home,
+        {"AVA_OPS_ALERTS_WEBHOOK_TOKEN": "tok-old", "AVA_ALERTS_WEBHOOK_TOKEN": "tok-new"},
+    )
+    changed = rt.migrate_alerts_webhook_token_env_key(fake_ava_home / ".env")
+    assert changed == [
+        "AVA_OPS_ALERTS_WEBHOOK_TOKEN dropped (AVA_ALERTS_WEBHOOK_TOKEN authoritative)"
+    ]
+    text = (fake_ava_home / ".env").read_text()
+    assert "AVA_ALERTS_WEBHOOK_TOKEN=tok-new" in text
+    assert "AVA_OPS_ALERTS_WEBHOOK_TOKEN" not in text
+
+
 def test_alerts_webhook_token_migration_idempotent_and_absent(fake_ava_home: Path) -> None:
     _seed_env(fake_ava_home, {"AVA_ALERTS_WEBHOOK_TOKEN": "tok-123"})
     assert rt.migrate_alerts_webhook_token_env_key(fake_ava_home / ".env") == []
