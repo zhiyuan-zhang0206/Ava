@@ -49,11 +49,16 @@ def _newest_artifact() -> Path:
     return artifacts[-1][1]
 
 
-_RESTORE_ROLES = ("ava_main", "ava_runner", "grafana_ro")
+_RESTORE_ROLES = ("ava_main", "ava_runner", "grafana_ro", "zzy")
 """Roles a managed dump's OWNER/GRANT statements reference. initdb only
 creates the `ava` superuser; without these pg_restore fails on
 `role "..." does not exist` (2026-08-27 prod drill finding). Attributes match
-the live cluster's pg_roles: plain LOGIN roles, no password (trust auth)."""
+the live cluster's pg_roles: plain LOGIN roles, no password (trust auth).
+`zzy` is the live admin role ad-hoc artifacts are created under (the
+`model_sweep_backup_*` sweep convention); the dump re-owns such objects to it,
+so the scratch cluster must carry the role too (2026-09-21 prod drill finding).
+It is created as a plain role: a restore needs it only to exist for the OWNER
+statements."""
 
 
 def _ensure_restore_roles(db_url: str) -> None:

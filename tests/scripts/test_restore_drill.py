@@ -65,8 +65,10 @@ def test_verification_reports_schema_counts_and_readable_conversation(
 
 def _grant_prod_roles(db_conn: psycopg.Connection) -> None:
     """Reproduce the prod role set in the test DB so the dump carries the
-    GRANT/OWNER statements that broke the 2026-08-27 prod drill (the throwaway
-    cluster only has `ava`, so pg_restore hit `role does not exist`)."""
+    GRANT/OWNER statements that broke production drills (the throwaway cluster
+    only has `ava`, so pg_restore hit `role does not exist`): the 2026-08-27
+    missing roles, plus the 2026-09-21 admin-owned-object variant — a
+    `zzy`-owned ad-hoc table, as the sweep backup convention leaves behind."""
     from psycopg import sql as pgsql
 
     with db_conn.cursor() as cur:
@@ -79,6 +81,12 @@ def _grant_prod_roles(db_conn: psycopg.Connection) -> None:
         cur.execute(
             pgsql.SQL("ALTER TABLE agents OWNER TO {}").format(pgsql.Identifier("ava_main"))
         )
+        # The 2026-09-21 variant: an ad-hoc table owned by the admin role
+        # (the model_sweep_backup_* convention leaves one in the app database).
+        cur.execute("CREATE TABLE IF NOT EXISTS adhoc_admin_owned (id int)")
+        cur.execute(
+            pgsql.SQL("ALTER TABLE adhoc_admin_owned OWNER TO {}").format(pgsql.Identifier("zzy"))
+        )
     db_conn.commit()
 
 
@@ -89,9 +97,9 @@ def test_run_drill_restores_an_encrypted_artifact_into_throwaway_postgres(
     """The command path decrypts, restores, and proves a checkpoint
     reader can consume the restored conversation without touching the source DB.
 
-    The test DB carries the prod role set (ava_main / ava_runner / grafana_ro
-    with grants) so the dump exercises the same restore path that failed in
-    production on 2026-08-27."""
+    The test DB carries the prod role set (ava_main / ava_runner / grafana_ro /
+    zzy with grants, plus a zzy-owned ad-hoc table) so the dump exercises the
+    same restore path that failed in production on 2026-08-27 and 2026-09-21."""
     _grant_prod_roles(db_conn)
     with db_conn.cursor() as cur:
         cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
