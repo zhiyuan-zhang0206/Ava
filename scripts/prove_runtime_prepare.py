@@ -62,6 +62,7 @@ def prove_checkout_absent(  # noqa: PLR0915 — one guarded checkout-retirement 
     bootstrap = _copy_proof(root, checkout, "prove_ops_bootstrap.py")
     updater = _copy_proof(root, checkout, "prove_updater_bootstrap.py")
     writer_chain = _copy_proof(root, checkout, "prove_managed_writer_chain.py")
+    normal = _copy_proof(root, checkout, "prove_normal_release.py")
     alias = root / "runtime-entry-alias"
     alias.symlink_to(release.root / "venv", target_is_directory=True)
     if (
@@ -250,6 +251,29 @@ def prove_checkout_absent(  # noqa: PLR0915 — one guarded checkout-retirement 
                     # suite watchdog must not truncate their final evidence write;
                     # it does not extend any operation's authority.
                     timeout=1800,
+                )
+            if "AVA_RUNTIME_PROOF_PG" in os.environ:
+                # Linux-only: gated spawns require /proc process identity.
+                subprocess.run(  # noqa: S603 — retained image, isolated CI database, private CI home.
+                    [
+                        str(release.interpreter),
+                        "-I",
+                        "-B",
+                        str(normal),
+                        release.digest,
+                        release.manifest_digest,
+                        schema,
+                    ],
+                    cwd=root,
+                    env=migration_env,
+                    check=True,
+                    # Eighteen isolated cases (success + INJ-1..14, where INJ-14
+                    # covers both clear crash points) each re-verify the image
+                    # twice; round-3 attempt 1 measured ~2 min per case, so the
+                    # suite runs ~40 min on a CI runner -- the watchdog stays
+                    # above the full replay without extending any operation's
+                    # authority.
+                    timeout=3600,
                 )
             result = subprocess.run(  # noqa: S603 — CI-only native PG at the prepared image boundary.
                 [

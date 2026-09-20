@@ -31,16 +31,22 @@ on:
       - 'cli/commands/_release_inventory.py'
       - 'scripts/prepare_plugin_fixture.py'
       - 'scripts/prove_ops_bootstrap.py'
+      - 'scripts/prove_normal_release.py'
       - 'scripts/prove_updater_bootstrap.py'
       - 'cli/commands/_update_bootstrap.py'
       - 'cli/commands/_update_agent_runner.py'
       - 'shared/updater_handoff.py'
       - 'services/agent_ops/bootstrap.py'
       - 'services/agent_ops/daemon.py'
-      - 'shared/managed_writer_observation.py'
-      - 'shared/managed_writer_barrier.py'
-      - 'shared/managed_writer_publication.py'
+      - 'cli/commands/_update_normal_release.py'
+      - 'cli/commands/_release_services.py'
+      - 'cli/commands/_release_selector.py'
+      - 'shared/spawn_receipt.py'
+      - 'shared/updater_recovery.py'
       - 'shared/managed_writer_activation.py'
+      - 'shared/managed_writer_publication.py'
+      - 'shared/managed_writer_barrier.py'
+      - 'shared/managed_writer_observation.py'
       - 'shared/managed_writer_closure.py'
       - 'shared/native_job_observation.py'
       - 'cli/commands/_update_publication.py'
@@ -61,7 +67,9 @@ jobs:
       matrix:
         os: [ubuntu-24.04, macos-14]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    # The ubuntu leg runs the offline prepare plus the full proof suites
+    # (~75 min on round-3 attempt 1's shape); 45 clipped mid-suite.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4
@@ -125,7 +133,7 @@ jobs:
         run: uv run --locked --no-dev python scripts/prepare_otel_release.py "$RUNNER_TEMP/prepare/otel-input"
       - name: Type-check retained collector integration
         shell: bash
-        run: uv run --locked pyright scripts/prepare_otel_release.py scripts/prove_runtime_otel.py scripts/prove_runtime_plugins.py scripts/prove_release_inventory.py scripts/prepare_plugin_fixture.py scripts/prove_updater_bootstrap.py shared/runtime_plugins.py shared/runtime_prepare.py shared/runtime_interpreter.py shared/paths.py shared/updater_handoff.py cli/commands/_otel_collector.py cli/commands/_release_inventory.py cli/commands/_update_bootstrap.py cli/commands/_update_agent_runner.py
+        run: uv run --locked pyright scripts/prepare_otel_release.py scripts/prove_runtime_otel.py scripts/prove_runtime_plugins.py scripts/prove_release_inventory.py scripts/prepare_plugin_fixture.py scripts/prove_updater_bootstrap.py scripts/prove_normal_release.py shared/runtime_plugins.py shared/runtime_prepare.py shared/runtime_interpreter.py shared/paths.py shared/updater_handoff.py cli/commands/_otel_collector.py cli/commands/_release_inventory.py cli/commands/_update_bootstrap.py cli/commands/_update_agent_runner.py
       - name: Type-check publication input reader
         run: uv run --locked pyright shared/runtime_publication_input.py shared/verified_file.py scripts/prove_runtime_publication_input.py
       - name: Type-check managed-writer activation chain proof
@@ -145,6 +153,7 @@ jobs:
           if [[ "$RUNNER_OS" == Linux ]]; then test -s "$RUNNER_TEMP/prepare/inventory-proof.json"; fi
           if [[ "$RUNNER_OS" == Linux ]]; then test -s "$RUNNER_TEMP/prepare/updater-bootstrap-proof.json"; fi
           if [[ "$RUNNER_OS" == Linux ]]; then test -s "$RUNNER_TEMP/prepare/managed-writer-chain-proof.json"; fi
+          if [[ "$RUNNER_OS" == Linux ]]; then test -s "$RUNNER_TEMP/prepare/normal-release-proof.json"; fi
       - name: Updater bootstrap regression cases
         if: runner.os == 'Linux'
         shell: bash
@@ -169,12 +178,22 @@ jobs:
             ${{ runner.temp }}/prepare/ops-bootstrap-proof.json
             ${{ runner.temp }}/prepare/updater-bootstrap-proof.json
             ${{ runner.temp }}/prepare/managed-writer-chain-proof.json
+            ${{ runner.temp }}/prepare/normal-release-proof.json
           if-no-files-found: error
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always() && runner.os == 'Linux'
         with:
           name: updater-hop-observations-${{ github.event.pull_request.head.sha }}
           path: ${{ runner.temp }}/prepare/hop-observation-*.json
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always() && runner.os == 'Linux'
+        with:
+          name: normal-release-observations-${{ github.event.pull_request.head.sha }}
+          path: |
+            ${{ runner.temp }}/prepare/normal-release-observation-*.json
+            ${{ runner.temp }}/prepare/normal-release-cases/**
+            ${{ runner.temp }}/prepare/unit/logs/**
           if-no-files-found: ignore
       - name: Stop isolated native PG
         if: always() && runner.os == 'Linux'
