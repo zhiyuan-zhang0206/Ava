@@ -366,7 +366,7 @@ def run_flow(
     events.write({"event": "publication-committed", "publication_id": str(publication_id)})
     normal.commit_normal_release_after_publication(plan, generation)
     events.write({"event": "unit-committed"})
-    if mode in {"settle", "inj-13", "inj-14"}:
+    if mode in {"settle", "inj-13", "inj-14", "inj-14b"}:
         cleared = updater_handoff.clear(generation)
         events.write({"event": "cleared", "ok": cleared})
         require(cleared, "clear refused on a committed recovery")
@@ -580,7 +580,7 @@ def apply_injection(  # noqa: PLR0915 -- one flat dispatch per named injection w
 
         stack.enter_context(patch.object(updater_handoff, "clear", clear_crash))
         return
-    if mode == "inj-14":
+    if mode in {"inj-14", "inj-14b"}:
         real_unlink = Path.unlink
         armed = {"once": True}
 
@@ -588,8 +588,16 @@ def apply_injection(  # noqa: PLR0915 -- one flat dispatch per named injection w
             self: Path,
             missing_ok: bool = False,  # noqa: FBT001, FBT002 -- mirrors Path.unlink's signature.
         ) -> None:
+            target = self == updater_handoff.bootstrap_state_path()
+            if mode == "inj-14b" and armed["once"] and target:
+                # Crash after the clear-time GC, before the first unlink: the
+                # attempt directory is gone while both state files remain.
+                armed["once"] = False
+                fire()
+                raise SystemExit(77)
             real_unlink(self, missing_ok=missing_ok)
-            if armed["once"] and self == updater_handoff.bootstrap_state_path():
+            if mode == "inj-14" and armed["once"] and target:
+                # Crash between the two unlinks: the bootstrap envelope is gone.
                 armed["once"] = False
                 fire()
                 raise SystemExit(77)
@@ -781,18 +789,28 @@ def check_pass1(name: str, case: dict[str, Any], meta: dict[str, Any], home: Pat
             observe_process(births[-1].expected_process()) == "alive",
             f"[{name}] W2 child is not alive",
         )
-    if name in {"inj-13", "inj-14"}:
+    if name in {"inj-13", "inj-14", "inj-14b"}:
         require(updater_handoff.state_path().exists(), f"[{name}] handoff vanished before clear")
-        if name == "inj-14":
-            require(
-                not updater_handoff.bootstrap_state_path().exists(),
-                f"[{name}] mid-clear crash did not remove the bootstrap envelope first",
-            )
-        else:
+        if name == "inj-13":
             require(
                 updater_handoff.bootstrap_state_path().exists(),
                 f"[{name}] bootstrap envelope missing before clear",
             )
+        else:
+            require(
+                not spawn_receipt.spawn_attempt_dir(home, str(meta["generation"])).exists(),
+                f"[{name}] clear-time GC did not retire the attempt directory",
+            )
+            if name == "inj-14":
+                require(
+                    not updater_handoff.bootstrap_state_path().exists(),
+                    f"[{name}] mid-clear crash did not remove the bootstrap envelope first",
+                )
+            else:
+                require(
+                    updater_handoff.bootstrap_state_path().exists(),
+                    f"[{name}] the GC-to-unlink crash was not the injected point",
+                )
     if case.get("signals_min"):
         check_signals(name, meta, events, minimum=int(case["signals_min"]))
 
@@ -822,6 +840,12 @@ def check_pass2(name: str, case: dict[str, Any], meta: dict[str, Any]) -> None:
         not updater_handoff.state_path().exists()
         and not updater_handoff.bootstrap_state_path().exists(),
         f"[{name}] clear did not retire the handoff pair",
+    )
+    require(
+        not spawn_receipt.spawn_attempt_dir(
+            Path(str(meta["home"])), str(meta["generation"])
+        ).exists(),
+        f"[{name}] settled clear did not GC the attempt directory",
     )
 
 
@@ -1334,6 +1358,21 @@ CASES: tuple[dict[str, Any], ...] = (
     {
         "case": "inj-14",
         "mode": "inj-14",
+        "services": 1,
+        "writes1": [
+            "waiting",
+            "selected",
+            "bootstrap_stopped",
+            "starting",
+            "observed",
+            "committed",
+        ],
+        "writes2": [],
+        "stage1": "committed",
+    },
+    {
+        "case": "inj-14b",
+        "mode": "inj-14b",
         "services": 1,
         "writes1": [
             "waiting",

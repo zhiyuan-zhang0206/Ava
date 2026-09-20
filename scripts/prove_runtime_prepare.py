@@ -267,9 +267,10 @@ def prove_checkout_absent(  # noqa: PLR0915 — one guarded checkout-retirement 
                     cwd=root,
                     env=migration_env,
                     check=True,
-                    # Seventeen isolated cases (success + INJ-1..14) each re-verify
-                    # the image twice; the watchdog stays above their worst-case
-                    # replay without extending any operation's authority.
+                    # Eighteen isolated cases (success + INJ-1..14, where INJ-14
+                    # covers both clear crash points) each re-verify the image
+                    # twice; the watchdog stays above their worst-case replay
+                    # without extending any operation's authority.
                     timeout=1500,
                 )
             result = subprocess.run(  # noqa: S603 — CI-only native PG at the prepared image boundary.
