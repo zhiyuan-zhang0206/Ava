@@ -17,6 +17,7 @@ from typing import Any
 from psycopg_pool import ConnectionPool
 
 from ops import (
+    ops_bootstrap_hop,
     ops_cluster,
     ops_config,
     ops_inventory,
@@ -24,6 +25,7 @@ from ops import (
     ops_prepare_facts,
     ops_uploads,
 )
+from ops.rpc_bootstrap_hop import BootstrapHopPayload
 from ops.rpc_prepare_dispatch import PrepareDispatchPayload
 from ops.rpc_prepare_facts import PrepareFactsPayload
 from ops.rpc_schemas import (
@@ -130,6 +132,15 @@ def dispatch_sync(
             # answers with the unit's acknowledgement (a refusal included).
             pd = PrepareDispatchPayload.model_validate_json(json.dumps(payload))
             return "completed", ops_prepare_dispatch.cluster_prepare_dispatch_op(pd).model_dump(
+                mode="json"
+            )
+        case "cluster_bootstrap_hop":
+            # Channel C: the request path crosses as JSON text; the handler
+            # re-checks it as canonical private unit state and starts the
+            # detached hop session -- the payload is a request, and the child
+            # re-verifies every binding from the request bytes itself.
+            bh = BootstrapHopPayload.model_validate_json(json.dumps(payload))
+            return "completed", ops_bootstrap_hop.cluster_bootstrap_hop_op(bh).model_dump(
                 mode="json"
             )
         case "cluster_resume":

@@ -84,10 +84,13 @@ _RETRY_MAX_DELAY_S = 4.0
 
 # Op kinds whose effect is NOT repeatable — re-executing a lost op duplicates
 # the effect (a second launch for spawn-launch, a second ava-updater session for
-# cluster_update, a second terminate/restart inbound for lifecycle). These are
+# cluster_update or cluster_bootstrap_hop, a second terminate/restart inbound for
+# lifecycle). These are
 # retried only under an idempotency key generated once per dispatch call unless
 # the caller supplies one; retries replay the first stored outcome.
-_NON_IDEMPOTENT_KINDS = frozenset({"spawn-launch", "cluster_update", "lifecycle"})
+_NON_IDEMPOTENT_KINDS = frozenset(
+    {"spawn-launch", "cluster_update", "cluster_bootstrap_hop", "lifecycle"}
+)
 # A stable cross-dispatch key is only safe for an agent launch: a caller
 # repeating a lifecycle reconciliation or a failed update needs the runner to
 # execute again rather than replay a stale failed outcome.

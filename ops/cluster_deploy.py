@@ -1,7 +1,7 @@
 """Trigger a whole-cluster update / rollout / restart, and refuse a second one.
 
 The top of the `ops/cluster*` family: the read-only "is there anything to roll
-out" preflight, the three detached-session triggers, the mutual exclusion that
+out" preflight, the four detached-session triggers, the mutual exclusion that
 keeps two of them from fighting over one host's services, and the reaper that
 cuts a hung updater session loose so it stops blocking every later attempt —
 asked both by the next attempt and, because a hung session refuses that next
@@ -67,7 +67,7 @@ import shared.migrations
 import shared.paths
 import shared.ui_update_state
 import shared.updater_handoff
-from ops import cluster_pause, cluster_session, deploy_spawn
+from ops import cluster_pause, cluster_session, deploy_spawn, unit_local
 from ops._update_shell import SOURCE_SWITCH_OFF, _restart_recovery_cmd
 from ops.cluster_session import (
     _CLUSTER_RESTART_SERVICE,
@@ -502,6 +502,75 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
                 cluster_pause.unpause_local_cluster()
             raise
     _log.info("[cluster] spawned updater session %s log=%s", updater_sess, log_path)
+    return {"session": updater_sess, "log": str(log_path)}
+
+
+def spawn_bootstrap_hop(request_path: Path, *, artifact_digest: str) -> dict[str, str]:
+    """Trigger a restricted bootstrap hop via a detached `ava-updater` session.
+
+    The fourth detached-session trigger, and the one that is not a source
+    update: the session runs the *retained candidate image's* interpreter on
+    `-m cli.commands._update_agent_runner --bootstrap-hop <request>`. The
+    announced digest selects an image (strictly resolved under this unit's
+    `releases/`), never authorizes one -- the entry re-derives every binding
+    from the request bytes, and its own compare-and-set
+    (`begin_bootstrap_after_dead_owner`) refuses a live or unproven handoff
+    owner. Unlike `spawn_update`, nothing is paused and no handoff is seeded:
+    the coordinator's exact pre-stop abort (task #4129 C-4) relies on "no unit
+    has acted" staying true until the child's first effect.
+
+    Refuses when any orchestration session on this host is already alive (the
+    same first line as `spawn_update`), rechecked inside the lifecycle mutex
+    before the spawn.
+
+    POSIX-only by construction: the ops handler refuses any non-Linux platform
+    before calling here (the restricted hop has no native proof there), so the
+    `native_cmd` slot is unreachable -- it carries the POSIX spelling only to
+    satisfy the session backend's two-flavor signature.
+
+    Returns {"session": "ava-updater", "log": <path>}.
+
+    Raises:
+        ClusterUpdateInProgress: an orchestration session (`ava-updater` /
+            rollout / cluster-restart) is already live on this host.
+        OrchestrationSpawnFailed: the session backend declined to start the
+            hop session.
+    """
+    deploy_spawn.assert_prod_home_has_its_own_checkout()
+    updater_sess = shared.cluster.session_name(_UPDATER_SERVICE)
+    if cluster_session._has_orchestration_session(updater_sess):
+        raise ClusterUpdateInProgress(
+            f"orchestration session {updater_sess!r} already exists; an update "
+            f"or a hop is in flight. Wait for it to finish — a hung updater is "
+            f"force-reaped automatically — or terminate the pid named in "
+            f"$AVA_HOME/run/sessions/{updater_sess}.json if it is hung."
+        )
+    log_path = _new_update_log("updater")
+    home = settings.general.ava_home
+    interpreter = unit_local.candidate_interpreter(home, artifact_digest)
+    inner_cmd = (
+        f"{{ export AVA_CLI_LOG_NAME=updater; "
+        f"if cd {shlex.quote(str(home))}; "
+        f"then {shlex.quote(str(interpreter))} -I -B -m cli.commands._update_agent_runner "
+        f"--bootstrap-hop {shlex.quote(str(request_path))}; rc=$?; "
+        f"else rc=$?; echo '[updater] cannot enter the unit home; nothing to hop'; fi; "
+        f'echo "[session-exit] rc=$rc"; }} '
+        f"2>&1 | tee -a {shlex.quote(str(log_path))}"
+    )
+    # Bracket the spawn so a stall inside it is attributable from the log alone
+    # (the 2026-08-12 shape; the same pair `spawn_update` writes).
+    _log.info("[cluster] spawning hop session %s (log=%s)", updater_sess, log_path)
+    with shared.ui_update_state.lifecycle_lock():
+        live_session = cluster_session.live_orchestration_session()
+        if live_session is not None:
+            raise ClusterUpdateInProgress(
+                f"orchestration session {live_session!r} already exists; "
+                f"an update or a hop is in flight"
+            )
+        cluster_session._spawn_detached_session(
+            updater_sess, shell_cmd=inner_cmd, native_cmd=inner_cmd
+        )
+    _log.info("[cluster] spawned hop session %s log=%s", updater_sess, log_path)
     return {"session": updater_sess, "log": str(log_path)}
 
 

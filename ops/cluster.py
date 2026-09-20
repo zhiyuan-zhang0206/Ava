@@ -70,6 +70,9 @@ from ops.cluster_deploy import (
     _new_update_log as _new_update_log,
 )
 from ops.cluster_deploy import (
+    spawn_bootstrap_hop as spawn_bootstrap_hop,
+)
+from ops.cluster_deploy import (
     spawn_restart as spawn_restart,
 )
 from ops.cluster_deploy import (
@@ -192,6 +195,7 @@ __all__ = [
     "local_resume_refusal",
     "pause_local_cluster",
     "reap_stalled_updater_if_hung",
+    "spawn_bootstrap_hop",
     "spawn_restart",
     "spawn_rollout",
     "spawn_update",
