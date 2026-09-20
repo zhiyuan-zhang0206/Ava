@@ -12,6 +12,13 @@ publication seats (`cli.commands._update_publication`) on the coordinator (task
   dispatch) is not connected yet (task #4129), so the step refuses explicitly
   today rather than let an `active` rollout stop the fleet without its journal.
   `off` / `blocked` skip it untouched.
+- `_collect_managed_writer_publication` (E2-c) -- the post-Phase-B, pre-commit
+  collection step: under an `active` decision the completed units' post-stop
+  facts are gathered across the fleet and adopted into the pending journal
+  before P5 publishes. The gathering channel (the collector) is not connected
+  yet (task #4129), so the step refuses explicitly today rather than let an
+  `active` rollout publish without its collection. `off` / `blocked` skip it
+  untouched.
 - `_commit_managed_writer_publication` (E2-a) -- the post-Phase-B step: under an
   `active` decision, publish the completed pending publication through the P5
   commit seat. `off` / `blocked` skip it untouched, so the pre-wiring rollout
@@ -20,8 +27,12 @@ publication seats (`cli.commands._update_publication`) on the coordinator (task
   A set that cannot be published refuses fail-closed, leaving the pending
   journal for checked recovery (`ava cluster recover-pending`).
 
-The remaining call position (E2-c collect+adopt) lands here in turn; until it
-does, its seat stays unwired, and the inertness pin
+All three call positions are wired (begin E2-b, collect E2-c, commit E2-a).
+Until the dispatch program (task #4129) connects the prepared-plan and
+collection channels, the begin and collect steps refuse explicitly under an
+`active` decision -- the commit seat is imported and called, but only a rollout
+whose begin and collect succeeded can reach it, so no half-open activation
+window exists in code. The inertness pin
 (`tests/cli/test_update_publication.py::test_the_seat_has_no_unnamed_production_callsite`)
 names this module as a conscious production exception beside the enable point.
 
@@ -70,6 +81,46 @@ def _begin_managed_writer_publication() -> int:
         "\n✗ managed-writer begin refused: the all-unit prepared plan "
         "channel (prepared dispatch, task #4129) is not connected yet, so the "
         "publication cannot be journaled; the rollout stops before any effect.\n"
+        "  disable the managed-writer switch or wait for the channel",
+        file=sys.stderr,
+    )
+    return 1
+
+
+def _collect_managed_writer_publication() -> int:
+    """Adopt the completed units' post-stop facts (P2 coordinator step).
+
+    The rollout's collection position of the managed-writer chain (task #4128,
+    E2-c), reached after Phase B converged every unit and before the P5 commit
+    publishes: under an `active` decision the units' post-stop facts -- the
+    observed writer closure and the platform final re-read after the candidate
+    is ready, gathered across the fleet -- are adopted into the durable pending
+    journal. `off` / `blocked` leave the seat untouched, and a call with no
+    recorded decision skips with the same visible beacon as the other steps.
+
+    The gathering channel (the collector) is the dispatch program's to provide
+    (task #4129), and that channel is not connected yet. Until it is, the step
+    refuses explicitly instead of degrading: an `active` rollout must not
+    proceed to publish with no collection adopted (fail-closed). Returns the
+    step's exit code: 0 for a clean skip, 1 for the refusal.
+    """
+    from cli.commands._managed_writer_mode import managed_writer_mode
+
+    mode = managed_writer_mode()
+    if mode is None:
+        print(
+            "  \u00b7 managed-writer collect: no mode decision recorded in this "
+            "process; skipping the position",
+            file=sys.stderr,
+        )
+        return 0
+    if mode.state != "active":
+        return 0
+    print(
+        "\n\u2717 managed-writer collect refused: the per-unit facts channel "
+        "(collector gathering, task #4129) is not connected yet, so the "
+        "completed units' facts cannot be adopted and the publication cannot "
+        "proceed.\n"
         "  disable the managed-writer switch or wait for the channel",
         file=sys.stderr,
     )
