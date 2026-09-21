@@ -411,17 +411,46 @@ def _print_settings_load_failure(e: ValidationError) -> int:
     return 1
 
 
+# Where the recorded launcher profile lives; shared/dotenv_boot.py reads the
+# same key back (`LAUNCHER_PROFILE_ENV_KEY`). It stays a literal here:
+# importing shared.dotenv_boot at CLI entry is not safe — it resolves the
+# process home at import (resolve_ava_home raises for an installed wheel
+# without an explicit absolute AVA_HOME, and on an env/checkout home
+# contradiction), while `ava enroll` must run exactly on hosts where those
+# gates cannot hold yet.
+_LAUNCHER_PROFILE_ENV_KEY = "AVA_LAUNCHER_PROFILE"
+
+
+def _normalize_process_profile() -> None:
+    """Pop the launcher's process profile, recording it for the boot pass.
+
+    The CLI is a settings-full process and must never inherit a launcher-set
+    process profile: with no marker, profiles.py constructs every domain as
+    before. Importing shared.config.profiles initializes shared.config first,
+    so that constant cannot be used before this cleanup without constructing
+    Settings. `ava enroll` bootstraps a fresh agent-runner that has no full
+    config yet, so it must run BEFORE any cli.commands import (handlers defer
+    that import, but parser building doesn't need it either — argparse builds
+    fine without Settings()). It lives in a settings-free module that does not
+    import shared.config. (Host provisioning is `scripts/install.sh`, not a
+    CLI verb.)
+
+    The popped value is recorded, not discarded: an agent-launched tree keeps
+    the launcher's injected runner DB / Redis projections through the authority
+    pass only under a live-or-recorded agent profile (shared/dotenv_boot.py
+    `_enforce_cluster_env_authority`), so popping without recording made that
+    exemption unreachable on every CLI path — `ava cluster health-probe` run
+    from an agent child on a pure agent-runner fell back to the sentinel
+    (#4334). The record is never cleared: a nested CLI overwrites it only when
+    it carries a fresh live marker of its own.
+    """
+    launcher_profile = os.environ.pop("AVA_PROCESS_PROFILE", None)
+    if launcher_profile:
+        os.environ[_LAUNCHER_PROFILE_ENV_KEY] = launcher_profile
+
+
 def main(argv: list[str] | None = None) -> int:
-    os.environ.pop("AVA_PROCESS_PROFILE", None)
-    # The CLI is a settings-full process and must never inherit a launcher-set
-    # process profile: with no marker, profiles.py constructs every domain as before.
-    # Importing shared.config.profiles initializes shared.config first, so that
-    # constant cannot be used before this cleanup without constructing Settings.
-    # `ava enroll` bootstraps a fresh agent-runner that has no full config yet, so
-    # it must run BEFORE any cli.commands import (handlers defer that import, but
-    # parser building doesn't need it either — argparse builds fine without
-    # Settings()). It lives in a settings-free module that does not import
-    # shared.config. (Host provisioning is `scripts/install.sh`, not a CLI verb.)
+    _normalize_process_profile()
     args_in = sys.argv[1:] if argv is None else argv
     if args_in[:2] == ["cluster", "update"]:
         # A verified wheel has no checkout anchor. Parse the SAME public tree,
