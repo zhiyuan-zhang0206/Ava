@@ -4883,6 +4883,17 @@ export interface components {
             reason?: string | null;
         };
         /**
+         * ConfigNormalization
+         * @description Spawn config_overlay settlement receipt (task #4306): the sent id and
+         *     the registered fallback it was rewritten to; present only on a rewrite.
+         */
+        ConfigNormalization: {
+            /** Requested */
+            requested: string;
+            /** Resolved */
+            resolved: string;
+        };
+        /**
          * ConfigView
          * @description GET /api/config response — grouped field list + raw_overrides (PUT body source).
          *
@@ -7757,6 +7768,7 @@ export interface components {
         SpawnedAgent: {
             /** Id */
             id: number;
+            config_normalized?: components["schemas"]["ConfigNormalization"] | null;
         };
         /**
          * SseDropBucket

@@ -118,6 +118,7 @@ from shared.agents import (
 from shared.audit_events import insert_event_log
 from shared.db import insert_inbound_message
 from shared.live_announce import publish_agent_updated_sync
+from shared.lm.registry import normalize_overlay_llm_model
 from shared.machine import machine_name
 
 _log = logging.getLogger(__name__)
@@ -506,6 +507,17 @@ def _restart_blocking(
             return None
         payload: dict[str, object] | None = None
         if body.config_overlay:
+            # Settle a withdrawn llm_model before the overlay is stored — the
+            # provider-outage model-switch channel must not persist a stale id (#4306).
+            overlay = dict(body.config_overlay)
+            model_receipt = normalize_overlay_llm_model(overlay)
+            if model_receipt is not None:
+                _log.warning(
+                    "restart overlay llm_model %r is withdrawn; storing the "
+                    "registered fallback %r (task #4306)",
+                    model_receipt[0],
+                    model_receipt[1],
+                )
             # This overlay write must not depend on borrowed-backend session
             # state: PgBouncer can hand us a backend whose session a previous
             # client left with default_transaction_read_only=on, and this
@@ -516,9 +528,9 @@ def _restart_blocking(
                 "UPDATE agents_meta "
                 "SET config_overlay = COALESCE(config_overlay, '{}'::jsonb) || %s::jsonb "
                 "WHERE id = %s",
-                (json.dumps(dict(body.config_overlay)), agent_id),
+                (json.dumps(overlay), agent_id),
             )
-            payload = {"config_overlay": dict(body.config_overlay)}
+            payload = {"config_overlay": overlay}
         # insert_inbound_message commits this connection, so its INSERT commits
         # the preceding overlay UPDATE in the same transaction.
         return insert_inbound_message(

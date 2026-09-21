@@ -9102,6 +9102,25 @@
         "title": "ConfigFieldWriteResult",
         "description": "Per-field verdict of a PUT /api/config write — `ok` plus a human-readable\n`reason` when the field was rejected (capability / scope / unknown).\n\n`reason` is None iff ok. The host-side op is authoritative for host-scope\nfields (re-validates remote_writable + capability); cluster fields can't\nfail a capability check, so they don't appear here on a self PUT."
       },
+      "ConfigNormalization": {
+        "properties": {
+          "requested": {
+            "type": "string",
+            "title": "Requested"
+          },
+          "resolved": {
+            "type": "string",
+            "title": "Resolved"
+          }
+        },
+        "type": "object",
+        "required": [
+          "requested",
+          "resolved"
+        ],
+        "title": "ConfigNormalization",
+        "description": "Spawn config_overlay settlement receipt (task #4306): the sent id and\nthe registered fallback it was rewritten to; present only on a rewrite."
+      },
       "ConfigView": {
         "properties": {
           "fields": {
@@ -15143,6 +15162,16 @@
           "id": {
             "type": "integer",
             "title": "Id"
+          },
+          "config_normalized": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConfigNormalization"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
