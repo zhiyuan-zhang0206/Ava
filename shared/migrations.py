@@ -585,13 +585,12 @@ def apply_pending_migrations(
                     # prepare=False: a migration body is arbitrary, possibly
                     # MULTI-statement SQL, which cannot go through the extended
                     # (prepared-statement) protocol — Postgres rejects "cannot
-                    # insert multiple commands into a prepared statement". The
-                    # connection may carry prepare_threshold=0 (shared.db.connect
-                    # sets it unconditionally, for PgBouncer transaction-pool
-                    # safety), which would otherwise force preparation on the first
-                    # execute and break every multi-statement migration. Forcing
-                    # the simple protocol here keeps the applier independent of the
-                    # conn's prepare posture.
+                    # insert multiple commands into a prepared statement". A
+                    # caller's connection may carry a prepare posture aggressive
+                    # enough to prepare on the first execute (the migration tests'
+                    # conn sets prepare_threshold=0), which would break every
+                    # multi-statement migration. Forcing the simple protocol here
+                    # keeps the applier independent of the conn's prepare posture.
                     cur.execute(body, prepare=False)  # type: ignore[arg-type]
                     cur.execute(
                         "INSERT INTO schema_migrations (name) VALUES (%s)",

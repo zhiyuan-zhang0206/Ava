@@ -250,7 +250,10 @@ def prepare_bootstrap_hop(request_path: Path) -> PreparedBootstrapHop:  # noqa: 
     ):
         raise ReleaseRejectedError("bootstrap recovery contexts changed")
     if journal is None:
-        with psycopg.connect(projection.db_url.get_secret_value(), connect_timeout=5) as conn:
+        # prepare_threshold=None: never prepare statements on the pooled front door.
+        with psycopg.connect(
+            projection.db_url.get_secret_value(), prepare_threshold=None, connect_timeout=5
+        ) as conn:
             expected = revalidate_prepared_inventory(
                 conn,
                 image,
@@ -268,7 +271,9 @@ def prepare_bootstrap_hop(request_path: Path) -> PreparedBootstrapHop:  # noqa: 
             request,
         )
         current_session = ExpectedSession(name="ava-ops", process=current_process)
-        with psycopg.connect(projection.db_url.get_secret_value(), connect_timeout=5) as conn:
+        with psycopg.connect(
+            projection.db_url.get_secret_value(), prepare_threshold=None, connect_timeout=5
+        ) as conn:
             expected = revalidate_bootstrap_inventory(
                 conn,
                 image,

@@ -130,8 +130,18 @@ def _connect_db() -> "psycopg.Connection":  # noqa: F821  # pyright: ignore[repo
     # session state between clients — scrub the session back to baseline on
     # every (re)connect so another client's session-level SET (2026-09-02 P0
     # read-only pollution) cannot break this connection's writes.
+    #
+    # prepare_threshold=None: no server-side prepared statements on a pooled
+    # dial. This connection lives for the whole process while pgbouncer hands
+    # each transaction a possibly different backend; psycopg3 would prepare a
+    # statement server-side after its 5th execution on one connection, and a
+    # prepared name made on one backend does not exist on the next (2026-09-21:
+    # a watcher's poll wedged this way on `_pg3_0`). See shared.db.connect().
     conn = psycopg.connect(
-        settings.data_plane.db_url, autocommit=True, **PG_STATEMENT_TIMEOUT_KWARGS
+        settings.data_plane.db_url,
+        autocommit=True,
+        prepare_threshold=None,
+        **PG_STATEMENT_TIMEOUT_KWARGS,
     )
     from shared.db import _restore_pooled_session
 

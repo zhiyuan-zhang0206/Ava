@@ -120,9 +120,12 @@ def validate_operation(context: PreparedObservation, projection: ObserverProject
     remaining = int((context.challenge.valid_until - datetime.now(UTC)).total_seconds())
     if remaining < 2:
         raise ReleaseRejectedError("bootstrap challenge has no connection budget remaining")
+    # prepare_threshold=None: never prepare statements on the pooled front door.
     with (
         psycopg.connect(
-            projection.db_url.get_secret_value(), connect_timeout=min(5, remaining)
+            projection.db_url.get_secret_value(),
+            prepare_threshold=None,
+            connect_timeout=min(5, remaining),
         ) as conn,
         conn.transaction(),
     ):
