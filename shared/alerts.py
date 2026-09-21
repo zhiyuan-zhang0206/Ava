@@ -306,8 +306,10 @@ def notify_im(text: str) -> bool:
     is down; notified_at simply stays NULL and the firing gate retries on
     the next re-send.
 
-    Delivery semantics: at-most-once, never silent — the failure is visible
-    (log + False).
+    Delivery semantics: best-effort, never silent — a lost response is
+    indistinguishable from a lost message, so the daemon's single per-channel
+    retry (task #4252) or a later firing-gate re-send can duplicate an alert
+    that in fact landed; every failure is still visible (log + False).
     """
 
     if not settings.alerts.im_notify_enabled:
