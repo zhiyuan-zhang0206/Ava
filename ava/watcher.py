@@ -45,6 +45,7 @@ __all_for_ava__ = [
 # watcher, not the agent. (Gateway URL / machine auth come from settings;
 # cluster env is forwarded onto the session by the session machinery.)
 _SESSION_ID_ENV = "AVA_WATCHER_SESSION_ID"
+type WatcherTimeout = float | datetime.timedelta | str
 
 
 def _validate_message(message: str) -> None:
@@ -388,6 +389,7 @@ def _spawn(
     cron_end_at: Any = None,
     timeout_secs: float | None = None,
     _exclude_session: int | None = None,
+    notify: str = "always",
 ) -> int:
     """Start a watcher child running ``code``; return its watcher id.
 
@@ -407,6 +409,7 @@ def _spawn(
     import shlex
     import sys
 
+    notify = _background.validate_notify(notify)
     agent_id = _agent_id()
     # The session's shell TTL IS this watcher's target deadline (user ruling
     # 2026-09-14, task #3411): launch = created + timeout, cron = cron_end_at,
@@ -468,6 +471,7 @@ def _spawn(
         source=f"watcher:{session_id}",
         output_path=output_path,
         keep=False,
+        notify=notify,
     )
     # R1 (Task #1021): the watcher registry — this row is what the agent's boot
     # reconcile reads to rebuild a watcher whose session a stop/rollout reaped
@@ -580,18 +584,19 @@ def _spawn(
     return session_id
 
 
-def launch(code: str, timeout: float | datetime.timedelta | str, *, name: str) -> int:
+def launch(code: str, timeout: WatcherTimeout, *, name: str, notify: str = "always") -> int:
     """Run `code` as a background watcher, bounded by `timeout`.
 
     `code` calls `ava.agents.send_message(ava.self.AGENT_ID, content)`
     whenever it wants to wake you. The watcher runs until it exits, you kill
-    its session, or `timeout` elapses; when it stops you get a message with
+    its session, or `timeout` elapses; its selected policy sends a message with
     its exit code and a pointer to its full output.
 
     Args:
         timeout: seconds, a `timedelta`, or a `"<n>{s,m,h,d}"` duration
             string (e.g. `"30m"`).
         name: a lowercase slug like `"ci-monitor"`.
+        notify: `"always"` (default), or `"failure"` to report only non-zero exits.
 
     Returns:
         The watcher's session id — while it runs, the watcher is one of your
@@ -606,6 +611,7 @@ def launch(code: str, timeout: float | datetime.timedelta | str, *, name: str) -
         name,
         kind="launch",
         timeout_secs=_parse_timeout(timeout),
+        notify=coerce_str(notify, "notify"),
     )
 
 
@@ -616,6 +622,7 @@ def cron(
     timezone: str | None = None,
     end_time: datetime.datetime | datetime.timedelta | str | None = None,
     name: str,
+    notify: str = "always",
     _exclude_session: int | None = None,
 ) -> int:
     """Runs until `end_time`, or until you kill its session.
@@ -644,6 +651,7 @@ def cron(
             future (a past end raises ValueError, like `at()`); defaults to
             now + 7 days.
         name: a lowercase slug like `"daily-check-in"`.
+        notify: `"always"` (default), or `"failure"` to report only non-zero exits.
 
     Returns:
         The watcher's session id; kill that session to stop the schedule.
@@ -712,6 +720,7 @@ def cron(
         cron_timezone=tz,
         cron_end_at=et,
         _exclude_session=_exclude_session,
+        notify=coerce_str(notify, "notify"),
     )
 
 
@@ -720,12 +729,14 @@ def at(
     message: str,
     *,
     name: str,
+    notify: str = "always",
 ) -> int:
     """
     Args:
         when: a TZ-aware datetime, a timedelta from now (UTC), or an ISO-8601
             string with timezone. Must be in the future.
         name: a lowercase slug like `"stand-up-reminder"`.
+        notify: `"always"` (default), or `"failure"` to report only non-zero exits.
 
     Returns:
         The watcher's session id; kill that session to cancel.
@@ -754,7 +765,15 @@ def at(
     )
     # The one-shot script sleeps until `when`, wakes you once, and exits — it
     # ends itself, so no watchdog.
-    return _spawn(code, None, name, kind="at", message=message, fires_at=due_at)
+    return _spawn(
+        code,
+        None,
+        name,
+        kind="at",
+        message=message,
+        fires_at=due_at,
+        notify=coerce_str(notify, "notify"),
+    )
 
 
 logger = logging.getLogger(__name__)

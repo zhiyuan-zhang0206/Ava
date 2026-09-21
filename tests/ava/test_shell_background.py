@@ -58,6 +58,45 @@ def test_notified_line_keep_leaves_session_open(tmp_path: Path) -> None:
     assert "agents send 5" in line
 
 
+@pytest.mark.parametrize(
+    ("notify", "expected_fragment"),
+    [
+        ("always", "agents send 5"),
+        ("failure", 'if [ "$_ec" -ne 0 ]; then'),
+    ],
+)
+def test_notified_line_applies_notify_policy(
+    tmp_path: Path, notify: str, expected_fragment: str
+) -> None:
+    line = _background.notified_line(
+        "make build",
+        agent_id=5,
+        label="Background command 'build'",
+        source="shell:3",
+        output_path=tmp_path / "x.log",
+        keep=False,
+        notify=notify,
+    )
+    assert expected_fragment in line
+    if notify == "always":
+        assert 'if [ "$_ec" -ne 0 ]; then' not in line
+    else:
+        assert line.index('if [ "$_ec" -ne 0 ]; then') < line.index("agents send 5")
+
+
+def test_notified_line_rejects_unknown_notify(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="notify must be one of"):
+        _background.notified_line(
+            "make build",
+            agent_id=5,
+            label="Background command 'build'",
+            source="shell:3",
+            output_path=tmp_path / "x.log",
+            keep=False,
+            notify="success",
+        )
+
+
 def test_notified_line_rejects_multiline_cmd(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="single line"):
         _background.notified_line(
@@ -138,6 +177,11 @@ def test_run_background_rejects_empty_cmd() -> None:
         ava.shell.run_background("   ", name="test-empty", ttl=120)
 
 
+def test_run_background_rejects_unknown_notify() -> None:
+    with pytest.raises(ValueError, match="notify must be one of"):
+        ava.shell.run_background("echo hi", name="test-notify", ttl=120, notify="success")
+
+
 def test_run_background_requires_name() -> None:
     with pytest.raises(TypeError):
         ava.shell.run_background("echo hi")  # type: ignore[call-arg]
@@ -198,6 +242,37 @@ def test_run_background_e2e_notice_log_and_close(
 
     # Default keep=False: the session closes unconditionally after the notice
     # (delivery is best-effort; a failed send must not leave the shell behind).
+    deadline = time.time() + 10
+    while time.time() < deadline and handle.session_id in ava.shell.list():
+        time.sleep(0.3)
+    assert handle.session_id not in ava.shell.list()
+
+
+@pytest.mark.flaky  # real pty session + signal delivery polling (15s deadline)
+def test_run_background_failure_notify_reports_sigkill(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The shell-level failure policy still reports a SIGKILL exit (137)."""
+    argv_file = tmp_path / "argv.txt"
+    fake_cli = tmp_path / "fake-ava"
+    fake_cli.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$@\" > {argv_file}\n")
+    fake_cli.chmod(0o755)
+    monkeypatch.setattr(_background, "cli_path", lambda: fake_cli)  # pyright: ignore[reportUnknownArgumentType]
+
+    handle = ava.shell.run_background(
+        "( bash -c 'kill -KILL $$' )",
+        name="test-bg-sigkill",
+        cwd=str(tmp_path),
+        ttl=120,
+        notify="failure",
+    )
+
+    deadline = time.time() + 15
+    while time.time() < deadline and not argv_file.exists():
+        time.sleep(0.3)
+    assert argv_file.exists(), "failure completion notice never fired"
+    assert "exited with code 137" in argv_file.read_text()
+
     deadline = time.time() + 10
     while time.time() < deadline and handle.session_id in ava.shell.list():
         time.sleep(0.3)
