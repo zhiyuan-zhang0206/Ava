@@ -8,6 +8,13 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
 ## [Unreleased]
 
 ### Added
+- The Ops dashboard gains two `Gateway & execution` panels for exec-envelope
+  transfer cost (task #2174): envelope size (`size_bytes` p50/p95/max) and
+  serialization cost (`serialize_ms` avg/p95/max), unwrapped from the
+  `exec_envelope` event and grouped by envelope/op — the display split from
+  the Exec outcomes other bucket (PM ruling 2026-08-31). A rising request
+  band is state/payload inflation; a write-side serialize step is a
+  dump-cost regression.
 - `ava impersonate send <session_id> --agent <agent_id> --to <target> --content '<text>'`
   — the attested CLI form of sending to another agent as a leased identity
   (previously reachable only through the SDK attachment); it delivers source

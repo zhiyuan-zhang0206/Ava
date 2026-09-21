@@ -59,6 +59,7 @@ _CORE_DEFINITION_MODULES = (
     "shared.core_metrics_events",
     "shared.core_metrics_host",
     "shared.core_metrics_observability",
+    "shared.core_metrics_exec_envelope",
     "shared.core_metrics_frontend",
 )
 
