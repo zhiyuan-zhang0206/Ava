@@ -9,6 +9,7 @@ from shared.events.payloads import (
     ComputerAction,
     ComputerSessionEnd,
     ComputerSessionStart,
+    DebtSweepDaily,
     DeliveryOutboxAbandoned,
     DeliveryOutboxFlushed,
     DeliveryPoisoned,
@@ -659,6 +660,11 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         "ci_usage_daily",
         "daily CI-minute reconciliation totals (C9)",
         payload=CiUsageDaily,
+    ),
+    "debt_sweep_daily": _telemetry(
+        "debt_sweep_daily",
+        "daily tech-debt mechanical scan and clearing-worker dispatch",
+        payload=DebtSweepDaily,
     ),
     "pr_flow_daily": _telemetry(
         "pr_flow_daily",
