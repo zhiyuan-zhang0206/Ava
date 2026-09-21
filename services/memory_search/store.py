@@ -313,10 +313,9 @@ class MemoryStore:
         """Exact cosine top-k **paths**, aggregated over chunk rows.
 
         One matrix product over every row (microseconds at pool scale), then
-        per path keep the best (maximum) cosine — the exact counterpart of the
-        milvus backend's minimum-distance aggregation, so both order paths the
-        same way. Returns fewer than k when the store has fewer distinct
-        paths; empty when the store is empty.
+        per path keep the best (maximum) cosine — the same best-similarity,
+        most-similar-first contract as the milvus backend. Returns fewer than k
+        when the store has fewer distinct paths; empty when the store is empty.
         """
         query = query_vector.astype(np.float32).reshape(-1)
         if query.shape != (self._dim,):
