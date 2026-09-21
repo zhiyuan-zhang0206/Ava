@@ -166,7 +166,10 @@ def test_delete_missing_noop(milvus_client) -> None:
 
 
 def test_search_topk_returns_sorted_by_cosine(milvus_client) -> None:
-    """Insert 3 known vectors, query matches one of them, that path ranks first."""
+    """milvus-lite >=3.1 returns raw cosine similarity, ranked descending.
+
+    Lite 3.0's 1 - similarity form is no longer the supported contract.
+    """
     backend = _backend(milvus_client)
     target = np.ones(_DIM, dtype=np.float32)
     orthogonal = np.zeros(_DIM, dtype=np.float32)
@@ -178,8 +181,7 @@ def test_search_topk_returns_sorted_by_cosine(milvus_client) -> None:
     backend.upsert("/opposite.md", 3.0, "h3", opposite, kind="body", chunk_idx=0)
 
     results = backend.search_topk(target, k=3)
-    assert results[0] == "/target.md"
-    assert results[-1] == "/opposite.md"
+    assert results == ["/target.md", "/orthogonal.md", "/opposite.md"]
 
 
 def test_search_topk_empty_collection(milvus_client) -> None:
@@ -210,12 +212,16 @@ def test_search_topk_aggregates_chunks_by_path(milvus_client) -> None:
     path decides the rank."""
     backend = _backend(milvus_client)
     ones = np.ones(_DIM, dtype=np.float32)
+    worst_chunk = np.zeros(_DIM, dtype=np.float32)
+    worst_chunk[0] = 1.0
     backend.upsert("/a.md", 1.0, "ha", ones, kind="body", chunk_idx=0)
     backend.upsert("/a.md", 1.0, "ha", 0.9 * ones, kind="body", chunk_idx=1)
     backend.upsert("/a.md", 1.0, "ha", 0.5 * ones, kind="body", chunk_idx=2)
+    backend.upsert("/a.md", 1.0, "ha", worst_chunk, kind="body", chunk_idx=3)
     backend.upsert("/b.md", 2.0, "hb", -ones, kind="body", chunk_idx=0)
+    backend.upsert("/c.md", 3.0, "hc", 0.7 * ones, kind="body", chunk_idx=0)
     results = backend.search_topk(ones, k=5)
-    assert results == ["/a.md", "/b.md"]  # no duplicate paths
+    assert results == ["/a.md", "/c.md", "/b.md"]  # no duplicate paths
 
 
 def test_delete_removes_all_chunks_of_path(milvus_client) -> None:

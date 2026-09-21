@@ -41,8 +41,9 @@ collection (path as PK, no kind/chunk_idx) and rebuilds it so the cold-start
 scan can repopulate the whole index chunked. Read-only connections refuse a
 missing or mismatched collection instead of changing persistent storage.
 
-Milvus COSINE returns "distance" = 1 - cosine_similarity, ascending (0
-= identical); aggregation keeps the minimum distance per path.
+milvus-lite >=3.1, Milvus server, and Zilliz return COSINE "distance" as raw
+cosine similarity (1 = identical); aggregation keeps the maximum similarity
+per path and ranks paths descending.
 """
 
 from __future__ import annotations
@@ -346,7 +347,8 @@ async def _connect_async(*, timeout: float) -> AsyncMilvusClient:
 async def _search_topk_async(
     client: AsyncMilvusClient, query_vector: np.ndarray, k: int, *, timeout: float
 ) -> list[str]:
-    """Async twin of ``search_topk`` — same chunk-aggregation contract.
+    """Async twin of ``search_topk`` — raw cosine similarity means the
+    highest-scoring chunk per path wins and paths rank descending.
 
     ``timeout`` is mandatory: without one, pymilvus's ``retry_on_rpc_failure``
     runs up to 75 backoff retries AND awaits each attempt with no
@@ -365,20 +367,22 @@ async def _search_topk_async(
     best: dict[str, float] = {}
     for hit in result[0]:
         path = hit["entity"]["path"]
-        distance = hit["distance"]
-        if path not in best or distance < best[path]:
-            best[path] = distance
-    return sorted(best, key=best.__getitem__)[:k]
+        similarity = hit[
+            "distance"
+        ]  # milvus-lite >=3.1 / Milvus server / Zilliz: raw cosine similarity
+        if path not in best or similarity > best[path]:
+            best[path] = similarity
+    return sorted(best, key=best.__getitem__, reverse=True)[:k]
 
 
 def _search_topk(client: MilvusClient, query_vector: np.ndarray, k: int) -> list[str]:
     """Cosine top-k **paths**, aggregated over chunk rows.
 
-    Milvus returns the top-`_RAW_SEARCH_LIMIT` chunk rows by distance
-    ascending (identical=0); rows of the same path collapse to their best
-    (minimum) distance, then the top-k paths are returned in that order.
-    Returns fewer than k when the collection has fewer distinct paths; an
-    empty list when the collection is empty.
+    Milvus returns the top-`_RAW_SEARCH_LIMIT` chunk rows with raw cosine
+    similarity (identical=1); rows of the same path collapse to their best
+    (maximum) similarity, then the top-k paths are returned descending.
+    Returns fewer than k when the collection has fewer distinct paths; an empty
+    list when the collection is empty.
 
     The caller-facing contract (a list of path strings) is unchanged from the
     single-row-per-file era — only the internals became chunk-aware.
@@ -397,10 +401,12 @@ def _search_topk(client: MilvusClient, query_vector: np.ndarray, k: int) -> list
     best: dict[str, float] = {}
     for hit in result[0]:
         path = hit["entity"]["path"]
-        distance = hit["distance"]
-        if path not in best or distance < best[path]:
-            best[path] = distance
-    return sorted(best, key=best.__getitem__)[:k]
+        similarity = hit[
+            "distance"
+        ]  # milvus-lite >=3.1 / Milvus server / Zilliz: raw cosine similarity
+        if path not in best or similarity > best[path]:
+            best[path] = similarity
+    return sorted(best, key=best.__getitem__, reverse=True)[:k]
 
 
 class MilvusBackend:
