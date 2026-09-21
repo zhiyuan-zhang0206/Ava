@@ -528,7 +528,7 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         name="watcher_reaped",
         category="log",
         tier="observation",
-        doc="the gateway TTL reaper reclaimed a watcher session — its deadline passed, or its owner agent is terminated for good; attributes carry agent_id, session_id, mode",
+        doc="the gateway TTL reaper reclaimed a watcher session — its deadline passed, or its owner agent is terminated for good; attributes carry agent_id, session_id, mode (killed / absent / machine_absent)",
     ),
     "watcher_ttl_healed": EventSpec(
         name="watcher_ttl_healed",
@@ -541,5 +541,11 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         category="log",
         tier="anomaly",
         doc="the gateway TTL reaper's scan found lifecycle command(s) sitting at done while agents_meta.lifecycle_command_id still pointed at them (an out-of-band torn write, task #3678) — every resurrect of the named agent(s) defers until settled; attributes carry count and samples",
+    ),
+    "lifecycle_fences_settled_absent_machine": EventSpec(
+        name="lifecycle_fences_settled_absent_machine",
+        category="log",
+        tier="observation",
+        doc="the gateway TTL reaper settled applied-but-unobserved force-terminate command(s) whose agent's home machine is absent from the machines registry (a decommissioned machine never runs the boot recovery that would observe its fences, task #4143); attributes carry count and samples",
     ),
 }

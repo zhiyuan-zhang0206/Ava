@@ -1,12 +1,14 @@
 """Unit tests for the per-host status fields added to ClusterStatus."""
 
 import asyncio
+import logging
 import os
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
+import gateway.routers._roster_probe as roster_probe
 import gateway.routers.status as status_mod
 from ops import cluster_status
 from ops.cluster import (
@@ -421,6 +423,110 @@ def test_probe_flags_identity_mismatch_when_responder_name_differs(monkeypatch: 
     assert m.online is False
     # It did NOT pick up the impostor's data.
     assert m.head_sha is None
+
+
+def test_identity_mismatch_logs_once_per_episode(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    """An active row's mismatch stays a loud ERROR, but one line per episode —
+    not one per panel poll; a correct identity echo ends the episode, so a
+    later mismatch logs anew (task #4143)."""
+    monkeypatch.setattr(roster_probe, "_identity_mismatch_active", set[str]())
+    monkeypatch.setattr(roster_probe, "_probe_failures", dict[str, tuple[int, float]]())
+    responder = {"name": "gateway-host"}
+
+    async def _fake_dispatch(
+        *,
+        target_machine,
+        kind,
+        payload,
+        timeout_s=None,
+        ops_url=None,
+        retries=None,
+        idempotency_key=None,
+    ):
+        return {
+            "machine_name": responder["name"],
+            "serve_gateway": True,
+            "serve_agent_runner": True,
+            "paused": False,
+            "head_sha": "abc123",
+        }
+
+    monkeypatch.setattr(status_mod._cluster_rpc, "dispatch_to_machine", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
+    rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]] = [
+        ("air", "http://localhost:8106", ["agent-runner"], datetime.now(UTC), None, None, False)
+    ]
+    caplog.set_level(logging.DEBUG, logger="gateway.routers._roster_probe")
+
+    machines = asyncio.run(status_mod.gather_cluster_status(rows, "gateway-host"))
+    assert machines[0].identity_mismatch is True
+    first = [r for r in caplog.records if r.name == "gateway.routers._roster_probe"]
+    assert [r.levelno for r in first] == [logging.ERROR]
+
+    # A second poll of the same mismatch is silent.
+    caplog.clear()
+    asyncio.run(status_mod.gather_cluster_status(rows, "gateway-host"))
+    assert [r for r in caplog.records if r.name == "gateway.routers._roster_probe"] == []
+
+    # The identity echoes correctly -> the episode ends...
+    caplog.clear()
+    responder["name"] = "air"
+    machines = asyncio.run(status_mod.gather_cluster_status(rows, "gateway-host"))
+    assert machines[0].online is True
+
+    # ...so the next mismatch is a fresh episode and logs again.
+    responder["name"] = "gateway-host"
+    asyncio.run(status_mod.gather_cluster_status(rows, "gateway-host"))
+    again = [
+        r
+        for r in caplog.records
+        if r.name == "gateway.routers._roster_probe" and r.levelno == logging.ERROR
+    ]
+    assert len(again) == 1
+
+
+def test_identity_mismatch_on_stopped_machine_is_info_once(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    """A stopped row's stale URL answering as another host is the expected
+    face of the stop: the verdict stays (the row is still not that host), but
+    the line degrades to INFO and is reported once per episode (task #4143)."""
+    monkeypatch.setattr(roster_probe, "_identity_mismatch_active", set[str]())
+    monkeypatch.setattr(roster_probe, "_probe_failures", dict[str, tuple[int, float]]())
+
+    async def _fake_dispatch(
+        *,
+        target_machine,
+        kind,
+        payload,
+        timeout_s=None,
+        ops_url=None,
+        retries=None,
+        idempotency_key=None,
+    ):
+        return {
+            "machine_name": "gateway-host",
+            "serve_gateway": True,
+            "serve_agent_runner": True,
+            "paused": False,
+            "head_sha": "abc123",
+        }
+
+    monkeypatch.setattr(status_mod._cluster_rpc, "dispatch_to_machine", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
+    stopped = datetime.now(UTC)
+    rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]] = [
+        ("air", "http://localhost:8106", ["agent-runner"], stopped, None, stopped, False)
+    ]
+    caplog.set_level(logging.DEBUG, logger="gateway.routers._roster_probe")
+
+    machines = asyncio.run(status_mod.gather_cluster_status(rows, "gateway-host"))
+    asyncio.run(status_mod.gather_cluster_status(rows, "gateway-host"))
+
+    assert machines[0].identity_mismatch is True
+    records = [r for r in caplog.records if r.name == "gateway.routers._roster_probe"]
+    assert [r.levelno for r in records] == [logging.INFO]
+    assert "stopped machine" in records[0].getMessage()
 
 
 def test_gather_cluster_status_local_pure_gateway_lightweight(monkeypatch: pytest.MonkeyPatch):

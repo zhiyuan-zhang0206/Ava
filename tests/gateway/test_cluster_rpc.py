@@ -164,20 +164,29 @@ async def test_non_probe_unreachable_stays_warning(
 
 
 @pytest.mark.asyncio
-async def test_unregistered_machine_raises_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A missing machines row -> ClusterOpUnreachable (translated from MachineNotRegistered)."""
+async def test_unregistered_machine_raises_target_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A missing machines row -> ClusterOpTargetAbsent, the definitive-absence
+    subclass of ClusterOpUnreachable (task #4143): consumers that own
+    terminal-state cleanup branch on it; every existing handler that catches
+    the parent keeps working (asserted here)."""
     _patch(monkeypatch, lookup_exc=MachineNotRegistered("no machine named 'ghost'"))
-    with pytest.raises(cluster_rpc.ClusterOpUnreachable, match="cannot resolve an address"):
+    with pytest.raises(cluster_rpc.ClusterOpTargetAbsent) as excinfo:
         await cluster_rpc.dispatch_to_machine("ghost", "status_probe", {})
+    assert isinstance(excinfo.value, cluster_rpc.ClusterOpUnreachable)
+    assert "absent from the machines registry" in str(excinfo.value)
 
 
 @pytest.mark.asyncio
 async def test_null_gateway_url_raises_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
     """A row with NULL gateway_url (host not yet started on new code) ->
-    ClusterOpUnreachable (translated from MachineGatewayUrlMissing)."""
+    ClusterOpUnreachable (translated from MachineGatewayUrlMissing), NOT the
+    target-absent subclass: the row exists, so the machine is not definitively
+    gone (task #4143)."""
     _patch(monkeypatch, lookup_exc=MachineGatewayUrlMissing("wsl advertises no gateway_url"))
-    with pytest.raises(cluster_rpc.ClusterOpUnreachable, match="cannot resolve an address"):
+    with pytest.raises(cluster_rpc.ClusterOpUnreachable) as excinfo:
         await cluster_rpc.dispatch_to_machine("wsl", "status_probe", {}, retries=0)
+    assert not isinstance(excinfo.value, cluster_rpc.ClusterOpTargetAbsent)
+    assert "cannot resolve an address" in str(excinfo.value)
 
 
 @pytest.mark.asyncio

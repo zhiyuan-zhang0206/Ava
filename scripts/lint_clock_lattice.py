@@ -217,10 +217,11 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "_STALL_CHECK_INTERVAL_S",
     ): "independent family (schedule breaker): settings alias, not part of the audited lattice",
     (
-        "gateway/ttl_reaper.py",
+        "gateway/lifecycle_fences.py",
         "_TORN_POINTER_SCAN_INTERVAL_S",
-    ): "independent: hourly torn-pointer scan cadence (the slow bypass detector beside "
-    "the commit-time pointer->done fence); nothing orders against it",
+    ): "independent: hourly lifecycle-pointer scan cadence (the slow bypass detector beside "
+    "the commit-time pointer->done fence, next to the absent-machine fence settle); "
+    "nothing orders against it",
     (
         "shared/watcher.py",
         "AT_SESSION_TTL_GRACE_SECONDS",

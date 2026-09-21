@@ -10,7 +10,9 @@ HTTP call.
   dispatch_to_machine(target_machine, kind, payload, ...) -> result dict
       POST {ops_url}/ops {"kind", "payload", "idempotency_key"?} -> {"status", "result"}.
       Returns result on status=="completed"; raises ClusterOpFailed on
-      status=="failed", ClusterOpUnreachable on connect/timeout/non-200.
+      status=="failed", ClusterOpUnreachable on connect/timeout/non-200, and
+      its subclass ClusterOpTargetAbsent when the machine row itself is gone
+      (a definitive, non-retryable absence).
 
   Retry policy: transient infrastructure failures (transport errors, 5xx)
   retry with bounded exponential backoff + jitter (see `_retry_delay_s`).
@@ -56,6 +58,7 @@ from shared.machines import (
 
 __all__ = [
     "ClusterOpFailed",
+    "ClusterOpTargetAbsent",
     "ClusterOpUnreachable",
     "OpKind",
     "dispatch_to_machine",
@@ -140,10 +143,32 @@ class _RetryableFailure(Exception):  # noqa: N818 — internal retry signal, not
 class ClusterOpUnreachable(RuntimeError):  # noqa: N818 — state description; same style as TimeoutError
     """The target agent-runner's ops server could not be reached or did not respond.
 
-    Covers a missing/NULL machines row, a connect/read timeout, a non-200
-    status from /ops (after retries, for transient statuses), and a malformed
-    response body. Distinct from ClusterOpFailed (a reached host whose op
-    raised a business error).
+    Covers a connect/read timeout, a non-200 status from /ops (after retries,
+    for transient statuses), a malformed response body, and a machines row
+    that advertises no address (``gateway_url`` NULL). A machines row that
+    does not exist at all is the sharper subclass ``ClusterOpTargetAbsent``.
+    Distinct from ClusterOpFailed (a reached host whose op raised a business
+    error).
+    """
+
+
+class ClusterOpTargetAbsent(ClusterOpUnreachable):
+    """The target machine has no row in the machines registry.
+
+    Either it was never registered under this name, or its row was deleted
+    (decommission / rename cleanup). Agent-facing state can only name a
+    machine that was registered when it was created — spawns validate the
+    target — so an absent row means the machine is gone from this cluster's
+    view, and a machine that re-registers later is a fresh member (nothing
+    bound to the old name survives on it). Absence is therefore a *definitive*
+    verdict, not a transport hiccup: a dial skipped here cannot succeed later
+    under the same name, so a consumer that owns terminal-state cleanup (the
+    TTL reapers) may terminalize the state it was about to dial instead of
+    deferring it forever.
+
+    A ``ClusterOpUnreachable`` subclass on purpose: every existing handler
+    keeps its transport-level behavior unchanged, and only a consumer that
+    branches on this exact type changes what it does.
     """
 
 
@@ -292,6 +317,9 @@ async def dispatch_to_machine(
         ClusterOpUnreachable: the host has no advertised address, or the POST
             hit a connect/read timeout or non-200 status (after retries for
             transient statuses).
+        ClusterOpTargetAbsent: no machines row exists for the target (a
+            definitive absence — see the exception's docstring). A subclass of
+            `ClusterOpUnreachable`.
         ClusterOpFailed: the host ran the op but it reported `status=failed`.
     """
     if timeout_s is None:
@@ -300,7 +328,16 @@ async def dispatch_to_machine(
     if ops_url is None:
         try:
             ops_url = lookup_machine_url(target_machine)
-        except (MachineNotRegistered, MachineGatewayUrlMissing) as exc:
+        except MachineNotRegistered as exc:
+            # No machines row at all — the machine is definitively absent under
+            # this name (deleted in a decommission / rename cleanup). Callers
+            # that own terminal-state cleanup branch on this exact type; the
+            # rest keep their ClusterOpUnreachable behavior (this is one).
+            raise ClusterOpTargetAbsent(
+                f"machine={target_machine!r} is absent from the machines registry "
+                f"(cannot resolve an address): {exc}"
+            ) from exc
+        except MachineGatewayUrlMissing as exc:
             raise ClusterOpUnreachable(
                 f"cannot resolve an address for machine={target_machine!r}: {exc}"
             ) from exc
