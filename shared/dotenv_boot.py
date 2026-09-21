@@ -310,6 +310,10 @@ def _is_launcher_runner_projection(value: str | None) -> bool:
     discipline that stops it dialing the host home's database — an agent shell
     must not smuggle the host URL into a bare worktree).
 
+    A value `urlsplit` cannot parse is not a projection either: it drops like
+    any other unrecognized value — the authority pass never raises on
+    environment input.
+
     The role literal mirrors shared/cluster/derive.py `RUNNER_ROLE`; it is
     duplicated at this leaf because this module runs BEFORE Settings (the same
     duplication reason as shared/config/data_plane.py).
@@ -318,7 +322,14 @@ def _is_launcher_runner_projection(value: str | None) -> bool:
         return False
     if os.environ.get("AVA_PROCESS_PROFILE") != "agent" or not _ANCHORED:
         return False
-    return urlsplit(value).username == "ava_runner"
+    try:
+        username = urlsplit(value).username
+    except ValueError:
+        # A malformed value (e.g. an invalid IPv6 host) is not a projection:
+        # the drop loop absorbs it exactly as it did before #3111 — the boot
+        # pass must never raise on environment input (review nit on #3111).
+        return False
+    return username == "ava_runner"
 
 
 def _enforce_cluster_env_authority() -> None:

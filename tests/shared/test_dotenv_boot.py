@@ -877,10 +877,16 @@ def test_agent_profile_keeps_undeclared_launcher_runner_url(
         "AVA_DB_URL",
         "postgresql://ava_runner:runner-password@127.0.0.1:5433/ava",
     )
+    # Companion (review nit): the exemption must not spill — inherited keys the
+    # `.env` does not declare still drop in the SAME pass.
+    monkeypatch.setitem(os.environ, "AVA_APP_PORT", "3001")
+    monkeypatch.setitem(os.environ, "AVA_DB_ADMIN_PASSWORD", "db-admin-only")
 
     dotenv_boot._enforce_cluster_env_authority()
 
     assert os.environ["AVA_DB_URL"] == "postgresql://ava_runner:runner-password@127.0.0.1:5433/ava"
+    assert "AVA_APP_PORT" not in os.environ
+    assert "AVA_DB_ADMIN_PASSWORD" not in os.environ
 
 
 def test_agent_profile_drops_undeclared_owner_url(
@@ -931,6 +937,22 @@ def test_unanchored_checkout_drops_undeclared_runner_url(
         "AVA_DB_URL",
         "postgresql://ava_runner:runner-password@127.0.0.1:5433/ava",
     )
+
+    dotenv_boot._enforce_cluster_env_authority()
+
+    assert "AVA_DB_URL" not in os.environ
+
+
+def test_agent_profile_drops_malformed_undeclared_db_url(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Review nit (#3111): a malformed inherited AVA_DB_URL — `urlsplit` itself
+    rejects it (invalid IPv6) — is not a projection; the drop loop absorbs it
+    like any other unrecognized value. Before the hardening it raised out of
+    `load_ava_env` (`ValueError: Invalid IPv6 URL`; e2e repro on the PR)."""
+    monkeypatch.setitem(os.environ, "AVA_PROCESS_PROFILE", "agent")
+    _point_env_at_without_db_url(monkeypatch, tmp_path)
+    monkeypatch.setitem(os.environ, "AVA_DB_URL", "postgresql://[::1")
 
     dotenv_boot._enforce_cluster_env_authority()
 
