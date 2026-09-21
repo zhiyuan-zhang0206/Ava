@@ -253,6 +253,36 @@ class TestSpawn:
         row = _agent_row(db_conn, new_id)
         assert row is not None and row[1] == "claude-code"
 
+    def test_spawn_settles_withdrawn_model_and_returns_receipt(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        """A registered-but-withdrawn llm_model is rewritten to its registered
+        fallback before the row is created, and the spawner gets the receipt in
+        the response (task #4306) — instead of the withdrawal surfacing only as
+        a wake-time normalization log."""
+        with TestClient(app) as client:
+            resp = client.post("/api/agents", json={"config": {"llm_model": "deepseek-v4-flash"}})
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["config_normalized"] == {
+            "requested": "deepseek-v4-flash",
+            "resolved": "deepseek-flash",
+        }
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT config_overlay FROM agents_meta WHERE id = %s", (body["id"],))
+            assert cur.fetchone() == ({"llm_model": "deepseek-flash"},)
+
+    def test_spawn_available_model_carries_no_receipt(self, db_conn: psycopg.Connection) -> None:
+        """An available id is stored as sent — no rewrite, no receipt."""
+        with TestClient(app) as client:
+            resp = client.post("/api/agents", json={"config": {"llm_model": "deepseek-flash"}})
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body.get("config_normalized") is None
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT config_overlay FROM agents_meta WHERE id = %s", (body["id"],))
+            assert cur.fetchone() == ({"llm_model": "deepseek-flash"},)
+
     def test_spawn_fork_resolves_latest_and_copies_checkpoint(
         self, db_conn: psycopg.Connection
     ) -> None:
@@ -778,6 +808,28 @@ class TestRestart:
                 (agent_id,),
             )
             assert cur.fetchone() == ({"config_overlay": {"llm_model": "gpt-5.6-sol"}},)
+
+    def test_restart_settles_withdrawn_model_before_storing(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        """The ops restart channel (the provider-outage model switch) settles a
+        withdrawn llm_model to its registered fallback in both the persisted
+        overlay and the restart payload (task #4306)."""
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            resp = client.post(
+                f"/api/agents/{agent_id}/restart",
+                json={"config_overlay": {"llm_model": "deepseek-v4-flash"}},
+            )
+        assert resp.status_code == 200
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,))
+            assert cur.fetchone() == ({"llm_model": "deepseek-flash"},)
+            cur.execute(
+                "SELECT payload FROM inbound_messages WHERE agent_id = %s AND kind = 'restart'",
+                (agent_id,),
+            )
+            assert cur.fetchone() == ({"config_overlay": {"llm_model": "deepseek-flash"}},)
 
     @pytest.mark.parametrize("config_overlay", [None, {}])
     def test_restart_empty_config_overlay_keeps_legacy_restart_shape(

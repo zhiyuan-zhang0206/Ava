@@ -173,6 +173,24 @@ def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
         from shared.plugin_config_registry import validate_config_overlay
 
         validate_config_overlay(config_overlay)
+        # Settle a withdrawn llm_model before it is stored (task #4306): the
+        # rewrite is reported in this agent's own log — the spawner-visible
+        # receipt for the self-restart path.
+        from shared.lm.registry import normalize_overlay_llm_model
+
+        config_overlay = dict(config_overlay)
+        model_receipt = normalize_overlay_llm_model(config_overlay)
+        if model_receipt is not None:
+            from shared.log import logger
+
+            logger.warning(
+                "restart config_overlay llm_model {requested!r} is withdrawn; "
+                "storing the registered fallback {resolved!r} — update the "
+                "template (task #4306)",
+                event="restart_config_normalized",
+                requested=model_receipt[0],
+                resolved=model_receipt[1],
+            )
         payload_json = _json.dumps({"config_overlay": dict(config_overlay)}, sort_keys=True)
 
     with ava.DB.cursor() as cur:

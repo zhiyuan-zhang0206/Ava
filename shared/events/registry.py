@@ -375,6 +375,29 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         "state (fingerprint)",
         tier="anomaly",
     ),
+    # ── write-side model settlement (task #4306): the overlay write paths'
+    # counterpart of the wake-time host_config_normalized above ──
+    "spawn_config_normalized": _telemetry(
+        "spawn_config_normalized",
+        "a spawn request's config_overlay carried a withdrawn llm_model — the "
+        "gateway settled it to the registered fallback before the row was "
+        "created, and the response carries the receipt (requested, resolved)",
+        tier="anomaly",
+    ),
+    "spawn_overlay_model_normalized": _telemetry(
+        "spawn_overlay_model_normalized",
+        "the spawn row INSERT settled a withdrawn llm_model in the overlay to "
+        "its registered fallback — the last-mile guard for client paths that "
+        "compose the map outside the gateway preflight",
+        tier="anomaly",
+    ),
+    "restart_config_normalized": _telemetry(
+        "restart_config_normalized",
+        "a restart config_overlay carried a withdrawn llm_model — it was "
+        "settled to the registered fallback before the overlay update and the "
+        "restart payload",
+        tier="anomaly",
+    ),
     "host_turn_crashed": _telemetry(
         "host_turn_crashed",
         "a hosted turn task raised — the task is dropped and the next wake retries "

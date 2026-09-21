@@ -212,6 +212,33 @@ class TestRestart:
         assert after_row is not None
         assert after_row[0] == before_row[0]
 
+    def test_restart_settles_withdrawn_model_to_registered_fallback(
+        self, db_conn: psycopg.Connection, monkeypatch
+    ) -> None:
+        """A registered-but-withdrawn model passes the membership check but is
+        settled to its registered fallback before persistence (task #4306): the
+        overlay column and the restart payload both carry the fallback."""
+        ava._boot._agent_id = spawn_agent()
+        with pytest.raises(ava.self.AgentRestart):
+            ava.self.restart(config_overlay={"llm_model": "deepseek-v4-flash"})
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT config_overlay FROM agents_meta WHERE id = %s",
+                (ava.self.AGENT_ID,),
+            )
+            row = cur.fetchone()
+        assert row is not None
+        assert row[0] == {"llm_model": "deepseek-flash"}
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT payload FROM inbound_messages "
+                "WHERE agent_id = %s AND kind = 'restart' ORDER BY id DESC LIMIT 1",
+                (ava.self.AGENT_ID,),
+            )
+            inbound_row = cur.fetchone()
+        assert inbound_row is not None
+        assert inbound_row[0] == {"config_overlay": {"llm_model": "deepseek-flash"}}
+
 
 class TestPauseHeartbeat:
     def test_pause_heartbeat_sets_window_records_trail_and_emits_event(
