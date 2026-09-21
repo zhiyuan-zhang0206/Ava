@@ -1035,13 +1035,17 @@ def test_endpoint_reachable_non_http_scheme_skips_probe():
     assert telemetry_otlp._OtlpBackend._endpoint_reachable("file:///tmp/x") is True
 
 
-def test_production_otlp_http_exporters_have_strict_timeouts(
+def test_production_otlp_provider_construction_contract(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Log and metric SDK workers receive the same explicit HTTP deadline."""
+    """Log and metric SDK workers receive the same explicit HTTP deadline, and
+    both providers leave the process-exit shutdown to the emitter (task #4320)."""
     calls: dict[str, Any] = {}
 
     class _LoggerProvider:
+        def __init__(self, **kwargs: object) -> None:
+            calls["logger_provider"] = kwargs
+
         def add_log_record_processor(self, processor: object) -> None:
             calls["installed_log_processor"] = processor
 
@@ -1098,6 +1102,11 @@ def test_production_otlp_http_exporters_have_strict_timeouts(
     assert calls["log_processor"][1]["export_timeout_millis"] == timeout_s * 1000
     assert calls["metric_reader"][1]["export_timeout_millis"] == timeout_s * 1000
     assert 0 < timeout_s <= 5.0
+    # Both providers must NOT register their own atexit shutdown: it would fire
+    # ahead of `shared.telemetry._drain_on_exit` (LIFO) and strand every tail
+    # record on a shut-down processor (task #4314 triage / #4320).
+    assert calls["logger_provider"] == {"shutdown_on_exit": False}
+    assert calls["meter_provider"]["shutdown_on_exit"] is False
 
 
 # ── exec-child export path (task #1423) ──────────────────────────────────────

@@ -655,6 +655,10 @@ def _hard_exit(code: int) -> NoReturn:
     ``main`` cancels and awaits loop tasks before reaching this point. Skipping
     interpreter teardown avoids its unbounded default/op-executor joins; logs
     are flushed explicitly because their atexit cleanup is also skipped.
+    ``os._exit`` also skips the emitter's exit drain
+    (``shared.telemetry._drain_on_exit``): the telemetry batch still queued
+    at this point is deliberately NOT flushed — hard-exit semantics win on
+    this path (accepted in the #4314 triage, task #4320).
     """
     with contextlib.suppress(Exception):
         from loguru import logger as _loguru
