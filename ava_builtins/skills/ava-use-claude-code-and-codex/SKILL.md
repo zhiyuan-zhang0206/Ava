@@ -199,7 +199,8 @@ loss surfaces in its exit notice.
 A **nudge** is just `ava.shell.sessions.send(id, "read <task-file> and continue")`
 (use the `tasks_file=` path the spawn script printed).
 Interrupt with `send_keys(id, "C-c")`. That is all `send` / `send_keys` are for
-now — not driving a menu.
+now — not driving a menu. Long text (over roughly 1K characters) sent into a TUI
+has its own rule — bracketed paste or a short pointer: [Delivery safety](reference/delivery_safety.md).
 
 `capture` is for the rare stall check and for reading
 the context indicator (below), not for routine progress.

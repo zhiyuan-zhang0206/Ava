@@ -307,7 +307,13 @@ def new(name: str, *, ttl: float) -> int:
 def send(id: int, cmd: str, *, enter: bool = True) -> None:
     """Asynchronous — returns immediately without waiting for the command.
 
-    Set `enter=False` to type the string without pressing Enter."""
+    Set `enter=False` to type the string without pressing Enter.
+
+    Long text (over roughly 1K characters) sent into a terminal UI can be
+    folded by its input handling and arrive silently incomplete (Claude Code
+    drops the folded part on a mixed submission; task #4364). Wrap such text
+    as a bracketed paste, or send a short pointer to a file the receiver
+    reads."""
     id = coerce_typed(id, "id", int)
     cmd = coerce_str(cmd, "cmd")
     enter = coerce_typed(enter, "enter", bool)
