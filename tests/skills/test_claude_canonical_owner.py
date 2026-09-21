@@ -35,6 +35,12 @@ def _load(name: str, path: Path) -> ModuleType:
 spawn_claude = _load("spawn_claude_under_test", _REFERENCE / "spawn_claude.py")
 
 
+def _unwrap_paste(text: str) -> str:
+    assert text.startswith(spawn_claude._PASTE_BEGIN)
+    assert text.endswith(spawn_claude._PASTE_END)
+    return text[len(spawn_claude._PASTE_BEGIN) : -len(spawn_claude._PASTE_END)]
+
+
 def _owner(tmp_path: Path) -> coding_session_owner.CodingSessionOwner:
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
@@ -165,7 +171,9 @@ def test_takeover_launch_inlines_brief_without_files_or_supervisor(
     assert rc == 0
     assert events == ["claim", "pretrust", "new", "publish", "send", "ready", "send", "receipt"]
     assert sent[0].startswith(f"cd {workspace.as_posix()} && ")
-    message = sent[1]
+    # The bootstrap goes out as one bracketed paste so the composer cannot
+    # fold it into content-dropping fragments (#4364).
+    message = _unwrap_paste(sent[1])
     assert "take over Ava agent 41" in message
     assert brief in message
     assert "tasks.md" not in message and "work.md" not in message
@@ -522,3 +530,56 @@ def test_failed_early_publish_kills_claude_session_before_startup(
     assert events == ["claim", "pretrust", "new", "publish"]
     assert killed == [7]
     assert terminated == [(launching.generation, "launch-failed")]
+
+
+def test_bracketed_paste_wraps_a_multi_chunk_payload() -> None:
+    payload = "x" * (spawn_claude._PASTE_WRAP_THRESHOLD_CHARS + 1)
+    assert spawn_claude._bracketed_paste(payload) == f"\x1b[200~{payload}\x1b[201~"
+
+
+def test_bracketed_paste_leaves_a_single_chunk_payload_unchanged() -> None:
+    payload = "x" * spawn_claude._PASTE_WRAP_THRESHOLD_CHARS
+    assert spawn_claude._bracketed_paste(payload) == payload
+
+
+def test_bracketed_paste_strips_inner_markers() -> None:
+    payload = "\x1b[201~" + "y" * (spawn_claude._PASTE_WRAP_THRESHOLD_CHARS + 1) + "\x1b[200~"
+    wrapped = spawn_claude._bracketed_paste(payload)
+    assert wrapped.startswith("\x1b[200~") and wrapped.endswith("\x1b[201~")
+    assert wrapped.count("\x1b[200~") == 1
+    assert wrapped.count("\x1b[201~") == 1
+
+
+def test_start_receipt_resend_wraps_a_multi_chunk_rebuilt_bootstrap(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The rebuild resend carries the bracketed wrap (#4364)."""
+    evidence = iter([False, False, True])
+    resend: list[str] = []
+
+    def transcript_evidence(_started: float) -> bool:
+        return next(evidence)
+
+    def no_sleep(_seconds: float) -> None:
+        return None
+
+    def send_enter(_sid: int, _key: str) -> None:
+        return None
+
+    def resend_bootstrap(_sid: int, message: str) -> None:
+        resend.append(message)
+
+    def unexpected_capture(_sid: int) -> str:
+        pytest.fail("capture is unnecessary once the rebuilt message is submitted")
+
+    monkeypatch.setattr(spawn_claude, "_bootstrap_submitted", transcript_evidence)
+    monkeypatch.setattr(spawn_claude.time, "sleep", no_sleep)
+    monkeypatch.setattr(spawn_claude.ava.shell.sessions, "send_keys", send_enter)
+    monkeypatch.setattr(spawn_claude.ava.shell.sessions, "send", resend_bootstrap)
+    monkeypatch.setattr(spawn_claude.ava.shell.sessions, "capture", unexpected_capture)
+
+    rebuilt = "b" * (spawn_claude._PASTE_WRAP_THRESHOLD_CHARS + 1)
+    spawn_claude._verify_start_receipt(7, lambda: rebuilt, timeout=0.0)
+
+    assert resend == [f"\x1b[200~{rebuilt}\x1b[201~"]
+    assert "start-receipt=submitted after rebuild resend" in capsys.readouterr().out
