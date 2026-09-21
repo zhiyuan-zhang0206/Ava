@@ -383,13 +383,12 @@ async def _probe_agent_runner(
     # status_probe response. If the responder is NOT the host we targeted, the
     # gateway_url pointed at the wrong box (a loopback/misregistered row makes the
     # gateway dial itself and answer under its own name). Refuse to render that as
-    # the target online — a loud identity-mismatch row instead.
+    # the target online — a loud identity-mismatch row instead. The log line
+    # itself is episode-deduped and degrades to INFO for a stopped row (a stale
+    # URL answering for someone else is that row's expected face — task #4143).
     if status.machine_name != name:
-        _log.error(
-            "identity mismatch: probing machine %r at %s, but the ops server self-reported %r",
-            name,
-            gateway_url,
-            status.machine_name,
+        _roster_probe.log_identity_mismatch(
+            name, gateway_url, status.machine_name, stopped=stopped_at is not None
         )
         return _roster_rows.identity_mismatch_status(
             name,
@@ -400,6 +399,7 @@ async def _probe_agent_runner(
             stopped_at,
             is_staging=is_staging,
         )
+    _roster_probe.note_identity_match(name)
     return MachineStatus(
         name=name,
         serve_gateway="gateway" in role,

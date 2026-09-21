@@ -51,7 +51,8 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         # which passes the name positionally — no `event=` literal to scan.
         "delivery_outbox_flushed",  # shared/delivery_outbox.py:flush
         "delivery_outbox_abandoned",  # shared/delivery_outbox.py:_abandon
-        "lifecycle_pointer_done_torn",  # gateway/ttl_reaper.py:_scan_torn_lifecycle_pointers_blocking (positional emit)
+        "lifecycle_pointer_done_torn",  # gateway/lifecycle_fences.py:_scan_torn_lifecycle_pointers_blocking (positional emit)
+        "lifecycle_fences_settled_absent_machine",  # gateway/lifecycle_fences.py:settle_absent_machine_fences (positional emit)
         "heartbeat_nudged",  # services/heartbeat/daemon.py:_alert_idle
         "heartbeat_backoff_raised",  # services/heartbeat/daemon.py:_raise_backoff_level (positional emit)
         "heartbeat_backoff_reset",  # services/heartbeat/daemon.py:_sweep_backoff_resets (positional emit)

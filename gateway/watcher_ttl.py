@@ -13,7 +13,8 @@ that rule applied to the registry:
 - `mark_reaped_live_owner` / `mark_reaped_and_notify_if_owner_still_terminated`
   terminalize the registry row once a reclaim is definitive — past the
   deadline a watcher is never rebuilt, and the owner-appropriate notice is
-  the only difference between the two;
+  the only difference between the two; `mark_reaped_owner_appropriate` is
+  the shared owner-state ladder both reclaim paths end with;
 - `reap_terminated_owner_watchers` is the #2617 path for owners that never
   come back to reconcile: their watcher sessions are killed and the rows
   terminalized with a reclamation notice (delivered on the owner's next
@@ -105,6 +106,36 @@ def mark_reaped_live_owner(pool: ConnectionPool, agent_id: int, session_id: int)
         )
         row = cur.fetchone()
         return None if row is None else str(row[0])
+
+
+async def mark_reaped_owner_appropriate(
+    pool: ConnectionPool, agent_id: int, session_id: int, *, mode: str
+) -> bool:
+    """Terminalize a still-``running`` watcher row the owner-appropriate way.
+
+    The one owner-state ladder both reclaim paths end with (task #3411): a
+    terminated-for-good owner gets the #2060 mark + notice in one statement
+    (``mark_reaped_and_notify_if_owner_still_terminated``); a live owner gets
+    a silent ``reaped`` (``mark_reaped_live_owner``); a crash-terminated
+    (auto-resurrect-eligible) owner's row is left running for its own
+    resurrect + boot reconcile. Emits ``watcher_reaped`` (with the reclaim's
+    ``mode``) when a row was marked; returns whether one was.
+    """
+    reaped_name = await asyncio.to_thread(
+        mark_reaped_and_notify_if_owner_still_terminated, pool, agent_id, session_id
+    )
+    if reaped_name is None:
+        reaped_name = await asyncio.to_thread(mark_reaped_live_owner, pool, agent_id, session_id)
+    if reaped_name is None:
+        return False
+    telemetry.emit(
+        "log",
+        "watcher_reaped",
+        level="info",
+        agent_id=agent_id,
+        attributes={"agent_id": agent_id, "session_id": session_id, "mode": mode},
+    )
+    return True
 
 
 def terminated_owner_watcher_rows(
@@ -205,7 +236,10 @@ async def reap_terminated_owner_watchers(
     Mirrors ``_reap_expired_shells`` discipline: the row is terminalized
     only on a definitive kill verdict (killed / absent); an unreachable
     machine or a failed op leaves the row for the next pass — marking it
-    first would orphan the live session. The post-kill mark re-checks the
+    first would orphan the live session. A machine absent from the machines
+    registry is definitive too (nothing on it can be dialed again under that
+    name — task #4143): the kill can never land, so the row terminalizes with
+    the same #2060 notice, mode ``machine_absent``. The post-kill mark re-checks the
     owner in SQL, so a mid-flight resurrect leaves the row ``running`` for
     the agent's own reconcile to rebuild (never a silent loss). A definitive
     mark also queues the #2060 reclamation notice for the owner — reaped is
@@ -229,6 +263,21 @@ async def reap_terminated_owner_watchers(
                 {"agent_id": agent_id, "session_id": session_id},
                 timeout_s=timeout_s,
             )
+        except cluster_rpc.ClusterOpTargetAbsent:
+            # Definitive: the machine has no registry row (deleted — retired /
+            # renamed away), so the kill can never land under this name. The
+            # owner is terminated for good on this path, so the reclaim verdict
+            # is final — terminalize now instead of retrying forever (task
+            # #4143). Nothing was killed, so the notice keeps the
+            # owner-termination attribution (task #4051).
+            _log.info(
+                "[ttl-reaper] terminated-owner watcher %s of agent %s: machine %r is "
+                "absent from the registry — terminalizing without a kill",
+                session_id,
+                agent_id,
+                machine,
+            )
+            result = {"mode": "machine_absent"}
         except (cluster_rpc.ClusterOpUnreachable, cluster_rpc.ClusterOpFailed) as exc:
             _log.warning(
                 "[ttl-reaper] terminated-owner watcher kill for agent %s session %s deferred: %r",
@@ -238,7 +287,7 @@ async def reap_terminated_owner_watchers(
             )
             continue
         mode = result.get("mode")
-        if mode not in ("killed", "absent"):
+        if mode not in ("killed", "absent", "machine_absent"):
             _log.warning(
                 "[ttl-reaper] terminated-owner watcher kill for agent %s session %s returned %r",
                 agent_id,

@@ -22,7 +22,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from gateway import ttl_reaper
+from gateway import lifecycle_fences, ttl_reaper
 from gateway.ttl_reaper import (
     _PASS_BATCH,
     _SHELL_KILL_TIMEOUT_S,
@@ -120,6 +120,52 @@ def _system_inbounds(conn: psycopg.Connection, agent_id: int) -> list[str]:
             (agent_id,),
         )
         return [r[0] for r in cur.fetchall()]
+
+
+def _capture_telemetry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[tuple[tuple[object, ...], dict[str, object]]]:
+    """Capture telemetry emits, asserting every name is registered (mirrors the
+    production emit contract, like the torn-pointer test does inline)."""
+    emitted: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def _capture_emit(*args: object, **kwargs: object) -> None:
+        from shared.events.contract import EVENTS
+
+        assert len(args) > 1 and args[1] in EVENTS, f"unregistered emit name: {args!r}"
+        emitted.append((args, kwargs))
+
+    monkeypatch.setattr(lifecycle_fences.telemetry, "emit", _capture_emit)
+    return emitted
+
+
+def _stuck_force_fence(conn: psycopg.Connection, *, machine: str, applied: bool = True) -> int:
+    """A terminated agent whose force-terminate fence is stuck: claimed
+    (+applied), unobserved, with ``lifecycle_command_id`` still pointing at it
+    — the shape a decommissioned machine leaves behind (task #4143)."""
+    aid = _running_agent(conn)
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agents_meta SET status='terminated', termination_source='user', "
+            "machine=%s, runtime_generation=gen_random_uuid(), "
+            "runtime_owner=gen_random_uuid(), lease_expires_at=now() + interval '1 hour' "
+            "WHERE id=%s RETURNING runtime_generation, runtime_owner",
+            (machine, aid),
+        )
+        gen, owner = cast(tuple[Any, Any], cur.fetchone())
+        cur.execute(
+            "INSERT INTO inbound_messages "
+            "(agent_id, content, kind, source, status, claimed_at, applied_at, "
+            " target_generation, target_owner) "
+            "VALUES (%s, '', 'terminate', 'machine-pause', 'claimed', now(), "
+            " CASE WHEN %s THEN now() ELSE NULL END, %s, %s) RETURNING id",
+            (aid, applied, gen, owner),
+        )
+        row = cur.fetchone()
+        assert row is not None
+        cur.execute("UPDATE agents_meta SET lifecycle_command_id=%s WHERE id=%s", (row[0], aid))
+    conn.commit()
+    return aid
 
 
 def test_reap_expired_web_sessions_removes_only_expired_rows(
@@ -301,15 +347,28 @@ def test_schedule_fire_log_prune_due_throttles(
 
 def test_torn_pointer_scan_due_throttles(monkeypatch: pytest.MonkeyPatch) -> None:
     """The scan fires on the first pass, then only after the scan interval."""
-    monkeypatch.setattr(ttl_reaper, "_torn_pointer_last_scan", None)
-    assert ttl_reaper._torn_pointer_scan_due() is True
-    assert ttl_reaper._torn_pointer_scan_due() is False
+    monkeypatch.setattr(lifecycle_fences, "_torn_pointer_last_scan", None)
+    assert lifecycle_fences._torn_pointer_scan_due() is True
+    assert lifecycle_fences._torn_pointer_scan_due() is False
     monkeypatch.setattr(
-        ttl_reaper,
+        lifecycle_fences,
         "_torn_pointer_last_scan",
-        time.monotonic() - 2 * ttl_reaper._TORN_POINTER_SCAN_INTERVAL_S,
+        time.monotonic() - 2 * lifecycle_fences._TORN_POINTER_SCAN_INTERVAL_S,
     )
-    assert ttl_reaper._torn_pointer_scan_due() is True
+    assert lifecycle_fences._torn_pointer_scan_due() is True
+
+
+def test_fence_settle_due_throttles(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The absent-machine fence settle fires on the first pass, then hourly."""
+    monkeypatch.setattr(lifecycle_fences, "_fence_settle_last_scan", None)
+    assert lifecycle_fences._fence_settle_due() is True
+    assert lifecycle_fences._fence_settle_due() is False
+    monkeypatch.setattr(
+        lifecycle_fences,
+        "_fence_settle_last_scan",
+        time.monotonic() - 2 * lifecycle_fences._FENCE_SETTLE_INTERVAL_S,
+    )
+    assert lifecycle_fences._fence_settle_due() is True
 
 
 def test_torn_pointer_scan_reports_torn_commands(
@@ -346,13 +405,71 @@ def test_torn_pointer_scan_reports_torn_commands(
     )
     db_conn.commit()
 
-    assert ttl_reaper._scan_torn_lifecycle_pointers_blocking(reaper_pool) == 1
+    assert lifecycle_fences._scan_torn_lifecycle_pointers_blocking(reaper_pool) == 1
     assert emitted
     assert emitted[-1][0][1] == "lifecycle_pointer_done_torn"
 
     db_conn.execute("UPDATE agents_meta SET lifecycle_command_id=NULL WHERE id=%s", (agent_id,))
     db_conn.commit()
-    assert ttl_reaper._scan_torn_lifecycle_pointers_blocking(reaper_pool) == 0
+    assert lifecycle_fences._scan_torn_lifecycle_pointers_blocking(reaper_pool) == 0
+
+
+def test_settle_absent_machine_fences_settles_stuck_force(
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Task #4143: a decommissioned machine never runs the boot recovery that
+    observes its agents' force fences, so the reaper settles them to the exact
+    transition ``recover_orphaned_hosted_forces`` would have written —
+    observed + done, pointer and lease cleared — and reports the event."""
+    emitted = _capture_telemetry(monkeypatch)
+    aid = _stuck_force_fence(db_conn, machine="ghost")
+
+    settled = lifecycle_fences.settle_absent_machine_fences(reaper_pool, batch=50)
+
+    assert settled == [aid]
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT i.status, i.observed_at IS NOT NULL, m.lifecycle_command_id IS NULL, "
+            "m.lease_expires_at IS NULL FROM agents_meta m "
+            "JOIN inbound_messages i ON i.agent_id = m.id AND i.kind = 'terminate' "
+            "WHERE m.id = %s",
+            (aid,),
+        )
+        row = cur.fetchone()
+    assert row == ("done", True, True, True)
+    assert emitted and emitted[-1][0][1] == "lifecycle_fences_settled_absent_machine"
+    assert emitted[-1][1]["attributes"] == {"count": 1, "samples": str(aid)}
+    # Idempotent: once settled, the scan is quiet.
+    assert lifecycle_fences.settle_absent_machine_fences(reaper_pool, batch=50) == []
+
+
+def test_settle_absent_machine_fences_leaves_registered_and_unapplied(
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool
+) -> None:
+    """Only absent machines are terminalized, and only applied commands:
+    a registered machine's boot recovery owns its fences, and an unapplied
+    command has no observation evidence to write (never fabricate one)."""
+    registered = _stuck_force_fence(db_conn, machine="macmini")
+    unapplied = _stuck_force_fence(db_conn, machine="ghost", applied=False)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO machines (name, role, gateway_url) "
+            "VALUES ('macmini', '{agent-runner}', 'http://macmini:8106')"
+        )
+    db_conn.commit()
+
+    assert lifecycle_fences.settle_absent_machine_fences(reaper_pool, batch=50) == []
+    with db_conn.cursor() as cur:
+        for aid in (registered, unapplied):
+            cur.execute(
+                "SELECT i.status, i.observed_at IS NULL, m.lifecycle_command_id IS NOT NULL "
+                "FROM agents_meta m JOIN inbound_messages i "
+                "ON i.agent_id = m.id AND i.kind = 'terminate' WHERE m.id = %s",
+                (aid,),
+            )
+            assert cur.fetchone() == ("claimed", True, True)
 
 
 async def test_reaper_reconciles_stale_work_failures_on_its_startup_pass(
@@ -488,6 +605,93 @@ async def test_reap_expired_shells_keeps_row_on_unreachable(
         cur.execute("SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s", (aid,))
         row = cur.fetchone()
         assert row is not None and row[0] == 1
+
+
+async def test_reap_expired_shells_absent_machine_terminalizes_row(
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Task #4143: a machine absent from the registry is a definitive verdict —
+    the expired row is dropped as an absent session instead of being deferred
+    forever, and nothing notifies (nothing on a gone machine was interrupted)."""
+    aid = _running_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at, created_at) "
+            "VALUES (%s, 8, now() - interval '1 minute', now() - interval '1 hour 1 minute')",
+            (aid,),
+        )
+        cur.execute("UPDATE agents_meta SET machine = 'ghost' WHERE id = %s", (aid,))
+    db_conn.commit()
+
+    async def _dispatch(
+        machine: str, kind: str, payload: dict[str, object], **kwargs: object
+    ) -> dict[str, object]:
+        raise ttl_reaper.cluster_rpc.ClusterOpTargetAbsent(
+            "machine 'ghost' is absent from the machines registry"
+        )
+
+    monkeypatch.setattr(ttl_reaper.cluster_rpc, "dispatch_to_machine", _dispatch)
+    emitted: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def _capture_emit(*args: object, **kwargs: object) -> None:
+        emitted.append((args, kwargs))
+
+    monkeypatch.setattr(ttl_reaper.telemetry, "emit", _capture_emit)
+    reaped = await _reap_expired_shells(reaper_pool)
+
+    assert reaped == [(aid, 8)]
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s", (aid,))
+        row = cur.fetchone()
+        assert row is not None and row[0] == 0
+    assert _system_inbounds(db_conn, aid) == []
+    # The synthetic verdict is spelled ``machine_absent`` — distinct from the
+    # live-host ``absent`` (session already ended) it must not masquerade as.
+    assert emitted and emitted[-1][0][1] == "shell_ttl_expired"
+    assert emitted[-1][1]["attributes"] == {
+        "agent_id": aid,
+        "session_id": 8,
+        "mode": "machine_absent",
+        "interrupted": False,
+    }
+
+
+async def test_reap_expired_shells_absent_machine_marks_watcher_reaped(
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The absent-machine verdict runs the same watcher bookkeeping as a real
+    verdict: a still-running watcher row is terminalized (live owner: silent
+    ``reaped``), so no later boot rebuilds the schedule."""
+    aid = _running_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at, created_at) "
+            "VALUES (%s, 22, now() - interval '1 minute', now() - interval '1 hour 1 minute')",
+            (aid,),
+        )
+        cur.execute(
+            "INSERT INTO agent_watchers (agent_id, session_id, kind, name, status, cron_end_at) "
+            "VALUES (%s, 22, 'cron', 'check', 'running', now() - interval '1 minute')",
+            (aid,),
+        )
+        cur.execute("UPDATE agents_meta SET machine = 'ghost' WHERE id = %s", (aid,))
+    db_conn.commit()
+
+    async def _dispatch(
+        machine: str, kind: str, payload: dict[str, object], **kwargs: object
+    ) -> dict[str, object]:
+        raise ttl_reaper.cluster_rpc.ClusterOpTargetAbsent("absent")
+
+    monkeypatch.setattr(ttl_reaper.cluster_rpc, "dispatch_to_machine", _dispatch)
+    reaped = await _reap_expired_shells(reaper_pool)
+
+    assert reaped == [(aid, 22)]
+    assert _watcher_status(db_conn, aid, 22) == "reaped"
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s", (aid,))
+        row = cur.fetchone()
+        assert row is not None and row[0] == 0
+    assert _system_inbounds(db_conn, aid) == []  # live owner: silent
 
 
 async def test_reap_expired_shells_kills_watcher_past_deadline(
@@ -1265,6 +1469,34 @@ async def test_reap_terminated_owner_watcher_unreachable_keeps_row(
 
     assert reaped == []
     assert _watcher_status(db_conn, aid, 33) == "running"
+
+
+async def test_reap_terminated_owner_watcher_absent_machine_terminalizes(
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Task #4143: an absent machine cannot take the kill, but the owner is
+    terminated for good — so the reclaim verdict is final: the row is
+    terminalized with the #2060 reclamation notice (the notice keeps the
+    owner-termination attribution — nothing was killed)."""
+    aid = _terminated_agent(db_conn, source="user")
+    _watcher_row(db_conn, aid, 34)
+
+    async def _dispatch(
+        machine: str, kind: str, payload: dict[str, object], **kwargs: object
+    ) -> dict[str, object]:
+        assert machine == "macmini"
+        raise ttl_reaper.cluster_rpc.ClusterOpTargetAbsent("absent")
+
+    monkeypatch.setattr(ttl_reaper.cluster_rpc, "dispatch_to_machine", _dispatch)
+    reaped = await _reap_terminated_watchers(reaper_pool)
+
+    assert reaped == [(aid, 34)]
+    assert _watcher_status(db_conn, aid, 34) == "reaped"
+    assert _system_inbounds(db_conn, aid) == [
+        f"Watcher schedule 'daily' (agent {aid}) was reclaimed because its "
+        "owner agent was terminated. Re-register it with ava.watcher.cron() "
+        "if it is still needed."
+    ]
 
 
 async def test_reap_terminated_owner_watcher_resurrected_mid_pass_keeps_row_running(
