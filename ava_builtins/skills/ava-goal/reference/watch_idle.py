@@ -91,7 +91,11 @@ def watch_via_poll(target_id: int, interval_s: float = 5.0) -> None:
 
     while True:
         try:
-            with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
+            # prepare_threshold=None: never prepare statements on the pooled front door.
+            with (
+                psycopg.connect(settings.data_plane.db_url, prepare_threshold=None) as conn,
+                conn.cursor() as cur,
+            ):
                 cur.execute("SELECT status FROM agents_meta WHERE id = %s", (target_id,))
                 row = cur.fetchone()
         except Exception:

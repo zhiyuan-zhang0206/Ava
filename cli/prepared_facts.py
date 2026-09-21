@@ -235,7 +235,8 @@ def produce_facts(args: argparse.Namespace) -> dict[str, object]:
     # it runs (`shared/managed_writer_barrier.py`: no filesystem work under the
     # lock; gathered facts are evidence, never authority, so nothing here
     # needs the lock held).
-    with psycopg.connect(url, connect_timeout=5) as conn:
+    # prepare_threshold=None: never prepare statements on the pooled front door.
+    with psycopg.connect(url, prepare_threshold=None, connect_timeout=5) as conn:
         with conn.transaction():
             lock_rollout(conn, operation)
             row = conn.execute(
