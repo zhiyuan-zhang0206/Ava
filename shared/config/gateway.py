@@ -344,6 +344,47 @@ class GatewaySettings(UpdateSpawnFields, ManagedWriterFields, EnvSettings):
         },
     )
 
+    stop_incomplete_recovery: bool = Field(
+        default=True,
+        alias="AVA_STOP_INCOMPLETE_RECOVERY",
+        description=(
+            "Caller-side bounded recovery of a half-done update stop (task #3942): an "
+            "agent-runner leg whose graceful stop exits non-zero, while its own "
+            "maintenance generation still sits between stopping and stopped, spends "
+            "ONE bounded attempt at its own internal start before returning the stop "
+            "rc. It declines unless the episode is provably its own. False = the "
+            "pre-#3942 behaviour: only the stranded-hold completion, the watchdog's "
+            "respawn, or a manual `ava start` restores the host."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    stop_incomplete_recovery_timeout_seconds: float = Field(
+        default=120.0,
+        gt=0,
+        allow_inf_nan=False,
+        alias="AVA_STOP_INCOMPLETE_RECOVERY_TIMEOUT_SECONDS",
+        description=(
+            "Deadline of that one bounded attempt (task #3942): the internal `ava "
+            "start` child is killed at this bound, so a hung start cannot hold the "
+            "updater's verdict past a bounded window. The 120s default covers a "
+            "normal start on a healthy host (launch plus readiness); a start still "
+            "running at the bound defers to the paths above. Must be finite and "
+            "positive."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     hold_watchdog_min_age_seconds: float = Field(
         default=1800.0,
         gt=0,

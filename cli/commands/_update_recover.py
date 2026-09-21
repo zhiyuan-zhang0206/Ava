@@ -275,7 +275,12 @@ def local_update_failure_detail(rc: int, *, restart_only: bool) -> str:
             "or off-site publish) is in flight; the gateway keeps serving — retry once it is idle"
         )
     if rc == STOP_INCOMPLETE_EXIT_CODE:
-        return "pause/stop incomplete; source and schema unchanged; use ava start to restore stopped services"
+        return (
+            "pause/stop incomplete (some services may be down); source and schema "
+            "unchanged; recovery is delegated -- an agent-runner leg retries its own "
+            "start once in-process; otherwise the stranded-hold completion, the "
+            "watchdog's respawn, or a manual `ava start` restores the host"
+        )
     if restart_only:
         return "restart bounce on current code failed (nothing to roll back); check `ava cluster status`"
     if rc == 1:
