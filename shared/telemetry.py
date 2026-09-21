@@ -779,7 +779,9 @@ def _drain_on_exit() -> None:
     exec-subprocess path, where `init_subprocess_logger` never opened the
     pipeline and `_ensure_pipeline` built it lazily on first emit). SIGKILL /
     SIGSTOP cannot be intercepted; there the JSONL mirror remains the recovery
-    source."""
+    source.
+    The ONE ordered exit seam for OTLP: providers are built with `shutdown_on_exit=False`;
+    no provider atexit shutdown can strand a tail record (task #4320)."""
     pipeline = _state["pipeline"]
     if pipeline is None:
         return

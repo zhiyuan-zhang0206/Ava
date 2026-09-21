@@ -132,6 +132,9 @@ single-box hosts collapse to the local receiver even when their secret is set.
   ID; renaming either would orphan the upgrade backlog. Metrics keep the ID but
   retain bounded in-memory retry. Queue/drop/silence observability lives in
   [[infra-metrics.ava.okf.md|Infrastructure metrics]].
+- Exit flush (task #4320) — both providers build with
+  `shutdown_on_exit=False`; the single ordered exit seam and its accepted
+  semantics: [[exit-flush.ava.okf.md|OTLP exit flush]].
 - The stack's operational story (collector, Grafana) is in
   `conventions/runbook.md` (Observability / Tracing).
 - Parent node: [[shared.ava.okf.md|Shared Libraries]].
