@@ -285,7 +285,10 @@ async def _dispatch(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, 
                 spawned = await ops_lifecycle.launch_agent_op(
                     LaunchAgentRequest.model_validate(payload), pool
                 )
-                return "completed", spawned.model_dump(mode="json")
+                # `exclude_none`: the settlement receipt is present only when a
+                # withdrawn model was rewritten (task #4306) — the common wire
+                # shape stays {"id": ...}.
+                return "completed", spawned.model_dump(mode="json", exclude_none=True)
             case "lifecycle":
                 lc = LifecyclePayload.model_validate(payload)
                 resp = await ops_lifecycle.lifecycle_op(

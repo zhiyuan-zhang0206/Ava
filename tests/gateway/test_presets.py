@@ -205,11 +205,14 @@ class TestSpawnWithPreset:
                     "skills_to_inject_into_system_prompt": ["a"],
                 },
             )
+            # An available id on purpose — a withdrawn override would settle to
+            # its registered fallback at the write side (task #4306, its own
+            # coverage); this test pins the preset merge.
             r = client.post(
                 "/api/agents",
                 json={
                     "spawner": "user",
-                    "config": {"preset": "coder", "llm_model": "deepseek-v4-pro"},
+                    "config": {"preset": "coder", "llm_model": "deepseek-flash"},
                 },
             )
             assert r.status_code == 201, r.text
@@ -217,7 +220,7 @@ class TestSpawnWithPreset:
         overlay, preset_name = self._row(db_conn, agent_id)
         assert preset_name == "coder"
         assert overlay == {  # pyright: ignore[reportUnknownMemberType]
-            "llm_model": "deepseek-v4-pro",
+            "llm_model": "deepseek-flash",
             "skills_to_inject_into_system_prompt": ["a"],
         }
 

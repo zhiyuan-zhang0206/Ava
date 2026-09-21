@@ -398,6 +398,33 @@ def resolve_available_model(model: str) -> str:
     return spec.unavailable_fallback if spec and spec.unavailable_fallback else model
 
 
+def normalize_overlay_llm_model(config: dict[str, object]) -> tuple[str, str] | None:
+    """Settle a withdrawn ``llm_model`` in a config overlay to its registered fallback.
+
+    The write-side counterpart of `admit_stored_model`'s wake-time settlement:
+    every overlay write (spawn row / self restart / ops restart) funnels through
+    here so a withdrawn id never lands in ``agents_meta.config_overlay`` — the
+    wake would normalize it later anyway, but the stored name is what forks,
+    snapshots and readers copy (task #4306: the 9/20-21 recurrence wrote 12
+    retired ids through the spawn path).
+
+    Mutates ``config`` in place and returns ``(requested, resolved)`` when the
+    name was rewritten, so the writer can emit the spawner-visible receipt — a
+    silent rewrite would leave the stale template in place and keep producing
+    withdrawn ids. Returns ``None`` when there is nothing to settle: no
+    ``llm_model``, an available id, or an unknown id (unknown ids are the spawn
+    boundary's validation concern — `validate_model_config`).
+    """
+    requested = config.get("llm_model")
+    if not isinstance(requested, str):
+        return None
+    resolved = resolve_available_model(requested)
+    if resolved == requested:
+        return None
+    config["llm_model"] = resolved
+    return requested, resolved
+
+
 # ---------------------------------------------------------------------------
 # Resolution
 # ---------------------------------------------------------------------------

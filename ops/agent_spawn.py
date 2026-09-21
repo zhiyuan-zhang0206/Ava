@@ -35,6 +35,7 @@ from shared.audit_events import insert_event_log
 from shared.birth_config import resolve_birth_config
 from shared.db import fetch_one, insert_inbound_message
 from shared.live_announce import publish_agent_spawned_sync
+from shared.lm.registry import normalize_overlay_llm_model
 from shared.log import logger
 
 
@@ -382,6 +383,22 @@ def create_agent_row(
         if fork_from is not None:
             cur.execute("SELECT birth_config FROM agents_meta WHERE id = %s", (fork_from,))
             inherited = fetch_one(cur, "spawn: read fork source birth_config")[0]
+        if config:
+            # Last-mile settlement (task #4306): the gateway preflight already
+            # normalized + reported a withdrawn llm_model; keeping the rewrite
+            # at the row itself means a withdrawn id never lands in
+            # agents_meta.config_overlay, whatever client path composed the map
+            # (a bare fork copies the source overlay over verbatim).
+            config = dict(config)
+            model_receipt = normalize_overlay_llm_model(config)
+            if model_receipt is not None:
+                logger.warning(
+                    "spawn overlay llm_model {requested!r} is withdrawn; stored "
+                    "the registered fallback {resolved!r} (task #4306)",
+                    event="spawn_overlay_model_normalized",
+                    requested=model_receipt[0],
+                    resolved=model_receipt[1],
+                )
         birth_config = resolve_birth_config(cur, config, inherited=inherited)
         # For a fork, spawner records the fork SOURCE — the lineage parent
         # (user ruling 2026-08-28, task #1879). The executor who triggered the

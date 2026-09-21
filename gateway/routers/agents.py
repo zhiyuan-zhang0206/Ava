@@ -31,7 +31,12 @@ from gateway.schemas import (
 )
 from ops.agent_spawn import create_agent_row
 from ops.ops_lifecycle import _spawn_prechecks_blocking
-from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
+from ops.rpc_schemas import (
+    ConfigNormalization,
+    LaunchAgentRequest,
+    SpawnAgentRequest,
+    SpawnedAgent,
+)
 from shared import agent_roster, agent_snapshot
 from shared.agents import (
     AgentNotFound,
@@ -42,6 +47,7 @@ from shared.agents import (
 from shared.config import settings
 from shared.db_transaction import write_transaction
 from shared.labels import publish_label_updated
+from shared.log import logger
 from shared.machine import machine_name
 
 router = APIRouter()
@@ -167,11 +173,13 @@ def _patch_label_blocking(pool: ConnectionPool, agent_id: int, new_label: str | 
 
 def _spawn_preflight_blocking(
     target: str, body: SpawnAgentRequest, pool: ConnectionPool
-) -> tuple[str | None, list[str] | None]:
+) -> tuple[str | None, list[str] | None, tuple[str, str] | None]:
     """Sync spawn preflight — via to_thread: registry capability check, preset
-    fold, fork config rule + tail-skills delta, model-config validation (may
-    read provider API keys). Returns ``(preset_name, tail_skills)`` for the
-    agent row / fork inbound.
+    fold, fork config rule + tail-skills delta, model-config settlement and
+    validation (may read provider API keys). Returns ``(preset_name,
+    tail_skills, model_receipt)`` for the agent row / fork inbound; the receipt
+    is ``(requested, resolved)`` when a withdrawn ``llm_model`` was rewritten,
+    else None.
     """
     from shared.agents import MachinePaused
     from shared.machines import is_paused, lookup_role
@@ -206,6 +214,16 @@ def _spawn_preflight_blocking(
     preset_name, tail_skills = _normalize_and_resolve_preset(pool, body)
     if body.fork_from is not None:
         preset_name, tail_skills = _validate_fork_config(pool, body, preset_name)
+    # Settle a withdrawn llm_model BEFORE the overlay is stored or forwarded —
+    # the row, fork copies and the launch op all carry the registered fallback,
+    # and the spawner gets a receipt (response field + log line) instead of the
+    # withdrawal surfacing later as a wake-time normalization (task #4306: the
+    # 9/20-21 recurrence wrote 12 retired ids through this path, silently).
+    model_receipt: tuple[str, str] | None = None
+    if body.config:
+        from shared.lm.registry import normalize_overlay_llm_model
+
+        model_receipt = normalize_overlay_llm_model(body.config)
     # Validate model config before forwarding — fail fast at the gateway
     # instead of letting the agent process silently hang on a missing API key.
     from shared.lm.factory import validate_model_config
@@ -214,7 +232,15 @@ def _spawn_preflight_blocking(
         validate_model_config(model=settings.lm.llm_model, config=body.config)
     except ValueError as exc:
         raise InvalidModelConfig(str(exc)) from exc
-    return preset_name, tail_skills
+    if model_receipt is not None:
+        logger.warning(
+            "spawn config_overlay llm_model {requested!r} is withdrawn; stored "
+            "the registered fallback {resolved!r} (task #4306)",
+            event="spawn_config_normalized",
+            requested=model_receipt[0],
+            resolved=model_receipt[1],
+        )
+    return preset_name, tail_skills, model_receipt
 
 
 # The overlay key naming a preset, and the only overlay keys a fork may change
@@ -378,7 +404,7 @@ async def create_and_launch_agent(
     the guide / packages / schedules draft routers, the MCP tools server), so
     preflight, row creation, and launch stay uniform across entry points.
     """
-    preset_name, tail_skills = await asyncio.to_thread(
+    preset_name, tail_skills, model_receipt = await asyncio.to_thread(
         _spawn_preflight_blocking, target, body, pool
     )
     # fork_checkpoint resolution stays gateway-side: LangGraph checkpoints are
@@ -413,11 +439,21 @@ async def create_and_launch_agent(
         label=body.label,
     )
     # The endpoint response is the launch op's verdict (the launched agent id —
-    # equal to new_id in production; the runner answers for the launch).
-    return await _forward_spawn_to_remote(target, launch)
+    # equal to new_id in production; the runner answers for the launch). A
+    # withdrawal settlement travels as the spawner's receipt (task #4306).
+    spawned = await _forward_spawn_to_remote(target, launch)
+    if model_receipt is not None:
+        spawned = spawned.model_copy(
+            update={
+                "config_normalized": ConfigNormalization(
+                    requested=model_receipt[0], resolved=model_receipt[1]
+                )
+            }
+        )
+    return spawned
 
 
-@router.post("/api/agents", status_code=201)
+@router.post("/api/agents", status_code=201, response_model_exclude_none=True)
 async def post_agents(body: SpawnAgentRequest, request: Request) -> SpawnedAgent:
     """Spawn a new agent — uniform HTTP path for SDK / frontend / scripts.
 

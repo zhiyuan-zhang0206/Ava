@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 29 | event stream |
-| telemetry (category=telemetry) | `events` | 205 | event stream |
+| telemetry (category=telemetry) | `events` | 208 | event stream |
 | log (category=log) | `events` | 13 | event stream |
 | file-only (destination=file) | file log | 1 | file only (not the stream) |
 | SSE live | Redis → frontend (not persisted) | 31 role | live projection |
@@ -96,7 +96,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `managed_writer_pre_stop_aborted` | the exact pre-stop abort cleared a never-effective pending publication and its lease | business | — | events |
 | `managed_writer_blocked` | managed-writer mode requested but refused entry: a readiness guard is missing or not True; the rollout ran the legacy flow | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 205)
+## 3. Telemetry events (category=telemetry, 208)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -145,6 +145,9 @@ consumers: see the comments at each emit point.
 | `host_dispatcher_bad_channel` | hosted dispatcher ignored a wake whose channel name carried no agent id | anomaly | — | — | events |
 | `host_config_rejected` | a hosted wake was consumed without a turn because the agent's stored model config cannot build (unknown model or missing provider key) — logged once per stored config state (fingerprint); the pending inbound is kept until the overlay is fixed | anomaly | — | — | events |
 | `host_config_normalized` | a hosted wake bound a stored llm_model pin as its registered fallback because the registry has withdrawn the pinned model — the turn and its usage attribution run on the fallback; logged once per stored config state (fingerprint) | anomaly | — | — | events |
+| `spawn_config_normalized` | a spawn request's config_overlay carried a withdrawn llm_model — the gateway settled it to the registered fallback before the row was created, and the response carries the receipt (requested, resolved) | anomaly | — | — | events |
+| `spawn_overlay_model_normalized` | the spawn row INSERT settled a withdrawn llm_model in the overlay to its registered fallback — the last-mile guard for client paths that compose the map outside the gateway preflight | anomaly | — | — | events |
+| `restart_config_normalized` | a restart config_overlay carried a withdrawn llm_model — it was settled to the registered fallback before the overlay update and the restart payload | anomaly | — | — | events |
 | `host_turn_crashed` | a hosted turn task raised — the task is dropped and the next wake retries from the checkpoint; neighbours are unaffected. Carries exception_type, plus config_fingerprint when the stored config was read before the failure | anomaly | — | — | events |
 | `host_agent_prepared` | the host built an agent's per-agent runtime (chat model + startup reconcile) on a cold path — carries duration_ms and a reason of cold / config_changed / evicted, so a wake that pays the cold cost is distinguishable from one that does not, and a cache thrashing on config churn is visible as reason mix | noise | — | — | events |
 | `host_started` | the hosted agent-runner finished process-scope boot and its dispatcher is live | noise | — | — | events |
