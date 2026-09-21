@@ -32,6 +32,9 @@ def test_fire_runs_default_repo_and_logs_previous_complete_day(
     module = _load()
     calls: list[list[str]] = []
     exporter = SimpleNamespace(DEFAULT_REPO="owner/repo", main=lambda args: calls.append(args) or 0)
+    # Pin the cluster timezone: the day label must follow the cluster wall
+    # clock, not the test environment's zone (CI has no cluster config).
+    monkeypatch.setattr(module, "TZ", "Asia/Shanghai")
     monkeypatch.setattr(module, "claimed_slot", lambda: datetime(2026, 9, 3, 22, 20, tzinfo=UTC))
     monkeypatch.setattr(module, "_load_exporter", lambda: exporter)
     monkeypatch.setattr(
@@ -41,11 +44,14 @@ def test_fire_runs_default_repo_and_logs_previous_complete_day(
             "repositories": {"owner/repo": {"days": {"2026-09-03": {"runs": 7, "failed_runs": 2}}}}
         },
     )
+    failures: list[str] = []
+    monkeypatch.setattr(module, "_report_failure", failures.append)
 
     module._fire(None)
 
     assert calls == [["--repo", "owner/repo"]]
     assert "2026-09-03 — 7 runs, 2 failed" in capsys.readouterr().out
+    assert failures == []
 
 
 def test_fire_reports_failed_collector(monkeypatch: pytest.MonkeyPatch) -> None:
