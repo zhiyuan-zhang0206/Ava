@@ -29,7 +29,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -166,10 +166,9 @@ def test_tail_record_of_a_short_lived_process_reaches_the_receiver(
         for path in sorted((home / "logs").glob("events-*.jsonl"))
         for line in path.read_text(encoding="utf-8").splitlines()
     ]
-    mirror_tail = [
-        row
-        for row in rows
-        if (row.get("attributes") or {}).get("marker") == marker
-        and (row.get("attributes") or {}).get("seq") == "tail"
-    ]
+    mirror_tail: list[Any] = []
+    for row in rows:
+        attributes = cast("dict[str, Any]", row.get("attributes") or {})
+        if attributes.get("marker") == marker and attributes.get("seq") == "tail":
+            mirror_tail.append(row)
     assert mirror_tail, "the JSONL mirror must hold the tail record"

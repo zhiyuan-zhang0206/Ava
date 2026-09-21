@@ -780,12 +780,8 @@ def _drain_on_exit() -> None:
     pipeline and `_ensure_pipeline` built it lazily on first emit). SIGKILL /
     SIGSTOP cannot be intercepted; there the JSONL mirror remains the recovery
     source.
-
-    This is also the ONE ordered exit seam for the OTLP side: the SDK
-    providers are built with `shutdown_on_exit=False` (see
-    `shared/telemetry_otlp_metrics._build_providers`), so no provider
-    registers an atexit shutdown that could fire ahead of this flush and
-    strand a tail record on a shut-down processor (task #4320)."""
+    The ONE ordered exit seam for OTLP: providers are built with `shutdown_on_exit=False`;
+    no provider atexit shutdown can strand a tail record (task #4320)."""
     pipeline = _state["pipeline"]
     if pipeline is None:
         return
