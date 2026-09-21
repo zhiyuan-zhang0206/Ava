@@ -6,6 +6,7 @@ import asyncio
 from datetime import UTC, datetime
 
 import psycopg
+import pytest
 
 from gateway import completion_notice_flusher
 from shared.completion_notices import CompletionNotice, record_hourly_notice
@@ -109,3 +110,54 @@ def test_flush_once_delivers_one_digest_and_marks_the_authoritative_events(
             "SELECT count(*) FROM completion_notice_events WHERE agent_id = %s", (agent_id,)
         )
         assert cur.fetchone() == (0,)
+
+
+def test_flush_once_continues_after_one_digest_delivery_failure(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One unavailable digest does not prevent another agent's completed hour."""
+    import shared.db
+
+    blocked_agent = _agent(db_conn)
+    delivered_agent = _agent(db_conn)
+    for agent_id in (blocked_agent, delivered_agent):
+        record_hourly_notice(
+            db_conn,
+            agent_id,
+            CompletionNotice(
+                source=f"shell:{agent_id}",
+                content="Background command 'ok' exited with code 0. Full output at ok.log.",
+                outcome="exit",
+                exit_code=0,
+            ),
+        )
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE completion_notice_events SET created_at = %s",
+            (datetime(2026, 9, 22, 10, tzinfo=UTC),),
+        )
+    db_conn.commit()
+
+    real_deliver = completion_notice_flusher.deliver_chat_inbound
+
+    async def fail_one(pool: object, agent_id: int, **kwargs: object) -> object:
+        if agent_id == blocked_agent:
+            raise RuntimeError("poison digest")
+        return await real_deliver(pool, agent_id, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(completion_notice_flusher, "deliver_chat_inbound", fail_one)
+    pool = shared.db.pool(max_size=2)
+    try:
+        delivered = asyncio.run(
+            completion_notice_flusher.flush_once(pool, now=datetime(2026, 9, 22, 12, tzinfo=UTC))
+        )
+    finally:
+        pool.close()
+
+    assert delivered == 1
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT agent_id, digest_inbound_id IS NOT NULL FROM completion_notice_events "
+            "ORDER BY agent_id"
+        )
+        assert cur.fetchall() == [(blocked_agent, False), (delivered_agent, True)]

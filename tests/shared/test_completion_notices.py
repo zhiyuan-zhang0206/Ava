@@ -33,7 +33,9 @@ def test_hourly_keeps_failures_immediate_and_counts_them_in_the_digest() -> None
 
     digest = format_digest(
         agent_id=7,
-        window_start=datetime(2026, 9, 22, 10, tzinfo=UTC),
+        window_start=datetime(
+            2026, 9, 22, 10, tzinfo=UTC
+        ),  # time-bomb-ok: fixed UTC formatting contract
         notices=[success, failure],
     )
 
@@ -70,7 +72,9 @@ def test_digest_bounds_rendered_logs_but_keeps_the_total_count() -> None:
     ]
     digest = format_digest(
         agent_id=7,
-        window_start=datetime(2026, 9, 22, 10, tzinfo=UTC),
+        window_start=datetime(
+            2026, 9, 22, 10, tzinfo=UTC
+        ),  # time-bomb-ok: fixed UTC formatting contract
         notices=notices,
     )
     assert "23 completion notices" in digest

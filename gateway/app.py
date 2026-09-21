@@ -66,8 +66,6 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import shared.db
-from gateway import _agent_max_id as _agent_max_id_module
-from gateway import _auth401_log as _auth401_log_module
 from gateway import (
     _idempotency,
     _latency,
@@ -79,8 +77,8 @@ from gateway import (
     prom_metrics,
     ttl_reaper,
 )
-from gateway import completion_notice_flusher as _completion_notice_flusher
 from gateway import mcp_endpoint as _mcp_endpoint
+from gateway import periodic_flushers as _periodic_flushers
 from gateway._auth401_log import _log_auth401_rejection
 from gateway._cors import cors_allowed_origins
 from gateway._server import main as _run_gateway
@@ -243,23 +241,6 @@ from shared.os_cron import register_os_cron
 _log = logging.getLogger(__name__)
 
 
-def _start_periodic_flushers(app: FastAPI) -> None:
-    """Start the gateway's periodic telemetry flushers as app.state tasks.
-
-    Gateway periodic tasks have one lifespan owner. Completion digests are
-    deliberately one loop here rather than one loop per agent, so a completed
-    hour has one platform-side delivery owner.
-    """
-    app.state.latency_flusher = asyncio.create_task(_latency.latency_flusher())
-    app.state.auth401_flusher = asyncio.create_task(_auth401_log_module.auth401_flusher())
-    app.state.agent_max_id_flusher = asyncio.create_task(
-        _agent_max_id_module.max_agent_id_flusher(app.state.db_pool)
-    )
-    app.state.completion_notice_flusher = asyncio.create_task(
-        _completion_notice_flusher.completion_notice_flusher(app.state.db_pool)
-    )
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """App-level resources: data-plane and control-plane DB pools.
@@ -362,7 +343,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Periodic telemetry emitters (latency / auth-401 / agent max-id / runtime): each
     # drains its accumulator or DB sample once per 60s and emits ONE bounded
     # event; the lifespan owns and stops every task or scheduled callback.
-    _start_periodic_flushers(app)
+    _periodic_flushers.start(app)
     app.state.runtime_metrics = _runtime_metrics.start_runtime_monitor()
 
     # /mcp endpoint (design task #1212 step 1): flag-gated, built fresh per

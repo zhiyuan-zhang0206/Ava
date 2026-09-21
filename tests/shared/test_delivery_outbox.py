@@ -8,6 +8,7 @@ with the record kept — what its budget or a permanent failure refuses.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -132,6 +133,35 @@ def test_record_merges_same_message_within_window(journal: Path) -> None:
     assert other is not None and other != first
 
 
+def test_read_accepts_legacy_fingerprint_without_completion_metadata(journal: Path) -> None:
+    """Old pending entries remain replayable when their metadata is absent."""
+    content = "the daily check fired"
+    legacy_raw = f"7\x1fwatcher:7\x1f{outbox._canonical_content(content)}"
+    legacy_fingerprint = hashlib.sha256(legacy_raw.encode("utf-8")).hexdigest()[:16]
+    entry = outbox.OutboxEntry(
+        schema_version=1,
+        agent_id=7,
+        source="watcher:7",
+        content=content,
+        client_message_id="legacy-key",
+        created_at=_NOW.isoformat(),
+        last_attempt_at=_NOW.isoformat(),
+        attempts=1,
+        origin_agent_id=None,
+        origin_pid=None,
+        flush_attempts=0,
+        last_flush_at=None,
+        state="pending",
+        abandon_reason=None,
+        abandon_detail=None,
+        abandoned_at=None,
+    )
+    path = outbox.journal_dir() / outbox._entry_path_name(7, legacy_fingerprint, _NOW)
+    outbox._write_atomic(path, entry)
+
+    assert outbox._read(path) == entry
+
+
 def test_record_splits_messages_further_apart_than_window(journal: Path) -> None:
     """Identical content after the window is a new logical message."""
     first = _record(agent_id=7, now=_NOW)
@@ -242,7 +272,7 @@ def test_flush_replays_hourly_completion_through_the_policy_boundary(
 
     report = outbox.flush(pool, now=_NOW + timedelta(seconds=31))
 
-    assert report.delivered == 1
+    assert report.delivered == 0 and report.buffered == 1
     assert not path.exists()
     assert _inbounds(db_conn, agent_id) == []
     with db_conn.cursor() as cur:

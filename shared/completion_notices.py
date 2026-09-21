@@ -8,10 +8,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal, cast
 
-import psycopg
-
 CompletionNoticePolicy = Literal["all", "failures", "hourly"]
 CompletionNoticeOutcome = Literal["exit", "missed"]
+CompletionNoticePayload = dict[str, object]
 
 _MAX_DIGEST_LOGS = 20
 _MAX_DIGEST_FAILURES = 5
@@ -35,6 +34,37 @@ class CompletionNotice:
     def summary(self) -> str:
         """The completion line without its optional output-tail rider."""
         return self.content.split("\n\n", maxsplit=1)[0]
+
+
+class CompletionNoticePayloadError(ValueError):
+    """A persisted completion marker cannot safely be replayed."""
+
+
+def completion_notice_from_metadata(
+    source: str,
+    content: object,
+    text: str,
+    metadata: CompletionNoticePayload | None,
+) -> CompletionNotice | None:
+    """Rebuild a completion notice from persisted transport metadata."""
+    if metadata is None:
+        return None
+    if not isinstance(content, str):
+        raise CompletionNoticePayloadError("completion_notice_content")
+    outcome = metadata.get("outcome")
+    exit_code = metadata.get("exit_code")
+    if outcome not in ("exit", "missed") or (
+        exit_code is not None and not isinstance(exit_code, int)
+    ):
+        raise CompletionNoticePayloadError("completion_notice_payload")
+    if (outcome == "exit") != (exit_code is not None):
+        raise CompletionNoticePayloadError("completion_notice_payload")
+    return CompletionNotice(
+        source=source,
+        content=text,
+        outcome=outcome,
+        exit_code=exit_code,
+    )
 
 
 @dataclass(frozen=True)
@@ -83,9 +113,7 @@ def immediate_delivery_required(policy: CompletionNoticePolicy, notice: Completi
     return notice.failed
 
 
-def policy_for_agent(
-    conn: psycopg.Connection[Any], agent_id: int, default: str
-) -> CompletionNoticePolicy:
+def policy_for_agent(conn: Any, agent_id: int, default: str) -> CompletionNoticePolicy:
     """Read the agent's live completion-notice policy from its config overlay."""
     with conn.cursor() as cursor:
         cursor.execute("SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,))
@@ -102,7 +130,7 @@ def policy_for_agent(
 
 
 def delivery_required_for_agent(
-    conn: psycopg.Connection[Any],
+    conn: Any,
     agent_id: int,
     notice: CompletionNotice,
     default: str,
@@ -126,9 +154,7 @@ def delivery_required_for_agent(
     return immediate_delivery_required(policy, notice)
 
 
-def hourly_notice_recorded(
-    conn: psycopg.Connection[Any], agent_id: int, notice: CompletionNotice
-) -> bool:
+def hourly_notice_recorded(conn: Any, agent_id: int, notice: CompletionNotice) -> bool:
     """Whether this exact successful event was already admitted to the digest."""
     with conn.cursor() as cursor:
         cursor.execute(
@@ -166,9 +192,7 @@ def format_digest(*, agent_id: int, window_start: datetime, notices: list[Comple
     return "\n".join(lines)
 
 
-def record_hourly_notice(
-    conn: psycopg.Connection[Any], agent_id: int, notice: CompletionNotice
-) -> None:
+def record_hourly_notice(conn: Any, agent_id: int, notice: CompletionNotice) -> None:
     """Persist one hourly-policy event before either immediate or digest delivery."""
     with conn.cursor() as cursor:
         cursor.execute(
@@ -179,7 +203,7 @@ def record_hourly_notice(
         )
 
 
-def pending_digests(conn: psycopg.Connection[Any], now: datetime) -> list[CompletionDigest]:
+def pending_digests(conn: Any, now: datetime) -> list[CompletionDigest]:
     """Read every completed, non-empty hour that still needs its digest."""
     with conn.cursor() as cursor:
         cursor.execute(
@@ -218,9 +242,7 @@ def pending_digests(conn: psycopg.Connection[Any], now: datetime) -> list[Comple
     ]
 
 
-def mark_digest_delivered(
-    conn: psycopg.Connection[Any], event_ids: list[int], inbound_id: int
-) -> None:
+def mark_digest_delivered(conn: Any, event_ids: list[int], inbound_id: int) -> None:
     """Attach one committed digest inbound to every event it summarizes."""
     with conn.cursor() as cursor:
         cursor.execute(
@@ -230,7 +252,7 @@ def mark_digest_delivered(
         )
 
 
-def prune_delivered_notices(conn: psycopg.Connection[Any], before: datetime) -> int:
+def prune_delivered_notices(conn: Any, before: datetime) -> int:
     """Delete delivered buffer rows once their canary inspection window closes."""
     with conn.cursor() as cursor:
         cursor.execute(

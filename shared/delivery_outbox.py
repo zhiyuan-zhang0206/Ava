@@ -66,7 +66,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 
-from shared.completion_notices import CompletionNotice
+from shared import completion_notices
+from shared.delivery_outbox_types import FlushReport
 from shared.log import logger
 from shared.paths import ava_home
 from shared.turn_identity import effective_agent_id
@@ -76,7 +77,7 @@ _ENTRY_SUFFIX = ".json"
 
 # Content type the SDK accepts: a plain string or OpenAI-shaped blocks.
 Content = str | list[dict[str, object]]
-CompletionNoticePayload = dict[str, object]
+CompletionNoticePayload = completion_notices.CompletionNoticePayload
 
 # HTTP statuses that mean "the gateway or one of its backends hiccuped" — a
 # delivery attempt worth replaying once the backend returns. 500 = unhandled
@@ -191,10 +192,9 @@ def fingerprint(
     completion_notice: CompletionNoticePayload | None = None,
 ) -> str:
     """Identity of one logical message, including platform completion metadata."""
-    raw = (
-        f"{agent_id}\x1f{source}\x1f{_canonical_content(content)}\x1f"
-        f"{_canonical_completion_notice(completion_notice)}"
-    )
+    raw = f"{agent_id}\x1f{source}\x1f{_canonical_content(content)}"
+    if completion_notice is not None:
+        raw += f"\x1f{_canonical_completion_notice(completion_notice)}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
@@ -540,21 +540,6 @@ class FlushPool(Protocol):
     def connection(self, *, timeout: float | None = None) -> AbstractContextManager[Any]: ...
 
 
-@dataclass(frozen=True)
-class FlushReport:
-    """What one flush pass did; drives tests and the daemon's logging."""
-
-    delivered: int = 0
-    abandoned: int = 0
-    deferred: int = 0
-    unreadable: int = 0
-    expired: int = 0
-
-    @property
-    def touched(self) -> int:
-        return self.delivered + self.abandoned
-
-
 class PermanentDeliveryError(Exception):
     """The record can never be delivered; abandon it with this reason.
 
@@ -569,28 +554,6 @@ class PermanentDeliveryError(Exception):
         self.detail = detail
 
 
-def _completion_notice(entry: OutboxEntry, text: str) -> CompletionNotice | None:
-    """Rebuild a trusted completion marker from one durable outbox entry."""
-    if entry.completion_notice is None:
-        return None
-    if not isinstance(entry.content, str):
-        raise PermanentDeliveryError("completion_notice_content")
-    outcome = entry.completion_notice.get("outcome")
-    exit_code = entry.completion_notice.get("exit_code")
-    if outcome not in ("exit", "missed") or (
-        exit_code is not None and not isinstance(exit_code, int)
-    ):
-        raise PermanentDeliveryError("completion_notice_payload")
-    if (outcome == "exit") != (exit_code is not None):
-        raise PermanentDeliveryError("completion_notice_payload")
-    return CompletionNotice(
-        source=entry.source,
-        content=text,
-        outcome=outcome,
-        exit_code=exit_code,
-    )
-
-
 def _deliver(pool: FlushPool, entry: OutboxEntry, connect_timeout_s: float) -> int | None:
     """Commit one entry through the canonical chat-inbound path; returns the id."""
     from shared.caller_protocol import CallerProtocolUnavailableError
@@ -603,19 +566,19 @@ def _deliver(pool: FlushPool, entry: OutboxEntry, connect_timeout_s: float) -> i
         if cur.fetchone() is None:
             # A missing agent row is permanent: ids are never re-assigned.
             raise PermanentDeliveryError("agent_missing")
-    notice = _completion_notice(entry, text)
-    if notice is not None:
-        from shared.completion_notices import (
-            current_default_completion_notice_policy,
-            delivery_required_for_agent,
+    try:
+        notice = completion_notices.completion_notice_from_metadata(
+            entry.source, entry.content, text, entry.completion_notice
         )
-
+    except completion_notices.CompletionNoticePayloadError as exc:
+        raise PermanentDeliveryError(str(exc)) from exc
+    if notice is not None:
         with pool.connection(timeout=connect_timeout_s) as conn:
-            required = delivery_required_for_agent(
+            required = completion_notices.delivery_required_for_agent(
                 conn,
                 entry.agent_id,
                 notice,
-                current_default_completion_notice_policy(),
+                completion_notices.current_default_completion_notice_policy(),
             )
             conn.commit()
         if not required:
@@ -741,7 +704,7 @@ def flush(pool: FlushPool, *, now: datetime | None = None) -> FlushReport:
     directory = journal_dir()
     if not directory.is_dir():
         return FlushReport()
-    delivered = abandoned = deferred = unreadable = expired = 0
+    delivered = buffered = abandoned = deferred = unreadable = expired = 0
     for path in sorted(directory.iterdir()):
         if path.suffix != _ENTRY_SUFFIX or not path.is_file():
             continue
@@ -791,28 +754,39 @@ def flush(pool: FlushPool, *, now: datetime | None = None) -> FlushReport:
         else:
             with suppress(OSError):
                 path.unlink()
-            delivered += 1
-            logger.info(
-                "[delivery-outbox] redelivered message to agent {} (source {!r}, "
-                "{} send attempt(s)) as inbound {}",
-                entry.agent_id,
-                entry.source,
-                entry.attempts,
-                inbound_id,
-            )
-            _emit(
-                "delivery_outbox_flushed",
-                entry,
-                {
-                    "inbound_id": inbound_id,
-                    "attempts": entry.attempts,
-                    "flush_attempts": entry.flush_attempts,
-                    "age_s": max(0.0, age_s),
-                    "origin_agent_id": entry.origin_agent_id,
-                },
-            )
+            if inbound_id is None:
+                buffered += 1
+                logger.info(
+                    "[delivery-outbox] replayed completion notice for agent {} (source {!r}, "
+                    "{} send attempt(s)) into its hourly digest",
+                    entry.agent_id,
+                    entry.source,
+                    entry.attempts,
+                )
+            else:
+                delivered += 1
+                logger.info(
+                    "[delivery-outbox] redelivered message to agent {} (source {!r}, "
+                    "{} send attempt(s)) as inbound {}",
+                    entry.agent_id,
+                    entry.source,
+                    entry.attempts,
+                    inbound_id,
+                )
+                _emit(
+                    "delivery_outbox_flushed",
+                    entry,
+                    {
+                        "inbound_id": inbound_id,
+                        "attempts": entry.attempts,
+                        "flush_attempts": entry.flush_attempts,
+                        "age_s": max(0.0, age_s),
+                        "origin_agent_id": entry.origin_agent_id,
+                    },
+                )
     return FlushReport(
         delivered=delivered,
+        buffered=buffered,
         abandoned=abandoned,
         deferred=deferred,
         unreadable=unreadable,
