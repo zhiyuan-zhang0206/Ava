@@ -49,6 +49,13 @@
 # floating tag (@v6) is a mutable pointer the action's owner can repoint, i.e. a
 # supply-chain write into every run. .github/dependabot.yml keeps the pins fresh
 # via reviewable PRs.
+#
+# Artifact publishing is transport, not a gate: every `upload-artifact` step in
+# this workflow continues on error, so a 403/500 while finalizing an upload
+# cannot red a job whose tests passed when the required checks fan in those jobs.
+# Per-shard coverage is the one consumed artifact: it retries once, then records
+# a gap explicitly. This follows the 2026-09-22 incident where a green suite's
+# shard 15/16 upload ejected a queued PR from the Trunk merge queue.
 
 name: CI
 
@@ -557,6 +564,7 @@ jobs:
 
       - name: Upload merged-tree lint report
         if: ${{ always() }}
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: merged-tree-structure
@@ -726,6 +734,7 @@ jobs:
 
       - name: Upload flake telemetry (attempt-1 failure)
         if: ${{ always() && (steps.pytest-shard.outputs.retried == 'true' || matrix.group == 8) }}
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: flake-attempt1-shard-${{ matrix.group }}
@@ -733,13 +742,43 @@ jobs:
           if-no-files-found: error
 
       - name: Upload coverage data
+        id: coverage-upload
+        # Artifact publishing must not red this job (2026-09-22: a FinalizeArtifact
+        # 403 killed shard 15/16 with the suite green and ejected a queued PR).
+        # The retry absorbs that transient service fault; the note below records
+        # the outcome for the coverage gate's arrival check.
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-shard-${{ matrix.group }}
           path: coverage-data-${{ matrix.group }}
 
+      - name: Retry coverage data upload
+        id: coverage-upload-retry
+        # One immediate retry, bounded: transient 403/500 from the artifact
+        # service is the observed failure mode, and a failed upload is the only
+        # copy of the data — a failed download can be retried by re-running the
+        # aggregator, a lost upload cannot.
+        if: ${{ steps.coverage-upload.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-shard-${{ matrix.group }}
+          path: coverage-data-${{ matrix.group }}
+          overwrite: true
+
+      - name: Note coverage upload outcome
+        if: ${{ always() && steps.coverage-upload.outcome == 'failure' }}
+        run: |
+          if [ "${{ steps.coverage-upload-retry.outcome }}" = "success" ]; then
+            echo "::warning title=coverage upload retried::first attempt to publish coverage-data-${{ matrix.group }} failed; the retry succeeded"
+          else
+            echo "::warning title=coverage upload failed::coverage-data-${{ matrix.group }} could not be published after a retry — artifact-service failure, not a test failure; the coverage gate scores the data that arrived"
+          fi
+
       - name: Upload pg fixture logs on failure
         if: failure()
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pg-fixture-logs-shard-${{ matrix.group }}
@@ -887,6 +926,7 @@ jobs:
 
       - name: Upload selected-subset log
         if: ${{ always() }}
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: test-selection-subset-log
@@ -982,13 +1022,43 @@ jobs:
           EOF
 
       - name: Upload coverage data
+        id: coverage-upload
+        # Artifact publishing must not red this job (2026-09-22: a FinalizeArtifact
+        # 403 killed shard 15/16 with the suite green and ejected a queued PR).
+        # The retry absorbs that transient service fault; the note below records
+        # the outcome for the coverage gate's arrival check.
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-shard-serial
           path: coverage-data-serial
 
+      - name: Retry coverage data upload
+        id: coverage-upload-retry
+        # One immediate retry, bounded: transient 403/500 from the artifact
+        # service is the observed failure mode, and a failed upload is the only
+        # copy of the data — a failed download can be retried by re-running the
+        # aggregator, a lost upload cannot.
+        if: ${{ steps.coverage-upload.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-shard-serial
+          path: coverage-data-serial
+          overwrite: true
+
+      - name: Note coverage upload outcome
+        if: ${{ always() && steps.coverage-upload.outcome == 'failure' }}
+        run: |
+          if [ "${{ steps.coverage-upload-retry.outcome }}" = "success" ]; then
+            echo "::warning title=coverage upload retried::first attempt to publish coverage-data-serial failed; the retry succeeded"
+          else
+            echo "::warning title=coverage upload failed::coverage-data-serial could not be published after a retry — artifact-service failure, not a test failure; the coverage gate scores the data that arrived"
+          fi
+
       - name: Upload pg fixture logs on failure
         if: failure()
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pg-fixture-logs-serial
@@ -1200,6 +1270,11 @@ jobs:
     timeout-minutes: 10
     needs: [classify, test-select, backend-static, backend-structure, backend-shard, backend-selected, backend-serial, backend-pgvector-smoke, helper-signing-smoke]
     if: ${{ always() && needs.classify.result == 'success' && needs.classify.outputs.backend == 'true' }}
+    env:
+      # Every coverage-data file the combine expects: all backend-shard matrix
+      # groups plus the serial bucket. tests/scripts/test_ci_artifact_policy.py
+      # pins this against the matrix.
+      COVERAGE_DATA_GROUPS: "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 serial"
     steps:
       - name: Verify backend job results
         env:
@@ -1246,6 +1321,8 @@ jobs:
         uses: ./.github/actions/uv-sync
 
       - name: Download shard coverage
+        # Artifact transport is non-gating; the combine step records gaps below.
+        continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: coverage-shard-*
@@ -1260,6 +1337,30 @@ jobs:
         env:
           BACKEND_COVERAGE_THRESHOLD: "85"
         run: |
+          coverage_files=(coverage-data-*)
+          if [ ! -e "${coverage_files[0]}" ]; then
+            coverage_files=()
+          fi
+          echo "coverage data files arrived: ${#coverage_files[@]}"
+          missing_groups=()
+          for group in $COVERAGE_DATA_GROUPS; do
+            if [ ! -f "coverage-data-$group" ]; then
+              missing_groups+=("$group")
+            fi
+          done
+          if [ "${#missing_groups[@]}" -gt 0 ]; then
+            missing_coverage_data=()
+            for group in "${missing_groups[@]}"; do
+              missing_coverage_data+=("coverage-data-$group")
+            done
+            missing_coverage_data="${missing_coverage_data[*]}"
+            echo "::warning title=coverage data incomplete::missing $missing_coverage_data — a shard's coverage upload failed after a retry (artifact-service failure, not a test failure); the gate below scores the data that arrived"
+            {
+              echo "### Coverage data incomplete"
+              echo "Missing $missing_coverage_data: a shard's coverage upload failed after a retry (artifact-service failure, not a test failure)."
+              echo "A gate failure while coverage data is incomplete may be caused by missing data, not a coverage regression."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
           # 90.5% combined coverage on 2026-08-23 supports an 85% gate: about
           # five points of buffer for shard-drop/flake variance. Do not aim for
           # 100% — line coverage is not quality; this gate only sees shard data
@@ -1366,6 +1467,7 @@ jobs:
 
       - name: Upload shadow comparison report
         if: ${{ always() }}
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: test-selection-shadow-report
@@ -1631,6 +1733,7 @@ jobs:
 
       - name: Upload e2e logs on failure
         if: failure()
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: e2e-logs-shard-${{ matrix.group }}
@@ -1757,6 +1860,7 @@ jobs:
 
       - name: Upload e2e logs on failure
         if: failure()
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: e2e-logs-hosted
@@ -1890,6 +1994,7 @@ jobs:
 
       - name: Upload e2e logs on failure
         if: failure()
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: e2e-logs-env-guard
