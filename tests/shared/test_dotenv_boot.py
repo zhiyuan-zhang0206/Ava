@@ -842,3 +842,96 @@ def test_agent_profile_keeps_launcher_runner_url_and_drops_admin_passwords(
     assert "AVA_DB_ADMIN_PASSWORD" not in os.environ
     assert "AVA_REDIS_ADMIN_PASSWORD" not in os.environ
     assert "AVA_REDIS_PASSWORD" not in os.environ
+
+
+_NO_DB_URL_IDENTITY_LINES = tuple(
+    ln
+    for ln in _IDENTITY_LINES
+    if ln.startswith(("AVA_REDIS_URL=", "AVA_CLUSTER_SECRET=", "AVA_GATEWAY_URL="))
+)
+
+
+def _point_env_at_without_db_url(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """An env file that declares every identity key EXCEPT AVA_DB_URL — the
+    pure agent-runner shape (#4334)."""
+    env_file = tmp_path / "no-db.env"
+    env_file.write_text(
+        "AVA_AGENT_HOST_HEALTH_PORT=18035\n" + "\n".join(_NO_DB_URL_IDENTITY_LINES) + "\n"
+    )
+    monkeypatch.setattr(dotenv_boot, "AVA_ENV_PATH", env_file)
+    monkeypatch.setattr(dotenv_boot, "AVA_MIRROR_ENV_PATH", tmp_path / "absent-mirror.env")
+
+
+def test_agent_profile_keeps_undeclared_launcher_runner_url(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """#4036/#4334: on a unit whose `.env` does NOT declare AVA_DB_URL (a pure
+    agent-runner), the launcher-injected runner projection must survive the
+    drop — it is the agent child's only DB source in settings-lite / CLI
+    paths, and popping it left the unanchored sentinel (probe population
+    check misread as an environment failure)."""
+    monkeypatch.setitem(os.environ, "AVA_PROCESS_PROFILE", "agent")
+    _point_env_at_without_db_url(monkeypatch, tmp_path)
+    monkeypatch.setitem(
+        os.environ,
+        "AVA_DB_URL",
+        "postgresql://ava_runner:runner-password@127.0.0.1:5433/ava",
+    )
+
+    dotenv_boot._enforce_cluster_env_authority()
+
+    assert os.environ["AVA_DB_URL"] == "postgresql://ava_runner:runner-password@127.0.0.1:5433/ava"
+
+
+def test_agent_profile_drops_undeclared_owner_url(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The keep is runner-shaped: an inherited OWNER url on an undeclared unit
+    is still dropped in an agent profile (sibling-leak protection unchanged)."""
+    monkeypatch.setitem(os.environ, "AVA_PROCESS_PROFILE", "agent")
+    _point_env_at_without_db_url(monkeypatch, tmp_path)
+    monkeypatch.setitem(
+        os.environ, "AVA_DB_URL", "postgresql://ava_main:owner-password@127.0.0.1:5433/ava"
+    )
+
+    dotenv_boot._enforce_cluster_env_authority()
+
+    assert "AVA_DB_URL" not in os.environ
+
+
+def test_plain_process_drops_undeclared_runner_url(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The keep is agent-profile-only: without the marker an inherited runner
+    url is dropped like any other undeclared cluster value."""
+    monkeypatch.delitem(os.environ, "AVA_PROCESS_PROFILE", raising=False)
+    _point_env_at_without_db_url(monkeypatch, tmp_path)
+    monkeypatch.setitem(
+        os.environ,
+        "AVA_DB_URL",
+        "postgresql://ava_runner:runner-password@127.0.0.1:5433/ava",
+    )
+
+    dotenv_boot._enforce_cluster_env_authority()
+
+    assert "AVA_DB_URL" not in os.environ
+
+
+def test_unanchored_checkout_drops_undeclared_runner_url(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The keep is anchored-only: an unanchored dev checkout keeps the sentinel
+    discipline — an agent shell's inherited runner url is still dropped, so a
+    bare worktree can never silently dial the host home's database."""
+    monkeypatch.setitem(os.environ, "AVA_PROCESS_PROFILE", "agent")
+    monkeypatch.setattr(dotenv_boot, "_ANCHORED", False)
+    _point_env_at_without_db_url(monkeypatch, tmp_path)
+    monkeypatch.setitem(
+        os.environ,
+        "AVA_DB_URL",
+        "postgresql://ava_runner:runner-password@127.0.0.1:5433/ava",
+    )
+
+    dotenv_boot._enforce_cluster_env_authority()
+
+    assert "AVA_DB_URL" not in os.environ
