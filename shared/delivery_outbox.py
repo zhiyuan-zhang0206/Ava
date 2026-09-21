@@ -66,6 +66,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 
+from shared import completion_notices
+from shared.delivery_outbox_types import FlushReport
 from shared.log import logger
 from shared.paths import ava_home
 from shared.turn_identity import effective_agent_id
@@ -75,6 +77,7 @@ _ENTRY_SUFFIX = ".json"
 
 # Content type the SDK accepts: a plain string or OpenAI-shaped blocks.
 Content = str | list[dict[str, object]]
+CompletionNoticePayload = completion_notices.CompletionNoticePayload
 
 # HTTP statuses that mean "the gateway or one of its backends hiccuped" — a
 # delivery attempt worth replaying once the backend returns. 500 = unhandled
@@ -178,9 +181,20 @@ def _canonical_content(content: Content) -> str:
     return "j:" + json.dumps(content, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
-def fingerprint(agent_id: int, source: str, content: Content) -> str:
-    """Identity of one logical message: target + source + exact content."""
+def _canonical_completion_notice(notice: CompletionNoticePayload | None) -> str:
+    return "" if notice is None else json.dumps(notice, sort_keys=True, separators=(",", ":"))
+
+
+def fingerprint(
+    agent_id: int,
+    source: str,
+    content: Content,
+    completion_notice: CompletionNoticePayload | None = None,
+) -> str:
+    """Identity of one logical message, including platform completion metadata."""
     raw = f"{agent_id}\x1f{source}\x1f{_canonical_content(content)}"
+    if completion_notice is not None:
+        raw += f"\x1f{_canonical_completion_notice(completion_notice)}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
@@ -230,9 +244,10 @@ class OutboxEntry:
     abandon_reason: str | None
     abandon_detail: str | None
     abandoned_at: str | None
+    completion_notice: CompletionNoticePayload | None = None
 
     def as_dict(self) -> dict[str, object]:
-        return {
+        raw: dict[str, object] = {
             "schema_version": self.schema_version,
             "agent_id": self.agent_id,
             "source": self.source,
@@ -250,6 +265,9 @@ class OutboxEntry:
             "abandon_detail": self.abandon_detail,
             "abandoned_at": self.abandoned_at,
         }
+        if self.completion_notice is not None:
+            raw["completion_notice"] = self.completion_notice
+        return raw
 
 
 def _entry_path_name(agent_id: int, message_fingerprint: str, stamp: datetime) -> str:
@@ -301,6 +319,9 @@ def _read(path: Path) -> OutboxEntry | None:
         content = raw.get("content")
         if not isinstance(content, str) and not isinstance(content, list):
             return None
+        completion_notice = raw.get("completion_notice")
+        if completion_notice is not None and not isinstance(completion_notice, dict):
+            return None
         entry = OutboxEntry(
             schema_version=_ENTRY_SCHEMA,
             agent_id=int(cast("int", raw["agent_id"])),
@@ -318,6 +339,7 @@ def _read(path: Path) -> OutboxEntry | None:
             abandon_reason=cast("str | None", raw.get("abandon_reason")),
             abandon_detail=cast("str | None", raw.get("abandon_detail")),
             abandoned_at=cast("str | None", raw.get("abandoned_at")),
+            completion_notice=cast("CompletionNoticePayload | None", completion_notice),
         )
         # Timestamps must parse (and carry a timezone) before anything consumes
         # them — see the docstring.
@@ -331,7 +353,7 @@ def _read(path: Path) -> OutboxEntry | None:
         # matches its name was corrupted or hand-edited; never trust it.
         expected = _entry_path_name(
             entry.agent_id,
-            fingerprint(entry.agent_id, entry.source, entry.content),
+            fingerprint(entry.agent_id, entry.source, entry.content, entry.completion_notice),
             created,
         )
         if path.name != expected:
@@ -355,7 +377,13 @@ _registry_lock = threading.Lock()
 _registry: dict[str, tuple[str, float]] = {}
 
 
-def logical_key(*, agent_id: int, source: str, content: Content) -> str:
+def logical_key(
+    *,
+    agent_id: int,
+    source: str,
+    content: Content,
+    completion_notice: CompletionNoticePayload | None = None,
+) -> str:
     """The idempotency key for this logical message.
 
     While the same fingerprint retries within the dedup window (and until any
@@ -368,7 +396,7 @@ def logical_key(*, agent_id: int, source: str, content: Content) -> str:
     enabled, window = send_path_settings()
     if not enabled:
         return uuid.uuid4().hex
-    message_fingerprint = fingerprint(agent_id, source, content)
+    message_fingerprint = fingerprint(agent_id, source, content, completion_notice)
     now = time.monotonic()
     with _registry_lock:
         for stale in [fp for fp, (_, at) in _registry.items() if now - at > window]:
@@ -382,14 +410,21 @@ def logical_key(*, agent_id: int, source: str, content: Content) -> str:
         return key
 
 
-def note_send_succeeded(*, agent_id: int, source: str, content: Content, key: str) -> None:
+def note_send_succeeded(
+    *,
+    agent_id: int,
+    source: str,
+    content: Content,
+    key: str,
+    completion_notice: CompletionNoticePayload | None = None,
+) -> None:
     """One logical message landed: retire its key and any pending record.
 
     Best-effort and never raises — it runs on the send path's success case and
     must not turn a delivered message into a failed call.
     """
     try:
-        message_fingerprint = fingerprint(agent_id, source, content)
+        message_fingerprint = fingerprint(agent_id, source, content, completion_notice)
         with _registry_lock:
             _registry.pop(message_fingerprint, None)
         for path in _matching_paths(agent_id, message_fingerprint):
@@ -410,6 +445,7 @@ def record_failed_send(
     source: str,
     content: Content,
     client_message_id: str,
+    completion_notice: CompletionNoticePayload | None = None,
     now: datetime | None = None,
 ) -> Path | None:
     """Durably record one failed delivery; returns the record path or None.
@@ -425,7 +461,7 @@ def record_failed_send(
         if not snapshot.enabled:
             return None
         moment = now or datetime.now(UTC)
-        message_fingerprint = fingerprint(agent_id, source, content)
+        message_fingerprint = fingerprint(agent_id, source, content, completion_notice)
         for path in _matching_paths(agent_id, message_fingerprint):
             entry = _read(path)
             if entry is None or entry.state != "pending":
@@ -471,6 +507,7 @@ def record_failed_send(
             abandon_reason=None,
             abandon_detail=None,
             abandoned_at=None,
+            completion_notice=completion_notice,
         )
         path = journal_dir() / _entry_path_name(agent_id, message_fingerprint, moment)
         _write_atomic(path, entry)
@@ -503,21 +540,6 @@ class FlushPool(Protocol):
     def connection(self, *, timeout: float | None = None) -> AbstractContextManager[Any]: ...
 
 
-@dataclass(frozen=True)
-class FlushReport:
-    """What one flush pass did; drives tests and the daemon's logging."""
-
-    delivered: int = 0
-    abandoned: int = 0
-    deferred: int = 0
-    unreadable: int = 0
-    expired: int = 0
-
-    @property
-    def touched(self) -> int:
-        return self.delivered + self.abandoned
-
-
 class PermanentDeliveryError(Exception):
     """The record can never be delivered; abandon it with this reason.
 
@@ -532,7 +554,7 @@ class PermanentDeliveryError(Exception):
         self.detail = detail
 
 
-def _deliver(pool: FlushPool, entry: OutboxEntry, connect_timeout_s: float) -> int:
+def _deliver(pool: FlushPool, entry: OutboxEntry, connect_timeout_s: float) -> int | None:
     """Commit one entry through the canonical chat-inbound path; returns the id."""
     from shared.caller_protocol import CallerProtocolUnavailableError
     from shared.chat_delivery import ClientMessageConflictError, insert_chat_inbound_once
@@ -544,6 +566,23 @@ def _deliver(pool: FlushPool, entry: OutboxEntry, connect_timeout_s: float) -> i
         if cur.fetchone() is None:
             # A missing agent row is permanent: ids are never re-assigned.
             raise PermanentDeliveryError("agent_missing")
+    try:
+        notice = completion_notices.completion_notice_from_metadata(
+            entry.source, entry.content, text, entry.completion_notice
+        )
+    except completion_notices.CompletionNoticePayloadError as exc:
+        raise PermanentDeliveryError(str(exc)) from exc
+    if notice is not None:
+        with pool.connection(timeout=connect_timeout_s) as conn:
+            required = completion_notices.delivery_required_for_agent(
+                conn,
+                entry.agent_id,
+                notice,
+                completion_notices.current_default_completion_notice_policy(),
+            )
+            conn.commit()
+        if not required:
+            return None
     try:
         with pool.connection(timeout=connect_timeout_s) as conn:
             receipt = insert_chat_inbound_once(
@@ -665,7 +704,7 @@ def flush(pool: FlushPool, *, now: datetime | None = None) -> FlushReport:
     directory = journal_dir()
     if not directory.is_dir():
         return FlushReport()
-    delivered = abandoned = deferred = unreadable = expired = 0
+    delivered = buffered = abandoned = deferred = unreadable = expired = 0
     for path in sorted(directory.iterdir()):
         if path.suffix != _ENTRY_SUFFIX or not path.is_file():
             continue
@@ -715,28 +754,39 @@ def flush(pool: FlushPool, *, now: datetime | None = None) -> FlushReport:
         else:
             with suppress(OSError):
                 path.unlink()
-            delivered += 1
-            logger.info(
-                "[delivery-outbox] redelivered message to agent {} (source {!r}, "
-                "{} send attempt(s)) as inbound {}",
-                entry.agent_id,
-                entry.source,
-                entry.attempts,
-                inbound_id,
-            )
-            _emit(
-                "delivery_outbox_flushed",
-                entry,
-                {
-                    "inbound_id": inbound_id,
-                    "attempts": entry.attempts,
-                    "flush_attempts": entry.flush_attempts,
-                    "age_s": max(0.0, age_s),
-                    "origin_agent_id": entry.origin_agent_id,
-                },
-            )
+            if inbound_id is None:
+                buffered += 1
+                logger.info(
+                    "[delivery-outbox] replayed completion notice for agent {} (source {!r}, "
+                    "{} send attempt(s)) into its hourly digest",
+                    entry.agent_id,
+                    entry.source,
+                    entry.attempts,
+                )
+            else:
+                delivered += 1
+                logger.info(
+                    "[delivery-outbox] redelivered message to agent {} (source {!r}, "
+                    "{} send attempt(s)) as inbound {}",
+                    entry.agent_id,
+                    entry.source,
+                    entry.attempts,
+                    inbound_id,
+                )
+                _emit(
+                    "delivery_outbox_flushed",
+                    entry,
+                    {
+                        "inbound_id": inbound_id,
+                        "attempts": entry.attempts,
+                        "flush_attempts": entry.flush_attempts,
+                        "age_s": max(0.0, age_s),
+                        "origin_agent_id": entry.origin_agent_id,
+                    },
+                )
     return FlushReport(
         delivered=delivered,
+        buffered=buffered,
         abandoned=abandoned,
         deferred=deferred,
         unreadable=unreadable,

@@ -762,6 +762,46 @@
         }
       }
     },
+    "/api/agents/{agent_id}/completion-notice-policy": {
+      "get": {
+        "summary": "Get Completion Notice Policy",
+        "description": "Expose the effective policy for canaries and platform diagnostics.",
+        "operationId": "get_completion_notice_policy_api_agents__agent_id__completion_notice_policy_get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompletionNoticePolicyView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/agents/{agent_id}/messages": {
       "post": {
         "summary": "Post Agent Message",
@@ -7457,6 +7497,16 @@
             "maxLength": 64,
             "minLength": 1,
             "title": "Source"
+          },
+          "completion_notice": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompletionNoticeIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -8940,6 +8990,60 @@
         ],
         "title": "CompactEnqueued",
         "description": "POST /api/agents/{id}/compact response — returns immediately after\npending insert, does not wait for the kernel loop to finish."
+      },
+      "CompletionNoticeIn": {
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "exit",
+              "missed"
+            ],
+            "title": "Outcome"
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "outcome"
+        ],
+        "title": "CompletionNoticeIn",
+        "description": "Platform-only completion metadata carried with a shell or watcher chat."
+      },
+      "CompletionNoticePolicyView": {
+        "properties": {
+          "agent_id": {
+            "type": "integer",
+            "title": "Agent Id"
+          },
+          "policy": {
+            "type": "string",
+            "enum": [
+              "all",
+              "failures",
+              "hourly"
+            ],
+            "title": "Policy"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "policy"
+        ],
+        "title": "CompletionNoticePolicyView",
+        "description": "Effective policy that the gateway applies to platform completions."
       },
       "ConfigAuditView": {
         "properties": {

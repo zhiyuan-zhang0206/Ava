@@ -81,6 +81,13 @@ class AgentMessageEnqueued(BaseModel):
     inbound_id: int | None = None
 
 
+class CompletionNoticePolicyView(BaseModel):
+    """Effective policy that the gateway applies to platform completions."""
+
+    agent_id: int
+    policy: Literal["all", "failures", "hourly"]
+
+
 class SystemNoteIn(BaseModel):
     """POST /api/agents/{id}/system-note request body — a framework system
     notification delivered to the agent as a system note (system_marker in

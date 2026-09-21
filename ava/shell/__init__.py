@@ -163,7 +163,7 @@ def run_background(
     cwd: str | None = None,
     keep: bool = False,
     ttl: float,
-    notify: str = "always",
+    notify: str | None = None,
 ) -> BackgroundRun:
     """You get a message when it finishes — no polling.
 
@@ -171,9 +171,10 @@ def run_background(
     `output_path` (`.shell_logs/<session_id>_<name>.log` in your workspace)
     and visible live in the session capture — read either to check progress.
     The completion message carries the exit code, the log path, and the output
-    tail; the session then closes itself unless `keep=True`. `notify="always"`
-    (the default) sends this message for every exit; `notify="failure"` sends
-    it only for a non-zero exit. While running it is an ordinary session.
+    tail; the session then closes itself unless `keep=True`. Omitting `notify`
+    applies the agent completion-notice policy (default `all` preserves a
+    message for every exit). Explicit `notify="always"` or `"failure"`
+    overrides that policy for this run. While running it is an ordinary session.
 
     Use this for one-shot long tasks; interactive programs belong in
     `sessions.new` + `send`.
@@ -183,8 +184,8 @@ def run_background(
             a script file.
         name: a lowercase slug like `"build"`.
         cwd: defaults to your workspace.
-        notify: `"always"` (default) sends a completion message for every
-            exit; `"failure"` sends only when the command exits non-zero.
+        notify: omit to use the agent policy; `"always"` sends a completion
+            message for every exit and `"failure"` sends only non-zero exits.
         ttl: required hard lifetime in seconds, counted from creation — the
             session is force-killed once it elapses, with no idle/activity
             renewal; extend it explicitly with ava.shell.sessions.renew()
@@ -197,7 +198,7 @@ def run_background(
     cwd = coerce_str(cwd, "cwd", allow_none=True, allow_types=(os.PathLike,))
     keep = coerce_typed(keep, "keep", bool)
     ttl = coerce_typed(ttl, "ttl", (int, float))
-    notify = _background.validate_notify(coerce_str(notify, "notify"))
+    notify = _background.validate_notify(coerce_str(notify, "notify", allow_none=True))
     if not cmd.strip():
         raise ValueError("cmd cannot be empty")
     aid = _boot.agent_id()

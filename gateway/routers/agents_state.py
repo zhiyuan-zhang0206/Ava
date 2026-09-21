@@ -22,6 +22,7 @@ from gateway.routers._eval_guard import caller_eval_isolation, deny_isolated_res
 from gateway.schemas import (
     AgentMessageEnqueued,
     AgentMessagesResponse,
+    CompletionNoticePolicyView,
     ContextBreakdownResponse,
     ContextCategory,
     ContextSection,
@@ -40,6 +41,13 @@ from shared.checkpoint import (
     CheckpointReadError,
     load_checkpoint_messages,
     load_checkpoint_messages_by_trace,
+)
+from shared.completion_notices import (
+    CompletionNotice,
+    CompletionNoticePolicy,
+    current_default_completion_notice_policy,
+    delivery_required_for_agent,
+    policy_for_agent,
 )
 from shared.config import settings
 from shared.db import agent_exists, insert_inbound_message, list_pending_inbounds
@@ -174,6 +182,36 @@ def _scoped_message_key(request: Request, agent_id: int, key: str) -> str:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+def _completion_delivery_required(
+    agent_id: int, notice: CompletionNotice, pool: ConnectionPool
+) -> bool:
+    """Commit one hourly buffer entry before deciding whether to deliver it."""
+    with pool.connection() as conn:
+        required = delivery_required_for_agent(
+            conn,
+            agent_id,
+            notice,
+            current_default_completion_notice_policy(),
+        )
+        conn.commit()
+    return required
+
+
+def _completion_policy(agent_id: int, pool: ConnectionPool) -> CompletionNoticePolicy:
+    """Read the policy through the same path used for delivery decisions."""
+    with pool.connection() as conn:
+        return policy_for_agent(conn, agent_id, current_default_completion_notice_policy())
+
+
+@router.get("/api/agents/{agent_id}/completion-notice-policy")
+async def get_completion_notice_policy(
+    agent_id: int, request: Request
+) -> CompletionNoticePolicyView:
+    """Expose the effective policy for canaries and platform diagnostics."""
+    policy = await asyncio.to_thread(_completion_policy, agent_id, request.app.state.db_pool)
+    return CompletionNoticePolicyView(agent_id=agent_id, policy=policy)
+
+
 @router.post("/api/agents/{agent_id}/messages", status_code=201)
 async def post_agent_message(
     agent_id: int,
@@ -240,6 +278,25 @@ async def post_agent_message(
             return AgentMessageEnqueued(
                 status=existing.status,
                 inbound_id=existing.inbound_id,
+            )
+    if body.completion_notice is not None:
+        if not isinstance(body.content, str):
+            raise RuntimeError("completion notice schema admitted non-string content")
+        notice = CompletionNotice(
+            source=body.source,
+            content=body.content,
+            outcome=body.completion_notice.outcome,
+            exit_code=body.completion_notice.exit_code,
+        )
+        if not await asyncio.to_thread(
+            _completion_delivery_required,
+            agent_id,
+            notice,
+            request.app.state.db_pool,
+        ):
+            return AgentMessageEnqueued(
+                status=await asyncio.to_thread(get_agent_status, agent_id),
+                inbound_id=None,
             )
     text, payload = _prepare_message_content(request, agent_id, body.content)
     try:

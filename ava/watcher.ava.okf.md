@@ -16,11 +16,11 @@ tags:
 
 ## Core API
 
-- `at(when, message, *, name, notify="always") → int` — One-time scheduled wake-up. `when` supports TZ-aware datetime / timedelta / ISO-8601 strings. Returns session ID (can be cancelled with kill).
-- `cron(expr, message, *, timezone=None, end_time=None, name, notify="always") → int` — Periodic wake-up via 5-field cron expression. `end_time` sets expiry; it **defaults to now + 7 days** (standing cap, task #2617) — a longer schedule passes an explicit `end_time`. Re-registering the same expression + timezone **supersedes**: the old watcher is replaced (new session, fresh end), never stacked — **regardless of either end time** (task #2617 renewal and #2061 explicit-end supersede, user ruling 2026-09-10: one live watcher per schedule). Returns session ID.
-- `launch(code, timeout, *, name, notify="always") → int` — Run custom Python code as watcher. Inside the code, call `ava.agents.send_message(ava.self.AGENT_ID, content)` to wake you. Force-stop after `timeout` (exit code 124).
+- `at(when, message, *, name, notify=None) → int` — One-time scheduled wake-up. `when` supports TZ-aware datetime / timedelta / ISO-8601 strings. Returns session ID (can be cancelled with kill).
+- `cron(expr, message, *, timezone=None, end_time=None, name, notify=None) → int` — Periodic wake-up via 5-field cron expression. `end_time` sets expiry; it **defaults to now + 7 days** (standing cap, task #2617) — a longer schedule passes an explicit `end_time`. Re-registering the same expression + timezone **supersedes**: the old watcher is replaced (new session, fresh end), never stacked — **regardless of either end time** (task #2617 renewal and #2061 explicit-end supersede, user ruling 2026-09-10: one live watcher per schedule). Returns session ID.
+- `launch(code, timeout, *, name, notify=None) → int` — Run custom Python code as watcher. Inside the code, call `ava.agents.send_message(ava.self.AGENT_ID, content)` to wake you. Force-stop after `timeout` (exit code 124).
 
-All watcher APIs accept `notify="always"` (default) to send their completion message for every exit, or `notify="failure"` to send it only for a non-zero exit. The shell-level message format and session lifecycle do not change.
+Omitted `notify` resolves the target agent's `completion_notice_policy` (`all` default, `failures`, or `hourly`); `hourly` retains every completion in its digest while non-zero exits and missed watchers stay immediate. Explicit `notify="always"` or `notify="failure"` overrides it for one run. The registry stores omitted values as `agent`, so a boot rebuild resolves the then-current agent policy rather than a stale default. The shell-level message format and session lifecycle do not change.
 - `reconcile() → list[str]` — called at agent runtime construction (`agent/_process_boot.py`): rebuilds watchers whose sessions were killed out from under them — `ava stop`'s reap, a crashed host, a machine reboot (the #1014 fix; rollouts no longer kill sessions) — and returns the action sentences.
 
 ## Watcher Registry & Boot Reconcile

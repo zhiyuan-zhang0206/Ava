@@ -97,6 +97,9 @@ from gateway.schemas.messages import (
     TraceCheckpointMessagesResponse,
     UserMessageIn,
 )
+from gateway.schemas.messages import (
+    CompletionNoticePolicyView as CompletionNoticePolicyView,
+)
 from gateway.schemas.models import (
     DefaultModelView,
     DefaultModelWrite,

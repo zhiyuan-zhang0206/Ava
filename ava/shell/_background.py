@@ -95,9 +95,9 @@ def cli_path() -> Path:
     return p
 
 
-def validate_notify(notify: str) -> str:
-    """Return a supported completion-notice policy or fail explicitly."""
-    if notify not in _NOTIFY_POLICIES:
+def validate_notify(notify: str | None) -> str | None:
+    """Validate an explicit per-run policy; None delegates to the agent policy."""
+    if notify is not None and notify not in _NOTIFY_POLICIES:
         raise ValueError(f"notify must be one of {list(_NOTIFY_POLICIES)}, got {notify!r}")
     return notify
 
@@ -110,7 +110,7 @@ def notified_line(
     source: str,
     output_path: Path,
     keep: bool,
-    notify: str = "always",
+    notify: str | None = None,
 ) -> str:
     """Build the shell line: run `cmd` in a subshell, tee stdout+stderr to
     `output_path` and the session capture, then deliver the completion notice,
@@ -123,7 +123,9 @@ def notified_line(
     other command can reset it. `pipefail` is unsuitable because a failed
     `tee` could replace that exit code and it would mutate a kept interactive
     shell's state. `notify="failure"` guards that same shell-level notice with
-    the captured exit code, so every non-zero exit path still sends. `label`
+    the captured exit code, so every non-zero exit path still sends. Omitting
+    `notify` marks the send as a platform completion; the gateway then applies
+    the agent's policy. `label`
     and `source` are caller-controlled literals (no user text), and the
     double-quoted notice only expands `${_ec}`.
     """
@@ -149,8 +151,10 @@ def notified_line(
     line = f"( {cmd} ) 2>&1 | tee {q_path}; _ec=${{PIPESTATUS[0]}}; "
     if notify == "failure":
         line += f'if [ "$_ec" -ne 0 ]; then {send_notice}; fi'
-    else:
+    elif notify == "always":
         line += send_notice
+    else:
+        line += f"{send_notice} --completion-exit-code ${{_ec}}"
     if not keep:
         line += "; exit $_ec"
     return line

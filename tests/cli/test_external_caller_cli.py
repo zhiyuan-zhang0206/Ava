@@ -14,6 +14,7 @@ def _send_args(**overrides: object) -> argparse.Namespace:
         "content": "hello",
         "source": None,
         "tail_file": None,
+        "completion_exit_code": None,
     }
     fields.update(overrides)
     return argparse.Namespace(**fields)

@@ -6,10 +6,25 @@ from __future__ import annotations
 
 from pydantic import Field
 
+from shared.completion_notices import CompletionNoticePolicy
 from shared.config._base import EnvSettings
 
 
 class AgentRuntimeSettings(EnvSettings):
+    completion_notice_policy: CompletionNoticePolicy = Field(
+        default="all",
+        alias="AVA_COMPLETION_NOTICE_POLICY",
+        description="Per-agent completion notification policy: all preserves one notice per completion, failures suppresses successful completions, and hourly aggregates every completion in a durable hourly digest while failures remain immediate.",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-default",
+            "per_agent": True,
+            "lifecycle": "live",
+        },
+    )
+
     checkpoint_interval: int = Field(
         default=4,
         alias="AVA_CHECKPOINT_INTERVAL",
