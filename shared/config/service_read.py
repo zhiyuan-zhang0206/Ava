@@ -186,10 +186,17 @@ def _decode_env_file_values(
     reuses its validators and coercion, so comma lists and JSON arrays decode
     silently and with the right types.
 
-    On a batch failure (a genuinely bad FILE value), each field is re-validated
-    alone — with the OTHER file fields reverted to their boot values so one bad
-    line hides nothing else: good values still land, the bad one warns and falls
-    back to the boot-time value.
+    On a batch failure, each field is re-validated alone — with the OTHER file
+    fields reverted to their boot values so one bad line hides nothing else:
+    good values still land, the bad one warns and falls back to the boot-time
+    value.
+
+    One failure is not a bad value: an agent-profile process at the default
+    home decoding the owner `AVA_DB_URL` line hits the deliberate guard refusal
+    (`AgentProfileOwnerDbUrlRefusedError`, #4332). That topology is expected — the
+    boot-time value is the launcher-injected runner projection — so it is
+    served SILENTLY (debug-logged only): warning on every fresh read (every
+    panel read / agent send) would bury the genuine decode failures.
     """
     model = _domain_model_classes()[domain]
     file_values = {name: raw for name, _alias, raw in batch}
@@ -202,25 +209,54 @@ def _decode_env_file_values(
                     model.model_validate(_isolated_domain_payload(model, {name: raw})),
                     name,
                 )
-            except ValidationError:
-                _warn_undecodable_field(name, alias, raw)
+            except ValidationError as exc:
+                if _is_expected_owner_url_refusal(exc):
+                    from shared.log import logger
+
+                    logger.debug(
+                        f"current_field_values: serving the boot-time {alias} "
+                        f"(expected agent-profile owner-URL refusal)"
+                    )
+                else:
+                    _warn_undecodable_field(name, alias, raw)
                 out[name] = _service_field_value(name)
         return
     for name, _alias, _raw in batch:
         out[name] = getattr(decoded, name)
 
 
+def _is_expected_owner_url_refusal(exc: ValidationError) -> bool:
+    """Whether `exc` is only the agent-profile owner-URL guard refusing (#4332).
+
+    The guard raises `AgentProfileOwnerDbUrlRefusedError` and pydantic keeps the
+    original exception instance in `err["ctx"]["error"]`, so this is a type
+    test — never a message match. EVERY reported error must be the refusal:
+    anything else is a genuine decode failure and warns.
+    """
+    from shared.config.data_plane import AgentProfileOwnerDbUrlRefusedError
+
+    errors = exc.errors()
+    return bool(errors) and all(
+        isinstance((item.get("ctx") or {}).get("error"), AgentProfileOwnerDbUrlRefusedError)
+        for item in errors
+    )
+
+
 def _warn_undecodable_field(name: str, alias: str, _raw: str) -> None:
     """Warn about a `.env` value the owning model cannot decode — the next
     process start's Settings construction will fail on it, so the operator must
     hear about it at panel-read time rather than at the next boot (audit
-    round-2 config.md P2)."""
+    round-2 config.md P2).
+
+    Only genuinely undecodable values reach this: the expected agent-profile
+    owner-URL refusal is classified out by `_is_expected_owner_url_refusal`.
+    """
     from shared.log import logger
 
     logger.warning(
         f"current_field_values: {alias} in .env cannot be decoded "
         f"by the {name!r} config field; serving the boot-time value instead — "
-        f"fix or remove the line before the next process start (Settings "
+        f"fix the line before the next process start (Settings "
         f"construction will fail on it)"
     )
 
