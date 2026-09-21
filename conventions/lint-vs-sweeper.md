@@ -9,7 +9,7 @@ different directions:
   until the author fixes the violation, at the source, in the same PR.
 - **The Sweeper** — the periodic debt sweep: the general engine in
   `skills/sweeper/` driven by this repo's debt classes in
-  `.agents/skills/ava-sweeper/` (tracker at `future/infra/debt-tracker.md`).
+  `.agents/skills/ava-sweeper/` (tracker at `future/tech-debt/ledger.md`).
   It runs on a cadence (not on every commit), tolerates judgement, may scan the
   whole repo / hit the network / reason across files, and lands its findings as
   its own `chore(sweeper)` PR.

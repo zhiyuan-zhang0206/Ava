@@ -527,6 +527,20 @@ class CiUsageDaily(TypedDict):
     est_usd: float
 
 
+class DebtSweepDaily(TypedDict):
+    """`debt_sweep_daily` payload — schedules/debt-sweep-daily-schedule.py.
+
+    One event per claimed 06:30 cluster-time slot. The mechanical scan may
+    fail without blocking the clearing worker, so scan status is an explicit
+    fact rather than an implied success from the worker action.
+    """
+
+    day: str  # cluster-tz date of the claimed slot
+    scan_status: str  # ok | failed
+    action: str  # spawned | resurrected | messaged
+    worker_agent_id: int
+
+
 class PrFlowDaily(TypedDict):
     """`pr_flow_daily` payload — scripts/pr_flow_export.py (macmini daily job).
 

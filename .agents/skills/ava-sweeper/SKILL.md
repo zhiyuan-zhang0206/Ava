@@ -13,7 +13,7 @@ landing as a PR) lives in the general engine: **read `ava.skills.sweeper` and
 follow it.** This skill only supplies the two repo-specific inputs the engine
 asks for:
 
-- **Tracker file:** `future/infra/debt-tracker.md` (the single living "open
+- **Tracker file:** `future/tech-debt/ledger.md` (the single living "open
   debt" view).
 - **Debt classes:** the 10 below.
 

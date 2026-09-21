@@ -16,6 +16,7 @@ directory. The manifest is the single expression of the built-in policy
 | Schedule | Script | Class | Default |
 |----------|--------|-------|---------|
 | `c9-daily-report` | `c9-daily-report-schedule.py` | product | **enabled** |
+| `debt-sweep-daily` | `debt-sweep-daily-schedule.py` | product | **enabled** |
 | `adversarial-eval-weekly` | `adversarial-eval-weekly-schedule.py` | product | **enabled** |
 | `memory-arbiter` | `memory-steward-schedule.py` | product | **enabled** |
 | `self-evolution-daily` | `self-evolution-daily-schedule.py` | product | **enabled** |
@@ -25,8 +26,8 @@ directory. The manifest is the single expression of the built-in policy
 | `trace-ship-tempo` | `trace-ship-tempo-schedule.py` | operator | **disabled** (present, not started) |
 
 - **product** schedules (adversarial evaluation, self-evolution, memory, model
-  tracking, the hierarchy worker) are Ava's own improvement loops — they ship
-  and start by default.
+  tracking, debt clearing, the hierarchy worker) are Ava's own improvement
+  loops — they ship and start by default.
 - **operator** schedules (cluster-operator tooling, e.g. shipping OTel traces
   to a local Tempo viewer) ship with the product but start **disabled**: they
   exist so they are discoverable, and start only when the operator enables
@@ -91,6 +92,7 @@ as before.
 
   ```bash
   ava schedules update memory-arbiter        --script-file schedules/memory-steward-schedule.py
+  ava schedules update debt-sweep-daily      --script-file schedules/debt-sweep-daily-schedule.py
   ava schedules update self-evolution-daily  --script-file schedules/self-evolution-daily-schedule.py
   ava schedules update self-evolution-weekly --script-file schedules/self-evolution-weekly-schedule.py
   ava schedules update adversarial-eval-weekly --script-file schedules/adversarial-eval-weekly-schedule.py

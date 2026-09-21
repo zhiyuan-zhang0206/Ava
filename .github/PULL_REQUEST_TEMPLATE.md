@@ -35,3 +35,9 @@ red-battery=<evidence>` or `repro=<command> red/green=<reference> why-not-guard=
 `doc_only=<reason>` for no-executable-behavior changes; `upline_hook=#<task>` for unshipped code.
 See conventions/incident-closeout.md. Delete this section when nothing applies (non-behavior
 surfaces). -->
+
+## Tech-debt registration
+<!-- A PR that knowingly introduces debt (a deliberate shortcut, deferred work/TODO, or
+suppression) must add or extend a fingerprinted entry in `future/tech-debt/ledger.md`.
+Write `none` when this PR introduces no such debt. Review and QA enforce this starter
+obligation; there is no CI gate yet. -->

@@ -44,7 +44,7 @@ These four plans co-locate with the code they plan for, per the 2026-08-12 doc r
 | [PG backup — off-site leg](infra/pg-backup.md) | Off-site leg (GCS / R2) for the disk-loss scenario; the local daily `pg_dump` landed |
 | [Release-directory atomic code swap](infra/release-dir-atomic-code-swap.md) | Deferred, not started — document the immutable-artifact swap mechanism |
 | [Release cadence: self-scheduling by Ava](infra/release-self-scheduling.md) | Once bootstrapping is done, Ava schedules its own releases |
-| [Living debt tracker](infra/debt-tracker.md) | Skeleton — a single "what debt is open now" view maintained by the sweeper engine |
+| [Living tech-debt ledger](tech-debt/ledger.md) | Single "what debt is open now" register maintained by the sweeper engine |
 | [DB write batching](infra/db-write-batching.md) | Design draft |
 | [Checkpoint storage rebuild](infra/checkpoint-storage-rebuild.md) | **Everything — design + cutover plan; implementation merged + deployed.** Delta-channel storage for `messages`, keep-everything retention (R1-R4), read-time fold compat layer, reader-first write switch with content fingerprints + materialize-and-rollback |
 | [Heartbeat design](infra/heartbeat-design.md) | Research record; Tier 2 shipped as a simpler opt-out design. Kept for the rejected two-tier proposal |
