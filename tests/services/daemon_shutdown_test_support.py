@@ -9,10 +9,13 @@ lands within a small bound and that the drain reached ``run()``'s cleanup, and
 carries its own kill deadline so the old unbounded shape fails as an assertion
 instead of hanging the suite.
 
-The shape was proven in ``tests/services/test_pitr_base_scheduler_shutdown.py``
-(task #4218, PR #3045); this module reuses it for the sweep-B daemons. The
-child stubs ``main()``'s boot gates that would need a live cluster (the schema
-version check); everything from signal wiring down is production code.
+The shape was proven by the pitr base-candidate regression (task #4218, PR
+#3045); this module hosts it for the sweep-B daemons and carries that
+regression too (task #4239). The child stubs ``main()``'s boot gates that would
+need a live cluster (the schema version check); everything from signal wiring
+down is production code. A caller whose test must observe a precondition before
+the stop window opens hands ``spawn_child`` a ``pre_ready`` callable: the child
+runs it once the wedge is armed, before it signals ``ready``.
 
 Reusers must keep both assertions — the ``interrupted`` log line and the
 ``cleanup-ran`` marker: a bounded exit alone would pass even if the drain
@@ -22,12 +25,14 @@ silently stopped reaching ``run()``'s cleanup.
 from __future__ import annotations
 
 import asyncio
+import importlib
 import os
 import signal
 import socket
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,6 +44,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 _MARKERS_ENV = "DAEMON_SHUTDOWN_TEST_MARKERS"
 _CHILD_MODULE_ENV = "DAEMON_SHUTDOWN_TEST_MODULE"
+_PRE_READY_ENV = "DAEMON_SHUTDOWN_TEST_PRE_READY"
 _ENDPOINT_ENV = "AVA_TELEMETRY_OTLP_ENDPOINT"
 
 # The child must exit within this bound of SIGTERM — small enough to separate a
@@ -59,17 +65,25 @@ def _mark(name: str) -> None:
         fh.write(f"{name}\n")
 
 
+def _load_pre_ready_probe() -> Callable[[], None] | None:
+    """Resolve the optional parent-named probe the child runs before ``ready``."""
+    spec = os.environ.get(_PRE_READY_ENV)
+    if not spec:
+        return None
+    module_name, _, attr = spec.partition(":")
+    return getattr(importlib.import_module(module_name), attr)
+
+
 def _noop_schema_gate(*_args: object, **_kwargs: object) -> None:
     """Stand-in for ``assert_schema_current``: the check needs a live cluster."""
 
 
 def run_child() -> None:
     """Child entry: production ``main()`` with a wedge-shaped ``run()``."""
-    import importlib
-
     import shared.migrations
 
     mod = importlib.import_module(os.environ[_CHILD_MODULE_ENV])
+    pre_ready = _load_pre_ready_probe()
 
     # Orthogonal to the exit shape under test and would otherwise dial the
     # cluster DB; the subprocess stays hermetic from here down everything is
@@ -83,6 +97,11 @@ def run_child() -> None:
             # only be bounded by refusing the executor join.
             asyncio.get_running_loop().run_in_executor(None, time.sleep, WEDGE_SECONDS)
             _mark("wedge-scheduled")
+            if pre_ready is not None:
+                # The caller's precondition (a dead OTLP window, say) must be
+                # observable before the parent signals; run it here, after the
+                # wedge is armed and before `ready` releases the parent.
+                pre_ready()
             _mark("ready")
             while True:
                 await asyncio.sleep(0.1)
@@ -167,8 +186,19 @@ def _free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-def spawn_child(tmp_path: Path, *, module: str, label: str) -> Child:
-    """Spawn ``module``'s production main() with a wedge run(); wait for ready."""
+def spawn_child(
+    tmp_path: Path,
+    *,
+    module: str,
+    label: str,
+    pre_ready: Callable[[], None] | None = None,
+) -> Child:
+    """Spawn ``module``'s production main() with a wedge run(); wait for ready.
+
+    ``pre_ready`` — an importable module-level callable — runs in the child
+    between arming the wedge and signalling ``ready``, for a precondition the
+    test must observe before the parent signals.
+    """
     dead_port = _free_port()
     endpoint = f"http://127.0.0.1:{dead_port}"
     markers_path = tmp_path / "markers.txt"
@@ -185,6 +215,10 @@ def spawn_child(tmp_path: Path, *, module: str, label: str) -> Child:
     env[_MARKERS_ENV] = str(markers_path)
     env[_CHILD_MODULE_ENV] = module
     env[_ENDPOINT_ENV] = endpoint
+    if pre_ready is not None:
+        env[_PRE_READY_ENV] = f"{pre_ready.__module__}:{pre_ready.__qualname__}"
+    else:
+        env.pop(_PRE_READY_ENV, None)
     # The helper-chain guard acts on this marker; a test child is not
     # helper-spawned, and inheriting a stray marker would self-exit(70).
     env.pop("AVA_PERMISSIONS_HELPER_PID", None)
