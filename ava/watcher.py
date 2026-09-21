@@ -313,6 +313,7 @@ def _register_cron_spawn(
     cron_end_at: Any,
     _exclude_session: int | None,
     generation: str | None,
+    notify: str,
 ) -> tuple[int | None, list[int]]:
     """Register one cron spawn; return ``(reused_session, superseded_sessions)``.
 
@@ -357,6 +358,7 @@ def _register_cron_spawn(
         exclude_session=_exclude_session,
         template_version=TEMPLATE_VERSION,
         generation=generation,
+        notify=notify,
     )
     if superseded:
         return None, superseded
@@ -372,6 +374,7 @@ def _register_cron_spawn(
         exclude_session=_exclude_session,
         template_version=TEMPLATE_VERSION,
         generation=generation,
+        notify=notify,
     )
     return reused, []
 
@@ -485,12 +488,7 @@ def _spawn(
     superseded: list[int] = []
     try:
         if kind == "cron":
-            # Task #1825 dedupe (atomic: xact lock + re-check + insert) and
-            # the twin supersede (task #2617 renewal, #2061 explicit-end) —
-            # one registration helper, both semantics (see
-            # _register_cron_spawn). kind == 'cron' guarantees the schedule
-            # payload (cron() always passes it); narrow for the registration
-            # contract.
+            # Atomically dedupe exact schedules and supersede live different-end twins.
             from typing import cast
 
             reused, superseded = _register_cron_spawn(
@@ -503,6 +501,7 @@ def _spawn(
                 cron_end_at=cron_end_at,
                 _exclude_session=_exclude_session,
                 generation=generation,
+                notify=notify,
             )
             if reused is not None:
                 # A concurrent registration won the race — the schedule is
@@ -532,6 +531,7 @@ def _spawn(
                 timeout_secs=timeout_secs,
                 template_version=TEMPLATE_VERSION,
                 generation=generation,
+                notify=notify,
             )
     except Exception:
         logger.error(
