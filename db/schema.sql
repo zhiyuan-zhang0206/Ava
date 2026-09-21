@@ -1479,6 +1479,8 @@ CREATE TABLE agent_watchers (
     cron_timezone  TEXT,                  -- kind='cron'
     cron_end_at    TIMESTAMPTZ,           -- kind='cron' (NULL = standing)
     timeout_secs   REAL,                  -- kind='launch'
+    notify         TEXT NOT NULL DEFAULT 'always'
+                   CHECK (notify IN ('always', 'failure')),  -- completion notice policy
     template_version INTEGER,             -- watcher template generation at spawn (issue #1330)
     generation     TEXT,                  -- PTY allocation generation at spawn (NULL = legacy)
     status         TEXT NOT NULL DEFAULT 'running'
@@ -2193,3 +2195,7 @@ INSERT INTO schema_migrations (name) VALUES ('20260918T113600_hierarchy-tail-sea
 -- The relay mint mark columns are represented above. Fresh DBs stamp the
 -- migration instead of replaying the strict ADD COLUMN delta.
 INSERT INTO schema_migrations (name) VALUES ('20260919T020500_impersonation-relay-minted');
+
+-- Watcher completion policy is represented above. Fresh DBs stamp the strict
+-- ADD COLUMN delta instead of replaying it against the baseline schema.
+INSERT INTO schema_migrations (name) VALUES ('20260921T195118_watcher-notify');

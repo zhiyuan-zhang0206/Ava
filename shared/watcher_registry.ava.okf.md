@@ -19,7 +19,7 @@ tags:
 
 ### The table (`agent_watchers`)
 
-Keyed by `(agent_id, session_id)` — shell-session ids are per-agent counters, not cluster-global. `kind` ∈ {`at`, `cron`, `launch`}; the row carries that kind's **rebuild payload** (the exact arguments the SDK verb needs to re-spawn): `message`, `fires_at` (at), `cron_expr` / `cron_timezone` / `cron_end_at` (cron), `timeout_secs` (launch), plus the PTY allocation `generation` that admitted the exact session. `status` ∈ {`running` (spawn state), `rebuilt` (died and re-spawned — history kept; the rebuild's NEW session has its own `running` row), `missed` (one-shot whose moment passed while its session was gone), `reaped` (a superseded generation retained as terminal history)}.
+Keyed by `(agent_id, session_id)` — shell-session ids are per-agent counters, not cluster-global. `kind` ∈ {`at`, `cron`, `launch`}; the row carries that kind's **rebuild payload** (the exact arguments the SDK verb needs to re-spawn): `message`, `fires_at` (at), `cron_expr` / `cron_timezone` / `cron_end_at` (cron), `timeout_secs` (launch), and `notify` (completion policy), plus the PTY allocation `generation` that admitted the exact session. `notify` defaults to `"always"`, preserving the fail-open policy for legacy rows; `"failure"` persists across cron, at, and template-upgrade rebuilds. `status` ∈ {`running` (spawn state), `rebuilt` (died and re-spawned — history kept; the rebuild's NEW session has its own `running` row), `missed` (one-shot whose moment passed while its session was gone), `reaped` (a superseded generation retained as terminal history)}.
 
 ### Writers
 

@@ -209,6 +209,7 @@ def _reconcile_missing(
                 timezone=row["cron_timezone"],
                 end_time=row["cron_end_at"],
                 name=name,
+                notify=row["notify"],
             )
             mark_status(agent_id, session_id, "rebuilt")
             return f"cron watcher '{name}' rebuilt as session {new_id}"
@@ -219,7 +220,7 @@ def _reconcile_missing(
             # session deadline (fires_at + AT_SESSION_TTL_GRACE_SECONDS)
             # governs the reclaim window, not this rebuild gate.
             if row["fires_at"] is not None and row["fires_at"] > now:
-                new_id = at(row["fires_at"], row["message"] or "", name=name)
+                new_id = at(row["fires_at"], row["message"] or "", name=name, notify=row["notify"])
                 mark_status(agent_id, session_id, "rebuilt")
                 return f"one-shot watcher '{name}' rebuilt as session {new_id}"
             # Delivery check (task #1858): the child deletes its own row on a
@@ -312,6 +313,7 @@ def _rebuild_stale_cron_watcher(row: dict[str, Any]) -> str | None:
             timezone=row["cron_timezone"],
             end_time=row["cron_end_at"],
             name=name,
+            notify=row["notify"],
             # The session being replaced is LIVE (this is a template upgrade,
             # not a death recovery) — the dedupe must not reuse it, or the
             # rebuild would kill the only live copy and leave nothing.
