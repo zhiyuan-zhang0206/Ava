@@ -68,7 +68,11 @@ class WorkerDispatch:
 
 def _worker_label() -> str:
     configured = os.environ.get(_WORKER_LABEL_ENV)
-    return configured.strip() if configured is not None and configured.strip() else _DEFAULT_WORKER_LABEL
+    return (
+        configured.strip()
+        if configured is not None and configured.strip()
+        else _DEFAULT_WORKER_LABEL
+    )
 
 
 def _report_agent() -> int:
@@ -124,7 +128,7 @@ def ensure_worker(label: str, prompt: str) -> WorkerDispatch:
             break
         before_id = page.next_cursor
     return WorkerDispatch(
-        agent_id=cast(int, ava.agents.spawn(prompt=prompt, label=label)),
+        agent_id=cast(int, ava.agents.spawn(prompt=prompt, label=label)),  # pyright: ignore[reportCallIssue] — fleet plugin wraps spawn with label
         action="spawned",
     )
 

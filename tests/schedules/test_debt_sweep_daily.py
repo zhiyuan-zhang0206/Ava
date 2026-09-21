@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 
@@ -169,8 +170,9 @@ def test_scan_failure_is_passed_to_worker_and_registered(
     monkeypatch.setattr(
         module,
         "ensure_worker",
-        lambda _label, prompt: prompts.append(prompt)
-        or module.WorkerDispatch(agent_id=44, action="spawned"),
+        lambda _label, prompt: (
+            prompts.append(prompt) or module.WorkerDispatch(agent_id=44, action="spawned")
+        ),
     )
     monkeypatch.setattr(module, "init_gateway_process", lambda **_kwargs: None)
     monkeypatch.setattr(
@@ -184,19 +186,22 @@ def test_scan_failure_is_passed_to_worker_and_registered(
 
     assert len(prompts) == 1
     assert "mechanical scan failed: exit 1" in prompts[0]
-    assert emitted == [
-        {
-            "category": "telemetry",
-            "event_name": "debt_sweep_daily",
-            "source": "system",
-            "attributes": {
-                "day": "2026-09-22",
-                "scan_status": "failed",
-                "action": "spawned",
-                "worker_agent_id": 44,
-            },
-        }
-    ]
+    assert (
+        emitted
+        == [
+            {
+                "category": "telemetry",
+                "event_name": "debt_sweep_daily",
+                "source": "system",
+                "attributes": {
+                    "day": "2026-09-22",  # time-bomb-ok: derived from the pinned claimed_slot fixture (Asia/Shanghai), no real-clock window
+                    "scan_status": "failed",
+                    "action": "spawned",
+                    "worker_agent_id": 44,
+                },
+            }
+        ]
+    )
 
 
 def test_event_payload_and_cluster_clock_constants() -> None:
@@ -205,7 +210,7 @@ def test_event_payload_and_cluster_clock_constants() -> None:
     assert module.CRON == "30 6 * * *"
     assert settings.general.timezone == module.TZ
     assert module.event_payload(
-        day="2026-09-21",
+        day="2026-09-21",  # time-bomb-ok: passthrough payload assertion, no clock-derived window
         scan=module.ScanReport(
             succeeded=True,
             artifact_path=Path("scan.txt"),
@@ -213,11 +218,69 @@ def test_event_payload_and_cluster_clock_constants() -> None:
         ),
         dispatch=module.WorkerDispatch(agent_id=77, action="messaged"),
     ) == {
-        "day": "2026-09-21",
+        "day": "2026-09-21",  # time-bomb-ok: passthrough payload assertion, no clock-derived window
         "scan_status": "ok",
         "action": "messaged",
         "worker_agent_id": 77,
     }
+
+
+def test_ensure_worker_reuses_worker_from_later_search_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_schedule_module()
+    unrelated = _agent(300, S.IDLING, label="steward-old")
+    target = _agent(200, S.TERMINATED)
+    pages = [
+        SimpleNamespace(agents=[unrelated], next_cursor=300),
+        SimpleNamespace(agents=[target], next_cursor=None),
+    ]
+    seen_before_ids: list[int | None] = []
+
+    def list_agents(
+        *, scope: str, query: str = "", before_id: int | None = None, limit: int = 100
+    ) -> SimpleNamespace:
+        seen_before_ids.append(before_id)
+        return pages[len(seen_before_ids) - 1]
+
+    resurrect = Mock()
+    monkeypatch.setattr(module.ava.agents, "list_agents", list_agents)
+    monkeypatch.setattr(module.ava.agents, "resurrect", resurrect)
+    monkeypatch.setattr(module.ava.agents, "send_message", Mock())
+    monkeypatch.setattr(module.ava.agents, "spawn", Mock())
+
+    dispatch = module.ensure_worker("debt-sweep-daily", "clear debt")
+
+    assert dispatch == module.WorkerDispatch(agent_id=200, action="resurrected")
+    resurrect.assert_called_once_with(200, "clear debt")
+    assert seen_before_ids == [None, 300]
+
+
+def test_ensure_worker_spawns_only_after_matching_pages_are_exhausted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_schedule_module()
+    pages = [
+        SimpleNamespace(agents=[], next_cursor=300),
+        SimpleNamespace(agents=[], next_cursor=None),
+    ]
+    seen_before_ids: list[int | None] = []
+
+    def list_agents(
+        *, scope: str, query: str = "", before_id: int | None = None, limit: int = 100
+    ) -> SimpleNamespace:
+        seen_before_ids.append(before_id)
+        return pages[len(seen_before_ids) - 1]
+
+    spawn = Mock(return_value=400)
+    monkeypatch.setattr(module.ava.agents, "list_agents", list_agents)
+    monkeypatch.setattr(module.ava.agents, "spawn", spawn)
+
+    dispatch = module.ensure_worker("missing", "clear debt")
+
+    assert dispatch == module.WorkerDispatch(agent_id=400, action="spawned")
+    spawn.assert_called_once_with(prompt="clear debt", label="missing")
+    assert seen_before_ids == [None, 300]
 
 
 def test_failure_notification_propagates_when_p0_lead_is_unavailable(
