@@ -17,7 +17,9 @@ This loop is the enforcer, scanning
   leave the open set (the daemon's existing two-layer teardown).
 - **Shells** — a ``shell_kill`` op is dispatched to the owning agent's machine;
   the tracking row is removed once the session is killed or found already
-  gone. A row whose machine is unreachable is left for the next pass. The
+  gone. A row whose machine is unreachable is left for the next pass; one
+  whose machine is absent from the registry is definitive and terminalizes as
+  an absent session (task #4143). The
   owner's ``ava.shell.sessions.renew()`` extends a live session's deadline
   before it passes; each kill dispatch re-checks the row is still expired
   first (renewal's own ``expires_at > clock_timestamp()`` guard makes the pair airtight),
@@ -80,11 +82,16 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
+from gateway.lifecycle_fences import (
+    _fence_settle_due,
+    _scan_torn_lifecycle_pointers_blocking,
+    _torn_pointer_scan_due,
+    settle_absent_machine_fences,
+)
 from gateway.routers import work_failed as work_failed_router
 from gateway.watcher_ttl import (
     heal_legacy_ttl,
-    mark_reaped_and_notify_if_owner_still_terminated,
-    mark_reaped_live_owner,
+    mark_reaped_owner_appropriate,
     reap_terminated_owner_watchers,
     watcher_deadline_of,
 )
@@ -118,12 +125,6 @@ _FIRE_LOG_PASS_BATCH = 50_000
 # a daily job, not a per-pass one (an empty-age DELETE every poll interval
 # would scan the whole table for nothing).
 _schedule_fire_log_last_pruned: float | None = None
-
-# Torn lifecycle-pointer scan cadence: the commit-time guard (task #3678) rejects
-# new pointer->done writes; this scan is the slow safety net for the sides the
-# guard cannot see (a bypass write, a rollback past the migration).
-_TORN_POINTER_SCAN_INTERVAL_S = 3600.0
-_torn_pointer_last_scan: float | None = None
 
 # The only agent states that can act on a reclamation notice. Terminated
 # agents must NOT be resurrected by an expiry notification.
@@ -435,6 +436,44 @@ def _delete_shell_row_blocking(
             )
 
 
+async def _dispatch_shell_kill(
+    machine: str, agent_id: int, session_id: int
+) -> dict[str, Any] | None:
+    """One ``shell_kill`` dispatch; None means "defer to the next pass".
+
+    A machine absent from the machines registry (task #4143) cannot be dialed:
+    the row terminalizes with the distinct ``machine_absent`` verdict — the
+    live-host ``absent`` means the host answered that the session already
+    ended, while no host exists here to answer at all. Deferring would retry
+    the row forever. An unreachable machine or a failed op defers: the session
+    may still live.
+    """
+    try:
+        return await cluster_rpc.dispatch_to_machine(
+            machine,
+            "shell_kill",
+            {"agent_id": agent_id, "session_id": session_id},
+            timeout_s=_SHELL_KILL_TIMEOUT_S,
+        )
+    except cluster_rpc.ClusterOpTargetAbsent:
+        _log.info(
+            "[ttl-reaper] shell %s of agent %s: machine %r is absent from the "
+            "registry — terminalizing with the machine_absent verdict",
+            session_id,
+            agent_id,
+            machine,
+        )
+        return {"mode": "machine_absent"}
+    except (cluster_rpc.ClusterOpUnreachable, cluster_rpc.ClusterOpFailed) as exc:
+        _log.warning(
+            "[ttl-reaper] shell_kill for agent %s session %s deferred: %r",
+            agent_id,
+            session_id,
+            exc,
+        )
+        return None
+
+
 async def _reap_expired_shells(
     pool: ConnectionPool, stop: asyncio.Event | None = None
 ) -> list[tuple[int, int]]:
@@ -450,11 +489,15 @@ async def _reap_expired_shells(
     true deadline is still ahead: the row is healed to the true deadline and
     never reclaimed (``gateway.watcher_ttl.heal_legacy_ttl``).
 
-    The row is deleted only on a definitive verdict (killed / absent); an
-    unreachable machine or a version-skewed runner leaves it for the next
-    pass — deleting the row would orphan the live session. All DB work runs
-    via to_thread: the gateway event loop never blocks on psycopg. A set
-    ``stop`` defers the not-yet-started rows to the next pass.
+    The row is deleted only on a definitive verdict (killed / absent /
+    machine_absent); an unreachable machine or a version-skewed runner leaves
+    it for the next pass — deleting the row would orphan the live session. A
+    machine absent from the machines registry is definitive too (nothing on it
+    can be dialed again under that name — task #4143): the row terminalizes
+    with the ``machine_absent`` verdict instead of deferring forever. All DB
+    work runs via to_thread: the
+    gateway event loop never blocks on psycopg. A set ``stop`` defers the
+    not-yet-started rows to the next pass.
     """
     rows = await asyncio.to_thread(_expired_shell_rows_blocking, pool)
     reaped: list[tuple[int, int]] = []
@@ -506,23 +549,11 @@ async def _reap_expired_shells(
                 agent_id,
             )
             continue
-        try:
-            result = await cluster_rpc.dispatch_to_machine(
-                machine,
-                "shell_kill",
-                {"agent_id": agent_id, "session_id": session_id},
-                timeout_s=_SHELL_KILL_TIMEOUT_S,
-            )
-        except (cluster_rpc.ClusterOpUnreachable, cluster_rpc.ClusterOpFailed) as exc:
-            _log.warning(
-                "[ttl-reaper] shell_kill for agent %s session %s deferred: %r",
-                agent_id,
-                session_id,
-                exc,
-            )
+        result = await _dispatch_shell_kill(machine, agent_id, session_id)
+        if result is None:
             continue
         mode = result.get("mode")
-        if mode not in ("killed", "absent"):
+        if mode not in ("killed", "absent", "machine_absent"):
             _log.warning(
                 "[ttl-reaper] shell_kill for agent %s session %s returned %r",
                 agent_id,
@@ -552,33 +583,11 @@ async def _reap_expired_shells(
         )
         if is_watcher and row["watcher_status"] == "running":
             # The reclaim is the watcher's deadline verdict: terminalize the
-            # desired-state record so no later boot rebuilds it (task #3411).
-            # Owner-appropriate bookkeeping: a terminated-for-good owner gets
-            # the #2060 reclamation notice (the same mark+notice the
-            # terminated-owner pass uses — the TTL pass must not beat it to a
-            # silent mark); a live owner gets a silent `reaped`; a
-            # crash-terminated (auto-resurrect-eligible) owner's row is left
-            # running for its own resurrect + boot reconcile. Fail-soft: the
+            # desired-state record so no later boot rebuilds it (task #3411) —
+            # the owner-state ladder lives in the helper. Fail-soft: the
             # reconcile's deadline check reaches the same verdict if a write
             # is lost.
-            reaped_name = await asyncio.to_thread(
-                mark_reaped_and_notify_if_owner_still_terminated,
-                pool,
-                agent_id,
-                session_id,
-            )
-            if reaped_name is None:
-                reaped_name = await asyncio.to_thread(
-                    mark_reaped_live_owner, pool, agent_id, session_id
-                )
-            if reaped_name is not None:
-                telemetry.emit(
-                    "log",
-                    "watcher_reaped",
-                    level="info",
-                    agent_id=agent_id,
-                    attributes={"agent_id": agent_id, "session_id": session_id, "mode": mode},
-                )
+            await mark_reaped_owner_appropriate(pool, agent_id, session_id, mode=mode)
         telemetry.emit(
             "log",
             "shell_ttl_expired",
@@ -620,66 +629,6 @@ def _schedule_fire_log_prune_due() -> bool:
         _schedule_fire_log_last_pruned = now
         return True
     return False
-
-
-def _torn_pointer_scan_due() -> bool:
-    """True once per torn-pointer scan interval (hourly).
-
-    Same throttle shape as the fire-log prune: the scan is hourly, not a
-    per-poll job (a live-pointer join every 30 s would scan agents_meta for
-    nothing).
-    """
-    global _torn_pointer_last_scan  # noqa: PLW0603 — process-local scan cadence
-    now = time.monotonic()
-    if (
-        _torn_pointer_last_scan is None
-        or now - _torn_pointer_last_scan >= _TORN_POINTER_SCAN_INTERVAL_S
-    ):
-        _torn_pointer_last_scan = now
-        return True
-    return False
-
-
-def _scan_torn_lifecycle_pointers_blocking(pool: ConnectionPool) -> int:
-    """Count lifecycle commands sitting at `done` while agents_meta still
-    points at them; alert when any is found.
-
-    That torn shape blinds boot recovery (it needs the command still
-    `claimed`) and live observation (it needs a live process identity) at
-    once, so any resurrect of the affected agent defers forever — 6285/200306
-    and 6089/172352 (task #3678). The commit-time guard rejects the inbound
-    side of the shape; this scan is the slower safety net for the sides it
-    cannot see.
-    """
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT count(*) FROM agents_meta m "
-            "JOIN inbound_messages i ON i.id = m.lifecycle_command_id AND i.agent_id = m.id "
-            "WHERE i.status = 'done'"
-        )
-        row = cur.fetchone()
-        count = 0 if row is None else int(row[0])
-        if not count:
-            return 0
-        cur.execute(
-            "SELECT m.id FROM agents_meta m "
-            "JOIN inbound_messages i ON i.id = m.lifecycle_command_id AND i.agent_id = m.id "
-            "WHERE i.status = 'done' ORDER BY m.id LIMIT 5"
-        )
-        samples = [int(r[0]) for r in cur.fetchall()]
-    _log.warning(
-        "[ttl-reaper] %d lifecycle command(s) sit at done with a live pointer "
-        "(agent(s) %s) — resurrection of the named agent(s) defers until settled",
-        count,
-        ", ".join(str(a) for a in samples),
-    )
-    telemetry.emit(
-        "log",
-        "lifecycle_pointer_done_torn",
-        level="warning",
-        attributes={"count": count, "samples": ", ".join(str(a) for a in samples)},
-    )
-    return count
 
 
 def _prune_schedule_fire_log_blocking(pool: ConnectionPool) -> int:
@@ -742,6 +691,11 @@ async def _reaper_loop(pool: ConnectionPool, stop: asyncio.Event) -> None:
                 torn_pointers = await asyncio.to_thread(
                     _scan_torn_lifecycle_pointers_blocking, pool
                 )
+            absent_fences = 0
+            if _fence_settle_due():
+                absent_fences = len(
+                    await asyncio.to_thread(settle_absent_machine_fences, pool, batch=_PASS_BATCH)
+                )
             if (
                 pages
                 or shells
@@ -753,12 +707,14 @@ async def _reaper_loop(pool: ConnectionPool, stop: asyncio.Event) -> None:
                 or reminded
                 or pruned_fire_log
                 or torn_pointers
+                or absent_fences
             ):
                 _log.info(
                     "[ttl-reaper] reclaimed %d page(s), %d shell(s), %d web session(s), "
                     "%d terminated-owner watcher(s), %d impersonation(s), %d notice(s); "
                     "completed %d stale work failure(s); reminded %d impersonation lease(s); "
-                    "pruned %d schedule fire-log row(s); found %d torn lifecycle pointer(s)",
+                    "pruned %d schedule fire-log row(s); found %d torn lifecycle pointer(s); "
+                    "settled %d absent-machine lifecycle fence(s)",
                     len(pages),
                     len(shells),
                     sessions,
@@ -769,6 +725,7 @@ async def _reaper_loop(pool: ConnectionPool, stop: asyncio.Event) -> None:
                     reminded,
                     pruned_fire_log,
                     torn_pointers,
+                    absent_fences,
                 )
         except Exception:
             _log.warning("[ttl-reaper] pass failed", exc_info=True)
