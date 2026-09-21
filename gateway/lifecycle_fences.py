@@ -180,6 +180,16 @@ def settle_absent_machine_fences(pool: ConnectionPool, *, batch: int) -> list[in
     fences are deliberately NOT in scope — the delivery watchdog's existing
     stale sweep closes those by age.
 
+    Two further boundaries are deliberate, not gaps. The settle evaluates no
+    request evidence (``quarantine_stale`` / ``require_resources_closed``):
+    that classification lives with the host's exec domain, which an absent
+    machine no longer has, and the premise here is stronger than the boot
+    recovery's — no process can still be running against a machine with no
+    registry row. And the candidate predicate takes ``claimed`` commands only:
+    the pointer-alive-at-``done`` torn shape stays detect-only (alerted by the
+    torn-pointer scan above, which also covers absent machines — this settle
+    never silently legalizes that shape).
+
     Bounded by `batch` per pass (the reaper's per-pass ceiling), so a backlog
     drains over successive passes. Returns the settled agent ids.
     """

@@ -441,10 +441,12 @@ async def _dispatch_shell_kill(
 ) -> dict[str, Any] | None:
     """One ``shell_kill`` dispatch; None means "defer to the next pass".
 
-    A machine absent from the machines registry (task #4143) answers with the
-    terminal ``absent`` verdict a live host would give — the session it tracked
-    is gone with the machine, and deferring would retry the row forever. An
-    unreachable machine or a failed op defers: the session may still live.
+    A machine absent from the machines registry (task #4143) cannot be dialed:
+    the row terminalizes with the distinct ``machine_absent`` verdict — the
+    live-host ``absent`` means the host answered that the session already
+    ended, while no host exists here to answer at all. Deferring would retry
+    the row forever. An unreachable machine or a failed op defers: the session
+    may still live.
     """
     try:
         return await cluster_rpc.dispatch_to_machine(
@@ -456,12 +458,12 @@ async def _dispatch_shell_kill(
     except cluster_rpc.ClusterOpTargetAbsent:
         _log.info(
             "[ttl-reaper] shell %s of agent %s: machine %r is absent from the "
-            "registry — terminalizing as an absent session",
+            "registry — terminalizing with the machine_absent verdict",
             session_id,
             agent_id,
             machine,
         )
-        return {"mode": "absent"}
+        return {"mode": "machine_absent"}
     except (cluster_rpc.ClusterOpUnreachable, cluster_rpc.ClusterOpFailed) as exc:
         _log.warning(
             "[ttl-reaper] shell_kill for agent %s session %s deferred: %r",
@@ -487,12 +489,13 @@ async def _reap_expired_shells(
     true deadline is still ahead: the row is healed to the true deadline and
     never reclaimed (``gateway.watcher_ttl.heal_legacy_ttl``).
 
-    The row is deleted only on a definitive verdict (killed / absent); an
-    unreachable machine or a version-skewed runner leaves it for the next
-    pass — deleting the row would orphan the live session. A machine absent
-    from the machines registry is definitive too (nothing on it can be dialed
-    again under that name — task #4143): the row terminalizes as an absent
-    session instead of deferring forever. All DB work runs via to_thread: the
+    The row is deleted only on a definitive verdict (killed / absent /
+    machine_absent); an unreachable machine or a version-skewed runner leaves
+    it for the next pass — deleting the row would orphan the live session. A
+    machine absent from the machines registry is definitive too (nothing on it
+    can be dialed again under that name — task #4143): the row terminalizes
+    with the ``machine_absent`` verdict instead of deferring forever. All DB
+    work runs via to_thread: the
     gateway event loop never blocks on psycopg. A set ``stop`` defers the
     not-yet-started rows to the next pass.
     """
@@ -550,7 +553,7 @@ async def _reap_expired_shells(
         if result is None:
             continue
         mode = result.get("mode")
-        if mode not in ("killed", "absent"):
+        if mode not in ("killed", "absent", "machine_absent"):
             _log.warning(
                 "[ttl-reaper] shell_kill for agent %s session %s returned %r",
                 agent_id,

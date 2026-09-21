@@ -631,6 +631,12 @@ async def test_reap_expired_shells_absent_machine_terminalizes_row(
         )
 
     monkeypatch.setattr(ttl_reaper.cluster_rpc, "dispatch_to_machine", _dispatch)
+    emitted: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def _capture_emit(*args: object, **kwargs: object) -> None:
+        emitted.append((args, kwargs))
+
+    monkeypatch.setattr(ttl_reaper.telemetry, "emit", _capture_emit)
     reaped = await _reap_expired_shells(reaper_pool)
 
     assert reaped == [(aid, 8)]
@@ -639,6 +645,15 @@ async def test_reap_expired_shells_absent_machine_terminalizes_row(
         row = cur.fetchone()
         assert row is not None and row[0] == 0
     assert _system_inbounds(db_conn, aid) == []
+    # The synthetic verdict is spelled ``machine_absent`` — distinct from the
+    # live-host ``absent`` (session already ended) it must not masquerade as.
+    assert emitted and emitted[-1][0][1] == "shell_ttl_expired"
+    assert emitted[-1][1]["attributes"] == {
+        "agent_id": aid,
+        "session_id": 8,
+        "mode": "machine_absent",
+        "interrupted": False,
+    }
 
 
 async def test_reap_expired_shells_absent_machine_marks_watcher_reaped(
