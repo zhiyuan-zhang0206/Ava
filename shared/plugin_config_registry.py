@@ -531,15 +531,23 @@ def _validate_framework_overlay_ranges(updates: dict[str, object]) -> None:
 def validate_config_overlay(overlay: dict[str, object]) -> None:
     """SDK-side validation — called before `ava.self.restart(config_overlay=overlay)` writes to DB.
 
-    Type validation relies on Pydantic: splice overlay into a dummy instance and
-    try to build (settings field via framework Settings, plugin field via the
-    corresponding cls). Framework fields with a named value universe then run
-    their semantic range validator. Failure raises InvalidConfigOverlay.
+    Type validation relies on Pydantic: splice overlay into a fresh declaring
+    sub-model instance and try to build (framework field via its declaring
+    model, plugin field via the corresponding cls). The overlay surface spans
+    every config domain (28 of 38 fields are agent-domain), while a boundary
+    gateway or ops process constructs only its profile's domains. Reading the
+    old process settings therefore raised the profile fail-fast AttributeError
+    at the HTTP boundary (500, task #4423). A fresh sub-model starts from env +
+    defaults, matching the child settings base before its overlay is applied, so
+    the validation verdict cannot depend on the validating process. Framework
+    fields with a named value universe then run their semantic range validator.
+    Failure raises InvalidConfigOverlay.
 
     Success = overlay is valid; does **not** modify settings / _PLUGIN_CONFIGS —
     that's `apply_config_overlay`'s job at new process boot.
     """
-    from shared.config import field_domain, settings
+    from shared.config import field_domain
+    from shared.config.service_read import _domain_model_classes
 
     targets = resolve_overlay_targets(overlay)
     grouped: dict[str | None, dict[str, object]] = {}
@@ -558,15 +566,9 @@ def validate_config_overlay(overlay: dict[str, object]) -> None:
                 for f, v in updates.items():
                     by_domain.setdefault(field_domain(f), {})[f] = v
                 for dom, upd in by_domain.items():
-                    sub: BaseModel = getattr(settings, dom)
-                    if not isinstance(sub, BaseModel):
-                        # Boot-lite (#3621): `settings.<domain>` can be a view
-                        # that upgrades in place — re-read the name so the
-                        # class-level validation runs against the built
-                        # sub-model.
-                        sub.model_dump()
-                        sub = getattr(settings, dom)
-                    type(sub).model_validate({**sub.model_dump(), **upd})
+                    cls = _domain_model_classes()[dom]
+                    sub = cls()
+                    cls.model_validate({**sub.model_dump(), **upd})
             else:
                 cls = _PLUGIN_CONFIG_CLASSES[plugin]
                 current = _PLUGIN_CONFIGS[plugin].model_dump()

@@ -58,6 +58,48 @@ class TestSpawnAgentRequestSourceValidation:
 class TestRestartAgentRequestConfigOverlay:
     """Restart overlays fail at both HTTP and runner schema boundaries."""
 
+    @pytest.mark.parametrize("profile", ["gateway", "runner"])
+    def test_accepts_agent_domain_overlay_in_boundary_profiles(
+        self, monkeypatch: pytest.MonkeyPatch, profile: str
+    ) -> None:
+        """Schema validation must not depend on the boundary process's domains."""
+        import shared.config as shared_config
+        from shared.config import Settings
+
+        monkeypatch.setattr(shared_config, "settings", Settings(profile=profile))
+
+        body = RestartAgentRequest(config_overlay={"completion_notice_policy": "hourly"})
+
+        assert body.config_overlay == {"completion_notice_policy": "hourly"}
+
+    @pytest.mark.parametrize("profile", ["gateway", "runner"])
+    def test_rejects_invalid_agent_domain_overlay_in_boundary_profiles(
+        self, monkeypatch: pytest.MonkeyPatch, profile: str
+    ) -> None:
+        """Profile-limited schema validation still rejects invalid agent settings."""
+        import shared.config as shared_config
+        from shared.config import Settings
+
+        monkeypatch.setattr(shared_config, "settings", Settings(profile=profile))
+
+        with pytest.raises(ValidationError):
+            RestartAgentRequest(config_overlay={"completion_notice_policy": "bogus"})
+
+    def test_validates_sandbox_overlay_in_gateway_profile(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The gateway does not construct sandbox, but must validate its fields."""
+        import shared.config as shared_config
+        from shared.config import Settings
+
+        monkeypatch.setattr(shared_config, "settings", Settings(profile="gateway"))
+
+        body = RestartAgentRequest(config_overlay={"syntax_fix_ruff_format": True})
+
+        assert body.config_overlay == {"syntax_fix_ruff_format": True}
+        with pytest.raises(ValidationError):
+            RestartAgentRequest(config_overlay={"syntax_fix_ruff_format": "not-a-bool"})
+
     @pytest.mark.parametrize(
         "config_overlay",
         [

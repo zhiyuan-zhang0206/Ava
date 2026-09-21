@@ -270,6 +270,34 @@ def test_validate_config_overlay_type_error_raises(isolated_registry, unit_home)
         validate_config_overlay({"marker": 123})
 
 
+def test_validate_config_overlay_uses_declaring_model_in_gateway_profile(
+    monkeypatch: pytest.MonkeyPatch, isolated_registry, unit_home
+) -> None:
+    """Framework validation must not read a domain absent from the gateway profile."""
+    import shared.config as shared_config
+    from shared.config import Settings
+
+    monkeypatch.setattr(shared_config, "settings", Settings(profile="gateway"))
+
+    validate_config_overlay({"completion_notice_policy": "hourly"})
+    with pytest.raises(InvalidConfigOverlay, match="completion_notice_policy"):
+        validate_config_overlay({"completion_notice_policy": "bogus"})
+
+
+def test_validate_config_overlay_runs_declaring_model_validators_in_gateway_profile(
+    monkeypatch: pytest.MonkeyPatch, isolated_registry, unit_home
+) -> None:
+    """Declaring-model validation preserves before and field validators."""
+    import shared.config as shared_config
+    from shared.config import Settings
+
+    monkeypatch.setattr(shared_config, "settings", Settings(profile="gateway"))
+
+    validate_config_overlay({"skills_to_expand_at_start": "a,b"})
+    with pytest.raises(InvalidConfigOverlay, match="only accepts"):
+        validate_config_overlay({"eval_network_allowlist": ["web", "shell"]})
+
+
 def test_validate_config_overlay_unknown_llm_model_raises(isolated_registry, unit_home):
     with pytest.raises(InvalidConfigOverlay, match="not a registered model") as exc_info:
         validate_config_overlay({"llm_model": "deepseek-v4-flash-vision"})
