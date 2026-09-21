@@ -411,6 +411,16 @@ def _finalize_telemetry() -> None:
         telemetry_otlp.finalize()
 
 
+def _deliver_envelope_telemetry() -> None:
+    """Best-effort last-mile delivery for the crash-envelope writers (task #4312).
+
+    Never raises and never rewrites the envelope: the crash must stay the
+    reported failure, and a failed delivery still leaves the JSONL mirror.
+    """
+    with contextlib.suppress(BaseException):
+        _finalize_telemetry()
+
+
 def _deliver_run_telemetry(result_path: str, payload: Any) -> None:
     """Deliver this run's queued records — after the envelope write (task #4312).
 
@@ -498,6 +508,7 @@ def _run(request_path: str, result_path: str) -> None:
     except BaseException as exc:
         # Boot-timing failure: the code never ran.
         _write_crashed_result(result_path, exc, code_reached=False)
+        _deliver_envelope_telemetry()
         return
     try:
         _run_code(request.code, payload)
@@ -506,6 +517,7 @@ def _run(request_path: str, result_path: str) -> None:
         # failure, not a user-code crash. Report it with the REAL code_reached
         # flag so main() never stamps it as a boot crash (P0 #2100).
         _write_crashed_result(result_path, exc, code_reached=payload.code_reached)
+        _deliver_envelope_telemetry()
         return
     finally:
         _take_result_state_update(payload, state_injected=request.state_raw is not None)
@@ -543,9 +555,8 @@ def main() -> None:
     except BaseException as exc:
         _write_crashed_result(result_path, exc)
         # The crash envelope's record needs the same last-mile delivery (task
-        # #4312); best-effort — a boot crash must stay the reported failure.
-        with contextlib.suppress(BaseException):
-            _finalize_telemetry()
+        # #4312).
+        _deliver_envelope_telemetry()
 
 
 def _write_crashed_result(
