@@ -224,8 +224,8 @@ def test_delete_missing_noop(backend: PGVectorBackend) -> None:
 
 
 def test_search_topk_orders_by_cosine_and_aggregates(backend: PGVectorBackend) -> None:
-    """Same-path chunks collapse to one hit (best cosine wins); ordering is
-    cosine-ascending — identical contract to the milvus backend."""
+    """Same-path chunks collapse to one hit; pgvector keeps the minimum
+    native cosine distance and returns most-similar paths first."""
     ones = np.ones(_DIM, dtype=np.float32)
     backend.upsert("/a.md", 1.0, "ha", ones, kind="body", chunk_idx=0)
     backend.upsert("/a.md", 1.0, "ha", 0.9 * ones, kind="body", chunk_idx=1)
