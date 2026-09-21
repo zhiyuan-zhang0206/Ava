@@ -129,7 +129,8 @@ single-box hosts collapse to the local receiver even when their secret is set.
 - Runner exporter component IDs stay `otlphttp/tempo`, `otlphttp/loki` and
   `otlphttp/prometheus` across the direct-backend → relay cutover. The
   file_storage extension keys the Tempo/Loki persistent queues by component
-  ID; renaming either would orphan the upgrade backlog. Metrics keep the ID but
+  ID; renaming either would orphan the upgrade backlog, and a 1 GiB `max_size`
+  byte cap bounds each queue file on disk (task #4012). Metrics keep the ID but
   retain bounded in-memory retry. Queue/drop/silence observability lives in
   [[infra-metrics.ava.okf.md|Infrastructure metrics]].
 - Exit flush (task #4320) — both providers build with

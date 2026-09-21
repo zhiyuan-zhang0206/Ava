@@ -264,6 +264,11 @@ extensions:
     directory: $AVA_HOME/otel-collector/queue
     create_directory: true
     timeout: 1s
+    # max_size: byte cap per queue file (task #4012). A full file rejects the
+    # newest write (storage-full) — the same counted loss path as the request
+    # bound. 1 GiB fleet-wide: measured steady state 580M on the busiest box,
+    # against a 30G minimum disk.
+    max_size: 1073741824
     # fsync off: this is a retry buffer, not an fsync durability boundary.
     # The separate trace mirror covers batches that reach file/traces; upstream
     # backpressure may still reject before either exporter.
