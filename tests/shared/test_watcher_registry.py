@@ -80,11 +80,27 @@ def test_register_and_read_roundtrip() -> None:
     assert row["cron_expr"] == "0 9 * * *"
     assert row["status"] == "running"
     assert row["cron_end_at"] is None
+    assert row["notify"] == "always"
     # other agents are not returned
     assert wr.watcher_rows(agent_id=43) == []
     assert wr.watcher_rows(agent_id=42) == [row]
     # session-id view
     assert wr.watcher_session_ids(agent_id=42) == {1001}
+
+
+def test_register_persists_failure_notify() -> None:
+    """The completion policy is durable rebuild payload, not spawn-only state."""
+    wr.register_watcher(
+        42,
+        1002,
+        kind="at",
+        name="failure-only",
+        message="wake",
+        fires_at=_FUTURE,
+        notify="failure",
+    )
+
+    assert wr.watcher_rows(agent_id=42)[0]["notify"] == "failure"
 
 
 def test_register_kinds_and_payloads() -> None:
@@ -169,12 +185,14 @@ def test_register_cron_atomic_inserts_when_no_live_duplicate() -> None:
         cron_timezone="UTC",
         cron_end_at=None,
         alive_provider=set,
+        notify="failure",
     )
     assert reused is None
     rows = wr.watcher_rows(agent_id=42)
     assert len(rows) == 1
     assert rows[0]["session_id"] == 2001
     assert rows[0]["status"] == "running"
+    assert rows[0]["notify"] == "failure"
 
 
 def test_register_cron_atomic_reuses_live_duplicate() -> None:

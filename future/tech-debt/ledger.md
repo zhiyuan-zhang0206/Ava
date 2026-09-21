@@ -49,6 +49,13 @@ cap-domain exits use `exitType`, `expires`, and `approver`); readers ignore unkn
 - **first-seen**: 2026-09-21
 - **last-verified**: 2026-09-21
 
+### boundary:ava-watcher-py-split
+- **class**: boundary
+- **status**: open
+- **evidence**: `ava/watcher.py` sits exactly at the 800-line hard ceiling (per-file budget in `conventions/python-conventions.md`: 600 soft / 800 hard, enforced by `scripts/lint_code_structure.py`; no exemption — split is the prescribed remedy). Both R2 PRs (#3148, #3150) had to compress/offload content to stay under the cap. Candidate split: spawn/rebuild helpers vs. public API surface.
+- **first-seen**: 2026-09-22 (PR #3150)
+- **last-verified**: 2026-09-22
+
 ## Wontfix
 
 _(none)_

@@ -54,8 +54,8 @@ _REGISTER_SQL = """
     INSERT INTO agent_watchers (
         session_id, agent_id, kind, name, message, fires_at,
         cron_expr, cron_timezone, cron_end_at, timeout_secs,
-        template_version, generation
-    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        notify, template_version, generation
+    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     ON CONFLICT (agent_id, session_id) DO NOTHING
 """
 
@@ -97,6 +97,7 @@ def register_cron_atomic(
     exclude_session: int | None = None,
     template_version: int | None = None,
     generation: str | None = None,
+    notify: str = "always",
 ) -> int | None:
     """Register one cron watcher row atomically — reuse a live duplicate or insert.
 
@@ -108,6 +109,11 @@ def register_cron_atomic(
     committed. Two concurrent registrations of the same schedule serialize on
     the lock: the loser's re-check sees the winner's committed row and reuses
     it — the Task #1825 dedupe becomes atomic (N2).
+
+    An exact match (same expression, timezone, and end) preserves the reused
+    row's `notify`: a later registration's completion policy is ignored, so
+    the first registration's policy remains in effect. Changing that policy is
+    intentionally left for a later change.
 
     The lock is TRANSACTION-scoped, deliberately not session-level: normal
     processes dial the cluster's PgBouncer (`pool_mode = transaction`,
@@ -175,6 +181,7 @@ def register_cron_atomic(
                 cron_timezone,
                 cron_end_at,
                 None,
+                notify,
                 template_version,
                 generation,
             ),
@@ -195,6 +202,7 @@ def register_cron_renewal(
     exclude_session: int | None = None,
     template_version: int | None = None,
     generation: str | None = None,
+    notify: str = "always",
 ) -> list[int]:
     """Supersede every live different-end twin of one cron schedule, atomically.
 
@@ -262,6 +270,7 @@ def register_cron_renewal(
                 cron_timezone,
                 cron_end_at,
                 None,
+                notify,
                 template_version,
                 generation,
             ),
@@ -283,17 +292,22 @@ def register_watcher(
     timeout_secs: float | None = None,
     template_version: int | None = None,
     generation: str | None = None,
+    notify: str = "always",
 ) -> None:
     """Record a watcher session at spawn (`ava.watcher._spawn`).
 
     `kind` must be one of at/cron/launch and the row carries that kind's
-    rebuild payload (see `_KIND_PAYLOAD`). `template_version` is the generated
-    script's template generation (shared.watcher.TEMPLATE_VERSION); the boot
-    reconcile rebuilds a live cron watcher whose row version is behind, so a
-    template fix reaches sessions that were already running when it landed
-    (issue #1330). `generation` identifies the PTY record that this desired
-    row may restore. Fail-soft at the call site: a registry write must never
-    break the watcher it is only observing.
+    rebuild payload (see `_KIND_PAYLOAD`). `notify` is the selected completion
+    policy, which each rebuild passes to the replacement watcher.
+    `template_version` is the generated script's template generation
+    (shared.watcher.TEMPLATE_VERSION); the boot reconcile rebuilds a live cron
+    watcher whose row version is behind, so a template fix reaches sessions
+    that were already running when it landed (issue #1330). `generation`
+    identifies the PTY record that this desired row may restore. Registry
+    failures degrade callers differently: at spawn the write GATES the start
+    (a failure refuses the spawn — see `ava.watcher._spawn`), while the
+    observation sites (delete/kill, reconcile) stay fail-soft: a registry
+    write never breaks a watcher it is only observing.
 
     Cron registrations go through `register_cron_atomic` instead — the
     Task #1825 dedupe lives in the registration itself.
@@ -314,6 +328,7 @@ def register_watcher(
                 cron_timezone,
                 cron_end_at,
                 timeout_secs,
+                notify,
                 template_version,
                 generation,
             ),

@@ -1010,7 +1010,13 @@ def test_cron_registers_rebuild_payload(_agent_row: int, monkeypatch: pytest.Mon
     from ava.shell import sessions as _sessions
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
-    wid = watcher.cron("0 9 * * *", "daily", timezone="America/Los_Angeles", name="test-cron-reg")
+    wid = watcher.cron(
+        "0 9 * * *",
+        "daily",
+        timezone="America/Los_Angeles",
+        name="test-cron-reg",
+        notify="failure",
+    )
     try:
         rows = [r for r in _registry_rows(_agent_row) if r["session_id"] == wid]
         assert rows and rows[0]["kind"] == "cron"
@@ -1018,6 +1024,7 @@ def test_cron_registers_rebuild_payload(_agent_row: int, monkeypatch: pytest.Mon
         assert rows[0]["cron_timezone"] == "America/Los_Angeles"
         assert rows[0]["message"] == "daily"
         assert rows[0]["status"] == "running"
+        assert rows[0]["notify"] == "failure"
     finally:
         ava.shell.kill(wid)
 
@@ -1041,11 +1048,13 @@ def test_reconcile_rebuilds_missing_cron(_agent_row: int, monkeypatch: pytest.Mo
         message="stand-up",
         cron_expr="0 9 * * *",
         cron_timezone="UTC",
+        notify="failure",
     )
     actions = watcher.reconcile()
     assert any("rebuilt" in a for a in actions)
     assert calls and calls[0][0][0] == "0 9 * * *"  # positional expr
     assert calls[0][0][1] == "stand-up"  # positional message
+    assert calls[0][1]["notify"] == "failure"
     # old row marked rebuilt
     rows = [r for r in _registry_rows(_agent_row) if r["session_id"] == 424242]
     assert rows and rows[0]["status"] == "rebuilt"
@@ -1559,6 +1568,7 @@ def _cron_row(**over: object) -> dict[str, object]:
         "cron_timezone": "Asia/Shanghai",
         "cron_end_at": None,
         "timeout_secs": None,
+        "notify": "always",
         "status": "running",
         "template_version": 1,
     }
@@ -1578,7 +1588,7 @@ def test_reconcile_rebuilds_live_cron_watcher_with_stale_template(
     monkeypatch.setattr(
         watcher_registry,
         "watcher_rows",
-        lambda _agent_id: [_cron_row()],  # pyright: ignore[reportUnknownArgumentType]
+        lambda _agent_id: [_cron_row(notify="failure")],  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(watcher_registry, "mark_status", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(watcher_registry, "delete_watcher", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
@@ -1594,6 +1604,7 @@ def test_reconcile_rebuilds_live_cron_watcher_with_stale_template(
         timezone: str,
         end_time: object,
         name: str,
+        notify: str,
         _exclude_session: int | None = None,
     ) -> int:
         spawned.update(
@@ -1602,6 +1613,7 @@ def test_reconcile_rebuilds_live_cron_watcher_with_stale_template(
             timezone=timezone,
             end_time=end_time,
             name=name,
+            notify=notify,
             exclude=_exclude_session,
         )
         return 999
@@ -1616,6 +1628,7 @@ def test_reconcile_rebuilds_live_cron_watcher_with_stale_template(
         "timezone": "Asia/Shanghai",
         "end_time": None,
         "name": "daily-signal-scan",
+        "notify": "failure",
         # The stale session being replaced is live — the dedupe must skip it,
         # or the rebuild would "reuse" the very session it then kills and
         # leave the schedule with no live copy (Task #1825).
@@ -1623,6 +1636,56 @@ def test_reconcile_rebuilds_live_cron_watcher_with_stale_template(
     }
     assert killed == [68]
     assert any("rebuilt as session 999" in a and "stale template v1" in a for a in actions)
+
+
+def test_reconcile_rebuilds_at_with_saved_notify(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A future one-shot retains its failure-only completion policy on recovery."""
+    from shared import watcher_registry
+
+    fires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=1)
+    row = _cron_row(
+        session_id=69,
+        kind="at",
+        name="failure-only-one-shot",
+        message="wake",
+        fires_at=fires_at,
+        cron_expr=None,
+        cron_timezone=None,
+        notify="failure",
+        template_version=None,
+    )
+    monkeypatch.setattr(
+        watcher_registry,
+        "watcher_rows",
+        lambda _agent_id: [row],  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(ava.shell.sessions, "list", set)
+    statuses: list[tuple[object, object, object]] = []
+    monkeypatch.setattr(
+        watcher_registry,
+        "mark_status",
+        lambda a, s, st: statuses.append((a, s, st)),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    spawned: dict[str, object] = {}
+
+    def fake_at(when: object, message: str, *, name: str, notify: str) -> int:
+        spawned.update(when=when, message=message, name=name, notify=notify)
+        return 999
+
+    monkeypatch.setattr(_watcher_reconcile, "at", fake_at)
+
+    actions = watcher.reconcile()
+
+    from tests.ava.conftest import _TEST_AGENT_BASE
+
+    assert spawned == {
+        "when": fires_at,
+        "message": "wake",
+        "name": "failure-only-one-shot",
+        "notify": "failure",
+    }
+    assert statuses == [(_TEST_AGENT_BASE, 69, "rebuilt")]
+    assert any("rebuilt as session 999" in action for action in actions)
 
 
 def test_reconcile_leaves_current_template_watcher_alone(
