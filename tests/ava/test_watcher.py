@@ -583,6 +583,32 @@ def test_cron_spawns_without_watchdog(_agent_row: int, monkeypatch: pytest.Monke
     assert captured["watchdog_secs"] is None
 
 
+def test_watcher_apis_forward_failure_notify(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: list[str] = []
+
+    def fake_spawn(_code: str, _watchdog_secs: float | None, _name: str, **kw: object) -> int:
+        notify = kw["notify"]
+        assert isinstance(notify, str)
+        captured.append(notify)
+        return 7
+
+    monkeypatch.setattr(watcher, "_spawn", fake_spawn)
+    when = (datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=365)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    watcher.launch("pass", timeout="1h", name="test-launch-notify", notify="failure")
+    watcher.at(when, "ping later", name="test-at-notify", notify="failure")
+    watcher.cron("0 3 * * *", "daily", name="test-cron-notify", notify="failure")
+    assert captured == ["failure", "failure", "failure"]
+
+
+def test_watcher_rejects_unknown_notify(_agent_row: int) -> None:
+    with pytest.raises(ValueError, match="notify must be one of"):
+        watcher.launch("pass", timeout="1h", name="test-invalid-notify", notify="success")
+
+
 def test_launch_carries_agent_and_session_to_child(
     _agent_row: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
