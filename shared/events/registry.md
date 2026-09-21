@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 29 | event stream |
-| telemetry (category=telemetry) | `events` | 208 | event stream |
+| telemetry (category=telemetry) | `events` | 209 | event stream |
 | log (category=log) | `events` | 14 | event stream |
 | file-only (destination=file) | file log | 1 | file only (not the stream) |
 | SSE live | Redis → frontend (not persisted) | 31 role | live projection |
@@ -96,7 +96,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `managed_writer_pre_stop_aborted` | the exact pre-stop abort cleared a never-effective pending publication and its lease | business | — | events |
 | `managed_writer_blocked` | managed-writer mode requested but refused entry: a readiness guard is missing or not True; the rollout ran the legacy flow | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 208)
+## 3. Telemetry events (category=telemetry, 209)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -184,6 +184,7 @@ consumers: see the comments at each emit point.
 | `heartbeat_backoff_raised` | no-op nudge backoff level raised | noise | level, interval_seconds | — | events |
 | `heartbeat_backoff_reset` | nudge backoff reset by real inbound or pause | noise | previous_level, reason | — | events |
 | `ci_usage_daily` | daily CI-minute reconciliation totals (C9) | observation | day, window_start, window_end, runs, attributed_runs, unattributed_runs, total_minutes, attributed_minutes, linux_minutes, macos_minutes, appended_runs, est_usd | — | events |
+| `debt_sweep_daily` | daily tech-debt mechanical scan and clearing-worker dispatch | observation | day, scan_status, action, worker_agent_id | — | events |
 | `pr_flow_daily` | daily PR-flow aggregates — ready->merged percentiles, QA rounds, flake discoveries (absolute gauges, one sample per complete day) | observation | day, merged_count, ready_to_merge_median_seconds, ready_to_merge_p90_seconds, qa_rounds_mean, qa_rereview_share, flake_new_quarantines | — | events |
 | `pr_flow_run` | PR-flow sampler run — point-in-time Trunk queue depth (absolute state) | observation | queue_depth | — | events |
 | `task_reminder_digest` | overdue-task owner digest | noise | owner_id, task_count, task_ids | — | events |

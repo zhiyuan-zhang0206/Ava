@@ -56,6 +56,7 @@ class TestLoadManifest:
         by_name = {s.name: s for s in scheds}
         assert set(by_name) == {
             "c9-daily-report",
+            "debt-sweep-daily",
             "adversarial-eval-weekly",
             "self-evolution-weekly",
             "self-evolution-daily",

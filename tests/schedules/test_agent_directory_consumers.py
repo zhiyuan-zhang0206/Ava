@@ -90,7 +90,12 @@ def test_spawns_only_after_all_matching_pages_are_exhausted(
 
 
 @pytest.mark.parametrize(
-    "filename", ("c9-daily-report-schedule.py", "model-update-tracker-schedule.py")
+    "filename",
+    (
+        "c9-daily-report-schedule.py",
+        "model-update-tracker-schedule.py",
+        "debt-sweep-daily-schedule.py",
+    ),
 )
 def test_report_recipient_can_be_beyond_first_search_page(
     filename: str, monkeypatch: pytest.MonkeyPatch

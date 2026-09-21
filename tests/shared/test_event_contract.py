@@ -212,9 +212,16 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # modified rendered destination preserved instead of overwritten) raises the
     # current total to 205; the write-side model-settlement family (task #4306:
     # spawn_config_normalized / spawn_overlay_model_normalized /
-    # restart_config_normalized) raises it to 208.
+    # restart_config_normalized) raises it to 208; the daily debt-sweep dispatch
+    # (task #4015: debt_sweep_daily) raises it to 209.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 208
+    assert len(_TELEMETRY_KINDS) == 209
+    assert payload_keys("debt_sweep_daily") == (
+        "day",
+        "scan_status",
+        "action",
+        "worker_agent_id",
+    )
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:

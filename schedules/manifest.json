@@ -11,6 +11,14 @@
       "command": "python c9-daily-report-schedule.py"
     },
     {
+      "name": "debt-sweep-daily",
+      "class": "product",
+      "default_enabled": true,
+      "description": "Daily 06:30 cluster-time mechanical scan plus one debt-clearing pass landing as the sweeper's chore(sweeper) PR; failures wake the P0 lead.",
+      "script": "debt-sweep-daily-schedule.py",
+      "command": "python debt-sweep-daily-schedule.py"
+    },
+    {
       "name": "adversarial-eval-weekly",
       "class": "product",
       "default_enabled": true,

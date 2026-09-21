@@ -31,6 +31,7 @@ _SCHEDULES = Path(__file__).resolve().parents[2] / "schedules"
 # excluded on purpose: `*/5 * * * *` is a period, not a time of day, and it says
 # so by passing "UTC" explicitly.
 _CLUSTER_CLOCK_TEMPLATES = {
+    "debt-sweep-daily-schedule.py": "TZ",
     "memory-steward-schedule.py": "TIMEZONE",
     "model-update-tracker-schedule.py": "TZ",
     "self-evolution-daily-schedule.py": "TZ",
