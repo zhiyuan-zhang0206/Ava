@@ -106,11 +106,13 @@ def _labels_runner(labels: list[str], calls: list[list[str]]):
 def gh(monkeypatch: pytest.MonkeyPatch):
     """Stub the `gh` subprocess, dispatching on the subcommand.
 
-    `check_ci` makes two different calls — `gh pr view` for the rollup and `gh
-    api .../actions/runs` for what Actions has scheduled — and they must not be
-    answered with the same payload: telling "no workflow ever ran" from "the
-    workflow has not attached a check yet" is exactly what the second call is
-    for. `scheduled` is the names of runs the API reports as not yet completed.
+    `check_ci` makes three different calls — `gh pr view` for the rollup, `gh
+    api .../actions/runs` for what Actions has scheduled, and the completed
+    main-workflow probe — and they must not be answered with the same payload.
+    Telling "no workflow ever ran" from "the workflow has not attached a check
+    yet" is exactly what the scheduled-runs call is for. `scheduled` is the
+    names of runs the API reports as not yet completed; `main_completed`
+    defaults to True for the completed main-workflow probe.
     """
 
     def _install(
@@ -118,6 +120,7 @@ def gh(monkeypatch: pytest.MonkeyPatch):
         mergeable: str = "MERGEABLE",
         *,
         scheduled: list[str] | None = None,
+        main_completed: bool = True,
     ) -> None:
         rollup = json.dumps(
             {"mergeable": mergeable, "statusCheckRollup": checks, "headRefOid": "deadbeef"}
@@ -125,13 +128,18 @@ def gh(monkeypatch: pytest.MonkeyPatch):
         runs = json.dumps(scheduled or [])
 
         def _run(cmd, *_a, **_k):
+            url = cmd[2] if len(cmd) > 2 else ""
             if "api" not in cmd:
                 stdout = rollup
-            elif "actions/runs?" in cmd[-1] and "--jq" not in cmd:
+            elif "status=completed" in url:
+                # The main-workflow-visibility probe: `length` of the completed
+                # main-workflow runs for this head.
+                stdout = "1" if main_completed else "0"
+            elif "actions/runs?" in url and "--jq" not in cmd:
                 # ci_job_rerun reads the raw REST runs payload (issue #1945);
                 # keep its view empty so diagnose tests stay deterministic.
                 stdout = json.dumps({"total_count": 0, "workflow_runs": []})
-            elif "/jobs?" in cmd[-1]:
+            elif "/jobs?" in url:
                 stdout = json.dumps({"total_count": 0, "jobs": []})
             else:
                 stdout = runs
@@ -501,7 +509,7 @@ def test_partial_suite_green_with_an_unanswerable_probe_is_error(
 def test_partial_suite_green_with_nothing_scheduled_is_green(gh: Any, has_workflows: Any) -> None:
     """The mirror of the early-green window: the same partially attached rollup,
     but the runs API reports nothing left to come — the suite is done, and the
-    verdict is green."""
+    verdict is green and the main run is seen."""
     gh(
         [
             _check("guardrails (impacted)", "SUCCESS"),
@@ -509,10 +517,109 @@ def test_partial_suite_green_with_nothing_scheduled_is_green(gh: Any, has_workfl
             _check("contracts", "SUCCESS"),
         ],
         scheduled=[],
+        main_completed=True,
     )
     has_workflows(True)
 
     assert ci_utils.check_ci("775").verdict is CIStatus.ALL_PASSED
+
+
+def test_early_green_window_without_the_main_run_is_not_green(gh: Any, has_workflows: Any) -> None:
+    """PR #3137 had only passing app/proof checks before CI registered; wait it
+    out until the main run is visible rather than calling that narrow window green."""
+    checks = [
+        _APP_CHECK,
+        _check("prove-observation", "SKIPPED", workflow="Agent observation proof"),
+        _check("prove-retry-guard", "SKIPPED", workflow="CI retry safety proof"),
+    ]
+    has_workflows(True)
+    gh(checks, scheduled=[], main_completed=False)
+
+    r = ci_utils.check_ci("3137")
+
+    assert r.verdict is CIStatus.PENDING
+    assert ci_utils.MAIN_CI_WORKFLOW_NAME in r.pending
+    assert "all green" not in r.summary()
+    assert "pending" in r.summary().lower()
+
+    gh(checks, scheduled=[], main_completed=True)
+
+    assert ci_utils.check_ci("3137").verdict is CIStatus.ALL_PASSED
+
+
+def test_main_run_seen_with_all_checks_passed_is_green(gh: Any, has_workflows: Any) -> None:
+    """Positive path of the gate: nothing is running and the main run is seen."""
+    gh(
+        [
+            _check("backend", "SUCCESS"),
+            _check("docs", "SKIPPED"),
+        ],
+        scheduled=[],
+        main_completed=True,
+    )
+    has_workflows(True)
+
+    assert ci_utils.check_ci("3137").verdict is CIStatus.ALL_PASSED
+
+
+def test_main_workflow_probe_failure_is_error(
+    gh: Any, has_workflows: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unanswerable main-workflow probe is unknown, never a green verdict."""
+    gh([_check("backend", "SUCCESS")], scheduled=[], main_completed=True)
+    has_workflows(True)
+    monkeypatch.setattr(ci_utils, "_main_workflow_run_completed", lambda *_a, **_k: None)
+
+    r = ci_utils.check_ci("3137")
+
+    assert r.verdict is CIStatus.ERROR
+    assert "probe" in r.error_detail
+
+
+def test_main_workflow_probe_reads_completed_runs_of_the_main_workflow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The completed-runs query is head-specific and filters for the main workflow."""
+    seen: dict[str, list[str]] = {}
+
+    class _R:
+        returncode = 0
+        stdout = "2"
+        stderr = ""
+
+    def _run(cmd, *_a, **_k):
+        seen["cmd"] = cmd
+        return _R()
+
+    monkeypatch.setattr(ci_utils.subprocess, "run", _run)
+
+    assert ci_utils._main_workflow_run_completed("abc123", None) is True
+    joined = " ".join(seen["cmd"])
+    assert "head_sha=abc123" in joined
+    assert "status=completed" in joined
+    assert f'select(.name == "{ci_utils.MAIN_CI_WORKFLOW_NAME}")' in joined
+
+    _R.stdout = "0"
+    assert ci_utils._main_workflow_run_completed("abc123", None) is False
+
+
+def test_main_workflow_probe_returns_none_when_unanswerable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed or unparseable completed-run query is unknown, not no main run."""
+
+    class _R:
+        returncode = 1
+        stdout = ""
+        stderr = "boom"
+
+    monkeypatch.setattr(ci_utils.subprocess, "run", lambda *_a, **_k: _R())
+
+    assert ci_utils._main_workflow_run_completed("abc123", None) is None
+
+    _R.returncode = 0
+    _R.stdout = "not a number"
+    assert ci_utils._main_workflow_run_completed("abc123", None) is None
 
 
 def test_runs_api_failure_keeps_the_conservative_verdict(
