@@ -79,6 +79,7 @@ from gateway import (
     prom_metrics,
     ttl_reaper,
 )
+from gateway import completion_notice_flusher as _completion_notice_flusher
 from gateway import mcp_endpoint as _mcp_endpoint
 from gateway._auth401_log import _log_auth401_rejection
 from gateway._cors import cors_allowed_origins
@@ -245,15 +246,17 @@ _log = logging.getLogger(__name__)
 def _start_periodic_flushers(app: FastAPI) -> None:
     """Start the gateway's periodic telemetry flushers as app.state tasks.
 
-    Three loops, one lifecycle group: gateway latency aggregates (Task
-    #1091), the auth-401 aggregate counter (Task #1712) and the agent-registry
-    max-id gauge (Task #2010). Each loop emits ONE bounded event per 60s and
-    never raises out of its loop; the lifespan teardown cancels all three.
+    Gateway periodic tasks have one lifespan owner. Completion digests are
+    deliberately one loop here rather than one loop per agent, so a completed
+    hour has one platform-side delivery owner.
     """
     app.state.latency_flusher = asyncio.create_task(_latency.latency_flusher())
     app.state.auth401_flusher = asyncio.create_task(_auth401_log_module.auth401_flusher())
     app.state.agent_max_id_flusher = asyncio.create_task(
         _agent_max_id_module.max_agent_id_flusher(app.state.db_pool)
+    )
+    app.state.completion_notice_flusher = asyncio.create_task(
+        _completion_notice_flusher.completion_notice_flusher(app.state.db_pool)
     )
 
 
@@ -387,6 +390,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             app.state.latency_flusher,
             app.state.auth401_flusher,
             app.state.agent_max_id_flusher,
+            app.state.completion_notice_flusher,
         ):
             flusher.cancel()
             with suppress(asyncio.CancelledError):

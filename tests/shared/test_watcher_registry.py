@@ -80,7 +80,7 @@ def test_register_and_read_roundtrip() -> None:
     assert row["cron_expr"] == "0 9 * * *"
     assert row["status"] == "running"
     assert row["cron_end_at"] is None
-    assert row["notify"] == "always"
+    assert row["notify"] == "agent"
     # other agents are not returned
     assert wr.watcher_rows(agent_id=43) == []
     assert wr.watcher_rows(agent_id=42) == [row]

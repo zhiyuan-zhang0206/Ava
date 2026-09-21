@@ -134,12 +134,22 @@ def _live_cron_session(
     return None
 
 
-def _notify_missed_watcher(agent_id: int, content: str) -> None:
-    """Best-effort notification for a one-shot watcher that cannot run."""
-    from ava import agents as _agents
+def _notify_missed_watcher(agent_id: int, session_id: int, content: str) -> None:
+    """Best-effort platform completion notice for a one-shot that cannot run."""
+    from ava import _gateway_client
 
     with contextlib.suppress(Exception):
-        _agents.send_message(agent_id, content)
+        _gateway_client.send_message(
+            agent_id,
+            content=content,
+            source=f"watcher:{session_id}",
+            completion_notice={"outcome": "missed", "exit_code": None},
+        )
+
+
+def _rebuild_notify(notify: str) -> str | None:
+    """Map the registry's dynamic-policy sentinel back to the public API."""
+    return None if notify == "agent" else notify
 
 
 def _reconcile_missing(
@@ -209,7 +219,7 @@ def _reconcile_missing(
                 timezone=row["cron_timezone"],
                 end_time=row["cron_end_at"],
                 name=name,
-                notify=row["notify"],
+                notify=_rebuild_notify(row["notify"]),
             )
             mark_status(agent_id, session_id, "rebuilt")
             return f"cron watcher '{name}' rebuilt as session {new_id}"
@@ -220,7 +230,12 @@ def _reconcile_missing(
             # session deadline (fires_at + AT_SESSION_TTL_GRACE_SECONDS)
             # governs the reclaim window, not this rebuild gate.
             if row["fires_at"] is not None and row["fires_at"] > now:
-                new_id = at(row["fires_at"], row["message"] or "", name=name, notify=row["notify"])
+                new_id = at(
+                    row["fires_at"],
+                    row["message"] or "",
+                    name=name,
+                    notify=_rebuild_notify(row["notify"]),
+                )
                 mark_status(agent_id, session_id, "rebuilt")
                 return f"one-shot watcher '{name}' rebuilt as session {new_id}"
             # Delivery check (task #1858): the child deletes its own row on a
@@ -236,6 +251,7 @@ def _reconcile_missing(
             mark_status(agent_id, session_id, "missed")
             _notify_missed_watcher(
                 agent_id,
+                session_id,
                 f"[watcher] '{name}' was not running at boot and its "
                 f"moment ({row['fires_at']}) has passed — marked missed.",
             )
@@ -243,6 +259,7 @@ def _reconcile_missing(
         mark_status(agent_id, session_id, "missed")
         _notify_missed_watcher(
             agent_id,
+            session_id,
             f"[watcher] '{name}' (one-shot launch watcher) was not "
             "running at boot — marked missed.",
         )
@@ -285,6 +302,7 @@ def _reap_superseded_watcher(row: dict[str, Any], alive: set[int]) -> str:
     if row["kind"] in ("at", "launch"):
         _notify_missed_watcher(
             agent_id,
+            session_id,
             f"[watcher] '{row['name']}' ({row['kind']} one-shot watcher) was reaped "
             "by an allocation generation flip before it could run — marked missed.",
         )
@@ -313,7 +331,7 @@ def _rebuild_stale_cron_watcher(row: dict[str, Any]) -> str | None:
             timezone=row["cron_timezone"],
             end_time=row["cron_end_at"],
             name=name,
-            notify=row["notify"],
+            notify=_rebuild_notify(row["notify"]),
             # The session being replaced is LIVE (this is a template upgrade,
             # not a death recovery) — the dedupe must not reuse it, or the
             # rebuild would kill the only live copy and leave nothing.

@@ -16,14 +16,14 @@ import pathlib
 import subprocess
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 
 import psycopg
 import pytest
 
 import ava
-from ava import _watcher_reconcile, watcher
+from ava import _gateway_client, _watcher_reconcile, watcher
 from ava.shell import _background
 from shared.platform import IS_WINDOWS
 
@@ -43,6 +43,22 @@ def _is_live_watcher(wid: int, name: str = "test-watcher") -> bool:
 
 def _boot_text(wid: int) -> str:
     return (watcher._watchers_dir() / f"watcher_{wid}_boot.py").read_text()
+
+
+def _capture_completion_notice(sent: list[str]) -> Callable[..., None]:
+    def capture(
+        _agent_id: int,
+        *,
+        content: str | list[dict[str, object]],
+        source: str,
+        completion_notice: dict[str, object] | None = None,
+    ) -> None:
+        assert source.startswith("watcher:")
+        assert completion_notice == {"outcome": "missed", "exit_code": None}
+        assert isinstance(content, str)
+        sent.append(content)
+
+    return capture
 
 
 def test_validate_message_rejects_empty() -> None:
@@ -1142,7 +1158,7 @@ def test_reconcile_notifies_when_a_superseded_one_shot_is_reaped(
     monkeypatch.setattr(_sessions, "_current_session_generation", lambda: "current-generation")
     monkeypatch.setattr(_sessions, "_reap", lambda _session_id: True)  # pyright: ignore[reportUnknownArgumentType]
     sent: list[str] = []
-    monkeypatch.setattr("ava.agents.send_message", lambda _aid, content: sent.append(content))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_gateway_client, "send_message", _capture_completion_notice(sent))
     if kind == "at":
         register_watcher(
             _agent_row,
@@ -1224,7 +1240,7 @@ def test_reconcile_drops_already_fired_one_shot_without_alert(
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     sent: list[str] = []
-    monkeypatch.setattr("ava.agents.send_message", lambda _aid, content: sent.append(content))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_gateway_client, "send_message", _capture_completion_notice(sent))
 
     past = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=5)
     register_watcher(_agent_row, 424245, kind="at", name="fired", message="go", fires_at=past)
@@ -1254,7 +1270,7 @@ def test_reconcile_completion_notice_does_not_count_as_delivered(
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     sent: list[str] = []
-    monkeypatch.setattr("ava.agents.send_message", lambda _aid, content: sent.append(content))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_gateway_client, "send_message", _capture_completion_notice(sent))
 
     past = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=5)
     register_watcher(
@@ -1286,7 +1302,7 @@ def test_reconcile_marks_missed_one_shot_and_alerts(
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     sent: list[str] = []
-    monkeypatch.setattr("ava.agents.send_message", lambda _aid, content: sent.append(content))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_gateway_client, "send_message", _capture_completion_notice(sent))
     from shared.watcher_registry import register_watcher
 
     past = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=5)
@@ -1323,7 +1339,7 @@ def test_reconcile_never_reruns_launch(_agent_row: int, monkeypatch: pytest.Monk
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     sent: list[str] = []
-    monkeypatch.setattr("ava.agents.send_message", lambda _aid, content: sent.append(content))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_gateway_client, "send_message", _capture_completion_notice(sent))
     calls: list[tuple[Any, ...]] = []
     monkeypatch.setattr(_watcher_reconcile, "launch", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType]
     from shared.watcher_registry import register_watcher
@@ -1638,8 +1654,16 @@ def test_reconcile_rebuilds_live_cron_watcher_with_stale_template(
     assert any("rebuilt as session 999" in a and "stale template v1" in a for a in actions)
 
 
-def test_reconcile_rebuilds_at_with_saved_notify(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A future one-shot retains its failure-only completion policy on recovery."""
+@pytest.mark.parametrize(
+    ("stored_notify", "rebuild_notify"),
+    [("failure", "failure"), ("agent", None)],
+)
+def test_reconcile_rebuilds_at_with_saved_notify(
+    monkeypatch: pytest.MonkeyPatch,
+    stored_notify: str,
+    rebuild_notify: str | None,
+) -> None:
+    """Recovery preserves explicit policy and re-delegates an omitted policy."""
     from shared import watcher_registry
 
     fires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=1)
@@ -1651,7 +1675,7 @@ def test_reconcile_rebuilds_at_with_saved_notify(monkeypatch: pytest.MonkeyPatch
         fires_at=fires_at,
         cron_expr=None,
         cron_timezone=None,
-        notify="failure",
+        notify=stored_notify,
         template_version=None,
     )
     monkeypatch.setattr(
@@ -1668,7 +1692,7 @@ def test_reconcile_rebuilds_at_with_saved_notify(monkeypatch: pytest.MonkeyPatch
     )
     spawned: dict[str, object] = {}
 
-    def fake_at(when: object, message: str, *, name: str, notify: str) -> int:
+    def fake_at(when: object, message: str, *, name: str, notify: str | None) -> int:
         spawned.update(when=when, message=message, name=name, notify=notify)
         return 999
 
@@ -1682,7 +1706,7 @@ def test_reconcile_rebuilds_at_with_saved_notify(monkeypatch: pytest.MonkeyPatch
         "when": fires_at,
         "message": "wake",
         "name": "failure-only-one-shot",
-        "notify": "failure",
+        "notify": rebuild_notify,
     }
     assert statuses == [(_TEST_AGENT_BASE, 69, "rebuilt")]
     assert any("rebuilt as session 999" in action for action in actions)

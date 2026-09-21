@@ -392,7 +392,7 @@ def _spawn(
     cron_end_at: Any = None,
     timeout_secs: float | None = None,
     _exclude_session: int | None = None,
-    notify: str = "always",
+    notify: str | None = None,
 ) -> int:
     """Start a watcher child running ``code``; return its watcher id.
 
@@ -501,7 +501,7 @@ def _spawn(
                 cron_end_at=cron_end_at,
                 _exclude_session=_exclude_session,
                 generation=generation,
-                notify=notify,
+                notify="agent" if notify is None else notify,
             )
             if reused is not None:
                 # A concurrent registration won the race — the schedule is
@@ -531,7 +531,7 @@ def _spawn(
                 timeout_secs=timeout_secs,
                 template_version=TEMPLATE_VERSION,
                 generation=generation,
-                notify=notify,
+                notify="agent" if notify is None else notify,
             )
     except Exception:
         logger.error(
@@ -584,7 +584,7 @@ def _spawn(
     return session_id
 
 
-def launch(code: str, timeout: WatcherTimeout, *, name: str, notify: str = "always") -> int:
+def launch(code: str, timeout: WatcherTimeout, *, name: str, notify: str | None = None) -> int:
     """Run `code` as a background watcher, bounded by `timeout`.
 
     `code` calls `ava.agents.send_message(ava.self.AGENT_ID, content)`
@@ -596,7 +596,7 @@ def launch(code: str, timeout: WatcherTimeout, *, name: str, notify: str = "alwa
         timeout: seconds, a `timedelta`, or a `"<n>{s,m,h,d}"` duration
             string (e.g. `"30m"`).
         name: a lowercase slug like `"ci-monitor"`.
-        notify: `"always"` (default), or `"failure"` to report only non-zero exits.
+        notify: omit to use the agent policy; `"always"` or `"failure"` overrides it.
 
     Returns:
         The watcher's session id — while it runs, the watcher is one of your
@@ -611,7 +611,7 @@ def launch(code: str, timeout: WatcherTimeout, *, name: str, notify: str = "alwa
         name,
         kind="launch",
         timeout_secs=_parse_timeout(timeout),
-        notify=coerce_str(notify, "notify"),
+        notify=coerce_str(notify, "notify", allow_none=True),
     )
 
 
@@ -622,7 +622,7 @@ def cron(
     timezone: str | None = None,
     end_time: datetime.datetime | datetime.timedelta | str | None = None,
     name: str,
-    notify: str = "always",
+    notify: str | None = None,
     _exclude_session: int | None = None,
 ) -> int:
     """Runs until `end_time`, or until you kill its session.
@@ -651,7 +651,7 @@ def cron(
             future (a past end raises ValueError, like `at()`); defaults to
             now + 7 days.
         name: a lowercase slug like `"daily-check-in"`.
-        notify: `"always"` (default), or `"failure"` to report only non-zero exits.
+        notify: omit to use the agent policy; `"always"` or `"failure"` overrides it.
 
     Returns:
         The watcher's session id; kill that session to stop the schedule.
@@ -720,7 +720,7 @@ def cron(
         cron_timezone=tz,
         cron_end_at=et,
         _exclude_session=_exclude_session,
-        notify=coerce_str(notify, "notify"),
+        notify=coerce_str(notify, "notify", allow_none=True),
     )
 
 
@@ -729,14 +729,14 @@ def at(
     message: str,
     *,
     name: str,
-    notify: str = "always",
+    notify: str | None = None,
 ) -> int:
     """
     Args:
         when: a TZ-aware datetime, a timedelta from now (UTC), or an ISO-8601
             string with timezone. Must be in the future.
         name: a lowercase slug like `"stand-up-reminder"`.
-        notify: `"always"` (default), or `"failure"` to report only non-zero exits.
+        notify: omit to use the agent policy; `"always"` or `"failure"` overrides it.
 
     Returns:
         The watcher's session id; kill that session to cancel.
@@ -772,7 +772,7 @@ def at(
         kind="at",
         message=message,
         fires_at=due_at,
-        notify=coerce_str(notify, "notify"),
+        notify=coerce_str(notify, "notify", allow_none=True),
     )
 
 

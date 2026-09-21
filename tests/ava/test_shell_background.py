@@ -41,6 +41,7 @@ def test_notified_line_structure(tmp_path: Path) -> None:
     assert "Background command 'build' exited with code ${_ec}" in line
     assert "--source shell:3" in line
     assert f"--tail-file {log}" in line
+    assert "--completion-exit-code ${_ec}" in line
     assert line.endswith("; exit $_ec")
 
 
@@ -61,12 +62,13 @@ def test_notified_line_keep_leaves_session_open(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("notify", "expected_fragment"),
     [
+        (None, "--completion-exit-code ${_ec}"),
         ("always", "agents send 5"),
         ("failure", 'if [ "$_ec" -ne 0 ]; then'),
     ],
 )
 def test_notified_line_applies_notify_policy(
-    tmp_path: Path, notify: str, expected_fragment: str
+    tmp_path: Path, notify: str | None, expected_fragment: str
 ) -> None:
     line = _background.notified_line(
         "make build",
@@ -78,7 +80,7 @@ def test_notified_line_applies_notify_policy(
         notify=notify,
     )
     assert expected_fragment in line
-    if notify == "always":
+    if notify is None or notify == "always":
         assert 'if [ "$_ec" -ne 0 ]; then' not in line
     else:
         assert line.index('if [ "$_ec" -ne 0 ]; then') < line.index("agents send 5")
@@ -206,6 +208,7 @@ def test_run_background_line_and_handle(monkeypatch: pytest.MonkeyPatch, tmp_pat
     assert "2>&1 | tee" in cmd
     assert "_ec=${PIPESTATUS[0]}" in cmd
     assert "--source shell:7" in cmd
+    assert "--completion-exit-code ${_ec}" in cmd
     assert cmd.endswith("; exit $_ec")
 
 
@@ -239,6 +242,8 @@ def test_run_background_e2e_notice_log_and_close(
     assert "exited with code 3" in argv[3]  # subshell exit code, ${_ec} expanded
     assert f"shell:{handle.session_id}" in argv
     assert handle.output_path in argv  # --tail-file target
+    assert "--completion-exit-code" in argv
+    assert "3" in argv
 
     # Default keep=False: the session closes unconditionally after the notice
     # (delivery is best-effort; a failed send must not leave the shell behind).

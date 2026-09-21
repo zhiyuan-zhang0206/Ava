@@ -458,6 +458,35 @@ CREATE UNIQUE INDEX idx_inbound_messages_client_message_id
     ON inbound_messages (client_message_id)
     WHERE client_message_id IS NOT NULL;
 
+-- ─────────────── completion_notice_events ───────────────
+-- Restart-safe hourly completion-notice buffer. Its rows are also the
+-- authoritative platform-side source for canary count-conservation checks.
+CREATE TABLE completion_notice_events (
+    id BIGSERIAL PRIMARY KEY,
+    agent_id BIGINT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    source TEXT NOT NULL,
+    content TEXT NOT NULL,
+    outcome TEXT NOT NULL CHECK (outcome IN ('exit', 'missed')),
+    exit_code INTEGER,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    digest_inbound_id BIGINT REFERENCES inbound_messages(id),
+    CONSTRAINT completion_notice_events_exit_code_check CHECK (
+        (outcome = 'exit' AND exit_code IS NOT NULL) OR (outcome = 'missed' AND exit_code IS NULL)
+    ),
+    CONSTRAINT completion_notice_events_source_outcome_unique UNIQUE (agent_id, source, outcome)
+);
+
+CREATE INDEX completion_notice_events_pending_idx
+    ON completion_notice_events (agent_id, created_at, id)
+    WHERE digest_inbound_id IS NULL;
+
+CREATE INDEX completion_notice_events_delivered_idx
+    ON completion_notice_events (created_at)
+    WHERE digest_inbound_id IS NOT NULL;
+
+COMMENT ON TABLE completion_notice_events IS
+    'Restart-safe hourly completion-notice buffer and canary conservation source. One row records each platform completion event admitted under an agent hourly policy; failure events remain individually delivered immediately and also appear in the hour count.';
+
 -- Failure producers submit one stable dedup key. The gateway records the event
 -- before routing it to the author, the nearest live birth-lineage delegator, or
 -- a task-registry alert when the entire chain is dead.
@@ -1480,7 +1509,7 @@ CREATE TABLE agent_watchers (
     cron_end_at    TIMESTAMPTZ,           -- kind='cron' (NULL = standing)
     timeout_secs   REAL,                  -- kind='launch'
     notify         TEXT NOT NULL DEFAULT 'always'
-                   CHECK (notify IN ('always', 'failure')),  -- completion notice policy
+                   CHECK (notify IN ('always', 'failure', 'agent')),  -- completion notice policy
     template_version INTEGER,             -- watcher template generation at spawn (issue #1330)
     generation     TEXT,                  -- PTY allocation generation at spawn (NULL = legacy)
     status         TEXT NOT NULL DEFAULT 'running'
@@ -2199,3 +2228,11 @@ INSERT INTO schema_migrations (name) VALUES ('20260919T020500_impersonation-rela
 -- Watcher completion policy is represented above. Fresh DBs stamp the strict
 -- ADD COLUMN delta instead of replaying it against the baseline schema.
 INSERT INTO schema_migrations (name) VALUES ('20260921T195118_watcher-notify');
+
+-- completion_notice_events is represented above. Fresh databases stamp this
+-- strict CREATE TABLE migration instead of replaying it against the baseline.
+INSERT INTO schema_migrations (name) VALUES ('20260921T211300_completion-notice-digest');
+
+-- Omitted watcher notify settings are represented above as `agent`; stamp the
+-- strict CHECK rebuild rather than replaying it against the folded baseline.
+INSERT INTO schema_migrations (name) VALUES ('20260921T211400_watcher-agent-notify');

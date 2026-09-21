@@ -217,6 +217,42 @@ def test_flush_delivers_and_retires(
     assert key == "key-1"
 
 
+def test_flush_replays_hourly_completion_through_the_policy_boundary(
+    journal: Path,
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+) -> None:
+    """A gateway outage cannot bypass hourly suppression on the outbox replay."""
+    agent_id = _agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agents_meta SET config_overlay = %s::jsonb WHERE id = %s",
+            ('{"completion_notice_policy": "hourly"}', agent_id),
+        )
+    db_conn.commit()
+    path = outbox.record_failed_send(
+        agent_id=agent_id,
+        source="shell:77",
+        content="Background command 'build' exited with code 0. Full output at build.log.",
+        client_message_id="hourly-key",
+        completion_notice={"outcome": "exit", "exit_code": 0},
+        now=_NOW,
+    )
+    assert path is not None
+
+    report = outbox.flush(pool, now=_NOW + timedelta(seconds=31))
+
+    assert report.delivered == 1
+    assert not path.exists()
+    assert _inbounds(db_conn, agent_id) == []
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT source, exit_code FROM completion_notice_events WHERE agent_id = %s",
+            (agent_id,),
+        )
+        assert cur.fetchone() == ("shell:77", 0)
+
+
 def test_flush_replay_after_interrupted_retire_is_exactly_once(
     journal: Path,
     db_conn: psycopg.Connection,
