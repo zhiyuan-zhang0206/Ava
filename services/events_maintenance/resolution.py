@@ -3,7 +3,9 @@
 The event stream is append-only in Loki, so no resolution path may write a
 ``resolved_by`` attribute back onto historical events. Active rows in
 ``event_dismissals`` instead remove one exact (category, level, event_name,
-source) class from the count. The companion ten-minute query is the safety
+source, process) class from the count — a row whose ``process`` is empty is a
+wildcard that cancels every process of its base, the scope every pre-dimension
+row keeps (task #4329 B5). The companion ten-minute query is the safety
 valve: a renewed burst reopens the class before it can hide a new incident.
 
 The class arithmetic is window-agnostic: :func:`level_splits` turns any
@@ -22,7 +24,7 @@ The public seams are :func:`run_resolution_slice`, :func:`level_splits`,
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
@@ -43,12 +45,19 @@ _AUTO_SLICE = timedelta(hours=6)
 
 @dataclass(frozen=True)
 class EventClass:
-    """The immutable-event resolution identity (per-agent scope is reserved)."""
+    """The immutable-event resolution identity (per-agent scope is reserved).
+
+    ``process`` is the emitting-process dimension (task #4329 B5): ``""``
+    reads as "every process" on a dismissal row and as "the row's body had no
+    process" on the count side — the mixed-version read both maps to the
+    wildcard.
+    """
 
     category: str
     level: str
     event_name: str
     source: str
+    process: str = ""
     agent_id: int | None = None
 
 
@@ -105,7 +114,9 @@ def grouped_count_query(window: str, *, cluster: str | None = None) -> str:
     — the daemon's fixed-window gauge pass leaves it unset, while the gateway
     dashboard scopes its raw counts to the current home cluster. The
     dismissal SET stays global either way, so the two surfaces cancel the
-    same classes (task #1935).
+    same classes (task #1935). ``process`` groups the emitting process; a row
+    whose body predates the dimension surfaces as the empty label and reads
+    as ``""`` (task #4329 B5).
     """
 
     pipeline = (
@@ -115,7 +126,10 @@ def grouped_count_query(window: str, *, cluster: str | None = None) -> str:
     if cluster is not None:
         escaped = escape_logql_label(cluster)
         pipeline += f' | cluster="{escaped}" or cluster=""'
-    return f"sum by (category, level, event_name, source) (count_over_time({pipeline} [{window}]))"
+    return (
+        f"sum by (category, level, event_name, source, process) "
+        f"(count_over_time({pipeline} [{window}]))"
+    )
 
 
 def _query_class_counts(window: str, at: datetime) -> dict[EventClass, int]:
@@ -136,24 +150,28 @@ def _query_class_counts(window: str, at: datetime) -> dict[EventClass, int]:
             level=labels["level"],
             event_name=labels["event_name"],
             source=labels["source"],
+            process=labels.get("process", ""),
         )
         counts[event_class] = int(value)
     return counts
 
 
 def active_dismissals(conn: Any) -> list[Dismissal]:
-    """Load class-wide active dismissals only.
+    """Load active class dismissals only (agent-scoped rows excluded).
 
-    The v1 API rejects a non-NULL agent_id rather than subtracting it from a
-    class-wide Loki aggregate incorrectly. A manually inserted future
-    per-agent row therefore remains visible in history but has no arithmetic
-    effect until the query grouping grows that dimension.
+    An empty ``process`` is a wildcard pattern; a concrete one targets a
+    single emitting process (task #4329 B5). The v1 API rejects a non-NULL
+    agent_id rather than subtracting it from a class-wide Loki aggregate
+    incorrectly; a manually inserted future per-agent row therefore remains
+    visible in history but has no arithmetic effect until the query grouping
+    grows that dimension.
     """
 
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             """
-            SELECT id, category, level, event_name, source, agent_id, dismissed_by, note
+            SELECT id, category, level, event_name, source, process, agent_id,
+                   dismissed_by, note
             FROM event_dismissals
             WHERE status = 'dismissed' AND agent_id IS NULL
             """
@@ -167,6 +185,7 @@ def active_dismissals(conn: Any) -> list[Dismissal]:
                 level=row["level"],
                 event_name=row["event_name"],
                 source=row["source"],
+                process=row["process"],
             ),
             dismissed_by=row["dismissed_by"],
             note=row["note"],
@@ -198,9 +217,9 @@ def _insert_auto_dismissal(conn: Any, event_class: EventClass, days: int) -> boo
         cur.execute(
             """
             INSERT INTO event_dismissals
-                (category, level, event_name, source, agent_id, dismissed_by, note)
-            VALUES (%s, %s, %s, %s, NULL, -1, %s)
-            ON CONFLICT (category, level, event_name, source, agent_id)
+                (category, level, event_name, source, process, agent_id, dismissed_by, note)
+            VALUES (%s, %s, %s, %s, %s, NULL, -1, %s)
+            ON CONFLICT (category, level, event_name, source, process, agent_id)
                 WHERE status = 'dismissed' DO NOTHING
             RETURNING id
             """,
@@ -209,6 +228,7 @@ def _insert_auto_dismissal(conn: Any, event_class: EventClass, days: int) -> boo
                 event_class.level,
                 event_class.event_name,
                 event_class.source,
+                event_class.process,
                 f"auto:stable-{days}-days",
             ),
         )
@@ -247,6 +267,7 @@ def _resolution_attributes(
         "level": event_class.level,
         "event_name": event_class.event_name,
         "source": event_class.source,
+        "process": event_class.process,
         "agent_id": event_class.agent_id,
         "dismissed_by": dismissed_by,
         "note": note,
@@ -282,15 +303,52 @@ def _emit_auto_resolved(event_class: EventClass, days: int) -> None:
     )
 
 
+def _same_base(left: EventClass, right: EventClass) -> bool:
+    """Whether two classes share the four base fields (process aside)."""
+
+    return (left.category, left.level, left.event_name, left.source) == (
+        right.category,
+        right.level,
+        right.event_name,
+        right.source,
+    )
+
+
+def _is_dismissed(event_class: EventClass, active: set[EventClass]) -> bool:
+    """Whether any active row cancels this counted class.
+
+    An exact row (same process) or a wildcard row (``process=""`` — the scope
+    every pre-dimension dismissal keeps) matches. A counted class whose
+    ``process`` is empty (mixed-version read) matches only the wildcard: no
+    live process can be attributed to it.
+    """
+
+    return event_class in active or replace(event_class, process="") in active
+
+
+def _burst_count_for(event_class: EventClass, burst_counts: dict[EventClass, int]) -> int:
+    """The ten-minute count one dismissal watches.
+
+    An exact dismissal watches its own class; a wildcard dismissal watches
+    the sum over every process of its base, so any process's burst still
+    trips the safety valve.
+    """
+
+    if event_class.process:
+        return burst_counts.get(event_class, 0)
+    return sum(count for other, count in burst_counts.items() if _same_base(other, event_class))
+
+
 def level_splits(counts: dict[EventClass, int], active: set[EventClass]) -> dict[str, LevelSplit]:
     """The window-agnostic class arithmetic: per-level total / dismissed / net.
 
     Every class in ``counts`` contributes its count to its level's ``total``;
     a class with an active dismissal moves the count from ``net`` to
-    ``dismissed`` instead. Levels are ``"warning"`` and ``"error"`` —
-    ``critical`` classes fold into ``error`` exactly as the Loki query's
-    level domain (``warning|error|critical``) and the operator gauges do, so
-    the three-way split always sums to the raw level counts.
+    ``dismissed`` instead — an exact (process-scoped) row or a wildcard
+    (``process=""``) row, see :func:`_is_dismissed`. Levels are ``"warning"``
+    and ``"error"`` — ``critical`` classes fold into ``error`` exactly as the
+    Loki query's level domain (``warning|error|critical``) and the operator
+    gauges do, so the three-way split always sums to the raw level counts.
 
     This is the single arithmetic both the daemon's fixed-window gauges and
     the dashboard's user-selected window use (task #1935).
@@ -300,7 +358,7 @@ def level_splits(counts: dict[EventClass, int], active: set[EventClass]) -> dict
     for event_class, count in counts.items():
         level = "warning" if event_class.level == "warning" else "error"
         split = splits.get(level, LevelSplit(0, 0, 0))
-        dismissed = count if event_class in active else 0
+        dismissed = count if _is_dismissed(event_class, active) else 0
         splits[level] = LevelSplit(
             total=split.total + count,
             dismissed=split.dismissed + dismissed,
@@ -337,14 +395,16 @@ def run_resolution_slice(
         active = active_dismissals(conn)
         active_classes = {dismissal.event_class for dismissal in active}
         for dismissal in active:
-            burst_count = burst_counts.get(dismissal.event_class, 0)
+            burst_count = _burst_count_for(dismissal.event_class, burst_counts)
             if (
                 burst_count > settings.daemon.events_resolution_burst_threshold
                 and _reopen_for_burst(conn, dismissal, burst_count)
             ):
                 reopened.append((dismissal, burst_count))
                 active_classes.discard(dismissal.event_class)
-        for event_class in auto_classes - active_classes:
+        for event_class in auto_classes:
+            if _is_dismissed(event_class, active_classes):
+                continue
             if _insert_auto_dismissal(conn, event_class, settings.daemon.events_auto_dismiss_days):
                 auto_dismissed.append(event_class)
                 active_classes.add(event_class)

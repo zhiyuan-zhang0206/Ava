@@ -63,6 +63,7 @@ def test_create_emits_marker_and_duplicate_conflicts(
                 "level": "warning",
                 "event_name": "test_warning",
                 "source": "events-maintenance",
+                "process": "",
                 "agent_id": None,
                 "dismissed_by": 0,
                 "note": "investigated by ops",
@@ -100,6 +101,7 @@ def test_list_filter_and_manual_reopen_emit_marker(
             "level": "warning",
             "event_name": "test_warning",
             "source": "events-maintenance",
+            "process": "",
             "agent_id": None,
             "dismissed_by": 0,
             "note": "investigated by ops",
@@ -127,3 +129,23 @@ def test_gateway_auth_protects_resolution_routes(
     response = client.post("/api/event-resolutions", json=_body())
 
     assert response.status_code == 401
+
+
+def test_process_scoped_dismissals_coexist(
+    client: TestClient, emitted: list[tuple[str, str, dict[str, object]]]
+) -> None:
+    """One class may carry a wildcard row and per-process rows at once — the
+    dimension that makes the coarse log classes targetable (task #4329 B5);
+    an exact duplicate still 409s."""
+    wildcard = client.post("/api/event-resolutions", json=_body()).json()
+    exact = client.post("/api/event-resolutions", json=_body(process="agent_host")).json()
+
+    assert wildcard["process"] == ""
+    assert exact["process"] == "agent_host"
+    assert emitted[-1][2]["process"] == "agent_host"
+
+    duplicate = client.post("/api/event-resolutions", json=_body(process="agent_host"))
+    assert duplicate.status_code == 409
+
+    active = client.get("/api/event-resolutions", params={"status": "dismissed"}).json()
+    assert {row["process"] for row in active["resolutions"]} == {"", "agent_host"}

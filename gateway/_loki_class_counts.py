@@ -104,6 +104,7 @@ def _count_event_classes_uncached(
             level=str(metric.get("level", "")),
             event_name=str(metric.get("event_name", "")),
             source=str(metric.get("source", "")),
+            process=str(metric.get("process", "")),
         )
         counts[event_class] = counts.get(event_class, 0) + int(value)
     return counts

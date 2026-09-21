@@ -9435,6 +9435,12 @@
             "minLength": 1,
             "title": "Source"
           },
+          "process": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Process",
+            "default": ""
+          },
           "agent_id": {
             "anyOf": [
               {
@@ -9462,7 +9468,7 @@
           "source"
         ],
         "title": "EventResolutionCreate",
-        "description": "One immutable event class to dismiss through the authenticated API."
+        "description": "One immutable event class to dismiss through the authenticated API.\n\nAn empty ``process`` is a wildcard that dismisses every process of the\nclass — the scope every pre-dimension row keeps; a concrete value targets\none emitting process (task #4329 B5)."
       },
       "EventResolutionListResponse": {
         "properties": {
@@ -9511,6 +9517,10 @@
           "source": {
             "type": "string",
             "title": "Source"
+          },
+          "process": {
+            "type": "string",
+            "title": "Process"
           },
           "agent_id": {
             "anyOf": [
@@ -9585,6 +9595,7 @@
           "level",
           "event_name",
           "source",
+          "process",
           "agent_id",
           "dismissed_by",
           "note",
@@ -15347,7 +15358,7 @@
           "plugin_stats"
         ],
         "title": "StatsDashboard",
-        "description": "GET /api/stats/dashboard response — sidebar-top stats card data pulled in one shot.\n\nAll windowed fields (`tokens` / `cost_usd` / `avg_turn_seconds` /\n`warnings` / `errors`) aggregate over the `applied_window_hours` horizon.\n`window_hours` echoes the selected value — `0` means five minutes; all\nother values are hours.\n`applied_window_hours` is the actually served window in hours, no greater\nthan `window_hours` and clamped to the Loki retention horizon.\n\n- `live_count`: current non-terminated count (from agents_meta, not\n  events; not windowed)\n- `tokens`: windowed telemetry LLM token usage (cached for at most 60s)\n- `cost_usd`: windowed LLM spend in USD, summed from the usage-time\n  `cost_usd` snapshots carried by telemetry Loki `llm_usage` events;\n  events that pre-date the snapshot field contribute 0 (cached for at\n  most 60s with `tokens`)\n- `avg_turn_seconds`: windowed avg LLM call wall time\n  (event=turn_end + ok=true)\n- `warnings` / `errors`: raw level totals over the window (critical\n  folds into error). Agent trial-and-error (exec_failed) logs at INFO\n  and is deliberately NOT counted — these numbers are operator-facing\n  alerts, not agent activity.\n- `warnings_dismissed` / `warnings_net` / `errors_dismissed` /\n  `errors_net`: the three-way resolution split (task #1935). The\n  arithmetic is the events-maintenance daemon's class subtraction\n  (`services.events_maintenance.resolution.level_splits`) applied to the\n  SELECTED window instead of the daemon's fixed six hours: events whose\n  (category, level, event_name, source) class has an active dismissal in\n  `event_dismissals` count as dismissed, the rest as net, and\n  dismissed + net == the raw total by construction.\n- `total_events`: archived event row count (frozen — the PG events copy\n  stopped growing at the LGTM cutover; not a live gauge)\n\n`avg_turn_seconds` None = zero turns in the window (new DB / no\nactivity); frontend renders \"—\".\n\n`plugin_stats` is not windowed (see `PluginStat`): the runtime values\nbehind cards that plugins declare under `contributions.ui.stats`, joined\nby the console on `(plugin, id)`.\n\n`stale` is true when this payload is the route's last-good response,\nserved because a live recompute failed while the payload was within the\nstale cap (`display.stats_dashboard_stale_max_s`); `as_of` is the UTC\ntime the served payload's reads were assembled — a stale fallback keeps\nits original timestamp so a client can show the data's age."
+        "description": "GET /api/stats/dashboard response — sidebar-top stats card data pulled in one shot.\n\nAll windowed fields (`tokens` / `cost_usd` / `avg_turn_seconds` /\n`warnings` / `errors`) aggregate over the `applied_window_hours` horizon.\n`window_hours` echoes the selected value — `0` means five minutes; all\nother values are hours.\n`applied_window_hours` is the actually served window in hours, no greater\nthan `window_hours` and clamped to the Loki retention horizon.\n\n- `live_count`: current non-terminated count (from agents_meta, not\n  events; not windowed)\n- `tokens`: windowed telemetry LLM token usage (cached for at most 60s)\n- `cost_usd`: windowed LLM spend in USD, summed from the usage-time\n  `cost_usd` snapshots carried by telemetry Loki `llm_usage` events;\n  events that pre-date the snapshot field contribute 0 (cached for at\n  most 60s with `tokens`)\n- `avg_turn_seconds`: windowed avg LLM call wall time\n  (event=turn_end + ok=true)\n- `warnings` / `errors`: raw level totals over the window (critical\n  folds into error). Agent trial-and-error (exec_failed) logs at INFO\n  and is deliberately NOT counted — these numbers are operator-facing\n  alerts, not agent activity.\n- `warnings_dismissed` / `warnings_net` / `errors_dismissed` /\n  `errors_net`: the three-way resolution split (task #1935). The\n  arithmetic is the events-maintenance daemon's class subtraction\n  (`services.events_maintenance.resolution.level_splits`) applied to the\n  SELECTED window instead of the daemon's fixed six hours: events whose\n  (category, level, event_name, source, process) class has an active\n  dismissal in `event_dismissals` — exact, or matching a wildcard row\n  with an empty `process` — count as dismissed, the rest as net, and\n  dismissed + net == the raw total by construction.\n- `total_events`: archived event row count (frozen — the PG events copy\n  stopped growing at the LGTM cutover; not a live gauge)\n\n`avg_turn_seconds` None = zero turns in the window (new DB / no\nactivity); frontend renders \"—\".\n\n`plugin_stats` is not windowed (see `PluginStat`): the runtime values\nbehind cards that plugins declare under `contributions.ui.stats`, joined\nby the console on `(plugin, id)`.\n\n`stale` is true when this payload is the route's last-good response,\nserved because a live recompute failed while the payload was within the\nstale cap (`display.stats_dashboard_stale_max_s`); `as_of` is the UTC\ntime the served payload's reads were assembled — a stale fallback keeps\nits original timestamp so a client can show the data's age."
       },
       "StatsTokens": {
         "properties": {
