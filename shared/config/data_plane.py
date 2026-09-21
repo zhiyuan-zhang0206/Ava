@@ -125,6 +125,19 @@ def gateway_url_host() -> str:
     return (urlsplit(url).hostname or "").lower().removeprefix("[").removesuffix("]")
 
 
+class AgentProfileOwnerDbUrlRefusedError(ValueError):
+    """An agent-profile process at the default home refused a local owner DB URL.
+
+    Raised by `_apply_data_plane_passwords` when the owner URL would combine
+    with the cluster secret — a deliberate fail-fast, not a decode failure. A
+    `ValueError` subclass so the config-service read path
+    (`shared/config/service_read.py`) can classify this EXPECTED topology
+    precisely (type test, never a message match) and serve the boot-time value
+    silently for the agent-profile process's own `.env` line, while every other
+    decode failure still surfaces as an operator warning (#4332).
+    """
+
+
 class DataPlaneSettings(EnvSettings):
     db_url: str = Field(
         alias="AVA_DB_URL",
@@ -515,7 +528,7 @@ class DataPlaneSettings(EnvSettings):
             # hygiene removes the owner password, granting the wrong identity.
             # Non-default homes are test/e2e clusters that deliberately retain
             # the owner URL topology to exercise password derivation.
-            raise ValueError(
+            raise AgentProfileOwnerDbUrlRefusedError(
                 "agent-profile processes must receive an ava_runner AVA_DB_URL; "
                 "refusing a local owner URL derived from AVA_CLUSTER_SECRET "
                 "at the default home"
