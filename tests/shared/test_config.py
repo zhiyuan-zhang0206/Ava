@@ -17,9 +17,13 @@ from shared import config
 class _RecordingLogger:
     def __init__(self) -> None:
         self.warnings: list[str] = []
+        self.debugs: list[str] = []
 
     def warning(self, msg: str) -> None:
         self.warnings.append(msg)
+
+    def debug(self, msg: str) -> None:
+        self.debugs.append(msg)
 
 
 def _patch_logger(monkeypatch: pytest.MonkeyPatch) -> _RecordingLogger:
@@ -1327,6 +1331,65 @@ def test_current_field_values_warns_on_bad_nodecode_list_value(
     assert len(rec.warnings) == 1
     assert "AVA_IM_SEND_RETRY_DELAYS" in rec.warnings[0]
     assert "banana,apple" not in rec.warnings[0]
+
+
+def test_current_field_values_silently_serves_boot_db_url_for_agent_profile_refusal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """#4332: an agent-profile process at the default home fresh-reading the
+    owner AVA_DB_URL line hits the deliberate guard refusal — an expected
+    topology, not a decode failure. It must serve the boot-time value (the
+    launcher-injected runner projection) with NO warning and only a debug
+    note; the old path warned on every panel read / agent send, while the
+    guard's fail-fast for a MISSING projection is unchanged."""
+    from shared import runtime_config as rt
+    from shared.config import data_plane
+
+    rec = _patch_logger(monkeypatch)
+    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(data_plane, "_unit_home", lambda: Path.home() / ".ava")
+    monkeypatch.setenv(config.AVA_PROCESS_PROFILE_ENV, "agent")
+    # The session singleton carries an empty cluster secret (single-box
+    # default); a real agent-profile process has one set — it is what turns
+    # the owner URL into the guard refusal.
+    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "test-cluster-secret")
+
+    boot = config.current_field_values()["db_url"]
+    rt.write_fields({"db_url": "postgresql://ava_main:owner-pw@127.0.0.1:5433/ava"}, set())
+
+    values = config.current_field_values()
+
+    assert values["db_url"] == boot
+    assert rec.warnings == []
+    assert rec.debugs, "the expected refusal must stay visible in a debug log"
+
+
+def test_current_field_values_warns_on_bad_db_url_under_agent_profile_conditions(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """#4332 precision: the refusal classification must not swallow genuine
+    decode failures — a malformed URL in the SAME agent-profile/default-home
+    context still warns and falls back to the boot-time value, and the
+    warning must not suggest removing the load-bearing .env line."""
+    from shared import runtime_config as rt
+    from shared.config import data_plane
+
+    rec = _patch_logger(monkeypatch)
+    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(data_plane, "_unit_home", lambda: Path.home() / ".ava")
+    monkeypatch.setenv(config.AVA_PROCESS_PROFILE_ENV, "agent")
+    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "test-cluster-secret")
+
+    boot = config.current_field_values()["db_url"]
+    rt.write_fields({"db_url": "postgresql://[::1"}, set())
+
+    values = config.current_field_values()
+
+    assert values["db_url"] == boot
+    assert len(rec.warnings) == 1
+    assert "AVA_DB_URL" in rec.warnings[0]
+    assert "fix the line" in rec.warnings[0]
+    assert "remove" not in rec.warnings[0]
 
 
 def test_current_field_values_isolates_bad_env_from_good_file_value(
