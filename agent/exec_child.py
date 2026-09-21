@@ -386,7 +386,12 @@ def _run_code(code: str, payload: Any) -> None:
 
 
 def _finalize_telemetry() -> None:
-    """Deliver queued records before a clean exit — only when a queue exists.
+    """Deliver queued records before exit — only when a queue exists.
+
+    Callers run it after the result envelope is written, so the envelope's own
+    result/write record rides the same delivery (task #4312); the process exit
+    path cannot carry it (the OTel provider's atexit shutdown runs before the
+    emitter's exit drain).
 
     The emitter loads `shared.telemetry` off its first record, so a zero-record
     child skips everything here and exits without the telemetry / OTel imports
@@ -404,6 +409,33 @@ def _finalize_telemetry() -> None:
         from shared import telemetry_otlp
 
         telemetry_otlp.finalize()
+
+
+def _deliver_run_telemetry(result_path: str, payload: Any) -> None:
+    """Deliver this run's queued records — after the envelope write (task #4312).
+
+    `write_result` ends the run with its result/write record, and this is the
+    last point that can carry it: the OTel provider's atexit shutdown is
+    registered when it comes up, so it fires before the emitter's exit drain
+    (`shared.telemetry._drain_on_exit`) and a late record stays in the JSONL
+    mirror only. sync() lands the pipeline's held batch (queue + drain-thread
+    batch); finalize() then completes a deferred OTLP hold (bring-up + backlog
+    drain + force-flush, task #3816 M4b) or plain-flushes a live backend — a
+    short-lived child exits before the 5s batch window would fire on its own.
+    A timed-out or cancelled child skips this (the parent is already killing it
+    and the JSONL mirror holds the records); a zero-record child skips it too,
+    so its exit never imports the telemetry / OTel modules at all (task #3816
+    M3)."""
+    if payload.kind not in ("done", "lifecycle", "crashed"):
+        return
+    try:
+        _finalize_telemetry()
+    except BaseException as exc:
+        # A post-run telemetry sync/flush failure must not read as a clean
+        # outcome: report it with the REAL code_reached flag (P0 #2100). A
+        # crashed envelope already carries its own failure.
+        if payload.kind in ("done", "lifecycle"):
+            _write_crashed_result(result_path, exc, code_reached=payload.code_reached)
 
 
 def _run(request_path: str, result_path: str) -> None:
@@ -469,22 +501,10 @@ def _run(request_path: str, result_path: str) -> None:
         return
     try:
         _run_code(request.code, payload)
-        # Deliver queued SDK-call events before a clean exit. sync() lands the
-        # pipeline's held batch (queue + drain-thread batch); finalize() then
-        # completes a deferred OTLP hold (bring-up + backlog drain +
-        # force-flush, task #3816 M4b) or plain-flushes a live backend — a
-        # short-lived child exits before the 5s batch window would fire on its
-        # own. A timed-out or cancelled child skips this (the parent is
-        # already killing it and the JSONL mirror holds the records); a
-        # zero-record child skips it too, so its exit never imports the
-        # telemetry / OTel modules at all (task #3816 M3).
-        if payload.kind in ("done", "lifecycle"):
-            _finalize_telemetry()
     except BaseException as exc:
-        # Only a post-run telemetry sync/flush failure lands here (_run_code
-        # catches everything): report it with the REAL code_reached flag —
-        # letting it reach main() would stamp a ran-code crash as a boot
-        # crash (P0 #2100).
+        # _run_code catches everything itself — an escape here is a framework
+        # failure, not a user-code crash. Report it with the REAL code_reached
+        # flag so main() never stamps it as a boot crash (P0 #2100).
         _write_crashed_result(result_path, exc, code_reached=payload.code_reached)
         return
     finally:
@@ -500,6 +520,8 @@ def _run(request_path: str, result_path: str) -> None:
         write_result(Path(result_path), payload)
     except BaseException as write_exc:
         _write_crashed_result(result_path, write_exc, code_reached=payload.code_reached)
+    # Deliver queued records after the envelope write (task #4312).
+    _deliver_run_telemetry(result_path, payload)
 
 
 def main() -> None:
@@ -520,6 +542,10 @@ def main() -> None:
         _run(request_path, result_path)
     except BaseException as exc:
         _write_crashed_result(result_path, exc)
+        # The crash envelope's record needs the same last-mile delivery (task
+        # #4312); best-effort — a boot crash must stay the reported failure.
+        with contextlib.suppress(BaseException):
+            _finalize_telemetry()
 
 
 def _write_crashed_result(
