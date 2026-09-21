@@ -3,11 +3,11 @@ receiver before the child exits (task #4312).
 
 `agent.exec_child._run` writes the result envelope last, so its
 `[exec envelope] result write` event is the child's final record. It must ride
-the child's own telemetry finalize: the OTel provider registers its atexit
-shutdown when it comes up mid-run, and that shutdown fires before the emitter's
-exit drain (`shared.telemetry._drain_on_exit`), so any record emitted after the
-finalize stays in the JSONL mirror only — the fleet's `result/write = 0` in
-Loki while the mirror holds every line.
+the child's own telemetry finalize (task #4312): an exec child defers its OTLP
+bring-up, and a deferred hold cannot complete once the interpreter is
+finalizing — `_ensure()` refuses to construct the providers — so without the
+in-life finalize the record stays in the JSONL mirror only (the fleet's
+`result/write = 0` in Loki while the mirror holds every line).
 
 Each test runs a real child against a minimal OTLP/HTTP receiver recording
 every POST body, and reads both channels: the JSONL mirror and the exported
@@ -193,9 +193,9 @@ def _poll_sent(expected: set[tuple[str, object, object]]) -> set[tuple[str, obje
 def test_done_child_delivers_result_write_record(tmp_path: Path, otlp_receiver: Any) -> None:
     """The done child's final record (result/write) is exported before exit.
 
-    Red before the fix (task #4312): the record was emitted after the child's
-    only finalize, the exit path could not carry it, and Loki never saw a
-    result/write event while the JSONL mirror held every line.
+    Red before the fix (task #4312): the record reached only the JSONL mirror —
+    the exit path cannot complete a deferred hold once the interpreter is
+    finalizing — and Loki never saw a result/write event.
     """
     proc, result_path = _spawn(tmp_path, "print('delivery ran')", _endpoint(otlp_receiver))
     assert proc.returncode == 0, proc.stderr
