@@ -338,6 +338,27 @@ def test_glm_5_3_flashx_registry_facts() -> None:
     assert resolve_setting("llm_retry_max_attempts", model="glm-5.3-flashx") == 10
 
 
+def test_mimo_v2_6_registry_facts() -> None:
+    """V2.6 Pro and UltraSpeed share Xiaomi's published 1M/128K limits and
+    binary thinking contract (model pages, checked 2026-09-22). Xiaomi has no
+    V2.6 cutoff publication, so both carry the V2.5 family estimate; the
+    capacity-unpublished UltraSpeed SKU retains the stricter retry posture."""
+    for model, spec in (
+        ("mimo-v2.6-pro", MODELS["mimo-v2.6-pro"]),
+        ("mimo-v2.6-pro-ultraspeed", MODELS["mimo-v2.6-pro-ultraspeed"]),
+    ):
+        assert spec.provider == "mimo"
+        assert spec.spawnable
+        assert spec.context_window == 1_000_000
+        assert spec.max_output_tokens == 128_000
+        assert spec.knowledge_cutoff == "2024-12"
+        assert spec.effort_levels == ("none", "high")
+        assert resolve_setting("reasoning_effort", model=model) == "high"
+
+    assert resolve_setting("llm_retry_max_attempts", model="mimo-v2.6-pro") == 6
+    assert resolve_setting("llm_retry_max_attempts", model="mimo-v2.6-pro-ultraspeed") == 10
+
+
 def test_glm_5_3_series_thinking_cannot_be_disabled() -> None:
     """The GLM-5.3-series models always think — thinking.type=disabled is
     rejected by the endpoint (400, error code 1210, live-checked 2026-08-27),

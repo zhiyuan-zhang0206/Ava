@@ -477,7 +477,13 @@ class TestBuildChatModel:
         assert isinstance(m, ChatOpenAI)
         assert m.reasoning == {"effort": "none"}
 
-    def test_mimo_returns_reasoning_content_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.parametrize(
+        "model",
+        ("mimo-v2.5-pro", "mimo-v2.6-pro", "mimo-v2.6-pro-ultraspeed"),
+    )
+    def test_mimo_returns_reasoning_content_model(
+        self, monkeypatch: pytest.MonkeyPatch, model: str
+    ) -> None:
         """mimo-* returns ReasoningContentChatModel (not bare ChatOpenAI) — the
         subclass recovers the `reasoning_content` delta that the base drops.
         base_url + api-key header target the Xiaomi OpenAI-compatible endpoint."""
@@ -485,7 +491,7 @@ class TestBuildChatModel:
         monkeypatch.setenv("MIMO_API_KEY", "sk-mimo")
         from shared.lm._reasoning_compat import ReasoningContentChatModel
 
-        m = build_chat_model("mimo-v2.5-pro")
+        m = build_chat_model(model)
         assert isinstance(m, ReasoningContentChatModel)
         assert "xiaomimimo.com" in str(m.openai_api_base)
 
@@ -646,13 +652,17 @@ class TestBuildChatModel:
         assert isinstance(m, ChatMoonshot)
         assert m.disable_streaming is False
 
-    def test_mimo_defaults_to_streaming(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.parametrize(
+        "model",
+        ("mimo-v2.5-pro", "mimo-v2.6-pro", "mimo-v2.6-pro-ultraspeed"),
+    )
+    def test_mimo_defaults_to_streaming(self, monkeypatch: pytest.MonkeyPatch, model: str) -> None:
         """mimo-* carries no registry streaming opt-out → default streaming=True."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("MIMO_API_KEY", "sk-test")
         from shared.lm._reasoning_compat import ReasoningContentChatModel
 
-        m = build_chat_model("mimo-v2.5-pro")
+        m = build_chat_model(model)
         assert isinstance(m, ReasoningContentChatModel)
         assert m.disable_streaming is False
 
@@ -1142,8 +1152,12 @@ class TestReasoningEffortDispatch:
 
     # ── mimo ────────────────────────────────────────────────────────────
 
+    @pytest.mark.parametrize(
+        "model",
+        ("mimo-v2.5-pro", "mimo-v2.6-pro", "mimo-v2.6-pro-ultraspeed"),
+    )
     def test_mimo_thinking_disabled_sends_body_thinking(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, model: str
     ) -> None:
         """MiMo officially documents thinking.type enabled/disabled — disabled goes through the
         body top-level thinking (previously silently swallowed, F5). effort is not mentioned
@@ -1152,11 +1166,15 @@ class TestReasoningEffortDispatch:
         monkeypatch.setenv("MIMO_API_KEY", "sk-mimo")
         from shared.lm._reasoning_compat import ReasoningContentChatModel
 
-        m = build_chat_model("mimo-v2.5-pro", thinking={"type": "disabled"})
+        m = build_chat_model(model, thinking={"type": "disabled"})
         assert isinstance(m, ReasoningContentChatModel)
         assert m.extra_body == {"thinking": {"type": "disabled"}}
 
-    def test_mimo_high_effort_is_noop(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.parametrize(
+        "model",
+        ("mimo-v2.5-pro", "mimo-v2.6-pro", "mimo-v2.6-pro-ultraspeed"),
+    )
+    def test_mimo_high_effort_is_noop(self, monkeypatch: pytest.MonkeyPatch, model: str) -> None:
         """MiMo has no graded reasoning_effort field — 'max' clamps to the
         two-value ('none', 'high') table's 'high' tier, which is the provider
         default (thinking already on) and needs no extra_body at all."""
@@ -1165,12 +1183,18 @@ class TestReasoningEffortDispatch:
         monkeypatch.setattr(settings.lm, "reasoning_effort", "max")
         from shared.lm._reasoning_compat import ReasoningContentChatModel
 
-        m = build_chat_model("mimo-v2.5-pro")
+        m = build_chat_model(model)
         assert isinstance(m, ReasoningContentChatModel)
         assert m.extra_body is None
         assert m.reasoning_effort is None
 
-    def test_mimo_none_effort_disables_thinking_body(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.parametrize(
+        "model",
+        ("mimo-v2.5-pro", "mimo-v2.6-pro", "mimo-v2.6-pro-ultraspeed"),
+    )
+    def test_mimo_none_effort_disables_thinking_body(
+        self, monkeypatch: pytest.MonkeyPatch, model: str
+    ) -> None:
         """AVA_REASONING_EFFORT='none' clamps to the table's 'none' tier — the
         only tier that differs from the provider default — and maps onto the
         same body thinking.type=disabled switch as an explicit thinking arg."""
@@ -1179,11 +1203,17 @@ class TestReasoningEffortDispatch:
         monkeypatch.setattr(settings.lm, "reasoning_effort", "none")
         from shared.lm._reasoning_compat import ReasoningContentChatModel
 
-        m = build_chat_model("mimo-v2.5-pro")
+        m = build_chat_model(model)
         assert isinstance(m, ReasoningContentChatModel)
         assert m.extra_body == {"thinking": {"type": "disabled"}}
 
-    def test_mimo_low_effort_clamps_to_high(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.parametrize(
+        "model",
+        ("mimo-v2.5-pro", "mimo-v2.6-pro", "mimo-v2.6-pro-ultraspeed"),
+    )
+    def test_mimo_low_effort_clamps_to_high(
+        self, monkeypatch: pytest.MonkeyPatch, model: str
+    ) -> None:
         """low sits equidistant from none/high in the cross-provider vocab —
         clamp ties round up, so it lands on 'high' (provider default, no-op),
         not 'none' (which would silently disable thinking)."""
@@ -1192,12 +1222,16 @@ class TestReasoningEffortDispatch:
         monkeypatch.setattr(settings.lm, "reasoning_effort", "low")
         from shared.lm._reasoning_compat import ReasoningContentChatModel
 
-        m = build_chat_model("mimo-v2.5-pro")
+        m = build_chat_model(model)
         assert isinstance(m, ReasoningContentChatModel)
         assert m.extra_body is None
 
+    @pytest.mark.parametrize(
+        "model",
+        ("mimo-v2.5-pro", "mimo-v2.6-pro", "mimo-v2.6-pro-ultraspeed"),
+    )
     def test_mimo_explicit_thinking_disabled_wins_over_effort(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, model: str
     ) -> None:
         """Caller-explicit thinking={'type':'disabled'} (short-text paths) wins
         outright — reasoning_effort is not even consulted."""
@@ -1206,7 +1240,7 @@ class TestReasoningEffortDispatch:
         monkeypatch.setattr(settings.lm, "reasoning_effort", "high")
         from shared.lm._reasoning_compat import ReasoningContentChatModel
 
-        m = build_chat_model("mimo-v2.5-pro", thinking={"type": "disabled"})
+        m = build_chat_model(model, thinking={"type": "disabled"})
         assert isinstance(m, ReasoningContentChatModel)
         assert m.extra_body == {"thinking": {"type": "disabled"}}
 
