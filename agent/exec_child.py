@@ -389,9 +389,12 @@ def _finalize_telemetry() -> None:
     """Deliver queued records before exit — only when a queue exists.
 
     Callers run it after the result envelope is written, so the envelope's own
-    result/write record rides the same delivery (task #4312); the process exit
-    path cannot carry it (the OTel provider's atexit shutdown runs before the
-    emitter's exit drain).
+    result/write record rides the same delivery (task #4312). The delivery must
+    happen in-life: an exec child defers its OTLP bring-up (task #3816 M4b),
+    and `_ensure()` refuses to construct the providers once the interpreter is
+    finalizing — an exit-time completion would leave the backlog mirror-only.
+    The exit seam (`shared.telemetry._drain_on_exit`, task #4320) carries a
+    live pipeline's tail batch; a deferred hold is not a live pipeline.
 
     The emitter loads `shared.telemetry` off its first record, so a zero-record
     child skips everything here and exits without the telemetry / OTel imports
@@ -424,13 +427,12 @@ def _deliver_envelope_telemetry() -> None:
 def _deliver_run_telemetry(result_path: str, payload: Any) -> None:
     """Deliver this run's queued records — after the envelope write (task #4312).
 
-    `write_result` ends the run with its result/write record, and this is the
-    last point that can carry it: the OTel provider's atexit shutdown is
-    registered when it comes up, so it fires before the emitter's exit drain
-    (`shared.telemetry._drain_on_exit`) and a late record stays in the JSONL
-    mirror only. sync() lands the pipeline's held batch (queue + drain-thread
-    batch); finalize() then completes a deferred OTLP hold (bring-up + backlog
-    drain + force-flush, task #3816 M4b) or plain-flushes a live backend — a
+    `write_result` ends the run with its result/write record, and this is where
+    the child delivers it — in-life, because a deferred hold cannot complete
+    once the interpreter is finalizing (`_ensure()` refuses to construct).
+    sync() lands the pipeline's held batch (queue + drain-thread batch);
+    finalize() then completes the deferred hold (bring-up + backlog drain +
+    force-flush, task #3816 M4b) or plain-flushes a live backend — a
     short-lived child exits before the 5s batch window would fire on its own.
     A timed-out or cancelled child skips this (the parent is already killing it
     and the JSONL mirror holds the records); a zero-record child skips it too,
