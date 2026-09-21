@@ -82,6 +82,27 @@ def launch(home: Path) -> Iterator[Callable[[str, str], subprocess.Popen[str]]]:
             proc.stderr.close()
 
 
+def _wait_armed(sentinel: Path, timeout: float = 10.0) -> None:
+    """The descendant's post-arm sentinel, once it lands (task #4299).
+
+    ``launch`` synchronizes on the leader's 'ready' only, and the leader
+    prints that line right after spawning the descendant — so the fixture can
+    return while the descendant has not yet installed its SIGTERM handler.
+    The stop's escalation TERMs captured descendants as soon as the leader is
+    gone; a TERM landing before ``signal.signal`` kills the descendant by
+    default disposition and the marker the assertions read is never written
+    (the shard15 term-count flake). A descendant creates this sentinel only
+    after arming, so waiting for it here is the test's sync point. Bounded: a
+    missing sentinel fails the test instead of hanging it.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if sentinel.exists():
+            return
+        time.sleep(0.02)
+    raise AssertionError(f"the descendant never armed: {sentinel}")
+
+
 _EXIT = "import time; print('ready', flush=True); time.sleep(60)"
 _IGNORE = (
     "import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); "
@@ -152,6 +173,7 @@ def test_each_descendant_receives_term_at_most_once(home: Path, launch: Launcher
     # running count, and lives on briefly, so any repeated delivery inside the
     # escalation loop would be counted and caught.
     marker = home / "term-count"
+    arm_sentinel = home / "arm-sentinel"
     child_code = (
         "import signal,time,pathlib\n"
         "count=[0]\n"
@@ -162,6 +184,7 @@ def test_each_descendant_receives_term_at_most_once(home: Path, launch: Launcher
         "    time.sleep(0.5)\n"
         "    raise SystemExit(0)\n"
         "signal.signal(signal.SIGTERM,handler)\n"
+        f"pathlib.Path({str(arm_sentinel)!r}).touch()\n"
         "print('ready',flush=True)\n"
         "time.sleep(60)\n"
     )
@@ -172,6 +195,9 @@ def test_each_descendant_receives_term_at_most_once(home: Path, launch: Launcher
         "time.sleep(60)"
     )
     parent = launch("parent", code)
+    # Sync point (task #4299): the stop's escalation must not race the
+    # descendant's handler install — enter it only once the descendant armed.
+    _wait_armed(arm_sentinel)
     children = psutil.Process(parent.pid).children()
     assert len(children) == 1
     child_identity = stop.OwnedProcess.capture(children[0])
@@ -184,18 +210,27 @@ def test_each_descendant_receives_term_at_most_once(home: Path, launch: Launcher
     assert marker.read_text() == "1"
 
 
-def test_descendant_refusing_term_keeps_hold_and_reports(launch: Launcher) -> None:
+def test_descendant_refusing_term_keeps_hold_and_reports(home: Path, launch: Launcher) -> None:
     # The convergence is TERM only: a descendant that ignores TERM keeps the
     # hold until the deadline and is reported by name and pid — never SIGKILL,
     # never silent success (issue #2123 acceptance: refusing processes report
     # the real failure and the waiting stage).
+    arm_sentinel = home / "arm-sentinel"
+    child_code = (
+        "import signal,time,pathlib\n"
+        "signal.signal(signal.SIGTERM,signal.SIG_IGN)\n"
+        f"pathlib.Path({str(arm_sentinel)!r}).touch()\n"
+        "time.sleep(60)\n"
+    )
     code = (
         "import subprocess,sys,time; "
-        "subprocess.Popen([sys.executable,'-c',"
-        "'import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); time.sleep(60)']); "
+        f"subprocess.Popen([sys.executable,'-u','-c',{child_code!r}]); "
         "print('ready',flush=True); time.sleep(60)"
     )
     parent = launch("parent", code)
+    # Sync point (task #4299): the stop's escalation must not race the
+    # descendant's handler install — enter it only once the descendant armed.
+    _wait_armed(arm_sentinel)
     children = psutil.Process(parent.pid).children()
     assert len(children) == 1
     try:
