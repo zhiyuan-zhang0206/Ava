@@ -286,22 +286,8 @@ def _main_loop() -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """The demo CLI — also tolerant of the schedule runner's argv.
-
-    The runner executes this template in-process via ``runpy`` with its own
-    argv (``python -m gateway.schedule_runner <id>``), so ``sys.argv[1:]``
-    carries the schedule id. An argparse view that rejects it exits 2 on
-    every manager launch and trips the crash breaker (observed live on
-    schedule 22, 2026-09-22); accept the id and ignore it — it is the
-    runner's context, not this script's input.
-    """
+    """The script's CLI — flags for manual runs and dry-run demos."""
     parser = argparse.ArgumentParser(description="Run the daily tech-debt clearing schedule.")
-    parser.add_argument(
-        "schedule_id",
-        nargs="?",
-        type=int,
-        help=argparse.SUPPRESS,
-    )
     parser.add_argument("--once", action="store_true", help="run one dry-run demonstration")
     parser.add_argument("--dry-run", action="store_true", help="scan without schedule side effects")
     parser.add_argument("--repo", type=Path, help="repository root for --once --dry-run")
