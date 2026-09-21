@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 29 | event stream |
-| telemetry (category=telemetry) | `events` | 209 | event stream |
+| telemetry (category=telemetry) | `events` | 212 | event stream |
 | log (category=log) | `events` | 14 | event stream |
 | file-only (destination=file) | file log | 1 | file only (not the stream) |
 | SSE live | Redis → frontend (not persisted) | 31 role | live projection |
@@ -96,7 +96,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `managed_writer_pre_stop_aborted` | the exact pre-stop abort cleared a never-effective pending publication and its lease | business | — | events |
 | `managed_writer_blocked` | managed-writer mode requested but refused entry: a readiness guard is missing or not True; the rollout ran the legacy flow | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 209)
+## 3. Telemetry events (category=telemetry, 212)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -187,6 +187,9 @@ consumers: see the comments at each emit point.
 | `debt_sweep_daily` | daily tech-debt mechanical scan and clearing-worker dispatch | observation | day, scan_status, action, worker_agent_id | — | events |
 | `pr_flow_daily` | daily PR-flow aggregates — ready->merged percentiles, QA rounds, flake discoveries (absolute gauges, one sample per complete day) | observation | day, merged_count, ready_to_merge_median_seconds, ready_to_merge_p90_seconds, qa_rounds_mean, qa_rereview_share, flake_new_quarantines | — | events |
 | `pr_flow_run` | PR-flow sampler run — point-in-time Trunk queue depth (absolute state) | observation | queue_depth | — | events |
+| `ci_runs_daily` | daily CI-run aggregates | observation | repo, day, runs, instant_skip_runs, watchdog_runs, qa_gate_runs, proof_runs, cancelled_runs, superseded_runs, superseded_zero_runs, failed_runs, retried_failed_runs, self_healed_runs, abandoned_runs, zombie_runs, prs_completed, prs_with_runs, per_pr_duration_median_minutes, per_pr_duration_p90_minutes, per_pr_runs_median, per_pr_runs_p90, per_pr_runs_executed_median, white_run_share, retry_share, noise_run_share, first_pass_pr_share | — | events |
+| `ci_workflow_window` | trailing workflow fragility | observation | repo, workflow, runs, failed_runs, self_healed_runs, retried_failed_runs, cancelled_runs, superseded_runs, instant_skip_runs, prs_appeared_on, pr_appearance_share, retry_share, exec_median_seconds, exec_p90_seconds | — | events |
+| `ci_runs_run` | CI-run sampler breadcrumb | observation | repo, window_days, window_runs, window_prs, api_requests | — | events |
 | `task_reminder_digest` | overdue-task owner digest | noise | owner_id, task_count, task_ids | — | events |
 | `task_escalation` | stalled-task escalation | observation | owner_id, task_count, task_ids, leg | — | events |
 | `task_usage_record_failed` | task usage recording failed | anomaly | — | — | events |

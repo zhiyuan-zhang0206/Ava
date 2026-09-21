@@ -213,9 +213,11 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # current total to 205; the write-side model-settlement family (task #4306:
     # spawn_config_normalized / spawn_overlay_model_normalized /
     # restart_config_normalized) raises it to 208; the daily debt-sweep dispatch
-    # (task #4015: debt_sweep_daily) raises it to 209.
+    # (task #4015: debt_sweep_daily) raises it to 209; the CI-run observability
+    # trio (task #4014: ci_runs_daily / ci_workflow_window / ci_runs_run) raises
+    # it to 212.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 209
+    assert len(_TELEMETRY_KINDS) == 212
     assert payload_keys("debt_sweep_daily") == (
         "day",
         "scan_status",

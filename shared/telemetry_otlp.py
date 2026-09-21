@@ -89,7 +89,7 @@ import time
 from functools import cache
 from typing import Any
 
-from shared import telemetry_otlp_metrics
+from shared import ci_runs_metrics, telemetry_otlp_metrics
 from shared.observability import (
     cluster_label,
     endpoint_override_is_explicit,
@@ -150,7 +150,6 @@ COLLECTOR_RETRY_INTERVAL_S = 300
 # reasoning as the trace content guard (metadata is small).
 _NO_METRIC_ATTRS = frozenset({"body"})
 _MAX_METRIC_ATTR_CHARS = 64
-
 # Per-field metric disposition overrides. The default rule (int -> Counter,
 # float -> Histogram) fits counts and durations; fields where the type is the
 # wrong signal declare themselves here. None = no metric at all (the field
@@ -193,6 +192,8 @@ _METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {
     ("pr_flow_daily", "qa_rereview_share"): "gauge",
     ("pr_flow_daily", "flake_new_quarantines"): "gauge",
     ("pr_flow_run", "queue_depth"): "gauge",
+    # CI-run state is re-emitted absolute state, so every numeric field is a gauge (task #4014).
+    **ci_runs_metrics.CI_RUN_GAUGE_DISPOSITIONS,
     # The agent registry max id is an absolute high-water mark, not a sum —
     # as an int it would default to a Counter and accrue value on every
     # sample. A gauge holds the latest sample (task #2010).
