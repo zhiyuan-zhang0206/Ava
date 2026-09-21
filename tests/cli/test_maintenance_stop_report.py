@@ -258,7 +258,13 @@ def test_failed_pause_persists_survivor_identity_on_the_status_journal(
 ) -> None:
     dependencies(monkeypatch)
     service = launch("ava-worker", _IGNORE)
-    assert entry.cmd_pause(timeout=0.25) == 1
+    # Budget starvation check (task #4392): the pre-phases ("retired" scans
+    # processes) are load-sensitive; at 0.25s a slow runner could spend the
+    # whole budget before "services" began, and the report named the deadline
+    # instead of the staged survivor. 1.0s leaves the services phase the room
+    # the sibling stage tests give theirs; the refusing service then keeps
+    # the hold until the later deadline — the assertions below are unchanged.
+    assert entry.cmd_pause(timeout=1.0) == 1
     err = capsys.readouterr().err
     assert "Pause/stop incomplete" in err
     assert "service stop incomplete" in err
