@@ -378,7 +378,7 @@ requires-dist = [
     { name = "lxml", specifier = ">=5.2.0" },
     { name = "matplotlib", specifier = ">=3.9.0" },
     { name = "mcp", specifier = ">=2.0.0,<3" },
-    { name = "milvus-lite", marker = "sys_platform != 'win32'", specifier = "==3.0" },
+    { name = "milvus-lite", marker = "sys_platform != 'win32'", specifier = "==3.1.1" },
     { name = "numpy", specifier = ">=2.4.4" },
     { name = "openpyxl", specifier = ">=3.1.2" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.30" },
@@ -2768,7 +2768,7 @@ wheels = [
 
 [[package]]
 name = "milvus-lite"
-version = "3.0"
+version = "3.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "faiss-cpu", marker = "sys_platform != 'win32'" },
@@ -2776,9 +2776,9 @@ dependencies = [
     { name = "numpy", marker = "sys_platform != 'win32'" },
     { name = "pyarrow", marker = "sys_platform != 'win32'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a3/9a/d80d260e6fe1246818a8ef782c374ba9c6ca46ca3b987c14eabe914ef805/milvus_lite-3.0.tar.gz", hash = "sha256:2c35d0d046b1faae3402cde1fb73d65f51ee8c6aba65f54de1dda46f7bb18b9b", size = 589749, upload-time = "2026-05-13T07:14:05.827Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d1/d0/3edb31f832287557c8a8bb0515aec2c73265512040dcd4fc43d747722d11/milvus_lite-3.1.1.tar.gz", hash = "sha256:0cbf8386a2e99b6464a5eda14cf8e31934b0e287e36c831e293aee614d9efc2e", size = 647172, upload-time = "2026-07-27T05:03:56.834Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/59/42/dee08ae3bfc1731572f193d00b248c9370b0b9dff12becb0ffd8b2ee8d56/milvus_lite-3.0-py3-none-any.whl", hash = "sha256:d9a094eab84bdaa4253da3721482282c939da1cce6f4e1759f947e8d3e53406e", size = 230490, upload-time = "2026-05-13T07:14:00.816Z" },
+    { url = "https://files.pythonhosted.org/packages/c5/22/51e60aaf1c1c69ca59d24b01a7f4b0703d6d5a5658385e7d3ed0f8a3a8b2/milvus_lite-3.1.1-py3-none-any.whl", hash = "sha256:0f343c9bf1e291d6c2fa615a52a57090ebbaf96b84bfb71f7eb73cd95cd7fc1c", size = 256749, upload-time = "2026-07-27T05:03:51.819Z" },
 ]
 
 [[package]]
