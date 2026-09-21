@@ -234,6 +234,8 @@ def test_mimo_catalog_entries_live_only_in_the_archive() -> None:
     expected = {
         "mimo-v2.5-pro",
         "mimo-v2.5-pro-ultraspeed",
+        "mimo-v2.6-pro",
+        "mimo-v2.6-pro-ultraspeed",
     }
 
     assert expected.isdisjoint(runtime_models)
@@ -316,6 +318,8 @@ def test_parse_catalog_rejects_unknown_schema_version() -> None:
         ("gpt-5.6-luna", 0.40 + 1.80),
         ("mimo-v2.5-pro", 0.435 + 0.87),
         ("mimo-v2.5-pro-ultraspeed", 1.305 + 2.61),
+        ("mimo-v2.6-pro", 0.435 + 0.87),
+        ("mimo-v2.6-pro-ultraspeed", 4.35 + 8.70),
     ],
 )
 def test_cost_usd_priced_models(model: str, expected: float, gemini_archive_catalog: None) -> None:
@@ -329,6 +333,19 @@ def test_cost_usd_cache_read_discount() -> None:
     assert cost_usd("gpt-5.6-sol", _M, 0, _M) == pytest.approx(0.8)  # pyright: ignore[reportUnknownMemberType]
     # mimo-v2.5-pro: ~120x cheaper cache hit (0.0036/M) vs miss (0.435/M).
     assert cost_usd("mimo-v2.5-pro", _M, 0, _M) == pytest.approx(0.0036)  # pyright: ignore[reportUnknownMemberType]
+
+
+@pytest.mark.parametrize(
+    ("model", "expected"),
+    [
+        ("mimo-v2.6-pro", Rates(0.435, 0.0036, 0.87)),
+        ("mimo-v2.6-pro-ultraspeed", Rates(4.35, 0.036, 8.70)),
+    ],
+)
+def test_mimo_v2_6_published_rates(model: str, expected: Rates) -> None:
+    """Xiaomi's V2.6 price rows are per-1M cache-miss/cache-hit/output USD
+    rates (https://mimo.mi.com/docs/price/pay-as-you-go, checked 2026-09-22)."""
+    assert rates_at(model, datetime(2026, 9, 22, tzinfo=UTC), _M) == expected
 
 
 def test_qwen_implicit_cache_hit_is_the_registered_rate() -> None:
@@ -667,6 +684,8 @@ def test_mimo_plugin_prices_equal_archive_current_base_tier(
     model_ids = (
         "mimo-v2.5-pro",
         "mimo-v2.5-pro-ultraspeed",
+        "mimo-v2.6-pro",
+        "mimo-v2.6-pro-ultraspeed",
     )
     current_instant = datetime(2026, 9, 5, tzinfo=UTC)
     plugin_rates = {model: _plugin_rates(model, current_instant) for model in model_ids}

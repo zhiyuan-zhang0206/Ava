@@ -59,11 +59,12 @@ def build(ctx: BuildContext) -> BaseChatModel:
     # Auth uses the `api-key` header (not the standard `Authorization: Bearer`).
     # Pass both api_key (Authorization: Bearer) and default_headers (api-key)
     # so the endpoint accepts either.
-    # UltraSpeed mode (mimo-v2.5-pro-ultraspeed, ~1000 token/s) is the same
-    # OpenAI-compatible call selected purely by model name. It is listed in
-    # SUPPORTED_MODELS, but access is an application-gated, time-limited
-    # trial — an unapproved account 400s with "Not supported model" (apply
-    # at https://platform.xiaomimimo.com/ultraspeed).
+    # MiMo V2.6 Pro UltraSpeed is the same OpenAI-compatible call selected
+    # purely by model name. Xiaomi's release notes
+    # (https://mimo.mi.com/docs/en-US/updates/model, checked 2026-09-22) list
+    # it as a V2.6 launch SKU; the provider model list and chat-completions
+    # probe verified it callable for this account on that date, so it is no
+    # longer modeled as an application-gated trial.
     # ReasoningContentChatModel (not bare ChatOpenAI) recovers MiMo's
     # `reasoning_content` delta into canonical thinking blocks — the base drops it.
     api_key = require_key("MIMO_API_KEY")
@@ -106,6 +107,12 @@ register(
         "mimo-v2.5-pro": ModelSpec(
             provider="mimo",
             spawnable=True,
+            # Xiaomi's pricing page (https://mimo.mi.com/docs/price/pay-as-you-go,
+            # checked 2026-09-22) marks V2.5 Pro for deprecation at 10:00
+            # Beijing time on 2026-10-21 and publishes the same rates as V2.6
+            # Pro. Keep this id spawnable for existing configurations;
+            # superseded_by only hides it in the picker.
+            superseded_by="mimo-v2.6-pro",
             # Xiaomi's model page and the HF card both say 1M context / 128K max
             # output — the old 128,000 window was the OUTPUT cap filed as the
             # window, which understated the window ~8x and made the compact
@@ -123,7 +130,15 @@ register(
         ),
         "mimo-v2.5-pro-ultraspeed": ModelSpec(
             provider="mimo",
-            spawnable=True,
+            # Retired from new selections 2026-09-22: Xiaomi's pricing page
+            # (https://mimo.mi.com/docs/price/pay-as-you-go) no longer lists
+            # this id; the live /v1/models list omitted it and chat completions
+            # returned "Unsupported model" (checked 2026-09-22). The entry
+            # stays registered so its facts, tuning, and price history remain;
+            # existing configurations resolve to the served V2.6 UltraSpeed id
+            # before provider construction.
+            spawnable=False,
+            unavailable_fallback="mimo-v2.6-pro-ultraspeed",
             # Same 1T/42B weights as Pro, served on the TileRT stack — same window
             # and output cap; only throughput and price differ.
             context_window=1_000_000,
@@ -137,6 +152,46 @@ register(
                 # Xiaomi omits this variant from the published RPM/TPM table
                 # entirely and gates it behind an application ("limited slots"),
                 # i.e. its serving capacity is self-declared scarce.
+                llm_retry_max_attempts=10,
+            ),
+        ),
+        "mimo-v2.6-pro": ModelSpec(
+            provider="mimo",
+            spawnable=True,
+            # Xiaomi's model page (https://mimo.mi.com/models/en-US/mimo-v2.6-pro,
+            # checked 2026-09-22) publishes a 1M context window and 128K maximum
+            # output.
+            context_window=1_000_000,
+            max_output_tokens=128_000,
+            # Xiaomi publishes no V2.6 knowledge cutoff; carry the V2.5 family
+            # value forward until it does (checked 2026-09-22).
+            knowledge_cutoff="2024-12",
+            effort_levels=("none", "high"),  # body-level thinking on/off only
+            tuning=ModelTuning(
+                # The provider defaults to thinking on; `mimo_extra_body` sends
+                # its disabled switch only for the "none" rung.
+                reasoning_effort="high",
+            ),
+        ),
+        "mimo-v2.6-pro-ultraspeed": ModelSpec(
+            provider="mimo",
+            spawnable=True,
+            # Xiaomi's model page
+            # (https://mimo.mi.com/models/en-US/mimo-v2.6-pro-ultraspeed,
+            # checked 2026-09-22) publishes the same 1M context window and 128K
+            # maximum output as V2.6 Pro.
+            context_window=1_000_000,
+            max_output_tokens=128_000,
+            # Xiaomi publishes no V2.6 knowledge cutoff; carry the V2.5 family
+            # value forward until it does (checked 2026-09-22).
+            knowledge_cutoff="2024-12",
+            effort_levels=("none", "high"),
+            tuning=ModelTuning(
+                reasoning_effort="high",
+                # Xiaomi leaves RPM/TPM unpublished for this SKU ("For
+                # customized services, please contact us" on the model page,
+                # checked 2026-09-22), so retain the scarce-serving retry
+                # posture used by the retired V2.5 UltraSpeed entry.
                 llm_retry_max_attempts=10,
             ),
         ),
@@ -183,6 +238,58 @@ register(
                             cache_miss="1.305",
                             cache_hit="0.0108",
                             output="2.61",
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        "mimo-v2.6-pro": PriceRates(
+            cache_miss=0.435,
+            cache_hit=0.0036,
+            output=0.87,
+            source_url="https://mimo.mi.com/docs/price/pay-as-you-go",
+            source_checked_at="2026-09-22",
+            vendor="xiaomi",
+            # Xiaomi publishes one unbounded per-1M price row for V2.6 Pro
+            # (https://mimo.mi.com/docs/price/pay-as-you-go, checked
+            # 2026-09-22), with no promotional period.
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="0.435",
+                            cache_hit="0.0036",
+                            output="0.87",
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        "mimo-v2.6-pro-ultraspeed": PriceRates(
+            cache_miss=4.35,
+            cache_hit=0.036,
+            output=8.70,
+            source_url="https://mimo.mi.com/docs/price/pay-as-you-go",
+            source_checked_at="2026-09-22",
+            vendor="xiaomi",
+            # Xiaomi publishes one unbounded per-1M price row for V2.6 Pro
+            # UltraSpeed (https://mimo.mi.com/docs/price/pay-as-you-go,
+            # checked 2026-09-22), with no promotional period.
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="4.35",
+                            cache_hit="0.036",
+                            output="8.70",
                         ),
                     ),
                 ),
