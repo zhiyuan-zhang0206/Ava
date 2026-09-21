@@ -69,6 +69,15 @@ BOOT_REDIS_PLACEHOLDER = "redis://install-cluster-boot@127.0.0.1:1/0"
 # polluted parent cannot leak a sibling cluster's value.
 _UNANCHORED_PLACEHOLDERS = frozenset({UNANCHORED_DB_SENTINEL, BOOT_REDIS_PLACEHOLDER})
 
+# The launcher's process profile, recorded by the CLI entry point before it
+# clears the live marker (cli/main.py `_normalize_process_profile`). The CLI is
+# deliberately settings-full — no profile — but a boot pass reached through it
+# must still see which launcher context this process tree descends from; the
+# launcher-projection exemptions in `_enforce_cluster_env_authority` read it
+# live-or-recorded (`_launcher_context`). Never cleared: a nested CLI only
+# overwrites it when it carries a fresh live marker of its own (#4334).
+LAUNCHER_PROFILE_ENV_KEY = "AVA_LAUNCHER_PROFILE"
+
 _HOME_POINTER = ".ava_home"
 
 # Opt out of the AVA_HOME-vs-checkout contradiction check (`resolve_ava_home`).
@@ -292,6 +301,20 @@ def _identity_env_only() -> frozenset[str]:
     return frozenset({"AVA_GATEWAY_URL"})
 
 
+def _launcher_context() -> str | None:
+    """The launcher's process profile for this process tree, live or recorded.
+
+    A launcher-spawned daemon or agent carries the live `AVA_PROCESS_PROFILE`
+    marker. A CLI entry point pops that marker before dispatch (the CLI is
+    settings-full by design) after recording the value as
+    `LAUNCHER_PROFILE_ENV_KEY` (cli/main.py `_normalize_process_profile`), so a
+    boot pass reached through a CLI still knows the launcher context (#4334).
+    None when the tree has no launcher context at all — a plain shell or test
+    process — and the projection exemptions stay off.
+    """
+    return os.environ.get("AVA_PROCESS_PROFILE") or os.environ.get(LAUNCHER_PROFILE_ENV_KEY)
+
+
 def _is_launcher_runner_projection(value: str | None) -> bool:
     """Whether `value` is the launcher-injected runner DB projection to keep.
 
@@ -304,11 +327,14 @@ def _is_launcher_runner_projection(value: str | None) -> bool:
     downstream (#4036).
 
     The scope is deliberately narrow, so the sibling-leak protection keeps its
-    full force: agent-profile processes only (a plain shell's inherited value
-    still drops); runner-role URLs only (an inherited owner URL still drops);
-    anchored checkouts only (an unanchored dev checkout keeps the sentinel
-    discipline that stops it dialing the host home's database — an agent shell
-    must not smuggle the host URL into a bare worktree).
+    full force: agent-launched trees only — the live `AVA_PROCESS_PROFILE=agent`
+    marker or the value a CLI entry point recorded before popping it
+    (`_launcher_context`; with only the live marker consulted, cli.main's pop
+    made this gate unreachable — #4334) — a plain shell's inherited value still
+    drops; runner-role URLs only (an inherited owner URL still drops); anchored
+    checkouts only (an unanchored dev checkout keeps the sentinel discipline
+    that stops it dialing the host home's database — an agent shell must not
+    smuggle the host URL into a bare worktree).
 
     A value `urlsplit` cannot parse is not a projection either: it drops like
     any other unrecognized value — the authority pass never raises on
@@ -320,7 +346,7 @@ def _is_launcher_runner_projection(value: str | None) -> bool:
     """
     if not value:
         return False
-    if os.environ.get("AVA_PROCESS_PROFILE") != "agent" or not _ANCHORED:
+    if _launcher_context() != "agent" or not _ANCHORED:
         return False
     try:
         username = urlsplit(value).username
@@ -330,6 +356,32 @@ def _is_launcher_runner_projection(value: str | None) -> bool:
         # pass must never raise on environment input (review nit on #3111).
         return False
     return username == "ava_runner"
+
+
+def _is_launcher_redis_url(value: str | None) -> bool:
+    """Whether `value` is the launcher-supplied Redis URL to keep.
+
+    The AVA_REDIS_URL mirror of `_is_launcher_runner_projection` (#4334): the
+    launcher hands every agent-launched tree the cluster's runtime ACL URL, and
+    on a unit whose `.env` does NOT declare AVA_REDIS_URL (a pure
+    agent-runner) the drop pass removed the process's only Redis source.
+
+    Unlike the DB projection there is no username shape to gate on — the URL
+    carries the same identity as the gateway's own (identity is data in the
+    URL, and a pre-identity cluster's URL may carry none) — so the gate narrows
+    by context instead: an agent-launched tree (live or recorded profile) on an
+    anchored checkout, with a URL `urlsplit` parses to a non-empty host. A
+    malformed or hostless value drops exactly as before: the authority pass
+    never raises on environment input.
+    """
+    if not value:
+        return False
+    if _launcher_context() != "agent" or not _ANCHORED:
+        return False
+    try:
+        return bool(urlsplit(value).hostname)
+    except ValueError:
+        return False
 
 
 def _enforce_cluster_env_authority() -> None:
@@ -364,16 +416,22 @@ def _enforce_cluster_env_authority() -> None:
     Dropping it lets bootstrap inject the real value (runner) or the field
     default apply (a gateway whose .env deliberately omits a key).
 
-        One undeclared key is NOT dropped, in one context: the launcher-injected
-    runner projection an agent-profile process carries (`AVA_PROCESS_PROFILE=agent`
-    plus an `ava_runner` URL, on an anchored checkout). The force loop above
-    already refuses to let the unit's `.env` owner URL replace that projection;
-    the drop loop must not revoke it either — on a unit whose `.env` does not
-    declare AVA_DB_URL (a pure agent-runner), the pop left settings-lite and
-    CLI paths with no DB source at all (`UnanchoredHomeError`; #4036). Every
-    other inherited value — owner-shaped URLs, plain-shell values, the
-    unanchored checkout's sentinel discipline — keeps the original drop
-    behavior.
+        One pair of undeclared keys is NOT dropped, in one context: the
+    launcher-injected data-plane projections an agent-launched tree carries —
+    the runner DB projection (`ava_runner`-shaped URL) and the Redis URL
+    (`urlsplit`-parseable with a host) — on an anchored checkout. The context
+    is the live `AVA_PROCESS_PROFILE=agent` marker or the value a CLI entry
+    point recorded before popping it (cli/main.py `_normalize_process_profile`
+    → `_launcher_context`); with only the live marker consulted, the CLI pop
+    made the exemption unreachable and a probe run from an agent child on a
+    pure agent-runner fell back to the sentinel (#4334). The force loop above
+    already refuses to let the unit's `.env` owner URL replace the DB
+    projection; the drop loop must not revoke either projection — on a unit
+    whose `.env` does not declare them (a pure agent-runner), the pop left
+    settings-lite and CLI paths with no DB or Redis source at all
+    (`UnanchoredHomeError`; #4036). Every other inherited value — owner-shaped
+    DB URLs, plain-shell values, the unanchored checkout's sentinel discipline
+    — keeps the original drop behavior.
 
         Host-scope keys are never in the cluster set (their scope=host fields
     are per-box facts with no bootstrap source: a not-yet-enrolled runner or
@@ -496,6 +554,10 @@ def _enforce_cluster_env_authority() -> None:
             if key == "AVA_DB_URL" and _is_launcher_runner_projection(os.environ.get(key)):
                 # Mirrored force-loop exemption (#4334): the launcher's runner
                 # projection is the agent child's DB source.
+                continue
+            if key == "AVA_REDIS_URL" and _is_launcher_redis_url(os.environ.get(key)):
+                # The Redis mirror (#4334): same launcher context, no username
+                # shape to gate on (see `_is_launcher_redis_url`).
                 continue
             os.environ.pop(key, None)
 
