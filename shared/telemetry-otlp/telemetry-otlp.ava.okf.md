@@ -132,6 +132,13 @@ single-box hosts collapse to the local receiver even when their secret is set.
   ID; renaming either would orphan the upgrade backlog. Metrics keep the ID but
   retain bounded in-memory retry. Queue/drop/silence observability lives in
   [[infra-metrics.ava.okf.md|Infrastructure metrics]].
+- Exit flush (task #4320): the SDK providers are built with
+  `shutdown_on_exit=False` (`_build_providers`), so no provider registers
+  an atexit shutdown; `shared.telemetry._drain_on_exit` is the single
+  ordered exit seam — it flushes the emitter and the OTLP queue, then
+  force-flushes the still-live providers. A record emitted inside the
+  drain thread's final batch window otherwise lands on a shut-down
+  processor and stays mirror-only.
 - The stack's operational story (collector, Grafana) is in
   `conventions/runbook.md` (Observability / Tracing).
 - Parent node: [[shared.ava.okf.md|Shared Libraries]].

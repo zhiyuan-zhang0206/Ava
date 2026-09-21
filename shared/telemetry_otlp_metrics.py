@@ -177,7 +177,16 @@ def _build_providers(endpoint: str) -> tuple[Any, Any]:
     from shared.telemetry_loss import install_exporter_drop_observer
 
     install_exporter_drop_observer()
-    logs = LoggerProvider()
+    # `shutdown_on_exit=False` on both providers: the SDK default registers a
+    # provider shutdown on atexit at bring-up (mid-life), which sits AFTER
+    # `shared.telemetry._drain_on_exit` (registered at import) in the LIFO exit
+    # order and therefore fires FIRST. The emitter's exit flush then lands on a
+    # shut-down processor (`force_flush` returns False) and a record emitted
+    # inside the drain thread's final batch window — every short-lived
+    # process's tail record — stays mirror-only (task #4314 triage / #4320).
+    # `_drain_on_exit` is the single ordered exit seam: it flushes the emitter
+    # and this queue, then force-flushes these still-live providers.
+    logs = LoggerProvider(shutdown_on_exit=False)
     log_exporter: Any = _EventDimensionResourceExporter(
         OTLPLogExporter(endpoint=f"{endpoint}/v1/logs", timeout=_OTLP_HTTP_TIMEOUT_S)
     )
@@ -185,6 +194,7 @@ def _build_providers(endpoint: str) -> tuple[Any, Any]:
         BatchLogRecordProcessor(log_exporter, export_timeout_millis=_OTLP_HTTP_TIMEOUT_S * 1000)
     )
     metrics = MeterProvider(
+        shutdown_on_exit=False,
         metric_readers=[
             PeriodicExportingMetricReader(
                 OTLPMetricExporter(endpoint=f"{endpoint}/v1/metrics", timeout=_OTLP_HTTP_TIMEOUT_S),
