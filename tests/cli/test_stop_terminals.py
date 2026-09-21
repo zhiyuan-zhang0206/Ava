@@ -51,6 +51,20 @@ _STUBBORN_JOB = (
 _LOOP_SHELL = "bash -c 'while true; do sleep 1; done'"
 
 
+def _has_exited(process: psutil.Process) -> bool:
+    """True once the process is a zombie or no longer exists.
+
+    The status read is racy on its own: the process can be reaped between its
+    construction and the read, and psutil reports that as NoSuchProcess (task
+    #4397 — it evicted #3142 from the merge queue). A vanished process is an
+    exited one.
+    """
+    try:
+        return process.status() == psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
+        return True
+
+
 def _wait_exit(pid: int, timeout: float = 10.0) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -58,7 +72,7 @@ def _wait_exit(pid: int, timeout: float = 10.0) -> bool:
             process = psutil.Process(pid)
         except psutil.NoSuchProcess:
             return True
-        if process.status() == psutil.STATUS_ZOMBIE:
+        if _has_exited(process):
             return True
         time.sleep(0.05)
     return False
@@ -178,11 +192,7 @@ def test_stop_closes_busy_terminal_job_with_real_signals(
         jobs: list[int] = []
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline and not jobs:
-            jobs = [
-                child.pid
-                for child in _shell_children(shell)
-                if child.status() != psutil.STATUS_ZOMBIE
-            ]
+            jobs = [child.pid for child in _shell_children(shell) if not _has_exited(child)]
             time.sleep(0.1)
         assert jobs, "the synthetic job never started"
         job_pid = jobs[0]
@@ -236,11 +246,7 @@ def test_stop_keeps_hold_when_job_ignores_termination(
         jobs: list[int] = []
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline and not jobs:
-            jobs = [
-                child.pid
-                for child in _shell_children(shell)
-                if child.status() != psutil.STATUS_ZOMBIE
-            ]
+            jobs = [child.pid for child in _shell_children(shell) if not _has_exited(child)]
             time.sleep(0.1)
         assert jobs, "the stubborn job never started"
         job_pid = jobs[0]
@@ -334,11 +340,7 @@ def test_stop_records_nothing_on_timeout(
         jobs: list[int] = []
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline and not jobs:
-            jobs = [
-                child.pid
-                for child in _shell_children(shell)
-                if child.status() != psutil.STATUS_ZOMBIE
-            ]
+            jobs = [child.pid for child in _shell_children(shell) if not _has_exited(child)]
             time.sleep(0.1)
         assert jobs, "the stubborn job never started"
 
@@ -365,3 +367,17 @@ def test_stop_tolerates_naturally_exited_session_with_stale_record(
     assert _wait_exit(shell.pid), "the shell must terminate after SIGKILL"
     # The record on disk remains; normal stop must tolerate the dead session
     assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=10) == 0
+
+
+def test_wait_exit_reads_a_reaped_process_as_exited(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A process reaped between its construction and the status read raises
+    NoSuchProcess from the read itself (task #4397 — the shape that evicted
+    #3142 from the merge queue); the wait must read that as an exited process."""
+
+    def vanished(*_args: object, **_kwargs: object) -> None:
+        raise psutil.NoSuchProcess(0)
+
+    monkeypatch.setattr(psutil.Process, "status", vanished)
+    assert _wait_exit(os.getpid(), timeout=0.3) is True
