@@ -21,8 +21,10 @@ ladder's recovery `ava start` on Windows (`ops/_update_shell.py`):
   `settings.gateway.stop_incomplete_recovery_timeout_seconds`.
 - **Observable and switchable.** `settings.gateway.stop_incomplete_recovery`
   turns it off; every attempt prints one `[updater] stop-recovery:` verdict line
-  (`ops.updater_outcome` carries it as the run's detail) and records one
-  `updater_stop_recovery` telemetry detail.
+  — `ops.updater_outcome` carries it as the run's detail, the durable record on
+  this path. Each attempt also calls `record_detail`, but that lands only when
+  an ambient rollout-telemetry collector is active in the process; the updater
+  leg runs without one today, so the printed line is what persists.
 - **Read-only on the shared state.** The caller arm never writes
   `host_deploy_state`: each actor gets its own single attempt (design v0.2 Q1'),
   so a failed caller attempt must not swallow the OS arm's one bounded
@@ -123,7 +125,8 @@ def recover_incomplete_stop(
 
     Called at the leg's `stop_rc != 0` exit. True when the host is back
     serving (the caller continues as success); False on every refusal or
-    failure, with one verdict line and one telemetry detail already recorded.
+    failure, with one verdict line already printed (plus a best-effort
+    telemetry detail when a collector is active).
     Never raises: the leg must be able to return its own stop rc.
     """
     if not _recovery_enabled():
