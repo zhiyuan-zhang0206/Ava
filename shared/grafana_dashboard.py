@@ -89,6 +89,7 @@ _CORE_SECTIONS_SUFFIX = (
     _Section("Host & data plane", 2006),
     _Section("Cost analysis", 2007),
     _Section("PR flow", 2008),
+    _Section("Dev/CI", 2009),
 )
 # Plugin sections — one row per metric-shipping plugin, sorted by plugin name,
 # ids allocated from the 1000 block — render between the prefix and suffix

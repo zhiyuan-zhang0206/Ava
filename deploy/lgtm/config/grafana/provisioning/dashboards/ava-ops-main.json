@@ -6228,6 +6228,113 @@
      }
     }
    ]
+  },
+  {
+   "collapsed": false,
+   "gridPos": {"h": 1, "w": 24, "x": 0, "y": 319},
+   "id": 2009,
+   "panels": [],
+   "title": "Dev/CI",
+   "type": "row"
+  },
+  {
+   "datasource": {"type": "prometheus", "uid": "prometheus"},
+   "description": "Attributed CI wall time per completed PR by complete cluster-time day: median and p90 minutes. Zombie wall-clock artifacts, instant skips, and watchdog reruns are excluded from duration sums.",
+   "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": []}, "unit": "m"}},
+   "gridPos": {"h": 7, "w": 12, "x": 0, "y": 320},
+   "id": 2501,
+   "options": {"cellHeight": "sm", "footer": {"countRows": false, "enablePagination": true, "show": false}, "showHeader": true, "showTypeIcons": false, "sortBy": []},
+   "targets": [
+    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (day) (last_over_time(ava_ci_runs_daily_per_pr_duration_median_minutes_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "median", "range": false, "refId": "A"},
+    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (day) (last_over_time(ava_ci_runs_daily_per_pr_duration_p90_minutes_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "p90", "range": false, "refId": "B"}
+   ],
+   "title": "Per-PR CI duration — median / p90 (by day)",
+   "transformations": [
+    {"id": "joinByField", "options": {"byField": "day", "mode": "outer"}},
+    {"id": "organize", "options": {"excludeByName": {"Time 1": true, "Time 2": true}, "renameByName": {"Value #A": "median", "Value #B": "p90"}}}
+   ],
+   "type": "table"
+  },
+  {
+   "datasource": {"type": "prometheus", "uid": "prometheus"},
+   "description": "Attributed CI trigger count per completed PR by complete cluster-time day. The executed median filters instant-skip, watchdog, QA-gate, and proof workflows.",
+   "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": []}, "unit": "short"}},
+   "gridPos": {"h": 7, "w": 12, "x": 12, "y": 320},
+   "id": 2502,
+   "options": {"cellHeight": "sm", "footer": {"countRows": false, "enablePagination": true, "show": false}, "showHeader": true, "showTypeIcons": false, "sortBy": []},
+   "targets": [
+    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (day) (last_over_time(ava_ci_runs_daily_per_pr_runs_median_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "median", "range": false, "refId": "A"},
+    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (day) (last_over_time(ava_ci_runs_daily_per_pr_runs_p90_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "p90", "range": false, "refId": "B"},
+    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (day) (last_over_time(ava_ci_runs_daily_per_pr_runs_executed_median_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "median executed", "range": false, "refId": "C"}
+   ],
+   "title": "Per-PR CI runs — median / p90 (by day)",
+   "transformations": [
+    {"id": "joinByField", "options": {"byField": "day", "mode": "outer"}},
+    {"id": "organize", "options": {"excludeByName": {"Time 1": true, "Time 2": true, "Time 3": true}, "renameByName": {"Value #A": "median", "Value #B": "p90", "Value #C": "median executed"}}}
+   ],
+   "type": "table"
+  },
+  {
+   "datasource": {"type": "prometheus", "uid": "prometheus"},
+   "description": "CI-red, rerun-to-green, failed retry, and v1 first-pass PR share by complete cluster-time day. First pass excludes watchdog, QA-gate, proof, instant-skip, and zombie runs.",
+   "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": []}, "unit": "short"}},
+   "gridPos": {"h": 7, "w": 12, "x": 0, "y": 327},
+   "id": 2503,
+   "options": {"cellHeight": "sm", "footer": {"countRows": false, "enablePagination": true, "show": false}, "showHeader": true, "showTypeIcons": false, "sortBy": []},
+   "targets": [
+    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (day) (last_over_time(ava_ci_runs_daily_failed_runs_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "failed", "range": false, "refId": "A"},
+    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (day) (last_over_time(ava_ci_runs_daily_self_healed_runs_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "self-healed", "range": false, "refId": "B"},
+    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (day) (last_over_time(ava_ci_runs_daily_retried_failed_runs_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "failed after retry", "range": false, "refId": "C"},
+    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (day) (last_over_time(ava_ci_runs_daily_first_pass_pr_share_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "first-pass share", "range": false, "refId": "D"}
+   ],
+   "title": "CI failures & self-healing (by day)",
+   "transformations": [
+    {"id": "joinByField", "options": {"byField": "day", "mode": "outer"}},
+    {"id": "organize", "options": {"excludeByName": {"Time 1": true, "Time 2": true, "Time 3": true, "Time 4": true}, "renameByName": {"Value #A": "failed", "Value #B": "self-healed", "Value #C": "failed after retry", "Value #D": "first-pass share"}}}
+   ],
+   "type": "table"
+  },
+  {
+   "datasource": {"type": "prometheus", "uid": "prometheus"},
+   "description": "Trailing-window workflow ranking by failures, run volume, completed-PR appearance, self-healing, and retry share. The explicit watchdog label keeps its designed noise filterable.",
+   "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": []}, "unit": "short"}},
+   "gridPos": {"h": 7, "w": 12, "x": 12, "y": 327},
+   "id": 2504,
+   "options": {"cellHeight": "sm", "footer": {"countRows": false, "enablePagination": true, "show": false}, "showHeader": true, "showTypeIcons": false, "sortBy": []},
+   "targets": [
+    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (workflow) (last_over_time(ava_ci_workflow_window_failed_runs_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "failed", "range": false, "refId": "A"},
+    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (workflow) (last_over_time(ava_ci_workflow_window_runs_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "runs", "range": false, "refId": "B"},
+    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (workflow) (last_over_time(ava_ci_workflow_window_pr_appearance_share_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "PR appearance share", "range": false, "refId": "C"},
+    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (workflow) (last_over_time(ava_ci_workflow_window_self_healed_runs_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "self-healed", "range": false, "refId": "D"},
+    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (workflow) (last_over_time(ava_ci_workflow_window_retry_share_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "retry share", "range": false, "refId": "E"}
+   ],
+   "title": "Most fragile workflows (trailing window)",
+   "transformations": [
+    {"id": "joinByField", "options": {"byField": "workflow", "mode": "outer"}},
+    {"id": "organize", "options": {"excludeByName": {"Time 1": true, "Time 2": true, "Time 3": true, "Time 4": true, "Time 5": true}, "renameByName": {"Value #A": "failed", "Value #B": "runs", "Value #C": "PR appearance share", "Value #D": "self-healed", "Value #E": "retry share"}}}
+   ],
+   "type": "table"
+  },
+  {
+   "datasource": {"type": "prometheus", "uid": "prometheus"},
+   "description": "The deduplicated white-run share and its instant-skip, superseded, abandoned, and retry components by complete cluster-time day.",
+   "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": []}, "unit": "short"}},
+   "gridPos": {"h": 7, "w": 12, "x": 0, "y": 334},
+   "id": 2505,
+   "options": {"cellHeight": "sm", "footer": {"countRows": false, "enablePagination": true, "show": false}, "showHeader": true, "showTypeIcons": false, "sortBy": []},
+   "targets": [
+    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (day) (last_over_time(ava_ci_runs_daily_white_run_share_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "white share", "range": false, "refId": "A"},
+    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (day) (last_over_time(ava_ci_runs_daily_instant_skip_runs_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "instant skip", "range": false, "refId": "B"},
+    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (day) (last_over_time(ava_ci_runs_daily_superseded_runs_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "superseded", "range": false, "refId": "C"},
+    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (day) (last_over_time(ava_ci_runs_daily_abandoned_runs_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "abandoned", "range": false, "refId": "D"},
+    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (day) (last_over_time(ava_ci_runs_daily_retry_share_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "retry share", "range": false, "refId": "E"}
+   ],
+   "title": "White-run classes (by day)",
+   "transformations": [
+    {"id": "joinByField", "options": {"byField": "day", "mode": "outer"}},
+    {"id": "organize", "options": {"excludeByName": {"Time 1": true, "Time 2": true, "Time 3": true, "Time 4": true, "Time 5": true}, "renameByName": {"Value #A": "white share", "Value #B": "instant skip", "Value #C": "superseded", "Value #D": "abandoned", "Value #E": "retry share"}}}
+   ],
+   "type": "table"
   }
  ],
  "refresh": "10m",

@@ -57,6 +57,7 @@ class TestLoadManifest:
         assert set(by_name) == {
             "c9-daily-report",
             "debt-sweep-daily",
+            "dev-ci-metrics",
             "adversarial-eval-weekly",
             "self-evolution-weekly",
             "self-evolution-daily",
