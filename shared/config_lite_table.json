@@ -65,6 +65,22 @@
       true,
       null
     ],
+    "stop_incomplete_recovery": [
+      "gateway",
+      "AVA_STOP_INCOMPLETE_RECOVERY",
+      "bool",
+      "literal",
+      true,
+      null
+    ],
+    "stop_incomplete_recovery_timeout_seconds": [
+      "gateway",
+      "AVA_STOP_INCOMPLETE_RECOVERY_TIMEOUT_SECONDS",
+      "float",
+      "literal",
+      120.0,
+      null
+    ],
     "hold_watchdog_min_age_seconds": [
       "gateway",
       "AVA_HOLD_WATCHDOG_MIN_AGE_SECONDS",
@@ -620,6 +636,8 @@
     "status_probe_backoff_cap_seconds": "gateway",
     "status_probe_fastfail_timeout_seconds": "gateway",
     "status_probe_timeout_seconds": "gateway",
+    "stop_incomplete_recovery": "gateway",
+    "stop_incomplete_recovery_timeout_seconds": "gateway",
     "stranded_hold_recovery": "gateway",
     "syntax_fix_ruff_format": "sandbox",
     "system_prompt_extra": "agent",
@@ -1120,6 +1138,8 @@
     "status_probe_backoff_cap_seconds": "AVA_STATUS_PROBE_BACKOFF_CAP_SECONDS",
     "status_probe_fastfail_timeout_seconds": "AVA_STATUS_PROBE_FASTFAIL_TIMEOUT_SECONDS",
     "status_probe_timeout_seconds": "AVA_STATUS_PROBE_TIMEOUT_SECONDS",
+    "stop_incomplete_recovery": "AVA_STOP_INCOMPLETE_RECOVERY",
+    "stop_incomplete_recovery_timeout_seconds": "AVA_STOP_INCOMPLETE_RECOVERY_TIMEOUT_SECONDS",
     "stranded_hold_recovery": "AVA_STRANDED_HOLD_RECOVERY",
     "syntax_fix_ruff_format": "AVA_SYNTAX_FIX_RUFF_FORMAT",
     "system_prompt_extra": "AVA_SYSTEM_PROMPT_EXTRA",
@@ -1620,6 +1640,8 @@
     "status_probe_backoff_cap_seconds": "cluster-pinned",
     "status_probe_fastfail_timeout_seconds": "cluster-pinned",
     "status_probe_timeout_seconds": "cluster-pinned",
+    "stop_incomplete_recovery": "cluster-pinned",
+    "stop_incomplete_recovery_timeout_seconds": "cluster-pinned",
     "stranded_hold_recovery": "cluster-pinned",
     "syntax_fix_ruff_format": "cluster-default",
     "system_prompt_extra": "cluster-default",
@@ -2120,6 +2142,8 @@
     "status_probe_backoff_cap_seconds": "gateway",
     "status_probe_fastfail_timeout_seconds": "gateway",
     "status_probe_timeout_seconds": "gateway",
+    "stop_incomplete_recovery": "gateway",
+    "stop_incomplete_recovery_timeout_seconds": "gateway",
     "stranded_hold_recovery": "gateway",
     "syntax_fix_ruff_format": "agent-runner",
     "system_prompt_extra": "agent-runner",
