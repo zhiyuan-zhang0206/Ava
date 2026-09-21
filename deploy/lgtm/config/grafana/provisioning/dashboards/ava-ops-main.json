@@ -3271,12 +3271,196 @@
    ]
   },
   {
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "description": "Exec envelope transfer size \u2014 serialized request/result envelope bytes moved between the agent and its exec child, unwrapped from the exec_envelope event's size_bytes attribute (agent/graph/_exec_protocol.py::_log_envelope_transfer). p50/p95 percentiles plus max, grouped by envelope/op; a rising request band is state/payload inflation. The event is excluded from the Exec outcomes other bucket (PM ruling 2026-08-31) and displays here instead. event_name='exec_envelope', category='telemetry'.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 12,
+      "lineInterpolation": "smooth",
+      "lineWidth": 1,
+      "showPoints": "never",
+      "spanNulls": true
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "bytes"
+    }
+   },
+   "gridPos": {
+    "h": 7,
+    "w": 12,
+    "x": 12,
+    "y": 148
+   },
+   "id": 54,
+   "options": {
+    "legend": {
+     "calcs": [
+      "mean",
+      "max",
+      "last"
+     ],
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "quantile_over_time(0.5, {service_name=\"unknown_service\", event_name=\"exec_envelope\"} | json | category=\"telemetry\" | unwrap attributes_size_bytes [$__interval]) by (attributes_envelope, attributes_op)",
+     "legendFormat": "p50 {{attributes_envelope}}/{{attributes_op}}",
+     "queryType": "range",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "quantile_over_time(0.95, {service_name=\"unknown_service\", event_name=\"exec_envelope\"} | json | category=\"telemetry\" | unwrap attributes_size_bytes [$__interval]) by (attributes_envelope, attributes_op)",
+     "legendFormat": "p95 {{attributes_envelope}}/{{attributes_op}}",
+     "queryType": "range",
+     "refId": "B"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "max_over_time({service_name=\"unknown_service\", event_name=\"exec_envelope\"} | json | category=\"telemetry\" | unwrap attributes_size_bytes [$__interval]) by (attributes_envelope, attributes_op)",
+     "legendFormat": "max {{attributes_envelope}}/{{attributes_op}}",
+     "queryType": "range",
+     "refId": "C"
+    }
+   ],
+   "title": "Exec envelope size (bytes)",
+   "type": "timeseries"
+  },
+  {
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "description": "Exec envelope serialization cost \u2014 milliseconds spent serializing or parsing one envelope, unwrapped from the exec_envelope event's serialize_ms attribute (measured around the transfer in _log_envelope_transfer). avg/p95/max, grouped by envelope/op; a write-side step is a dump-cost regression, a read-side one a parse-cost regression. event_name='exec_envelope', category='telemetry'.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 12,
+      "lineInterpolation": "smooth",
+      "lineWidth": 1,
+      "showPoints": "never",
+      "spanNulls": true
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "ms"
+    }
+   },
+   "gridPos": {
+    "h": 7,
+    "w": 12,
+    "x": 0,
+    "y": 155
+   },
+   "id": 55,
+   "options": {
+    "legend": {
+     "calcs": [
+      "mean",
+      "max",
+      "last"
+     ],
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "avg_over_time({service_name=\"unknown_service\", event_name=\"exec_envelope\"} | json | category=\"telemetry\" | unwrap attributes_serialize_ms [$__interval]) by (attributes_envelope, attributes_op)",
+     "legendFormat": "avg {{attributes_envelope}}/{{attributes_op}}",
+     "queryType": "range",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "quantile_over_time(0.95, {service_name=\"unknown_service\", event_name=\"exec_envelope\"} | json | category=\"telemetry\" | unwrap attributes_serialize_ms [$__interval]) by (attributes_envelope, attributes_op)",
+     "legendFormat": "p95 {{attributes_envelope}}/{{attributes_op}}",
+     "queryType": "range",
+     "refId": "B"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "max_over_time({service_name=\"unknown_service\", event_name=\"exec_envelope\"} | json | category=\"telemetry\" | unwrap attributes_serialize_ms [$__interval]) by (attributes_envelope, attributes_op)",
+     "legendFormat": "max {{attributes_envelope}}/{{attributes_op}}",
+     "queryType": "range",
+     "refId": "C"
+    }
+   ],
+   "title": "Exec envelope serialize (ms)",
+   "type": "timeseries"
+  },
+  {
    "collapsed": false,
    "gridPos": {
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 155
+    "y": 162
    },
    "id": 2004,
    "panels": [],
@@ -3319,7 +3503,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 156
+    "y": 163
    },
    "id": 27,
    "options": {
@@ -3394,7 +3578,7 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 156
+    "y": 163
    },
    "id": 28,
    "options": {
@@ -3459,7 +3643,7 @@
     "h": 4,
     "w": 6,
     "x": 0,
-    "y": 163
+    "y": 170
    },
    "id": 32,
    "options": {
@@ -3519,7 +3703,7 @@
     "h": 4,
     "w": 6,
     "x": 6,
-    "y": 163
+    "y": 170
    },
    "id": 52,
    "options": {
@@ -3593,7 +3777,7 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 163
+    "y": 170
    },
    "id": 9,
    "options": {
@@ -3688,7 +3872,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 170
+    "y": 177
    },
    "id": 2301,
    "options": {
@@ -3752,7 +3936,7 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 170
+    "y": 177
    },
    "id": 2302,
    "options": {
@@ -3788,7 +3972,7 @@
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 177
+    "y": 184
    },
    "id": 1001,
    "panels": [],
@@ -3829,7 +4013,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 178
+    "y": 185
    },
    "id": 1002,
    "options": {
@@ -3892,7 +4076,7 @@
     "h": 4,
     "w": 8,
     "x": 12,
-    "y": 178
+    "y": 185
    },
    "id": 1003,
    "options": {
@@ -3932,7 +4116,7 @@
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 185
+    "y": 192
    },
    "id": 1004,
    "panels": [],
@@ -3973,7 +4157,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 186
+    "y": 193
    },
    "id": 1005,
    "options": {
@@ -4015,7 +4199,7 @@
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 193
+    "y": 200
    },
    "id": 1007,
    "panels": [],
@@ -4056,7 +4240,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 194
+    "y": 201
    },
    "id": 1008,
    "options": {
@@ -4126,7 +4310,7 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 194
+    "y": 201
    },
    "id": 1009,
    "options": {
@@ -4204,7 +4388,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 201
+    "y": 208
    },
    "id": 1010,
    "options": {
@@ -4267,7 +4451,7 @@
     "h": 4,
     "w": 8,
     "x": 12,
-    "y": 201
+    "y": 208
    },
    "id": 1011,
    "options": {
@@ -4335,7 +4519,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 208
+    "y": 215
    },
    "id": 1012,
    "options": {
@@ -4405,7 +4589,7 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 208
+    "y": 215
    },
    "id": 1013,
    "options": {
@@ -4447,7 +4631,7 @@
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 215
+    "y": 222
    },
    "id": 2006,
    "panels": [],
@@ -4467,7 +4651,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 216
+    "y": 223
    },
    "targets": [
     {
@@ -4523,7 +4707,7 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 216
+    "y": 223
    },
    "targets": [
     {
@@ -4579,7 +4763,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 224
+    "y": 231
    },
    "targets": [
     {
@@ -4655,7 +4839,7 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 224
+    "y": 231
    },
    "targets": [
     {
@@ -4711,7 +4895,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 232
+    "y": 239
    },
    "targets": [
     {
@@ -4765,7 +4949,7 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 232
+    "y": 239
    },
    "targets": [
     {
@@ -4819,7 +5003,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 240
+    "y": 247
    },
    "targets": [
     {
@@ -4885,7 +5069,7 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 240
+    "y": 247
    },
    "targets": [
     {
@@ -4950,7 +5134,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 248
+    "y": 255
    },
    "targets": [
     {
@@ -5004,7 +5188,7 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 248
+    "y": 255
    },
    "targets": [
     {
@@ -5069,7 +5253,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 256
+    "y": 263
    },
    "targets": [
     {
@@ -5135,7 +5319,7 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 256
+    "y": 263
    },
    "targets": [
     {
@@ -5222,7 +5406,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 264
+    "y": 271
    },
    "id": 2303,
    "options": {
@@ -5286,7 +5470,7 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 264
+    "y": 271
    },
    "id": 2304,
    "options": {
@@ -5322,7 +5506,7 @@
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 271
+    "y": 278
    },
    "id": 2007,
    "panels": [],
@@ -5358,7 +5542,7 @@
     "h": 4,
     "w": 8,
     "x": 0,
-    "y": 272
+    "y": 279
    },
    "id": 38,
    "options": {
@@ -5420,7 +5604,7 @@
     "h": 4,
     "w": 16,
     "x": 8,
-    "y": 272
+    "y": 279
    },
    "id": 39,
    "options": {
@@ -5475,7 +5659,7 @@
     "h": 7,
     "w": 24,
     "x": 0,
-    "y": 276
+    "y": 283
    },
    "id": 41,
    "options": {
@@ -5532,7 +5716,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 283
+    "y": 290
    },
    "id": 42,
    "options": {
@@ -5581,7 +5765,7 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 283
+    "y": 290
    },
    "id": 43,
    "options": {
@@ -5633,7 +5817,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 290
+    "y": 297
    },
    "id": 50,
    "options": {
@@ -5690,7 +5874,7 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 290
+    "y": 297
    },
    "id": 51,
    "options": {
@@ -5731,7 +5915,7 @@
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 297
+    "y": 304
    },
    "id": 2008,
    "panels": [],
@@ -5757,7 +5941,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 298
+    "y": 305
    },
    "id": 2401,
    "options": {
@@ -5858,7 +6042,7 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 298
+    "y": 305
    },
    "id": 2402,
    "options": {
@@ -5907,7 +6091,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 305
+    "y": 312
    },
    "id": 2403,
    "options": {
@@ -5993,7 +6177,7 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 305
+    "y": 312
    },
    "id": 2404,
    "options": {

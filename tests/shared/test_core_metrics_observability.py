@@ -1,7 +1,7 @@
 """Core observability metrics pack tests (Task #882 migration, #1280 Loki).
 
 Covers the generic observability pack migrated from the retired
-``ava_observability`` plugin to core metrics: registration shape (23 metrics
+``ava_observability`` plugin to core metrics: registration shape (25 metrics
 across grafana / inspector surfaces, plugin == "core"), the LogQL template
 safety validation, and every rendered query's structure — the stream selector,
 the ``| json`` pipeline, the event_name/category placeholders, and the
@@ -44,6 +44,14 @@ EXPECTED = {
         1,
     ),
     "ava_obs_exec_success_rate": ("timeseries", ["grafana"], "exec", "telemetry", 6),
+    "ava_obs_exec_envelope_size": ("timeseries", ["grafana"], "exec_envelope", "telemetry", 3),
+    "ava_obs_exec_envelope_serialize": (
+        "timeseries",
+        ["grafana"],
+        "exec_envelope",
+        "telemetry",
+        3,
+    ),
     "ava_obs_syntax_fix_by_kind": ("timeseries", ["grafana"], "syntax_fix", "telemetry", 7),
     "ava_obs_spawn_by_spawner": ("barchart", ["grafana"], "spawn", "audit", 1),
     "ava_obs_lifecycle_counts": ("barchart", ["grafana"], "spawn", "audit", 1),
@@ -93,14 +101,17 @@ EXPECTED = {
 
 def _load_pack() -> None:
     """Import the core observability definition modules (fresh core registry
-    each call). The pack spans two modules since the task #3697 S1 line-budget
-    split moved the frontend telemetry specs to ``core_metrics_frontend``."""
+    each call). The pack spans three modules: the task #3697 S1 line-budget
+    split moved the frontend telemetry specs to ``core_metrics_frontend``,
+    and the #2174 split moved the exec-envelope pair to
+    ``core_metrics_exec_envelope``."""
     import importlib
     import sys
 
     core_metrics.clear_core_registry()
     for module_name in (
         "shared.core_metrics_observability",
+        "shared.core_metrics_exec_envelope",
         "shared.core_metrics_frontend",
     ):
         sys.modules.pop(module_name, None)

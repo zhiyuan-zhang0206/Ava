@@ -43,7 +43,8 @@ restored by task #3689). All sections are **expanded by default**
 2. **`LLM`** — throughput tokens/s, the three TPS series, calls/bucket,
    cost USD, LLM errors, provider stalls, and per-agent Top 20.
 3. **`Gateway & execution`** — gateway latency p50/p95/p99/max + p95/p99 and
-   sample count by route, turn duration, exec outcomes, syntax-fix triggers,
+   sample count by route, turn duration, exec outcomes, exec-envelope transfer
+   cost (size / serialize, task #2174), syntax-fix triggers,
    halt classes, SDK Top 20, frontend interactions ×3, settings changes.
 4. **`Fleet`** — windowed agent spawns by source, windowed lifecycle totals,
    delivery-stalled total, SSE backlog, and the Max Agent ID growth curve
@@ -86,7 +87,7 @@ the same reason: the instant queries return one frame per day series, and
 without the join the table falls back to a per-series frame picker instead
 of one row per day.
 
-The dashboard now has 95 panel entries (85 panels + 10 row headers): core
+The dashboard now has 97 panel entries (87 panels + 10 row headers): core
 ids remain below 1000 (the four new stat tiles are 44–47), plugin ids are
 >= 1000 (the three plugin rows are 1001 / 1004 / 1007; their panels are
 1002–1013), host/data-plane panels are 2101–2112, the cost-analysis panels are

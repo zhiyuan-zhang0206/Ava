@@ -11,7 +11,7 @@ registries instead of a hand-maintained file. This module locks the renderer
    file, modulo four enumerable normalizations (below). This is the migration
    lock: nothing the user sees may change beyond those.
 2. **The layout engine reproduces the file's full geometry** — replaying the
-   fixture's 95 entries (sizes + order + the one pinned position + the
+   fixture's 97 entries (sizes + order + the one pinned position + the
    section gaps) through the renderer's flow engine must reproduce every
    gridPos exactly.
 3. **Invariants** — unique ids, no overlapping rectangles, the stable
@@ -37,10 +37,11 @@ The four normalizations (each applied to both sides before comparison):
   the render gives every chart the one standard look).
 
 All 85 panels are covered since S2 (task #3697) registered the last 18 and
-task #3948 added the provider-stall panel; the fixture-only worklist
+task #3948 added the provider-stall panel, task #2174 the exec-envelope
+size/serialize pair; the fixture-only worklist
 (``_S2_PENDING``) is empty. The fidelity lock compares panel content AND
 geometry (gridPos) panel-for-panel; the layout replay separately locks the
-engine on the fixture's full 95-entry geometry.
+engine on the fixture's full 97-entry geometry.
 """
 
 from __future__ import annotations
@@ -267,7 +268,7 @@ def test_rendered_sequence_follows_the_fixture(
 def test_layout_engine_reproduces_the_full_fixture_geometry(
     world: tuple[list[MetricSpec], list[MetricSpec], dict[str, Any]],
 ) -> None:
-    """Replay the fixture's 95 entries — sizes and order from the file, the
+    """Replay the fixture's 97 entries — sizes and order from the file, the
     pin from the spec, the gaps from the section registry — through the
     renderer's flow engine; every gridPos must come back exactly."""
     core_specs, plugin_specs, _ = world
