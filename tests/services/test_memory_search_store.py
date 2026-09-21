@@ -230,7 +230,7 @@ def test_delete_stale_rows_noop_for_unknown_path(tmp_path: Path) -> None:
 
 def test_search_topk_exact_cosine_order_and_aggregation(tmp_path: Path) -> None:
     """Best chunk per path wins; ordering is cosine-descending — the exact
-    counterpart of milvus's distance-ascending contract."""
+    counterpart of milvus's raw-similarity contract."""
     ones = np.ones(_DIM, dtype=np.float32)
     store = _store(tmp_path)
     store.upsert("/a.md", 1.0, "ha", ones, kind="body", chunk_idx=0)
