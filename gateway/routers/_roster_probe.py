@@ -1,15 +1,16 @@
 """Bounded transport policy for the status roster's runner probes.
 
 One dial's budget, the per-machine failure backoff that spaces re-dials to a
-down host, and the fast-fail budget a known-failed host's re-probe gets
-(task #3507) live here, beside the dispatch they bound. Split out of
-``routers/status.py`` (which sits at the 800-line hard ceiling).
+down host, and the detached single-flight recovery dial a known-down host's
+recovery check runs on (task #3507) live here, beside the dispatch they bound.
+Split out of ``routers/status.py`` (which sits at the 800-line hard ceiling).
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
 from typing import Any
 
@@ -29,9 +30,9 @@ async def dispatch_status_probe(
     for a blackholed host.
 
     ``timeout_s`` defaults to the full per-machine budget
-    (``settings.gateway.status_probe_timeout_seconds``); callers pass
-    ``_probe_budget_s``'s fast-fail budget for a machine that already carries
-    reachability failures.
+    (``settings.gateway.status_probe_timeout_seconds``); the detached recovery
+    dial passes ``_probe_budget_s``'s fast-fail budget for a machine that
+    already carries reachability failures.
     """
     if timeout_s is None:
         timeout_s = settings.gateway.status_probe_timeout_seconds
@@ -54,8 +55,8 @@ async def dispatch_status_probe(
 # Per-machine probe backoff. A machine that keeps failing its status_probe (a
 # down host — e.g. a flaky WSL peer) would otherwise be dialed on every panel
 # poll (~5s), one wasted round-trip + one log line each. Instead a recently-failed
-# host is re-probed on an exponential schedule: min(base * 2**failures, cap)
-# seconds, with the two bounds in config
+# host's detached recovery dial runs on an exponential schedule: min(base * 2**failures,
+# cap) seconds, with the two bounds in config
 # (gateway.status_probe_backoff_base_seconds / _cap_seconds, resolved at call
 # time; the schedule literals moved there under the numeric-limits convention,
 # tasks #3507 / #3696). Only reachability failures (ClusterOpUnreachable) widen
@@ -117,6 +118,86 @@ def _probe_budget_s(name: str, *, full_budget_s: float | None = None) -> float:
         # own wider first-contact budget; the fast-fail side stays shared.
         return full_budget_s
     return settings.gateway.status_probe_timeout_seconds
+
+
+# A known-down host is never dialed on a read path (task #3507): the read serves
+# the cached offline row, and the recovery check — the dial that can notice the
+# host came back — runs detached in its own daemon thread, paced by the same
+# failure backoff the inline re-dial used to be. The whole-table read therefore
+# never carries a down host's dial budget, and the recovery cadence is
+# unchanged: one in-flight dial per host, its outcome folded back into the state
+# below.
+_recovery_inflight: set[str] = set()
+_recovery_lock = threading.Lock()
+
+
+def _start_recovery_thread(name: str, ops_url: str) -> None:
+    """Spawn the detached recovery dial (the test seam for thread behavior)."""
+    threading.Thread(
+        target=_run_recovery_dial,
+        args=(name, ops_url),
+        name=f"roster-recovery-{name}",
+        daemon=True,
+    ).start()
+
+
+def _run_recovery_dial(name: str, ops_url: str) -> None:
+    """One detached recovery dial for a known-down host.
+
+    Runs the dispatch the read path used to run inline, under
+    ``_probe_budget_s`` (the fast-fail budget while the failure record stands),
+    then folds the outcome into the shared state exactly as the inline re-dial
+    did: a reachable answer clears the record (the next read dials the host
+    fresh as a first contact), an unreachable one widens the window, and an
+    unexpected failure leaves both untouched so the next window retries.
+    Bounded by the dial budget — the thread lives at most that long and always
+    converges back into this state machine.
+    """
+    reachable: bool | None = None
+    try:
+        asyncio.run(dispatch_status_probe(name, ops_url, timeout_s=_probe_budget_s(name)))
+        reachable = True
+    except cluster_rpc.ClusterOpUnreachable:
+        reachable = False
+    except cluster_rpc.ClusterOpFailed:
+        # The ops server answered and its op raised — the host is reachable.
+        reachable = True
+    except Exception:
+        _log.exception("detached recovery dial for %r failed unexpectedly", name)
+    # Fold the outcome in before releasing the in-flight slot: a read racing
+    # this completion must see the final state, never (slot-free + stale record).
+    if reachable is True:
+        _note_probe_reachable(name)
+    elif reachable is False:
+        _note_probe_unreachable(name)
+    _recovery_inflight.discard(name)
+
+
+def _maybe_kick_recovery_dial(name: str, ops_url: str | None) -> None:
+    """Start `name`'s detached recovery dial when one is due.
+
+    Single-flight per machine: at most one recovery dial may be in flight, and
+    only once the failure window has elapsed (the same
+    ``min(base * 2**failures, cap)`` schedule the inline re-dial used) — a read
+    inside the window, or during an in-flight dial, just serves the cached row.
+    A host with no advertised address has nothing to dial. Best-effort by
+    contract: failing to spawn must never fail the read it was kicked from.
+    """
+    if ops_url is None or name not in _probe_failures or _probe_in_backoff(name):
+        return
+    with _recovery_lock:
+        if name in _recovery_inflight:
+            return
+        _recovery_inflight.add(name)
+    try:
+        _start_recovery_thread(name, ops_url)
+    except Exception:
+        # Spawning is best-effort: a refusal here (e.g. the OS declining a new
+        # thread) must never fail the read it was kicked from, and the slot
+        # must not leak — a leaked name would silently stop this host's
+        # recovery dials for the life of the process.
+        _recovery_inflight.discard(name)
+        _log.exception("failed to start the recovery dial thread for %r", name)
 
 
 # Identity-mismatch episode tracking: one log line per mismatching episode, not
