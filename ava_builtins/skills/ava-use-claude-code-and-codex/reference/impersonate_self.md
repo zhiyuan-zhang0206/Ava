@@ -46,3 +46,14 @@ The two states, and nothing else:
 TTL remains the recovery deadline if the takeover dies. Without
 `--impersonate-self` the normal delegated workflow applies and you remain the
 supervisor making decisions.
+
+
+### Delivery safety
+
+The launch message is long, and a raw composer burst can be folded by the
+TUI into content-dropping paste fragments (#4364). The launcher wraps it in
+bracketed-paste markers so the composer takes it as one atomic paste. If a
+launch still reports `start-receipt=not-submitted`, fall back to the
+file-driven path: write the briefing to a file in the workspace, send the
+session a short pointer message naming that file, and let the executor read
+the brief from disk before acting.
