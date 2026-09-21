@@ -20,7 +20,11 @@ EventResolutionStatus = Literal["dismissed", "reopened"]
 
 
 class EventResolutionCreate(BaseModel):
-    """One immutable event class to dismiss through the authenticated API."""
+    """One immutable event class to dismiss through the authenticated API.
+
+    An empty ``process`` is a wildcard that dismisses every process of the
+    class — the scope every pre-dimension row keeps; a concrete value targets
+    one emitting process (task #4329 B5)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -28,6 +32,7 @@ class EventResolutionCreate(BaseModel):
     level: EventResolutionLevel
     event_name: str = Field(min_length=1, max_length=255)
     source: str = Field(min_length=1, max_length=255)
+    process: str = Field(default="", max_length=255)
     agent_id: int | None = None
     note: str = Field(default="", max_length=4_000)
 
@@ -50,6 +55,7 @@ class EventResolutionRow(BaseModel):
     level: EventResolutionLevel
     event_name: str
     source: str
+    process: str
     agent_id: int | None
     dismissed_by: int
     note: str

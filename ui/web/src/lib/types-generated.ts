@@ -5090,6 +5090,10 @@ export interface components {
         /**
          * EventResolutionCreate
          * @description One immutable event class to dismiss through the authenticated API.
+         *
+         *     An empty ``process`` is a wildcard that dismisses every process of the
+         *     class — the scope every pre-dimension row keeps; a concrete value targets
+         *     one emitting process (task #4329 B5).
          */
         EventResolutionCreate: {
             /**
@@ -5106,6 +5110,11 @@ export interface components {
             event_name: string;
             /** Source */
             source: string;
+            /**
+             * Process
+             * @default
+             */
+            process: string;
             /** Agent Id */
             agent_id?: number | null;
             /**
@@ -5143,6 +5152,8 @@ export interface components {
             event_name: string;
             /** Source */
             source: string;
+            /** Process */
+            process: string;
             /** Agent Id */
             agent_id: number | null;
             /** Dismissed By */
@@ -7828,8 +7839,9 @@ export interface components {
          *       arithmetic is the events-maintenance daemon's class subtraction
          *       (`services.events_maintenance.resolution.level_splits`) applied to the
          *       SELECTED window instead of the daemon's fixed six hours: events whose
-         *       (category, level, event_name, source) class has an active dismissal in
-         *       `event_dismissals` count as dismissed, the rest as net, and
+         *       (category, level, event_name, source, process) class has an active
+         *       dismissal in `event_dismissals` — exact, or matching a wildcard row
+         *       with an empty `process` — count as dismissed, the rest as net, and
          *       dismissed + net == the raw total by construction.
          *     - `total_events`: archived event row count (frozen — the PG events copy
          *       stopped growing at the LGTM cutover; not a live gauge)

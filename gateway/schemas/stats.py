@@ -122,8 +122,9 @@ class StatsDashboard(BaseModel):
       arithmetic is the events-maintenance daemon's class subtraction
       (`services.events_maintenance.resolution.level_splits`) applied to the
       SELECTED window instead of the daemon's fixed six hours: events whose
-      (category, level, event_name, source) class has an active dismissal in
-      `event_dismissals` count as dismissed, the rest as net, and
+      (category, level, event_name, source, process) class has an active
+      dismissal in `event_dismissals` — exact, or matching a wildcard row
+      with an empty `process` — count as dismissed, the rest as net, and
       dismissed + net == the raw total by construction.
     - `total_events`: archived event row count (frozen — the PG events copy
       stopped growing at the LGTM cutover; not a live gauge)

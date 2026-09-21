@@ -33,6 +33,7 @@ def _resolution_attributes(row: dict[str, Any]) -> dict[str, object]:
         "level": row["level"],
         "event_name": row["event_name"],
         "source": row["source"],
+        "process": row["process"],
         "agent_id": row["agent_id"],
         "dismissed_by": row["dismissed_by"],
         "note": row["note"],
@@ -66,18 +67,20 @@ def create_event_resolution(body: EventResolutionCreate, request: Request) -> Ev
         cur.execute(
             """
             INSERT INTO event_dismissals
-                (category, level, event_name, source, agent_id, dismissed_by, note)
-            VALUES (%s, %s, %s, %s, %s, 0, %s)
-            ON CONFLICT (category, level, event_name, source, agent_id)
+                (category, level, event_name, source, process, agent_id, dismissed_by, note)
+            VALUES (%s, %s, %s, %s, %s, %s, 0, %s)
+            ON CONFLICT (category, level, event_name, source, process, agent_id)
                 WHERE status = 'dismissed' DO NOTHING
-            RETURNING id, category, level, event_name, source, agent_id, dismissed_by, note,
-                      status, dismissed_at, reopened_at, burst_count, created_at, updated_at
+            RETURNING id, category, level, event_name, source, process, agent_id, dismissed_by,
+                      note, status, dismissed_at, reopened_at, burst_count, created_at,
+                      updated_at
             """,
             (
                 body.category,
                 body.level,
                 body.event_name,
                 body.source,
+                body.process,
                 body.agent_id,
                 body.note,
             ),
@@ -107,8 +110,9 @@ def list_event_resolutions(
         if status is None:
             cur.execute(
                 """
-                SELECT id, category, level, event_name, source, agent_id, dismissed_by, note,
-                       status, dismissed_at, reopened_at, burst_count, created_at, updated_at
+                SELECT id, category, level, event_name, source, process, agent_id,
+                       dismissed_by, note, status, dismissed_at, reopened_at, burst_count,
+                       created_at, updated_at
                 FROM event_dismissals
                 ORDER BY dismissed_at DESC, id DESC
                 """
@@ -116,8 +120,9 @@ def list_event_resolutions(
         else:
             cur.execute(
                 """
-                SELECT id, category, level, event_name, source, agent_id, dismissed_by, note,
-                       status, dismissed_at, reopened_at, burst_count, created_at, updated_at
+                SELECT id, category, level, event_name, source, process, agent_id,
+                       dismissed_by, note, status, dismissed_at, reopened_at, burst_count,
+                       created_at, updated_at
                 FROM event_dismissals
                 WHERE status = %s
                 ORDER BY dismissed_at DESC, id DESC
@@ -144,8 +149,9 @@ def reopen_event_resolution(dismissal_id: int, request: Request) -> EventResolut
             UPDATE event_dismissals
             SET status = 'reopened', reopened_at = now(), burst_count = NULL, updated_at = now()
             WHERE id = %s AND status = 'dismissed'
-            RETURNING id, category, level, event_name, source, agent_id, dismissed_by, note,
-                      status, dismissed_at, reopened_at, burst_count, created_at, updated_at
+            RETURNING id, category, level, event_name, source, process, agent_id, dismissed_by,
+                      note, status, dismissed_at, reopened_at, burst_count, created_at,
+                      updated_at
             """,
             (dismissal_id,),
         )
