@@ -189,7 +189,15 @@ def _maybe_kick_recovery_dial(name: str, ops_url: str | None) -> None:
         if name in _recovery_inflight:
             return
         _recovery_inflight.add(name)
-    _start_recovery_thread(name, ops_url)
+    try:
+        _start_recovery_thread(name, ops_url)
+    except Exception:
+        # Spawning is best-effort: a refusal here (e.g. the OS declining a new
+        # thread) must never fail the read it was kicked from, and the slot
+        # must not leak — a leaked name would silently stop this host's
+        # recovery dials for the life of the process.
+        _recovery_inflight.discard(name)
+        _log.exception("failed to start the recovery dial thread for %r", name)
 
 
 # Identity-mismatch episode tracking: one log line per mismatching episode, not

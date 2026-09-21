@@ -1062,6 +1062,42 @@ class TestDetachedRecoveryDial:
             await asyncio.sleep(0.01)
         assert _roster_probe._recovery_inflight == set()
 
+    def test_spawn_failure_never_fails_the_read_and_never_leaks_the_slot(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A spawn refusal (e.g. the OS declining a new thread) is best-effort:
+        the read still serves the cached offline row, the in-flight slot is
+        released, and the next kick can spawn again (QA #3242, PR #3118)."""
+        from datetime import UTC, datetime
+
+        def broken_start(name: str, ops_url: str) -> None:
+            raise RuntimeError("can't start new thread")
+
+        monkeypatch.setattr(_roster_probe, "_start_recovery_thread", broken_start)
+        _roster_probe._probe_failures["wsl"] = (1, 0.0)  # window long elapsed
+
+        row = asyncio.run(
+            status_router._probe_agent_runner(
+                "wsl", ["agent-runner"], _OPS_URL, datetime(2026, 5, 24, tzinfo=UTC), None, None
+            )
+        )
+        assert row.online is False  # the read survived the spawn refusal
+        assert _roster_probe._recovery_inflight == set()  # no leaked slot
+
+        spawned: list[str] = []
+
+        def working_start(name: str, ops_url: str) -> None:
+            spawned.append(name)
+
+        monkeypatch.setattr(_roster_probe, "_start_recovery_thread", working_start)
+        row = asyncio.run(
+            status_router._probe_agent_runner(
+                "wsl", ["agent-runner"], _OPS_URL, datetime(2026, 5, 24, tzinfo=UTC), None, None
+            )
+        )
+        assert row.online is False
+        assert spawned == ["wsl"]  # the next kick spawns again
+
     def test_real_thread_single_flight_and_convergence(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
