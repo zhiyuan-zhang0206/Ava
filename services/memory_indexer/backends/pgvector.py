@@ -24,10 +24,11 @@ cluster's Postgres — provisioned by
 `scripts/provision/database.sh` and CI's `install-pg-redis` action.
 
 Search is exact: `vector <=> %s::vector` over every row (a few thousand rows
-x 3072 dims is single-digit ms), aggregated per path (minimum distance wins —
-the same contract as milvus COSINE ascending) and returned as top-k paths. No
-approximate index yet: at the current pool size an exact scan is cheaper than
-an HNSW build, and exactness is what makes this backend a useful
+x 3072 dims is single-digit ms), aggregated per path (minimum distance wins)
+and returned as top-k paths. Its native cosine distance is 1 - similarity,
+unlike Milvus's raw-similarity response. No approximate index yet: at the
+current pool size an exact scan is cheaper than an HNSW build, and exactness
+is what makes this backend a useful
 reconciliation baseline for the approximate ones.
 """
 
@@ -406,7 +407,7 @@ class PGVectorBackend:
         """Cosine top-k **paths**, aggregated over chunk rows.
 
         `vector <=> %s` is pgvector's cosine distance (1 - cosine_similarity,
-        ascending — identical semantics to milvus COSINE). Raw rows aggregate
+        ascending), unlike Milvus's raw-similarity response. Raw rows aggregate
         per path (minimum distance wins) and the top-k paths return in that
         order; fewer than k when the table has fewer distinct paths; empty
         when the table is empty. `timeout` bounds the pool-borrow wait when
