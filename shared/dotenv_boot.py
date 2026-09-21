@@ -43,6 +43,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from dotenv import dotenv_values, load_dotenv
 
@@ -291,6 +292,35 @@ def _identity_env_only() -> frozenset[str]:
     return frozenset({"AVA_GATEWAY_URL"})
 
 
+def _is_launcher_runner_projection(value: str | None) -> bool:
+    """Whether `value` is the launcher-injected runner DB projection to keep.
+
+    The agent launcher injects an `ava_runner` URL into every agent-profile
+    process's environment, and the force loop below refuses to let the unit's
+    `.env` owner URL replace it. The drop loop carries the mirror exemption
+    (#4334): on a unit whose `.env` does NOT declare AVA_DB_URL (a pure
+    agent-runner), popping the injection left settings-lite and CLI paths with
+    no DB source at all — the unanchored sentinel and an `UnanchoredHomeError`
+    downstream (#4036).
+
+    The scope is deliberately narrow, so the sibling-leak protection keeps its
+    full force: agent-profile processes only (a plain shell's inherited value
+    still drops); runner-role URLs only (an inherited owner URL still drops);
+    anchored checkouts only (an unanchored dev checkout keeps the sentinel
+    discipline that stops it dialing the host home's database — an agent shell
+    must not smuggle the host URL into a bare worktree).
+
+    The role literal mirrors shared/cluster/derive.py `RUNNER_ROLE`; it is
+    duplicated at this leaf because this module runs BEFORE Settings (the same
+    duplication reason as shared/config/data_plane.py).
+    """
+    if not value:
+        return False
+    if os.environ.get("AVA_PROCESS_PROFILE") != "agent" or not _ANCHORED:
+        return False
+    return urlsplit(value).username == "ava_runner"
+
+
 def _enforce_cluster_env_authority() -> None:
     """Force this unit's derived env keys from its own `.env`, overriding a
     polluted parent environment.
@@ -322,6 +352,17 @@ def _enforce_cluster_env_authority() -> None:
     process (pytest, agent shells, scripts) and could be dialed by mistake.
     Dropping it lets bootstrap inject the real value (runner) or the field
     default apply (a gateway whose .env deliberately omits a key).
+
+        One undeclared key is NOT dropped, in one context: the launcher-injected
+    runner projection an agent-profile process carries (`AVA_PROCESS_PROFILE=agent`
+    plus an `ava_runner` URL, on an anchored checkout). The force loop above
+    already refuses to let the unit's `.env` owner URL replace that projection;
+    the drop loop must not revoke it either — on a unit whose `.env` does not
+    declare AVA_DB_URL (a pure agent-runner), the pop left settings-lite and
+    CLI paths with no DB source at all (`UnanchoredHomeError`; #4036). Every
+    other inherited value — owner-shaped URLs, plain-shell values, the
+    unanchored checkout's sentinel discipline — keeps the original drop
+    behavior.
 
         Host-scope keys are never in the cluster set (their scope=host fields
     are per-box facts with no bootstrap source: a not-yet-enrolled runner or
@@ -423,6 +464,8 @@ def _enforce_cluster_env_authority() -> None:
     for key in keep:
         val = file_vals.get(key)
         if key == "AVA_DB_URL" and os.environ.get("AVA_PROCESS_PROFILE") == "agent":
+            # The injected runner projection is authoritative for an agent
+            # process; the drop loop mirrors this exemption (#4334).
             continue
         # The unanchored sentinel outranks the file. AVA_DB_URL is a cluster-scope
         # key, and an unanchored checkout resolves AVA_ENV_PATH to the DEFAULT home
@@ -439,6 +482,10 @@ def _enforce_cluster_env_authority() -> None:
     # (the env-suppliable gateway-URL pair stays exempt).
     for key in env_authority_drop_set(role) - _force_also - _identity_env_only():
         if file_vals.get(key) is None and os.environ.get(key) not in _UNANCHORED_PLACEHOLDERS:
+            if key == "AVA_DB_URL" and _is_launcher_runner_projection(os.environ.get(key)):
+                # Mirrored force-loop exemption (#4334): the launcher's runner
+                # projection is the agent child's DB source.
+                continue
             os.environ.pop(key, None)
 
     # Gateway profile: drop agent-runner capability keys from os.environ.
