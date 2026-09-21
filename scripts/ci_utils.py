@@ -21,6 +21,16 @@ at the NO_WORKFLOW_RUNS assignment in `check_ci`: a run that has not registered
 yet is invisible to the probe, so seconds after a head change a healthy PR can
 still read as NO_WORKFLOW_RUNS once — corroborate before acting on it.
 
+The green verdict carries the mirror of that window: a rollup can carry only
+second-scale checks (GitHub Apps and small proof workflows) attached and
+passed while the main workflow's run has not registered yet, and the
+incomplete-runs probe sees nothing to hold the verdict back (2026-09-21, PR
+#3137: "CI all green (3 checks passed)" ~3s after the push; 18 checks were
+running seconds later). Every green verdict therefore also confirms the main
+CI workflow has a completed run for the head (`MAIN_CI_WORKFLOW_NAME`); until
+it does the verdict is PENDING and `--wait` keeps polling. A passing check-set
+far smaller than the suite's is the tell to corroborate by hand.
+
 Usage as CLI:
     .venv/bin/python scripts/ci_utils.py <PR_NUMBER> [--repo owner/repo] [--json]
     .venv/bin/python scripts/ci_utils.py <PR_NUMBER> --wait [--timeout N] [--merge] [--force]
@@ -293,6 +303,12 @@ QA_EVIDENCE_CHECK_NAME = "evaluate-qa-evidence"
 # verdict buckets.
 QA_GATE_CHECK_NAMES = frozenset({QA_APPROVED_GATE_CHECK_NAME, QA_EVIDENCE_CHECK_NAME})
 
+# The repo's main CI workflow (`.github/workflows/ci.yml`, `name: CI`) — the
+# suite a green verdict must be able to say was seen for the head. A check-set
+# made only of second-scale checks is not that evidence: see
+# `_main_workflow_run_completed` and the green path in `check_ci`.
+MAIN_CI_WORKFLOW_NAME = "CI"
+
 
 def _latest_completed_per_name(checks: list[dict]) -> list[dict]:
     """Keep the newest COMPLETED check run per name.
@@ -453,6 +469,49 @@ def _runs_not_yet_reporting(head_sha: str, repo: str | None) -> list[str] | None
     return [str(n) for n in names] if isinstance(names, list) else None
 
 
+def _main_workflow_run_completed(head_sha: str, repo: str | None) -> bool | None:
+    """Whether the main CI workflow has a COMPLETED run for `head_sha`.
+
+    The incomplete-runs probe cannot prove the suite was ever seen: seconds
+    after a head change the rollup can carry a few second-scale checks — GitHub
+    Apps and small proof workflows, all passing — while the main workflow's run
+    has not registered yet and is therefore invisible to the runs API
+    (2026-09-21, PR #3137: `--wait` read "CI all green (3 checks passed)" ~3s
+    after the push; 18 checks were running seconds later). A green verdict needs
+    positive evidence the main run exists for this head. Asking for a COMPLETED
+    run keeps this probe race-free against the incomplete-runs probe: a run that
+    registers between the two probes is still running, so the next poll reads it
+    as PENDING rather than green.
+
+    A passing check-set far smaller than the repo's suite is the tell to
+    corroborate by hand (`gh run list --commit <head-sha>`) before trusting a
+    green verdict from an unwatched context.
+
+    None means the probe could not answer (missing evidence, never "no run"):
+    the all-green caller reports ERROR (unknown) rather than guess green.
+    """
+    owner = repo if repo else "{owner}/{repo}"
+    r = subprocess.run(  # noqa: S603
+        [
+            "gh",
+            "api",
+            f"repos/{owner}/actions/runs?head_sha={head_sha}&status=completed&per_page=100",
+            "--jq",
+            f'[.workflow_runs[] | select(.name == "{MAIN_CI_WORKFLOW_NAME}")] | length',
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if r.returncode != 0:
+        return None
+    try:
+        count = int(r.stdout.strip())
+    except ValueError:
+        return None
+    return count > 0
+
+
 def _limbo_runs(head_sha: str, repo: str | None) -> list[LimboRun] | None:
     """Runs for `head_sha` that look permanently stuck in GitHub limbo.
 
@@ -561,7 +620,9 @@ def _empty_rollup_verdict(result: CIResult, head_sha: str, repo: str | None) -> 
         result.verdict = CIStatus.NO_CHECKS
 
 
-def check_ci(pr_number: str | int, *, repo: str | None = None) -> CIResult:
+def check_ci(  # noqa: PLR0915 — one ordered verdict ladder; every probe feeds the guard below it.
+    pr_number: str | int, *, repo: str | None = None
+) -> CIResult:
     """Poll one PR's CI status and mergeability via `gh pr view --json`.
 
     Returns a CIResult with a clear verdict — no ambiguous exit codes
@@ -576,6 +637,10 @@ def check_ci(pr_number: str | int, *, repo: str | None = None) -> CIResult:
     settled: a run still queued / in progress for this head means checks are
     coming (PENDING), a confirmed-empty answer is NO_CHECKS, and an
     unanswerable probe is ERROR — never a settled NO_CHECKS.
+
+    Before a green verdict, a second probe confirms the main CI workflow has a
+    completed run for this head — a check-set built from second-scale checks alone
+    is not evidence the suite ran (2026-09-21, PR #3137).
 
     The key rule: only COMPLETED checks are evaluated.  Checks that are
     QUEUED / IN_PROGRESS / PENDING are correctly identified as such and
@@ -696,8 +761,43 @@ def check_ci(pr_number: str | int, *, repo: str | None = None) -> CIResult:
                 "queued for this head"
             )
         else:
-            # All completed, none failed, nothing left scheduled
-            result.verdict = CIStatus.ALL_PASSED
+            # Nothing is still running — but that only rules out runs that HAVE
+            # registered. Registration lags a head change, and in that window a
+            # rollup of second-scale checks (GitHub Apps, small proof workflows)
+            # all passing is indistinguishable from a finished suite: the
+            # incomplete-runs probe above sees nothing to wait for, so green
+            # here would end a watch before the suite began (2026-09-21, PR
+            # #3137: "CI all green (3 checks passed)" ~3s after the push; 18
+            # checks were running seconds later). A green verdict therefore also
+            # confirms the main CI workflow has been SEEN for this head — a
+            # completed run of MAIN_CI_WORKFLOW_NAME — and a check-set far
+            # smaller than the repo's suite is the tell to corroborate by hand.
+            # Scoped by _repo_has_workflows(): a checkout with no workflows is
+            # legitimately green on app checks alone.
+            #
+            # Not seen -> PENDING with the run name in `pending`: --wait keeps
+            # polling (bounded by --timeout), and the one-shot keeps its legacy
+            # contract — it prints this pending summary, never "all green".
+            main_run = (
+                _main_workflow_run_completed(data.get("headRefOid", ""), repo)
+                if _repo_has_workflows()
+                else True
+            )
+            if main_run is None:
+                # Same asymmetry as every probe here: unanswerable is unknown,
+                # never green (--wait exits 3 if it persists).
+                result.verdict = CIStatus.ERROR
+                result.error_detail = (
+                    "runs API probe failed: cannot confirm the main CI workflow "
+                    "has finished a run for this head"
+                )
+            elif not main_run:
+                result.pending.append(MAIN_CI_WORKFLOW_NAME)
+                result.verdict = CIStatus.PENDING
+            else:
+                # All completed, none failed, nothing left scheduled, and the
+                # main workflow's run is seen.
+                result.verdict = CIStatus.ALL_PASSED
 
     return result
 
