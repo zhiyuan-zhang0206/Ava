@@ -210,9 +210,11 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # instead of as an unclassified crash) raises the current total to 204; the
     # converge-preserve signal (task #3871's converge_file_preserved — a locally
     # modified rendered destination preserved instead of overwritten) raises the
-    # current total to 205.
+    # current total to 205; the write-side model-settlement family (task #4306:
+    # spawn_config_normalized / spawn_overlay_model_normalized /
+    # restart_config_normalized) raises it to 208.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 205
+    assert len(_TELEMETRY_KINDS) == 208
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:

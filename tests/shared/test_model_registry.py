@@ -21,6 +21,7 @@ from shared.lm.registry import (
     ModelSpec,
     ModelTuning,
     explain_setting,
+    normalize_overlay_llm_model,
     resolve_available_model,
     resolve_setting,
     tuning_field_names,
@@ -716,3 +717,28 @@ def test_resolve_is_self_sufficient_in_a_fresh_process() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "OK"
+
+
+def test_normalize_overlay_settles_withdrawn_model_and_returns_receipt() -> None:
+    """Write-side settlement (task #4306): a registered-but-withdrawn id in a
+    config overlay is rewritten in place to its registered fallback and the
+    (requested, resolved) pair comes back for the spawner-visible receipt —
+    the stored name must never be the withdrawn id."""
+    config: dict[str, object] = {"llm_model": "deepseek-v4-flash", "reasoning_effort": "low"}
+    assert normalize_overlay_llm_model(config) == ("deepseek-v4-flash", "deepseek-flash")
+    assert config == {"llm_model": "deepseek-flash", "reasoning_effort": "low"}
+
+
+def test_normalize_overlay_leaves_available_unknown_and_absent_untouched() -> None:
+    """Nothing to settle for: no llm_model key, an available id, or an unknown
+    id (unknown ids are `validate_config_overlay` / `validate_model_config`'s
+    rejection concern — this helper must not invent a fallback for them)."""
+    cases: list[dict[str, object]] = [
+        {},
+        {"llm_model": "deepseek-flash"},
+        {"llm_model": "not-a-real-model"},
+    ]
+    for config in cases:
+        before = dict(config)
+        assert normalize_overlay_llm_model(config) is None
+        assert config == before

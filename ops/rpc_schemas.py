@@ -197,10 +197,19 @@ class LaunchAgentRequest(BaseModel):
         return value
 
 
+class ConfigNormalization(BaseModel):
+    """Spawn config_overlay settlement receipt (task #4306): the sent id and
+    the registered fallback it was rewritten to; present only on a rewrite."""
+
+    requested: str
+    resolved: str
+
+
 class SpawnedAgent(BaseModel):
     """POST /api/agents response — new agent_id (== agent_id)."""
 
     id: int
+    config_normalized: ConfigNormalization | None = None
 
 
 class ResurrectAgentRequest(BaseModel):

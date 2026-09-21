@@ -78,7 +78,11 @@ class TestForkConfigStability:
             ]
         overlay, preset_name = _row(db_conn, fork)
         assert preset_name == "coder"
-        assert overlay == {"llm_model": "deepseek-v4-pro"}
+        # The source's withdrawn `deepseek-v4-pro` was settled to its registered
+        # fallback when the SOURCE was created (task #4306), so the fork's
+        # verbatim copy carries the settled value — still exactly what the
+        # source ran.
+        assert overlay == {"llm_model": "deepseek-flash"}
         assert _fork_inbound(db_conn, fork) is None
 
     def test_fork_with_identical_explicit_config_is_allowed(

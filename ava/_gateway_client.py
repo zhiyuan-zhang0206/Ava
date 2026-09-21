@@ -169,7 +169,21 @@ def spawn(
     # (task #698 G7 + task #960). Inherited from the contract — no override.
     resp = _post("/api/agents", body)
     _raise_from_response(resp)
-    return int(resp.json()["id"])
+    data = resp.json()
+    normalized = data.get("config_normalized")
+    if normalized:
+        # The spawner-visible receipt for a withdrawal settlement (task #4306):
+        # the gateway stored the registered fallback, but this template still
+        # names the withdrawn id — fix it at the source.
+        logger.warning(
+            "spawn config_overlay llm_model {requested!r} is withdrawn; the "
+            "agent was stored on the registered fallback {resolved!r} — update "
+            "the template (task #4306)",
+            event="spawn_config_normalized",
+            requested=normalized.get("requested"),
+            resolved=normalized.get("resolved"),
+        )
+    return int(data["id"])
 
 
 def send_message(
