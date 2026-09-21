@@ -61,7 +61,11 @@ def _next_session_index_from_db() -> int:
     # PG_KEEPALIVE_KWARGS: this runs inside the agent's exec sandbox, so a
     # black-holing database would otherwise hang `ava.shell.new()` on the OS
     # TCP-retransmit timeout instead of raising. Same constant as shared.db.
-    with psycopg.connect(DB_URL, **PG_STATEMENT_TIMEOUT_KWARGS) as conn, conn.cursor() as cur:
+    # prepare_threshold=None: never prepare statements on the pooled front door.
+    with (
+        psycopg.connect(DB_URL, prepare_threshold=None, **PG_STATEMENT_TIMEOUT_KWARGS) as conn,
+        conn.cursor() as cur,
+    ):
         cur.execute("SET TRANSACTION READ WRITE")
         cur.execute(
             "UPDATE agents_meta SET session_index = session_index + 1 "
@@ -195,7 +199,7 @@ def _record_ttl(session_id: int, ttl: float) -> None:
 
     try:
         with (
-            psycopg.connect(DB_URL, **PG_STATEMENT_TIMEOUT_KWARGS) as conn,
+            psycopg.connect(DB_URL, prepare_threshold=None, **PG_STATEMENT_TIMEOUT_KWARGS) as conn,
             conn.cursor() as cur,
         ):
             cur.execute("SET TRANSACTION READ WRITE")
@@ -503,7 +507,7 @@ def _read_expiry_row(agent_id: int, session_id: int) -> datetime | None:
 
     try:
         with (
-            psycopg.connect(DB_URL, **PG_STATEMENT_TIMEOUT_KWARGS) as conn,
+            psycopg.connect(DB_URL, prepare_threshold=None, **PG_STATEMENT_TIMEOUT_KWARGS) as conn,
             conn.cursor() as cur,
         ):
             cur.execute(
@@ -554,7 +558,7 @@ def _apply_renewal(agent_id: int, session_id: int, ttl: float, prev_expires: dat
     new_expires: datetime | None = None
     try:
         with (
-            psycopg.connect(DB_URL, **PG_STATEMENT_TIMEOUT_KWARGS) as conn,
+            psycopg.connect(DB_URL, prepare_threshold=None, **PG_STATEMENT_TIMEOUT_KWARGS) as conn,
             conn.cursor() as cur,
         ):
             cur.execute("SET TRANSACTION READ WRITE")

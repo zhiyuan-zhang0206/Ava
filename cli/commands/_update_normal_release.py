@@ -134,10 +134,12 @@ def _preflight_pending_plan(plan: PreparedNormalRelease) -> None:
     remaining = int((context.challenge.valid_until - datetime.now(UTC)).total_seconds())
     if remaining < 2:
         raise ReleaseRejectedError("normal plan has no pre-stop connection budget")
+    # prepare_threshold=None: never prepare statements on the pooled front door.
     with (
         psycopg.connect(
             plan.projection.db_url.get_secret_value(),
             autocommit=True,
+            prepare_threshold=None,
             connect_timeout=min(5, remaining),
         ) as conn,
         pending_transaction(conn, context),
@@ -609,6 +611,7 @@ def _drive_checked_normal_release(
     with psycopg.connect(
         plan.projection.db_url.get_secret_value(),
         autocommit=True,
+        prepare_threshold=None,
         connect_timeout=min(5, remaining),
     ) as conn:
         if journal.stage == "waiting":
@@ -659,6 +662,7 @@ def commit_normal_release_after_publication(
     with psycopg.connect(
         plan.projection.db_url.get_secret_value(),
         autocommit=True,
+        prepare_threshold=None,
         connect_timeout=min(5, remaining),
     ) as conn:
         with pending_transaction(conn, context):

@@ -159,10 +159,11 @@ def test_ava_db_connect_fails_fast(silent_peer_url: str, monkeypatch: pytest.Mon
 def _record_connect_kwargs(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """Replace `psycopg.connect` with a spy that records its kwargs and raises.
 
-    Used for the shell-session call site whose *behaviour* is impractical to
-    drive here because allocation needs an agent identity in agents_meta. The
-    behaviour is already proven above — this pins that the site hands libpq the
-    same constant, which is the whole mechanism.
+    Used for the call sites whose *behaviour* is impractical to drive here
+    (allocation needs an agent identity in `agents_meta`; the TTL dials and
+    `ava.DB` need a live database). The behaviour is already proven above by
+    the black-hole tests — this pins that the site hands libpq the same
+    kwargs, which is the whole mechanism.
     """
     seen: dict[str, Any] = {}
 
@@ -178,7 +179,8 @@ def test_shell_session_index_passes_the_resilience_kwargs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Configuration pin, not a behavioural assertion: `ava.shell.new()`'s
-    session-index allocation hands libpq `PG_KEEPALIVE_KWARGS`."""
+    session-index allocation hands libpq `PG_KEEPALIVE_KWARGS` and never
+    prepares (`prepare_threshold=None`)."""
     import ava._boot
     from ava.shell import sessions
 
@@ -186,4 +188,39 @@ def test_shell_session_index_passes_the_resilience_kwargs(
     seen = _record_connect_kwargs(monkeypatch)
     with pytest.raises(psycopg.OperationalError):
         sessions._next_session_index_from_db()
-    assert seen.items() >= PG_KEEPALIVE_KWARGS.items()
+    assert seen.items() >= {**PG_KEEPALIVE_KWARGS, "prepare_threshold": None}.items()
+
+
+def test_ava_db_connect_never_prepares(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`ava.DB` lives for the whole process and dials the pooled front door —
+    a server-side prepared statement made on one pgbouncer backend does not
+    exist on the next (2026-09-21 watcher wedge on `_pg3_0`), so the dial must
+    never prepare."""
+    from ava._settings import _connect_db
+
+    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://ava:x@127.0.0.1:1/ava")
+    seen = _record_connect_kwargs(monkeypatch)
+    with pytest.raises(psycopg.OperationalError):
+        _connect_db()
+    assert seen["prepare_threshold"] is None
+
+
+def test_shell_session_ttl_sites_never_prepare(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Configuration pin: every TTL bookkeeping dial in `ava.shell.sessions`
+    (`_record_ttl`, `_read_expiry_row`, `_apply_renewal`) hands libpq
+    `prepare_threshold=None` — the module dials the pooled front door
+    everywhere."""
+    from datetime import UTC, datetime
+
+    from ava.shell import sessions
+
+    dials: list[Callable[[], object]] = [
+        lambda: sessions._record_ttl(1, 60.0),
+        lambda: sessions._read_expiry_row(1, 2),
+        lambda: sessions._apply_renewal(1, 2, 60.0, datetime.now(UTC)),
+    ]
+    for dial in dials:
+        seen = _record_connect_kwargs(monkeypatch)
+        with pytest.raises(RuntimeError):
+            dial()
+        assert seen["prepare_threshold"] is None
