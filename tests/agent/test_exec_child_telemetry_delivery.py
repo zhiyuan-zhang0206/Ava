@@ -25,7 +25,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -127,6 +127,16 @@ def _mirror_records(tmp_path: Path) -> list[dict[str, Any]]:
     return records
 
 
+def _mirror_keys(tmp_path: Path) -> set[tuple[str, object, object]]:
+    """The mirror's `(event_name, envelope, op)` keys — the same shape
+    `_sent_keys` builds from the receiver, read from the JSONL mirror."""
+    keys: set[tuple[str, object, object]] = set()
+    for record in _mirror_records(tmp_path):
+        attributes = cast("dict[str, Any]", record.get("attributes") or {})
+        keys.add((str(record.get("event_name")), attributes.get("envelope"), attributes.get("op")))
+    return keys
+
+
 def _sent_keys() -> set[tuple[str, object, object]]:
     """Decode the receiver's OTLP/HTTP log batches into envelope keys.
 
@@ -204,12 +214,8 @@ def test_done_child_delivers_result_write_record(tmp_path: Path, otlp_receiver: 
     assert ("exec_envelope", "result", "write") in keys, f"receiver saw: {sorted(keys)}"
 
     # The mirror carries the same record — the local channel never lost it.
-    assert any(
-        record.get("event_name") == "exec_envelope"
-        and (record.get("attributes") or {}).get("envelope") == "result"
-        and (record.get("attributes") or {}).get("op") == "write"
-        for record in _mirror_records(tmp_path)
-    )
+    mirror_keys = _mirror_keys(tmp_path)
+    assert ("exec_envelope", "result", "write") in mirror_keys, f"mirror saw: {sorted(mirror_keys)}"
 
 
 def test_crashed_child_delivers_its_records(tmp_path: Path, otlp_receiver: Any) -> None:
