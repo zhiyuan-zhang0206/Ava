@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "catalog_version": "2026-09-17.1",
+  "catalog_version": "2026-09-22.1",
   "currency": "USD",
   "unit_tokens": 1000000,
   "models": {
@@ -1234,6 +1234,52 @@
                 "input": "1.305",
                 "cache_read": "0.0108",
                 "output": "2.61"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "mimo-v2.6-pro": {
+      "vendor": "xiaomi",
+      "source_url": "https://mimo.mi.com/docs/price/pay-as-you-go",
+      "source_checked_at": "2026-09-22",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.435",
+                "cache_read": "0.0036",
+                "output": "0.87"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "mimo-v2.6-pro-ultraspeed": {
+      "vendor": "xiaomi",
+      "source_url": "https://mimo.mi.com/docs/price/pay-as-you-go",
+      "source_checked_at": "2026-09-22",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "4.35",
+                "cache_read": "0.036",
+                "output": "8.70"
               },
               "utc_daily_overrides": []
             }

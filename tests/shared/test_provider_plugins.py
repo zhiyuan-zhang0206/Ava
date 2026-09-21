@@ -90,6 +90,8 @@ _REPO_MODEL_VENDORS = {
     "kimi-k3": "moonshot",
     "mimo-v2.5-pro": "xiaomi",
     "mimo-v2.5-pro-ultraspeed": "xiaomi",
+    "mimo-v2.6-pro": "xiaomi",
+    "mimo-v2.6-pro-ultraspeed": "xiaomi",
     "qwen3.8-27b": "alibaba",
     "qwen3.8-flash": "alibaba",
     "qwen3.8-max": "alibaba",
@@ -296,7 +298,7 @@ def test_zero_provider_plugins_fail_loud_and_remain_retryable(
 def test_repo_model_vendor_vocabulary_is_complete() -> None:
     ensure_provider_plugins_loaded()
 
-    assert len(_REPO_MODEL_VENDORS) == 37
+    assert len(_REPO_MODEL_VENDORS) == 39
     assert set(MODELS) == _REPO_MODEL_VENDORS.keys()
     # Catalog-only entries: a registered chat model pops its archive entry, so
     # what remains is the catalog-only services plus models the registry no
@@ -602,9 +604,17 @@ def test_repo_xiaomi_provider_is_enabled_and_registers_complete_contract() -> No
     mimo_models = {
         "mimo-v2.5-pro",
         "mimo-v2.5-pro-ultraspeed",
+        "mimo-v2.6-pro",
+        "mimo-v2.6-pro-ultraspeed",
     }
     assert mimo_models <= MODELS.keys()
-    assert set(SUPPORTED_MODELS["mimo"]) == mimo_models
+    assert set(SUPPORTED_MODELS["mimo"]) == {
+        "mimo-v2.5-pro",
+        "mimo-v2.6-pro",
+        "mimo-v2.6-pro-ultraspeed",
+    }
+    assert MODELS["mimo-v2.5-pro"].superseded_by == "mimo-v2.6-pro"
+    assert MODELS["mimo-v2.5-pro-ultraspeed"].unavailable_fallback == "mimo-v2.6-pro-ultraspeed"
     assert pricing.model_vendor("mimo-v2.5-pro") == "xiaomi"
 
     from shared.lm.factory import _MODEL_KEY_MAP, provider_key_map, provider_key_of_model
