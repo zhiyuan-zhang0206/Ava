@@ -73,6 +73,14 @@
       "description": "Compact-driven understanding-tree worker — scans for new compaction boundaries, enqueues per-agent builds of the run-timeline narrative layers and runs them serially with a bounded per-job budget (task #3704 P2b).",
       "script": "hierarchy-worker-schedule.py",
       "command": "python hierarchy-worker-schedule.py"
+    },
+    {
+      "name": "dev-ci-metrics",
+      "class": "product",
+      "default_enabled": true,
+      "description": "Daily GitHub Actions run-observability collection at 06:20 cluster time — publishes absolute Dev/CI workflow, failure, per-PR, and white-run gauges; failures wake the Ava P0 lead.",
+      "script": "dev-ci-metrics-schedule.py",
+      "command": "python dev-ci-metrics-schedule.py"
     }
   ]
 }

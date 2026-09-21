@@ -60,6 +60,9 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "debt_sweep_daily",  # schedules/debt-sweep-daily-schedule.py:_fire (positional emit)
         "pr_flow_daily",  # scripts/pr_flow_export.py:_emit_events (positional emit)
         "pr_flow_run",  # scripts/pr_flow_export.py:_emit_events (positional emit)
+        "ci_runs_daily",  # scripts/ci_runs_export.py:emit_snapshot (positional emit)
+        "ci_workflow_window",  # scripts/ci_runs_export.py:emit_snapshot (positional emit)
+        "ci_runs_run",  # scripts/ci_runs_export.py:emit_snapshot (positional emit)
         # Dynamic emit: positional-argument form, no `event=` literal.
         "task_reminder_digest",  # task_maintenance/daemon.py:_run_reminders
         "task_escalation",  # task_maintenance/daemon.py:_run_escalate

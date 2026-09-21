@@ -8,6 +8,11 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
 ## [Unreleased]
 
 ### Added
+- The Ops dashboard gains a `Dev/CI` row backed by daily GitHub Actions run
+  classification: per-PR duration and trigger percentiles, red/self-healed
+  outcomes, fragile workflows, and deduplicated white-run classes. The
+  watchdog remains explicit noise rather than inflating development failure
+  signals (task #4014).
 - The Ops dashboard gains two `Gateway & execution` panels for exec-envelope
   transfer cost (task #2174): envelope size (`size_bytes` p50/p95/max) and
   serialization cost (`serialize_ms` avg/p95/max), unwrapped from the

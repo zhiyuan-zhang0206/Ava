@@ -576,6 +576,87 @@ class PrFlowRun(TypedDict):
     queue_depth: NotRequired[int]
 
 
+class CiRunsDaily(TypedDict):
+    """`ci_runs_daily` payload — scripts/ci_runs_export.py.
+
+    One absolute-state sample per complete cluster-time day and repository.
+    The collector re-emits its trailing window, so every number is an OTLP
+    gauge rather than an accumulating counter. Classification labels overlap;
+    `white_run_share` alone deduplicates instant skips, superseded runs, and
+    abandoned PR heads in that priority order. Per-PR percentiles are absent
+    when no completed PR has attributed runs. `first_pass_pr_share` is v1's
+    run-level approximation: attributed non-noise, non-zombie runs have no
+    red conclusion and no retry attempt.
+    """
+
+    repo: str
+    day: str
+    runs: int
+    instant_skip_runs: int
+    watchdog_runs: int
+    qa_gate_runs: int
+    proof_runs: int
+    cancelled_runs: int
+    superseded_runs: int
+    superseded_zero_runs: int
+    failed_runs: int
+    retried_failed_runs: int
+    self_healed_runs: int
+    abandoned_runs: int
+    zombie_runs: int
+    prs_completed: int
+    prs_with_runs: int
+    per_pr_duration_median_minutes: NotRequired[float]
+    per_pr_duration_p90_minutes: NotRequired[float]
+    per_pr_runs_median: NotRequired[float]
+    per_pr_runs_p90: NotRequired[float]
+    per_pr_runs_executed_median: NotRequired[float]
+    white_run_share: NotRequired[float]
+    retry_share: NotRequired[float]
+    noise_run_share: NotRequired[float]
+    first_pass_pr_share: NotRequired[float]
+
+
+class CiWorkflowWindow(TypedDict):
+    """`ci_workflow_window` payload — scripts/ci_runs_export.py.
+
+    Trailing-window absolute workflow state, keyed by repository and workflow
+    name, emitted with the same daily sampler. Execution percentiles omit
+    zombie wall-clock artifacts and zero-execution runs rather than treating
+    an empty population as a real zero.
+    """
+
+    repo: str
+    workflow: str
+    runs: int
+    failed_runs: int
+    self_healed_runs: int
+    retried_failed_runs: int
+    cancelled_runs: int
+    superseded_runs: int
+    instant_skip_runs: int
+    prs_appeared_on: int
+    pr_appearance_share: NotRequired[float]
+    retry_share: NotRequired[float]
+    exec_median_seconds: NotRequired[float]
+    exec_p90_seconds: NotRequired[float]
+
+
+class CiRunsRun(TypedDict):
+    """`ci_runs_run` payload — scripts/ci_runs_export.py.
+
+    One sampler breadcrumb per repository: the fixed window's population and
+    this run's GitHub-read budget. These are current observations, so all
+    numbers are gauges even though their names are counts.
+    """
+
+    repo: str
+    window_days: int
+    window_runs: int
+    window_prs: int
+    api_requests: int
+
+
 class TaskReminderDigest(TypedDict):
     """`task_reminder_digest` payload — task-maintenance daemon."""
 

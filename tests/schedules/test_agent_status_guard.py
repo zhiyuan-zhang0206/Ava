@@ -20,6 +20,11 @@ EXPECTED_STATUS_MEMBERS: dict[str, set[str]] = {
         "RUNNING",
         "TERMINATED",
     },
+    "dev-ci-metrics-schedule.py": {
+        "IDLING",
+        "RUNNING",
+        "TERMINATED",
+    },
     "adversarial-eval-weekly-schedule.py": {
         "IDLING",
         "TERMINATED",
@@ -38,6 +43,7 @@ EXPECTED_STATUS_MEMBERS: dict[str, set[str]] = {
 SCHEDULE_NAMES = {
     "c9-daily-report-schedule.py": "c9-daily-report",
     "debt-sweep-daily-schedule.py": "debt-sweep-daily",
+    "dev-ci-metrics-schedule.py": "dev-ci-metrics",
     "adversarial-eval-weekly-schedule.py": "adversarial-eval-weekly",
     "memory-steward-schedule.py": "memory-arbiter",
     "model-update-tracker-schedule.py": "model-update-tracker",

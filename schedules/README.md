@@ -17,6 +17,7 @@ directory. The manifest is the single expression of the built-in policy
 |----------|--------|-------|---------|
 | `c9-daily-report` | `c9-daily-report-schedule.py` | product | **enabled** |
 | `debt-sweep-daily` | `debt-sweep-daily-schedule.py` | product | **enabled** |
+| `dev-ci-metrics` | `dev-ci-metrics-schedule.py` | product | **enabled** |
 | `adversarial-eval-weekly` | `adversarial-eval-weekly-schedule.py` | product | **enabled** |
 | `memory-arbiter` | `memory-steward-schedule.py` | product | **enabled** |
 | `self-evolution-daily` | `self-evolution-daily-schedule.py` | product | **enabled** |
@@ -26,8 +27,8 @@ directory. The manifest is the single expression of the built-in policy
 | `trace-ship-tempo` | `trace-ship-tempo-schedule.py` | operator | **disabled** (present, not started) |
 
 - **product** schedules (adversarial evaluation, self-evolution, memory, model
-  tracking, debt clearing, the hierarchy worker) are Ava's own improvement
-  loops — they ship and start by default.
+  tracking, debt clearing, CI observability, the hierarchy worker) are Ava's own
+  improvement loops — they ship and start by default.
 - **operator** schedules (cluster-operator tooling, e.g. shipping OTel traces
   to a local Tempo viewer) ship with the product but start **disabled**: they
   exist so they are discoverable, and start only when the operator enables
@@ -96,6 +97,7 @@ as before.
   ava schedules update self-evolution-daily  --script-file schedules/self-evolution-daily-schedule.py
   ava schedules update self-evolution-weekly --script-file schedules/self-evolution-weekly-schedule.py
   ava schedules update adversarial-eval-weekly --script-file schedules/adversarial-eval-weekly-schedule.py
+  ava schedules update dev-ci-metrics          --script-file schedules/dev-ci-metrics-schedule.py
   ava schedules update model-update-tracker  --script-file schedules/model-update-tracker-schedule.py
   ava schedules update trace-ship-tempo      --script-file schedules/trace-ship-tempo-schedule.py
   ```

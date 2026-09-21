@@ -4,7 +4,10 @@ from typing import Any, Literal
 
 from shared.events.payloads import (
     LLM_ERROR_FAMILY,
+    CiRunsDaily,
+    CiRunsRun,
     CiUsageDaily,
+    CiWorkflowWindow,
     CompactionCompleted,
     ComputerAction,
     ComputerSessionEnd,
@@ -677,6 +680,11 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         "PR-flow sampler run — point-in-time Trunk queue depth (absolute state)",
         payload=PrFlowRun,
     ),
+    "ci_runs_daily": _telemetry("ci_runs_daily", "daily CI-run aggregates", payload=CiRunsDaily),
+    "ci_workflow_window": _telemetry(
+        "ci_workflow_window", "trailing workflow fragility", payload=CiWorkflowWindow
+    ),
+    "ci_runs_run": _telemetry("ci_runs_run", "CI-run sampler breadcrumb", payload=CiRunsRun),
     "task_reminder_digest": _telemetry(
         "task_reminder_digest",
         "overdue-task owner digest",
