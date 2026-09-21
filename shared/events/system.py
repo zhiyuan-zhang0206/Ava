@@ -74,6 +74,7 @@ class ResolvedMarker(TypedDict, total=False):
     level: NotRequired[str]
     event_name: NotRequired[str]
     source: NotRequired[str]
+    process: NotRequired[str]
     agent_id: NotRequired[int | None]
     dismissed_by: NotRequired[int]
     note: NotRequired[str]
@@ -86,6 +87,7 @@ class EventClassReopened(TypedDict):
     level: str
     event_name: str
     source: str
+    process: str
     agent_id: int | None
     dismissed_by: int
     note: str

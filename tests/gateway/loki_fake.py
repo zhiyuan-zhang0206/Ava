@@ -152,6 +152,7 @@ class FakeLoki:
                 level=r["level"],
                 event_name=r["event_name"],
                 source=r["source"],
+                process=str(r.get("process", "")),
             )
             counts[event_class] = counts.get(event_class, 0) + 1
         return counts

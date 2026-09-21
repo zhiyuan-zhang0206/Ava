@@ -38,9 +38,10 @@ def _event_class(
     level: str = "warning",
     event_name: str = "x",
     source: str = "test",
+    process: str = "",
 ) -> resolution.EventClass:
     return resolution.EventClass(
-        category=category, level=level, event_name=event_name, source=source
+        category=category, level=level, event_name=event_name, source=source, process=process
     )
 
 
@@ -48,14 +49,16 @@ def _insert_dismissal(conn: psycopg.Connection[Any], event_class: resolution.Eve
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO event_dismissals (category, level, event_name, source, dismissed_by)
-            VALUES (%s, %s, %s, %s, 0)
+            INSERT INTO event_dismissals
+                (category, level, event_name, source, process, dismissed_by)
+            VALUES (%s, %s, %s, %s, %s, 0)
             """,
             (
                 event_class.category,
                 event_class.level,
                 event_class.event_name,
                 event_class.source,
+                event_class.process,
             ),
         )
     conn.commit()
@@ -82,7 +85,7 @@ def test_resolution_query_uses_json_fields_until_the_legacy_expiry() -> None:
     """The fixed window aggregates classes without unsafe stream-label filters."""
 
     assert resolution.grouped_count_query("6h") == (
-        "sum by (category, level, event_name, source) "
+        "sum by (category, level, event_name, source, process) "
         '(count_over_time({service_name="unknown_service"} | json | '
         'category=~"telemetry|log" | level=~"warning|error|critical" [6h]))'
     )
@@ -93,7 +96,7 @@ def test_resolution_query_optional_cluster_stage() -> None:
     without changing the daemon's unfiltered query (task #1935)."""
 
     assert resolution.grouped_count_query("6h", cluster='my"cluster') == (
-        "sum by (category, level, event_name, source) "
+        "sum by (category, level, event_name, source, process) "
         '(count_over_time({service_name="unknown_service"} | json | '
         'category=~"telemetry|log" | level=~"warning|error|critical"'
         ' | cluster="my\\"cluster" or cluster="" [6h]))'
@@ -167,6 +170,7 @@ def test_burst_reopens_only_above_the_configured_threshold(
             "level": "warning",
             "event_name": "hit",
             "source": "test",
+            "process": "",
             "agent_id": None,
             "dismissed_by": 0,
             "note": "auto:burst",
@@ -286,3 +290,76 @@ def test_daemon_emits_dismissed_gauges_alongside_unresolved(
         "dismissed_errors": 0,
         "window": "6h",
     }
+
+
+def test_process_scopes_dismissal_matching() -> None:
+    """Exact rows cancel one process; wildcard rows cancel every process; a
+    mixed-version counted class (no process in its body) matches only the
+    wildcard (task #4329 B5)."""
+
+    agent_host = _event_class(process="agent_host")
+    im_bridge = _event_class(process="im_bridge")
+    legacy = _event_class()  # pre-dimension body: no process -> ""
+    counts = {agent_host: 3, im_bridge: 3, legacy: 1}
+
+    exact = resolution.level_splits(counts, {agent_host})
+    assert exact["warning"] == resolution.LevelSplit(total=7, dismissed=3, net=4)
+
+    wildcard = resolution.level_splits(counts, {_event_class()})
+    assert wildcard["warning"] == resolution.LevelSplit(total=7, dismissed=7, net=0)
+
+
+def test_exact_dismissal_reopens_only_on_its_own_process_burst(
+    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Its own process's burst reopens an exact dismissal; a different
+    process's burst of the same base must not (task #4329 B5)."""
+
+    host_class = _event_class(process="agent_host")
+    bridge_class = _event_class(process="im_bridge")
+    _insert_dismissal(db_conn, host_class)
+    _insert_dismissal(db_conn, bridge_class)
+    counts = {host_class: 6, bridge_class: 2}
+
+    def query_class_counts(_window: str, _at: datetime) -> dict[resolution.EventClass, int]:
+        return counts
+
+    monkeypatch.setattr(resolution, "_query_class_counts", query_class_counts)
+    monkeypatch.setattr(resolution.settings.daemon, "events_resolution_burst_threshold", 5)
+    emitted = _capture_events(monkeypatch)
+
+    result = resolution.run_resolution_slice(cast(ConnectionPool, _Pool(db_conn)))
+
+    assert result == resolution.ResolutionResult(6, 0, reopened=1, auto_dismissed=0)
+    assert emitted[0][1] == "warning_reopened"
+    assert emitted[0][2]["process"] == "agent_host"
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT event_name, process, status FROM event_dismissals ORDER BY process")
+        assert cur.fetchall() == [
+            ("x", "agent_host", "reopened"),
+            ("x", "im_bridge", "dismissed"),
+        ]
+
+
+def test_wildcard_dismissal_reopens_on_the_whole_base_burst(
+    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A wildcard (process="") dismissal — every pre-dimension row's scope —
+    watches the summed ten-minute count across processes."""
+
+    _insert_dismissal(db_conn, _event_class())  # process="" wildcard
+    counts = {_event_class(process="agent_host"): 4, _event_class(process="im_bridge"): 2}
+
+    def query_class_counts(_window: str, _at: datetime) -> dict[resolution.EventClass, int]:
+        return counts
+
+    monkeypatch.setattr(resolution, "_query_class_counts", query_class_counts)
+    monkeypatch.setattr(resolution.settings.daemon, "events_resolution_burst_threshold", 5)
+    emitted = _capture_events(monkeypatch)
+
+    result = resolution.run_resolution_slice(cast(ConnectionPool, _Pool(db_conn)))
+
+    # 4 + 2 = 6 > 5: the base-wide burst trips the wildcard row's safety valve.
+    assert result == resolution.ResolutionResult(6, 0, reopened=1, auto_dismissed=0)
+    assert emitted[0][2]["process"] == ""
+    assert emitted[0][2]["triggered_by_count"] == 6

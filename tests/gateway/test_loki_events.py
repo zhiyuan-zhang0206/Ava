@@ -1634,6 +1634,7 @@ def _class_payload(*, count: str, level: str = "warning") -> dict[str, Any]:
                         "level": level,
                         "event_name": "agent_restart",
                         "source": "test",
+                        "process": "gateway",
                     },
                     "value": [1723300000, count],
                 }
@@ -1643,7 +1644,11 @@ def _class_payload(*, count: str, level: str = "warning") -> dict[str, Any]:
 
 
 _CLASS = EventClass(
-    category="telemetry", level="warning", event_name="agent_restart", source="test"
+    category="telemetry",
+    level="warning",
+    event_name="agent_restart",
+    source="test",
+    process="gateway",
 )
 
 

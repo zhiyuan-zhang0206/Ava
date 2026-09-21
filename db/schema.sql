@@ -816,13 +816,15 @@ END $$;
 -- Loki log lines are immutable, so a resolution is state about an event class,
 -- never a write-back onto an historical event. NULL agent_id means every agent;
 -- the first API version rejects per-agent dismissals while retaining the field
--- for the class identity's future extension.
+-- for the class identity's future extension. An empty `process` means every
+-- process — the scope every pre-dimension dismissal keeps (task #4329 B5).
 CREATE TABLE event_dismissals (
     id           BIGSERIAL PRIMARY KEY,
     category     TEXT NOT NULL,
     level        TEXT NOT NULL,
     event_name   TEXT NOT NULL,
     source       TEXT NOT NULL,
+    process      TEXT NOT NULL DEFAULT '',
     agent_id     INTEGER,
     dismissed_by INTEGER NOT NULL,
     note         TEXT NOT NULL DEFAULT '',
@@ -839,7 +841,7 @@ COMMENT ON COLUMN event_dismissals.dismissed_by IS
     'Acting agent id; 0 means a user or operator through the gateway UI/API, -1 is the auto-dismiss system.';
 
 CREATE UNIQUE INDEX event_dismissals_one_active_class_idx
-    ON event_dismissals (category, level, event_name, source, agent_id) NULLS NOT DISTINCT
+    ON event_dismissals (category, level, event_name, source, process, agent_id) NULLS NOT DISTINCT
     WHERE status = 'dismissed';
 
 -- ─────────────── agent_pages ───────────────

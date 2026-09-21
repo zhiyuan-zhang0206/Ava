@@ -547,6 +547,7 @@ def test_class_resolution_markers_are_telemetry_category() -> None:
         "level",
         "event_name",
         "source",
+        "process",
         "agent_id",
         "dismissed_by",
         "note",

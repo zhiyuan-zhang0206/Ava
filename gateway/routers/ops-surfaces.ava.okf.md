@@ -51,8 +51,10 @@ and merge the shared helper's contiguous, clock-aligned 12h shards for a
 longer window. The warning/error section reads per-class counts with the
 events-maintenance daemon's grouped query and applies its class arithmetic
 (`resolution.level_splits`) over the SELECTED window (task #1935): events
-whose class has an active dismissal in `event_dismissals` land in
-`*_dismissed`, the rest in `*_net`, and dismissed + net == the raw total —
+whose class has an active dismissal in `event_dismissals` — an exact
+`(category, level, event_name, source, process)` match, or a wildcard row
+with an empty `process` (task #4329 B5) — land in `*_dismissed`, the rest in
+`*_net`, and dismissed + net == the raw total —
 the same cancellation the daemon's fixed-six-hour Grafana gauges apply. The `llm_usage.cost_usd` sum is
 the usage-time quote snapshot, not historical tokens repriced against today's
 registry. While a last-good response for the window is within
