@@ -244,6 +244,18 @@ end: it restores service and resumes after its readiness gate, without the
 explicit hold — unless blocking failed receipts remain, in which case it
 refuses before launching services (clear those first, as for `resume --cancel`).
 
+The updater leg itself also carries a bounded caller-side arm (task #3942): an
+agent-runner leg whose graceful stop exits non-zero spends ONE bounded attempt
+at its own internal start — the same `ava start --persist-services` shape as
+the leg's step 5 — when the hold is still its exact generation at a post-stop
+phase, its updater handoff is live, and no stranded hold is declared. The
+attempt is bounded by `AVA_STOP_INCOMPLETE_RECOVERY_TIMEOUT_SECONDS` (default
+120s) and switchable with `AVA_STOP_INCOMPLETE_RECOVERY`; failure or refusal is
+not fatal — the leg returns its stop rc and the paths below (the stranded-hold
+completion, the watchdog, a manual `ava start`) remain the recovery. The arm is
+read-only on the fleet's stranded-recovery record: it never spends the OS
+completion's one bounded attempt.
+
 A post-stop hold whose shepherding process is gone no longer waits for a human
 indefinitely: since task #3887 an OS-scheduled watchdog (`ava cluster
 hold-watchdog`, one job per home; the design half of tasks #3722/#3723) spends

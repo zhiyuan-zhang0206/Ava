@@ -569,6 +569,15 @@ def _run_agent_runner_self_update_inner(  # noqa: PLR0915 — the self-update's 
     #    out. The exec boundary means this process has no old modules in
     #    `sys.modules`, while the existing lazy session-kill chain remains a second
     #    defense against importing an unrelated stale dependency before the stop.
+    #
+    #    A non-zero exit leaves the host half-stopped with its hold still held:
+    #    `_update_stop_recovery` (task #3942) spends ONE bounded attempt at this
+    #    leg's own step-5 start before the stop's rc becomes the verdict. It
+    #    declines unless the leg can prove the episode is its own, and it never
+    #    touches the state the out-of-band completion paths own.
+    from cli.commands import _update_stop_recovery as stop_recovery
+
+    stop_episode = stop_recovery.capture_stop_episode()
     with updater_stage("stop"):
         stop_rc = _ns._do_stop(
             repo,
@@ -578,8 +587,17 @@ def _run_agent_runner_self_update_inner(  # noqa: PLR0915 — the self-update's 
             force_reap_agents=force_reap_agents,
             force=force_reap_agents,
         )
-        if stop_rc != 0:
-            return stop_rc
+
+    if stop_rc != 0:
+        if stop_recovery.recover_incomplete_stop(
+            repo,
+            ava_bin,
+            stop_rc=stop_rc,
+            episode=stop_episode,
+            handoff_generation=handoff_generation,
+        ):
+            return 0
+        return stop_rc
 
     # 5) start in a FRESH process so it loads the just-synced new code. Calling
     #    cmd_start() in-process would mix already-imported old modules with the

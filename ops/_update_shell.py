@@ -73,8 +73,16 @@ def _restart_recovery_cmd(
     if force_reap:
         flags += " --force-reap"
     final_marker = "(python -m cli.commands._updater_stage final || ver>nul)"
+    # The recovery arms carry the same verdict/upgrade line the POSIX caller arm
+    # prints (task #3942): if this internal start leaves the host down, the
+    # stranded-hold completion, the watchdog respawn, or a manual `ava start`
+    # are the named recovery paths. Plain echo text — no parentheses or other
+    # cmd.exe operators — so the parenthesized arm cannot be re-shaped by it.
     recovery_start = (
-        "(python -m cli.commands._updater_stage start || ver>nul) & ava start --persist-services"
+        "(python -m cli.commands._updater_stage start || ver>nul) & echo [updater] "
+        "stop-recovery: internal ava start next -- if it leaves the host down, the "
+        "stranded-hold completion, the watchdog respawn, or a manual ava start are the "
+        "recovery paths & ava start --persist-services"
     )
     # The recovery `ava start` arms run as an INTERNAL child start
     # (`--persist-services`), never as an operator start: a Phase-B updater
