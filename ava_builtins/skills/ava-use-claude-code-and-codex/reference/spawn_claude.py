@@ -66,6 +66,34 @@ from shared.agents import AgentNotFound, AgentStatus
 
 _DEFAULT_TTL_SECONDS = 24 * 3600
 
+_PASTE_WRAP_THRESHOLD_CHARS = 1022
+"""One Claude composer chunk is ~1022 chars: a longer raw burst folds into collapsed paste fragments, and a submission made while such a fragment sits next to a raw tail drops the fragment's content (#4364)."""
+
+_PASTE_BEGIN = "\x1b[200~"
+_PASTE_END = "\x1b[201~"
+
+
+def _bracketed_paste(text: str) -> str:
+    """Wrap a multi-chunk payload so the composer takes it as one atomic paste.
+
+    The composer folds a raw burst longer than one chunk into collapsed paste
+    fragments; when Enter lands with a collapsed fragment plus a raw tail in
+    the composer, the fragment's content is dropped from the submission
+    (#4364). Bracketed-paste markers make the composer take the whole payload
+    as one paste whose content survives intact. Inner markers are stripped so
+    the payload cannot close the wrapper early; a payload within one chunk is
+    sent unchanged.
+    """
+    body = text.replace(_PASTE_BEGIN, "").replace(_PASTE_END, "")
+    if len(body) <= _PASTE_WRAP_THRESHOLD_CHARS:
+        return body
+    return f"{_PASTE_BEGIN}{body}{_PASTE_END}"
+
+
+def _send_bootstrap(sid: int, message: str) -> None:
+    """Send the takeover bootstrap through the composer's paste path (#4364)."""
+    ava.shell.sessions.send(sid, _bracketed_paste(message))
+
 
 def _resolve_dir(dir_path: str) -> Path:
     p = Path(dir_path).expanduser().resolve()
@@ -312,7 +340,7 @@ def _verify_start_receipt(
     print("  -> no submission evidence after Enter; rebuilding and resending once")
     message = rebuild_bootstrap()
     try:
-        ava.shell.sessions.send(sid, message)
+        _send_bootstrap(sid, message)
     except ValueError as exc:
         print(
             "  -> WARNING: start-receipt=not-submitted "
@@ -538,7 +566,7 @@ def _run_takeover_launch(
         ava.shell.sessions.send(sid, _claude_command(workspace, caller_instance))
         _wait_for_ready(sid)
         message = _takeover_bootstrap_message(owner_agent_id, takeover_name, takeover_brief)
-        ava.shell.sessions.send(sid, message)
+        _send_bootstrap(sid, message)
         _verify_start_receipt(
             sid,
             lambda: _takeover_bootstrap_message(owner_agent_id, takeover_name, takeover_brief),
