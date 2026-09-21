@@ -536,6 +536,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/{agent_id}/completion-notice-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Completion Notice Policy
+         * @description Expose the effective policy for canaries and platform diagnostics.
+         */
+        get: operations["get_completion_notice_policy_api_agents__agent_id__completion_notice_policy_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents/{agent_id}/messages": {
         parameters: {
             query?: never;
@@ -4073,6 +4093,7 @@ export interface components {
             content: string | (components["schemas"]["TextContentBlock"] | components["schemas"]["ImageUrlContentBlock"])[];
             /** Source */
             source: string;
+            completion_notice?: components["schemas"]["CompletionNoticeIn"] | null;
         };
         /**
          * AgentMessagesResponse
@@ -4797,6 +4818,32 @@ export interface components {
              * @constant
              */
             status: "enqueued";
+        };
+        /**
+         * CompletionNoticeIn
+         * @description Platform-only completion metadata carried with a shell or watcher chat.
+         */
+        CompletionNoticeIn: {
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "exit" | "missed";
+            /** Exit Code */
+            exit_code?: number | null;
+        };
+        /**
+         * CompletionNoticePolicyView
+         * @description Effective policy that the gateway applies to platform completions.
+         */
+        CompletionNoticePolicyView: {
+            /** Agent Id */
+            agent_id: number;
+            /**
+             * Policy
+             * @enum {string}
+             */
+            policy: "all" | "failures" | "hourly";
         };
         /**
          * ConfigAuditView
@@ -9223,6 +9270,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RestartAgentResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_completion_notice_policy_api_agents__agent_id__completion_notice_policy_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompletionNoticePolicyView"];
                 };
             };
             /** @description Validation Error */

@@ -144,7 +144,11 @@ def _explicit_send_source(source: str | None) -> str:
 
 
 def cmd_agents_send(
-    agent_id: int, content: str, source: str | None, tail_file: str | None = None
+    agent_id: int,
+    content: str,
+    source: str | None,
+    tail_file: str | None = None,
+    completion_exit_code: int | None = None,
 ) -> int:
     """`ava agents send <id> <content> --source S [--tail-file PATH]` — deliver a
     chat inbound via POST /api/agents/{id}/messages.
@@ -173,13 +177,24 @@ def cmd_agents_send(
     cannot change it."""
     # argparse enforces --source for the CLI; the guard covers programmatic callers.
     source = _explicit_send_source(source)
-    status = send_agent_message(agent_id, content, source=source, tail_file=tail_file)
+    status = send_agent_message(
+        agent_id,
+        content,
+        source=source,
+        tail_file=tail_file,
+        completion_exit_code=completion_exit_code,
+    )
     print(f"  ✓ agent {agent_id} send: {status}")
     return 0
 
 
 def send_agent_message(
-    agent_id: int, content: str, *, source: str, tail_file: str | None = None
+    agent_id: int,
+    content: str,
+    *,
+    source: str,
+    tail_file: str | None = None,
+    completion_exit_code: int | None = None,
 ) -> str:
     """Deliver one chat inbound to `agent_id` carrying `source` — the single transport.
 
@@ -224,11 +239,19 @@ def send_agent_message(
         else:
             if tail.strip():
                 content += f"\n\nLast output ({tail_file}):\n{tail.strip()}"
+    completion_notice: dict[str, object] | None = None
+    if completion_exit_code is not None:
+        completion_notice = {"outcome": "exit", "exit_code": completion_exit_code}
     # All attempts of one logical message share one key; minting it here also
     # arms the server's client_message_id receipt for the flush replay.
     key: str | None = None
     try:
-        key = delivery_outbox.logical_key(agent_id=agent_id, source=source, content=content)
+        key = delivery_outbox.logical_key(
+            agent_id=agent_id,
+            source=source,
+            content=content,
+            completion_notice=completion_notice,
+        )
     except Exception:
         # The outbox is a safety net for a failing send, never a reason for
         # one: an unusable outbox degrades to the unkeyed behavior with a
@@ -244,7 +267,11 @@ def send_agent_message(
     try:
         resp = dial_post(
             url,
-            json={"content": content, "source": source},
+            json={
+                "content": content,
+                "source": source,
+                **({"completion_notice": completion_notice} if completion_notice else {}),
+            },
             timeout=_TIMEOUT_S,
             headers=headers,
         )
@@ -255,6 +282,7 @@ def send_agent_message(
                 source=source,
                 content=content,
                 client_message_id=key,
+                completion_notice=completion_notice,
             )
         raise
     if key is not None:
@@ -264,10 +292,15 @@ def send_agent_message(
                 source=source,
                 content=content,
                 client_message_id=key,
+                completion_notice=completion_notice,
             )
         elif resp.is_success:
             delivery_outbox.note_send_succeeded(
-                agent_id=agent_id, source=source, content=content, key=key
+                agent_id=agent_id,
+                source=source,
+                content=content,
+                key=key,
+                completion_notice=completion_notice,
             )
     if resp.status_code >= 400:
         # Surface the response body before raising: the 422 detail carries the

@@ -57,9 +57,10 @@ async def _run(pool: ConnectionPool, interval: float) -> None:
             else:
                 if report.touched or report.expired:
                     _log.info(
-                        "[delivery-outbox] flush pass: delivered={} abandoned={} "
+                        "[delivery-outbox] flush pass: delivered={} buffered={} abandoned={} "
                         "deferred={} unreadable={} expired={}",
                         report.delivered,
+                        report.buffered,
                         report.abandoned,
                         report.deferred,
                         report.unreadable,

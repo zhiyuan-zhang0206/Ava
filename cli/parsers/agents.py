@@ -52,7 +52,13 @@ def _h_agents_send(args: argparse.Namespace) -> int:
     from cli.commands.agents import ProvenanceError, cmd_agents_send
 
     try:
-        return cmd_agents_send(args.agent_id, args.content, args.source, args.tail_file)
+        return cmd_agents_send(
+            args.agent_id,
+            args.content,
+            args.source,
+            args.tail_file,
+            args.completion_exit_code,
+        )
     except ProvenanceError as exc:
         print(f"ava: {exc}", file=sys.stderr)
         return 2
@@ -189,6 +195,12 @@ def _add_send_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
         default=None,
         help="append the tail of this file to the message (completion notices "
         "carry the end of the command's output this way)",
+    )
+    agents_send_p.add_argument(
+        "--completion-exit-code",
+        type=int,
+        default=None,
+        help="mark this shell/watcher send as a platform completion with this exit code",
     )
     agents_send_p.set_defaults(func=_h_agents_send)
 

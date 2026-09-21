@@ -191,6 +191,7 @@ def send_message(
     *,
     content: str | list[dict[str, object]],
     source: str,
+    completion_notice: dict[str, object] | None = None,
 ) -> None:
     """POST /api/agents/{id}/messages — deliver a chat inbound.
 
@@ -225,10 +226,19 @@ def send_message(
 
     from shared import delivery_outbox
 
-    body = {"content": content, "source": source}
+    body = {
+        "content": content,
+        "source": source,
+        **({"completion_notice": completion_notice} if completion_notice else {}),
+    }
     key: str | None = None
     try:
-        key = delivery_outbox.logical_key(agent_id=agent_id, source=source, content=content)
+        key = delivery_outbox.logical_key(
+            agent_id=agent_id,
+            source=source,
+            content=content,
+            completion_notice=completion_notice,
+        )
     except Exception:
         # The outbox is a safety net for a failing send, never a reason for one:
         # an unusable outbox degrades to the pre-outbox behavior (no shared key,
@@ -250,6 +260,7 @@ def send_message(
                 source=source,
                 content=content,
                 client_message_id=key,
+                completion_notice=completion_notice,
             )
         raise
     if key is not None:
@@ -259,10 +270,15 @@ def send_message(
                 source=source,
                 content=content,
                 client_message_id=key,
+                completion_notice=completion_notice,
             )
         elif resp.is_success:
             delivery_outbox.note_send_succeeded(
-                agent_id=agent_id, source=source, content=content, key=key
+                agent_id=agent_id,
+                source=source,
+                content=content,
+                key=key,
+                completion_notice=completion_notice,
             )
     _raise_from_response(resp)
 

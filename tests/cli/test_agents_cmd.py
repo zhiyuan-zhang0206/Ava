@@ -396,6 +396,7 @@ def test_agents_send_transport_failure_is_recorded(monkeypatch: pytest.MonkeyPat
             "source": "shell:3",
             "content": "notice",
             "client_message_id": "key-cli-1",
+            "completion_notice": None,
         }
     ]
     headers = seen["headers"]
@@ -444,7 +445,13 @@ def test_agents_send_success_retires_the_pending_record(monkeypatch: pytest.Monk
     seen = _patch_post(monkeypatch, {"status": "delivered"})
     assert _agents.cmd_agents_send(5, "build done", "shell:3") == 0
     assert retired == [
-        {"agent_id": 5, "source": "shell:3", "content": "build done", "key": "key-cli-1"}
+        {
+            "agent_id": 5,
+            "source": "shell:3",
+            "content": "build done",
+            "key": "key-cli-1",
+            "completion_notice": None,
+        }
     ]
     headers = seen["headers"]
     assert isinstance(headers, dict)

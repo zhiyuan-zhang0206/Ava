@@ -97,7 +97,7 @@ def register_cron_atomic(
     exclude_session: int | None = None,
     template_version: int | None = None,
     generation: str | None = None,
-    notify: str = "always",
+    notify: str = "agent",
 ) -> int | None:
     """Register one cron watcher row atomically — reuse a live duplicate or insert.
 
@@ -202,7 +202,7 @@ def register_cron_renewal(
     exclude_session: int | None = None,
     template_version: int | None = None,
     generation: str | None = None,
-    notify: str = "always",
+    notify: str = "agent",
 ) -> list[int]:
     """Supersede every live different-end twin of one cron schedule, atomically.
 
@@ -292,7 +292,7 @@ def register_watcher(
     timeout_secs: float | None = None,
     template_version: int | None = None,
     generation: str | None = None,
-    notify: str = "always",
+    notify: str = "agent",
 ) -> None:
     """Record a watcher session at spawn (`ava.watcher._spawn`).
 
