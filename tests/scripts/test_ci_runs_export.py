@@ -220,10 +220,10 @@ def test_dry_run_prints_snapshot_without_writes_or_emission(
         window_prs=0,
         api_requests=1,
     )
-    monkeypatch.setattr(module, "collect_repo", lambda *_a, **_k: collection)
+    monkeypatch.setattr(module, "collect_repo", lambda *_a, **_k: collection)  # pyright: ignore[reportUnknownArgumentType]
     writes: list[Path] = []
-    monkeypatch.setattr(module, "save_json", lambda path, *_a: writes.append(path))
-    monkeypatch.setattr(module, "emit_snapshot", lambda *_a: pytest.fail("dry run emitted"))
+    monkeypatch.setattr(module, "save_json", lambda path, *_a: writes.append(path))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(module, "emit_snapshot", lambda *_a: pytest.fail("dry run emitted"))  # pyright: ignore[reportUnknownArgumentType]
 
     assert module.main(["--repo", "owner/repo", "--state-dir", str(tmp_path), "--dry-run"]) == 0
     assert writes == []
@@ -234,11 +234,13 @@ def test_failed_authoritative_pr_walk_aborts_before_emission(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     module = ci_runs_export
-    monkeypatch.setattr(module, "fetch_runs", lambda *_a: [])
+    monkeypatch.setattr(module, "fetch_runs", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
-        module, "fetch_closed_prs", lambda *_a: (_ for _ in ()).throw(module.CiRunsError("down"))
+        module,
+        "fetch_closed_prs",
+        lambda *_a: (_ for _ in ()).throw(module.CiRunsError("down")),  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(module, "emit_snapshot", lambda *_a: pytest.fail("failed walk emitted"))
+    monkeypatch.setattr(module, "emit_snapshot", lambda *_a: pytest.fail("failed walk emitted"))  # pyright: ignore[reportUnknownArgumentType]
 
     assert module.main(["--state-dir", str(tmp_path)]) == 1
     assert not list(tmp_path.iterdir())

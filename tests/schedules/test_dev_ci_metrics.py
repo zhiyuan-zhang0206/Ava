@@ -6,7 +6,7 @@ import importlib.util
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -14,7 +14,7 @@ _ROOT = Path(__file__).resolve().parents[2]
 _SCHEDULE = _ROOT / "schedules" / "dev-ci-metrics-schedule.py"
 
 
-def _load() -> object:
+def _load() -> ModuleType:
     spec = importlib.util.spec_from_file_location("dev_ci_metrics", _SCHEDULE)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
