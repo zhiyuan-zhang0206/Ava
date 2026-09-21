@@ -27,7 +27,7 @@ from cli.commands import _maintenance_stop as stop
 from cli.commands import stop as entry
 from shared.session_backend import PosixProcSessionBackend
 from shared.session_record import SessionRecord, pid_starttime_ticks
-from tests.cli.test_maintenance_stop import Launcher
+from tests.cli.test_maintenance_stop import Launcher, _wait_armed
 from tests.cli.test_maintenance_stop import home as home
 from tests.cli.test_maintenance_stop import launch as launch
 from tests.cli.test_pause_stop import dependencies
@@ -74,12 +74,23 @@ def test_leader_exit_with_refusing_descendant_names_the_survivor(
     # child, and here the child also refuses TERM, so the stop holds until the
     # deadline. The report must name the child as the leader's descendant — the
     # process that actually held the stop.
+    arm_sentinel = home / "arm-sentinel"
+    child_code = (
+        "import signal,time,pathlib\n"
+        "signal.signal(signal.SIGTERM,signal.SIG_IGN)\n"
+        f"pathlib.Path({str(arm_sentinel)!r}).touch()\n"
+        "print('ready',flush=True)\n"
+        "time.sleep(60)\n"
+    )
     code = (
         "import subprocess,sys,time; "
-        f"subprocess.Popen([sys.executable,'-u','-c',{_IGNORE!r}]); "
+        f"subprocess.Popen([sys.executable,'-u','-c',{child_code!r}]); "
         "print('ready',flush=True); time.sleep(60)"
     )
     parent = launch("ava-frontend", code)
+    # Sync point (task #4391, same family as #3091): the stop's escalation
+    # must not race the descendant's SIG_IGN arm — enter it only once armed.
+    _wait_armed(arm_sentinel)
     children = psutil.Process(parent.pid).children()
     assert len(children) == 1
     child = stop.OwnedProcess.capture(children[0])
@@ -97,7 +108,10 @@ def test_leader_exit_with_refusing_descendant_names_the_survivor(
         assert "SIG_IGN" in str(payload[child.pid]["cmdline"])
         assert children[0].is_running()  # the refusal never becomes a force kill
     finally:
-        children[0].kill()  # Exact child created by this fixture, after the assertions.
+        # Already-dead is fine on failure paths — cleanup must never raise
+        # over the real failure (task #4391).
+        with contextlib.suppress(psutil.NoSuchProcess):
+            children[0].kill()  # Exact child created by this fixture, after the assertions.
 
 
 def test_late_child_in_recorded_group_is_named_as_group_member(
@@ -171,7 +185,12 @@ def test_layered_shell_node_chain_reports_the_surviving_node_process(home: Path)
         "process.on('SIGTERM', () => process.exit(0));\n"
         "setInterval(() => {}, 1000);\n"
     )
-    child.write_text("process.on('SIGTERM', () => {});\nsetInterval(() => {}, 1000);\n")
+    arm_sentinel = home / "arm-sentinel"
+    child.write_text(
+        "process.on('SIGTERM', () => {});\n"
+        f"require('fs').writeFileSync({json.dumps(str(arm_sentinel))}, 'armed');\n"
+        "setInterval(() => {}, 1000);\n"
+    )
     proc = subprocess.Popen(  # noqa: S603 — test-owned bash + node, fixed fixture scripts
         ["bash", "-lc", f"node {leader}"],
         cwd=home,
@@ -196,6 +215,10 @@ def test_layered_shell_node_chain_reports_the_surviving_node_process(home: Path)
         assert leader_pid is not None
         grandchild = psutil.Process(leader_pid).children()[0]
         grandchild_pid = grandchild.pid
+        # Sync point (task #4391, same family as #3091): the grandchild arms
+        # its SIGTERM refusal only after its node boot — wait for the arm
+        # before the stop can race it.
+        _wait_armed(arm_sentinel)
         SessionRecord(
             leader_pid,
             psutil.Process(leader_pid).create_time(),
