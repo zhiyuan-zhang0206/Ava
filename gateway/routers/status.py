@@ -284,16 +284,18 @@ def _get_services_status() -> ServicesStatus:
 # 2 consecutive failures -> machine_probe offline) while /healthz answered in
 # ~15ms. This is the budget of FIRST contact — the anti-jitter margin a
 # slow-but-healthy host needs. A machine that already carries reachability
-# failures re-probes under the fast-fail budget instead
-# (`_roster_probe._probe_budget_s`, task #3507): a blackholed re-dial otherwise
-# hangs until this full budget and drags the whole-table read past the CLI/UI
-# read budget. The heartbeat liveness pass reads this setting
+# failures is not dialed on this path at all: its row serves from the cached
+# offline state and its recovery check runs detached under the fast-fail
+# budget (`_roster_probe._maybe_kick_recovery_dial`, task #3507), so no re-dial
+# can drag the whole-table read past the CLI/UI read budget. The heartbeat
+# liveness pass reads this setting
 # (services/heartbeat/liveness.py), so its probes stay aligned with the
 # roster's first-contact ones.
 
-# The per-machine probe backoff (failure state, window schedule) and the
-# per-machine probe budget both live in `_roster_probe`, beside the dispatch
-# they bound — split out under the file-line budget (task #3507).
+# The per-machine probe backoff (failure state, window schedule), the detached
+# recovery dial and the per-machine probe budget all live in `_roster_probe`,
+# beside the dispatch they bound — split out under the file-line budget
+# (task #3507).
 
 
 async def _probe_agent_runner(
@@ -315,12 +317,17 @@ async def _probe_agent_runner(
     its registered localhost URL, keeping one uniform probe path.
 
     Online == the ops server responded within the timeout. Paused comes from
-    the host's local `cluster_is_paused()` snapshot.
+    the host's local `cluster_is_paused()` snapshot. A host that already carries
+    a failure record is not dialed here: it serves the cached offline row while
+    the detached recovery dial runs (task #3507).
     """
-    if _roster_probe._probe_in_backoff(name):
-        # Recently-failed host still inside its backoff window: skip the dial and
-        # report the same offline row a live probe would. One success re-probe
-        # (once the window elapses) clears the backoff.
+    if name in _roster_probe._probe_failures:
+        # Known-down host: serve the cached offline row and hand the recovery
+        # check to the detached dial. This read never carries the host's dial
+        # budget — the blackholed re-dial that used to drag the whole-table
+        # read past the CLI/UI budget runs off the read path now, single-flight
+        # and paced by the failure backoff (task #3507).
+        _roster_probe._maybe_kick_recovery_dial(name, gateway_url)
         return _roster_rows.offline_status(
             name, role, gateway_url, up_since_at, description, stopped_at, is_staging=is_staging
         )
@@ -331,9 +338,9 @@ async def _probe_agent_runner(
         return _roster_rows.offline_status(
             name, role, gateway_url, up_since_at, description, stopped_at, is_staging=is_staging
         )
-    # Known-failed host -> fast-fail budget; first contact -> the full one. A
-    # blackholed re-dial under the full budget is what dragged the whole-table
-    # read past the CLI/UI budget (task #3507).
+    # First contact -> the full budget (the anti-jitter margin, task #1200). A
+    # record that races in mid-read (another observer failed the host) still
+    # buys the fast-fail budget via `_probe_budget_s`.
     try:
         result = await _roster_probe.dispatch_status_probe(
             name, gateway_url, timeout_s=_roster_probe._probe_budget_s(name)
@@ -587,9 +594,10 @@ async def gather_cluster_status(
     """Async fan-out: every machine probed in parallel via a status_probe op
     to its ops server (the local machine included — its ops server is dialed
     at its registered localhost URL). Total wall ≈ the largest per-probe budget
-    in play: `settings.gateway.status_probe_timeout_seconds` on first contact,
-    the faster `status_probe_fastfail_timeout_seconds` for a machine already in
-    the failure backoff (task #3507).
+    in play — `settings.gateway.status_probe_timeout_seconds` on first contact;
+    a machine already in the failure backoff is not dialed here (it serves the
+    cached offline row, its recovery check runs detached — task #3507), so no
+    down host can drag the read.
 
     The one exception is a local machine without the agent-runner capability
     (a pure gateway in a split deployment): it runs no ops server, so its row
@@ -670,8 +678,8 @@ def _get_cluster_status(cur: Cursor) -> ClusterPanel:
     only active members; `ava cluster resume` brings a row back) + dispatch
     parallel probes (agent-runner via a `status_probe` op; the host responds
     with its local paused state). Total wall ≈ the largest per-probe budget in
-    play (a known-failed machine re-probes under the fast-fail budget)
-    regardless of N machines.
+    play on first contact regardless of N machines; a known-failed machine is
+    not dialed here — cached offline row + detached recovery dial (task #3507).
 
     Wrapped sync via asyncio.run because `/api/status` is a sync FastAPI
     handler (runs in threadpool); creating a fresh event loop here is safe.
