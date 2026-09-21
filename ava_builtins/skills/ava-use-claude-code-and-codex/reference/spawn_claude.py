@@ -57,6 +57,7 @@ import stat
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import ava
@@ -265,17 +266,23 @@ def _bootstrap_submitted(started: float) -> bool:
     return False
 
 
-def _verify_start_receipt(sid: int, timeout: float = 45.0) -> None:
+def _verify_start_receipt(
+    sid: int, rebuild_bootstrap: Callable[[], str], timeout: float = 45.0
+) -> None:
     """The takeover bootstrap must actually submit, not vanish into the composer.
 
     A live session is not receipt: a message parked in the composer leaves an
     executor that never learned it replaced the agent (F1 class — do not infer
     receipt from a zero exit code). Submission evidence = the workspace's
     Claude transcript freshly records the bootstrap. When it stays absent,
-    press Enter once (a stale composer entry submits there) and re-check. Kept
-    loud but not fatal: the session may still be rendering; the operator sees
-    the warning. A dead session's send_keys()/capture() refusal is reported the
-    same way.
+    press Enter once (a stale composer entry submits there) and re-check. If
+    that still lacks evidence, rebuild and resend the formal bootstrap once.
+    The final evidence re-check immediately before rebuilding avoids a duplicate
+    during delayed transcript writes; the straight-line recovery branch invokes
+    the factory at most once. Canonical session ownership already excludes a
+    second launcher for the same workspace. Kept loud but not fatal: the
+    session may still be rendering; the operator sees the warning. A dead
+    session's send_keys()/send()/capture() refusal is reported the same way.
     """
     print("verifying the takeover bootstrap was submitted...")
     started = time.time()
@@ -299,6 +306,24 @@ def _verify_start_receipt(sid: int, timeout: float = 45.0) -> None:
     if _bootstrap_submitted(started):
         print("  -> start-receipt=submitted after Enter retry")
         return
+    if _bootstrap_submitted(started):
+        print("  -> start-receipt=submitted before rebuild resend")
+        return
+    print("  -> no submission evidence after Enter; rebuilding and resending once")
+    message = rebuild_bootstrap()
+    try:
+        ava.shell.sessions.send(sid, message)
+    except ValueError as exc:
+        print(
+            "  -> WARNING: start-receipt=not-submitted "
+            f"(rebuild resend failed: {exc}); the session may have ended. "
+            "Check the session before relying on it."
+        )
+        return
+    time.sleep(5)
+    if _bootstrap_submitted(started):
+        print("  -> start-receipt=submitted after rebuild resend")
+        return
     try:
         visible = "take over Ava agent" in ava.shell.sessions.capture(sid)
     except ValueError as exc:
@@ -307,14 +332,15 @@ def _verify_start_receipt(sid: int, timeout: float = 45.0) -> None:
         # the session and rolls the launch back on exceptions).
         print(
             "  -> WARNING: start-receipt=not-submitted "
-            f"(capture failed: {exc}); the takeover bootstrap may be parked, or "
-            "the session may have ended. Check the session before relying on it."
+            f"(rebuild resend completed; capture failed: {exc}); the takeover bootstrap "
+            "may be parked, or the session may have ended. Check the session before "
+            "relying on it."
         )
         return
     print(
         "  -> WARNING: start-receipt=not-submitted "
-        f"(visible={visible}); the takeover bootstrap may be parked or missing. "
-        "Check the session before relying on it."
+        f"(after one rebuild resend; visible={visible}); the takeover bootstrap may be "
+        "parked or missing. Check the session before relying on it."
     )
 
 
@@ -513,7 +539,10 @@ def _run_takeover_launch(
         _wait_for_ready(sid)
         message = _takeover_bootstrap_message(owner_agent_id, takeover_name, takeover_brief)
         ava.shell.sessions.send(sid, message)
-        _verify_start_receipt(sid)
+        _verify_start_receipt(
+            sid,
+            lambda: _takeover_bootstrap_message(owner_agent_id, takeover_name, takeover_brief),
+        )
     except BaseException:
         # A replacement may own the canonical record by now, so its generation
         # CAS cannot reclaim this PTY. The old launcher still owns the numeric id
