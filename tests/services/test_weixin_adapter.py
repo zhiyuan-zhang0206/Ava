@@ -76,7 +76,7 @@ def test_retry_reuses_client_id(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) 
     async def scenario() -> None:
         with pytest.raises(RuntimeError, match="timed out"):
             await a.send("peer-1", "hello")
-        await a.send("peer-1", "hello")  # the immediate retry
+        await a.send("peer-1", "hello")  # the retry
 
     asyncio.run(scenario())
     ids = _client_ids(http)

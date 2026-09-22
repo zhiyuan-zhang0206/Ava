@@ -13,6 +13,7 @@ import contextlib
 import logging
 import time
 import uuid
+from functools import partial
 from typing import Any, Literal
 
 from services.im_bridge import copy, notice_bridge, push_watchdog
@@ -112,7 +113,10 @@ class IMBridgeCore(SpawnMenuMixin):
         ``/send`` RPC): the user gets the alert on whichever IM channels are
         actually connected. A channel that fails (unconfigured, no known
         chat, platform error) is logged and skipped — one broken channel must
-        not stop the others."""
+        not stop the others. A failing channel gets one retry after the same
+        bounded jitter backoff as the push path (task #4252); an adapter that
+        cannot resolve an owner chat (``NotImplementedError``) is skipped
+        without a retry — no retry can change that."""
 
         results: dict[str, str] = {}
         for channel, adapter in self.adapters.items():
@@ -123,7 +127,18 @@ class IMBridgeCore(SpawnMenuMixin):
                 results[channel] = "skipped"
             except Exception as exc:  # fan-out must not break
                 _log.warning("notify_user: %s send_to_owner failed: %r", channel, exc)
-                results[channel] = f"error: {type(exc).__name__}"
+                try:
+                    # partial, not a lambda: this iteration's adapter is bound
+                    # now, so the retry call can never read a loop variable late.
+                    await push_watchdog.retry_once_after_backoff(
+                        partial(adapter.send_to_owner, text)
+                    )
+                    results[channel] = "ok"
+                except Exception as retry_exc:
+                    _log.warning(
+                        "notify_user: %s send_to_owner retry failed: %r", channel, retry_exc
+                    )
+                    results[channel] = f"error: {type(retry_exc).__name__}"
         return results
 
     # -- inbound -------------------------------------------------------------
