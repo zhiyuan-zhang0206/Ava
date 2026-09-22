@@ -338,10 +338,20 @@ def run(schedule_id: int) -> int:
             # so a clean return cannot be overtaken by a spurious kill.
             _patch_park_detection()
             stop_guard = _start_stall_guard(schedule_id, run_id)
+            # The gateway launches this runner as `python -m gateway.schedule_runner
+            # <id>`, so sys.argv carries the schedule id. The script must not
+            # inherit that runner-only argv: hand it the argv `python <script>`
+            # would produce — just its own path — and restore the runner's argv
+            # afterwards (2026-09-22: the daily debt sweep's argparse rejected the
+            # leaked id and exited 2 on every launch, tripping the crash breaker
+            # before its first fire).
+            runner_argv = sys.argv
+            sys.argv = [str(script_path)]
             try:
                 ava._ensure_plugins_loaded()
                 runpy.run_path(str(script_path), run_name="__main__")
             finally:
+                sys.argv = runner_argv
                 stop_guard.set()
                 # The park wrapper is process-wide; the guard's judgment window
                 # is over, so restore the stdlib sleep — it must not leak into

@@ -8,6 +8,7 @@ tested here — that needs a live gateway and is covered end-to-end elsewhere.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -283,6 +284,30 @@ def test_run_loads_plugins_for_py_script(
 
     assert run(sid) == 0
     assert calls == [1]
+
+
+def test_run_hands_py_script_a_clean_argv(
+    db_conn: psycopg.Connection, unit_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The gateway launches the runner as `python -m gateway.schedule_runner <id>`,
+    # so this process's sys.argv carries the schedule id. A .py script runs
+    # in-process and must see the argv `python <script>` would give it — just its
+    # own path — not the runner's (2026-09-22: the daily debt sweep's argparse
+    # rejected the leaked id and exited 2 on every launch).
+    monkeypatch.setattr(sys, "argv", ["schedule_runner", "4242"])
+    marker = unit_home / "argv.json"
+    script = (
+        "import json, pathlib, sys\n"
+        f"pathlib.Path({str(marker)!r}).write_text(json.dumps(sys.argv))\n"
+    )
+    sid = _insert_schedule(db_conn, script=script)
+
+    assert run(sid) == 0
+    assert json.loads(marker.read_text()) == [
+        str(unit_home / "schedules" / str(sid) / "schedule.py")
+    ]
+    # The runner keeps its own argv for whatever follows the script.
+    assert sys.argv == ["schedule_runner", "4242"]
 
 
 def test_run_skips_plugin_load_for_non_py_command(

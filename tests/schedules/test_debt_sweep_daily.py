@@ -283,19 +283,15 @@ def test_ensure_worker_spawns_only_after_matching_pages_are_exhausted(
     assert seen_before_ids == [None, 300]
 
 
-def test_runner_argv_passthrough_is_tolerated() -> None:
-    """The runner runs this template in-process with its own argv
-    (``python -m gateway.schedule_runner <id>``), so ``sys.argv[1:]`` carries
-    the schedule id. Rejecting it exits 2 on every launch and trips the
-    manager's crash breaker (observed live: schedule 22 crashed 5x)."""
+def test_cli_takes_flags_only() -> None:
+    """The runner hands this script a clean argv (``python <script>``), so its
+    CLI carries no positional runner id — only the manual-run flags. The
+    runner-side contract is pinned by tests/gateway/test_schedule_runner.py
+    (``test_run_hands_py_script_a_clean_argv``)."""
     module = _load_schedule_module()
     parser = module.build_parser()
 
-    runner = parser.parse_args(["22"])
-    assert runner.schedule_id == 22
-    assert not runner.once and not runner.dry_run
-
-    demo = parser.parse_args(["22", "--once", "--dry-run", "--repo", "."])
+    demo = parser.parse_args(["--once", "--dry-run", "--repo", "."])
     assert demo.once and demo.dry_run
 
     with pytest.raises(SystemExit):
