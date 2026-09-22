@@ -87,9 +87,11 @@ ava impersonate ack <session_id> 101 102 --agent <agent_id>
 Rules that keep delivery honest:
 
 - **Acknowledge only what you actually handled.** A batch that is not
-  acknowledged within the window is pushed again, explicitly marked as
-  re-delivery, until it is ACKed or the lease ends; the ids make re-ACKing a
-  batch you already handled harmless. Never ACK a message to silence delivery;
+  acknowledged within five minutes is pushed once more, explicitly marked as
+  the final delivery. Another five minutes without ACK ends impersonation and
+  returns unacknowledged input to the native agent. The two-attempt budget is
+  per message and survives relay restarts; the ids make re-ACKing a batch you
+  already handled harmless. Never ACK a message to silence delivery;
   if you cannot handle it, leave it unacknowledged and say so in your release
   summary.
 - **Never poll, never write inbox code.** `ava impersonate inbox <session_id> --agent <agent_id>`

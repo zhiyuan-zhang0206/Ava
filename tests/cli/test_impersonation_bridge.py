@@ -1,5 +1,5 @@
 """Push delivery with an ACK window: the relay delivers full inbox content
-and re-delivers unacknowledged batches until the host ACKs or the lease ends.
+and retries an unacknowledged message once before ending the lease.
 
 The relay never ACKs work itself and never renews the lease; a failed or
 restarted relay cannot lose a pending message.
@@ -12,6 +12,7 @@ import shlex
 import subprocess
 import sys
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
@@ -51,6 +52,7 @@ class Inbox:
         self.expires_at = datetime.now(UTC) + timedelta(minutes=5)
         self.start_message = "Start here: resume the implementation from the failing test."
         self.reads = 0
+        self.attempts: dict[int, tuple[int, float]] = {}
 
     @property
     def pending(self) -> set[int]:
@@ -70,12 +72,31 @@ class Inbox:
             self.messages.pop(message_id, None)
             self.routine.discard(message_id)
 
+    async def reserve(self, ids: list[int]) -> frozenset[int]:
+        for i in ids:
+            count, _ = self.attempts.get(i, (0, 0))
+            self.attempts[i] = (count + 1, relay._loop_time())
+        return frozenset(ids)
+
     async def read(self) -> relay.InboxSnapshot:
         self.reads += 1
+        if any(
+            i in self.pending and count == 2 and relay._loop_time() - at >= 300
+            for i, (count, at) in self.attempts.items()
+        ):
+            self.status = "expired"
         page = frozenset(sorted(self.messages)[: self.page_size])
         return relay.InboxSnapshot(
             page,
-            {i: self.messages[i] for i in page},
+            {
+                i: replace(
+                    self.messages[i],
+                    delivery_attempts=self.attempts.get(i, (0, 0))[0],
+                    delivery_due=i not in self.attempts
+                    or relay._loop_time() - self.attempts[i][1] >= 300,
+                )
+                for i in page
+            },
             self.expires_at,
             self.status,
             routine_ids=frozenset(i for i in page if i in self.routine),
@@ -166,6 +187,7 @@ def run(
             42,
             LEASE_ID,
             read_inbox=inbox.read,
+            reserve=inbox.reserve,
             listener=listener,
             emit=emit,
             debounce=debounce,
@@ -644,6 +666,8 @@ def test_shared_inbox_rows_keep_their_bodies_for_the_push_envelope(
                 "content": "the body rides into the push envelope",
                 "payload": None,
                 "created_at": datetime.now(UTC),
+                "delivery_attempts": 0,
+                "delivery_due": True,
             }
         ]
 
@@ -714,6 +738,13 @@ def test_command_passes_remote_to_steer(monkeypatch: pytest.MonkeyPatch) -> None
         return listener
 
     monkeypatch.setattr(relay, "_read_inbox", read)
+
+    def reserve(_lease: str, _token: str, ids: list[int]) -> frozenset[int]:
+        for i in ids:
+            inbox.messages[i] = replace(inbox.messages[i], delivery_attempts=1, delivery_due=False)
+        return frozenset(ids)
+
+    monkeypatch.setattr(relay, "reserve_delivery", reserve)
     monkeypatch.setattr(relay.shared.redis_listener, "RedisInboundListener", make_listener)
 
     def heartbeat_ok(_lease_id: UUID, _token: str) -> bool:
@@ -782,6 +813,13 @@ def test_codex_relay_caps_content_and_preserves_inbox_on_steer_failure(
         return listener
 
     monkeypatch.setattr(relay, "_read_inbox", read)
+
+    def reserve(_lease: str, _token: str, ids: list[int]) -> frozenset[int]:
+        for i in ids:
+            inbox.messages[i] = replace(inbox.messages[i], delivery_attempts=1, delivery_due=False)
+        return frozenset(ids)
+
+    monkeypatch.setattr(relay, "reserve_delivery", reserve)
     monkeypatch.setattr(relay.shared.redis_listener, "RedisInboundListener", make_listener)
 
     def heartbeat_ok(_lease_id: UUID, _token: str) -> bool:
@@ -839,6 +877,7 @@ def test_invalid_debounce_fails_before_open(debounce: float) -> None:
                 42,
                 LEASE_ID,
                 read_inbox=inbox.read,
+                reserve=inbox.reserve,
                 listener=listener,
                 emit=lambda _push: None,
                 debounce=debounce,
@@ -890,3 +929,23 @@ def test_pending_consent_checks_status_without_opening_inbox(
     snapshot = relay._read_inbox(42, LEASE_ID, "test-token")
     assert snapshot.status == status
     assert not snapshot.message_ids
+
+
+def test_two_missed_ack_windows_end_the_takeover_without_a_third_push(clock: FakeClock) -> None:
+    inbox = Inbox(11)
+    emitted: list[str] = []
+
+    def waited(n: int) -> None:
+        if n <= 2:
+            clock.advance(relay._ACK_WINDOW_SECONDS + 1)
+        else:
+            inbox.active = False  # bound the old infinite-retry implementation
+
+    listener = Listener(inbox, waited=waited)
+    run(inbox, listener, emitted.append)
+
+    assert sum("[id=11]" in text for text in emitted) == 2
+    assert inbox.status == "expired"
+    assert inbox.pending == {11}
+    assert "Ava control expired" in emitted[-1]
+    assert listener.closed

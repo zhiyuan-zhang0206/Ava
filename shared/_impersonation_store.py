@@ -17,6 +17,8 @@ from shared.proc_tree import create_time_matches, stable_create_time
 from shared.runtime_incarnation import RuntimeIncarnation
 
 OPEN = ("requested", "accepted", "active")
+ACK_WINDOW_SECONDS = 300
+MAX_DELIVERY_ATTEMPTS = 2
 
 
 class ImpersonationError(RuntimeError):
@@ -304,22 +306,44 @@ def expire(conn: psycopg.Connection, lease: dict[str, Any]) -> dict[str, Any]:
     if lease["status"] not in OPEN:
         return lease
     fresh = conn.execute("SELECT %s > clock_timestamp()", (lease["expires_at"],)).fetchone()
-    if fresh == (True,):
+    # Reconcile across the entire lease, not just the relay's bounded inbox
+    # page. ACK and delivery reservations take this same agent/lease lock.
+    overdue = (
+        conn.execute(
+            "SELECT m.inbound_id FROM agent_impersonation_messages m "
+            "JOIN inbound_messages i ON i.id=m.inbound_id "
+            "WHERE m.lease_id=%s AND m.acknowledged_at IS NULL AND i.status='pending' "
+            "AND m.delivery_attempts >= %s "
+            "AND m.last_delivery_at <= clock_timestamp() - %s*interval '1 second' "
+            "ORDER BY m.inbound_id LIMIT 1",
+            (lease["id"], MAX_DELIVERY_ATTEMPTS, ACK_WINDOW_SECONDS),
+        ).fetchone()
+        if lease["status"] == "active"
+        else None
+    )
+    if fresh == (True,) and overdue is None:
         return lease
+    detail = (
+        f"the executor did not ACK message {overdue[0]} after "
+        f"{MAX_DELIVERY_ATTEMPTS} delivery attempts ({ACK_WINDOW_SECONDS}s per ACK window)"
+        if overdue is not None
+        else None
+    )
     inbound_id = None
     if lease["status"] == "active" and not lease["automatic"]:
         inbound_id = insert_handoff(
             conn,
             lease,
-            f"Impersonation {lease['id']} by {lease['source']} expired. "
-            "Control has returned. Unacknowledged messages remain pending; "
+            f"Impersonation {lease['id']} by {lease['source']} "
+            + (f"stopped: {detail}. " if detail else "expired. ")
+            + "Control has returned. Unacknowledged messages remain pending; "
             "no external completion summary was supplied.",
             expired=True,
         )
     conn.execute(
         "UPDATE agent_impersonations SET status='expired',ended_at=clock_timestamp(), "
-        "summary_inbound_id=%s WHERE id=%s",
-        (inbound_id, lease["id"]),
+        "summary_inbound_id=%s,rejection_reason=COALESCE(%s,rejection_reason) WHERE id=%s",
+        (inbound_id, f"aborted: {detail}" if detail else None, lease["id"]),
     )
     # A pending renewal reminder only matters to the external session; the
     # lease is over, so it must never reach the native agent's inbox.
@@ -380,7 +404,7 @@ def validate_relay_spec(
 
 
 def authenticate_relay(lease: dict[str, Any], relay_token: str) -> None:
-    """The relay's scoped credential: read/beat only, never controller authority."""
+    """The relay's scoped credential: inbox/delivery/beat, never controller authority."""
     if lease["relay_token_hash"] is None or not hmac.compare_digest(
         lease["relay_token_hash"], token_hash(relay_token)
     ):

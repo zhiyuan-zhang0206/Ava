@@ -1,0 +1,287 @@
+"""Database-enforced delivery budget, races, restart and native handoff."""
+
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import Any, LiteralString, cast
+from uuid import uuid4
+
+import psycopg
+import pytest
+from psycopg import sql
+
+from shared import impersonation as leases
+from shared import impersonation_delivery as delivery
+from shared.caller_identity import CallerIdentity
+from shared.db import create_agent, insert_inbound_message
+from shared.machine import machine_name
+from shared.runtime_incarnation import RuntimeIncarnation
+from tests.impersonation_support import attested_caller, recorded_tree
+
+type ActiveSession = tuple[dict[str, Any], RuntimeIncarnation, int]
+
+
+@pytest.fixture
+def active(db_conn: psycopg.Connection) -> tuple[dict[str, Any], RuntimeIncarnation, int]:
+    agent_id = create_agent(db_conn)
+    owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())
+    db_conn.execute(
+        "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner,"
+        "runtime_kind,lease_expires_at) VALUES(%s,'idling',%s,%s,%s,'process',"
+        "clock_timestamp()+interval '1 hour')",
+        (agent_id, machine_name(), owner.generation, owner.owner),
+    )
+    db_conn.commit()
+    lease = leases.request(
+        agent_id,
+        caller=CallerIdentity(kind="external_agent", subject="codex", instance="test"),
+        ttl_seconds=3600,
+        reason="Test ACK exhaustion",
+        relay_provider="claude",
+        process_metadata=recorded_tree(),
+    )
+    leases.accept(lease["id"], agent_id, owner, "Process and ACK the test message")
+    leases.activate(lease["id"], owner)
+    message_id = insert_inbound_message(
+        db_conn, agent_id, "Unprocessed user input", "user", kind="chat"
+    )
+    db_conn.commit()
+    leases.relay_inbox(lease["id"], lease["relay_token"])
+    return lease, owner, message_id
+
+
+def reserve(lease: dict[str, Any], message_id: int) -> frozenset[int]:
+    return delivery.reserve_delivery(lease["id"], lease["relay_token"], [message_id])
+
+
+def elapse(db_conn: psycopg.Connection, lease: dict[str, Any], seconds: int = 301) -> None:
+    db_conn.execute(
+        "UPDATE agent_impersonation_messages SET last_delivery_at="
+        "clock_timestamp() - %s*interval '1 second' WHERE lease_id=%s AND delivery_attempts>0",
+        (seconds, lease["id"]),
+    )
+    db_conn.commit()
+
+
+def test_two_attempts_each_get_a_full_window_then_native_observes_expiry(
+    db_conn: psycopg.Connection, active: ActiveSession
+) -> None:
+    lease, owner, mid = active
+    assert reserve(lease, mid) == {mid}
+    assert reserve(lease, mid) == set()  # no early retry
+    elapse(db_conn, lease)
+    assert leases.relay_get(lease["id"], lease["relay_token"])["status"] == "active"
+    assert reserve(lease, mid) == {mid}
+    elapse(db_conn, lease, 299)
+    assert leases.relay_get(lease["id"], lease["relay_token"])["status"] == "active"
+    assert reserve(lease, mid) == set()
+    elapse(db_conn, lease)
+    # The native reconciler also enforces the budget without a live relay.
+    ended = leases.native_status(owner.agent_id, owner)
+    assert ended is not None
+    assert ended["status"] == "expired"
+    assert f"did not ACK message {mid} after 2 delivery attempts" in ended["rejection_reason"]
+    assert ended["reason"] == "Test ACK exhaustion"
+    assert reserve(lease, mid) == set()
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE id=%s", (mid,)
+    ).fetchone() == ("pending",)
+    note = db_conn.execute(
+        "SELECT content FROM inbound_messages WHERE id=%s", (ended["summary_inbound_id"],)
+    ).fetchone()
+    assert note is not None
+    assert "did not ACK" in note[0] and "Unacknowledged messages remain pending" in note[0]
+
+
+def test_ack_in_final_window_prevents_expiry(
+    db_conn: psycopg.Connection, active: ActiveSession
+) -> None:
+    lease, _, mid = active
+    reserve(lease, mid)
+    elapse(db_conn, lease)
+    reserve(lease, mid)
+    leases.ack(lease["id"], attested_caller(lease), [mid])
+    elapse(db_conn, lease)
+    assert leases.relay_get(lease["id"], lease["relay_token"])["status"] == "active"
+    assert reserve(lease, mid) == set()
+
+
+def test_rotating_relay_does_not_reset_budget(
+    db_conn: psycopg.Connection, active: ActiveSession
+) -> None:
+    lease, owner, mid = active
+    reserve(lease, mid)
+    elapse(db_conn, lease)
+    reserve(lease, mid)
+    leases.provision_relay(lease["id"], owner, "replacement")
+    with pytest.raises(leases.ImpersonationError, match="Invalid relay token"):
+        reserve(lease, mid)
+    lease["relay_token"] = "replacement"  # noqa: S105 — test-only scoped credential
+    rows = leases.relay_inbox(lease["id"], "replacement")
+    assert rows[0]["delivery_attempts"] == 2
+    assert rows[0]["delivery_due"] is False
+    elapse(db_conn, lease)
+    assert reserve(lease, mid) == set()
+    assert leases.relay_get(lease["id"], "replacement")["status"] == "expired"
+
+
+def test_concurrent_relays_only_reserve_once(
+    db_conn: psycopg.Connection, active: ActiveSession
+) -> None:
+    lease, _, mid = active
+    with ThreadPoolExecutor(2) as pool:
+        futures = [pool.submit(reserve, lease, mid) for _ in range(2)]
+    assert sorted(len(f.result()) for f in futures) == [0, 1]
+    assert leases.relay_inbox(lease["id"], lease["relay_token"])[0]["delivery_attempts"] == 1
+
+
+def test_ack_after_read_before_reservation_cannot_be_pushed(
+    db_conn: psycopg.Connection, active: ActiveSession
+) -> None:
+    lease, _, mid = active
+    leases.ack(lease["id"], attested_caller(lease), [mid])
+    assert reserve(lease, mid) == set()
+
+
+def test_release_wins_timeout_race_without_being_overwritten(
+    db_conn: psycopg.Connection, active: ActiveSession
+) -> None:
+    lease, _, mid = active
+    reserve(lease, mid)
+    elapse(db_conn, lease)
+    reserve(lease, mid)
+    leases.release(lease["id"], attested_caller(lease), "Returning control")
+    elapse(db_conn, lease)
+    assert reserve(lease, mid) == set()
+    assert leases.relay_get(lease["id"], lease["relay_token"])["status"] == "released"
+
+
+def test_exhausted_message_outside_page_still_ends_lease(
+    db_conn: psycopg.Connection, active: ActiveSession
+) -> None:
+    lease, _, first = active
+    other = insert_inbound_message(
+        db_conn, lease["agent_id"], "Second message", "user", kind="chat"
+    )
+    db_conn.commit()
+    leases.relay_inbox(lease["id"], lease["relay_token"])
+    reserve(lease, other)
+    elapse(db_conn, lease)
+    reserve(lease, other)
+    rows = leases.relay_inbox(lease["id"], lease["relay_token"], limit=1)
+    assert [row["id"] for row in rows] == [first]
+    # Fresh input and ACK of another message cannot forgive the exhausted one.
+    reserve(lease, first)
+    leases.ack(lease["id"], attested_caller(lease), [first])
+    elapse(db_conn, lease)
+    ended = leases.relay_get(lease["id"], lease["relay_token"])
+    assert ended["status"] == "expired"
+    assert f"message {other}" in ended["rejection_reason"]
+
+
+def test_migration_roundtrip_initializes_old_unacked_rows(
+    db_conn: psycopg.Connection, active: ActiveSession
+) -> None:
+    lease, _, mid = active
+    root = Path(__file__).parents[2] / "migrations"
+    stem = "20260922T053200_impersonation-delivery-budget"
+    with db_conn.transaction(force_rollback=True):
+        db_conn.execute(sql.SQL(cast(LiteralString, (root / f"{stem}.down.sql").read_text())))
+        db_conn.execute(sql.SQL(cast(LiteralString, (root / f"{stem}.sql").read_text())))
+        assert db_conn.execute(
+            "SELECT delivery_attempts,last_delivery_at,acknowledged_at "
+            "FROM agent_impersonation_messages WHERE lease_id=%s AND inbound_id=%s",
+            (lease["id"], mid),
+        ).fetchone() == (0, None, None)
+
+
+@pytest.mark.parametrize("crash_after_first_submission", [False, True])
+async def test_real_relay_uses_database_budget_and_emits_only_two_attempts(
+    db_conn: psycopg.Connection,
+    active: ActiveSession,
+    monkeypatch: pytest.MonkeyPatch,
+    crash_after_first_submission: bool,
+) -> None:
+    from uuid import UUID
+
+    from cli.commands import impersonation_relay as relay
+
+    lease, owner, mid = active
+    pushes: list[str] = []
+    monkeypatch.setattr(relay, "_MIN_EMIT_INTERVAL_SECONDS", 0)
+
+    async def read() -> relay.InboxSnapshot:
+        return relay._read_inbox(owner.agent_id, UUID(lease["id"]), lease["relay_token"])
+
+    async def claim(ids: list[int]) -> frozenset[int]:
+        return delivery.reserve_delivery(lease["id"], lease["relay_token"], ids)
+
+    class ClockListener:
+        closed = False
+        waits = 0
+
+        async def ensure_listening(self) -> None:
+            pass
+
+        async def wait_one(self, timeout: float) -> None:
+            self.waits += 1
+            assert self.waits <= 2  # old endless delivery must fail, not hang
+            elapse(db_conn, lease)
+
+        async def close(self) -> None:
+            self.closed = True
+
+    if crash_after_first_submission:
+
+        def crash(push: str) -> None:
+            pushes.append(push)
+            if f"[id={mid}]" in push:
+                raise RuntimeError("host accepted but relay died")
+
+        first_listener = ClockListener()
+        with pytest.raises(RuntimeError, match="relay died"):
+            await relay.relay_inbox(
+                owner.agent_id,
+                0,
+                read_inbox=read,
+                reserve=claim,
+                listener=first_listener,
+                emit=crash,
+                debounce=0,
+            )
+        assert first_listener.closed
+        assert leases.relay_inbox(lease["id"], lease["relay_token"])[0]["delivery_attempts"] == 1
+
+    listener = ClockListener()
+    await relay.relay_inbox(
+        owner.agent_id,
+        0,
+        read_inbox=read,
+        reserve=claim,
+        listener=listener,
+        emit=pushes.append,
+        debounce=0,
+    )
+    assert sum(f"[id={mid}]" in push for push in pushes) == 2
+    assert "final delivery" in pushes[-2]
+    assert "Ava control expired" in pushes[-1]
+    assert "did not ACK" in pushes[-1]
+    assert listener.closed and listener.waits == 2
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE id=%s", (mid,)
+    ).fetchone() == ("pending",)
+
+
+def test_rollback_refuses_to_reset_an_active_budget(
+    db_conn: psycopg.Connection, active: ActiveSession
+) -> None:
+    lease, _, mid = active
+    reserve(lease, mid)
+    rollback = (
+        Path(__file__).parents[2]
+        / "migrations/20260922T053200_impersonation-delivery-budget.down.sql"
+    )
+    with (
+        db_conn.transaction(force_rollback=True),
+        pytest.raises(psycopg.errors.RaiseException, match="End active impersonations"),
+    ):
+        db_conn.execute(sql.SQL(cast(LiteralString, rollback.read_text())))

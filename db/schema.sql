@@ -1759,8 +1759,14 @@ CREATE TABLE IF NOT EXISTS agent_impersonation_messages (
     lease_id UUID NOT NULL REFERENCES agent_impersonations(id) ON DELETE RESTRICT,
     inbound_id BIGINT NOT NULL REFERENCES inbound_messages(id) ON DELETE CASCADE,
     acknowledged_at TIMESTAMPTZ,
+    delivery_attempts INTEGER NOT NULL DEFAULT 0 CHECK (delivery_attempts BETWEEN 0 AND 2),
+    last_delivery_at TIMESTAMPTZ,
+    CONSTRAINT agent_impersonation_messages_delivery_consistent CHECK ((delivery_attempts = 0) = (last_delivery_at IS NULL)),
     PRIMARY KEY (lease_id, inbound_id)
 );
+CREATE INDEX agent_impersonation_messages_unacknowledged_delivery
+    ON agent_impersonation_messages(lease_id, last_delivery_at)
+    WHERE acknowledged_at IS NULL;
 
 -- Every termination writer (including force/reaper) revokes in its own atomic
 -- status transaction. Restart uses 'restarting' and preserves the active lease.
@@ -2236,3 +2242,6 @@ INSERT INTO schema_migrations (name) VALUES ('20260921T211300_completion-notice-
 -- Omitted watcher notify settings are represented above as `agent`; stamp the
 -- strict CHECK rebuild rather than replaying it against the folded baseline.
 INSERT INTO schema_migrations (name) VALUES ('20260921T211400_watcher-agent-notify');
+
+-- Durable per-message relay attempt budget.
+INSERT INTO schema_migrations (name) VALUES ('20260922T053200_impersonation-delivery-budget');
