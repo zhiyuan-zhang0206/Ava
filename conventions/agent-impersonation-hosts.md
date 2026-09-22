@@ -206,8 +206,12 @@ the stale window plus one scan interval (≈75 s).
   It subscribes before its first delivery snapshot to close the startup race.
 - Push with an ACK window: every pending inbox row is pushed once with its
   full content in one envelope per batch, and every unacknowledged batch is
-  pushed again after five minutes, marked as re-delivery, until the host ACKs
-  it or the lease ends. Rows already pending at activation push immediately
+  pushed once more after five minutes, marked as the final re-delivery.
+  After another five minutes without ACK, the takeover ends as `expired` with
+  an explicit missing-ACK cause and unacknowledged input goes to native handoff.
+  Reads and native reconciliation check this across the whole lease, regardless
+  of inbox pagination or new arrivals, on the existing 30-second catchup cycle.
+  Due retries take priority over fresh rows. Rows already pending at activation push immediately
   (they waited through preparation); fresh routine arrivals coalesce inside the
   lease's configured merge window, stated explicitly at request time
   (0..300 seconds; 0 pushes immediately), while user chats, cancels and renewal
@@ -228,11 +232,13 @@ the stale window plus one scan interval (≈75 s).
   Treat `kind="cancel"` as a request to stop current work, then explicitly ACK it.
   Native Ava does not consume cancellation on behalf of the external controller.
 - Reading or successfully submitting a push does not mark a message done. The
-  relay tracks pushed-but-unacknowledged ids in memory. Restart replays every
-  still-pending row it encounters. This is at-least-once delivery, with the
-  envelope ids as the idempotency key: a host that already handled a batch
-  simply re-ACKs it. There is no exactly-once claim across provider
-  acknowledgement or process crashes.
+  relay reserves each attempt in the database before host submission. Restart
+  and credential rotation preserve the attempt count and ACK deadline. Failed
+  or ambiguous submissions spend an attempt because transport acceptance and
+  database commit cannot be atomic; content remains available for native
+  handoff. Envelope ids remain the idempotency key: a host that already handled
+  a batch simply re-ACKs it. The budget is two attempts per message, with no
+  exactly-once claim across transport or process crashes.
 - The relay heartbeats the lease row every 10 seconds; a heartbeat older than
   45 seconds counts as stale and stops the lease (see *Process death →
   auto-stop*), so messages never sit silently behind a dead relay. The one

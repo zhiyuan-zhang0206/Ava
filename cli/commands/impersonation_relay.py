@@ -1,18 +1,8 @@
-"""Push the agent's durable inbox into an existing external agent session.
+"""Push a durable inbox through the bound relay, without ACK or lease renewal.
 
-Redis is the wake signal; the database owns pending messages. This process runs
-under the lease's scoped relay credential (read inbox + heartbeat only), never
-ACKs a message and never renews a lease. It heartbeats the lease row so the
-accepting runtime and the wake path can observe its liveness.
-
-Delivery is push with an ACK window: the relay sends the native agent's start
-message at activation, then pushes every pending inbox row with its full
-content in one self-contained envelope per batch. A batch the host does not
-ACK within the window is pushed again, marked as re-delivery, until it is
-ACKed or the lease ends. The message ids in each envelope make delivery
-idempotent, and restarting the relay replays every pending row — at-least-once,
-never silently lost. Inbox emptiness never ends it — only a terminal lease
-does.
+Each message gets two delivery attempts, each followed by a five-minute ACK
+window. Reservations survive relay restarts. Exhaustion expires the takeover
+through normal native handoff, preserving all unacknowledged content.
 """
 
 from __future__ import annotations
@@ -34,12 +24,14 @@ from pydantic import BaseModel
 
 import shared.redis_listener
 from cli.commands.codex_app_server import live_submit, require_control_endpoint
+from shared._impersonation_store import ACK_WINDOW_SECONDS, MAX_DELIVERY_ATTEMPTS
 from shared.config import settings
 from shared.impersonation import RELAY_HEARTBEAT_SECONDS
+from shared.impersonation_delivery import reserve_delivery
 
 _CATCHUP_SECONDS = 30.0
 _MIN_EMIT_INTERVAL_SECONDS = 2.0
-_ACK_WINDOW_SECONDS = 300.0
+_ACK_WINDOW_SECONDS = ACK_WINDOW_SECONDS
 # Bound each message in the host context; full bodies remain in the durable
 # inbox. The same cap also respects Claude Monitor's per-line budget.
 _PUSH_MAX_CHARS = 2000
@@ -54,6 +46,7 @@ class _Lease(BaseModel):
     expires_at: datetime
     relay_batch_window_seconds: int = 0
     start_message: str = ""
+    rejection_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -64,6 +57,8 @@ class InboxMessage:
     kind: str
     source: str
     content: str
+    delivery_attempts: int = 0
+    delivery_due: bool = True
 
 
 @dataclass(frozen=True)
@@ -87,6 +82,7 @@ class InboxSnapshot:
     routine_ids: frozenset[int] = frozenset()
     batch_window: float = 0.0
     start_message: str = ""
+    end_reason: str | None = None
 
     @property
     def active(self) -> bool:
@@ -150,8 +146,12 @@ def message_push(
         blocks.append("")
     blocks.append(f"ACK after processing: {ack_command(lease_id, ids, agent_id)}")
     blocks.append(
-        f"Unacknowledged messages are re-delivered every {_ACK_WINDOW_SECONDS:g}s "
-        "until acknowledged."
+        f"ACK within {_ACK_WINDOW_SECONDS:g}s. "
+        + (
+            "This is the final delivery; another missed ACK window ends impersonation."
+            if redelivery
+            else "One retry is allowed; a second missed ACK window ends impersonation."
+        )
     )
     return "\n".join(blocks)
 
@@ -171,7 +171,8 @@ def activation_hint(agent_id: int, lease_id: int | UUID) -> str:
         f"Ava control active: agent={agent_id} lease={lease_id}. "
         "Inbox messages are pushed to this session; after processing each batch "
         f"run: {ack} ID... Use {inbox} to read missed or truncated messages. "
-        "Unacknowledged messages are re-delivered until acknowledged."
+        f"Each message has {MAX_DELIVERY_ATTEMPTS} delivery attempts, "
+        f"with {_ACK_WINDOW_SECONDS:g}s to ACK each; exhaustion ends impersonation."
     )
 
 
@@ -185,6 +186,7 @@ def _ended(
             f"Ava control {snapshot.status}: agent={agent_id} lease={lease_id}. "
             "Do not use this identity. The native agent can continue its workflow. "
             "The relay did not ACK messages or renew the lease."
+            + (f" Reason: {snapshot.end_reason}" if snapshot.end_reason else "")
         )
     return True
 
@@ -231,14 +233,22 @@ def _read_inbox(agent_id: int, lease_id: UUID, token: str) -> InboxSnapshot:
     if lease.agent_id != agent_id or lease.id != lease_id:
         raise ValueError("The impersonation lease does not belong to the requested agent")
     if lease.status != "active":
-        return InboxSnapshot(frozenset(), {}, lease.expires_at, lease.status)
+        return InboxSnapshot(
+            frozenset(), {}, lease.expires_at, lease.status, end_reason=lease.rejection_reason
+        )
     try:
         # relay_inbox validates same-machine active authority in its own transaction.
         rows = impersonation.relay_inbox(str(lease_id), token)
     except impersonation.ImpersonationError:
         latest = _Lease.model_validate(impersonation.relay_get(str(lease_id), token))
         if latest.status in _TERMINAL:
-            return InboxSnapshot(frozenset(), {}, latest.expires_at, latest.status)
+            return InboxSnapshot(
+                frozenset(),
+                {},
+                latest.expires_at,
+                latest.status,
+                end_reason=latest.rejection_reason,
+            )
         raise
     messages = {
         row["id"]: InboxMessage(
@@ -246,6 +256,8 @@ def _read_inbox(agent_id: int, lease_id: UUID, token: str) -> InboxSnapshot:
             kind=row["kind"],
             source=row["source"],
             content=row["content"],
+            delivery_attempts=row["delivery_attempts"],
+            delivery_due=row["delivery_due"],
         )
         for row in rows
     }
@@ -310,50 +322,45 @@ def _window_wait(
     return routine_deadline, remaining
 
 
-async def relay_inbox(  # noqa: PLR0915 — one lease-driven state machine: terminal, window, push, re-deliver
+def _due_ids(snapshot: InboxSnapshot, *, redelivery: bool) -> frozenset[int]:
+    return frozenset(
+        message.id
+        for message in snapshot.messages.values()
+        if message.delivery_due
+        and message.delivery_attempts < MAX_DELIVERY_ATTEMPTS
+        and (message.delivery_attempts > 0) == redelivery
+    )
+
+
+async def relay_inbox(  # noqa: PLR0915 — one consent/window/reservation delivery loop
     agent_id: int,
     lease_id: int | UUID,
     *,
     read_inbox: Callable[[], Awaitable[InboxSnapshot]],
+    reserve: Callable[[list[int]], Awaitable[frozenset[int]]],
     listener: WakeListener,
     emit: Callable[[str], None],
     debounce: float = 0.5,
     catchup_seconds: float = _CATCHUP_SECONDS,
     max_chars: int | None = None,
 ) -> None:
-    """Wait natively for consent, then deliver the start message and inbox rows.
+    """Deliver consent/start first, then at most two attempts per pending row.
 
-    Push with an ACK window: every pending inbox row is pushed with its full
-    content; a batch not ACKed within ``_ACK_WINDOW_SECONDS`` is pushed again,
-    marked as re-delivery, until the host ACKs it or the lease ends. ACK
-    observation shrinks the outstanding set; the envelope ids make delivery
-    idempotent, and a relay restart replays every pending row.
-
-    The start message goes first, once, when
-    the lease goes active. Rows already pending at activation skip the merge
-    window — they waited through consent; later routine arrivals coalesce
-    inside the configured window, while user chats, cancels and reminders
-    never wait. A sustained no-ACK is visible as periodic re-deliveries, not
-    silence.
-
-    Periodic native DB catchup repairs a dropped Redis publish, without running
-    an LLM. Delivered ids are not a processing cursor: no message is marked
-    done. An emission failure exits so a restart can replay all pending rows.
-    Inbox emptiness never ends delivery: only a terminal lease status does.
+    Database time and durable reservations own the ACK windows and budget;
+    local monotonic time only controls batching/rate limits. Every read
+    reconciles exhaustion across the whole lease, even outside this inbox
+    page. Due retries precede fresh rows so arrivals cannot starve them.
+    Reserve immediately before the host call, rechecking ACK/release races.
+    A failed or ambiguous host submission spends an attempt, never an ACK.
     """
     if not math.isfinite(debounce) or not 0 <= debounce <= _CATCHUP_SECONDS:
         raise ValueError(f"debounce must be between 0 and {_CATCHUP_SECONDS:g} seconds")
     if not math.isfinite(catchup_seconds) or catchup_seconds <= 0:
         raise ValueError("catchup_seconds must be finite and positive")
-    outstanding: dict[int, float] = {}
     start_sent = False
     last_emit = float("-inf")
     routine_deadline: float | None = None
     activation_pending: frozenset[int] = frozenset()
-
-    def urgent(snapshot: InboxSnapshot) -> frozenset[int]:
-        return snapshot.message_ids - snapshot.routine_ids
-
     try:
         initial = await read_inbox()
         if _ended(initial, agent_id, lease_id, emit):
@@ -363,9 +370,7 @@ async def relay_inbox(  # noqa: PLR0915 — one lease-driven state machine: term
             snapshot = await read_inbox()
             if _ended(snapshot, agent_id, lease_id, emit):
                 return
-            outstanding = {i: t for i, t in outstanding.items() if i in snapshot.message_ids}
             if not snapshot.active:
-                # Still awaiting native consent/drain: nothing is announced yet.
                 await listener.wait_one(max(0.5, min(catchup_seconds, _seconds_left(snapshot))))
                 continue
             if not start_sent:
@@ -377,91 +382,49 @@ async def relay_inbox(  # noqa: PLR0915 — one lease-driven state machine: term
                 start_sent = True
                 last_emit = _loop_time()
                 continue
-            new = snapshot.message_ids - outstanding.keys()
-            if new:
-                # Activation-pending rows and urgent rows push immediately;
-                # routine-only fresh arrivals may wait out the merge window.
-                if not (new & urgent(snapshot)) and not (new & activation_pending):
+            redelivery = bool(_due_ids(snapshot, redelivery=True))
+            due = _due_ids(snapshot, redelivery=redelivery)
+            if due:
+                if not redelivery and not (due & activation_pending):
                     routine_deadline, remaining = _window_wait(
                         snapshot,
-                        new_ids=new,
+                        new_ids=due,
                         routine_deadline=routine_deadline,
                         now=_loop_time(),
                     )
                     if remaining is not None:
                         await listener.wait_one(
-                            max(
-                                0.5,
-                                min(catchup_seconds, _seconds_left(snapshot), remaining),
-                            )
+                            max(0.5, min(catchup_seconds, _seconds_left(snapshot), remaining))
                         )
                         continue
-                # Re-read after a bounded debounce to merge bursts and catch a
-                # concurrent release/expiry before attempting host delivery.
-                # Claude Monitor replenishes one output-event allowance per
-                # two seconds. Sustained overload can stop its subprocess.
-                interval = max(
-                    debounce,
-                    last_emit + _MIN_EMIT_INTERVAL_SECONDS - _loop_time(),
+                # Catch ACK/release during debounce and merge bursts. Claude
+                # Monitor replenishes one event allowance per two seconds.
+                await asyncio.sleep(
+                    max(debounce, last_emit + _MIN_EMIT_INTERVAL_SECONDS - _loop_time())
                 )
-                await asyncio.sleep(interval)
                 snapshot = await read_inbox()
                 if _ended(snapshot, agent_id, lease_id, emit):
                     return
-                outstanding = {i: t for i, t in outstanding.items() if i in snapshot.message_ids}
-                new = snapshot.message_ids - outstanding.keys()
-                if not new:
-                    routine_deadline = None
-                    continue  # vanished (ACKed) during the debounce
-                emit(
-                    message_push(
-                        agent_id,
-                        lease_id,
-                        [snapshot.messages[i] for i in sorted(new)],
-                        max_chars=max_chars,
+                if not snapshot.active:
+                    continue
+                redelivery = bool(_due_ids(snapshot, redelivery=True))
+                due = _due_ids(snapshot, redelivery=redelivery)
+                reserved: frozenset[int] = await reserve(sorted(due)) if due else frozenset()
+                if reserved:
+                    emit(
+                        message_push(
+                            agent_id,
+                            lease_id,
+                            [snapshot.messages[i] for i in sorted(reserved)],
+                            redelivery=redelivery,
+                            max_chars=max_chars,
+                        )
                     )
-                )
-                now = _loop_time()
-                for message_id in new:
-                    outstanding[message_id] = now
-                last_emit = now
+                    last_emit = _loop_time()
                 routine_deadline = None
                 continue
-            stale = [
-                message_id
-                for message_id, pushed_at in outstanding.items()
-                if _loop_time() - pushed_at >= _ACK_WINDOW_SECONDS
-            ]
-            if stale:
-                interval = max(
-                    debounce,
-                    last_emit + _MIN_EMIT_INTERVAL_SECONDS - _loop_time(),
-                )
-                await asyncio.sleep(interval)
-                snapshot = await read_inbox()
-                if _ended(snapshot, agent_id, lease_id, emit):
-                    return
-                outstanding = {i: t for i, t in outstanding.items() if i in snapshot.message_ids}
-                stale = [message_id for message_id in stale if message_id in outstanding]
-                if not stale:
-                    continue
-                emit(
-                    message_push(
-                        agent_id,
-                        lease_id,
-                        [snapshot.messages[i] for i in sorted(stale)],
-                        redelivery=True,
-                        max_chars=max_chars,
-                    )
-                )
-                now = _loop_time()
-                for message_id in stale:
-                    outstanding[message_id] = now
-                last_emit = now
-                continue
-            # The DB clock grants/revokes authority. Local time only shortens a
-            # wait before its deadline; clock skew must not revoke a live lease
-            # or spin on a past local timestamp while the DB still grants it.
+            # The database owns expiry; periodic catchup also repairs missed
+            # Redis wakes and observes the final ACK window's expiration.
             await listener.wait_one(max(0.5, min(catchup_seconds, _seconds_left(snapshot))))
     finally:
         await listener.close()
@@ -493,7 +456,7 @@ def cmd_relay(args: argparse.Namespace) -> int:
 
     The first heartbeat is written before the inbox loop, so the accepting
     runtime's readiness gate observes a live relay immediately. The relay
-    never renews the lease; its credential only reads and beats.
+    never renews the lease; its credential reads, reserves delivery, and beats.
     """
     from cli.commands import impersonation
 
@@ -517,6 +480,9 @@ def cmd_relay(args: argparse.Namespace) -> int:
             async def read_inbox() -> InboxSnapshot:
                 return await asyncio.to_thread(_read_inbox, args.agent_id, lease_id, token)
 
+            async def reserve(ids: list[int]) -> frozenset[int]:
+                return await asyncio.to_thread(reserve_delivery, str(lease_id), token, ids)
+
             if not await asyncio.to_thread(_write_heartbeat, lease_id, token):
                 return  # lease already terminal; nothing to relay
             heartbeat = asyncio.create_task(_heartbeat_loop(lease_id, token))
@@ -528,6 +494,7 @@ def cmd_relay(args: argparse.Namespace) -> int:
                     args.agent_id,
                     session_id,
                     read_inbox=read_inbox,
+                    reserve=reserve,
                     listener=listener,
                     emit=emit,
                     debounce=args.debounce,

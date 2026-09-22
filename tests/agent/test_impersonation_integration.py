@@ -559,7 +559,9 @@ async def test_end_note_resumes_an_empty_queue(
         assert resumed["impersonation_handoff_id"] == f"{owner.agent_id}:0"
 
 
+@pytest.mark.parametrize("cause", ["relay_death", "ack_exhaustion"])
 async def test_aborted_takeover_resumes_the_native_with_the_death_cause(
+    cause: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
@@ -592,18 +594,35 @@ async def test_aborted_takeover_resumes_the_native_with_the_death_cause(
         await flush_checkpoint(saver, owner.agent_id)
         assert await settle_checkpoint(graph, owner.agent_id)
         assert not model_calls
-        # A restart lost the relay handle and the fresh-start window has
-        # closed: the stale heartbeat stops the takeover (variant A).
-        monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
-        monkeypatch.setattr(
-            impersonation, "_PROCESS_STARTED_MONOTONIC", impersonation.time.monotonic() - 1000.0
-        )
-        session = leases.native_status(owner.agent_id, owner)
-        assert session is not None
-        await impersonation.supervise_relay(session, owner.agent_id)
+        if cause == "relay_death":
+            # A lost relay outside the fresh-start window stops the takeover.
+            monkeypatch.setattr(
+                impersonation, "_provider_anchor_states", Mock(return_value=["alive"])
+            )
+            monkeypatch.setattr(
+                impersonation, "_PROCESS_STARTED_MONOTONIC", impersonation.time.monotonic() - 1000.0
+            )
+            session = leases.native_status(owner.agent_id, owner)
+            assert session is not None
+            await impersonation.supervise_relay(session, owner.agent_id)
+            detail = "the bound relay stopped heartbeating"
+        else:
+            row = db_conn.execute(
+                "INSERT INTO inbound_messages(agent_id,kind,source,content) "
+                "VALUES(%s,'chat','user','Preserve this unacknowledged input') RETURNING id",
+                (owner.agent_id,),
+            ).fetchone()
+            assert row is not None
+            db_conn.execute(
+                "INSERT INTO agent_impersonation_messages(lease_id,inbound_id,delivery_attempts,last_delivery_at) "
+                "VALUES(%s,%s,2,clock_timestamp()-interval '301 seconds')",
+                (requested["id"], row[0]),
+            )
+            db_conn.commit()
+            detail = f"the executor did not ACK message {row[0]} after 2 delivery attempts (300s per ACK window)"
         died = leases.get(requested["id"], attested_caller(requested))
         assert died["status"] == "expired"
-        assert died["rejection_reason"] == "aborted: the bound relay stopped heartbeating"
+        assert died["rejection_reason"] == f"aborted: {detail}"
         # The graph boundary pass observes the terminal lease; the resume chain
         # then delivers the end note (never the abort transaction itself).
         await graph.ainvoke(reset, config, context=ctx)
@@ -616,8 +635,10 @@ async def test_aborted_takeover_resumes_the_native_with_the_death_cause(
         assert len(model_calls) == 1
         note = model_calls[0].messages[-1]
         assert note.id == f"impersonation-handoff:{owner.agent_id}:0"
-        assert (
-            "This session was stopped early: the bound relay stopped heartbeating." in note.content
-        )
+        assert f"This session was stopped early: {detail}." in note.content
+        if cause == "ack_exhaustion":
+            handoff = (tmp_path / "impersonation/0.json").read_text()
+            assert "Preserve this unacknowledged input" in handoff
+            assert '"acknowledged": false' in handoff
         assert "structured handoff" not in note.content
         assert resumed["impersonation_handoff_id"] == f"{owner.agent_id}:0"

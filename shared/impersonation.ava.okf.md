@@ -51,6 +51,17 @@ A crash retries the same note identity and flushes even when its checkpoint
 receipt is already visible. New sessions and ordinary input remain gated until
 this receipt succeeds. File or checkpoint failures cannot resume native work.
 
+## Bounded delivery
+
+`shared/impersonation_delivery.py` reserves at most two host submissions per
+message, each followed by a 300-second ACK window. Attempt count and database
+reservation time survive restart and relay credential rotation. The relay
+credential can reserve delivery but cannot ACK, renew, or arbitrarily release.
+Lease reads and native reconciliation expire an exhausted takeover with the
+missing-ACK cause through the existing handoff. Expiry checks all pending rows,
+not just the relay page. New arrivals and unrelated ACKs do not reset a budget.
+A submission failure spends its reserved attempt and retains the pending body.
+
 ## Permanent messages and unified timeline
 
 `agent_impersonations` retains every session and lifecycle endpoint.
