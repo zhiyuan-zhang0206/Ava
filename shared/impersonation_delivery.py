@@ -7,8 +7,6 @@ therefore consumes an attempt; its body stays pending for native handoff.
 """
 
 from shared._impersonation_store import (
-    ACK_WINDOW_SECONDS,
-    MAX_DELIVERY_ATTEMPTS,
     authenticate_relay,
     expire,
     lock_lease,
@@ -23,7 +21,7 @@ def reserve_delivery(lease_id: str, relay_token: str, message_ids: list[int]) ->
     The agent/lease lock serializes with ACK, release, and other relay sends.
     Recheck expiry here, committing any timeout even when nothing can be sent;
     the relay observes the terminal lease on its next read. Stale snapshots
-    cannot spend an early retry or push a third time. A rotated credential
+    cannot spend an early retry or exceed the lease budget. A rotated credential
     cannot reserve; the new relay retains the previous relay's attempt count.
     """
     with write_transaction() as conn:
@@ -41,6 +39,12 @@ def reserve_delivery(lease_id: str, relay_token: str, message_ids: list[int]) ->
             "AND m.acknowledged_at IS NULL AND m.delivery_attempts < %s "
             "AND (m.last_delivery_at IS NULL OR m.last_delivery_at <= "
             "clock_timestamp() - %s*interval '1 second') RETURNING m.inbound_id",
-            (lease_id, message_ids, lease["agent_id"], MAX_DELIVERY_ATTEMPTS, ACK_WINDOW_SECONDS),
+            (
+                lease_id,
+                message_ids,
+                lease["agent_id"],
+                lease["max_delivery_attempts"],
+                lease["ack_window_seconds"],
+            ),
         ).fetchall()
     return frozenset(row[0] for row in rows)

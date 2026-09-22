@@ -53,9 +53,13 @@ this receipt succeeds. File or checkpoint failures cannot resume native work.
 
 ## Bounded delivery
 
-`shared/impersonation_delivery.py` reserves at most two host submissions per
-message, each followed by a 300-second ACK window. Attempt count and database
-reservation time survive restart and relay credential rotation. The relay
+`shared/impersonation_delivery.py` reserves host submissions against the
+lease's `max_delivery_attempts` and `ack_window_seconds`. Requests snapshot
+`impersonation_max_delivery_attempts` and `impersonation_ack_window_seconds`
+from cluster config (defaults: 2 total attempts, 180 seconds per ACK window).
+Later config edits apply to new leases. Migration preserves the 300-second
+window of existing leases. Attempt count, policy and database reservation time
+survive restart and relay credential rotation. The relay
 credential can reserve delivery but cannot ACK, renew, or arbitrarily release.
 Lease reads and native reconciliation expire an exhausted takeover with the
 missing-ACK cause through the existing handoff. Expiry checks all pending rows,

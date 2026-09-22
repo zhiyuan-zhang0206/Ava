@@ -76,7 +76,7 @@ Messages carry a `kind` that tells you how to treat them:
 - `system_note` — platform lifecycle information (rare during a lease).
 
 After processing a batch, acknowledge exactly the ids you handled, within the
-five-minute ACK window:
+ACK window stated in the envelope (180 seconds by default):
 
 ```bash
 ava impersonate ack <session_id> 101 102 --agent <agent_id>
@@ -87,10 +87,11 @@ ava impersonate ack <session_id> 101 102 --agent <agent_id>
 Rules that keep delivery honest:
 
 - **Acknowledge only what you actually handled.** A batch that is not
-  acknowledged within five minutes is pushed once more, explicitly marked as
-  the final delivery. Another five minutes without ACK ends impersonation and
-  returns unacknowledged input to the native agent. The two-attempt budget is
-  per message and survives relay restarts; the ids make re-ACKing a batch you
+  acknowledged within its ACK window is retried up to the lease's configured
+  total attempt limit (default: 2 attempts, each with 180 seconds to ACK).
+  Missing the final ACK window ends impersonation and returns unacknowledged
+  input to the native agent. The per-message budget is fixed at request time
+  and survives relay restarts; the ids make re-ACKing a batch you
   already handled harmless. Never ACK a message to silence delivery;
   if you cannot handle it, leave it unacknowledged and say so in your release
   summary.
