@@ -1,7 +1,7 @@
 """Push a durable inbox through the bound relay, without ACK or lease renewal.
 
-Each message gets two delivery attempts, each followed by a five-minute ACK
-window. Reservations survive relay restarts. Exhaustion expires the takeover
+Each message uses the delivery budget and ACK window snapshotted on its lease.
+Reservations survive relay restarts. Exhaustion expires the takeover
 through normal native handoff, preserving all unacknowledged content.
 """
 
@@ -24,14 +24,12 @@ from pydantic import BaseModel
 
 import shared.redis_listener
 from cli.commands.codex_app_server import live_submit, require_control_endpoint
-from shared._impersonation_store import ACK_WINDOW_SECONDS, MAX_DELIVERY_ATTEMPTS
 from shared.config import settings
 from shared.impersonation import RELAY_HEARTBEAT_SECONDS
 from shared.impersonation_delivery import reserve_delivery
 
 _CATCHUP_SECONDS = 30.0
 _MIN_EMIT_INTERVAL_SECONDS = 2.0
-_ACK_WINDOW_SECONDS = ACK_WINDOW_SECONDS
 # Bound each message in the host context; full bodies remain in the durable
 # inbox. The same cap also respects Claude Monitor's per-line budget.
 _PUSH_MAX_CHARS = 2000
@@ -44,6 +42,8 @@ class _Lease(BaseModel):
     agent_id: int
     status: LeaseStatus
     expires_at: datetime
+    ack_window_seconds: int
+    max_delivery_attempts: int
     relay_batch_window_seconds: int = 0
     start_message: str = ""
     rejection_reason: str | None = None
@@ -83,6 +83,8 @@ class InboxSnapshot:
     batch_window: float = 0.0
     start_message: str = ""
     end_reason: str | None = None
+    ack_window_seconds: int = 180
+    max_delivery_attempts: int = 2
 
     @property
     def active(self) -> bool:
@@ -118,6 +120,8 @@ def message_push(
     lease_id: int | UUID,
     messages: Sequence[InboxMessage],
     *,
+    ack_window_seconds: int,
+    max_delivery_attempts: int,
     redelivery: bool = False,
     max_chars: int | None = None,
 ) -> str:
@@ -142,21 +146,25 @@ def message_push(
                 content[:max_chars] + " (truncated; run the inbox command to read the full message)"
             )
         blocks.append(f"[id={message.id}] kind={message.kind} from={message.source}")
+        blocks.append(f"Delivery attempt {message.delivery_attempts + 1}/{max_delivery_attempts}")
         blocks.append(content)
         blocks.append("")
     blocks.append(f"ACK after processing: {ack_command(lease_id, ids, agent_id)}")
     blocks.append(
-        f"ACK within {_ACK_WINDOW_SECONDS:g}s. "
+        f"ACK within {ack_window_seconds}s. "
         + (
-            "This is the final delivery; another missed ACK window ends impersonation."
-            if redelivery
-            else "One retry is allowed; a second missed ACK window ends impersonation."
+            "This batch includes a final delivery; a missed ACK window ends impersonation."
+            if any(m.delivery_attempts + 1 >= max_delivery_attempts for m in messages)
+            else f"At most {max_delivery_attempts} total attempts per message; "
+            "a missed final ACK window ends impersonation."
         )
     )
     return "\n".join(blocks)
 
 
-def activation_hint(agent_id: int, lease_id: int | UUID) -> str:
+def activation_hint(
+    agent_id: int, lease_id: int | UUID, *, ack_window_seconds: int, max_delivery_attempts: int
+) -> str:
     """Fallback start message for a lease accepted without one.
 
     New accepts require a nonempty start message, so this only serves leases
@@ -171,8 +179,8 @@ def activation_hint(agent_id: int, lease_id: int | UUID) -> str:
         f"Ava control active: agent={agent_id} lease={lease_id}. "
         "Inbox messages are pushed to this session; after processing each batch "
         f"run: {ack} ID... Use {inbox} to read missed or truncated messages. "
-        f"Each message has {MAX_DELIVERY_ATTEMPTS} delivery attempts, "
-        f"with {_ACK_WINDOW_SECONDS:g}s to ACK each; exhaustion ends impersonation."
+        f"Each message has {max_delivery_attempts} delivery attempts, "
+        f"with {ack_window_seconds}s to ACK each; exhaustion ends impersonation."
     )
 
 
@@ -269,6 +277,8 @@ def _read_inbox(agent_id: int, lease_id: UUID, token: str) -> InboxSnapshot:
         routine_ids=_routine_ids(rows),
         batch_window=float(lease.relay_batch_window_seconds),
         start_message=lease.start_message,
+        ack_window_seconds=lease.ack_window_seconds,
+        max_delivery_attempts=lease.max_delivery_attempts,
     )
 
 
@@ -327,7 +337,7 @@ def _due_ids(snapshot: InboxSnapshot, *, redelivery: bool) -> frozenset[int]:
         message.id
         for message in snapshot.messages.values()
         if message.delivery_due
-        and message.delivery_attempts < MAX_DELIVERY_ATTEMPTS
+        and message.delivery_attempts < snapshot.max_delivery_attempts
         and (message.delivery_attempts > 0) == redelivery
     )
 
@@ -344,7 +354,7 @@ async def relay_inbox(  # noqa: PLR0915 — one consent/window/reservation deliv
     catchup_seconds: float = _CATCHUP_SECONDS,
     max_chars: int | None = None,
 ) -> None:
-    """Deliver consent/start first, then at most two attempts per pending row.
+    """Deliver consent/start first, then respect the lease budget per pending row.
 
     Database time and durable reservations own the ACK windows and budget;
     local monotonic time only controls batching/rate limits. Every read
@@ -375,9 +385,15 @@ async def relay_inbox(  # noqa: PLR0915 — one consent/window/reservation deliv
                 continue
             if not start_sent:
                 activation_pending = snapshot.message_ids
-                start_message = snapshot.start_message or activation_hint(agent_id, lease_id)
+                hint = activation_hint(
+                    agent_id,
+                    lease_id,
+                    ack_window_seconds=snapshot.ack_window_seconds,
+                    max_delivery_attempts=snapshot.max_delivery_attempts,
+                )
+                start_message = snapshot.start_message or hint
                 if snapshot.start_message and isinstance(lease_id, int):
-                    start_message += "\n\n" + activation_hint(agent_id, lease_id)
+                    start_message += "\n\n" + hint
                 emit(start_message)
                 start_sent = True
                 last_emit = _loop_time()
@@ -416,6 +432,8 @@ async def relay_inbox(  # noqa: PLR0915 — one consent/window/reservation deliv
                             agent_id,
                             lease_id,
                             [snapshot.messages[i] for i in sorted(reserved)],
+                            ack_window_seconds=snapshot.ack_window_seconds,
+                            max_delivery_attempts=snapshot.max_delivery_attempts,
                             redelivery=redelivery,
                             max_chars=max_chars,
                         )

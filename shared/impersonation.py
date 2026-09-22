@@ -13,7 +13,6 @@ from psycopg.types.json import Jsonb
 
 from shared import redis_client
 from shared._impersonation_store import (
-    ACK_WINDOW_SECONDS,
     OPEN,
     authenticate,
     authenticate_relay,
@@ -36,6 +35,7 @@ from shared._impersonation_store import (
 )
 from shared.caller_identity import CallerIdentity, caller_payload
 from shared.config import settings
+from shared.config.service_read import current_field_values
 from shared.db import connect, publish_inbound_wake
 from shared.db_transaction import write_transaction
 from shared.impersonation_history import append, capture_pending, set_actor
@@ -108,6 +108,7 @@ def request(
         raise ValueError("relay_batch_window_seconds must be an integer from 0 through 300")
     relay_token = secrets.token_urlsafe(32) if relay_provider == "claude" else None
     lease_id = uuid4()
+    delivery_config = current_field_values()
     with write_transaction() as conn:
         meta = lock_agent(conn, agent_id)
         if meta["machine"] != machine_name():
@@ -134,8 +135,9 @@ def request(
         conn.execute(
             "INSERT INTO agent_impersonations(id,agent_id,source,machine,reason,"
             "status,ttl_seconds,expires_at,relay_provider,relay_thread_id,relay_codex_remote,"
-            "relay_token_hash,relay_batch_window_seconds,name,executor_name,process_metadata,automatic) VALUES(%s,%s,%s,%s,%s,'requested',%s,"
-            "clock_timestamp()+%s*interval '1 second',%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "relay_token_hash,relay_batch_window_seconds,name,executor_name,process_metadata,automatic,"
+            "ack_window_seconds,max_delivery_attempts) VALUES(%s,%s,%s,%s,%s,'requested',%s,"
+            "clock_timestamp()+%s*interval '1 second',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 lease_id,
                 agent_id,
@@ -153,6 +155,8 @@ def request(
                 executor_name or caller.source(),
                 Jsonb(process_metadata or {}),
                 automatic,
+                delivery_config["impersonation_ack_window_seconds"],
+                delivery_config["impersonation_max_delivery_attempts"],
             ),
         )
         result = public(lock_lease(conn, str(lease_id)))
@@ -560,7 +564,7 @@ def relay_inbox(lease_id: str, relay_token: str, *, limit: int = 100) -> list[di
                 "WHERE i.agent_id=%s AND i.status='pending' AND i.kind IN "
                 "('chat','system_note','cancel','reminder') "
                 "ORDER BY i.id LIMIT %s",
-                (ACK_WINDOW_SECONDS, lease_id, lease["agent_id"], limit),
+                (lease["ack_window_seconds"], lease_id, lease["agent_id"], limit),
             )
             messages = cur.fetchall()
         for message in messages:

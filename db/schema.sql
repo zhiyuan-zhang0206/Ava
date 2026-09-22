@@ -1725,6 +1725,8 @@ CREATE TABLE IF NOT EXISTS agent_impersonations (
     relay_minted_at TIMESTAMPTZ,
     relay_minted_generation UUID,
     relay_minted_owner UUID,
+    ack_window_seconds INTEGER NOT NULL DEFAULT 180 CHECK (ack_window_seconds > 0),
+    max_delivery_attempts INTEGER NOT NULL DEFAULT 2 CHECK (max_delivery_attempts > 0),
     relay_batch_window_seconds INTEGER NOT NULL DEFAULT 0
         CHECK (relay_batch_window_seconds BETWEEN 0 AND 300),
     CHECK (applied_version >= 0 AND applied_version <= delta_version),
@@ -1759,7 +1761,7 @@ CREATE TABLE IF NOT EXISTS agent_impersonation_messages (
     lease_id UUID NOT NULL REFERENCES agent_impersonations(id) ON DELETE RESTRICT,
     inbound_id BIGINT NOT NULL REFERENCES inbound_messages(id) ON DELETE CASCADE,
     acknowledged_at TIMESTAMPTZ,
-    delivery_attempts INTEGER NOT NULL DEFAULT 0 CHECK (delivery_attempts BETWEEN 0 AND 2),
+    delivery_attempts INTEGER NOT NULL DEFAULT 0 CHECK (delivery_attempts >= 0),
     last_delivery_at TIMESTAMPTZ,
     CONSTRAINT agent_impersonation_messages_delivery_consistent CHECK ((delivery_attempts = 0) = (last_delivery_at IS NULL)),
     PRIMARY KEY (lease_id, inbound_id)
@@ -2245,3 +2247,6 @@ INSERT INTO schema_migrations (name) VALUES ('20260921T211400_watcher-agent-noti
 
 -- Durable per-message relay attempt budget.
 INSERT INTO schema_migrations (name) VALUES ('20260922T053200_impersonation-delivery-budget');
+
+-- Lease-scoped delivery policy and configurable attempt limits.
+INSERT INTO schema_migrations (name) VALUES ('20260922T075826_impersonation-delivery-config');

@@ -119,8 +119,11 @@ ava impersonate inbox 0 --agent 405 --limit 100
 ava impersonate renew 0 --agent 405 --ttl 3600
 ```
 
-Inbox reads do not ACK. Missed batches repeat after five minutes. ACK changes
-processing state, never history retention. `cancel` asks the external controller
+Inbox reads do not ACK. Each lease snapshots the configured ACK window and
+maximum total delivery attempts (defaults: 180 seconds, 2 attempts including
+the first). Missing a final ACK window ends the takeover and preserves pending
+input for native handoff. See [delivery configuration](agent-impersonation-hosts.md#delivery-and-recovery).
+ACK changes processing state, never history retention. `cancel` asks the external controller
 to stop; ACK after stopping. `reminder` indicates an approaching TTL deadline:
 decide whether to renew once or release. Renew explicitly, never in an automated
 heartbeat loop. TTL is 1..86400 seconds; relay liveness does not extend it.

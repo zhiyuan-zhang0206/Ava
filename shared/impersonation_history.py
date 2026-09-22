@@ -63,6 +63,8 @@ def public_session(lease: dict[str, Any]) -> dict[str, Any]:
         "ended_at",
         "expires_at",
         "ttl_seconds",
+        "ack_window_seconds",
+        "max_delivery_attempts",
         "reason",
         "summary",
         "handoff_path",

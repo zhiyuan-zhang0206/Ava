@@ -615,11 +615,11 @@ async def test_aborted_takeover_resumes_the_native_with_the_death_cause(
             assert row is not None
             db_conn.execute(
                 "INSERT INTO agent_impersonation_messages(lease_id,inbound_id,delivery_attempts,last_delivery_at) "
-                "VALUES(%s,%s,2,clock_timestamp()-interval '301 seconds')",
+                "VALUES(%s,%s,2,clock_timestamp()-interval '181 seconds')",
                 (requested["id"], row[0]),
             )
             db_conn.commit()
-            detail = f"the executor did not ACK message {row[0]} after 2 delivery attempts (300s per ACK window)"
+            detail = f"the executor did not ACK message {row[0]} after 2 delivery attempts (180s per ACK window)"
         died = leases.get(requested["id"], attested_caller(requested))
         assert died["status"] == "expired"
         assert died["rejection_reason"] == f"aborted: {detail}"
