@@ -57,12 +57,11 @@ the UI) keeps it around without running.
 Edit the script template and the manifest entry (name, class, default_enabled,
 description), PR it, and deploy.
 
-A `.py` template's CLI must tolerate the schedule runner's argv: the runner
-executes it in-process via `runpy` under `python -m gateway.schedule_runner <id>`,
-so `sys.argv[1:]` carries the schedule id. An argparse view that rejects it exits 2
-on every launch and trips the manager's crash breaker (the daily debt sweep did,
-2026-09-22, before its first fire) — accept and ignore the positional id, and keep
-flags for manual runs. On deploy, new manifest entries are
+A `.py` template is executed in-process by the runner, which hands it a clean
+`sys.argv` — just its own path, exactly what `python <script>` would give it; the
+runner's own argv (`python -m gateway.schedule_runner <id>`) never reaches the
+script, so a template's CLI takes its own flags only (keep them usable for
+manual runs). On deploy, new manifest entries are
 provisioned at the next gateway boot; changed defaults only apply to rows that
 do not exist yet — an existing cluster's rows keep their operator-set state.
 To roll a changed template out to an existing cluster's schedule, use
