@@ -195,6 +195,51 @@ def test_remote_home_machine_is_forwarded(
     assert captured["target"] == "stale-wsl"
 
 
+def test_restart_overlay_is_validated_without_gateway_agent_domain(
+    _force_local_machine: str,
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Restart validates its forwarded overlay without constructing agent settings."""
+    import shared.config as shared_config
+    from shared.config import Settings
+
+    captured: dict[str, Any] = {}
+
+    async def _capture_forward(
+        agent_id: int, path: str, json_body: dict[str, object]
+    ) -> dict[str, str]:
+        captured["agent_id"] = agent_id
+        captured["path"] = path
+        captured["json_body"] = json_body
+        return {"status": "enqueued"}
+
+    monkeypatch.setattr(lifecycle_module, "_forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
+    with TestClient(app) as client:
+        agent_id = client.post("/api/agents", json={}).json()["id"]
+        _set_agent_machine(db_conn, agent_id, "remote-runner")
+        with monkeypatch.context() as profile_patch:
+            profile_patch.setattr(shared_config, "settings", Settings(profile="gateway"))
+            valid = client.post(
+                f"/api/agents/{agent_id}/restart",
+                json={"config_overlay": {"completion_notice_policy": "hourly"}},
+            )
+            invalid = client.post(
+                f"/api/agents/{agent_id}/restart",
+                json={"config_overlay": {"completion_notice_policy": "bogus"}},
+            )
+
+    assert valid.status_code == 200
+    assert valid.json() == {"status": "enqueued"}
+    assert captured["agent_id"] == agent_id
+    assert captured["path"] == f"/api/agents/{agent_id}/restart"
+    assert captured["json_body"] == {
+        "source": "user",
+        "config_overlay": {"completion_notice_policy": "hourly"},
+    }
+    assert invalid.status_code == 422
+
+
 def _insert_open_task(
     db_conn: psycopg.Connection,
     *,
