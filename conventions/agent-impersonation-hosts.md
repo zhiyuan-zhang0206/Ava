@@ -26,7 +26,7 @@ The controller itself holds no credential: see *Control plane* below.
 
 Verify that the start message actually arrives in the intended conversation
 before relying on automatic delivery. Lease activation, relay process liveness,
-and queue acceptance establish different facts; none establishes host receipt.
+and transport acceptance establish different facts; none establishes host receipt.
 
 ## Codex CLI
 

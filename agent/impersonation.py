@@ -278,8 +278,9 @@ def _spawn_codex_relay(
     """Spawn the bound relay; the scoped credential travels over a private pipe.
 
     The token never appears in argv or the environment. The child receives the
-    session environment projection and boots its cluster connections; stdout is discarded (hints
-    travel through `codex queue`), stderr flows into this process's log.
+    session environment projection and boots its cluster connections. Stdout is
+    discarded because delivery uses the app-server Steer path; stderr flows
+    into this process's log.
     """
     from shared.session_env import forward_env_dict
 

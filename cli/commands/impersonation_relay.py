@@ -131,9 +131,8 @@ def message_push(
     command, so the external session processes messages without reading or
     parsing the inbox. A re-delivery push says so explicitly; the ids make it
     idempotent for a host that already handled the batch. ``max_chars`` bounds
-    each content block — Claude Monitor's per-line budget, and the codex
-    ``queue --message`` argv safety cap; the tail points at the inbox command
-    for the full text.
+    each content block to fit Claude Monitor's per-line budget and limit host
+    context; the tail points at the inbox command for the full text.
     """
     ids = [message.id for message in messages]
     header = f"Ava message agent={agent_id} lease={lease_id} ids={','.join(map(str, ids))}"
