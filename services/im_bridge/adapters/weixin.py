@@ -39,9 +39,9 @@ EP_GET_UPDATES = "ilink/bot/getupdates"
 EP_SEND_MESSAGE = "ilink/bot/sendmessage"
 
 # How long a failed send's client_id stays reusable for the retry. The
-# retry is immediate (push_watchdog.send_with_retry), so 5 min is a wide
-# margin; the expiry exists so a stale id can never be reused for a later,
-# different message (iLink dedups by client_id and would drop it).
+# push_watchdog retry waits its bounded backoff (seconds), so 5 min is a
+# wide margin; the expiry exists so a stale id can never be reused for a
+# later, different message (iLink dedups by client_id and would drop it).
 _PENDING_CLIENT_ID_TTL_S = 300.0
 EP_GET_BOT_QR = "ilink/bot/get_bot_qrcode"
 EP_GET_QR_STATUS = "ilink/bot/get_qrcode_status"
@@ -330,7 +330,7 @@ class WeixinAdapter(IMAdapter):
         self._push_alerted_at: float | None = None
         self._chunk_delay_seconds = _SEND_CHUNK_DELAY_SECONDS
         # (chat_id, chunk_idx) -> (client_id, monotonic): the id of the last
-        # failed send attempt, reused by the immediate retry so iLink's
+        # failed send attempt, reused on the push_watchdog retry so iLink's
         # client_id dedup collapses the duplicate (audit round 2, P1).
         # Entries expire so a stale id can never swallow a later, different
         # message.

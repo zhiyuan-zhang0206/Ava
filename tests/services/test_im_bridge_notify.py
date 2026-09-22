@@ -4,8 +4,9 @@ The ops-alerts pipeline's IM fan-out: the gateway POSTs one message to the
 im_bridge daemon's health-port `/send` route; the core fans it out to every
 loaded adapter's `send_to_owner`. This module locks the fan-out contract —
 all adapters receive the text, a channel that cannot resolve an owner chat is
-skipped, one failing channel does not stop the others, and the `/send` route
-handler validates the body and returns per-channel results.
+skipped, one failing channel does not stop the others, a failing channel gets
+exactly one retry after the shared bounded jitter backoff (task #4252), and
+the `/send` route handler validates the body and returns per-channel results.
 """
 
 from __future__ import annotations
@@ -13,22 +14,54 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import pytest
+
+from services.im_bridge import push_watchdog
 from services.im_bridge.core import IMBridgeCore
 from services.im_bridge.types import IMAdapter
+from shared.config import settings
+
+
+@pytest.fixture
+def retry_sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """Record the retry backoff instead of sleeping it out.
+
+    The seam is `push_watchdog._sleep` (tests/README.md: patch the module-local
+    seam, not `asyncio.sleep`), so no test pays real wall-clock time."""
+
+    recorded: list[float] = []
+
+    async def _record(seconds: float) -> None:
+        recorded.append(seconds)
+
+    monkeypatch.setattr(push_watchdog, "_sleep", _record)
+    return recorded
 
 
 class _RecordingAdapter(IMAdapter):
-    """IMAdapter stand-in recording send_to_owner calls."""
+    """IMAdapter stand-in recording send_to_owner calls.
+
+    `error` + `fail_times` script a transient failure: the first `fail_times`
+    attempts raise, later ones succeed. `fail_times=None` with an error set
+    fails every attempt."""
 
     _next_channel = 0
 
-    def __init__(self, *, error: Exception | None = None, skipped: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        error: Exception | None = None,
+        fail_times: int | None = None,
+        skipped: bool = False,
+    ) -> None:
         super().__init__(core=None)  # type: ignore[arg-type] — duck-typed, never used
         _RecordingAdapter._next_channel += 1
         self.channel = f"rec{_RecordingAdapter._next_channel}"
         self.error = error
+        self.fail_times = fail_times
         self.skipped = skipped
         self.sent: list[str] = []
+        self.attempts = 0
 
     async def start(self) -> None:  # pragma: no cover - abstract contract
         return None
@@ -48,9 +81,10 @@ class _RecordingAdapter(IMAdapter):
 
     async def send_to_owner(self, text: str, *, markdown: bool = False) -> None:
         del markdown
+        self.attempts += 1
         if self.skipped:
             raise NotImplementedError("no owner chat")
-        if self.error is not None:
+        if self.error is not None and (self.fail_times is None or self.attempts <= self.fail_times):
             raise self.error
         self.sent.append(text)
 
@@ -73,9 +107,10 @@ def test_notify_user_fans_out_to_all_adapters() -> None:
     assert set(results.values()) == {"ok"}
 
 
-def test_notify_user_skips_and_isolates_failures() -> None:
+def test_notify_user_skips_and_isolates_failures(retry_sleeps: list[float]) -> None:
     """A channel without an owner chat is skipped; a failing channel does not
-    stop the others from receiving the message."""
+    stop the others from receiving the message. The skipped channel pays no
+    retry (a permanent condition), the broken one exactly one."""
     core = IMBridgeCore()
     skipped, broken, ok = (
         _RecordingAdapter(skipped=True),
@@ -95,6 +130,45 @@ def test_notify_user_skips_and_isolates_failures() -> None:
     assert broken.sent == []
     assert results[skipped.channel] == "skipped"
     assert results[broken.channel].startswith("error:")
+    assert skipped.attempts == 1  # NotImplementedError is permanent — never retried
+    assert broken.attempts == 2  # failed once, retried once
+    assert len(retry_sleeps) == 1
+
+
+def test_notify_user_retry_after_backoff_recovers(retry_sleeps: list[float]) -> None:
+    """A transient failure (the ~0.65s connection window, task #4252) is
+    healed by exactly one retry after the bounded jitter backoff."""
+    core = IMBridgeCore()
+    flaky = _RecordingAdapter(error=RuntimeError("connect jitter"), fail_times=1)
+    core.register(flaky)
+
+    async def run() -> dict[str, str]:
+        return await core.notify_user("hi")
+
+    results = asyncio_run(run())
+    assert results[flaky.channel] == "ok"
+    assert flaky.sent == ["hi"]
+    assert flaky.attempts == 2
+    assert len(retry_sleeps) == 1
+    base = settings.services.im_push_retry_backoff_seconds
+    jitter = settings.services.im_push_retry_jitter_seconds
+    assert base <= retry_sleeps[0] <= base + jitter
+
+
+def test_notify_user_double_failure_reports_error(retry_sleeps: list[float]) -> None:
+    """Both attempts fail -> the channel keeps its "error: <TypeName>" result
+    (the /send gate still sees no delivery), with exactly one retry."""
+    core = IMBridgeCore()
+    broken = _RecordingAdapter(error=ValueError("boom"))
+    core.register(broken)
+
+    async def run() -> dict[str, str]:
+        return await core.notify_user("hi")
+
+    results = asyncio_run(run())
+    assert results[broken.channel] == "error: ValueError"
+    assert broken.attempts == 2
+    assert len(retry_sleeps) == 1
 
 
 def test_notify_user_empty_core() -> None:

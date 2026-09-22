@@ -350,6 +350,43 @@ class ServiceSettings(ServiceHealthPortFields, _ServiceRuntimeSettings):
         },
     )
 
+    im_push_retry_backoff_seconds: float = Field(
+        default=1.0,
+        ge=0.0,
+        alias="AVA_IM_PUSH_RETRY_BACKOFF_SECONDS",
+        description=(
+            "Base wait (seconds) before an im_bridge outbound send is retried once "
+            "(the push path and the ops-alert notify leg share it). Connection-level "
+            "failures cluster in a ~0.65s window (probe, task #4252), so an immediate "
+            "retry re-enters the same window; 1.0s plus up to 2.0s of jitter "
+            "(im_push_retry_jitter_seconds) walks past it."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    im_push_retry_jitter_seconds: float = Field(
+        default=2.0,
+        ge=0.0,
+        alias="AVA_IM_PUSH_RETRY_JITTER_SECONDS",
+        description=(
+            "Upper bound (seconds) of the uniform jitter added to "
+            "im_push_retry_backoff_seconds before an im_bridge outbound retry "
+            "(task #4252): spreads concurrent retries so they do not all re-enter "
+            "the platform endpoint in lockstep. 0 disables the jitter."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     im_sse_read_timeout_seconds: float = Field(
         default=120.0,
         alias="AVA_IM_SSE_READ_TIMEOUT_SECONDS",

@@ -10,12 +10,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 from typing import Any
 
 import httpx
 import pytest
 
-from services.im_bridge import copy
+from services.im_bridge import copy, push_watchdog
 from services.im_bridge import state as state_mod
 from services.im_bridge.core import IMBridgeCore
 from services.im_bridge.types import ChatState, IMAdapter, InboundMessage, Reply
@@ -1015,6 +1016,7 @@ class FakeFailingWeixinAdapter(FakePlainAdapter):
         self.push_recovered_at: float | None = None
         self._push_alerted_at: float | None = None
         self.owner_alerts: list[str] = []
+        self.send_attempts = 0
 
     async def send(
         self,
@@ -1025,6 +1027,7 @@ class FakeFailingWeixinAdapter(FakePlainAdapter):
         markdown: bool = False,
     ) -> None:
         del buttons, markdown
+        self.send_attempts += 1
         raise RuntimeError("iLink sendmessage error: ret=-2 errmsg=prepare failed")
 
     async def send_to_owner(self, text: str, *, markdown: bool = False) -> None:
@@ -1032,10 +1035,47 @@ class FakeFailingWeixinAdapter(FakePlainAdapter):
         self.owner_alerts.append(text)
 
 
-def test_weixin_push_failures_alert_other_channel() -> None:
+class FakeFlakyWeixinAdapter(FakePlainAdapter):
+    """Weixin adapter stand-in whose first send fails and whose retry
+    succeeds — the probe's self-heal case (task #4252). Every attempt is
+    appended to `events`, so a test can assert the backoff interleaving."""
+
+    def __init__(self, events: list[str]) -> None:
+        super().__init__()
+        self.channel = "weixin"
+        self.events = events
+        self.push_failures = 0
+        self.push_failed_at: float | None = None
+        self.push_recovered_at: float | None = None
+        self._push_alerted_at: float | None = None
+        self.send_attempts = 0
+
+    async def send(
+        self,
+        chat_id: str,
+        text: str,
+        *,
+        buttons: list[tuple[str, str]] | None = None,
+        markdown: bool = False,
+    ) -> None:
+        del buttons, markdown
+        self.send_attempts += 1
+        self.events.append("send")
+        if self.send_attempts == 1:
+            self.push_failures += 1
+            self.push_failed_at = time.time()
+            raise RuntimeError("iLink sendmessage error: ret=-2 errmsg=prepare failed")
+        if self.push_failures > 0:
+            self.push_recovered_at = time.time()  # the real adapter's reset path
+        self.push_failures = 0
+        self.sent.append((chat_id, text))
+
+
+def test_weixin_push_failures_alert_other_channel(monkeypatch: pytest.MonkeyPatch) -> None:
     """After enough consecutive weixin send failures, the user is alerted
     through another channel (Telegram) — inbound-only failure is invisible
-    to the user otherwise (Task #829)."""
+    to the user otherwise (Task #829). A double failure costs exactly one
+    retry, past the bounded jitter backoff (task #4252)."""
     gateway = FakeGateway()
     core = _core(gateway)
     wx = FakeFailingWeixinAdapter()
@@ -1044,6 +1084,12 @@ def test_weixin_push_failures_alert_other_channel() -> None:
     core.register(tg)
     wx.push_failures = 2
     wx.push_failed_at = 1234.0
+    sleeps: list[float] = []
+
+    async def _record(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(push_watchdog, "_sleep", _record)
 
     async def scenario() -> None:
         await core._send("weixin", "o9cq804", Reply("hello"))
@@ -1052,9 +1098,14 @@ def test_weixin_push_failures_alert_other_channel() -> None:
         assert wx._push_alerted_at is not None
 
     asyncio.run(scenario())
+    assert wx.send_attempts == 2  # exactly one retry
+    assert len(sleeps) == 1
+    base = settings.services.im_push_retry_backoff_seconds
+    jitter = settings.services.im_push_retry_jitter_seconds
+    assert base <= sleeps[0] <= base + jitter
 
 
-def test_weixin_push_failure_alert_cooldown() -> None:
+def test_weixin_push_failure_alert_cooldown(monkeypatch: pytest.MonkeyPatch) -> None:
     """The cross-channel alert fires at most once per cooldown window."""
     gateway = FakeGateway()
     core = _core(gateway)
@@ -1065,6 +1116,11 @@ def test_weixin_push_failure_alert_cooldown() -> None:
     wx.push_failures = 2
     wx.push_failed_at = 100.0
     wx._push_alerted_at = 100.0  # just alerted
+
+    async def _no_sleep(seconds: float) -> None:
+        del seconds
+
+    monkeypatch.setattr(push_watchdog, "_sleep", _no_sleep)
 
     async def scenario() -> None:
         # same window -> no second alert
@@ -1111,6 +1167,56 @@ def test_weixin_push_recovery_hints_on_next_inbound() -> None:
         assert any("push link failed earlier and has now recovered" in t for t in texts)
 
     asyncio.run(scenario())
+
+
+# --- Task #4252: push retry — bounded jitter backoff, exactly one retry ---
+
+
+def test_push_retry_sleeps_backoff_before_retrying(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A transient first failure (the probe's ~0.65s connection window,
+    task #4252) recovers on the retry: the bounded jitter backoff sleep
+    happens between the two attempts, exactly once, and no cross-channel
+    alert fires."""
+    gateway = FakeGateway()
+    core = _core(gateway)
+    events: list[str] = []
+
+    async def _sleep(seconds: float) -> None:
+        base = settings.services.im_push_retry_backoff_seconds
+        jitter = settings.services.im_push_retry_jitter_seconds
+        assert base <= seconds <= base + jitter
+        events.append("sleep")
+
+    monkeypatch.setattr(push_watchdog, "_sleep", _sleep)
+    wx = FakeFlakyWeixinAdapter(events)
+    tg = FakeTypingAdapter()
+    core.register(wx)
+    core.register(tg)
+
+    async def scenario() -> None:
+        await core._send("weixin", "o9cq804", Reply("hello"))
+
+    asyncio.run(scenario())
+    assert events == ["send", "sleep", "send"]  # exactly one retry, after the backoff
+    assert wx.sent == [("o9cq804", "hello")]
+    assert tg.owner_sent == []  # healed on the retry: no push-failure alert
+    assert wx.push_failures == 0
+    assert wx.push_recovered_at is not None
+
+
+def test_push_retry_backoff_is_config_backed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The backoff is a config field, not a bare literal (user ruling: behaviour
+    constants are configurable, each carrying its reason): base + U(0, jitter),
+    read at retry time; jitter 0 makes the wait deterministic."""
+    assert settings.services.im_push_retry_backoff_seconds == 1.0
+    assert settings.services.im_push_retry_jitter_seconds == 2.0
+    monkeypatch.setattr(settings.services, "im_push_retry_backoff_seconds", 1.5)
+    monkeypatch.setattr(settings.services, "im_push_retry_jitter_seconds", 0.0)
+    assert push_watchdog.retry_backoff_seconds() == 1.5
+    monkeypatch.setattr(settings.services, "im_push_retry_jitter_seconds", 2.0)
+    delays = [push_watchdog.retry_backoff_seconds() for _ in range(50)]
+    assert all(1.5 <= delay <= 3.5 for delay in delays)
+    assert len(set(delays)) > 1  # the jitter actually varies
 
 
 def test_restore_subscriptions_skips_disabled_channels(

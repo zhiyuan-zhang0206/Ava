@@ -16,11 +16,15 @@ The old "24h window" reminder assumed a fixed 24h expiry and was retired.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import random
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from services.im_bridge import copy
+from shared.config import settings
 
 _log = logging.getLogger("services.im_bridge.core.push_watchdog")
 
@@ -28,17 +32,48 @@ PUSH_FAILURE_THRESHOLD = 2  # consecutive failures before alerting
 PUSH_ALERT_COOLDOWN_SECONDS = 1800  # seconds between alerts
 PUSH_RECOVERED_HINT_SECONDS = 60  # seconds after first success to hint
 
+_sleep = asyncio.sleep  # module-local seam: tests patch this name, not asyncio.sleep
+
+
+def retry_backoff_seconds() -> float:
+    """Bounded jitter backoff before a retry: base + U(0, jitter).
+
+    The measured failure mode is a connection-establishment window of
+    ~0.65 s (probe, task #4252): an immediate retry re-enters the same
+    window, while the default 1.0 s base plus 0-2.0 s of jitter walks
+    past it."""
+
+    base = settings.services.im_push_retry_backoff_seconds
+    jitter = settings.services.im_push_retry_jitter_seconds
+    return base + random.uniform(0.0, jitter)  # noqa: S311 — spread, not secrecy
+
+
+async def retry_once_after_backoff(attempt: Callable[[], Awaitable[None]]) -> None:
+    """Sleep a bounded jitter backoff, then run one retry attempt.
+
+    Exactly one retry — never a loop. A failure of the retry propagates to
+    the caller, which owns the logging and the outcome. Shared by the push
+    path (``send_with_retry``) and the ops-alert fan-out
+    (``IMBridgeCore.notify_user``)."""
+
+    await _sleep(retry_backoff_seconds())
+    await attempt()
+
 
 async def send_with_retry(core: Any, channel: str, chat_id: str, reply: Any, adapter: Any) -> None:
-    """Send once, retry once; on the retry failure also run the weixin
-    push-failure watchdog (alert the user through other channels)."""
+    """Send once, retry once after a bounded jitter backoff; on the retry
+    failure also run the weixin push-failure watchdog (alert the user
+    through other channels)."""
+
+    async def attempt() -> None:
+        await adapter.send(chat_id, reply.text, buttons=reply.buttons, markdown=reply.markdown)
 
     try:
-        await adapter.send(chat_id, reply.text, buttons=reply.buttons, markdown=reply.markdown)
+        await attempt()
     except Exception:
         _log.exception("send failed channel=%s chat=%s", channel, chat_id)
         try:
-            await adapter.send(chat_id, reply.text, buttons=reply.buttons, markdown=reply.markdown)
+            await retry_once_after_backoff(attempt)
         except Exception:
             _log.exception("send retry failed channel=%s chat=%s", channel, chat_id)
             await alert_push_failure(core, channel, adapter)
