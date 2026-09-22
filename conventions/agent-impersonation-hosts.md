@@ -147,9 +147,9 @@ Every watch carries a deadline (`timeout_ms`; 5 minutes when omitted, capped at
 30 minutes — arm with 1800000). At the deadline the watch **and the relay
 process it runs are killed**, and the session receives one
 `[Monitor expired ... Re-arm it if you still need the watch.]` notice. Re-arm as
-soon as that notice arrives: the fresh arm starts a new relay that replays every
-unacknowledged row (at-least-once is unchanged), while a missed re-arm stops the
-heartbeat and the lease stops (Process death → auto-stop). The legacy
+soon as that notice arrives: the fresh arm starts a relay that resumes delivery
+using each message's existing attempt count and ACK deadline. A missed re-arm
+stops the heartbeat and the lease stops (Process death → auto-stop). The legacy
 `persistent` field is ignored; an arm without `timeout_ms` runs under the
 5-minute default. Verified on Claude Code 2.1.275 (task #4037). Normal Bash
 permissions apply. Monitor is unavailable
