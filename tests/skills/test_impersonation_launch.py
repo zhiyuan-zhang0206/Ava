@@ -51,7 +51,7 @@ def test_self_takeover_bootstrap_inlines_brief_and_links_real_guide(
     assert "ava impersonate say" in message
     assert "ava.impersonation.say" not in message
     assert "release with your own summary" in message
-    assert "queue acceptance is not host receipt" in message
+    assert "transport acceptance is not host receipt" in message
     if provider == "codex":
         assert "CODEX_THREAD_ID" in message and "CODEX_HOME" in message
         assert "--codex-remote" in message

@@ -130,6 +130,11 @@ def _dispatch(args: argparse.Namespace) -> int:
 
     command = args.impersonation_cmd
     if command == "request":
+        from cli.commands.codex_app_server import require_control_endpoint
+
+        endpoint = args.relay_codex_remote
+        if args.relay_provider == "codex":
+            endpoint = require_control_endpoint(endpoint)
         _emit(
             sessions.request(
                 args.agent_id,
@@ -140,7 +145,7 @@ def _dispatch(args: argparse.Namespace) -> int:
                 reason=args.reason,
                 provider=args.relay_provider,
                 thread_id=args.relay_thread_id,
-                codex_remote=args.relay_codex_remote,
+                codex_remote=endpoint,
                 batch_window_seconds=args.relay_batch_window_seconds,
             )
         )
@@ -149,7 +154,7 @@ def _dispatch(args: argparse.Namespace) -> int:
                 "The runtime starts the codex relay automatically at activation; "
                 "no relay process starts here. When your session runs an explicit app "
                 "server, pass --codex-remote with its endpoint so the relay reaches the "
-                "same server the session uses (live turn/start, codex queue fallback; "
+                "same server the session uses (Steer delivery, no Pending fallback; "
                 "see the host conventions). A relay "
                 "that cannot start rolls the takeover back loudly (status becomes "
                 "rejected with the reason).",

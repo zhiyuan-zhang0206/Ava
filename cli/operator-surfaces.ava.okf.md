@@ -12,6 +12,12 @@ tags:
 
 ## Agent and context commands
 
+- `ava impersonate request/relay`: Codex delivery requires a control endpoint
+  for the existing host and uses Steer semantics. Missing endpoints fail before
+  a CLI request acquires control; delivery failures stop the relay without a
+  Pending-mode queue fallback. Unacknowledged messages remain for normal handoff
+  ([[shared/impersonation.ava.okf.md|impersonation]]).
+
 - `ava agents ls/send/cancel/restart/resurrect/terminate/kill`: `ls` renders the
   authenticated agent summary projection as stable `id / status / machine /
   label` columns. It does not expose runner-local workspace paths.
