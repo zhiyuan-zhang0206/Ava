@@ -8,24 +8,18 @@ turn, with an active steerable turn it steers that turn, and either way the
 reply carries the turn: the message is in the host's flow now, not parked in a
 database waiting for the next idle boundary.
 
-A JSON-RPC *error* reply means the server refused the input (an active turn
-that cannot be steered — a review or a manual compaction — or an unknown
-thread). Transport failures (unreachable endpoint, failed handshake, timeout)
-mean the same thing to the caller: not delivered by this transport. In all
-those cases the caller falls back to the durable ``codex queue`` path, whose
-delivery happens at the next turn boundary; at-least-once holds across the two
-paths because the pushed envelope carries the message ids either way, and a
-re-delivery repeat is marked as such — the ids are the idempotency key.
+A JSON-RPC error or transport failure is a delivery failure. The caller stops
+the relay; it must not substitute ``codex queue``, whose Pending semantics wait
+for the current turn to finish. Ava's durable, unacknowledged inbox remains the
+recovery source.
 
-This module never raises for a failed delivery: it returns a short reason for
-the caller to log before falling back. Wire facts verified against codex
-0.153.4: every connection starts with ``initialize`` (clientInfo) followed by
-the ``initialized`` notification; requests are ``{"id", "method", "params"}``;
-replies are ``{"id", "result"}`` or ``{"id", "error"}``; server notifications
-and server-initiated requests interleave, so a reply is matched by id *and* by
-carrying result/error. The default local endpoint is the daemon control socket
-``$CODEX_HOME/app-server-control/app-server-control.sock`` (a bare
-``--listen unix://`` binds exactly there).
+Wire facts verified against Codex 0.155.1: ``turn/start`` atomically starts an
+idle turn or steers an active regular turn, without the read/steer race of
+looking up ``expectedTurnId`` for ``turn/steer``. Every connection starts with
+``initialize`` then ``initialized``. Requests omit ``jsonrpc``; replies match
+by id and carry result/error, since server requests and notifications interleave.
+The default daemon socket is
+``$CODEX_HOME/app-server-control/app-server-control.sock``.
 """
 
 from __future__ import annotations
@@ -45,8 +39,8 @@ LIVE_SUBMIT_TIMEOUT_SECONDS = 5.0
 
 The endpoint is a local socket (or a reachable host); when it answers, the
 round trips are milliseconds, so the deadline only bites against a hung
-endpoint. The caller's queue fallback preserves delivery either way, and the
-bound stays well under the relay's 10s heartbeat cadence.
+endpoint. Failure stops the relay without acknowledging the durable inbox;
+the bound stays well under the relay's 10s heartbeat cadence.
 """
 
 _CLOSE_TIMEOUT_SECONDS = 1.0
@@ -71,11 +65,23 @@ def default_control_socket() -> Path:
 def default_control_endpoint() -> str | None:
     """The local daemon's endpoint once its socket exists, else None.
 
-    Probed per call, not cached: the relay outlives app-server restarts, and a
-    daemon that starts later must still receive live deliveries.
+    Resolution does not prove the daemon owns the target thread. The request
+    records this endpoint; the relay's first submission must still succeed.
     """
     socket_path = default_control_socket()
     return f"unix://{socket_path}" if socket_path.exists() else None
+
+
+def require_control_endpoint(remote: str | None) -> str:
+    """Resolve the existing host's Steer endpoint before acquiring control."""
+    endpoint = remote or default_control_endpoint()
+    if endpoint is None:
+        raise RuntimeError(
+            "Codex Steer delivery requires the existing session's app server; "
+            "pass --codex-remote with the same endpoint used by codex --remote. "
+            "Pending delivery via codex queue is not supported."
+        )
+    return endpoint
 
 
 def live_submit(
@@ -90,13 +96,13 @@ def live_submit(
     Returns ``None`` when the server accepted the input (a JSON-RPC result:
     it started a turn or steered the active one). Otherwise returns a short
     reason — a refusal, an unreachable endpoint, a failed handshake, a timeout
-    — for the caller to log before falling back to the durable queue. Never
+    — for the caller to report as a delivery failure. Never
     raises for a failed delivery.
 
     ``endpoint`` takes the shapes codex itself accepts: ``unix://PATH`` (bare
     ``unix://`` means the default control socket), ``ws://host:port`` or
     ``wss://host:port``. Authentication headers are not sent; the recorded
-    endpoint is expected to be reachable as-is, matching the queue path.
+    endpoint is expected to be reachable as-is.
     """
     deadline = time.monotonic() + timeout
     conn: ClientConnection | None = None
@@ -115,9 +121,8 @@ def live_submit(
             return _clip(f"turn/start refused ({_error_summary(error)})")
         return None
     except Exception as exc:
-        # Every failure here means "not delivered by this transport" and hands
-        # the message to the queue; a program error in this module degrades to
-        # the same safe path instead of killing the relay.
+        # A timeout may follow server acceptance. Do not retry through another
+        # transport: only a controller ACK establishes processing in Ava.
         return _clip(f"{type(exc).__name__}: {exc}")
     finally:
         if conn is not None:
