@@ -1,6 +1,6 @@
-"""Task tracking — shared, persistent work items. All agents are peers: any
-agent can update any task; owners are reminded periodically; a task may have
-a parent."""
+"""Task tracking — shared, persistent work items. Any agent can update any
+task; owners are reminded periodically, and a task may nest under a parent.
+"""
 
 from __future__ import annotations
 
@@ -254,25 +254,17 @@ def create(
     usd_budget: float | int | None = None,
     brief: str | None = None,
 ) -> Task:
-    """
-    Args:
-        title: unique among in_progress tasks.
-        parent: id of an existing task this task descends from. The system
-            root task (id 1) parents only top-level tasks; every other task
-            must reference an existing task. Raises ValueError when the
-            parent does not exist, is closed (done / cancelled — a closed
-            task never gains children), or, for parent=1, when task 1 is not
-            the system root on this deployment.
-        remind_interval_seconds: cannot be disabled; None means the priority
-            default (P0 30m / P1 1h / P2 2h / P3 4h), capped at 24h; an
-            explicit value wins over the default.
-        owner: agent to assign to; None means you. An owner other than you is
-            notified.
-        priority: "P0" (highest) through "P3" (lowest).
-        token_budget: optional positive ceiling for task-tagged LLM tokens.
-        usd_budget: optional positive finite USD ceiling for task-tagged LLM cost.
-            Untagged LLM calls do not count toward either ceiling.
-        brief: deprecated alias for description.
+    """Args:
+    title: unique among in_progress tasks.
+    parent: id of an existing, open task this task descends from; the system
+        root (id 1) parents only top-level tasks. An invalid parent raises ValueError.
+    remind_interval_seconds: cannot be disabled; None = the priority default
+        (P0 30m / P1 1h / P2 2h / P3 4h), capped at 24h.
+    owner: agent to assign to; None means you.
+    priority: "P0" (highest) through "P3" (lowest).
+    token_budget: optional positive ceiling for task-tagged LLM tokens.
+    usd_budget: optional positive ceiling for task-tagged LLM cost.
+    brief: deprecated alias for description.
     """
     title = coerce_str(title, "title")
     description = coerce_str(description, "description", allow_none=True)
@@ -414,22 +406,15 @@ def update(
     content: str | None = None,
     note: str | None = None,
 ) -> None:
-    """Any write resets the reminder clock. When the owner changes, both the old
-    and new owner are notified (the new owner's message also carries a summary
-    of the other fields changed in the same call). When the updater is not the
-    owner, the owner is notified of the change and its author — except a
-    parent-only reparent (no other field, no note), which is structural tree
-    maintenance and stays silent. A terminated owner is never resurrected for
-    a notification.
+    """Any write resets the reminder clock. Owner changes notify both owners; other
+    updates tell the owner who changed it; a parent-only reparent stays silent.
 
     Args:
-        status: one of "in_progress", "done", "cancelled". Closing a task is
-            rejected while any direct child is in progress.
+        status: one of "in_progress", "done", "cancelled"; closing is rejected
+            while any direct child is in progress.
         results: replaces the whole field; use note to append instead.
-        owner: agent id to reassign to. None means no change — a task always
-            has an owner.
-        remind_interval_seconds: None means no change; reminders cannot be disabled.
-            Positive seconds, capped at 24h.
+        owner: agent id to reassign to; a task always has an owner.
+        remind_interval_seconds: None = unchanged; reminders cannot be disabled; capped at 24h.
         parent_id: reparent (explicit None = system root; int = set parent).
         content: deprecated alias for results.
     """

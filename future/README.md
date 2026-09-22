@@ -35,9 +35,9 @@ These four plans co-locate with the code they plan for, per the 2026-08-12 doc r
 | [Auth / TLS design](infra/auth-tls-design.md) | **Phase 3 (TLS) only** — Phase 1 (fail-closed gateway auth) and Phase 2 (cookie session auth) are deployed |
 | [Cluster consistency: commit-level pinning](infra/commit-pinned-cluster.md) | Increments A + B built and drift now self-heals via `ops/controllers/pin.py`. The remaining hard fail-fast enforcement is **overtaken** by the fail-fast-vs-reconcile decision and needs re-litigating before it is built |
 | [Ops module](../ops/ops-module.md) | Spec / Status / controllers / manager built. Left: `ops/identity.py` and the shared **Drain** primitive (still `cli/commands/update.py`); pg-backup is a supervised scheduler service |
-| [Extension ownership](infra/extension-ownership.md) | **Everything — design for issue #39, slices S1–S5.** Cluster-owned content + enablement (PG rows + blobs), machine demoted to a computed capability set, per-agent activation overlay; partially supersedes the two rows below when it lands |
+| [Extension ownership](infra/extension-ownership.md) | **S2's sync event, then S3–S5** (design for issue #39): S1 done (decision + spec revision); S2 mostly built (cluster rows + blobs, converge/boot materialization, adoption sweep); S3 onward untouched |
 | [Decentralized install + local config](infra/decentralized-install-and-config.md) | **Hooks-only plugin bundles only** — everything else (install registry, CC plugin materialization, `type="mcp"` packages, the cross-machine inventory UI) landed. The per-machine enable-state direction is proposed to be reversed by [extension-ownership](infra/extension-ownership.md) |
-| [Core package update channel](infra/core-package-update-channel.md) | **P0 landed (PR #2355) — left: P1 skills fast lane (task #3267):** refresh executor + OS job, rollout skip rule; then P2 core-plugin materialization; P3 aligns with [extension-ownership](infra/extension-ownership.md) |
+| [Core package update channel](infra/core-package-update-channel.md) | **P2 core-plugin materialization** (P0+P1 landed — PRs #2355/#2368): collision rule, module-identity verification, isolation gates; then P3 alignment with [extension-ownership](infra/extension-ownership.md) |
 | [MCP scope & bundling](infra/mcp-scope-and-bundling.md) | **Formalizing per-machine scope** — all three config sources landed; there is still no `scope` field, and the one real machine-scope consumer (the shared browser MCP upstream) is hand-built. [extension-ownership](infra/extension-ownership.md) proposes dissolving the scope field into capability matching |
 | [Prompt injection — boundary map](infra/prompt-injection.md) | The content-layer scanner (`ava/security.py`) is built and default-on. Left: two coverage gaps (content-source skills, `ava.understand(url)`) and the whole structural boundary (sandboxed reader, egress allowlist) |
 | [Skill supply-chain trust](infra/skill-supply-chain-trust.md) | The install gate + trust tier are built. Left: recall must enforce the tier (highest value), a re-scan sweep when the rule table grows, a human-presence channel for `--accept-risk`, publisher signatures |
@@ -45,8 +45,7 @@ These four plans co-locate with the code they plan for, per the 2026-08-12 doc r
 | [Release-directory atomic code swap](infra/release-dir-atomic-code-swap.md) | Deferred, not started — document the immutable-artifact swap mechanism |
 | [Release cadence: self-scheduling by Ava](infra/release-self-scheduling.md) | Once bootstrapping is done, Ava schedules its own releases |
 | [Living tech-debt ledger](tech-debt/ledger.md) | Single "what debt is open now" register maintained by the sweeper engine |
-| [DB write batching](infra/db-write-batching.md) | Design draft |
-| [Checkpoint storage rebuild](infra/checkpoint-storage-rebuild.md) | **Everything — design + cutover plan; implementation merged + deployed.** Delta-channel storage for `messages`, keep-everything retention (R1-R4), read-time fold compat layer, reader-first write switch with content fingerprints + materialize-and-rollback |
+| [Checkpoint storage rebuild](infra/checkpoint-storage-rebuild.md) | **Observation-window calibrations (Section 7)** — delta-channel storage, keep-everything retention (R1–R4), read-time fold, and the reader-first write switch are all landed and deployed (write switch 2026-09-14, task #3180) |
 | [Heartbeat design](infra/heartbeat-design.md) | Research record; Tier 2 shipped as a simpler opt-out design. Kept for the rejected two-tier proposal |
 | [Process / service lifecycle final state](infra/lifecycle-final-state.md) | Implementation slices **P1–P7** (task #3195) — F1, the multi-level attribution measurement, runs first; the one-shot migration window is booked with the user |
 | [Model providers as plugins](../shared/lm/model-providers-as-plugins.md) | **Mechanics + Grok pilot landed** — registry, dispatch, vocabularies, key channel, and lazy load are built. Left: plugin dependency installation and deciding which remaining core providers should extract |
@@ -57,7 +56,7 @@ These four plans co-locate with the code they plan for, per the 2026-08-12 doc r
 |------|------|
 | [**Roadmap**](roadmap/README.md) | ★ The live, ordered list of what Ava builds next. Buckets: **now**, **north star**, gated-on-sandbox, open-source prerequisites, low-priority, deliberate-no list |
 | [Distribution form: one core, packaging is a gated outer layer](distribution-form.md) | Distribution architecture |
-| [Frontend plugin contributions](frontend-plugin-contributions.md) | **All of it** (design settled, issue #57): `contributions.ui` manifest key + validator, theme token packs, plugin page mount + nav, agent-inspect sections, blessing the gateway API for alternative frontends — slices U1–U5 |
+| [Frontend plugin contributions](frontend-plugin-contributions.md) | **U4 (agent-inspect sections beyond the shipped U4a widgets) + U5 (bless the gateway API)** — U1–U3, U1a, U6 shipped (issue #57) |
 | [web-ai — drive frontier-model web apps](web-ai.md) | Driving ChatGPT / Gemini / Claude through a logged-in browser |
 
 > **Cleaned up 2026-07-28.** Deleted as fully landed with no load-bearing decision
@@ -76,3 +75,5 @@ These four plans co-locate with the code they plan for, per the 2026-08-12 doc r
 > test-env-followups, agent-label-improvements, update-failure-recovery,
 > vps-attack-surface, agent-events-stats-index, and supervision-queue, and dropped
 > the release-history dir (release history lives in the annotated git tags + `CHANGELOG.md`).
+>
+> **Cleaned up 2026-09-23 (sweeper pass).** Deleted as superseded with nothing left to track: `db-write-batching` (its subject was replaced by the event-system W1 and its conclusions carried over). Status rows refreshed: `extension-ownership`, `core-package-update-channel` (P1 landed), `checkpoint-storage-rebuild` (write switch landed), `frontend-plugin-contributions`.

@@ -677,7 +677,7 @@ def _content_block_item(
         return None, None, reasoning_attached
     if (typed_block := cast(ContentBlock, block)).get("type") not in ("text", "thinking"):
         # tool_use (anthropic) / function_call (openai) and any other block
-        # type: code is rendered from msg.tool_calls below.
+        # kind are rendered from msg.tool_calls below.
         return None, None, reasoning_attached
     block_idx = typed_block.get("index", pos)
     if typed_block.get("type") == "thinking":

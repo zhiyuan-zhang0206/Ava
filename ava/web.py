@@ -236,16 +236,11 @@ def fetch(
     """Fetch web pages in parallel and answer a prompt about each.
 
     Each target is a `(url, prompt)` pair: the page at `url` is read, then a
-    model answers `prompt` against its content. `max_chars` caps how much of
+    model answers `prompt` against its content; `max_chars` caps how much of
     each page the model reads.
 
-    `effort` sets the summarizing model's reasoning depth (same levels as
-    `ava.understand`; also available as `ava.web.ReasoningEffort`). `None`
-    (default) keeps the configured `settings.web.web_fetch_reasoning`
-    (default `none`) — pass `effort="high"` per call for deeper summaries.
-
-    `max_concurrent` caps parallel fetches; the default is 12. Pass a positive
-    integer to choose a different ceiling.
+    `effort` sets the summarizing model's reasoning depth (default `none`);
+    `max_concurrent` (default 12) caps parallel fetches.
 
     Returns:
         One answer per pair, in input order.

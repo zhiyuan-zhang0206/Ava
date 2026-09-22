@@ -3,10 +3,11 @@
 Date: 2026-09-11 (revised 2026-09-14)
 Author: #6095 (checkpoint-storage-design, tasks #3097/#3181)
 Requester: #405 (user ruling 2026-09-11 17:53; direction re-decided 2026-09-12 23:19)
-Status: **plan — final direction: delta channel + keep-everything (Sections 3.5, 5)**.
-The four implementation PRs (#2313 retention exemptions; #2322 wrapper retirement; #2318
-guard fast path; #2321 read-compat layer) are merged and deployed cluster-wide
-(2026-09-13, 5/5 @ `30df11a83`); the write switch awaits its user-supervised window.
+Status: **built and deployed — the delta-channel write model is live; what remains is
+the observation window (Section 7)**. The four implementation PRs (#2313 retention
+exemptions; #2322 wrapper retirement; #2318 guard fast path; #2321 read-compat layer)
+are merged and deployed cluster-wide (2026-09-13, 5/5 @ `30df11a83`), and the
+reader-first write switch landed 2026-09-14 (task #3180, done).
 Code read against main@`c7e69429b`; production numbers are read-only, as-of
 2026-09-11 18:02-18:04 CST (live table — snapshots, not constants).
 
@@ -460,8 +461,9 @@ re-evaluate the placement under the normal rule.
   stay consistent.
 - **Open questions.** Snapshot cadence `K` (calibrate after the guard fast path with the
   guard-inclusive, large-payload benchmark; keep it configurable through the observation
-  window); the optional compact-boundary small snapshot (R3; decide before the write
-  switch); scope of the read-path performance gate during the observation window.
+  window); the optional compact-boundary small snapshot (R3 — its pre-switch decision
+  point has passed; now an ordinary follow-up); scope of the read-path performance gate
+  during the observation window.
 
 ## Appendix A — harness and queries
 

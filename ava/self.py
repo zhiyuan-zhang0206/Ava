@@ -286,17 +286,12 @@ def compact(summary: str) -> NoReturn:
     entire memory of everything before it; nothing raw is kept beside it.
 
     First persist durable state: your personal memory (`memory/` in your
-    workspace plus its `MEMORY.md` index) and the shared pool (`ava.memory`,
-    for facts other agents need). Then write `summary` — a first-person record
-    of this conversation round. Fill every section; write "(none)" only when
-    empty:
+    workspace) and the shared pool (`ava.memory`; facts other agents need). Then
+    write `summary`: a first-person record of this conversation round, every
+    section filled, "(none)" only when empty.
 
-    - Requests
-    - Progress
-    - In flight
-    - Dead ends
-    - Pitfalls
-    - Verbatim tail (exclude the compaction request that triggered this)
+    Sections: Requests / Progress / In flight / Dead ends / Pitfalls /
+    Verbatim tail (exclude the compaction request that triggered this).
     """
     summary = coerce_str(summary, "summary")
     from ava import _boot
@@ -340,13 +335,11 @@ def compact(summary: str) -> NoReturn:
 
 
 def update() -> NoReturn:
-    """Removed — updates go through the CLI only.
+    """Removed — updates go through the CLI only; calling it now raises
+    `RuntimeError`.
 
         ava cluster update                 # smooth (default)  # lint-docstring: ok CLI command name
         ava cluster update --mode force    # force: ~10s drain  # lint-docstring: ok CLI command name
-
-    Raises:
-        RuntimeError: always — this method no longer exists.
     """
     raise RuntimeError(
         "ava.self.update() has been removed; update the cluster from the CLI "

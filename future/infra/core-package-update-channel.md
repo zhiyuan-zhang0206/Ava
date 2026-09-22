@@ -1,6 +1,6 @@
 # Core package update channel — decoupling core skill/plugin updates from the cluster update
 
-Status: design for implementation (authored 2026-09-11; user rulings 2026-09-11 and 2026-09-13). Implementation: P0 landed (registry schema v2, `ava packages status`, derived host version — PR #2355); remaining: P1 skills fast lane (`task #3267`), then P2 core-plugin materialization, then P3 alignment with [extension-ownership](extension-ownership.md).
+Status: design for implementation (authored 2026-09-11; user rulings 2026-09-11 and 2026-09-13). Implementation: P0 landed (registry schema v2, `ava packages status`, derived host version — PR #2355) and P1 landed (content-channel executor — `ava packages refresh`/`rollback`/`policy` + OS job + rollout skip + host filter — PR #2368); remaining: P2 core-plugin materialization, then P3 alignment with [extension-ownership](extension-ownership.md).
 
 Ruling record: [`decisions/2026-09-13-core-package-update-channel.md`](../../decisions/2026-09-13-core-package-update-channel.md) — it revises the delivery half of `decisions/2026-08-19-four-layer-modification-model.md` ruling 2.
 
@@ -327,7 +327,7 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
 - Docs: the ruling entry + this elaboration (landed together); update `okf/skills/load-directory-sync.ava.okf.md`, `cli/commands/packages/packages.ava.okf.md`, and the `ava-modification-layers` / `develop-a-plugin` skill phrasing ('kernel-shipped base set, changed via L4') when P1/P2 land.
 - Acceptance at landing: v1 file loads, migrates on next write, defaults visible in status; no behavior change elsewhere (test lock: registry round-trip + migration) — the v1 leg later retired, batch b5 2026-09-20: v1 files are refused.
 
-### P1 — skills fast lane (the POC; the deliverable the user can feel)
+### P1 — skills fast lane (the POC; the deliverable the user can feel) — **landed: PR #2368**
 - `ava packages refresh` implementing §5.3 for `skill` packages, `core` channel first (fetch from the checkout's remote, per-package diff, archive-extract, gates, staged swap, records) and `git` channel second (reusing `acquire_source` / `cmd_skill_upgrade` semantics).
 - OS job registration (`shared/os_packages.py`, new module; 15-min tick, converge step) behind a setting; default ON for skill-class core content after the user's ruling; OFF until then (safe rollout).
 - Rollout skip rule (§5.7-1) in the two `_refresh_builtin_skills` legs + `cmd_skill_update`.

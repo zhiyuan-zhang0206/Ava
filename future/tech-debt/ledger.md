@@ -13,7 +13,7 @@ records an ordinary fingerprinted entry here with its own class. PRs that
 knowingly introduce debt register it here through the PR template, and the
 daily debt-clearing pass reconciles this ledger.
 
-<!-- watermark: last-swept-sha=6882acc0 last-swept-date=2026-06-03 -->
+<!-- watermark: last-swept-sha=a2495ca1f last-swept-date=2026-09-23 -->
 
 ## Entry format
 
@@ -42,27 +42,39 @@ cap-domain exits use `exitType`, `expires`, and `approver`); readers ignore unkn
 - **first-seen**: 2026-09-23 (PR for task #4518)
 - **last-verified**: 2026-09-23
 
-### deps:playwright-1.59to1.60
-- **class**: deps
-- **status**: open
-- **evidence**: `uv pip list --outdated` — playwright 1.59.0 -> 1.60.0 (+ pytest-playwright 0.7.2 -> 0.8.0). NOT a lock-only bump: the e2e CI job runs natively on the CI host, whose chromium lives at `/opt/ms-playwright/` (installed by `scripts/provision/install-playwright.sh`, `PLAYWRIGHT_VERSION` pinned). Bumping the `playwright` wheel without refreshing that browser makes `uv sync --frozen` install a wheel whose expected browser revision is absent on disk ("Executable doesn't exist at .../chromium_headless_shell-..."). Its PR must, in lockstep: bump the wheel + `PLAYWRIGHT_VERSION` in `install-playwright.sh` (re-run on the CI host) AND in `Dockerfile` (rebuild the eval image).
-- **first-seen**: 2026-06-03 (backend routine batch — e2e browser mismatch)
-- **last-verified**: 2026-06-03
-
 ### deps:playwright-1.62to1.63
 - **class**: deps
 - **status**: open
-- **evidence**: Worktree mechanical scan (2026-09-21) reports playwright 1.62.0 -> 1.63.0. `uv.lock` pins 1.62.0 while `Dockerfile:29` and `scripts/provision/install-playwright.sh:10` still provision Chromium with PLAYWRIGHT_VERSION=1.59.0. This is actionable high-risk dependency debt: upgrade the wheel and both browser-provision pins together, then refresh the CI host and eval image.
+- **evidence**: `uv pip list --outdated` (synced worktree venv, 2026-09-23) reports playwright 1.62.0 -> 1.63.0; PyPI latest re-confirmed 1.63.0. `uv.lock` pins 1.62.0 while `Dockerfile:29` and `scripts/provision/install-playwright.sh:10` still provision Chromium with `PLAYWRIGHT_VERSION=1.59.0` — the wheel/browser lockstep still needs the joint bump (wheel + both pins), then the CI host refresh and the eval-image rebuild. The 1.59→1.60 entry was removed this pass (the wheel moved past 1.60 long ago; this entry carries the current state).
 - **first-seen**: 2026-09-21
-- **last-verified**: 2026-09-21
+- **last-verified**: 2026-09-23
 
 ### boundary:ava-watcher-py-split
 - **class**: boundary
 - **status**: open
-- **evidence**: `ava/watcher.py` sits exactly at the 800-line hard ceiling (per-file budget in `conventions/python-conventions.md`: 600 soft / 800 hard, enforced by `scripts/lint_code_structure.py`; no exemption — split is the prescribed remedy). Both R2 PRs (#3148, #3150) had to compress/offload content to stay under the cap. Candidate split: spawn/rebuild helpers vs. public API surface.
+- **evidence**: `ava/watcher.py` sits in the 600–800 transitional zone (783 lines after the 2026-09-23 docstring trims; exactly 800 before them) — per-file budget in `conventions/python-conventions.md`: 600 soft / 800 hard, enforced by `scripts/lint_code_structure.py`; no exemption — split is the prescribed remedy. Both R2 PRs (#3148, #3150) had to compress/offload content to stay under the cap. Candidate split: spawn/rebuild helpers vs. public API surface.
 - **first-seen**: 2026-09-22 (PR #3150)
-- **last-verified**: 2026-09-22
+- **last-verified**: 2026-09-23
 
 ## Wontfix
 
-_(none)_
+### docstring-budget:ava/security.py:module
+- **class**: docstring-budget
+- **status**: wontfix
+- **evidence**: module docstring trimmed 15 -> 6 lines this pass (soft cap 2). Kept: the module is off the default prompt surface (not in `__all_for_ava__`, not in the SDK-expand list), so the standing prompt pays nothing; the residue is the purpose + the mitigation caveat, for `help()` drill-down readers. Cutting further would drop the non-boundary warning.
+- **first-seen**: 2026-09-23
+- **last-verified**: 2026-09-23
+
+### docstring-budget:ava/ui.py:serve
+- **class**: docstring-budget
+- **status**: wontfix
+- **evidence**: trimmed 31 -> 20 lines this pass (soft cap 12). The residue is contract: five Args each carrying a real constraint (dir resolution, name charset, port range/policy, title/ttl defaults) plus the session life-cycle and `index.html` requirements — the class's Args-format-heavy allowance.
+- **first-seen**: 2026-09-23
+- **last-verified**: 2026-09-23
+
+### docstring-budget:ava/watcher.py:cron
+- **class**: docstring-budget
+- **status**: wontfix
+- **evidence**: trimmed 31 -> 19 lines this pass (soft cap 12). Residue: five Args (cron format, timezone, end_time types, name, notify) + the renewal semantics (supersede / replace / reuse) whose loss would reintroduce double-firing schedules. The class's calibration note already expected `watcher.cron` as an Args-format-heavy standing item.
+- **first-seen**: 2026-09-23
+- **last-verified**: 2026-09-23

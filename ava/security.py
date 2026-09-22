@@ -1,18 +1,9 @@
 """Rule-based scan that marks ingested content carrying prompt-injection
-patterns. Pure string and regex matching, no model call.
+patterns; pure string matching, no model call. Findings ride along as system
+notes on the affected turn — the content itself is returned clean.
 
-Findings are recorded to an in-memory, turn-scoped buffer and delivered by
-the exec node as system notes in the same exec's messages delta — there is no
-side-channel file (user ruling 2026-08-11: the JSONL side-channel is the wrong
-design; the wrapper must modify the exec's state-update messages key in
-memory, and files are used only for archiving oversized content). The scanned
-content is returned clean, never polluted with a prepended warning. The old
-`MARKER`-prepend path is removed: injected warnings broke programmatic
-consumers (parsing Python source, JSON, etc.) that expected the raw content.
-
-This is a mitigation layer, not a boundary: pattern matching lowers the rate of
-a successful injection, it does not close it. Read a clean result as "no known
-pattern matched", not as "safe".
+A mitigation, not a boundary: a clean result means "no known pattern
+matched", not "safe".
 """
 
 import re

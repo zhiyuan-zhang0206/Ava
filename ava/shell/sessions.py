@@ -416,27 +416,14 @@ def kill_all() -> int:
 
 
 def renew(id: int, *, ttl: float) -> datetime:
-    """Extend a live session's TTL deadline by `ttl` seconds, counted from now.
+    """Extend a live session's TTL deadline by `ttl` seconds.
 
-    Explicit renewal (user ruling 2026-09-08): the deadline moves to
-    now + ttl — never stacked on the current deadline — and the owning agent
-    may renew as many times as it needs (no lifetime cap; every call is
-    audited, see `_record_renewal`). `ttl` is REQUIRED and capped at 24h per
-    call, the same cap as creation.
+    The deadline moves to now + ttl — never stacked on the current deadline.
+    `ttl` is required, capped at 24h per call; renewal has no lifetime cap.
 
-    Only this agent's live, not-yet-expired sessions can be renewed. An
-    expired deadline means the session is reclaimed automatically (TTL expiry
-    = immediate reclamation; no renewable expired state — user ruling
-    2026-09-08), so renewal past the deadline is rejected. Watcher sessions
-    are rejected too, on one-lifecycle grounds (user ruling 2026-09-14, task
-    #3411): a watcher's shell TTL IS its target deadline (launch timeout /
-    cron end / at moment + grace, derived by
-    `shared.watcher.session_deadline`), so renewing the row would
-    desynchronize the TTL from that target — a longer deadline the watcher
-    itself will not honor (the generated script, the rebuild payload, and
-    any display all still end at the target). To extend a schedule,
-    re-register it (`ava.watcher.cron` / `ava.watcher.at`), which re-mounts
-    the session with the folded remaining deadline.
+    Only this agent's live, not-yet-expired sessions can renew. Watcher
+    sessions are refused too — their shell TTL is the target deadline, so
+    re-register the schedule instead (`ava.watcher.cron` / `ava.watcher.at`).
 
     Returns:
         The new deadline (DB clock).
