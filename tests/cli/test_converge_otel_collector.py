@@ -342,6 +342,35 @@ def test_gateway_and_runner_exporters_drop_newest_after_bounded_retry(
     ]
 
 
+@pytest.mark.parametrize(
+    "roles",
+    [
+        pytest.param(frozenset({"gateway"}), id="gateway"),
+        pytest.param(frozenset({"agent-runner"}), id="runner"),
+        pytest.param(frozenset({"observability-station"}), id="station"),
+    ],
+)
+def test_file_storage_caps_queue_bytes_in_every_shape(
+    monkeypatch: pytest.MonkeyPatch,
+    roles: frozenset[str],
+) -> None:
+    """The persistent sending queues carry a byte cap in every shape.
+
+    A request-count bound alone (5,000) still lets sustained backpressure grow
+    each queue file without limit; 1 GiB is the calibrated fleet-wide value
+    (task #4012) — the measured steady state peaks at 580M against a 30G
+    minimum disk. At the cap the collector rejects the newest write, the same
+    counted loss path as a request-full queue.
+    """
+    cfg = _render_real_template(monkeypatch, roles)
+    assert cfg["extensions"]["file_storage"] == {
+        "directory": "/home/u/.ava/otel-collector/queue",
+        "create_directory": True,
+        "timeout": "1s",
+        "max_size": 1073741824,
+    }
+
+
 def test_gateway_config_scrapes_this_clusters_own_data_plane(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
