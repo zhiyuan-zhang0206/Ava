@@ -11,6 +11,8 @@ BEGIN
 END;
 $$;
 
+DROP INDEX IF EXISTS agent_impersonation_messages_unacknowledged_delivery;
+
 ALTER TABLE agent_impersonation_messages
     DROP CONSTRAINT agent_impersonation_messages_delivery_consistent,
     DROP COLUMN last_delivery_at,

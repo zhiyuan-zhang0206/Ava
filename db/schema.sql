@@ -1764,6 +1764,9 @@ CREATE TABLE IF NOT EXISTS agent_impersonation_messages (
     CONSTRAINT agent_impersonation_messages_delivery_consistent CHECK ((delivery_attempts = 0) = (last_delivery_at IS NULL)),
     PRIMARY KEY (lease_id, inbound_id)
 );
+CREATE INDEX agent_impersonation_messages_unacknowledged_delivery
+    ON agent_impersonation_messages(lease_id, last_delivery_at)
+    WHERE acknowledged_at IS NULL;
 
 -- Every termination writer (including force/reaper) revokes in its own atomic
 -- status transaction. Restart uses 'restarting' and preserves the active lease.
