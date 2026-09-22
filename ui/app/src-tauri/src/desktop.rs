@@ -10,6 +10,10 @@ use tauri::{AppHandle, Manager, WebviewWindow};
 
 use crate::window::{self, MAIN_WINDOW};
 
+/// Menu-bar icon. Black-on-transparent so macOS can treat it as a template;
+/// Windows renders it as-is.
+const TRAY_ICON: &[u8] = include_bytes!("../icons/tray.png");
+
 const MENU_OPEN: &str = "open";
 const MENU_AUTOSTART: &str = "autostart";
 const MENU_UPDATE: &str = "update";
@@ -67,9 +71,11 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     )?;
 
     TrayIconBuilder::with_id("ava")
-        // No branded glyph: the app ships without a logo (task #3286). The
-        // status item keeps its tooltip, menu, and click behavior; it just
-        // renders without an image.
+        // A dedicated monochrome template, not the app icon: macOS renders a
+        // template as a silhouette that follows the menu bar's light/dark
+        // appearance, and a full-colour icon squashed to 18pt reads as a blob.
+        .icon(tauri::image::Image::from_bytes(TRAY_ICON)?)
+        .icon_as_template(true)
         .tooltip("Ava")
         .menu(&menu)
         // The menu is the tray's whole surface on Windows; on macOS a left

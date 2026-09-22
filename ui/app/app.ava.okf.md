@@ -66,10 +66,7 @@ does not block the Android main looper.
 ## Desktop
 
 `src-tauri/src/desktop.rs` provides one-instance behavior, tray open/quit,
-close-to-tray, launch-at-login, and Tauri updater checks. The app ships without
-branding icons: the bundle declares none, the tray item renders without an
-image, and `icons/` keeps only the blank `.png`/`.ico` placeholders the
-toolchain requires. Auto-login reads the
+close-to-tray, launch-at-login, and Tauri updater checks. Auto-login reads the
 local `$AVA_HOME/.env` secret, performs the gateway login outside web content,
 and reloads after its native cookie store receives the session.
 
