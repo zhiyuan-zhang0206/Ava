@@ -207,10 +207,15 @@ def scoped_unit_env(original: bytes, namespace: str) -> bytes:
     keyword-value conninfo survives the dotenv parse byte-for-byte, and
     psycopg parses it unchanged.
     """
+    url = scoped_db_url(namespace)
+    if '"' in url:
+        raise AssertionError(
+            "scoped AVA_DB_URL contains a double quote; the quoted .env line cannot round-trip"
+        )
     lines = original.decode("utf-8").splitlines()
     for index, line in enumerate(lines):
         if line.startswith("AVA_DB_URL="):
-            lines[index] = f'AVA_DB_URL="{scoped_db_url(namespace)}"'
+            lines[index] = f'AVA_DB_URL="{url}"'
             break
     else:
         raise AssertionError("unit .env does not declare AVA_DB_URL")
@@ -876,9 +881,15 @@ def check_pass2(name: str, case: dict[str, Any], meta: dict[str, Any]) -> None:
             journal_stage() == "waiting",
             f"[{name}] refused settle changed the stage to {journal_stage()!r}",
         )
+        refusals = [entry for entry in events if entry.get("event") == "refused-as-expected"]
         require(
-            any(entry.get("event") == "refused-as-expected" for entry in events),
-            f"[{name}] missing the expected refusal record",
+            len(refusals) == 1,
+            f"[{name}] expected exactly one refusal record, saw {len(refusals)}",
+        )
+        reason = str(refusals[0].get("error", ""))
+        require(
+            "connection budget" in reason,
+            f"[{name}] refusal reason {reason!r} does not name the exhausted budget",
         )
         return
     require(
@@ -1129,6 +1140,10 @@ def run_case(  # noqa: PLR0915 -- one bounded fixture lifecycle per case.
             f"[{name}] pass1 exit {proc1.returncode} != {expect1}; stderr={tail(proc1)}",
         )
         check_pass1(name, case, meta, home)
+        # The settle's clear retires the envelope by design, so the stage is
+        # readable only up to here: record what pass1 left behind (it is what
+        # check_pass1 has just pinned), not a post-clear None.
+        stage_after_pass1 = journal_stage()
         check_instances(name, meta, home, extra=False)
 
         if case.get("settle") == "refuse":
@@ -1157,7 +1172,7 @@ def run_case(  # noqa: PLR0915 -- one bounded fixture lifecycle per case.
                 "ok": True,
                 "pass1Exit": proc1.returncode,
                 "settleExit": proc2.returncode,
-                "stage1": journal_stage(),
+                "stage1": stage_after_pass1,
                 "writes1": write_stages(events1),
                 "writes2": write_stages(events2),
                 "selectorWrites": selector_writes(all_events),
