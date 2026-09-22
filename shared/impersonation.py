@@ -13,6 +13,7 @@ from psycopg.types.json import Jsonb
 
 from shared import redis_client
 from shared._impersonation_store import (
+    ACK_WINDOW_SECONDS,
     OPEN,
     authenticate,
     authenticate_relay,
@@ -536,7 +537,7 @@ def relay_get(lease_id: str, relay_token: str) -> dict[str, Any]:
 
 
 def relay_inbox(lease_id: str, relay_token: str, *, limit: int = 100) -> list[dict[str, Any]]:
-    """The relay's read-only inbox page: same durable rows, relay credential only.
+    """The relay's inbox page and durable attempt state, under its scoped credential.
 
     The controller identity cannot read here and the relay token cannot release,
     renew or ACK anything — the handoff is scoped by construction. ``limit``
@@ -550,11 +551,16 @@ def relay_inbox(lease_id: str, relay_token: str, *, limit: int = 100) -> list[di
         require_relay_active_locked(conn, lease, relay_token)
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
-                "SELECT id,content,kind,source,payload,created_at FROM inbound_messages "
-                "WHERE agent_id=%s AND status='pending' AND kind IN "
+                "SELECT i.id,i.content,i.kind,i.source,i.payload,i.created_at,"
+                "COALESCE(m.delivery_attempts,0) AS delivery_attempts,"
+                "(m.last_delivery_at IS NULL OR m.last_delivery_at <= "
+                "clock_timestamp() - %s*interval '1 second') AS delivery_due "
+                "FROM inbound_messages i LEFT JOIN agent_impersonation_messages m "
+                "ON m.inbound_id=i.id AND m.lease_id=%s "
+                "WHERE i.agent_id=%s AND i.status='pending' AND i.kind IN "
                 "('chat','system_note','cancel','reminder') "
-                "ORDER BY id LIMIT %s",
-                (lease["agent_id"], limit),
+                "ORDER BY i.id LIMIT %s",
+                (ACK_WINDOW_SECONDS, lease_id, lease["agent_id"], limit),
             )
             messages = cur.fetchall()
         for message in messages:

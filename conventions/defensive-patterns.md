@@ -172,7 +172,9 @@ Not where the diff's lines are. `shared/` sits at the bottom of the import
 layering, so every layer above consumes it — and this repo deliberately places
 exhaustiveness assertions over enums and field sets in the **consumer's** test
 file, as review forcing functions. Edit-adjacency is structurally blind to them.
-Editing anything in `shared/` means the full suite.
+A `shared/` change requires full-suite coverage in CI. Locally, select bounded
+consumer tests by dependency; never launch the full backend suite locally
+(user ruling 2026-09-22; see the run-local-tests skill).
 Evidence: [`postmortems/0003`](../postmortems/0003-touched-areas-is-not-the-blast-radius.md).
 
 ### Prefer a mechanical guard where the boundary is nameable
