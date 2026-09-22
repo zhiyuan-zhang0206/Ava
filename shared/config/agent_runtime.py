@@ -76,6 +76,34 @@ class AgentRuntimeSettings(EnvSettings):
         },
     )
 
+    impersonation_ack_window_seconds: int = Field(
+        default=180,
+        alias="AVA_IMPERSONATION_ACK_WINDOW_SECONDS",
+        description="Seconds to ACK each impersonation delivery attempt. Snapshotted when a lease is requested; config edits apply to new leases, including after relay restart.",
+        gt=0,
+        le=2147483647,
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    impersonation_max_delivery_attempts: int = Field(
+        default=2,
+        alias="AVA_IMPERSONATION_MAX_DELIVERY_ATTEMPTS",
+        description="Maximum total delivery attempts per impersonation message, including the initial submission. The final missed ACK window ends the lease. Snapshotted at request; config edits apply to new leases.",
+        gt=0,
+        le=2147483647,
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     impersonation_reprovision_window_seconds: float = Field(
         default=120.0,
         alias="AVA_IMPERSONATION_REPROVISION_WINDOW_SECONDS",

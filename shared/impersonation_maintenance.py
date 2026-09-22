@@ -60,8 +60,8 @@ def remind_expiring_impersonations(
     reminder per expiry deadline: the NOT EXISTS below considers ANY reminder row
     for that deadline — an ACKed ('done') row still counts, so a controller that
     ACKs without renewing or releasing is not nagged again every reaper cycle
-    (issue #2054); an un-ACKed row gets one relay retry before ACK or
-    lease end. The reaper's expiry pass dismisses pending reminders whose
+    (issue #2054); an un-ACKed row uses the lease's configured relay budget before
+    ACK or lease end. The reaper's expiry pass dismisses pending reminders whose
     lease ended, so a leftover can never reach the native agent's inbox.
     """
     reminded_agents: list[int] = []

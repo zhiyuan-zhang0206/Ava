@@ -205,9 +205,15 @@ the stale window plus one scan interval (≈75 s).
   database every 30 seconds and after reconnect/wake, without invoking an LLM.
   It subscribes before its first delivery snapshot to close the startup race.
 - Push with an ACK window: every pending inbox row is pushed once with its
-  full content in one envelope per batch, and every unacknowledged batch is
-  pushed once more after five minutes, marked as the final re-delivery.
-  After another five minutes without ACK, the takeover ends as `expired` with
+  full content in one envelope per batch. Cluster config
+  `AVA_IMPERSONATION_ACK_WINDOW_SECONDS` (default **180**) controls the ACK
+  window, and `AVA_IMPERSONATION_MAX_DELIVERY_ATTEMPTS` (default **2**) counts
+  total attempts including the first submission. Both are positive integers
+  configured through the normal config panel/CLI. The request snapshots them
+  on the lease; edits apply to new leases, while existing leases and relay
+  restarts keep their saved policy. Pre-migration leases keep their 300-second
+  window. Each envelope states the window and per-message attempt number.
+  Missing the final ACK window ends the takeover as `expired` with
   an explicit missing-ACK cause and unacknowledged input goes to native handoff.
   Reads and native reconciliation check this across the whole lease, regardless
   of inbox pagination or new arrivals, on the existing 30-second catchup cycle.
@@ -237,7 +243,7 @@ the stale window plus one scan interval (≈75 s).
   or ambiguous submissions spend an attempt because transport acceptance and
   database commit cannot be atomic; content remains available for native
   handoff. Envelope ids remain the idempotency key: a host that already handled
-  a batch simply re-ACKs it. The budget is two attempts per message, with no
+  a batch simply re-ACKs it. The configured budget is per message, with no
   exactly-once claim across transport or process crashes.
 - The relay heartbeats the lease row every 10 seconds; a heartbeat older than
   45 seconds counts as stale and stops the lease (see *Process death →

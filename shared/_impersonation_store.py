@@ -17,8 +17,6 @@ from shared.proc_tree import create_time_matches, stable_create_time
 from shared.runtime_incarnation import RuntimeIncarnation
 
 OPEN = ("requested", "accepted", "active")
-ACK_WINDOW_SECONDS = 300
-MAX_DELIVERY_ATTEMPTS = 2
 
 
 class ImpersonationError(RuntimeError):
@@ -316,7 +314,7 @@ def expire(conn: psycopg.Connection, lease: dict[str, Any]) -> dict[str, Any]:
             "AND m.delivery_attempts >= %s "
             "AND m.last_delivery_at <= clock_timestamp() - %s*interval '1 second' "
             "ORDER BY m.inbound_id LIMIT 1",
-            (lease["id"], MAX_DELIVERY_ATTEMPTS, ACK_WINDOW_SECONDS),
+            (lease["id"], lease["max_delivery_attempts"], lease["ack_window_seconds"]),
         ).fetchone()
         if lease["status"] == "active"
         else None
@@ -325,7 +323,8 @@ def expire(conn: psycopg.Connection, lease: dict[str, Any]) -> dict[str, Any]:
         return lease
     detail = (
         f"the executor did not ACK message {overdue[0]} after "
-        f"{MAX_DELIVERY_ATTEMPTS} delivery attempts ({ACK_WINDOW_SECONDS}s per ACK window)"
+        f"{lease['max_delivery_attempts']} delivery attempts "
+        f"({lease['ack_window_seconds']}s per ACK window)"
         if overdue is not None
         else None
     )

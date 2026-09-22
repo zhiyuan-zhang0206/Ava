@@ -53,6 +53,8 @@ class Inbox:
         self.start_message = "Start here: resume the implementation from the failing test."
         self.reads = 0
         self.attempts: dict[int, tuple[int, float]] = {}
+        self.ack_window_seconds = 180
+        self.max_delivery_attempts = 2
 
     @property
     def pending(self) -> set[int]:
@@ -81,7 +83,9 @@ class Inbox:
     async def read(self) -> relay.InboxSnapshot:
         self.reads += 1
         if any(
-            i in self.pending and count == 2 and relay._loop_time() - at >= 300
+            i in self.pending
+            and count >= self.max_delivery_attempts
+            and relay._loop_time() - at >= self.ack_window_seconds
             for i, (count, at) in self.attempts.items()
         ):
             self.status = "expired"
@@ -93,7 +97,7 @@ class Inbox:
                     self.messages[i],
                     delivery_attempts=self.attempts.get(i, (0, 0))[0],
                     delivery_due=i not in self.attempts
-                    or relay._loop_time() - self.attempts[i][1] >= 300,
+                    or relay._loop_time() - self.attempts[i][1] >= self.ack_window_seconds,
                 )
                 for i in page
             },
@@ -102,6 +106,8 @@ class Inbox:
             routine_ids=frozenset(i for i in page if i in self.routine),
             batch_window=self.batch_window,
             start_message=self.start_message,
+            ack_window_seconds=self.ack_window_seconds,
+            max_delivery_attempts=self.max_delivery_attempts,
         )
 
     @property
@@ -345,7 +351,7 @@ def test_unacknowledged_batch_is_redelivered_after_the_ack_window(clock: FakeClo
 
     def waited(n: int) -> None:
         if n == 1:
-            clock.advance(relay._ACK_WINDOW_SECONDS + 1)
+            clock.advance(inbox.ack_window_seconds + 1)
         else:
             inbox.active = False
 
@@ -366,7 +372,7 @@ def test_redelivery_covers_only_still_unacknowledged_ids(clock: FakeClock) -> No
     def waited(n: int) -> None:
         if n == 1:
             inbox.ack(11)  # half processed
-            clock.advance(relay._ACK_WINDOW_SECONDS + 1)
+            clock.advance(inbox.ack_window_seconds + 1)
         else:
             inbox.active = False
 
@@ -386,7 +392,7 @@ def test_redelivery_stops_when_the_host_acks(clock: FakeClock) -> None:
     def waited(n: int) -> None:
         if n == 1:
             inbox.ack(11, 12)
-            clock.advance(relay._ACK_WINDOW_SECONDS + 1)
+            clock.advance(inbox.ack_window_seconds + 1)
         else:
             inbox.active = False
 
@@ -649,6 +655,8 @@ def test_shared_inbox_rows_keep_their_bodies_for_the_push_envelope(
         "agent_id": 42,
         "status": "active",
         "expires_at": datetime.now(UTC) + timedelta(minutes=5),
+        "ack_window_seconds": 180,
+        "max_delivery_attempts": 2,
     }
     calls: list[tuple[str, str]] = []
 
@@ -689,6 +697,8 @@ def test_agent_mismatch_refuses_inbox_before_subscription(monkeypatch: pytest.Mo
             "agent_id": 99,
             "status": "active",
             "expires_at": datetime.now(UTC) + timedelta(minutes=5),
+            "ack_window_seconds": 180,
+            "max_delivery_attempts": 2,
         }
 
     def inbox(_lease_id: str, _token: str) -> list[dict[str, Any]]:
@@ -897,6 +907,8 @@ def test_release_racing_with_read_stops_cleanly(monkeypatch: pytest.MonkeyPatch)
             "agent_id": 42,
             "status": next(states),
             "expires_at": datetime.now(UTC) + timedelta(minutes=5),
+            "ack_window_seconds": 180,
+            "max_delivery_attempts": 2,
         }
 
     def inbox(_lease_id: str, _token: str) -> list[dict[str, Any]]:
@@ -919,6 +931,8 @@ def test_pending_consent_checks_status_without_opening_inbox(
             "agent_id": 42,
             "status": status,
             "expires_at": datetime.now(UTC) + timedelta(minutes=5),
+            "ack_window_seconds": 180,
+            "max_delivery_attempts": 2,
         }
 
     def inbox(_lease_id: str, _token: str) -> list[dict[str, Any]]:
@@ -937,7 +951,7 @@ def test_two_missed_ack_windows_end_the_takeover_without_a_third_push(clock: Fak
 
     def waited(n: int) -> None:
         if n <= 2:
-            clock.advance(relay._ACK_WINDOW_SECONDS + 1)
+            clock.advance(inbox.ack_window_seconds + 1)
         else:
             inbox.active = False  # bound the old infinite-retry implementation
 
