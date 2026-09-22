@@ -54,6 +54,7 @@ from collections.abc import Generator
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
+from io import StringIO
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
@@ -61,6 +62,7 @@ from uuid import uuid4
 
 import psutil
 import psycopg
+from dotenv import dotenv_values
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
 from psycopg.types.json import Jsonb
@@ -204,18 +206,25 @@ def scoped_unit_env(original: bytes, namespace: str) -> bytes:
     lookup ("relation deployment_state does not exist"). The file IS the
     unit's database projection, so for this proof's lifetime it carries the
     scoped URL; main() restores the original bytes in its finally. The quoted
-    keyword-value conninfo survives the dotenv parse byte-for-byte, and
-    psycopg parses it unchanged.
+    keyword-value conninfo must survive the dotenv parse byte-for-byte --
+    asserted below with a round-trip through dotenv itself -- and psycopg
+    parses it unchanged.
     """
     url = scoped_db_url(namespace)
-    if '"' in url:
+    line = f'AVA_DB_URL="{url}"'
+    # A double-quoted dotenv value decodes escapes and interpolates ${...}, so
+    # a quote, backslash or dollar-brace in the URL would silently rewrite the
+    # credential; re-parse the written line with the same dotenv call the unit
+    # boot uses and refuse any deviation from the scoped URL.
+    parsed = dotenv_values(stream=StringIO(line)).get("AVA_DB_URL")
+    if parsed != url:
         raise AssertionError(
-            "scoped AVA_DB_URL contains a double quote; the quoted .env line cannot round-trip"
+            f"scoped AVA_DB_URL does not survive the .env round-trip: dotenv reads {parsed!r}"
         )
     lines = original.decode("utf-8").splitlines()
-    for index, line in enumerate(lines):
-        if line.startswith("AVA_DB_URL="):
-            lines[index] = f'AVA_DB_URL="{url}"'
+    for index, candidate in enumerate(lines):
+        if candidate.startswith("AVA_DB_URL="):
+            lines[index] = line
             break
     else:
         raise AssertionError("unit .env does not declare AVA_DB_URL")
