@@ -540,6 +540,9 @@ def gateway_proc(scenario_env: None, monkeypatch: pytest.MonkeyPatch) -> Iterato
     ]
     log_path = _LOG_DIR / f"gateway-{_E2E_SUFFIX}.log"
     env = os.environ.copy()
+    # Prod-shaped profile construction: production starts the gateway with its
+    # `gateway` profile, so e2e must exercise only the config domains it owns.
+    env["AVA_PROCESS_PROFILE"] = "gateway"
     # Disable the auth middleware in e2e — the auth layer is tested by its
     # dedicated suite; e2e tests exercise business logic without auth overhead.
     env["AVA_AUTH_MIDDLEWARE_ENABLED"] = "false"
