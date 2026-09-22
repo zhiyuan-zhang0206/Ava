@@ -26,7 +26,7 @@ The controller itself holds no credential: see *Control plane* below.
 
 Verify that the start message actually arrives in the intended conversation
 before relying on automatic delivery. Lease activation, relay process liveness,
-and queue acceptance establish different facts; none establishes host receipt.
+and transport acceptance establish different facts; none establishes host receipt.
 
 ## Codex CLI
 
@@ -72,7 +72,7 @@ it starts the app server on a private per-generation socket under the cluster's
 janitor that ends the server when the coding session dies, connects the TUI
 with `--remote`, and passes the endpoint into the launch message so the request
 records it (`--codex-remote`) and the runtime's relay delivers into the same
-server (live `turn/start`, with `codex queue` as the fallback).
+server with Steer delivery.
 
 The codex relay needs no manual start: the accepting runtime spawns it at
 activation from the recorded spec, handing the scoped relay credential over a
@@ -88,54 +88,41 @@ exception. The manual form below remains for diagnostics:
   --codex-remote unix:///path/to/private/run/codex.sock
 ```
 
-Delivery is live-first, preserving the existing conversation either way.
-Primary: the relay opens a websocket to the session's app server endpoint and
-calls `turn/start` with the message — on an idle thread that starts a new turn,
-and on an active regular turn it steers that turn, so an active host receives
-the message within seconds. When the session recorded no endpoint, the relay
-probes the local daemon's control socket
-(`$CODEX_HOME/app-server-control/app-server-control.sock`) and uses it when it
-exists. Fallback: whenever the live attempt does not land —
-the endpoint is unreachable, times out, or the host refuses (an active turn
-that cannot be steered, a review or a manual compaction; an unknown thread) —
-the relay invokes `codex queue --thread UUID --message TEXT --remote ENDPOINT`,
-the durable queue, which delivers at the next turn boundary and never loses the
-message. The envelope's message ids ride in the text either way: a
-re-delivery repeat is marked, a host that already processed a batch skips it,
-and the two paths together stay at-least-once with idempotent repeats.
-It never starts `codex exec` or resumes a conversation
-per message. Select the session UUID explicitly; `/status` in that CLI session
-shows it. The `codex` executable on PATH must support `queue` and reach the same
-app server as that session. Run `codex queue --help` to check the
-installed command. Codex 0.149.0 introduced the queue command and idle-session
-wake behavior; see the [official changelog](https://developers.openai.com/codex/changelog/).
+Codex impersonation requires **Steer delivery**. Pending delivery through
+`codex queue` waits for the active turn to finish and does not satisfy that
+contract. A missing control endpoint, rejected input, or transport failure
+stops the relay; messages remain unacknowledged in Ava for the normal handoff.
+There is no automatic downgrade to Pending.
 
-The endpoint is optional for existing setups that already share a server, but
-the UUID alone does not select the process holding the session. In Codex 0.153.4,
-CLI configuration overrides can select an embedded server while a separate
-queue command reaches another server. The owning server then discovers the
-external queue write on a **10-second interval**, adding up to roughly ten
-seconds before it starts an idle turn. Queue submission to that owning server
-instead calls its wake path immediately; see the tagged
-[server selection](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/tui/src/lib.rs)
-and [queue dispatch](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/ext/queue/src/service.rs)
-implementations. Both TUI and relay must use the same endpoint. A successful
-queue command means accepted delivery, not that the model has started or ACKed
-the Ava message. `--codex-remote` is rejected for Claude Monitor.
+Use the endpoint of the server that owns the existing conversation. Without
+`--codex-remote`, the CLI resolves the default local daemon socket
+(`$CODEX_HOME/app-server-control/app-server-control.sock`) before requesting
+control and records that endpoint. If it is absent, the request fails before
+acquiring a lease. A socket's existence does not prove it owns the thread;
+the first delivery still has to succeed. The relay independently checks for
+an endpoint before heartbeating, including requests made through the SDK.
 
-Desktop and ChatGPT embedded sessions may use a different app-server instance
-or event consumer; a thread UUID alone does not establish delivery. Idle wake-up
-has also been verified in a ChatGPT embedded host through the shared CLI queue:
-a queued push started a new turn after the active turn ended. Busy-turn
-delivery is not implied through the queue — a queued item's turn is dispatched
-when the thread is idle, so it waits out an active turn; only the live
-`turn/start` path steers an active *steerable* turn, and review or compaction
-turns are not steerable (they fall back to the queue). Test receipt on the host
-you are wiring, both while it is busy and after it becomes idle; queued items
-during an active turn alone do not establish a delivery failure.
-Do not infer receipt from a shared database or a zero queue exit code.
-Verify the existing conversation's behavior before changing hosts; moving work
-into a CLI session is a separate host handoff.
+The relay uses `turn/start` as Codex's atomic start-or-steer operation: an idle
+thread starts a turn, while an active regular turn receives additional input
+inside that turn. This behavior is verified with Codex 0.155.1. The explicit
+[`turn/steer` API](https://developers.openai.com/codex/app-server/#steer-an-active-turn)
+also steers, but requires the active `expectedTurnId` and fails if the turn
+ends between lookup and submission. Using `turn/start` avoids that race without
+changing to Pending semantics. Review and manual compaction can refuse input;
+that refusal remains a delivery failure.
+
+Select the existing session UUID explicitly (`/status` in the TUI). The relay
+never starts `codex exec` or resumes a conversation per message. Desktop,
+embedded, and CLI sessions can use different app servers; the same UUID or
+shared queue database does not establish ownership or receipt. A host without
+a reachable control endpoint cannot support this takeover. Moving the current
+conversation to another host is a separate handoff, not a relay fallback.
+`--codex-remote` is rejected for Claude Monitor.
+
+Verify receipt on the actual host while it is busy and while idle. Server
+acceptance is not model processing: only the controller's explicit Ava ACK
+records that it handled the input. A timeout can follow acceptance, so a failed
+transport must not silently resubmit through a second delivery mechanism.
 
 ## Claude Code Monitor
 
@@ -230,7 +217,7 @@ the stale window plus one scan interval (≈75 s).
   once every two seconds. Terminal control notices are immediate. Every relay
   provider truncates each content block to 2000 characters with a pointer to
   the inbox command: it fits Claude Monitor's per-line budget and keeps the
-  codex `queue --message` argv bounded, so one oversized inbound cannot fail
+  host input bounded, so one oversized inbound cannot fail
   every emit and wedge the relay. Fetch messages (or full payloads) with
   `impersonate inbox 0 --agent 42`; process and explicitly
   `impersonate ack 0 ID ... --agent 42`. The envelope's ACK line carries the
@@ -240,7 +227,7 @@ the stale window plus one scan interval (≈75 s).
   Repeating an ACK for already-done messages does not publish another wake.
   Treat `kind="cancel"` as a request to stop current work, then explicitly ACK it.
   Native Ava does not consume cancellation on behalf of the external controller.
-- Reading or successfully queueing a push does not mark a message done. The
+- Reading or successfully submitting a push does not mark a message done. The
   relay tracks pushed-but-unacknowledged ids in memory. Restart replays every
   still-pending row it encounters. This is at-least-once delivery, with the
   envelope ids as the idempotency key: a host that already handled a batch
@@ -256,7 +243,7 @@ the stale window plus one scan interval (≈75 s).
   the session linkage) that the relay pushes like any message. Release or expiry
   dismisses any still-pending reminder, so the native agent never sees a stale
   one.
-- Release, expiry, rejection, an invalid lease, a failed host queue or a broken
+- Release, expiry, rejection, an invalid lease, a failed host delivery or a broken
   Monitor pipe stops delivery. Expiry sends a loss-of-control notice before
   stopping; the database's clock and status decide authority. A local clock
   difference only adjusts the next native status check. Pending messages remain
@@ -269,7 +256,7 @@ the stale window plus one scan interval (≈75 s).
   TTL remains the recovery boundary if the controller or its relay dies.
   Native resume still requires the lease lifecycle's normal handoff checks.
 
-The host receives a queued event at its next processing opportunity; there is
-no promise to interrupt a token or an in-flight tool. Transport success also
+Steer input reaches the active turn at its next processing opportunity; it
+does not promise to interrupt an in-flight tool. Transport success also
 does not prove that the model processed the message. Keep processing ACKs in
 Ava, and make actions safe to retry when their completion is ambiguous.

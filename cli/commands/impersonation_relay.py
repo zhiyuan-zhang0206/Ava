@@ -32,22 +32,16 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-import shared.proc
 import shared.redis_listener
-from cli.commands.codex_app_server import default_control_endpoint, live_submit
+from cli.commands.codex_app_server import live_submit, require_control_endpoint
 from shared.config import settings
 from shared.impersonation import RELAY_HEARTBEAT_SECONDS
 
 _CATCHUP_SECONDS = 30.0
-_QUEUE_TIMEOUT_SECONDS = 10.0
 _MIN_EMIT_INTERVAL_SECONDS = 2.0
 _ACK_WINDOW_SECONDS = 300.0
-# Every provider's per-message content cap. Claude Monitor enforces its own
-# per-line budget; for codex the cap keeps the `codex queue --message` argv
-# small — one oversized inbound (a large compact summary) used to overflow the
-# argv/queue limit, fail every emit, and crash-loop the relay on the same row
-# until lease expiry (issue #2055). The envelope points the host at the inbox
-# command for the full text either way (task #3696 exception inventory).
+# Bound each message in the host context; full bodies remain in the durable
+# inbox. The same cap also respects Claude Monitor's per-line budget.
 _PUSH_MAX_CHARS = 2000
 _TERMINAL = frozenset({"released", "rejected", "expired"})
 type LeaseStatus = Literal["requested", "accepted", "active", "released", "rejected", "expired"]
@@ -137,9 +131,8 @@ def message_push(
     command, so the external session processes messages without reading or
     parsing the inbox. A re-delivery push says so explicitly; the ids make it
     idempotent for a host that already handled the batch. ``max_chars`` bounds
-    each content block — Claude Monitor's per-line budget, and the codex
-    ``queue --message`` argv safety cap; the tail points at the inbox command
-    for the full text.
+    each content block to fit Claude Monitor's per-line budget and limit host
+    context; the tail points at the inbox command for the full text.
     """
     ids = [message.id for message in messages]
     header = f"Ava message agent={agent_id} lease={lease_id} ids={','.join(map(str, ids))}"
@@ -196,24 +189,6 @@ def _ended(
     return True
 
 
-def queue_codex(thread_id: UUID, message: str, *, remote: str | None = None) -> None:
-    """Queue on the explicitly selected existing Codex session; never spawn one."""
-    argv = ["codex", "queue", "--thread", str(thread_id), "--message", message]
-    if remote is not None:
-        # Queue into the server holding this thread. A different server can
-        # persist the push but leave delivery to Codex's 10-second DB watcher.
-        argv.extend(["--remote", remote])
-    result = shared.proc.run_bounded(
-        argv,
-        timeout=_QUEUE_TIMEOUT_SECONDS,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode:
-        # Do not forward arbitrary provider output (which can contain credentials).
-        raise RuntimeError(f"codex queue failed with exit code {result.returncode}")
-
-
 def monitor_claude(message: str) -> None:
     """Each flushed stdout line is a same-session Claude Monitor event."""
     print(message, flush=True)
@@ -224,28 +199,20 @@ def host_emitter(
 ) -> Callable[[str], None]:
     """Resolve an explicit host destination before opening the inbox relay.
 
-    Codex delivery is live-first: each emission tries ``turn/start`` on the
-    session's app server (a fresh turn on an idle thread, a steer into an
-    active steerable one) and falls back to the durable ``codex queue`` on any
-    refusal or transport failure. The queue delivers at the next turn
-    boundary; the envelope ids keep the two paths idempotent together.
+    Codex uses Steer delivery on the owning app server. Missing endpoints,
+    refusals and transport failures stop the relay, preserving pending inbox
+    rows for the normal handoff. Pending-mode queue delivery is not equivalent.
     """
     if provider == "codex":
         if thread_id is None:
             raise ValueError("codex relay requires --thread-id for an existing session")
         target = UUID(thread_id)
+        endpoint = require_control_endpoint(codex_remote)
 
         def emit_codex(message: str) -> None:
-            endpoint = codex_remote or default_control_endpoint()
-            if endpoint is not None:
-                reason = live_submit(str(target), message, endpoint=endpoint)
-                if reason is None:
-                    return
-                print(
-                    f"codex live delivery fell back to the queue ({reason})",
-                    file=sys.stderr,
-                )
-            queue_codex(target, message, remote=codex_remote)
+            reason = live_submit(str(target), message, endpoint=endpoint)
+            if reason is not None:
+                raise RuntimeError(f"Codex Steer delivery failed: {reason}")
 
         return emit_codex
     if provider == "claude":

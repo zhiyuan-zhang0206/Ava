@@ -85,6 +85,10 @@ def test_request_uses_external_identity_without_delivering_a_credential(
             "expires_at": datetime(2026, 9, 5, tzinfo=UTC),
         }
 
+    monkeypatch.setattr(
+        "cli.commands.codex_app_server.default_control_endpoint",
+        lambda: "unix:///tmp/codex.sock",
+    )
     monkeypatch.setattr(sessions, "request", request)
     assert (
         cli.cmd_impersonate(
@@ -114,11 +118,43 @@ def test_request_uses_external_identity_without_delivering_a_credential(
     assert seen["ttl_seconds"] == 600
     assert seen["provider"] == "codex"
     assert seen["thread_id"] == "thread-1"
-    assert seen["codex_remote"] is None
+    assert seen["codex_remote"] == "unix:///tmp/codex.sock"
     assert seen["batch_window_seconds"] == 0
     output = capsys.readouterr()
     assert "token" not in json.loads(output.out)
     assert "starts the codex relay automatically" in output.err
+
+
+def test_request_without_steer_endpoint_does_not_acquire_a_lease(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from unittest.mock import Mock
+
+    from cli.commands import codex_app_server
+
+    request = Mock(return_value={})
+    monkeypatch.setattr(sessions, "request", request)
+    monkeypatch.setattr(codex_app_server, "default_control_endpoint", lambda: None)
+    args = _args(
+        "request",
+        "--name",
+        "Steer test",
+        "--agent",
+        "405",
+        "--as",
+        "Codex",
+        "--ttl",
+        "600",
+        "--provider",
+        "codex",
+        "--thread-id",
+        "thread-1",
+        "--batch-window",
+        "0",
+    )
+    assert cli.cmd_impersonate(args) == 1
+    request.assert_not_called()
+    assert "Steer" in capsys.readouterr().err
 
 
 def test_request_records_the_shared_app_server_endpoint(

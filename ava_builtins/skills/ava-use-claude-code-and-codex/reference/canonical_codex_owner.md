@@ -48,16 +48,16 @@ contract, and Git tree; a takeover process has none of those files and
 rebuilds from the briefing inlined in its launch message instead.
 
 Every takeover generation also owns the explicit shared app server the relay
-delivers into: queue acceptance on a different server never reaches the
-conversation. The launcher starts `codex app-server --listen unix://<socket>`
+delivers into: the endpoint must belong to the server holding the existing
+conversation; Pending queue acceptance does not establish Steer delivery. The launcher starts `codex app-server --listen unix://<socket>`
 on a private per-generation socket under the cluster's `run/` directory (with
 `approval_policy="never"` and `sandbox_mode="danger-full-access"` configured on
 the server itself), starts a janitor that ends the server when the coding
 session dies, connects the TUI with `--remote` to that exact endpoint, and
 carries the endpoint into the launch message so the request records it
 (`--codex-remote`). This needs a codex release with `app-server --listen`, TUI
-`--remote`, and `queue --remote` (verified on 0.153.4); the launch is refused
-loudly without it, and a takeover additionally prints
+`--remote`, and app-server start-or-steer support (verified on 0.155.1).
+Missing host capabilities fail visibly, and a takeover additionally prints
 `codex_app_server=<endpoint>`.
 
 Cleanup boundary: the janitor is the only cleanup owner — if it never starts,

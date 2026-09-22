@@ -3,8 +3,8 @@
 The fake app server speaks codex's own transport (JSON-RPC over a websocket on
 a unix socket). The contract pinned here: initialize then initialized, one
 ``turn/start``; a result means delivered, while a refusal, a timeout, a dead
-endpoint or an unsupported endpoint shape returns a reason the relay falls
-back on. The relay-level live-first/queue-fallback wiring lives in
+endpoint or an unsupported endpoint shape returns a reason the relay reports
+as failure. The relay-level Steer-only wiring lives in
 ``test_impersonation_bridge.py``.
 """
 

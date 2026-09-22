@@ -51,7 +51,7 @@ def bootstrap_message(
     codex_routing = (
         "Add --thread-id with this Codex session's CODEX_THREAD_ID and --codex-remote "
         f"{codex_remote} when issuing the request; preserve CODEX_HOME so the native relay "
-        "delivers into that same server (live turn/start; queue fallback) — the TUI and the "
+        "delivers into that same server via Steer — the TUI and the "
         "relay must share one endpoint."
         if codex_remote is not None
         else "Add --thread-id with this Codex session's CODEX_THREAD_ID; preserve CODEX_HOME "
@@ -74,7 +74,7 @@ def bootstrap_message(
         "under this session's id and are pinned to this process tree. Wait for status active "
         "before acting as this agent. Its execution pauses automatically when the session starts. "
         "Once active, verify the start message actually arrives in this conversation before "
-        "relying on automatic delivery — queue acceptance is not host receipt. "
+        "relying on automatic delivery — transport acceptance is not host receipt. "
         "Use ava impersonate say for all "
         "user-facing progress and questions; process and ACK inbound messages from the relay. "
         "When complete, flush attached SDK work, stop your work, then release with your own "
