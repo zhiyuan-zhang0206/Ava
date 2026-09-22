@@ -7,12 +7,18 @@ description: Runs the Ava repo's Python, frontend, and end-to-end checks and dia
 
 ## Test layering
 
-- **Commit hook = lint only** (seconds, zero containers). pre-commit runs
-  ruff, pyright, eslint, tsc, vitest (frontend), and custom lints — no pytest.
+- **Full test suites run in CI only** (user ruling 2026-09-22). Never launch
+  a local repository-wide or full-backend run, including after a `shared/`
+  change. Run bounded tests selected from the changed behavior and its direct
+  consumers locally; leave broad verification to CI.
+- **Commit hooks** run static checks and custom lints. If a frontend test hook
+  invokes a full suite, skip that hook by name and record the targeted tests
+  run instead; do not bypass the other hooks.
 - **Local tests before push** — mandatory. After commit and before `git push`,
   run tests for the areas you touched:
-  - Python: `.venv/bin/pytest <touched-test-files>` (at minimum; wider is fine)
-  - Frontend: `cd ui/web && npx vitest run && npx eslint . --max-warnings 0 && npx next typegen && npx tsc --noEmit`
+  - Python: `.venv/bin/pytest <selected-test-files-or-node-ids>`
+  - Frontend: `cd ui/web && npx vitest run <selected-test-files>`, plus relevant
+    eslint checks, `npx next typegen`, and `npx tsc --noEmit`.
   Failures must be fixed before pushing; do not rely on CI to catch them.
   A new test must be **shown to fail without the fix** — run it against the
   stashed pre-change code, or invert its assertion momentarily.
@@ -28,14 +34,12 @@ description: Runs the Ava repo's Python, frontend, and end-to-end checks and dia
   `PYTHONPATH=<this-worktree> <other-worktree>/.venv/bin/python -m pytest ...`
   (PYTHONPATH outranks that venv's `.pth`, so the tests run against this
   worktree's code).
-- **Pick the areas by dependency, not by directory.** "Touched areas" means the
-  areas a change can break, and for anything in `shared/` that is the whole
-  suite: `shared/` sits at the bottom of the import layering, and the repo
-  deliberately places exhaustiveness assertions over enums and field sets in the
-  *consumer's* test file as review forcing functions — so a `shared/` edit is
-  asserted over in `tests/gateway/`, where edit-adjacency will never look. Run
-  `pytest tests -q --ignore=tests/e2e`. Cheap narrowing aid for a new enum
-  member, not a substitute: `grep -rn "set(<EnumName>)\|list(<EnumName>)" tests/`.
+- **Pick targeted tests by dependency, not only by directory.** Shared changes
+  can break consumer-side enum or field-set assertions. Locate those consumers
+  and include their specific tests locally, rather than expanding to the full
+  backend suite. For a new enum member, search with
+  `rg 'set\(<EnumName>\)|list\(<EnumName>\)' tests/`. CI must still run the full
+  suite before merge; an unrun or skipped CI suite is not a pass.
   ([postmortem](../../../postmortems/0003-touched-areas-is-not-the-blast-radius.md))
 
 - **Every pre-commit lint hook also runs in CI**, so a locally skipped hook is
